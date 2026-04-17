@@ -47,7 +47,7 @@ export const ensureAppProfile = async (session: Session): Promise<void> => {
     auth_user_id: session.user.id,
     email: session.user.email ?? '',
     display_name: session.user.user_metadata?.name ?? session.user.email?.split('@')[0] ?? 'usuario',
-    role: 'admin',
+    role: 'sdr',
   }
 
   const { error } = await client.from('app_profiles').upsert(payload, { onConflict: 'auth_user_id' })

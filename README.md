@@ -1,38 +1,43 @@
-# CRM Limitless - Frontend + Supabase
+# CRM Limitless - Instituto Lorena
 
-Este projeto ja roda em dois modos:
+CRM comercial com frontend React + Supabase, com operacao configuravel por banco e controle por papeis.
+
+## Modos de dados
 
 - `mock`: dados locais para prototipacao
 - `supabase`: leitura/escrita real no Supabase
 
-## Configuracao
-
-1. Copie o arquivo de ambiente:
+## Setup
 
 ```bash
 cp .env.example .env
 ```
 
-2. Preencha:
+Variaveis:
 
 - `VITE_DATA_MODE=mock` ou `VITE_DATA_MODE=supabase`
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY` (ou `VITE_SUPABASE_PUBLISHABLE_KEY`)
 
-## Supabase (primeiro uso)
+## Banco e seguranca (RLS)
 
-1. Abra o SQL Editor do Supabase.
-2. Rode o script `supabase/schema.sql`.
-3. No app, clique em `Seed usuarios + dados`.
+Rode no projeto linkado:
 
-Isso cria usuarios de teste e dados iniciais de pipeline/leads/interacoes.
+```bash
+npx supabase db query --linked --file "supabase/schema.sql"
+```
 
-Usuarios de teste criados:
+O schema inclui:
 
-- Ana Costa (sdr)
-- Bruno Lima (sdr)
-- Carla Souza (sdr)
-- Diego Moura (gestor)
+- tabelas de operacao (`leads`, `pipelines`, `pipeline_stages`, `interactions`)
+- tabelas de configuracao (`channel_configs`, `metric_configs`, `workflow_fields`, `permission_profiles`, `notification_rules`, `tv_widgets`, `dashboard_widgets`)
+- `app_profiles` com role por usuario autenticado
+- RLS por role (`admin`, `gestor`, `sdr`) via funcoes SQL
+- `audit_logs` + triggers para rastrear alteracoes de configuracao
+
+## Seed inicial
+
+No app, use `Seed dados` para popular dados de teste.
 
 ## Rodar local
 
@@ -47,19 +52,15 @@ Build:
 npm run build
 ```
 
-## Deploy na Vercel
+## Telas principais
 
-1. Conectar repo GitHub na Vercel.
-2. Confirmar framework `Vite`.
-3. Definir variaveis:
-   - `VITE_DATA_MODE`
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY` ou `VITE_SUPABASE_PUBLISHABLE_KEY`
-4. Deploy.
-
-## Arquivos principais
-
-- `src/App.tsx`: UI e acoes principais (sync/seed)
-- `src/services/crmSupabase.ts`: camada de dados Supabase
-- `src/lib/supabaseClient.ts`: cliente Supabase
-- `supabase/schema.sql`: schema minimo para comecar
+- `/dashboard` dashboard operacional configuravel
+- `/dashboard-config` configuracao dos cards do dashboard
+- `/boards` configuracao de pipelines/etapas
+- `/kanban` quadro de leads
+- `/canais` configuracao de canais
+- `/metricas` configuracao de metricas
+- `/usuarios` gestao de usuarios internos
+- `/configuracoes` workflow, permissoes e notificacoes
+- `/tv-config` configuracao da tela TV
+- `/tv` painel para monitor/televisao

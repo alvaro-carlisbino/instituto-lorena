@@ -47,6 +47,72 @@ export type TriageResult = {
   recommendation: string
 }
 
+export type ChannelConfig = {
+  id: string
+  name: string
+  enabled: boolean
+  slaMinutes: number
+  autoReply: boolean
+  priority: number
+}
+
+export type MetricConfig = {
+  id: string
+  label: string
+  value: number
+  target: number
+  unit: 'percent' | 'minutes' | 'count'
+}
+
+export type WorkflowField = {
+  id: string
+  label: string
+  fieldType: 'text' | 'select' | 'number' | 'date'
+  required: boolean
+  options: string[]
+}
+
+export type PermissionProfile = {
+  id: string
+  role: 'admin' | 'gestor' | 'sdr'
+  canEditBoards: boolean
+  canRouteLeads: boolean
+  canManageUsers: boolean
+  canViewTvPanel: boolean
+}
+
+export type NotificationRule = {
+  id: string
+  name: string
+  channel: 'email' | 'whatsapp' | 'in_app'
+  enabled: boolean
+  trigger: string
+}
+
+export type AppUser = {
+  id: string
+  name: string
+  role: 'admin' | 'gestor' | 'sdr'
+  active: boolean
+}
+
+export type TvWidget = {
+  id: string
+  title: string
+  widgetType: 'kpi' | 'bar'
+  metricKey: string
+  enabled: boolean
+  position: number
+}
+
+export type DashboardWidget = {
+  id: string
+  title: string
+  metricKey: string
+  enabled: boolean
+  position: number
+}
+
 export const pipelines: Pipeline[] = [
   {
     id: 'pipeline-clinica',
@@ -173,4 +239,69 @@ export const integrationStatus = [
   { id: 'meta', name: 'Meta Graph API', status: 'Conectado', latency: '420ms' },
   { id: 'whatsapp', name: 'WhatsApp Cloud API', status: 'Conectado', latency: '350ms' },
   { id: 'openai', name: 'OpenAI API', status: 'Conectado', latency: '810ms' },
+]
+
+export const initialChannels: ChannelConfig[] = [
+  { id: 'meta', name: 'Meta Leads', enabled: true, slaMinutes: 15, autoReply: true, priority: 1 },
+  { id: 'whatsapp', name: 'WhatsApp Oficial', enabled: true, slaMinutes: 8, autoReply: true, priority: 2 },
+  { id: 'site', name: 'Formulario do Site', enabled: true, slaMinutes: 20, autoReply: false, priority: 3 },
+  { id: 'manual', name: 'Cadastro Manual', enabled: true, slaMinutes: 30, autoReply: false, priority: 4 },
+]
+
+export const initialMetrics: MetricConfig[] = [
+  { id: 'conversion', label: 'Conversao geral', value: 32, target: 40, unit: 'percent' },
+  { id: 'first-response', label: '1a resposta', value: 11, target: 8, unit: 'minutes' },
+  { id: 'qualified-rate', label: 'Qualificacao IA', value: 67, target: 70, unit: 'percent' },
+  { id: 'new-leads-day', label: 'Leads por dia', value: 29, target: 35, unit: 'count' },
+]
+
+export const tvKpiSeries = [
+  { label: '08h', leads: 4, qualified: 2 },
+  { label: '09h', leads: 6, qualified: 4 },
+  { label: '10h', leads: 8, qualified: 5 },
+  { label: '11h', leads: 10, qualified: 7 },
+  { label: '12h', leads: 7, qualified: 5 },
+  { label: '13h', leads: 9, qualified: 6 },
+  { label: '14h', leads: 11, qualified: 7 },
+  { label: '15h', leads: 12, qualified: 8 },
+]
+
+export const initialWorkflowFields: WorkflowField[] = [
+  { id: 'wf-1', label: 'Especialidade de interesse', fieldType: 'select', required: true, options: ['Clinica', 'Estetica', 'Odonto'] },
+  { id: 'wf-2', label: 'Faixa de investimento', fieldType: 'select', required: false, options: ['Ate R$500', 'R$500 a R$1500', 'Acima de R$1500'] },
+  { id: 'wf-3', label: 'Data preferida', fieldType: 'date', required: false, options: [] },
+]
+
+export const initialPermissions: PermissionProfile[] = [
+  { id: 'perm-admin', role: 'admin', canEditBoards: true, canRouteLeads: true, canManageUsers: true, canViewTvPanel: true },
+  { id: 'perm-gestor', role: 'gestor', canEditBoards: true, canRouteLeads: true, canManageUsers: false, canViewTvPanel: true },
+  { id: 'perm-sdr', role: 'sdr', canEditBoards: false, canRouteLeads: false, canManageUsers: false, canViewTvPanel: true },
+]
+
+export const initialNotifications: NotificationRule[] = [
+  { id: 'ntf-1', name: 'Lead sem retorno em 30 min', channel: 'in_app', enabled: true, trigger: 'sla_delay_30m' },
+  { id: 'ntf-2', name: 'Lead qualificado por IA', channel: 'email', enabled: true, trigger: 'ai_qualified' },
+  { id: 'ntf-3', name: 'Falha de webhook', channel: 'whatsapp', enabled: false, trigger: 'integration_webhook_error' },
+]
+
+export const initialAppUsers: AppUser[] = [
+  { id: 'admin-1', name: 'Alvaro', role: 'admin', active: true },
+  { id: 'gestor-1', name: 'Diego Moura', role: 'gestor', active: true },
+  { id: 'sdr-1', name: 'Ana Costa', role: 'sdr', active: true },
+  { id: 'sdr-2', name: 'Bruno Lima', role: 'sdr', active: true },
+  { id: 'sdr-3', name: 'Carla Souza', role: 'sdr', active: true },
+]
+
+export const initialTvWidgets: TvWidget[] = [
+  { id: 'tv-1', title: 'Leads Hoje', widgetType: 'kpi', metricKey: 'new-leads-day', enabled: true, position: 1 },
+  { id: 'tv-2', title: 'Conversao', widgetType: 'kpi', metricKey: 'conversion', enabled: true, position: 2 },
+  { id: 'tv-3', title: 'Tempo 1a Resposta', widgetType: 'kpi', metricKey: 'first-response', enabled: true, position: 3 },
+  { id: 'tv-4', title: 'Capacao x Qualificacao', widgetType: 'bar', metricKey: 'hourly-funnel', enabled: true, position: 4 },
+]
+
+export const initialDashboardWidgets: DashboardWidget[] = [
+  { id: 'dash-1', title: 'Leads ativos', metricKey: 'leads-active', enabled: true, position: 1 },
+  { id: 'dash-2', title: 'Leads quentes', metricKey: 'leads-hot', enabled: true, position: 2 },
+  { id: 'dash-3', title: 'Qualificados IA', metricKey: 'qualified-ai', enabled: true, position: 3 },
+  { id: 'dash-4', title: 'Canais ativos', metricKey: 'channels-active', enabled: true, position: 4 },
 ]
