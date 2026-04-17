@@ -141,9 +141,15 @@ export const inviteTeamMember = async (params: {
 }): Promise<void> => {
   const client = assertSupabase()
   const { error, data } = await client.functions.invoke('invite-user', { body: params })
-  if (error) throw new Error(error.message)
-  if (data && typeof data === 'object' && 'error' in data) {
-    throw new Error(String((data as { error: string }).error))
+  const bodyError =
+    data && typeof data === 'object' && data !== null && 'error' in data
+      ? String((data as { error: unknown }).error).trim()
+      : ''
+  if (error) {
+    throw new Error(bodyError || error.message)
+  }
+  if (bodyError) {
+    throw new Error(bodyError)
   }
 }
 
@@ -156,8 +162,14 @@ export const provisionUserWithPassword = async (params: {
 }): Promise<void> => {
   const client = assertSupabase()
   const { error, data } = await client.functions.invoke('provision-user', { body: params })
-  if (error) throw new Error(error.message)
-  if (data && typeof data === 'object' && 'error' in data) {
-    throw new Error(String((data as { error: string }).error))
+  const bodyError =
+    data && typeof data === 'object' && data !== null && 'error' in data
+      ? String((data as { error: unknown }).error).trim()
+      : ''
+  if (error) {
+    throw new Error(bodyError || error.message)
+  }
+  if (bodyError) {
+    throw new Error(bodyError)
   }
 }

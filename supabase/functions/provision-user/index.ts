@@ -13,6 +13,36 @@ type Body = {
   appUserId?: string
 }
 
+/** Localiza utilizador Auth por e-mail (paginação; típico < 1000 contas). */
+async function findAuthUserIdByEmail(
+  admin: ReturnType<typeof createClient>,
+  email: string,
+): Promise<string | null> {
+  const want = email.trim().toLowerCase()
+  const perPage = 200
+  for (let page = 1; page <= 50; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage })
+    if (error) return null
+    const list = data?.users ?? []
+    const hit = list.find((u) => (u.email ?? '').toLowerCase() === want)
+    if (hit?.id) return hit.id
+    if (list.length < perPage) break
+  }
+  return null
+}
+
+function isDuplicateAuthUserError(err: { message?: string; code?: string } | null): boolean {
+  if (!err?.message) return false
+  const m = err.message.toLowerCase()
+  return (
+    m.includes('already been registered') ||
+    m.includes('already registered') ||
+    m.includes('user already') ||
+    m.includes('email') && m.includes('exists') ||
+    err.code === 'email_exists'
+  )
+}
+
 async function callerCanManageUsers(
   admin: ReturnType<typeof createClient>,
   authUserId: string,
@@ -122,14 +152,36 @@ Deno.serve(async (req) => {
     user_metadata: { name: displayName, app_role: role },
   })
 
+  let authUserId: string | null = created.user?.id ?? null
+
   if (createErr) {
-    return new Response(JSON.stringify({ error: createErr.message }), {
-      status: 400,
-      headers: { ...cors, 'Content-Type': 'application/json' },
+    if (!isDuplicateAuthUserError(createErr)) {
+      return new Response(JSON.stringify({ error: createErr.message }), {
+        status: 400,
+        headers: { ...cors, 'Content-Type': 'application/json' },
+      })
+    }
+    const existingId = await findAuthUserIdByEmail(admin, email)
+    if (!existingId) {
+      return new Response(JSON.stringify({ error: createErr.message }), {
+        status: 400,
+        headers: { ...cors, 'Content-Type': 'application/json' },
+      })
+    }
+    authUserId = existingId
+    const { error: authUpdErr } = await admin.auth.admin.updateUserById(existingId, {
+      password,
+      email_confirm: true,
+      user_metadata: { name: displayName, app_role: role },
     })
+    if (authUpdErr) {
+      return new Response(JSON.stringify({ error: authUpdErr.message }), {
+        status: 400,
+        headers: { ...cors, 'Content-Type': 'application/json' },
+      })
+    }
   }
 
-  const authUserId = created.user?.id
   if (!authUserId) {
     return new Response(JSON.stringify({ error: 'auth_user_missing' }), {
       status: 500,
