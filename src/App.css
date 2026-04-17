@@ -77,6 +77,20 @@
   z-index: 1;
 }
 
+.route-stage {
+  animation: routeFade 220ms ease;
+}
+
+.route-stage.entering {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.route-stage.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .screen-header {
   margin-bottom: 1rem;
 }
@@ -415,6 +429,26 @@ button:disabled {
   }
 }
 
+@keyframes routeFade {
+  from {
+    opacity: 0.4;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes skeletonWave {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -20% 0;
+  }
+}
+
 .kanban-board {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -561,6 +595,19 @@ button:disabled {
   border-color: #1570a6;
   background: #e8f4fb;
   color: #1d5077;
+}
+
+.skeleton-wrap {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.skeleton-line {
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #e8eff4 0%, #f6fbfe 42%, #e5edf3 100%);
+  background-size: 220% 100%;
+  animation: skeletonWave 1.3s linear infinite;
 }
 
 .history-screen {
@@ -722,6 +769,10 @@ button:disabled {
   background: rgba(255, 255, 255, 0.05);
 }
 
+.tv-kpi-tile {
+  animation: riseIn 420ms ease;
+}
+
 .tv-kpis p {
   margin: 0;
   color: #c2dced;
@@ -742,6 +793,10 @@ button:disabled {
   border-radius: 0.9rem;
   padding: 0.9rem;
   background: rgba(255, 255, 255, 0.05);
+}
+
+.tv-animated-panel {
+  animation: riseIn 480ms ease;
 }
 
 .tv-graphs h2 {
@@ -884,5 +939,16 @@ button:disabled {
   .metrics-grid,
   .tv-kpis {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

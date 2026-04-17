@@ -17,6 +17,7 @@ import { AuditPage } from './pages/AuditPage'
 import { AuthPage } from './pages/AuthPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { AdminLabPage } from './pages/AdminLabPage'
+import { RouteTransition } from './components/RouteTransition'
 import './App.css'
 
 function AppRoutes() {
@@ -73,7 +74,9 @@ function App() {
 
   return (
     <CrmProvider value={crmState}>
-      <AppRoutes />
+      <RouteTransition>
+        <AppRoutes />
+      </RouteTransition>
     </CrmProvider>
   )
 }

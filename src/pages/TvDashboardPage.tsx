@@ -40,7 +40,7 @@ export function TvDashboardPage() {
           .map((widget) => {
             const metric = metricByKey(widget.metricKey)
             return (
-              <article key={widget.id}>
+              <article key={widget.id} className="tv-kpi-tile">
                 <p>{widget.title}</p>
                 <strong>{metric ? metric.value : crm.totalQualified}</strong>
               </article>
@@ -50,8 +50,8 @@ export function TvDashboardPage() {
 
       <section className="tv-graphs">
         {orderedWidgets.some((widget) => widget.widgetType === 'bar') ? (
-          <article>
-            <h2>Capacao x Qualificacao por hora</h2>
+          <article className="tv-animated-panel">
+            <h2>Captação x Qualificação por hora</h2>
             <ul>
               {crm.tvKpiSeries.map((point) => (
                 <li key={point.label}>
@@ -66,7 +66,7 @@ export function TvDashboardPage() {
           </article>
         ) : null}
 
-        <article>
+        <article className="tv-animated-panel delayed-1">
           <h2>Ranking SDR</h2>
           <ul>
             {crm.workloadBySdr.map((sdr) => (

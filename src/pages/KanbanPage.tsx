@@ -2,6 +2,7 @@ import { AppLayout } from '../layouts/AppLayout'
 import { useCrm } from '../context/CrmContext'
 import { sourceLabel } from '../hooks/useCrmState'
 import { useMemo, useState } from 'react'
+import { SkeletonBlocks } from '../components/SkeletonBlocks'
 
 export function KanbanPage() {
   const crm = useCrm()
@@ -35,7 +36,7 @@ export function KanbanPage() {
     <AppLayout title="Kanban de Leads" subtitle="Boards e etapas configuraveis por processo comercial.">
       <section className="panel toolbar">
         <button className="primary" onClick={crm.simulateMetaCapture}>
-          Simular captura Meta
+          Simular captura na Meta
         </button>
         <select value={crm.selectedPipelineId} onChange={(event) => crm.setSelectedPipelineId(event.target.value)}>
           {crm.pipelineCatalog.map((pipeline) => (
@@ -54,13 +55,14 @@ export function KanbanPage() {
           onChange={(event) => setTemperatureFilter(event.target.value as 'all' | 'hot' | 'warm' | 'cold')}
         >
           <option value="all">Todas temperaturas</option>
-          <option value="hot">Hot</option>
-          <option value="warm">Warm</option>
-          <option value="cold">Cold</option>
+          <option value="hot">Quente</option>
+          <option value="warm">Morna</option>
+          <option value="cold">Fria</option>
         </select>
       </section>
 
       <section className="kanban-board">
+        {crm.isLoading ? <SkeletonBlocks rows={6} card={false} /> : null}
         {crm.selectedPipeline.stages.map((stage) => (
           <article key={stage.id} className="kanban-column">
             <header>

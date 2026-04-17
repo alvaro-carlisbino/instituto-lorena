@@ -2,6 +2,7 @@ import { AppLayout } from '../layouts/AppLayout'
 import { useCrm } from '../context/CrmContext'
 import { sourceLabel } from '../hooks/useCrmState'
 import { useMemo, useState } from 'react'
+import { SkeletonBlocks } from '../components/SkeletonBlocks'
 
 export function HistoryPage() {
   const crm = useCrm()
@@ -24,6 +25,7 @@ export function HistoryPage() {
   return (
     <AppLayout title="Historico Unificado" subtitle="Timeline centralizada por paciente com canais e IA.">
       <section className="history-screen">
+        {crm.isLoading ? <SkeletonBlocks rows={5} /> : null}
         <section className="panel toolbar history-filters">
           <input
             value={searchTerm}
@@ -38,7 +40,7 @@ export function HistoryPage() {
             <span className="badge">
               {currentPage}/{totalPages}
             </span>
-            <button onClick={() => setPage((previous) => Math.min(totalPages, previous + 1))}>Proxima</button>
+            <button onClick={() => setPage((previous) => Math.min(totalPages, previous + 1))}>Próxima</button>
           </div>
         </section>
 
