@@ -1,15 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700&display=swap');
+
 :root {
-  font-family: 'Segoe UI', Tahoma, sans-serif;
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
   line-height: 1.45;
   font-weight: 400;
-  color: #12202a;
-  background-color: #f4f7f9;
+  color: #142430;
+  background-color: #f3f6f8;
   --text-primary: #102230;
-  --text-muted: #577081;
+  --text-muted: #4f697c;
   --surface: #ffffff;
-  --surface-soft: #f7fafc;
-  --stroke: #d7e1e8;
-  --stroke-strong: #7ea0b4;
+  --surface-soft: #f4f8fb;
+  --stroke: #d5e0e8;
+  --stroke-strong: #6f8da2;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -24,9 +26,9 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(circle at 15% 10%, #dbedf7 0%, transparent 38%),
-    radial-gradient(circle at 90% 18%, #eaf3d9 0%, transparent 30%),
-    #f4f7f9;
+    radial-gradient(circle at 12% 8%, rgba(105, 172, 216, 0.22) 0%, transparent 34%),
+    radial-gradient(circle at 88% 14%, rgba(162, 210, 146, 0.24) 0%, transparent 30%),
+    linear-gradient(160deg, #eff4f7 0%, #f5f8f3 100%);
 }
 
 #root {

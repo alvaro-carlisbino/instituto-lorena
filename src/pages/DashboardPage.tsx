@@ -22,17 +22,18 @@ export function DashboardPage() {
 
       <section className="metrics-grid">
         {dashboardCards.map((card) => (
-          <article key={card.id}>
+          <article key={card.id} className="metric-card animated-rise">
             <p>{card.title}</p>
             <strong>{getDashboardValue(card.metricKey)}</strong>
+            <span className="metric-trail" />
           </article>
         ))}
       </section>
 
       {crm.captureNotice ? <p className="notice">{crm.captureNotice}</p> : null}
 
-      <section className="panel-grid two-col">
-        <article className="panel">
+      <section className="panel-grid two-col animated-rise delayed-1">
+        <article className="panel glass-panel">
           <header>
             <h2>Pipeline atual</h2>
             <select value={crm.selectedPipelineId} onChange={(event) => crm.setSelectedPipelineId(event.target.value)}>
@@ -53,7 +54,7 @@ export function DashboardPage() {
           </ul>
         </article>
 
-        <article className="panel">
+        <article className="panel glass-panel">
           <header>
             <h2>Equipe SDR</h2>
           </header>
