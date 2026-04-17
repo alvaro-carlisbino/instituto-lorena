@@ -20,4 +20,22 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: ['src/components/ui/**/*.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
+  {
+    files: ['src/hooks/use-mobile.ts'],
+    rules: {
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
+  {
+    files: ['src/hooks/useCrmState.ts'],
+    rules: {
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
 ])

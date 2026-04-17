@@ -1,78 +1,91 @@
-import { AppLayout } from '../layouts/AppLayout'
-import { useCrm } from '../context/CrmContext'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { useCrm } from '@/context/CrmContext'
+import { AppLayout } from '@/layouts/AppLayout'
 
 export function ChannelsPage() {
   const crm = useCrm()
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Canais Configuraveis" subtitle="Sem permissao para editar canais no perfil atual.">
-        <section className="panel">
-          <p>Seu perfil pode visualizar canais, mas nao pode alterar configuracoes.</p>
-        </section>
+      <AppLayout title="Canais configuráveis" subtitle="Sem permissão para editar canais no perfil atual.">
+        <Card className="shadow-sm">
+          <CardContent className="pt-6 text-sm text-muted-foreground">
+            <p className="m-0">Você pode visualizar canais, mas não alterar configurações.</p>
+          </CardContent>
+        </Card>
       </AppLayout>
     )
   }
 
   return (
-    <AppLayout title="Canais Configuraveis" subtitle="Ative canais, ajuste prioridade, SLA e resposta automatica.">
-      <section className="panel toolbar">
-        <button className="primary" onClick={crm.addChannel}>
+    <AppLayout title="Canais configuráveis" subtitle="Ative canais, prioridade, SLA e resposta automática.">
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" onClick={crm.addChannel}>
           Novo canal
-        </button>
-      </section>
+        </Button>
+      </div>
 
-      <section className="panel-grid two-col">
+      <div className="grid gap-4 lg:grid-cols-2">
         {crm.channels.map((channel) => (
-          <article key={channel.id} className="panel">
-            <header>
-              <input value={channel.name} onChange={(event) => crm.updateChannel(channel.id, { name: event.target.value })} />
-              <label className="switch-row">
+          <Card key={channel.id} className="shadow-sm">
+            <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+              <Input
+                value={channel.name}
+                onChange={(event) => crm.updateChannel(channel.id, { name: event.target.value })}
+                className="max-w-xs font-medium"
+              />
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
                   type="checkbox"
+                  className="size-4 rounded border-input"
                   checked={channel.enabled}
                   onChange={(event) => crm.updateChannel(channel.id, { enabled: event.target.checked })}
                 />
                 Ativo
               </label>
-            </header>
-
-            <div className="form-grid">
-              <label>
-                SLA (min)
-                <input
+            </CardHeader>
+            <CardContent className="grid gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor={`sla-${channel.id}`}>SLA (min)</Label>
+                <Input
+                  id={`sla-${channel.id}`}
                   type="number"
                   min={1}
                   value={channel.slaMinutes}
                   onChange={(event) => crm.updateChannel(channel.id, { slaMinutes: Number(event.target.value) })}
+                  className="max-w-[10rem]"
                 />
-              </label>
-
-              <label>
-                Prioridade
-                <div className="inline-actions">
-                  <button onClick={() => crm.moveChannelPriority(channel.id, 'up')}>Subir</button>
-                  <button onClick={() => crm.moveChannelPriority(channel.id, 'down')}>Descer</button>
-                  <span className="badge">{channel.priority}</span>
-                </div>
-              </label>
-
-              <label className="switch-row">
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-muted-foreground">Prioridade</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => crm.moveChannelPriority(channel.id, 'up')}>
+                  Subir
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => crm.moveChannelPriority(channel.id, 'down')}>
+                  Descer
+                </Button>
+                <Badge variant="secondary">{channel.priority}</Badge>
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
                   type="checkbox"
+                  className="size-4 rounded border-input"
                   checked={channel.autoReply}
                   onChange={(event) => crm.updateChannel(channel.id, { autoReply: event.target.checked })}
                 />
-                Resposta automatica
+                Resposta automática
               </label>
-
-              <button className="danger" onClick={() => crm.removeChannel(channel.id)}>
+              <Button type="button" variant="destructive" size="sm" className="w-fit" onClick={() => crm.removeChannel(channel.id)}>
                 Remover canal
-              </button>
-            </div>
-          </article>
+              </Button>
+            </CardContent>
+          </Card>
         ))}
-      </section>
+      </div>
     </AppLayout>
   )
 }

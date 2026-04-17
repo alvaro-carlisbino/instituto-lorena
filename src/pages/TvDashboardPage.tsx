@@ -1,24 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useCrm } from '../context/CrmContext'
+
+import { useCrm } from '@/context/CrmContext'
+import { cn } from '@/lib/utils'
 
 export function TvDashboardPage() {
   const crm = useCrm()
   const [tick, setTick] = useState<number>(0)
-
-  if (!crm.currentPermission.canViewTvPanel) {
-    return (
-      <div className="tv-screen">
-        <header>
-          <h1>Instituto Lorena | Painel TV</h1>
-          <p>Acesso negado para o perfil atual.</p>
-        </header>
-      </div>
-    )
-  }
-
-  const metricByKey = (key: string) => crm.metrics.find((metric) => metric.id === key)
-
-  const orderedWidgets = crm.tvWidgets.filter((widget) => widget.enabled).sort((a, b) => a.position - b.position)
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -27,38 +14,67 @@ export function TvDashboardPage() {
     return () => window.clearInterval(timer)
   }, [])
 
+  if (!crm.currentPermission.canViewTvPanel) {
+    return (
+      <div className="min-h-svh bg-zinc-950 px-8 py-10 text-zinc-50">
+        <header className="mb-8">
+          <h1 className="m-0 text-3xl font-semibold tracking-tight">Instituto Lorena · Painel TV</h1>
+          <p className="mt-2 text-zinc-400">Acesso negado para o perfil atual.</p>
+        </header>
+      </div>
+    )
+  }
+
+  const metricByKey = (key: string) => crm.metrics.find((metric) => metric.id === key)
+
+  const orderedWidgets = crm.tvWidgets.filter((widget) => widget.enabled).sort((a, b) => a.position - b.position)
+  const hasBarWidget = orderedWidgets.some((widget) => widget.widgetType === 'bar')
+
   return (
-    <div className="tv-screen">
-      <header>
-        <h1>Instituto Lorena | Painel TV</h1>
-        <p>Atualizacao automatica a cada 15s | ciclo {tick}</p>
+    <div className="min-h-svh bg-gradient-to-br from-zinc-900 via-slate-950 to-zinc-950 px-8 py-10 text-zinc-50">
+      <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="m-0 text-3xl font-semibold tracking-tight md:text-4xl">Instituto Lorena · Painel TV</h1>
+          <p className="mt-2 text-lg text-zinc-400">Atualização automática a cada 15 s · ciclo {tick}</p>
+        </div>
       </header>
 
-      <section className="tv-kpis">
+      <section className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {orderedWidgets
           .filter((widget) => widget.widgetType === 'kpi')
           .map((widget) => {
             const metric = metricByKey(widget.metricKey)
             return (
-              <article key={widget.id} className="tv-kpi-tile">
-                <p>{widget.title}</p>
-                <strong>{metric ? metric.value : crm.totalQualified}</strong>
+              <article
+                key={widget.id}
+                className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur-sm"
+              >
+                <p className="m-0 text-sm text-zinc-400">{widget.title}</p>
+                <p className="mt-2 text-4xl font-semibold tabular-nums tracking-tight">{metric ? metric.value : crm.totalQualified}</p>
               </article>
             )
           })}
       </section>
 
-      <section className="tv-graphs">
-        {orderedWidgets.some((widget) => widget.widgetType === 'bar') ? (
-          <article className="tv-animated-panel">
-            <h2>Captação x Qualificação por hora</h2>
-            <ul>
+      <section
+        className={cn('grid gap-6', hasBarWidget ? 'xl:grid-cols-[2fr_1fr]' : 'xl:max-w-xl')}
+      >
+        {hasBarWidget ? (
+          <article className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg">
+            <h2 className="m-0 mb-4 text-xl font-semibold text-zinc-100">Captação × qualificação por hora</h2>
+            <ul className="m-0 list-none space-y-4 p-0">
               {crm.tvKpiSeries.map((point) => (
-                <li key={point.label}>
-                  <span>{point.label}</span>
-                  <div className="tv-bar-group">
-                    <div className="tv-bar leads" style={{ width: `${point.leads * 7}%` }} />
-                    <div className="tv-bar qualified" style={{ width: `${point.qualified * 7}%` }} />
+                <li key={point.label} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                  <span className="w-24 shrink-0 text-sm text-zinc-400">{point.label}</span>
+                  <div className="flex min-h-3 flex-1 gap-1">
+                    <div
+                      className="h-3 rounded-full bg-sky-500/90"
+                      style={{ width: `${Math.min(100, point.leads * 7)}%` }}
+                    />
+                    <div
+                      className="h-3 rounded-full bg-emerald-500/90"
+                      style={{ width: `${Math.min(100, point.qualified * 7)}%` }}
+                    />
                   </div>
                 </li>
               ))}
@@ -66,13 +82,13 @@ export function TvDashboardPage() {
           </article>
         ) : null}
 
-        <article className="tv-animated-panel delayed-1">
-          <h2>Ranking SDR</h2>
-          <ul>
+        <article className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg">
+          <h2 className="m-0 mb-4 text-xl font-semibold text-zinc-100">Ranking SDR</h2>
+          <ul className="m-0 list-none space-y-3 p-0">
             {crm.workloadBySdr.map((sdr) => (
-              <li key={sdr.id}>
-                <span>{sdr.name}</span>
-                <strong>{sdr.total} leads</strong>
+              <li key={sdr.id} className="flex items-center justify-between gap-4 border-b border-white/5 pb-3 last:border-0">
+                <span className="text-zinc-200">{sdr.name}</span>
+                <strong className="text-lg tabular-nums text-zinc-100">{sdr.total} leads</strong>
               </li>
             ))}
           </ul>

@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AppLayout } from '../layouts/AppLayout'
-import { useCrm } from '../context/CrmContext'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { useCrm } from '@/context/CrmContext'
+import { AppLayout } from '@/layouts/AppLayout'
 
 export function AuditPage() {
   const crm = useCrm()
@@ -31,10 +35,12 @@ export function AuditPage() {
 
   if (!crm.currentPermission.canManageUsers) {
     return (
-      <AppLayout title="Auditoria" subtitle="Sem permissao para visualizar trilha de auditoria.">
-        <section className="panel">
-          <p>Seu perfil nao possui permissao para acessar auditoria.</p>
-        </section>
+      <AppLayout title="Auditoria" subtitle="Sem permissão para visualizar a trilha de auditoria.">
+        <Card className="shadow-sm">
+          <CardContent className="pt-6 text-sm text-muted-foreground">
+            <p className="m-0">Seu perfil não pode acessar auditoria.</p>
+          </CardContent>
+        </Card>
       </AppLayout>
     )
   }
@@ -42,74 +48,87 @@ export function AuditPage() {
   const totalPages = Math.max(1, Math.ceil(crm.auditTotal / pageSize))
 
   return (
-    <AppLayout title="Auditoria" subtitle="Eventos reais do banco com filtros e paginação server-side.">
-      <section className="panel">
-        <section className="panel toolbar">
-          <select
-            value={actionFilter}
-            onChange={(event) => {
-              setActionFilter(event.target.value as 'all' | 'INSERT' | 'UPDATE' | 'DELETE')
-              setPage(0)
-            }}
-          >
-            <option value="all">Todas acoes</option>
-            <option value="INSERT">INSERT</option>
-            <option value="UPDATE">UPDATE</option>
-            <option value="DELETE">DELETE</option>
-          </select>
+    <AppLayout title="Auditoria" subtitle="Eventos reais do banco com filtros e paginação no servidor.">
+      <Card className="shadow-sm">
+        <CardContent className="space-y-4 pt-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              value={actionFilter}
+              onChange={(event) => {
+                setActionFilter(event.target.value as 'all' | 'INSERT' | 'UPDATE' | 'DELETE')
+                setPage(0)
+              }}
+            >
+              <option value="all">Todas ações</option>
+              <option value="INSERT">INSERT</option>
+              <option value="UPDATE">UPDATE</option>
+              <option value="DELETE">DELETE</option>
+            </select>
 
-          <select
-            value={tableFilter}
-            onChange={(event) => {
-              setTableFilter(event.target.value)
-              setPage(0)
-            }}
-          >
-            <option value="all">Todas tabelas</option>
-            {uniqueTables.map((table) => (
-              <option key={table} value={table}>
-                {table}
-              </option>
-            ))}
-          </select>
+            <select
+              className="h-8 min-w-[8rem] rounded-md border border-input bg-background px-2 text-sm"
+              value={tableFilter}
+              onChange={(event) => {
+                setTableFilter(event.target.value)
+                setPage(0)
+              }}
+            >
+              <option value="all">Todas tabelas</option>
+              {uniqueTables.map((table) => (
+                <option key={table} value={table}>
+                  {table}
+                </option>
+              ))}
+            </select>
 
-          <select
-            value={daysFilter}
-            onChange={(event) => {
-              setDaysFilter(Number(event.target.value))
-              setPage(0)
-            }}
-          >
-            <option value={1}>Ultimas 24h</option>
-            <option value={3}>Ultimos 3 dias</option>
-            <option value={7}>Ultimos 7 dias</option>
-            <option value={30}>Ultimos 30 dias</option>
-          </select>
+            <select
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              value={daysFilter}
+              onChange={(event) => {
+                setDaysFilter(Number(event.target.value))
+                setPage(0)
+              }}
+            >
+              <option value={1}>Últimas 24 h</option>
+              <option value={3}>Últimos 3 dias</option>
+              <option value={7}>Últimos 7 dias</option>
+              <option value={30}>Últimos 30 dias</option>
+            </select>
 
-          <div className="inline-actions">
-            <button onClick={() => setPage((previous) => Math.max(0, previous - 1))}>Anterior</button>
-            <span className="badge">
-              {page + 1}/{totalPages}
-            </span>
-            <button onClick={() => setPage((previous) => Math.min(totalPages - 1, previous + 1))}>Proxima</button>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => setPage((previous) => Math.max(0, previous - 1))}>
+                Anterior
+              </Button>
+              <Badge variant="secondary" className="tabular-nums">
+                {page + 1}/{totalPages}
+              </Badge>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((previous) => Math.min(totalPages - 1, previous + 1))}
+              >
+                Próxima
+              </Button>
+            </div>
           </div>
-        </section>
 
-        {crm.isLoading ? <p>Carregando trilha de auditoria...</p> : null}
-        <ul className="editable-list">
-          {crm.auditRows.map((event) => (
-            <li key={event.id}>
-              <div className="item-main">
-                <strong>{event.actorEmail ?? 'sistema'}</strong>
-                <small>
-                  {event.action} | {event.targetTable} | {new Date(event.createdAt).toLocaleString('pt-BR')}
-                </small>
-                <span>ID alvo: {event.targetId ?? 'n/a'}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
+          {crm.isLoading ? <p className="text-sm text-muted-foreground">Carregando trilha de auditoria…</p> : null}
+
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {crm.auditRows.map((event) => (
+              <li key={event.id} className="space-y-1 p-3 text-sm">
+                <p className="m-0 font-medium">{event.actorEmail ?? 'sistema'}</p>
+                <p className="m-0 text-xs text-muted-foreground">
+                  {event.action} · {event.targetTable} · {new Date(event.createdAt).toLocaleString('pt-BR')}
+                </p>
+                <p className="m-0 text-muted-foreground">ID alvo: {event.targetId ?? 'n/a'}</p>
+              </li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
     </AppLayout>
   )
 }

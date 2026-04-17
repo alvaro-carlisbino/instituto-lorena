@@ -426,6 +426,16 @@ export const useCrmState = () => {
     )
   }
 
+  const refreshWebhookJobs = async () => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) return
+    try {
+      const jobs = await loadWebhookJobs(50)
+      setQueueJobs(jobs)
+    } catch {
+      // noop for now
+    }
+  }
+
   const syncFromSupabase = async () => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured) return
     setIsLoading(true)
@@ -1007,12 +1017,14 @@ export const useCrmState = () => {
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void syncFromSupabase()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sync apenas quando dataMode muda
   }, [dataMode])
 
   useEffect(() => {
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void refreshWebhookJobs()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh apenas quando dataMode muda
   }, [dataMode])
 
   useEffect(() => {
@@ -1108,16 +1120,6 @@ export const useCrmState = () => {
       setSyncNotice(`Falha no replay: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
     } finally {
       setIsLoading(false)
-    }
-  }
-
-  const refreshWebhookJobs = async () => {
-    if (dataMode !== 'supabase' || !isSupabaseConfigured) return
-    try {
-      const jobs = await loadWebhookJobs(50)
-      setQueueJobs(jobs)
-    } catch {
-      // noop for now
     }
   }
 

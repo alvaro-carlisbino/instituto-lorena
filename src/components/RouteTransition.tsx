@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
+
+import { cn } from '@/lib/utils'
 
 type Props = {
   children: ReactNode
@@ -8,15 +9,13 @@ type Props = {
 
 export function RouteTransition({ children }: Props) {
   const location = useLocation()
-  const [phase, setPhase] = useState<'entering' | 'visible'>('visible')
 
-  useEffect(() => {
-    setPhase('entering')
-    const timer = window.setTimeout(() => {
-      setPhase('visible')
-    }, 150)
-    return () => window.clearTimeout(timer)
-  }, [location.pathname])
-
-  return <div className={`route-stage ${phase}`}>{children}</div>
+  return (
+    <div
+      key={location.pathname}
+      className={cn('animate-in fade-in slide-in-from-bottom-1 duration-200 fill-mode-both motion-reduce:animate-none')}
+    >
+      {children}
+    </div>
+  )
 }

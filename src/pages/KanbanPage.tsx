@@ -1,8 +1,11 @@
-import { AppLayout } from '../layouts/AppLayout'
-import { useCrm } from '../context/CrmContext'
-import { sourceLabel } from '../hooks/useCrmState'
 import { useMemo, useState } from 'react'
-import { SkeletonBlocks } from '../components/SkeletonBlocks'
+
+import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
+import { KanbanToolbar } from '@/components/kanban/KanbanToolbar'
+import { SkeletonBlocks } from '@/components/SkeletonBlocks'
+import { useCrm } from '@/context/CrmContext'
+import { sourceLabel } from '@/hooks/useCrmState'
+import { AppLayout } from '@/layouts/AppLayout'
 
 export function KanbanPage() {
   const crm = useCrm()
@@ -24,122 +27,84 @@ export function KanbanPage() {
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Kanban de Leads" subtitle="Visualizacao liberada, edicao bloqueada para este perfil.">
-        <section className="panel">
-          <p>Seu perfil nao possui permissao para movimentar leads e roteamento.</p>
-        </section>
+      <AppLayout title="Kanban de leads" subtitle="Seu perfil não pode movimentar leads nem alterar roteamento.">
+        <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-sm">
+          <p className="m-0">Entre com um perfil autorizado ou peça liberação ao administrador.</p>
+        </div>
       </AppLayout>
     )
   }
 
   return (
-    <AppLayout title="Kanban de Leads" subtitle="Boards e etapas configuraveis por processo comercial.">
-      <section className="panel toolbar">
-        <button className="primary" onClick={crm.simulateMetaCapture}>
-          Simular captura na Meta
-        </button>
-        <select value={crm.selectedPipelineId} onChange={(event) => crm.setSelectedPipelineId(event.target.value)}>
-          {crm.pipelineCatalog.map((pipeline) => (
-            <option key={pipeline.id} value={pipeline.id}>
-              {pipeline.name}
-            </option>
-          ))}
-        </select>
-        <input
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
-          placeholder="Buscar paciente ou resumo"
-        />
-        <select
-          value={temperatureFilter}
-          onChange={(event) => setTemperatureFilter(event.target.value as 'all' | 'hot' | 'warm' | 'cold')}
-        >
-          <option value="all">Todas temperaturas</option>
-          <option value="hot">Quente</option>
-          <option value="warm">Morna</option>
-          <option value="cold">Fria</option>
-        </select>
-      </section>
+    <AppLayout title="Kanban de leads" subtitle="Boards e etapas configuráveis por processo comercial.">
+      <KanbanToolbar
+        onSimulateCapture={crm.simulateMetaCapture}
+        pipelineId={crm.selectedPipelineId}
+        pipelineOptions={crm.pipelineCatalog.map((p) => ({ id: p.id, name: p.name }))}
+        onPipelineChange={crm.setSelectedPipelineId}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        temperatureFilter={temperatureFilter}
+        onTemperatureChange={setTemperatureFilter}
+      />
 
-      <section className="kanban-board">
-        {crm.isLoading ? <SkeletonBlocks rows={6} card={false} /> : null}
-        {crm.selectedPipeline.stages.map((stage) => (
-          <article key={stage.id} className="kanban-column">
-            <header>
-              <h2>{stage.name}</h2>
-              <span>{visibleLeads.filter((lead) => lead.stageId === stage.id).length}</span>
-            </header>
+      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+        {crm.isLoading ? <SkeletonRows /> : null}
+        {crm.selectedPipeline.stages.map((stage) => {
+          const stageLeads = visibleLeads.filter((lead) => lead.stageId === stage.id)
+          return (
+            <article
+              key={stage.id}
+              className="flex min-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+            >
+              <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
+                <h2 className="m-0 text-sm font-semibold">{stage.name}</h2>
+                <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs tabular-nums">
+                  {stageLeads.length}
+                </span>
+              </header>
 
-            <div className="column-scroll">
-              {visibleLeads
-                .filter((lead) => lead.stageId === stage.id)
-                .map((lead) => (
-                  <div
+              <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
+                {stageLeads.map((lead) => (
+                  <KanbanLeadCard
                     key={lead.id}
-                    className={`lead-card ${crm.selectedLeadId === lead.id ? 'selected' : ''}`}
-                    draggable
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData('text/lead-id', lead.id)
-                    }}
-                    onDragOver={(event) => {
-                      event.preventDefault()
-                      setDragOverStageId(stage.id)
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault()
-                      setDragOverStageId(null)
-                      const draggedLeadId = event.dataTransfer.getData('text/lead-id')
-                      if (!draggedLeadId) return
-                      const stageLeads = visibleLeads.filter((item) => item.stageId === stage.id)
-                      const targetIndex = stageLeads.findIndex((item) => item.id === lead.id)
-                      crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: Math.max(0, targetIndex) })
-                    }}
-                    onClick={() => crm.setSelectedLeadId(lead.id)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') crm.setSelectedLeadId(lead.id)
-                    }}
-                  >
-                    <div className="lead-card-top">
-                      <p>{lead.patientName}</p>
-                      <span className={`temperature ${lead.temperature}`}>{lead.temperature}</span>
-                    </div>
-                    <small>{sourceLabel[lead.source]}</small>
-                    <p className="summary">{lead.summary}</p>
-                    <div className="meta-row">
-                      <span>Score {lead.score}</span>
-                      <span>{crm.getOwnerName(lead.ownerId)}</span>
-                    </div>
-                    <div className="card-actions">
-                      <button onClick={() => crm.moveLead(lead.id, 'prev')}>Voltar</button>
-                      <button onClick={() => crm.moveLead(lead.id, 'next')}>Avancar</button>
-                    </div>
-                  </div>
+                    lead={lead}
+                    selected={crm.selectedLeadId === lead.id}
+                    sourceLabel={sourceLabel[lead.source]}
+                    ownerName={crm.getOwnerName(lead.ownerId)}
+                    onSelect={() => crm.setSelectedLeadId(lead.id)}
+                    onMovePrev={() => crm.moveLead(lead.id, 'prev')}
+                    onMoveNext={() => crm.moveLead(lead.id, 'next')}
+                    stageLeadsOrdered={stageLeads}
+                    onReorderDrop={(draggedLeadId, targetIndex) =>
+                      crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: targetIndex })
+                    }
+                    onDragEnterColumn={() => setDragOverStageId(stage.id)}
+                  />
                 ))}
 
-              <div
-                className={`drop-zone ${dragOverStageId === stage.id ? 'active' : ''}`}
-                onDragOver={(event) => {
-                  event.preventDefault()
-                  setDragOverStageId(stage.id)
-                }}
-                onDrop={(event) => {
-                  event.preventDefault()
-                  setDragOverStageId(null)
-                  const draggedLeadId = event.dataTransfer.getData('text/lead-id')
-                  if (!draggedLeadId) return
-                  const stageLeads = visibleLeads.filter((item) => item.stageId === stage.id)
-                  crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: stageLeads.length })
-                }}
-                onDragLeave={() => setDragOverStageId(null)}
-              >
-                Arraste para adicionar no fim da etapa
+                <KanbanColumnDropZone
+                  active={dragOverStageId === stage.id}
+                  onDragOver={() => setDragOverStageId(stage.id)}
+                  onDragLeave={() => setDragOverStageId(null)}
+                  onDropEnd={(draggedLeadId) => {
+                    setDragOverStageId(null)
+                    crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: stageLeads.length })
+                  }}
+                />
               </div>
-            </div>
-          </article>
-        ))}
-      </section>
+            </article>
+          )
+        })}
+      </div>
     </AppLayout>
+  )
+}
+
+function SkeletonRows() {
+  return (
+    <div className="col-span-full">
+      <SkeletonBlocks rows={6} card={false} />
+    </div>
   )
 }
