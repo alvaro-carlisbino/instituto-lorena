@@ -35,6 +35,7 @@ create table if not exists public.leads (
   phone text not null,
   source text not null,
   created_at timestamptz not null,
+  position int not null default 1,
   score int not null,
   temperature text not null,
   owner_id text not null references public.app_users(id),
@@ -127,6 +128,8 @@ create table if not exists public.dashboard_widgets (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.leads add column if not exists position int not null default 1;
 
 create table if not exists public.audit_logs (
   id uuid primary key default gen_random_uuid(),

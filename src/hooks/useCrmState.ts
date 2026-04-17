@@ -35,6 +35,7 @@ import {
   saveWorkflowField,
   seedDemoData,
   seedTestUsers,
+  saveLeadOrdering,
   updateLeadStage,
 } from '../services/crmSupabase'
 import { isSupabaseConfigured } from '../lib/supabaseClient'
@@ -156,7 +157,7 @@ export const useCrmState = () => {
   )
 
   const filteredLeads = useMemo(
-    () => leads.filter((lead) => lead.pipelineId === selectedPipeline.id),
+    () => leads.filter((lead) => lead.pipelineId === selectedPipeline.id).sort((a, b) => a.position - b.position),
     [leads, selectedPipeline.id],
   )
 
@@ -194,6 +195,69 @@ export const useCrmState = () => {
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void insertInteraction(interaction)
     }
+  }
+
+  const normalizeStagePositions = (items: Lead[]) => {
+    return items
+      .sort((a, b) => a.position - b.position)
+      .map((lead, index) => ({ ...lead, position: index + 1 }))
+  }
+
+  const reorderLeadCard = (
+    leadId: string,
+    target: { stageId: string; index: number },
+  ) => {
+    const leadToMove = leads.find((lead) => lead.id === leadId)
+    if (!leadToMove) return
+
+    const sameStage = leadToMove.stageId === target.stageId
+    const originStageLeads = leads.filter((lead) => lead.stageId === leadToMove.stageId && lead.id !== leadId)
+    const targetStageLeads = sameStage
+      ? originStageLeads
+      : leads.filter((lead) => lead.stageId === target.stageId)
+
+    const boundedIndex = Math.max(0, Math.min(target.index, targetStageLeads.length))
+
+    const movedLead: Lead = {
+      ...leadToMove,
+      stageId: target.stageId,
+      position: boundedIndex + 1,
+    }
+
+    const nextTargetStage = [...targetStageLeads]
+    nextTargetStage.splice(boundedIndex, 0, movedLead)
+
+    const normalizedTarget = normalizeStagePositions(nextTargetStage)
+    const normalizedOrigin = sameStage ? [] : normalizeStagePositions(originStageLeads)
+
+    setLeads((previous) => {
+      const untouched = previous.filter(
+        (lead) => lead.stageId !== leadToMove.stageId && lead.stageId !== target.stageId && lead.id !== leadId,
+      )
+      return [...untouched, ...normalizedOrigin, ...normalizedTarget]
+    })
+
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      normalizedTarget.forEach((lead) => {
+        void saveLeadOrdering(lead.id, { stageId: lead.stageId, position: lead.position })
+      })
+      normalizedOrigin.forEach((lead) => {
+        void saveLeadOrdering(lead.id, { stageId: lead.stageId, position: lead.position })
+      })
+    }
+
+    const targetStageName =
+      selectedPipeline.stages.find((stage) => stage.id === target.stageId)?.name ?? 'Etapa atualizada'
+
+    addInteraction({
+      leadId: leadToMove.id,
+      patientName: leadToMove.patientName,
+      channel: 'system',
+      direction: 'system',
+      author: 'Kanban DnD',
+      content: `Lead reposicionado para ${targetStageName} na ordem ${boundedIndex + 1}.`,
+      happenedAt: new Date().toISOString(),
+    })
   }
 
   const moveLead = (leadId: string, direction: 'prev' | 'next') => {
@@ -263,6 +327,7 @@ export const useCrmState = () => {
       createdAt: new Date().toISOString(),
       score: Math.floor(40 + Math.random() * 50),
       temperature: Math.random() > 0.5 ? 'warm' : 'hot',
+      position: leads.filter((lead) => lead.stageId === firstStage.id).length + 1,
       ownerId: owner.id,
       pipelineId: selectedPipeline.id,
       stageId: firstStage.id,
@@ -1097,6 +1162,7 @@ export const useCrmState = () => {
     authNotice,
     getOwnerName,
     moveLead,
+    reorderLeadCard,
     simulateMetaCapture,
     sendMessage,
     retryFailedJobs,

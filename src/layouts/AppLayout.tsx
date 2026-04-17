@@ -18,6 +18,7 @@ const navItems = [
   { to: '/metricas', label: 'Metricas' },
   { to: '/usuarios', label: 'Usuarios' },
   { to: '/auditoria', label: 'Auditoria' },
+  { to: '/admin-lab', label: 'Admin Lab' },
   { to: '/configuracoes', label: 'Configuracoes' },
   { to: '/tv-config', label: 'TV Config' },
   { to: '/tv', label: 'Tela TV' },
@@ -31,6 +32,7 @@ export function AppLayout({ title, subtitle, children }: Props) {
     if (item.to === '/boards') return crm.currentPermission.canEditBoards
     if (item.to === '/usuarios') return crm.currentPermission.canManageUsers
     if (item.to === '/auditoria') return crm.currentPermission.canManageUsers
+    if (item.to === '/admin-lab') return crm.currentPermission.canManageUsers
     if (item.to === '/tv' || item.to === '/tv-config') return crm.currentPermission.canViewTvPanel
     return true
   })

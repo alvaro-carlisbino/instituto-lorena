@@ -21,6 +21,7 @@ export type Lead = {
   phone: string
   source: 'meta_facebook' | 'meta_instagram' | 'whatsapp' | 'manual'
   createdAt: string
+  position: number
   score: number
   temperature: 'cold' | 'warm' | 'hot'
   ownerId: string
@@ -150,6 +151,7 @@ export const initialLeads: Lead[] = [
     phone: '+55 11 91234-2222',
     source: 'meta_instagram',
     createdAt: '2026-04-16T10:00:00Z',
+    position: 1,
     score: 78,
     temperature: 'hot',
     ownerId: 'sdr-1',
@@ -163,6 +165,7 @@ export const initialLeads: Lead[] = [
     phone: '+55 11 94567-3333',
     source: 'meta_facebook',
     createdAt: '2026-04-16T11:20:00Z',
+    position: 1,
     score: 62,
     temperature: 'warm',
     ownerId: 'sdr-2',
@@ -176,6 +179,7 @@ export const initialLeads: Lead[] = [
     phone: '+55 11 99876-7878',
     source: 'whatsapp',
     createdAt: '2026-04-16T12:50:00Z',
+    position: 1,
     score: 45,
     temperature: 'warm',
     ownerId: 'sdr-3',

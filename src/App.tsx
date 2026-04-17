@@ -16,6 +16,7 @@ import { TvConfigPage } from './pages/TvConfigPage'
 import { AuditPage } from './pages/AuditPage'
 import { AuthPage } from './pages/AuthPage'
 import { OnboardingPage } from './pages/OnboardingPage'
+import { AdminLabPage } from './pages/AdminLabPage'
 import './App.css'
 
 function AppRoutes() {
@@ -30,6 +31,7 @@ function AppRoutes() {
       <Route path="/metricas" element={<MetricsPage />} />
       <Route path="/usuarios" element={<UsersPage />} />
       <Route path="/auditoria" element={<AuditPage />} />
+      <Route path="/admin-lab" element={<AdminLabPage />} />
       <Route path="/configuracoes" element={<SettingsPage />} />
       <Route path="/tv-config" element={<TvConfigPage />} />
       <Route path="/tv" element={<TvDashboardPage />} />

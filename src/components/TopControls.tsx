@@ -14,24 +14,9 @@ export function TopControls() {
         <button onClick={() => void crm.runSignOut()} disabled={crm.isLoading || !crm.session}>
           Sair
         </button>
-        {crm.currentPermission.canManageUsers ? (
-          <button onClick={() => void crm.createTestAuthUsers()} disabled={crm.isLoading}>
-            Criar auth teste
-          </button>
-        ) : null}
         <button onClick={() => void crm.syncFromSupabase()} disabled={crm.isLoading || !crm.currentPermission.canRouteLeads}>
           {crm.isLoading ? 'Sincronizando...' : 'Sincronizar'}
         </button>
-        {crm.currentPermission.canManageUsers ? (
-          <>
-            <button onClick={() => void crm.seedSupabase()} disabled={crm.isLoading || !crm.currentPermission.canManageUsers}>
-              Seed dados
-            </button>
-            <button onClick={() => void crm.runWebhookReplay()} disabled={crm.isLoading}>
-              Replay webhook
-            </button>
-          </>
-        ) : null}
       </div>
 
       <div className="control-notices">

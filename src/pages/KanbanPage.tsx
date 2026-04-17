@@ -74,6 +74,21 @@ export function KanbanPage() {
                   <div
                     key={lead.id}
                     className={`lead-card ${crm.selectedLeadId === lead.id ? 'selected' : ''}`}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData('text/lead-id', lead.id)
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault()
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      const draggedLeadId = event.dataTransfer.getData('text/lead-id')
+                      if (!draggedLeadId) return
+                      const stageLeads = visibleLeads.filter((item) => item.stageId === stage.id)
+                      const targetIndex = stageLeads.findIndex((item) => item.id === lead.id)
+                      crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: Math.max(0, targetIndex) })
+                    }}
                     onClick={() => crm.setSelectedLeadId(lead.id)}
                     role="button"
                     tabIndex={0}
@@ -97,6 +112,22 @@ export function KanbanPage() {
                     </div>
                   </div>
                 ))}
+
+              <div
+                className="drop-zone"
+                onDragOver={(event) => {
+                  event.preventDefault()
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  const draggedLeadId = event.dataTransfer.getData('text/lead-id')
+                  if (!draggedLeadId) return
+                  const stageLeads = visibleLeads.filter((item) => item.stageId === stage.id)
+                  crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: stageLeads.length })
+                }}
+              >
+                Arraste para adicionar no fim da etapa
+              </div>
             </div>
           </article>
         ))}

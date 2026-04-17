@@ -37,6 +37,7 @@ type DbLead = {
   phone: string
   source: Lead['source']
   created_at: string
+  position: number
   score: number
   temperature: Lead['temperature']
   owner_id: string
@@ -96,8 +97,8 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       client.from('app_users').select('id, name, active, role').order('name', { ascending: true }),
       client
         .from('leads')
-        .select('id, patient_name, phone, source, created_at, score, temperature, owner_id, pipeline_id, stage_id, summary')
-        .order('created_at', { ascending: false }),
+        .select('id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary')
+        .order('position', { ascending: true }),
       client
         .from('interactions')
         .select('id, lead_id, patient_name, channel, direction, author, content, happened_at')
@@ -160,6 +161,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
         phone: lead.phone,
         source: lead.source,
         createdAt: lead.created_at,
+        position: lead.position,
         score: lead.score,
         temperature: lead.temperature,
         ownerId: lead.owner_id,
@@ -299,6 +301,7 @@ export const seedDemoData = async (): Promise<void> => {
     phone: lead.phone,
     source: lead.source,
     created_at: lead.createdAt,
+    position: lead.position,
     score: lead.score,
     temperature: lead.temperature,
     owner_id: lead.ownerId,
@@ -403,6 +406,18 @@ export const updateLeadStage = async (leadId: string, stageId: string): Promise<
   if (error) throw error
 }
 
+export const saveLeadOrdering = async (
+  leadId: string,
+  payload: { stageId: string; position: number },
+): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client
+    .from('leads')
+    .update({ stage_id: payload.stageId, position: payload.position })
+    .eq('id', leadId)
+  if (error) throw error
+}
+
 export const insertLead = async (lead: Lead): Promise<void> => {
   const client = assertSupabase()
   const { error } = await client.from('leads').insert({
@@ -411,6 +426,7 @@ export const insertLead = async (lead: Lead): Promise<void> => {
     phone: lead.phone,
     source: lead.source,
     created_at: lead.createdAt,
+    position: lead.position,
     score: lead.score,
     temperature: lead.temperature,
     owner_id: lead.ownerId,
