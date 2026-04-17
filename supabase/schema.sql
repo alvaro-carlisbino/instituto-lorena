@@ -222,7 +222,15 @@ returns trigger
 language plpgsql
 security definer
 as $$
+declare
+  is_service_role boolean;
 begin
+  is_service_role := coalesce((auth.jwt() ->> 'role') = 'service_role', false);
+
+  if is_service_role then
+    return coalesce(new, old);
+  end if;
+
   if tg_table_name in ('app_users', 'permission_profiles') and not public.can_manage_users() then
     raise exception 'forbidden: requires can_manage_users';
   end if;
