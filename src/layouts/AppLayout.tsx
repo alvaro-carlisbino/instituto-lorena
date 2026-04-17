@@ -173,7 +173,7 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
       <SidebarInset className="min-w-0">
         <div className="flex min-h-svh min-w-0 flex-1 flex-col">
           <div className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-            <div className="mx-auto flex w-full max-w-7xl min-w-0 items-center gap-2 px-4 py-2">
+            <div className="mx-auto flex w-full max-w-7xl min-w-0 items-start gap-2 px-4 py-2 sm:items-center">
               <TopControls />
             </div>
             <div className="mx-auto w-full max-w-7xl min-w-0 px-4">

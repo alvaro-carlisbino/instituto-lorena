@@ -8,6 +8,12 @@ export type AuthProfile = {
   role: 'admin' | 'gestor' | 'sdr'
 }
 
+const normalizeProfileRole = (raw: unknown): AuthProfile['role'] => {
+  const r = String(raw ?? '').trim().toLowerCase()
+  if (r === 'admin' || r === 'gestor' || r === 'sdr') return r
+  return 'sdr'
+}
+
 const assertSupabase = () => {
   if (!supabase) {
     throw new Error('Supabase nao configurado.')
@@ -50,14 +56,24 @@ export const onAuthStateChanged = (callback: (session: Session | null) => void) 
 
 export const ensureAppProfile = async (session: Session): Promise<void> => {
   const client = assertSupabase()
+  const userId = session.user.id
+
+  const { data: existing, error: readError } = await client
+    .from('app_profiles')
+    .select('auth_user_id')
+    .eq('auth_user_id', userId)
+    .maybeSingle()
+  if (readError) throw readError
+  if (existing) return
+
   const payload = {
-    auth_user_id: session.user.id,
+    auth_user_id: userId,
     email: session.user.email ?? '',
     display_name: session.user.user_metadata?.name ?? session.user.email?.split('@')[0] ?? 'usuario',
-    role: 'sdr',
+    role: 'sdr' as const,
   }
 
-  const { error } = await client.from('app_profiles').upsert(payload, { onConflict: 'auth_user_id' })
+  const { error } = await client.from('app_profiles').insert(payload)
   if (error) throw error
 }
 
@@ -82,7 +98,7 @@ export const getMyProfile = async (): Promise<AuthProfile | null> => {
     authUserId: data.auth_user_id,
     email: data.email,
     displayName: data.display_name,
-    role: data.role,
+    role: normalizeProfileRole(data.role),
   }
 }
 
@@ -97,14 +113,6 @@ export const updateMyProfile = async (payload: { displayName: string }): Promise
     throw new Error('Sessao invalida para atualizar perfil.')
   }
 
-  const { error } = await client.from('app_profiles').upsert(
-    {
-      auth_user_id: userId,
-      email,
-      display_name: payload.displayName,
-      role: 'sdr',
-    },
-    { onConflict: 'auth_user_id' },
-  )
+  const { error } = await client.from('app_profiles').update({ display_name: payload.displayName }).eq('auth_user_id', userId)
   if (error) throw error
 }

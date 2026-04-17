@@ -17,11 +17,15 @@ export function TopControls() {
   const crm = useCrm()
   const email = crm.session?.user.email ?? 'Sem sessão'
 
-  return (
-    <div className="flex w-full flex-wrap items-center gap-2">
-      <SidebarTrigger className="-ml-1" />
+  const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
 
-      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+      <div className="flex shrink-0 items-center gap-2">
+        <SidebarTrigger className="-ml-1" />
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
         <DropdownMenu>
           <DropdownMenuTrigger>
             <Button variant="outline" size="sm" className="max-w-[min(100%,14rem)] gap-1 truncate md:max-w-xs">
@@ -50,14 +54,14 @@ export function TopControls() {
         <Button
           variant="secondary"
           size="sm"
-          disabled={crm.isLoading || !crm.currentPermission.canRouteLeads}
+          disabled={crm.isLoading || !canSync}
           onClick={() => void crm.syncFromSupabase()}
         >
           <RefreshCw className={`size-3.5 ${crm.isLoading ? 'animate-spin' : ''}`} />
           {crm.isLoading ? 'Sincronizando…' : 'Sincronizar'}
         </Button>
 
-        <Collapsible className="w-full min-w-[12rem] flex-[1_1_100%] md:flex-[0_1_auto] md:min-w-0">
+        <Collapsible className="w-full min-w-0 sm:w-auto sm:max-w-md">
           <CollapsibleTrigger>
             <Button variant="ghost" size="sm" className="w-full justify-between gap-2 md:w-auto">
               <span className="inline-flex items-center gap-1.5">

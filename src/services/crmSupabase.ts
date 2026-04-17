@@ -28,6 +28,13 @@ import type {
 } from '../mocks/crmMock'
 import { supabase } from '../lib/supabaseClient'
 
+/** Alinha papel do banco (ex.: casing) ao union usado no app. */
+const normalizeAppRole = (raw: string): PermissionProfile['role'] => {
+  const r = String(raw ?? '').trim().toLowerCase()
+  if (r === 'admin' || r === 'gestor' || r === 'sdr') return r
+  return 'sdr'
+}
+
 type DbPipeline = { id: string; name: string }
 type DbStage = { id: string; pipeline_id: string; name: string; position: number }
 type DbUser = { id: string; name: string; active: boolean; role: string }
@@ -220,7 +227,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   const builtPermissions: PermissionProfile[] = (permissionsRes.data ?? []).length
     ? (permissionsRes.data ?? []).map((row) => ({
         id: row.id,
-        role: row.role,
+        role: normalizeAppRole(row.role),
         canEditBoards: row.can_edit_boards,
         canRouteLeads: row.can_route_leads,
         canManageUsers: row.can_manage_users,
@@ -236,7 +243,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     ? userRows.map((row) => ({
         id: row.id,
         name: row.name,
-        role: row.role as AppUser['role'],
+        role: normalizeAppRole(row.role),
         active: row.active,
       }))
     : initialAppUsers

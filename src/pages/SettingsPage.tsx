@@ -7,12 +7,14 @@ import { AppLayout } from '@/layouts/AppLayout'
 export function SettingsPage() {
   const crm = useCrm()
 
-  if (!crm.currentPermission.canEditBoards) {
+  const canAccessSettings = crm.currentPermission.canEditBoards || crm.currentPermission.canManageUsers
+
+  if (!canAccessSettings) {
     return (
       <AppLayout title="Configurações gerais" subtitle="Sem permissão para editar configurações estruturais.">
         <Card className="shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
-            <p className="m-0">Seu perfil não pode alterar workflow, perfis e notificações.</p>
+            <p className="m-0">Peça acesso a um administrador (workflow, perfis de permissão e notificações).</p>
           </CardContent>
         </Card>
       </AppLayout>

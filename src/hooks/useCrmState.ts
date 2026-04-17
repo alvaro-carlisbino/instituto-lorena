@@ -1066,16 +1066,40 @@ export const useCrmState = () => {
 
   const effectiveRole = actingRole
 
-  const currentPermission =
-    permissions.find((permission) => permission.role === effectiveRole) ??
-    ({
-      id: 'fallback',
-      role: 'sdr',
-      canEditBoards: false,
-      canRouteLeads: false,
-      canManageUsers: false,
-      canViewTvPanel: true,
-    } as PermissionProfile)
+  const currentPermission = useMemo((): PermissionProfile => {
+    const matchRole = (list: PermissionProfile[], role: string) =>
+      list.find((p) => p.role === role) ??
+      list.find((p) => p.role.toLowerCase() === role.toLowerCase())
+
+    const base =
+      matchRole(permissions, effectiveRole) ??
+      matchRole(initialPermissions, effectiveRole) ??
+      ({
+        id: 'fallback',
+        role: effectiveRole,
+        canEditBoards: false,
+        canRouteLeads: false,
+        canManageUsers: false,
+        canViewTvPanel: true,
+      } as PermissionProfile)
+
+    if (useRolePreview) {
+      return base
+    }
+
+    if (effectiveRole === 'admin') {
+      return {
+        ...base,
+        role: 'admin',
+        canEditBoards: true,
+        canRouteLeads: true,
+        canManageUsers: true,
+        canViewTvPanel: base.canViewTvPanel !== false,
+      }
+    }
+
+    return base
+  }, [permissions, effectiveRole, useRolePreview])
 
   const completeOnboarding = async () => {
     const displayName = displayNameDraft.trim()

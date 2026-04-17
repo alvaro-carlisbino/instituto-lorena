@@ -123,10 +123,12 @@
     }
   html {
     @apply font-sans;
-    overflow-x: hidden;
     }
   body {
     @apply bg-background text-foreground;
-    overflow-x: hidden;
+    }
+  #root {
+    min-height: 100vh;
+    min-width: 0;
     }
 }
