@@ -70,6 +70,17 @@ export type CrmDataSnapshot = {
   dashboardWidgets: DashboardWidget[]
 }
 
+export type AuditLogEntry = {
+  id: string
+  actorId: string | null
+  actorEmail: string | null
+  action: string
+  targetTable: string
+  targetId: string | null
+  metadata: Record<string, unknown>
+  createdAt: string
+}
+
 const assertSupabase = () => {
   if (!supabase) throw new Error('Supabase nao configurado.')
   return supabase
@@ -572,4 +583,26 @@ export const deleteDashboardWidget = async (widgetId: string): Promise<void> => 
   const client = assertSupabase()
   const { error } = await client.from('dashboard_widgets').delete().eq('id', widgetId)
   if (error) throw error
+}
+
+export const loadAuditLogs = async (limit = 120): Promise<AuditLogEntry[]> => {
+  const client = assertSupabase()
+  const { data, error } = await client
+    .from('audit_logs')
+    .select('id, actor_id, actor_email, action, target_table, target_id, metadata, created_at')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) throw error
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    actorId: row.actor_id,
+    actorEmail: row.actor_email,
+    action: row.action,
+    targetTable: row.target_table,
+    targetId: row.target_id,
+    metadata: (row.metadata ?? {}) as Record<string, unknown>,
+    createdAt: row.created_at,
+  }))
 }

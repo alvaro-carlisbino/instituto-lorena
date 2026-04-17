@@ -5,23 +5,12 @@ export function TopControls() {
 
   return (
     <section className="top-controls">
-      <div className="auth-fields">
-        <input value={crm.authEmail} onChange={(event) => crm.setAuthEmail(event.target.value)} placeholder="email" />
-        <input
-          value={crm.authPassword}
-          onChange={(event) => crm.setAuthPassword(event.target.value)}
-          placeholder="senha"
-          type="password"
-        />
+      <div className="top-identity">
+        <strong>{crm.session?.user.email ?? 'sem sessao'}</strong>
+        <small>{crm.currentPermission.role}</small>
       </div>
 
       <div className="button-group">
-        <button onClick={() => void crm.runSignIn()} disabled={crm.isLoading}>
-          Login
-        </button>
-        <button onClick={() => void crm.runSignUp()} disabled={crm.isLoading}>
-          Criar conta
-        </button>
         <button onClick={() => void crm.runSignOut()} disabled={crm.isLoading || !crm.session}>
           Sair
         </button>
@@ -38,7 +27,6 @@ export function TopControls() {
 
       <div className="control-notices">
         <p>Modo: {crm.dataMode}</p>
-        <p>Sessao: {crm.session?.user.email ?? 'nao autenticado'}</p>
         <p>
           Atuando como:{' '}
           <select

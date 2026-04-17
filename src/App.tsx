@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { CrmProvider } from './context/CrmContext'
 import { useCrmState } from './hooks/useCrmState'
+import { getDataProviderMode } from './services/dataMode'
 import { DashboardPage } from './pages/DashboardPage'
 import { BoardsPage } from './pages/BoardsPage'
 import { KanbanPage } from './pages/KanbanPage'
@@ -13,6 +14,7 @@ import { TvDashboardPage } from './pages/TvDashboardPage'
 import { UsersPage } from './pages/UsersPage'
 import { TvConfigPage } from './pages/TvConfigPage'
 import { AuditPage } from './pages/AuditPage'
+import { AuthPage } from './pages/AuthPage'
 import './App.css'
 
 function AppRoutes() {
@@ -37,6 +39,22 @@ function AppRoutes() {
 
 function App() {
   const crmState = useCrmState()
+  const dataMode = getDataProviderMode()
+
+  if (dataMode === 'supabase' && !crmState.session) {
+    return (
+      <AuthPage
+        email={crmState.authEmail}
+        password={crmState.authPassword}
+        isLoading={crmState.isLoading}
+        notice={crmState.authNotice}
+        onEmailChange={crmState.setAuthEmail}
+        onPasswordChange={crmState.setAuthPassword}
+        onSignIn={() => void crmState.runSignIn()}
+        onSignUp={() => void crmState.runSignUp()}
+      />
+    )
+  }
 
   return (
     <CrmProvider value={crmState}>
