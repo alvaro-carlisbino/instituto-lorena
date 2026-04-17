@@ -13,7 +13,7 @@ export function PageHeader({ title, description, actions, className }: PageHeade
   return (
     <div
       className={cn(
-        'flex flex-col gap-1 border-b border-border bg-background/95 pb-4 pt-2 md:flex-row md:items-start md:justify-between md:gap-4',
+        'flex min-w-0 flex-col gap-1 border-b border-border bg-background/95 pb-4 pt-2 md:flex-row md:items-start md:justify-between md:gap-4',
         className
       )}
     >

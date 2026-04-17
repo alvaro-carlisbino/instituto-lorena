@@ -18,8 +18,6 @@ import { AuthPage } from './pages/AuthPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { AdminLabPage } from './pages/AdminLabPage'
 import { RouteTransition } from './components/RouteTransition'
-import { SidebarProvider } from '@/components/ui/sidebar'
-import { TooltipProvider } from '@/components/ui/tooltip'
 
 function AppRoutes() {
   return (
@@ -75,13 +73,9 @@ function App() {
 
   return (
     <CrmProvider value={crmState}>
-      <SidebarProvider>
-        <TooltipProvider delay={200}>
-          <RouteTransition>
-            <AppRoutes />
-          </RouteTransition>
-        </TooltipProvider>
-      </SidebarProvider>
+      <RouteTransition>
+        <AppRoutes />
+      </RouteTransition>
     </CrmProvider>
   )
 }

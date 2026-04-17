@@ -67,7 +67,7 @@ export function TopControls() {
               <ChevronDown className="size-3.5 opacity-60" />
             </Button>
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2 w-full rounded-lg border border-border bg-muted/40 p-3 text-sm md:absolute md:right-4 md:top-full md:z-30 md:mt-1 md:min-w-[20rem] md:shadow-md">
+          <CollapsibleContent className="mt-2 w-full max-w-full rounded-lg border border-border bg-muted/40 p-3 text-sm shadow-sm">
             <div className="grid gap-2 text-muted-foreground">
               <p>
                 <span className="font-medium text-foreground">Modo de dados:</span> {crm.dataMode}
