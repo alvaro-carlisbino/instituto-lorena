@@ -753,8 +753,13 @@ export const saveAppUser = async (user: AppUser): Promise<void> => {
   if (error) throw error
 }
 
-export const deleteAppUser = async (userId: string): Promise<void> => {
+/** Reatribui leads antes de apagar (FK owner_id → app_users). */
+export const deleteAppUser = async (userId: string, reassignOwnerId?: string): Promise<void> => {
   const client = assertSupabase()
+  if (reassignOwnerId && reassignOwnerId !== userId) {
+    const { error: reassignErr } = await client.from('leads').update({ owner_id: reassignOwnerId }).eq('owner_id', userId)
+    if (reassignErr) throw reassignErr
+  }
   const { error } = await client.from('app_users').delete().eq('id', userId)
   if (error) throw error
 }

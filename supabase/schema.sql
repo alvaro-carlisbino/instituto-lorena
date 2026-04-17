@@ -605,6 +605,12 @@ create policy "audit logs admin read"
   for select
   using (public.can_manage_users());
 
+drop policy if exists "audit logs insert by session user" on public.audit_logs;
+create policy "audit logs insert by session user"
+  on public.audit_logs
+  for insert
+  with check (actor_id is not null and actor_id = auth.uid());
+
 drop policy if exists "webhook jobs admin read" on public.webhook_jobs;
 drop policy if exists "webhook jobs admin write" on public.webhook_jobs;
 create policy "webhook jobs admin read"

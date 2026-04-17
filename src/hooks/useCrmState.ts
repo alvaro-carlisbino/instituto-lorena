@@ -793,10 +793,18 @@ export const useCrmState = () => {
   }
 
   const removeUser = (userId: string) => {
-    setUsers((previous) => previous.filter((user) => user.id !== userId))
+    const remaining = users.filter((user) => user.id !== userId)
+    const fallbackOwnerId =
+      remaining.find((u) => u.role === 'admin')?.id ??
+      remaining.find((u) => u.active)?.id ??
+      remaining[0]?.id
+
     if (dataMode === 'supabase' && isSupabaseConfigured) {
-      void deleteAppUser(userId)
+      void deleteAppUser(userId, fallbackOwnerId).catch((error) => {
+        setAuthNotice(`Falha ao remover utilizador: ${error instanceof Error ? error.message : String(error)}`)
+      })
     }
+    setUsers(remaining)
   }
 
   const addTvWidget = () => {
