@@ -1,5 +1,6 @@
+import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanner'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useCrm } from '@/context/CrmContext'
@@ -14,7 +15,7 @@ export function SettingsPage() {
   if (!canAccessSettings) {
     return (
       <AppLayout title="Configurações gerais" subtitle="Sem permissão para editar configurações estruturais.">
-        <Card className="shadow-sm">
+        <Card className="border-border/80 shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
             <p className="m-0">Peça acesso a um administrador (workflow, perfis de permissão e notificações).</p>
           </CardContent>
@@ -25,16 +26,25 @@ export function SettingsPage() {
 
   return (
     <AppLayout title="Configurações gerais" subtitle="Permissões, campos de workflow e regras de notificação.">
+      <NoticeBanner
+        message={crm.syncNotice}
+        variant={noticeVariantFromMessage(crm.syncNotice)}
+        className="mb-2"
+      />
+
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="shadow-sm">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Campos de workflow</CardTitle>
+        <Card className="border-border/80 shadow-sm">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-4">
+            <div className="space-y-1">
+              <CardTitle className="text-base">Campos de workflow</CardTitle>
+              <CardDescription>Chaves estáveis, rótulos e onde cada campo aparece no CRM.</CardDescription>
+            </div>
             <Button type="button" variant="outline" size="sm" onClick={crm.addWorkflowField}>
               Novo campo
             </Button>
           </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border rounded-lg border border-border">
+          <CardContent className="pt-0">
+            <ul className="m-0 list-none space-y-3 p-0">
               {crm.workflowFields.map((field) => {
                 const toggleVis = (ctx: FieldVisibilityContext, checked: boolean) => {
                   const next = checked
@@ -44,7 +54,10 @@ export function SettingsPage() {
                 }
                 const vis = (ctx: FieldVisibilityContext) => field.visibleIn.includes(ctx)
                 return (
-                  <li key={field.id} className="flex flex-col gap-3 p-3">
+                  <li
+                    key={field.id}
+                    className="flex flex-col gap-3 rounded-xl border border-border/80 bg-card/50 p-4 shadow-sm"
+                  >
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                       <div className="grid gap-1">
                         <Label className="text-xs text-muted-foreground">Chave (slug)</Label>
@@ -138,17 +151,23 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Permissões por papel</CardTitle>
+        <Card className="border-border/80 shadow-sm">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-4">
+            <div className="space-y-1">
+              <CardTitle className="text-base">Permissões por papel</CardTitle>
+              <CardDescription>Combinações de permissões por função (admin, gestor, SDR).</CardDescription>
+            </div>
             <Button type="button" variant="outline" size="sm" onClick={crm.addPermissionProfile}>
               Novo perfil
             </Button>
           </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border rounded-lg border border-border">
+          <CardContent className="pt-0">
+            <ul className="m-0 list-none space-y-3 p-0">
               {crm.permissions.map((profile) => (
-                <li key={profile.id} className="space-y-3 p-3">
+                <li
+                  key={profile.id}
+                  className="space-y-3 rounded-xl border border-border/80 bg-card/50 p-4 shadow-sm"
+                >
                   <div className="flex flex-wrap items-center gap-2">
                     <select
                       className="h-8 rounded-md border border-input bg-background px-2 text-sm"
@@ -221,17 +240,23 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm lg:col-span-2">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Notificações</CardTitle>
+        <Card className="border-border/80 shadow-sm lg:col-span-2">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-4">
+            <div className="space-y-1">
+              <CardTitle className="text-base">Notificações</CardTitle>
+              <CardDescription>Canais e gatilhos para alertas operacionais.</CardDescription>
+            </div>
             <Button type="button" variant="outline" size="sm" onClick={crm.addNotificationRule}>
               Nova regra
             </Button>
           </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border rounded-lg border border-border">
+          <CardContent className="pt-0">
+            <ul className="m-0 list-none space-y-3 p-0">
               {crm.notifications.map((rule) => (
-                <li key={rule.id} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <li
+                  key={rule.id}
+                  className="flex flex-col gap-3 rounded-xl border border-border/80 bg-card/50 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                >
                   <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
                     <Input
                       value={rule.name}
@@ -281,9 +306,10 @@ export function SettingsPage() {
       </div>
 
       {crm.currentPermission.canEditBoards ? (
-        <Card className="mt-6 shadow-sm">
-          <CardHeader>
+        <Card className="mt-6 border-border/80 shadow-sm">
+          <CardHeader className="pb-2">
             <CardTitle className="text-base">Organização (datas e locale)</CardTitle>
+            <CardDescription>Fuso e formato usados em relatórios e listagens.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="grid gap-2">

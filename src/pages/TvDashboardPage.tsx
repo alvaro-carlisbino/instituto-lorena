@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 
+import { APP_ENV_BADGE, APP_TV_HEADING } from '@/config/branding'
 import { useCrm } from '@/context/CrmContext'
 import { cn } from '@/lib/utils'
 
@@ -37,8 +38,9 @@ export function TvDashboardPage() {
     return (
       <div className="min-h-svh bg-zinc-950 px-8 py-10 text-zinc-50">
         <header className="mb-8">
-          <h1 className="m-0 text-3xl font-semibold tracking-tight">Instituto Lorena · Painel TV</h1>
-          <p className="mt-2 text-zinc-400">Acesso negado para o perfil atual.</p>
+          <h1 className="m-0 text-3xl font-semibold tracking-tight">{APP_TV_HEADING}</h1>
+          <p className="mt-2 text-sm font-medium uppercase tracking-wider text-zinc-500">{APP_ENV_BADGE}</p>
+          <p className="mt-1 text-zinc-400">Acesso negado para o perfil atual.</p>
         </header>
       </div>
     )
@@ -48,7 +50,8 @@ export function TvDashboardPage() {
     <div className="min-h-svh bg-gradient-to-br from-zinc-900 via-slate-950 to-zinc-950 px-8 py-10 text-zinc-50">
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="m-0 text-3xl font-semibold tracking-tight md:text-4xl">Instituto Lorena · Painel TV</h1>
+          <h1 className="m-0 text-3xl font-semibold tracking-tight md:text-4xl">{APP_TV_HEADING}</h1>
+          <p className="mt-1 text-xs font-semibold uppercase tracking-widest text-zinc-500">Painel TV · {APP_ENV_BADGE}</p>
           <p className="mt-2 text-lg text-zinc-400">Atualização automática a cada 15 s · ciclo {tick}</p>
         </div>
       </header>

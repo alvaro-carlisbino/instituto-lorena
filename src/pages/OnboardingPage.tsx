@@ -1,3 +1,4 @@
+import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -20,7 +21,7 @@ export function OnboardingPage({
 }: Props) {
   return (
     <div className="flex min-h-svh items-center justify-center bg-muted/40 p-4">
-      <Card className="w-full max-w-md shadow-sm">
+      <Card className="w-full max-w-md border-border/80 shadow-sm">
         <CardHeader className="space-y-1">
           <p className="text-xs font-semibold tracking-wide text-primary uppercase">Primeiro acesso</p>
           <CardTitle className="text-xl">Complete seu perfil</CardTitle>
@@ -40,9 +41,7 @@ export function OnboardingPage({
               autoComplete="name"
             />
           </div>
-          {notice ? (
-            <p className="rounded-md border border-border bg-muted/60 px-3 py-2 text-sm text-foreground">{notice}</p>
-          ) : null}
+          <NoticeBanner message={notice} variant={noticeVariantFromMessage(notice)} />
         </CardContent>
         <CardFooter>
           <Button className="w-full" onClick={onComplete} disabled={isLoading}>

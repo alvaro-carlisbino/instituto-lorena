@@ -17,8 +17,10 @@ import {
   Users,
 } from 'lucide-react'
 
+import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '@/components/page/PageHeader'
 import { TopControls } from '@/components/TopControls'
+import { APP_ENV_BADGE, APP_LOGO_MONOGRAM, APP_NAME, APP_TAGLINE } from '@/config/branding'
 import { useCrm } from '@/context/CrmContext'
 import {
   Sidebar,
@@ -55,6 +57,7 @@ function NavItem({ to, label, icon: Icon }: { to: string; label: string; icon: t
         isActive={isActive}
         render={<NavLink to={to} />}
         tooltip={label}
+        className="transition-colors data-[active=true]:bg-sidebar-accent/90"
       >
         <Icon className="size-4 shrink-0" />
         <span>{label}</span>
@@ -79,12 +82,17 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton size="lg" render={<Link to="/dashboard" />}>
-                  <div className="flex size-8 items-center justify-center rounded-md bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground">
-                    IL
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-xs font-bold tracking-tight text-sidebar-primary-foreground shadow-sm">
+                    {APP_LOGO_MONOGRAM}
                   </div>
-                  <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">Instituto Lorena</span>
-                    <span className="truncate text-xs text-sidebar-foreground/70">CRM comercial</span>
+                  <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-semibold">{APP_NAME}</span>
+                      <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px] font-semibold uppercase">
+                        {APP_ENV_BADGE}
+                      </Badge>
+                    </span>
+                    <span className="truncate text-xs text-sidebar-foreground/70">{APP_TAGLINE}</span>
                   </div>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -92,8 +100,10 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
           </SidebarHeader>
 
           <SidebarContent>
-            <SidebarGroup>
-              <SidebarGroupLabel>Operação</SidebarGroupLabel>
+            <SidebarGroup className="pt-1">
+              <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                Operação
+              </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
                   <NavItem to="/dashboard" label="Dashboard" icon={LayoutDashboard} />
@@ -104,7 +114,9 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
             </SidebarGroup>
 
             <SidebarGroup>
-              <SidebarGroupLabel>Dados e canais</SidebarGroupLabel>
+              <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                Dados e canais
+              </SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
                   <NavItem to="/canais" label="Canais" icon={Radio} />
@@ -117,7 +129,9 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
 
             {(showDashboardConfig || showAdmin) && (
               <SidebarGroup>
-                <SidebarGroupLabel>Configuração</SidebarGroupLabel>
+                <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                  Configuração
+                </SidebarGroupLabel>
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {showDashboardConfig ? (
@@ -131,7 +145,9 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
 
             {showAdmin ? (
               <SidebarGroup>
-                <SidebarGroupLabel>Administração</SidebarGroupLabel>
+                <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                  Administração
+                </SidebarGroupLabel>
                 <SidebarGroupContent>
                   <SidebarMenu>
                     <NavItem to="/usuarios" label="Usuários" icon={Users} />
@@ -144,7 +160,9 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
 
             {showTv ? (
               <SidebarGroup>
-                <SidebarGroupLabel>TV</SidebarGroupLabel>
+                <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                  TV
+                </SidebarGroupLabel>
                 <SidebarGroupContent>
                   <SidebarMenu>
                     <NavItem to="/tv-config" label="Config. TV" icon={Tv} />
@@ -156,7 +174,9 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
 
             {!showDashboardConfig && !showAdmin ? (
               <SidebarGroup>
-                <SidebarGroupLabel>Geral</SidebarGroupLabel>
+                <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+                  Geral
+                </SidebarGroupLabel>
                 <SidebarGroupContent>
                   <SidebarMenu>
                     <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
@@ -167,7 +187,9 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
           </SidebarContent>
 
           <SidebarSeparator />
-          <SidebarFooter className="text-xs text-sidebar-foreground/60">Versão interna · uso operacional</SidebarFooter>
+          <SidebarFooter className="px-2 text-[11px] leading-relaxed text-sidebar-foreground/55">
+            {APP_ENV_BADGE} · uso operacional
+          </SidebarFooter>
           <SidebarRail />
         </Sidebar>
       </TooltipProvider>
@@ -183,7 +205,7 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
             </div>
           </div>
 
-          <div className="mx-auto w-full max-w-7xl min-w-0 flex-1 space-y-6 px-4 py-6">{children}</div>
+          <div className="mx-auto w-full max-w-7xl min-w-0 flex-1 space-y-8 px-4 py-8">{children}</div>
         </div>
       </SidebarInset>
     </SidebarProvider>

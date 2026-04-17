@@ -10,6 +10,7 @@ import {
   signUpWithEmail,
   updateMyProfile,
   inviteTeamMember,
+  provisionUserWithPassword,
 } from '../services/authSupabase'
 import {
   deleteDashboardWidget,
@@ -1228,6 +1229,55 @@ export const useCrmState = () => {
     }
   }
 
+  const runProvisionUser = async (payload: {
+    appUserId: string
+    email: string
+    displayName: string
+    role: AppUser['role']
+    password: string
+    passwordConfirm: string
+  }): Promise<boolean> => {
+    if (!isSupabaseConfigured) {
+      setAuthNotice('Supabase nao configurado.')
+      return false
+    }
+    if (!currentPermission.canManageUsers) {
+      setAuthNotice('Sem permissao para criar usuarios.')
+      return false
+    }
+    const email = payload.email.trim().toLowerCase()
+    if (!email.includes('@')) {
+      setAuthNotice('Informe um e-mail valido.')
+      return false
+    }
+    if (payload.password.length < 8) {
+      setAuthNotice('A senha deve ter pelo menos 8 caracteres.')
+      return false
+    }
+    if (payload.password !== payload.passwordConfirm) {
+      setAuthNotice('Senha e confirmacao nao coincidem.')
+      return false
+    }
+    setIsLoading(true)
+    try {
+      await provisionUserWithPassword({
+        email,
+        password: payload.password,
+        displayName: payload.displayName.trim() || email.split('@')[0] || 'usuario',
+        role: payload.role,
+        appUserId: payload.appUserId,
+      })
+      setAuthNotice('Acesso criado. O usuario ja pode entrar com e-mail e senha.')
+      await syncFromSupabase()
+      return true
+    } catch (error) {
+      setAuthNotice(`Falha ao criar acesso: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
+      return false
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const runWebhookReplay = async () => {
     if (!supabase) {
       setSyncNotice('Supabase nao configurado.')
@@ -1339,6 +1389,7 @@ export const useCrmState = () => {
     createTestAuthUsers,
     runWebhookReplay,
     runInviteTeamMember,
+    runProvisionUser,
     updateChannel,
     addChannel,
     removeChannel,

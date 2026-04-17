@@ -1,5 +1,6 @@
 import { ChevronDown, LogOut, RefreshCw, Wrench } from 'lucide-react'
 
+import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanner'
 import { useCrm } from '@/context/CrmContext'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -101,8 +102,12 @@ export function TopControls() {
               <p>
                 <span className="font-medium text-foreground">Efetivo:</span> {crm.effectiveRole}
               </p>
-              {crm.syncNotice ? <p className="text-foreground">{crm.syncNotice}</p> : null}
-              {crm.authNotice ? <p className="text-foreground">{crm.authNotice}</p> : null}
+              {crm.syncNotice ? (
+                <NoticeBanner message={crm.syncNotice} variant={noticeVariantFromMessage(crm.syncNotice)} />
+              ) : null}
+              {crm.authNotice ? (
+                <NoticeBanner message={crm.authNotice} variant={noticeVariantFromMessage(crm.authNotice)} />
+              ) : null}
             </div>
           </CollapsibleContent>
         </Collapsible>

@@ -1,7 +1,10 @@
+import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanner'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { APP_ENV_BADGE, APP_LOGO_MONOGRAM, APP_NAME } from '@/config/branding'
 
 type Props = {
   email: string
@@ -25,27 +28,52 @@ export function AuthPage({
   onSignUp,
 }: Props) {
   return (
-    <div className="flex min-h-svh items-center justify-center bg-muted/40 p-4">
-      <Card className="w-full max-w-md shadow-sm">
-        <CardHeader className="space-y-1">
-          <p className="text-xs font-semibold tracking-wide text-primary uppercase">Instituto Lorena · Área restrita</p>
-          <CardTitle className="text-xl">Central comercial</CardTitle>
-          <CardDescription>Acesse com seu usuário corporativo para entrar no CRM.</CardDescription>
+    <div className="relative flex min-h-svh items-center justify-center overflow-hidden bg-gradient-to-b from-muted/50 via-background to-muted/30 p-4">
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.35]"
+        style={{
+          backgroundImage: `radial-gradient(ellipse 80% 50% at 50% -20%, hsl(var(--primary) / 0.18), transparent 55%)`,
+        }}
+      />
+      <Card className="relative w-full max-w-md border-border/80 shadow-lg shadow-black/5">
+        <CardHeader className="space-y-4 pb-2">
+          <div className="flex items-center gap-3">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold tracking-tight text-primary-foreground shadow-md">
+              {APP_LOGO_MONOGRAM}
+            </div>
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-primary">{APP_NAME}</p>
+                <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-semibold uppercase">
+                  {APP_ENV_BADGE}
+                </Badge>
+              </div>
+              <CardTitle className="text-2xl font-semibold tracking-tight">Entrar</CardTitle>
+            </div>
+          </div>
+          <CardDescription className="text-base leading-relaxed text-muted-foreground">
+            Use o e-mail e a senha fornecidos pela equipe para acessar o painel.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4">
+        <CardContent className="grid gap-5 pt-2">
           <div className="grid gap-2">
-            <Label htmlFor="auth-email">Email</Label>
+            <Label htmlFor="auth-email" className="text-foreground">
+              E-mail
+            </Label>
             <Input
               id="auth-email"
               type="email"
               value={email}
               onChange={(event) => onEmailChange(event.target.value)}
-              placeholder="voce@institutolorena.com"
+              placeholder="voce@empresa.com"
               autoComplete="email"
+              className="h-11"
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="auth-password">Senha</Label>
+            <Label htmlFor="auth-password" className="text-foreground">
+              Senha
+            </Label>
             <Input
               id="auth-password"
               type="password"
@@ -53,17 +81,16 @@ export function AuthPage({
               onChange={(event) => onPasswordChange(event.target.value)}
               placeholder="••••••••"
               autoComplete="current-password"
+              className="h-11"
             />
           </div>
-          {notice ? (
-            <p className="rounded-md border border-border bg-muted/60 px-3 py-2 text-sm text-foreground">{notice}</p>
-          ) : null}
+          <NoticeBanner message={notice} variant={noticeVariantFromMessage(notice)} />
         </CardContent>
-        <CardFooter className="flex flex-col gap-2 sm:flex-row">
-          <Button className="w-full sm:flex-1" onClick={onSignIn} disabled={isLoading}>
+        <CardFooter className="flex flex-col gap-3 border-t border-border/60 bg-muted/20 px-6 py-5 sm:flex-row sm:justify-stretch">
+          <Button className="h-11 w-full font-medium sm:flex-1" onClick={onSignIn} disabled={isLoading}>
             {isLoading ? 'Entrando…' : 'Entrar'}
           </Button>
-          <Button type="button" variant="outline" className="w-full sm:flex-1" onClick={onSignUp} disabled={isLoading}>
+          <Button type="button" variant="outline" className="h-11 w-full sm:flex-1" onClick={onSignUp} disabled={isLoading}>
             Solicitar acesso
           </Button>
         </CardFooter>
