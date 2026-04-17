@@ -28,16 +28,28 @@ export function TopControls() {
       <div className="control-notices">
         <p>Modo: {crm.dataMode}</p>
         <p>
+          <label className="switch-row">
+            <input
+              type="checkbox"
+              checked={crm.useRolePreview}
+              onChange={(event) => crm.setUseRolePreview(event.target.checked)}
+            />
+            Modo preview de perfil
+          </label>
+        </p>
+        <p>
           Atuando como:{' '}
           <select
             value={crm.actingRole}
             onChange={(event) => crm.setActingRole(event.target.value as 'admin' | 'gestor' | 'sdr')}
+            disabled={!crm.useRolePreview}
           >
             <option value="admin">admin</option>
             <option value="gestor">gestor</option>
             <option value="sdr">sdr</option>
           </select>
         </p>
+        <p>Perfil efetivo: {crm.effectiveRole}</p>
         {crm.syncNotice ? <p>{crm.syncNotice}</p> : null}
         {crm.authNotice ? <p>{crm.authNotice}</p> : null}
       </div>

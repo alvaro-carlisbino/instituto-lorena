@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import {
   ensureAppProfile,
   getCurrentSession,
+  getMyProfile,
   onAuthStateChanged,
   signInWithEmail,
   signOutSession,
@@ -135,6 +136,7 @@ export const useCrmState = () => {
   const [authPassword, setAuthPassword] = useState<string>('')
   const [authNotice, setAuthNotice] = useState<string>('')
   const [actingRole, setActingRole] = useState<'admin' | 'gestor' | 'sdr'>('admin')
+  const [useRolePreview, setUseRolePreview] = useState<boolean>(false)
   const [triageByLead, setTriageByLead] = useState<Record<string, TriageResult>>({
     'lead-001': {
       leadId: 'lead-001',
@@ -959,15 +961,22 @@ export const useCrmState = () => {
   }, [dataMode])
 
   useEffect(() => {
-    if (!session?.user?.email) return
-    const profile = users.find((user) => user.name.toLowerCase().includes(session.user.email?.split('@')[0] ?? ''))
-    if (profile) {
-      setActingRole(profile.role)
-    }
+    if (!session) return
+    void getMyProfile()
+      .then((profile) => {
+        if (profile) {
+          setActingRole(profile.role)
+        }
+      })
+      .catch(() => {
+        setAuthNotice('Nao foi possivel ler perfil. Verifique RLS/app_profiles.')
+      })
   }, [session, users])
 
+  const effectiveRole = actingRole
+
   const currentPermission =
-    permissions.find((permission) => permission.role === actingRole) ??
+    permissions.find((permission) => permission.role === effectiveRole) ??
     ({
       id: 'fallback',
       role: 'sdr',
@@ -1014,6 +1023,9 @@ export const useCrmState = () => {
     session,
     actingRole,
     setActingRole,
+    useRolePreview,
+    setUseRolePreview,
+    effectiveRole,
     currentPermission,
     authEmail,
     setAuthEmail,

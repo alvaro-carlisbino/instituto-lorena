@@ -205,6 +205,7 @@ button:disabled {
   gap: 0.6rem;
   align-items: center;
   margin-bottom: 0.9rem;
+  flex-wrap: wrap;
 }
 
 .inline-actions {
@@ -456,6 +457,10 @@ button:disabled {
   gap: 0.9rem;
 }
 
+.history-filters {
+  margin-bottom: 0.9rem;
+}
+
 .history-layout aside {
   display: grid;
   gap: 0.5rem;
@@ -678,6 +683,10 @@ button:disabled {
 
 .auth-actions button {
   flex: 1;
+}
+
+.ghost {
+  background: #f4f7fa;
 }
 
 .auth-notice {

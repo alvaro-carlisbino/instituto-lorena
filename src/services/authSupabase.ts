@@ -1,6 +1,13 @@
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabaseClient'
 
+export type AuthProfile = {
+  authUserId: string
+  email: string
+  displayName: string
+  role: 'admin' | 'gestor' | 'sdr'
+}
+
 const assertSupabase = () => {
   if (!supabase) {
     throw new Error('Supabase nao configurado.')
@@ -52,4 +59,29 @@ export const ensureAppProfile = async (session: Session): Promise<void> => {
 
   const { error } = await client.from('app_profiles').upsert(payload, { onConflict: 'auth_user_id' })
   if (error) throw error
+}
+
+export const getMyProfile = async (): Promise<AuthProfile | null> => {
+  const client = assertSupabase()
+  const { data: authData, error: authError } = await client.auth.getUser()
+  if (authError) throw authError
+
+  const userId = authData.user?.id
+  if (!userId) return null
+
+  const { data, error } = await client
+    .from('app_profiles')
+    .select('auth_user_id, email, display_name, role')
+    .eq('auth_user_id', userId)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return null
+
+  return {
+    authUserId: data.auth_user_id,
+    email: data.email,
+    displayName: data.display_name,
+    role: data.role,
+  }
 }

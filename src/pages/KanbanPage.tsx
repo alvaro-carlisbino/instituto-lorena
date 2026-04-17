@@ -1,9 +1,24 @@
 import { AppLayout } from '../layouts/AppLayout'
 import { useCrm } from '../context/CrmContext'
 import { sourceLabel } from '../hooks/useCrmState'
+import { useMemo, useState } from 'react'
 
 export function KanbanPage() {
   const crm = useCrm()
+  const [searchTerm, setSearchTerm] = useState<string>('')
+  const [temperatureFilter, setTemperatureFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
+
+  const visibleLeads = useMemo(() => {
+    const normalized = searchTerm.trim().toLowerCase()
+    return crm.filteredLeads.filter((lead) => {
+      const matchesText =
+        normalized.length === 0 ||
+        lead.patientName.toLowerCase().includes(normalized) ||
+        lead.summary.toLowerCase().includes(normalized)
+      const matchesTemperature = temperatureFilter === 'all' || lead.temperature === temperatureFilter
+      return matchesText && matchesTemperature
+    })
+  }, [crm.filteredLeads, searchTerm, temperatureFilter])
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
@@ -28,6 +43,20 @@ export function KanbanPage() {
             </option>
           ))}
         </select>
+        <input
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="Buscar paciente ou resumo"
+        />
+        <select
+          value={temperatureFilter}
+          onChange={(event) => setTemperatureFilter(event.target.value as 'all' | 'hot' | 'warm' | 'cold')}
+        >
+          <option value="all">Todas temperaturas</option>
+          <option value="hot">Hot</option>
+          <option value="warm">Warm</option>
+          <option value="cold">Cold</option>
+        </select>
       </section>
 
       <section className="kanban-board">
@@ -35,11 +64,11 @@ export function KanbanPage() {
           <article key={stage.id} className="kanban-column">
             <header>
               <h2>{stage.name}</h2>
-              <span>{crm.filteredLeads.filter((lead) => lead.stageId === stage.id).length}</span>
+              <span>{visibleLeads.filter((lead) => lead.stageId === stage.id).length}</span>
             </header>
 
             <div className="column-scroll">
-              {crm.filteredLeads
+              {visibleLeads
                 .filter((lead) => lead.stageId === stage.id)
                 .map((lead) => (
                   <div
