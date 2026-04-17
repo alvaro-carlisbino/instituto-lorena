@@ -142,6 +142,15 @@ create table if not exists public.audit_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.webhook_jobs (
+  id uuid primary key default gen_random_uuid(),
+  source text not null,
+  status text not null default 'queued',
+  note text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create or replace function public.current_profile_role()
 returns text
 language sql
@@ -261,6 +270,9 @@ create trigger audit_tv_widgets after insert or update or delete on public.tv_wi
 drop trigger if exists audit_dashboard_widgets on public.dashboard_widgets;
 create trigger audit_dashboard_widgets after insert or update or delete on public.dashboard_widgets for each row execute function public.log_audit();
 
+drop trigger if exists audit_webhook_jobs on public.webhook_jobs;
+create trigger audit_webhook_jobs after insert or update or delete on public.webhook_jobs for each row execute function public.log_audit();
+
 drop trigger if exists enforce_app_users on public.app_users;
 create trigger enforce_app_users before insert or update or delete on public.app_users for each row execute function public.enforce_role_write();
 
@@ -311,6 +323,7 @@ alter table public.notification_rules enable row level security;
 alter table public.tv_widgets enable row level security;
 alter table public.dashboard_widgets enable row level security;
 alter table public.audit_logs enable row level security;
+alter table public.webhook_jobs enable row level security;
 
 drop policy if exists "profiles self select" on public.app_profiles;
 drop policy if exists "profiles self upsert" on public.app_profiles;
@@ -484,6 +497,18 @@ create policy "audit logs admin read"
   on public.audit_logs
   for select
   using (public.can_manage_users());
+
+drop policy if exists "webhook jobs admin read" on public.webhook_jobs;
+drop policy if exists "webhook jobs admin write" on public.webhook_jobs;
+create policy "webhook jobs admin read"
+  on public.webhook_jobs
+  for select
+  using (public.can_manage_users());
+create policy "webhook jobs admin write"
+  on public.webhook_jobs
+  for all
+  using (public.can_manage_users())
+  with check (public.can_manage_users());
 
 drop policy if exists "public read app_users" on public.app_users;
 drop policy if exists "public write app_users" on public.app_users;

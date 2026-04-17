@@ -1,62 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AppLayout } from '../layouts/AppLayout'
 import { useCrm } from '../context/CrmContext'
-import { loadAuditLogs } from '../services/crmSupabase'
-
-type AuditEntry = {
-  id: string
-  actorEmail: string | null
-  action: string
-  targetTable: string
-  targetId: string | null
-  createdAt: string
-}
 
 export function AuditPage() {
   const crm = useCrm()
-  const [auditEvents, setAuditEvents] = useState<AuditEntry[]>([])
-  const [auditLoading, setAuditLoading] = useState<boolean>(false)
-  const [auditNotice, setAuditNotice] = useState<string>('')
   const [actionFilter, setActionFilter] = useState<'all' | 'INSERT' | 'UPDATE' | 'DELETE'>('all')
   const [tableFilter, setTableFilter] = useState<string>('all')
   const [daysFilter, setDaysFilter] = useState<number>(7)
+  const [page, setPage] = useState<number>(0)
+  const pageSize = 20
+
+  const uniqueTables = useMemo(
+    () => Array.from(new Set(crm.auditRows.map((event) => event.targetTable))).sort(),
+    [crm.auditRows],
+  )
 
   useEffect(() => {
     if (!crm.currentPermission.canManageUsers) return
 
-    setAuditLoading(true)
-    void loadAuditLogs(80)
-      .then((rows) => {
-        setAuditEvents(
-          rows.map((row) => ({
-            id: row.id,
-            actorEmail: row.actorEmail,
-            action: row.action,
-            targetTable: row.targetTable,
-            targetId: row.targetId,
-            createdAt: row.createdAt,
-          })),
-        )
-        setAuditNotice('')
-      })
-      .catch((error) => {
-        setAuditNotice(`Falha ao carregar auditoria: ${error instanceof Error ? error.message : 'erro'}`)
-      })
-      .finally(() => {
-        setAuditLoading(false)
-      })
-  }, [crm.currentPermission.canManageUsers])
+    const sinceDate = new Date(Date.now() - daysFilter * 24 * 60 * 60 * 1000).toISOString()
 
-  const uniqueTables = Array.from(new Set(auditEvents.map((event) => event.targetTable))).sort()
-
-  const filteredEvents = auditEvents.filter((event) => {
-    const actionOk = actionFilter === 'all' || event.action === actionFilter
-    const tableOk = tableFilter === 'all' || event.targetTable === tableFilter
-    const daysOk =
-      Date.now() - new Date(event.createdAt).getTime() <=
-      daysFilter * 24 * 60 * 60 * 1000
-    return actionOk && tableOk && daysOk
-  })
+    void crm.fetchAuditPage({
+      page,
+      pageSize,
+      action: actionFilter === 'all' ? undefined : actionFilter,
+      targetTable: tableFilter === 'all' ? undefined : tableFilter,
+      sinceIso: sinceDate,
+    })
+  }, [crm, page, actionFilter, tableFilter, daysFilter])
 
   if (!crm.currentPermission.canManageUsers) {
     return (
@@ -68,13 +39,18 @@ export function AuditPage() {
     )
   }
 
+  const totalPages = Math.max(1, Math.ceil(crm.auditTotal / pageSize))
+
   return (
-    <AppLayout title="Auditoria" subtitle="Eventos reais do banco para alteracoes operacionais e configuracoes.">
+    <AppLayout title="Auditoria" subtitle="Eventos reais do banco com filtros e paginação server-side.">
       <section className="panel">
         <section className="panel toolbar">
           <select
             value={actionFilter}
-            onChange={(event) => setActionFilter(event.target.value as 'all' | 'INSERT' | 'UPDATE' | 'DELETE')}
+            onChange={(event) => {
+              setActionFilter(event.target.value as 'all' | 'INSERT' | 'UPDATE' | 'DELETE')
+              setPage(0)
+            }}
           >
             <option value="all">Todas acoes</option>
             <option value="INSERT">INSERT</option>
@@ -82,7 +58,13 @@ export function AuditPage() {
             <option value="DELETE">DELETE</option>
           </select>
 
-          <select value={tableFilter} onChange={(event) => setTableFilter(event.target.value)}>
+          <select
+            value={tableFilter}
+            onChange={(event) => {
+              setTableFilter(event.target.value)
+              setPage(0)
+            }}
+          >
             <option value="all">Todas tabelas</option>
             {uniqueTables.map((table) => (
               <option key={table} value={table}>
@@ -91,18 +73,31 @@ export function AuditPage() {
             ))}
           </select>
 
-          <select value={daysFilter} onChange={(event) => setDaysFilter(Number(event.target.value))}>
+          <select
+            value={daysFilter}
+            onChange={(event) => {
+              setDaysFilter(Number(event.target.value))
+              setPage(0)
+            }}
+          >
             <option value={1}>Ultimas 24h</option>
             <option value={3}>Ultimos 3 dias</option>
             <option value={7}>Ultimos 7 dias</option>
             <option value={30}>Ultimos 30 dias</option>
           </select>
+
+          <div className="inline-actions">
+            <button onClick={() => setPage((previous) => Math.max(0, previous - 1))}>Anterior</button>
+            <span className="badge">
+              {page + 1}/{totalPages}
+            </span>
+            <button onClick={() => setPage((previous) => Math.min(totalPages - 1, previous + 1))}>Proxima</button>
+          </div>
         </section>
 
-        {auditLoading ? <p>Carregando trilha de auditoria...</p> : null}
-        {auditNotice ? <p>{auditNotice}</p> : null}
+        {crm.isLoading ? <p>Carregando trilha de auditoria...</p> : null}
         <ul className="editable-list">
-          {filteredEvents.map((event) => (
+          {crm.auditRows.map((event) => (
             <li key={event.id}>
               <div className="item-main">
                 <strong>{event.actorEmail ?? 'sistema'}</strong>

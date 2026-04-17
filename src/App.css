@@ -465,6 +465,12 @@ button:disabled {
   font-size: 0.8rem;
 }
 
+.drop-zone.active {
+  border-color: #1570a6;
+  background: #e8f4fb;
+  color: #1d5077;
+}
+
 .history-screen {
   border: 1px solid var(--stroke);
   border-radius: 0.95rem;
@@ -480,6 +486,42 @@ button:disabled {
 
 .history-filters {
   margin-bottom: 0.9rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.status-pill.queued {
+  background: #f6efe3;
+  color: #8f6020;
+  border-color: #eccf9b;
+}
+
+.status-pill.processing {
+  background: #e8f3fb;
+  color: #1f5e8d;
+  border-color: #afd2ee;
+}
+
+.status-pill.retry {
+  background: #fde9e9;
+  color: #9f2c2c;
+  border-color: #f1b6b6;
+}
+
+.status-pill.done {
+  background: #e6f7ee;
+  color: #256f4b;
+  border-color: #9fdab9;
 }
 
 .history-layout aside {

@@ -39,6 +39,19 @@ export function AdminLabPage() {
           <button onClick={() => void crm.runWebhookReplay()} disabled={crm.isLoading}>
             Reprocessar webhook
           </button>
+
+          <ul className="editable-list">
+            {crm.queueJobs.slice(0, 10).map((job) => (
+              <li key={job.id}>
+                <div className="item-main">
+                  <strong>{job.source}</strong>
+                  <small>{new Date(job.createdAt).toLocaleString('pt-BR')}</small>
+                  <span>{job.note}</span>
+                </div>
+                <span className={`status-pill ${job.status}`}>{job.status}</span>
+              </li>
+            ))}
+          </ul>
         </article>
 
         <article className="panel">

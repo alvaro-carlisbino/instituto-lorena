@@ -82,6 +82,14 @@ export type AuditLogEntry = {
   createdAt: string
 }
 
+export type WebhookJob = {
+  id: string
+  source: 'meta-webhook' | 'whatsapp-webhook' | 'ai-triage'
+  status: 'queued' | 'processing' | 'retry' | 'done'
+  note: string
+  createdAt: string
+}
+
 const assertSupabase = () => {
   if (!supabase) throw new Error('Supabase nao configurado.')
   return supabase
@@ -621,4 +629,74 @@ export const loadAuditLogs = async (limit = 120): Promise<AuditLogEntry[]> => {
     metadata: (row.metadata ?? {}) as Record<string, unknown>,
     createdAt: row.created_at,
   }))
+}
+
+export const loadAuditLogsPage = async (params: {
+  page: number
+  pageSize: number
+  action?: 'INSERT' | 'UPDATE' | 'DELETE'
+  targetTable?: string
+  sinceIso?: string
+}): Promise<{ rows: AuditLogEntry[]; total: number }> => {
+  const client = assertSupabase()
+  const from = params.page * params.pageSize
+  const to = from + params.pageSize - 1
+
+  let query = client
+    .from('audit_logs')
+    .select('id, actor_id, actor_email, action, target_table, target_id, metadata, created_at', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to)
+
+  if (params.action) query = query.eq('action', params.action)
+  if (params.targetTable) query = query.eq('target_table', params.targetTable)
+  if (params.sinceIso) query = query.gte('created_at', params.sinceIso)
+
+  const { data, error, count } = await query
+  if (error) throw error
+
+  const rows = (data ?? []).map((row) => ({
+    id: row.id,
+    actorId: row.actor_id,
+    actorEmail: row.actor_email,
+    action: row.action,
+    targetTable: row.target_table,
+    targetId: row.target_id,
+    metadata: (row.metadata ?? {}) as Record<string, unknown>,
+    createdAt: row.created_at,
+  }))
+
+  return { rows, total: count ?? 0 }
+}
+
+export const loadWebhookJobs = async (limit = 40): Promise<WebhookJob[]> => {
+  const client = assertSupabase()
+  const { data, error } = await client
+    .from('webhook_jobs')
+    .select('id, source, status, note, created_at')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) throw error
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    source: row.source,
+    status: row.status,
+    note: row.note,
+    createdAt: row.created_at,
+  }))
+}
+
+export const createWebhookReplayJob = async (payload: {
+  source: WebhookJob['source']
+  note: string
+}): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('webhook_jobs').insert({
+    source: payload.source,
+    status: 'queued',
+    note: payload.note,
+  })
+  if (error) throw error
 }

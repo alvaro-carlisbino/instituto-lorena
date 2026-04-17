@@ -7,6 +7,7 @@ export function KanbanPage() {
   const crm = useCrm()
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [temperatureFilter, setTemperatureFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
+  const [dragOverStageId, setDragOverStageId] = useState<string | null>(null)
 
   const visibleLeads = useMemo(() => {
     const normalized = searchTerm.trim().toLowerCase()
@@ -80,9 +81,11 @@ export function KanbanPage() {
                     }}
                     onDragOver={(event) => {
                       event.preventDefault()
+                      setDragOverStageId(stage.id)
                     }}
                     onDrop={(event) => {
                       event.preventDefault()
+                      setDragOverStageId(null)
                       const draggedLeadId = event.dataTransfer.getData('text/lead-id')
                       if (!draggedLeadId) return
                       const stageLeads = visibleLeads.filter((item) => item.stageId === stage.id)
@@ -114,17 +117,20 @@ export function KanbanPage() {
                 ))}
 
               <div
-                className="drop-zone"
+                className={`drop-zone ${dragOverStageId === stage.id ? 'active' : ''}`}
                 onDragOver={(event) => {
                   event.preventDefault()
+                  setDragOverStageId(stage.id)
                 }}
                 onDrop={(event) => {
                   event.preventDefault()
+                  setDragOverStageId(null)
                   const draggedLeadId = event.dataTransfer.getData('text/lead-id')
                   if (!draggedLeadId) return
                   const stageLeads = visibleLeads.filter((item) => item.stageId === stage.id)
                   crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: stageLeads.length })
                 }}
+                onDragLeave={() => setDragOverStageId(null)}
               >
                 Arraste para adicionar no fim da etapa
               </div>

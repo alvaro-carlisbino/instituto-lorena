@@ -23,7 +23,10 @@ import {
   deleteWorkflowField,
   insertInteraction,
   insertLead,
+  loadWebhookJobs,
   loadCrmData,
+  loadAuditLogsPage,
+  createWebhookReplayJob,
   savePipelineConfig,
   saveChannelConfig,
   saveMetricConfig,
@@ -73,13 +76,9 @@ import type {
 import { getDataProviderMode } from '../services/dataMode'
 import { supabase } from '../lib/supabaseClient'
 
-export type QueueJob = {
-  id: string
-  source: 'meta-webhook' | 'whatsapp-webhook' | 'ai-triage'
-  status: 'queued' | 'processing' | 'retry' | 'done'
-  createdAt: string
-  note: string
-}
+import type { WebhookJob, AuditLogEntry } from '../services/crmSupabase'
+
+export type QueueJob = WebhookJob
 
 export const queueSeed: QueueJob[] = [
   {
@@ -142,6 +141,8 @@ export const useCrmState = () => {
   const [useRolePreview, setUseRolePreview] = useState<boolean>(false)
   const [displayNameDraft, setDisplayNameDraft] = useState<string>('')
   const [onboardingDone, setOnboardingDone] = useState<boolean>(false)
+  const [auditRows, setAuditRows] = useState<AuditLogEntry[]>([])
+  const [auditTotal, setAuditTotal] = useState<number>(0)
   const [triageByLead, setTriageByLead] = useState<Record<string, TriageResult>>({
     'lead-001': {
       leadId: 'lead-001',
@@ -442,6 +443,7 @@ export const useCrmState = () => {
       setUsers(snapshot.users)
       setTvWidgets(snapshot.tvWidgets)
       setDashboardWidgets(snapshot.dashboardWidgets)
+      await refreshWebhookJobs()
       setSyncNotice('Dados sincronizados com Supabase.')
     } catch (error) {
       setSyncNotice(`Falha ao carregar Supabase: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
@@ -1008,6 +1010,12 @@ export const useCrmState = () => {
   }, [dataMode])
 
   useEffect(() => {
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void refreshWebhookJobs()
+    }
+  }, [dataMode])
+
+  useEffect(() => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured) return
 
     void getCurrentSession().then((currentSession) => {
@@ -1090,25 +1098,40 @@ export const useCrmState = () => {
 
     setIsLoading(true)
     try {
-      const { error } = await supabase.from('notification_rules').select('id').limit(1)
-      if (error) throw error
-
-      setQueueJobs((previous) => [
-        {
-          id: `job-replay-${Date.now()}`,
-          source: 'meta-webhook',
-          status: 'processing',
-          createdAt: new Date().toISOString(),
-          note: 'Reprocessamento manual de webhook disparado pelo admin.',
-        },
-        ...previous,
-      ])
+      await createWebhookReplayJob({
+        source: 'meta-webhook',
+        note: 'Reprocessamento manual de webhook disparado pelo admin.',
+      })
+      await refreshWebhookJobs()
       setSyncNotice('Reprocessamento acionado com sucesso.')
     } catch (error) {
       setSyncNotice(`Falha no replay: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const refreshWebhookJobs = async () => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) return
+    try {
+      const jobs = await loadWebhookJobs(50)
+      setQueueJobs(jobs)
+    } catch {
+      // noop for now
+    }
+  }
+
+  const fetchAuditPage = async (params: {
+    page: number
+    pageSize: number
+    action?: 'INSERT' | 'UPDATE' | 'DELETE'
+    targetTable?: string
+    sinceIso?: string
+  }) => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) return
+    const result = await loadAuditLogsPage(params)
+    setAuditRows(result.rows)
+    setAuditTotal(result.total)
   }
 
   return {
@@ -1131,6 +1154,8 @@ export const useCrmState = () => {
     totalQualified,
     captureNotice,
     queueJobs,
+    auditRows,
+    auditTotal,
     channels,
     metrics,
     workflowFields,
@@ -1167,6 +1192,8 @@ export const useCrmState = () => {
     sendMessage,
     retryFailedJobs,
     syncFromSupabase,
+    refreshWebhookJobs,
+    fetchAuditPage,
     seedSupabase,
     runSignIn,
     runSignUp,
