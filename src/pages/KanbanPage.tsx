@@ -6,6 +6,7 @@ import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
+import { getLeadFieldValue } from '@/lib/leadFields'
 
 export function KanbanPage() {
   const crm = useCrm()
@@ -16,11 +17,19 @@ export function KanbanPage() {
   const visibleLeads = useMemo(() => {
     const normalized = searchTerm.trim().toLowerCase()
     return crm.filteredLeads.filter((lead) => {
-      const matchesText =
-        normalized.length === 0 ||
-        lead.patientName.toLowerCase().includes(normalized) ||
-        lead.summary.toLowerCase().includes(normalized)
-      const matchesTemperature = temperatureFilter === 'all' || lead.temperature === temperatureFilter
+      const haystack = [
+        lead.patientName,
+        lead.summary,
+        lead.phone,
+        JSON.stringify(lead.customFields ?? {}),
+      ]
+        .join(' ')
+        .toLowerCase()
+      const matchesText = normalized.length === 0 || haystack.includes(normalized)
+      const temp = getLeadFieldValue(lead, 'temperature')
+      const effTemp =
+        temp === 'cold' || temp === 'warm' || temp === 'hot' ? temp : lead.temperature
+      const matchesTemperature = temperatureFilter === 'all' || effTemp === temperatureFilter
       return matchesText && matchesTemperature
     })
   }, [crm.filteredLeads, searchTerm, temperatureFilter])
@@ -58,7 +67,14 @@ export function KanbanPage() {
               className="flex min-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm"
             >
               <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
-                <h2 className="m-0 text-sm font-semibold">{stage.name}</h2>
+                <div className="min-w-0">
+                  <h2 className="m-0 text-sm font-semibold">{stage.name}</h2>
+                  {crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id] != null ? (
+                    <p className="m-0 text-xs text-muted-foreground">
+                      SLA {crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id]} min
+                    </p>
+                  ) : null}
+                </div>
                 <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs tabular-nums">
                   {stageLeads.length}
                 </span>
@@ -69,6 +85,7 @@ export function KanbanPage() {
                   <KanbanLeadCard
                     key={lead.id}
                     lead={lead}
+                    kanbanFields={crm.kanbanFieldsOrdered}
                     selected={crm.selectedLeadId === lead.id}
                     sourceLabel={sourceLabel[lead.source]}
                     ownerName={crm.getOwnerName(lead.ownerId)}

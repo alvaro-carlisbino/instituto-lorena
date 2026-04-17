@@ -1,6 +1,8 @@
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 
@@ -67,6 +69,38 @@ export function TvConfigPage() {
                         />
                         Ativo
                       </label>
+                    </div>
+                    <div className="col-span-full grid gap-2 sm:grid-cols-2">
+                      <div className="grid gap-1">
+                        <Label className="text-xs">Layout (JSON)</Label>
+                        <Textarea
+                          rows={3}
+                          className="font-mono text-xs"
+                          defaultValue={JSON.stringify(widget.layout ?? {}, null, 2)}
+                          onBlur={(e) => {
+                            try {
+                              crm.updateTvWidget(widget.id, { layout: JSON.parse(e.target.value || '{}') })
+                            } catch {
+                              /* ignore */
+                            }
+                          }}
+                        />
+                      </div>
+                      <div className="grid gap-1">
+                        <Label className="text-xs">Widget config (JSON)</Label>
+                        <Textarea
+                          rows={3}
+                          className="font-mono text-xs"
+                          defaultValue={JSON.stringify(widget.widgetConfig ?? {}, null, 2)}
+                          onBlur={(e) => {
+                            try {
+                              crm.updateTvWidget(widget.id, { widgetConfig: JSON.parse(e.target.value || '{}') })
+                            } catch {
+                              /* ignore */
+                            }
+                          }}
+                        />
+                      </div>
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">

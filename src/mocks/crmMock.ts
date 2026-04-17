@@ -3,10 +3,16 @@ export type Stage = {
   name: string
 }
 
+export type BoardConfig = {
+  stageSlaMinutes?: Record<string, number>
+  kanbanFieldOrder?: string[]
+}
+
 export type Pipeline = {
   id: string
   name: string
   stages: Stage[]
+  boardConfig: BoardConfig
 }
 
 export type Sdr = {
@@ -28,6 +34,7 @@ export type Lead = {
   pipelineId: string
   stageId: string
   summary: string
+  customFields: Record<string, unknown>
 }
 
 export type Interaction = {
@@ -48,6 +55,8 @@ export type TriageResult = {
   recommendation: string
 }
 
+export type ChannelDriver = 'manual' | 'meta' | 'whatsapp' | 'webhook'
+
 export type ChannelConfig = {
   id: string
   name: string
@@ -55,6 +64,9 @@ export type ChannelConfig = {
   slaMinutes: number
   autoReply: boolean
   priority: number
+  driver: ChannelDriver
+  fieldMapping: Record<string, string>
+  credentialsRef: string
 }
 
 export type MetricConfig = {
@@ -65,12 +77,19 @@ export type MetricConfig = {
   unit: 'percent' | 'minutes' | 'count'
 }
 
+export type FieldVisibilityContext = 'kanban_card' | 'lead_detail' | 'list' | 'capture_form'
+
 export type WorkflowField = {
   id: string
+  fieldKey: string
   label: string
   fieldType: 'text' | 'select' | 'number' | 'date'
   required: boolean
   options: string[]
+  section: string
+  sortOrder: number
+  visibleIn: FieldVisibilityContext[]
+  validation: Record<string, unknown>
 }
 
 export type PermissionProfile = {
@@ -93,8 +112,10 @@ export type NotificationRule = {
 export type AppUser = {
   id: string
   name: string
+  email: string
   role: 'admin' | 'gestor' | 'sdr'
   active: boolean
+  authUserId?: string | null
 }
 
 export type TvWidget = {
@@ -104,6 +125,8 @@ export type TvWidget = {
   metricKey: string
   enabled: boolean
   position: number
+  layout: Record<string, unknown>
+  widgetConfig: Record<string, unknown>
 }
 
 export type DashboardWidget = {
@@ -112,12 +135,34 @@ export type DashboardWidget = {
   metricKey: string
   enabled: boolean
   position: number
+  layout: Record<string, unknown>
+  widgetConfig: Record<string, unknown>
+}
+
+export type DataViewConfig = {
+  columns?: string[]
+  sortField?: string
+  sortDir?: 'asc' | 'desc'
+}
+
+export type DataView = {
+  id: string
+  name: string
+  config: DataViewConfig
+}
+
+export type OrgSettings = {
+  id: string
+  timezone: string
+  dateFormat: string
+  weekStartsOn: number
 }
 
 export const pipelines: Pipeline[] = [
   {
     id: 'pipeline-clinica',
     name: 'Pipeline Clinica',
+    boardConfig: {},
     stages: [
       { id: 'novo', name: 'Novo lead' },
       { id: 'triagem', name: 'Triagem IA' },
@@ -129,6 +174,7 @@ export const pipelines: Pipeline[] = [
   {
     id: 'pipeline-estetica',
     name: 'Pipeline Estetica',
+    boardConfig: {},
     stages: [
       { id: 'novo-estetica', name: 'Novo lead' },
       { id: 'avaliacao', name: 'Avaliacao inicial' },
@@ -158,6 +204,7 @@ export const initialLeads: Lead[] = [
     pipelineId: 'pipeline-clinica',
     stageId: 'triagem',
     summary: 'Quer avaliacao para harmonizacao facial ainda esta semana.',
+    customFields: {},
   },
   {
     id: 'lead-002',
@@ -172,6 +219,7 @@ export const initialLeads: Lead[] = [
     pipelineId: 'pipeline-clinica',
     stageId: 'contato',
     summary: 'Interesse em check-up preventivo, prefere contato por WhatsApp.',
+    customFields: {},
   },
   {
     id: 'lead-003',
@@ -186,6 +234,7 @@ export const initialLeads: Lead[] = [
     pipelineId: 'pipeline-clinica',
     stageId: 'novo',
     summary: 'Pediu informacoes de valores e condicoes de pagamento.',
+    customFields: {},
   },
 ]
 
@@ -246,10 +295,50 @@ export const integrationStatus = [
 ]
 
 export const initialChannels: ChannelConfig[] = [
-  { id: 'meta', name: 'Meta Leads', enabled: true, slaMinutes: 15, autoReply: true, priority: 1 },
-  { id: 'whatsapp', name: 'WhatsApp Oficial', enabled: true, slaMinutes: 8, autoReply: true, priority: 2 },
-  { id: 'site', name: 'Formulario do Site', enabled: true, slaMinutes: 20, autoReply: false, priority: 3 },
-  { id: 'manual', name: 'Cadastro Manual', enabled: true, slaMinutes: 30, autoReply: false, priority: 4 },
+  {
+    id: 'meta',
+    name: 'Meta Leads',
+    enabled: true,
+    slaMinutes: 15,
+    autoReply: true,
+    priority: 1,
+    driver: 'meta',
+    fieldMapping: { patient_name: 'full_name', phone: 'phone_number' },
+    credentialsRef: '',
+  },
+  {
+    id: 'whatsapp',
+    name: 'WhatsApp Oficial',
+    enabled: true,
+    slaMinutes: 8,
+    autoReply: true,
+    priority: 2,
+    driver: 'whatsapp',
+    fieldMapping: {},
+    credentialsRef: '',
+  },
+  {
+    id: 'site',
+    name: 'Formulario do Site',
+    enabled: true,
+    slaMinutes: 20,
+    autoReply: false,
+    priority: 3,
+    driver: 'webhook',
+    fieldMapping: {},
+    credentialsRef: '',
+  },
+  {
+    id: 'manual',
+    name: 'Cadastro Manual',
+    enabled: true,
+    slaMinutes: 30,
+    autoReply: false,
+    priority: 4,
+    driver: 'manual',
+    fieldMapping: {},
+    credentialsRef: '',
+  },
 ]
 
 export const initialMetrics: MetricConfig[] = [
@@ -270,10 +359,105 @@ export const tvKpiSeries = [
   { label: '15h', leads: 12, qualified: 8 },
 ]
 
+const allContexts: FieldVisibilityContext[] = ['kanban_card', 'lead_detail', 'list', 'capture_form']
+
 export const initialWorkflowFields: WorkflowField[] = [
-  { id: 'wf-1', label: 'Especialidade de interesse', fieldType: 'select', required: true, options: ['Clinica', 'Estetica', 'Odonto'] },
-  { id: 'wf-2', label: 'Faixa de investimento', fieldType: 'select', required: false, options: ['Ate R$500', 'R$500 a R$1500', 'Acima de R$1500'] },
-  { id: 'wf-3', label: 'Data preferida', fieldType: 'date', required: false, options: [] },
+  {
+    id: 'core-patient',
+    fieldKey: 'patient_name',
+    label: 'Paciente',
+    fieldType: 'text',
+    required: true,
+    options: [],
+    section: 'Principal',
+    sortOrder: 0,
+    visibleIn: ['kanban_card', 'lead_detail', 'list'],
+    validation: {},
+  },
+  {
+    id: 'core-summary',
+    fieldKey: 'summary',
+    label: 'Resumo',
+    fieldType: 'text',
+    required: true,
+    options: [],
+    section: 'Principal',
+    sortOrder: 1,
+    visibleIn: ['kanban_card', 'lead_detail', 'list'],
+    validation: {},
+  },
+  {
+    id: 'core-score',
+    fieldKey: 'score',
+    label: 'Score',
+    fieldType: 'number',
+    required: false,
+    options: [],
+    section: 'Principal',
+    sortOrder: 2,
+    visibleIn: ['kanban_card', 'lead_detail', 'list'],
+    validation: {},
+  },
+  {
+    id: 'core-temp',
+    fieldKey: 'temperature',
+    label: 'Temperatura',
+    fieldType: 'select',
+    required: false,
+    options: ['cold', 'warm', 'hot'],
+    section: 'Principal',
+    sortOrder: 3,
+    visibleIn: ['kanban_card', 'lead_detail', 'list'],
+    validation: {},
+  },
+  {
+    id: 'core-phone',
+    fieldKey: 'phone',
+    label: 'Telefone',
+    fieldType: 'text',
+    required: false,
+    options: [],
+    section: 'Contato',
+    sortOrder: 4,
+    visibleIn: ['lead_detail', 'list', 'capture_form'],
+    validation: {},
+  },
+  {
+    id: 'wf-1',
+    fieldKey: 'especialidade_interesse',
+    label: 'Especialidade de interesse',
+    fieldType: 'select',
+    required: true,
+    options: ['Clinica', 'Estetica', 'Odonto'],
+    section: 'Clinico',
+    sortOrder: 10,
+    visibleIn: allContexts,
+    validation: {},
+  },
+  {
+    id: 'wf-2',
+    fieldKey: 'faixa_investimento',
+    label: 'Faixa de investimento',
+    fieldType: 'select',
+    required: false,
+    options: ['Ate R$500', 'R$500 a R$1500', 'Acima de R$1500'],
+    section: 'Comercial',
+    sortOrder: 11,
+    visibleIn: allContexts,
+    validation: {},
+  },
+  {
+    id: 'wf-3',
+    fieldKey: 'data_preferida',
+    label: 'Data preferida',
+    fieldType: 'date',
+    required: false,
+    options: [],
+    section: 'Agenda',
+    sortOrder: 12,
+    visibleIn: allContexts,
+    validation: {},
+  },
 ]
 
 export const initialPermissions: PermissionProfile[] = [
@@ -289,23 +473,107 @@ export const initialNotifications: NotificationRule[] = [
 ]
 
 export const initialAppUsers: AppUser[] = [
-  { id: 'admin-1', name: 'Alvaro', role: 'admin', active: true },
-  { id: 'gestor-1', name: 'Diego Moura', role: 'gestor', active: true },
-  { id: 'sdr-1', name: 'Ana Costa', role: 'sdr', active: true },
-  { id: 'sdr-2', name: 'Bruno Lima', role: 'sdr', active: true },
-  { id: 'sdr-3', name: 'Carla Souza', role: 'sdr', active: true },
+  { id: 'admin-1', name: 'Alvaro', email: 'alvaro@institutolorena.com', role: 'admin', active: true },
+  { id: 'gestor-1', name: 'Diego Moura', email: 'diego@institutolorena.com', role: 'gestor', active: true },
+  { id: 'sdr-1', name: 'Ana Costa', email: 'ana@institutolorena.com', role: 'sdr', active: true },
+  { id: 'sdr-2', name: 'Bruno Lima', email: 'bruno@institutolorena.com', role: 'sdr', active: true },
+  { id: 'sdr-3', name: 'Carla Souza', email: 'carla@institutolorena.com', role: 'sdr', active: true },
 ]
 
+const defaultTvLayout = (position: number) => ({
+  grid: 'legacy',
+  col: ((position - 1) % 4) + 1,
+  row: Math.floor((position - 1) / 4) + 1,
+  span: 1,
+})
+
 export const initialTvWidgets: TvWidget[] = [
-  { id: 'tv-1', title: 'Leads Hoje', widgetType: 'kpi', metricKey: 'new-leads-day', enabled: true, position: 1 },
-  { id: 'tv-2', title: 'Conversao', widgetType: 'kpi', metricKey: 'conversion', enabled: true, position: 2 },
-  { id: 'tv-3', title: 'Tempo 1a Resposta', widgetType: 'kpi', metricKey: 'first-response', enabled: true, position: 3 },
-  { id: 'tv-4', title: 'Capacao x Qualificacao', widgetType: 'bar', metricKey: 'hourly-funnel', enabled: true, position: 4 },
+  {
+    id: 'tv-1',
+    title: 'Leads Hoje',
+    widgetType: 'kpi',
+    metricKey: 'new-leads-day',
+    enabled: true,
+    position: 1,
+    layout: defaultTvLayout(1),
+    widgetConfig: {},
+  },
+  {
+    id: 'tv-2',
+    title: 'Conversao',
+    widgetType: 'kpi',
+    metricKey: 'conversion',
+    enabled: true,
+    position: 2,
+    layout: defaultTvLayout(2),
+    widgetConfig: {},
+  },
+  {
+    id: 'tv-3',
+    title: 'Tempo 1a Resposta',
+    widgetType: 'kpi',
+    metricKey: 'first-response',
+    enabled: true,
+    position: 3,
+    layout: defaultTvLayout(3),
+    widgetConfig: {},
+  },
+  {
+    id: 'tv-4',
+    title: 'Capacao x Qualificacao',
+    widgetType: 'bar',
+    metricKey: 'hourly-funnel',
+    enabled: true,
+    position: 4,
+    layout: { ...defaultTvLayout(4), span: 2 },
+    widgetConfig: {},
+  },
 ]
 
 export const initialDashboardWidgets: DashboardWidget[] = [
-  { id: 'dash-1', title: 'Leads ativos', metricKey: 'leads-active', enabled: true, position: 1 },
-  { id: 'dash-2', title: 'Leads quentes', metricKey: 'leads-hot', enabled: true, position: 2 },
-  { id: 'dash-3', title: 'Qualificados IA', metricKey: 'qualified-ai', enabled: true, position: 3 },
-  { id: 'dash-4', title: 'Canais ativos', metricKey: 'channels-active', enabled: true, position: 4 },
+  {
+    id: 'dash-1',
+    title: 'Leads ativos',
+    metricKey: 'leads-active',
+    enabled: true,
+    position: 1,
+    layout: { w: 1, h: 1 },
+    widgetConfig: {},
+  },
+  {
+    id: 'dash-2',
+    title: 'Leads quentes',
+    metricKey: 'leads-hot',
+    enabled: true,
+    position: 2,
+    layout: { w: 1, h: 1 },
+    widgetConfig: {},
+  },
+  {
+    id: 'dash-3',
+    title: 'Qualificados IA',
+    metricKey: 'qualified-ai',
+    enabled: true,
+    position: 3,
+    layout: { w: 1, h: 1 },
+    widgetConfig: {},
+  },
+  {
+    id: 'dash-4',
+    title: 'Canais ativos',
+    metricKey: 'channels-active',
+    enabled: true,
+    position: 4,
+    layout: { w: 1, h: 1 },
+    widgetConfig: {},
+  },
 ]
+
+export const initialDataViews: DataView[] = []
+
+export const initialOrgSettings: OrgSettings = {
+  id: 'default',
+  timezone: 'America/Sao_Paulo',
+  dateFormat: 'dd/MM/yyyy',
+  weekStartsOn: 1,
+}

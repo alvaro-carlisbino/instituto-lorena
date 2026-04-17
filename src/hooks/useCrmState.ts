@@ -9,6 +9,7 @@ import {
   signOutSession,
   signUpWithEmail,
   updateMyProfile,
+  inviteTeamMember,
 } from '../services/authSupabase'
 import {
   deleteDashboardWidget,
@@ -20,6 +21,7 @@ import {
   deletePipelineConfig,
   deleteStageConfig,
   deleteTvWidget,
+  deleteDataView,
   deleteWorkflowField,
   insertInteraction,
   insertLead,
@@ -27,10 +29,13 @@ import {
   loadCrmData,
   loadAuditLogsPage,
   createWebhookReplayJob,
+  persistLead,
   savePipelineConfig,
   saveChannelConfig,
+  saveDataView,
   saveMetricConfig,
   saveNotificationRule,
+  saveOrgSettings,
   savePermissionProfile,
   saveAppUser,
   saveDashboardWidget,
@@ -46,25 +51,30 @@ import {
   initialDashboardWidgets,
   initialAppUsers,
   initialChannels,
+  initialDataViews,
   initialInteractions,
   initialLeads,
   initialMetrics,
   initialNotifications,
+  initialOrgSettings,
   initialPermissions,
   initialTvWidgets,
   initialWorkflowFields,
   pipelines,
   sdrTeam,
+  sourceLabel as leadSourceLabels,
   tvKpiSeries,
 } from '../mocks/crmMock'
 import type {
   ChannelConfig,
   AppUser,
+  DataView,
   Interaction,
   DashboardWidget,
   Lead,
   MetricConfig,
   NotificationRule,
+  OrgSettings,
   PermissionProfile,
   Pipeline,
   Sdr,
@@ -73,6 +83,7 @@ import type {
   TriageResult,
   WorkflowField,
 } from '../mocks/crmMock'
+import { mergeKanbanFieldOrder } from '../lib/leadFields'
 import { getDataProviderMode } from '../services/dataMode'
 import { supabase } from '../lib/supabaseClient'
 
@@ -104,12 +115,7 @@ export const queueSeed: QueueJob[] = [
   },
 ]
 
-export const sourceLabel = {
-  meta_facebook: 'Meta Facebook',
-  meta_instagram: 'Meta Instagram',
-  whatsapp: 'WhatsApp',
-  manual: 'Manual',
-}
+export { sourceLabel } from '../mocks/crmMock'
 
 const parseForceAdminEmails = (): string[] => {
   const raw = import.meta.env.VITE_FORCE_ADMIN_EMAILS
@@ -137,6 +143,8 @@ export const useCrmState = () => {
   const [users, setUsers] = useState<AppUser[]>(initialAppUsers)
   const [tvWidgets, setTvWidgets] = useState<TvWidget[]>(initialTvWidgets)
   const [dashboardWidgets, setDashboardWidgets] = useState<DashboardWidget[]>(initialDashboardWidgets)
+  const [dataViews, setDataViews] = useState<DataView[]>(initialDataViews)
+  const [orgSettings, setOrgSettings] = useState<OrgSettings>(initialOrgSettings)
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [syncNotice, setSyncNotice] = useState<string>('')
   const [session, setSession] = useState<Session | null>(null)
@@ -161,6 +169,11 @@ export const useCrmState = () => {
   const selectedPipeline = useMemo(
     () => pipelineCatalog.find((pipeline) => pipeline.id === selectedPipelineId) ?? pipelineCatalog[0] ?? pipelines[0],
     [selectedPipelineId, pipelineCatalog],
+  )
+
+  const kanbanFieldsOrdered = useMemo(
+    () => mergeKanbanFieldOrder(selectedPipeline.boardConfig ?? {}, workflowFields),
+    [selectedPipeline.boardConfig, workflowFields],
   )
 
   const filteredLeads = useMemo(
@@ -339,11 +352,12 @@ export const useCrmState = () => {
       pipelineId: selectedPipeline.id,
       stageId: firstStage.id,
       summary: candidate.summary,
+      customFields: {},
     }
 
     setLeads((previous) => [newLead, ...previous])
     setSelectedLeadId(newLead.id)
-    setCaptureNotice(`Novo lead via ${sourceLabel[newLead.source]} roteado para ${owner.name}.`)
+    setCaptureNotice(`Novo lead via ${leadSourceLabels[newLead.source]} roteado para ${owner.name}.`)
 
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void insertLead(newLead)
@@ -459,6 +473,8 @@ export const useCrmState = () => {
       setUsers(snapshot.users)
       setTvWidgets(snapshot.tvWidgets)
       setDashboardWidgets(snapshot.dashboardWidgets)
+      setDataViews(snapshot.dataViews ?? initialDataViews)
+      setOrgSettings(snapshot.orgSettings ?? initialOrgSettings)
       await refreshWebhookJobs()
       setSyncNotice('Dados sincronizados com Supabase.')
     } catch (error) {
@@ -604,6 +620,9 @@ export const useCrmState = () => {
       slaMinutes: 15,
       autoReply: false,
       priority: channels.length + 1,
+      driver: 'manual',
+      fieldMapping: {},
+      credentialsRef: '',
     }
     setChannels((previous) => [...previous, next].sort((a, b) => a.priority - b.priority))
     if (dataMode === 'supabase' && isSupabaseConfigured) {
@@ -668,10 +687,15 @@ export const useCrmState = () => {
   const addWorkflowField = () => {
     const next: WorkflowField = {
       id: `wf-${Date.now()}`,
+      fieldKey: `campo_${Date.now()}`,
       label: 'Novo campo',
       fieldType: 'text',
       required: false,
       options: [],
+      section: 'Geral',
+      sortOrder: workflowFields.length + 20,
+      visibleIn: ['lead_detail', 'list'],
+      validation: {},
     }
     setWorkflowFields((previous) => [...previous, next])
     if (dataMode === 'supabase' && isSupabaseConfigured) {
@@ -738,6 +762,7 @@ export const useCrmState = () => {
     const next: AppUser = {
       id: `user-${Date.now()}`,
       name: 'Novo usuario',
+      email: '',
       role: 'sdr',
       active: true,
     }
@@ -775,6 +800,8 @@ export const useCrmState = () => {
       metricKey: 'new-leads-day',
       enabled: true,
       position: tvWidgets.length + 1,
+      layout: { grid: 'legacy', col: 1, row: 1, span: 1 },
+      widgetConfig: {},
     }
     setTvWidgets((previous) => [...previous, next].sort((a, b) => a.position - b.position))
     if (dataMode === 'supabase' && isSupabaseConfigured) {
@@ -830,6 +857,8 @@ export const useCrmState = () => {
       metricKey: 'leads-active',
       enabled: true,
       position: dashboardWidgets.length + 1,
+      layout: { w: 1, h: 1 },
+      widgetConfig: {},
     }
     setDashboardWidgets((previous) => [...previous, next].sort((a, b) => a.position - b.position))
     if (dataMode === 'supabase' && isSupabaseConfigured) {
@@ -878,6 +907,53 @@ export const useCrmState = () => {
     })
   }
 
+  const persistLeadPatch = (next: Lead) => {
+    setLeads((previous) => previous.map((lead) => (lead.id === next.id ? next : lead)))
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void persistLead(next)
+    }
+  }
+
+  const addDataView = () => {
+    const next: DataView = {
+      id: `view-${Date.now()}`,
+      name: 'Nova visão',
+      config: { columns: ['patient_name', 'phone', 'summary'], sortField: 'patient_name', sortDir: 'asc' },
+    }
+    setDataViews((previous) => [...previous, next])
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void saveDataView(next)
+    }
+  }
+
+  const updateDataView = (viewId: string, updates: Partial<DataView>) => {
+    setDataViews((previous) => {
+      const next = previous.map((view) => (view.id === viewId ? { ...view, ...updates } : view))
+      if (dataMode === 'supabase' && isSupabaseConfigured) {
+        const changed = next.find((view) => view.id === viewId)
+        if (changed) void saveDataView(changed)
+      }
+      return next
+    })
+  }
+
+  const removeDataView = (viewId: string) => {
+    setDataViews((previous) => previous.filter((view) => view.id !== viewId))
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void deleteDataView(viewId)
+    }
+  }
+
+  const updateOrgSettings = (updates: Partial<OrgSettings>) => {
+    setOrgSettings((previous) => {
+      const next = { ...previous, ...updates }
+      if (dataMode === 'supabase' && isSupabaseConfigured) {
+        void saveOrgSettings(next)
+      }
+      return next
+    })
+  }
+
   const addNotificationRule = () => {
     const next: NotificationRule = {
       id: `ntf-${Date.now()}`,
@@ -916,6 +992,7 @@ export const useCrmState = () => {
     const next: Pipeline = {
       id: `pipeline-${Date.now()}`,
       name: 'Novo pipeline',
+      boardConfig: {},
       stages: [
         { id: `stage-${Date.now()}-1`, name: 'Entrada' },
         { id: `stage-${Date.now()}-2`, name: 'Contato' },
@@ -1131,6 +1208,26 @@ export const useCrmState = () => {
     }
   }
 
+  const runInviteTeamMember = async (email: string, displayName: string, role: AppUser['role']) => {
+    if (!isSupabaseConfigured) {
+      setAuthNotice('Supabase nao configurado.')
+      return
+    }
+    if (!currentPermission.canManageUsers) {
+      setAuthNotice('Sem permissao para convidar usuarios.')
+      return
+    }
+    setIsLoading(true)
+    try {
+      await inviteTeamMember({ email: email.trim().toLowerCase(), displayName: displayName.trim() || email, role })
+      setAuthNotice('Convite enviado por email (Supabase Auth).')
+    } catch (error) {
+      setAuthNotice(`Falha no convite: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const runWebhookReplay = async () => {
     if (!supabase) {
       setSyncNotice('Supabase nao configurado.')
@@ -1177,6 +1274,7 @@ export const useCrmState = () => {
     selectedPipelineId,
     setSelectedPipelineId,
     selectedPipeline,
+    kanbanFieldsOrdered,
     leads,
     filteredLeads,
     selectedLeadId,
@@ -1200,6 +1298,8 @@ export const useCrmState = () => {
     users,
     tvWidgets,
     dashboardWidgets,
+    dataViews,
+    orgSettings,
     tvKpiSeries,
     draftMessage,
     setDraftMessage,
@@ -1224,6 +1324,7 @@ export const useCrmState = () => {
     getOwnerName,
     moveLead,
     reorderLeadCard,
+    persistLeadPatch,
     simulateMetaCapture,
     sendMessage,
     retryFailedJobs,
@@ -1237,6 +1338,7 @@ export const useCrmState = () => {
     completeOnboarding,
     createTestAuthUsers,
     runWebhookReplay,
+    runInviteTeamMember,
     updateChannel,
     addChannel,
     removeChannel,
@@ -1264,6 +1366,10 @@ export const useCrmState = () => {
     updateDashboardWidget,
     removeDashboardWidget,
     moveDashboardWidget,
+    addDataView,
+    updateDataView,
+    removeDataView,
+    updateOrgSettings,
     updatePipeline,
     addPipeline,
     removePipeline,

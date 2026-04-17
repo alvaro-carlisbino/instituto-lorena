@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 
@@ -79,6 +80,48 @@ export function ChannelsPage() {
                 />
                 Resposta automática
               </label>
+              <div className="grid gap-2">
+                <Label>Driver de integração</Label>
+                <select
+                  className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  value={channel.driver}
+                  onChange={(event) =>
+                    crm.updateChannel(channel.id, {
+                      driver: event.target.value as (typeof channel)['driver'],
+                    })
+                  }
+                >
+                  <option value="manual">manual</option>
+                  <option value="meta">meta</option>
+                  <option value="whatsapp">whatsapp</option>
+                  <option value="webhook">webhook</option>
+                </select>
+              </div>
+              <div className="grid gap-2">
+                <Label>Mapeamento campo → caminho JSON (objeto)</Label>
+                <Textarea
+                  key={`${channel.id}-fm`}
+                  rows={3}
+                  className="font-mono text-xs"
+                  defaultValue={JSON.stringify(channel.fieldMapping, null, 0)}
+                  onBlur={(event) => {
+                    try {
+                      const parsed = JSON.parse(event.target.value || '{}') as Record<string, string>
+                      crm.updateChannel(channel.id, { fieldMapping: parsed })
+                    } catch {
+                      /* mantém anterior */
+                    }
+                  }}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Referência de credenciais (vault/env)</Label>
+                <Input
+                  value={channel.credentialsRef}
+                  onChange={(event) => crm.updateChannel(channel.id, { credentialsRef: event.target.value })}
+                  placeholder="ex.: VAULT_META_KEY"
+                />
+              </div>
               <Button type="button" variant="destructive" size="sm" className="w-fit" onClick={() => crm.removeChannel(channel.id)}>
                 Remover canal
               </Button>

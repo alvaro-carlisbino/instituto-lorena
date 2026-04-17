@@ -17,6 +17,7 @@ import { AuditPage } from './pages/AuditPage'
 import { AuthPage } from './pages/AuthPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { AdminLabPage } from './pages/AdminLabPage'
+import { DataViewsPage } from './pages/DataViewsPage'
 import { RouteTransition } from './components/RouteTransition'
 
 function AppRoutes() {
@@ -25,6 +26,7 @@ function AppRoutes() {
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/dashboard-config" element={<DashboardConfigPage />} />
       <Route path="/boards" element={<BoardsPage />} />
+      <Route path="/visoes" element={<DataViewsPage />} />
       <Route path="/kanban" element={<KanbanPage />} />
       <Route path="/historico" element={<HistoryPage />} />
       <Route path="/canais" element={<ChannelsPage />} />

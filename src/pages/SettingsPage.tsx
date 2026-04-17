@@ -1,8 +1,10 @@
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import type { FieldVisibilityContext } from '@/mocks/crmMock'
 
 export function SettingsPage() {
   const crm = useCrm()
@@ -33,45 +35,105 @@ export function SettingsPage() {
           </CardHeader>
           <CardContent>
             <ul className="divide-y divide-border rounded-lg border border-border">
-              {crm.workflowFields.map((field) => (
-                <li key={field.id} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                    <Input
-                      value={field.label}
-                      onChange={(event) => crm.updateWorkflowField(field.id, { label: event.target.value })}
-                      className="max-w-[12rem]"
-                    />
-                    <select
-                      className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                      value={field.fieldType}
-                      onChange={(event) =>
-                        crm.updateWorkflowField(field.id, {
-                          fieldType: event.target.value as 'text' | 'select' | 'number' | 'date',
-                        })
-                      }
-                    >
-                      <option value="text">text</option>
-                      <option value="select">select</option>
-                      <option value="number">number</option>
-                      <option value="date">date</option>
-                    </select>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="flex cursor-pointer items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        className="size-4 rounded border-input"
-                        checked={field.required}
-                        onChange={(event) => crm.updateWorkflowField(field.id, { required: event.target.checked })}
-                      />
-                      Obrigatório
-                    </label>
-                    <Button type="button" variant="destructive" size="sm" onClick={() => crm.removeWorkflowField(field.id)}>
-                      Remover
-                    </Button>
-                  </div>
-                </li>
-              ))}
+              {crm.workflowFields.map((field) => {
+                const toggleVis = (ctx: FieldVisibilityContext, checked: boolean) => {
+                  const next = checked
+                    ? Array.from(new Set([...field.visibleIn, ctx]))
+                    : field.visibleIn.filter((c) => c !== ctx)
+                  crm.updateWorkflowField(field.id, { visibleIn: next as FieldVisibilityContext[] })
+                }
+                const vis = (ctx: FieldVisibilityContext) => field.visibleIn.includes(ctx)
+                return (
+                  <li key={field.id} className="flex flex-col gap-3 p-3">
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="grid gap-1">
+                        <Label className="text-xs text-muted-foreground">Chave (slug)</Label>
+                        <Input
+                          value={field.fieldKey}
+                          onChange={(event) => crm.updateWorkflowField(field.id, { fieldKey: event.target.value })}
+                          className="font-mono text-sm"
+                        />
+                      </div>
+                      <div className="grid gap-1">
+                        <Label className="text-xs text-muted-foreground">Rótulo</Label>
+                        <Input
+                          value={field.label}
+                          onChange={(event) => crm.updateWorkflowField(field.id, { label: event.target.value })}
+                        />
+                      </div>
+                      <div className="grid gap-1">
+                        <Label className="text-xs text-muted-foreground">Seção / ordem</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            value={field.section}
+                            onChange={(event) => crm.updateWorkflowField(field.id, { section: event.target.value })}
+                            placeholder="Seção"
+                          />
+                          <Input
+                            type="number"
+                            className="w-20"
+                            value={field.sortOrder}
+                            onChange={(event) =>
+                              crm.updateWorkflowField(field.id, { sortOrder: Number(event.target.value) || 0 })
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                        value={field.fieldType}
+                        onChange={(event) =>
+                          crm.updateWorkflowField(field.id, {
+                            fieldType: event.target.value as 'text' | 'select' | 'number' | 'date',
+                          })
+                        }
+                      >
+                        <option value="text">text</option>
+                        <option value="select">select</option>
+                        <option value="number">number</option>
+                        <option value="date">date</option>
+                      </select>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="size-4 rounded border-input"
+                          checked={field.required}
+                          onChange={(event) => crm.updateWorkflowField(field.id, { required: event.target.checked })}
+                        />
+                        Obrigatório
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-xs">
+                      <span className="text-muted-foreground">Visível em:</span>
+                      {(
+                        [
+                          ['kanban_card', 'Kanban'],
+                          ['lead_detail', 'Detalhe'],
+                          ['list', 'Lista'],
+                          ['capture_form', 'Captura'],
+                        ] as const
+                      ).map(([ctx, label]) => (
+                        <label key={ctx} className="flex cursor-pointer items-center gap-1">
+                          <input
+                            type="checkbox"
+                            className="size-3.5 rounded border-input"
+                            checked={vis(ctx)}
+                            onChange={(e) => toggleVis(ctx, e.target.checked)}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex justify-end">
+                      <Button type="button" variant="destructive" size="sm" onClick={() => crm.removeWorkflowField(field.id)}>
+                        Remover
+                      </Button>
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           </CardContent>
         </Card>
@@ -217,6 +279,43 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {crm.currentPermission.canEditBoards ? (
+        <Card className="mt-6 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base">Organização (datas e locale)</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-2">
+              <Label htmlFor="org-tz">Fuso horário</Label>
+              <Input
+                id="org-tz"
+                value={crm.orgSettings.timezone}
+                onChange={(e) => crm.updateOrgSettings({ timezone: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="org-df">Formato de data</Label>
+              <Input
+                id="org-df"
+                value={crm.orgSettings.dateFormat}
+                onChange={(e) => crm.updateOrgSettings({ dateFormat: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="org-ws">Semana começa em (0=dom …)</Label>
+              <Input
+                id="org-ws"
+                type="number"
+                min={0}
+                max={6}
+                value={crm.orgSettings.weekStartsOn}
+                onChange={(e) => crm.updateOrgSettings({ weekStartsOn: Number(e.target.value) || 0 })}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
     </AppLayout>
   )
 }

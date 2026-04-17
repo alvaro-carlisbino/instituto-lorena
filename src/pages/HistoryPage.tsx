@@ -4,10 +4,12 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
+import { workflowFieldsForContext } from '@/lib/leadFields'
 import { cn } from '@/lib/utils'
 
 export function HistoryPage() {
@@ -77,6 +79,22 @@ export function HistoryPage() {
 
             <article className="min-h-[12rem] rounded-lg border border-border bg-card p-4 shadow-sm">
               <h3 className="mt-0 text-base font-semibold">{crm.selectedLead?.patientName ?? 'Nenhum lead selecionado'}</h3>
+              {crm.selectedLead && crm.currentPermission.canRouteLeads ? (
+                <div className="mb-4 grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-2">
+                  {workflowFieldsForContext(crm.workflowFields, 'lead_detail').map((field) => {
+                    const lead = crm.selectedLead
+                    if (!lead) return null
+                    return (
+                      <DynamicFieldRenderer
+                        key={field.id}
+                        field={field}
+                        lead={lead}
+                        onChange={(next) => crm.persistLeadPatch(next)}
+                      />
+                    )
+                  })}
+                </div>
+              ) : null}
               <ul className="m-0 list-none space-y-3 p-0">
                 {crm.selectedLeadHistory.map((item) => (
                   <li key={item.id} className="rounded-md border border-border bg-muted/20 p-3">

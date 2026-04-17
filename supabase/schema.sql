@@ -3,6 +3,8 @@ create table if not exists public.app_users (
   name text not null,
   role text not null,
   active boolean not null default true,
+  email text not null default '',
+  auth_user_id uuid references auth.users (id) on delete set null,
   created_at timestamptz not null default now()
 );
 
@@ -18,6 +20,7 @@ create table if not exists public.app_profiles (
 create table if not exists public.pipelines (
   id text primary key,
   name text not null,
+  board_config jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -41,7 +44,8 @@ create table if not exists public.leads (
   owner_id text not null references public.app_users(id),
   pipeline_id text not null references public.pipelines(id),
   stage_id text not null references public.pipeline_stages(id),
-  summary text not null
+  summary text not null,
+  custom_fields jsonb not null default '{}'::jsonb
 );
 
 create table if not exists public.interactions (
@@ -63,6 +67,9 @@ create table if not exists public.channel_configs (
   sla_minutes int not null default 15,
   auto_reply boolean not null default false,
   priority int not null default 1,
+  driver text not null default 'manual',
+  field_mapping jsonb not null default '{}'::jsonb,
+  credentials_ref text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -83,9 +90,16 @@ create table if not exists public.workflow_fields (
   field_type text not null,
   required boolean not null default false,
   options text[] not null default '{}',
+  field_key text not null,
+  section text not null default '',
+  sort_order int not null default 0,
+  visible_in text[] not null default array['kanban_card','lead_detail','list','capture_form']::text[],
+  validation jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create unique index if not exists workflow_fields_field_key_lower_idx on public.workflow_fields (lower(field_key));
 
 create table if not exists public.permission_profiles (
   id text primary key,
@@ -115,6 +129,8 @@ create table if not exists public.tv_widgets (
   metric_key text not null,
   enabled boolean not null default true,
   position int not null default 1,
+  layout jsonb not null default '{}'::jsonb,
+  widget_config jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -125,11 +141,32 @@ create table if not exists public.dashboard_widgets (
   metric_key text not null,
   enabled boolean not null default true,
   position int not null default 1,
+  layout jsonb not null default '{}'::jsonb,
+  widget_config jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.data_views (
+  id text primary key,
+  name text not null,
+  config jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.org_settings (
+  id text primary key,
+  timezone text not null default 'America/Sao_Paulo',
+  date_format text not null default 'dd/MM/yyyy',
+  week_starts_on int not null default 1,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.org_settings (id) values ('default') on conflict (id) do nothing;
+
 alter table public.leads add column if not exists position int not null default 1;
+alter table public.leads add column if not exists custom_fields jsonb not null default '{}'::jsonb;
 
 create table if not exists public.audit_logs (
   id uuid primary key default gen_random_uuid(),
@@ -235,7 +272,7 @@ begin
     raise exception 'forbidden: requires can_manage_users';
   end if;
 
-  if tg_table_name in ('pipelines', 'pipeline_stages', 'workflow_fields') and not public.can_edit_boards() then
+  if tg_table_name in ('pipelines', 'pipeline_stages', 'workflow_fields', 'data_views', 'org_settings') and not public.can_edit_boards() then
     raise exception 'forbidden: requires can_edit_boards';
   end if;
 
@@ -278,6 +315,12 @@ create trigger audit_tv_widgets after insert or update or delete on public.tv_wi
 drop trigger if exists audit_dashboard_widgets on public.dashboard_widgets;
 create trigger audit_dashboard_widgets after insert or update or delete on public.dashboard_widgets for each row execute function public.log_audit();
 
+drop trigger if exists audit_data_views on public.data_views;
+create trigger audit_data_views after insert or update or delete on public.data_views for each row execute function public.log_audit();
+
+drop trigger if exists audit_org_settings on public.org_settings;
+create trigger audit_org_settings after insert or update or delete on public.org_settings for each row execute function public.log_audit();
+
 drop trigger if exists audit_webhook_jobs on public.webhook_jobs;
 create trigger audit_webhook_jobs after insert or update or delete on public.webhook_jobs for each row execute function public.log_audit();
 
@@ -317,6 +360,12 @@ create trigger enforce_tv_widgets before insert or update or delete on public.tv
 drop trigger if exists enforce_dashboard_widgets on public.dashboard_widgets;
 create trigger enforce_dashboard_widgets before insert or update or delete on public.dashboard_widgets for each row execute function public.enforce_role_write();
 
+drop trigger if exists enforce_data_views on public.data_views;
+create trigger enforce_data_views before insert or update or delete on public.data_views for each row execute function public.enforce_role_write();
+
+drop trigger if exists enforce_org_settings on public.org_settings;
+create trigger enforce_org_settings before insert or update or delete on public.org_settings for each row execute function public.enforce_role_write();
+
 alter table public.app_users enable row level security;
 alter table public.app_profiles enable row level security;
 alter table public.pipelines enable row level security;
@@ -330,6 +379,8 @@ alter table public.permission_profiles enable row level security;
 alter table public.notification_rules enable row level security;
 alter table public.tv_widgets enable row level security;
 alter table public.dashboard_widgets enable row level security;
+alter table public.data_views enable row level security;
+alter table public.org_settings enable row level security;
 alter table public.audit_logs enable row level security;
 alter table public.webhook_jobs enable row level security;
 
@@ -448,6 +499,30 @@ create policy "workflow read auth"
   using (auth.role() = 'authenticated');
 create policy "workflow edit boards"
   on public.workflow_fields
+  for all
+  using (public.can_edit_boards())
+  with check (public.can_edit_boards());
+
+drop policy if exists "data_views read auth" on public.data_views;
+drop policy if exists "data_views edit boards" on public.data_views;
+create policy "data_views read auth"
+  on public.data_views
+  for select
+  using (auth.role() = 'authenticated');
+create policy "data_views edit boards"
+  on public.data_views
+  for all
+  using (public.can_edit_boards())
+  with check (public.can_edit_boards());
+
+drop policy if exists "org_settings read auth" on public.org_settings;
+drop policy if exists "org_settings edit boards" on public.org_settings;
+create policy "org_settings read auth"
+  on public.org_settings
+  for select
+  using (auth.role() = 'authenticated');
+create policy "org_settings edit boards"
+  on public.org_settings
   for all
   using (public.can_edit_boards())
   with check (public.can_edit_boards());

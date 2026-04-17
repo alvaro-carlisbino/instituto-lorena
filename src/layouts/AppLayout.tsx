@@ -12,6 +12,7 @@ import {
   Settings,
   Shield,
   SlidersHorizontal,
+  Table2,
   Tv,
   Users,
 } from 'lucide-react'
@@ -109,6 +110,7 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
                   <NavItem to="/canais" label="Canais" icon={Radio} />
                   <NavItem to="/metricas" label="Métricas" icon={BarChart3} />
                   {showBoards ? <NavItem to="/boards" label="Boards" icon={LayoutGrid} /> : null}
+                  {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table2} /> : null}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>

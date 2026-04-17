@@ -115,3 +115,16 @@ export const updateMyProfile = async (payload: { displayName: string }): Promise
   const { error } = await client.from('app_profiles').update({ display_name: payload.displayName }).eq('auth_user_id', userId)
   if (error) throw error
 }
+
+export const inviteTeamMember = async (params: {
+  email: string
+  displayName: string
+  role: 'admin' | 'gestor' | 'sdr'
+}): Promise<void> => {
+  const client = assertSupabase()
+  const { error, data } = await client.functions.invoke('invite-user', { body: params })
+  if (error) throw new Error(error.message)
+  if (data && typeof data === 'object' && 'error' in data) {
+    throw new Error(String((data as { error: string }).error))
+  }
+}

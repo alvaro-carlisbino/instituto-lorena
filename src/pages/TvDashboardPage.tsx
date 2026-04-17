@@ -1,7 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 
 import { useCrm } from '@/context/CrmContext'
 import { cn } from '@/lib/utils'
+
+function layoutStyle(layout: Record<string, unknown>): CSSProperties {
+  const col = typeof layout.col === 'number' ? layout.col : Number(layout.col) || 1
+  const row = typeof layout.row === 'number' ? layout.row : Number(layout.row) || 1
+  const span = typeof layout.span === 'number' ? layout.span : Number(layout.span) || 1
+  return {
+    gridColumn: `${col} / span ${span}`,
+    gridRow: row,
+  }
+}
 
 export function TvDashboardPage() {
   const crm = useCrm()
@@ -14,6 +24,15 @@ export function TvDashboardPage() {
     return () => window.clearInterval(timer)
   }, [])
 
+  const metricByKey = (key: string) => crm.metrics.find((metric) => metric.id === key)
+
+  const orderedWidgets = useMemo(
+    () => crm.tvWidgets.filter((widget) => widget.enabled).sort((a, b) => a.position - b.position),
+    [crm.tvWidgets],
+  )
+
+  const hasLayout = orderedWidgets.some((w) => w.layout && (w.layout as { grid?: string }).grid !== 'legacy')
+
   if (!crm.currentPermission.canViewTvPanel) {
     return (
       <div className="min-h-svh bg-zinc-950 px-8 py-10 text-zinc-50">
@@ -25,11 +44,6 @@ export function TvDashboardPage() {
     )
   }
 
-  const metricByKey = (key: string) => crm.metrics.find((metric) => metric.id === key)
-
-  const orderedWidgets = crm.tvWidgets.filter((widget) => widget.enabled).sort((a, b) => a.position - b.position)
-  const hasBarWidget = orderedWidgets.some((widget) => widget.widgetType === 'bar')
-
   return (
     <div className="min-h-svh bg-gradient-to-br from-zinc-900 via-slate-950 to-zinc-950 px-8 py-10 text-zinc-50">
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
@@ -39,7 +53,21 @@ export function TvDashboardPage() {
         </div>
       </header>
 
-      <section className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section
+        className={cn(
+          'mb-8 gap-4',
+          hasLayout ? 'grid' : 'grid sm:grid-cols-2 xl:grid-cols-4',
+        )}
+        style={
+          hasLayout
+            ? {
+                display: 'grid',
+                gridTemplateColumns: 'repeat(12, minmax(0, 1fr))',
+                gridAutoRows: 'minmax(5rem, auto)',
+              }
+            : undefined
+        }
+      >
         {orderedWidgets
           .filter((widget) => widget.widgetType === 'kpi')
           .map((widget) => {
@@ -47,19 +75,23 @@ export function TvDashboardPage() {
             return (
               <article
                 key={widget.id}
-                className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur-sm"
+                className={cn(
+                  'rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur-sm',
+                  hasLayout ? '' : '',
+                )}
+                style={hasLayout ? layoutStyle(widget.layout) : undefined}
               >
                 <p className="m-0 text-sm text-zinc-400">{widget.title}</p>
-                <p className="mt-2 text-4xl font-semibold tabular-nums tracking-tight">{metric ? metric.value : crm.totalQualified}</p>
+                <p className="mt-2 text-4xl font-semibold tabular-nums tracking-tight">
+                  {metric ? metric.value : crm.totalQualified}
+                </p>
               </article>
             )
           })}
       </section>
 
-      <section
-        className={cn('grid gap-6', hasBarWidget ? 'xl:grid-cols-[2fr_1fr]' : 'xl:max-w-xl')}
-      >
-        {hasBarWidget ? (
+      <section className="grid gap-6 xl:grid-cols-[2fr_1fr]">
+        {orderedWidgets.some((widget) => widget.widgetType === 'bar') ? (
           <article className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg">
             <h2 className="m-0 mb-4 text-xl font-semibold text-zinc-100">Captação × qualificação por hora</h2>
             <ul className="m-0 list-none space-y-4 p-0">
