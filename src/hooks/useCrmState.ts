@@ -111,6 +111,12 @@ export const sourceLabel = {
   manual: 'Manual',
 }
 
+const parseForceAdminEmails = (): string[] => {
+  const raw = import.meta.env.VITE_FORCE_ADMIN_EMAILS
+  if (typeof raw !== 'string' || !raw.trim()) return []
+  return raw.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean)
+}
+
 export const useCrmState = () => {
   const dataMode = getDataProviderMode()
   const [pipelineCatalog, setPipelineCatalog] = useState<Pipeline[]>(pipelines)
@@ -1054,7 +1060,11 @@ export const useCrmState = () => {
     void getMyProfile()
       .then((profile) => {
         if (profile) {
-          setActingRole(profile.role)
+          const email = session.user.email?.toLowerCase() ?? ''
+          const forced = parseForceAdminEmails()
+          const role =
+            forced.length > 0 && email && forced.includes(email) ? 'admin' : profile.role
+          setActingRole(role)
           setDisplayNameDraft(profile.displayName)
           setOnboardingDone(profile.displayName.trim().length > 1)
         }

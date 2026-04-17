@@ -70,7 +70,6 @@ export const ensureAppProfile = async (session: Session): Promise<void> => {
     auth_user_id: userId,
     email: session.user.email ?? '',
     display_name: session.user.user_metadata?.name ?? session.user.email?.split('@')[0] ?? 'usuario',
-    role: 'sdr' as const,
   }
 
   const { error } = await client.from('app_profiles').insert(payload)
