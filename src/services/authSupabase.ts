@@ -54,6 +54,23 @@ export const onAuthStateChanged = (callback: (session: Session | null) => void) 
   return data.subscription
 }
 
+/** Atualiza app_profiles.role para admin quando o e-mail está em VITE_FORCE_ADMIN_EMAILS (bootstrap). */
+export const syncForcedAdminRole = async (session: Session, forcedEmails: string[]): Promise<void> => {
+  if (!forcedEmails.length) return
+  const email = session.user.email?.trim().toLowerCase()
+  if (!email || !forcedEmails.includes(email)) return
+  const client = assertSupabase()
+  const { data, error: readErr } = await client
+    .from('app_profiles')
+    .select('role')
+    .eq('auth_user_id', session.user.id)
+    .maybeSingle()
+  if (readErr) throw readErr
+  if (!data || String(data.role).toLowerCase() === 'admin') return
+  const { error } = await client.from('app_profiles').update({ role: 'admin' }).eq('auth_user_id', session.user.id)
+  if (error) throw error
+}
+
 export const ensureAppProfile = async (session: Session): Promise<void> => {
   const client = assertSupabase()
   const userId = session.user.id
@@ -70,6 +87,7 @@ export const ensureAppProfile = async (session: Session): Promise<void> => {
     auth_user_id: userId,
     email: session.user.email ?? '',
     display_name: session.user.user_metadata?.name ?? session.user.email?.split('@')[0] ?? 'usuario',
+    role: 'sdr' as const,
   }
 
   const { error } = await client.from('app_profiles').insert(payload)

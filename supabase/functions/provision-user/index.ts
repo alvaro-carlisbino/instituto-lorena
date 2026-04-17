@@ -13,6 +13,23 @@ type Body = {
   appUserId?: string
 }
 
+async function callerCanManageUsers(
+  admin: ReturnType<typeof createClient>,
+  authUserId: string,
+): Promise<boolean> {
+  const { data: profile, error } = await admin.from('app_profiles').select('role').eq('auth_user_id', authUserId).maybeSingle()
+  if (error || !profile?.role) return false
+  const r = String(profile.role).trim().toLowerCase()
+  if (r === 'admin') return true
+  const { data: perm } = await admin
+    .from('permission_profiles')
+    .select('can_manage_users')
+    .eq('role', r)
+    .limit(1)
+    .maybeSingle()
+  return Boolean(perm?.can_manage_users)
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: cors })
@@ -58,13 +75,8 @@ Deno.serve(async (req) => {
   }
 
   const admin = createClient(supabaseUrl, serviceKey)
-  const { data: profile, error: profErr } = await admin
-    .from('app_profiles')
-    .select('role')
-    .eq('auth_user_id', user.id)
-    .maybeSingle()
-
-  if (profErr || profile?.role !== 'admin') {
+  const allowed = await callerCanManageUsers(admin, user.id)
+  if (!allowed) {
     return new Response(JSON.stringify({ error: 'forbidden' }), {
       status: 403,
       headers: { ...cors, 'Content-Type': 'application/json' },

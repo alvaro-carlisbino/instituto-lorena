@@ -204,7 +204,16 @@ returns boolean
 language sql
 stable
 as $$
-  select public.current_profile_role() = 'admin';
+  select public.current_profile_role() = 'admin'
+    or coalesce(
+      (
+        select pp.can_manage_users
+        from public.permission_profiles pp
+        where lower(pp.role) = lower(public.current_profile_role())
+        limit 1
+      ),
+      false
+    );
 $$;
 
 create or replace function public.can_route_leads()

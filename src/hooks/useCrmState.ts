@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
   ensureAppProfile,
+  syncForcedAdminRole,
   getCurrentSession,
   getMyProfile,
   onAuthStateChanged,
@@ -152,6 +153,7 @@ export const useCrmState = () => {
   const [authEmail, setAuthEmail] = useState<string>('')
   const [authPassword, setAuthPassword] = useState<string>('')
   const [authNotice, setAuthNotice] = useState<string>('')
+  const [profileReloadTick, setProfileReloadTick] = useState(0)
   const [actingRole, setActingRole] = useState<'admin' | 'gestor' | 'sdr'>('admin')
   const [useRolePreview, setUseRolePreview] = useState<boolean>(false)
   const [displayNameDraft, setDisplayNameDraft] = useState<string>('')
@@ -769,7 +771,9 @@ export const useCrmState = () => {
     }
     setUsers((previous) => [...previous, next])
     if (dataMode === 'supabase' && isSupabaseConfigured) {
-      void saveAppUser(next)
+      void saveAppUser(next).catch((error) => {
+        setAuthNotice(`Falha ao guardar utilizador: ${error instanceof Error ? error.message : String(error)}`)
+      })
     }
   }
 
@@ -779,7 +783,9 @@ export const useCrmState = () => {
       if (dataMode === 'supabase' && isSupabaseConfigured) {
         const changed = next.find((user) => user.id === userId)
         if (changed) {
-          void saveAppUser(changed)
+          void saveAppUser(changed).catch((error) => {
+            setAuthNotice(`Falha ao guardar utilizador: ${error instanceof Error ? error.message : String(error)}`)
+          })
         }
       }
       return next
@@ -1114,18 +1120,30 @@ export const useCrmState = () => {
   useEffect(() => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured) return
 
-    void getCurrentSession().then((currentSession) => {
+    void getCurrentSession().then(async (currentSession) => {
       setSession(currentSession)
-      if (currentSession) {
-        void ensureAppProfile(currentSession)
+      if (!currentSession) return
+      try {
+        await ensureAppProfile(currentSession)
+        await syncForcedAdminRole(currentSession, parseForceAdminEmails())
+        setProfileReloadTick((t) => t + 1)
+      } catch (error) {
+        setAuthNotice(`Perfil: ${error instanceof Error ? error.message : String(error)}`)
       }
     })
 
     const subscription = onAuthStateChanged((updatedSession) => {
       setSession(updatedSession)
-      if (updatedSession) {
-        void ensureAppProfile(updatedSession)
-      }
+      if (!updatedSession) return
+      void (async () => {
+        try {
+          await ensureAppProfile(updatedSession)
+          await syncForcedAdminRole(updatedSession, parseForceAdminEmails())
+          setProfileReloadTick((t) => t + 1)
+        } catch (error) {
+          setAuthNotice(`Perfil: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      })()
     })
 
     return () => {
@@ -1150,7 +1168,7 @@ export const useCrmState = () => {
       .catch(() => {
         setAuthNotice('Nao foi possivel ler perfil. Verifique RLS/app_profiles.')
       })
-  }, [session, users])
+  }, [session, users, profileReloadTick])
 
   const effectiveRole = actingRole
 
