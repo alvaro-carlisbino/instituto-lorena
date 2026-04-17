@@ -85,3 +85,26 @@ export const getMyProfile = async (): Promise<AuthProfile | null> => {
     role: data.role,
   }
 }
+
+export const updateMyProfile = async (payload: { displayName: string }): Promise<void> => {
+  const client = assertSupabase()
+  const { data: authData, error: authError } = await client.auth.getUser()
+  if (authError) throw authError
+
+  const userId = authData.user?.id
+  const email = authData.user?.email
+  if (!userId || !email) {
+    throw new Error('Sessao invalida para atualizar perfil.')
+  }
+
+  const { error } = await client.from('app_profiles').upsert(
+    {
+      auth_user_id: userId,
+      email,
+      display_name: payload.displayName,
+      role: 'sdr',
+    },
+    { onConflict: 'auth_user_id' },
+  )
+  if (error) throw error
+}

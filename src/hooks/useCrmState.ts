@@ -8,6 +8,7 @@ import {
   signInWithEmail,
   signOutSession,
   signUpWithEmail,
+  updateMyProfile,
 } from '../services/authSupabase'
 import {
   deleteDashboardWidget,
@@ -69,6 +70,7 @@ import type {
   WorkflowField,
 } from '../mocks/crmMock'
 import { getDataProviderMode } from '../services/dataMode'
+import { supabase } from '../lib/supabaseClient'
 
 export type QueueJob = {
   id: string
@@ -137,6 +139,8 @@ export const useCrmState = () => {
   const [authNotice, setAuthNotice] = useState<string>('')
   const [actingRole, setActingRole] = useState<'admin' | 'gestor' | 'sdr'>('admin')
   const [useRolePreview, setUseRolePreview] = useState<boolean>(false)
+  const [displayNameDraft, setDisplayNameDraft] = useState<string>('')
+  const [onboardingDone, setOnboardingDone] = useState<boolean>(false)
   const [triageByLead, setTriageByLead] = useState<Record<string, TriageResult>>({
     'lead-001': {
       leadId: 'lead-001',
@@ -966,6 +970,8 @@ export const useCrmState = () => {
       .then((profile) => {
         if (profile) {
           setActingRole(profile.role)
+          setDisplayNameDraft(profile.displayName)
+          setOnboardingDone(profile.displayName.trim().length > 1)
         }
       })
       .catch(() => {
@@ -985,6 +991,60 @@ export const useCrmState = () => {
       canManageUsers: false,
       canViewTvPanel: true,
     } as PermissionProfile)
+
+  const completeOnboarding = async () => {
+    const displayName = displayNameDraft.trim()
+    if (displayName.length < 2) {
+      setAuthNotice('Informe um nome valido para continuar.')
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      await updateMyProfile({ displayName })
+      setOnboardingDone(true)
+      setAuthNotice('Perfil atualizado com sucesso.')
+      await syncFromSupabase()
+    } catch (error) {
+      setAuthNotice(`Falha ao atualizar perfil: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const runWebhookReplay = async () => {
+    if (!supabase) {
+      setSyncNotice('Supabase nao configurado.')
+      return
+    }
+
+    if (!currentPermission.canManageUsers) {
+      setSyncNotice('Sem permissao para reprocessar webhooks.')
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      const { error } = await supabase.from('notification_rules').select('id').limit(1)
+      if (error) throw error
+
+      setQueueJobs((previous) => [
+        {
+          id: `job-replay-${Date.now()}`,
+          source: 'meta-webhook',
+          status: 'processing',
+          createdAt: new Date().toISOString(),
+          note: 'Reprocessamento manual de webhook disparado pelo admin.',
+        },
+        ...previous,
+      ])
+      setSyncNotice('Reprocessamento acionado com sucesso.')
+    } catch (error) {
+      setSyncNotice(`Falha no replay: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   return {
     dataMode,
@@ -1021,6 +1081,9 @@ export const useCrmState = () => {
     isLoading,
     syncNotice,
     session,
+    onboardingDone,
+    displayNameDraft,
+    setDisplayNameDraft,
     actingRole,
     setActingRole,
     useRolePreview,
@@ -1042,7 +1105,9 @@ export const useCrmState = () => {
     runSignIn,
     runSignUp,
     runSignOut,
+    completeOnboarding,
     createTestAuthUsers,
+    runWebhookReplay,
     updateChannel,
     addChannel,
     removeChannel,

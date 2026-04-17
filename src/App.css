@@ -114,6 +114,10 @@
   font-size: 0.85rem;
 }
 
+.control-notices select:disabled {
+  opacity: 0.6;
+}
+
 button,
 select,
 textarea,

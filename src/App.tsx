@@ -15,6 +15,7 @@ import { UsersPage } from './pages/UsersPage'
 import { TvConfigPage } from './pages/TvConfigPage'
 import { AuditPage } from './pages/AuditPage'
 import { AuthPage } from './pages/AuthPage'
+import { OnboardingPage } from './pages/OnboardingPage'
 import './App.css'
 
 function AppRoutes() {
@@ -52,6 +53,18 @@ function App() {
         onPasswordChange={crmState.setAuthPassword}
         onSignIn={() => void crmState.runSignIn()}
         onSignUp={() => void crmState.runSignUp()}
+      />
+    )
+  }
+
+  if (dataMode === 'supabase' && crmState.session && !crmState.onboardingDone) {
+    return (
+      <OnboardingPage
+        displayName={crmState.displayNameDraft}
+        isLoading={crmState.isLoading}
+        notice={crmState.authNotice}
+        onDisplayNameChange={crmState.setDisplayNameDraft}
+        onComplete={() => void crmState.completeOnboarding()}
       />
     )
   }
