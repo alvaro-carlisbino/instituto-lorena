@@ -1,19 +1,30 @@
+import { Search } from 'lucide-react'
+
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
+
+type Temperature = 'all' | 'hot' | 'warm' | 'cold'
+
+const TEMP_OPTIONS: { value: Temperature; label: string }[] = [
+  { value: 'all', label: 'Todas' },
+  { value: 'hot', label: 'Quente' },
+  { value: 'warm', label: 'Morna' },
+  { value: 'cold', label: 'Fria' },
+]
 
 type Props = {
-  onSimulateCapture: () => void
   pipelineId: string
   pipelineOptions: { id: string; name: string }[]
   onPipelineChange: (id: string) => void
   searchTerm: string
   onSearchChange: (value: string) => void
-  temperatureFilter: 'all' | 'hot' | 'warm' | 'cold'
-  onTemperatureChange: (value: 'all' | 'hot' | 'warm' | 'cold') => void
+  temperatureFilter: Temperature
+  onTemperatureChange: (value: Temperature) => void
 }
 
 export function KanbanToolbar({
-  onSimulateCapture,
   pipelineId,
   pipelineOptions,
   onPipelineChange,
@@ -23,37 +34,56 @@ export function KanbanToolbar({
   onTemperatureChange,
 }: Props) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-center">
-      <Button type="button" onClick={onSimulateCapture}>
-        Simular captura na Meta
-      </Button>
-      <select
-        className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-        value={pipelineId}
-        onChange={(event) => onPipelineChange(event.target.value)}
-      >
-        {pipelineOptions.map((pipeline) => (
-          <option key={pipeline.id} value={pipeline.id}>
-            {pipeline.name}
-          </option>
-        ))}
-      </select>
-      <Input
-        className="max-w-xs"
-        value={searchTerm}
-        onChange={(event) => onSearchChange(event.target.value)}
-        placeholder="Buscar paciente ou resumo"
-      />
-      <select
-        className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-        value={temperatureFilter}
-        onChange={(event) => onTemperatureChange(event.target.value as 'all' | 'hot' | 'warm' | 'cold')}
-      >
-        <option value="all">Todas temperaturas</option>
-        <option value="hot">Quente</option>
-        <option value="warm">Morna</option>
-        <option value="cold">Fria</option>
-      </select>
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <Select value={pipelineId} onValueChange={(v) => v && onPipelineChange(v)}>
+          <SelectTrigger className="w-full min-w-[12rem] sm:w-[min(100%,14rem)]" size="default">
+            <SelectValue placeholder="Pipeline" />
+          </SelectTrigger>
+          <SelectContent>
+            {pipelineOptions.map((pipeline) => (
+              <SelectItem key={pipeline.id} value={pipeline.id}>
+                {pipeline.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <InputGroup className="w-full max-w-md sm:min-w-[14rem] sm:flex-1">
+          <InputGroupAddon>
+            <Search aria-hidden />
+            <span className="sr-only">Buscar</span>
+          </InputGroupAddon>
+          <InputGroupInput
+            value={searchTerm}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Buscar paciente ou resumo"
+            aria-label="Buscar paciente ou resumo"
+          />
+        </InputGroup>
+
+        <div
+          role="group"
+          aria-label="Filtrar por temperatura"
+          className="flex w-full flex-wrap gap-1 rounded-lg border border-border bg-muted/30 p-1 sm:w-auto"
+        >
+          {TEMP_OPTIONS.map((opt) => (
+            <Button
+              key={opt.value}
+              type="button"
+              size="sm"
+              variant={temperatureFilter === opt.value ? 'secondary' : 'ghost'}
+              className={cn(
+                'h-7 flex-1 rounded-md sm:flex-none',
+                temperatureFilter === opt.value && 'bg-background shadow-sm ring-1 ring-border'
+              )}
+              onClick={() => onTemperatureChange(opt.value)}
+            >
+              {opt.label}
+            </Button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

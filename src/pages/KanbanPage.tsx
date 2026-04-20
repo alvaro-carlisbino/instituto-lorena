@@ -1,15 +1,28 @@
 import { useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { History, LayoutDashboard, LayoutGrid, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react'
 
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
 import { KanbanToolbar } from '@/components/kanban/KanbanToolbar'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
+import { Button, buttonVariants } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
 import { getLeadFieldValue } from '@/lib/leadFields'
+import { cn } from '@/lib/utils'
 
 export function KanbanPage() {
   const crm = useCrm()
+  const navigate = useNavigate()
+  const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [temperatureFilter, setTemperatureFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null)
@@ -45,9 +58,54 @@ export function KanbanPage() {
   }
 
   return (
-    <AppLayout title="Kanban de leads" subtitle="Boards e etapas configuráveis por processo comercial.">
+    <AppLayout
+      title="Kanban de leads"
+      subtitle="Boards e etapas configuráveis por processo comercial."
+      actions={
+        <>
+          <Link
+            to="/dashboard"
+            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'inline-flex gap-1.5')}
+          >
+            <LayoutDashboard className="size-4" />
+            Dashboard
+          </Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <MoreHorizontal className="size-4" />
+                Mais ações
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-52">
+              <DropdownMenuItem onClick={() => navigate('/historico')}>
+                <History className="size-4" />
+                Histórico de leads
+              </DropdownMenuItem>
+              {crm.currentPermission.canEditBoards ? (
+                <DropdownMenuItem onClick={() => navigate('/boards')}>
+                  <LayoutGrid className="size-4" />
+                  Boards e pipelines
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => crm.simulateMetaCapture()}>
+                <Sparkles className="size-4" />
+                Simular captura na Meta
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={crm.isLoading || !canSync}
+                onClick={() => void crm.syncFromSupabase()}
+              >
+                <RefreshCw className={`size-4 ${crm.isLoading ? 'animate-spin' : ''}`} />
+                {crm.isLoading ? 'Sincronizando…' : 'Sincronizar dados'}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      }
+    >
       <KanbanToolbar
-        onSimulateCapture={crm.simulateMetaCapture}
         pipelineId={crm.selectedPipelineId}
         pipelineOptions={crm.pipelineCatalog.map((p) => ({ id: p.id, name: p.name }))}
         onPipelineChange={crm.setSelectedPipelineId}

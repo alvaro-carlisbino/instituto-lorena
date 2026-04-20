@@ -1,10 +1,24 @@
-import { AppLayout } from '@/layouts/AppLayout'
-import { useCrm } from '@/context/CrmContext'
+import { Link, useNavigate } from 'react-router-dom'
+import { KanbanSquare, MoreHorizontal, RefreshCw, SlidersHorizontal } from 'lucide-react'
+
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useCrm } from '@/context/CrmContext'
+import { AppLayout } from '@/layouts/AppLayout'
+import { cn } from '@/lib/utils'
 
 export function DashboardPage() {
   const crm = useCrm()
+  const navigate = useNavigate()
+  const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
 
   const getDashboardValue = (metricKey: string) => {
     if (metricKey === 'leads-active') return crm.leads.length
@@ -18,7 +32,45 @@ export function DashboardPage() {
   const dashboardCards = crm.dashboardWidgets.filter((widget) => widget.enabled).sort((a, b) => a.position - b.position)
 
   return (
-    <AppLayout title="Dashboard comercial" subtitle="Visão geral com indicadores ajustáveis e operação do dia.">
+    <AppLayout
+      title="Dashboard comercial"
+      subtitle="Visão geral com indicadores ajustáveis e operação do dia."
+      actions={
+        <>
+          {crm.currentPermission.canRouteLeads ? (
+            <Link to="/kanban" className={cn(buttonVariants({ size: 'sm' }), 'inline-flex gap-1.5')}>
+              <KanbanSquare className="size-4" />
+              Abrir Kanban
+            </Link>
+          ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <MoreHorizontal className="size-4" />
+                Mais ações
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-52">
+              {crm.currentPermission.canRouteLeads ? (
+                <DropdownMenuItem onClick={() => navigate('/dashboard-config')}>
+                  <SlidersHorizontal className="size-4" />
+                  Ajustar widgets do dashboard
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem onClick={() => navigate('/configuracoes')}>Configurações gerais</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={crm.isLoading || !canSync}
+                onClick={() => void crm.syncFromSupabase()}
+              >
+                <RefreshCw className={`size-4 ${crm.isLoading ? 'animate-spin' : ''}`} />
+                {crm.isLoading ? 'Sincronizando…' : 'Sincronizar dados'}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      }
+    >
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {dashboardCards.map((card) => (
           <Card key={card.id} className="shadow-sm">
@@ -31,7 +83,9 @@ export function DashboardPage() {
       </section>
 
       {crm.captureNotice ? (
-        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{crm.captureNotice}</p>
+        <p className="rounded-lg border border-success/35 bg-success/10 px-4 py-3 text-sm text-success-foreground">
+          {crm.captureNotice}
+        </p>
       ) : null}
 
       <section className="grid gap-6 lg:grid-cols-2">

@@ -2,8 +2,7 @@ import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanne
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { Field, FieldControl } from '@/components/ui/field'
 import { APP_ENV_BADGE, APP_LOGO_MONOGRAM, APP_NAME } from '@/config/branding'
 
 type Props = {
@@ -56,34 +55,24 @@ export function AuthPage({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-5 pt-2">
-          <div className="grid gap-2">
-            <Label htmlFor="auth-email" className="text-foreground">
-              E-mail
-            </Label>
-            <Input
-              id="auth-email"
+          <Field label="E-mail" inputSize="comfortable">
+            <FieldControl
               type="email"
               value={email}
               onChange={(event) => onEmailChange(event.target.value)}
               placeholder="voce@empresa.com"
               autoComplete="email"
-              className="h-11"
             />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="auth-password" className="text-foreground">
-              Senha
-            </Label>
-            <Input
-              id="auth-password"
+          </Field>
+          <Field label="Senha" inputSize="comfortable">
+            <FieldControl
               type="password"
               value={password}
               onChange={(event) => onPasswordChange(event.target.value)}
               placeholder="••••••••"
               autoComplete="current-password"
-              className="h-11"
             />
-          </div>
+          </Field>
           <NoticeBanner message={notice} variant={noticeVariantFromMessage(notice)} />
         </CardContent>
         <CardFooter className="flex flex-col gap-3 border-t border-border/60 bg-muted/20 px-6 py-5 sm:flex-row sm:justify-stretch">
