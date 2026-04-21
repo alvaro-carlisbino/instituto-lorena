@@ -162,7 +162,13 @@ export const pipelines: Pipeline[] = [
   {
     id: 'pipeline-clinica',
     name: 'Pipeline Clinica',
-    boardConfig: {},
+    boardConfig: {
+      stageSlaMinutes: {
+        'novo': 15,
+        'triagem': 30,
+        'contato': 60
+      }
+    },
     stages: [
       { id: 'novo', name: 'Novo lead' },
       { id: 'triagem', name: 'Triagem IA' },
@@ -174,7 +180,12 @@ export const pipelines: Pipeline[] = [
   {
     id: 'pipeline-estetica',
     name: 'Pipeline Estetica',
-    boardConfig: {},
+    boardConfig: {
+      stageSlaMinutes: {
+        'novo-estetica': 30,
+        'avaliacao': 120
+      }
+    },
     stages: [
       { id: 'novo-estetica', name: 'Novo lead' },
       { id: 'avaliacao', name: 'Avaliacao inicial' },

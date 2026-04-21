@@ -22,6 +22,9 @@ type Props = {
   onSearchChange: (value: string) => void
   temperatureFilter: Temperature
   onTemperatureChange: (value: Temperature) => void
+  ownerFilter: string
+  onOwnerChange: (value: string) => void
+  ownerOptions: { id: string; name: string }[]
 }
 
 export function KanbanToolbar({
@@ -32,18 +35,35 @@ export function KanbanToolbar({
   onSearchChange,
   temperatureFilter,
   onTemperatureChange,
+  ownerFilter,
+  onOwnerChange,
+  ownerOptions,
 }: Props) {
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <Select value={pipelineId} onValueChange={(v) => v && onPipelineChange(v)}>
-          <SelectTrigger className="w-full min-w-[12rem] sm:w-[min(100%,14rem)]" size="default">
+          <SelectTrigger className="w-full min-w-[12rem] sm:w-[min(100%,13rem)] rounded-none border-foreground/20 uppercase tracking-widest font-bold text-xs" size="default">
             <SelectValue placeholder="Pipeline" />
           </SelectTrigger>
           <SelectContent>
             {pipelineOptions.map((pipeline) => (
               <SelectItem key={pipeline.id} value={pipeline.id}>
                 {pipeline.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={ownerFilter} onValueChange={(v) => v && onOwnerChange(v)}>
+          <SelectTrigger className="w-full min-w-[12rem] sm:w-[min(100%,11rem)] rounded-none border-foreground/20 uppercase tracking-widest font-bold text-[10px]" size="default">
+            <SelectValue placeholder="SDR/Médico" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">SDR: TODOS</SelectItem>
+            {ownerOptions.map((owner) => (
+              <SelectItem key={owner.id} value={owner.id}>
+                {owner.name}
               </SelectItem>
             ))}
           </SelectContent>

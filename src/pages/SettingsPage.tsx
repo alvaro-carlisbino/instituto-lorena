@@ -15,8 +15,8 @@ export function SettingsPage() {
   if (!canAccessSettings) {
     return (
       <AppLayout title="Configurações gerais" subtitle="Sem permissão para editar configurações estruturais.">
-        <Card className="border-border/80 shadow-sm">
-          <CardContent className="pt-6 text-sm text-muted-foreground">
+        <Card className="border-border shadow-none bg-muted/10 rounded-none">
+          <CardContent className="pt-6 text-sm text-destructive font-bold uppercase tracking-widest">
             <p className="m-0">Peça acesso a um administrador (workflow, perfis de permissão e notificações).</p>
           </CardContent>
         </Card>
@@ -32,19 +32,19 @@ export function SettingsPage() {
         className="mb-2"
       />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="border-border/80 shadow-sm">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-4">
+      <div className="grid gap-8 lg:grid-cols-2">
+        <Card className="border-border shadow-none rounded-none bg-card">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
             <div className="space-y-1">
-              <CardTitle className="text-base">Campos de workflow</CardTitle>
-              <CardDescription>Chaves estáveis, rótulos e onde cada campo aparece no CRM.</CardDescription>
+              <CardTitle className="tracking-widest uppercase text-base font-bold">Campos de workflow</CardTitle>
+              <CardDescription className="text-xs">Chaves estáveis, rótulos e onde cada campo aparece no CRM.</CardDescription>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={crm.addWorkflowField}>
+            <Button type="button" variant="outline" size="sm" onClick={crm.addWorkflowField} className="rounded-none uppercase tracking-widest font-bold">
               Novo campo
             </Button>
           </CardHeader>
-          <CardContent className="pt-0">
-            <ul className="m-0 list-none space-y-3 p-0">
+          <CardContent className="pt-0 px-0">
+            <ul className="m-0 list-none space-y-0 p-0 divide-y divide-border">
               {crm.workflowFields.map((field) => {
                 const toggleVis = (ctx: FieldVisibilityContext, checked: boolean) => {
                   const next = checked
@@ -56,15 +56,15 @@ export function SettingsPage() {
                 return (
                   <li
                     key={field.id}
-                    className="flex flex-col gap-3 rounded-xl border border-border/80 bg-card/50 p-4 shadow-sm"
+                    className="flex flex-col gap-6 bg-transparent hover:bg-muted/5 transition-colors p-6"
                   >
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      <div className="grid gap-1">
-                        <Label className="text-xs text-muted-foreground">Chave (slug)</Label>
+                    <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="grid gap-2">
+                        <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Chave (slug)</Label>
                         <Input
                           value={field.fieldKey}
                           onChange={(event) => crm.updateWorkflowField(field.id, { fieldKey: event.target.value })}
-                          className="font-mono text-sm"
+                          className="font-mono text-sm rounded-none border-foreground/20 font-bold"
                         />
                       </div>
                       <div className="grid gap-1">
@@ -151,26 +151,26 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/80 shadow-sm">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-4">
+        <Card className="border-border shadow-none rounded-none bg-card">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
             <div className="space-y-1">
-              <CardTitle className="text-base">Permissões por papel</CardTitle>
-              <CardDescription>Combinações de permissões por função (admin, gestor, SDR).</CardDescription>
+              <CardTitle className="tracking-widest uppercase text-base font-bold">Permissões por papel</CardTitle>
+              <CardDescription className="text-xs">Combinações de permissões por função (admin, gestor, SDR).</CardDescription>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={crm.addPermissionProfile}>
+            <Button type="button" variant="outline" size="sm" onClick={crm.addPermissionProfile} className="rounded-none uppercase tracking-widest font-bold">
               Novo perfil
             </Button>
           </CardHeader>
-          <CardContent className="pt-0">
-            <ul className="m-0 list-none space-y-3 p-0">
+          <CardContent className="pt-0 px-0">
+            <ul className="m-0 list-none space-y-0 p-0 divide-y divide-border">
               {crm.permissions.map((profile) => (
                 <li
                   key={profile.id}
-                  className="space-y-3 rounded-xl border border-border/80 bg-card/50 p-4 shadow-sm"
+                  className="space-y-6 hover:bg-muted/5 transition-colors p-6"
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <select
-                      className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                      className="h-10 rounded-none border border-input bg-background px-3 text-sm font-semibold uppercase tracking-wide"
                       value={profile.role}
                       onChange={(event) =>
                         crm.updatePermissionProfile(profile.id, {
@@ -240,13 +240,13 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/80 shadow-sm lg:col-span-2">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-4">
+        <Card className="border-border shadow-none rounded-none bg-card lg:col-span-2">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
             <div className="space-y-1">
-              <CardTitle className="text-base">Notificações</CardTitle>
-              <CardDescription>Canais e gatilhos para alertas operacionais.</CardDescription>
+              <CardTitle className="tracking-widest uppercase text-base font-bold">Notificações</CardTitle>
+              <CardDescription className="text-xs">Canais e gatilhos para alertas operacionais.</CardDescription>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={crm.addNotificationRule}>
+            <Button type="button" variant="outline" size="sm" onClick={crm.addNotificationRule} className="rounded-none uppercase tracking-widest font-bold">
               Nova regra
             </Button>
           </CardHeader>

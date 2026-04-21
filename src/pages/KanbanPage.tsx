@@ -25,6 +25,7 @@ export function KanbanPage() {
   const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [temperatureFilter, setTemperatureFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
+  const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null)
 
   const visibleLeads = useMemo(() => {
@@ -43,9 +44,10 @@ export function KanbanPage() {
       const effTemp =
         temp === 'cold' || temp === 'warm' || temp === 'hot' ? temp : lead.temperature
       const matchesTemperature = temperatureFilter === 'all' || effTemp === temperatureFilter
-      return matchesText && matchesTemperature
+      const matchesOwner = ownerFilter === 'all' || lead.ownerId === ownerFilter
+      return matchesText && matchesTemperature && matchesOwner
     })
-  }, [crm.filteredLeads, searchTerm, temperatureFilter])
+  }, [crm.filteredLeads, searchTerm, temperatureFilter, ownerFilter])
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
@@ -113,6 +115,9 @@ export function KanbanPage() {
         onSearchChange={setSearchTerm}
         temperatureFilter={temperatureFilter}
         onTemperatureChange={setTemperatureFilter}
+        ownerFilter={ownerFilter}
+        onOwnerChange={setOwnerFilter}
+        ownerOptions={crm.users.map((u) => ({ id: u.id, name: u.name }))}
       />
 
       <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
@@ -122,28 +127,29 @@ export function KanbanPage() {
           return (
             <article
               key={stage.id}
-              className="flex min-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+              className="flex min-h-[28rem] flex-col overflow-hidden rounded-none border border-border bg-card shadow-none transition-colors hover:border-primary/50"
             >
-              <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
-                <div className="min-w-0">
-                  <h2 className="m-0 text-sm font-semibold">{stage.name}</h2>
+              <header className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
+                <div className="min-w-0 flex-1">
+                  <h2 className="m-0 text-sm font-bold uppercase tracking-widest text-foreground">{stage.name}</h2>
                   {crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id] != null ? (
-                    <p className="m-0 text-xs text-muted-foreground">
+                    <p className="m-0 text-[10px] uppercase font-bold text-destructive mt-1">
                       SLA {crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id]} min
                     </p>
                   ) : null}
                 </div>
-                <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs tabular-nums">
+                <span className="rounded-none border border-border/50 bg-background px-3 py-1 text-xs tabular-nums font-mono font-bold shadow-sm">
                   {stageLeads.length}
                 </span>
               </header>
 
-              <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
+              <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3 bg-muted/5">
                 {stageLeads.map((lead) => (
                   <KanbanLeadCard
                     key={lead.id}
                     lead={lead}
                     kanbanFields={crm.kanbanFieldsOrdered}
+                    slaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id]}
                     selected={crm.selectedLeadId === lead.id}
                     sourceLabel={sourceLabel[lead.source]}
                     ownerName={crm.getOwnerName(lead.ownerId)}

@@ -20,6 +20,9 @@ import { AdminLabPage } from './pages/AdminLabPage'
 import { DataViewsPage } from './pages/DataViewsPage'
 import { CommandPalette } from './components/CommandPalette'
 import { RouteTransition } from './components/RouteTransition'
+import { SidebarProvider } from '@/components/ui/sidebar'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { AppSidebar } from '@/layouts/AppSidebar'
 
 function AppRoutes() {
   return (
@@ -76,10 +79,17 @@ function App() {
 
   return (
     <CrmProvider value={crmState}>
-      <CommandPalette />
-      <RouteTransition>
-        <AppRoutes />
-      </RouteTransition>
+      <TooltipProvider delay={200}>
+        <SidebarProvider>
+          <AppSidebar />
+          <CommandPalette />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <RouteTransition>
+              <AppRoutes />
+            </RouteTransition>
+          </div>
+        </SidebarProvider>
+      </TooltipProvider>
     </CrmProvider>
   )
 }
