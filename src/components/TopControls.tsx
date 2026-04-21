@@ -4,7 +4,6 @@ import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanne
 import { useCrm } from '@/context/CrmContext'
 import { Button } from '@/components/ui/button'
 import { useState, useRef, useEffect } from 'react'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   DropdownMenu,
   DropdownMenuContent,
