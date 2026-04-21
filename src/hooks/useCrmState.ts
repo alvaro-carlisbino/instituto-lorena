@@ -499,11 +499,10 @@ export const useCrmState = () => {
       setDataViews(snapshot.dataViews ?? initialDataViews)
       setOrgSettings(snapshot.orgSettings ?? initialOrgSettings)
       await refreshWebhookJobs()
-      setSyncNotice('Dados sincronizados com Supabase.')
+      setSyncNotice('Sistema atualizado com os dados mais recentes.')
     } catch (error: any) {
-      console.error('Supabase load error:', error)
-      const msg = error?.message || JSON.stringify(error) || 'erro desconhecido'
-      setSyncNotice(`Falha ao carregar Supabase: ${msg}`)
+      console.error('Falha de sistema:', error)
+      setSyncNotice('Falha de conexão com os servidores. Verifique sua rede e tente novamente.')
     } finally {
       setIsLoading(false)
     }
@@ -516,9 +515,9 @@ export const useCrmState = () => {
       await seedTestUsers()
       await seedDemoData()
       await syncFromSupabase()
-      setSyncNotice('Usuarios de teste e dados demo criados no Supabase.')
+      setSyncNotice('Base de demonstração preenchida com sucesso no sistema.')
     } catch (error) {
-      setSyncNotice(`Falha ao criar seed: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
+      setSyncNotice('Problema ao carregar os dados modelo. Tente novamente mais tarde.')
     } finally {
       setIsLoading(false)
     }
