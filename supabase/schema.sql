@@ -192,9 +192,11 @@ create or replace function public.current_profile_role()
 returns text
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select coalesce(
-    (select role from public.app_profiles where auth_user_id = auth.uid()),
+    (select role from public.app_profiles where auth_user_id = auth.uid() limit 1),
     'sdr'
   );
 $$;
