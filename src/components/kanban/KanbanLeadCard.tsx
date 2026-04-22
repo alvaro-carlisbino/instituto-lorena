@@ -9,6 +9,7 @@ import { temperaturePillClass } from './temperatureClass'
 type Props = {
   lead: Lead
   kanbanFields: WorkflowField[]
+  slaMinutes?: number
   selected: boolean
   sourceLabel: string
   ownerName: string
@@ -23,6 +24,7 @@ type Props = {
 export function KanbanLeadCard({
   lead,
   kanbanFields,
+  slaMinutes,
   selected,
   sourceLabel,
   ownerName,
@@ -39,6 +41,11 @@ export function KanbanLeadCard({
   const temperature =
     tempRaw === 'cold' || tempRaw === 'warm' || tempRaw === 'hot' ? tempRaw : lead.temperature
 
+  // SLA Calculation
+  const elapsedMs = Date.now() - new Date(lead.createdAt).getTime()
+  const elapsedMinutes = Math.floor(elapsedMs / 60000)
+  const isSlaBreached = slaMinutes !== undefined && elapsedMinutes > slaMinutes
+
   const detailFields = kanbanFields.filter(
     (f) => f.fieldKey !== 'patient_name' && f.fieldKey !== 'temperature',
   )
@@ -46,8 +53,9 @@ export function KanbanLeadCard({
   return (
     <div
       className={cn(
-        'cursor-grab rounded-lg border border-border bg-card p-3 shadow-sm transition hover:border-primary/30 hover:shadow-md active:cursor-grabbing',
-        selected && 'border-primary ring-2 ring-primary/20',
+        'cursor-grab bg-card p-3 transition hover:shadow-md active:cursor-grabbing border-l-4 rounded-none',
+        selected ? 'ring-2 ring-primary/20' : '',
+        isSlaBreached ? 'border-destructive shadow-[0_0_10px_rgba(255,0,0,0.1)]' : 'border-border hover:border-primary/30'
       )}
       draggable
       onDragStart={(event) => {
@@ -71,8 +79,14 @@ export function KanbanLeadCard({
         if (event.key === 'Enter' || event.key === ' ') onSelect()
       }}
     >
+      {isSlaBreached && (
+        <div className="mb-2 w-full bg-destructive/10 text-destructive text-[10px] uppercase font-bold tracking-widest px-2 py-1 rounded-sm border border-destructive/20 flex items-center gap-1">
+          <span className="size-2 rounded-full bg-destructive animate-pulse" />
+          SLA ESTOURADO ({elapsedMinutes - (slaMinutes ?? 0)}m)
+        </div>
+      )}
       <div className="flex items-start justify-between gap-2">
-        <p className="m-0 font-semibold leading-tight">{title}</p>
+        <p className="m-0 font-bold leading-tight uppercase tracking-wider text-sm">{title}</p>
         <span className={temperaturePillClass(temperature)}>{temperature}</span>
       </div>
       <small className="text-muted-foreground">{sourceLabel}</small>

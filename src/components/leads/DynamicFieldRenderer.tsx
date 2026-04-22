@@ -1,8 +1,12 @@
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { getLeadFieldValue, setLeadFieldValue } from '@/lib/leadFields'
+import { cn } from '@/lib/utils'
 import type { Lead, WorkflowField } from '@/mocks/crmMock'
 import { sourceLabel } from '@/mocks/crmMock'
+
+const EMPTY_SELECT = '__empty__'
 
 type Props = {
   field: WorkflowField
@@ -18,41 +22,60 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
     onChange(setLeadFieldValue(lead, field.fieldKey, value))
   }
 
+  const selectTriggerClass = cn(
+    'w-full min-w-0 justify-between',
+    compact ? 'h-7' : 'h-9'
+  )
+  const selectSize = compact ? 'sm' : 'default'
+
   if (field.fieldType === 'select' && field.fieldKey === 'source') {
+    const keys = Object.keys(sourceLabel) as Lead['source'][]
+    const rawStr = raw == null ? '' : String(raw)
+    const value = keys.includes(rawStr as Lead['source']) ? rawStr : keys[0]
     return (
       <div className={compact ? 'contents' : 'grid gap-2'}>
         {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
-        <select
-          className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-          value={String(raw ?? '')}
-          onChange={(e) => apply(e.target.value)}
-        >
-          {(Object.keys(sourceLabel) as Lead['source'][]).map((key) => (
-            <option key={key} value={key}>
-              {sourceLabel[key]}
-            </option>
-          ))}
-        </select>
+        <Select value={value} onValueChange={(v) => v && apply(v)}>
+          <SelectTrigger className={selectTriggerClass} size={selectSize}>
+            <SelectValue placeholder="Origem" />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(sourceLabel) as Lead['source'][]).map((key) => (
+              <SelectItem key={key} value={key}>
+                {sourceLabel[key]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     )
   }
 
   if (field.fieldType === 'select' && field.options.length > 0) {
+    const hasValue = raw !== undefined && raw !== null && String(raw).length > 0
+    const selectValue = hasValue ? String(raw) : EMPTY_SELECT
     return (
       <div className={compact ? 'contents' : 'grid gap-2'}>
         {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
-        <select
-          className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-          value={raw === undefined || raw === null ? '' : String(raw)}
-          onChange={(e) => apply(e.target.value)}
+        <Select
+          value={selectValue}
+          onValueChange={(v) => {
+            if (!v) return
+            apply(v === EMPTY_SELECT ? '' : v)
+          }}
         >
-          <option value="">—</option>
-          {field.options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className={selectTriggerClass} size={selectSize}>
+            <SelectValue placeholder="Selecionar" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={EMPTY_SELECT}>—</SelectItem>
+            {field.options.map((opt) => (
+              <SelectItem key={opt} value={opt}>
+                {opt}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     )
   }

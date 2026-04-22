@@ -387,7 +387,27 @@ export const useCrmState = () => {
     })
   }
 
-  const runAiTriage = (lead: Lead, text: string): TriageResult => {
+  const runAiTriage = async (lead: Lead, text: string): Promise<TriageResult> => {
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      try {
+        const { data, error } = await supabase!.functions.invoke('ai-triage', {
+          body: { leadId: lead.id, text },
+        })
+
+        if (!error && data) {
+          return {
+            leadId: String(data.leadId || lead.id),
+            classification: String(data.classification || 'human_handoff') as TriageResult['classification'],
+            confidence: Number(data.confidence || 0.8),
+            recommendation: String(data.recommendation || 'Fallback recommendacao via nuvem.'),
+          }
+        }
+      } catch (err) {
+        console.error('AI Triage falhou via supabase:', err)
+      }
+    }
+
+    // Mock/Fallback
     const normalized = text.toLowerCase()
     if (normalized.includes('preco') || normalized.includes('valor') || normalized.includes('agendar')) {
       return {
@@ -413,7 +433,7 @@ export const useCrmState = () => {
     }
   }
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!selectedLead || !draftMessage.trim()) return
 
     const outbound = draftMessage.trim()
@@ -429,7 +449,7 @@ export const useCrmState = () => {
       happenedAt: new Date().toISOString(),
     })
 
-    const triage = runAiTriage(selectedLead, outbound)
+    const triage = await runAiTriage(selectedLead, outbound)
     setTriageByLead((previous) => ({ ...previous, [selectedLead.id]: triage }))
 
     addInteraction({
@@ -437,7 +457,7 @@ export const useCrmState = () => {
       patientName: selectedLead.patientName,
       channel: 'ai',
       direction: 'system',
-      author: 'AI Triage',
+      author: 'IA (Nuvem Supabase)',
       content: `${triage.classification} (${Math.round(triage.confidence * 100)}%): ${triage.recommendation}`,
       happenedAt: new Date().toISOString(),
     })
@@ -479,9 +499,10 @@ export const useCrmState = () => {
       setDataViews(snapshot.dataViews ?? initialDataViews)
       setOrgSettings(snapshot.orgSettings ?? initialOrgSettings)
       await refreshWebhookJobs()
-      setSyncNotice('Dados sincronizados com Supabase.')
-    } catch (error) {
-      setSyncNotice(`Falha ao carregar Supabase: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
+      setSyncNotice('Sistema atualizado com os dados mais recentes.')
+    } catch (error: any) {
+      console.error('Falha de sistema:', error)
+      setSyncNotice('Falha de conexão com os servidores. Verifique sua rede e tente novamente.')
     } finally {
       setIsLoading(false)
     }
@@ -494,9 +515,9 @@ export const useCrmState = () => {
       await seedTestUsers()
       await seedDemoData()
       await syncFromSupabase()
-      setSyncNotice('Usuarios de teste e dados demo criados no Supabase.')
+      setSyncNotice('Base de demonstração preenchida com sucesso no sistema.')
     } catch (error) {
-      setSyncNotice(`Falha ao criar seed: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
+      setSyncNotice('Problema ao carregar os dados modelo. Tente novamente mais tarde.')
     } finally {
       setIsLoading(false)
     }

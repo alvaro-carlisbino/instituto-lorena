@@ -98,7 +98,7 @@ export function ChannelsPage() {
                 </select>
               </div>
               <div className="grid gap-2">
-                <Label>Mapeamento campo → caminho JSON (objeto)</Label>
+                <Label>Regras de Integração (Configuração Avançada)</Label>
                 <Textarea
                   key={`${channel.id}-fm`}
                   rows={3}
@@ -115,11 +115,11 @@ export function ChannelsPage() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Referência de credenciais (vault/env)</Label>
+                <Label>Chave de Acesso / Token de Segurança</Label>
                 <Input
                   value={channel.credentialsRef}
                   onChange={(event) => crm.updateChannel(channel.id, { credentialsRef: event.target.value })}
-                  placeholder="ex.: VAULT_META_KEY"
+                  placeholder="ex.: Chave do WhatsApp ou Meta"
                 />
               </div>
               <Button type="button" variant="destructive" size="sm" className="w-fit" onClick={() => crm.removeChannel(channel.id)}>

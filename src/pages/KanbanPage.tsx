@@ -1,17 +1,31 @@
 import { useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { History, LayoutDashboard, LayoutGrid, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react'
 
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
 import { KanbanToolbar } from '@/components/kanban/KanbanToolbar'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
+import { Button, buttonVariants } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
 import { getLeadFieldValue } from '@/lib/leadFields'
+import { cn } from '@/lib/utils'
 
 export function KanbanPage() {
   const crm = useCrm()
+  const navigate = useNavigate()
+  const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [temperatureFilter, setTemperatureFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
+  const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null)
 
   const visibleLeads = useMemo(() => {
@@ -30,9 +44,10 @@ export function KanbanPage() {
       const effTemp =
         temp === 'cold' || temp === 'warm' || temp === 'hot' ? temp : lead.temperature
       const matchesTemperature = temperatureFilter === 'all' || effTemp === temperatureFilter
-      return matchesText && matchesTemperature
+      const matchesOwner = ownerFilter === 'all' || lead.ownerId === ownerFilter
+      return matchesText && matchesTemperature && matchesOwner
     })
-  }, [crm.filteredLeads, searchTerm, temperatureFilter])
+  }, [crm.filteredLeads, searchTerm, temperatureFilter, ownerFilter])
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
@@ -45,9 +60,54 @@ export function KanbanPage() {
   }
 
   return (
-    <AppLayout title="Kanban de leads" subtitle="Boards e etapas configuráveis por processo comercial.">
+    <AppLayout
+      title="Kanban de leads"
+      subtitle="Boards e etapas configuráveis por processo comercial."
+      actions={
+        <>
+          <Link
+            to="/dashboard"
+            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'inline-flex gap-1.5')}
+          >
+            <LayoutDashboard className="size-4" />
+            Dashboard
+          </Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger>
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <MoreHorizontal className="size-4" />
+                Mais ações
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-52">
+              <DropdownMenuItem onClick={() => navigate('/historico')}>
+                <History className="size-4" />
+                Histórico de leads
+              </DropdownMenuItem>
+              {crm.currentPermission.canEditBoards ? (
+                <DropdownMenuItem onClick={() => navigate('/boards')}>
+                  <LayoutGrid className="size-4" />
+                  Boards e pipelines
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => crm.simulateMetaCapture()}>
+                <Sparkles className="size-4" />
+                Simular captura na Meta
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={crm.isLoading || !canSync}
+                onClick={() => void crm.syncFromSupabase()}
+              >
+                <RefreshCw className={`size-4 ${crm.isLoading ? 'animate-spin' : ''}`} />
+                {crm.isLoading ? 'Sincronizando…' : 'Sincronizar dados'}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      }
+    >
       <KanbanToolbar
-        onSimulateCapture={crm.simulateMetaCapture}
         pipelineId={crm.selectedPipelineId}
         pipelineOptions={crm.pipelineCatalog.map((p) => ({ id: p.id, name: p.name }))}
         onPipelineChange={crm.setSelectedPipelineId}
@@ -55,6 +115,9 @@ export function KanbanPage() {
         onSearchChange={setSearchTerm}
         temperatureFilter={temperatureFilter}
         onTemperatureChange={setTemperatureFilter}
+        ownerFilter={ownerFilter}
+        onOwnerChange={setOwnerFilter}
+        ownerOptions={crm.users.map((u) => ({ id: u.id, name: u.name }))}
       />
 
       <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
@@ -64,28 +127,29 @@ export function KanbanPage() {
           return (
             <article
               key={stage.id}
-              className="flex min-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+              className="flex min-h-[28rem] flex-col overflow-hidden rounded-none border border-border bg-card shadow-none transition-colors hover:border-primary/50"
             >
-              <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
-                <div className="min-w-0">
-                  <h2 className="m-0 text-sm font-semibold">{stage.name}</h2>
+              <header className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
+                <div className="min-w-0 flex-1">
+                  <h2 className="m-0 text-sm font-bold uppercase tracking-widest text-foreground">{stage.name}</h2>
                   {crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id] != null ? (
-                    <p className="m-0 text-xs text-muted-foreground">
+                    <p className="m-0 text-[10px] uppercase font-bold text-destructive mt-1">
                       SLA {crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id]} min
                     </p>
                   ) : null}
                 </div>
-                <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs tabular-nums">
+                <span className="rounded-none border border-border/50 bg-background px-3 py-1 text-xs tabular-nums font-mono font-bold shadow-sm">
                   {stageLeads.length}
                 </span>
               </header>
 
-              <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
+              <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3 bg-muted/5">
                 {stageLeads.map((lead) => (
                   <KanbanLeadCard
                     key={lead.id}
                     lead={lead}
                     kanbanFields={crm.kanbanFieldsOrdered}
+                    slaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id]}
                     selected={crm.selectedLeadId === lead.id}
                     sourceLabel={sourceLabel[lead.source]}
                     ownerName={crm.getOwnerName(lead.ownerId)}
