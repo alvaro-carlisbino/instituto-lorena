@@ -3,7 +3,8 @@ import { ChevronDown, LogOut, RefreshCw, Wrench } from 'lucide-react'
 import { NoticeBanner } from '@/components/NoticeBanner'
 import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import { useCrm } from '@/context/CrmContext'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { useState, useRef, useEffect } from 'react'
 import {
   DropdownMenu,
@@ -42,11 +43,14 @@ export function TopControls() {
 
       <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
         <DropdownMenu>
-          <DropdownMenuTrigger>
-            <Button variant="outline" size="sm" className="max-w-[min(100%,14rem)] gap-1 truncate md:max-w-xs">
-              <span className="truncate">{email}</span>
-              <ChevronDown className="size-3.5 shrink-0 opacity-60" />
-            </Button>
+          <DropdownMenuTrigger
+            className={cn(
+              buttonVariants({ variant: 'outline', size: 'sm' }),
+              'max-w-[min(100%,14rem)] gap-1 truncate md:max-w-xs',
+            )}
+          >
+            <span className="truncate">{email}</span>
+            <ChevronDown className="size-3.5 shrink-0 opacity-60" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-56">
             <DropdownMenuLabel className="font-normal">

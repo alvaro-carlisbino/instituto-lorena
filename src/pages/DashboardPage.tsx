@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { KanbanSquare, MoreHorizontal, RefreshCw, SlidersHorizontal } from 'lucide-react'
 
-import { Button, buttonVariants } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   DropdownMenu,
@@ -44,11 +44,11 @@ export function DashboardPage() {
             </Link>
           ) : null}
           <DropdownMenu>
-            <DropdownMenuTrigger>
-              <Button variant="outline" size="sm" className="gap-1.5">
-                <MoreHorizontal className="size-4" />
-                Mais ações
-              </Button>
+            <DropdownMenuTrigger
+              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-1.5')}
+            >
+              <MoreHorizontal className="size-4" />
+              Mais ações
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-52">
               {crm.currentPermission.canRouteLeads ? (

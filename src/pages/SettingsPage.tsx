@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { slugifyLabel } from '@/lib/utils'
-import type { FieldVisibilityContext } from '@/mocks/crmMock'
+import type { FieldVisibilityContext, WorkflowField } from '@/mocks/crmMock'
 
 const FIELD_TYPE_LABELS: { value: 'text' | 'select' | 'number' | 'date'; label: string }[] = [
   { value: 'text', label: 'Texto livre' },
@@ -70,6 +70,7 @@ export function SettingsPage() {
                 return (
                   <li
                     key={field.id}
+                    data-testid={`workflow-field-${field.fieldKey}`}
                     className="flex flex-col gap-6 bg-transparent hover:bg-muted/5 transition-colors p-6"
                   >
                     <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -128,11 +129,14 @@ export function SettingsPage() {
                       <select
                         className="h-8 rounded-md border border-input bg-background px-2 text-sm"
                         value={field.fieldType}
-                        onChange={(event) =>
-                          crm.updateWorkflowField(field.id, {
-                            fieldType: event.target.value as 'text' | 'select' | 'number' | 'date',
-                          })
-                        }
+                        onChange={(event) => {
+                          const fieldType = event.target.value as 'text' | 'select' | 'number' | 'date'
+                          const updates: Partial<WorkflowField> = { fieldType }
+                          if (fieldType === 'select' && field.options.length === 0) {
+                            updates.options = ['Nova opção']
+                          }
+                          crm.updateWorkflowField(field.id, updates)
+                        }}
                       >
                         {FIELD_TYPE_LABELS.map((o) => (
                           <option key={o.value} value={o.value}>
@@ -171,6 +175,53 @@ export function SettingsPage() {
                         </label>
                       ))}
                     </div>
+                    {field.fieldType === 'select' ? (
+                      <div className="grid gap-2 rounded-md border border-border/60 bg-muted/5 p-3 sm:col-span-2">
+                        <Label className="text-xs text-muted-foreground">Opções da lista (texto mostrado e gravado)</Label>
+                        <ul className="m-0 list-none space-y-2 p-0">
+                          {(field.options.length > 0 ? field.options : ['']).map((opt, optIndex) => (
+                            <li key={`${field.id}-opt-${optIndex}`} className="flex flex-wrap items-center gap-2">
+                              <Input
+                                value={opt}
+                                onChange={(event) => {
+                                  const base = field.options.length > 0 ? [...field.options] : ['']
+                                  base[optIndex] = event.target.value
+                                  crm.updateWorkflowField(field.id, { options: base })
+                                }}
+                                placeholder={`Opção ${optIndex + 1}`}
+                                className="max-w-md flex-1"
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const base = field.options.length > 0 ? [...field.options] : ['']
+                                  base.splice(optIndex, 1)
+                                  crm.updateWorkflowField(field.id, { options: base.length > 0 ? base : [''] })
+                                }}
+                                disabled={(field.options.length > 0 ? field.options : ['']).length <= 1}
+                              >
+                                Remover
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="w-fit"
+                          onClick={() =>
+                            crm.updateWorkflowField(field.id, {
+                              options: [...(field.options.length > 0 ? field.options : ['']), ''],
+                            })
+                          }
+                        >
+                          Adicionar opção
+                        </Button>
+                      </div>
+                    ) : null}
                     <div className="flex justify-end">
                       <Button type="button" variant="destructive" size="sm" onClick={() => crm.removeWorkflowField(field.id)}>
                         Remover

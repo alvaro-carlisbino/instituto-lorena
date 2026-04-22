@@ -93,3 +93,13 @@ Use com **modo mock** (sem Supabase) ou com **Supabase** ligado, conforme o ambi
 npm run lint
 npm run build
 ```
+
+### Testes E2E (smoke, modo mock)
+
+Na primeira máquina, instale o browser do Playwright: `npx playwright install chromium`.
+
+O servidor de teste usa a porta **5174** para não colidir com `npm run dev` na 5173.
+
+```bash
+npm run test:e2e
+```
