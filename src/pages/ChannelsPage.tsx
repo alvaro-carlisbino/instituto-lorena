@@ -1,9 +1,9 @@
+import { ChannelFieldMappingEditor } from '@/components/config/ChannelFieldMappingEditor'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 
@@ -23,12 +23,24 @@ export function ChannelsPage() {
   }
 
   return (
-    <AppLayout title="Canais configuráveis" subtitle="Ative canais, prioridade, SLA e resposta automática.">
+    <AppLayout
+      title="Canais configuráveis"
+      subtitle="Ative canais, prioridade, SLA e ligação aos dados do lead — sem JSON, só listas e texto."
+    >
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={crm.addChannel}>
           Novo canal
         </Button>
       </div>
+
+      <Card className="mb-4 border-border/80 shadow-sm">
+        <CardContent className="pt-4">
+          <CardDescription className="text-sm leading-relaxed text-muted-foreground">
+            O mapeamento diz ao sistema de onde ler cada informação quando o canal recebe um evento (por exemplo um webhook).
+            Preencha o caminho como texto simples; a equipa técnica pode indicar o formato exacto.
+          </CardDescription>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {crm.channels.map((channel) => (
@@ -81,7 +93,7 @@ export function ChannelsPage() {
                 Resposta automática
               </label>
               <div className="grid gap-2">
-                <Label>Driver de integração</Label>
+                <Label>Tipo de integração</Label>
                 <select
                   className="h-9 rounded-md border border-input bg-background px-2 text-sm"
                   value={channel.driver}
@@ -91,35 +103,28 @@ export function ChannelsPage() {
                     })
                   }
                 >
-                  <option value="manual">manual</option>
-                  <option value="meta">meta</option>
-                  <option value="whatsapp">whatsapp</option>
-                  <option value="webhook">webhook</option>
+                  <option value="manual">Manual (sem sistema externo)</option>
+                  <option value="meta">Meta (Facebook / Instagram)</option>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="webhook">Webhook (URL própria)</option>
                 </select>
               </div>
               <div className="grid gap-2">
-                <Label>Regras de Integração (Configuração Avançada)</Label>
-                <Textarea
-                  key={`${channel.id}-fm`}
-                  rows={3}
-                  className="font-mono text-xs"
-                  defaultValue={JSON.stringify(channel.fieldMapping, null, 0)}
-                  onBlur={(event) => {
-                    try {
-                      const parsed = JSON.parse(event.target.value || '{}') as Record<string, string>
-                      crm.updateChannel(channel.id, { fieldMapping: parsed })
-                    } catch {
-                      /* mantém anterior */
-                    }
-                  }}
+                <Label>Ligação dos dados (mapeamento)</Label>
+                <ChannelFieldMappingEditor
+                  key={`${channel.id}-${JSON.stringify(channel.fieldMapping ?? {})}`}
+                  channelId={channel.id}
+                  fieldMapping={channel.fieldMapping}
+                  workflowFields={crm.workflowFields}
+                  onApply={(next) => crm.updateChannel(channel.id, { fieldMapping: next })}
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Chave de Acesso / Token de Segurança</Label>
+                <Label>Identificador da credencial no ambiente</Label>
                 <Input
                   value={channel.credentialsRef}
                   onChange={(event) => crm.updateChannel(channel.id, { credentialsRef: event.target.value })}
-                  placeholder="ex.: Chave do WhatsApp ou Meta"
+                  placeholder="Só preencha se a equipa técnica indicar (ex.: nome da variável)"
                 />
               </div>
               <Button type="button" variant="destructive" size="sm" className="w-fit" onClick={() => crm.removeChannel(channel.id)}>

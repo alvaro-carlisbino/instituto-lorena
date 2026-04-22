@@ -1,19 +1,10 @@
+import type { NoticeVariant } from '@/lib/noticeVariant'
 import { cn } from '@/lib/utils'
-
-export type NoticeVariant = 'default' | 'success' | 'warning'
 
 const styles: Record<NoticeVariant, string> = {
   default: 'border-border bg-muted/50 text-foreground',
   success: 'border-emerald-500/30 bg-emerald-500/10 text-foreground',
   warning: 'border-amber-500/35 bg-amber-500/10 text-foreground',
-}
-
-export function noticeVariantFromMessage(message: string): NoticeVariant {
-  const m = message.trim().toLowerCase()
-  if (!m) return 'default'
-  if (/falha|erro|sem permiss|não |nao |inválid|invalid/.test(m)) return 'warning'
-  if (/sucesso|criad|enviad|atualiz|convite|acess|perfil/.test(m)) return 'success'
-  return 'default'
 }
 
 type Props = {

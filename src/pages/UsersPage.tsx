@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 
-import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanner'
+import { NoticeBanner } from '@/components/NoticeBanner'
+import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'

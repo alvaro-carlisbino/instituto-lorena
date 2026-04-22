@@ -1,8 +1,8 @@
+import { WidgetLayoutEditor } from '@/components/config/WidgetLayoutEditor'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 
@@ -22,7 +22,18 @@ export function TvConfigPage() {
   }
 
   return (
-    <AppLayout title="Configuração da tela TV" subtitle="Defina widgets, ordem e o que aparece no painel de TV.">
+    <AppLayout
+      title="Configuração da tela TV"
+      subtitle="Defina widgets, ordem e o que aparece no painel de TV — sem código, só formulários."
+    >
+      <Card className="mb-4 border-border/80 shadow-sm">
+        <CardContent className="pt-4 text-sm text-muted-foreground">
+          <CardDescription className="text-sm leading-relaxed text-muted-foreground">
+            O painel TV usa uma grelha de 12 colunas quando algum widget está em modo &quot;Grelha personalizada&quot;. Os números são coluna, linha e quantas colunas o widget ocupa.
+          </CardDescription>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={crm.addTvWidget}>
           Novo widget
@@ -36,14 +47,18 @@ export function TvConfigPage() {
               .sort((a, b) => a.position - b.position)
               .map((widget) => (
                 <li key={widget.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
-                    <Input
-                      value={widget.title}
-                      onChange={(event) => crm.updateTvWidget(widget.id, { title: event.target.value })}
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
+                  <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label className="text-xs text-muted-foreground">Título no painel</Label>
+                      <Input
+                        value={widget.title}
+                        onChange={(event) => crm.updateTvWidget(widget.id, { title: event.target.value })}
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label className="text-xs text-muted-foreground">Tipo de bloco</Label>
                       <select
-                        className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
                         value={widget.widgetType}
                         onChange={(event) =>
                           crm.updateTvWidget(widget.id, {
@@ -51,56 +66,43 @@ export function TvConfigPage() {
                           })
                         }
                       >
-                        <option value="kpi">kpi</option>
-                        <option value="bar">bar</option>
+                        <option value="kpi">Indicador (número grande)</option>
+                        <option value="bar">Gráfico de barras (resumo)</option>
                       </select>
-                      <Input
+                    </div>
+                    <div className="grid gap-2 sm:col-span-2">
+                      <Label className="text-xs text-muted-foreground">Métrica a mostrar</Label>
+                      <select
+                        className="h-9 max-w-md rounded-md border border-input bg-background px-2 text-sm"
                         value={widget.metricKey}
                         onChange={(event) => crm.updateTvWidget(widget.id, { metricKey: event.target.value })}
-                        placeholder="Métrica"
-                        className="max-w-[10rem]"
-                      />
-                      <label className="flex cursor-pointer items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          className="size-4 rounded border-input"
-                          checked={widget.enabled}
-                          onChange={(event) => crm.updateTvWidget(widget.id, { enabled: event.target.checked })}
-                        />
-                        Ativo
-                      </label>
+                      >
+                        {crm.metrics.some((m) => m.id === widget.metricKey) ? null : (
+                          <option value={widget.metricKey}>Métrica atual ({widget.metricKey})</option>
+                        )}
+                        {crm.metrics.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                    <div className="col-span-full grid gap-2 sm:grid-cols-2">
-                      <div className="grid gap-1">
-                        <Label className="text-xs">Layout (JSON)</Label>
-                        <Textarea
-                          rows={3}
-                          className="font-mono text-xs"
-                          defaultValue={JSON.stringify(widget.layout ?? {}, null, 2)}
-                          onBlur={(e) => {
-                            try {
-                              crm.updateTvWidget(widget.id, { layout: JSON.parse(e.target.value || '{}') })
-                            } catch {
-                              /* ignore */
-                            }
-                          }}
-                        />
-                      </div>
-                      <div className="grid gap-1">
-                        <Label className="text-xs">Widget config (JSON)</Label>
-                        <Textarea
-                          rows={3}
-                          className="font-mono text-xs"
-                          defaultValue={JSON.stringify(widget.widgetConfig ?? {}, null, 2)}
-                          onBlur={(e) => {
-                            try {
-                              crm.updateTvWidget(widget.id, { widgetConfig: JSON.parse(e.target.value || '{}') })
-                            } catch {
-                              /* ignore */
-                            }
-                          }}
-                        />
-                      </div>
+                    <label className="flex cursor-pointer items-center gap-2 text-sm sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        className="size-4 rounded border-input"
+                        checked={widget.enabled}
+                        onChange={(event) => crm.updateTvWidget(widget.id, { enabled: event.target.checked })}
+                      />
+                      Mostrar este widget no painel
+                    </label>
+                    <div className="sm:col-span-2">
+                      <Label className="mb-2 block text-xs font-medium text-muted-foreground">Posição na grelha</Label>
+                      <WidgetLayoutEditor
+                        layout={widget.layout ?? {}}
+                        helpId={`tv-layout-help-${widget.id}`}
+                        onLayoutChange={(next) => crm.updateTvWidget(widget.id, { layout: next })}
+                      />
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">

@@ -1,9 +1,11 @@
-import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanner'
+import { NoticeBanner } from '@/components/NoticeBanner'
+import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldControl } from '@/components/ui/field'
-import { APP_ENV_BADGE, APP_LOGO_MONOGRAM, APP_NAME } from '@/config/branding'
+import { BRAND_LOGO_HORIZONTAL_URL } from '@/config/brandAssets'
+import { APP_ENV_BADGE, APP_NAME } from '@/config/branding'
 
 type Props = {
   email: string
@@ -37,8 +39,8 @@ export function AuthPage({
       <Card className="relative w-full max-w-md border-border/80 shadow-lg shadow-black/5">
         <CardHeader className="space-y-4 pb-2">
           <div className="flex items-center gap-3">
-            <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-bold tracking-tight text-primary-foreground shadow-md">
-              {APP_LOGO_MONOGRAM}
+            <div className="flex h-12 max-w-[min(100%,12rem)] shrink-0 items-center justify-center rounded-xl bg-muted/40 px-2 py-1.5 shadow-inner ring-1 ring-border/60">
+              <img src={BRAND_LOGO_HORIZONTAL_URL} alt="" className="max-h-10 w-full object-contain object-left" />
             </div>
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex flex-wrap items-center gap-2">

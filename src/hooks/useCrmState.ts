@@ -500,7 +500,7 @@ export const useCrmState = () => {
       setOrgSettings(snapshot.orgSettings ?? initialOrgSettings)
       await refreshWebhookJobs()
       setSyncNotice('Sistema atualizado com os dados mais recentes.')
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Falha de sistema:', error)
       setSyncNotice('Falha de conexão com os servidores. Verifique sua rede e tente novamente.')
     } finally {
@@ -516,7 +516,8 @@ export const useCrmState = () => {
       await seedDemoData()
       await syncFromSupabase()
       setSyncNotice('Base de demonstração preenchida com sucesso no sistema.')
-    } catch (error) {
+    } catch (error: unknown) {
+      console.error('Seed Supabase:', error)
       setSyncNotice('Problema ao carregar os dados modelo. Tente novamente mais tarde.')
     } finally {
       setIsLoading(false)
@@ -709,9 +710,10 @@ export const useCrmState = () => {
   }
 
   const addWorkflowField = () => {
+    const stamp = Date.now().toString(36).slice(-5)
     const next: WorkflowField = {
       id: `wf-${Date.now()}`,
-      fieldKey: `campo_${Date.now()}`,
+      fieldKey: `novo-campo-${stamp}`,
       label: 'Novo campo',
       fieldType: 'text',
       required: false,

@@ -17,7 +17,8 @@ import {
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
-import { APP_ENV_BADGE, APP_LOGO_MONOGRAM, APP_NAME, APP_TAGLINE } from '@/config/branding'
+import { BRAND_FAVICON_URL } from '@/config/brandAssets'
+import { APP_ENV_BADGE, APP_NAME, APP_TAGLINE } from '@/config/branding'
 import { useCrm } from '@/context/CrmContext'
 import {
   Sidebar,
@@ -67,8 +68,8 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<Link to="/dashboard" />}>
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-xs font-bold tracking-tight text-sidebar-primary-foreground shadow-sm">
-                {APP_LOGO_MONOGRAM}
+              <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sidebar-primary/10 p-1 shadow-sm ring-1 ring-sidebar-border/60">
+                <img src={BRAND_FAVICON_URL} alt="" className="size-full object-contain" />
               </div>
               <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
                 <span className="flex min-w-0 items-center gap-2">

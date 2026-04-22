@@ -1,14 +1,26 @@
-import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanner'
+import { useState } from 'react'
+
+import { NoticeBanner } from '@/components/NoticeBanner'
+import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import { slugifyLabel } from '@/lib/utils'
 import type { FieldVisibilityContext } from '@/mocks/crmMock'
+
+const FIELD_TYPE_LABELS: { value: 'text' | 'select' | 'number' | 'date'; label: string }[] = [
+  { value: 'text', label: 'Texto livre' },
+  { value: 'select', label: 'Lista de opções' },
+  { value: 'number', label: 'Número' },
+  { value: 'date', label: 'Data' },
+]
 
 export function SettingsPage() {
   const crm = useCrm()
+  const [workflowKeyManual, setWorkflowKeyManual] = useState<Record<string, boolean>>({})
 
   const canAccessSettings = crm.currentPermission.canEditBoards || crm.currentPermission.canManageUsers
 
@@ -37,7 +49,9 @@ export function SettingsPage() {
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
             <div className="space-y-1">
               <CardTitle className="tracking-widest uppercase text-base font-bold">Campos de workflow</CardTitle>
-              <CardDescription className="text-xs">Chaves estáveis, rótulos e onde cada campo aparece no CRM.</CardDescription>
+              <CardDescription className="text-xs">
+                Use o nome visível; o identificador interno gera-se sozinho. Só abra &quot;Identificador interno&quot; se a equipa técnica pedir.
+              </CardDescription>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={crm.addWorkflowField} className="rounded-none uppercase tracking-widest font-bold">
               Novo campo
@@ -59,19 +73,20 @@ export function SettingsPage() {
                     className="flex flex-col gap-6 bg-transparent hover:bg-muted/5 transition-colors p-6"
                   >
                     <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                      <div className="grid gap-2">
-                        <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Chave (slug)</Label>
-                        <Input
-                          value={field.fieldKey}
-                          onChange={(event) => crm.updateWorkflowField(field.id, { fieldKey: event.target.value })}
-                          className="font-mono text-sm rounded-none border-foreground/20 font-bold"
-                        />
-                      </div>
-                      <div className="grid gap-1">
-                        <Label className="text-xs text-muted-foreground">Rótulo</Label>
+                      <div className="grid gap-2 sm:col-span-2 lg:col-span-1">
+                        <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">
+                          Nome no CRM
+                        </Label>
                         <Input
                           value={field.label}
                           onChange={(event) => crm.updateWorkflowField(field.id, { label: event.target.value })}
+                          onBlur={(event) => {
+                            const label = event.target.value.trim()
+                            if (!workflowKeyManual[field.id] && label) {
+                              crm.updateWorkflowField(field.id, { fieldKey: slugifyLabel(label) })
+                            }
+                          }}
+                          className="rounded-none border-foreground/20 font-medium"
                         />
                       </div>
                       <div className="grid gap-1">
@@ -92,6 +107,22 @@ export function SettingsPage() {
                           />
                         </div>
                       </div>
+                      <details className="sm:col-span-2 lg:col-span-3 rounded-md border border-dashed border-border/80 bg-muted/10 p-3">
+                        <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                          Identificador interno (avançado)
+                        </summary>
+                        <div className="mt-3 grid gap-2 max-w-md">
+                          <Label className="text-[10px] uppercase text-muted-foreground">Chave técnica (não alterar sem orientação)</Label>
+                          <Input
+                            value={field.fieldKey}
+                            onChange={(event) => {
+                              setWorkflowKeyManual((m) => ({ ...m, [field.id]: true }))
+                              crm.updateWorkflowField(field.id, { fieldKey: event.target.value })
+                            }}
+                            className="text-sm rounded-none border-foreground/20"
+                          />
+                        </div>
+                      </details>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <select
@@ -103,10 +134,11 @@ export function SettingsPage() {
                           })
                         }
                       >
-                        <option value="text">text</option>
-                        <option value="select">select</option>
-                        <option value="number">number</option>
-                        <option value="date">date</option>
+                        {FIELD_TYPE_LABELS.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
                       </select>
                       <label className="flex cursor-pointer items-center gap-2 text-sm">
                         <input
@@ -178,9 +210,9 @@ export function SettingsPage() {
                         })
                       }
                     >
-                      <option value="admin">admin</option>
-                      <option value="gestor">gestor</option>
-                      <option value="sdr">sdr</option>
+                      <option value="admin">Administrador</option>
+                      <option value="gestor">Gestor comercial</option>
+                      <option value="sdr">SDR / atendimento</option>
                     </select>
                   </div>
                   <div className="flex flex-wrap gap-3 text-sm">
@@ -193,7 +225,7 @@ export function SettingsPage() {
                           crm.updatePermissionProfile(profile.id, { canEditBoards: event.target.checked })
                         }
                       />
-                      boards
+                      Editar quadros e etapas
                     </label>
                     <label className="flex cursor-pointer items-center gap-2">
                       <input
@@ -204,7 +236,7 @@ export function SettingsPage() {
                           crm.updatePermissionProfile(profile.id, { canRouteLeads: event.target.checked })
                         }
                       />
-                      roteamento
+                      Roteamento de leads
                     </label>
                     <label className="flex cursor-pointer items-center gap-2">
                       <input
@@ -215,7 +247,7 @@ export function SettingsPage() {
                           crm.updatePermissionProfile(profile.id, { canViewTvPanel: event.target.checked })
                         }
                       />
-                      painel TV
+                      Ver painel TV
                     </label>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -272,9 +304,9 @@ export function SettingsPage() {
                           })
                         }
                       >
-                        <option value="in_app">in_app</option>
-                        <option value="email">email</option>
-                        <option value="whatsapp">whatsapp</option>
+                        <option value="in_app">No próprio CRM</option>
+                        <option value="email">E-mail</option>
+                        <option value="whatsapp">WhatsApp</option>
                       </select>
                       <Input
                         value={rule.trigger}

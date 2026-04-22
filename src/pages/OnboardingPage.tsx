@@ -1,4 +1,5 @@
-import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanner'
+import { NoticeBanner } from '@/components/NoticeBanner'
+import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import { BRAND_LOGO_HORIZONTAL_URL } from '@/config/brandAssets'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'

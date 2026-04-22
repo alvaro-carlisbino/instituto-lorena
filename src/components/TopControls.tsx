@@ -1,6 +1,7 @@
 import { ChevronDown, LogOut, RefreshCw, Wrench } from 'lucide-react'
 
-import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanner'
+import { NoticeBanner } from '@/components/NoticeBanner'
+import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import { useCrm } from '@/context/CrmContext'
 import { Button } from '@/components/ui/button'
 import { useState, useRef, useEffect } from 'react'

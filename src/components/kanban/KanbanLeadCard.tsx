@@ -1,6 +1,7 @@
 import type { Lead, WorkflowField } from '@/mocks/crmMock'
 
 import { Button } from '@/components/ui/button'
+import { useNowMs } from '@/hooks/useNowMs'
 import { cn } from '@/lib/utils'
 import { getLeadFieldValue } from '@/lib/leadFields'
 
@@ -35,6 +36,7 @@ export function KanbanLeadCard({
   onReorderDrop,
   onDragEnterColumn,
 }: Props) {
+  const nowMs = useNowMs(30_000)
   const title =
     (getLeadFieldValue(lead, 'patient_name') as string | undefined) ?? lead.patientName
   const tempRaw = getLeadFieldValue(lead, 'temperature')
@@ -42,7 +44,7 @@ export function KanbanLeadCard({
     tempRaw === 'cold' || tempRaw === 'warm' || tempRaw === 'hot' ? tempRaw : lead.temperature
 
   // SLA Calculation
-  const elapsedMs = Date.now() - new Date(lead.createdAt).getTime()
+  const elapsedMs = nowMs - new Date(lead.createdAt).getTime()
   const elapsedMinutes = Math.floor(elapsedMs / 60000)
   const isSlaBreached = slaMinutes !== undefined && elapsedMinutes > slaMinutes
 
