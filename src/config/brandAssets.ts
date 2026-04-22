@@ -1,4 +1,4 @@
-/** URLs resolvidas pelo Vite para @assets/ (raiz do repositório). */
+/** URLs resolvidas pelo Vite para @assets/ (raiz do repositório). Paleta global em `src/index.css` (:root). */
 
 import brandFaviconUrl from '@assets/Ícone_Instituto_Lorena_Visentainer_1.png?url'
 import brandLogoHorizontalUrl from '@assets/Logo_Instituto_Lorena_Visentainer_Horizontal_Policromia.png?url'

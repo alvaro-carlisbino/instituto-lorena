@@ -33,7 +33,7 @@ export function AuthPage({
       <div
         className="pointer-events-none absolute inset-0 opacity-[0.35]"
         style={{
-          backgroundImage: `radial-gradient(ellipse 80% 50% at 50% -20%, hsl(var(--primary) / 0.18), transparent 55%)`,
+          backgroundImage: `radial-gradient(ellipse 80% 50% at 50% -20%, color-mix(in oklch, var(--primary) 22%, transparent), transparent 55%)`,
         }}
       />
       <Card className="relative w-full max-w-md border-border/80 shadow-lg shadow-black/5">
