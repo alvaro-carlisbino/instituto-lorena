@@ -1,7 +1,10 @@
+import { useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { KanbanSquare, LayoutListIcon, MoreHorizontal, RefreshCw, SlidersHorizontal, UsersIcon } from 'lucide-react'
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, LabelList } from 'recharts'
 
 import { EmptyState } from '@/components/ui/empty-state'
+import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -15,6 +18,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { cn } from '@/lib/utils'
+
+const CHART_COLORS = [
+  'oklch(0.638 0.065 44)',
+  'oklch(0.58 0.08 240)',
+  'oklch(0.58 0.11 152)',
+  'oklch(0.72 0.09 48)',
+  'oklch(0.82 0.14 82)',
+  'oklch(0.52 0.19 25)',
+]
 
 export function DashboardPage() {
   const crm = useCrm()
@@ -31,6 +43,30 @@ export function DashboardPage() {
   }
 
   const dashboardCards = crm.dashboardWidgets.filter((widget) => widget.enabled).sort((a, b) => a.position - b.position)
+
+  const funnelData = useMemo(() =>
+    crm.selectedPipeline.stages.map((stage) => ({
+      name: stage.name,
+      leads: crm.filteredLeads.filter((lead) => lead.stageId === stage.id).length,
+    })),
+    [crm.selectedPipeline.stages, crm.filteredLeads],
+  )
+
+  const workloadData = useMemo(() =>
+    crm.workloadBySdr.map((sdr) => ({
+      name: sdr.name,
+      leads: sdr.total,
+    })),
+    [crm.workloadBySdr],
+  )
+
+  if (crm.isLoading) {
+    return (
+      <AppLayout title="Dashboard comercial" subtitle="Carregando dados...">
+        <SkeletonBlocks rows={8} />
+      </AppLayout>
+    )
+  }
 
   return (
     <AppLayout
@@ -123,28 +159,29 @@ export function DashboardPage() {
               </SelectContent>
             </Select>
           </CardHeader>
-          <CardContent className="p-0">
+          <CardContent className="p-6">
             {crm.selectedPipeline.stages.length === 0 ? (
               <EmptyState
                 icon={LayoutListIcon}
                 title="Nenhuma etapa configurada"
                 description="Adicione etapas ao pipeline em 'Boards e pipelines'."
-                className="py-8"
+                className="py-4"
               />
             ) : (
-              <ul className="divide-y divide-border">
-                {crm.selectedPipeline.stages.map((stage) => (
-                  <li key={stage.id} className="flex items-center justify-between gap-3 px-6 py-4 text-sm transition-colors hover:bg-muted/10 group">
-                    <span className="font-semibold text-foreground/80 group-hover:text-primary transition-colors">{stage.name}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-[10px] tracking-widest uppercase text-muted-foreground font-semibold">Leads</span>
-                      <span className="tabular-nums font-mono text-base bg-secondary px-3 py-1 text-secondary-foreground border border-border/50">
-                        {crm.filteredLeads.filter((lead) => lead.stageId === stage.id).length}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <div className="h-[260px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={funnelData} layout="vertical" margin={{ left: 0, right: 24, top: 8, bottom: 8 }}>
+                    <XAxis type="number" hide />
+                    <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12, fontWeight: 600 }} axisLine={false} tickLine={false} />
+                    <Bar dataKey="leads" radius={[0, 4, 4, 0]} maxBarSize={36}>
+                      {funnelData.map((_entry, index) => (
+                        <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                      ))}
+                      <LabelList dataKey="leads" position="right" style={{ fontSize: 13, fontWeight: 700, fontFamily: 'monospace' }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -163,14 +200,19 @@ export function DashboardPage() {
                 className="py-8 text-primary-foreground [&_p]:text-primary-foreground/70 [&_*]:text-primary-foreground/70"
               />
             ) : (
-              <ul className="divide-y divide-primary-foreground/10">
-                {crm.workloadBySdr.map((sdr) => (
-                  <li key={sdr.id} className="flex items-center justify-between gap-3 px-6 py-4 text-sm">
-                    <span className="font-semibold tracking-wide">{sdr.name}</span>
-                    <span className="text-primary-foreground/80 font-mono text-xs">{sdr.total} ativos</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="px-4 py-4">
+                <div className="h-[200px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={workloadData} layout="vertical" margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
+                      <XAxis type="number" hide />
+                      <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11, fill: 'rgba(255,255,255,0.85)' }} axisLine={false} tickLine={false} />
+                      <Bar dataKey="leads" radius={[0, 4, 4, 0]} maxBarSize={28} fill="rgba(255,255,255,0.25)">
+                        <LabelList dataKey="leads" position="right" style={{ fontSize: 12, fontWeight: 700, fill: 'rgba(255,255,255,0.9)', fontFamily: 'monospace' }} />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LabelList } from 'recharts'
 
 import { BRAND_LOGO_HORIZONTAL_NEGATIVE_URL } from '@/config/brandAssets'
 import { APP_ENV_BADGE, APP_TV_HEADING } from '@/config/branding'
@@ -34,6 +35,20 @@ export function TvDashboardPage() {
   )
 
   const hasLayout = orderedWidgets.some((w) => w.layout && (w.layout as { grid?: string }).grid !== 'legacy')
+
+  const barChartData = useMemo(
+    () => crm.tvKpiSeries.map((point) => ({
+      label: point.label,
+      leads: point.leads,
+      qualified: point.qualified,
+    })),
+    [crm.tvKpiSeries],
+  )
+
+  const maxLeads = useMemo(
+    () => Math.max(...crm.tvKpiSeries.map((p) => p.leads + p.qualified), 1),
+    [crm.tvKpiSeries],
+  )
 
   if (!crm.currentPermission.canViewTvPanel) {
     return (
@@ -103,24 +118,25 @@ export function TvDashboardPage() {
       <section className="grid gap-6 xl:grid-cols-[2fr_1fr]">
         {orderedWidgets.some((widget) => widget.widgetType === 'bar') ? (
           <article className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg">
-            <h2 className="m-0 mb-4 text-xl font-semibold text-white">Captação × qualificação por hora</h2>
-            <ul className="m-0 list-none space-y-4 p-0">
-              {crm.tvKpiSeries.map((point) => (
-                <li key={point.label} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-                  <span className="w-24 shrink-0 text-sm text-white/65">{point.label}</span>
-                  <div className="flex min-h-3 flex-1 gap-1">
-                    <div
-                      className="h-3 rounded-full bg-[var(--brand-tv-bar-primary)]"
-                      style={{ width: `${Math.min(100, point.leads * 7)}%` }}
-                    />
-                    <div
-                      className="h-3 rounded-full bg-[var(--brand-tv-bar-secondary)]"
-                      style={{ width: `${Math.min(100, point.qualified * 7)}%` }}
-                    />
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <h2 className="m-0 mb-4 text-xl font-semibold text-white">Captacao x qualificacao por hora</h2>
+            {barChartData.length === 0 ? (
+              <p className="text-sm text-white/50">Sem dados de captacao.</p>
+            ) : (
+              <div className="h-[240px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={barChartData} layout="vertical" margin={{ left: 8, right: 24, top: 8, bottom: 8 }}>
+                    <XAxis type="number" hide domain={[0, maxLeads]} />
+                    <YAxis type="category" dataKey="label" width={72} tick={{ fontSize: 12, fill: 'rgba(255,255,255,0.6)' }} axisLine={false} tickLine={false} />
+                    <Bar dataKey="leads" stackId="a" fill="oklch(0.74 0.088 46)" radius={[0, 0, 0, 0]} maxBarSize={20}>
+                      <LabelList dataKey="leads" position="center" style={{ fontSize: 10, fontWeight: 700, fill: 'rgba(0,0,0,0.7)' }} />
+                    </Bar>
+                    <Bar dataKey="qualified" stackId="a" fill="oklch(0.82 0.048 78)" radius={[0, 4, 4, 0]} maxBarSize={20}>
+                      <LabelList dataKey="qualified" position="center" style={{ fontSize: 10, fontWeight: 700, fill: 'rgba(0,0,0,0.5)' }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </article>
         ) : null}
 

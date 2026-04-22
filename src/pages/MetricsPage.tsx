@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import { cn } from '@/lib/utils'
 
 const UNIT_OPTIONS = [
   { value: 'count', label: 'Contagem' },
@@ -77,11 +78,19 @@ export function MetricsPage() {
                   <span className="text-lg font-semibold tabular-nums">{formatMetricValue(metric.value, metric.unit)}</span>
                 </CardHeader>
                 <CardContent className="grid gap-4">
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div className="h-3 w-full overflow-hidden rounded-full bg-muted relative">
                     <div
-                      className="h-full rounded-full bg-primary transition-all"
+                      className={cn(
+                        'h-full rounded-full transition-all',
+                        performance >= 80 ? 'bg-success' : performance >= 50 ? 'bg-warning' : 'bg-destructive',
+                      )}
                       style={{ width: `${Math.min(performance, 100)}%` }}
                     />
+                    {performance > 15 && (
+                      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold tabular-nums text-foreground mix-blend-difference">
+                        {performance}%
+                      </span>
+                    )}
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="grid gap-2">
