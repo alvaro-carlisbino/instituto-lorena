@@ -1,8 +1,15 @@
+import { useState } from 'react'
+import { toast } from 'sonner'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
 
 function jobStatusClass(status: string) {
@@ -15,8 +22,60 @@ function jobStatusClass(status: string) {
   )
 }
 
+const WEBHOOK_SOURCES = [
+  { value: 'meta_facebook' as const, label: 'Meta (Facebook)' },
+  { value: 'meta_instagram' as const, label: 'Meta (Instagram)' },
+  { value: 'whatsapp' as const, label: 'WhatsApp' },
+  { value: 'manual' as const, label: 'Manual' },
+]
+
 export function AdminLabPage() {
   const crm = useCrm()
+  const [webhookName, setWebhookName] = useState('Teste Webhook')
+  const [webhookPhone, setWebhookPhone] = useState('11999999999')
+  const [webhookSource, setWebhookSource] = useState<(typeof WEBHOOK_SOURCES)[number]['value']>('whatsapp')
+  const [webhookSending, setWebhookSending] = useState(false)
+
+  const handleTestWebhook = () => {
+    if (!isSupabaseConfigured || !supabase) {
+      toast.error('Configure VITE_SUPABASE_URL e a chave anon no .env')
+      return
+    }
+    const secret = import.meta.env.VITE_CRM_WEBHOOK_SECRET?.trim()
+    if (!secret) {
+      toast.error('Defina VITE_CRM_WEBHOOK_SECRET (mesmo valor que CRM_WEBHOOK_SECRET no Supabase)')
+      return
+    }
+    setWebhookSending(true)
+    void (async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke('crm-ingest-webhook', {
+          body: {
+            patient_name: webhookName,
+            phone: webhookPhone,
+            source: webhookSource,
+            summary: 'Carga de teste via Admin Lab',
+          },
+          headers: { 'x-webhook-secret': secret },
+        })
+        if (error) {
+          toast.error(error.message)
+          return
+        }
+        const d = data as { leadId?: string; status?: string; error?: string }
+        if (d.error) {
+          toast.error(d.error)
+          return
+        }
+        toast.success(`Lead ${d.status === 'updated' ? 'atualizado' : 'criado'}: ${d.leadId ?? '—'}`)
+        await crm.syncFromSupabase()
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Falha na chamada')
+      } finally {
+        setWebhookSending(false)
+      }
+    })()
+  }
 
   if (!crm.currentPermission.canManageUsers) {
     return (
@@ -89,6 +148,53 @@ export function AdminLabPage() {
           <CardFooter>
             <Button type="button" variant="outline" onClick={() => void crm.syncFromSupabase()} disabled={crm.isLoading}>
               Sincronizar agora
+            </Button>
+          </CardFooter>
+        </Card>
+
+        <Card className="shadow-sm lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">Testar webhook de ingestão</CardTitle>
+            <CardDescription>
+              Envia POST para a Edge Function <code className="text-xs">crm-ingest-webhook</code> com o segredo em{' '}
+              <code className="text-xs">VITE_CRM_WEBHOOK_SECRET</code> (não comitar em repositórios públicos).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-2 sm:col-span-2">
+              <Label htmlFor="wh-name">Nome do lead</Label>
+              <Input id="wh-name" value={webhookName} onChange={(e) => setWebhookName(e.target.value)} />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="wh-phone">Telefone (mín. 10 dígitos)</Label>
+              <Input id="wh-phone" value={webhookPhone} onChange={(e) => setWebhookPhone(e.target.value)} inputMode="tel" />
+            </div>
+            <div className="grid gap-2 sm:col-span-2">
+              <Label>Origem</Label>
+              <Select
+                value={webhookSource}
+                onValueChange={(v) => setWebhookSource(v as (typeof WEBHOOK_SOURCES)[number]['value'])}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WEBHOOK_SOURCES.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+          <CardFooter>
+            <Button
+              type="button"
+              onClick={handleTestWebhook}
+              disabled={webhookSending || crm.isLoading}
+            >
+              {webhookSending ? 'Enviando…' : 'Enviar payload de teste'}
             </Button>
           </CardFooter>
         </Card>

@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   readonly VITE_APP_NAME?: string
   readonly VITE_APP_BADGE?: string
   readonly VITE_APP_LOGO_MONOGRAM?: string
+  /** Segredo do webhook de ingestao (apenas homologacao / Admin Lab; nao commitar em producao publica) */
+  readonly VITE_CRM_WEBHOOK_SECRET?: string
 }
 
 interface ImportMeta {
