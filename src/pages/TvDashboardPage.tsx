@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 
+import { BRAND_LOGO_HORIZONTAL_NEGATIVE_URL } from '@/config/brandAssets'
 import { APP_ENV_BADGE, APP_TV_HEADING } from '@/config/branding'
 import { useCrm } from '@/context/CrmContext'
 import { cn } from '@/lib/utils'
@@ -38,6 +39,9 @@ export function TvDashboardPage() {
     return (
       <div className="min-h-svh bg-zinc-950 px-8 py-10 text-zinc-50">
         <header className="mb-8">
+          <div className="mb-3 flex items-center gap-3">
+            <img src={BRAND_LOGO_HORIZONTAL_NEGATIVE_URL} alt="" className="h-9 max-w-[11rem] object-contain object-left opacity-90" />
+          </div>
           <h1 className="m-0 text-3xl font-semibold tracking-tight">{APP_TV_HEADING}</h1>
           <p className="mt-2 text-sm font-medium uppercase tracking-wider text-zinc-500">{APP_ENV_BADGE}</p>
           <p className="mt-1 text-zinc-400">Acesso negado para o perfil atual.</p>
@@ -50,6 +54,9 @@ export function TvDashboardPage() {
     <div className="min-h-svh bg-gradient-to-br from-zinc-900 via-slate-950 to-zinc-950 px-8 py-10 text-zinc-50">
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
+          <div className="mb-3">
+            <img src={BRAND_LOGO_HORIZONTAL_NEGATIVE_URL} alt="" className="h-10 max-w-[12rem] object-contain object-left opacity-95 md:h-11" />
+          </div>
           <h1 className="m-0 text-3xl font-semibold tracking-tight md:text-4xl">{APP_TV_HEADING}</h1>
           <p className="mt-1 text-xs font-semibold uppercase tracking-widest text-zinc-500">Painel TV · {APP_ENV_BADGE}</p>
           <p className="mt-2 text-lg text-zinc-400">Atualização automática a cada 15 s · ciclo {tick}</p>

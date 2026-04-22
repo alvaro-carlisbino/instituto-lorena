@@ -1,4 +1,5 @@
 import { NoticeBanner, noticeVariantFromMessage } from '@/components/NoticeBanner'
+import { BRAND_LOGO_HORIZONTAL_URL } from '@/config/brandAssets'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -22,7 +23,10 @@ export function OnboardingPage({
   return (
     <div className="flex min-h-svh items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-md border-border/80 shadow-sm">
-        <CardHeader className="space-y-1">
+        <CardHeader className="space-y-3">
+          <div className="flex h-11 max-w-[12rem] items-center justify-start rounded-lg bg-muted/50 px-2 py-1 ring-1 ring-border/50">
+            <img src={BRAND_LOGO_HORIZONTAL_URL} alt="" className="max-h-9 w-full object-contain object-left" />
+          </div>
           <p className="text-xs font-semibold tracking-wide text-primary uppercase">Primeiro acesso</p>
           <CardTitle className="text-xl">Complete seu perfil</CardTitle>
           <CardDescription>
