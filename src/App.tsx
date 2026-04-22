@@ -22,6 +22,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { RouteTransition } from './components/RouteTransition'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { Toaster } from '@/components/ui/sonner'
 import { AppSidebar } from '@/layouts/AppSidebar'
 
 function AppRoutes() {
@@ -90,6 +91,7 @@ function App() {
           </div>
         </SidebarProvider>
       </TooltipProvider>
+      <Toaster richColors position="top-right" />
     </CrmProvider>
   )
 }

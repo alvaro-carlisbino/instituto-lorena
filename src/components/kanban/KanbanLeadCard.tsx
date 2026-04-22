@@ -57,7 +57,7 @@ export function KanbanLeadCard({
       className={cn(
         'cursor-grab bg-card p-3 transition hover:shadow-md active:cursor-grabbing border-l-4 rounded-none',
         selected ? 'ring-2 ring-primary/20' : '',
-        isSlaBreached ? 'border-destructive shadow-[0_0_10px_rgba(255,0,0,0.1)]' : 'border-border hover:border-primary/30'
+        isSlaBreached ? 'border-destructive shadow-[0_0_10px_var(--destructive)]' : 'border-border hover:border-primary/30'
       )}
       draggable
       onDragStart={(event) => {

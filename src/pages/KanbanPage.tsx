@@ -164,6 +164,12 @@ export function KanbanPage() {
                   />
                 ))}
 
+                {stageLeads.length === 0 && !crm.isLoading && (
+                  <p className="py-8 text-center text-xs text-muted-foreground">
+                    Nenhum lead nesta etapa
+                  </p>
+                )}
+
                 <KanbanColumnDropZone
                   active={dragOverStageId === stage.id}
                   onDragOver={() => setDragOverStageId(stage.id)}

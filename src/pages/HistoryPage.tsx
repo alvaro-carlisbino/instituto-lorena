@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
+import { ClipboardListIcon, UserIcon } from 'lucide-react'
 
+import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -61,55 +63,84 @@ export function HistoryPage() {
 
           <div className="grid gap-6 lg:grid-cols-[minmax(0,280px)_1fr]">
             <aside className="flex flex-col gap-px border border-border bg-border/50">
-              {paginatedLeads.map((lead) => (
-                <button
-                  key={lead.id}
-                  type="button"
-                  className={cn(
-                    'px-4 py-3 text-left text-sm transition bg-card hover:bg-muted/30 focus:outline-none',
-                    crm.selectedLeadId === lead.id && 'bg-muted/10 font-bold border-l-2 border-l-primary'
-                  )}
-                  onClick={() => crm.setSelectedLeadId(lead.id)}
-                >
-                  <span className="block truncate tracking-wide text-foreground uppercase">{lead.patientName}</span>
-                  <span className="block text-[10px] font-semibold tracking-widest text-muted-foreground uppercase mt-1">{sourceLabel[lead.source]}</span>
-                </button>
-              ))}
+              {paginatedLeads.length === 0 && !crm.isLoading ? (
+                <EmptyState
+                  icon={UserIcon}
+                  title="Nenhum paciente encontrado"
+                  description="Ajuste a busca ou aguarde novos leads entrarem no sistema."
+                  className="py-8"
+                />
+              ) : (
+                paginatedLeads.map((lead) => (
+                  <button
+                    key={lead.id}
+                    type="button"
+                    className={cn(
+                      'px-4 py-3 text-left text-sm transition bg-card hover:bg-muted/30 focus:outline-none',
+                      crm.selectedLeadId === lead.id && 'bg-muted/10 font-bold border-l-2 border-l-primary'
+                    )}
+                    onClick={() => crm.setSelectedLeadId(lead.id)}
+                  >
+                    <span className="block truncate tracking-wide text-foreground uppercase">{lead.patientName}</span>
+                    <span className="block text-[10px] font-semibold tracking-widest text-muted-foreground uppercase mt-1">{sourceLabel[lead.source]}</span>
+                  </button>
+                ))
+              )}
             </aside>
 
             <article className="min-h-[12rem] bg-card border-none shadow-none">
-              <h3 className="mt-0 pb-4 text-sm tracking-widest uppercase font-bold text-foreground border-b border-border mb-6">{crm.selectedLead?.patientName ?? 'NENHUM PACIENTE SELECIONADO'}</h3>
-              {crm.selectedLead && crm.currentPermission.canRouteLeads ? (
-                <div className="mb-4 grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-2">
-                  {workflowFieldsForContext(crm.workflowFields, 'lead_detail').map((field) => {
-                    const lead = crm.selectedLead
-                    if (!lead) return null
-                    return (
-                      <DynamicFieldRenderer
-                        key={field.id}
-                        field={field}
-                        lead={lead}
-                        onChange={(next) => crm.persistLeadPatch(next)}
-                      />
-                    )
-                  })}
-                </div>
-              ) : null}
-              <ul className="m-0 list-none space-y-px bg-border/50 pt-px border-t border-border mt-8">
-                {crm.selectedLeadHistory.map((item) => (
-                  <li key={item.id} className="bg-card p-4 hover:bg-muted/10 transition-colors">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border/30 pb-2 mb-3">
-                      <strong className="text-xs uppercase font-bold tracking-wider">{item.author}</strong>
-                      <small className="text-[10px] tabular-nums font-mono font-semibold text-muted-foreground">{new Date(item.happenedAt).toLocaleString('pt-BR')}</small>
+              {crm.selectedLead ? (
+                <>
+                  <h3 className="mt-0 pb-4 text-sm tracking-widest uppercase font-bold text-foreground border-b border-border mb-6">{crm.selectedLead.patientName}</h3>
+                  {crm.currentPermission.canRouteLeads ? (
+                    <div className="mb-4 grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-2">
+                      {workflowFieldsForContext(crm.workflowFields, 'lead_detail').map((field) => {
+                        const lead = crm.selectedLead
+                        if (!lead) return null
+                        return (
+                          <DynamicFieldRenderer
+                            key={field.id}
+                            field={field}
+                            lead={lead}
+                            onChange={(next) => crm.persistLeadPatch(next)}
+                          />
+                        )
+                      })}
                     </div>
-                    <p className="my-0 mb-4 text-sm leading-relaxed text-foreground/80">{item.content}</p>
-                    <div className="flex gap-2">
-                      <Badge variant="outline" className="rounded-none text-[9px] uppercase tracking-widest">{item.channel}</Badge>
-                      <Badge variant="secondary" className="rounded-none text-[9px] uppercase tracking-widest">{item.direction}</Badge>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                  ) : null}
+                  {crm.selectedLeadHistory.length === 0 ? (
+                    <EmptyState
+                      icon={ClipboardListIcon}
+                      title="Nenhum registro"
+                      description="Este paciente ainda não possui interações registradas."
+                      className="py-8"
+                    />
+                  ) : (
+                    <ul className="m-0 list-none space-y-px bg-border/50 pt-px border-t border-border mt-8">
+                      {crm.selectedLeadHistory.map((item) => (
+                        <li key={item.id} className="bg-card p-4 hover:bg-muted/10 transition-colors">
+                          <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border/30 pb-2 mb-3">
+                            <strong className="text-xs uppercase font-bold tracking-wider">{item.author}</strong>
+                            <small className="text-[10px] tabular-nums font-mono font-semibold text-muted-foreground">{new Date(item.happenedAt).toLocaleString('pt-BR')}</small>
+                          </div>
+                          <p className="my-0 mb-4 text-sm leading-relaxed text-foreground/80">{item.content}</p>
+                          <div className="flex gap-2">
+                            <Badge variant="outline" className="rounded-none text-[9px] uppercase tracking-widest">{item.channel}</Badge>
+                            <Badge variant="secondary" className="rounded-none text-[9px] uppercase tracking-widest">{item.direction}</Badge>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              ) : (
+                <EmptyState
+                  icon={UserIcon}
+                  title="Nenhum paciente selecionado"
+                  description="Selecione um paciente na lista ao lado para ver o histórico de interações."
+                  className="py-12"
+                />
+              )}
             </article>
           </div>
         </CardContent>

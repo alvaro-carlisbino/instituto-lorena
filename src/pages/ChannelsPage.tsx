@@ -1,14 +1,37 @@
+import { useState } from 'react'
+import { RadioIcon, Trash2Icon } from 'lucide-react'
+import { toast } from 'sonner'
+
 import { ChannelFieldMappingEditor } from '@/components/config/ChannelFieldMappingEditor'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 
+const DRIVER_OPTIONS = [
+  { value: 'manual', label: 'Manual (sem sistema externo)' },
+  { value: 'meta', label: 'Meta (Facebook / Instagram)' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'webhook', label: 'Webhook (URL própria)' },
+] as const
+
 export function ChannelsPage() {
   const crm = useCrm()
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
+
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return
+    crm.removeChannel(deleteTarget.id)
+    toast.success('Canal removido com sucesso.')
+    setDeleteTarget(null)
+  }
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
@@ -28,7 +51,7 @@ export function ChannelsPage() {
       subtitle="Ative canais, prioridade, SLA e ligação aos dados do lead — sem JSON, só listas e texto."
     >
       <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={crm.addChannel}>
+        <Button type="button" onClick={() => { crm.addChannel(); toast.success('Canal criado.') }}>
           Novo canal
         </Button>
       </div>
@@ -42,98 +65,117 @@ export function ChannelsPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {crm.channels.map((channel) => (
-          <Card key={channel.id} className="shadow-sm">
-            <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
-              <Input
-                value={channel.name}
-                onChange={(event) => crm.updateChannel(channel.id, { name: event.target.value })}
-                className="max-w-xs font-medium"
-              />
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="size-4 rounded border-input"
-                  checked={channel.enabled}
-                  onChange={(event) => crm.updateChannel(channel.id, { enabled: event.target.checked })}
-                />
-                Ativo
-              </label>
-            </CardHeader>
-            <CardContent className="grid gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor={`sla-${channel.id}`}>SLA (min)</Label>
+      {crm.channels.length === 0 ? (
+        <EmptyState
+          icon={RadioIcon}
+          title="Nenhum canal configurado"
+          description="Crie um canal para receber leads de fontes externas como WhatsApp, Meta Ads ou webhooks."
+        />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {crm.channels.map((channel) => (
+            <Card key={channel.id} className="shadow-sm">
+              <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
                 <Input
-                  id={`sla-${channel.id}`}
-                  type="number"
-                  min={1}
-                  value={channel.slaMinutes}
-                  onChange={(event) => crm.updateChannel(channel.id, { slaMinutes: Number(event.target.value) })}
-                  className="max-w-[10rem]"
+                  value={channel.name}
+                  onChange={(event) => crm.updateChannel(channel.id, { name: event.target.value })}
+                  className="max-w-xs font-medium"
                 />
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm text-muted-foreground">Prioridade</span>
-                <Button type="button" variant="outline" size="sm" onClick={() => crm.moveChannelPriority(channel.id, 'up')}>
-                  Subir
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={channel.enabled}
+                    onCheckedChange={(checked) => crm.updateChannel(channel.id, { enabled: checked })}
+                  />
+                  <Label className="text-sm cursor-pointer">Ativo</Label>
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor={`sla-${channel.id}`}>SLA (min)</Label>
+                  <Input
+                    id={`sla-${channel.id}`}
+                    type="number"
+                    min={1}
+                    value={channel.slaMinutes}
+                    onChange={(event) => crm.updateChannel(channel.id, { slaMinutes: Number(event.target.value) })}
+                    className="max-w-[10rem]"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Prioridade</span>
+                  <Button type="button" variant="outline" size="sm" onClick={() => crm.moveChannelPriority(channel.id, 'up')}>
+                    Subir
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => crm.moveChannelPriority(channel.id, 'down')}>
+                    Descer
+                  </Button>
+                  <Badge variant="secondary">{channel.priority}</Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={channel.autoReply}
+                    onCheckedChange={(checked) => crm.updateChannel(channel.id, { autoReply: checked })}
+                  />
+                  <Label className="text-sm cursor-pointer">Resposta automática</Label>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Tipo de integração</Label>
+                  <Select
+                    value={channel.driver}
+                    onValueChange={(value) =>
+                      crm.updateChannel(channel.id, {
+                        driver: value as (typeof channel)['driver'],
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DRIVER_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Ligação dos dados (mapeamento)</Label>
+                  <ChannelFieldMappingEditor
+                    key={`${channel.id}-${JSON.stringify(channel.fieldMapping ?? {})}`}
+                    channelId={channel.id}
+                    fieldMapping={channel.fieldMapping}
+                    workflowFields={crm.workflowFields}
+                    onApply={(next) => { crm.updateChannel(channel.id, { fieldMapping: next }); toast.success('Mapeamento atualizado.') }}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Identificador da credencial no ambiente</Label>
+                  <Input
+                    value={channel.credentialsRef}
+                    onChange={(event) => crm.updateChannel(channel.id, { credentialsRef: event.target.value })}
+                    placeholder="Só preencha se a equipa técnica indicar (ex.: nome da variável)"
+                  />
+                </div>
+                <Button type="button" variant="destructive" size="sm" className="w-fit" onClick={() => setDeleteTarget({ id: channel.id, name: channel.name })}>
+                  <Trash2Icon className="size-4 mr-1" />
+                  Remover canal
                 </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => crm.moveChannelPriority(channel.id, 'down')}>
-                  Descer
-                </Button>
-                <Badge variant="secondary">{channel.priority}</Badge>
-              </div>
-              <label className="flex cursor-pointer items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="size-4 rounded border-input"
-                  checked={channel.autoReply}
-                  onChange={(event) => crm.updateChannel(channel.id, { autoReply: event.target.checked })}
-                />
-                Resposta automática
-              </label>
-              <div className="grid gap-2">
-                <Label>Tipo de integração</Label>
-                <select
-                  className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                  value={channel.driver}
-                  onChange={(event) =>
-                    crm.updateChannel(channel.id, {
-                      driver: event.target.value as (typeof channel)['driver'],
-                    })
-                  }
-                >
-                  <option value="manual">Manual (sem sistema externo)</option>
-                  <option value="meta">Meta (Facebook / Instagram)</option>
-                  <option value="whatsapp">WhatsApp</option>
-                  <option value="webhook">Webhook (URL própria)</option>
-                </select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Ligação dos dados (mapeamento)</Label>
-                <ChannelFieldMappingEditor
-                  key={`${channel.id}-${JSON.stringify(channel.fieldMapping ?? {})}`}
-                  channelId={channel.id}
-                  fieldMapping={channel.fieldMapping}
-                  workflowFields={crm.workflowFields}
-                  onApply={(next) => crm.updateChannel(channel.id, { fieldMapping: next })}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Identificador da credencial no ambiente</Label>
-                <Input
-                  value={channel.credentialsRef}
-                  onChange={(event) => crm.updateChannel(channel.id, { credentialsRef: event.target.value })}
-                  placeholder="Só preencha se a equipa técnica indicar (ex.: nome da variável)"
-                />
-              </div>
-              <Button type="button" variant="destructive" size="sm" className="w-fit" onClick={() => crm.removeChannel(channel.id)}>
-                Remover canal
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+        title="Remover canal"
+        description={`Tem certeza que deseja remover o canal "${deleteTarget?.name ?? ''}"? Esta ação não pode ser desfeita.`}
+        confirmLabel="Remover"
+        onConfirm={handleConfirmDelete}
+      />
     </AppLayout>
   )
 }

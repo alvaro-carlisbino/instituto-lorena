@@ -1,10 +1,26 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ClipboardListIcon, PlusCircleIcon, MinusCircleIcon, PencilIcon } from 'lucide-react'
 
+import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+
+const ACTION_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+  INSERT: 'default',
+  UPDATE: 'secondary',
+  DELETE: 'destructive',
+}
+
+const ACTION_ICON: Record<string, typeof PlusCircleIcon> = {
+  INSERT: PlusCircleIcon,
+  UPDATE: PencilIcon,
+  DELETE: MinusCircleIcon,
+}
 
 export function AuditPage() {
   const crm = useCrm()
@@ -52,49 +68,61 @@ export function AuditPage() {
       <Card className="shadow-sm">
         <CardContent className="space-y-4 pt-6">
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            <Select
               value={actionFilter}
-              onChange={(event) => {
-                setActionFilter(event.target.value as 'all' | 'INSERT' | 'UPDATE' | 'DELETE')
+              onValueChange={(value) => {
+                setActionFilter(value as 'all' | 'INSERT' | 'UPDATE' | 'DELETE')
                 setPage(0)
               }}
             >
-              <option value="all">Todas ações</option>
-              <option value="INSERT">INSERT</option>
-              <option value="UPDATE">UPDATE</option>
-              <option value="DELETE">DELETE</option>
-            </select>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas ações</SelectItem>
+                <SelectItem value="INSERT">INSERT</SelectItem>
+                <SelectItem value="UPDATE">UPDATE</SelectItem>
+                <SelectItem value="DELETE">DELETE</SelectItem>
+              </SelectContent>
+            </Select>
 
-            <select
-              className="h-8 min-w-[8rem] rounded-md border border-input bg-background px-2 text-sm"
+            <Select
               value={tableFilter}
-              onChange={(event) => {
-                setTableFilter(event.target.value)
+              onValueChange={(value) => {
+                setTableFilter(value ?? 'all')
                 setPage(0)
               }}
             >
-              <option value="all">Todas tabelas</option>
-              {uniqueTables.map((table) => (
-                <option key={table} value={table}>
-                  {table}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas tabelas</SelectItem>
+                {uniqueTables.map((table) => (
+                  <SelectItem key={table} value={table}>
+                    {table}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-            <select
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-              value={daysFilter}
-              onChange={(event) => {
-                setDaysFilter(Number(event.target.value))
+            <Select
+              value={String(daysFilter)}
+              onValueChange={(value) => {
+                setDaysFilter(Number(value))
                 setPage(0)
               }}
             >
-              <option value={1}>Últimas 24 h</option>
-              <option value={3}>Últimos 3 dias</option>
-              <option value={7}>Últimos 7 dias</option>
-              <option value={30}>Últimos 30 dias</option>
-            </select>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1">Últimas 24 h</SelectItem>
+                <SelectItem value="3">Últimos 3 dias</SelectItem>
+                <SelectItem value="7">Últimos 7 dias</SelectItem>
+                <SelectItem value="30">Últimos 30 dias</SelectItem>
+              </SelectContent>
+            </Select>
 
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <Button type="button" variant="outline" size="sm" onClick={() => setPage((previous) => Math.max(0, previous - 1))}>
@@ -114,19 +142,47 @@ export function AuditPage() {
             </div>
           </div>
 
-          {crm.isLoading ? <p className="text-sm text-muted-foreground">Carregando trilha de auditoria…</p> : null}
-
-          <ul className="divide-y divide-border rounded-lg border border-border">
-            {crm.auditRows.map((event) => (
-              <li key={event.id} className="space-y-1 p-3 text-sm">
-                <p className="m-0 font-medium">{event.actorEmail ?? 'sistema'}</p>
-                <p className="m-0 text-xs text-muted-foreground">
-                  {event.action} · {event.targetTable} · {new Date(event.createdAt).toLocaleString('pt-BR')}
-                </p>
-                <p className="m-0 text-muted-foreground">ID alvo: {event.targetId ?? 'n/a'}</p>
-              </li>
-            ))}
-          </ul>
+          {crm.isLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="space-y-2 p-3">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-72" />
+                </div>
+              ))}
+            </div>
+          ) : crm.auditRows.length === 0 ? (
+            <EmptyState
+              icon={ClipboardListIcon}
+              title="Nenhum evento encontrado"
+              description="Ajuste os filtros ou aguarde novas ações no sistema."
+            />
+          ) : (
+            <ul className="divide-y divide-border rounded-lg border border-border">
+              {crm.auditRows.map((event) => {
+                const ActionIcon = ACTION_ICON[event.action] ?? ClipboardListIcon
+                return (
+                  <li key={event.id} className="flex items-start gap-3 p-3 text-sm hover:bg-muted/5 transition-colors">
+                    <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-muted">
+                      <ActionIcon className="size-3.5 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="m-0 font-medium">{event.actorEmail ?? 'sistema'}</p>
+                        <Badge variant={ACTION_VARIANT[event.action] ?? 'outline'} className="text-[10px] uppercase tracking-widest font-bold">
+                          {event.action}
+                        </Badge>
+                      </div>
+                      <p className="m-0 text-xs text-muted-foreground">
+                        {event.targetTable} · {new Date(event.createdAt).toLocaleString('pt-BR')}
+                      </p>
+                      <p className="m-0 text-xs text-muted-foreground">ID alvo: {event.targetId ?? 'n/a'}</p>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </AppLayout>

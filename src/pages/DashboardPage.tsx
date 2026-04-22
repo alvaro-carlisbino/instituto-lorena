@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { KanbanSquare, MoreHorizontal, RefreshCw, SlidersHorizontal } from 'lucide-react'
+import { KanbanSquare, LayoutListIcon, MoreHorizontal, RefreshCw, SlidersHorizontal, UsersIcon } from 'lucide-react'
 
+import { EmptyState } from '@/components/ui/empty-state'
 import { buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -63,7 +64,7 @@ export function DashboardPage() {
                 disabled={crm.isLoading || !canSync}
                 onClick={() => void crm.syncFromSupabase()}
               >
-                <RefreshCw className={`size-4 ${crm.isLoading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={cn('size-4', crm.isLoading && 'animate-spin')} />
                 {crm.isLoading ? 'Sincronizando…' : 'Sincronizar dados'}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -71,16 +72,25 @@ export function DashboardPage() {
         </>
       }
     >
-      <section className="grid gap-px bg-border/50 sm:grid-cols-2 xl:grid-cols-4 border border-border">
-        {dashboardCards.map((card, index) => (
-          <Card key={card.id} className={cn("border-0 rounded-none shadow-none bg-card transition-all duration-300 hover:bg-muted/30", index === 0 ? "xl:col-span-1 border-b-2 border-b-primary" : "")}>
-            <CardHeader className="pb-4 pt-6 px-6">
-              <CardTitle className="text-4xl font-light tabular-nums tracking-tighter text-foreground mb-1">{getDashboardValue(card.metricKey)}</CardTitle>
-              <CardDescription className="text-xs uppercase tracking-widest font-semibold text-muted-foreground">{card.title}</CardDescription>
-            </CardHeader>
-          </Card>
-        ))}
-      </section>
+      {dashboardCards.length === 0 ? (
+        <EmptyState
+          icon={LayoutListIcon}
+          title="Nenhum widget ativo"
+          description="Configure os indicadores do dashboard em 'Ajustar widgets'."
+          className="border border-border rounded-none"
+        />
+      ) : (
+        <section className="grid gap-px bg-border/50 sm:grid-cols-2 xl:grid-cols-4 border border-border">
+          {dashboardCards.map((card, index) => (
+            <Card key={card.id} className={cn("border-0 rounded-none shadow-none bg-card transition-all duration-300 hover:bg-muted/30", index === 0 ? "xl:col-span-1 border-b-2 border-b-primary" : "")}>
+              <CardHeader className="pb-4 pt-6 px-6">
+                <CardTitle className="text-4xl font-light tabular-nums tracking-tighter text-foreground mb-1">{getDashboardValue(card.metricKey)}</CardTitle>
+                <CardDescription className="text-xs uppercase tracking-widest font-semibold text-muted-foreground">{card.title}</CardDescription>
+              </CardHeader>
+            </Card>
+          ))}
+        </section>
+      )}
 
       {crm.captureNotice ? (
         <p className="rounded-lg border border-success/35 bg-success/10 px-4 py-3 text-sm text-success-foreground">
@@ -114,19 +124,28 @@ export function DashboardPage() {
             </Select>
           </CardHeader>
           <CardContent className="p-0">
-            <ul className="divide-y divide-border">
-              {crm.selectedPipeline.stages.map((stage) => (
-                <li key={stage.id} className="flex items-center justify-between gap-3 px-6 py-4 text-sm transition-colors hover:bg-muted/10 group">
-                  <span className="font-semibold text-foreground/80 group-hover:text-primary transition-colors">{stage.name}</span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] tracking-widest uppercase text-muted-foreground font-semibold">Leads</span>
-                    <span className="tabular-nums font-mono text-base bg-secondary px-3 py-1 text-secondary-foreground border border-border/50">
-                      {crm.filteredLeads.filter((lead) => lead.stageId === stage.id).length}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            {crm.selectedPipeline.stages.length === 0 ? (
+              <EmptyState
+                icon={LayoutListIcon}
+                title="Nenhuma etapa configurada"
+                description="Adicione etapas ao pipeline em 'Boards e pipelines'."
+                className="py-8"
+              />
+            ) : (
+              <ul className="divide-y divide-border">
+                {crm.selectedPipeline.stages.map((stage) => (
+                  <li key={stage.id} className="flex items-center justify-between gap-3 px-6 py-4 text-sm transition-colors hover:bg-muted/10 group">
+                    <span className="font-semibold text-foreground/80 group-hover:text-primary transition-colors">{stage.name}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] tracking-widest uppercase text-muted-foreground font-semibold">Leads</span>
+                      <span className="tabular-nums font-mono text-base bg-secondary px-3 py-1 text-secondary-foreground border border-border/50">
+                        {crm.filteredLeads.filter((lead) => lead.stageId === stage.id).length}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardContent>
         </Card>
 
@@ -136,14 +155,23 @@ export function DashboardPage() {
             <CardDescription className="text-xs text-primary-foreground/70">Distribuição direta de responsabilidade</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
-            <ul className="divide-y divide-primary-foreground/10">
-              {crm.workloadBySdr.map((sdr) => (
-                <li key={sdr.id} className="flex items-center justify-between gap-3 px-6 py-4 text-sm">
-                  <span className="font-semibold tracking-wide">{sdr.name}</span>
-                  <span className="text-primary-foreground/80 font-mono text-xs">{sdr.total} ativos</span>
-                </li>
-              ))}
-            </ul>
+            {crm.workloadBySdr.length === 0 ? (
+              <EmptyState
+                icon={UsersIcon}
+                title="Nenhum SDR ativo"
+                description="Adicione membros à equipe e atribua leads."
+                className="py-8 text-primary-foreground [&_p]:text-primary-foreground/70 [&_*]:text-primary-foreground/70"
+              />
+            ) : (
+              <ul className="divide-y divide-primary-foreground/10">
+                {crm.workloadBySdr.map((sdr) => (
+                  <li key={sdr.id} className="flex items-center justify-between gap-3 px-6 py-4 text-sm">
+                    <span className="font-semibold tracking-wide">{sdr.name}</span>
+                    <span className="text-primary-foreground/80 font-mono text-xs">{sdr.total} ativos</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardContent>
         </Card>
       </section>
