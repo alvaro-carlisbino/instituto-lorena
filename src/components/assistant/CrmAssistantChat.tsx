@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { AssistantMarkdown } from '@/components/assistant/AssistantMarkdown'
 import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import {
   GLM_MODEL_OPTIONS,
@@ -148,7 +149,11 @@ export function CrmAssistantChat({ dataMode, context }: Props) {
                 <span className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                   {m.role === 'user' ? 'Você' : 'GLM'}
                 </span>
-                <p className="m-0 whitespace-pre-wrap">{m.content}</p>
+                {m.role === 'user' ? (
+                  <p className="m-0 whitespace-pre-wrap">{m.content}</p>
+                ) : (
+                  <AssistantMarkdown content={m.content} />
+                )}
               </li>
             ))}
             {loading ? (
