@@ -1,7 +1,12 @@
 /**
  * Assistente CRM (GLM / Z.ai) — leituras com JWT do utilizador (RLS).
  *
- * Secrets: ZAI_API_KEY (obrigatório), ZAI_MODEL (opcional, ex. glm-4.7).
+ * Secrets: ZAI_API_KEY (obrigatório).
+ * Opcionais: ZAI_MODEL (ex. glm-4.7 ou zai-coding-plan/glm-4.7),
+ *   ZAI_API_BASE — URL base sem trailing slash:
+ *   - pay-as-you-go (saldo): https://api.z.ai/api/paas/v4 (comportamento antigo)
+ *   - Coding Plan (subscrição): https://api.z.ai/api/coding/paas/v4
+ *   Se ZAI_API_BASE for o endpoint /coding/, os modelos glm-* são enviados como zai-coding-plan/glm-*.
  * Deploy: supabase functions deploy crm-ai-assistant
  *
  * Nota: respostas de negócio usam HTTP 200 + `{ ok: false, ... }` para o cliente
@@ -14,11 +19,10 @@ const cors = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const ZAI_BASE = 'https://api.z.ai/api/paas/v4/chat/completions'
 /** Limite aproximado do system prompt (caracteres) para evitar rejeição / timeout na Z.ai. */
 const MAX_SYSTEM_CHARS = 95_000
 
-const ALLOWED_MODELS = new Set([
+const GLM_MODEL_IDS = [
   'glm-5.1',
   'glm-4.7',
   'glm-4.6',
@@ -26,7 +30,28 @@ const ALLOWED_MODELS = new Set([
   'glm-4.5-air',
   'glm-4-flash',
   'glm-4-plus',
+] as const
+
+const ALLOWED_MODELS = new Set<string>([
+  ...GLM_MODEL_IDS,
+  ...GLM_MODEL_IDS.map((id) => `zai-coding-plan/${id}`),
 ])
+
+function zaiApiRootFromEnv(): string {
+  return (Deno.env.get('ZAI_API_BASE') ?? 'https://api.z.ai/api/paas/v4').trim().replace(/\/$/, '')
+}
+
+function isCodingPlanBase(apiBaseTrimmed: string): boolean {
+  return apiBaseTrimmed.includes('/coding/')
+}
+
+/** No endpoint Coding Plan, a API espera identificadores com prefixo zai-coding-plan/. */
+function modelForZaiBilling(model: string, apiBaseTrimmed: string): string {
+  if (!isCodingPlanBase(apiBaseTrimmed)) return model
+  if (model.startsWith('zai-coding-plan/')) return model
+  if (/^glm-/.test(model)) return `zai-coding-plan/${model}`
+  return model
+}
 
 type ChatMsg = { role: string; content: string }
 
@@ -245,7 +270,12 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     const zaiKey = Deno.env.get('ZAI_API_KEY') ?? ''
-    const defaultModel = (Deno.env.get('ZAI_MODEL') ?? 'glm-4.7').trim()
+    const zaiApiRoot = zaiApiRootFromEnv()
+    const zaiChatUrl = `${zaiApiRoot}/chat/completions`
+    const defaultModel = (
+      Deno.env.get('ZAI_MODEL')?.trim() ||
+      (isCodingPlanBase(zaiApiRoot) ? 'zai-coding-plan/glm-4.7' : 'glm-4.7')
+    ).trim()
 
     if (!supabaseUrl || !anonKey) {
       return jsonResponse({ ok: false, error: 'server_misconfigured', message: 'SUPABASE_URL ou ANON_KEY em falta.' }, 500)
@@ -288,7 +318,8 @@ Deno.serve(async (req) => {
     }
 
     const requested = String(body.model ?? '').trim()
-    const model = ALLOWED_MODELS.has(requested) ? requested : defaultModel
+    let model = ALLOWED_MODELS.has(requested) ? requested : defaultModel
+    model = modelForZaiBilling(model, zaiApiRoot)
     const context = parseContext(body.context)
 
     let snapshot: Record<string, unknown>
@@ -330,7 +361,7 @@ Deno.serve(async (req) => {
 
     const messages: ChatMsg[] = [{ role: 'system', content: systemContent }, ...clientMessages]
 
-    const zaiRes = await fetch(ZAI_BASE, {
+    const zaiRes = await fetch(zaiChatUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
