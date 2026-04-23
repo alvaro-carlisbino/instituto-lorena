@@ -46,8 +46,9 @@ Edge Function que chama a API Z.ai (modelos GLM) com snapshot do CRM obtido **co
 1. No dashboard Supabase (ou CLI), defina secrets: `ZAI_API_KEY` (obrigatório). Opcionais: `ZAI_MODEL`, `ZAI_API_BASE`.
    - **Pay-as-you-go** (saldo na conta): omita `ZAI_API_BASE` ou use `https://api.z.ai/api/paas/v4`.
    - **Coding Plan** (`ZAI_API_BASE` = `https://api.z.ai/api/coding/paas/v4`): na [documentação Z.ai](https://docs.z.ai/api-reference/introduction), este URL destina-se a um conjunto fechado de ferramentas (IDEs, agentes de código). Um **assistente CRM customizado** pode receber erros genéricos (ex. HTTP 500 `Operation failed`). Para chat de produto geral, a Z.ai recomenda **`https://api.z.ai/api/paas/v4`** com **saldo pay-as-you-go** (não defina `ZAI_API_BASE` ou aponte explicitamente para `/paas/v4`). O código do modelo (`glm-4.7`, …) é o mesmo nos dois URLs.
-2. Deploy: `supabase functions deploy crm-ai-assistant`
-3. No app, abra **Operação → Assistente IA** ou `/assistente`. Opcional: `?leadId=<uuid>&focus=lead` para contexto de um lead.
+2. Migrações: tabelas `crm_assistant_threads` e `crm_assistant_messages` guardam o **histórico de conversas** por utilizador (RLS). Aplique com `supabase db push` (ou SQL no Dashboard).
+3. Deploy: `supabase functions deploy crm-ai-assistant`
+4. No app, abra **Operação → Assistente IA** ou `/assistente`. Opcional: `?leadId=<uuid>&focus=lead`; histórico na coluna esquerda e `?threadId=<uuid>` ao reabrir uma conversa.
 
 A função antiga `user-ai-assistant` foi substituída por esta. Integrações futuras (Meta, WhatsApp, Evolution) podem ampliar o snapshot sem mudar o contrato básico (`messages`, `model`, `context`).
 

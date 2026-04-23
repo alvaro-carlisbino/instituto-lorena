@@ -1,14 +1,21 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, SendHorizonal } from 'lucide-react'
 
+import { AssistantMarkdown } from '@/components/assistant/AssistantMarkdown'
 import { NoticeBanner } from '@/components/NoticeBanner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { AssistantMarkdown } from '@/components/assistant/AssistantMarkdown'
 import { noticeVariantFromMessage } from '@/lib/noticeVariant'
+import { isSupabaseConfigured } from '@/lib/supabaseClient'
+import {
+  insertAssistantMessage,
+  insertAssistantThread,
+  listAssistantMessages,
+  touchAssistantThread,
+} from '@/services/assistantThreadsSupabase'
 import {
   GLM_MODEL_OPTIONS,
   type CrmAiAssistantContext,
@@ -19,22 +26,61 @@ import {
 
 const DEFAULT_MODEL: GlmModelId = 'glm-4.7'
 
+function titleFromFirstMessage(text: string): string {
+  const line = text.split('\n')[0]?.trim() ?? text
+  return line.slice(0, 120) || 'Conversa'
+}
+
 type Props = {
   dataMode: 'mock' | 'supabase'
   context: CrmAiAssistantContext
+  /** Quando definido, carrega mensagens desta thread; `undefined` = conversa nova (vazia até enviar). */
+  activeThreadId?: string | null
+  onActiveThreadChange: (id: string | undefined) => void
+  /** Chamado após gravar mensagens (para atualizar a lista na página). */
+  onThreadListInvalidate?: () => void
 }
 
-export function CrmAssistantChat({ dataMode, context }: Props) {
+export function CrmAssistantChat({
+  dataMode,
+  context,
+  activeThreadId,
+  onActiveThreadChange,
+  onThreadListInvalidate,
+}: Props) {
   const [model, setModel] = useState<GlmModelId>(DEFAULT_MODEL)
   const [messages, setMessages] = useState<CrmAiChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadingThread, setLoadingThread] = useState(false)
   const [notice, setNotice] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
 
   const scrollToEnd = useCallback(() => {
     queueMicrotask(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }))
   }, [])
+
+  useEffect(() => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) return
+    const id = activeThreadId?.trim() || null
+    if (!id) {
+      setMessages([])
+      setLoadingThread(false)
+      return
+    }
+
+    let cancelled = false
+    setLoadingThread(true)
+    void listAssistantMessages(id).then((rows) => {
+      if (cancelled) return
+      setMessages(rows.map((r) => ({ role: r.role as CrmAiChatMessage['role'], content: r.content })))
+      setLoadingThread(false)
+      scrollToEnd()
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [activeThreadId, dataMode, scrollToEnd])
 
   const send = useCallback(
     async (text: string) => {
@@ -49,6 +95,35 @@ export function CrmAssistantChat({ dataMode, context }: Props) {
       setLoading(true)
       scrollToEnd()
 
+      const startedWithoutThread = !activeThreadId
+      let tid = activeThreadId ?? undefined
+      const persist = dataMode === 'supabase' && isSupabaseConfigured
+
+      if (persist) {
+        if (!tid) {
+          const newId = await insertAssistantThread({
+            title: titleFromFirstMessage(trimmed),
+            context,
+            model,
+          })
+          if (!newId) {
+            setLoading(false)
+            setMessages((prev) => prev.slice(0, -1))
+            setNotice('Não foi possível criar a conversa. Confirme sessão e migrações Supabase.')
+            scrollToEnd()
+            return
+          }
+          tid = newId
+        }
+        if (!(await insertAssistantMessage(tid, 'user', trimmed))) {
+          setLoading(false)
+          setMessages((prev) => prev.slice(0, -1))
+          setNotice('Não foi possível guardar a mensagem.')
+          scrollToEnd()
+          return
+        }
+      }
+
       const result = await invokeCrmAiAssistant({ messages: history, model, context })
 
       setLoading(false)
@@ -61,8 +136,27 @@ export function CrmAssistantChat({ dataMode, context }: Props) {
 
       setMessages((prev) => [...prev, { role: 'assistant', content: result.reply }])
       scrollToEnd()
+
+      if (persist && tid) {
+        await insertAssistantMessage(tid, 'assistant', result.reply)
+        await touchAssistantThread(tid, { context, model })
+        if (startedWithoutThread) {
+          onActiveThreadChange(tid)
+        }
+        onThreadListInvalidate?.()
+      }
     },
-    [context, loading, messages, model, scrollToEnd]
+    [
+      activeThreadId,
+      context,
+      dataMode,
+      loading,
+      messages,
+      model,
+      onActiveThreadChange,
+      onThreadListInvalidate,
+      scrollToEnd,
+    ],
   )
 
   const startConversation = useCallback(() => {
@@ -102,7 +196,7 @@ export function CrmAssistantChat({ dataMode, context }: Props) {
         </CardTitle>
         <CardDescription className="text-xs leading-relaxed">
           Cada mensagem atualiza o <strong className="text-foreground">snapshot</strong> do CRM (sempre com as tuas permissões).
-          Enter envia; Shift+Enter nova linha.
+          O histórico fica guardado na tua conta. Enter envia; Shift+Enter nova linha.
         </CardDescription>
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <div className="flex items-center gap-2">
@@ -125,7 +219,7 @@ export function CrmAssistantChat({ dataMode, context }: Props) {
             variant="secondary"
             size="sm"
             className="rounded-none text-[10px] font-bold uppercase tracking-widest"
-            disabled={loading}
+            disabled={loading || loadingThread}
             onClick={startConversation}
           >
             {messages.length === 0 ? 'Iniciar conversa' : 'Nova pergunta guia'}
@@ -137,9 +231,12 @@ export function CrmAssistantChat({ dataMode, context }: Props) {
 
         <ScrollArea className="h-[min(28rem,55vh)] rounded-md border border-border bg-muted/20 p-3">
           <ul className="m-0 list-none space-y-3 p-0">
+            {loadingThread ? (
+              <li className="px-3 py-2 text-sm text-muted-foreground">A carregar conversa…</li>
+            ) : null}
             {messages.map((m, i) => (
               <li
-                key={`${i}-${m.role}`}
+                key={`${activeThreadId ?? 'draft'}-${i}-${m.role}`}
                 className={
                   m.role === 'user'
                     ? 'ml-6 rounded-md border border-border bg-background px-3 py-2 text-sm'
@@ -171,7 +268,7 @@ export function CrmAssistantChat({ dataMode, context }: Props) {
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Ex.: O que mudou esta semana nos leads quentes? Sugere um email de follow-up (rascunho)."
             className="min-h-[4.5rem] flex-1 rounded-none border-foreground/20"
-            disabled={loading}
+            disabled={loading || loadingThread}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -181,8 +278,8 @@ export function CrmAssistantChat({ dataMode, context }: Props) {
           />
           <Button
             type="button"
-            className="h-11 shrink-0 rounded-none uppercase tracking-widest font-bold sm:h-auto sm:px-6"
-            disabled={loading || !draft.trim()}
+            className="h-11 shrink-0 rounded-none font-bold uppercase tracking-widest sm:h-auto sm:px-6"
+            disabled={loading || loadingThread || !draft.trim()}
             onClick={() => void send(draft)}
           >
             <SendHorizonal className="size-4 sm:mr-2" />
