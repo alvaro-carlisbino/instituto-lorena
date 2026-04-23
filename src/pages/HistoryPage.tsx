@@ -21,7 +21,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   meta_lead: 'Meta',
   manual: 'Manual',
   webhook: 'Link externo',
-  in_app: 'No CRM',
+  in_app: 'No app',
 }
 
 const DIRECTION_LABEL: Record<string, string> = {

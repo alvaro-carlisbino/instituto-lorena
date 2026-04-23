@@ -62,7 +62,7 @@ export function DashboardPage() {
 
   if (crm.isLoading) {
     return (
-      <AppLayout title="Dashboard comercial" subtitle="Carregando dados...">
+      <AppLayout title="Painel comercial" subtitle="Carregando dados...">
         <SkeletonBlocks rows={8} />
       </AppLayout>
     )
@@ -70,7 +70,7 @@ export function DashboardPage() {
 
   return (
     <AppLayout
-      title="Dashboard comercial"
+      title="Painel comercial"
       subtitle="Visão geral com indicadores ajustáveis e operação do dia."
       actions={
         <>

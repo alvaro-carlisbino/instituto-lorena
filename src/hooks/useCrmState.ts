@@ -277,7 +277,7 @@ export const useCrmState = () => {
       patientName: leadToMove.patientName,
       channel: 'system',
       direction: 'system',
-      author: 'Kanban DnD',
+      author: 'Quadro (ordenação)',
       content: `Lead reposicionado para ${targetStageName} na ordem ${boundedIndex + 1}.`,
       happenedAt: new Date().toISOString(),
     })
@@ -307,7 +307,7 @@ export const useCrmState = () => {
       patientName: targetLead.patientName,
       channel: 'system',
       direction: 'system',
-      author: 'Kanban',
+      author: 'Quadro',
       content: `Lead movido para a etapa: ${nextStage.name}.`,
       happenedAt: new Date().toISOString(),
     })
@@ -372,7 +372,7 @@ export const useCrmState = () => {
       channel: 'meta',
       direction: 'in',
       author: 'Meta Graph API',
-      content: 'Lead capturado automaticamente via webhook (mock).',
+      content: 'Lead capturado automaticamente (demonstração).',
       happenedAt: new Date().toISOString(),
     })
 
@@ -414,7 +414,7 @@ export const useCrmState = () => {
         leadId: lead.id,
         classification: 'qualified',
         confidence: 0.9,
-        recommendation: 'Lead com intencao comercial clara. Escalar para SDR agora.',
+        recommendation: 'Lead com intenção comercial clara. Escalar para o atendente imediatamente.',
       }
     }
     if (normalized.includes('duvida') || normalized.includes('medo') || normalized.includes('dor')) {
@@ -1334,7 +1334,7 @@ export const useCrmState = () => {
     }
 
     if (!currentPermission.canManageUsers) {
-      setSyncNotice('Sem permissao para reprocessar webhooks.')
+      setSyncNotice('Sem permissão para reprocessar mensagens.')
       return
     }
 
@@ -1342,7 +1342,7 @@ export const useCrmState = () => {
     try {
       await createWebhookReplayJob({
         source: 'meta-webhook',
-        note: 'Reprocessamento manual de webhook disparado pelo admin.',
+        note: 'Reprocessamento manual de mensagens disparado pelo administrador.',
       })
       await refreshWebhookJobs()
       setSyncNotice('Reprocessamento acionado com sucesso.')

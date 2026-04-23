@@ -163,10 +163,10 @@ export function CrmAssistantChat({
     if (loading) return
     const intro =
       context.leadId != null
-        ? 'Olá. Tens contexto do lead em foco. Em 2–3 frases, resume oportunidades e próximos passos recomendados.'
+        ? 'Olá. Você tem o lead em foco. Em 2 a 3 frases, resuma oportunidades e próximos passos recomendados.'
         : context.focus === 'analytics'
-          ? 'Olá. Com base nos dados desta semana, que padrões ou alertas destacarias para a equipe comercial?'
-          : 'Olá. Em que podes ajudar neste CRM (leads, métricas, semana, churn, pontuações) com os dados que tens?'
+          ? 'Olá. Com base nos dados desta semana, que padrões ou alertas você destacaria para a equipe comercial?'
+          : 'Olá. Em que podemos ajudar com os dados que você tem (leads, indicadores da semana, risco de perda, pontuações)?'
     void send(intro)
   }, [context.focus, context.leadId, loading, send])
 
@@ -174,7 +174,7 @@ export function CrmAssistantChat({
     return (
       <Card className="border-border shadow-none rounded-none bg-muted/10">
         <CardHeader>
-          <CardTitle className="text-base font-bold uppercase tracking-widest">Assistente CRM</CardTitle>
+          <CardTitle className="text-base font-bold uppercase tracking-widest">Assistente</CardTitle>
           <CardDescription className="text-xs leading-relaxed">
             O assistente só está disponível com a conexão ao banco de dados ativa. Peça ajuda ao administrador se precisar ativá-lo.
           </CardDescription>
@@ -191,7 +191,7 @@ export function CrmAssistantChat({
           Conversa
         </CardTitle>
         <CardDescription className="text-xs leading-relaxed">
-          Cada mensagem usa os dados mais recentes do CRM, de acordo com o teu acesso. O histórico é salvo na sua conta. Enter envia;
+          Cada mensagem usa os dados mais recentes do sistema, de acordo com o seu acesso. O histórico é salvo na sua conta. Enter envia;
           Shift+Enter para nova linha.
         </CardDescription>
         <div className="flex flex-wrap items-center gap-3 pt-2">

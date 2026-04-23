@@ -39,7 +39,7 @@ type Props = {
   onApply: (next: Record<string, string>) => void
 }
 
-/** Liga campos do CRM a caminhos no payload do webhook, sem JSON. */
+/** Liga campos do sistema a caminhos no dado recebido (ex.: formulário ou link externo). */
 export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFields, onApply }: Props) {
   const [rows, setRows] = useState<Row[]>(() => rowsFromMapping(fieldMapping))
   const [message, setMessage] = useState<string>('')
@@ -77,13 +77,13 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
     <div className="grid gap-3 rounded-lg border border-border/80 bg-muted/15 p-3">
       <p className="text-xs text-muted-foreground">
         Indique onde cada dado chega no aviso do canal (ex.: <code className="rounded bg-muted px-1">entry.changes.0.value</code>).
-        Use uma linha por campo — não é necessário JSON completo.
+        Use uma linha por campo; não é necessário preencher tudo de uma vez.
       </p>
       <ul className="m-0 list-none space-y-2 p-0">
         {rows.map((row, index) => (
           <li key={`${channelId}-row-${index}`} className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <div className="grid min-w-0 flex-1 gap-1">
-              <Label className="text-xs">Campo no CRM</Label>
+              <Label className="text-xs">Campo no cadastro</Label>
               <select
                 className="h-9 rounded-md border border-input bg-background px-2 text-sm"
                 value={row.fieldKey}

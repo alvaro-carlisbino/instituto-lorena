@@ -31,7 +31,7 @@ const ROLE_OPTIONS = [
 ] as const
 
 const CHANNEL_OPTIONS = [
-  { value: 'in_app', label: 'No próprio CRM' },
+  { value: 'in_app', label: 'No próprio app' },
   { value: 'email', label: 'E-mail' },
   { value: 'whatsapp', label: 'WhatsApp' },
 ] as const
@@ -126,7 +126,7 @@ export function SettingsPage() {
                       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                         <div className="grid gap-2 sm:col-span-2 lg:col-span-1">
                           <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">
-                            Nome no CRM
+                            Nome no cadastro
                           </Label>
                           <Input
                             value={field.label}
@@ -284,7 +284,7 @@ export function SettingsPage() {
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
             <div className="space-y-1">
               <CardTitle className="tracking-widest uppercase text-base font-bold">Permissões por papel</CardTitle>
-              <CardDescription className="text-xs">Combinações de permissões por função (admin, gestor, SDR).</CardDescription>
+              <CardDescription className="text-xs">Combinações de permissões por função (administrador, gestor, atendente).</CardDescription>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => { crm.addPermissionProfile(); toast.success('Perfil criado.') }} className="rounded-none uppercase tracking-widest font-bold">
               Novo perfil

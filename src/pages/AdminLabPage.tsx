@@ -31,7 +31,7 @@ const WEBHOOK_SOURCES = [
 
 export function AdminLabPage() {
   const crm = useCrm()
-  const [webhookName, setWebhookName] = useState('Teste Webhook')
+  const [webhookName, setWebhookName] = useState('Contato de teste')
   const [webhookPhone, setWebhookPhone] = useState('11999999999')
   const [webhookSource, setWebhookSource] = useState<(typeof WEBHOOK_SOURCES)[number]['value']>('whatsapp')
   const [webhookSending, setWebhookSending] = useState(false)
@@ -54,7 +54,7 @@ export function AdminLabPage() {
             patient_name: webhookName,
             phone: webhookPhone,
             source: webhookSource,
-            summary: 'Carga de teste via Admin Lab',
+            summary: 'Carga de teste (demonstração)',
           },
           headers: { 'x-webhook-secret': secret },
         })

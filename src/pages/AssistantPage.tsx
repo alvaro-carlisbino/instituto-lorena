@@ -101,7 +101,7 @@ export function AssistantPage() {
 
   return (
     <AppLayout
-      title="Assistente CRM"
+      title="Assistente"
       subtitle="Pergunte sobre contatos, equipe e resultados. As respostas usam só a informação que você tem acesso."
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,19rem)_1fr]">
@@ -139,7 +139,7 @@ export function AssistantPage() {
                 </div>
               ) : (
                 <p className="m-0 text-xs text-muted-foreground leading-relaxed">
-                  Se você abrir o assistente a partir de um contato no Kanban, essa pessoa aparece aqui e as respostas centram-se nela.
+                  Se você abrir o assistente a partir de um contato no quadro de leads, essa pessoa aparece aqui e as respostas se concentram nela.
                 </p>
               )}
             </CardContent>

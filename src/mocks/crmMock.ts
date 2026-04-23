@@ -161,7 +161,7 @@ export type OrgSettings = {
 export const pipelines: Pipeline[] = [
   {
     id: 'pipeline-clinica',
-    name: 'Pipeline Clinica',
+    name: 'Funil Clínica',
     boardConfig: {
       stageSlaMinutes: {
         'novo': 15,
@@ -171,15 +171,15 @@ export const pipelines: Pipeline[] = [
     },
     stages: [
       { id: 'novo', name: 'Novo lead' },
-      { id: 'triagem', name: 'Triagem IA' },
-      { id: 'contato', name: 'Contato SDR' },
+      { id: 'triagem', name: 'Triagem (IA)' },
+      { id: 'contato', name: 'Contato (atendente)' },
       { id: 'consulta', name: 'Consulta agendada' },
       { id: 'fechado', name: 'Fechado' },
     ],
   },
   {
     id: 'pipeline-estetica',
-    name: 'Pipeline Estetica',
+    name: 'Funil Estética',
     boardConfig: {
       stageSlaMinutes: {
         'novo-estetica': 30,
@@ -188,7 +188,7 @@ export const pipelines: Pipeline[] = [
     },
     stages: [
       { id: 'novo-estetica', name: 'Novo lead' },
-      { id: 'avaliacao', name: 'Avaliacao inicial' },
+      { id: 'avaliacao', name: 'Avaliação inicial' },
       { id: 'proposta', name: 'Proposta' },
       { id: 'fechado-estetica', name: 'Fechado' },
     ],
@@ -480,7 +480,7 @@ export const initialPermissions: PermissionProfile[] = [
 export const initialNotifications: NotificationRule[] = [
   { id: 'ntf-1', name: 'Lead sem retorno em 30 min', channel: 'in_app', enabled: true, trigger: 'sla_delay_30m' },
   { id: 'ntf-2', name: 'Lead qualificado por IA', channel: 'email', enabled: true, trigger: 'ai_qualified' },
-  { id: 'ntf-3', name: 'Falha de webhook', channel: 'whatsapp', enabled: false, trigger: 'integration_webhook_error' },
+  { id: 'ntf-3', name: 'Falha no link externo', channel: 'whatsapp', enabled: false, trigger: 'integration_webhook_error' },
 ]
 
 export const initialAppUsers: AppUser[] = [

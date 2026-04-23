@@ -31,7 +31,7 @@ export function OnboardingPage({
           <p className="text-xs font-semibold tracking-wide text-primary uppercase">Primeiro acesso</p>
           <CardTitle className="text-xl">Complete seu perfil</CardTitle>
           <CardDescription>
-            Antes de entrar no CRM, confirme seu nome de exibição para auditoria e trilha operacional.
+            Antes de começar, confirme seu nome de exibição para o registro de ações e o acompanhamento operacional.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">

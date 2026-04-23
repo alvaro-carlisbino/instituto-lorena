@@ -69,7 +69,7 @@ export function ChannelsPage() {
         <EmptyState
           icon={RadioIcon}
           title="Nenhum canal configurado"
-          description="Crie um canal para receber leads de fontes externas como WhatsApp, Meta Ads ou webhooks."
+          description="Crie um canal para receber leads de fontes externas como WhatsApp, Meta Ads ou link externo (URL)."
         />
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
