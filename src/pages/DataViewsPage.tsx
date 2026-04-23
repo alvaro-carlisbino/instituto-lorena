@@ -11,11 +11,11 @@ import { getLeadFieldValue } from '@/lib/leadFields'
 const DEFAULT_COLUMNS = ['patient_name', 'phone', 'summary'] as const
 
 const CORE_LABELS: Record<string, string> = {
-  patient_name: 'Nome do contacto',
+  patient_name: 'Nome do contato',
   phone: 'Telefone',
   summary: 'Resumo',
   source: 'Origem',
-  temperature: 'Temperatura',
+  temperature: 'Interesse',
   score: 'Pontuação',
 }
 
@@ -69,7 +69,7 @@ export function DataViewsPage() {
   return (
     <AppLayout
       title="Visões de dados"
-      subtitle="Escolha as colunas da tabela com caixas de seleção — sem listas separadas por vírgula."
+      subtitle="Escolha as colunas da tabela marcando as opções desejadas."
     >
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={crm.addDataView}>

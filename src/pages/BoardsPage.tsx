@@ -19,7 +19,7 @@ export function BoardsPage() {
     if (!deleteTarget) return
     if (deleteTarget.type === 'pipeline') {
       crm.removePipeline(deleteTarget.id)
-      toast.success('Pipeline removido com sucesso.')
+      toast.success('Funil removido com sucesso.')
     } else if (deleteTarget.pipelineId) {
       crm.removeStage(deleteTarget.pipelineId, deleteTarget.id)
       toast.success('Etapa removida com sucesso.')
@@ -29,10 +29,10 @@ export function BoardsPage() {
 
   if (!crm.currentPermission.canEditBoards) {
     return (
-      <AppLayout title="Boards e pipelines" subtitle="Sem permissão para editar boards com o papel atual.">
+      <AppLayout title="Funis e etapas" subtitle="Sem permissão para editar funis com o perfil atual.">
         <Card className="shadow-none border-border rounded-none bg-muted/10">
           <CardContent className="pt-6 text-sm font-semibold uppercase tracking-widest text-destructive">
-            <p className="m-0">Seu perfil não tem privilégios de administrador de board.</p>
+            <p className="m-0">Seu perfil não tem privilégios de administrador de funil.</p>
           </CardContent>
         </Card>
       </AppLayout>
@@ -40,9 +40,9 @@ export function BoardsPage() {
   }
 
   return (
-    <AppLayout title="Boards e pipelines" subtitle="Configure funis, etapas e regras de movimentação do kanban.">
+    <AppLayout title="Funis e etapas" subtitle="Configure funis, etapas e regras de movimentação.">
       <div className="flex flex-wrap gap-2 mb-8">
-        <Button type="button" onClick={() => { crm.addPipeline(); toast.success('Pipeline criado.') }} className="rounded-none uppercase tracking-widest font-bold">
+        <Button type="button" onClick={() => { crm.addPipeline(); toast.success('Funil criado.') }} className="rounded-none uppercase tracking-widest font-bold">
           Novo pipeline
         </Button>
       </div>
@@ -76,7 +76,7 @@ export function BoardsPage() {
                 </CardHeader>
                 <CardContent className="space-y-6 pt-6">
                   <div className="grid gap-2">
-                    <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Ordem dos campos no Kanban (chaves separadas por vírgula)</Label>
+                    <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Ordem dos campos no quadro (nomes separados por vírgula)</Label>
                     <Input
                       className="font-mono text-xs rounded-none bg-muted/5 border-foreground/20"
                       defaultValue={(bc.kanbanFieldOrder ?? []).join(', ')}
@@ -102,7 +102,7 @@ export function BoardsPage() {
                             className="max-w-sm rounded-none border-t-0 border-r-0 border-l-0 border-b border-foreground/30 bg-transparent focus-visible:ring-0 focus-visible:border-primary px-0 font-bold tracking-wide uppercase text-sm"
                           />
                           <div className="flex items-center gap-2">
-                            <Label className="m-0 shrink-0 text-[10px] uppercase font-bold tracking-widest text-muted-foreground">SLA (min)</Label>
+                            <Label className="m-0 shrink-0 text-[10px] uppercase font-bold tracking-widest text-muted-foreground">Prazo (min)</Label>
                             <Input
                               type="number"
                               min={1}

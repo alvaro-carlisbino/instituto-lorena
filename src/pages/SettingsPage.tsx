@@ -27,7 +27,7 @@ const FIELD_TYPE_OPTIONS = [
 const ROLE_OPTIONS = [
   { value: 'admin', label: 'Administrador' },
   { value: 'gestor', label: 'Gestor comercial' },
-  { value: 'sdr', label: 'SDR / Atendimento' },
+  { value: 'sdr', label: 'Atendente' },
 ] as const
 
 const CHANNEL_OPTIONS = [
@@ -37,10 +37,10 @@ const CHANNEL_OPTIONS = [
 ] as const
 
 const VISIBILITY_CONTEXTS: { value: FieldVisibilityContext; label: string }[] = [
-  { value: 'kanban_card', label: 'Kanban' },
+  { value: 'kanban_card', label: 'Quadro' },
   { value: 'lead_detail', label: 'Detalhe' },
   { value: 'list', label: 'Lista' },
-  { value: 'capture_form', label: 'Captura' },
+  { value: 'capture_form', label: 'Formulário' },
 ]
 
 type DeleteTarget = { type: 'field' | 'profile' | 'rule'; id: string; name?: string } | null
@@ -80,7 +80,7 @@ export function SettingsPage() {
   }
 
   return (
-    <AppLayout title="Configurações gerais" subtitle="Permissões, campos de workflow e regras de notificação.">
+    <AppLayout title="Configurações gerais" subtitle="Permissões, campos personalizados e regras de notificação.">
       <NoticeBanner
         message={crm.syncNotice}
         variant={noticeVariantFromMessage(crm.syncNotice)}
@@ -91,9 +91,9 @@ export function SettingsPage() {
         <Card className="border-border shadow-none rounded-none bg-card">
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
             <div className="space-y-1">
-              <CardTitle className="tracking-widest uppercase text-base font-bold">Campos de workflow</CardTitle>
+              <CardTitle className="tracking-widest uppercase text-base font-bold">Campos personalizados</CardTitle>
               <CardDescription className="text-xs">
-                Use o nome visível; o identificador interno gera-se sozinho. Só abra &quot;Identificador interno&quot; se a equipa técnica pedir.
+                Use o nome visível; o identificador interno é gerado automaticamente. Só abra &quot;Identificador interno&quot; se a equipe técnica pedir.
               </CardDescription>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => { crm.addWorkflowField(); toast.success('Campo criado.') }} className="rounded-none uppercase tracking-widest font-bold">
@@ -104,7 +104,7 @@ export function SettingsPage() {
             {crm.workflowFields.length === 0 ? (
               <EmptyState
                 icon={FileTextIcon}
-                title="Nenhum campo de workflow"
+                title="Nenhum campo personalizado"
                 description="Crie campos para capturar informações personalizadas dos leads."
                 className="py-8"
               />
@@ -459,7 +459,7 @@ export function SettingsPage() {
       {crm.currentPermission.canEditBoards ? (
         <Card className="mt-6 border-border/80 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Organização (datas e locale)</CardTitle>
+            <CardTitle className="text-base">Organização (datas e idioma)</CardTitle>
             <CardDescription>Fuso e formato usados em relatórios e listagens.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -480,15 +480,24 @@ export function SettingsPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="org-ws">Semana começa em (0=dom …)</Label>
-              <Input
-                id="org-ws"
-                type="number"
-                min={0}
-                max={6}
-                value={crm.orgSettings.weekStartsOn}
-                onChange={(e) => crm.updateOrgSettings({ weekStartsOn: Number(e.target.value) || 0 })}
-              />
+              <Label htmlFor="org-ws">Semana começa no dia</Label>
+              <Select
+                value={String(crm.orgSettings.weekStartsOn)}
+                onValueChange={(value) => crm.updateOrgSettings({ weekStartsOn: Number(value) })}
+              >
+                <SelectTrigger id="org-ws">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Domingo</SelectItem>
+                  <SelectItem value="1">Segunda-feira</SelectItem>
+                  <SelectItem value="2">Terça-feira</SelectItem>
+                  <SelectItem value="3">Quarta-feira</SelectItem>
+                  <SelectItem value="4">Quinta-feira</SelectItem>
+                  <SelectItem value="5">Sexta-feira</SelectItem>
+                  <SelectItem value="6">Sábado</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>

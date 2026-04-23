@@ -52,7 +52,7 @@ export function KanbanPage() {
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Kanban de leads" subtitle="Seu perfil não pode movimentar leads nem alterar roteamento.">
+      <AppLayout title="Quadro de leads" subtitle="Seu perfil não pode movimentar leads nem alterar roteamento.">
         <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-sm">
           <p className="m-0">Entre com um perfil autorizado ou peça liberação ao administrador.</p>
         </div>
@@ -62,8 +62,8 @@ export function KanbanPage() {
 
   return (
     <AppLayout
-      title="Kanban de leads"
-      subtitle="Boards e etapas configuráveis por processo comercial."
+      title="Quadro de leads"
+      subtitle="Funis e etapas configuráveis por processo."
       actions={
         <>
           <Link
@@ -71,7 +71,7 @@ export function KanbanPage() {
             className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'inline-flex gap-1.5')}
           >
             <LayoutDashboard className="size-4" />
-            Dashboard
+            Painel
           </Link>
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -88,7 +88,7 @@ export function KanbanPage() {
               {crm.currentPermission.canEditBoards ? (
                 <DropdownMenuItem onClick={() => navigate('/boards')}>
                   <LayoutGrid className="size-4" />
-                  Boards e pipelines
+                  Funis e etapas
                 </DropdownMenuItem>
               ) : null}
               {crm.selectedLeadId ? (
@@ -96,20 +96,20 @@ export function KanbanPage() {
                   onClick={() => navigate(`${CRM_ASSISTANT_PATH}?leadId=${encodeURIComponent(crm.selectedLeadId)}&focus=lead`)}
                 >
                   <Bot className="size-4" />
-                  Assistente IA sobre este lead
+                  Perguntar à assistente sobre este lead
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => crm.simulateMetaCapture()}>
                 <Sparkles className="size-4" />
-                Simular captura na Meta
+                Simular recebimento de contato via Meta
               </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={crm.isLoading || !canSync}
                 onClick={() => void crm.syncFromSupabase()}
               >
                 <RefreshCw className={`size-4 ${crm.isLoading ? 'animate-spin' : ''}`} />
-                {crm.isLoading ? 'Sincronizando…' : 'Sincronizar dados'}
+                {crm.isLoading ? 'Atualizando…' : 'Atualizar dados'}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -143,7 +143,7 @@ export function KanbanPage() {
                   <h2 className="m-0 text-sm font-bold uppercase tracking-widest text-foreground">{stage.name}</h2>
                   {crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id] != null ? (
                     <p className="m-0 text-[10px] uppercase font-bold text-destructive mt-1">
-                      SLA {crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id]} min
+                      Prazo {crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id]} min
                     </p>
                   ) : null}
                 </div>

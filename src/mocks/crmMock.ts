@@ -300,9 +300,9 @@ export const sourceLabel: Record<Lead['source'], string> = {
 }
 
 export const integrationStatus = [
-  { id: 'meta', name: 'Meta Graph API', status: 'Conectado', latency: '420ms' },
-  { id: 'whatsapp', name: 'WhatsApp Cloud API', status: 'Conectado', latency: '350ms' },
-  { id: 'openai', name: 'OpenAI API', status: 'Conectado', latency: '810ms' },
+  { id: 'meta', name: 'Meta (Facebook)', status: 'Conectado', latency: '420ms' },
+  { id: 'whatsapp', name: 'WhatsApp', status: 'Conectado', latency: '350ms' },
+  { id: 'openai', name: 'OpenAI', status: 'Conectado', latency: '810ms' },
 ]
 
 export const initialChannels: ChannelConfig[] = [
@@ -400,7 +400,7 @@ export const initialWorkflowFields: WorkflowField[] = [
   {
     id: 'core-score',
     fieldKey: 'score',
-    label: 'Score',
+    label: 'Pontuação',
     fieldType: 'number',
     required: false,
     options: [],
@@ -412,7 +412,7 @@ export const initialWorkflowFields: WorkflowField[] = [
   {
     id: 'core-temp',
     fieldKey: 'temperature',
-    label: 'Temperatura',
+    label: 'Interesse',
     fieldType: 'select',
     required: false,
     options: ['cold', 'warm', 'hot'],

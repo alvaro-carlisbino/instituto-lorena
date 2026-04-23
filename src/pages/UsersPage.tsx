@@ -21,7 +21,7 @@ type PwDraft = { password: string; confirm: string; visible: boolean }
 const ROLE_OPTIONS = [
   { value: 'admin', label: 'Administrador' },
   { value: 'gestor', label: 'Gestor comercial' },
-  { value: 'sdr', label: 'SDR / Atendimento' },
+  { value: 'sdr', label: 'Atendente' },
 ] as const
 
 export function UsersPage() {

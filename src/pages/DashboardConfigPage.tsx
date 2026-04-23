@@ -24,12 +24,12 @@ export function DashboardConfigPage() {
   return (
     <AppLayout
       title="Configuração do dashboard"
-      subtitle="Escolha títulos, métricas e ordem dos cards — tudo por listas e números, sem JSON."
+      subtitle="Escolha títulos, métricas e ordem dos cards de forma simples."
     >
       <Card className="mb-4 border-border/80 shadow-sm">
         <CardContent className="pt-4">
           <CardDescription className="text-sm leading-relaxed text-muted-foreground">
-            Cada card mostra um número ligado a uma métrica. A grelha abaixo reserva-se para quando o dashboard passar a usar posições fixas no ecrã (opcional).
+            Cada card mostra um número associado a um indicador. A grade de posições abaixo é opcional.
           </CardDescription>
         </CardContent>
       </Card>
@@ -70,7 +70,7 @@ export function DashboardConfigPage() {
                           'channels-active',
                           ...crm.metrics.map((m) => m.id),
                         ].includes(card.metricKey) ? null : (
-                          <option value={card.metricKey}>Métrica atual ({card.metricKey})</option>
+                          <option value={card.metricKey}>Métrica atual</option>
                         )}
                         <option value="leads-active">Leads ativos (contagem)</option>
                         <option value="leads-hot">Leads quentes</option>
@@ -93,7 +93,7 @@ export function DashboardConfigPage() {
                       Mostrar no dashboard
                     </label>
                     <div className="sm:col-span-2">
-                      <Label className="mb-2 block text-xs font-medium text-muted-foreground">Posição (grelha reservada)</Label>
+                      <Label className="mb-2 block text-xs font-medium text-muted-foreground">Posição na tela (opcional)</Label>
                       <WidgetLayoutEditor
                         layout={card.layout ?? {}}
                         helpId={`dash-layout-help-${card.id}`}

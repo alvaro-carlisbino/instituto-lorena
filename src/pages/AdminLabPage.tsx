@@ -38,12 +38,12 @@ export function AdminLabPage() {
 
   const handleTestWebhook = () => {
     if (!isSupabaseConfigured || !supabase) {
-      toast.error('Configure VITE_SUPABASE_URL e a chave anon no .env')
+      toast.error('Sistema não configurado. Contate o suporte técnico.')
       return
     }
     const secret = import.meta.env.VITE_CRM_WEBHOOK_SECRET?.trim()
     if (!secret) {
-      toast.error('Defina VITE_CRM_WEBHOOK_SECRET (mesmo valor que CRM_WEBHOOK_SECRET no Supabase)')
+      toast.error('Configuração de segurança ausente. Contate o suporte técnico.')
       return
     }
     setWebhookSending(true)
@@ -67,10 +67,10 @@ export function AdminLabPage() {
           toast.error(d.error)
           return
         }
-        toast.success(`Lead ${d.status === 'updated' ? 'atualizado' : 'criado'}: ${d.leadId ?? '—'}`)
+        toast.success(d.status === 'updated' ? 'Lead atualizado com sucesso.' : 'Lead criado com sucesso.')
         await crm.syncFromSupabase()
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Falha na chamada')
+        toast.error(e instanceof Error ? e.message : 'Falha na comunicação. Tente novamente.')
       } finally {
         setWebhookSending(false)
       }
@@ -79,7 +79,7 @@ export function AdminLabPage() {
 
   if (!crm.currentPermission.canManageUsers) {
     return (
-      <AppLayout title="Admin Lab" subtitle="Sem permissão para rotas administrativas.">
+      <AppLayout title="Ferramentas" subtitle="Você não tem permissão para acessar esta área.">
         <Card className="shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
             <p className="m-0">Apenas administradores podem acessar esta área.</p>
@@ -90,40 +90,40 @@ export function AdminLabPage() {
   }
 
   return (
-    <AppLayout title="Admin Lab" subtitle="Ferramentas de suporte para homologação e manutenção.">
+    <AppLayout title="Ferramentas" subtitle="Ferramentas de suporte e manutenção do sistema.">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">Seed de dados</CardTitle>
-            <CardDescription>Popula usuários, pipelines e configurações iniciais para homologação.</CardDescription>
+            <CardTitle className="text-base">Dados de exemplo</CardTitle>
+            <CardDescription>Cria usuários, funis e configurações iniciais para teste.</CardDescription>
           </CardHeader>
           <CardFooter>
             <Button type="button" onClick={() => void crm.seedSupabase()} disabled={crm.isLoading}>
-              Seed dados
+              Carregar dados de exemplo
             </Button>
           </CardFooter>
         </Card>
 
         <Card className="shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">Usuários auth de teste</CardTitle>
-            <CardDescription>Cria usuários padrão de SDR para demos controladas.</CardDescription>
+            <CardTitle className="text-base">Usuários de teste para demonstração</CardTitle>
+            <CardDescription>Cria usuários de demonstração para a equipe de atendimento.</CardDescription>
           </CardHeader>
           <CardFooter>
             <Button type="button" variant="outline" onClick={() => void crm.createTestAuthUsers()} disabled={crm.isLoading}>
-              Criar auth teste
+              Criar usuário de teste
             </Button>
           </CardFooter>
         </Card>
 
         <Card className="shadow-sm lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">Replay webhook</CardTitle>
-            <CardDescription>Dispara replay manual para a fila de webhooks.</CardDescription>
+            <CardTitle className="text-base">Reprocessar mensagens</CardTitle>
+            <CardDescription>Reprocessa manualmente as mensagens que ficaram na fila.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <Button type="button" variant="outline" onClick={() => void crm.runWebhookReplay()} disabled={crm.isLoading}>
-              Reprocessar webhook
+              Reprocessar mensagens
             </Button>
             <ul className="divide-y divide-border rounded-lg border border-border">
               {crm.queueJobs.slice(0, 10).map((job) => (
@@ -133,7 +133,7 @@ export function AdminLabPage() {
                     <p className="m-0 text-xs text-muted-foreground">{new Date(job.createdAt).toLocaleString('pt-BR')}</p>
                     <p className="m-0 text-sm text-muted-foreground">{job.note}</p>
                   </div>
-                  <Badge className={cn('shrink-0 border', jobStatusClass(job.status))}>{job.status}</Badge>
+                  <Badge className={cn('shrink-0 border', jobStatusClass(job.status))}>{job.status === 'queued' ? 'Aguardando' : job.status === 'processing' ? 'Processando' : job.status === 'retry' ? 'Tentando novamente' : job.status === 'done' ? 'Concluído' : job.status}</Badge>
                 </li>
               ))}
             </ul>
@@ -143,7 +143,7 @@ export function AdminLabPage() {
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Sincronização</CardTitle>
-            <CardDescription>Força leitura completa do estado atual do Supabase.</CardDescription>
+            <CardDescription>Atualiza todos os dados do sistema.</CardDescription>
           </CardHeader>
           <CardFooter>
             <Button type="button" variant="outline" onClick={() => void crm.syncFromSupabase()} disabled={crm.isLoading}>
@@ -154,10 +154,9 @@ export function AdminLabPage() {
 
         <Card className="shadow-sm lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">Testar webhook de ingestão</CardTitle>
+            <CardTitle className="text-base">Testar recebimento de novo contato</CardTitle>
             <CardDescription>
-              Envia POST para a Edge Function <code className="text-xs">crm-ingest-webhook</code> com o segredo em{' '}
-              <code className="text-xs">VITE_CRM_WEBHOOK_SECRET</code> (não comitar em repositórios públicos).
+              Simula o recebimento de um novo contato com os dados preenchidos abaixo. Use apenas em ambiente de teste.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -194,7 +193,7 @@ export function AdminLabPage() {
               onClick={handleTestWebhook}
               disabled={webhookSending || crm.isLoading}
             >
-              {webhookSending ? 'Enviando…' : 'Enviar payload de teste'}
+              {webhookSending ? 'Enviando…' : 'Simular envio'}
             </Button>
           </CardFooter>
         </Card>

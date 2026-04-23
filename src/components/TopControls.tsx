@@ -18,7 +18,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar'
 
 export function TopControls() {
   const crm = useCrm()
-  const email = crm.session?.user.email ?? 'Sem sessão'
+  const email = crm.session?.user.email ?? 'Não conectado'
 
   const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
 
@@ -56,7 +56,7 @@ export function TopControls() {
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs text-muted-foreground">Perfil</span>
-                <span className="text-sm font-medium capitalize">{crm.currentPermission.role}</span>
+                <span className="text-sm font-medium">{crm.currentPermission.role === 'sdr' ? 'Atendente' : crm.currentPermission.role === 'gestor' ? 'Gestor' : 'Administrador'}</span>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -77,7 +77,7 @@ export function TopControls() {
           onClick={() => void crm.syncFromSupabase()}
         >
           <RefreshCw className={`size-3.5 ${crm.isLoading ? 'animate-spin' : ''}`} />
-          {crm.isLoading ? 'Sincronizando…' : 'Sincronizar'}
+          {crm.isLoading ? 'Atualizando…' : 'Atualizar'}
         </Button>
 
         {(crm.currentPermission.canManageUsers || import.meta.env.DEV) && (
@@ -102,11 +102,11 @@ export function TopControls() {
                     <span className="text-[11px] font-bold uppercase tracking-widest text-foreground">Ajustes Operacionais</span>
                   </div>
                   <p className="flex items-center justify-between text-xs font-mono uppercase">
-                    <span className="font-bold text-foreground">Modo de dados:</span>
-                    <span className="bg-muted px-2 py-0.5 text-foreground">{crm.dataMode}</span>
+                    <span className="font-bold text-foreground">Origem dos dados:</span>
+                    <span className="bg-muted px-2 py-0.5 text-foreground">{crm.dataMode === 'supabase' ? 'Tempo real' : 'Demonstração'}</span>
                   </p>
                   <label className="flex cursor-pointer items-center justify-between text-xs font-bold uppercase">
-                    <span>Preview de perfil</span>
+                    <span>Simular perfil</span>
                     <input
                       type="checkbox"
                       className="size-4 rounded-none border-2 border-input"
@@ -115,21 +115,21 @@ export function TopControls() {
                     />
                   </label>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold uppercase text-foreground">Atuar como:</span>
+                    <span className="text-xs font-bold uppercase text-foreground">Ver como:</span>
                     <select
                       className="h-8 rounded-none border-2 border-input bg-background px-2 text-xs font-bold uppercase text-foreground focus-visible:ring-0"
                       value={crm.actingRole}
                       onChange={(event) => crm.setActingRole(event.target.value as 'admin' | 'gestor' | 'sdr')}
                       disabled={!crm.useRolePreview}
                     >
-                      <option value="admin">admin</option>
-                      <option value="gestor">gestor</option>
-                      <option value="sdr">sdr</option>
+                      <option value="admin">Administrador</option>
+                      <option value="gestor">Gestor</option>
+                      <option value="sdr">Atendente</option>
                     </select>
                   </div>
                   <p className="flex items-center justify-between pt-2 border-t-2 border-border border-dashed text-xs font-mono uppercase">
-                    <span className="font-bold text-foreground">Efetivo:</span>
-                    <span className="bg-primary text-primary-foreground px-2 py-0.5">{crm.effectiveRole}</span>
+                    <span className="font-bold text-foreground">Perfil ativo:</span>
+                    <span className="bg-primary text-primary-foreground px-2 py-0.5">{crm.effectiveRole === 'sdr' ? 'Atendente' : crm.effectiveRole === 'gestor' ? 'Gestor' : 'Administrador'}</span>
                   </p>
                   {crm.syncNotice ? (
                     <NoticeBanner message={crm.syncNotice} variant={noticeVariantFromMessage(crm.syncNotice)} />

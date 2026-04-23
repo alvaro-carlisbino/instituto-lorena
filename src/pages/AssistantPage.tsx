@@ -90,7 +90,7 @@ export function AssistantPage() {
   const deleteThread = async (e: React.MouseEvent, id: string) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!confirm('Eliminar esta conversa? Esta ação não pode ser anulada.')) return
+    if (!confirm('Excluir esta conversa? Esta ação não pode ser desfeita.')) return
     const ok = await deleteAssistantThread(id)
     if (!ok) return
     if (threadIdParam === id) setThreadId(undefined)
@@ -102,15 +102,15 @@ export function AssistantPage() {
   return (
     <AppLayout
       title="Assistente CRM"
-      subtitle="Pergunta sobre contactos, equipa e resultados. As respostas usam só a informação a que tens acesso no CRM."
+      subtitle="Pergunte sobre contatos, equipe e resultados. As respostas usam só a informação que você tem acesso."
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,19rem)_1fr]">
         <div className="flex flex-col gap-4">
           <Card className="h-fit border-border shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">Como queres perguntar</CardTitle>
+              <CardTitle className="text-sm font-semibold">Como você quer perguntar</CardTitle>
               <CardDescription className="text-xs leading-relaxed">
-                Isto orienta o assistente: visão geral, números da semana, ou uma pessoa em concreto quando estás a falar de alguém do quadro.
+                Isto orienta o assistente: visão geral, números da semana, ou uma pessoa em concreto quando está falando de alguém do quadro.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
@@ -131,15 +131,15 @@ export function AssistantPage() {
               </div>
               {leadIdParam ? (
                 <div className="rounded-md border border-border bg-muted/30 p-3 text-xs">
-                  <p className="m-0 font-medium text-foreground">Estás a falar desta pessoa</p>
-                  <p className="mt-1 m-0 text-sm text-foreground">{leadName ?? 'Contacto sem nome'}</p>
+                  <p className="m-0 font-medium text-foreground">Está falando desta pessoa</p>
+                  <p className="mt-1 m-0 text-sm text-foreground">{leadName ?? 'Contato sem nome'}</p>
                   <Button variant="link" size="sm" className="h-auto px-0 text-xs" onClick={() => navigate('/assistente')}>
-                    Voltar a perguntar sobre o CRM todo
+                    Voltar a perguntar sobre todos os leads
                   </Button>
                 </div>
               ) : (
                 <p className="m-0 text-xs text-muted-foreground leading-relaxed">
-                  Se abrires o assistente a partir de um contacto no Kanban, essa pessoa aparece aqui e as respostas centram-se nela.
+                  Se você abrir o assistente a partir de um contato no Kanban, essa pessoa aparece aqui e as respostas centram-se nela.
                 </p>
               )}
             </CardContent>
@@ -153,7 +153,7 @@ export function AssistantPage() {
                   Histórico
                 </CardTitle>
                 <CardDescription className="text-xs leading-relaxed">
-                  As conversas anteriores ficam aqui. «Nova conversa» começa um tópico limpo à direita.
+                  As conversas anteriores ficam aqui. "Nova conversa" inicia uma conversa limpa à direita.
                 </CardDescription>
                 <Button
                   type="button"
@@ -168,7 +168,7 @@ export function AssistantPage() {
               </CardHeader>
               <CardContent className="pt-0">
                 {threads.length === 0 ? (
-                  <p className="m-0 text-xs text-muted-foreground">Ainda não há conversas guardadas.</p>
+                  <p className="m-0 text-xs text-muted-foreground">Ainda não há conversas salvas.</p>
                 ) : (
                   <ScrollArea className="h-[min(20rem,40vh)] pr-2">
                     <ul className="m-0 list-none space-y-1 p-0">

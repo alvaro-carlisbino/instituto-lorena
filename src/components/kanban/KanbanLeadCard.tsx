@@ -84,7 +84,7 @@ export function KanbanLeadCard({
       {isSlaBreached && (
         <div className="mb-2 w-full bg-destructive/10 text-destructive text-[10px] uppercase font-bold tracking-widest px-2 py-1 rounded-sm border border-destructive/20 flex items-center gap-1">
           <span className="size-2 rounded-full bg-destructive animate-pulse" />
-          SLA ESTOURADO ({elapsedMinutes - (slaMinutes ?? 0)}m)
+          PRAZO EXCEDIDO ({elapsedMinutes - (slaMinutes ?? 0)}m)
         </div>
       )}
       <div className="flex items-start justify-between gap-2">
@@ -104,8 +104,8 @@ export function KanbanLeadCard({
       <div className="flex justify-between text-xs text-muted-foreground">
         <span>
           {kanbanFields.some((f) => f.fieldKey === 'score')
-            ? `Score ${getLeadFieldValue(lead, 'score') ?? lead.score}`
-            : `Score ${lead.score}`}
+            ? `Pontuação ${getLeadFieldValue(lead, 'score') ?? lead.score}`
+            : `Pontuação ${lead.score}`}
         </span>
         <span>{ownerName}</span>
       </div>

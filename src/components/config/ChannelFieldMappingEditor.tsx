@@ -6,11 +6,11 @@ import { Label } from '@/components/ui/label'
 import type { WorkflowField } from '@/mocks/crmMock'
 
 const CORE_LEAD_FIELDS: { key: string; label: string }[] = [
-  { key: 'patient_name', label: 'Nome do contacto' },
+  { key: 'patient_name', label: 'Nome do contato' },
   { key: 'phone', label: 'Telefone' },
   { key: 'source', label: 'Origem' },
   { key: 'summary', label: 'Resumo' },
-  { key: 'temperature', label: 'Temperatura' },
+  { key: 'temperature', label: 'Interesse' },
   { key: 'score', label: 'Pontuação' },
 ]
 
@@ -66,10 +66,10 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
     const next = mappingFromRows(rows)
     const invalid = rows.some((r) => r.fieldKey.trim() && !r.path.trim())
     if (invalid) {
-      setMessage('Cada campo escolhido precisa de um caminho no payload (texto à direita).')
+      setMessage('Cada campo escolhido precisa de um caminho no dado recebido (texto à direita).')
       return
     }
-    setMessage('Mapeamento guardado.')
+    setMessage('Mapeamento salvo.')
     onApply(next)
   }
 
@@ -100,7 +100,7 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
               </select>
             </div>
             <div className="grid min-w-0 flex-[2] gap-1">
-              <Label className="text-xs">Caminho no payload</Label>
+              <Label className="text-xs">Caminho no dado recebido</Label>
               <Input
                 value={row.path}
                 onChange={(e) => setRows((prev) => prev.map((r, i) => (i === index ? { ...r, path: e.target.value } : r)))}
@@ -131,7 +131,7 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
           Adicionar linha
         </Button>
         <Button type="button" size="sm" onClick={apply}>
-          Guardar mapeamento
+          Salvar mapeamento
         </Button>
       </div>
       {message ? <p className="m-0 text-xs text-muted-foreground">{message}</p> : null}

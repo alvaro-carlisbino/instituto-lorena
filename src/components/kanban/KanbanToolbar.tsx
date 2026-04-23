@@ -44,7 +44,7 @@ export function KanbanToolbar({
       <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <Select value={pipelineId} onValueChange={(v) => v && onPipelineChange(v)}>
           <SelectTrigger className="w-full min-w-[12rem] sm:w-[min(100%,13rem)] rounded-none border-foreground/20 uppercase tracking-widest font-bold text-xs" size="default">
-            <SelectValue placeholder="Pipeline" />
+            <SelectValue placeholder="Funil" />
           </SelectTrigger>
           <SelectContent>
             {pipelineOptions.map((pipeline) => (
@@ -57,10 +57,10 @@ export function KanbanToolbar({
 
         <Select value={ownerFilter} onValueChange={(v) => v && onOwnerChange(v)}>
           <SelectTrigger className="w-full min-w-[12rem] sm:w-[min(100%,11rem)] rounded-none border-foreground/20 uppercase tracking-widest font-bold text-[10px]" size="default">
-            <SelectValue placeholder="SDR/Médico" />
+            <SelectValue placeholder="Responsável" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">SDR: TODOS</SelectItem>
+            <SelectItem value="all">Todos</SelectItem>
             {ownerOptions.map((owner) => (
               <SelectItem key={owner.id} value={owner.id}>
                 {owner.name}

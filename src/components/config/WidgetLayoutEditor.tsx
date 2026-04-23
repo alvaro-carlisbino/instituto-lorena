@@ -24,14 +24,14 @@ type Props = {
   helpId: string
 }
 
-/** Controlo simples da grelha do painel TV (sem JSON). */
+/** Controle simples da grade do painel TV. */
 export function WidgetLayoutEditor({ layout, onLayoutChange, helpId }: Props) {
   const { mode, col, row, span } = readLayout(layout)
 
   return (
     <div className="grid gap-3 rounded-lg border border-border/80 bg-muted/20 p-3">
       <p id={helpId} className="text-xs text-muted-foreground">
-        Na grelha de 12 colunas, defina em que célula o widget aparece. Em modo automático, o painel reparte o espaço sozinho.
+        Na grade de 12 colunas, defina em que célula o bloco aparece. Em modo automático, o painel reparte o espaço sozinho.
       </p>
       <div className="grid gap-2">
         <Label className="text-xs font-medium">Posição no painel</Label>
@@ -45,7 +45,7 @@ export function WidgetLayoutEditor({ layout, onLayoutChange, helpId }: Props) {
           }}
         >
           <option value="auto">Automático (reparte o espaço)</option>
-          <option value="grid">Grelha personalizada (12 colunas)</option>
+          <option value="grid">Grade personalizada (12 colunas)</option>
         </select>
       </div>
       {mode === 'grid' ? (

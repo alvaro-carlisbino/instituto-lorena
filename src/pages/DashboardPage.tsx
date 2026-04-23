@@ -77,7 +77,7 @@ export function DashboardPage() {
           {crm.currentPermission.canRouteLeads ? (
             <Link to="/kanban" className={cn(buttonVariants({ size: 'sm' }), 'inline-flex gap-1.5')}>
               <KanbanSquare className="size-4" />
-              Abrir Kanban
+              Abrir quadro
             </Link>
           ) : null}
           <DropdownMenu>
@@ -138,7 +138,7 @@ export function DashboardPage() {
         <Card className="shadow-none border-border rounded-none lg:col-span-8">
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-4 border-b border-border/50 pb-4 bg-muted/20">
             <div className="space-y-1">
-              <CardTitle className="text-sm uppercase tracking-widest">Pipeline de Triagem</CardTitle>
+              <CardTitle className="text-sm uppercase tracking-widest">Funil de Triagem</CardTitle>
               <CardDescription className="text-xs">Visualização do fluxo clínico no estágio atual</CardDescription>
             </div>
             <Select
@@ -148,7 +148,7 @@ export function DashboardPage() {
               }}
             >
               <SelectTrigger className="w-[min(100%,16rem)] rounded-none border-foreground/20 font-medium" size="sm">
-                <SelectValue placeholder="Pipeline" />
+                <SelectValue placeholder="Funil" />
               </SelectTrigger>
               <SelectContent className="rounded-none font-medium">
                 {crm.pipelineCatalog.map((pipeline) => (
@@ -164,7 +164,7 @@ export function DashboardPage() {
               <EmptyState
                 icon={LayoutListIcon}
                 title="Nenhuma etapa configurada"
-                description="Adicione etapas ao pipeline em 'Boards e pipelines'."
+                description="Adicione etapas ao funil em 'Funis e etapas'."
                 className="py-4"
               />
             ) : (
@@ -188,14 +188,14 @@ export function DashboardPage() {
 
         <Card className="shadow-none border-border rounded-none lg:col-span-4 bg-primary text-primary-foreground border-transparent">
           <CardHeader className="border-b border-primary-foreground/10 pb-4">
-            <CardTitle className="text-sm uppercase tracking-widest text-primary-foreground/90">Workload da Equipe</CardTitle>
+            <CardTitle className="text-sm uppercase tracking-widest text-primary-foreground/90">Carga da equipe</CardTitle>
             <CardDescription className="text-xs text-primary-foreground/70">Distribuição direta de responsabilidade</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             {crm.workloadBySdr.length === 0 ? (
               <EmptyState
                 icon={UsersIcon}
-                title="Nenhum SDR ativo"
+                title="Nenhum atendente ativo"
                 description="Adicione membros à equipe e atribua leads."
                 className="py-8 text-primary-foreground [&_p]:text-primary-foreground/70 [&_*]:text-primary-foreground/70"
               />

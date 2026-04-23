@@ -93,8 +93,8 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <NavItem to="/dashboard" label="Dashboard" icon={LayoutDashboard} />
-              <NavItem to="/kanban" label="Kanban" icon={KanbanSquare} />
+              <NavItem to="/dashboard" label="Painel" icon={LayoutDashboard} />
+              <NavItem to="/kanban" label="Quadro de leads" icon={KanbanSquare} />
               <NavItem to="/historico" label="Histórico" icon={History} />
               <NavItem to="/assistente" label="Assistente IA" icon={Bot} />
             </SidebarMenu>
@@ -109,7 +109,7 @@ export function AppSidebar() {
             <SidebarMenu>
               <NavItem to="/canais" label="Canais" icon={Radio} />
               <NavItem to="/metricas" label="Métricas" icon={BarChart3} />
-              {showBoards ? <NavItem to="/boards" label="Boards" icon={LayoutGrid} /> : null}
+              {showBoards ? <NavItem to="/boards" label="Funis" icon={LayoutGrid} /> : null}
               {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table2} /> : null}
             </SidebarMenu>
           </SidebarGroupContent>
@@ -123,7 +123,7 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu>
                 {showDashboardConfig ? (
-                  <NavItem to="/dashboard-config" label="Dashboard" icon={SlidersHorizontal} />
+                  <NavItem to="/dashboard-config" label="Painel" icon={SlidersHorizontal} />
                 ) : null}
                 <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
               </SidebarMenu>
@@ -140,7 +140,7 @@ export function AppSidebar() {
               <SidebarMenu>
                 <NavItem to="/usuarios" label="Usuários" icon={Users} />
                 <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
-                <NavItem to="/admin-lab" label="Admin Lab" icon={FlaskConical} />
+                <NavItem to="/admin-lab" label="Ferramentas" icon={FlaskConical} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -176,7 +176,7 @@ export function AppSidebar() {
 
       <SidebarSeparator />
       <SidebarFooter className="px-2 pb-4 text-[10px] leading-relaxed text-sidebar-foreground/55 group-data-[collapsible=icon]:hidden">
-        {APP_ENV_BADGE} · CRM Clínico
+        {APP_ENV_BADGE} · Gestão da Clínica
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

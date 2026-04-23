@@ -82,14 +82,14 @@ export function CommandPalette() {
             onSelect={() => go('/dashboard')}
           >
             <LayoutDashboard className="size-4 shrink-0 opacity-70" />
-            Dashboard
+            Painel
           </Command.Item>
           <Command.Item
             className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
             onSelect={() => go('/kanban')}
           >
             <KanbanSquare className="size-4 shrink-0 opacity-70" />
-            Kanban
+            Quadro de leads
           </Command.Item>
           <Command.Item
             className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
@@ -104,7 +104,7 @@ export function CommandPalette() {
             onSelect={goAiAssistant}
           >
             <Bot className="size-4 shrink-0 opacity-70" />
-            Assistente CRM (GLM)
+            Assistente
           </Command.Item>
         </Command.Group>
 
@@ -129,7 +129,7 @@ export function CommandPalette() {
               onSelect={() => go('/boards')}
             >
               <LayoutGrid className="size-4 shrink-0 opacity-70" />
-              Boards
+              Funis
             </Command.Item>
           ) : null}
           {showBoards ? (
@@ -138,7 +138,7 @@ export function CommandPalette() {
               onSelect={() => go('/visoes')}
             >
               <Table2 className="size-4 shrink-0 opacity-70" />
-              Visões de dados
+              Tabelas de dados
             </Command.Item>
           ) : null}
         </Command.Group>
@@ -150,7 +150,7 @@ export function CommandPalette() {
               onSelect={() => go('/dashboard-config')}
             >
               <SlidersHorizontal className="size-4 shrink-0 opacity-70" />
-              Ajustar dashboard
+              Ajustar painel
             </Command.Item>
           ) : null}
           <Command.Item
@@ -183,7 +183,7 @@ export function CommandPalette() {
               onSelect={() => go('/admin-lab')}
             >
               <FlaskConical className="size-4 shrink-0 opacity-70" />
-              Admin Lab
+              Ferramentas
             </Command.Item>
           </Command.Group>
         ) : null}
@@ -217,7 +217,7 @@ export function CommandPalette() {
             }}
           >
             <RefreshCw className={cn('size-4 shrink-0 opacity-70', crm.isLoading && 'animate-spin')} />
-            Sincronizar dados
+            Atualizar dados
           </Command.Item>
         </Command.Group>
       </Command.List>

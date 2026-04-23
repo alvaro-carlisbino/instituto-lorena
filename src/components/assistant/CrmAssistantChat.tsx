@@ -109,7 +109,7 @@ export function CrmAssistantChat({
           if (!newId) {
             setLoading(false)
             setMessages((prev) => prev.slice(0, -1))
-            setNotice('Não foi possível criar a conversa. Verifica a sessão ou tenta mais tarde.')
+            setNotice('Não foi possível criar a conversa. Verifique a sessão ou tente mais tarde.')
             scrollToEnd()
             return
           }
@@ -118,7 +118,7 @@ export function CrmAssistantChat({
         if (!(await insertAssistantMessage(tid, 'user', trimmed))) {
           setLoading(false)
           setMessages((prev) => prev.slice(0, -1))
-          setNotice('Não foi possível guardar a mensagem.')
+          setNotice('Não foi possível salvar a mensagem.')
           scrollToEnd()
           return
         }
@@ -165,8 +165,8 @@ export function CrmAssistantChat({
       context.leadId != null
         ? 'Olá. Tens contexto do lead em foco. Em 2–3 frases, resume oportunidades e próximos passos recomendados.'
         : context.focus === 'analytics'
-          ? 'Olá. Com base no snapshot desta semana, que padrões ou alertas destacarias para a equipa comercial?'
-          : 'Olá. Em que podes ajudar neste CRM (leads, métricas, semana, churn, scores) com os dados que tens?'
+          ? 'Olá. Com base nos dados desta semana, que padrões ou alertas destacarias para a equipe comercial?'
+          : 'Olá. Em que podes ajudar neste CRM (leads, métricas, semana, churn, pontuações) com os dados que tens?'
     void send(intro)
   }, [context.focus, context.leadId, loading, send])
 
@@ -176,7 +176,7 @@ export function CrmAssistantChat({
         <CardHeader>
           <CardTitle className="text-base font-bold uppercase tracking-widest">Assistente CRM</CardTitle>
           <CardDescription className="text-xs leading-relaxed">
-            O assistente de IA só está disponível com a ligação à base de dados ativa. Pedes ajuda ao administrador se precisares de o ativar.
+            O assistente só está disponível com a conexão ao banco de dados ativa. Peça ajuda ao administrador se precisar ativá-lo.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -191,7 +191,7 @@ export function CrmAssistantChat({
           Conversa
         </CardTitle>
         <CardDescription className="text-xs leading-relaxed">
-          Cada mensagem usa os dados mais recentes do CRM, de acordo com o teu acesso. O histórico guarda-se na tua conta. Enter envia;
+          Cada mensagem usa os dados mais recentes do CRM, de acordo com o teu acesso. O histórico é salvo na sua conta. Enter envia;
           Shift+Enter para nova linha.
         </CardDescription>
         <div className="flex flex-wrap items-center gap-3 pt-2">

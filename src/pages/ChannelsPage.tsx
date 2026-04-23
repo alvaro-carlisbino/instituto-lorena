@@ -19,7 +19,7 @@ const DRIVER_OPTIONS = [
   { value: 'manual', label: 'Manual (sem sistema externo)' },
   { value: 'meta', label: 'Meta (Facebook / Instagram)' },
   { value: 'whatsapp', label: 'WhatsApp' },
-  { value: 'webhook', label: 'Webhook (URL própria)' },
+  { value: 'webhook', label: 'Link externo (URL)' },
 ] as const
 
 export function ChannelsPage() {
@@ -48,7 +48,7 @@ export function ChannelsPage() {
   return (
     <AppLayout
       title="Canais configuráveis"
-      subtitle="Ative canais, prioridade, SLA e ligação aos dados do lead — sem JSON, só listas e texto."
+      subtitle="Ative canais, prioridade, prazo e conexão dos campos do lead."
     >
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={() => { crm.addChannel(); toast.success('Canal criado.') }}>
@@ -59,8 +59,8 @@ export function ChannelsPage() {
       <Card className="mb-4 border-border/80 shadow-sm">
         <CardContent className="pt-4">
           <CardDescription className="text-sm leading-relaxed text-muted-foreground">
-            O mapeamento diz ao sistema de onde ler cada informação quando o canal recebe um evento (por exemplo um webhook).
-            Preencha o caminho como texto simples; a equipa técnica pode indicar o formato exacto.
+            Define qual informação do contato será preenchida automaticamente quando o canal receber uma mensagem.
+            Preencha o caminho como texto simples; a equipe técnica pode indicar o formato exato.
           </CardDescription>
         </CardContent>
       </Card>
@@ -91,7 +91,7 @@ export function ChannelsPage() {
               </CardHeader>
               <CardContent className="grid gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor={`sla-${channel.id}`}>SLA (min)</Label>
+                  <Label htmlFor={`sla-${channel.id}`}>Prazo (min)</Label>
                   <Input
                     id={`sla-${channel.id}`}
                     type="number"
@@ -141,7 +141,7 @@ export function ChannelsPage() {
                   </Select>
                 </div>
                 <div className="grid gap-2">
-                  <Label>Ligação dos dados (mapeamento)</Label>
+                  <Label>Conexão dos campos</Label>
                   <ChannelFieldMappingEditor
                     key={`${channel.id}-${JSON.stringify(channel.fieldMapping ?? {})}`}
                     channelId={channel.id}
@@ -151,11 +151,11 @@ export function ChannelsPage() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Identificador da credencial no ambiente</Label>
+                  <Label>Nome da configuração de acesso</Label>
                   <Input
                     value={channel.credentialsRef}
                     onChange={(event) => crm.updateChannel(channel.id, { credentialsRef: event.target.value })}
-                    placeholder="Só preencha se a equipa técnica indicar (ex.: nome da variável)"
+                    placeholder="Preencha apenas se a equipe técnica orientar"
                   />
                 </div>
                 <Button type="button" variant="destructive" size="sm" className="w-fit" onClick={() => setDeleteTarget({ id: channel.id, name: channel.name })}>

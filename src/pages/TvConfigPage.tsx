@@ -29,7 +29,7 @@ export function TvConfigPage() {
       <Card className="mb-4 border-border/80 shadow-sm">
         <CardContent className="pt-4 text-sm text-muted-foreground">
           <CardDescription className="text-sm leading-relaxed text-muted-foreground">
-            O painel TV usa uma grelha de 12 colunas quando algum widget está em modo &quot;Grelha personalizada&quot;. Os números são coluna, linha e quantas colunas o widget ocupa.
+            O painel organiza os blocos em uma grade de 12 colunas. A posição de cada bloco é definida pela coluna, linha e largura.
           </CardDescription>
         </CardContent>
       </Card>
@@ -78,7 +78,7 @@ export function TvConfigPage() {
                         onChange={(event) => crm.updateTvWidget(widget.id, { metricKey: event.target.value })}
                       >
                         {crm.metrics.some((m) => m.id === widget.metricKey) ? null : (
-                          <option value={widget.metricKey}>Métrica atual ({widget.metricKey})</option>
+                          <option value={widget.metricKey}>Métrica atual</option>
                         )}
                         {crm.metrics.map((m) => (
                           <option key={m.id} value={m.id}>
@@ -97,7 +97,7 @@ export function TvConfigPage() {
                       Mostrar este widget no painel
                     </label>
                     <div className="sm:col-span-2">
-                      <Label className="mb-2 block text-xs font-medium text-muted-foreground">Posição na grelha</Label>
+                      <Label className="mb-2 block text-xs font-medium text-muted-foreground">Posição na tela</Label>
                       <WidgetLayoutEditor
                         layout={widget.layout ?? {}}
                         helpId={`tv-layout-help-${widget.id}`}

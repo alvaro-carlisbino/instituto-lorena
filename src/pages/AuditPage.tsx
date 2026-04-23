@@ -22,6 +22,23 @@ const ACTION_ICON: Record<string, typeof PlusCircleIcon> = {
   DELETE: MinusCircleIcon,
 }
 
+const ACTION_LABEL: Record<string, string> = {
+  INSERT: 'Criado',
+  UPDATE: 'Atualizado',
+  DELETE: 'Removido',
+}
+
+const FRIENDLY_TABLE: Record<string, string> = {
+  leads: 'Leads',
+  interactions: 'Interações',
+  channels: 'Canais',
+  users: 'Usuários',
+  profiles: 'Perfis',
+  settings: 'Configurações',
+  workflow_fields: 'Campos personalizados',
+  capture_submissions: 'Formulários',
+}
+
 export function AuditPage() {
   const crm = useCrm()
   const [actionFilter, setActionFilter] = useState<'all' | 'INSERT' | 'UPDATE' | 'DELETE'>('all')
@@ -64,7 +81,7 @@ export function AuditPage() {
   const totalPages = Math.max(1, Math.ceil(crm.auditTotal / pageSize))
 
   return (
-    <AppLayout title="Auditoria" subtitle="Eventos reais do banco com filtros e paginação no servidor.">
+    <AppLayout title="Auditoria" subtitle="Registro de ações realizadas no sistema.">
       <Card className="shadow-sm">
         <CardContent className="space-y-4 pt-6">
           <div className="flex flex-wrap items-center gap-2">
@@ -80,9 +97,9 @@ export function AuditPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas ações</SelectItem>
-                <SelectItem value="INSERT">INSERT</SelectItem>
-                <SelectItem value="UPDATE">UPDATE</SelectItem>
-                <SelectItem value="DELETE">DELETE</SelectItem>
+                <SelectItem value="INSERT">Criação</SelectItem>
+                <SelectItem value="UPDATE">Atualização</SelectItem>
+                <SelectItem value="DELETE">Remoção</SelectItem>
               </SelectContent>
             </Select>
 
@@ -97,10 +114,10 @@ export function AuditPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todas tabelas</SelectItem>
+                <SelectItem value="all">Todos os tipos</SelectItem>
                 {uniqueTables.map((table) => (
                   <SelectItem key={table} value={table}>
-                    {table}
+                    {FRIENDLY_TABLE[table] ?? table}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -170,13 +187,12 @@ export function AuditPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="m-0 font-medium">{event.actorEmail ?? 'sistema'}</p>
                         <Badge variant={ACTION_VARIANT[event.action] ?? 'outline'} className="text-[10px] uppercase tracking-widest font-bold">
-                          {event.action}
+                          {ACTION_LABEL[event.action] ?? event.action}
                         </Badge>
                       </div>
                       <p className="m-0 text-xs text-muted-foreground">
-                        {event.targetTable} · {new Date(event.createdAt).toLocaleString('pt-BR')}
+                        {FRIENDLY_TABLE[event.targetTable] ?? event.targetTable} · {new Date(event.createdAt).toLocaleString('pt-BR')}
                       </p>
-                      <p className="m-0 text-xs text-muted-foreground">ID alvo: {event.targetId ?? 'n/a'}</p>
                     </div>
                   </li>
                 )

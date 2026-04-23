@@ -18,7 +18,7 @@ function layoutStyle(layout: Record<string, unknown>): CSSProperties {
 
 export function TvDashboardPage() {
   const crm = useCrm()
-  const [tick, setTick] = useState<number>(0)
+  const [, setTick] = useState<number>(0)
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -74,7 +74,7 @@ export function TvDashboardPage() {
           </div>
           <h1 className="m-0 text-3xl font-semibold tracking-tight md:text-4xl">{APP_TV_HEADING}</h1>
           <p className="mt-1 text-xs font-semibold uppercase tracking-widest text-white/55">Painel TV · {APP_ENV_BADGE}</p>
-          <p className="mt-2 text-lg text-white/70">Atualização automática a cada 15 s · ciclo {tick}</p>
+          <p className="mt-2 text-lg text-white/70">Atualização automática a cada 15 segundos</p>
         </div>
       </header>
 
@@ -118,9 +118,9 @@ export function TvDashboardPage() {
       <section className="grid gap-6 xl:grid-cols-[2fr_1fr]">
         {orderedWidgets.some((widget) => widget.widgetType === 'bar') ? (
           <article className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg">
-            <h2 className="m-0 mb-4 text-xl font-semibold text-white">Captacao x qualificacao por hora</h2>
+            <h2 className="m-0 mb-4 text-xl font-semibold text-white">Captação x qualificação por hora</h2>
             {barChartData.length === 0 ? (
-              <p className="text-sm text-white/50">Sem dados de captacao.</p>
+              <p className="text-sm text-white/50">Sem dados de captação.</p>
             ) : (
               <div className="h-[240px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
@@ -141,7 +141,7 @@ export function TvDashboardPage() {
         ) : null}
 
         <article className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg">
-          <h2 className="m-0 mb-4 text-xl font-semibold text-white">Ranking SDR</h2>
+          <h2 className="m-0 mb-4 text-xl font-semibold text-white">Ranking da equipe</h2>
           <ul className="m-0 list-none space-y-3 p-0">
             {crm.workloadBySdr.map((sdr) => (
               <li key={sdr.id} className="flex items-center justify-between gap-4 border-b border-white/5 pb-3 last:border-0">

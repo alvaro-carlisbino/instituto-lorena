@@ -14,6 +14,21 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { workflowFieldsForContext } from '@/lib/leadFields'
 import { cn } from '@/lib/utils'
 
+const CHANNEL_LABEL: Record<string, string> = {
+  whatsapp: 'WhatsApp',
+  email: 'E-mail',
+  phone: 'Telefone',
+  meta_lead: 'Meta',
+  manual: 'Manual',
+  webhook: 'Link externo',
+  in_app: 'No CRM',
+}
+
+const DIRECTION_LABEL: Record<string, string> = {
+  inbound: 'Entrada',
+  outbound: 'Saída',
+}
+
 export function HistoryPage() {
   const crm = useCrm()
   const [searchTerm, setSearchTerm] = useState<string>('')
@@ -125,8 +140,8 @@ export function HistoryPage() {
                           </div>
                           <p className="my-0 mb-4 text-sm leading-relaxed text-foreground/80">{item.content}</p>
                           <div className="flex gap-2">
-                            <Badge variant="outline" className="rounded-none text-[9px] uppercase tracking-widest">{item.channel}</Badge>
-                            <Badge variant="secondary" className="rounded-none text-[9px] uppercase tracking-widest">{item.direction}</Badge>
+                            <Badge variant="outline" className="rounded-none text-[9px] uppercase tracking-widest">{CHANNEL_LABEL[item.channel] ?? item.channel}</Badge>
+                            <Badge variant="secondary" className="rounded-none text-[9px] uppercase tracking-widest">{DIRECTION_LABEL[item.direction] ?? item.direction}</Badge>
                           </div>
                         </li>
                       ))}

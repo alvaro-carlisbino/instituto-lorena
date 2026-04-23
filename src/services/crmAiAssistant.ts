@@ -52,7 +52,7 @@ export async function invokeCrmAiAssistant(params: {
   context?: CrmAiAssistantContext
 }): Promise<CrmAiAssistantResult> {
   if (!supabase) {
-    return { ok: false, error: 'Supabase não configurado.' }
+    return { ok: false, error: 'Sistema não configurado. Contate o administrador.' }
   }
 
   const { data, error } = await supabase.functions.invoke('crm-ai-assistant', {
@@ -84,7 +84,7 @@ export async function invokeCrmAiAssistant(params: {
   if (payload?.ok === false) {
     return {
       ok: false,
-      error: String(payload.error ?? 'Erro no servidor'),
+      error: String(payload.error ?? 'Erro no sistema. Tente novamente em instantes.'),
       detail: detailFromPayload(payload),
     }
   }
@@ -92,7 +92,7 @@ export async function invokeCrmAiAssistant(params: {
   if (payload && 'error' in payload && payload.ok !== true) {
     return {
       ok: false,
-      error: String(payload.error ?? 'Erro no servidor'),
+      error: String(payload.error ?? 'Erro no sistema. Tente novamente em instantes.'),
       detail: detailFromPayload(payload),
     }
   }
@@ -106,23 +106,23 @@ export async function invokeCrmAiAssistant(params: {
     }
     return {
       ok: false,
-      error: error.message || 'Falha ao chamar o assistente.',
+      error: error.message || 'Não foi possível falar com o assistente. Tente novamente.',
       detail,
     }
   }
 
   if (payload?.ok === true && typeof payload.reply === 'string') {
     const reply = payload.reply.trim()
-    if (!reply) return { ok: false, error: 'Resposta vazia do modelo.' }
+    if (!reply) return { ok: false, error: 'O assistente não retornou uma resposta. Tente novamente.' }
     return { ok: true, reply, model: String(payload.model ?? params.model) }
   }
 
   if (data && typeof data === 'object' && 'reply' in data) {
     const d = data as { reply?: string; model?: string }
     const reply = String(d.reply ?? '').trim()
-    if (!reply) return { ok: false, error: 'Resposta vazia do modelo.' }
+    if (!reply) return { ok: false, error: 'O assistente não retornou uma resposta. Tente novamente.' }
     return { ok: true, reply, model: String(d.model ?? params.model) }
   }
 
-  return { ok: false, error: 'Resposta inesperada do servidor.' }
+  return { ok: false, error: 'Erro inesperado. Tente novamente.' }
 }
