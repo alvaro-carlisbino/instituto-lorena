@@ -1,21 +1,23 @@
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
-  BarChart3,
-  Bot,
-  FlaskConical,
-  History,
-  KanbanSquare,
-  LayoutDashboard,
-  LayoutGrid,
+  type Icon,
+  IconContext,
+  ChartBar,
+  ChartLineUp,
+  CirclesThreePlus,
+  ClockCounterClockwise,
+  Flask,
+  Gear,
   Monitor,
   Radio,
-  Settings,
+  Robot,
   Shield,
   SlidersHorizontal,
-  Table2,
-  Tv,
+  SquaresFour,
+  Table,
+  Television,
   Users,
-} from 'lucide-react'
+} from 'phosphor-react'
 
 import { Badge } from '@/components/ui/badge'
 import { BRAND_FAVICON_URL } from '@/config/brandAssets'
@@ -36,7 +38,7 @@ import {
   SidebarSeparator,
 } from '@/components/ui/sidebar'
 
-function NavItem({ to, label, icon: Icon }: { to: string; label: string; icon: typeof LayoutDashboard }) {
+function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon: Icon }) {
   const location = useLocation()
   const isActive = location.pathname === to || location.pathname.startsWith(`${to}/`)
 
@@ -48,7 +50,7 @@ function NavItem({ to, label, icon: Icon }: { to: string; label: string; icon: t
         tooltip={label}
         className="transition-colors data-[active=true]:bg-sidebar-accent/90"
       >
-        <Icon className="size-4 shrink-0" />
+        <NavIcon className="size-[18px] shrink-0 opacity-90" aria-hidden />
         <span>{label}</span>
       </SidebarMenuButton>
     </SidebarMenuItem>
@@ -65,11 +67,12 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" variant="sidebar">
-      <SidebarHeader className="border-b border-sidebar-border">
+      <IconContext.Provider value={{ size: 18, weight: 'regular', mirrored: false }}>
+      <SidebarHeader className="border-b border-sidebar-border/80">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<Link to="/dashboard" />}>
-              <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sidebar-primary/10 p-1 shadow-sm ring-1 ring-sidebar-border/60">
+              <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-sidebar-primary/10 p-1 ring-1 ring-sidebar-border/50">
                 <img src={BRAND_FAVICON_URL} alt="" className="size-full object-contain" />
               </div>
               <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
@@ -93,10 +96,10 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              <NavItem to="/dashboard" label="Painel" icon={LayoutDashboard} />
-              <NavItem to="/kanban" label="Quadro de leads" icon={KanbanSquare} />
-              <NavItem to="/historico" label="Histórico" icon={History} />
-              <NavItem to="/assistente" label="Assistente IA" icon={Bot} />
+              <NavItem to="/dashboard" label="Painel" icon={ChartLineUp} />
+              <NavItem to="/kanban" label="Quadro de leads" icon={SquaresFour} />
+              <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />
+              <NavItem to="/assistente" label="Assistente IA" icon={Robot} />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -108,9 +111,9 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <NavItem to="/canais" label="Canais" icon={Radio} />
-              <NavItem to="/metricas" label="Métricas" icon={BarChart3} />
-              {showBoards ? <NavItem to="/boards" label="Funis" icon={LayoutGrid} /> : null}
-              {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table2} /> : null}
+              <NavItem to="/metricas" label="Métricas" icon={ChartBar} />
+              {showBoards ? <NavItem to="/boards" label="Funis" icon={CirclesThreePlus} /> : null}
+              {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table} /> : null}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -125,7 +128,7 @@ export function AppSidebar() {
                 {showDashboardConfig ? (
                   <NavItem to="/dashboard-config" label="Painel" icon={SlidersHorizontal} />
                 ) : null}
-                <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
+                <NavItem to="/configuracoes" label="Configurações" icon={Gear} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -140,7 +143,7 @@ export function AppSidebar() {
               <SidebarMenu>
                 <NavItem to="/usuarios" label="Usuários" icon={Users} />
                 <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
-                <NavItem to="/admin-lab" label="Ferramentas" icon={FlaskConical} />
+                <NavItem to="/admin-lab" label="Ferramentas" icon={Flask} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -153,7 +156,7 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <NavItem to="/tv-config" label="Config. TV" icon={Tv} />
+                <NavItem to="/tv-config" label="Config. TV" icon={Television} />
                 <NavItem to="/tv" label="Tela TV" icon={Monitor} />
               </SidebarMenu>
             </SidebarGroupContent>
@@ -167,7 +170,7 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
+                <NavItem to="/configuracoes" label="Configurações" icon={Gear} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -179,6 +182,7 @@ export function AppSidebar() {
         {APP_ENV_BADGE} · Gestão da Clínica
       </SidebarFooter>
       <SidebarRail />
+      </IconContext.Provider>
     </Sidebar>
   )
 }

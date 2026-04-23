@@ -1,16 +1,20 @@
-import type { LucideIcon } from 'lucide-react'
-import { InboxIcon } from 'lucide-react'
+import { Tray } from 'phosphor-react'
+import type { ComponentType } from 'react'
+
 import { cn } from '@/lib/utils'
 
+/** Lucide, Phosphor, etc. — qualquer componente de ícone que aceite `className`. */
+type IconLike = ComponentType<{ className?: string }>
+
 interface EmptyStateProps {
-  icon?: LucideIcon
+  icon?: IconLike
   title: string
   description?: string
   className?: string
 }
 
 export function EmptyState({
-  icon: Icon = InboxIcon,
+  icon: Icon = Tray,
   title,
   description,
   className,
@@ -23,7 +27,7 @@ export function EmptyState({
       )}
     >
       <div className="flex size-12 items-center justify-center rounded-md bg-muted">
-        <Icon className="size-6 text-muted-foreground" />
+        <Icon className="size-6 text-muted-foreground" aria-hidden />
       </div>
       <p className="font-heading text-sm font-medium text-foreground">
         {title}

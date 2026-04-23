@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { RadioIcon, Trash2Icon } from 'lucide-react'
+import { Radio, Trash } from 'phosphor-react'
 import { toast } from 'sonner'
 
 import { ChannelFieldMappingEditor } from '@/components/config/ChannelFieldMappingEditor'
@@ -50,14 +50,21 @@ export function ChannelsPage() {
       title="Canais configuráveis"
       subtitle="Ative canais, prioridade, prazo e conexão dos campos do lead."
     >
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={() => { crm.addChannel(); toast.success('Canal criado.') }}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <Button
+          type="button"
+          className="w-full sm:w-auto"
+          onClick={() => {
+            crm.addChannel()
+            toast.success('Canal criado.')
+          }}
+        >
           Novo canal
         </Button>
       </div>
 
-      <Card className="mb-4 border-border/80 shadow-sm">
-        <CardContent className="pt-4">
+      <Card className="mb-4 border-border/60 bg-muted/10 shadow-sm">
+        <CardContent className="pt-4 sm:pt-5">
           <CardDescription className="text-sm leading-relaxed text-muted-foreground">
             Define qual informação do contato será preenchida automaticamente quando o canal receber uma mensagem.
             Preencha o caminho como texto simples; a equipe técnica pode indicar o formato exato.
@@ -67,21 +74,21 @@ export function ChannelsPage() {
 
       {crm.channels.length === 0 ? (
         <EmptyState
-          icon={RadioIcon}
+          icon={Radio}
           title="Nenhum canal configurado"
           description="Crie um canal para receber leads de fontes externas como WhatsApp, Meta Ads ou link externo (URL)."
         />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {crm.channels.map((channel) => (
-            <Card key={channel.id} className="shadow-sm">
-              <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+            <Card key={channel.id} className="border-border/50 shadow-sm transition-shadow hover:shadow-md">
+              <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <Input
                   value={channel.name}
                   onChange={(event) => crm.updateChannel(channel.id, { name: event.target.value })}
-                  className="max-w-xs font-medium"
+                  className="min-w-0 w-full font-medium sm:max-w-md"
                 />
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2 self-start sm:self-center">
                   <Switch
                     checked={channel.enabled}
                     onCheckedChange={(checked) => crm.updateChannel(channel.id, { enabled: checked })}
@@ -90,7 +97,7 @@ export function ChannelsPage() {
                 </div>
               </CardHeader>
               <CardContent className="grid gap-4">
-                <div className="grid gap-2">
+                <div className="grid w-full min-w-0 gap-2 sm:max-w-xs">
                   <Label htmlFor={`sla-${channel.id}`}>Prazo (min)</Label>
                   <Input
                     id={`sla-${channel.id}`}
@@ -98,10 +105,10 @@ export function ChannelsPage() {
                     min={1}
                     value={channel.slaMinutes}
                     onChange={(event) => crm.updateChannel(channel.id, { slaMinutes: Number(event.target.value) })}
-                    className="max-w-[10rem]"
+                    className="w-full max-w-full min-[380px]:max-w-[10rem]"
                   />
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
                   <span className="text-sm text-muted-foreground">Prioridade</span>
                   <Button type="button" variant="outline" size="sm" onClick={() => crm.moveChannelPriority(channel.id, 'up')}>
                     Subir
@@ -158,8 +165,14 @@ export function ChannelsPage() {
                     placeholder="Preencha apenas se a equipe técnica orientar"
                   />
                 </div>
-                <Button type="button" variant="destructive" size="sm" className="w-fit" onClick={() => setDeleteTarget({ id: channel.id, name: channel.name })}>
-                  <Trash2Icon className="size-4 mr-1" />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  className="w-full min-[380px]:w-fit"
+                  onClick={() => setDeleteTarget({ id: channel.id, name: channel.name })}
+                >
+                  <Trash className="mr-1 size-4" weight="duotone" />
                   Remover canal
                 </Button>
               </CardContent>
