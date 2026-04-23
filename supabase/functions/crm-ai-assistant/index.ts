@@ -6,7 +6,9 @@
  *   ZAI_API_BASE — URL base sem trailing slash:
  *   - pay-as-you-go (saldo): https://api.z.ai/api/paas/v4 (comportamento antigo)
  *   - Coding Plan (subscrição): https://api.z.ai/api/coding/paas/v4
- *   O código do modelo é o mesmo nos dois (docs Z.ai); não use prefixo zai-coding-plan/ nesta API.
+ *     A doc Z.ai indica que este URL é para integrações listadas (IDEs, agentes de código);
+ *     um CRM customizado pode precisar de /paas/v4 + saldo.
+ *   O código do modelo é o mesmo nos dois; não use prefixo zai-coding-plan/ nesta API.
  * Deploy: supabase functions deploy crm-ai-assistant
  *
  * Nota: respostas de negócio usam HTTP 200 + `{ ok: false, ... }` para o cliente
@@ -53,6 +55,38 @@ function normalizeZaiModelCode(model: string): string {
   const m = model.trim()
   if (m.startsWith('zai-coding-plan/')) return m.slice('zai-coding-plan/'.length)
   return m
+}
+
+function isCodingPlanApiRoot(apiRoot: string): boolean {
+  return apiRoot.includes('/coding/')
+}
+
+/** Doc Z.ai: GLM-5.x usa temperature por omissão ~1.0; evitar valores muito baixos. */
+function temperatureForModel(model: string): number {
+  if (model.startsWith('glm-5')) return 1.0
+  return 0.7
+}
+
+/**
+ * Com /coding/, alguns gateways falham com `role: system` + contexto grande;
+ * fundir na primeira mensagem `user` alinha-se a exemplos só com `user`.
+ */
+function buildMessagesForZaiRequest(
+  systemContent: string,
+  clientMessages: ChatMsg[],
+  codingEndpoint: boolean,
+): ChatMsg[] {
+  if (!codingEndpoint) {
+    return [{ role: 'system', content: systemContent }, ...clientMessages]
+  }
+  if (clientMessages.length === 0) {
+    return [{ role: 'user', content: systemContent }]
+  }
+  const first = clientMessages[0]
+  if (first.role === 'user') {
+    return [{ role: 'user', content: `${systemContent}\n\n---\n\n${first.content}` }, ...clientMessages.slice(1)]
+  }
+  return [{ role: 'user', content: systemContent }, ...clientMessages]
 }
 
 type ChatMsg = { role: string; content: string }
@@ -362,28 +396,38 @@ Deno.serve(async (req) => {
       systemContent = systemContent.slice(0, MAX_SYSTEM_CHARS) + '\n…[snapshot truncado por tamanho máximo]'
     }
 
-    const messages: ChatMsg[] = [{ role: 'system', content: systemContent }, ...clientMessages]
+    const useCodingMerge = isCodingPlanApiRoot(zaiApiRoot)
+    const messages = buildMessagesForZaiRequest(systemContent, clientMessages, useCodingMerge)
 
     const zaiRes = await fetch(zaiChatUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Accept-Language': 'en-US,en',
         Authorization: `Bearer ${zaiKey}`,
       },
       body: JSON.stringify({
         model,
         messages,
-        temperature: 0.35,
+        temperature: temperatureForModel(model),
         max_tokens: 2048,
       }),
     })
 
     const zaiText = await zaiRes.text()
     if (!zaiRes.ok) {
+      const bodyText = trunc(zaiText, 1200)
+      const looksLikeGenericFail =
+        /Operation failed|"code"\s*:\s*"500"/i.test(zaiText) || (zaiRes.status === 500 && bodyText.length < 500)
+      const hint =
+        useCodingMerge && looksLikeGenericFail
+          ? 'O endpoint …/coding/paas/v4 (GLM Coding Plan) na documentação Z.ai destina-se a integrações listadas (IDEs, agentes de código). Um assistente CRM no Supabase pode não ser suportado e devolver 500 genérico. Para uso geral na app, use https://api.z.ai/api/paas/v4 com saldo pay-as-you-go (ajuste o secret ZAI_API_BASE).'
+          : undefined
       return jsonResponse({
         ok: false,
         error: 'zai_upstream',
-        message: trunc(zaiText, 1200),
+        message: bodyText,
+        ...(hint ? { hint } : {}),
         status: zaiRes.status,
       })
     }

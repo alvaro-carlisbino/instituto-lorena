@@ -36,6 +36,13 @@ export type CrmAiAssistantResult =
   | { ok: true; reply: string; model: string }
   | { ok: false; error: string; detail?: string }
 
+function detailFromPayload(p: Record<string, unknown>): string | undefined {
+  const parts: string[] = []
+  if (typeof p.message === 'string' && p.message.trim()) parts.push(p.message.trim())
+  if (typeof p.hint === 'string' && p.hint.trim()) parts.push(p.hint.trim())
+  return parts.length ? parts.join('\n\n') : undefined
+}
+
 /**
  * Edge Function `crm-ai-assistant`: snapshot CRM via RLS (JWT) + GLM (Z.ai), secret ZAI_API_KEY.
  */
@@ -78,7 +85,7 @@ export async function invokeCrmAiAssistant(params: {
     return {
       ok: false,
       error: String(payload.error ?? 'Erro no servidor'),
-      detail: typeof payload.message === 'string' ? payload.message : undefined,
+      detail: detailFromPayload(payload),
     }
   }
 
@@ -86,16 +93,17 @@ export async function invokeCrmAiAssistant(params: {
     return {
       ok: false,
       error: String(payload.error ?? 'Erro no servidor'),
-      detail: typeof payload.message === 'string' ? payload.message : undefined,
+      detail: detailFromPayload(payload),
     }
   }
 
   if (error) {
     const fromBody = await jsonFromHttpError(error)
-    const detail =
-      (fromBody && typeof fromBody.message === 'string' && fromBody.message) ||
-      (fromBody && typeof fromBody.error === 'string' && fromBody.error) ||
-      undefined
+    let detail: string | undefined
+    if (fromBody) {
+      detail = detailFromPayload(fromBody)
+      if (!detail && typeof fromBody.error === 'string') detail = fromBody.error
+    }
     return {
       ok: false,
       error: error.message || 'Falha ao chamar o assistente.',

@@ -45,7 +45,7 @@ Edge Function que chama a API Z.ai (modelos GLM) com snapshot do CRM obtido **co
 
 1. No dashboard Supabase (ou CLI), defina secrets: `ZAI_API_KEY` (obrigatório). Opcionais: `ZAI_MODEL`, `ZAI_API_BASE`.
    - **Pay-as-you-go** (saldo na conta): omita `ZAI_API_BASE` ou use `https://api.z.ai/api/paas/v4`.
-   - **Coding Plan** (subscrição, sem saldo PAYG): defina `ZAI_API_BASE` = `https://api.z.ai/api/coding/paas/v4`. O **código do modelo** (`glm-4.7`, `glm-5.1`, …) é o mesmo que na API geral; só muda o URL (erro `1113` no `/paas/v4` costuma ser plano coding a apontar para o endpoint errado).
+   - **Coding Plan** (`ZAI_API_BASE` = `https://api.z.ai/api/coding/paas/v4`): na [documentação Z.ai](https://docs.z.ai/api-reference/introduction), este URL destina-se a um conjunto fechado de ferramentas (IDEs, agentes de código). Um **assistente CRM customizado** pode receber erros genéricos (ex. HTTP 500 `Operation failed`). Para chat de produto geral, a Z.ai recomenda **`https://api.z.ai/api/paas/v4`** com **saldo pay-as-you-go** (não defina `ZAI_API_BASE` ou aponte explicitamente para `/paas/v4`). O código do modelo (`glm-4.7`, …) é o mesmo nos dois URLs.
 2. Deploy: `supabase functions deploy crm-ai-assistant`
 3. No app, abra **Operação → Assistente IA** ou `/assistente`. Opcional: `?leadId=<uuid>&focus=lead` para contexto de um lead.
 
