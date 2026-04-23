@@ -1,6 +1,7 @@
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   BarChart3,
+  Bot,
   FlaskConical,
   History,
   KanbanSquare,
@@ -95,6 +96,7 @@ export function AppSidebar() {
               <NavItem to="/dashboard" label="Dashboard" icon={LayoutDashboard} />
               <NavItem to="/kanban" label="Kanban" icon={KanbanSquare} />
               <NavItem to="/historico" label="Histórico" icon={History} />
+              <NavItem to="/assistente" label="Assistente IA" icon={Bot} />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

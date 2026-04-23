@@ -1,30 +1,31 @@
 import { useCallback, useRef, useState } from 'react'
 import { Bot, SendHorizonal } from 'lucide-react'
 
+import { NoticeBanner } from '@/components/NoticeBanner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { NoticeBanner } from '@/components/NoticeBanner'
-import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { GLM_MODEL_OPTIONS, type GlmModelId, type UserAiChatMessage, invokeUserAiAssistant } from '@/services/userAiAssistant'
+import { noticeVariantFromMessage } from '@/lib/noticeVariant'
+import {
+  GLM_MODEL_OPTIONS,
+  type CrmAiAssistantContext,
+  type CrmAiChatMessage,
+  type GlmModelId,
+  invokeCrmAiAssistant,
+} from '@/services/crmAiAssistant'
 
 const DEFAULT_MODEL: GlmModelId = 'glm-4.7'
 
-const INTRO_USER: UserAiChatMessage = {
-  role: 'user',
-  content:
-    'Olá. Em uma frase, como você pode me ajudar a gerir utilizadores e papéis neste CRM?',
-}
-
 type Props = {
   dataMode: 'mock' | 'supabase'
+  context: CrmAiAssistantContext
 }
 
-export function UserAiAssistantPanel({ dataMode }: Props) {
+export function CrmAssistantChat({ dataMode, context }: Props) {
   const [model, setModel] = useState<GlmModelId>(DEFAULT_MODEL)
-  const [messages, setMessages] = useState<UserAiChatMessage[]>([])
+  const [messages, setMessages] = useState<CrmAiChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState('')
@@ -39,7 +40,7 @@ export function UserAiAssistantPanel({ dataMode }: Props) {
       const trimmed = text.trim()
       if (!trimmed || loading) return
 
-      const nextUser: UserAiChatMessage = { role: 'user', content: trimmed }
+      const nextUser: CrmAiChatMessage = { role: 'user', content: trimmed }
       const history = [...messages, nextUser]
       setMessages(history)
       setDraft('')
@@ -47,7 +48,7 @@ export function UserAiAssistantPanel({ dataMode }: Props) {
       setLoading(true)
       scrollToEnd()
 
-      const result = await invokeUserAiAssistant({ messages: history, model })
+      const result = await invokeCrmAiAssistant({ messages: history, model, context })
 
       setLoading(false)
       if (!result.ok) {
@@ -60,23 +61,31 @@ export function UserAiAssistantPanel({ dataMode }: Props) {
       setMessages((prev) => [...prev, { role: 'assistant', content: result.reply }])
       scrollToEnd()
     },
-    [loading, messages, model, scrollToEnd]
+    [context, loading, messages, model, scrollToEnd]
   )
 
   const startConversation = useCallback(() => {
     if (loading) return
-    void send(INTRO_USER.content)
-  }, [loading, send])
+    const intro =
+      context.leadId != null
+        ? 'Olá. Tens contexto do lead em foco. Em 2–3 frases, resume oportunidades e próximos passos recomendados.'
+        : context.focus === 'analytics'
+          ? 'Olá. Com base no snapshot desta semana, que padrões ou alertas destacarias para a equipa comercial?'
+          : 'Olá. Em que podes ajudar neste CRM (leads, métricas, semana, churn, scores) com os dados que tens?'
+    void send(intro)
+  }, [context.focus, context.leadId, loading, send])
 
   if (dataMode !== 'supabase') {
     return (
       <Card className="border-border shadow-none rounded-none bg-muted/10">
         <CardHeader>
-          <CardTitle className="text-base font-bold uppercase tracking-widest">Assistente IA (equipa)</CardTitle>
-          <CardDescription>
-            Ative <code className="text-xs">VITE_DATA_MODE=supabase</code>, publique a função{' '}
-            <code className="text-xs">user-ai-assistant</code> e defina o secret <code className="text-xs">ZAI_API_KEY</code> no
-            Supabase para usar modelos GLM da Z.ai.
+          <CardTitle className="text-base font-bold uppercase tracking-widest">Assistente CRM (GLM)</CardTitle>
+          <CardDescription className="space-y-2 text-xs leading-relaxed">
+            <p className="m-0">
+              Ative <code className="text-[10px]">VITE_DATA_MODE=supabase</code>, faça deploy da função{' '}
+              <code className="text-[10px]">crm-ai-assistant</code> e defina <code className="text-[10px]">ZAI_API_KEY</code> nos
+              secrets do Supabase.
+            </p>
           </CardDescription>
         </CardHeader>
       </Card>
@@ -88,11 +97,11 @@ export function UserAiAssistantPanel({ dataMode }: Props) {
       <CardHeader className="space-y-1 border-b border-border/50 bg-muted/10 pb-4">
         <CardTitle className="flex items-center gap-2 text-lg font-bold uppercase tracking-widest">
           <Bot className="size-5 text-primary" />
-          Assistente IA — utilizadores
+          Conversa
         </CardTitle>
         <CardDescription className="text-xs leading-relaxed">
-          Modelos <strong className="text-foreground">GLM (Z.ai)</strong> via API compatível. A lista de equipa é enviada pelo
-          servidor (Edge Function); a chave <code className="text-[10px]">ZAI_API_KEY</code> não fica no browser.
+          Cada mensagem atualiza o <strong className="text-foreground">snapshot</strong> do CRM (sempre com as tuas permissões).
+          Enter envia; Shift+Enter nova linha.
         </CardDescription>
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <div className="flex items-center gap-2">
@@ -118,14 +127,14 @@ export function UserAiAssistantPanel({ dataMode }: Props) {
             disabled={loading}
             onClick={startConversation}
           >
-            {messages.length === 0 ? 'Iniciar conversa' : 'Repetir pergunta inicial'}
+            {messages.length === 0 ? 'Iniciar conversa' : 'Nova pergunta guia'}
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 pt-4">
         {notice ? <NoticeBanner message={notice} variant={noticeVariantFromMessage(notice)} className="rounded-none" /> : null}
 
-        <ScrollArea className="h-[min(22rem,50vh)] rounded-md border border-border bg-muted/20 p-3">
+        <ScrollArea className="h-[min(28rem,55vh)] rounded-md border border-border bg-muted/20 p-3">
           <ul className="m-0 list-none space-y-3 p-0">
             {messages.map((m, i) => (
               <li
@@ -144,7 +153,7 @@ export function UserAiAssistantPanel({ dataMode }: Props) {
             ))}
             {loading ? (
               <li className="mr-6 rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
-                A pensar…
+                A analisar dados…
               </li>
             ) : null}
             <div ref={endRef} />
@@ -155,7 +164,7 @@ export function UserAiAssistantPanel({ dataMode }: Props) {
           <Textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="Ex.: Que papel recomendas para quem só gere leads no Kanban?"
+            placeholder="Ex.: O que mudou esta semana nos leads quentes? Sugere um email de follow-up (rascunho)."
             className="min-h-[4.5rem] flex-1 rounded-none border-foreground/20"
             disabled={loading}
             onKeyDown={(e) => {

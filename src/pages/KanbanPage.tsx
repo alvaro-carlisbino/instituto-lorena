@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { History, LayoutDashboard, LayoutGrid, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react'
+import { Bot, History, LayoutDashboard, LayoutGrid, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react'
 
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
 import { KanbanToolbar } from '@/components/kanban/KanbanToolbar'
@@ -18,6 +18,7 @@ import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
 import { getLeadFieldValue } from '@/lib/leadFields'
 import { cn } from '@/lib/utils'
+import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
 
 export function KanbanPage() {
   const crm = useCrm()
@@ -88,6 +89,14 @@ export function KanbanPage() {
                 <DropdownMenuItem onClick={() => navigate('/boards')}>
                   <LayoutGrid className="size-4" />
                   Boards e pipelines
+                </DropdownMenuItem>
+              ) : null}
+              {crm.selectedLeadId ? (
+                <DropdownMenuItem
+                  onClick={() => navigate(`${CRM_ASSISTANT_PATH}?leadId=${encodeURIComponent(crm.selectedLeadId)}&focus=lead`)}
+                >
+                  <Bot className="size-4" />
+                  Assistente IA sobre este lead
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuSeparator />

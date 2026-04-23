@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Command } from 'cmdk'
 import {
   BarChart3,
+  Bot,
   FlaskConical,
   History,
   KanbanSquare,
@@ -20,6 +21,7 @@ import {
 
 import { useCrm } from '@/context/CrmContext'
 import { cn } from '@/lib/utils'
+import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false)
@@ -43,6 +45,13 @@ export function CommandPalette() {
   }, [])
 
   const go = (path: string) => {
+    navigate(path)
+    setOpen(false)
+  }
+
+  const goAiAssistant = () => {
+    const lead = crm.selectedLeadId
+    const path = lead ? `${CRM_ASSISTANT_PATH}?leadId=${encodeURIComponent(lead)}&focus=lead` : CRM_ASSISTANT_PATH
     navigate(path)
     setOpen(false)
   }
@@ -88,6 +97,14 @@ export function CommandPalette() {
           >
             <History className="size-4 shrink-0 opacity-70" />
             Histórico
+          </Command.Item>
+          <Command.Item
+            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
+            keywords={['ia', 'ai', 'glm', 'zai', 'z.ai', 'assistente', 'chat', 'analytics', 'leads', 'churn']}
+            onSelect={goAiAssistant}
+          >
+            <Bot className="size-4 shrink-0 opacity-70" />
+            Assistente CRM (GLM)
           </Command.Item>
         </Command.Group>
 

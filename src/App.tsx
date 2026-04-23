@@ -18,6 +18,7 @@ import { AuthPage } from './pages/AuthPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { AdminLabPage } from './pages/AdminLabPage'
 import { DataViewsPage } from './pages/DataViewsPage'
+import { AssistantPage } from './pages/AssistantPage'
 import { CommandPalette } from './components/CommandPalette'
 import { RouteTransition } from './components/RouteTransition'
 import { SidebarProvider } from '@/components/ui/sidebar'
@@ -33,6 +34,7 @@ function AppRoutes() {
       <Route path="/boards" element={<BoardsPage />} />
       <Route path="/visoes" element={<DataViewsPage />} />
       <Route path="/kanban" element={<KanbanPage />} />
+      <Route path="/assistente" element={<AssistantPage />} />
       <Route path="/historico" element={<HistoryPage />} />
       <Route path="/canais" element={<ChannelsPage />} />
       <Route path="/metricas" element={<MetricsPage />} />

@@ -13,7 +13,6 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
-import { UserAiAssistantPanel } from '@/components/users/UserAiAssistantPanel'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 
@@ -76,10 +75,6 @@ export function UsersPage() {
         variant={noticeVariantFromMessage(crm.authNotice)}
         className="mt-4 rounded-none"
       />
-
-      <div className="mt-8">
-        <UserAiAssistantPanel dataMode={crm.dataMode} />
-      </div>
 
       <Card className="mt-8 border-border shadow-none rounded-none bg-card">
         <CardHeader className="space-y-1 pb-6 border-b border-border/50 bg-muted/10">

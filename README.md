@@ -39,6 +39,16 @@ O schema inclui:
 
 No app, use `Seed dados` para popular dados de teste.
 
+## Assistente IA (`crm-ai-assistant`)
+
+Edge Function que chama a API Z.ai (modelos GLM) com snapshot do CRM obtido **com o JWT do utilizador** (RLS).
+
+1. No dashboard Supabase (ou CLI), defina secrets: `ZAI_API_KEY` (obrigatório), `ZAI_MODEL` opcional (ex. `glm-4.7`).
+2. Deploy: `supabase functions deploy crm-ai-assistant`
+3. No app, abra **Operação → Assistente IA** ou `/assistente`. Opcional: `?leadId=<uuid>&focus=lead` para contexto de um lead.
+
+A função antiga `user-ai-assistant` foi substituída por esta. Integrações futuras (Meta, WhatsApp, Evolution) podem ampliar o snapshot sem mudar o contrato básico (`messages`, `model`, `context`).
+
 ## Rodar local
 
 ```bash
@@ -58,6 +68,7 @@ npm run build
 - `/dashboard-config` configuracao dos cards do dashboard
 - `/boards` configuracao de pipelines/etapas
 - `/kanban` quadro de leads
+- `/assistente` assistente de IA (GLM / Z.ai) sobre dados do CRM conforme RLS
 - `/canais` configuracao de canais
 - `/metricas` configuracao de metricas
 - `/usuarios` gestao de usuarios internos

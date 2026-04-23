@@ -1,9 +1,12 @@
 import { supabase } from '@/lib/supabaseClient'
 
-export type UserAiChatRole = 'user' | 'assistant'
+/** Rota da página do assistente (navegação e paleta ⌘K). */
+export const CRM_ASSISTANT_PATH = '/assistente'
 
-export type UserAiChatMessage = {
-  role: UserAiChatRole
+export type CrmAiChatRole = 'user' | 'assistant'
+
+export type CrmAiChatMessage = {
+  role: CrmAiChatRole
   content: string
 }
 
@@ -19,23 +22,36 @@ export const GLM_MODEL_OPTIONS = [
 
 export type GlmModelId = (typeof GLM_MODEL_OPTIONS)[number]['value']
 
-export type UserAiAssistantResult =
+export type CrmAiAssistantFocus = 'analytics' | 'lead' | 'general'
+
+export type CrmAiAssistantContext = {
+  leadId?: string
+  weekStartIso?: string
+  focus?: CrmAiAssistantFocus
+}
+
+export type CrmAiAssistantResult =
   | { ok: true; reply: string; model: string }
   | { ok: false; error: string; detail?: string }
 
 /**
- * Chama a Edge Function `user-ai-assistant`, que usa a API Z.ai (GLM) com a chave em segredo no Supabase.
+ * Edge Function `crm-ai-assistant`: snapshot CRM via RLS (JWT) + GLM (Z.ai), secret ZAI_API_KEY.
  */
-export async function invokeUserAiAssistant(params: {
-  messages: UserAiChatMessage[]
+export async function invokeCrmAiAssistant(params: {
+  messages: CrmAiChatMessage[]
   model: GlmModelId
-}): Promise<UserAiAssistantResult> {
+  context?: CrmAiAssistantContext
+}): Promise<CrmAiAssistantResult> {
   if (!supabase) {
     return { ok: false, error: 'Supabase não configurado.' }
   }
 
-  const { data, error } = await supabase.functions.invoke('user-ai-assistant', {
-    body: { messages: params.messages, model: params.model },
+  const { data, error } = await supabase.functions.invoke('crm-ai-assistant', {
+    body: {
+      messages: params.messages,
+      model: params.model,
+      context: params.context ?? {},
+    },
   })
 
   const payload = data && typeof data === 'object' ? (data as Record<string, unknown>) : null
