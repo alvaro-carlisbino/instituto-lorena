@@ -1,3 +1,5 @@
+import { FunctionsHttpError } from '@supabase/supabase-js'
+
 import { supabase } from '@/lib/supabaseClient'
 
 /** Rota da página do assistente (navegação e paleta ⌘K). */
@@ -56,7 +58,31 @@ export async function invokeCrmAiAssistant(params: {
 
   const payload = data && typeof data === 'object' ? (data as Record<string, unknown>) : null
 
-  if (payload && 'error' in payload) {
+  /** Corpo JSON quando a função devolve 4xx/5xx (invoke coloca em `error.context`). */
+  async function jsonFromHttpError(err: unknown): Promise<Record<string, unknown> | null> {
+    if (!(err instanceof FunctionsHttpError)) return null
+    try {
+      const j = await err.context.clone().json()
+      return j && typeof j === 'object' ? (j as Record<string, unknown>) : null
+    } catch {
+      try {
+        const t = await err.context.clone().text()
+        return t ? { message: t } : null
+      } catch {
+        return null
+      }
+    }
+  }
+
+  if (payload?.ok === false) {
+    return {
+      ok: false,
+      error: String(payload.error ?? 'Erro no servidor'),
+      detail: typeof payload.message === 'string' ? payload.message : undefined,
+    }
+  }
+
+  if (payload && 'error' in payload && payload.ok !== true) {
     return {
       ok: false,
       error: String(payload.error ?? 'Erro no servidor'),
@@ -65,11 +91,22 @@ export async function invokeCrmAiAssistant(params: {
   }
 
   if (error) {
+    const fromBody = await jsonFromHttpError(error)
+    const detail =
+      (fromBody && typeof fromBody.message === 'string' && fromBody.message) ||
+      (fromBody && typeof fromBody.error === 'string' && fromBody.error) ||
+      undefined
     return {
       ok: false,
       error: error.message || 'Falha ao chamar o assistente.',
-      detail: typeof payload?.message === 'string' ? payload.message : undefined,
+      detail,
     }
+  }
+
+  if (payload?.ok === true && typeof payload.reply === 'string') {
+    const reply = payload.reply.trim()
+    if (!reply) return { ok: false, error: 'Resposta vazia do modelo.' }
+    return { ok: true, reply, model: String(payload.model ?? params.model) }
   }
 
   if (data && typeof data === 'object' && 'reply' in data) {
