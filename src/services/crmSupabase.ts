@@ -114,7 +114,7 @@ export type WebhookJob = {
 }
 
 const assertSupabase = () => {
-  if (!supabase) throw new Error('Supabase nao configurado.')
+  if (!supabase) throw new Error('Sistema não está configurado.')
   return supabase
 }
 

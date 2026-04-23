@@ -16,7 +16,7 @@ const normalizeProfileRole = (raw: unknown): AuthProfile['role'] => {
 
 const assertSupabase = () => {
   if (!supabase) {
-    throw new Error('Supabase nao configurado.')
+    throw new Error('Sistema não está configurado.')
   }
   return supabase
 }
@@ -127,7 +127,7 @@ export const updateMyProfile = async (payload: { displayName: string }): Promise
   const userId = authData.user?.id
   const email = authData.user?.email
   if (!userId || !email) {
-    throw new Error('Sessao invalida para atualizar perfil.')
+    throw new Error('Sessão inválida para atualizar o perfil.')
   }
 
   const { error } = await client.from('app_profiles').update({ display_name: payload.displayName }).eq('auth_user_id', userId)

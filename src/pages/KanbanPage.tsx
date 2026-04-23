@@ -32,14 +32,12 @@ export function KanbanPage() {
   const visibleLeads = useMemo(() => {
     const normalized = searchTerm.trim().toLowerCase()
     return crm.filteredLeads.filter((lead) => {
-      const haystack = [
-        lead.patientName,
-        lead.summary,
-        lead.phone,
-        JSON.stringify(lead.customFields ?? {}),
-      ]
-        .join(' ')
-        .toLowerCase()
+      const customText = lead.customFields
+        ? Object.values(lead.customFields as Record<string, unknown>)
+            .map((v) => (v != null ? String(v) : ''))
+            .join(' ')
+        : ''
+      const haystack = [lead.patientName, lead.summary, lead.phone, customText].join(' ').toLowerCase()
       const matchesText = normalized.length === 0 || haystack.includes(normalized)
       const temp = getLeadFieldValue(lead, 'temperature')
       const effTemp =

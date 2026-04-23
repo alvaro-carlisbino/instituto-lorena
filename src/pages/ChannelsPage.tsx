@@ -148,9 +148,17 @@ export function ChannelsPage() {
                   </Select>
                 </div>
                 <div className="grid gap-2">
-                  <Label>Conexão dos campos</Label>
+                  <div className="space-y-0.5">
+                    <Label>Conexão dos campos</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Opção de integração. No dia a dia, peça apoio da equipe de TI se precisar ajustar caminhos técnicos.
+                    </p>
+                  </div>
                   <ChannelFieldMappingEditor
-                    key={`${channel.id}-${JSON.stringify(channel.fieldMapping ?? {})}`}
+                    key={`${channel.id}-${Object.entries(channel.fieldMapping ?? {})
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([k, v]) => `${k}:${v}`)
+                      .join('|')}`}
                     channelId={channel.id}
                     fieldMapping={channel.fieldMapping}
                     workflowFields={crm.workflowFields}

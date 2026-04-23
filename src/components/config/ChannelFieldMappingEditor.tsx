@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash } from 'phosphor-react'
+import { CaretRight, Plus, Trash } from 'phosphor-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,45 +7,64 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import type { WorkflowField } from '@/mocks/crmMock'
 
-const CORE_LEAD_FIELDS: { key: string; label: string; pathHint: string; placeholder: string }[] = [
+/** Dica curta (equipe geral) + detalhe técnico (só na área colapsável). */
+const CORE_LEAD_FIELDS: {
+  key: string
+  label: string
+  pathHintSimple: string
+  pathHintTechnical: string
+  placeholder: string
+}[] = [
   {
     key: 'patient_name',
     label: 'Nome do contato',
-    pathHint:
-      'full_name · name · no Meta/Lead Ads costuma vir em field_data; em webhooks genéricos: entry.0.changes.0.value…',
+    pathHintSimple: 'O nome costuma vir em um campo como full_name ou name no aviso do canal.',
+    pathHintTechnical:
+      'Meta Lead Ads: field_data com nome. Webhooks genéricos: muitas vezes em entry.0.changes.0.value (estrutura varia).',
     placeholder: 'ex.: full_name',
   },
   {
     key: 'phone',
     label: 'Telefone',
-    pathHint:
-      'phone_number · no WhatsApp Cloud: entry.0.changes.0.value.messages.0.contacts.0.wa_id (varia por versão da API)',
+    pathHintSimple: 'O telefone em geral vem como phone_number ou em campo parecido no aviso.',
+    pathHintTechnical:
+      'WhatsApp Cloud API: caminhos longos como entry.0.changes.0.value.messages.0... (varia com a versão do aviso).',
     placeholder: 'ex.: phone_number',
   },
   {
     key: 'source',
     label: 'Origem',
-    pathHint: 'source · utm_source · origem (conforme o provedor enviar no aviso)',
+    pathHintSimple: 'A origem pode vir em source, utm_source ou nome definido pelo provedor.',
+    pathHintTechnical: 'Ajuste ao formato exato do aviso (planilha de integração do fornecedor).',
     placeholder: 'ex.: source',
   },
   {
     key: 'summary',
     label: 'Resumo',
-    pathHint: 'message · text · body · resumo (texto principal da mensagem no aviso)',
+    pathHintSimple: 'O texto do contato costuma vir em message, text ou body.',
+    pathHintTechnical: 'Caminho depende do corpo do aviso (ver documentação do canal).',
     placeholder: 'ex.: text',
   },
   {
     key: 'temperature',
     label: 'Interesse',
-    pathHint: 'Campo de interesse/temperatura se o provedor enviar (senão deixe vazio na linha ou use valor fixo no canal)',
+    pathHintSimple: 'Só preencha se o aviso traz um campo de interesse/temperatura; senão deixe vazio ou peça suporte à TI.',
+    pathHintTechnical: 'Nome exato do campo no objeto recebido (pontos para níveis, ex.: parent.child).',
     placeholder: 'ex.: temperature',
   },
   {
     key: 'score',
     label: 'Pontuação',
-    pathHint: 'score · points · pontuacao (se existir no payload do aviso)',
+    pathHintSimple: 'Se o canal envia pontuação, use o nome do campo correspondente (score, points, etc.).',
+    pathHintTechnical: 'Caminho no objeto do aviso onde vem a pontuação, se existir.',
     placeholder: 'ex.: score',
   },
+]
+
+const TECHNICAL_REFERENCE: { title: string; code: string }[] = [
+  { title: 'Aviso cujo dado fica em entry.changes[0].value (comum em integrações por URL):', code: 'entry.0.changes.0.value' },
+  { title: 'Apenas o identificador do nome (formulário / aviso):', code: 'full_name' },
+  { title: 'Apenas o identificador do telefone (formulário / aviso):', code: 'phone_number' },
 ]
 
 type Row = { fieldKey: string; path: string }
@@ -72,17 +91,20 @@ function hintForFieldKey(
 ): { text: string; placeholder: string } {
   const core = CORE_LEAD_FIELDS.find((f) => f.key === fieldKey)
   if (core) {
-    return { text: core.pathHint, placeholder: core.placeholder }
+    return {
+      text: core.pathHintSimple,
+      placeholder: core.placeholder,
+    }
   }
   const wf = fieldOptions.find((f) => f.key === fieldKey)
   if (wf) {
     return {
-      text: `Campo personalizado “${wf.label}”: use o caminho no dado recebido (ex.: custom_fields.${fieldKey}).`,
+      text: `Campo “${wf.label}”: o nome no aviso costuma lembrar o código do campo. A equipe de integração ajuda a confirmar o caminho exato (ex.: custom_fields.${fieldKey}).`,
       placeholder: `ex.: custom_fields.${fieldKey}`,
     }
   }
   return {
-    text: 'Indique o caminho no aviso, em notação com pontos (ex.: entry.changes.0.value). Uma linha por campo.',
+    text: 'Preencha o que o aviso traz com esse dado, usando ponto se for um caminho (ex.: parte1.parte2).',
     placeholder: 'ex.: campo.no.aviso',
   }
 }
@@ -94,7 +116,6 @@ type Props = {
   onApply: (next: Record<string, string>) => void
 }
 
-/** Liga campos do cadastro a caminhos no dado bruto de cada aviso (Meta, WhatsApp, URL própria, etc.). */
 export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFields, onApply }: Props) {
   const [rows, setRows] = useState<Row[]>(() => rowsFromMapping(fieldMapping))
   const [message, setMessage] = useState<string>('')
@@ -121,7 +142,7 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
     const next = mappingFromRows(rows)
     const invalid = rows.some((r) => r.fieldKey.trim() && !r.path.trim())
     if (invalid) {
-      setMessage('Cada campo escolhido precisa de um caminho no dado recebido (texto à direita).')
+      setMessage('Cada linha com campo escolhido precisa do caminho preenchido à direita.')
       return
     }
     setMessage('Mapeamento salvo.')
@@ -136,11 +157,42 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
       )}
     >
       <p className="m-0 text-sm leading-relaxed text-muted-foreground">
-        Indique <strong className="font-medium text-foreground">onde cada dado chega</strong> no aviso do canal. Use
-        notação com pontos (ex.: <code className="rounded-md bg-muted px-1.5 py-0.5 text-xs">entry.changes.0.value</code>
-        ), <strong className="font-medium text-foreground">uma linha por campo</strong> — não é necessário colar o JSON
-        inteiro.
+        Aqui a equipe liga o que o <strong className="font-medium text-foreground">cadastro</strong> do lead a como o
+        dado <strong className="font-medium text-foreground">chega no aviso do canal</strong> (o pacote de informação
+        após o envio de formulário, WhatsApp, etc.). Preencha uma linha por campo, com o <strong
+          className="font-medium text-foreground"
+        >
+          nome do campo no aviso
+        </strong>
+        &nbsp;(às vezes em forma de <span className="whitespace-nowrap">parte1.parte2</span>).
       </p>
+
+      <details className="group rounded-xl border border-border/50 bg-muted/25 px-3 py-2 text-left text-sm">
+        <summary className="flex cursor-pointer list-none items-center gap-2 text-foreground/90">
+          <CaretRight className="size-4 shrink-0 transition group-open:rotate-90" weight="bold" />
+          <span>Referência técnica (integração / API / formato do aviso)</span>
+        </summary>
+        <div className="mt-2 space-y-2 border-t border-border/50 pt-3 text-xs text-muted-foreground">
+          <p className="m-0">
+            Para integração, apoio de TI. Não é preciso colar o arquivo completo: só o caminho até o valor (notação com
+            pontos). Em guias técnicos isso costuma ser chamado de JSON ou payload; aqui basta o trecho com o dado.
+          </p>
+          <ul className="m-0 list-none space-y-2 p-0">
+            {CORE_LEAD_FIELDS.map((f) => (
+              <li key={f.key} className="rounded-md bg-background/80 px-2 py-1.5">
+                <span className="font-medium text-foreground">{f.label}:</span> {f.pathHintTechnical}
+              </li>
+            ))}
+            {TECHNICAL_REFERENCE.map((ref) => (
+              <li key={ref.title} className="rounded-md bg-background/80 px-2 py-1.5">
+                <p className="m-0 mb-1 text-[11px] text-muted-foreground">{ref.title}</p>
+                <code className="block w-full break-all rounded bg-muted px-2 py-1 font-mono text-[11px]">{ref.code}</code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </details>
+
       <ul className="m-0 list-none space-y-3 p-0">
         {rows.map((row, index) => {
           const { text: guideText, placeholder } = hintForFieldKey(row.fieldKey, fieldOptions)
@@ -168,7 +220,7 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
                   </select>
                 </div>
                 <div className="grid min-w-0 gap-1.5">
-                  <Label className="text-xs font-medium">Caminho no dado recebido</Label>
+                  <Label className="text-xs font-medium">Nome do campo no aviso</Label>
                   <Input
                     value={row.path}
                     onChange={(e) => setRows((prev) => prev.map((r, i) => (i === index ? { ...r, path: e.target.value } : r)))}
@@ -180,7 +232,7 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
                 </div>
               </div>
               <p className="mt-2.5 m-0 rounded-lg bg-muted/40 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground sm:text-xs">
-                <span className="font-medium text-foreground/90">Onde costuma vir: </span>
+                <span className="font-medium text-foreground/90">Dica: </span>
                 {guideText}
               </p>
               <div className="mt-3 flex justify-stretch min-[480px]:justify-end">

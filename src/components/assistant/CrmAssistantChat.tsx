@@ -176,7 +176,7 @@ export function CrmAssistantChat({
         <CardHeader>
           <CardTitle className="text-base font-bold uppercase tracking-widest">Assistente</CardTitle>
           <CardDescription className="text-xs leading-relaxed">
-            O assistente só está disponível com a conexão ao banco de dados ativa. Peça ajuda ao administrador se precisar ativá-lo.
+            O assistente só fica disponível com o sistema conectado em tempo real. Peça ajuda ao administrador se o acesso não estiver ativo.
           </CardDescription>
         </CardHeader>
       </Card>

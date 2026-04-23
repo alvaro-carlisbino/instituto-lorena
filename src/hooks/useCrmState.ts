@@ -371,7 +371,7 @@ export const useCrmState = () => {
       patientName: newLead.patientName,
       channel: 'meta',
       direction: 'in',
-      author: 'Meta Graph API',
+      author: 'Meta (Facebook/Instagram)',
       content: 'Lead capturado automaticamente (demonstração).',
       happenedAt: new Date().toISOString(),
     })
@@ -457,7 +457,7 @@ export const useCrmState = () => {
       patientName: selectedLead.patientName,
       channel: 'ai',
       direction: 'system',
-      author: 'IA (Nuvem Supabase)',
+      author: 'Assistente (nuvem)',
       content: `${triage.classification} (${Math.round(triage.confidence * 100)}%): ${triage.recommendation}`,
       happenedAt: new Date().toISOString(),
     })
@@ -548,7 +548,7 @@ export const useCrmState = () => {
     setIsLoading(true)
     try {
       await signUpWithEmail(authEmail, authPassword)
-      setAuthNotice('Conta criada. Se email confirmation estiver ativo, confirme no email.')
+      setAuthNotice('Conta criada. Se a confirmação por e-mail estiver ativa, abra a mensagem e conclua o acesso.')
     } catch (error) {
       setAuthNotice(`Falha no cadastro: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
     } finally {
@@ -586,12 +586,14 @@ export const useCrmState = () => {
         }
       }
       if (failures.length > 0) {
-        setAuthNotice(`Falha ao criar auth: ${failures.join(', ')}`)
+        setAuthNotice(`Falha ao criar acesso (teste): ${failures.join(', ')}`)
       } else {
-        setAuthNotice('Usuarios de auth criados/atualizados. Senha padrao: Teste@12345')
+        setAuthNotice('Usuários de acesso (teste) criados ou atualizados. Senha padrão: Teste@12345')
       }
     } catch (error) {
-      setAuthNotice(`Falha ao criar usuarios auth: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
+      setAuthNotice(
+        `Falha ao criar usuários de acesso (teste): ${error instanceof Error ? error.message : 'erro desconhecido'}`,
+      )
     } finally {
       setIsLoading(false)
     }
@@ -795,7 +797,7 @@ export const useCrmState = () => {
     setUsers((previous) => [...previous, next])
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void saveAppUser(next).catch((error) => {
-        setAuthNotice(`Falha ao guardar utilizador: ${error instanceof Error ? error.message : String(error)}`)
+        setAuthNotice(`Falha ao salvar o usuário: ${error instanceof Error ? error.message : String(error)}`)
       })
     }
   }
@@ -807,7 +809,7 @@ export const useCrmState = () => {
         const changed = next.find((user) => user.id === userId)
         if (changed) {
           void saveAppUser(changed).catch((error) => {
-            setAuthNotice(`Falha ao guardar utilizador: ${error instanceof Error ? error.message : String(error)}`)
+            setAuthNotice(`Falha ao salvar o usuário: ${error instanceof Error ? error.message : String(error)}`)
           })
         }
       }
@@ -824,7 +826,7 @@ export const useCrmState = () => {
 
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void deleteAppUser(userId, fallbackOwnerId).catch((error) => {
-        setAuthNotice(`Falha ao remover utilizador: ${error instanceof Error ? error.message : String(error)}`)
+        setAuthNotice(`Falha ao remover o usuário: ${error instanceof Error ? error.message : String(error)}`)
       })
     }
     setUsers(remaining)
@@ -1197,7 +1199,7 @@ export const useCrmState = () => {
         }
       })
       .catch(() => {
-        setAuthNotice('Nao foi possivel ler perfil. Verifique RLS/app_profiles.')
+        setAuthNotice('Não foi possível carregar o perfil. Tente sair e entrar de novo; se continuar, fale com o suporte.')
       })
   }, [session, users, profileReloadTick])
 
@@ -1260,7 +1262,7 @@ export const useCrmState = () => {
 
   const runInviteTeamMember = async (email: string, displayName: string, role: AppUser['role']) => {
     if (!isSupabaseConfigured) {
-      setAuthNotice('Supabase nao configurado.')
+      setAuthNotice('Sistema não está configurado. Fale com o suporte ou o administrador.')
       return
     }
     if (!currentPermission.canManageUsers) {
@@ -1270,7 +1272,7 @@ export const useCrmState = () => {
     setIsLoading(true)
     try {
       await inviteTeamMember({ email: email.trim().toLowerCase(), displayName: displayName.trim() || email, role })
-      setAuthNotice('Convite enviado por email (Supabase Auth).')
+      setAuthNotice('Convite enviado por e-mail. A pessoa convidada receberá as instruções de acesso.')
     } catch (error) {
       setAuthNotice(`Falha no convite: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
     } finally {
@@ -1287,7 +1289,7 @@ export const useCrmState = () => {
     passwordConfirm: string
   }): Promise<boolean> => {
     if (!isSupabaseConfigured) {
-      setAuthNotice('Supabase nao configurado.')
+      setAuthNotice('Sistema não está configurado. Fale com o suporte ou o administrador.')
       return false
     }
     if (!currentPermission.canManageUsers) {
@@ -1329,7 +1331,7 @@ export const useCrmState = () => {
 
   const runWebhookReplay = async () => {
     if (!supabase) {
-      setSyncNotice('Supabase nao configurado.')
+      setSyncNotice('Sistema não está configurado. Fale com o suporte ou o administrador.')
       return
     }
 
