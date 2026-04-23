@@ -19,9 +19,9 @@ import type { CrmAiAssistantContext, CrmAiAssistantFocus } from '@/services/crmA
 import { AppLayout } from '@/layouts/AppLayout'
 
 const FOCUS_OPTIONS: { value: CrmAiAssistantFocus | 'general'; label: string }[] = [
-  { value: 'general', label: 'Geral' },
-  { value: 'analytics', label: 'Analytics / semana' },
-  { value: 'lead', label: 'Lead em foco' },
+  { value: 'general', label: 'Visão geral' },
+  { value: 'analytics', label: 'Números e semana' },
+  { value: 'lead', label: 'Uma pessoa em concreto' },
 ]
 
 function parseFocus(raw: string | null): CrmAiAssistantFocus | undefined {
@@ -102,21 +102,20 @@ export function AssistantPage() {
   return (
     <AppLayout
       title="Assistente CRM"
-      subtitle="IA (GLM / Z.ai) sobre leads, métricas, interações e equipa — conforme as tuas permissões. Integrações Meta/WhatsApp/Evolution podem alimentar o snapshot no futuro."
+      subtitle="Pergunta sobre contactos, equipa e resultados. As respostas usam só a informação a que tens acesso no CRM."
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,19rem)_1fr]">
         <div className="flex flex-col gap-4">
           <Card className="h-fit border-border shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">Contexto</CardTitle>
-              <CardDescription className="text-xs">
-                Ajusta o foco enviado ao servidor. O <strong className="text-foreground">leadId</strong> pode vir da URL (
-                <code className="text-[10px]">?leadId=…</code>) ao abrir a partir do Kanban.
+              <CardTitle className="text-sm font-semibold">Como queres perguntar</CardTitle>
+              <CardDescription className="text-xs leading-relaxed">
+                Isto orienta o assistente: visão geral, números da semana, ou uma pessoa em concreto quando estás a falar de alguém do quadro.
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
               <div className="grid gap-2">
-                <Label className="text-xs text-muted-foreground">Foco da pergunta</Label>
+                <Label className="text-xs text-muted-foreground">Tipo de resposta</Label>
                 <Select value={focus ?? 'general'} onValueChange={(v) => v && setFocus(v)}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
@@ -132,17 +131,15 @@ export function AssistantPage() {
               </div>
               {leadIdParam ? (
                 <div className="rounded-md border border-border bg-muted/30 p-3 text-xs">
-                  <p className="m-0 font-medium text-foreground">Lead em foco</p>
-                  <p className="mt-1 mb-2 font-mono text-[10px] text-muted-foreground">{leadIdParam}</p>
-                  {leadName ? <p className="m-0 text-foreground">{leadName}</p> : null}
+                  <p className="m-0 font-medium text-foreground">Estás a falar desta pessoa</p>
+                  <p className="mt-1 m-0 text-sm text-foreground">{leadName ?? 'Contacto sem nome'}</p>
                   <Button variant="link" size="sm" className="h-auto px-0 text-xs" onClick={() => navigate('/assistente')}>
-                    Limpar lead da URL
+                    Voltar a perguntar sobre o CRM todo
                   </Button>
                 </div>
               ) : (
-                <p className="m-0 text-xs text-muted-foreground">
-                  Dica: no Kanban, no futuro podes ligar um botão «Perguntar à IA» com{' '}
-                  <code className="text-[10px]">/assistente?leadId=…&amp;focus=lead</code>.
+                <p className="m-0 text-xs text-muted-foreground leading-relaxed">
+                  Se abrires o assistente a partir de um contacto no Kanban, essa pessoa aparece aqui e as respostas centram-se nela.
                 </p>
               )}
             </CardContent>
@@ -155,9 +152,8 @@ export function AssistantPage() {
                   <History className="size-4 text-muted-foreground" />
                   Histórico
                 </CardTitle>
-                <CardDescription className="text-xs">
-                  Conversas guardadas na tua conta. «Nova conversa» limpa o painel e inicia outro fio (a URL perde{' '}
-                  <code className="text-[10px]">threadId</code>).
+                <CardDescription className="text-xs leading-relaxed">
+                  As conversas anteriores ficam aqui. «Nova conversa» começa um tópico limpo à direita.
                 </CardDescription>
                 <Button
                   type="button"

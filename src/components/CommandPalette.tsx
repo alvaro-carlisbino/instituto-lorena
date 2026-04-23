@@ -100,7 +100,7 @@ export function CommandPalette() {
           </Command.Item>
           <Command.Item
             className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
-            keywords={['ia', 'ai', 'glm', 'zai', 'z.ai', 'assistente', 'chat', 'analytics', 'leads', 'churn']}
+            keywords={['ia', 'ai', 'assistente', 'chat', 'analytics', 'leads', 'churn', 'perguntar']}
             onSelect={goAiAssistant}
           >
             <Bot className="size-4 shrink-0 opacity-70" />

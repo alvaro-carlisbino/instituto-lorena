@@ -109,7 +109,7 @@ export function CrmAssistantChat({
           if (!newId) {
             setLoading(false)
             setMessages((prev) => prev.slice(0, -1))
-            setNotice('Não foi possível criar a conversa. Confirme sessão e migrações Supabase.')
+            setNotice('Não foi possível criar a conversa. Verifica a sessão ou tenta mais tarde.')
             scrollToEnd()
             return
           }
@@ -174,13 +174,9 @@ export function CrmAssistantChat({
     return (
       <Card className="border-border shadow-none rounded-none bg-muted/10">
         <CardHeader>
-          <CardTitle className="text-base font-bold uppercase tracking-widest">Assistente CRM (GLM)</CardTitle>
-          <CardDescription className="space-y-2 text-xs leading-relaxed">
-            <p className="m-0">
-              Ative <code className="text-[10px]">VITE_DATA_MODE=supabase</code>, faça deploy da função{' '}
-              <code className="text-[10px]">crm-ai-assistant</code> e defina <code className="text-[10px]">ZAI_API_KEY</code> nos
-              secrets do Supabase.
-            </p>
+          <CardTitle className="text-base font-bold uppercase tracking-widest">Assistente CRM</CardTitle>
+          <CardDescription className="text-xs leading-relaxed">
+            O assistente de IA só está disponível com a ligação à base de dados ativa. Pedes ajuda ao administrador se precisares de o ativar.
           </CardDescription>
         </CardHeader>
       </Card>
@@ -195,12 +191,12 @@ export function CrmAssistantChat({
           Conversa
         </CardTitle>
         <CardDescription className="text-xs leading-relaxed">
-          Cada mensagem atualiza o <strong className="text-foreground">snapshot</strong> do CRM (sempre com as tuas permissões).
-          O histórico fica guardado na tua conta. Enter envia; Shift+Enter nova linha.
+          Cada mensagem usa os dados mais recentes do CRM, de acordo com o teu acesso. O histórico guarda-se na tua conta. Enter envia;
+          Shift+Enter para nova linha.
         </CardDescription>
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Modelo</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Versão</span>
             <Select value={model} onValueChange={(v) => v && setModel(v as GlmModelId)}>
               <SelectTrigger size="sm" className="w-[min(100%,11rem)]">
                 <SelectValue />
