@@ -2,11 +2,11 @@
  * Assistente CRM (GLM / Z.ai) — leituras com JWT do utilizador (RLS).
  *
  * Secrets: ZAI_API_KEY (obrigatório).
- * Opcionais: ZAI_MODEL (ex. glm-4.7 ou zai-coding-plan/glm-4.7),
+ * Opcionais: ZAI_MODEL (código oficial, ex. glm-4.7, glm-5.1),
  *   ZAI_API_BASE — URL base sem trailing slash:
  *   - pay-as-you-go (saldo): https://api.z.ai/api/paas/v4 (comportamento antigo)
  *   - Coding Plan (subscrição): https://api.z.ai/api/coding/paas/v4
- *   Se ZAI_API_BASE for o endpoint /coding/, os modelos glm-* são enviados como zai-coding-plan/glm-*.
+ *   O código do modelo é o mesmo nos dois (docs Z.ai); não use prefixo zai-coding-plan/ nesta API.
  * Deploy: supabase functions deploy crm-ai-assistant
  *
  * Nota: respostas de negócio usam HTTP 200 + `{ ok: false, ... }` para o cliente
@@ -22,35 +22,37 @@ const cors = {
 /** Limite aproximado do system prompt (caracteres) para evitar rejeição / timeout na Z.ai. */
 const MAX_SYSTEM_CHARS = 95_000
 
+/** Alinhado à enum da API Z.ai (chat completions); códigos sem prefixo. */
 const GLM_MODEL_IDS = [
   'glm-5.1',
+  'glm-5',
+  'glm-5-turbo',
   'glm-4.7',
+  'glm-4.7-flash',
+  'glm-4.7-flashx',
   'glm-4.6',
   'glm-4.5',
   'glm-4.5-air',
+  'glm-4.5-x',
+  'glm-4.5-airx',
+  'glm-4.5-flash',
+  'glm-4-32b-0414-128k',
+  /** Legado no UI do CRM; mantidos por compatibilidade se a API ainda aceitar */
   'glm-4-flash',
   'glm-4-plus',
 ] as const
 
-const ALLOWED_MODELS = new Set<string>([
-  ...GLM_MODEL_IDS,
-  ...GLM_MODEL_IDS.map((id) => `zai-coding-plan/${id}`),
-])
+const ALLOWED_MODELS = new Set<string>([...GLM_MODEL_IDS])
 
 function zaiApiRootFromEnv(): string {
   return (Deno.env.get('ZAI_API_BASE') ?? 'https://api.z.ai/api/paas/v4').trim().replace(/\/$/, '')
 }
 
-function isCodingPlanBase(apiBaseTrimmed: string): boolean {
-  return apiBaseTrimmed.includes('/coding/')
-}
-
-/** No endpoint Coding Plan, a API espera identificadores com prefixo zai-coding-plan/. */
-function modelForZaiBilling(model: string, apiBaseTrimmed: string): string {
-  if (!isCodingPlanBase(apiBaseTrimmed)) return model
-  if (model.startsWith('zai-coding-plan/')) return model
-  if (/^glm-/.test(model)) return `zai-coding-plan/${model}`
-  return model
+/** Alguns clientes usam zai-coding-plan/glm-*; a REST Z.ai espera só glm-*. */
+function normalizeZaiModelCode(model: string): string {
+  const m = model.trim()
+  if (m.startsWith('zai-coding-plan/')) return m.slice('zai-coding-plan/'.length)
+  return m
 }
 
 type ChatMsg = { role: string; content: string }
@@ -272,10 +274,7 @@ Deno.serve(async (req) => {
     const zaiKey = Deno.env.get('ZAI_API_KEY') ?? ''
     const zaiApiRoot = zaiApiRootFromEnv()
     const zaiChatUrl = `${zaiApiRoot}/chat/completions`
-    const defaultModel = (
-      Deno.env.get('ZAI_MODEL')?.trim() ||
-      (isCodingPlanBase(zaiApiRoot) ? 'zai-coding-plan/glm-4.7' : 'glm-4.7')
-    ).trim()
+    const defaultModel = normalizeZaiModelCode(Deno.env.get('ZAI_MODEL')?.trim() || 'glm-4.7')
 
     if (!supabaseUrl || !anonKey) {
       return jsonResponse({ ok: false, error: 'server_misconfigured', message: 'SUPABASE_URL ou ANON_KEY em falta.' }, 500)
@@ -317,9 +316,13 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: 'empty_messages' }, 400)
     }
 
-    const requested = String(body.model ?? '').trim()
-    let model = ALLOWED_MODELS.has(requested) ? requested : defaultModel
-    model = modelForZaiBilling(model, zaiApiRoot)
+    const requestedRaw = String(body.model ?? '').trim()
+    const requested = normalizeZaiModelCode(requestedRaw)
+    const model = ALLOWED_MODELS.has(requested)
+      ? requested
+      : ALLOWED_MODELS.has(defaultModel)
+        ? defaultModel
+        : 'glm-4.7'
     const context = parseContext(body.context)
 
     let snapshot: Record<string, unknown>

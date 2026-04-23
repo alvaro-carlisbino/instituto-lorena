@@ -45,7 +45,7 @@ Edge Function que chama a API Z.ai (modelos GLM) com snapshot do CRM obtido **co
 
 1. No dashboard Supabase (ou CLI), defina secrets: `ZAI_API_KEY` (obrigatório). Opcionais: `ZAI_MODEL`, `ZAI_API_BASE`.
    - **Pay-as-you-go** (saldo na conta): omita `ZAI_API_BASE` ou use `https://api.z.ai/api/paas/v4`.
-   - **Coding Plan** (subscrição, sem saldo PAYG): defina `ZAI_API_BASE` = `https://api.z.ai/api/coding/paas/v4`. A função mapeia modelos `glm-*` para `zai-coding-plan/glm-*` nesse endpoint (erro Z.ai `1113` no `/paas/v4` costuma ser este caso).
+   - **Coding Plan** (subscrição, sem saldo PAYG): defina `ZAI_API_BASE` = `https://api.z.ai/api/coding/paas/v4`. O **código do modelo** (`glm-4.7`, `glm-5.1`, …) é o mesmo que na API geral; só muda o URL (erro `1113` no `/paas/v4` costuma ser plano coding a apontar para o endpoint errado).
 2. Deploy: `supabase functions deploy crm-ai-assistant`
 3. No app, abra **Operação → Assistente IA** ou `/assistente`. Opcional: `?leadId=<uuid>&focus=lead` para contexto de um lead.
 
