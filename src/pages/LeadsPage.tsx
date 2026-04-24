@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -16,6 +16,7 @@ import { columnLabel } from '@/lib/leadColumnLabels'
 import { parseCsv, rowsToObjects } from '@/lib/csvParse'
 import { getLeadFieldValue } from '@/lib/leadFields'
 import { formatTemperature } from '@/lib/fieldLabels'
+import { archiveImportFileToStorage } from '@/lib/importArchiveStorage'
 import { parseInteractionsImportJson } from '@/lib/interactionsImportSchema'
 import { cn } from '@/lib/utils'
 
@@ -30,8 +31,14 @@ export function LeadsPage() {
   const [stageFilter, setStageFilter] = useState<string>('all')
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [sourceFilter, setSourceFilter] = useState<string>('all')
-  const [csvText, setCsvText] = useState('')
-  const [jsonInteractions, setJsonInteractions] = useState('')
+  const csvInputRef = useRef<HTMLInputElement>(null)
+  const jsonInputRef = useRef<HTMLInputElement>(null)
+  const [csvFileLabel, setCsvFileLabel] = useState<string | null>(null)
+  const [jsonFileLabel, setJsonFileLabel] = useState<string | null>(null)
+  const [csvPreviewRows, setCsvPreviewRows] = useState<number | null>(null)
+  const [jsonPreviewCount, setJsonPreviewCount] = useState<number | null>(null)
+  const [pendingCsvFile, setPendingCsvFile] = useState<File | null>(null)
+  const [pendingJsonFile, setPendingJsonFile] = useState<File | null>(null)
 
   const leadIdParam = searchParams.get('leadId')
 
@@ -87,15 +94,22 @@ export function LeadsPage() {
     }
   }
 
-  const runCsvImport = async () => {
-    const trimmed = csvText.trim()
-    if (!trimmed) {
-      toast.error('Cole o conteúdo CSV.')
+  const runCsvImportFromFile = async (file: File) => {
+    const name = file.name.toLowerCase()
+    if (!name.endsWith('.csv')) {
+      toast.error('Escolha um ficheiro com extensão .csv.')
       return
     }
-    const grid = parseCsv(trimmed)
+    let text: string
+    try {
+      text = await file.text()
+    } catch {
+      toast.error('Não foi possível ler o ficheiro.')
+      return
+    }
+    const grid = parseCsv(text.trim())
     if (grid.length < 2) {
-      toast.error('CSV precisa de cabeçalho e ao menos uma linha.')
+      toast.error('O CSV precisa de cabeçalho e pelo menos uma linha de dados.')
       return
     }
     const header = grid[0]!.map((h) => h.trim())
@@ -107,20 +121,82 @@ export function LeadsPage() {
     if (errors.length) {
       toast.error(`${errors.length} erro(s). Primeiro: ${errors[0]}`)
     }
-    if (ok) toast.success(`${ok} lead(s) importado(s).`)
-    setCsvText('')
+    if (ok) {
+      toast.success(`${ok} lead(s) importado(s).`)
+      try {
+        await archiveImportFileToStorage(file, 'csv')
+      } catch (e) {
+        toast.message('Importação concluída, mas o arquivo não foi guardado no armazenamento.', {
+          description: e instanceof Error ? e.message : String(e),
+        })
+      }
+    }
+    setCsvFileLabel(null)
+    setCsvPreviewRows(null)
+    setPendingCsvFile(null)
+    if (csvInputRef.current) csvInputRef.current.value = ''
   }
 
-  const runJsonImport = async () => {
+  const runJsonImportFromFile = async (file: File) => {
+    const name = file.name.toLowerCase()
+    if (!name.endsWith('.json')) {
+      toast.error('Escolha um ficheiro com extensão .json.')
+      return
+    }
+    let text: string
     try {
-      const parsed = parseInteractionsImportJson(jsonInteractions.trim())
+      text = await file.text()
+    } catch {
+      toast.error('Não foi possível ler o ficheiro.')
+      return
+    }
+    try {
+      const parsed = parseInteractionsImportJson(text.trim())
       const { ok, errors } = await crm.importInteractionsFromPayload(parsed.interactions)
       if (errors.length) toast.error(errors[0] ?? 'Erro na importação.')
-      if (ok) toast.success(`${ok} interação(ões) importada(s).`)
-      setJsonInteractions('')
+      if (ok) {
+        toast.success(`${ok} interação(ões) importada(s).`)
+        try {
+          await archiveImportFileToStorage(file, 'json')
+        } catch (e) {
+          toast.message('Importação concluída, mas o arquivo não foi guardado no armazenamento.', {
+            description: e instanceof Error ? e.message : String(e),
+          })
+        }
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'JSON inválido.')
+      toast.error(e instanceof Error ? e.message : 'Ficheiro JSON inválido.')
     }
+    setJsonFileLabel(null)
+    setJsonPreviewCount(null)
+    setPendingJsonFile(null)
+    if (jsonInputRef.current) jsonInputRef.current.value = ''
+  }
+
+  const onCsvInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPendingCsvFile(file)
+    setCsvFileLabel(file.name)
+    void file.text().then((t) => {
+      const rows = parseCsv(t.trim()).length
+      setCsvPreviewRows(rows > 0 ? rows - 1 : 0)
+    })
+  }
+
+  const onJsonInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPendingJsonFile(file)
+    setJsonFileLabel(file.name)
+    void file.text().then((t) => {
+      try {
+        const parsed = parseInteractionsImportJson(t.trim())
+        setJsonPreviewCount(parsed.interactions.length)
+      } catch {
+        setJsonPreviewCount(null)
+      }
+    })
   }
 
   if (!crm.currentPermission.canRouteLeads) {
@@ -138,7 +214,7 @@ export function LeadsPage() {
   return (
     <AppLayout
       title="Todos os leads"
-      subtitle="Filtros, importação CSV e detalhe em painel lateral."
+      subtitle="Filtros, importação por ficheiros e detalhe em painel lateral."
     >
       {crm.isLoading ? <SkeletonBlocks rows={3} /> : null}
 
@@ -279,19 +355,43 @@ export function LeadsPage() {
           <CardHeader>
             <CardTitle className="text-base">Importar leads (CSV)</CardTitle>
             <CardDescription>
-              Primeira linha: cabeçalhos como patient_name, phone, summary, source, temperature. Use o funil selecionado acima
-              (filtro &quot;Funil&quot;) como destino; primeira etapa do funil será aplicada.
+              Selecione um ficheiro .csv: primeira linha com cabeçalhos (ex.: patient_name, phone, summary, source,
+              temperature). O funil escolhido nos filtros acima define o destino; usa-se a primeira etapa desse funil.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-2">
-            <Label htmlFor="csv-paste">Cole o CSV</Label>
-            <textarea
-              id="csv-paste"
-              className="min-h-[8rem] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
-              value={csvText}
-              onChange={(e) => setCsvText(e.target.value)}
+          <CardContent className="grid gap-3">
+            <input
+              ref={csvInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="sr-only"
+              aria-label="Ficheiro CSV de leads"
+              onChange={onCsvInputChange}
             />
-            <Button type="button" onClick={() => void runCsvImport()}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" onClick={() => csvInputRef.current?.click()}>
+                Escolher ficheiro CSV
+              </Button>
+              {csvFileLabel ? (
+                <span className="text-sm text-muted-foreground">
+                  {csvFileLabel}
+                  {csvPreviewRows != null ? ` · ${csvPreviewRows} linha(s) de dados` : null}
+                </span>
+              ) : (
+                <span className="text-sm text-muted-foreground">Nenhum ficheiro selecionado.</span>
+              )}
+            </div>
+            <Button
+              type="button"
+              disabled={!pendingCsvFile}
+              onClick={() => {
+                if (!pendingCsvFile) {
+                  toast.error('Selecione um ficheiro CSV primeiro.')
+                  return
+                }
+                void runCsvImportFromFile(pendingCsvFile)
+              }}
+            >
               Importar leads
             </Button>
           </CardContent>
@@ -300,19 +400,45 @@ export function LeadsPage() {
           <CardHeader>
             <CardTitle className="text-base">Importar conversas (JSON)</CardTitle>
             <CardDescription>
-              Formato: {'{'} &quot;interactions&quot;: [ {'{'} &quot;leadId&quot;, &quot;patientName&quot;, &quot;channel&quot;,
-              &quot;direction&quot;, &quot;author&quot;, &quot;content&quot;, &quot;happenedAt&quot; {'}'} ] {'}'}
+              Selecione um ficheiro .json exportado pelo sistema: deve conter a lista de interações no formato interno
+              (chave de topo interactions, cada item com leadId, patientName, channel, direction, author, content,
+              happenedAt).
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-2">
-            <Label htmlFor="json-paste">Cole o JSON</Label>
-            <textarea
-              id="json-paste"
-              className="min-h-[8rem] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs"
-              value={jsonInteractions}
-              onChange={(e) => setJsonInteractions(e.target.value)}
+          <CardContent className="grid gap-3">
+            <input
+              ref={jsonInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="sr-only"
+              aria-label="Ficheiro JSON de interações"
+              onChange={onJsonInputChange}
             />
-            <Button type="button" variant="secondary" onClick={() => void runJsonImport()}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" onClick={() => jsonInputRef.current?.click()}>
+                Escolher ficheiro JSON
+              </Button>
+              {jsonFileLabel ? (
+                <span className="text-sm text-muted-foreground">
+                  {jsonFileLabel}
+                  {jsonPreviewCount != null ? ` · ${jsonPreviewCount} interação(ões)` : null}
+                </span>
+              ) : (
+                <span className="text-sm text-muted-foreground">Nenhum ficheiro selecionado.</span>
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!pendingJsonFile}
+              onClick={() => {
+                if (!pendingJsonFile) {
+                  toast.error('Selecione um ficheiro JSON primeiro.')
+                  return
+                }
+                void runJsonImportFromFile(pendingJsonFile)
+              }}
+            >
               Importar interações
             </Button>
           </CardContent>
