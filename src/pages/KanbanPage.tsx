@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Bot, History, LayoutDashboard, LayoutGrid, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react'
+import { Bot, History, LayoutDashboard, LayoutGrid, List, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react'
 
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
+import { LeadDetailSheet } from '@/components/leads/LeadDetailSheet'
 import { KanbanToolbar } from '@/components/kanban/KanbanToolbar'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { buttonVariants } from '@/components/ui/button'
@@ -28,6 +29,7 @@ export function KanbanPage() {
   const [temperatureFilter, setTemperatureFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
 
   const visibleLeads = useMemo(() => {
     const normalized = searchTerm.trim().toLowerCase()
@@ -82,6 +84,10 @@ export function KanbanPage() {
               <DropdownMenuItem onClick={() => navigate('/historico')}>
                 <History className="size-4" />
                 Histórico de leads
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate('/leads')}>
+                <List className="size-4" />
+                Todos os leads
               </DropdownMenuItem>
               {crm.currentPermission.canEditBoards ? (
                 <DropdownMenuItem onClick={() => navigate('/boards')}>
@@ -160,7 +166,10 @@ export function KanbanPage() {
                     selected={crm.selectedLeadId === lead.id}
                     sourceLabel={sourceLabel[lead.source]}
                     ownerName={crm.getOwnerName(lead.ownerId)}
-                    onSelect={() => crm.setSelectedLeadId(lead.id)}
+                    onSelect={() => {
+                      crm.setSelectedLeadId(lead.id)
+                      setDetailOpen(true)
+                    }}
                     onMovePrev={() => crm.moveLead(lead.id, 'prev')}
                     onMoveNext={() => crm.moveLead(lead.id, 'next')}
                     stageLeadsOrdered={stageLeads}
@@ -191,6 +200,8 @@ export function KanbanPage() {
           )
         })}
       </div>
+
+      <LeadDetailSheet open={detailOpen} onOpenChange={setDetailOpen} />
     </AppLayout>
   )
 }

@@ -79,17 +79,67 @@ export type MetricConfig = {
 
 export type FieldVisibilityContext = 'kanban_card' | 'lead_detail' | 'list' | 'capture_form'
 
+/** Opção de select: string legada ou par valor + rótulo. */
+export type WorkflowFieldOption = string | { value: string; label: string }
+
 export type WorkflowField = {
   id: string
   fieldKey: string
   label: string
   fieldType: 'text' | 'select' | 'number' | 'date'
   required: boolean
-  options: string[]
+  options: WorkflowFieldOption[]
   section: string
   sortOrder: number
   visibleIn: FieldVisibilityContext[]
   validation: Record<string, unknown>
+}
+
+export type LeadTaskStatus = 'open' | 'done' | 'cancelled'
+
+export type LeadTask = {
+  id: string
+  leadId: string
+  title: string
+  assigneeId: string | null
+  dueAt: string | null
+  status: LeadTaskStatus
+  taskType: string
+  metadata: Record<string, unknown>
+  createdAt: string
+}
+
+export type AutomationRule = {
+  id: string
+  name: string
+  enabled: boolean
+  triggerType: string
+  triggerConfig: Record<string, unknown>
+  actionType: string
+  actionConfig: Record<string, unknown>
+}
+
+export type SurveyTemplate = {
+  id: string
+  name: string
+  npsQuestion: string
+  enabled: boolean
+}
+
+export type SurveyDispatch = {
+  id: string
+  templateId: string
+  leadId: string
+  sentAt: string
+  channel: string
+}
+
+export type SurveyResponse = {
+  id: string
+  dispatchId: string
+  score: number
+  comment: string | null
+  respondedAt: string
 }
 
 export type PermissionProfile = {
@@ -415,7 +465,11 @@ export const initialWorkflowFields: WorkflowField[] = [
     label: 'Interesse',
     fieldType: 'select',
     required: false,
-    options: ['cold', 'warm', 'hot'],
+    options: [
+      { value: 'cold', label: 'Frio' },
+      { value: 'warm', label: 'Morno' },
+      { value: 'hot', label: 'Quente' },
+    ],
     section: 'Principal',
     sortOrder: 3,
     visibleIn: ['kanban_card', 'lead_detail', 'list'],
@@ -588,3 +642,42 @@ export const initialOrgSettings: OrgSettings = {
   dateFormat: 'dd/MM/yyyy',
   weekStartsOn: 1,
 }
+
+export const initialLeadTasks: LeadTask[] = [
+  {
+    id: 'task-demo-1',
+    leadId: 'lead-001',
+    title: 'Retornar ligação — harmonização',
+    assigneeId: 'sdr-1',
+    dueAt: new Date(Date.now() + 86400000).toISOString(),
+    status: 'open',
+    taskType: 'follow_up',
+    metadata: {},
+    createdAt: '2026-04-16T10:05:00Z',
+  },
+]
+
+export const initialAutomationRules: AutomationRule[] = [
+  {
+    id: 'auto-1',
+    name: 'Follow-up 24h após triagem',
+    enabled: true,
+    triggerType: 'stage_entered',
+    triggerConfig: { stageId: 'contato' },
+    actionType: 'create_task',
+    actionConfig: { title: 'Contato humano obrigatório', hoursOffset: 24, taskType: 'follow_up' },
+  },
+]
+
+export const initialSurveyTemplates: SurveyTemplate[] = [
+  {
+    id: 'nps-default',
+    name: 'NPS pós-atendimento',
+    npsQuestion: 'De 0 a 10, o quanto recomendaria nossos serviços?',
+    enabled: true,
+  },
+]
+
+export const initialSurveyDispatches: SurveyDispatch[] = []
+
+export const initialSurveyResponses: SurveyResponse[] = []

@@ -1,14 +1,19 @@
 import {
+  initialAutomationRules,
   initialDashboardWidgets,
   initialAppUsers,
   initialChannels,
   initialDataViews,
   initialInteractions,
+  initialLeadTasks,
   initialLeads,
   initialMetrics,
   initialNotifications,
   initialOrgSettings,
   initialPermissions,
+  initialSurveyDispatches,
+  initialSurveyResponses,
+  initialSurveyTemplates,
   initialTvWidgets,
   initialWorkflowFields,
   pipelines,
@@ -16,20 +21,26 @@ import {
 } from '../mocks/crmMock'
 import type {
   AppUser,
+  AutomationRule,
   ChannelConfig,
   DashboardWidget,
   DataView,
   FieldVisibilityContext,
   Interaction,
   Lead,
+  LeadTask,
   MetricConfig,
   NotificationRule,
   OrgSettings,
   PermissionProfile,
   Pipeline,
   Sdr,
+  SurveyDispatch,
+  SurveyResponse,
+  SurveyTemplate,
   TvWidget,
   WorkflowField,
+  WorkflowFieldOption,
 } from '../mocks/crmMock'
 import { defaultVisibleInAll } from '../lib/leadFields'
 import { supabase } from '../lib/supabaseClient'
@@ -92,6 +103,11 @@ export type CrmDataSnapshot = {
   dashboardWidgets: DashboardWidget[]
   dataViews: DataView[]
   orgSettings: OrgSettings
+  leadTasks: LeadTask[]
+  automationRules: AutomationRule[]
+  surveyTemplates: SurveyTemplate[]
+  surveyDispatches: SurveyDispatch[]
+  surveyResponses: SurveyResponse[]
 }
 
 export type AuditLogEntry = {
@@ -140,13 +156,64 @@ const mapWorkflowFromDb = (row: Record<string, unknown>): WorkflowField => {
       ? row.field_type
       : 'text') as WorkflowField['fieldType'],
     required: Boolean(row.required),
-    options: Array.isArray(row.options) ? (row.options as string[]) : [],
+    options: Array.isArray(row.options) ? (row.options as WorkflowFieldOption[]) : [],
     section: String(row.section ?? ''),
     sortOrder: typeof row.sort_order === 'number' ? row.sort_order : Number(row.sort_order) || 0,
     visibleIn: visibleIn.length ? visibleIn : defaultVisibleInAll,
     validation: (row.validation && typeof row.validation === 'object' ? row.validation : {}) as Record<string, unknown>,
   }
 }
+
+const mapLeadTaskFromDb = (row: Record<string, unknown>): LeadTask => ({
+  id: String(row.id),
+  leadId: String(row.lead_id),
+  title: String(row.title),
+  assigneeId: row.assignee_id != null && String(row.assignee_id).length > 0 ? String(row.assignee_id) : null,
+  dueAt: row.due_at != null ? String(row.due_at) : null,
+  status: (['open', 'done', 'cancelled'].includes(String(row.status)) ? row.status : 'open') as LeadTask['status'],
+  taskType: String(row.task_type ?? 'follow_up'),
+  metadata: (row.metadata && typeof row.metadata === 'object' ? row.metadata : {}) as Record<string, unknown>,
+  createdAt: String(row.created_at ?? new Date().toISOString()),
+})
+
+const mapAutomationFromDb = (row: Record<string, unknown>): AutomationRule => ({
+  id: String(row.id),
+  name: String(row.name),
+  enabled: Boolean(row.enabled),
+  triggerType: String(row.trigger_type ?? ''),
+  triggerConfig: (row.trigger_config && typeof row.trigger_config === 'object' ? row.trigger_config : {}) as Record<
+    string,
+    unknown
+  >,
+  actionType: String(row.action_type ?? ''),
+  actionConfig: (row.action_config && typeof row.action_config === 'object' ? row.action_config : {}) as Record<
+    string,
+    unknown
+  >,
+})
+
+const mapSurveyTemplateFromDb = (row: Record<string, unknown>): SurveyTemplate => ({
+  id: String(row.id),
+  name: String(row.name),
+  npsQuestion: String(row.nps_question ?? ''),
+  enabled: Boolean(row.enabled),
+})
+
+const mapSurveyDispatchFromDb = (row: Record<string, unknown>): SurveyDispatch => ({
+  id: String(row.id),
+  templateId: String(row.template_id),
+  leadId: String(row.lead_id),
+  sentAt: String(row.sent_at ?? new Date().toISOString()),
+  channel: String(row.channel ?? 'in_app'),
+})
+
+const mapSurveyResponseFromDb = (row: Record<string, unknown>): SurveyResponse => ({
+  id: String(row.id),
+  dispatchId: String(row.dispatch_id),
+  score: Number(row.score) || 0,
+  comment: row.comment != null ? String(row.comment) : null,
+  respondedAt: String(row.responded_at ?? new Date().toISOString()),
+})
 
 export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   const client = assertSupabase()
@@ -217,6 +284,33 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   if (dashboardWidgetsRes.error) throw dashboardWidgetsRes.error
   if (dataViewsRes.error) throw dataViewsRes.error
   if (orgSettingsRes.error) throw orgSettingsRes.error
+
+  const [tasksRes, rulesRes, tmplRes, dispRes, respRes] = await Promise.all([
+    client
+      .from('lead_tasks')
+      .select('id, lead_id, title, assignee_id, due_at, status, task_type, metadata, created_at')
+      .order('due_at', { ascending: true }),
+    client.from('automation_rules').select('id, name, enabled, trigger_type, trigger_config, action_type, action_config'),
+    client.from('survey_templates').select('id, name, nps_question, enabled'),
+    client.from('survey_dispatches').select('id, template_id, lead_id, sent_at, channel'),
+    client.from('survey_responses').select('id, dispatch_id, score, comment, responded_at'),
+  ])
+
+  const builtLeadTasks: LeadTask[] = !tasksRes.error
+    ? ((tasksRes.data ?? []) as Record<string, unknown>[]).map(mapLeadTaskFromDb)
+    : initialLeadTasks
+  const builtAutomationRules: AutomationRule[] = !rulesRes.error
+    ? ((rulesRes.data ?? []) as Record<string, unknown>[]).map(mapAutomationFromDb)
+    : initialAutomationRules
+  const builtSurveyTemplates: SurveyTemplate[] = !tmplRes.error
+    ? ((tmplRes.data ?? []) as Record<string, unknown>[]).map(mapSurveyTemplateFromDb)
+    : initialSurveyTemplates
+  const builtSurveyDispatches: SurveyDispatch[] = !dispRes.error
+    ? ((dispRes.data ?? []) as Record<string, unknown>[]).map(mapSurveyDispatchFromDb)
+    : initialSurveyDispatches
+  const builtSurveyResponses: SurveyResponse[] = !respRes.error
+    ? ((respRes.data ?? []) as Record<string, unknown>[]).map(mapSurveyResponseFromDb)
+    : initialSurveyResponses
 
   const pipelineRows = (pipelinesRes.data ?? []) as DbPipeline[]
   const stageRows = (stagesRes.data ?? []) as DbStage[]
@@ -392,6 +486,11 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     dashboardWidgets: builtDashboardWidgets,
     dataViews: builtDataViews,
     orgSettings: builtOrgSettings,
+    leadTasks: builtLeadTasks,
+    automationRules: builtAutomationRules,
+    surveyTemplates: builtSurveyTemplates,
+    surveyDispatches: builtSurveyDispatches,
+    surveyResponses: builtSurveyResponses,
   }
 }
 
@@ -546,6 +645,41 @@ export const seedDemoData = async (): Promise<void> => {
 
   const dashboardWidgetRes = await client.from('dashboard_widgets').upsert(dashboardWidgetPayload)
   if (dashboardWidgetRes.error) throw dashboardWidgetRes.error
+
+  const surveyTemplatePayload = initialSurveyTemplates.map((t) => ({
+    id: t.id,
+    name: t.name,
+    nps_question: t.npsQuestion,
+    enabled: t.enabled,
+  }))
+  const surveyTRes = await client.from('survey_templates').upsert(surveyTemplatePayload)
+  if (surveyTRes.error) throw surveyTRes.error
+
+  const automationPayload = initialAutomationRules.map((r) => ({
+    id: r.id,
+    name: r.name,
+    enabled: r.enabled,
+    trigger_type: r.triggerType,
+    trigger_config: r.triggerConfig,
+    action_type: r.actionType,
+    action_config: r.actionConfig,
+  }))
+  const autoRes = await client.from('automation_rules').upsert(automationPayload)
+  if (autoRes.error) throw autoRes.error
+
+  const taskPayload = initialLeadTasks.map((t) => ({
+    id: t.id,
+    lead_id: t.leadId,
+    title: t.title,
+    assignee_id: t.assigneeId,
+    due_at: t.dueAt,
+    status: t.status,
+    task_type: t.taskType,
+    metadata: t.metadata ?? {},
+    created_at: t.createdAt,
+  }))
+  const taskRes = await client.from('lead_tasks').upsert(taskPayload)
+  if (taskRes.error) throw taskRes.error
 }
 
 export const updateLeadStage = async (leadId: string, stageId: string): Promise<void> => {
@@ -642,6 +776,52 @@ export const saveChannelConfig = async (channel: ChannelConfig): Promise<void> =
 export const saveMetricConfig = async (metric: MetricConfig): Promise<void> => {
   const client = assertSupabase()
   const { error } = await client.from('metric_configs').upsert(metric)
+  if (error) throw error
+}
+
+export const saveLeadTask = async (task: LeadTask): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('lead_tasks').upsert({
+    id: task.id,
+    lead_id: task.leadId,
+    title: task.title,
+    assignee_id: task.assigneeId,
+    due_at: task.dueAt,
+    status: task.status,
+    task_type: task.taskType,
+    metadata: task.metadata ?? {},
+    created_at: task.createdAt,
+  })
+  if (error) throw error
+}
+
+export const deleteLeadTask = async (taskId: string): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('lead_tasks').delete().eq('id', taskId)
+  if (error) throw error
+}
+
+export const saveSurveyResponse = async (row: SurveyResponse): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('survey_responses').upsert({
+    id: row.id,
+    dispatch_id: row.dispatchId,
+    score: row.score,
+    comment: row.comment,
+    responded_at: row.respondedAt,
+  })
+  if (error) throw error
+}
+
+export const saveSurveyDispatch = async (row: SurveyDispatch): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('survey_dispatches').upsert({
+    id: row.id,
+    template_id: row.templateId,
+    lead_id: row.leadId,
+    sent_at: row.sentAt,
+    channel: row.channel,
+  })
   if (error) throw error
 }
 

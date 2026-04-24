@@ -1,6 +1,7 @@
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { normalizeFieldSelectOptions } from '@/lib/workflowFieldOptions'
 import { getLeadFieldValue, setLeadFieldValue } from '@/lib/leadFields'
 import { cn } from '@/lib/utils'
 import type { Lead, WorkflowField } from '@/mocks/crmMock'
@@ -52,8 +53,11 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
   }
 
   if (field.fieldType === 'select' && field.options.length > 0) {
+    const pairs = normalizeFieldSelectOptions(field.options as unknown[])
     const hasValue = raw !== undefined && raw !== null && String(raw).length > 0
-    const selectValue = hasValue ? String(raw) : EMPTY_SELECT
+    const rawStr = hasValue ? String(raw) : ''
+    const known = pairs.some((p) => p.value === rawStr)
+    const selectValue = !hasValue ? EMPTY_SELECT : known ? rawStr : rawStr || EMPTY_SELECT
     return (
       <div className={compact ? 'contents' : 'grid gap-2'}>
         {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
@@ -69,9 +73,14 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={EMPTY_SELECT}>—</SelectItem>
-            {field.options.map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
+            {hasValue && !known && rawStr ? (
+              <SelectItem value={rawStr}>
+                {rawStr} (valor fora da lista)
+              </SelectItem>
+            ) : null}
+            {pairs.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
               </SelectItem>
             ))}
           </SelectContent>

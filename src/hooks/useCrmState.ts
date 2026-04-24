@@ -25,6 +25,7 @@ import {
   deleteTvWidget,
   deleteDataView,
   deleteWorkflowField,
+  deleteLeadTask,
   insertInteraction,
   insertLead,
   loadWebhookJobs,
@@ -43,6 +44,9 @@ import {
   saveDashboardWidget,
   saveTvWidget,
   saveWorkflowField,
+  saveLeadTask,
+  saveSurveyDispatch,
+  saveSurveyResponse,
   seedDemoData,
   seedTestUsers,
   saveLeadOrdering,
@@ -55,11 +59,16 @@ import {
   initialChannels,
   initialDataViews,
   initialInteractions,
+  initialAutomationRules,
+  initialLeadTasks,
   initialLeads,
   initialMetrics,
   initialNotifications,
   initialOrgSettings,
   initialPermissions,
+  initialSurveyDispatches,
+  initialSurveyResponses,
+  initialSurveyTemplates,
   initialTvWidgets,
   initialWorkflowFields,
   pipelines,
@@ -68,12 +77,14 @@ import {
   tvKpiSeries,
 } from '../mocks/crmMock'
 import type {
+  AutomationRule,
   ChannelConfig,
   AppUser,
   DataView,
   Interaction,
   DashboardWidget,
   Lead,
+  LeadTask,
   MetricConfig,
   NotificationRule,
   OrgSettings,
@@ -81,6 +92,9 @@ import type {
   Pipeline,
   Sdr,
   Stage,
+  SurveyDispatch,
+  SurveyResponse,
+  SurveyTemplate,
   TvWidget,
   TriageResult,
   WorkflowField,
@@ -147,6 +161,11 @@ export const useCrmState = () => {
   const [dashboardWidgets, setDashboardWidgets] = useState<DashboardWidget[]>(initialDashboardWidgets)
   const [dataViews, setDataViews] = useState<DataView[]>(initialDataViews)
   const [orgSettings, setOrgSettings] = useState<OrgSettings>(initialOrgSettings)
+  const [leadTasks, setLeadTasks] = useState<LeadTask[]>(initialLeadTasks)
+  const [automationRules, setAutomationRules] = useState<AutomationRule[]>(initialAutomationRules)
+  const [surveyTemplates, setSurveyTemplates] = useState<SurveyTemplate[]>(initialSurveyTemplates)
+  const [surveyDispatches, setSurveyDispatches] = useState<SurveyDispatch[]>(initialSurveyDispatches)
+  const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>(initialSurveyResponses)
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [syncNotice, setSyncNotice] = useState<string>('')
   const [session, setSession] = useState<Session | null>(null)
@@ -311,6 +330,48 @@ export const useCrmState = () => {
       content: `Lead movido para a etapa: ${nextStage.name}.`,
       happenedAt: new Date().toISOString(),
     })
+
+    for (const rule of automationRules) {
+      if (!rule.enabled || rule.triggerType !== 'stage_entered') continue
+      if (String(rule.triggerConfig.stageId) !== nextStage.id) continue
+      if (rule.actionType === 'create_task') {
+        const title = String(rule.actionConfig.title ?? 'Tarefa automática')
+        const hours = Number(rule.actionConfig.hoursOffset) || 24
+        const dueAt = new Date(Date.now() + hours * 3600000).toISOString()
+        const task: LeadTask = {
+          id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          leadId: targetLead.id,
+          title,
+          assigneeId: targetLead.ownerId,
+          dueAt,
+          status: 'open',
+          taskType: String(rule.actionConfig.taskType ?? 'follow_up'),
+          metadata: { ruleId: rule.id },
+          createdAt: new Date().toISOString(),
+        }
+        setLeadTasks((prev) => [...prev, task])
+        if (dataMode === 'supabase' && isSupabaseConfigured) {
+          void saveLeadTask(task)
+        }
+      }
+    }
+
+    if (nextStage.id.includes('fechado')) {
+      const tmpl = surveyTemplates.find((t) => t.enabled)
+      if (tmpl) {
+        const dispatch: SurveyDispatch = {
+          id: `disp-${Date.now()}`,
+          templateId: tmpl.id,
+          leadId: targetLead.id,
+          sentAt: new Date().toISOString(),
+          channel: 'in_app',
+        }
+        setSurveyDispatches((prev) => [...prev, dispatch])
+        if (dataMode === 'supabase' && isSupabaseConfigured) {
+          void saveSurveyDispatch(dispatch)
+        }
+      }
+    }
   }
 
   const getRoundRobinOwner = () => {
@@ -498,6 +559,11 @@ export const useCrmState = () => {
       setDashboardWidgets(snapshot.dashboardWidgets)
       setDataViews(snapshot.dataViews ?? initialDataViews)
       setOrgSettings(snapshot.orgSettings ?? initialOrgSettings)
+      setLeadTasks(snapshot.leadTasks ?? initialLeadTasks)
+      setAutomationRules(snapshot.automationRules ?? initialAutomationRules)
+      setSurveyTemplates(snapshot.surveyTemplates ?? initialSurveyTemplates)
+      setSurveyDispatches(snapshot.surveyDispatches ?? initialSurveyDispatches)
+      setSurveyResponses(snapshot.surveyResponses ?? initialSurveyResponses)
       await refreshWebhookJobs()
       setSyncNotice('Sistema atualizado com os dados mais recentes.')
     } catch (error: unknown) {
@@ -954,6 +1020,144 @@ export const useCrmState = () => {
     }
   }
 
+  const importLeadsFromParsed = async (rows: Record<string, string>[], pipelineId: string, stageId: string) => {
+    const pipeline = pipelineCatalog.find((p) => p.id === pipelineId) ?? selectedPipeline
+    const stage = pipeline.stages.find((s) => s.id === stageId) ?? pipeline.stages[0]
+    if (!stage) return { ok: 0, errors: ['Funil sem etapas.'] as string[] }
+    const owner = sdrMembers.find((s) => s.active) ?? sdrMembers[0]
+    const errors: string[] = []
+    const created: Lead[] = []
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i]
+      const name = (row.patient_name ?? row.nome ?? row.name ?? '').trim()
+      if (!name) {
+        errors.push(`Linha ${i + 2}: nome obrigatório.`)
+        continue
+      }
+      const phone = (row.phone ?? row.telefone ?? '').trim() || '+55 00 00000-0000'
+      const summary = (row.summary ?? row.resumo ?? '').trim() || 'Importado via CSV.'
+      const srcRaw = (row.source ?? row.origem ?? 'manual').trim().toLowerCase()
+      const source =
+        srcRaw === 'whatsapp' || srcRaw === 'meta_facebook' || srcRaw === 'meta_instagram'
+          ? (srcRaw as Lead['source'])
+          : ('manual' as Lead['source'])
+      const position =
+        leads.filter((l) => l.stageId === stage.id).length + created.filter((l) => l.stageId === stage.id).length + 1
+      const newLead: Lead = {
+        id: `lead-import-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`,
+        patientName: name,
+        phone,
+        source,
+        createdAt: new Date().toISOString(),
+        position,
+        score: Number(row.score ?? 0) || 0,
+        temperature: (['cold', 'warm', 'hot'].includes(String(row.temperature))
+          ? row.temperature
+          : 'warm') as Lead['temperature'],
+        ownerId: owner?.id ?? sdrTeam[0].id,
+        pipelineId: pipeline.id,
+        stageId: stage.id,
+        summary,
+        customFields: {},
+      }
+      if (dataMode === 'supabase' && isSupabaseConfigured) {
+        try {
+          await insertLead(newLead)
+        } catch (e) {
+          errors.push(`Linha ${i + 2}: ${e instanceof Error ? e.message : 'erro'}`)
+          continue
+        }
+      }
+      created.push(newLead)
+    }
+    if (created.length) {
+      setLeads((prev) => [...created, ...prev])
+    }
+    return { ok: created.length, errors }
+  }
+
+  const importInteractionsFromPayload = async (
+    items: Omit<Interaction, 'id'>[],
+  ): Promise<{ ok: number; errors: string[] }> => {
+    const errors: string[] = []
+    let ok = 0
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i]
+      if (!leads.some((l) => l.id === item.leadId)) {
+        errors.push(`Item ${i + 1}: lead ${item.leadId} não encontrado.`)
+        continue
+      }
+      addInteraction(item)
+      ok += 1
+    }
+    return { ok, errors }
+  }
+
+  const addLeadTask = (partial: Omit<LeadTask, 'id' | 'createdAt'> & { id?: string; createdAt?: string }) => {
+    const task: LeadTask = {
+      id: partial.id ?? `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      leadId: partial.leadId,
+      title: partial.title,
+      assigneeId: partial.assigneeId ?? null,
+      dueAt: partial.dueAt ?? null,
+      status: partial.status ?? 'open',
+      taskType: partial.taskType ?? 'follow_up',
+      metadata: partial.metadata ?? {},
+      createdAt: partial.createdAt ?? new Date().toISOString(),
+    }
+    setLeadTasks((prev) => [...prev, task])
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void saveLeadTask(task)
+    }
+  }
+
+  const updateLeadTask = (taskId: string, updates: Partial<LeadTask>) => {
+    setLeadTasks((prev) => {
+      const next = prev.map((t) => (t.id === taskId ? { ...t, ...updates } : t))
+      const changed = next.find((t) => t.id === taskId)
+      if (changed && dataMode === 'supabase' && isSupabaseConfigured) {
+        void saveLeadTask(changed)
+      }
+      return next
+    })
+  }
+
+  const removeLeadTask = (taskId: string) => {
+    setLeadTasks((prev) => prev.filter((t) => t.id !== taskId))
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void deleteLeadTask(taskId)
+    }
+  }
+
+  const recordSurveyResponse = (dispatchId: string, score: number, comment: string | null) => {
+    const row: SurveyResponse = {
+      id: `svr-${Date.now()}`,
+      dispatchId,
+      score,
+      comment,
+      respondedAt: new Date().toISOString(),
+    }
+    setSurveyResponses((prev) => [...prev, row])
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void saveSurveyResponse(row)
+    }
+  }
+
+  const dispatchNpsForLead = (templateId: string, leadId: string) => {
+    const dispatch: SurveyDispatch = {
+      id: `disp-${Date.now()}`,
+      templateId,
+      leadId,
+      sentAt: new Date().toISOString(),
+      channel: 'in_app',
+    }
+    setSurveyDispatches((prev) => [...prev, dispatch])
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void saveSurveyDispatch(dispatch)
+    }
+    return dispatch
+  }
+
   const addDataView = () => {
     const next: DataView = {
       id: `view-${Date.now()}`,
@@ -1205,6 +1409,12 @@ export const useCrmState = () => {
 
   const effectiveRole = actingRole
 
+  const myAppUserId = useMemo(() => {
+    if (!session?.user?.email) return null
+    const email = session.user.email.toLowerCase()
+    return users.find((u) => u.email.toLowerCase() === email)?.id ?? null
+  }, [session, users])
+
   const currentPermission = useMemo((): PermissionProfile => {
     const matchRole = (list: PermissionProfile[], role: string) =>
       list.find((p) => p.role === role) ??
@@ -1402,6 +1612,12 @@ export const useCrmState = () => {
     dataViews,
     orgSettings,
     tvKpiSeries,
+    leadTasks,
+    automationRules,
+    surveyTemplates,
+    surveyDispatches,
+    surveyResponses,
+    myAppUserId,
     draftMessage,
     setDraftMessage,
     triageByLead,
@@ -1426,6 +1642,13 @@ export const useCrmState = () => {
     moveLead,
     reorderLeadCard,
     persistLeadPatch,
+    importLeadsFromParsed,
+    importInteractionsFromPayload,
+    addLeadTask,
+    updateLeadTask,
+    removeLeadTask,
+    recordSurveyResponse,
+    dispatchNpsForLead,
     simulateMetaCapture,
     sendMessage,
     retryFailedJobs,

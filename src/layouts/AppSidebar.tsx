@@ -12,11 +12,13 @@ import {
   Radio,
   Robot,
   Shield,
+  ListBullets,
   SlidersHorizontal,
   SquaresFour,
   Table,
   Television,
   Users,
+  CheckSquare,
 } from 'phosphor-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -61,6 +63,7 @@ export function AppSidebar() {
   const crm = useCrm()
 
   const showDashboardConfig = crm.currentPermission.canRouteLeads
+  const showLeadsHub = crm.currentPermission.canRouteLeads
   const showBoards = crm.currentPermission.canEditBoards
   const showAdmin = crm.currentPermission.canManageUsers
   const showTv = crm.currentPermission.canViewTvPanel
@@ -98,7 +101,9 @@ export function AppSidebar() {
             <SidebarMenu>
               <NavItem to="/dashboard" label="Painel" icon={ChartLineUp} />
               <NavItem to="/kanban" label="Quadro de leads" icon={SquaresFour} />
+              {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={ListBullets} /> : null}
               <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />
+              {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={CheckSquare} /> : null}
               <NavItem to="/assistente" label="Assistente IA" icon={Robot} />
             </SidebarMenu>
           </SidebarGroupContent>

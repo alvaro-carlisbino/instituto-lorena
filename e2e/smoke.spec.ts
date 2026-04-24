@@ -10,7 +10,7 @@ test.describe('smoke (modo mock)', () => {
   test('configurações e campos de workflow sem textarea JSON', async ({ page }) => {
     await page.goto('/configuracoes')
     await expect(page.getByRole('heading', { name: 'Configurações gerais' })).toBeVisible()
-    await expect(page.getByText('Campos de workflow', { exact: true })).toBeVisible()
+    await expect(page.getByText('Campos personalizados', { exact: true })).toBeVisible()
     await expect(page.locator('textarea')).toHaveCount(0)
   })
 
@@ -31,7 +31,12 @@ test.describe('smoke (modo mock)', () => {
   test('lista de opções do workflow (tipo select)', async ({ page }) => {
     await page.goto('/configuracoes')
     const tempBlock = page.getByTestId('workflow-field-temperature')
-    await expect(tempBlock.getByText('Opções da lista')).toBeVisible()
+    await expect(tempBlock.getByText(/Opções \(valor interno/)).toBeVisible()
     await expect(tempBlock.getByRole('button', { name: 'Adicionar opção' })).toBeVisible()
+  })
+
+  test('página de todos os leads', async ({ page }) => {
+    await page.goto('/leads')
+    await expect(page.getByRole('heading', { name: 'Todos os leads' })).toBeVisible()
   })
 })

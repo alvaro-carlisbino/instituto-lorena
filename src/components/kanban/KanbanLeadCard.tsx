@@ -3,6 +3,7 @@ import type { Lead, WorkflowField } from '@/mocks/crmMock'
 import { Button } from '@/components/ui/button'
 import { useNowMs } from '@/hooks/useNowMs'
 import { cn } from '@/lib/utils'
+import { formatTemperature } from '@/lib/fieldLabels'
 import { getLeadFieldValue } from '@/lib/leadFields'
 
 import { temperaturePillClass } from './temperatureClass'
@@ -89,7 +90,7 @@ export function KanbanLeadCard({
       )}
       <div className="flex items-start justify-between gap-2">
         <p className="m-0 font-bold leading-tight uppercase tracking-wider text-sm">{title}</p>
-        <span className={temperaturePillClass(temperature)}>{temperature}</span>
+        <span className={temperaturePillClass(temperature)}>{formatTemperature(tempRaw, lead.temperature)}</span>
       </div>
       <small className="text-muted-foreground">{sourceLabel}</small>
       {detailFields.map((field) => {

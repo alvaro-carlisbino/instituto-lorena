@@ -14,6 +14,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import {
+  ensureOptionValue,
+  normalizeFieldSelectOptions,
+  toStoredOptions,
+} from '@/lib/workflowFieldOptions'
 import { slugifyLabel } from '@/lib/utils'
 import type { FieldVisibilityContext, WorkflowField } from '@/mocks/crmMock'
 
@@ -182,7 +187,7 @@ export function SettingsPage() {
                             const fieldType = value as 'text' | 'select' | 'number' | 'date'
                             const updates: Partial<WorkflowField> = { fieldType }
                             if (fieldType === 'select' && field.options.length === 0) {
-                              updates.options = ['Nova opção']
+                              updates.options = [{ value: 'nova-opcao', label: 'Nova opção' }]
                             }
                             crm.updateWorkflowField(field.id, updates)
                           }}
@@ -221,33 +226,65 @@ export function SettingsPage() {
                       </div>
                       {field.fieldType === 'select' ? (
                         <div className="grid gap-2 rounded-md border border-border/60 bg-muted/5 p-3 sm:col-span-2">
-                          <Label className="text-xs text-muted-foreground">Opções da lista (texto mostrado e gravado)</Label>
+                          <Label className="text-xs text-muted-foreground">
+                            Opções (valor interno estável + rótulo exibido)
+                          </Label>
                           <ul className="m-0 list-none space-y-2 p-0">
-                            {(field.options.length > 0 ? field.options : ['']).map((opt, optIndex) => (
-                              <li key={`${field.id}-opt-${optIndex}`} className="flex flex-wrap items-center gap-2">
-                                <Input
-                                  value={opt}
-                                  onChange={(event) => {
-                                    const base = field.options.length > 0 ? [...field.options] : ['']
-                                    base[optIndex] = event.target.value
-                                    crm.updateWorkflowField(field.id, { options: base })
-                                  }}
-                                  placeholder={`Opção ${optIndex + 1}`}
-                                  className="max-w-md flex-1"
-                                />
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    const base = field.options.length > 0 ? [...field.options] : ['']
-                                    base.splice(optIndex, 1)
-                                    crm.updateWorkflowField(field.id, { options: base.length > 0 ? base : [''] })
-                                  }}
-                                  disabled={(field.options.length > 0 ? field.options : ['']).length <= 1}
-                                >
-                                  Remover
-                                </Button>
+                            {(field.options.length > 0 ? normalizeFieldSelectOptions(field.options as unknown[]) : [{ value: '', label: '' }]).map((pair, optIndex) => (
+                              <li key={`${field.id}-opt-${optIndex}`} className="grid gap-2 rounded-md border border-border/40 p-2 sm:grid-cols-2">
+                                <div className="grid gap-1">
+                                  <Label className="text-[10px] uppercase text-muted-foreground">Rótulo</Label>
+                                  <Input
+                                    value={pair.label}
+                                    onChange={(event) => {
+                                      const pairs = normalizeFieldSelectOptions(
+                                        field.options.length > 0 ? (field.options as unknown[]) : [''],
+                                      )
+                                      const nextPairs = [...pairs]
+                                      const label = event.target.value
+                                      const others = new Set(
+                                        pairs.map((p, i) => (i !== optIndex ? p.value : '')).filter(Boolean),
+                                      )
+                                      let value = nextPairs[optIndex]?.value ?? ''
+                                      if (!value || value === slugifyLabel(pair.label)) {
+                                        value = ensureOptionValue(label || 'opcao', others)
+                                      }
+                                      nextPairs[optIndex] = { value, label }
+                                      crm.updateWorkflowField(field.id, { options: toStoredOptions(nextPairs) })
+                                    }}
+                                    placeholder={`Opção ${optIndex + 1}`}
+                                  />
+                                </div>
+                                <div className="grid gap-1">
+                                  <Label className="text-[10px] uppercase text-muted-foreground">Valor (chave)</Label>
+                                  <Input
+                                    value={pair.value}
+                                    onChange={(event) => {
+                                      const pairs = normalizeFieldSelectOptions(field.options as unknown[])
+                                      const nextPairs = [...pairs]
+                                      nextPairs[optIndex] = { ...nextPairs[optIndex]!, value: event.target.value }
+                                      crm.updateWorkflowField(field.id, { options: toStoredOptions(nextPairs) })
+                                    }}
+                                    className="font-mono text-xs"
+                                  />
+                                </div>
+                                <div className="sm:col-span-2 flex justify-end">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      const pairs = normalizeFieldSelectOptions(field.options as unknown[])
+                                      pairs.splice(optIndex, 1)
+                                      crm.updateWorkflowField(field.id, {
+                                        options: toStoredOptions(pairs.length ? pairs : [{ value: 'a', label: 'Nova opção' }]),
+                                      })
+                                    }}
+                                    disabled={normalizeFieldSelectOptions(field.options as unknown[]).length <= 1}
+                                  >
+                                    Remover
+                                  </Button>
+                                </div>
                               </li>
                             ))}
                           </ul>
@@ -256,11 +293,13 @@ export function SettingsPage() {
                             variant="secondary"
                             size="sm"
                             className="w-fit"
-                            onClick={() =>
-                              crm.updateWorkflowField(field.id, {
-                                options: [...(field.options.length > 0 ? field.options : ['']), ''],
-                              })
-                            }
+                            onClick={() => {
+                              const pairs = normalizeFieldSelectOptions(field.options as unknown[])
+                              const used = new Set(pairs.map((p) => p.value))
+                              const label = `Nova opção ${pairs.length + 1}`
+                              pairs.push({ value: ensureOptionValue(label, used), label })
+                              crm.updateWorkflowField(field.id, { options: toStoredOptions(pairs) })
+                            }}
                           >
                             Adicionar opção
                           </Button>

@@ -6,24 +6,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import { columnLabel } from '@/lib/leadColumnLabels'
 import { getLeadFieldValue } from '@/lib/leadFields'
 
 const DEFAULT_COLUMNS = ['patient_name', 'phone', 'summary'] as const
-
-const CORE_LABELS: Record<string, string> = {
-  patient_name: 'Nome do contato',
-  phone: 'Telefone',
-  summary: 'Resumo',
-  source: 'Origem',
-  temperature: 'Interesse',
-  score: 'Pontuação',
-}
-
-function columnLabel(fieldKey: string, workflowFields: { fieldKey: string; label: string }[]): string {
-  const wf = workflowFields.find((f) => f.fieldKey === fieldKey)
-  if (wf) return wf.label
-  return CORE_LABELS[fieldKey] ?? fieldKey
-}
 
 export function DataViewsPage() {
   const crm = useCrm()
