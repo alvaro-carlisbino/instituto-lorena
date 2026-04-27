@@ -11,18 +11,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
+import { WorkspaceLeadSidebar } from '@/components/leads/WorkspaceLeadSidebar'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { labelForIdName } from '@/lib/selectDisplay'
 import { getConversationState, setConversationMode, type ConversationOwnerMode } from '@/services/conversationControl'
 
-
-const QUICK_REPLIES = [
-  'Oi! Tudo bem? Posso te ajudar com valores e horários.',
-  'Temos horários disponíveis nesta semana. Prefere manhã ou tarde?',
-  'Perfeito, vou te encaminhar os próximos passos para fechar.',
-]
 
 export function ChatWorkspacePage() {
   const crm = useCrm()
@@ -197,19 +192,15 @@ export function ChatWorkspacePage() {
                 ) : null}
               </div>
               <div className="flex w-full max-w-full shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap lg:max-w-[min(100%,24rem)] xl:max-w-[min(100%,20rem)]">
-                {QUICK_REPLIES.map((reply, idx) => (
-                  <Button
-                    key={idx}
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="rounded-lg border-border/70 text-xs transition-all duration-200 hover:-translate-y-0.5 sm:text-sm"
-                    onClick={() => crm.setDraftMessage(reply)}
-                    title={reply}
-                  >
-                    Rápida {idx + 1}
-                  </Button>
-                ))}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="rounded-lg border-border/70 text-xs transition-all duration-200 hover:-translate-y-0.5 sm:text-sm"
+                  onClick={() => crm.setDraftMessage('Oi! Tudo bem? Posso te ajudar com valores e horários?')}
+                >
+                  Mensagem Padrão
+                </Button>
               </div>
             </div>
           </CardHeader>
@@ -224,6 +215,10 @@ export function ChatWorkspacePage() {
             )}
           </CardContent>
         </Card>
+
+        {activeLead ? (
+          <WorkspaceLeadSidebar lead={activeLead} history={activeHistory} />
+        ) : null}
       </div>
     </AppLayout>
   )
