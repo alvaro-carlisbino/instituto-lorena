@@ -1331,7 +1331,7 @@ export const upsertAppointment = async (a: Appointment): Promise<void> => {
     notes: a.notes,
     created_at: a.createdAt,
     updated_at: a.updatedAt,
-  })
+  }, { onConflict: 'id' })
   if (error) throw error
 }
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { CaretLeft, CaretRight, Clock, Plus, Sparkle } from 'phosphor-react'
 import { toast } from 'sonner'
 
@@ -45,6 +45,15 @@ export function AgendaPage() {
   const [roomId, setRoomId] = useState(crm.rooms[0]?.id ?? '')
   const [duration, setDuration] = useState(30)
   const [notes, setNotes] = useState('')
+
+  useEffect(() => {
+    if (leadId && !crm.leads.some((l) => l.id === leadId)) {
+      setLeadId(crm.leads[0]?.id ?? '')
+    }
+    if (roomId && !crm.rooms.some((r) => r.id === roomId)) {
+      setRoomId(crm.rooms[0]?.id ?? '')
+    }
+  }, [crm.leads, crm.rooms, leadId, roomId])
 
   const activeRooms = useMemo(() => crm.rooms.filter(r => r.active), [crm.rooms])
 

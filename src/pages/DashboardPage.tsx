@@ -237,7 +237,7 @@ export function DashboardPage() {
           <CardContent>
             {newWaByLine.length > 0 ? (
               <div className="h-[min(20rem,24rem)] w-full min-w-0">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <BarChart
                     data={newWaByLine}
                     layout="vertical"
@@ -306,7 +306,7 @@ export function DashboardPage() {
               />
             ) : (
               <div className="h-[260px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <BarChart data={funnelData} layout="vertical" margin={{ left: 0, right: 24, top: 8, bottom: 8 }}>
                     <XAxis type="number" hide />
                     <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12, fontWeight: 600 }} axisLine={false} tickLine={false} />
@@ -339,7 +339,7 @@ export function DashboardPage() {
             ) : (
               <div className="px-4 py-4">
                 <div className="h-[200px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                     <BarChart data={workloadData} layout="vertical" margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
                       <XAxis type="number" hide />
                       <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 13, fill: 'currentColor', fontWeight: 500 }} axisLine={false} tickLine={false} />
