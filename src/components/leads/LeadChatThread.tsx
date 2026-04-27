@@ -54,7 +54,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -78,7 +78,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
         </Button>
       </div>
 
-      <ScrollArea className="min-h-[12rem] flex-1 rounded-xl border border-border/70 bg-[#0b141a] p-3 shadow-inner">
+      <ScrollArea className="min-h-[min(50dvh,24rem)] w-full flex-1 rounded-xl border border-border/70 bg-[#0b141a] p-3 shadow-inner sm:min-h-[min(55dvh,32rem)] md:min-h-0">
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
           {items.length === 0 ? (
             <li className="text-center text-xs text-white/60">Nenhuma mensagem neste filtro.</li>
@@ -89,11 +89,14 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
               return (
                 <li
                   key={msg.id}
-                  className={cn('flex max-w-[min(100%,20rem)] flex-col gap-0.5 transition-all duration-200', out ? 'ml-auto items-end' : 'mr-auto items-start')}
+                  className={cn(
+                    'flex w-full max-w-[min(100%,28rem)] flex-col gap-0.5 transition-all duration-200 sm:max-w-[min(100%,40rem)] md:max-w-[min(100%,48rem)]',
+                    out ? 'ml-auto items-end' : 'mr-auto items-start',
+                  )}
                 >
                   <div
                     className={cn(
-                      'rounded-xl px-3 py-2 text-sm shadow-sm',
+                      'rounded-xl px-3 py-2.5 text-sm shadow-sm sm:px-4 sm:text-base',
                       out
                         ? 'rounded-tr-none bg-[#005c4b] text-white'
                         : 'rounded-tl-none bg-[#202c33] text-white/95',
@@ -116,17 +119,17 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
       </ScrollArea>
 
       {canCompose && isActiveLead ? (
-        <div className="flex flex-col gap-2 border-t border-border pt-2">
-          <label htmlFor={`lead-chat-draft-${leadId}`} className="text-xs font-medium text-muted-foreground">
+        <div className="flex flex-col gap-2 border-t border-border pt-2 sm:gap-3 sm:pt-3">
+          <label htmlFor={`lead-chat-draft-${leadId}`} className="text-xs font-medium text-muted-foreground sm:text-sm">
             Mensagem para o cliente
           </label>
           <Textarea
             id={`lead-chat-draft-${leadId}`}
-            rows={2}
+            rows={3}
             value={crm.draftMessage}
             onChange={(e) => crm.setDraftMessage(e.target.value)}
             placeholder="Digite uma mensagem de saída…"
-            className="resize-none rounded-xl border-border/70 bg-background"
+            className="min-h-[5.5rem] resize-y rounded-xl border-border/70 bg-background text-base sm:min-h-[6rem]"
           />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">

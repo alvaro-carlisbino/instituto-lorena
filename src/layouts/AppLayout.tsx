@@ -29,7 +29,7 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
   }, [])
 
   return (
-    <SidebarInset className="min-w-0 bg-transparent flex min-h-svh flex-1 flex-col transition-all duration-300 ease-in-out">
+    <SidebarInset className="flex min-h-0 min-h-svh w-full min-w-0 flex-1 flex-col bg-transparent transition-all duration-300 ease-in-out">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_10%,oklch(0.95_0.03_50/.6),transparent_28%),radial-gradient(circle_at_88%_4%,oklch(0.93_0.03_250/.5),transparent_22%)]" />
       <header
         role="banner"
@@ -38,15 +38,19 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
         scrolled && 'shadow-sm',
       )}
       >
-        <div className="mx-auto flex w-full max-w-7xl min-w-0 items-start gap-2 px-4 py-2 sm:items-center">
+        <div className="mx-auto flex w-full max-w-[min(100%,1800px)] min-w-0 items-start gap-2 px-4 py-2 sm:items-center sm:px-6 lg:px-8">
           <TopControls />
         </div>
-        <div className="mx-auto w-full max-w-7xl min-w-0 px-4">
+        <div className="mx-auto w-full max-w-[min(100%,1800px)] min-w-0 px-4 sm:px-6 lg:px-8">
           <PageHeader title={title} titleId={titleId} description={subtitle} actions={actions} className="border-0 pb-4" />
         </div>
       </header>
 
-      <main id="main-content" aria-labelledby={titleId} className="mx-auto w-full max-w-7xl min-w-0 flex-1 space-y-8 px-4 py-6 sm:py-8 relative">
+      <main
+        id="main-content"
+        aria-labelledby={titleId}
+        className="mx-auto flex min-h-0 w-full max-w-[min(100%,1800px)] min-w-0 flex-1 flex-col space-y-6 px-4 py-5 sm:space-y-8 sm:px-6 sm:py-8 lg:px-8 relative"
+      >
         {children}
       </main>
     </SidebarInset>

@@ -90,9 +90,9 @@ export function ChatWorkspacePage() {
 
   return (
     <AppLayout title="Central de conversas" subtitle="Atendimento rápido, organizado e fácil para toda a equipe.">
-      <div className="grid min-h-[72vh] gap-4 lg:grid-cols-[320px_1fr_320px]">
-        <Card className="overflow-hidden rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
-          <CardHeader className="border-b border-border/60 bg-muted/20 p-3">
+      <div className="grid min-h-0 w-full flex-1 grid-cols-1 gap-4 xl:min-h-[min(calc(100dvh-10.5rem),64rem)] xl:grid-cols-12 xl:gap-5">
+        <Card className="order-1 flex min-h-0 flex-col overflow-hidden rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm xl:col-span-3">
+          <CardHeader className="shrink-0 border-b border-border/60 bg-muted/20 p-3 sm:p-4">
             <CardTitle className="text-sm font-semibold">Conversas</CardTitle>
             <p className="text-xs text-muted-foreground" aria-live="polite">
               {conversations.length} conversa(s) encontrada(s)
@@ -128,7 +128,7 @@ export function ChatWorkspacePage() {
               </Select>
             </div>
           </CardHeader>
-          <CardContent className="max-h-[62vh] space-y-2 overflow-y-auto p-2">
+          <CardContent className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2 sm:max-h-[40vh] sm:p-3 xl:max-h-none">
             {conversations.map((lead) => (
               <button
                 key={lead.id}
@@ -155,14 +155,16 @@ export function ChatWorkspacePage() {
           </CardContent>
         </Card>
 
-        <Card className="flex min-h-[72vh] flex-col overflow-hidden rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
-          <CardHeader className="border-b border-border/60 bg-muted/20 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <CardTitle className="text-sm font-semibold" aria-live="polite">
+        <Card className="order-2 flex min-h-[min(100dvh,52rem)] flex-1 flex-col overflow-hidden rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm sm:min-h-[min(100dvh,56rem)] xl:col-span-6 xl:min-h-[min(calc(100dvh-11rem),56rem)]">
+          <CardHeader className="shrink-0 border-b border-border/60 bg-muted/20 p-3 sm:p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0 flex-1">
+                <CardTitle className="text-base font-semibold sm:text-lg" aria-live="polite">
                   {activeLead?.patientName ?? 'Sem conversa selecionada'}
                 </CardTitle>
-                <p className="m-0 text-xs text-muted-foreground">{activeLead?.phone ?? 'Selecione um lead à esquerda'}</p>
+                <p className="m-0 text-xs text-muted-foreground sm:text-sm">
+                  {activeLead?.phone ?? 'Selecione um lead na lista em cima (ou à esquerda)'}
+                </p>
                 {activeLead ? (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <span className="text-[11px] font-medium text-muted-foreground">Atendimento:</span>
@@ -223,23 +225,24 @@ export function ChatWorkspacePage() {
                   </div>
                 ) : null}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex w-full max-w-full shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap lg:max-w-[min(100%,24rem)] xl:max-w-[min(100%,20rem)]">
                 {QUICK_REPLIES.map((reply, idx) => (
                   <Button
                     key={idx}
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="rounded-lg border-border/70 transition-all duration-200 hover:-translate-y-0.5"
+                    className="rounded-lg border-border/70 text-xs transition-all duration-200 hover:-translate-y-0.5 sm:text-sm"
                     onClick={() => crm.setDraftMessage(reply)}
+                    title={reply}
                   >
-                    Resposta {idx + 1}
+                    Rápida {idx + 1}
                   </Button>
                 ))}
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex min-h-0 flex-1 bg-[#f7f9fc] p-2 dark:bg-background">
+          <CardContent className="flex min-h-0 flex-1 flex-col bg-[#f7f9fc] p-2 sm:p-3 dark:bg-background">
             {activeLead ? (
               <LeadChatThread leadId={activeLead.id} history={activeHistory} canCompose={crm.currentPermission.canRouteLeads} />
             ) : (
@@ -251,11 +254,11 @@ export function ChatWorkspacePage() {
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
-          <CardHeader className="border-b border-border/60 bg-muted/20 p-3">
-            <CardTitle className="text-sm font-semibold">Contexto do lead</CardTitle>
+        <Card className="order-3 flex min-h-0 flex-col overflow-hidden rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm xl:col-span-3">
+          <CardHeader className="shrink-0 border-b border-border/60 bg-muted/20 p-3 sm:p-4">
+            <CardTitle className="text-sm font-semibold sm:text-base">Contexto do lead</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 p-3 text-sm">
+          <CardContent className="space-y-3 overflow-y-auto p-3 text-sm sm:max-h-[32vh] sm:p-4 xl:max-h-none">
             {activeLead ? (
               <>
                 <p className="m-0"><strong>Pipeline:</strong> {crm.pipelineCatalog.find((p) => p.id === activeLead.pipelineId)?.name ?? activeLead.pipelineId}</p>
