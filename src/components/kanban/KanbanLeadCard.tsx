@@ -110,6 +110,19 @@ export function KanbanLeadCard({
       {detailFields.map((field) => {
         const v = getLeadFieldValue(lead, field.fieldKey)
         if (v === undefined || v === null || v === '') return null
+
+        if (field.fieldType === 'boolean') {
+          const isChecked = Boolean(v === 'true' || v === true || v === 1)
+          return (
+             <p key={field.id} className="m-0 text-xs flex items-center gap-1.5 text-muted-foreground">
+                <span className={isChecked ? "text-green-500" : "text-muted-foreground/50"}>
+                  {isChecked ? "✅" : "⬜"}
+                </span>
+                <span className="font-medium text-foreground/80">{field.label}</span>
+             </p>
+          )
+        }
+
         return (
           <p key={field.id} className="m-0 line-clamp-2 text-xs text-muted-foreground">
             <span className="font-medium text-foreground/80">{field.label}:</span> {String(v)}

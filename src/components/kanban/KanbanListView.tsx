@@ -179,7 +179,11 @@ export function KanbanListView({
                             <td className="px-3 py-3 text-xs">{getOwnerName(lead.ownerId)}</td>
                             {kanbanFieldsOrdered.slice(0, 2).map((f) => {
                               const raw = lead.customFields?.[f.id]
-                              const v = raw != null && String(raw).trim() !== '' ? String(raw) : '—'
+                              let v = raw != null && String(raw).trim() !== '' ? String(raw) : '—'
+                              if (f.fieldType === 'boolean') {
+                                const isChecked = Boolean(raw === 'true' || raw === true || raw === 1)
+                                v = isChecked ? '✅ Sim' : '⬜ Não'
+                              }
                               return (
                                 <td key={f.id} className="hidden max-w-[10rem] truncate px-3 py-3 text-xs text-muted-foreground lg:table-cell">
                                   {v}

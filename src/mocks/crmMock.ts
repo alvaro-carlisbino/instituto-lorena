@@ -129,7 +129,7 @@ export type WorkflowField = {
   id: string
   fieldKey: string
   label: string
-  fieldType: 'text' | 'select' | 'number' | 'date'
+  fieldType: 'text' | 'select' | 'number' | 'date' | 'boolean'
   required: boolean
   options: WorkflowFieldOption[]
   section: string
@@ -563,6 +563,18 @@ export const initialWorkflowFields: WorkflowField[] = [
     section: 'Principal',
     sortOrder: 1,
     visibleIn: ['kanban_card', 'lead_detail', 'list'],
+    validation: {},
+  },
+  {
+    id: 'custom-primeira-consulta',
+    fieldKey: 'primeira_consulta',
+    label: 'Primeira Consulta?',
+    fieldType: 'boolean',
+    required: false,
+    options: [],
+    section: 'Principal',
+    sortOrder: 2,
+    visibleIn: ['kanban_card', 'lead_detail'],
     validation: {},
   },
   {

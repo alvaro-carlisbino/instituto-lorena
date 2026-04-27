@@ -1,6 +1,7 @@
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { normalizeFieldSelectOptions } from '@/lib/workflowFieldOptions'
 import { getLeadFieldValue, setLeadFieldValue } from '@/lib/leadFields'
 import { cn } from '@/lib/utils'
@@ -111,6 +112,19 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
       <div className={compact ? 'contents' : 'grid gap-2'}>
         {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
         <Input type="date" value={raw ? String(raw).slice(0, 10) : ''} onChange={(e) => apply(e.target.value)} />
+      </div>
+    )
+  }
+
+  if (field.fieldType === 'boolean') {
+    const isChecked = Boolean(raw === 'true' || raw === true || raw === 1)
+    return (
+      <div className={compact ? 'flex items-center justify-between w-full' : 'flex items-center gap-2 mt-2'}>
+        <Label className={cn("text-xs cursor-pointer", compact ? "text-muted-foreground" : "")}>{field.label}</Label>
+        <Switch 
+          checked={isChecked} 
+          onCheckedChange={(checked) => apply(checked)} 
+        />
       </div>
     )
   }

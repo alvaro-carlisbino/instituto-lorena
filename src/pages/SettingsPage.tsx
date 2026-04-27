@@ -32,6 +32,7 @@ const FIELD_TYPE_OPTIONS = [
   { value: 'select', label: 'Lista de opções' },
   { value: 'number', label: 'Número' },
   { value: 'date', label: 'Data' },
+  { value: 'boolean', label: 'Sim/Não (Checkbox)' },
 ] as const
 
 const ROLE_OPTIONS = [
@@ -367,7 +368,7 @@ export function SettingsPage() {
                         <Select
                           value={field.fieldType}
                           onValueChange={(value) => {
-                            const fieldType = value as 'text' | 'select' | 'number' | 'date'
+                            const fieldType = value as 'text' | 'select' | 'number' | 'date' | 'boolean'
                             const updates: Partial<WorkflowField> = { fieldType }
                             if (fieldType === 'select' && field.options.length === 0) {
                               updates.options = [{ value: 'nova-opcao', label: 'Nova opção' }]
