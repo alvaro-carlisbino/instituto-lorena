@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { ChevronDownIcon, ChevronUpIcon, FolderKanbanIcon } from 'lucide-react'
+import { ChevronDownIcon, ChevronUpIcon, FolderKanbanIcon, MessageSquareHeart } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useCrm } from '@/context/CrmContext'
@@ -14,6 +16,31 @@ import { AppLayout } from '@/layouts/AppLayout'
 export function BoardsPage() {
   const crm = useCrm()
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'pipeline' | 'stage'; id: string; pipelineId?: string; name?: string } | null>(null)
+  const [automationTarget, setAutomationTarget] = useState<{ pipelineId: string; stageId: string; name: string } | null>(null)
+  const [draftAutomation, setDraftAutomation] = useState({ enabled: false, template: '' })
+
+  const handleOpenAutomation = (pipelineId: string, stageId: string, name: string, config: any) => {
+    const automations = config.stageAutomations || {}
+    const current = automations[stageId] || { enabled: false, template: '' }
+    setDraftAutomation(current)
+    setAutomationTarget({ pipelineId, stageId, name })
+  }
+
+  const handleSaveAutomation = () => {
+    if (!automationTarget) return
+    const pipeline = crm.pipelineCatalog.find(p => p.id === automationTarget.pipelineId)
+    if (pipeline) {
+      const bc = pipeline.boardConfig ?? {}
+      const automations = { ...(bc.stageAutomations ?? {}) }
+      automations[automationTarget.stageId] = draftAutomation
+      
+      crm.updatePipeline(pipeline.id, {
+        boardConfig: { ...bc, stageAutomations: automations }
+      })
+      toast.success('Automação salva com sucesso.')
+    }
+    setAutomationTarget(null)
+  }
 
   const handleConfirmDelete = () => {
     if (!deleteTarget) return
@@ -120,7 +147,17 @@ export function BoardsPage() {
                             />
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-2 shrink-0">
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          <Button 
+                            type="button" 
+                            variant={bc.stageAutomations?.[stage.id]?.enabled ? "default" : "outline"} 
+                            size="sm" 
+                            className="rounded-none h-8 px-3 text-xs font-bold gap-1"
+                            onClick={() => handleOpenAutomation(pipeline.id, stage.id, stage.name, bc)}
+                          >
+                            <MessageSquareHeart className="w-3.5 h-3.5" />
+                            {bc.stageAutomations?.[stage.id]?.enabled ? 'Automação Ativa' : 'Automação'}
+                          </Button>
                           <Button type="button" variant="outline" size="sm" className="rounded-none h-8 px-3" onClick={() => crm.moveStage(pipeline.id, stage.id, 'up')}>
                             <ChevronUpIcon className="size-4" />
                           </Button>
@@ -155,6 +192,45 @@ export function BoardsPage() {
         confirmLabel="Remover"
         onConfirm={handleConfirmDelete}
       />
+
+      {/* Automation Config Dialog */}
+      <Dialog open={automationTarget !== null} onOpenChange={(open) => !open && setAutomationTarget(null)}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Automação: {automationTarget?.name}</DialogTitle>
+            <DialogDescription>
+              Configure uma mensagem automática que será enviada via WhatsApp assim que um Lead for movido para esta etapa.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex items-center gap-2">
+              <input 
+                type="checkbox" 
+                id="auto-enabled"
+                checked={draftAutomation.enabled}
+                onChange={(e) => setDraftAutomation({ ...draftAutomation, enabled: e.target.checked })}
+              />
+              <Label htmlFor="auto-enabled" className="text-sm cursor-pointer">Ativar disparo automático de mensagem</Label>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Template da Mensagem</Label>
+              <Textarea 
+                value={draftAutomation.template}
+                onChange={(e) => setDraftAutomation({ ...draftAutomation, template: e.target.value })}
+                placeholder="Ex: Olá {{nome}}, sua consulta está agendada!"
+                className="min-h-[120px]"
+                disabled={!draftAutomation.enabled}
+              />
+              <p className="text-[10px] text-muted-foreground">Variáveis disponíveis: {'{{nome}}, {{telefone}}'}</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAutomationTarget(null)}>Cancelar</Button>
+            <Button onClick={handleSaveAutomation}>Salvar Automação</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   )
 }

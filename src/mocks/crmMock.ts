@@ -6,6 +6,7 @@ export type Stage = {
 export type BoardConfig = {
   stageSlaMinutes?: Record<string, number>
   kanbanFieldOrder?: string[]
+  stageAutomations?: Record<string, { enabled: boolean; template: string }>
 }
 
 export type Pipeline = {

@@ -362,6 +362,19 @@ export const useCrmState = () => {
       }
     }
 
+    // Pipeline Stage Automations
+    const currentPipeline = pipelineCatalog.find(p => p.id === targetLead.pipelineId) || pipelines[0]
+    const automations = currentPipeline.boardConfig?.stageAutomations || {}
+    const auto = automations[nextStage.id]
+    
+    if (auto && auto.enabled && auto.template) {
+      const msg = auto.template
+        .replace(/\{\{nome\}\}/gi, targetLead.patientName)
+        .replace(/\{\{telefone\}\}/gi, targetLead.phone)
+      
+      void sendAutomatedMessage(targetLead, msg)
+    }
+
     if (shouldDispatchNpsForStage(nextStage.id)) {
       const tmpl = pickNpsTemplateForPipeline(targetLead.pipelineId, surveyTemplates)
       if (tmpl) {
@@ -583,6 +596,36 @@ export const useCrmState = () => {
         happenedAt: new Date().toISOString(),
       })
     }
+  }
+
+  const sendAutomatedMessage = async (lead: Lead, message: string) => {
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      const result = await sendWhatsappMessage({
+        leadId: lead.id,
+        to: lead.phone,
+        text: message,
+        attachments: [],
+      })
+      if (!result.ok) {
+        toast.error(`Falha na automação: ${result.error}`)
+        return
+      }
+      toast.success('Mensagem automática enviada via Evolution API.')
+      await refreshChatFromSupabase()
+      return
+    }
+
+    // Local Mock Mode
+    addInteraction({
+      leadId: lead.id,
+      patientName: lead.patientName,
+      channel: 'whatsapp',
+      direction: 'out',
+      author: 'Automação (Sistema)',
+      content: message,
+      happenedAt: new Date().toISOString(),
+    })
+    toast.success('Automação de etapa disparada (modo mock).')
   }
 
   const retryFailedJobs = () => {
