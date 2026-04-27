@@ -52,6 +52,42 @@ Edge Function que chama a API Z.ai (modelos GLM) com snapshot do CRM obtido **co
 
 A função antiga `user-ai-assistant` foi substituída por esta. Integrações futuras (Meta, WhatsApp, Evolution) podem ampliar o snapshot sem mudar o contrato básico (`messages`, `model`, `context`).
 
+## WhatsApp Provider (Evolution)
+
+Fluxo novo com camada de provider para facilitar migração futura para API Oficial:
+
+- Inbound: `crm-whatsapp-webhook` (valida assinatura + normaliza payload + upsert lead + cria interação + dispara triagem)
+- Outbound: `crm-send-message` (CRM envia mensagem pelo provider ativo)
+- Triagem: `ai-triage` (classificação/recomendação e registro em `interactions`)
+- Provider ativo por variável de ambiente: `WHATSAPP_PROVIDER=evolution|official`
+
+### Secrets (Edge Functions)
+
+Defina no Supabase:
+
+- `WHATSAPP_PROVIDER` (`evolution` por padrão)
+- `EVOLUTION_API_BASE`
+- `EVOLUTION_API_KEY`
+- `EVOLUTION_INSTANCE`
+- `EVOLUTION_WEBHOOK_SECRET` (opcional; se ausente, webhook não exige `x-webhook-secret`)
+- `CRM_WEBHOOK_SECRET` (mantido para webhook genérico existente)
+
+Deploy:
+
+```bash
+supabase functions deploy crm-whatsapp-webhook
+supabase functions deploy crm-send-message
+supabase functions deploy ai-triage
+supabase functions deploy crm-ingest-webhook
+```
+
+### Estratégia de migração para API Oficial
+
+- O frontend não depende de Evolution diretamente; usa `crm-send-message`.
+- A troca de provider ocorre por `WHATSAPP_PROVIDER`.
+- Para migrar, implementar `OfficialWhatsappProvider` em `supabase/functions/_shared/whatsapp/official.ts` mantendo os mesmos DTOs/contratos.
+- Idempotência inbound usa chave `event:<provider>:<externalMessageId>` em `webhook_jobs`.
+
 ## Rodar local
 
 ```bash

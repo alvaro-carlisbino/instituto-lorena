@@ -98,7 +98,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
       {canCompose && isActiveLead ? (
         <div className="flex flex-col gap-2 border-t border-border pt-2">
           <label htmlFor={`lead-chat-draft-${leadId}`} className="text-xs font-medium text-muted-foreground">
-            Mensagem (simulação — sem API WhatsApp)
+            Mensagem (envio via provider WhatsApp)
           </label>
           <Textarea
             id={`lead-chat-draft-${leadId}`}

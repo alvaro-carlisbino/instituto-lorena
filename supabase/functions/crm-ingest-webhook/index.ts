@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { upsertLeadByPhone } from '../_shared/crm.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -14,22 +15,6 @@ function getByPath(obj: Record<string, unknown>, path: string): unknown {
     cur = (cur as Record<string, unknown>)[p]
   }
   return cur
-}
-
-function digitsOnly(value: string): string {
-  return value.replace(/[^0-9]/g, '')
-}
-
-function temperatureForSource(
-  source: 'meta_facebook' | 'meta_instagram' | 'whatsapp' | 'manual',
-  override: string | undefined,
-): 'cold' | 'warm' | 'hot' {
-  if (override && ['cold', 'warm', 'hot'].includes(override)) {
-    return override as 'cold' | 'warm' | 'hot'
-  }
-  if (source === 'meta_facebook' || source === 'meta_instagram') return 'hot'
-  if (source === 'whatsapp') return 'warm'
-  return 'cold'
 }
 
 Deno.serve(async (req) => {
@@ -79,9 +64,8 @@ Deno.serve(async (req) => {
     return v !== undefined && v !== null ? String(v) : fallback
   }
 
-  const phoneRaw = pick('phone', '')
-  const normalizedPhone = digitsOnly(phoneRaw)
-  if (normalizedPhone.length < 10) {
+  const phone = pick('phone', '')
+  if (phone.replace(/[^0-9]/g, '').length < 10) {
     return new Response(JSON.stringify({ error: 'invalid_phone', message: 'Telefone deve ter pelo menos 10 dígitos' }), {
       status: 400,
       headers: { ...cors, 'Content-Type': 'application/json' },
@@ -96,81 +80,32 @@ Deno.serve(async (req) => {
     : 'manual'
 
   const tempOverride = pick('temperature', '')
-  const temperature = temperatureForSource(
-    source,
-    tempOverride && tempOverride.length > 0 ? tempOverride : undefined,
-  )
-
-  const owner_id = pick('owner_id', 'sdr-1')
-  const pipeline_id = pick('pipeline_id', 'pipeline-clinica')
-  const stage_id = pick('stage_id', 'novo')
   const score = Number(pick('score', '50')) || 50
-  const custom_fields = (payload.custom_fields as Record<string, unknown> | undefined) ?? {}
+  const customFields = (payload.custom_fields as Record<string, unknown> | undefined) ?? {}
+  const preferredLeadId = pick('id', '')
 
-  let existingId: string | null = null
-  const { data: fromRpc, error: findError } = await admin.rpc('find_lead_id_by_phone_digits', {
-    p_digits: normalizedPhone,
-  })
-  if (!findError && fromRpc) {
-    existingId = String(fromRpc)
-  } else if (findError) {
-    const { data: byEq } = await admin.from('leads').select('id').eq('phone', normalizedPhone).maybeSingle()
-    existingId = byEq?.id ?? null
-  }
-
-  const row = {
-    patient_name,
-    phone: normalizedPhone,
-    source,
-    summary,
-    owner_id,
-    pipeline_id,
-    stage_id,
-    score,
-    temperature,
-    custom_fields,
-  }
-
-  if (existingId) {
-    const { error: updateError } = await admin
-      .from('leads')
-      .update({
-        ...row,
-        // keep created_at
-      })
-      .eq('id', existingId)
-
-    if (updateError) {
-      return new Response(JSON.stringify({ error: updateError.message }), {
-        status: 400,
-        headers: { ...cors, 'Content-Type': 'application/json' },
-      })
-    }
-
-    return new Response(JSON.stringify({ leadId: existingId, status: 'updated' }), {
+  try {
+    const result = await upsertLeadByPhone(admin, {
+      patientName: patient_name,
+      phone,
+      summary,
+      source,
+      ownerId: pick('owner_id', ''),
+      pipelineId: pick('pipeline_id', ''),
+      stageId: pick('stage_id', ''),
+      score,
+      temperature: tempOverride && tempOverride.length > 0 ? (tempOverride as 'cold' | 'warm' | 'hot') : undefined,
+      customFields,
+      preferredLeadId: preferredLeadId || undefined,
+    })
+    return new Response(JSON.stringify(result), {
       status: 202,
       headers: { ...cors, 'Content-Type': 'application/json' },
     })
-  }
-
-  const newId = pick('id', `lead-${crypto.randomUUID().slice(0, 12)}`)
-
-  const { error: insertError } = await admin.from('leads').insert({
-    id: newId,
-    ...row,
-    created_at: new Date().toISOString(),
-    position: 1,
-  })
-
-  if (insertError) {
-    return new Response(JSON.stringify({ error: insertError.message }), {
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }), {
       status: 400,
       headers: { ...cors, 'Content-Type': 'application/json' },
     })
   }
-
-  return new Response(JSON.stringify({ leadId: newId, status: 'created' }), {
-    status: 202,
-    headers: { ...cors, 'Content-Type': 'application/json' },
-  })
 })

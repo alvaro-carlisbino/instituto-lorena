@@ -41,22 +41,41 @@ export function AdminLabPage() {
       toast.error('Sistema não configurado. Contate o suporte técnico.')
       return
     }
-    const secret = import.meta.env.VITE_CRM_WEBHOOK_SECRET?.trim()
-    if (!secret) {
+    const secret =
+      (webhookSource === 'whatsapp'
+        ? import.meta.env.VITE_EVOLUTION_WEBHOOK_SECRET
+        : import.meta.env.VITE_CRM_WEBHOOK_SECRET) ?? ''
+    const requiresSecret = webhookSource !== 'whatsapp'
+    if (requiresSecret && !secret.trim()) {
       toast.error('Configuração de segurança ausente. Contate o suporte técnico.')
       return
     }
     setWebhookSending(true)
     void (async () => {
       try {
-        const { data, error } = await supabase.functions.invoke('crm-ingest-webhook', {
-          body: {
-            patient_name: webhookName,
-            phone: webhookPhone,
-            source: webhookSource,
-            summary: 'Carga de teste (demonstração)',
-          },
-          headers: { 'x-webhook-secret': secret },
+        const targetFn = webhookSource === 'whatsapp' ? 'crm-whatsapp-webhook' : 'crm-ingest-webhook'
+        const body =
+          webhookSource === 'whatsapp'
+            ? {
+                event: 'messages.upsert',
+                data: {
+                  key: { id: `test-${Date.now()}`, fromMe: false, remoteJid: `${webhookPhone}@s.whatsapp.net` },
+                  pushName: webhookName,
+                  message: { conversation: 'Mensagem de teste via AdminLab' },
+                  messageTimestamp: Math.floor(Date.now() / 1000),
+                },
+              }
+            : {
+                patient_name: webhookName,
+                phone: webhookPhone,
+                source: webhookSource,
+                summary: 'Carga de teste (demonstração)',
+              }
+
+        const headers = secret.trim() ? { 'x-webhook-secret': secret.trim() } : undefined
+        const { data, error } = await supabase.functions.invoke(targetFn, {
+          body,
+          headers,
         })
         if (error) {
           toast.error(error.message)

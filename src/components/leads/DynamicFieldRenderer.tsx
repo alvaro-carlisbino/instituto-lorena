@@ -33,12 +33,13 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
     const keys = Object.keys(sourceLabel) as Lead['source'][]
     const rawStr = raw == null ? '' : String(raw)
     const value = keys.includes(rawStr as Lead['source']) ? rawStr : keys[0]
+    const selectedSourceLabel = sourceLabel[value as Lead['source']] ?? 'Origem'
     return (
       <div className={compact ? 'contents' : 'grid gap-2'}>
         {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
         <Select value={value} onValueChange={(v) => v && apply(v)}>
           <SelectTrigger className={selectTriggerClass} size={selectSize}>
-            <SelectValue placeholder="Origem" />
+            <SelectValue>{selectedSourceLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             {(Object.keys(sourceLabel) as Lead['source'][]).map((key) => (
@@ -58,6 +59,9 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
     const rawStr = hasValue ? String(raw) : ''
     const known = pairs.some((p) => p.value === rawStr)
     const selectValue = !hasValue ? EMPTY_SELECT : known ? rawStr : rawStr || EMPTY_SELECT
+    const selectedOptionLabel = !hasValue
+      ? '—'
+      : pairs.find((p) => p.value === rawStr)?.label ?? `${rawStr} (valor fora da lista)`
     return (
       <div className={compact ? 'contents' : 'grid gap-2'}>
         {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
@@ -69,7 +73,7 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
           }}
         >
           <SelectTrigger className={selectTriggerClass} size={selectSize}>
-            <SelectValue placeholder="Selecionar" />
+            <SelectValue>{selectedOptionLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={EMPTY_SELECT}>—</SelectItem>

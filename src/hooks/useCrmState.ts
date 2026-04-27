@@ -101,6 +101,7 @@ import type {
 } from '../mocks/crmMock'
 import { mergeKanbanFieldOrder } from '../lib/leadFields'
 import { getDataProviderMode } from '../services/dataMode'
+import { sendWhatsappMessage } from '../services/crmWhatsapp'
 import { supabase } from '../lib/supabaseClient'
 
 import type { WebhookJob, AuditLogEntry } from '../services/crmSupabase'
@@ -179,7 +180,7 @@ export const useCrmState = () => {
   const [onboardingDone, setOnboardingDone] = useState<boolean>(false)
   const [auditRows, setAuditRows] = useState<AuditLogEntry[]>([])
   const [auditTotal, setAuditTotal] = useState<number>(0)
-  const [triageByLead, setTriageByLead] = useState<Record<string, TriageResult>>({
+  const [triageByLead] = useState<Record<string, TriageResult>>({
     'lead-001': {
       leadId: 'lead-001',
       classification: 'qualified',
@@ -448,78 +449,53 @@ export const useCrmState = () => {
     })
   }
 
-  const runAiTriage = async (lead: Lead, text: string): Promise<TriageResult> => {
-    if (dataMode === 'supabase' && isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase!.functions.invoke('ai-triage', {
-          body: { leadId: lead.id, text },
-        })
-
-        if (!error && data) {
-          return {
-            leadId: String(data.leadId || lead.id),
-            classification: String(data.classification || 'human_handoff') as TriageResult['classification'],
-            confidence: Number(data.confidence || 0.8),
-            recommendation: String(data.recommendation || 'Fallback recommendacao via nuvem.'),
-          }
-        }
-      } catch (err) {
-        console.error('AI Triage falhou via supabase:', err)
-      }
-    }
-
-    // Mock/Fallback
-    const normalized = text.toLowerCase()
-    if (normalized.includes('preco') || normalized.includes('valor') || normalized.includes('agendar')) {
-      return {
-        leadId: lead.id,
-        classification: 'qualified',
-        confidence: 0.9,
-        recommendation: 'Lead com intenção comercial clara. Escalar para o atendente imediatamente.',
-      }
-    }
-    if (normalized.includes('duvida') || normalized.includes('medo') || normalized.includes('dor')) {
-      return {
-        leadId: lead.id,
-        classification: 'human_handoff',
-        confidence: 0.78,
-        recommendation: 'Encaminhar para atendimento humano com linguagem consultiva.',
-      }
-    }
-    return {
-      leadId: lead.id,
-      classification: 'not_qualified',
-      confidence: 0.72,
-      recommendation: 'Manter nutricao automatica e tentar novo contato em 24h.',
-    }
-  }
-
   const sendMessage = async () => {
     if (!selectedLead || !draftMessage.trim()) return
 
     const outbound = draftMessage.trim()
     setDraftMessage('')
+    const senderName = getOwnerName(selectedLead.ownerId)
+
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      const result = await sendWhatsappMessage({
+        leadId: selectedLead.id,
+        to: selectedLead.phone,
+        text: outbound,
+      })
+
+      if (!result.ok) {
+        addInteraction({
+          leadId: selectedLead.id,
+          patientName: selectedLead.patientName,
+          channel: 'system',
+          direction: 'system',
+          author: 'WhatsApp Provider',
+          content: `Falha no envio: ${result.error}${result.detail ? ` (${result.detail})` : ''}`,
+          happenedAt: new Date().toISOString(),
+        })
+        return
+      }
+
+      await syncFromSupabase()
+      addInteraction({
+        leadId: selectedLead.id,
+        patientName: selectedLead.patientName,
+        channel: 'system',
+        direction: 'system',
+        author: 'WhatsApp Provider',
+        content: `Mensagem enviada via ${result.provider} (status: ${result.status}).`,
+        happenedAt: new Date().toISOString(),
+      })
+      return
+    }
 
     addInteraction({
       leadId: selectedLead.id,
       patientName: selectedLead.patientName,
       channel: 'whatsapp',
       direction: 'out',
-      author: getOwnerName(selectedLead.ownerId),
+      author: senderName,
       content: outbound,
-      happenedAt: new Date().toISOString(),
-    })
-
-    const triage = await runAiTriage(selectedLead, outbound)
-    setTriageByLead((previous) => ({ ...previous, [selectedLead.id]: triage }))
-
-    addInteraction({
-      leadId: selectedLead.id,
-      patientName: selectedLead.patientName,
-      channel: 'ai',
-      direction: 'system',
-      author: 'Assistente (nuvem)',
-      content: `${triage.classification} (${Math.round(triage.confidence * 100)}%): ${triage.recommendation}`,
       happenedAt: new Date().toISOString(),
     })
   }
@@ -1553,8 +1529,8 @@ export const useCrmState = () => {
     setIsLoading(true)
     try {
       await createWebhookReplayJob({
-        source: 'meta-webhook',
-        note: 'Reprocessamento manual de mensagens disparado pelo administrador.',
+        source: 'whatsapp-webhook',
+        note: 'Reprocessamento manual de webhooks WhatsApp disparado pelo administrador.',
       })
       await refreshWebhookJobs()
       setSyncNotice('Reprocessamento acionado com sucesso.')
