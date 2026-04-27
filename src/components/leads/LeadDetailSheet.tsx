@@ -52,12 +52,20 @@ export function LeadDetailSheet({ open, onOpenChange }: Props) {
                 </span>
               </SheetDescription>
               <div className="pt-2">
-                <Link
-                  to={`${CRM_ASSISTANT_PATH}?leadId=${encodeURIComponent(lead.id)}&focus=lead`}
-                  className={buttonVariants({ variant: 'outline', size: 'sm' })}
-                >
-                  Assistente IA sobre este lead
-                </Link>
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
+                    className={buttonVariants({ variant: 'default', size: 'sm' })}
+                  >
+                    Abrir conversa completa
+                  </Link>
+                  <Link
+                    to={`${CRM_ASSISTANT_PATH}?leadId=${encodeURIComponent(lead.id)}&focus=lead`}
+                    className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                  >
+                    Assistente sobre este lead
+                  </Link>
+                </div>
               </div>
             </SheetHeader>
 
@@ -107,7 +115,7 @@ export function LeadDetailSheet({ open, onOpenChange }: Props) {
                     />
                   </div>
                   <div className="grid gap-1.5 sm:col-span-2">
-                    <Label className="text-xs">Notas internas</Label>
+                    <Label className="text-xs">Notas</Label>
                     <Textarea
                       rows={2}
                       value={String(lead.customFields?.notes ?? '')}

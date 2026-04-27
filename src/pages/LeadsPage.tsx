@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { LeadDetailSheet } from '@/components/leads/LeadDetailSheet'
@@ -176,7 +176,7 @@ export function LeadsPage() {
         }
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Ficheiro JSON inválido.')
+      toast.error(e instanceof Error ? e.message : 'Arquivo de conversas inválido.')
     }
     setJsonFileLabel(null)
     setJsonPreviewCount(null)
@@ -229,7 +229,7 @@ export function LeadsPage() {
     >
       {crm.isLoading ? <SkeletonBlocks rows={3} /> : null}
 
-      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+      <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 p-4 shadow-sm backdrop-blur-sm lg:flex-row lg:flex-wrap lg:items-end">
         <div className="grid gap-1.5">
           <Label htmlFor="leads-search">Busca</Label>
           <Input
@@ -237,13 +237,13 @@ export function LeadsPage() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Nome, telefone, resumo…"
-            className="min-w-[12rem]"
+            className="min-w-[12rem] rounded-xl border-border/70"
           />
         </div>
         <div className="grid gap-1.5">
           <Label>Funil</Label>
           <Select value={pipelineFilter} onValueChange={(v) => { if (v) { setPipelineFilter(v); setStageFilter('all') } }}>
-            <SelectTrigger className="w-[min(100%,14rem)]">
+            <SelectTrigger className="w-[min(100%,14rem)] rounded-xl border-border/70">
               <SelectValue placeholder="Funil" />
             </SelectTrigger>
             <SelectContent>
@@ -259,7 +259,7 @@ export function LeadsPage() {
         <div className="grid gap-1.5">
           <Label>Etapa</Label>
           <Select value={stageFilter} onValueChange={(v) => v && setStageFilter(v)} disabled={pipelineFilter === 'all'}>
-            <SelectTrigger className="w-[min(100%,14rem)]">
+            <SelectTrigger className="w-[min(100%,14rem)] rounded-xl border-border/70">
               <SelectValue placeholder="Etapa" />
             </SelectTrigger>
             <SelectContent>
@@ -275,7 +275,7 @@ export function LeadsPage() {
         <div className="grid gap-1.5">
           <Label>Responsável</Label>
           <Select value={ownerFilter} onValueChange={(v) => v && setOwnerFilter(v)}>
-            <SelectTrigger className="w-[min(100%,14rem)]">
+            <SelectTrigger className="w-[min(100%,14rem)] rounded-xl border-border/70">
               <SelectValue placeholder="Responsável" />
             </SelectTrigger>
             <SelectContent>
@@ -291,7 +291,7 @@ export function LeadsPage() {
         <div className="grid gap-1.5">
           <Label>Origem</Label>
           <Select value={sourceFilter} onValueChange={(v) => v && setSourceFilter(v)}>
-            <SelectTrigger className="w-[min(100%,14rem)]">
+            <SelectTrigger className="w-[min(100%,14rem)] rounded-xl border-border/70">
               <SelectValue placeholder="Origem" />
             </SelectTrigger>
             <SelectContent>
@@ -327,7 +327,7 @@ export function LeadsPage() {
         </div>
       </div>
 
-      <Card className="mb-4">
+      <Card className="mb-4 rounded-2xl border-border/70 bg-card/80 shadow-sm backdrop-blur-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Ações em lote</CardTitle>
           <CardDescription>Selecione leads e aplique alterações de forma rápida.</CardDescription>
@@ -335,8 +335,8 @@ export function LeadsPage() {
         <CardContent className="flex flex-wrap items-end gap-3">
           <div className="grid gap-1.5">
             <Label>Responsável</Label>
-            <Select value={bulkOwnerId} onValueChange={setBulkOwnerId}>
-              <SelectTrigger className="w-[14rem]">
+            <Select value={bulkOwnerId} onValueChange={(value) => setBulkOwnerId(value ?? 'all')}>
+            <SelectTrigger className="w-[14rem] rounded-xl border-border/70">
                 <SelectValue placeholder="Responsável" />
               </SelectTrigger>
               <SelectContent>
@@ -351,8 +351,8 @@ export function LeadsPage() {
           </div>
           <div className="grid gap-1.5">
             <Label>Etapa</Label>
-            <Select value={bulkStageId} onValueChange={setBulkStageId}>
-              <SelectTrigger className="w-[14rem]">
+            <Select value={bulkStageId} onValueChange={(value) => setBulkStageId(value ?? 'all')}>
+            <SelectTrigger className="w-[14rem] rounded-xl border-border/70">
                 <SelectValue placeholder="Etapa" />
               </SelectTrigger>
               <SelectContent>
@@ -386,7 +386,7 @@ export function LeadsPage() {
         </CardContent>
       </Card>
 
-      <Card className="mb-8 overflow-hidden border-border shadow-sm">
+      <Card className="mb-8 overflow-hidden rounded-2xl border-border/70 bg-card/80 shadow-sm backdrop-blur-sm">
         <CardHeader className="border-b border-border/60 bg-muted/20 py-3">
           <CardTitle className="text-base">Lista ({filteredLeads.length})</CardTitle>
           <CardDescription>Clique em uma linha para abrir o painel de detalhe.</CardDescription>
@@ -401,6 +401,7 @@ export function LeadsPage() {
                     {columnLabel(col, crm.workflowFields)}
                   </th>
                 ))}
+                <th className="p-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground text-right">Conversa</th>
               </tr>
             </thead>
             <tbody>
@@ -411,10 +412,19 @@ export function LeadsPage() {
                   <tr
                     key={lead.id}
                     className={cn(
-                      'cursor-pointer border-b border-border/70 transition-colors hover:bg-muted/40',
+                      'cursor-pointer border-b border-border/70 transition-all duration-200 hover:bg-muted/40 focus-within:bg-muted/40',
                       crm.selectedLeadId === lead.id && 'bg-primary/5',
                     )}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Abrir detalhes do lead ${lead.patientName}`}
                     onClick={() => openLead(lead.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        openLead(lead.id)
+                      }
+                    }}
                   >
                     <td className="p-2.5" onClick={(e) => e.stopPropagation()}>
                       <input
@@ -439,13 +449,21 @@ export function LeadsPage() {
                                   : String(getLeadFieldValue(lead, col) ?? '')}
                       </td>
                     ))}
+                    <td className="p-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                      <Link to={`/chat?leadId=${encodeURIComponent(lead.id)}`} className="inline-flex rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors underline-offset-2 hover:bg-primary/10 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+                        Abrir conversa
+                      </Link>
+                    </td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
           {filteredLeads.length === 0 ? (
-            <p className="p-6 text-center text-sm text-muted-foreground">Nenhum lead com estes filtros.</p>
+            <div className="p-8 text-center">
+              <p className="m-0 text-sm font-medium text-foreground">Nenhum lead encontrado</p>
+              <p className="m-0 mt-1 text-sm text-muted-foreground">Ajuste os filtros ou limpe a busca para ver mais resultados.</p>
+            </div>
           ) : null}
         </CardContent>
       </Card>
@@ -498,11 +516,9 @@ export function LeadsPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Importar conversas (JSON)</CardTitle>
+            <CardTitle className="text-base">Importar conversas</CardTitle>
             <CardDescription>
-              Selecione um ficheiro .json exportado pelo sistema: deve conter a lista de interações no formato interno
-              (chave de topo interactions, cada item com leadId, patientName, channel, direction, author, content,
-              happenedAt).
+              Selecione um arquivo de conversas já exportado pelo sistema para incluir o histórico dos atendimentos.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
@@ -511,12 +527,12 @@ export function LeadsPage() {
               type="file"
               accept=".json,application/json"
               className="sr-only"
-              aria-label="Ficheiro JSON de interações"
+              aria-label="Arquivo de conversas"
               onChange={onJsonInputChange}
             />
             <div className="flex flex-wrap items-center gap-2">
               <Button type="button" variant="outline" onClick={() => jsonInputRef.current?.click()}>
-                Escolher ficheiro JSON
+                Escolher arquivo de conversas
               </Button>
               {jsonFileLabel ? (
                 <span className="text-sm text-muted-foreground">
@@ -533,7 +549,7 @@ export function LeadsPage() {
               disabled={!pendingJsonFile}
               onClick={() => {
                 if (!pendingJsonFile) {
-                  toast.error('Selecione um ficheiro JSON primeiro.')
+                  toast.error('Selecione um arquivo primeiro.')
                   return
                 }
                 void runJsonImportFromFile(pendingJsonFile)

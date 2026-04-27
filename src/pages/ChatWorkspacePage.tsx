@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Search, Tags } from 'lucide-react'
 
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
@@ -18,6 +19,7 @@ const QUICK_REPLIES = [
 
 export function ChatWorkspacePage() {
   const crm = useCrm()
+  const [searchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [ownerFilter, setOwnerFilter] = useState('all')
   const [tagFilter, setTagFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
@@ -44,19 +46,30 @@ export function ChatWorkspacePage() {
     [crm.interactions, activeLead],
   )
 
+  useEffect(() => {
+    const leadId = searchParams.get('leadId')
+    if (!leadId) return
+    if (crm.leads.some((lead) => lead.id === leadId)) {
+      crm.setSelectedLeadId(leadId)
+    }
+  }, [crm, searchParams])
+
   return (
-    <AppLayout title="Chat comercial" subtitle="Workspace estilo WhatsApp Web para atendimento completo.">
+    <AppLayout title="Central de conversas" subtitle="Atendimento rápido, organizado e fácil para toda a equipe.">
       <div className="grid min-h-[72vh] gap-4 lg:grid-cols-[320px_1fr_320px]">
-        <Card className="overflow-hidden">
-          <CardHeader className="border-b border-border/60 p-3">
+        <Card className="overflow-hidden rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
+          <CardHeader className="border-b border-border/60 bg-muted/20 p-3">
             <CardTitle className="text-sm font-semibold">Conversas</CardTitle>
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {conversations.length} conversa(s) encontrada(s)
+            </p>
             <div className="grid gap-2">
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 size-4 text-muted-foreground" />
-                <Input value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8" placeholder="Buscar conversa..." />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} className="rounded-xl border-border/70 pl-8" placeholder="Buscar conversa..." />
               </div>
-              <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-                <SelectTrigger>
+              <Select value={ownerFilter} onValueChange={(value) => setOwnerFilter(value ?? 'all')}>
+                <SelectTrigger className="rounded-xl border-border/70">
                   <SelectValue placeholder="Responsável" />
                 </SelectTrigger>
                 <SelectContent>
@@ -69,7 +82,7 @@ export function ChatWorkspacePage() {
                 </SelectContent>
               </Select>
               <Select value={tagFilter} onValueChange={(v) => setTagFilter(v as 'all' | 'hot' | 'warm' | 'cold')}>
-                <SelectTrigger>
+                <SelectTrigger className="rounded-xl border-border/70">
                   <SelectValue placeholder="Etiqueta" />
                 </SelectTrigger>
                 <SelectContent>
@@ -86,9 +99,10 @@ export function ChatWorkspacePage() {
               <button
                 key={lead.id}
                 type="button"
-                className={`w-full rounded-md border px-3 py-2 text-left transition ${
-                  crm.selectedLeadId === lead.id ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/30'
+                className={`w-full rounded-xl border px-3 py-2 text-left transition-all duration-200 hover:-translate-y-0.5 ${
+                  crm.selectedLeadId === lead.id ? 'border-primary bg-primary/10 shadow-sm' : 'border-border/70 hover:bg-muted/40'
                 }`}
+                aria-label={`Abrir conversa com ${lead.patientName}`}
                 onClick={() => crm.setSelectedLeadId(lead.id)}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -98,23 +112,32 @@ export function ChatWorkspacePage() {
                 <p className="m-0 truncate text-xs text-muted-foreground">{lead.summary}</p>
               </button>
             ))}
+            {conversations.length === 0 ? (
+              <div className="px-2 py-8 text-center">
+                <p className="m-0 text-sm font-medium text-foreground">Nenhuma conversa por aqui</p>
+                <p className="m-0 mt-1 text-xs text-muted-foreground">Tente outro termo de busca ou ajuste os filtros.</p>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
-        <Card className="flex min-h-[72vh] flex-col overflow-hidden">
-          <CardHeader className="border-b border-border/60 p-3">
+        <Card className="flex min-h-[72vh] flex-col overflow-hidden rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
+          <CardHeader className="border-b border-border/60 bg-muted/20 p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <CardTitle className="text-sm font-semibold">{activeLead?.patientName ?? 'Sem conversa selecionada'}</CardTitle>
+                <CardTitle className="text-sm font-semibold" aria-live="polite">
+                  {activeLead?.patientName ?? 'Sem conversa selecionada'}
+                </CardTitle>
                 <p className="m-0 text-xs text-muted-foreground">{activeLead?.phone ?? 'Selecione um lead à esquerda'}</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {QUICK_REPLIES.map((reply, idx) => (
                   <Button
                     key={idx}
                     type="button"
                     size="sm"
                     variant="outline"
+                    className="rounded-lg border-border/70 transition-all duration-200 hover:-translate-y-0.5"
                     onClick={() => crm.setDraftMessage(reply)}
                   >
                     Resposta {idx + 1}
@@ -123,17 +146,20 @@ export function ChatWorkspacePage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex min-h-0 flex-1 p-2">
+          <CardContent className="flex min-h-0 flex-1 bg-[#f7f9fc] p-2 dark:bg-background">
             {activeLead ? (
               <LeadChatThread leadId={activeLead.id} history={activeHistory} canCompose={crm.currentPermission.canRouteLeads} />
             ) : (
-              <p className="m-auto text-sm text-muted-foreground">Nenhuma conversa disponível.</p>
+              <div className="m-auto text-center">
+                <p className="m-0 text-sm font-medium text-foreground">Nenhuma conversa disponível</p>
+                <p className="m-0 mt-1 text-xs text-muted-foreground">Quando houver mensagens, elas aparecem aqui automaticamente.</p>
+              </div>
             )}
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden">
-          <CardHeader className="border-b border-border/60 p-3">
+        <Card className="overflow-hidden rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
+          <CardHeader className="border-b border-border/60 bg-muted/20 p-3">
             <CardTitle className="text-sm font-semibold">Contexto do lead</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 p-3 text-sm">
@@ -143,7 +169,7 @@ export function ChatWorkspacePage() {
                 <p className="m-0"><strong>Etapa:</strong> {activeLead.stageId}</p>
                 <p className="m-0"><strong>Responsável:</strong> {crm.getOwnerName(activeLead.ownerId)}</p>
                 <p className="m-0"><strong>Pontuação:</strong> {activeLead.score}</p>
-                <div className="rounded-md border border-border p-2">
+                <div className="rounded-xl border border-border/70 bg-muted/20 p-2.5">
                   <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <Tags className="size-3.5" /> Etiquetas
                   </p>

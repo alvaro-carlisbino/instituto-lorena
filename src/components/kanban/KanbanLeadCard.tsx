@@ -56,9 +56,9 @@ export function KanbanLeadCard({
   return (
     <div
       className={cn(
-        'cursor-grab bg-card p-3 transition hover:shadow-md active:cursor-grabbing border-l-4 rounded-none',
-        selected ? 'ring-2 ring-primary/20' : '',
-        isSlaBreached ? 'border-destructive shadow-[0_0_10px_var(--destructive)]' : 'border-border hover:border-primary/30'
+        'cursor-grab border-l-4 rounded-2xl bg-card/90 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing',
+        selected ? 'ring-2 ring-primary/25 shadow-sm' : '',
+        isSlaBreached ? 'border-destructive shadow-[0_0_10px_var(--destructive)]' : 'border-border/80 hover:border-primary/35'
       )}
       draggable
       onDragStart={(event) => {
@@ -83,13 +83,13 @@ export function KanbanLeadCard({
       }}
     >
       {isSlaBreached && (
-        <div className="mb-2 w-full bg-destructive/10 text-destructive text-[10px] uppercase font-bold tracking-widest px-2 py-1 rounded-sm border border-destructive/20 flex items-center gap-1">
+        <div className="mb-2 flex w-full items-center gap-1 rounded-lg border border-destructive/20 bg-destructive/10 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-destructive">
           <span className="size-2 rounded-full bg-destructive animate-pulse" />
           PRAZO EXCEDIDO ({elapsedMinutes - (slaMinutes ?? 0)}m)
         </div>
       )}
       <div className="flex items-start justify-between gap-2">
-        <p className="m-0 font-bold leading-tight uppercase tracking-wider text-sm">{title}</p>
+        <p className="m-0 text-sm font-semibold leading-tight tracking-tight">{title}</p>
         <span className={temperaturePillClass(temperature)}>{formatTemperature(tempRaw, lead.temperature)}</span>
       </div>
       <small className="text-muted-foreground">{sourceLabel}</small>

@@ -90,6 +90,9 @@ function App() {
 
   return (
     <CrmProvider value={crmState}>
+      <a href="#main-content" className="skip-link">
+        Pular para o conteúdo principal
+      </a>
       <TooltipProvider delay={200}>
         <SidebarProvider>
           <AppSidebar />

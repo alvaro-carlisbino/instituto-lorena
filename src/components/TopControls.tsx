@@ -46,7 +46,7 @@ export function TopControls() {
           <DropdownMenuTrigger
             className={cn(
               buttonVariants({ variant: 'outline', size: 'sm' }),
-              'max-w-[min(100%,14rem)] gap-1 truncate md:max-w-xs',
+              'max-w-[min(100%,14rem)] gap-1 truncate rounded-xl border-border/70 bg-background/80 md:max-w-xs',
             )}
           >
             <span className="truncate">{email}</span>
@@ -73,6 +73,7 @@ export function TopControls() {
         <Button
           variant="secondary"
           size="sm"
+          className="rounded-xl"
           disabled={crm.isLoading || !canSync}
           onClick={() => void crm.syncFromSupabase()}
         >
@@ -85,7 +86,7 @@ export function TopControls() {
             <Button 
               variant="ghost" 
               size="sm" 
-              className="w-full justify-between gap-2 md:w-auto"
+              className="w-full justify-between gap-2 rounded-xl border border-transparent bg-background/60 md:w-auto"
               onClick={() => setIsToolsOpen(!isToolsOpen)}
             >
               <span className="inline-flex items-center gap-1.5">
@@ -96,7 +97,7 @@ export function TopControls() {
             </Button>
             
             {isToolsOpen && (
-              <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-full min-w-0 max-w-[min(100vw-2rem,24rem)] sm:min-w-[300px] sm:max-w-none sm:w-[360px] rounded-xl border border-border/80 bg-popover/95 p-4 text-sm shadow-lg backdrop-blur supports-[backdrop-filter]:bg-popover/90">
+              <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-full min-w-0 max-w-[min(100vw-2rem,24rem)] rounded-2xl border border-border/80 bg-popover/95 p-4 text-sm shadow-xl backdrop-blur supports-[backdrop-filter]:bg-popover/90 sm:min-w-[300px] sm:max-w-none sm:w-[360px]">
                 <div className="grid gap-3 text-muted-foreground">
                   <div className="flex items-center justify-between border-b border-border/60 pb-2">
                     <span className="text-xs font-semibold text-foreground">Ajustes operacionais</span>

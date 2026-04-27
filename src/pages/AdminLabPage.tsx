@@ -109,7 +109,7 @@ export function AdminLabPage() {
   }
 
   return (
-    <AppLayout title="Ferramentas" subtitle="Ferramentas de suporte e manutenção do sistema.">
+    <AppLayout title="Ferramentas" subtitle="Atalhos de apoio para testes e manutenção.">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="shadow-sm">
           <CardHeader>
@@ -138,7 +138,7 @@ export function AdminLabPage() {
         <Card className="shadow-sm lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Reprocessar mensagens</CardTitle>
-            <CardDescription>Reprocessa manualmente as mensagens que ficaram na fila.</CardDescription>
+            <CardDescription>Tenta novamente mensagens que ficaram pendentes.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <Button type="button" variant="outline" onClick={() => void crm.runWebhookReplay()} disabled={crm.isLoading}>
@@ -162,7 +162,7 @@ export function AdminLabPage() {
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Sincronização</CardTitle>
-            <CardDescription>Atualiza todos os dados do sistema.</CardDescription>
+            <CardDescription>Atualiza as informações para mostrar os dados mais recentes.</CardDescription>
           </CardHeader>
           <CardFooter>
             <Button type="button" variant="outline" onClick={() => void crm.syncFromSupabase()} disabled={crm.isLoading}>
@@ -175,7 +175,7 @@ export function AdminLabPage() {
           <CardHeader>
             <CardTitle className="text-base">Testar recebimento de novo contato</CardTitle>
             <CardDescription>
-              Simula o recebimento de um novo contato com os dados preenchidos abaixo. Use apenas em ambiente de teste.
+              Simula a chegada de um novo contato com os dados preenchidos abaixo. Use apenas para testes.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

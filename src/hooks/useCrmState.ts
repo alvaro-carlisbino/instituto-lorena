@@ -482,8 +482,8 @@ export const useCrmState = () => {
         patientName: selectedLead.patientName,
         channel: 'system',
         direction: 'system',
-        author: 'WhatsApp Provider',
-        content: `Mensagem enviada via ${result.provider} (status: ${result.status}).`,
+        author: 'Canal de mensagens',
+        content: `Mensagem enviada com sucesso (status: ${result.status}).`,
         happenedAt: new Date().toISOString(),
       })
       return

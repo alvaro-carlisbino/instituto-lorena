@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 
 import { PageHeader } from '@/components/page/PageHeader'
@@ -16,6 +16,7 @@ type Props = {
 export function AppLayout({ title, subtitle, actions, children }: Props) {
   const location = useLocation()
   const [scrolled, setScrolled] = useState(false)
+  const titleId = useId()
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -29,21 +30,25 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
 
   return (
     <SidebarInset className="min-w-0 bg-transparent flex min-h-svh flex-1 flex-col transition-all duration-300 ease-in-out">
-      <div className={cn(
-        'sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 transition-shadow duration-200',
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_10%,oklch(0.95_0.03_50/.6),transparent_28%),radial-gradient(circle_at_88%_4%,oklch(0.93_0.03_250/.5),transparent_22%)]" />
+      <header
+        role="banner"
+        className={cn(
+        'sticky top-0 z-20 border-b border-border/70 bg-background/90 backdrop-blur-xl supports-[backdrop-filter]:bg-background/75 transition-shadow duration-200',
         scrolled && 'shadow-sm',
-      )}>
+      )}
+      >
         <div className="mx-auto flex w-full max-w-7xl min-w-0 items-start gap-2 px-4 py-2 sm:items-center">
           <TopControls />
         </div>
         <div className="mx-auto w-full max-w-7xl min-w-0 px-4">
-          <PageHeader title={title} description={subtitle} actions={actions} className="border-0 pb-4" />
+          <PageHeader title={title} titleId={titleId} description={subtitle} actions={actions} className="border-0 pb-4" />
         </div>
-      </div>
+      </header>
 
-      <div className="mx-auto w-full max-w-7xl min-w-0 flex-1 space-y-8 px-4 py-8 relative">
+      <main id="main-content" aria-labelledby={titleId} className="mx-auto w-full max-w-7xl min-w-0 flex-1 space-y-8 px-4 py-6 sm:py-8 relative">
         {children}
-      </div>
+      </main>
     </SidebarInset>
   )
 }

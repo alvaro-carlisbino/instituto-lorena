@@ -306,7 +306,7 @@ export const initialInteractions: Interaction[] = [
     patientName: 'Mariana Alves',
     channel: 'meta',
     direction: 'in',
-    author: 'Meta Graph API',
+    author: 'Anúncios Meta',
     content: 'Lead capturado do formulario do Instagram Ads.',
     happenedAt: '2026-04-16T10:00:00Z',
   },
@@ -514,7 +514,7 @@ export const initialWorkflowFields: WorkflowField[] = [
   {
     id: 'core-notes',
     fieldKey: 'notes',
-    label: 'Notas internas',
+    label: 'Notas',
     fieldType: 'text',
     required: false,
     options: [],

@@ -469,7 +469,7 @@ export function SettingsPage() {
                         <Input
                           value={rule.trigger}
                           onChange={(event) => crm.updateNotificationRule(rule.id, { trigger: event.target.value })}
-                          placeholder="Gatilho"
+                          placeholder="Quando avisar"
                           className="max-w-[12rem]"
                         />
                       </div>

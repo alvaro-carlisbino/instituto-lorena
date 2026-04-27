@@ -145,7 +145,7 @@ export function KanbanPage() {
           return (
             <article
               key={stage.id}
-              className="flex min-h-[28rem] flex-col overflow-hidden rounded-none border border-border bg-card shadow-none transition-colors hover:border-primary/50"
+              className="flex min-h-[28rem] flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-sm transition-colors hover:border-primary/50 hover:shadow-md"
             >
               <header className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
                 <div className="min-w-0 flex-1">
@@ -156,7 +156,7 @@ export function KanbanPage() {
                     </p>
                   ) : null}
                 </div>
-                <span className="rounded-none border border-border/50 bg-background px-3 py-1 text-xs tabular-nums font-mono font-bold shadow-sm">
+                <span className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs tabular-nums font-mono font-bold shadow-sm">
                   {stageLeads.length}
                 </span>
               </header>

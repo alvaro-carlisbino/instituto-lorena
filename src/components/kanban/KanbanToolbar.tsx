@@ -40,10 +40,10 @@ export function KanbanToolbar({
   ownerOptions,
 }: Props) {
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-sm sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-4 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm backdrop-blur-sm sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <Select value={pipelineId} onValueChange={(v) => v && onPipelineChange(v)}>
-          <SelectTrigger className="w-full min-w-[12rem] sm:w-[min(100%,13rem)] rounded-none border-foreground/20 uppercase tracking-widest font-bold text-xs" size="default">
+          <SelectTrigger className="w-full min-w-[12rem] sm:w-[min(100%,13rem)] rounded-xl border-border/70 text-xs font-medium" size="default">
             <SelectValue placeholder="Funil" />
           </SelectTrigger>
           <SelectContent>
@@ -56,7 +56,7 @@ export function KanbanToolbar({
         </Select>
 
         <Select value={ownerFilter} onValueChange={(v) => v && onOwnerChange(v)}>
-          <SelectTrigger className="w-full min-w-[12rem] sm:w-[min(100%,11rem)] rounded-none border-foreground/20 uppercase tracking-widest font-bold text-[10px]" size="default">
+          <SelectTrigger className="w-full min-w-[12rem] sm:w-[min(100%,11rem)] rounded-xl border-border/70 text-xs font-medium" size="default">
             <SelectValue placeholder="Responsável" />
           </SelectTrigger>
           <SelectContent>
@@ -85,7 +85,7 @@ export function KanbanToolbar({
         <div
           role="group"
           aria-label="Filtrar por temperatura"
-          className="flex w-full flex-wrap gap-1 rounded-lg border border-border bg-muted/30 p-1 sm:w-auto"
+          className="flex w-full flex-wrap gap-1 rounded-xl border border-border/70 bg-muted/20 p-1 sm:w-auto"
         >
           {TEMP_OPTIONS.map((opt) => (
             <Button

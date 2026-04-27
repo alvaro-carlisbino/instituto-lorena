@@ -34,7 +34,7 @@ export function TasksPage() {
   const recordNps = () => {
     const id = npsDispatchId.trim()
     if (!id) {
-      toast.error('Informe o ID do disparo (survey_dispatches).')
+      toast.error('Informe o código da pesquisa enviada.')
       return
     }
     const score = Math.min(10, Math.max(0, Math.round(Number(npsScore))))
@@ -78,7 +78,7 @@ export function TasksPage() {
       <Card className="mb-8">
         <CardHeader>
           <CardTitle className="text-base">Tarefas ({tasks.length})</CardTitle>
-          <CardDescription>Automação ao mudar etapa cria tarefas conforme regras em `automation_rules` (Supabase).</CardDescription>
+          <CardDescription>Tarefas podem ser criadas automaticamente ao avançar um lead no processo.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           {tasks.length === 0 ? (
@@ -112,12 +112,12 @@ export function TasksPage() {
         <CardHeader>
           <CardTitle className="text-base">Registrar NPS</CardTitle>
           <CardDescription>
-            Ao mover lead para etapa &quot;fechado&quot;, um disparo é criado. Informe o ID do disparo e a nota (0–10).
+            Ao concluir um atendimento, uma pesquisa pode ser enviada. Informe o código da pesquisa e a nota (0–10).
           </CardDescription>
         </CardHeader>
         <CardContent className="grid max-w-md gap-3">
           <div className="grid gap-1.5">
-            <Label htmlFor="dispatch-id">ID do disparo</Label>
+            <Label htmlFor="dispatch-id">Código da pesquisa</Label>
             <Input id="dispatch-id" value={npsDispatchId} onChange={(e) => setNpsDispatchId(e.target.value)} placeholder="disp-…" />
           </div>
           <div className="grid gap-1.5">
@@ -144,7 +144,7 @@ export function TasksPage() {
           </Button>
           {crm.surveyDispatches.length > 0 ? (
             <div className="mt-4 border-t border-border pt-4">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Disparos recentes (copie o ID)</p>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">Pesquisas recentes (copie o código)</p>
               <ul className="m-0 max-h-40 list-none space-y-1 overflow-y-auto p-0 font-mono text-[11px]">
                 {crm.surveyDispatches.slice(0, 12).map((d) => (
                   <li key={d.id} className="flex justify-between gap-2 truncate">
