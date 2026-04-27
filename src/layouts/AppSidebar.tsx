@@ -20,6 +20,7 @@ import {
   Users,
   CheckSquare,
   ChatsCircle,
+  QrCode,
 } from 'phosphor-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -151,6 +152,7 @@ export function AppSidebar() {
                 <NavItem to="/usuarios" label="Usuários" icon={Users} />
                 <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
                 <NavItem to="/admin-operacao" label="Operação Admin" icon={Gear} />
+                <NavItem to="/admin-whatsapp" label="WhatsApp Evolution" icon={QrCode} />
                 <NavItem to="/admin-lab" label="Ferramentas" icon={Flask} />
               </SidebarMenu>
             </SidebarGroupContent>

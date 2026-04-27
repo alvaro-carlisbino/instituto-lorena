@@ -23,6 +23,7 @@ import { LeadsPage } from './pages/LeadsPage'
 import { TasksPage } from './pages/TasksPage'
 import { ChatWorkspacePage } from './pages/ChatWorkspacePage'
 import { AdminOperationsPage } from './pages/AdminOperationsPage'
+import { WhatsappConnectionPage } from './pages/WhatsappConnectionPage'
 import { CommandPalette } from './components/CommandPalette'
 import { RouteTransition } from './components/RouteTransition'
 import { SidebarProvider } from '@/components/ui/sidebar'
@@ -49,6 +50,7 @@ function AppRoutes() {
       <Route path="/auditoria" element={<AuditPage />} />
       <Route path="/admin-lab" element={<AdminLabPage />} />
       <Route path="/admin-operacao" element={<AdminOperationsPage />} />
+      <Route path="/admin-whatsapp" element={<WhatsappConnectionPage />} />
       <Route path="/configuracoes" element={<SettingsPage />} />
       <Route path="/tv-config" element={<TvConfigPage />} />
       <Route path="/tv" element={<TvDashboardPage />} />

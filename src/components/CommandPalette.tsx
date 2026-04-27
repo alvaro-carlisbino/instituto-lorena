@@ -21,6 +21,7 @@ import {
   Users,
   MessageSquare,
   BriefcaseBusiness,
+  QrCode,
 } from 'lucide-react'
 
 import { useCrm } from '@/context/CrmContext'
@@ -218,6 +219,14 @@ export function CommandPalette() {
             >
               <BriefcaseBusiness className="size-4 shrink-0 opacity-70" />
               Operação Admin
+            </Command.Item>
+            <Command.Item
+              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
+              keywords={['whatsapp', 'evolution', 'qr', 'instancia']}
+              onSelect={() => go('/admin-whatsapp')}
+            >
+              <QrCode className="size-4 shrink-0 opacity-70" />
+              WhatsApp Evolution
             </Command.Item>
           </Command.Group>
         ) : null}
