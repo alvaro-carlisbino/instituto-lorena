@@ -6,7 +6,8 @@ import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { LeadTaskPanel } from '@/components/leads/LeadTaskPanel'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
+import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -20,6 +21,7 @@ import {
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { workflowFieldsForContext } from '@/lib/leadFields'
+import { labelForIdName } from '@/lib/selectDisplay'
 import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
 import { fetchWhatsappChannelInstances } from '@/services/whatsappChannelInstances'
 import { fetchLeadWaLineEvents, type LeadWaLineEvent } from '@/services/leadWaLineEvents'
@@ -82,6 +84,27 @@ export function LeadDetailSheet({ open, onOpenChange }: Props) {
   const destPipeline = useMemo(
     () => crm.pipelineCatalog.find((p) => p.id === destPipelineId),
     [crm.pipelineCatalog, destPipelineId],
+  )
+
+  const destPipelineLabel = useMemo(
+    () =>
+      labelForIdName(
+        destPipelineId,
+        otherPipelines.map((p) => ({ id: p.id, name: p.name })),
+        undefined,
+        'Funil',
+      ),
+    [destPipelineId, otherPipelines],
+  )
+  const destStageLabel = useMemo(
+    () =>
+      labelForIdName(
+        destStageId,
+        (destPipeline?.stages ?? []).map((s) => ({ id: s.id, name: s.name })),
+        undefined,
+        'Etapa',
+      ),
+    [destStageId, destPipeline],
   )
 
   const handleDestPipelineChange = (pid: string) => {
@@ -221,9 +244,9 @@ export function LeadDetailSheet({ open, onOpenChange }: Props) {
                           if (v) handleDestPipelineChange(v)
                         }}
                       >
-                        <SelectTrigger className="h-9 text-left text-xs">
-                          <SelectValue placeholder="Funil" />
-                        </SelectTrigger>
+                        <LabeledSelectTrigger className="h-9 text-left text-xs" size="default">
+                          {destPipelineLabel}
+                        </LabeledSelectTrigger>
                         <SelectContent>
                           {otherPipelines.map((p) => (
                             <SelectItem key={p.id} value={p.id} className="text-xs">
@@ -242,9 +265,9 @@ export function LeadDetailSheet({ open, onOpenChange }: Props) {
                         }}
                         disabled={!destPipeline || destPipeline.stages.length === 0}
                       >
-                        <SelectTrigger className="h-9 text-left text-xs">
-                          <SelectValue placeholder="Etapa" />
-                        </SelectTrigger>
+                        <LabeledSelectTrigger className="h-9 text-left text-xs" size="default">
+                          {destStageLabel}
+                        </LabeledSelectTrigger>
                         <SelectContent>
                           {(destPipeline?.stages ?? []).map((s) => (
                             <SelectItem key={s.id} value={s.id} className="text-xs">

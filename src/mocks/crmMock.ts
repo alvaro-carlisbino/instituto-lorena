@@ -251,39 +251,73 @@ export type OrgSettings = {
   weekStartsOn: number
 }
 
+/**
+ * Três funis padrão Lorena (teste com cliente). IDs de etapa são únicos em toda a base (Postgres).
+ * Jornada sugerida: Clínica (entrada) → TRATAMENTO CAPILAR → Processo cirúrgico (após concluir o capilar).
+ */
 export const pipelines: Pipeline[] = [
   {
     id: 'pipeline-clinica',
-    name: 'Funil Clínica',
+    name: 'Pipeline Clínica',
     boardConfig: {
       stageSlaMinutes: {
-        'novo': 15,
-        'triagem': 30,
-        'contato': 60
-      }
+        novo: 15,
+        triagem: 30,
+        contato: 60,
+        consulta: 120,
+        acompanhamento: 240,
+        fechado: 0,
+      },
     },
     stages: [
       { id: 'novo', name: 'Novo lead' },
-      { id: 'triagem', name: 'Triagem (IA)' },
-      { id: 'contato', name: 'Contato (atendente)' },
+      { id: 'triagem', name: 'Triagem' },
+      { id: 'contato', name: 'Contato' },
       { id: 'consulta', name: 'Consulta agendada' },
-      { id: 'fechado', name: 'Fechado' },
+      { id: 'acompanhamento', name: 'Acompanhamento' },
+      { id: 'fechado', name: 'Encerrado' },
     ],
   },
   {
-    id: 'pipeline-estetica',
-    name: 'Funil Estética',
+    id: 'pipeline-tratamento-capilar',
+    name: 'Pipeline TRATAMENTO CAPILAR',
     boardConfig: {
       stageSlaMinutes: {
-        'novo-estetica': 30,
-        'avaliacao': 120
-      }
+        'tc-novo': 20,
+        'tc-triagem': 45,
+        'tc-avaliacao': 120,
+        'tc-plano': 240,
+        'tc-sessoes': 0,
+        'tc-concluido': 0,
+      },
     },
     stages: [
-      { id: 'novo-estetica', name: 'Novo lead' },
-      { id: 'avaliacao', name: 'Avaliação inicial' },
-      { id: 'proposta', name: 'Proposta' },
-      { id: 'fechado-estetica', name: 'Fechado' },
+      { id: 'tc-novo', name: 'Novo' },
+      { id: 'tc-triagem', name: 'Triagem e primeiros dados' },
+      { id: 'tc-avaliacao', name: 'Avaliação capilar' },
+      { id: 'tc-plano', name: 'Plano e orçamento' },
+      { id: 'tc-sessoes', name: 'Em tratamento (sessões)' },
+      { id: 'tc-concluido', name: 'Tratamento concluído (pré-cirúrgico)' },
+    ],
+  },
+  {
+    id: 'pipeline-processo-cirurgico',
+    name: 'PROCESSO CIRÚRGICO',
+    boardConfig: {
+      stageSlaMinutes: {
+        'cx-entrada': 60,
+        'cx-pre-op': 1440,
+        'cx-cirurgia': 0,
+        'cx-pos-op': 720,
+        'cx-alta': 0,
+      },
+    },
+    stages: [
+      { id: 'cx-entrada', name: 'Entrada (pós-tratamento capilar)' },
+      { id: 'cx-pre-op', name: 'Pré-operatório' },
+      { id: 'cx-cirurgia', name: 'Cirurgia' },
+      { id: 'cx-pos-op', name: 'Pós-operatório' },
+      { id: 'cx-alta', name: 'Alta / concluído' },
     ],
   },
 ]
@@ -342,6 +376,40 @@ export const initialLeads: Lead[] = [
     pipelineId: 'pipeline-clinica',
     stageId: 'novo',
     summary: 'Pediu informacoes de valores e condicoes de pagamento.',
+    customFields: {},
+    whatsappInstanceId: null,
+    tagIds: [],
+  },
+  {
+    id: 'lead-004',
+    patientName: 'Fernanda Rocha',
+    phone: '+55 11 97777-1010',
+    source: 'whatsapp',
+    createdAt: '2026-04-20T09:00:00Z',
+    position: 1,
+    score: 55,
+    temperature: 'warm',
+    ownerId: 'sdr-1',
+    pipelineId: 'pipeline-tratamento-capilar',
+    stageId: 'tc-plano',
+    summary: 'Avaliação feita; aguardando aprovação do plano de sessões.',
+    customFields: {},
+    whatsappInstanceId: null,
+    tagIds: [],
+  },
+  {
+    id: 'lead-005',
+    patientName: 'Gustavo Prado',
+    phone: '+55 11 96666-2020',
+    source: 'manual',
+    createdAt: '2026-04-22T14:00:00Z',
+    position: 1,
+    score: 80,
+    temperature: 'hot',
+    ownerId: 'sdr-2',
+    pipelineId: 'pipeline-processo-cirurgico',
+    stageId: 'cx-pre-op',
+    summary: 'Concluiu tratamento capilar; documentação e exames pré-operatórios em andamento.',
     customFields: {},
     whatsappInstanceId: null,
     tagIds: [],
@@ -632,6 +700,9 @@ export const initialNotifications: NotificationRule[] = [
   { id: 'ntf-1', name: 'Lead sem retorno em 30 min', channel: 'in_app', enabled: true, trigger: 'sla_delay_30m' },
   { id: 'ntf-2', name: 'Lead qualificado por IA', channel: 'email', enabled: true, trigger: 'ai_qualified' },
   { id: 'ntf-3', name: 'Falha no link externo', channel: 'whatsapp', enabled: false, trigger: 'integration_webhook_error' },
+  { id: 'ntf-4', name: 'Tarefa de follow-up a vencer hoje', channel: 'in_app', enabled: true, trigger: 'task_follow_up_due_today' },
+  { id: 'ntf-5', name: 'NPS enviado — aguarda registo de resposta', channel: 'in_app', enabled: true, trigger: 'nps_dispatch_pending' },
+  { id: 'ntf-6', name: 'Lembrete: lead em triagem ha mais de 2h', channel: 'in_app', enabled: true, trigger: 'triage_stale_2h' },
 ]
 
 export const initialAppUsers: AppUser[] = [
@@ -757,21 +828,111 @@ export const initialLeadTasks: LeadTask[] = [
 
 export const initialAutomationRules: AutomationRule[] = [
   {
-    id: 'auto-1',
-    name: 'Follow-up 24h após triagem',
+    id: 'auto-novo',
+    name: 'Clínica: primeiro retorno (novo lead)',
+    enabled: true,
+    triggerType: 'stage_entered',
+    triggerConfig: { stageId: 'novo' },
+    actionType: 'create_task',
+    actionConfig: { title: 'Ligar ou WhatsApp em ate 2h', hoursOffset: 2, taskType: 'follow_up' },
+  },
+  {
+    id: 'auto-triagem',
+    name: 'Clínica: follow-up pós-triagem',
+    enabled: true,
+    triggerType: 'stage_entered',
+    triggerConfig: { stageId: 'triagem' },
+    actionType: 'create_task',
+    actionConfig: { title: 'Confirmar entendimento e proximo passo (triagem)', hoursOffset: 4, taskType: 'follow_up' },
+  },
+  {
+    id: 'auto-contato',
+    name: 'Clínica: contato humano (24h)',
     enabled: true,
     triggerType: 'stage_entered',
     triggerConfig: { stageId: 'contato' },
     actionType: 'create_task',
-    actionConfig: { title: 'Contato humano obrigatório', hoursOffset: 24, taskType: 'follow_up' },
+    actionConfig: { title: 'Contato humano: proposta ou proxima acao', hoursOffset: 24, taskType: 'follow_up' },
+  },
+  {
+    id: 'auto-consulta',
+    name: 'Clínica: pos-consulta',
+    enabled: true,
+    triggerType: 'stage_entered',
+    triggerConfig: { stageId: 'consulta' },
+    actionType: 'create_task',
+    actionConfig: { title: 'Check-in pos-consulta (satisfacao e retorno)', hoursOffset: 48, taskType: 'follow_up' },
+  },
+  {
+    id: 'auto-tc-avaliacao',
+    name: 'Capilar: apos avaliacao',
+    enabled: true,
+    triggerType: 'stage_entered',
+    triggerConfig: { stageId: 'tc-avaliacao' },
+    actionType: 'create_task',
+    actionConfig: { title: 'Enviar plano e condicoes (avaliacao capilar)', hoursOffset: 24, taskType: 'follow_up' },
+  },
+  {
+    id: 'auto-tc-plano',
+    name: 'Capilar: acompanhamento do plano',
+    enabled: true,
+    triggerType: 'stage_entered',
+    triggerConfig: { stageId: 'tc-plano' },
+    actionType: 'create_task',
+    actionConfig: { title: 'Cobrar aceite do plano / orcamento', hoursOffset: 48, taskType: 'follow_up' },
+  },
+  {
+    id: 'auto-tc-sessoes',
+    name: 'Capilar: em sessoes',
+    enabled: true,
+    triggerType: 'stage_entered',
+    triggerConfig: { stageId: 'tc-sessoes' },
+    actionType: 'create_task',
+    actionConfig: { title: 'Check-in de evolucao (meio do tratamento)', hoursOffset: 168, taskType: 'follow_up' },
+  },
+  {
+    id: 'auto-cx-pre',
+    name: 'Cirurgico: pre-operatorio',
+    enabled: true,
+    triggerType: 'stage_entered',
+    triggerConfig: { stageId: 'cx-pre-op' },
+    actionType: 'create_task',
+    actionConfig: { title: 'Checklist de exames e documentacao pre-cirurgia', hoursOffset: 24, taskType: 'follow_up' },
+  },
+  {
+    id: 'auto-cx-pos',
+    name: 'Cirurgico: pos-operatorio',
+    enabled: true,
+    triggerType: 'stage_entered',
+    triggerConfig: { stageId: 'cx-pos-op' },
+    actionType: 'create_task',
+    actionConfig: { title: 'Primeiro contato pos-cirurgia (dor, curativo, duvidas)', hoursOffset: 4, taskType: 'follow_up' },
   },
 ]
 
 export const initialSurveyTemplates: SurveyTemplate[] = [
   {
     id: 'nps-default',
-    name: 'NPS pós-atendimento',
-    npsQuestion: 'De 0 a 10, o quanto recomendaria nossos serviços?',
+    name: 'NPS generico (fallback)',
+    npsQuestion: 'De 0 a 10, quanto recomendaria a nossa clinica a um amigo ou familiar?',
+    enabled: false,
+  },
+  {
+    id: 'nps-clinica',
+    name: 'NPS — Pipeline Clínica',
+    npsQuestion: 'Apos o atendimento, de 0 a 10, o quanto recomendaria a experiencia na nossa recepcao e triagem?',
+    enabled: true,
+  },
+  {
+    id: 'nps-capilar',
+    name: 'NPS — Tratamento capilar',
+    npsQuestion: 'Sobre o tratamento capilar, de 0 a 10, como avalia o acompanhamento e os resultados ate aqui?',
+    enabled: true,
+  },
+  {
+    id: 'nps-cirurgico',
+    name: 'NPS — Processo cirurgico',
+    npsQuestion: 'Sobre a cirurgia e o cuidado pos-operatorio, de 0 a 10, o quanto recomendaria a nossa equipe?',
     enabled: true,
   },
 ]

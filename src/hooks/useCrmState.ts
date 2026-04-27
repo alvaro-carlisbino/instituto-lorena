@@ -27,6 +27,8 @@ import {
   deleteDataView,
   deleteWorkflowField,
   deleteLeadTask,
+  saveAutomationRule,
+  deleteAutomationRule,
   insertInteraction,
   insertLead,
   loadWebhookJobs,
@@ -111,6 +113,7 @@ import type {
   TriageResult,
   WorkflowField,
 } from '../mocks/crmMock'
+import { isWorkloadExcludedStageId, pickNpsTemplateForPipeline, shouldDispatchNpsForStage } from '../lib/followUpNps'
 import { mergeKanbanFieldOrder } from '../lib/leadFields'
 import { getDataProviderMode } from '../services/dataMode'
 import { sendWhatsappMessage } from '../services/crmWhatsapp'
@@ -233,7 +236,9 @@ export const useCrmState = () => {
   const workloadBySdr = useMemo(() => {
     return sdrMembers.map((sdr) => ({
       ...sdr,
-      total: leads.filter((lead) => lead.ownerId === sdr.id && !lead.stageId.includes('fechado')).length,
+      total: leads.filter(
+        (lead) => lead.ownerId === sdr.id && !isWorkloadExcludedStageId(lead.stageId),
+      ).length,
     }))
   }, [leads, sdrMembers])
 
@@ -305,8 +310,10 @@ export const useCrmState = () => {
       })
     }
 
+    const leadPipeline =
+      pipelineCatalog.find((pipeline) => pipeline.id === leadToMove.pipelineId) ?? selectedPipeline
     const targetStageName =
-      selectedPipeline.stages.find((stage) => stage.id === target.stageId)?.name ?? 'Etapa atualizada'
+      leadPipeline.stages.find((stage) => stage.id === target.stageId)?.name ?? 'Etapa atualizada'
 
     addInteraction({
       leadId: leadToMove.id,
@@ -317,6 +324,13 @@ export const useCrmState = () => {
       content: `Lead reposicionado para ${targetStageName} na ordem ${boundedIndex + 1}.`,
       happenedAt: new Date().toISOString(),
     })
+
+    if (!sameStage) {
+      const st = leadPipeline.stages.find((s) => s.id === target.stageId)
+      if (st) {
+        runStageEnteredSideEffects(movedLead, st)
+      }
+    }
   }
 
   const runStageEnteredSideEffects = (targetLead: Lead, nextStage: Stage) => {
@@ -348,8 +362,8 @@ export const useCrmState = () => {
       }
     }
 
-    if (nextStage.id.includes('fechado')) {
-      const tmpl = surveyTemplates.find((t) => t.enabled)
+    if (shouldDispatchNpsForStage(nextStage.id)) {
+      const tmpl = pickNpsTemplateForPipeline(targetLead.pipelineId, surveyTemplates)
       if (tmpl) {
         const dispatch: SurveyDispatch = {
           id: `disp-${Date.now()}`,
@@ -362,6 +376,15 @@ export const useCrmState = () => {
         if (dataMode === 'supabase' && isSupabaseConfigured) {
           void saveSurveyDispatch(dispatch)
         }
+        addInteraction({
+          leadId: targetLead.id,
+          patientName: targetLead.patientName,
+          channel: 'system',
+          direction: 'system',
+          author: 'NPS',
+          content: `Pesquisa "${tmpl.name}" enviada (in-app). Codigo: ${dispatch.id}. Registre a nota em Tarefas e NPS.`,
+          happenedAt: new Date().toISOString(),
+        })
       }
     }
   }
@@ -1087,29 +1110,13 @@ export const useCrmState = () => {
 
   const ensureStandardKanbanSetup = () => {
     if (pipelineCatalog.length > 0) return
-    const basePipeline: Pipeline = {
-      id: 'pipeline-padrao-comercial',
-      name: 'Pipeline Comercial Padrão',
-      boardConfig: {
-        stageSlaMinutes: {
-          'novo-lead': 15,
-          'qualificacao': 30,
-          'contato-humano': 60,
-          'proposta': 240,
-          'fechamento': 480,
-        },
-      },
-      stages: [
-        { id: 'novo-lead', name: 'Novo lead' },
-        { id: 'qualificacao', name: 'Qualificação' },
-        { id: 'contato-humano', name: 'Contato humano' },
-        { id: 'proposta', name: 'Proposta' },
-        { id: 'fechamento', name: 'Fechamento' },
-      ],
+    setPipelineCatalog(pipelines)
+    setSelectedPipelineId(pipelines[0]!.id)
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      for (const p of pipelines) {
+        void savePipelineConfig(p)
+      }
     }
-    setPipelineCatalog([basePipeline])
-    setSelectedPipelineId(basePipeline.id)
-    if (dataMode === 'supabase' && isSupabaseConfigured) void savePipelineConfig(basePipeline)
   }
 
   const importLeadsFromParsed = async (rows: Record<string, string>[], pipelineId: string, stageId: string) => {
@@ -1350,14 +1357,27 @@ export const useCrmState = () => {
       actionConfig: {},
     }
     setAutomationRules((previous) => [...previous, next])
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void saveAutomationRule(next)
+    }
   }
 
   const updateAutomationRule = (ruleId: string, updates: Partial<AutomationRule>) => {
-    setAutomationRules((previous) => previous.map((rule) => (rule.id === ruleId ? { ...rule, ...updates } : rule)))
+    setAutomationRules((previous) => {
+      const next = previous.map((rule) => (rule.id === ruleId ? { ...rule, ...updates } : rule))
+      if (dataMode === 'supabase' && isSupabaseConfigured) {
+        const changed = next.find((r) => r.id === ruleId)
+        if (changed) void saveAutomationRule(changed)
+      }
+      return next
+    })
   }
 
   const removeAutomationRule = (ruleId: string) => {
     setAutomationRules((previous) => previous.filter((rule) => rule.id !== ruleId))
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void deleteAutomationRule(ruleId)
+    }
   }
 
   const runBirthdayCampaign = () => {

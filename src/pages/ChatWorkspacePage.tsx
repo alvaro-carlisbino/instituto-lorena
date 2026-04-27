@@ -9,11 +9,19 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
+import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
+import { labelForIdName, labelForKeyMap } from '@/lib/selectDisplay'
 import { getConversationState, setConversationMode, type ConversationOwnerMode } from '@/services/conversationControl'
+
+const CHAT_TEMPERATURE_MAP: Readonly<Record<string, string>> = {
+  hot: 'Quente',
+  warm: 'Morna',
+  cold: 'Fria',
+}
 
 const QUICK_REPLIES = [
   'Oi! Tudo bem? Posso te ajudar com valores e horários.',
@@ -30,6 +38,27 @@ export function ChatWorkspacePage() {
   const [tagFilter, setTagFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
   const [leadMode, setLeadMode] = useState<ConversationOwnerMode>('auto')
   const [modeLoading, setModeLoading] = useState(false)
+
+  const ownerSelectLabel = useMemo(
+    () =>
+      labelForIdName(
+        ownerFilter,
+        crm.users.map((u) => ({ id: u.id, name: u.name })),
+        { value: 'all', label: 'Todos responsáveis' },
+        'Responsável',
+      ),
+    [ownerFilter, crm.users],
+  )
+  const temperatureSelectLabel = useMemo(
+    () =>
+      labelForKeyMap(
+        tagFilter,
+        CHAT_TEMPERATURE_MAP,
+        { value: 'all', label: 'Todas as temperaturas' },
+        'Temperatura',
+      ),
+    [tagFilter],
+  )
 
   const conversations = useMemo(() => {
     const text = search.trim().toLowerCase()
@@ -60,6 +89,12 @@ export function ChatWorkspacePage() {
       crm.setSelectedLeadId(leadId)
     }
   }, [crm, searchParams])
+
+  useEffect(() => {
+    if (ownerFilter !== 'all' && !crm.users.some((u) => u.id === ownerFilter)) {
+      setOwnerFilter('all')
+    }
+  }, [crm.users, ownerFilter])
 
   useEffect(() => {
     if (!activeLead || crm.dataMode !== 'supabase') return
@@ -104,9 +139,9 @@ export function ChatWorkspacePage() {
                 <Input value={search} onChange={(e) => setSearch(e.target.value)} className="rounded-xl border-border/70 pl-8" placeholder="Buscar conversa..." />
               </div>
               <Select value={ownerFilter} onValueChange={(value) => setOwnerFilter(value ?? 'all')}>
-                <SelectTrigger className="rounded-xl border-border/70">
-                  <SelectValue placeholder="Responsável" />
-                </SelectTrigger>
+                <LabeledSelectTrigger className="rounded-xl border-border/70" size="default">
+                  {ownerSelectLabel}
+                </LabeledSelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos responsáveis</SelectItem>
                   {crm.users.map((u) => (
@@ -117,9 +152,9 @@ export function ChatWorkspacePage() {
                 </SelectContent>
               </Select>
               <Select value={tagFilter} onValueChange={(v) => setTagFilter(v as 'all' | 'hot' | 'warm' | 'cold')}>
-                <SelectTrigger className="rounded-xl border-border/70">
-                  <SelectValue placeholder="Etiqueta" />
-                </SelectTrigger>
+                <LabeledSelectTrigger className="rounded-xl border-border/70" size="default">
+                  {temperatureSelectLabel}
+                </LabeledSelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todas etiquetas</SelectItem>
                   <SelectItem value="hot">Quente</SelectItem>

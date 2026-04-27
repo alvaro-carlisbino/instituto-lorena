@@ -1018,6 +1018,26 @@ export const saveNotificationRule = async (rule: NotificationRule): Promise<void
   if (error) throw error
 }
 
+export const saveAutomationRule = async (rule: AutomationRule): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('automation_rules').upsert({
+    id: rule.id,
+    name: rule.name,
+    enabled: rule.enabled,
+    trigger_type: rule.triggerType,
+    trigger_config: rule.triggerConfig,
+    action_type: rule.actionType,
+    action_config: rule.actionConfig,
+  })
+  if (error) throw error
+}
+
+export const deleteAutomationRule = async (ruleId: string): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('automation_rules').delete().eq('id', ruleId)
+  if (error) throw error
+}
+
 export const savePipelineConfig = async (pipeline: Pipeline): Promise<void> => {
   const client = assertSupabase()
   const pipelineRes = await client

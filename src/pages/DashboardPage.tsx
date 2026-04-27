@@ -14,10 +14,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
+import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { isSameLocalDayInTimezone } from '@/lib/sameLocalDayInTimezone'
+import { labelForIdName } from '@/lib/selectDisplay'
 import { fetchHandoffEventCountForTodayInTimezone } from '@/services/leadWaLineEvents'
 import { fetchWhatsappChannelInstances } from '@/services/whatsappChannelInstances'
 import { cn } from '@/lib/utils'
@@ -46,6 +48,17 @@ export function DashboardPage() {
   }
 
   const dashboardCards = crm.dashboardWidgets.filter((widget) => widget.enabled).sort((a, b) => a.position - b.position)
+
+  const pipelineSelectLabel = useMemo(
+    () =>
+      labelForIdName(
+        crm.selectedPipelineId,
+        crm.pipelineCatalog.map((p) => ({ id: p.id, name: p.name })),
+        undefined,
+        'Funil',
+      ),
+    [crm.selectedPipelineId, crm.pipelineCatalog],
+  )
 
   const funnelData = useMemo(() =>
     crm.selectedPipeline.stages.map((stage) => ({
@@ -106,6 +119,14 @@ export function DashboardPage() {
     }
     void fetchHandoffEventCountForTodayInTimezone(orgTz).then(setHandoffsToday)
   }, [crm.isLoading, crm.dataMode, orgTz, crm.leads.length])
+
+  useEffect(() => {
+    const list = crm.pipelineCatalog
+    if (list.length === 0) return
+    if (!list.some((p) => p.id === crm.selectedPipelineId)) {
+      void crm.setSelectedPipelineId(list[0]!.id)
+    }
+  }, [crm.pipelineCatalog, crm.selectedPipelineId, crm.setSelectedPipelineId])
 
   if (crm.isLoading) {
     return (
@@ -265,9 +286,9 @@ export function DashboardPage() {
                 if (value) crm.setSelectedPipelineId(value)
               }}
             >
-              <SelectTrigger className="w-[min(100%,16rem)] rounded-none border-foreground/20 font-medium" size="sm">
-                <SelectValue placeholder="Funil" />
-              </SelectTrigger>
+              <LabeledSelectTrigger className="w-[min(100%,16rem)] rounded-none border-foreground/20 font-medium" size="sm">
+                {pipelineSelectLabel}
+              </LabeledSelectTrigger>
               <SelectContent className="rounded-none font-medium">
                 {crm.pipelineCatalog.map((pipeline) => (
                   <SelectItem key={pipeline.id} value={pipeline.id}>

@@ -10,7 +10,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
+import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
@@ -19,6 +20,7 @@ import { parseCsv, rowsToObjects } from '@/lib/csvParse'
 import { getLeadFieldValue } from '@/lib/leadFields'
 import { formatTemperature } from '@/lib/fieldLabels'
 import { archiveImportFileToStorage } from '@/lib/importArchiveStorage'
+import { labelForIdName, labelForKeyMap } from '@/lib/selectDisplay'
 import { parseInteractionsImportJson } from '@/lib/interactionsImportSchema'
 import { cn } from '@/lib/utils'
 
@@ -71,6 +73,67 @@ export function LeadsPage() {
     return p?.stages ?? []
   }, [crm.pipelineCatalog, crm.selectedPipeline, crm.selectedPipelineId])
 
+  const pipelineSelectLabel = useMemo(
+    () =>
+      labelForIdName(
+        pipelineFilter,
+        crm.pipelineCatalog.map((p) => ({ id: p.id, name: p.name })),
+        { value: 'all', label: 'Todos os funis' },
+        'Funil',
+      ),
+    [pipelineFilter, crm.pipelineCatalog],
+  )
+  const stageSelectLabel = useMemo(
+    () =>
+      labelForIdName(
+        stageFilter,
+        stagesInFilterPipeline.map((s) => ({ id: s.id, name: s.name })),
+        { value: 'all', label: 'Todas' },
+        'Etapa',
+      ),
+    [stageFilter, stagesInFilterPipeline],
+  )
+  const ownerSelectLabel = useMemo(
+    () =>
+      labelForIdName(
+        ownerFilter,
+        crm.users.map((u) => ({ id: u.id, name: u.name })),
+        { value: 'all', label: 'Todos' },
+        'Responsável',
+      ),
+    [ownerFilter, crm.users],
+  )
+  const sourceSelectLabel = useMemo(
+    () =>
+      labelForKeyMap(
+        sourceFilter,
+        sourceLabel,
+        { value: 'all', label: 'Todas' },
+        'Origem',
+      ),
+    [sourceFilter],
+  )
+  const bulkOwnerLabel = useMemo(
+    () =>
+      labelForIdName(
+        bulkOwnerId,
+        crm.users.map((u) => ({ id: u.id, name: u.name })),
+        { value: 'all', label: 'Escolher responsável' },
+        'Responsável',
+      ),
+    [bulkOwnerId, crm.users],
+  )
+  const bulkStageLabel = useMemo(
+    () =>
+      labelForIdName(
+        bulkStageId,
+        stagesForBulk.map((s) => ({ id: s.id, name: s.name })),
+        { value: 'all', label: 'Escolher etapa' },
+        'Etapa',
+      ),
+    [bulkStageId, stagesForBulk],
+  )
+
   const filteredLeads = useMemo(() => {
     const n = searchTerm.trim().toLowerCase()
     return crm.leads.filter((lead) => {
@@ -109,6 +172,44 @@ export function LeadsPage() {
       setSheetOpen(true)
     }
   }, [leadIdParam, crm])
+
+  useEffect(() => {
+    if (pipelineFilter !== 'all' && !crm.pipelineCatalog.some((p) => p.id === pipelineFilter)) {
+      setPipelineFilter('all')
+      setStageFilter('all')
+    }
+  }, [crm.pipelineCatalog, pipelineFilter])
+
+  useEffect(() => {
+    if (pipelineFilter === 'all') return
+    if (stageFilter !== 'all' && !stagesInFilterPipeline.some((s) => s.id === stageFilter)) {
+      setStageFilter('all')
+    }
+  }, [pipelineFilter, stagesInFilterPipeline, stageFilter])
+
+  useEffect(() => {
+    if (ownerFilter !== 'all' && !crm.users.some((u) => u.id === ownerFilter)) {
+      setOwnerFilter('all')
+    }
+  }, [crm.users, ownerFilter])
+
+  useEffect(() => {
+    if (sourceFilter !== 'all' && !(sourceFilter in sourceLabel)) {
+      setSourceFilter('all')
+    }
+  }, [sourceFilter])
+
+  useEffect(() => {
+    if (bulkOwnerId !== 'all' && !crm.users.some((u) => u.id === bulkOwnerId)) {
+      setBulkOwnerId('all')
+    }
+  }, [crm.users, bulkOwnerId])
+
+  useEffect(() => {
+    if (bulkStageId !== 'all' && !stagesForBulk.some((s) => s.id === bulkStageId)) {
+      setBulkStageId('all')
+    }
+  }, [stagesForBulk, bulkStageId])
 
   const handleSheetChange = (open: boolean) => {
     setSheetOpen(open)
@@ -279,9 +380,9 @@ export function LeadsPage() {
         <div className="grid min-w-0 gap-1.5">
           <Label className="text-xs sm:text-sm">Funil</Label>
           <Select value={pipelineFilter} onValueChange={(v) => { if (v) { setPipelineFilter(v); setStageFilter('all') } }}>
-            <SelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11">
-              <SelectValue placeholder="Funil" />
-            </SelectTrigger>
+            <LabeledSelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11" size="default">
+              {pipelineSelectLabel}
+            </LabeledSelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos os funis</SelectItem>
               {crm.pipelineCatalog.map((p) => (
@@ -295,9 +396,9 @@ export function LeadsPage() {
         <div className="grid min-w-0 gap-1.5">
           <Label className="text-xs sm:text-sm">Etapa</Label>
           <Select value={stageFilter} onValueChange={(v) => v && setStageFilter(v)} disabled={pipelineFilter === 'all'}>
-            <SelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11">
-              <SelectValue placeholder="Etapa" />
-            </SelectTrigger>
+            <LabeledSelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11" size="default">
+              {stageSelectLabel}
+            </LabeledSelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas</SelectItem>
               {stagesInFilterPipeline.map((s) => (
@@ -311,9 +412,9 @@ export function LeadsPage() {
         <div className="grid min-w-0 gap-1.5">
           <Label className="text-xs sm:text-sm">Responsável</Label>
           <Select value={ownerFilter} onValueChange={(v) => v && setOwnerFilter(v)}>
-            <SelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11">
-              <SelectValue placeholder="Responsável" />
-            </SelectTrigger>
+            <LabeledSelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11" size="default">
+              {ownerSelectLabel}
+            </LabeledSelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos</SelectItem>
               {crm.users.map((u) => (
@@ -327,9 +428,9 @@ export function LeadsPage() {
         <div className="grid min-w-0 gap-1.5">
           <Label className="text-xs sm:text-sm">Origem</Label>
           <Select value={sourceFilter} onValueChange={(v) => v && setSourceFilter(v)}>
-            <SelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11">
-              <SelectValue placeholder="Origem" />
-            </SelectTrigger>
+            <LabeledSelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11" size="default">
+              {sourceSelectLabel}
+            </LabeledSelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas</SelectItem>
               {(Object.keys(sourceLabel) as (keyof typeof sourceLabel)[]).map((k) => (
@@ -373,9 +474,9 @@ export function LeadsPage() {
           <div className="grid min-w-0 flex-1 gap-1.5 sm:max-w-[16rem]">
             <Label className="text-xs sm:text-sm">Responsável</Label>
             <Select value={bulkOwnerId} onValueChange={(value) => setBulkOwnerId(value ?? 'all')}>
-            <SelectTrigger className="h-10 w-full rounded-xl border-border/70 sm:h-11">
-                <SelectValue placeholder="Responsável" />
-              </SelectTrigger>
+            <LabeledSelectTrigger className="h-10 w-full rounded-xl border-border/70 sm:h-11" size="default">
+                {bulkOwnerLabel}
+              </LabeledSelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Escolher responsável</SelectItem>
                 {crm.users.map((u) => (
@@ -389,9 +490,9 @@ export function LeadsPage() {
           <div className="grid min-w-0 flex-1 gap-1.5 sm:max-w-[16rem]">
             <Label className="text-xs sm:text-sm">Etapa</Label>
             <Select value={bulkStageId} onValueChange={(value) => setBulkStageId(value ?? 'all')}>
-            <SelectTrigger className="h-10 w-full rounded-xl border-border/70 sm:h-11">
-                <SelectValue placeholder="Etapa" />
-              </SelectTrigger>
+            <LabeledSelectTrigger className="h-10 w-full rounded-xl border-border/70 sm:h-11" size="default">
+                {bulkStageLabel}
+              </LabeledSelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Escolher etapa</SelectItem>
                 {stagesForBulk.map((s) => (

@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Bot, History, LayoutDashboard, LayoutGrid, List, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react'
 
+import { KanbanListView } from '@/components/kanban/KanbanListView'
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
 import { LeadDetailSheet } from '@/components/leads/LeadDetailSheet'
 import { KanbanToolbar } from '@/components/kanban/KanbanToolbar'
@@ -31,7 +32,40 @@ export function KanbanPage() {
   const [tagFilter, setTagFilter] = useState<string>('all')
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [viewMode, setViewMode] = useState<'board' | 'list'>(() => {
+    if (typeof sessionStorage === 'undefined') return 'board'
+    return sessionStorage.getItem('crm-kanban-view-mode') === 'list' ? 'list' : 'board'
+  })
+
   if (crm.pipelineCatalog.length === 0) crm.ensureStandardKanbanSetup()
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('crm-kanban-view-mode', viewMode)
+    } catch {
+      /* ignore */
+    }
+  }, [viewMode])
+
+  useEffect(() => {
+    const list = crm.pipelineCatalog
+    if (list.length === 0) return
+    if (!list.some((p) => p.id === crm.selectedPipelineId)) {
+      void crm.setSelectedPipelineId(list[0]!.id)
+    }
+  }, [crm.pipelineCatalog, crm.selectedPipelineId, crm.setSelectedPipelineId])
+
+  useEffect(() => {
+    if (ownerFilter !== 'all' && !crm.users.some((u) => u.id === ownerFilter)) {
+      setOwnerFilter('all')
+    }
+  }, [crm.users, ownerFilter])
+
+  useEffect(() => {
+    if (tagFilter !== 'all' && !crm.leadTagDefinitions.some((t) => t.id === tagFilter)) {
+      setTagFilter('all')
+    }
+  }, [crm.leadTagDefinitions, tagFilter])
 
   const visibleLeads = useMemo(() => {
     const normalized = searchTerm.trim().toLowerCase()
@@ -150,76 +184,93 @@ export function KanbanPage() {
         tagFilter={tagFilter}
         onTagFilterChange={setTagFilter}
         tagOptions={crm.leadTagDefinitions.map((t) => ({ id: t.id, name: t.name }))}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
-      <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
-        {crm.isLoading ? <SkeletonRows /> : null}
-        {crm.selectedPipeline.stages.map((stage) => {
-          const stageLeads = visibleLeads.filter((lead) => lead.stageId === stage.id)
-          return (
-            <article
-              key={stage.id}
-              className="flex min-h-[28rem] flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-sm transition-colors hover:border-primary/50 hover:shadow-md"
-            >
-              <header className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
-                <div className="min-w-0 flex-1">
-                  <h2 className="m-0 text-sm font-bold uppercase tracking-widest text-foreground">{stage.name}</h2>
-                  {crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id] != null ? (
-                    <p className="m-0 text-[10px] uppercase font-bold text-destructive mt-1">
-                      Prazo {crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id]} min
-                    </p>
-                  ) : null}
-                </div>
-                <span className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs tabular-nums font-mono font-bold shadow-sm">
-                  {stageLeads.length}
-                </span>
-              </header>
+      {viewMode === 'list' ? (
+        <KanbanListView
+          stages={crm.selectedPipeline.stages}
+          leads={visibleLeads}
+          isLoading={crm.isLoading}
+          selectedLeadId={crm.selectedLeadId}
+          onSelectLead={(id) => {
+            crm.setSelectedLeadId(id)
+            setDetailOpen(true)
+          }}
+          getOwnerName={crm.getOwnerName}
+          tagPillsForLead={tagPillsForLead}
+          kanbanFieldsOrdered={crm.kanbanFieldsOrdered}
+          stageSlaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes}
+        />
+      ) : (
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+          {crm.isLoading ? <SkeletonRows /> : null}
+          {crm.selectedPipeline.stages.map((stage) => {
+            const stageLeads = visibleLeads.filter((lead) => lead.stageId === stage.id)
+            return (
+              <article
+                key={stage.id}
+                className="flex min-h-[28rem] flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-sm transition-colors hover:border-primary/50 hover:shadow-md"
+              >
+                <header className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
+                  <div className="min-w-0 flex-1">
+                    <h2 className="m-0 text-sm font-bold uppercase tracking-widest text-foreground">{stage.name}</h2>
+                    {crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id] != null ? (
+                      <p className="m-0 text-[10px] uppercase font-bold text-destructive mt-1">
+                        Prazo {crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id]} min
+                      </p>
+                    ) : null}
+                  </div>
+                  <span className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs tabular-nums font-mono font-bold shadow-sm">
+                    {stageLeads.length}
+                  </span>
+                </header>
 
-              <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3 bg-muted/5">
-                {stageLeads.map((lead) => (
-                  <KanbanLeadCard
-                    key={lead.id}
-                    lead={lead}
-                    kanbanFields={crm.kanbanFieldsOrdered}
-                    slaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id]}
-                    selected={crm.selectedLeadId === lead.id}
-                    sourceLabel={sourceLabel[lead.source]}
-                    ownerName={crm.getOwnerName(lead.ownerId)}
-                    tagPills={tagPillsForLead(lead.id)}
-                    onSelect={() => {
-                      crm.setSelectedLeadId(lead.id)
-                      setDetailOpen(true)
+                <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3 bg-muted/5">
+                  {stageLeads.map((lead) => (
+                    <KanbanLeadCard
+                      key={lead.id}
+                      lead={lead}
+                      kanbanFields={crm.kanbanFieldsOrdered}
+                      slaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id]}
+                      selected={crm.selectedLeadId === lead.id}
+                      sourceLabel={sourceLabel[lead.source]}
+                      ownerName={crm.getOwnerName(lead.ownerId)}
+                      tagPills={tagPillsForLead(lead.id)}
+                      onSelect={() => {
+                        crm.setSelectedLeadId(lead.id)
+                        setDetailOpen(true)
+                      }}
+                      onMovePrev={() => crm.moveLead(lead.id, 'prev')}
+                      onMoveNext={() => crm.moveLead(lead.id, 'next')}
+                      stageLeadsOrdered={stageLeads}
+                      onReorderDrop={(draggedLeadId, targetIndex) =>
+                        crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: targetIndex })
+                      }
+                      onDragEnterColumn={() => setDragOverStageId(stage.id)}
+                    />
+                  ))}
+
+                  {stageLeads.length === 0 && !crm.isLoading && (
+                    <p className="py-8 text-center text-xs text-muted-foreground">Nenhum lead nesta etapa</p>
+                  )}
+
+                  <KanbanColumnDropZone
+                    active={dragOverStageId === stage.id}
+                    onDragOver={() => setDragOverStageId(stage.id)}
+                    onDragLeave={() => setDragOverStageId(null)}
+                    onDropEnd={(draggedLeadId) => {
+                      setDragOverStageId(null)
+                      crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: stageLeads.length })
                     }}
-                    onMovePrev={() => crm.moveLead(lead.id, 'prev')}
-                    onMoveNext={() => crm.moveLead(lead.id, 'next')}
-                    stageLeadsOrdered={stageLeads}
-                    onReorderDrop={(draggedLeadId, targetIndex) =>
-                      crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: targetIndex })
-                    }
-                    onDragEnterColumn={() => setDragOverStageId(stage.id)}
                   />
-                ))}
-
-                {stageLeads.length === 0 && !crm.isLoading && (
-                  <p className="py-8 text-center text-xs text-muted-foreground">
-                    Nenhum lead nesta etapa
-                  </p>
-                )}
-
-                <KanbanColumnDropZone
-                  active={dragOverStageId === stage.id}
-                  onDragOver={() => setDragOverStageId(stage.id)}
-                  onDragLeave={() => setDragOverStageId(null)}
-                  onDropEnd={(draggedLeadId) => {
-                    setDragOverStageId(null)
-                    crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: stageLeads.length })
-                  }}
-                />
-              </div>
-            </article>
-          )
-        })}
-      </div>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      )}
 
       <LeadDetailSheet open={detailOpen} onOpenChange={setDetailOpen} />
     </AppLayout>

@@ -103,7 +103,11 @@ export function AdminOperationsPage() {
         <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
           <CardHeader>
             <CardTitle>Automações</CardTitle>
-          <CardDescription>Regras automáticas para agilizar o trabalho da equipe.</CardDescription>
+          <CardDescription>
+            Pré-configurado: tarefas de follow-up ao entrar em etapas (Clínica, Capilar, Cirúrgico). Ajuste prazos ou crie
+            regras novas; o gatilho é <code className="text-xs">stage_entered</code> e a ação <code className="text-xs">create_task</code>
+            (campos <code className="text-xs">title</code>, <code className="text-xs">hoursOffset</code>).
+          </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Button type="button" size="sm" className="rounded-lg" onClick={handleAddAutomation}>

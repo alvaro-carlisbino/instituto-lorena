@@ -59,7 +59,10 @@ export function TasksPage() {
   }
 
   return (
-    <AppLayout title="Tarefas e NPS" subtitle="Follow-up e NPS (registro manual, MVP).">
+    <AppLayout
+      title="Tarefas e NPS"
+      subtitle="Tarefas de follow-up podem ser criadas ao mover o lead de etapa; o NPS dispara nas etapas finais (encerrado, tratamento concluído, alta) com modelo por funil."
+    >
       <div className="mb-4 flex flex-wrap gap-2">
         <Button type="button" size="sm" variant={filter === 'open' ? 'default' : 'outline'} onClick={() => setFilter('open')}>
           Abertas
@@ -78,7 +81,9 @@ export function TasksPage() {
       <Card className="mb-8">
         <CardHeader>
           <CardTitle className="text-base">Tarefas ({tasks.length})</CardTitle>
-          <CardDescription>Tarefas podem ser criadas automaticamente ao avançar um lead no processo.</CardDescription>
+          <CardDescription>
+          Automatismos de follow-up (Operação admin) usam a etapa do funil: prazos sugeridos de 2h a 7 dias consoante a fase.
+        </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
           {tasks.length === 0 ? (
@@ -112,7 +117,7 @@ export function TasksPage() {
         <CardHeader>
           <CardTitle className="text-base">Registrar NPS</CardTitle>
           <CardDescription>
-            Ao concluir um atendimento, uma pesquisa pode ser enviada. Informe o código da pesquisa e a nota (0–10).
+            Quando o lead entra numa etapa final, o CRM gera um envio in-app: use o código abaixo (por funil há modelos de NPS Clínica, Capilar ou Cirúrgico). Registe a nota 0–10.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid max-w-md gap-3">
@@ -146,14 +151,20 @@ export function TasksPage() {
             <div className="mt-4 border-t border-border pt-4">
               <p className="mb-2 text-xs font-medium text-muted-foreground">Pesquisas recentes (copie o código)</p>
               <ul className="m-0 max-h-40 list-none space-y-1 overflow-y-auto p-0 font-mono text-[11px]">
-                {crm.surveyDispatches.slice(0, 12).map((d) => (
-                  <li key={d.id} className="flex justify-between gap-2 truncate">
-                    <button type="button" className="truncate text-left underline" onClick={() => setNpsDispatchId(d.id)}>
-                      {d.id}
-                    </button>
-                    <span className="shrink-0 text-muted-foreground">{d.leadId}</span>
-                  </li>
-                ))}
+                {crm.surveyDispatches.slice(0, 12).map((d) => {
+                  const tpl = crm.surveyTemplates.find((t) => t.id === d.templateId)
+                  return (
+                    <li key={d.id} className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                      <div className="min-w-0">
+                        <button type="button" className="block w-full truncate text-left font-mono text-[10px] underline" onClick={() => setNpsDispatchId(d.id)}>
+                          {d.id}
+                        </button>
+                        {tpl ? <span className="text-[10px] text-muted-foreground">{tpl.name}</span> : null}
+                      </div>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">{d.leadId}</span>
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           ) : null}
