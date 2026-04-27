@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CalendarBlank, Clock, Sparkle } from 'phosphor-react'
+import { CaretLeft, CaretRight, Clock, Plus, Sparkle } from 'phosphor-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
@@ -18,14 +18,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
+
 import type { Appointment } from '@/mocks/crmMock'
 
-function formatLocal(iso: string) {
+const START_HOUR = 8
+const END_HOUR = 19
+const HOURS = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i)
+const PIXELS_PER_HOUR = 80 // Height of each hour block
+
+function formatTime(iso: string) {
   try {
-    return new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' })
+    const d = new Date(iso)
+    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   } catch {
-    return iso
+    return ''
   }
 }
 
@@ -33,18 +39,29 @@ export function AgendaPage() {
   const crm = useCrm()
   const dataMode = getDataProviderMode()
   const online = dataMode === 'supabase' && isSupabaseConfigured
+  
+  const [currentDate, setCurrentDate] = useState(new Date())
+  
   const [leadId, setLeadId] = useState(crm.leads[0]?.id ?? '')
   const [roomId, setRoomId] = useState(crm.rooms[0]?.id ?? '')
   const [duration, setDuration] = useState(30)
   const [notes, setNotes] = useState('')
 
-  const list = useMemo(
-    () => [...crm.appointments].sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
-    [crm.appointments],
-  )
+  const activeRooms = useMemo(() => crm.rooms.filter(r => r.active), [crm.rooms])
+
+  const appointmentsForDay = useMemo(() => {
+    const startOfDay = new Date(currentDate)
+    startOfDay.setHours(0, 0, 0, 0)
+    const endOfDay = new Date(currentDate)
+    endOfDay.setHours(23, 59, 59, 999)
+
+    return crm.appointments.filter(a => {
+      const d = new Date(a.startsAt)
+      return d >= startOfDay && d <= endOfDay
+    })
+  }, [crm.appointments, currentDate])
 
   const leadName = (id: string) => crm.leads.find((l) => l.id === id)?.patientName ?? id
-  const roomName = (id: string) => crm.rooms.find((r) => r.id === id)?.name ?? id
 
   const handleSuggest = async () => {
     if (!online) {
@@ -62,7 +79,7 @@ export function AgendaPage() {
         durationMinutes: duration,
       })
       if (!slot) {
-        toast.message('Nenhum intervalo livre no período de 14 dias (verifique salas activas).')
+        toast.message('Nenhum intervalo livre no período de 14 dias (verifique salas ativas).')
         return
       }
       if (!leadId || !roomId) {
@@ -89,34 +106,42 @@ export function AgendaPage() {
     }
   }
 
+  const navigateDays = (days: number) => {
+    const next = new Date(currentDate)
+    next.setDate(next.getDate() + days)
+    setCurrentDate(next)
+  }
+
   const handleMarkAttendance = (a: Appointment, s: Appointment['attendanceStatus']) => {
     crm.saveAppointmentRow({ ...a, attendanceStatus: s, updatedAt: new Date().toISOString() })
+    toast.success('Status atualizado.')
   }
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
       <AppLayout title="Agenda">
         <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">Apenas a equipa com acesso a leads pode gerir a agenda.</CardContent>
+          <CardContent className="p-6 text-sm text-muted-foreground">Apenas a equipe com acesso a leads pode gerenciar a agenda.</CardContent>
         </Card>
       </AppLayout>
     )
   }
 
   return (
-    <AppLayout title="Agenda">
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardHeader>
+    <AppLayout title="Agenda Visual">
+      <div className="grid gap-4 xl:grid-cols-4">
+        {/* Sidebar: Auto Schedule */}
+        <Card className="xl:col-span-1 h-fit shadow-sm">
+          <CardHeader className="pb-3 border-b border-border/40">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Sparkle className="h-4 w-4" /> Primeiro horário livre
+              <Sparkle className="h-4 w-4 text-primary" /> Auto-Agendamento
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-4 pt-4">
             <div className="space-y-1.5">
               <Label>Lead</Label>
               <Select value={leadId} onValueChange={(v) => v && setLeadId(v)}>
-                <SelectTrigger>
+                <SelectTrigger className="rounded-xl">
                   <SelectValue placeholder="Escolher lead" />
                 </SelectTrigger>
                 <SelectContent>
@@ -129,108 +154,152 @@ export function AgendaPage() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Preferência de sala (sugestão ainda escolhe outra se a primeira estiver cheia)</Label>
+              <Label>Preferência de sala</Label>
               <Select value={roomId} onValueChange={(v) => v && setRoomId(v)}>
-                <SelectTrigger>
+                <SelectTrigger className="rounded-xl">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {crm.rooms
-                    .filter((r) => r.active)
-                    .map((r) => (
-                      <SelectItem key={r.id} value={r.id}>
-                        {r.name}
-                      </SelectItem>
-                    ))}
+                  {activeRooms.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      {r.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label>Duração (min)</Label>
-              <Input
-                type="number"
-                min={5}
-                max={240}
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value) || 30)}
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Duração (min)</Label>
+                <Input
+                  type="number"
+                  min={5}
+                  max={240}
+                  step={5}
+                  value={duration}
+                  className="rounded-xl"
+                  onChange={(e) => setDuration(Number(e.target.value) || 30)}
+                />
+              </div>
             </div>
             <div className="space-y-1.5">
-              <Label>Notas</Label>
-              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opcional" />
+              <Label>Notas do Procedimento</Label>
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} className="rounded-xl" placeholder="Ex: Avaliação Inicial" />
             </div>
-            <Button type="button" onClick={() => void handleSuggest()} className="w-full" disabled={!online}>
-              {online ? 'Procurar e criar marcação' : 'Ligue Supabase para usar'}
+            <Button type="button" onClick={() => void handleSuggest()} className="w-full rounded-xl" disabled={!online}>
+              {online ? 'Encontrar Horário Livre' : 'Ligue Supabase para usar'}
             </Button>
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <CalendarBlank className="h-4 w-4" /> Próximas
-            </CardTitle>
+        {/* Main: Visual Timeline */}
+        <Card className="xl:col-span-3 flex flex-col min-h-[600px] shadow-sm overflow-hidden">
+          {/* Calendar Header Controls */}
+          <CardHeader className="flex flex-row items-center justify-between border-b border-border/40 bg-muted/20 py-3">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-xl border border-border/70 bg-background overflow-hidden p-0.5">
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => navigateDays(-1)}>
+                  <CaretLeft className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="sm" className="h-8 rounded-lg text-sm font-semibold hover:bg-muted" onClick={() => setCurrentDate(new Date())}>
+                  Hoje
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => navigateDays(1)}>
+                  <CaretRight className="h-4 w-4" />
+                </Button>
+              </div>
+              <h2 className="ml-2 text-base font-semibold">
+                {currentDate.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
+              </h2>
+            </div>
+            <Button size="sm" className="rounded-xl gap-1">
+              <Plus className="h-4 w-4" /> Novo Agendamento
+            </Button>
           </CardHeader>
-          <CardContent>
-            {list.length === 0 ? (
-              <p className="m-0 text-sm text-muted-foreground">Nenhuma marcação ainda.</p>
-            ) : (
-              <ul className="m-0 list-none space-y-2 p-0">
-                {list.map((a) => (
-                  <li
-                    key={a.id}
-                    className="flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div>
-                      <p className="m-0 font-medium">
-                        {leadName(a.leadId)} <span className="text-muted-foreground">· {roomName(a.roomId)}</span>
-                      </p>
-                      <p className="m-0 flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Clock className="h-3.5 w-3.5" />
-                        {formatLocal(a.startsAt)} — {formatLocal(a.endsAt)}
-                      </p>
-                      {a.notes ? <p className="m-0 text-xs text-muted-foreground">Nota: {a.notes}</p> : null}
+
+          {/* Timeline Grid */}
+          <div className="flex flex-1 flex-col overflow-hidden bg-background">
+            {/* Rooms Header */}
+            <div className="grid border-b border-border/50 bg-muted/10" style={{ gridTemplateColumns: `60px repeat(${activeRooms.length}, minmax(0, 1fr))` }}>
+              <div className="w-[60px]" />
+              {activeRooms.map(r => (
+                <div key={r.id} className="py-2.5 px-3 border-l border-border/50 text-center text-sm font-medium text-foreground truncate">
+                  {r.name}
+                </div>
+              ))}
+            </div>
+
+            {/* Scrollable Timeline Area */}
+            <div className="flex-1 overflow-y-auto">
+              <div className="relative grid" style={{ gridTemplateColumns: `60px repeat(${activeRooms.length}, minmax(0, 1fr))` }}>
+                {/* Y-Axis: Time Labels */}
+                <div className="w-[60px] flex flex-col border-r border-border/50 bg-muted/5">
+                  {HOURS.map(h => (
+                    <div key={h} className="border-b border-border/50 text-right pr-2 pt-1.5 text-xs text-muted-foreground" style={{ height: PIXELS_PER_HOUR }}>
+                      {h}:00
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge
-                        variant={
-                          a.attendanceStatus === 'checked_in'
-                            ? 'default'
-                            : a.attendanceStatus === 'no_show'
-                              ? 'destructive'
-                              : 'secondary'
+                  ))}
+                </div>
+                
+                {/* X-Axis: Room Columns */}
+                {activeRooms.map(room => {
+                  const roomAppts = appointmentsForDay.filter(a => a.roomId === room.id)
+
+                  return (
+                    <div key={room.id} className="relative border-l border-border/50 border-r-transparent last:border-r-0 first:border-l-0">
+                      {/* Grid Lines */}
+                      {HOURS.map(h => (
+                        <div key={h} className="border-b border-border/40" style={{ height: PIXELS_PER_HOUR }} />
+                      ))}
+                      
+                      {/* Appointment Blocks */}
+                      {roomAppts.map(appt => {
+                        const start = new Date(appt.startsAt)
+                        const end = new Date(appt.endsAt)
+                        
+                        // Prevent out of bounds render
+                        if (start.getHours() >= END_HOUR + 1 || end.getHours() < START_HOUR) return null
+
+                        const top = ((start.getHours() - START_HOUR) * PIXELS_PER_HOUR) + (start.getMinutes() / 60) * PIXELS_PER_HOUR
+                        const height = Math.max(24, ((end.getTime() - start.getTime()) / (1000 * 60 * 60)) * PIXELS_PER_HOUR)
+                        
+                        // Visual styles based on status
+                        let blockClass = "bg-primary/10 border-primary/30 text-primary-foreground/90 hover:bg-primary/20"
+                        if (appt.attendanceStatus === 'checked_in') {
+                          blockClass = "bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25"
+                        } else if (appt.attendanceStatus === 'no_show') {
+                          blockClass = "bg-red-500/15 border-red-500/30 text-red-700 dark:text-red-300 hover:bg-red-500/25"
                         }
-                      >
-                        {a.attendanceStatus === 'checked_in'
-                          ? 'Presente'
-                          : a.attendanceStatus === 'no_show'
-                            ? 'Faltou'
-                            : 'Previsto'}
-                      </Badge>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleMarkAttendance(a, 'checked_in')}
-                      >
-                        Check-in
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleMarkAttendance(a, 'no_show')}
-                      >
-                        Faltou
-                      </Button>
+
+                        return (
+                          <div 
+                            key={appt.id} 
+                            className={`absolute left-1 right-1 rounded-md border p-2 overflow-hidden shadow-sm transition-colors cursor-pointer ${blockClass}`}
+                            style={{ top: `${top}px`, height: `${height}px` }}
+                            onClick={() => {
+                              if (appt.attendanceStatus === 'expected') {
+                                handleMarkAttendance(appt, 'checked_in')
+                              }
+                            }}
+                          >
+                            <p className="text-xs font-semibold leading-tight truncate">{leadName(appt.leadId)}</p>
+                            <div className="flex items-center gap-1 mt-0.5 opacity-80">
+                              <Clock className="w-3 h-3" />
+                              <span className="text-[10px]">{formatTime(appt.startsAt)} - {formatTime(appt.endsAt)}</span>
+                            </div>
+                            {appt.notes && <p className="text-[10px] mt-1 opacity-70 truncate">{appt.notes}</p>}
+                          </div>
+                        )
+                      })}
                     </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
         </Card>
       </div>
     </AppLayout>
   )
 }
+

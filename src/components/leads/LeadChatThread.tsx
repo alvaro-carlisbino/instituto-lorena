@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
+import { CalendarPlus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
+import { ScheduleAppointmentDialog } from '@/components/leads/ScheduleAppointmentDialog'
 import { useCrm } from '@/context/CrmContext'
 import { cn } from '@/lib/utils'
 import type { Interaction } from '@/mocks/crmMock'
@@ -25,6 +27,7 @@ type Props = {
 export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Props) {
   const crm = useCrm()
   const [onlyWa, setOnlyWa] = useState(Boolean(whatsappOnly))
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false)
 
   const items = useMemo(() => {
     const list = [...history].sort(
@@ -127,8 +130,15 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
             id={`lead-chat-draft-${leadId}`}
             rows={3}
             value={crm.draftMessage}
-            onChange={(e) => crm.setDraftMessage(e.target.value)}
-            placeholder="Digite uma mensagem de saída…"
+            onChange={(e) => {
+              const val = e.target.value
+              crm.setDraftMessage(val)
+              if (val.endsWith('/agendar ')) {
+                crm.setDraftMessage(val.replace('/agendar ', ''))
+                setIsScheduleOpen(true)
+              }
+            }}
+            placeholder="Digite uma mensagem... (dica: digite /agendar para marcar)"
             className="min-h-[5.5rem] resize-y rounded-xl border-border/70 bg-background text-base sm:min-h-[6rem]"
           />
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -146,11 +156,29 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
               <span className="text-xs text-muted-foreground">{crm.draftAttachments.length} anexo(s) pronto(s)</span>
             ) : null}
           </div>
-          <Button type="button" className="self-end rounded-xl" onClick={() => void crm.sendMessage()}>
-            Enviar
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="rounded-xl flex items-center gap-2 h-10 px-3"
+              onClick={() => setIsScheduleOpen(true)}
+            >
+              <CalendarPlus className="w-4 h-4 text-primary" />
+              <span className="hidden sm:inline">Agendar</span>
+            </Button>
+            <Button type="button" className="rounded-xl h-10 px-6 ml-auto" onClick={() => void crm.sendMessage()}>
+              Enviar
+            </Button>
+          </div>
         </div>
       ) : null}
+
+      <ScheduleAppointmentDialog 
+        isOpen={isScheduleOpen} 
+        onClose={() => setIsScheduleOpen(false)} 
+        leadId={leadId} 
+      />
     </div>
   )
 }
