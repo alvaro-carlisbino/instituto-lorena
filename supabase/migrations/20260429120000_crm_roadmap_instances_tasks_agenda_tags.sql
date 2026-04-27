@@ -346,10 +346,15 @@ create policy "crm_lead_att delete"
   using (bucket_id = 'crm-lead-attachments');
 
 -- Seed: uma sala padrão e uma etiqueta de exemplo (idempotente)
+-- Desliga triggers de perfil: migração corre sem JWT de utilizador
+alter table public.rooms disable trigger enforce_rooms;
 insert into public.rooms (id, name, active, slot_minutes, sort_order)
 values ('room-1', 'Sala 1', true, 30, 0)
 on conflict (id) do nothing;
+alter table public.rooms enable trigger enforce_rooms;
 
+alter table public.lead_tag_definitions disable trigger enforce_lead_tag_definitions;
 insert into public.lead_tag_definitions (id, name, color)
 values ('tag-vip', 'VIP', '#a855f7')
 on conflict (id) do nothing;
+alter table public.lead_tag_definitions enable trigger enforce_lead_tag_definitions;

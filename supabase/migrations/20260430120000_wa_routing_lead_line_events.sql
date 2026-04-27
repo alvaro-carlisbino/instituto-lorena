@@ -1,4 +1,5 @@
 -- Roteamento por telefone (instância WhatsApp) + histórico de handoff entre linhas
+-- Depende de whatsapp_channel_instances (migração 20260429120000_crm_roadmap_...)
 
 alter table public.whatsapp_channel_instances
   add column if not exists entry_pipeline_id text references public.pipelines (id) on delete set null,
@@ -12,7 +13,6 @@ comment on column public.whatsapp_channel_instances.entry_pipeline_id is
 comment on column public.whatsapp_channel_instances.on_line_change is
   'keep_stage: se o lead já existir e escrever por outra linha, mantém etapa. use_entry: aplica etapa/entrada desta linha.';
 
--- Eventos: mesmo telefone a migrar de uma instância / linha para outra (continuidade do atendimento)
 create table if not exists public.lead_wa_line_events (
   id uuid primary key default gen_random_uuid(),
   lead_id text not null references public.leads (id) on delete cascade,
@@ -34,8 +34,6 @@ create policy "lead_wa_line_events read"
   for select
   to authenticated
   using (true);
-
--- Sem insert na app: serviço (webhook) usa service_role. Opcional: insert para admins via RPC no futuro.
 
 comment on table public.lead_wa_line_events is
   'Handoff: mensagem do mesmo lead por outro número/instância WhatsApp, para analytics e trilha de atendimento.';
