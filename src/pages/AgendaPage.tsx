@@ -16,7 +16,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select'
 
 import type { Appointment } from '@/mocks/crmMock'
@@ -142,7 +141,9 @@ export function AgendaPage() {
               <Label>Lead</Label>
               <Select value={leadId} onValueChange={(v) => v && setLeadId(v)}>
                 <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder="Escolher lead" />
+                  <span className="truncate">
+                    {leadId ? crm.leads.find(l => l.id === leadId)?.patientName || 'Lead não encontrado' : 'Escolher lead'}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   {crm.leads.map((l) => (
@@ -157,7 +158,9 @@ export function AgendaPage() {
               <Label>Preferência de sala</Label>
               <Select value={roomId} onValueChange={(v) => v && setRoomId(v)}>
                 <SelectTrigger className="rounded-xl">
-                  <SelectValue />
+                  <span className="truncate">
+                    {roomId ? activeRooms.find(r => r.id === roomId)?.name || 'Sala não encontrada' : 'Escolher sala'}
+                  </span>
                 </SelectTrigger>
                 <SelectContent>
                   {activeRooms.map((r) => (
