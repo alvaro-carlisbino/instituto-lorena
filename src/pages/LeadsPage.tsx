@@ -254,7 +254,7 @@ export function LeadsPage() {
             <p className="m-0 text-sm font-semibold sm:text-base">Resumo</p>
             <p className="m-0 text-xs text-muted-foreground sm:text-sm">
               <span className="font-medium text-foreground">{filteredLeads.length}</span> de{' '}
-              <span className="text-foreground">{crm.leads.length}</span> visíveis com os filtros actuais
+              <span className="text-foreground">{crm.leads.length}</span> visíveis com os filtros atuais
             </p>
           </div>
         </div>
