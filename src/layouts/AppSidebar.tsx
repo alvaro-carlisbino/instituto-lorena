@@ -21,8 +21,10 @@ import {
   CheckSquare,
   ChatsCircle,
   QrCode,
+  Calendar,
 } from 'phosphor-react'
 
+import { InboxMenu } from '@/components/InboxMenu'
 import { Badge } from '@/components/ui/badge'
 import { BRAND_FAVICON_URL } from '@/config/brandAssets'
 import { APP_ENV_BADGE, APP_NAME, APP_TAGLINE } from '@/config/branding'
@@ -76,20 +78,23 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border/80">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<Link to="/dashboard" />}>
-              <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-sidebar-primary/10 p-1 ring-1 ring-sidebar-border/50">
-                <img src={BRAND_FAVICON_URL} alt="" className="size-full object-contain" />
-              </div>
-              <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
-                <span className="flex min-w-0 items-center gap-2">
-                  <span className="truncate font-semibold">{APP_NAME}</span>
-                  <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px] font-semibold uppercase">
-                    {APP_ENV_BADGE}
-                  </Badge>
-                </span>
-                <span className="truncate text-xs text-sidebar-foreground/70">{APP_TAGLINE}</span>
-              </div>
-            </SidebarMenuButton>
+            <div className="flex w-full items-center gap-1 pr-1">
+              <SidebarMenuButton size="lg" className="min-w-0 flex-1" render={<Link to="/dashboard" />}>
+                <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-sidebar-primary/10 p-1 ring-1 ring-sidebar-border/50">
+                  <img src={BRAND_FAVICON_URL} alt="" className="size-full object-contain" />
+                </div>
+                <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate font-semibold">{APP_NAME}</span>
+                    <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px] font-semibold uppercase">
+                      {APP_ENV_BADGE}
+                    </Badge>
+                  </span>
+                  <span className="truncate text-xs text-sidebar-foreground/70">{APP_TAGLINE}</span>
+                </div>
+              </SidebarMenuButton>
+              <InboxMenu />
+            </div>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -106,7 +111,8 @@ export function AppSidebar() {
               {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={ListBullets} /> : null}
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={ChatsCircle} /> : null}
               <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />
-              {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={CheckSquare} /> : null}
+              {showLeadsHub ?               <NavItem to="/tarefas" label="Tarefas e NPS" icon={CheckSquare} /> : null}
+              {showLeadsHub ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
               <NavItem to="/assistente" label="Assistente IA" icon={Robot} />
             </SidebarMenu>
           </SidebarGroupContent>

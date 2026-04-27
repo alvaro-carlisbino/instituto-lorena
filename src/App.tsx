@@ -24,6 +24,7 @@ import { TasksPage } from './pages/TasksPage'
 import { ChatWorkspacePage } from './pages/ChatWorkspacePage'
 import { AdminOperationsPage } from './pages/AdminOperationsPage'
 import { WhatsappConnectionPage } from './pages/WhatsappConnectionPage'
+import { AgendaPage } from './pages/AgendaPage'
 import { CommandPalette } from './components/CommandPalette'
 import { RouteTransition } from './components/RouteTransition'
 import { SidebarProvider } from '@/components/ui/sidebar'
@@ -41,6 +42,7 @@ function AppRoutes() {
       <Route path="/kanban" element={<KanbanPage />} />
       <Route path="/leads" element={<LeadsPage />} />
       <Route path="/tarefas" element={<TasksPage />} />
+      <Route path="/agenda" element={<AgendaPage />} />
       <Route path="/chat" element={<ChatWorkspacePage />} />
       <Route path="/assistente" element={<AssistantPage />} />
       <Route path="/historico" element={<HistoryPage />} />

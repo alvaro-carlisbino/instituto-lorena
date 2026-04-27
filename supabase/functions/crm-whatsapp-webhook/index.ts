@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { enrichInboundWhatsappMediaAndAppendContext } from '../_shared/crmMediaEnrichment.ts'
 import { insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
 import { getWhatsappProviderFromEnv } from '../_shared/whatsapp/provider.ts'
+import { getWhatsappProviderForEvent, resolveWhatsappInstanceRow } from '../_shared/whatsapp/evolutionConfig.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -55,7 +56,9 @@ Deno.serve(async (req) => {
   const normalized = provider.normalizeInbound(payload, req.headers)
   if (!normalized) return json({ ok: true, skipped: 'event_not_supported' }, 202)
 
-  const dedupKey = `event:${provider.name}:${normalized.externalMessageId}`
+  const wInstance = await resolveWhatsappInstanceRow(admin, normalized.evolutionInstanceName ?? '')
+  const wInstanceId = wInstance?.id ?? null
+  const dedupKey = `event:${provider.name}:${String(normalized.evolutionInstanceName ?? 'default')}:${normalized.externalMessageId}`
   const { data: existing } = await admin
     .from('webhook_jobs')
     .select('id')
@@ -82,6 +85,7 @@ Deno.serve(async (req) => {
         phone: normalized.fromPhone,
         summary: normalized.text.slice(0, 500),
         source: 'whatsapp',
+        whatsappInstanceId: wInstanceId,
         customFields: {
           provider: provider.name,
           externalMessageId: normalized.externalMessageId,
@@ -165,6 +169,7 @@ Deno.serve(async (req) => {
       phone: normalized.fromPhone,
       summary: normalized.text.slice(0, 500),
       source: 'whatsapp',
+      whatsappInstanceId: wInstanceId,
       customFields: {
         provider: provider.name,
         externalMessageId: normalized.externalMessageId,
@@ -265,7 +270,11 @@ Deno.serve(async (req) => {
       const aiObj = (aiResult && typeof aiResult === 'object' ? aiResult : {}) as Record<string, unknown>
       const aiReply = typeof aiObj.reply === 'string' ? aiObj.reply.trim() : ''
       if (aiReply) {
-        const sent = await provider.sendMessage({
+        const sendProvider = await getWhatsappProviderForEvent(admin, {
+          evolutionInstanceName: normalized.evolutionInstanceName ?? '',
+          provider: (Deno.env.get('WHATSAPP_PROVIDER') ?? 'evolution').trim().toLowerCase(),
+        })
+        const sent = await sendProvider.sendMessage({
           to: normalized.fromPhone,
           text: aiReply,
           leadId: lead.leadId,
@@ -293,7 +302,7 @@ Deno.serve(async (req) => {
         await admin.from('webhook_jobs').insert({
           source: 'whatsapp-webhook',
           status: 'done',
-          note: `ai_auto_reply:${provider.name}:${sent.externalMessageId}`.slice(0, 500),
+          note: `ai_auto_reply:${sendProvider.name}:${sent.externalMessageId}`.slice(0, 500),
         })
       }
     } else {

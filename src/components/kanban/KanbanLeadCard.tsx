@@ -15,6 +15,7 @@ type Props = {
   selected: boolean
   sourceLabel: string
   ownerName: string
+  tagPills?: { id: string; name: string; color: string }[]
   onSelect: () => void
   onMovePrev: () => void
   onMoveNext: () => void
@@ -30,6 +31,7 @@ export function KanbanLeadCard({
   selected,
   sourceLabel,
   ownerName,
+  tagPills = [],
   onSelect,
   onMovePrev,
   onMoveNext,
@@ -56,8 +58,8 @@ export function KanbanLeadCard({
   return (
     <div
       className={cn(
-        'cursor-grab border-l-4 rounded-2xl bg-card/90 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing',
-        selected ? 'ring-2 ring-primary/25 shadow-sm' : '',
+        'cursor-grab border-l-4 rounded-2xl bg-card/90 p-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing',
+        selected ? 'ring-2 ring-primary/25 shadow-md' : '',
         isSlaBreached ? 'border-destructive shadow-[0_0_10px_var(--destructive)]' : 'border-border/80 hover:border-primary/35'
       )}
       draggable
@@ -92,7 +94,19 @@ export function KanbanLeadCard({
         <p className="m-0 text-sm font-semibold leading-tight tracking-tight">{title}</p>
         <span className={temperaturePillClass(temperature)}>{formatTemperature(tempRaw, lead.temperature)}</span>
       </div>
-      <small className="text-muted-foreground">{sourceLabel}</small>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <small className="text-muted-foreground">{sourceLabel}</small>
+        {tagPills.map((t) => (
+          <span
+            key={t.id}
+            className="inline-flex max-w-[7rem] truncate rounded-md border border-border/60 px-1.5 py-0.5 text-[10px] font-medium"
+            style={{ borderColor: t.color, color: t.color }}
+            title={t.name}
+          >
+            {t.name}
+          </span>
+        ))}
+      </div>
       {detailFields.map((field) => {
         const v = getLeadFieldValue(lead, field.fieldKey)
         if (v === undefined || v === null || v === '') return null

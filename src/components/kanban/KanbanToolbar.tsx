@@ -25,6 +25,9 @@ type Props = {
   ownerFilter: string
   onOwnerChange: (value: string) => void
   ownerOptions: { id: string; name: string }[]
+  tagFilter: string
+  onTagFilterChange: (value: string) => void
+  tagOptions: { id: string; name: string }[]
 }
 
 export function KanbanToolbar({
@@ -38,6 +41,9 @@ export function KanbanToolbar({
   ownerFilter,
   onOwnerChange,
   ownerOptions,
+  tagFilter,
+  onTagFilterChange,
+  tagOptions,
 }: Props) {
   return (
     <div className="flex flex-col gap-4 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm backdrop-blur-sm sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
@@ -64,6 +70,20 @@ export function KanbanToolbar({
             {ownerOptions.map((owner) => (
               <SelectItem key={owner.id} value={owner.id}>
                 {owner.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={tagFilter} onValueChange={(v) => v && onTagFilterChange(v)}>
+          <SelectTrigger className="w-full min-w-[10rem] sm:w-[min(100%,10rem)] rounded-xl border-border/70 text-xs font-medium" size="default">
+            <SelectValue placeholder="Etiqueta" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas as etiquetas</SelectItem>
+            {tagOptions.map((t) => (
+              <SelectItem key={t.id} value={t.id}>
+                {t.name}
               </SelectItem>
             ))}
           </SelectContent>

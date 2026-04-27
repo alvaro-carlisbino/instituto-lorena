@@ -13,7 +13,10 @@ export type EvolutionSnapshotResult = {
   message?: string
 }
 
-export async function evolutionConnectionAction(action: EvolutionAction): Promise<EvolutionSnapshotResult> {
+export async function evolutionConnectionAction(
+  action: EvolutionAction,
+  extra?: { instanceId?: string },
+): Promise<EvolutionSnapshotResult> {
   if (!supabase) {
     return {
       ok: false,
@@ -26,7 +29,7 @@ export async function evolutionConnectionAction(action: EvolutionAction): Promis
   }
 
   const { data, error } = await supabase.functions.invoke('crm-evolution-connection', {
-    body: { action },
+    body: { action, instanceId: extra?.instanceId },
   })
 
   if (error) {

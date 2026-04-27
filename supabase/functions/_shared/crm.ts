@@ -15,6 +15,8 @@ export type UpsertLeadInput = {
   temperature?: LeadTemperature
   customFields?: Record<string, unknown>
   preferredLeadId?: string
+  /** When set, ties the lead to a DB whatsapp_channel_instances row (multi-line). */
+  whatsappInstanceId?: string | null
 }
 
 export type UpsertLeadResult = {
@@ -42,6 +44,31 @@ async function findLeadByPhone(admin: SupabaseClient, phone: string): Promise<st
   if (!findError && fromRpc) return String(fromRpc)
   const { data: byEq } = await admin.from('leads').select('id').eq('phone', phone).maybeSingle()
   return byEq?.id ?? null
+}
+
+async function findLeadIdByPhoneAndInstance(
+  admin: SupabaseClient,
+  phone: string,
+  instanceId: string | null,
+): Promise<string | null> {
+  if (instanceId) {
+    const { data: byBoth } = await admin
+      .from('leads')
+      .select('id')
+      .eq('phone', phone)
+      .eq('whatsapp_instance_id', instanceId)
+      .maybeSingle()
+    if (byBoth?.id) return String(byBoth.id)
+    const { data: byPhoneNull } = await admin
+      .from('leads')
+      .select('id')
+      .eq('phone', phone)
+      .is('whatsapp_instance_id', null)
+      .maybeSingle()
+    if (byPhoneNull?.id) return String(byPhoneNull.id)
+    return null
+  }
+  return findLeadByPhone(admin, phone)
 }
 
 export async function resolveDefaultRouting(admin: SupabaseClient): Promise<{
@@ -134,9 +161,10 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
   const stageId = input.stageId ?? routing.stageId
   const score = Number(input.score ?? 50) || 50
   const temperature = temperatureForSource(input.source, input.temperature)
-  const existingId = await findLeadByPhone(admin, phone)
+  const instanceId = input.whatsappInstanceId && String(input.whatsappInstanceId).length > 0 ? String(input.whatsappInstanceId) : null
+  const existingId = await findLeadIdByPhoneAndInstance(admin, phone, instanceId)
 
-  const row = {
+  const row: Record<string, unknown> = {
     patient_name: input.patientName || 'Lead webhook',
     phone,
     source: input.source,
@@ -147,6 +175,9 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
     score,
     temperature,
     custom_fields: input.customFields ?? {},
+  }
+  if (instanceId) {
+    row.whatsapp_instance_id = instanceId
   }
 
   if (existingId) {

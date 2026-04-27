@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Search, Tags } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { ConversationModeSwitch } from '@/components/leads/ConversationModeSwitch'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -166,62 +167,23 @@ export function ChatWorkspacePage() {
                   {activeLead?.phone ?? 'Selecione um lead na lista em cima (ou à esquerda)'}
                 </p>
                 {activeLead ? (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] font-medium text-muted-foreground">Atendimento:</span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={leadMode === 'human' ? 'default' : 'outline'}
-                      disabled={modeLoading}
-                      onClick={() => {
+                  <div className="mt-3 max-w-2xl">
+                    <ConversationModeSwitch
+                      value={leadMode}
+                      loading={modeLoading}
+                      onChange={(next) => {
                         setModeLoading(true)
-                        void setConversationMode(activeLead.id, 'human')
+                        void setConversationMode(activeLead.id, next)
                           .then((state) => {
                             setLeadMode(state.owner_mode)
-                            toast.success('Conversa em modo humano.')
+                            if (next === 'human') toast.success('Atendimento: só a equipe.')
+                            else if (next === 'ai') toast.success('Atendimento: assistente de IA ativa nesta conversa.')
+                            else toast.success('Atendimento: modo misto (regras + equipe).')
                           })
-                          .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao alterar modo.'))
+                          .catch((error) => toast.error(error instanceof Error ? error.message : 'Não foi possível alterar o modo.'))
                           .finally(() => setModeLoading(false))
                       }}
-                    >
-                      Humano
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={leadMode === 'ai' ? 'default' : 'outline'}
-                      disabled={modeLoading}
-                      onClick={() => {
-                        setModeLoading(true)
-                        void setConversationMode(activeLead.id, 'ai')
-                          .then((state) => {
-                            setLeadMode(state.owner_mode)
-                            toast.success('Conversa em modo IA.')
-                          })
-                          .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao alterar modo.'))
-                          .finally(() => setModeLoading(false))
-                      }}
-                    >
-                      IA
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={leadMode === 'auto' ? 'default' : 'outline'}
-                      disabled={modeLoading}
-                      onClick={() => {
-                        setModeLoading(true)
-                        void setConversationMode(activeLead.id, 'auto')
-                          .then((state) => {
-                            setLeadMode(state.owner_mode)
-                            toast.success('Conversa em modo automático por regras.')
-                          })
-                          .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao alterar modo.'))
-                          .finally(() => setModeLoading(false))
-                      }}
-                    >
-                      Auto
-                    </Button>
+                    />
                   </div>
                 ) : null}
               </div>

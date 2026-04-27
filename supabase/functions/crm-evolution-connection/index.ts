@@ -191,18 +191,34 @@ Deno.serve(async (req) => {
 
   const base = env('EVOLUTION_API_BASE')
   const key = env('EVOLUTION_API_KEY')
-  const instance = env('EVOLUTION_INSTANCE')
-  if (!base || !key || !instance) {
-    return json({ error: 'missing_env', message: 'Configure EVOLUTION_API_BASE, EVOLUTION_API_KEY e EVOLUTION_INSTANCE.' }, 500)
+  const defaultInstance = env('EVOLUTION_INSTANCE')
+  if (!base || !key) {
+    return json({ error: 'missing_env', message: 'Configure EVOLUTION_API_BASE e EVOLUTION_API_KEY.' }, 500)
   }
 
-  let body: { action?: Action }
+  let body: { action?: Action; instanceId?: string }
   try {
-    body = (await req.json()) as { action?: Action }
+    body = (await req.json()) as { action?: Action; instanceId?: string }
   } catch {
     body = {}
   }
   const action = body.action ?? 'snapshot'
+
+  let instance = defaultInstance
+  if (body.instanceId) {
+    const { data: row } = await userClient
+      .from('whatsapp_channel_instances')
+      .select('evolution_instance_name, active')
+      .eq('id', String(body.instanceId).trim())
+      .maybeSingle()
+    if (row && (row as { active?: boolean }).active !== false) {
+      const n = String((row as { evolution_instance_name?: string }).evolution_instance_name ?? '').trim()
+      if (n) instance = n
+    }
+  }
+  if (!instance) {
+    return json({ error: 'missing_instance', message: 'Defina EVOLUTION_INSTANCE ou registe um telefone com nome de instância.' }, 500)
+  }
   if (!['snapshot', 'status', 'qrcode', 'connect', 'logout', 'restart'].includes(action)) {
     return json({ error: 'invalid_action' }, 400)
   }

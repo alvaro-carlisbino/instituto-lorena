@@ -28,6 +28,7 @@ export function KanbanPage() {
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [temperatureFilter, setTemperatureFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
+  const [tagFilter, setTagFilter] = useState<string>('all')
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   if (crm.pipelineCatalog.length === 0) crm.ensureStandardKanbanSetup()
@@ -47,9 +48,19 @@ export function KanbanPage() {
         temp === 'cold' || temp === 'warm' || temp === 'hot' ? temp : lead.temperature
       const matchesTemperature = temperatureFilter === 'all' || effTemp === temperatureFilter
       const matchesOwner = ownerFilter === 'all' || lead.ownerId === ownerFilter
-      return matchesText && matchesTemperature && matchesOwner
+      const matchesTag =
+        tagFilter === 'all' || (Array.isArray(lead.tagIds) && lead.tagIds.includes(tagFilter))
+      return matchesText && matchesTemperature && matchesOwner && matchesTag
     })
-  }, [crm.filteredLeads, searchTerm, temperatureFilter, ownerFilter])
+  }, [crm.filteredLeads, searchTerm, temperatureFilter, ownerFilter, tagFilter])
+
+  const tagPillsForLead = (leadId: string) => {
+    const lead = crm.leads.find((l) => l.id === leadId)
+    if (!lead?.tagIds?.length) return []
+    return crm.leadTagDefinitions
+      .filter((d) => lead.tagIds.includes(d.id))
+      .map((d) => ({ id: d.id, name: d.name, color: d.color }))
+  }
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
@@ -136,6 +147,9 @@ export function KanbanPage() {
         ownerFilter={ownerFilter}
         onOwnerChange={setOwnerFilter}
         ownerOptions={crm.users.map((u) => ({ id: u.id, name: u.name }))}
+        tagFilter={tagFilter}
+        onTagFilterChange={setTagFilter}
+        tagOptions={crm.leadTagDefinitions.map((t) => ({ id: t.id, name: t.name }))}
       />
 
       <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
@@ -171,6 +185,7 @@ export function KanbanPage() {
                     selected={crm.selectedLeadId === lead.id}
                     sourceLabel={sourceLabel[lead.source]}
                     ownerName={crm.getOwnerName(lead.ownerId)}
+                    tagPills={tagPillsForLead(lead.id)}
                     onSelect={() => {
                       crm.setSelectedLeadId(lead.id)
                       setDetailOpen(true)

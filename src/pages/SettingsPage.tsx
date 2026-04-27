@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { NoticeBanner } from '@/components/NoticeBanner'
 import { noticeVariantFromMessage } from '@/lib/noticeVariant'
+import { ConversationModeSwitch } from '@/components/leads/ConversationModeSwitch'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -20,7 +21,7 @@ import {
   toStoredOptions,
 } from '@/lib/workflowFieldOptions'
 import { slugifyLabel } from '@/lib/utils'
-import type { FieldVisibilityContext, WorkflowField } from '@/mocks/crmMock'
+import type { FieldVisibilityContext, WorkflowField, Room } from '@/mocks/crmMock'
 import { getAiConfig, saveAiConfig, type ConversationOwnerMode } from '@/services/conversationControl'
 
 const FIELD_TYPE_OPTIONS = [
@@ -143,23 +144,36 @@ export function SettingsPage() {
               Defina prompt global, modo padrão e limites de segurança para o atendimento automático.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Switch checked={aiEnabled} onCheckedChange={setAiEnabled} />
-              <Label>Habilitar IA no atendimento automático</Label>
+          <CardContent className="grid gap-5">
+            <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-gradient-to-r from-primary/[0.04] to-transparent p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="min-w-0 space-y-1 sm:pr-2">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="ai-enabled"
+                    checked={aiEnabled}
+                    onCheckedChange={setAiEnabled}
+                    className="shrink-0"
+                  />
+                  <Label htmlFor="ai-enabled" className="cursor-pointer text-sm font-medium sm:text-base">
+                    Permitir respostas automáticas da IA
+                  </Label>
+                </div>
+                <p className="m-0 text-xs text-muted-foreground sm:text-sm">
+                  Com desligado, a assistente nunca gera respostas — mesmo com modo <strong>IA</strong> ou <strong>Misto</strong> numa conversa.
+                </p>
+              </div>
             </div>
-            <div className="grid gap-2 sm:max-w-xs">
-              <Label>Modo padrão de novas conversas</Label>
-              <Select value={aiDefaultMode} onValueChange={(v) => setAiDefaultMode(v as ConversationOwnerMode)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="human">Humano</SelectItem>
-                  <SelectItem value="ai">IA</SelectItem>
-                  <SelectItem value="auto">Automático por regras</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="min-w-0 max-w-2xl">
+              <p className="m-0 mb-2 text-xs text-muted-foreground sm:text-sm">
+                Valor sugerido quando entra um <strong>lead novo</strong> (pode mudar por conversa no chat).
+              </p>
+              <ConversationModeSwitch
+                title="Modo padrão de novas conversas"
+                value={aiDefaultMode}
+                loading={false}
+                showFooterHint
+                onChange={setAiDefaultMode}
+              />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="ai-prompt">Prompt global da IA</Label>
@@ -221,6 +235,44 @@ export function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+      ) : null}
+
+      {crm.currentPermission.canRouteLeads ? (
+        <div className="mb-8 grid gap-4 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Etiquetas (Kanban)</CardTitle>
+              <CardDescription>Usadas para filtros e chips no quadro. Cores em hex.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <ul className="m-0 list-none space-y-1 p-0 text-sm">
+                {crm.leadTagDefinitions.map((t) => (
+                  <li key={t.id} className="flex items-center gap-2">
+                    <span className="size-2.5 rounded-full" style={{ background: t.color }} />
+                    {t.name} <code className="text-xs text-muted-foreground">{t.id}</code>
+                  </li>
+                ))}
+              </ul>
+              <TagDefForm crm={crm} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Salas (agenda)</CardTitle>
+              <CardDescription>Recursos para marcações e função de primeiro horário livre.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <ul className="m-0 list-none space-y-1 p-0 text-sm">
+                {crm.rooms.map((r) => (
+                  <li key={r.id}>
+                    {r.name} {r.active ? '' : '(inactiva)'}
+                  </li>
+                ))}
+              </ul>
+              <RoomForm crm={crm} />
+            </CardContent>
+          </Card>
+        </div>
       ) : null}
 
       <div className="grid gap-8 lg:grid-cols-2">
@@ -686,5 +738,72 @@ export function SettingsPage() {
         onConfirm={handleConfirmDelete}
       />
     </AppLayout>
+  )
+}
+
+type CrmApi = ReturnType<typeof useCrm>
+
+function TagDefForm({ crm }: { crm: CrmApi }) {
+  const [name, setName] = useState('')
+  const [color, setColor] = useState('#6366f1')
+  return (
+    <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:flex-wrap sm:items-end">
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <Label htmlFor="tag-name">Novo nome</Label>
+        <Input id="tag-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Urgente, parceiro, …" />
+      </div>
+      <div className="w-24 space-y-1.5">
+        <Label htmlFor="tag-color">Cor</Label>
+        <Input id="tag-color" type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+      </div>
+      <Button
+        type="button"
+        onClick={() => {
+          if (!name.trim()) return
+          crm.saveTagDefinition({
+            id: `tag-${Date.now().toString(36)}`,
+            name: name.trim(),
+            color,
+            createdAt: new Date().toISOString(),
+          })
+          setName('')
+          toast.success('Etiqueta criada')
+        }}
+      >
+        Criar etiqueta
+      </Button>
+    </div>
+  )
+}
+
+function RoomForm({ crm }: { crm: CrmApi }) {
+  const [name, setName] = useState('')
+  return (
+    <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:items-end">
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <Label htmlFor="room-name">Novo nome da sala</Label>
+        <Input id="room-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Sala 2" />
+      </div>
+      <Button
+        type="button"
+        onClick={() => {
+          if (!name.trim()) return
+          const now = new Date().toISOString()
+          const r: Room = {
+            id: `room-${Date.now().toString(36)}`,
+            name: name.trim(),
+            active: true,
+            slotMinutes: 30,
+            sortOrder: crm.rooms.length,
+            createdAt: now,
+          }
+          crm.saveRoomRow(r)
+          setName('')
+          toast.success('Sala adicionada')
+        }}
+      >
+        Adicionar sala
+      </Button>
+    </div>
   )
 }

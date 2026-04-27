@@ -23,6 +23,8 @@ export type NormalizedInboundMessage = {
   text: string
   direction: ProviderMessageDirection
   happenedAt: string
+  /** Evolution API: instance that received/sent the message, for multi-line routing. */
+  evolutionInstanceName?: string
   mediaItems?: Array<{
     type: 'audio' | 'image' | 'video' | 'document' | 'other'
     mimeType?: string

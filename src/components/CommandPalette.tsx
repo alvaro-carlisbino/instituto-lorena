@@ -18,6 +18,7 @@ import {
   Table2,
   Tv,
   CheckSquare,
+  Calendar,
   Users,
   MessageSquare,
   BriefcaseBusiness,
@@ -118,6 +119,14 @@ export function CommandPalette() {
           >
             <CheckSquare className="size-4 shrink-0 opacity-70" />
             Tarefas e NPS
+          </Command.Item>
+          <Command.Item
+            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
+            keywords={['agenda', 'marcação', 'consulta', 'sala']}
+            onSelect={() => go('/agenda')}
+          >
+            <Calendar className="size-4 shrink-0 opacity-70" />
+            Agenda
           </Command.Item>
           <Command.Item
             className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"

@@ -5,6 +5,7 @@ import {
   type WhatsappProvider,
   digitsOnly,
 } from './types.ts'
+import { extractEvolutionInstanceNameFromPayload } from './evolutionPayload.ts'
 
 function envOrThrow(key: string): string {
   const value = (Deno.env.get(key) ?? '').trim()
@@ -36,6 +37,13 @@ function normalizePhone(raw: string): string {
   return digitsOnly(raw)
 }
 
+export type EvolutionProviderConfig = {
+  baseUrl: string
+  apiKey: string
+  instance: string
+  webhookSecret: string
+}
+
 export class EvolutionProvider implements WhatsappProvider {
   readonly name = 'evolution' as const
   private readonly baseUrl: string
@@ -43,11 +51,23 @@ export class EvolutionProvider implements WhatsappProvider {
   private readonly instance: string
   private readonly webhookSecret: string
 
-  constructor() {
-    this.baseUrl = envOrThrow('EVOLUTION_API_BASE').replace(/\/$/, '')
-    this.apiKey = envOrThrow('EVOLUTION_API_KEY')
-    this.instance = envOrThrow('EVOLUTION_INSTANCE')
-    this.webhookSecret = (Deno.env.get('EVOLUTION_WEBHOOK_SECRET') ?? '').trim()
+  /**
+   * Full config (multi-instance / tests).
+   */
+  constructor(config: EvolutionProviderConfig) {
+    this.baseUrl = config.baseUrl.replace(/\/$/, '')
+    this.apiKey = config.apiKey
+    this.instance = config.instance
+    this.webhookSecret = config.webhookSecret
+  }
+
+  static fromEnv(): EvolutionProvider {
+    return new EvolutionProvider({
+      baseUrl: envOrThrow('EVOLUTION_API_BASE').replace(/\/$/, ''),
+      apiKey: envOrThrow('EVOLUTION_API_KEY'),
+      instance: envOrThrow('EVOLUTION_INSTANCE'),
+      webhookSecret: (Deno.env.get('EVOLUTION_WEBHOOK_SECRET') ?? '').trim(),
+    })
   }
 
   validateWebhookSignature(_rawBody: string, headers: Headers): boolean {
@@ -56,7 +76,7 @@ export class EvolutionProvider implements WhatsappProvider {
     return Boolean(this.webhookSecret && headerSecret === this.webhookSecret)
   }
 
-  normalizeInbound(payload: Record<string, unknown>): NormalizedInboundMessage | null {
+  normalizeInbound(payload: Record<string, unknown>, _headers: Headers): NormalizedInboundMessage | null {
     const event = safeString(payload.event).toLowerCase()
     if (event && !event.includes('message')) return null
 
@@ -91,7 +111,7 @@ export class EvolutionProvider implements WhatsappProvider {
       safeString(getByPath(payload, 'message'))
 
     const messageObj = asRecord(getByPath(payload, 'data.message')) ?? {}
-    const mediaItems: NormalizedInboundMessage['mediaItems'] = []
+    const mediaItems: NonNullable<NormalizedInboundMessage['mediaItems']> = []
     const pushMedia = (
       key: string,
       type: 'audio' | 'image' | 'video' | 'document' | 'other',
@@ -123,6 +143,8 @@ export class EvolutionProvider implements WhatsappProvider {
       ? new Date(happenedAtRaw > 1e12 ? happenedAtRaw : happenedAtRaw * 1000).toISOString()
       : new Date().toISOString()
 
+    const evoName = extractEvolutionInstanceNameFromPayload(payload) || this.instance
+
     return {
       provider: this.name,
       source: 'whatsapp',
@@ -133,6 +155,7 @@ export class EvolutionProvider implements WhatsappProvider {
       direction: fromMe ? 'out' : 'in',
       happenedAt: happenedAtIso,
       mediaItems,
+      evolutionInstanceName: evoName || undefined,
       raw: payload,
     }
   }
@@ -182,4 +205,3 @@ export class EvolutionProvider implements WhatsappProvider {
     }
   }
 }
-

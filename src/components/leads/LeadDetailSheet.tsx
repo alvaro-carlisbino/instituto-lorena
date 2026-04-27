@@ -1,10 +1,12 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
+import { LeadTaskPanel } from '@/components/leads/LeadTaskPanel'
 import { Badge } from '@/components/ui/badge'
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -35,6 +37,35 @@ export function LeadDetailSheet({ open, onOpenChange }: Props) {
     if (!lead) return []
     return crm.interactions.filter((i) => i.leadId === lead.id)
   }, [crm.interactions, lead])
+
+  const otherPipelines = useMemo(
+    () => (lead ? crm.pipelineCatalog.filter((p) => p.id !== lead.pipelineId) : []),
+    [crm.pipelineCatalog, lead],
+  )
+  const [destPipelineId, setDestPipelineId] = useState('')
+  const [destStageId, setDestStageId] = useState('')
+
+  useEffect(() => {
+    if (!lead || otherPipelines.length === 0) {
+      setDestPipelineId('')
+      setDestStageId('')
+      return
+    }
+    const first = otherPipelines[0]
+    setDestPipelineId(first.id)
+    setDestStageId(first.stages[0]?.id ?? '')
+  }, [lead?.id, lead?.pipelineId, otherPipelines])
+
+  const destPipeline = useMemo(
+    () => crm.pipelineCatalog.find((p) => p.id === destPipelineId),
+    [crm.pipelineCatalog, destPipelineId],
+  )
+
+  const handleDestPipelineChange = (pid: string) => {
+    setDestPipelineId(pid)
+    const p = crm.pipelineCatalog.find((x) => x.id === pid)
+    if (p?.stages[0]) setDestStageId(p.stages[0].id)
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -142,6 +173,118 @@ export function LeadDetailSheet({ open, onOpenChange }: Props) {
                   </div>
                 </div>
               </section>
+
+              {crm.currentPermission.canRouteLeads && otherPipelines.length > 0 ? (
+                <section
+                  aria-labelledby="lead-funnel-routing-heading"
+                  className="rounded-md border border-dashed border-border/80 bg-muted/10 p-3"
+                >
+                  <h2
+                    id="lead-funnel-routing-heading"
+                    className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground"
+                  >
+                    Encaminhar de funil
+                  </h2>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    Após a triagem (ex.: protocolo clínico ou processo cirúrgico), mova o lead para o funil certo. As
+                    automações da etapa de destino serão aplicadas.
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-1.5">
+                      <span className="text-xs text-muted-foreground">Funil de destino</span>
+                      <Select
+                        value={destPipelineId}
+                        onValueChange={(v) => {
+                          if (v) handleDestPipelineChange(v)
+                        }}
+                      >
+                        <SelectTrigger className="h-9 text-left text-xs">
+                          <SelectValue placeholder="Funil" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {otherPipelines.map((p) => (
+                            <SelectItem key={p.id} value={p.id} className="text-xs">
+                              {p.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-1.5">
+                      <span className="text-xs text-muted-foreground">Etapa inicial</span>
+                      <Select
+                        value={destStageId}
+                        onValueChange={(v) => {
+                          if (v) setDestStageId(v)
+                        }}
+                        disabled={!destPipeline || destPipeline.stages.length === 0}
+                      >
+                        <SelectTrigger className="h-9 text-left text-xs">
+                          <SelectValue placeholder="Etapa" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(destPipeline?.stages ?? []).map((s) => (
+                            <SelectItem key={s.id} value={s.id} className="text-xs">
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="w-full sm:w-auto"
+                      disabled={!destPipelineId || !destStageId}
+                      onClick={() => {
+                        crm.moveLeadToPipeline(lead.id, destPipelineId, destStageId)
+                      }}
+                    >
+                      Aplicar encaminhamento
+                    </Button>
+                  </div>
+                </section>
+              ) : null}
+
+              {crm.currentPermission.canRouteLeads ? <LeadTaskPanel leadId={lead.id} className="rounded-md border border-border/80 bg-card/30 p-3" /> : null}
+
+              {crm.currentPermission.canRouteLeads && crm.leadTagDefinitions.length > 0 ? (
+                <section aria-labelledby="lead-tags-heading" className="rounded-md border border-border/80 bg-card/20 p-3">
+                  <h2 id="lead-tags-heading" className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                    Etiquetas
+                  </h2>
+                  <div className="flex flex-wrap gap-2">
+                    {crm.leadTagDefinitions.map((def) => {
+                      const on = (lead.tagIds ?? []).includes(def.id)
+                      return (
+                        <label
+                          key={def.id}
+                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-border/70 px-2 py-1 text-xs"
+                          style={{ borderColor: on ? def.color : undefined, color: on ? def.color : undefined }}
+                        >
+                          <input
+                            type="checkbox"
+                            className="rounded"
+                            checked={on}
+                            onChange={() => {
+                              const set = new Set(lead.tagIds ?? [])
+                              if (set.has(def.id)) {
+                                set.delete(def.id)
+                              } else {
+                                set.add(def.id)
+                              }
+                              crm.applyLeadTagIds(lead.id, Array.from(set))
+                            }}
+                          />
+                          {def.name}
+                        </label>
+                      )
+                    })}
+                  </div>
+                </section>
+              ) : null}
 
               <section aria-labelledby="lead-fields-heading">
                 <h2 id="lead-fields-heading" className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">

@@ -52,7 +52,11 @@ import {
   seedDemoData,
   seedTestUsers,
   saveLeadOrdering,
+  setLeadTagIdsForLead,
   updateLeadStage,
+  upsertAppointment,
+  upsertLeadTagDefinition,
+  upsertRoom,
 } from '../services/crmSupabase'
 import { isSupabaseConfigured } from '../lib/supabaseClient'
 import {
@@ -70,6 +74,9 @@ import {
   initialPermissions,
   initialSurveyDispatches,
   initialSurveyResponses,
+  initialAppointments,
+  initialLeadTagDefinitions,
+  initialRooms,
   initialSurveyTemplates,
   initialTvWidgets,
   initialWorkflowFields,
@@ -79,6 +86,7 @@ import {
   tvKpiSeries,
 } from '../mocks/crmMock'
 import type {
+  Appointment,
   AutomationRule,
   ChannelConfig,
   AppUser,
@@ -86,12 +94,14 @@ import type {
   Interaction,
   DashboardWidget,
   Lead,
+  LeadTagDefinition,
   LeadTask,
   MetricConfig,
   NotificationRule,
   OrgSettings,
   PermissionProfile,
   Pipeline,
+  Room,
   Sdr,
   Stage,
   SurveyDispatch,
@@ -170,6 +180,9 @@ export const useCrmState = () => {
   const [surveyTemplates, setSurveyTemplates] = useState<SurveyTemplate[]>(initialSurveyTemplates)
   const [surveyDispatches, setSurveyDispatches] = useState<SurveyDispatch[]>(initialSurveyDispatches)
   const [surveyResponses, setSurveyResponses] = useState<SurveyResponse[]>(initialSurveyResponses)
+  const [leadTagDefinitions, setLeadTagDefinitions] = useState<LeadTagDefinition[]>(initialLeadTagDefinitions)
+  const [rooms, setRooms] = useState<Room[]>(initialRooms)
+  const [appointments, setAppointments] = useState<Appointment[]>(initialAppointments)
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [syncNotice, setSyncNotice] = useState<string>('')
   const [session, setSession] = useState<Session | null>(null)
@@ -306,6 +319,53 @@ export const useCrmState = () => {
     })
   }
 
+  const runStageEnteredSideEffects = (targetLead: Lead, nextStage: Stage) => {
+    for (const rule of automationRules) {
+      if (!rule.enabled || rule.triggerType !== 'stage_entered') continue
+      if (String(rule.triggerConfig.stageId) !== nextStage.id) continue
+      if (rule.actionType === 'create_task') {
+        const title = String(rule.actionConfig.title ?? 'Tarefa automática')
+        const hours = Number(rule.actionConfig.hoursOffset) || 24
+        const dueAt = new Date(Date.now() + hours * 3600000).toISOString()
+        const orders = leadTasks.filter((t) => t.leadId === targetLead.id).map((t) => t.sortOrder)
+        const nextOrder = (orders.length ? Math.max(...orders) : -1) + 1
+        const task: LeadTask = {
+          id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          leadId: targetLead.id,
+          title,
+          assigneeId: targetLead.ownerId,
+          dueAt,
+          status: 'open',
+          taskType: String(rule.actionConfig.taskType ?? 'follow_up'),
+          metadata: { ruleId: rule.id },
+          createdAt: new Date().toISOString(),
+          sortOrder: nextOrder,
+        }
+        setLeadTasks((prev) => [...prev, task])
+        if (dataMode === 'supabase' && isSupabaseConfigured) {
+          void saveLeadTask(task)
+        }
+      }
+    }
+
+    if (nextStage.id.includes('fechado')) {
+      const tmpl = surveyTemplates.find((t) => t.enabled)
+      if (tmpl) {
+        const dispatch: SurveyDispatch = {
+          id: `disp-${Date.now()}`,
+          templateId: tmpl.id,
+          leadId: targetLead.id,
+          sentAt: new Date().toISOString(),
+          channel: 'in_app',
+        }
+        setSurveyDispatches((prev) => [...prev, dispatch])
+        if (dataMode === 'supabase' && isSupabaseConfigured) {
+          void saveSurveyDispatch(dispatch)
+        }
+      }
+    }
+  }
+
   const moveLead = (leadId: string, direction: 'prev' | 'next') => {
     const targetLead = leads.find((lead) => lead.id === leadId)
     if (!targetLead) return
@@ -335,47 +395,47 @@ export const useCrmState = () => {
       happenedAt: new Date().toISOString(),
     })
 
-    for (const rule of automationRules) {
-      if (!rule.enabled || rule.triggerType !== 'stage_entered') continue
-      if (String(rule.triggerConfig.stageId) !== nextStage.id) continue
-      if (rule.actionType === 'create_task') {
-        const title = String(rule.actionConfig.title ?? 'Tarefa automática')
-        const hours = Number(rule.actionConfig.hoursOffset) || 24
-        const dueAt = new Date(Date.now() + hours * 3600000).toISOString()
-        const task: LeadTask = {
-          id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          leadId: targetLead.id,
-          title,
-          assigneeId: targetLead.ownerId,
-          dueAt,
-          status: 'open',
-          taskType: String(rule.actionConfig.taskType ?? 'follow_up'),
-          metadata: { ruleId: rule.id },
-          createdAt: new Date().toISOString(),
-        }
-        setLeadTasks((prev) => [...prev, task])
-        if (dataMode === 'supabase' && isSupabaseConfigured) {
-          void saveLeadTask(task)
-        }
-      }
+    runStageEnteredSideEffects(targetLead, nextStage)
+  }
+
+  const moveLeadToPipeline = (leadId: string, targetPipelineId: string, targetStageId: string) => {
+    const targetLead = leads.find((lead) => lead.id === leadId)
+    if (!targetLead) return
+    if (targetLead.pipelineId === targetPipelineId && targetLead.stageId === targetStageId) return
+
+    const nextPipeline = pipelineCatalog.find((p) => p.id === targetPipelineId)
+    if (!nextPipeline) return
+    const nextStage = nextPipeline.stages.find((s) => s.id === targetStageId)
+    if (!nextStage) return
+
+    const sameCol = leads.filter(
+      (l) => l.id !== leadId && l.pipelineId === targetPipelineId && l.stageId === targetStageId,
+    )
+    const newPosition = sameCol.length + 1
+    const updated: Lead = {
+      ...targetLead,
+      pipelineId: targetPipelineId,
+      stageId: targetStageId,
+      position: newPosition,
     }
 
-    if (nextStage.id.includes('fechado')) {
-      const tmpl = surveyTemplates.find((t) => t.enabled)
-      if (tmpl) {
-        const dispatch: SurveyDispatch = {
-          id: `disp-${Date.now()}`,
-          templateId: tmpl.id,
-          leadId: targetLead.id,
-          sentAt: new Date().toISOString(),
-          channel: 'in_app',
-        }
-        setSurveyDispatches((prev) => [...prev, dispatch])
-        if (dataMode === 'supabase' && isSupabaseConfigured) {
-          void saveSurveyDispatch(dispatch)
-        }
-      }
+    setLeads((previous) => previous.map((lead) => (lead.id === leadId ? updated : lead)))
+
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void persistLead(updated)
     }
+
+    addInteraction({
+      leadId: targetLead.id,
+      patientName: targetLead.patientName,
+      channel: 'system',
+      direction: 'system',
+      author: 'Quadro',
+      content: `Lead encaminhado para o funil «${nextPipeline.name}», etapa: ${nextStage.name}.`,
+      happenedAt: new Date().toISOString(),
+    })
+
+    runStageEnteredSideEffects(updated, nextStage)
   }
 
   const getRoundRobinOwner = () => {
@@ -421,6 +481,8 @@ export const useCrmState = () => {
       stageId: firstStage.id,
       summary: candidate.summary,
       customFields: {},
+      whatsappInstanceId: null,
+      tagIds: [],
     }
 
     setLeads((previous) => [newLead, ...previous])
@@ -551,6 +613,9 @@ export const useCrmState = () => {
       setSurveyTemplates(snapshot.surveyTemplates ?? initialSurveyTemplates)
       setSurveyDispatches(snapshot.surveyDispatches ?? initialSurveyDispatches)
       setSurveyResponses(snapshot.surveyResponses ?? initialSurveyResponses)
+      setLeadTagDefinitions(snapshot.leadTagDefinitions ?? initialLeadTagDefinitions)
+      setRooms(snapshot.rooms ?? initialRooms)
+      setAppointments(snapshot.appointments ?? initialAppointments)
       await refreshWebhookJobs()
       setSyncNotice('Sistema atualizado com os dados mais recentes.')
     } catch (error: unknown) {
@@ -1086,6 +1151,8 @@ export const useCrmState = () => {
         stageId: stage.id,
         summary,
         customFields: {},
+        whatsappInstanceId: null,
+        tagIds: [],
       }
       if (dataMode === 'supabase' && isSupabaseConfigured) {
         try {
@@ -1120,7 +1187,12 @@ export const useCrmState = () => {
     return { ok, errors }
   }
 
-  const addLeadTask = (partial: Omit<LeadTask, 'id' | 'createdAt'> & { id?: string; createdAt?: string }) => {
+  const addLeadTask = (
+    partial: Omit<LeadTask, 'id' | 'createdAt' | 'sortOrder'> & { id?: string; createdAt?: string; sortOrder?: number },
+  ) => {
+    const forLead = leadTasks.filter((t) => t.leadId === partial.leadId)
+    const orders = forLead.map((t) => t.sortOrder)
+    const nextOrder = partial.sortOrder !== undefined ? partial.sortOrder : (orders.length ? Math.max(...orders) : -1) + 1
     const task: LeadTask = {
       id: partial.id ?? `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       leadId: partial.leadId,
@@ -1131,6 +1203,7 @@ export const useCrmState = () => {
       taskType: partial.taskType ?? 'follow_up',
       metadata: partial.metadata ?? {},
       createdAt: partial.createdAt ?? new Date().toISOString(),
+      sortOrder: nextOrder,
     }
     setLeadTasks((prev) => [...prev, task])
     if (dataMode === 'supabase' && isSupabaseConfigured) {
@@ -1154,6 +1227,26 @@ export const useCrmState = () => {
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void deleteLeadTask(taskId)
     }
+  }
+
+  const reorderLeadTasks = (leadId: string, orderedTaskIds: string[]) => {
+    const orderMap = new Map(orderedTaskIds.map((id, i) => [id, i]))
+    setLeadTasks((prev) => {
+      const next = prev.map((t) => {
+        if (t.leadId !== leadId) return t
+        const o = orderMap.get(t.id)
+        if (o === undefined) return t
+        return { ...t, sortOrder: o }
+      })
+      if (dataMode === 'supabase' && isSupabaseConfigured) {
+        for (const t of next) {
+          if (t.leadId === leadId && orderMap.has(t.id)) {
+            void saveLeadTask(t)
+          }
+        }
+      }
+      return next
+    })
   }
 
   const recordSurveyResponse = (dispatchId: string, score: number, comment: string | null) => {
@@ -1660,6 +1753,52 @@ export const useCrmState = () => {
     setAuditTotal(result.total)
   }
 
+  const saveTagDefinition = (row: LeadTagDefinition) => {
+    setLeadTagDefinitions((p) => {
+      const i = p.findIndex((t) => t.id === row.id)
+      if (i === -1) return [...p, row].sort((a, b) => a.name.localeCompare(b.name))
+      const n = [...p]
+      n[i] = row
+      return n
+    })
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void upsertLeadTagDefinition(row)
+    }
+  }
+
+  const applyLeadTagIds = (leadId: string, tagIds: string[]) => {
+    setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, tagIds } : l)))
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void setLeadTagIdsForLead(leadId, tagIds)
+    }
+  }
+
+  const saveRoomRow = (room: Room) => {
+    setRooms((p) => {
+      const i = p.findIndex((r) => r.id === room.id)
+      if (i === -1) return [...p, room].sort((a, b) => a.sortOrder - b.sortOrder)
+      const n = [...p]
+      n[i] = room
+      return n
+    })
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void upsertRoom(room)
+    }
+  }
+
+  const saveAppointmentRow = (a: Appointment) => {
+    setAppointments((p) => {
+      const i = p.findIndex((x) => x.id === a.id)
+      if (i === -1) return [...p, a].sort((x, y) => x.startsAt.localeCompare(y.startsAt))
+      const n = [...p]
+      n[i] = a
+      return n
+    })
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void upsertAppointment(a)
+    }
+  }
+
   return {
     dataMode,
     pipelineCatalog,
@@ -1699,6 +1838,13 @@ export const useCrmState = () => {
     surveyTemplates,
     surveyDispatches,
     surveyResponses,
+    leadTagDefinitions,
+    saveTagDefinition,
+    applyLeadTagIds,
+    rooms,
+    appointments,
+    saveRoomRow,
+    saveAppointmentRow,
     myAppUserId,
     draftMessage,
     draftAttachments,
@@ -1726,6 +1872,7 @@ export const useCrmState = () => {
     ensureStandardKanbanSetup,
     bulkUpdateLeads,
     moveLead,
+    moveLeadToPipeline,
     reorderLeadCard,
     persistLeadPatch,
     importLeadsFromParsed,
@@ -1733,6 +1880,7 @@ export const useCrmState = () => {
     addLeadTask,
     updateLeadTask,
     removeLeadTask,
+    reorderLeadTasks,
     recordSurveyResponse,
     dispatchNpsForLead,
     simulateMetaCapture,

@@ -7,6 +7,9 @@ import {
   initialInteractions,
   initialLeadTasks,
   initialLeads,
+  initialLeadTagDefinitions,
+  initialRooms,
+  initialAppointments,
   initialMetrics,
   initialNotifications,
   initialOrgSettings,
@@ -28,7 +31,10 @@ import type {
   FieldVisibilityContext,
   Interaction,
   Lead,
+  LeadTagDefinition,
   LeadTask,
+  Room,
+  Appointment,
   MetricConfig,
   NotificationRule,
   OrgSettings,
@@ -76,6 +82,7 @@ type DbLead = {
   stage_id: string
   summary: string
   custom_fields?: Record<string, unknown> | null
+  whatsapp_instance_id?: string | null
 }
 type DbInteraction = {
   id: string
@@ -108,6 +115,9 @@ export type CrmDataSnapshot = {
   surveyTemplates: SurveyTemplate[]
   surveyDispatches: SurveyDispatch[]
   surveyResponses: SurveyResponse[]
+  leadTagDefinitions: LeadTagDefinition[]
+  rooms: Room[]
+  appointments: Appointment[]
 }
 
 export type AuditLogEntry = {
@@ -174,6 +184,7 @@ const mapLeadTaskFromDb = (row: Record<string, unknown>): LeadTask => ({
   taskType: String(row.task_type ?? 'follow_up'),
   metadata: (row.metadata && typeof row.metadata === 'object' ? row.metadata : {}) as Record<string, unknown>,
   createdAt: String(row.created_at ?? new Date().toISOString()),
+  sortOrder: typeof row.sort_order === 'number' ? row.sort_order : Number(row.sort_order) || 0,
 })
 
 const mapAutomationFromDb = (row: Record<string, unknown>): AutomationRule => ({
@@ -240,7 +251,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     client
       .from('leads')
       .select(
-        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields',
+        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id',
       )
       .order('position', { ascending: true }),
     client
@@ -285,15 +296,17 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   if (dataViewsRes.error) throw dataViewsRes.error
   if (orgSettingsRes.error) throw orgSettingsRes.error
 
-  const [tasksRes, rulesRes, tmplRes, dispRes, respRes] = await Promise.all([
+  const [tasksRes, rulesRes, tmplRes, dispRes, respRes, tagAssignRes] = await Promise.all([
     client
       .from('lead_tasks')
-      .select('id, lead_id, title, assignee_id, due_at, status, task_type, metadata, created_at')
+      .select('id, lead_id, title, assignee_id, due_at, status, task_type, metadata, created_at, sort_order')
+      .order('sort_order', { ascending: true })
       .order('due_at', { ascending: true }),
     client.from('automation_rules').select('id, name, enabled, trigger_type, trigger_config, action_type, action_config'),
     client.from('survey_templates').select('id, name, nps_question, enabled'),
     client.from('survey_dispatches').select('id, template_id, lead_id, sent_at, channel'),
     client.from('survey_responses').select('id, dispatch_id, score, comment, responded_at'),
+    client.from('lead_tag_assignments').select('lead_id, tag_id'),
   ])
 
   const builtLeadTasks: LeadTask[] = !tasksRes.error
@@ -311,6 +324,17 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   const builtSurveyResponses: SurveyResponse[] = !respRes.error
     ? ((respRes.data ?? []) as Record<string, unknown>[]).map(mapSurveyResponseFromDb)
     : initialSurveyResponses
+
+  const tagIdsByLead = new Map<string, string[]>()
+  if (!tagAssignRes.error && tagAssignRes.data) {
+    for (const row of tagAssignRes.data as { lead_id: string; tag_id: string }[]) {
+      const lid = String(row.lead_id)
+      const t = String(row.tag_id)
+      const list = tagIdsByLead.get(lid) ?? []
+      list.push(t)
+      tagIdsByLead.set(lid, list)
+    }
+  }
 
   const pipelineRows = (pipelinesRes.data ?? []) as DbPipeline[]
   const stageRows = (stagesRes.data ?? []) as DbStage[]
@@ -356,6 +380,10 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
           string,
           unknown
         >,
+        whatsappInstanceId: lead.whatsapp_instance_id != null && String(lead.whatsapp_instance_id).length > 0
+          ? String(lead.whatsapp_instance_id)
+          : null,
+        tagIds: tagIdsByLead.get(lead.id) ?? [],
       }))
     : initialLeads
 
@@ -471,6 +499,53 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       }
     : initialOrgSettings
 
+  const [tagDefRes, roomsRes, apptRes] = await Promise.all([
+    client.from('lead_tag_definitions').select('id, name, color, created_at').order('name', { ascending: true }),
+    client.from('rooms').select('id, name, active, slot_minutes, sort_order, created_at').order('sort_order', { ascending: true }),
+    client
+      .from('appointments')
+      .select('id, lead_id, room_id, starts_at, ends_at, status, attendance_status, notes, created_at, updated_at')
+      .order('starts_at', { ascending: true })
+      .limit(500),
+  ])
+
+  const builtTagDefs: LeadTagDefinition[] = !tagDefRes.error
+    ? ((tagDefRes.data ?? []) as Record<string, unknown>[]).map((r) => ({
+        id: String(r.id),
+        name: String(r.name),
+        color: String(r.color ?? '#6366f1'),
+        createdAt: String(r.created_at ?? new Date().toISOString()),
+      }))
+    : initialLeadTagDefinitions
+
+  const builtRooms: Room[] = !roomsRes.error
+    ? ((roomsRes.data ?? []) as Record<string, unknown>[]).map((r) => ({
+        id: String(r.id),
+        name: String(r.name),
+        active: r.active !== false,
+        slotMinutes: typeof r.slot_minutes === 'number' ? r.slot_minutes : Number(r.slot_minutes) || 30,
+        sortOrder: typeof r.sort_order === 'number' ? r.sort_order : Number(r.sort_order) || 0,
+        createdAt: String(r.created_at ?? new Date().toISOString()),
+      }))
+    : initialRooms
+
+  const builtAppointments: Appointment[] = !apptRes.error
+    ? ((apptRes.data ?? []) as Record<string, unknown>[]).map((r) => ({
+        id: String(r.id),
+        leadId: String(r.lead_id),
+        roomId: String(r.room_id),
+        startsAt: String(r.starts_at),
+        endsAt: String(r.ends_at),
+        status: (['draft', 'confirmed', 'cancelled'].includes(String(r.status)) ? r.status : 'confirmed') as Appointment['status'],
+        attendanceStatus: (['expected', 'checked_in', 'no_show'].includes(String(r.attendance_status))
+          ? r.attendance_status
+          : 'expected') as Appointment['attendanceStatus'],
+        notes: r.notes != null && String(r.notes).length ? String(r.notes) : null,
+        createdAt: String(r.created_at ?? new Date().toISOString()),
+        updatedAt: String(r.updated_at ?? r.created_at ?? new Date().toISOString()),
+      }))
+    : initialAppointments
+
   return {
     pipelines: builtPipelines,
     sdrTeam: builtSdrUsers,
@@ -491,6 +566,9 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     surveyTemplates: builtSurveyTemplates,
     surveyDispatches: builtSurveyDispatches,
     surveyResponses: builtSurveyResponses,
+    leadTagDefinitions: builtTagDefs,
+    rooms: builtRooms,
+    appointments: builtAppointments,
   }
 }
 
@@ -501,23 +579,35 @@ export type ChatSlice = {
 
 export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
   const client = assertSupabase()
-  const [leadsRes, interactionsRes] = await Promise.all([
+  const [leadsRes, interactionsRes, tagAssignRes] = await Promise.all([
     client
       .from('leads')
       .select(
-        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields',
+        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id',
       )
       .order('position', { ascending: true }),
     client
       .from('interactions')
       .select('id, lead_id, patient_name, channel, direction, author, content, happened_at')
       .order('happened_at', { ascending: false }),
+    client.from('lead_tag_assignments').select('lead_id, tag_id'),
   ])
   if (leadsRes.error) throw leadsRes.error
   if (interactionsRes.error) throw interactionsRes.error
 
   const leadRows = (leadsRes.data ?? []) as DbLead[]
   const interactionRows = (interactionsRes.data ?? []) as DbInteraction[]
+
+  const tagIdsByLead = new Map<string, string[]>()
+  if (!tagAssignRes.error && tagAssignRes.data) {
+    for (const row of tagAssignRes.data as { lead_id: string; tag_id: string }[]) {
+      const lid = String(row.lead_id)
+      const t = String(row.tag_id)
+      const list = tagIdsByLead.get(lid) ?? []
+      list.push(t)
+      tagIdsByLead.set(lid, list)
+    }
+  }
 
   const builtLeads: Lead[] = leadRows.map((lead) => ({
     id: lead.id,
@@ -536,6 +626,10 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
       string,
       unknown
     >,
+    whatsappInstanceId: lead.whatsapp_instance_id != null && String(lead.whatsapp_instance_id).length > 0
+      ? String(lead.whatsapp_instance_id)
+      : null,
+    tagIds: tagIdsByLead.get(lead.id) ?? [],
   }))
 
   const builtInteractions: Interaction[] = interactionRows.map((interaction) => ({
@@ -595,6 +689,7 @@ export const seedDemoData = async (): Promise<void> => {
     stage_id: lead.stageId,
     summary: lead.summary,
     custom_fields: lead.customFields ?? {},
+    whatsapp_instance_id: lead.whatsappInstanceId,
   }))
 
   const interactionPayload = initialInteractions.map((interaction) => ({
@@ -735,6 +830,7 @@ export const seedDemoData = async (): Promise<void> => {
     task_type: t.taskType,
     metadata: t.metadata ?? {},
     created_at: t.createdAt,
+    sort_order: t.sortOrder,
   }))
   const taskRes = await client.from('lead_tasks').upsert(taskPayload)
   if (taskRes.error) throw taskRes.error
@@ -774,6 +870,7 @@ export const insertLead = async (lead: Lead): Promise<void> => {
     stage_id: lead.stageId,
     summary: lead.summary,
     custom_fields: lead.customFields ?? {},
+    whatsapp_instance_id: lead.whatsappInstanceId,
   })
   if (error) throw error
 }
@@ -795,6 +892,7 @@ export const persistLead = async (lead: Lead): Promise<void> => {
       stage_id: lead.stageId,
       summary: lead.summary,
       custom_fields: lead.customFields ?? {},
+      whatsapp_instance_id: lead.whatsappInstanceId,
     },
     { onConflict: 'id' },
   )
@@ -849,6 +947,7 @@ export const saveLeadTask = async (task: LeadTask): Promise<void> => {
     task_type: task.taskType,
     metadata: task.metadata ?? {},
     created_at: task.createdAt,
+    sort_order: task.sortOrder,
   })
   if (error) throw error
 }
@@ -1162,4 +1261,76 @@ export const createWebhookReplayJob = async (payload: {
     note: payload.note,
   })
   if (error) throw error
+}
+
+export const upsertLeadTagDefinition = async (row: LeadTagDefinition): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('lead_tag_definitions').upsert({
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    created_at: row.createdAt,
+  })
+  if (error) throw error
+}
+
+export const setLeadTagIdsForLead = async (leadId: string, tagIds: string[]): Promise<void> => {
+  const client = assertSupabase()
+  const { error: delErr } = await client.from('lead_tag_assignments').delete().eq('lead_id', leadId)
+  if (delErr) throw delErr
+  if (tagIds.length === 0) return
+  const { error } = await client.from('lead_tag_assignments').insert(
+    tagIds.map((tagId) => ({ lead_id: leadId, tag_id: tagId })),
+  )
+  if (error) throw error
+}
+
+export const upsertRoom = async (room: Room): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('rooms').upsert({
+    id: room.id,
+    name: room.name,
+    active: room.active,
+    slot_minutes: room.slotMinutes,
+    sort_order: room.sortOrder,
+    created_at: room.createdAt,
+  })
+  if (error) throw error
+}
+
+export const upsertAppointment = async (a: Appointment): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('appointments').upsert({
+    id: a.id,
+    lead_id: a.leadId,
+    room_id: a.roomId,
+    starts_at: a.startsAt,
+    ends_at: a.endsAt,
+    status: a.status,
+    attendance_status: a.attendanceStatus,
+    notes: a.notes,
+    created_at: a.createdAt,
+    updated_at: a.updatedAt,
+  })
+  if (error) throw error
+}
+
+export const findFirstFreeSlot = async (params: {
+  startsOn: string
+  endsOn: string
+  durationMinutes: number
+}): Promise<{ roomId: string; slotStart: string; slotEnd: string } | null> => {
+  const client = assertSupabase()
+  const { data, error } = await client.rpc('find_first_appointment_slot', {
+    p_starts_on: params.startsOn,
+    p_ends_on: params.endsOn,
+    p_duration_minutes: params.durationMinutes,
+  })
+  if (error) throw error
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | { room_id?: string; slot_start?: string; slot_end?: string }
+    | null
+    | undefined
+  if (!row || !row.room_id || !row.slot_start || !row.slot_end) return null
+  return { roomId: String(row.room_id), slotStart: String(row.slot_start), slotEnd: String(row.slot_end) }
 }

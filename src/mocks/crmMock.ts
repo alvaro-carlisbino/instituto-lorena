@@ -21,6 +21,45 @@ export type Sdr = {
   active: boolean
 }
 
+export type LeadTagDefinition = {
+  id: string
+  name: string
+  color: string
+  createdAt: string
+}
+
+export type Room = {
+  id: string
+  name: string
+  active: boolean
+  slotMinutes: number
+  sortOrder: number
+  createdAt: string
+}
+
+export type Appointment = {
+  id: string
+  leadId: string
+  roomId: string
+  startsAt: string
+  endsAt: string
+  status: 'draft' | 'confirmed' | 'cancelled'
+  attendanceStatus: 'expected' | 'checked_in' | 'no_show'
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type AppInboxItem = {
+  id: string
+  kind: string
+  title: string
+  body: string
+  readAt: string | null
+  createdAt: string
+  metadata: Record<string, unknown>
+}
+
 export type Lead = {
   id: string
   patientName: string
@@ -35,6 +74,9 @@ export type Lead = {
   stageId: string
   summary: string
   customFields: Record<string, unknown>
+  /** CRM line (Evolution instance) when using multi-phone. */
+  whatsappInstanceId: string | null
+  tagIds: string[]
 }
 
 export type Interaction = {
@@ -107,6 +149,7 @@ export type LeadTask = {
   taskType: string
   metadata: Record<string, unknown>
   createdAt: string
+  sortOrder: number
 }
 
 export type AutomationRule = {
@@ -266,6 +309,8 @@ export const initialLeads: Lead[] = [
     stageId: 'triagem',
     summary: 'Quer avaliacao para harmonizacao facial ainda esta semana.',
     customFields: {},
+    whatsappInstanceId: null,
+    tagIds: [],
   },
   {
     id: 'lead-002',
@@ -281,6 +326,8 @@ export const initialLeads: Lead[] = [
     stageId: 'contato',
     summary: 'Interesse em check-up preventivo, prefere contato por WhatsApp.',
     customFields: {},
+    whatsappInstanceId: null,
+    tagIds: [],
   },
   {
     id: 'lead-003',
@@ -296,6 +343,8 @@ export const initialLeads: Lead[] = [
     stageId: 'novo',
     summary: 'Pediu informacoes de valores e condicoes de pagamento.',
     customFields: {},
+    whatsappInstanceId: null,
+    tagIds: [],
   },
 ]
 
@@ -702,6 +751,7 @@ export const initialLeadTasks: LeadTask[] = [
     taskType: 'follow_up',
     metadata: {},
     createdAt: '2026-04-16T10:05:00Z',
+    sortOrder: 0,
   },
 ]
 
@@ -729,3 +779,7 @@ export const initialSurveyTemplates: SurveyTemplate[] = [
 export const initialSurveyDispatches: SurveyDispatch[] = []
 
 export const initialSurveyResponses: SurveyResponse[] = []
+
+export const initialLeadTagDefinitions: LeadTagDefinition[] = []
+export const initialRooms: Room[] = []
+export const initialAppointments: Appointment[] = []
