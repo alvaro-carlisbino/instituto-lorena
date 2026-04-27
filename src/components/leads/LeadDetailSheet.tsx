@@ -5,6 +5,9 @@ import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Sheet,
   SheetContent,
@@ -59,6 +62,79 @@ export function LeadDetailSheet({ open, onOpenChange }: Props) {
             </SheetHeader>
 
             <div className="grid gap-4 p-4">
+              <section aria-labelledby="lead-profile-heading">
+                <h2 id="lead-profile-heading" className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                  Perfil completo
+                </h2>
+                <div className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-2">
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">Nome</Label>
+                    <Input
+                      value={lead.patientName}
+                      onChange={(e) => crm.persistLeadPatch({ ...lead, patientName: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">Telefone principal</Label>
+                    <Input
+                      value={lead.phone}
+                      onChange={(e) => crm.persistLeadPatch({ ...lead, phone: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">E-mail</Label>
+                    <Input
+                      value={String(lead.customFields?.email ?? '')}
+                      onChange={(e) =>
+                        crm.persistLeadPatch({
+                          ...lead,
+                          customFields: { ...lead.customFields, email: e.target.value },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label className="text-xs">Aniversário</Label>
+                    <Input
+                      type="date"
+                      value={String(lead.customFields?.birthday ?? '').slice(0, 10)}
+                      onChange={(e) =>
+                        crm.persistLeadPatch({
+                          ...lead,
+                          customFields: { ...lead.customFields, birthday: e.target.value },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-1.5 sm:col-span-2">
+                    <Label className="text-xs">Notas internas</Label>
+                    <Textarea
+                      rows={2}
+                      value={String(lead.customFields?.notes ?? '')}
+                      onChange={(e) =>
+                        crm.persistLeadPatch({
+                          ...lead,
+                          customFields: { ...lead.customFields, notes: e.target.value },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-1.5 sm:col-span-2">
+                    <Label className="text-xs">Observações</Label>
+                    <Textarea
+                      rows={2}
+                      value={String(lead.customFields?.observations ?? '')}
+                      onChange={(e) =>
+                        crm.persistLeadPatch({
+                          ...lead,
+                          customFields: { ...lead.customFields, observations: e.target.value },
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              </section>
+
               <section aria-labelledby="lead-fields-heading">
                 <h2 id="lead-fields-heading" className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">
                   Campos

@@ -19,6 +19,7 @@ import {
   Television,
   Users,
   CheckSquare,
+  ChatsCircle,
 } from 'phosphor-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -102,6 +103,7 @@ export function AppSidebar() {
               <NavItem to="/dashboard" label="Painel" icon={ChartLineUp} />
               <NavItem to="/kanban" label="Quadro de leads" icon={SquaresFour} />
               {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={ListBullets} /> : null}
+              {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={ChatsCircle} /> : null}
               <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />
               {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={CheckSquare} /> : null}
               <NavItem to="/assistente" label="Assistente IA" icon={Robot} />
@@ -148,6 +150,7 @@ export function AppSidebar() {
               <SidebarMenu>
                 <NavItem to="/usuarios" label="Usuários" icon={Users} />
                 <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
+                <NavItem to="/admin-operacao" label="Operação Admin" icon={Gear} />
                 <NavItem to="/admin-lab" label="Ferramentas" icon={Flask} />
               </SidebarMenu>
             </SidebarGroupContent>

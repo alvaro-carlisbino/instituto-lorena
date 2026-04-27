@@ -996,6 +996,46 @@ export const useCrmState = () => {
     }
   }
 
+  const bulkUpdateLeads = (leadIds: string[], updates: Partial<Lead>) => {
+    const target = new Set(leadIds)
+    setLeads((previous) => {
+      const next = previous.map((lead) => (target.has(lead.id) ? { ...lead, ...updates } : lead))
+      if (dataMode === 'supabase' && isSupabaseConfigured) {
+        next.forEach((lead) => {
+          if (target.has(lead.id)) void persistLead(lead)
+        })
+      }
+      return next
+    })
+  }
+
+  const ensureStandardKanbanSetup = () => {
+    if (pipelineCatalog.length > 0) return
+    const basePipeline: Pipeline = {
+      id: 'pipeline-padrao-comercial',
+      name: 'Pipeline Comercial Padrão',
+      boardConfig: {
+        stageSlaMinutes: {
+          'novo-lead': 15,
+          'qualificacao': 30,
+          'contato-humano': 60,
+          'proposta': 240,
+          'fechamento': 480,
+        },
+      },
+      stages: [
+        { id: 'novo-lead', name: 'Novo lead' },
+        { id: 'qualificacao', name: 'Qualificação' },
+        { id: 'contato-humano', name: 'Contato humano' },
+        { id: 'proposta', name: 'Proposta' },
+        { id: 'fechamento', name: 'Fechamento' },
+      ],
+    }
+    setPipelineCatalog([basePipeline])
+    setSelectedPipelineId(basePipeline.id)
+    if (dataMode === 'supabase' && isSupabaseConfigured) void savePipelineConfig(basePipeline)
+  }
+
   const importLeadsFromParsed = async (rows: Record<string, string>[], pipelineId: string, stageId: string) => {
     const pipeline = pipelineCatalog.find((p) => p.id === pipelineId) ?? selectedPipeline
     const stage = pipeline.stages.find((s) => s.id === stageId) ?? pipeline.stages[0]
@@ -1193,6 +1233,61 @@ export const useCrmState = () => {
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void deleteNotificationRule(ruleId)
     }
+  }
+
+  const addAutomationRule = () => {
+    const next: AutomationRule = {
+      id: `auto-${Date.now()}`,
+      name: 'Nova automação',
+      enabled: true,
+      triggerType: 'stage_entered',
+      triggerConfig: {},
+      actionType: 'create_task',
+      actionConfig: {},
+    }
+    setAutomationRules((previous) => [...previous, next])
+  }
+
+  const updateAutomationRule = (ruleId: string, updates: Partial<AutomationRule>) => {
+    setAutomationRules((previous) => previous.map((rule) => (rule.id === ruleId ? { ...rule, ...updates } : rule)))
+  }
+
+  const removeAutomationRule = (ruleId: string) => {
+    setAutomationRules((previous) => previous.filter((rule) => rule.id !== ruleId))
+  }
+
+  const runBirthdayCampaign = () => {
+    const today = new Date()
+    const mmdd = `${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    const birthdayLeads = leads.filter((lead) => {
+      const raw = lead.customFields?.birthday ?? lead.customFields?.birth_date ?? ''
+      const iso = String(raw)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false
+      return iso.slice(5) === mmdd
+    })
+
+    birthdayLeads.forEach((lead) => {
+      addInteraction({
+        leadId: lead.id,
+        patientName: lead.patientName,
+        channel: 'system',
+        direction: 'system',
+        author: 'Campanha aniversário',
+        content: 'Lead com aniversário hoje. Sugerir envio de mensagem de parabéns.',
+        happenedAt: new Date().toISOString(),
+      })
+      addLeadTask({
+        leadId: lead.id,
+        title: 'Enviar parabéns de aniversário',
+        assigneeId: lead.ownerId,
+        dueAt: new Date().toISOString(),
+        status: 'open',
+        taskType: 'birthday_campaign',
+        metadata: { auto: true },
+      })
+    })
+
+    return birthdayLeads.length
   }
 
   const updatePipeline = (pipelineId: string, updates: Partial<Pipeline>) => {
@@ -1615,6 +1710,8 @@ export const useCrmState = () => {
     setAuthPassword,
     authNotice,
     getOwnerName,
+    ensureStandardKanbanSetup,
+    bulkUpdateLeads,
     moveLead,
     reorderLeadCard,
     persistLeadPatch,
@@ -1656,6 +1753,10 @@ export const useCrmState = () => {
     updateNotificationRule,
     addNotificationRule,
     removeNotificationRule,
+    addAutomationRule,
+    updateAutomationRule,
+    removeAutomationRule,
+    runBirthdayCampaign,
     addUser,
     updateUser,
     removeUser,

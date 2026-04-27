@@ -21,6 +21,8 @@ import { DataViewsPage } from './pages/DataViewsPage'
 import { AssistantPage } from './pages/AssistantPage'
 import { LeadsPage } from './pages/LeadsPage'
 import { TasksPage } from './pages/TasksPage'
+import { ChatWorkspacePage } from './pages/ChatWorkspacePage'
+import { AdminOperationsPage } from './pages/AdminOperationsPage'
 import { CommandPalette } from './components/CommandPalette'
 import { RouteTransition } from './components/RouteTransition'
 import { SidebarProvider } from '@/components/ui/sidebar'
@@ -38,6 +40,7 @@ function AppRoutes() {
       <Route path="/kanban" element={<KanbanPage />} />
       <Route path="/leads" element={<LeadsPage />} />
       <Route path="/tarefas" element={<TasksPage />} />
+      <Route path="/chat" element={<ChatWorkspacePage />} />
       <Route path="/assistente" element={<AssistantPage />} />
       <Route path="/historico" element={<HistoryPage />} />
       <Route path="/canais" element={<ChannelsPage />} />
@@ -45,6 +48,7 @@ function AppRoutes() {
       <Route path="/usuarios" element={<UsersPage />} />
       <Route path="/auditoria" element={<AuditPage />} />
       <Route path="/admin-lab" element={<AdminLabPage />} />
+      <Route path="/admin-operacao" element={<AdminOperationsPage />} />
       <Route path="/configuracoes" element={<SettingsPage />} />
       <Route path="/tv-config" element={<TvConfigPage />} />
       <Route path="/tv" element={<TvDashboardPage />} />

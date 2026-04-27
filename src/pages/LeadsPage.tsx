@@ -39,6 +39,10 @@ export function LeadsPage() {
   const [jsonPreviewCount, setJsonPreviewCount] = useState<number | null>(null)
   const [pendingCsvFile, setPendingCsvFile] = useState<File | null>(null)
   const [pendingJsonFile, setPendingJsonFile] = useState<File | null>(null)
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([])
+  const [visibleColumns, setVisibleColumns] = useState<(typeof TABLE_COLUMNS)[number][]>([...TABLE_COLUMNS])
+  const [bulkOwnerId, setBulkOwnerId] = useState<string>('all')
+  const [bulkStageId, setBulkStageId] = useState<string>('all')
 
   const leadIdParam = searchParams.get('leadId')
 
@@ -46,6 +50,10 @@ export function LeadsPage() {
     const p = crm.pipelineCatalog.find((x) => x.id === pipelineFilter)
     return p?.stages ?? []
   }, [crm.pipelineCatalog, pipelineFilter])
+  const stagesForBulk = useMemo(() => {
+    const p = crm.pipelineCatalog.find((x) => x.id === crm.selectedPipelineId) ?? crm.selectedPipeline
+    return p?.stages ?? []
+  }, [crm.pipelineCatalog, crm.selectedPipeline, crm.selectedPipelineId])
 
   const filteredLeads = useMemo(() => {
     const n = searchTerm.trim().toLowerCase()
@@ -75,6 +83,9 @@ export function LeadsPage() {
     },
     [crm, setSearchParams],
   )
+  const toggleLeadSelection = (leadId: string) => {
+    setSelectedLeadIds((prev) => (prev.includes(leadId) ? prev.filter((id) => id !== leadId) : [...prev, leadId]))
+  }
 
   useEffect(() => {
     if (leadIdParam && crm.leads.some((l) => l.id === leadIdParam)) {
@@ -293,7 +304,87 @@ export function LeadsPage() {
             </SelectContent>
           </Select>
         </div>
+        <div className="grid gap-1.5">
+          <Label>Colunas visíveis</Label>
+          <div className="flex flex-wrap gap-2">
+            {TABLE_COLUMNS.map((col) => {
+              const active = visibleColumns.includes(col)
+              return (
+                <Button
+                  key={col}
+                  type="button"
+                  size="sm"
+                  variant={active ? 'default' : 'outline'}
+                  onClick={() =>
+                    setVisibleColumns((prev) => (active ? prev.filter((c) => c !== col) : [...prev, col]))
+                  }
+                >
+                  {columnLabel(col, crm.workflowFields)}
+                </Button>
+              )
+            })}
+          </div>
+        </div>
       </div>
+
+      <Card className="mb-4">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Ações em lote</CardTitle>
+          <CardDescription>Selecione leads e aplique alterações de forma rápida.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1.5">
+            <Label>Responsável</Label>
+            <Select value={bulkOwnerId} onValueChange={setBulkOwnerId}>
+              <SelectTrigger className="w-[14rem]">
+                <SelectValue placeholder="Responsável" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Escolher responsável</SelectItem>
+                {crm.users.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {u.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>Etapa</Label>
+            <Select value={bulkStageId} onValueChange={setBulkStageId}>
+              <SelectTrigger className="w-[14rem]">
+                <SelectValue placeholder="Etapa" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Escolher etapa</SelectItem>
+                {stagesForBulk.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            type="button"
+            disabled={selectedLeadIds.length === 0}
+            onClick={() => {
+              const patch: Record<string, unknown> = {}
+              if (bulkOwnerId !== 'all') patch.ownerId = bulkOwnerId
+              if (bulkStageId !== 'all') patch.stageId = bulkStageId
+              if (Object.keys(patch).length === 0) {
+                toast.error('Selecione ao menos uma alteração para aplicar.')
+                return
+              }
+              crm.bulkUpdateLeads(selectedLeadIds, patch)
+              toast.success(`${selectedLeadIds.length} lead(s) atualizados.`)
+              setSelectedLeadIds([])
+            }}
+          >
+            Aplicar em selecionados ({selectedLeadIds.length})
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card className="mb-8 overflow-hidden border-border shadow-sm">
         <CardHeader className="border-b border-border/60 bg-muted/20 py-3">
@@ -304,7 +395,8 @@ export function LeadsPage() {
           <table className="w-full min-w-[48rem] border-collapse text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/30 text-left">
-                {TABLE_COLUMNS.map((col) => (
+                <th className="w-10 p-2.5" />
+                {visibleColumns.map((col) => (
                   <th key={col} className="p-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     {columnLabel(col, crm.workflowFields)}
                   </th>
@@ -324,7 +416,15 @@ export function LeadsPage() {
                     )}
                     onClick={() => openLead(lead.id)}
                   >
-                    {TABLE_COLUMNS.map((col) => (
+                    <td className="p-2.5" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedLeadIds.includes(lead.id)}
+                        onChange={() => toggleLeadSelection(lead.id)}
+                        aria-label={`Selecionar ${lead.patientName}`}
+                      />
+                    </td>
+                    {visibleColumns.map((col) => (
                       <td key={col} className="max-w-[14rem] truncate p-2.5 text-muted-foreground">
                         {col === 'pipeline_id'
                           ? (pipe?.name ?? lead.pipelineId)

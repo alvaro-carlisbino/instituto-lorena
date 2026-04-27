@@ -19,6 +19,8 @@ import {
   Tv,
   CheckSquare,
   Users,
+  MessageSquare,
+  BriefcaseBusiness,
 } from 'lucide-react'
 
 import { useCrm } from '@/context/CrmContext'
@@ -100,6 +102,14 @@ export function CommandPalette() {
           >
             <List className="size-4 shrink-0 opacity-70" />
             Todos os leads
+          </Command.Item>
+          <Command.Item
+            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
+            keywords={['chat', 'whatsapp', 'conversas']}
+            onSelect={() => go('/chat')}
+          >
+            <MessageSquare className="size-4 shrink-0 opacity-70" />
+            Chat comercial
           </Command.Item>
           <Command.Item
             className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
@@ -201,6 +211,13 @@ export function CommandPalette() {
             >
               <FlaskConical className="size-4 shrink-0 opacity-70" />
               Ferramentas
+            </Command.Item>
+            <Command.Item
+              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
+              onSelect={() => go('/admin-operacao')}
+            >
+              <BriefcaseBusiness className="size-4 shrink-0 opacity-70" />
+              Operação Admin
             </Command.Item>
           </Command.Group>
         ) : null}

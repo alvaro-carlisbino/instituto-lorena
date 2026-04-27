@@ -30,6 +30,7 @@ export function KanbanPage() {
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  if (crm.pipelineCatalog.length === 0) crm.ensureStandardKanbanSetup()
 
   const visibleLeads = useMemo(() => {
     const normalized = searchTerm.trim().toLowerCase()
@@ -114,6 +115,10 @@ export function KanbanPage() {
               >
                 <RefreshCw className={`size-4 ${crm.isLoading ? 'animate-spin' : ''}`} />
                 {crm.isLoading ? 'Atualizando…' : 'Atualizar dados'}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => crm.ensureStandardKanbanSetup()}>
+                <LayoutGrid className="size-4" />
+                Garantir Kanban padrão
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
