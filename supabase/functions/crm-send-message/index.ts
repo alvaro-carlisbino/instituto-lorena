@@ -14,6 +14,10 @@ function json(body: Record<string, unknown>, status = 200): Response {
   })
 }
 
+function nowIso(): string {
+  return new Date().toISOString()
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -34,7 +38,12 @@ Deno.serve(async (req) => {
   } = await userClient.auth.getUser()
   if (userErr || !user) return json({ error: 'unauthorized' }, 401)
 
-  let body: { leadId?: string; to?: string; text?: string }
+  let body: {
+    leadId?: string
+    to?: string
+    text?: string
+    attachments?: Array<{ name?: string; mimeType?: string; base64?: string }>
+  }
   try {
     body = (await req.json()) as { leadId?: string; to?: string; text?: string }
   } catch {
@@ -44,6 +53,7 @@ Deno.serve(async (req) => {
   const leadId = String(body.leadId ?? '').trim()
   const to = String(body.to ?? '').trim()
   const text = String(body.text ?? '').trim()
+  const attachments = Array.isArray(body.attachments) ? body.attachments : []
   if (!leadId || !to || !text) return json({ error: 'missing_fields' }, 400)
 
   const { data: lead, error: leadErr } = await admin
@@ -61,6 +71,30 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const { data: aiConfig } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
+    const maxPerHour = Number(aiConfig?.max_ai_replies_per_hour ?? 2)
+    const minSecondsBetween = Number(aiConfig?.min_seconds_between_ai_replies ?? 240)
+    const oneHourAgoIso = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    const { count: outboundLastHour } = await admin
+      .from('webhook_jobs')
+      .select('id', { count: 'exact', head: true })
+      .eq('source', 'whatsapp-webhook')
+      .like('note', 'outbound:%')
+      .gte('created_at', oneHourAgoIso)
+    if ((outboundLastHour ?? 0) > Math.max(10, maxPerHour * 8)) {
+      return json({ error: 'rate_limited', message: 'Limite de segurança atingido. Tente novamente em alguns minutos.' }, 429)
+    }
+
+    const { data: state } = await admin
+      .from('crm_conversation_states')
+      .select('last_human_reply_at')
+      .eq('lead_id', leadId)
+      .maybeSingle()
+    const lastHumanAt = state?.last_human_reply_at ? new Date(String(state.last_human_reply_at)).getTime() : 0
+    if (lastHumanAt && (Date.now() - lastHumanAt) / 1000 < Math.min(120, minSecondsBetween)) {
+      return json({ error: 'cooldown', message: 'Aguarde alguns segundos antes de enviar outra mensagem.' }, 429)
+    }
+
     const sent = await provider.sendMessage({ to, text, leadId })
     await insertInteraction(admin, {
       leadId: String(lead.id),
@@ -70,11 +104,37 @@ Deno.serve(async (req) => {
       author: user.email ?? 'Operador',
       content: text,
     })
+    if (attachments.length > 0) {
+      await admin.from('crm_media_items').insert(
+        attachments.map((file) => ({
+          lead_id: leadId,
+          direction: 'out',
+          media_type: String(file.mimeType ?? '').startsWith('audio/')
+            ? 'audio'
+            : String(file.mimeType ?? '').startsWith('image/')
+              ? 'image'
+              : 'document',
+          mime_type: String(file.mimeType ?? ''),
+          metadata: {
+            name: String(file.name ?? 'arquivo'),
+            size_base64: String(file.base64 ?? '').length,
+            outbound_mode: 'manual_attachment',
+          },
+        })),
+      )
+    }
 
     await admin.from('webhook_jobs').insert({
       source: 'whatsapp-webhook',
       status: 'done',
       note: `outbound:${provider.name}:${sent.externalMessageId}`.slice(0, 500),
+    })
+    await admin.from('crm_conversation_states').upsert({
+      lead_id: leadId,
+      owner_mode: 'human',
+      ai_enabled: true,
+      last_human_reply_at: nowIso(),
+      updated_at: nowIso(),
     })
 
     return json({

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Search, Tags } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +11,8 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
+import { getConversationState, setConversationMode, type ConversationOwnerMode } from '@/services/conversationControl'
 
 const QUICK_REPLIES = [
   'Oi! Tudo bem? Posso te ajudar com valores e horários.',
@@ -19,10 +22,13 @@ const QUICK_REPLIES = [
 
 export function ChatWorkspacePage() {
   const crm = useCrm()
+  const { dataMode, refreshChatFromSupabase } = crm
   const [searchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [ownerFilter, setOwnerFilter] = useState('all')
   const [tagFilter, setTagFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
+  const [leadMode, setLeadMode] = useState<ConversationOwnerMode>('auto')
+  const [modeLoading, setModeLoading] = useState(false)
 
   const conversations = useMemo(() => {
     const text = search.trim().toLowerCase()
@@ -53,6 +59,34 @@ export function ChatWorkspacePage() {
       crm.setSelectedLeadId(leadId)
     }
   }, [crm, searchParams])
+
+  useEffect(() => {
+    if (!activeLead || crm.dataMode !== 'supabase') return
+    setModeLoading(true)
+    void getConversationState(activeLead.id)
+      .then((state) => setLeadMode((state.owner_mode as ConversationOwnerMode) ?? 'auto'))
+      .catch(() => setLeadMode('auto'))
+      .finally(() => setModeLoading(false))
+  }, [activeLead, crm.dataMode])
+
+  useEffect(() => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured || !supabase) return
+    const client = supabase
+
+    const channel = client
+      .channel('crm-chat-interactions-leads')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, () => {
+        void refreshChatFromSupabase()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
+        void refreshChatFromSupabase()
+      })
+      .subscribe()
+
+    return () => {
+      void client.removeChannel(channel)
+    }
+  }, [dataMode, refreshChatFromSupabase])
 
   return (
     <AppLayout title="Central de conversas" subtitle="Atendimento rápido, organizado e fácil para toda a equipe.">
@@ -129,6 +163,65 @@ export function ChatWorkspacePage() {
                   {activeLead?.patientName ?? 'Sem conversa selecionada'}
                 </CardTitle>
                 <p className="m-0 text-xs text-muted-foreground">{activeLead?.phone ?? 'Selecione um lead à esquerda'}</p>
+                {activeLead ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-medium text-muted-foreground">Atendimento:</span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={leadMode === 'human' ? 'default' : 'outline'}
+                      disabled={modeLoading}
+                      onClick={() => {
+                        setModeLoading(true)
+                        void setConversationMode(activeLead.id, 'human')
+                          .then((state) => {
+                            setLeadMode(state.owner_mode)
+                            toast.success('Conversa em modo humano.')
+                          })
+                          .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao alterar modo.'))
+                          .finally(() => setModeLoading(false))
+                      }}
+                    >
+                      Humano
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={leadMode === 'ai' ? 'default' : 'outline'}
+                      disabled={modeLoading}
+                      onClick={() => {
+                        setModeLoading(true)
+                        void setConversationMode(activeLead.id, 'ai')
+                          .then((state) => {
+                            setLeadMode(state.owner_mode)
+                            toast.success('Conversa em modo IA.')
+                          })
+                          .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao alterar modo.'))
+                          .finally(() => setModeLoading(false))
+                      }}
+                    >
+                      IA
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={leadMode === 'auto' ? 'default' : 'outline'}
+                      disabled={modeLoading}
+                      onClick={() => {
+                        setModeLoading(true)
+                        void setConversationMode(activeLead.id, 'auto')
+                          .then((state) => {
+                            setLeadMode(state.owner_mode)
+                            toast.success('Conversa em modo automático por regras.')
+                          })
+                          .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao alterar modo.'))
+                          .finally(() => setModeLoading(false))
+                      }}
+                    >
+                      Auto
+                    </Button>
+                  </div>
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
                 {QUICK_REPLIES.map((reply, idx) => (

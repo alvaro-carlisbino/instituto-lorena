@@ -35,6 +35,24 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
 
   const isActiveLead = crm.selectedLeadId === leadId
 
+  const handleAttachFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const next: Array<{ name: string; mimeType: string; base64: string }> = []
+    for (const file of Array.from(files)) {
+      const raw = await file.arrayBuffer()
+      const bytes = new Uint8Array(raw)
+      let binary = ''
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i] as number)
+      const base64 = btoa(binary)
+      next.push({
+        name: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        base64,
+      })
+    }
+    crm.setDraftAttachments([...(crm.draftAttachments ?? []), ...next])
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -110,6 +128,21 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
             placeholder="Digite uma mensagem de saída…"
             className="resize-none rounded-xl border-border/70 bg-background"
           />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
+              <input
+                type="file"
+                multiple
+                accept="audio/*,image/*,.pdf,.doc,.docx,.txt"
+                className="sr-only"
+                onChange={(e) => void handleAttachFiles(e.target.files)}
+              />
+              Anexar áudio/arquivo
+            </label>
+            {crm.draftAttachments.length > 0 ? (
+              <span className="text-xs text-muted-foreground">{crm.draftAttachments.length} anexo(s) pronto(s)</span>
+            ) : null}
+          </div>
           <Button type="button" className="self-end rounded-xl" onClick={() => void crm.sendMessage()}>
             Enviar
           </Button>

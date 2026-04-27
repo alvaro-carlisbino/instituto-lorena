@@ -4,6 +4,11 @@ export type SendWhatsappPayload = {
   leadId: string
   to: string
   text: string
+  attachments?: Array<{
+    name: string
+    mimeType: string
+    base64: string
+  }>
 }
 
 export type SendWhatsappResult =

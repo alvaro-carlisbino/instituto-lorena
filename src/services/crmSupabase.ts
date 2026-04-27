@@ -494,6 +494,64 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   }
 }
 
+export type ChatSlice = {
+  leads: Lead[]
+  interactions: Interaction[]
+}
+
+export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
+  const client = assertSupabase()
+  const [leadsRes, interactionsRes] = await Promise.all([
+    client
+      .from('leads')
+      .select(
+        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields',
+      )
+      .order('position', { ascending: true }),
+    client
+      .from('interactions')
+      .select('id, lead_id, patient_name, channel, direction, author, content, happened_at')
+      .order('happened_at', { ascending: false }),
+  ])
+  if (leadsRes.error) throw leadsRes.error
+  if (interactionsRes.error) throw interactionsRes.error
+
+  const leadRows = (leadsRes.data ?? []) as DbLead[]
+  const interactionRows = (interactionsRes.data ?? []) as DbInteraction[]
+
+  const builtLeads: Lead[] = leadRows.map((lead) => ({
+    id: lead.id,
+    patientName: lead.patient_name,
+    phone: lead.phone,
+    source: lead.source,
+    createdAt: lead.created_at,
+    position: lead.position,
+    score: lead.score,
+    temperature: lead.temperature,
+    ownerId: lead.owner_id,
+    pipelineId: lead.pipeline_id,
+    stageId: lead.stage_id,
+    summary: lead.summary,
+    customFields: (lead.custom_fields && typeof lead.custom_fields === 'object' ? lead.custom_fields : {}) as Record<
+      string,
+      unknown
+    >,
+  }))
+
+  const builtInteractions: Interaction[] = interactionRows.map((interaction) => ({
+    id: interaction.id,
+    leadId: interaction.lead_id,
+    patientName: interaction.patient_name,
+    channel: interaction.channel,
+    direction: interaction.direction,
+    author: interaction.author,
+    content: interaction.content,
+    happenedAt: interaction.happened_at,
+  }))
+
+  return { leads: builtLeads, interactions: builtInteractions }
+}
+
 export const seedTestUsers = async (): Promise<void> => {
   const client = assertSupabase()
   const payload = [

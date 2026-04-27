@@ -27,6 +27,11 @@ function getByPath(obj: Record<string, unknown>, path: string): unknown {
   return cur
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
 function normalizePhone(raw: string): string {
   return digitsOnly(raw)
 }
@@ -65,6 +70,8 @@ export class EvolutionProvider implements WhatsappProvider {
       safeString(getByPath(payload, 'data.key.remoteJid')) ||
       safeString(getByPath(payload, 'data.from')) ||
       safeString(getByPath(payload, 'sender'))
+    const fromRawNormalized = fromRaw.toLowerCase()
+    if (fromRawNormalized.includes('@g.us')) return null
     const fromPhone = normalizePhone(fromRaw)
     if (fromPhone.length < 10) return null
 
@@ -77,9 +84,38 @@ export class EvolutionProvider implements WhatsappProvider {
     const text =
       safeString(getByPath(payload, 'data.message.conversation')) ||
       safeString(getByPath(payload, 'data.message.extendedTextMessage.text')) ||
+      safeString(getByPath(payload, 'data.message.imageMessage.caption')) ||
+      safeString(getByPath(payload, 'data.message.videoMessage.caption')) ||
+      safeString(getByPath(payload, 'data.message.documentMessage.caption')) ||
       safeString(getByPath(payload, 'data.body')) ||
       safeString(getByPath(payload, 'message'))
-    if (!text.trim()) return null
+
+    const messageObj = asRecord(getByPath(payload, 'data.message')) ?? {}
+    const mediaItems: NormalizedInboundMessage['mediaItems'] = []
+    const pushMedia = (
+      key: string,
+      type: 'audio' | 'image' | 'video' | 'document' | 'other',
+      mimePath: string,
+      idPath: string,
+      captionPath?: string,
+    ) => {
+      const node = asRecord(messageObj[key])
+      if (!node) return
+      mediaItems.push({
+        type,
+        mimeType: safeString(getByPath(node, mimePath)),
+        externalMediaId: safeString(getByPath(node, idPath)),
+        caption: captionPath ? safeString(getByPath(node, captionPath)) : '',
+      })
+    }
+    pushMedia('audioMessage', 'audio', 'mimetype', 'mediaKey')
+    pushMedia('documentMessage', 'document', 'mimetype', 'mediaKey', 'caption')
+    pushMedia('imageMessage', 'image', 'mimetype', 'mediaKey', 'caption')
+    pushMedia('videoMessage', 'video', 'mimetype', 'mediaKey', 'caption')
+
+    const hasMedia = mediaItems.length > 0
+    const finalText = text.trim() || (hasMedia ? `[mídia recebida: ${mediaItems.map((m) => m.type).join(', ')}]` : '')
+    if (!finalText) return null
 
     const fromMe = Boolean(getByPath(payload, 'data.key.fromMe') ?? false)
     const happenedAtRaw = Number(getByPath(payload, 'data.messageTimestamp') ?? Date.now() / 1000)
@@ -93,9 +129,10 @@ export class EvolutionProvider implements WhatsappProvider {
       externalMessageId: messageId,
       fromPhone,
       fromName,
-      text: text.trim(),
+      text: finalText,
       direction: fromMe ? 'out' : 'in',
       happenedAt: happenedAtIso,
+      mediaItems,
       raw: payload,
     }
   }

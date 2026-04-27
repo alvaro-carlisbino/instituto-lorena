@@ -128,7 +128,9 @@ function trunc(s: string, max: number): string {
 function parseContext(raw: unknown): AiContext {
   if (!raw || typeof raw !== 'object') return {}
   const o = raw as Record<string, unknown>
-  const leadId = typeof o.leadId === 'string' && /^[0-9a-f-]{36}$/i.test(o.leadId.trim()) ? o.leadId.trim() : undefined
+  const rawLeadId = typeof o.leadId === 'string' ? o.leadId.trim() : ''
+  const leadId =
+    rawLeadId.length > 0 && rawLeadId.length <= 128 && !/[\s<>"']/.test(rawLeadId) ? rawLeadId : undefined
   const weekStartIso =
     typeof o.weekStartIso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.weekStartIso.trim()) ? o.weekStartIso.trim() : undefined
   const f = typeof o.focus === 'string' ? o.focus.trim().toLowerCase() : ''
@@ -229,14 +231,23 @@ async function buildCrmSnapshot(userClient: SupabaseClient, ctx: AiContext): Pro
 
   let leadFocus: Record<string, unknown> | null = null
   if (ctx.leadId) {
-    const { data, error } = await userClient
-      .from('leads')
-      .select('id, patient_name, phone, source, score, temperature, stage_id, pipeline_id, summary, created_at, custom_fields')
-      .eq('id', ctx.leadId)
-      .maybeSingle()
-    if (error) queryWarnings.push(`lead_focus: ${error.message}`)
-    if (data && typeof data === 'object') {
-      const d = data as Record<string, unknown>
+    const [leadRes, mediaRes] = await Promise.all([
+      userClient
+        .from('leads')
+        .select('id, patient_name, phone, source, score, temperature, stage_id, pipeline_id, summary, created_at, custom_fields')
+        .eq('id', ctx.leadId)
+        .maybeSingle(),
+      userClient
+        .from('crm_media_items')
+        .select('id, media_type, direction, transcribed_text, extracted_text, created_at')
+        .eq('lead_id', ctx.leadId)
+        .order('created_at', { ascending: false })
+        .limit(24),
+    ])
+    if (leadRes.error) queryWarnings.push(`lead_focus: ${leadRes.error.message}`)
+    if (mediaRes.error) queryWarnings.push(`crm_media_items: ${mediaRes.error.message}`)
+    if (leadRes.data && typeof leadRes.data === 'object') {
+      const d = leadRes.data as Record<string, unknown>
       let cf: string | null = null
       if (d.custom_fields != null) {
         try {
@@ -245,10 +256,20 @@ async function buildCrmSnapshot(userClient: SupabaseClient, ctx: AiContext): Pro
           cf = null
         }
       }
+      const mediaRows = (mediaRes.data ?? []) as Record<string, unknown>[]
+      const recent_media_intel = mediaRows.map((row) => ({
+        id: row.id,
+        media_type: row.media_type,
+        direction: row.direction,
+        created_at: row.created_at,
+        audio_transcript: row.transcribed_text ? trunc(String(row.transcribed_text), 3500) : null,
+        document_or_image_text: row.extracted_text ? trunc(String(row.extracted_text), 3500) : null,
+      }))
       leadFocus = {
         ...d,
         summary: trunc(String(d.summary ?? ''), 500),
         custom_fields: cf,
+        recent_media_intel,
       }
     }
   }
@@ -338,9 +359,9 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: 'unauthorized', message: userErr?.message ?? 'Sessão inválida.' }, 401)
     }
 
-    let body: { messages?: unknown; model?: string; context?: unknown }
+    let body: { messages?: unknown; model?: string; context?: unknown; promptOverride?: unknown }
     try {
-      body = (await req.json()) as { messages?: unknown; model?: string; context?: unknown }
+      body = (await req.json()) as { messages?: unknown; model?: string; context?: unknown; promptOverride?: unknown }
     } catch {
       return jsonResponse({ ok: false, error: 'invalid_json' }, 400)
     }
@@ -358,6 +379,7 @@ Deno.serve(async (req) => {
         ? defaultModel
         : 'glm-4.7'
     const context = parseContext(body.context)
+    const promptOverride = typeof body.promptOverride === 'string' ? body.promptOverride.trim() : ''
 
     let snapshot: Record<string, unknown>
     try {
@@ -380,6 +402,7 @@ Deno.serve(async (req) => {
     let systemContent = [
       'Você é o assistente de IA do CRM Instituto Lorena (operação comercial / clínica).',
       'Use APENAS o snapshot JSON abaixo; não invente números, leads ou interações que não apareçam.',
+      'Quando existir leadFocus.recent_media_intel, use audio_transcript e document_or_image_text como parte do contexto da conversa (transcrições e OCR/extração de documentos).',
       'Os dados respeitam as permissões (RLS) da conta do utilizador — pode ser uma amostra parcial.',
       'Responda em português de Portugal ou Brasil, de forma clara e profissional.',
       'Não peça nem repita senhas. Não confirme envio de mensagens a pacientes: pode sugerir RASCUNHOS; o humano envia.',
@@ -391,6 +414,10 @@ Deno.serve(async (req) => {
       'Snapshot CRM (JSON):',
       JSON.stringify(snapshot),
     ].join('\n')
+
+    if (promptOverride) {
+      systemContent = `${promptOverride}\n\n---\n\n${systemContent}`
+    }
 
     if (systemContent.length > MAX_SYSTEM_CHARS) {
       systemContent = systemContent.slice(0, MAX_SYSTEM_CHARS) + '\n…[snapshot truncado por tamanho máximo]'

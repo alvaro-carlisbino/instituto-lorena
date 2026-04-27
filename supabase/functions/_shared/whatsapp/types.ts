@@ -23,6 +23,12 @@ export type NormalizedInboundMessage = {
   text: string
   direction: ProviderMessageDirection
   happenedAt: string
+  mediaItems?: Array<{
+    type: 'audio' | 'image' | 'video' | 'document' | 'other'
+    mimeType?: string
+    externalMediaId?: string
+    caption?: string
+  }>
   raw: Record<string, unknown>
 }
 

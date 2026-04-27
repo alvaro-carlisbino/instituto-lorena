@@ -177,16 +177,22 @@ export async function insertInteraction(
     content: string
     happenedAt?: string
   },
-): Promise<void> {
-  const { error } = await admin.from('interactions').insert({
-    lead_id: input.leadId,
-    patient_name: input.patientName,
-    channel: input.channel,
-    direction: input.direction,
-    author: input.author,
-    content: input.content,
-    happened_at: input.happenedAt ?? new Date().toISOString(),
-  })
+): Promise<string> {
+  const { data, error } = await admin
+    .from('interactions')
+    .insert({
+      lead_id: input.leadId,
+      patient_name: input.patientName,
+      channel: input.channel,
+      direction: input.direction,
+      author: input.author,
+      content: input.content,
+      happened_at: input.happenedAt ?? new Date().toISOString(),
+    })
+    .select('id')
+    .single()
   if (error) throw new Error(error.message)
+  if (!data?.id) throw new Error('insert_interaction_no_id')
+  return String(data.id)
 }
 

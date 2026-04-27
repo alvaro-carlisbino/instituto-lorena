@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import type { Session } from '@supabase/supabase-js'
 import {
   ensureAppProfile,
@@ -30,6 +31,7 @@ import {
   insertLead,
   loadWebhookJobs,
   loadCrmData,
+  loadChatSliceFromSupabase,
   loadAuditLogsPage,
   createWebhookReplayJob,
   persistLead,
@@ -149,6 +151,7 @@ export const useCrmState = () => {
   const [interactions, setInteractions] = useState<Interaction[]>(initialInteractions)
   const [selectedLeadId, setSelectedLeadId] = useState<string>(initialLeads[0].id)
   const [draftMessage, setDraftMessage] = useState<string>('')
+  const [draftAttachments, setDraftAttachments] = useState<Array<{ name: string; mimeType: string; base64: string }>>([])
   const [routingCursor, setRoutingCursor] = useState<number>(0)
   const [captureNotice, setCaptureNotice] = useState<string>('')
   const [queueJobs, setQueueJobs] = useState<QueueJob[]>(queueSeed)
@@ -454,6 +457,8 @@ export const useCrmState = () => {
 
     const outbound = draftMessage.trim()
     setDraftMessage('')
+    const attachments = [...draftAttachments]
+    setDraftAttachments([])
     const senderName = getOwnerName(selectedLead.ownerId)
 
     if (dataMode === 'supabase' && isSupabaseConfigured) {
@@ -461,31 +466,15 @@ export const useCrmState = () => {
         leadId: selectedLead.id,
         to: selectedLead.phone,
         text: outbound,
+        attachments,
       })
 
       if (!result.ok) {
-        addInteraction({
-          leadId: selectedLead.id,
-          patientName: selectedLead.patientName,
-          channel: 'system',
-          direction: 'system',
-          author: 'WhatsApp Provider',
-          content: `Falha no envio: ${result.error}${result.detail ? ` (${result.detail})` : ''}`,
-          happenedAt: new Date().toISOString(),
-        })
+        toast.error(`Falha no envio: ${result.error}${result.detail ? ` (${result.detail})` : ''}`)
         return
       }
 
-      await syncFromSupabase()
-      addInteraction({
-        leadId: selectedLead.id,
-        patientName: selectedLead.patientName,
-        channel: 'system',
-        direction: 'system',
-        author: 'Canal de mensagens',
-        content: `Mensagem enviada com sucesso (status: ${result.status}).`,
-        happenedAt: new Date().toISOString(),
-      })
+      await refreshChatFromSupabase()
       return
     }
 
@@ -498,6 +487,17 @@ export const useCrmState = () => {
       content: outbound,
       happenedAt: new Date().toISOString(),
     })
+    if (attachments.length > 0) {
+      addInteraction({
+        leadId: selectedLead.id,
+        patientName: selectedLead.patientName,
+        channel: 'system',
+        direction: 'system',
+        author: 'Anexos',
+        content: `${attachments.length} arquivo(s)/áudio(s) adicionados à conversa.`,
+        happenedAt: new Date().toISOString(),
+      })
+    }
   }
 
   const retryFailedJobs = () => {
@@ -515,6 +515,17 @@ export const useCrmState = () => {
       // noop for now
     }
   }
+
+  const refreshChatFromSupabase = useCallback(async () => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) return
+    try {
+      const slice = await loadChatSliceFromSupabase()
+      setLeads(slice.leads)
+      setInteractions(slice.interactions)
+    } catch {
+      // noop
+    }
+  }, [dataMode])
 
   const syncFromSupabase = async () => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured) return
@@ -1690,7 +1701,9 @@ export const useCrmState = () => {
     surveyResponses,
     myAppUserId,
     draftMessage,
+    draftAttachments,
     setDraftMessage,
+    setDraftAttachments,
     triageByLead,
     isLoading,
     syncNotice,
@@ -1726,6 +1739,7 @@ export const useCrmState = () => {
     sendMessage,
     retryFailedJobs,
     syncFromSupabase,
+    refreshChatFromSupabase,
     refreshWebhookJobs,
     fetchAuditPage,
     seedSupabase,

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BellIcon, FileTextIcon, ShieldIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -21,6 +21,7 @@ import {
 } from '@/lib/workflowFieldOptions'
 import { slugifyLabel } from '@/lib/utils'
 import type { FieldVisibilityContext, WorkflowField } from '@/mocks/crmMock'
+import { getAiConfig, saveAiConfig, type ConversationOwnerMode } from '@/services/conversationControl'
 
 const FIELD_TYPE_OPTIONS = [
   { value: 'text', label: 'Texto livre' },
@@ -54,6 +55,12 @@ export function SettingsPage() {
   const crm = useCrm()
   const [workflowKeyManual, setWorkflowKeyManual] = useState<Record<string, boolean>>({})
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null)
+  const [aiEnabled, setAiEnabled] = useState(true)
+  const [aiDefaultMode, setAiDefaultMode] = useState<ConversationOwnerMode>('auto')
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiMaxPerHour, setAiMaxPerHour] = useState(2)
+  const [aiCooldownSeconds, setAiCooldownSeconds] = useState(240)
+  const [aiLoading, setAiLoading] = useState(false)
 
   const canAccessSettings = crm.currentPermission.canEditBoards || crm.currentPermission.canManageUsers
 
@@ -84,6 +91,42 @@ export function SettingsPage() {
     )
   }
 
+  const loadAiConfig = () => {
+    if (crm.dataMode !== 'supabase') return
+    setAiLoading(true)
+    void getAiConfig()
+      .then((cfg) => {
+        if (!cfg) return
+        setAiEnabled(Boolean(cfg.enabled))
+        setAiDefaultMode(cfg.default_owner_mode)
+        setAiPrompt(cfg.system_prompt ?? '')
+        setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 2))
+        setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 240))
+      })
+      .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao carregar configuração da IA.'))
+      .finally(() => setAiLoading(false))
+  }
+
+  useEffect(() => {
+    if (crm.dataMode !== 'supabase') return
+    void (async () => {
+      setAiLoading(true)
+      try {
+        const cfg = await getAiConfig()
+        if (!cfg) return
+        setAiEnabled(Boolean(cfg.enabled))
+        setAiDefaultMode(cfg.default_owner_mode)
+        setAiPrompt(cfg.system_prompt ?? '')
+        setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 2))
+        setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 240))
+      } catch {
+        // noop
+      } finally {
+        setAiLoading(false)
+      }
+    })()
+  }, [crm.dataMode])
+
   return (
     <AppLayout title="Configurações gerais" subtitle="Permissões, campos personalizados e regras de notificação.">
       <NoticeBanner
@@ -91,6 +134,94 @@ export function SettingsPage() {
         variant={noticeVariantFromMessage(crm.syncNotice)}
         className="mb-2"
       />
+
+      {crm.currentPermission.canManageUsers ? (
+        <Card className="mb-6 border-border/80 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base">Atendimento com IA (configuração)</CardTitle>
+            <CardDescription>
+              Defina prompt global, modo padrão e limites de segurança para o atendimento automático.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Switch checked={aiEnabled} onCheckedChange={setAiEnabled} />
+              <Label>Habilitar IA no atendimento automático</Label>
+            </div>
+            <div className="grid gap-2 sm:max-w-xs">
+              <Label>Modo padrão de novas conversas</Label>
+              <Select value={aiDefaultMode} onValueChange={(v) => setAiDefaultMode(v as ConversationOwnerMode)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="human">Humano</SelectItem>
+                  <SelectItem value="ai">IA</SelectItem>
+                  <SelectItem value="auto">Automático por regras</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ai-prompt">Prompt global da IA</Label>
+              <textarea
+                id="ai-prompt"
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                className="min-h-32 rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                placeholder="Defina como a IA deve se comportar no atendimento..."
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 sm:max-w-xl">
+              <div className="grid gap-2">
+                <Label htmlFor="ai-max-hour">Máximo de respostas IA por hora</Label>
+                <Input
+                  id="ai-max-hour"
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={aiMaxPerHour}
+                  onChange={(e) => setAiMaxPerHour(Number(e.target.value) || 2)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ai-cooldown">Cooldown mínimo entre respostas IA (segundos)</Label>
+                <Input
+                  id="ai-cooldown"
+                  type="number"
+                  min={30}
+                  max={3600}
+                  value={aiCooldownSeconds}
+                  onChange={(e) => setAiCooldownSeconds(Number(e.target.value) || 240)}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                disabled={aiLoading}
+                onClick={() => {
+                  setAiLoading(true)
+                  void saveAiConfig({
+                    enabled: aiEnabled,
+                    defaultOwnerMode: aiDefaultMode,
+                    systemPrompt: aiPrompt,
+                    maxAiRepliesPerHour: aiMaxPerHour,
+                    minSecondsBetweenAiReplies: aiCooldownSeconds,
+                  })
+                    .then(() => toast.success('Configuração da IA salva com sucesso.'))
+                    .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao salvar configuração da IA.'))
+                    .finally(() => setAiLoading(false))
+                }}
+              >
+                {aiLoading ? 'Salvando...' : 'Salvar configuração da IA'}
+              </Button>
+              <Button type="button" variant="outline" disabled={aiLoading} onClick={loadAiConfig}>
+                Recarregar
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-8 lg:grid-cols-2">
         <Card className="border-border shadow-none rounded-none bg-card">
