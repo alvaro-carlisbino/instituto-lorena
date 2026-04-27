@@ -98,7 +98,7 @@ export function KanbanPage() {
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Quadro de leads" subtitle="Seu perfil não pode movimentar leads nem alterar roteamento.">
+      <AppLayout title="Quadro de leads">
         <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground shadow-sm">
           <p className="m-0">Entre com um perfil autorizado ou peça liberação ao administrador.</p>
         </div>
@@ -109,7 +109,6 @@ export function KanbanPage() {
   return (
     <AppLayout
       title="Quadro de leads"
-      subtitle="Arraste o cartão entre as etapas do funil selecionado."
       actions={
         <>
           <Link
@@ -211,9 +210,9 @@ export function KanbanPage() {
             return (
               <article
                 key={stage.id}
-                className="flex min-h-[28rem] flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-sm transition-colors hover:border-primary/50 hover:shadow-md"
+                className="flex min-h-[28rem] flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none transition-colors hover:border-border/80"
               >
-                <header className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
+                <header className="flex items-center justify-between border-b border-border/20 px-4 py-3">
                   <div className="min-w-0 flex-1">
                     <h2 className="m-0 text-sm font-bold uppercase tracking-widest text-foreground">{stage.name}</h2>
                     {crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id] != null ? (
@@ -222,12 +221,12 @@ export function KanbanPage() {
                       </p>
                     ) : null}
                   </div>
-                  <span className="rounded-full border border-border/50 bg-background px-3 py-1 text-xs tabular-nums font-mono font-bold shadow-sm">
+                  <span className="rounded-full bg-muted/50 px-3 py-1 text-xs tabular-nums font-mono font-medium text-muted-foreground">
                     {stageLeads.length}
                   </span>
                 </header>
 
-                <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3 bg-muted/5">
+                <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3 bg-muted/10">
                   {stageLeads.map((lead) => (
                     <KanbanLeadCard
                       key={lead.id}

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -50,7 +50,7 @@ export function AdminOperationsPage() {
 
   if (!crm.currentPermission.canManageUsers) {
     return (
-      <AppLayout title="Operação Admin" subtitle="Gestão prática e governança comercial.">
+      <AppLayout title="Operação Admin">
         <Card>
           <CardContent className="pt-6 text-sm text-muted-foreground">Somente admin pode acessar esta página.</CardContent>
         </Card>
@@ -59,12 +59,11 @@ export function AdminOperationsPage() {
   }
 
   return (
-    <AppLayout title="Operação Admin" subtitle="Atalhos de gestão e automação (só admin).">
+    <AppLayout title="Operação Admin">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
           <CardHeader>
             <CardTitle>Kanban padrão</CardTitle>
-            <CardDescription>Restaura/garante o pipeline padrão organizado.</CardDescription>
           </CardHeader>
           <CardContent>
             <Button
@@ -83,7 +82,6 @@ export function AdminOperationsPage() {
         <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
           <CardHeader>
             <CardTitle>Campanha de aniversário</CardTitle>
-            <CardDescription>Gera tarefas e registro operacional para aniversariantes de hoje.</CardDescription>
           </CardHeader>
           <CardContent>
             <Button
@@ -103,11 +101,6 @@ export function AdminOperationsPage() {
         <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
           <CardHeader>
             <CardTitle>Automações</CardTitle>
-          <CardDescription>
-            Pré-configurado: tarefas de follow-up ao entrar em etapas (Clínica, Capilar, Cirúrgico). Ajuste prazos ou crie
-            regras novas; o gatilho é <code className="text-xs">stage_entered</code> e a ação <code className="text-xs">create_task</code>
-            (campos <code className="text-xs">title</code>, <code className="text-xs">hoursOffset</code>).
-          </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Button type="button" size="sm" className="rounded-lg" onClick={handleAddAutomation}>
@@ -148,7 +141,6 @@ export function AdminOperationsPage() {
         <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
           <CardHeader>
             <CardTitle>Governança e escala</CardTitle>
-            <CardDescription>Visão rápida de auditoria e fila de integração.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             <p className="m-0 text-sm"><strong>Mensagens em processamento:</strong> {crm.queueJobs.length}</p>

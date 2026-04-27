@@ -68,7 +68,7 @@ export function AuditPage() {
 
   if (!crm.currentPermission.canManageUsers) {
     return (
-      <AppLayout title="Auditoria" subtitle="Sem permissão para visualizar a trilha de auditoria.">
+      <AppLayout title="Auditoria">
         <Card className="shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
             <p className="m-0">Seu perfil não pode acessar auditoria.</p>
@@ -81,7 +81,7 @@ export function AuditPage() {
   const totalPages = Math.max(1, Math.ceil(crm.auditTotal / pageSize))
 
   return (
-    <AppLayout title="Auditoria" subtitle="Trilha de ações (quem fez o quê e quando).">
+    <AppLayout title="Auditoria">
       <Card className="shadow-sm">
         <CardContent className="space-y-4 pt-6">
           <div className="flex flex-wrap items-center gap-2">

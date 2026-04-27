@@ -38,10 +38,10 @@ export function MetricsPage() {
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Métricas ajustáveis" subtitle="Sem permissão para editar métricas no perfil atual.">
+      <AppLayout title="Métricas">
         <Card className="shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
-            <p className="m-0">Visualização liberada; edição de metas não está disponível para este perfil.</p>
+            <p className="m-0">Seu perfil não pode editar metas.</p>
           </CardContent>
         </Card>
       </AppLayout>
@@ -49,7 +49,7 @@ export function MetricsPage() {
   }
 
   return (
-    <AppLayout title="Métricas ajustáveis" subtitle="Metas e acompanhamento (cartões do painel).">
+    <AppLayout title="Métricas">
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={() => { crm.addMetric(); toast.success('Métrica criada.') }}>
           Nova métrica

@@ -85,7 +85,7 @@ export function SettingsPage() {
 
   if (!canAccessSettings) {
     return (
-      <AppLayout title="Configurações gerais" subtitle="Sem permissão para editar configurações estruturais.">
+      <AppLayout title="Configurações gerais">
         <Card className="border-border shadow-none bg-muted/10 rounded-none">
           <CardContent className="pt-6 text-sm text-destructive font-bold uppercase tracking-widest">
             <p className="m-0">Peça acesso a um administrador (workflow, perfis de permissão e notificações).</p>
@@ -134,15 +134,9 @@ export function SettingsPage() {
   return (
     <AppLayout
       title="Configurações gerais"
-      subtitle="Estrutura do CRM, atendimento com IA e regras da equipe."
       actions={
-        <PageHelp title="Blocos desta página" label="Ajuda, configurações gerais">
-          <p>
-            <strong>IA</strong> — liga a assistente, modo padrão, prompt e limites. <strong>Etiquetas e salas</strong> — apoio
-            ao Kanban e à agenda. <strong>Campos</strong> — dados extra por lead; chave técnica fica no avançado.{' '}
-            <strong>Permissões</strong> — o que admin, gestor e atendente podem fazer. <strong>Notificações</strong> — canal
-            (app, e-mail, WhatsApp) e gatilho. <strong>Organização</strong> — fuso e formatos de data/hora.
-          </p>
+        <PageHelp title="O que está em cada bloco" label="Ajuda">
+          <p>IA, etiquetas, campos, permissões, notificações e fuso/horas.</p>
         </PageHelp>
       }
     >
@@ -284,13 +278,13 @@ export function SettingsPage() {
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="border-border shadow-none rounded-none bg-card">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
+        <Card className="border border-border/40 shadow-none bg-card">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/20">
             <div>
-              <CardTitle className="tracking-widest uppercase text-base font-bold">Campos personalizados</CardTitle>
+              <CardTitle className="text-lg font-medium">Campos personalizados</CardTitle>
               <p className="mt-1 m-0 max-w-xl text-xs text-muted-foreground">Nome exibido; a chave nasce sozinha (detalhe técnico no bloco de cada campo).</p>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={() => { crm.addWorkflowField(); toast.success('Campo criado.') }} className="rounded-none uppercase tracking-widest font-bold">
+            <Button type="button" variant="outline" size="sm" onClick={() => { crm.addWorkflowField(); toast.success('Campo criado.') }} className="rounded-md font-medium">
               Novo campo
             </Button>
           </CardHeader>
@@ -319,7 +313,7 @@ export function SettingsPage() {
                     >
                       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                         <div className="grid gap-2 sm:col-span-2 lg:col-span-1">
-                          <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">
+                          <Label className="text-xs font-medium text-muted-foreground">
                             Nome no cadastro
                           </Label>
                           <Input
@@ -331,7 +325,7 @@ export function SettingsPage() {
                                 crm.updateWorkflowField(field.id, { fieldKey: slugifyLabel(label) })
                               }
                             }}
-                            className="rounded-none border-foreground/20 font-medium"
+                            className="rounded-md border-border/40 font-medium h-9"
                           />
                         </div>
                         <div className="grid gap-1">
@@ -508,12 +502,12 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border shadow-none rounded-none bg-card">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
+        <Card className="border border-border/40 shadow-none bg-card">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/20">
             <div>
-              <CardTitle className="tracking-widest uppercase text-base font-bold">Permissões por papel</CardTitle>
+              <CardTitle className="text-lg font-medium">Permissões por papel</CardTitle>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={() => { crm.addPermissionProfile(); toast.success('Perfil criado.') }} className="rounded-none uppercase tracking-widest font-bold">
+            <Button type="button" variant="outline" size="sm" onClick={() => { crm.addPermissionProfile(); toast.success('Perfil criado.') }} className="rounded-md font-medium">
               Novo perfil
             </Button>
           </CardHeader>
@@ -541,7 +535,7 @@ export function SettingsPage() {
                           })
                         }
                       >
-                        <SelectTrigger className="w-[220px] rounded-none font-semibold uppercase tracking-wide">
+                        <SelectTrigger className="w-[220px] rounded-md font-medium h-9 border-border/40">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -604,12 +598,12 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border shadow-none rounded-none bg-card lg:col-span-2">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
+        <Card className="border border-border/40 shadow-none bg-card lg:col-span-2">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/20">
             <div>
-              <CardTitle className="tracking-widest uppercase text-base font-bold">Notificações</CardTitle>
+              <CardTitle className="text-lg font-medium">Notificações</CardTitle>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={() => { crm.addNotificationRule(); toast.success('Regra criada.') }} className="rounded-none uppercase tracking-widest font-bold">
+            <Button type="button" variant="outline" size="sm" onClick={() => { crm.addNotificationRule(); toast.success('Regra criada.') }} className="rounded-md font-medium">
               Nova regra
             </Button>
           </CardHeader>

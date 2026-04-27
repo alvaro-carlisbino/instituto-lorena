@@ -1,6 +1,6 @@
 import { WidgetLayoutEditor } from '@/components/config/WidgetLayoutEditor'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useCrm } from '@/context/CrmContext'
@@ -11,7 +11,7 @@ export function TvConfigPage() {
 
   if (!crm.currentPermission.canViewTvPanel) {
     return (
-      <AppLayout title="Configuração da tela TV" subtitle="Sem permissão para o painel TV.">
+      <AppLayout title="Tela TV">
         <Card className="shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
             <p className="m-0">Seu perfil não pode configurar o painel de TV.</p>
@@ -22,18 +22,7 @@ export function TvConfigPage() {
   }
 
   return (
-    <AppLayout
-      title="Configuração da tela TV"
-      subtitle="O que a TV mostra: widgets e ordem, só com formulário."
-    >
-      <Card className="mb-4 border-border/80 shadow-sm">
-        <CardContent className="pt-4 text-sm text-muted-foreground">
-          <CardDescription className="text-sm leading-relaxed text-muted-foreground">
-            O painel organiza os blocos em uma grade de 12 colunas. A posição de cada bloco é definida pela coluna, linha e largura.
-          </CardDescription>
-        </CardContent>
-      </Card>
-
+    <AppLayout title="Tela TV">
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={crm.addTvWidget}>
           Novo widget

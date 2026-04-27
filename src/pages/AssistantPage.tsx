@@ -4,7 +4,7 @@ import { History, MessageSquarePlus, Trash2 } from 'lucide-react'
 
 import { CrmAssistantChat } from '@/components/assistant/CrmAssistantChat'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -103,11 +103,9 @@ export function AssistantPage() {
   return (
     <AppLayout
       title="Assistente"
-      subtitle="Perguntas com base no que a sua função pode ver no CRM."
       actions={
         <PageHelp title="Sobre o assistente" label="Ajuda, assistente">
-          <p>As respostas usam leads, equipe e números que a sua sessão tem permissão de ler — não vê o que o perfil bloqueia.</p>
-          <p>O tipo de resposta (visão geral, semana, uma pessoa) orienta o contexto, como no painel esquerdo.</p>
+          <p>Respostas limitadas às permissões do seu perfil. O contexto (geral, semana ou ficha) define o foco.</p>
         </PageHelp>
       }
     >
@@ -115,8 +113,7 @@ export function AssistantPage() {
         <div className="flex flex-col gap-4">
           <Card className="h-fit border-border shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">Como você quer perguntar</CardTitle>
-              <CardDescription className="text-xs">Contexto: geral, semana ou ficha de uma pessoa.</CardDescription>
+              <CardTitle className="text-sm font-semibold">Contexto</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-4">
               <div className="grid gap-2">
@@ -136,15 +133,13 @@ export function AssistantPage() {
               </div>
               {leadIdParam ? (
                 <div className="rounded-md border border-border bg-muted/30 p-3 text-xs">
-                  <p className="m-0 font-medium text-foreground">Está falando desta pessoa</p>
-                  <p className="mt-1 m-0 text-sm text-foreground">{leadName ?? 'Contato sem nome'}</p>
+                  <p className="m-0 font-medium text-foreground">Foco no lead</p>
+                  <p className="mt-1 m-0 text-sm text-foreground">{leadName ?? 'Sem nome'}</p>
                   <Button variant="link" size="sm" className="h-auto px-0 text-xs" onClick={() => navigate('/assistente')}>
-                    Voltar a perguntar sobre todos os leads
+                    Limpar foco
                   </Button>
                 </div>
-              ) : (
-                <p className="m-0 text-xs text-muted-foreground">Abra a partir de um lead: a ficha fica fixa e as respostas focam nela.</p>
-              )}
+              ) : null}
             </CardContent>
           </Card>
 
@@ -155,7 +150,6 @@ export function AssistantPage() {
                   <History className="size-4 text-muted-foreground" />
                   Histórico
                 </CardTitle>
-                <CardDescription className="text-xs">Lista à esquerda; <strong>Nova conversa</strong> limpa o painel de chat.</CardDescription>
                 <Button
                   type="button"
                   variant="secondary"

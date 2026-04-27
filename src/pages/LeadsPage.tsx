@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { MessageCircle, Search, Users } from 'lucide-react'
+import { MessageCircle, Search } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { LeadDetailSheet } from '@/components/leads/LeadDetailSheet'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
@@ -329,7 +329,7 @@ export function LeadsPage() {
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Leads" subtitle="Lista global de leads.">
+      <AppLayout title="Leads">
         <Card>
           <CardContent className="pt-6 text-sm text-muted-foreground">
             <p className="m-0">Seu perfil não tem permissão para gerenciar leads.</p>
@@ -340,26 +340,8 @@ export function LeadsPage() {
   }
 
   return (
-    <AppLayout
-      title="Todos os leads"
-      subtitle="Filtros, tabela, importação e ficha no painel."
-    >
+    <AppLayout title="Leads">
       {crm.isLoading ? <SkeletonBlocks rows={3} /> : null}
-
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border/60 bg-gradient-to-r from-primary/[0.06] to-transparent px-4 py-3 sm:px-5">
-        <div className="flex min-w-0 items-center gap-2">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Users className="size-4 sm:size-5" aria-hidden />
-          </div>
-          <div className="min-w-0">
-            <p className="m-0 text-sm font-semibold sm:text-base">Resumo</p>
-            <p className="m-0 text-xs text-muted-foreground sm:text-sm">
-              <span className="font-medium text-foreground">{filteredLeads.length}</span> de{' '}
-              <span className="text-foreground">{crm.leads.length}</span> visíveis com os filtros atuais
-            </p>
-          </div>
-        </div>
-      </div>
 
       <div className="mb-4 grid w-full max-w-full gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm backdrop-blur-sm sm:p-5 lg:grid-cols-2 lg:items-end xl:grid-cols-3 2xl:grid-cols-4">
         <div className="grid min-w-0 gap-1.5 lg:col-span-2 xl:col-span-1 2xl:col-span-2">
@@ -442,7 +424,7 @@ export function LeadsPage() {
           </Select>
         </div>
         <div className="grid min-w-0 gap-1.5 sm:col-span-2 lg:col-span-2 2xl:col-span-4">
-          <Label className="text-xs sm:text-sm">Colunas visíveis (tabela)</Label>
+          <Label className="text-xs sm:text-sm">Colunas</Label>
           <div className="flex flex-wrap gap-1.5 sm:gap-2">
             {TABLE_COLUMNS.map((col) => {
               const active = visibleColumns.includes(col)
@@ -468,7 +450,6 @@ export function LeadsPage() {
       <Card className="mb-4 rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
         <CardHeader className="pb-2 sm:pb-3">
           <CardTitle className="text-base sm:text-lg">Ações em lote</CardTitle>
-          <CardDescription className="text-xs sm:text-sm">Marque linhas; depois mude etapa e/ou responsável e aplique.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col flex-wrap items-stretch gap-3 sm:flex-row sm:items-end sm:gap-4">
           <div className="grid min-w-0 flex-1 gap-1.5 sm:max-w-[16rem]">
@@ -527,8 +508,7 @@ export function LeadsPage() {
 
       <Card className="mb-6 overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-sm backdrop-blur-sm sm:mb-8">
         <CardHeader className="space-y-1 border-b border-border/60 bg-muted/15 px-4 py-3 sm:px-5 sm:py-4">
-          <CardTitle className="text-base sm:text-lg">Leads — {filteredLeads.length} resultado(s)</CardTitle>
-          <CardDescription className="text-xs sm:text-sm">Abre o lead com um toque. Caixa à esquerda: seleção em lote.</CardDescription>
+          <CardTitle className="text-base sm:text-lg">Leads · {filteredLeads.length}</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <ul className="m-0 flex list-none flex-col divide-y divide-border/60 md:hidden">
@@ -588,8 +568,7 @@ export function LeadsPage() {
           </ul>
           {filteredLeads.length === 0 ? (
             <div className="p-8 text-center md:p-12">
-              <p className="m-0 text-base font-medium text-foreground">Nenhum lead com estes filtros</p>
-              <p className="m-0 mt-1 text-sm text-muted-foreground">Limpe a busca ou mude o funil / etapa / origem.</p>
+              <p className="m-0 text-sm text-muted-foreground">Nada neste filtro</p>
             </div>
           ) : null}
 
@@ -710,9 +689,6 @@ export function LeadsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Importar leads (CSV)</CardTitle>
-            <CardDescription className="text-xs sm:text-sm">
-              .csv com cabeçalho; primeira etapa = a do funil ativo no filtro do topo.
-            </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             <input
@@ -753,8 +729,7 @@ export function LeadsPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Importar conversas</CardTitle>
-            <CardDescription className="text-xs sm:text-sm">JSON de conversa exportado por este CRM.</CardDescription>
+            <CardTitle className="text-base">Importar conversas (JSON)</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3">
             <input

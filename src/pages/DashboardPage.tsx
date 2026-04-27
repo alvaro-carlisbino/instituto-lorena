@@ -130,7 +130,7 @@ export function DashboardPage() {
 
   if (crm.isLoading) {
     return (
-      <AppLayout title="Painel comercial" subtitle="Carregando dados...">
+      <AppLayout title="Painel comercial">
         <SkeletonBlocks rows={8} />
       </AppLayout>
     )
@@ -139,7 +139,6 @@ export function DashboardPage() {
   return (
     <AppLayout
       title="Painel comercial"
-      subtitle={`Resumo, novos hoje (${orgTz}) e trocas entre linhas de WhatsApp.`}
       actions={
         <>
           {crm.currentPermission.canRouteLeads ? (
@@ -179,17 +178,17 @@ export function DashboardPage() {
       {dashboardCards.length === 0 ? (
         <EmptyState
           icon={LayoutListIcon}
-          title="Nenhum widget ativo"
-          description="Configure os indicadores do dashboard em 'Ajustar widgets'."
-          className="border border-border rounded-none"
+          title="Visão Geral"
+          description="Acompanhe seus indicadores principais aqui."
+          className="border-0 shadow-none mb-6"
         />
       ) : (
-        <section className="grid gap-px bg-border/50 sm:grid-cols-2 xl:grid-cols-4 border border-border">
+        <section className="grid gap-1 sm:grid-cols-2 xl:grid-cols-4 mb-6">
           {dashboardCards.map((card, index) => (
-            <Card key={card.id} className={cn("border-0 rounded-none shadow-none bg-card transition-all duration-300 hover:bg-muted/30", index === 0 ? "xl:col-span-1 border-b-2 border-b-primary" : "")}>
+            <Card key={card.id} className={cn("border border-border/40 shadow-none bg-card transition-all duration-300 hover:bg-muted/20", index === 0 ? "xl:col-span-1 border-t-2 border-t-primary" : "")}>
               <CardHeader className="pb-4 pt-6 px-6">
-                <CardTitle className="text-4xl font-light tabular-nums tracking-tighter text-foreground mb-1">{getDashboardValue(card.metricKey)}</CardTitle>
-                <CardDescription className="text-xs uppercase tracking-widest font-semibold text-muted-foreground">{card.title}</CardDescription>
+                <CardDescription className="text-sm font-medium text-muted-foreground mb-2">{card.title}</CardDescription>
+                <CardTitle className="text-5xl font-light tabular-nums tracking-tighter text-foreground">{getDashboardValue(card.metricKey)}</CardTitle>
               </CardHeader>
             </Card>
           ))}
@@ -197,34 +196,34 @@ export function DashboardPage() {
       )}
 
       {crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers ? (
-        <section className="mb-6 grid gap-px border border-border bg-border/50 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="border-0 rounded-none shadow-none bg-card">
-            <CardHeader className="pb-2 pt-4">
-              <CardTitle className="text-2xl font-light tabular-nums tracking-tight">{leadsNewToday.length}</CardTitle>
-              <CardDescription className="text-[0.65rem] uppercase tracking-widest">Novos leads hoje</CardDescription>
+        <section className="mb-6 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
+          <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors">
+            <CardHeader className="pb-4 pt-6 text-center">
+              <CardTitle className="text-4xl font-light tabular-nums tracking-tight text-foreground">{leadsNewToday.length}</CardTitle>
+              <CardDescription className="text-xs uppercase tracking-widest mt-2 font-medium">Novos leads hoje</CardDescription>
             </CardHeader>
           </Card>
-          <Card className="border-0 rounded-none shadow-none bg-card">
-            <CardHeader className="pb-2 pt-4">
-              <CardTitle className="text-2xl font-light tabular-nums tracking-tight">{newWhatsappToday.length}</CardTitle>
-              <CardDescription className="text-[0.65rem] uppercase tracking-widest">Entradas via WhatsApp hoje</CardDescription>
+          <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors">
+            <CardHeader className="pb-4 pt-6 text-center">
+              <CardTitle className="text-4xl font-light tabular-nums tracking-tight text-foreground">{newWhatsappToday.length}</CardTitle>
+              <CardDescription className="text-xs uppercase tracking-widest mt-2 font-medium">Entradas via WhatsApp</CardDescription>
             </CardHeader>
           </Card>
-          <Card className="border-0 rounded-none shadow-none bg-card">
-            <CardHeader className="pb-2 pt-4">
-              <CardTitle className="text-2xl font-light tabular-nums tracking-tight">{handoffsToday}</CardTitle>
-              <CardDescription className="text-[0.65rem] uppercase tracking-widest">Mudanças de linha hoje</CardDescription>
+          <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors">
+            <CardHeader className="pb-4 pt-6 text-center">
+              <CardTitle className="text-4xl font-light tabular-nums tracking-tight text-foreground">{handoffsToday}</CardTitle>
+              <CardDescription className="text-xs uppercase tracking-widest mt-2 font-medium">Mudanças de linha</CardDescription>
             </CardHeader>
           </Card>
-          <Card className="border-0 rounded-none shadow-none bg-card">
-            <CardHeader className="pb-2 pt-4">
+          <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors flex flex-col justify-center items-center text-center">
+            <CardHeader className="pb-4 pt-6">
               <Link
                 to="/admin-whatsapp"
-                className="text-sm font-medium text-primary underline-offset-2 hover:underline"
+                className="text-base font-medium text-primary underline-offset-4 hover:underline"
               >
-                Roteamento por telefone
+                Gerenciar Linhas
               </Link>
-              <CardDescription className="pt-2 text-[0.65rem] uppercase tracking-widest">Funis por instância</CardDescription>
+              <CardDescription className="mt-2 text-xs uppercase tracking-widest font-medium">Roteamento por telefone</CardDescription>
             </CardHeader>
           </Card>
         </section>
@@ -233,8 +232,7 @@ export function DashboardPage() {
       {newWhatsappToday.length > 0 && (crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers) ? (
         <Card className="mb-8 border-border shadow-none rounded-none">
           <CardHeader>
-            <CardTitle className="text-sm uppercase tracking-widest">WhatsApp: novos hoje por linha</CardTitle>
-            <CardDescription className="text-xs">Baseado no primeiro registo de cada contacto; o mesmo lead pode migrar de linha ao longo do dia.</CardDescription>
+            <CardTitle className="text-sm uppercase tracking-widest">WhatsApp: novos hoje (por linha)</CardTitle>
           </CardHeader>
           <CardContent>
             {newWaByLine.length > 0 ? (
@@ -273,12 +271,12 @@ export function DashboardPage() {
         </p>
       ) : null}
 
-      <section className="grid gap-8 lg:grid-cols-12 mt-8">
-        <Card className="shadow-none border-border rounded-none lg:col-span-8">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-4 border-b border-border/50 pb-4 bg-muted/20">
-            <div className="space-y-1">
-              <CardTitle className="text-sm uppercase tracking-widest">Funil de Triagem</CardTitle>
-              <CardDescription className="text-xs">Visualização do fluxo clínico no estágio atual</CardDescription>
+      <section className="grid gap-6 lg:grid-cols-12 mt-8">
+        <Card className="shadow-none border border-border/40 lg:col-span-8">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-4 pb-6">
+            <div className="min-w-0">
+              <CardTitle className="text-lg font-medium text-foreground">Funil de Triagem</CardTitle>
+              <CardDescription className="mt-1">Visão atual do andamento dos leads</CardDescription>
             </div>
             <Select
               value={crm.selectedPipelineId}
@@ -286,7 +284,7 @@ export function DashboardPage() {
                 if (value) crm.setSelectedPipelineId(value)
               }}
             >
-              <LabeledSelectTrigger className="w-[min(100%,16rem)] rounded-none border-foreground/20 font-medium" size="sm">
+              <LabeledSelectTrigger className="w-[min(100%,16rem)] border-border/40 font-medium bg-muted/20" size="sm">
                 {pipelineSelectLabel}
               </LabeledSelectTrigger>
               <SelectContent className="rounded-none font-medium">
@@ -325,10 +323,10 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-none border-border rounded-none lg:col-span-4 bg-primary text-primary-foreground border-transparent">
-          <CardHeader className="border-b border-primary-foreground/10 pb-4">
-            <CardTitle className="text-sm uppercase tracking-widest text-primary-foreground/90">Carga da equipe</CardTitle>
-            <CardDescription className="text-xs text-primary-foreground/70">Distribuição direta de responsabilidade</CardDescription>
+        <Card className="shadow-none border border-border/40 lg:col-span-4 bg-card">
+          <CardHeader className="pb-6">
+            <CardTitle className="text-lg font-medium text-foreground">Carga da Equipe</CardTitle>
+            <CardDescription className="mt-1">Distribuição de leads por atendente</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             {crm.workloadBySdr.length === 0 ? (
@@ -344,9 +342,9 @@ export function DashboardPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={workloadData} layout="vertical" margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
                       <XAxis type="number" hide />
-                      <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11, fill: 'rgba(255,255,255,0.85)' }} axisLine={false} tickLine={false} />
-                      <Bar dataKey="leads" radius={[0, 4, 4, 0]} maxBarSize={28} fill="rgba(255,255,255,0.25)">
-                        <LabelList dataKey="leads" position="right" style={{ fontSize: 12, fontWeight: 700, fill: 'rgba(255,255,255,0.9)', fontFamily: 'monospace' }} />
+                      <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 13, fill: 'currentColor', fontWeight: 500 }} axisLine={false} tickLine={false} />
+                      <Bar dataKey="leads" radius={[0, 4, 4, 0]} maxBarSize={28} fill="currentColor" className="fill-primary/20">
+                        <LabelList dataKey="leads" position="right" style={{ fontSize: 13, fontWeight: 600, fill: 'currentColor' }} />
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>

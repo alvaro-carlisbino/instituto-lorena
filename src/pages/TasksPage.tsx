@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -50,7 +50,7 @@ export function TasksPage() {
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Tarefas" subtitle="Follow-up e pós-atendimento.">
+      <AppLayout title="Tarefas">
         <Card>
           <CardContent className="pt-6 text-sm text-muted-foreground">Sem permissão para ver tarefas.</CardContent>
         </Card>
@@ -59,10 +59,7 @@ export function TasksPage() {
   }
 
   return (
-    <AppLayout
-      title="Tarefas e NPS"
-      subtitle="Tarefas de follow-up podem ser criadas ao mover o lead de etapa; o NPS dispara nas etapas finais (encerrado, tratamento concluído, alta) com modelo por funil."
-    >
+    <AppLayout title="Tarefas e NPS">
       <div className="mb-4 flex flex-wrap gap-2">
         <Button type="button" size="sm" variant={filter === 'open' ? 'default' : 'outline'} onClick={() => setFilter('open')}>
           Abertas
@@ -80,10 +77,7 @@ export function TasksPage() {
 
       <Card className="mb-8">
         <CardHeader>
-          <CardTitle className="text-base">Tarefas ({tasks.length})</CardTitle>
-          <CardDescription>
-          Automatismos de follow-up (Operação admin) usam a etapa do funil: prazos sugeridos de 2h a 7 dias consoante a fase.
-        </CardDescription>
+          <CardTitle className="text-base">Tarefas · {tasks.length}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3">
           {tasks.length === 0 ? (
@@ -115,10 +109,7 @@ export function TasksPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Registrar NPS</CardTitle>
-          <CardDescription>
-            Quando o lead entra numa etapa final, o CRM gera um envio in-app: use o código abaixo (por funil há modelos de NPS Clínica, Capilar ou Cirúrgico). Registe a nota 0–10.
-          </CardDescription>
+          <CardTitle className="text-base">NPS</CardTitle>
         </CardHeader>
         <CardContent className="grid max-w-md gap-3">
           <div className="grid gap-1.5">

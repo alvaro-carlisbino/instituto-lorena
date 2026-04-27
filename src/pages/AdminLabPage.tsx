@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -98,7 +98,7 @@ export function AdminLabPage() {
 
   if (!crm.currentPermission.canManageUsers) {
     return (
-      <AppLayout title="Ferramentas" subtitle="Você não tem permissão para acessar esta área.">
+      <AppLayout title="Ferramentas">
         <Card className="shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
             <p className="m-0">Apenas administradores podem acessar esta área.</p>
@@ -109,12 +109,11 @@ export function AdminLabPage() {
   }
 
   return (
-    <AppLayout title="Ferramentas" subtitle="Testes e manutenção (só quem tem acesso).">
+    <AppLayout title="Ferramentas">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Dados de exemplo</CardTitle>
-            <CardDescription>Cria usuários, funis e configurações iniciais para teste.</CardDescription>
           </CardHeader>
           <CardFooter>
             <Button type="button" onClick={() => void crm.seedSupabase()} disabled={crm.isLoading}>
@@ -125,8 +124,7 @@ export function AdminLabPage() {
 
         <Card className="shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">Usuários de teste para demonstração</CardTitle>
-            <CardDescription>Cria usuários de demonstração para a equipe de atendimento.</CardDescription>
+            <CardTitle className="text-base">Usuários de teste</CardTitle>
           </CardHeader>
           <CardFooter>
             <Button type="button" variant="outline" onClick={() => void crm.createTestAuthUsers()} disabled={crm.isLoading}>
@@ -138,7 +136,6 @@ export function AdminLabPage() {
         <Card className="shadow-sm lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Reprocessar mensagens</CardTitle>
-            <CardDescription>Tenta novamente mensagens que ficaram pendentes.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <Button type="button" variant="outline" onClick={() => void crm.runWebhookReplay()} disabled={crm.isLoading}>
@@ -162,7 +159,6 @@ export function AdminLabPage() {
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Sincronização</CardTitle>
-            <CardDescription>Atualiza as informações para mostrar os dados mais recentes.</CardDescription>
           </CardHeader>
           <CardFooter>
             <Button type="button" variant="outline" onClick={() => void crm.syncFromSupabase()} disabled={crm.isLoading}>
@@ -173,10 +169,7 @@ export function AdminLabPage() {
 
         <Card className="shadow-sm lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">Testar recebimento de novo contato</CardTitle>
-            <CardDescription>
-              Simula a chegada de um novo contato com os dados preenchidos abaixo. Use apenas para testes.
-            </CardDescription>
+            <CardTitle className="text-base">Simular novo contato</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2 sm:col-span-2">

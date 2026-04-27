@@ -1,6 +1,6 @@
 import { WidgetLayoutEditor } from '@/components/config/WidgetLayoutEditor'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useCrm } from '@/context/CrmContext'
@@ -11,7 +11,7 @@ export function DashboardConfigPage() {
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Configuração do dashboard" subtitle="Sem permissão para editar o dashboard.">
+      <AppLayout title="Painel">
         <Card className="shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
             <p className="m-0">Seu perfil não pode alterar os cards do dashboard.</p>
@@ -22,18 +22,7 @@ export function DashboardConfigPage() {
   }
 
   return (
-    <AppLayout
-      title="Configuração do dashboard"
-      subtitle="Títulos, métricas e ordem dos blocos do painel."
-    >
-      <Card className="mb-4 border-border/80 shadow-sm">
-        <CardContent className="pt-4">
-          <CardDescription className="text-sm leading-relaxed text-muted-foreground">
-            Cada card mostra um número associado a um indicador. A grade de posições abaixo é opcional.
-          </CardDescription>
-        </CardContent>
-      </Card>
-
+    <AppLayout title="Painel">
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={crm.addDashboardWidget}>
           Novo card

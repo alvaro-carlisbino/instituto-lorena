@@ -48,7 +48,7 @@ export function HistoryPage() {
   const paginatedLeads = visibleLeads.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   return (
-    <AppLayout title="Prontuário e histórico" subtitle="Linha do tempo: notas clínicas e contatos, por paciente.">
+    <AppLayout title="Histórico">
       <Card className="shadow-none border-border rounded-none">
         <CardContent className="space-y-6 pt-6">
           {crm.isLoading ? <SkeletonBlocks rows={5} /> : null}

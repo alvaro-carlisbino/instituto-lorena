@@ -71,10 +71,10 @@ export function KanbanToolbar({
   )
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm backdrop-blur-sm sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-4 border-b border-border/30 pb-5 mb-5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <div
-          className="inline-flex w-full min-w-0 max-w-full rounded-xl border border-border/70 bg-muted/15 p-0.5 sm:w-auto"
+          className="inline-flex w-full min-w-0 max-w-full rounded-md bg-muted/30 p-1 sm:w-auto"
           role="group"
           aria-label="Modo de visualização do quadro"
         >
@@ -112,7 +112,7 @@ export function KanbanToolbar({
 
         <Select value={pipelineId} onValueChange={(v) => v && onPipelineChange(v)}>
           <LabeledSelectTrigger
-            className="w-full min-w-[12rem] sm:w-[min(100%,13rem)] rounded-xl border-border/70 text-xs font-medium"
+            className="w-full min-w-[12rem] sm:w-[min(100%,13rem)] rounded-md border-border/40 text-xs font-medium"
             size="default"
           >
             {pipelineLabel}
@@ -128,7 +128,7 @@ export function KanbanToolbar({
 
         <Select value={ownerFilter} onValueChange={(v) => v && onOwnerChange(v)}>
           <LabeledSelectTrigger
-            className="w-full min-w-[12rem] sm:w-[min(100%,11rem)] rounded-xl border-border/70 text-xs font-medium"
+            className="w-full min-w-[12rem] sm:w-[min(100%,11rem)] rounded-md border-border/40 text-xs font-medium"
             size="default"
           >
             {ownerLabel}
@@ -145,7 +145,7 @@ export function KanbanToolbar({
 
         <Select value={tagFilter} onValueChange={(v) => v && onTagFilterChange(v)}>
           <LabeledSelectTrigger
-            className="w-full min-w-[10rem] sm:w-[min(100%,10rem)] rounded-xl border-border/70 text-xs font-medium"
+            className="w-full min-w-[10rem] sm:w-[min(100%,10rem)] rounded-md border-border/40 text-xs font-medium"
             size="default"
           >
             {tagLabel}
@@ -176,7 +176,7 @@ export function KanbanToolbar({
         <div
           role="group"
           aria-label="Filtrar por temperatura"
-          className="flex w-full flex-wrap gap-1 rounded-xl border border-border/70 bg-muted/20 p-1 sm:w-auto"
+          className="flex w-full flex-wrap gap-1 rounded-md bg-muted/30 p-1 sm:w-auto"
         >
           {TEMP_OPTIONS.map((opt) => (
             <Button

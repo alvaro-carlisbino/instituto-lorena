@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -158,7 +158,7 @@ export function WhatsappConnectionPage() {
 
   if (!crm.currentPermission.canManageUsers) {
     return (
-      <AppLayout title="Conexão WhatsApp" subtitle="Sem permissão para acessar esta área.">
+      <AppLayout title="WhatsApp">
         <Card>
           <CardContent className="pt-6 text-sm text-muted-foreground">
             Apenas administradores podem gerenciar a conexão do WhatsApp.
@@ -298,21 +298,15 @@ export function WhatsappConnectionPage() {
   return (
     <AppLayout
       title="WhatsApp"
-      subtitle="Cada item é um número conectado ao serviço de mensagens; use o QR abaixo para conectar o celular."
       actions={
-        <PageHelp title="WhatsApp no CRM">
-          <p>Um &quot;telefone&quot; aqui é a conexão com o serviço de mensagens. Novos contatos podem entrar no processo (funil) que você marcar abaixo.</p>
-          <p>No celular, use o QR: <strong>WhatsApp</strong> → <strong>Aparelhos conectados</strong> (menu) e leia o código exibido ao lado.</p>
-          <p>Mesma pessoa em outro número cadastrado: a ficha (lead) segue a mesma; use <strong>Já estava em outro lugar</strong> se o suporte criou a conta em outro painel.</p>
+        <PageHelp title="Conexão">
+          <p>QR: WhatsApp → Aparelhos conectados. Cada bloco abaixo é um número/linha; escolha o funil de entrada.</p>
         </PageHelp>
       }
     >
       <Card className={cn('mb-4', pageQuietCardClass)}>
         <CardHeader>
-          <CardTitle>Meus telefones</CardTitle>
-          <CardDescription className="max-w-2xl">
-            Adicione, selecione a linha e use o QR no bloco Estado e código.
-          </CardDescription>
+          <CardTitle>Telefones</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
           {instances.length > 0 ? (
@@ -449,12 +443,10 @@ export function WhatsappConnectionPage() {
           <CardHeader className="space-y-1">
             <div className="flex flex-col gap-2 min-[500px]:flex-row min-[500px]:items-start min-[500px]:justify-between">
               <div>
-                <CardTitle>Onde a primeira conversa cai</CardTitle>
-                <CardDescription>Primeira mensagem, por telefone. Salve com o botão em cada linha.</CardDescription>
+                <CardTitle>Entrada da primeira conversa</CardTitle>
               </div>
               <PageHelp title="Regras do primeiro contato" label="Regras do primeiro contato, ajuda">
-                <p>Vale só para a <strong>primeira mensagem</strong> de um <strong>contato novo</strong> nesse telefone.</p>
-                <p>Se a pessoa manda de outro número (também listado), a ficha continua: escolhe se a conversa fica <strong>na mesma coluna</strong> do quadro ou aplica de novo a entrada desta linha. O histórico registra troca de linha.</p>
+                <p>Só a 1.ª mensagem de um contato novo nesta linha; ajuste o funil/etapa e use Salvar na linha.</p>
               </PageHelp>
             </div>
           </CardHeader>

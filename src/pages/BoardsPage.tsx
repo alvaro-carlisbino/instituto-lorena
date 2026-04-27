@@ -29,7 +29,7 @@ export function BoardsPage() {
 
   if (!crm.currentPermission.canEditBoards) {
     return (
-      <AppLayout title="Funis e etapas" subtitle="Sem permissão para editar funis com o perfil atual.">
+      <AppLayout title="Funis e etapas">
         <Card className="shadow-none border-border rounded-none bg-muted/10">
           <CardContent className="pt-6 text-sm font-semibold uppercase tracking-widest text-destructive">
             <p className="m-0">Seu perfil não tem privilégios de administrador de funil.</p>
@@ -40,7 +40,7 @@ export function BoardsPage() {
   }
 
   return (
-    <AppLayout title="Funis e etapas" subtitle="Criar funis, ordenar etapas e regras de movimento.">
+    <AppLayout title="Funis e etapas">
       <div className="flex flex-wrap gap-2 mb-8">
         <Button type="button" onClick={() => { crm.addPipeline(); toast.success('Funil criado.') }} className="rounded-none uppercase tracking-widest font-bold">
           Novo pipeline

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useCrm } from '@/context/CrmContext'
@@ -27,7 +27,7 @@ export function DataViewsPage() {
 
   if (!crm.currentPermission.canEditBoards) {
     return (
-      <AppLayout title="Visões de dados" subtitle="Sem permissão para editar visões salvas.">
+      <AppLayout title="Visões">
         <Card className="shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
             <p className="m-0">Peça acesso de gestor ou administrador.</p>
@@ -53,10 +53,7 @@ export function DataViewsPage() {
   }
 
   return (
-    <AppLayout
-      title="Visões de dados"
-      subtitle="Colunas visíveis por visão salva; marque o que precisar."
-    >
+    <AppLayout title="Visões">
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={crm.addDataView}>
           Nova visão
@@ -98,11 +95,6 @@ export function DataViewsPage() {
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Pré-visualização</CardTitle>
-            {activeView ? (
-              <CardDescription className="text-sm">
-                Marque as colunas que quer ver. Os nomes mostrados são os rótulos amigáveis dos campos.
-              </CardDescription>
-            ) : null}
           </CardHeader>
           <CardContent className="overflow-x-auto">
             {activeView ? (

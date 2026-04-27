@@ -58,9 +58,9 @@ export function KanbanLeadCard({
   return (
     <div
       className={cn(
-        'cursor-grab border-l-4 rounded-2xl bg-card/90 p-3 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md active:cursor-grabbing',
+        'cursor-grab flex flex-col gap-2 rounded-xl border-l-4 bg-card p-3 shadow-sm transition-colors hover:shadow-md active:cursor-grabbing',
         selected ? 'ring-2 ring-primary/25 shadow-md' : '',
-        isSlaBreached ? 'border-destructive shadow-[0_0_10px_var(--destructive)]' : 'border-border/80 hover:border-primary/35'
+        isSlaBreached ? 'border-destructive shadow-[0_0_10px_var(--destructive)]' : 'border-border hover:border-primary/50'
       )}
       draggable
       onDragStart={(event) => {
@@ -94,8 +94,8 @@ export function KanbanLeadCard({
         <p className="m-0 text-sm font-semibold leading-tight tracking-tight">{title}</p>
         <span className={temperaturePillClass(temperature)}>{formatTemperature(tempRaw, lead.temperature)}</span>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <small className="text-muted-foreground">{sourceLabel}</small>
+      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+        <small className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">{sourceLabel}</small>
         {tagPills.map((t) => (
           <span
             key={t.id}
@@ -124,12 +124,12 @@ export function KanbanLeadCard({
         </span>
         <span>{ownerName}</span>
       </div>
-      <div className="mt-2 flex gap-2">
+      <div className="mt-1 flex gap-1 border-t border-border/40 pt-2">
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="flex-1"
+          className="flex-1 h-7 text-xs font-medium text-muted-foreground hover:text-foreground"
           onClick={(e) => {
             e.stopPropagation()
             onMovePrev()
@@ -137,11 +137,12 @@ export function KanbanLeadCard({
         >
           Voltar
         </Button>
+        <div className="w-px bg-border/40" />
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="sm"
-          className="flex-1"
+          className="flex-1 h-7 text-xs font-medium text-muted-foreground hover:text-foreground"
           onClick={(e) => {
             e.stopPropagation()
             onMoveNext()

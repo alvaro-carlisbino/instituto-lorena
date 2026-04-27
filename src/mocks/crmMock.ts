@@ -658,8 +658,8 @@ export const initialWorkflowFields: WorkflowField[] = [
     label: 'Especialidade de interesse',
     fieldType: 'select',
     required: true,
-    options: ['Clinica', 'Estetica', 'Odonto'],
-    section: 'Clinico',
+    options: ['Clínica Geral', 'Estética Avançada', 'Odontologia', 'Cirurgia Plástica', 'Dermatologia'],
+    section: 'Comercial',
     sortOrder: 10,
     visibleIn: allContexts,
     validation: {},
@@ -667,10 +667,10 @@ export const initialWorkflowFields: WorkflowField[] = [
   {
     id: 'wf-2',
     fieldKey: 'faixa_investimento',
-    label: 'Faixa de investimento',
+    label: 'Faixa de investimento (R$)',
     fieldType: 'select',
     required: false,
-    options: ['Ate R$500', 'R$500 a R$1500', 'Acima de R$1500'],
+    options: ['Até R$ 1.000', 'R$ 1.000 a R$ 5.000', 'Acima de R$ 5.000', 'Indefinido'],
     section: 'Comercial',
     sortOrder: 11,
     visibleIn: allContexts,
@@ -679,13 +679,49 @@ export const initialWorkflowFields: WorkflowField[] = [
   {
     id: 'wf-3',
     fieldKey: 'data_preferida',
-    label: 'Data preferida',
+    label: 'Data preferida para avaliação',
     fieldType: 'date',
     required: false,
     options: [],
     section: 'Agenda',
     sortOrder: 12,
     visibleIn: allContexts,
+    validation: {},
+  },
+  {
+    id: 'wf-4',
+    fieldKey: 'convenio',
+    label: 'Convênio / Plano de Saúde',
+    fieldType: 'select',
+    required: false,
+    options: ['Particular', 'Unimed', 'Bradesco Saúde', 'SulAmérica', 'Amil', 'Outros'],
+    section: 'Cadastro Médio',
+    sortOrder: 13,
+    visibleIn: ['lead_detail', 'capture_form'],
+    validation: {},
+  },
+  {
+    id: 'wf-5',
+    fieldKey: 'procedimentos_anteriores',
+    label: 'Já realizou procedimentos similares?',
+    fieldType: 'select',
+    required: false,
+    options: ['Sim', 'Não'],
+    section: 'Triagem Clínica',
+    sortOrder: 14,
+    visibleIn: ['lead_detail'],
+    validation: {},
+  },
+  {
+    id: 'wf-6',
+    fieldKey: 'medicamentos_uso',
+    label: 'Medicamentos em uso contínuo',
+    fieldType: 'text',
+    required: false,
+    options: [],
+    section: 'Triagem Clínica',
+    sortOrder: 15,
+    visibleIn: ['lead_detail'],
     validation: {},
   },
 ]
@@ -941,6 +977,19 @@ export const initialSurveyDispatches: SurveyDispatch[] = []
 
 export const initialSurveyResponses: SurveyResponse[] = []
 
-export const initialLeadTagDefinitions: LeadTagDefinition[] = []
-export const initialRooms: Room[] = []
+export const initialLeadTagDefinitions: LeadTagDefinition[] = [
+  { id: 'tag-1', name: 'Urgência Médica', color: '#ef4444', createdAt: '2026-04-01T10:00:00Z' },
+  { id: 'tag-2', name: 'Paciente VIP', color: '#eab308', createdAt: '2026-04-01T10:00:00Z' },
+  { id: 'tag-3', name: 'Indicação', color: '#3b82f6', createdAt: '2026-04-01T10:00:00Z' },
+  { id: 'tag-4', name: 'Recorrente', color: '#22c55e', createdAt: '2026-04-01T10:00:00Z' },
+  { id: 'tag-5', name: 'Pendente Doc.', color: '#f97316', createdAt: '2026-04-01T10:00:00Z' },
+]
+
+export const initialRooms: Room[] = [
+  { id: 'room-1', name: 'Consultório 1 (Avaliação)', active: true, slotMinutes: 30, sortOrder: 0, createdAt: '2026-04-01T10:00:00Z' },
+  { id: 'room-2', name: 'Consultório 2 (Procedimentos)', active: true, slotMinutes: 60, sortOrder: 1, createdAt: '2026-04-01T10:00:00Z' },
+  { id: 'room-3', name: 'Sala de Cirurgia', active: true, slotMinutes: 120, sortOrder: 2, createdAt: '2026-04-01T10:00:00Z' },
+  { id: 'room-4', name: 'Sala de Recuperação', active: true, slotMinutes: 60, sortOrder: 3, createdAt: '2026-04-01T10:00:00Z' },
+]
+
 export const initialAppointments: Appointment[] = []

@@ -16,16 +16,16 @@ export function PageHeader({ title, description, actions, className, titleId }: 
     <div
       className={cn(
         'flex min-w-0 flex-col gap-2 border-b border-border/70 bg-background/70 pt-2 md:flex-row md:items-start md:justify-between md:gap-4',
-        description && description !== '' ? 'pb-4' : 'pb-3',
+        description && description !== '' ? 'pb-3' : 'pb-2.5',
         className
       )}
     >
-      <div className={cn('min-w-0', description && description !== '' && 'space-y-1.5')}>
-        <h1 id={titleId} className="font-heading text-xl font-semibold tracking-tight text-foreground md:text-2xl lg:text-[1.65rem]">
+      <div className={cn('min-w-0', description && description !== '' && 'space-y-1')}>
+        <h1 id={titleId} className="font-heading text-xl font-semibold tracking-tight text-foreground md:text-2xl lg:text-[1.6rem]">
           {title}
         </h1>
         {description != null && description !== '' ? (
-          <div className="max-w-3xl text-sm leading-relaxed text-muted-foreground [&_p]:m-0 [&_p+p]:mt-2">
+          <div className="max-w-2xl text-xs leading-snug text-muted-foreground/90 [&_p]:m-0 [&_p+p]:mt-1.5">
             {typeof description === 'string' ? <p className="m-0">{description}</p> : description}
           </div>
         ) : null}

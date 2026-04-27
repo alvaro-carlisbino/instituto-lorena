@@ -8,7 +8,7 @@ import { findFirstFreeSlot } from '@/services/crmSupabase'
 import { getDataProviderMode } from '@/services/dataMode'
 import { isSupabaseConfigured } from '@/lib/supabaseClient'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -95,7 +95,7 @@ export function AgendaPage() {
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Agenda" subtitle="Sem permissão.">
+      <AppLayout title="Agenda">
         <Card>
           <CardContent className="p-6 text-sm text-muted-foreground">Apenas a equipa com acesso a leads pode gerir a agenda.</CardContent>
         </Card>
@@ -104,17 +104,13 @@ export function AgendaPage() {
   }
 
   return (
-    <AppLayout
-      title="Agenda"
-      subtitle="Marcações, salas e presença. (Calendário externo: em breve.)"
-    >
+    <AppLayout title="Agenda">
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <Sparkle className="h-4 w-4" /> Novo: primeiro horário livre
+              <Sparkle className="h-4 w-4" /> Primeiro horário livre
             </CardTitle>
-            <CardDescription>Usa a função SQL e as salas activas. Duração em minutos.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-1.5">
@@ -172,9 +168,8 @@ export function AgendaPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <CalendarBlank className="h-4 w-4" /> Próximas marcações
+              <CalendarBlank className="h-4 w-4" /> Próximas
             </CardTitle>
-            <CardDescription>Presença: esperado, check-in ou ausência.</CardDescription>
           </CardHeader>
           <CardContent>
             {list.length === 0 ? (

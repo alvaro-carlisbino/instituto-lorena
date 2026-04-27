@@ -7,7 +7,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -35,7 +35,7 @@ export function ChannelsPage() {
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Canais configuráveis" subtitle="Sem permissão para editar canais no perfil atual.">
+      <AppLayout title="Canais">
         <Card className="shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
             <p className="m-0">Você pode visualizar canais, mas não alterar configurações.</p>
@@ -46,10 +46,7 @@ export function ChannelsPage() {
   }
 
   return (
-    <AppLayout
-      title="Canais configuráveis"
-      subtitle="Canais ativos, prioridade, prazos e ligação aos campos do lead."
-    >
+    <AppLayout title="Canais">
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <Button
           type="button"
@@ -62,15 +59,6 @@ export function ChannelsPage() {
           Novo canal
         </Button>
       </div>
-
-      <Card className="mb-4 border-border/60 bg-muted/10 shadow-sm">
-        <CardContent className="pt-4 sm:pt-5">
-          <CardDescription className="text-sm leading-relaxed text-muted-foreground">
-            Define qual informação do contato será preenchida automaticamente quando o canal receber uma mensagem.
-            Preencha o caminho como texto simples; a equipe técnica pode indicar o formato exato.
-          </CardDescription>
-        </CardContent>
-      </Card>
 
       {crm.channels.length === 0 ? (
         <EmptyState

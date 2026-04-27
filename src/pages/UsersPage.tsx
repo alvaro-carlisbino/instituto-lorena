@@ -7,7 +7,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { NoticeBanner } from '@/components/NoticeBanner'
 import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -49,7 +49,7 @@ export function UsersPage() {
 
   if (!crm.currentPermission.canManageUsers) {
     return (
-      <AppLayout title="Usuários e permissões" subtitle="Sem permissão para gerenciamento de usuários.">
+      <AppLayout title="Equipe">
         <Card className="border-border shadow-none bg-muted/10 rounded-none">
           <CardContent className="pt-6 text-sm text-destructive font-bold uppercase tracking-widest">
             <p className="m-0">Seu perfil não pode gerenciar usuários.</p>
@@ -60,12 +60,9 @@ export function UsersPage() {
   }
 
   return (
-    <AppLayout
-      title="Usuários e permissões"
-      subtitle="E-mail, papel (admin, gestor, SDR) e acesso: senha agora ou convite."
-    >
+    <AppLayout title="Equipe">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <Button type="button" onClick={() => { crm.addUser(); toast.success('Usuário adicionado à lista.') }} className="rounded-none uppercase tracking-widest font-bold">
+        <Button type="button" onClick={() => { crm.addUser(); toast.success('Usuário adicionado à lista.') }} className="rounded-md">
           Novo usuário
         </Button>
       </div>
@@ -76,14 +73,9 @@ export function UsersPage() {
         className="mt-4 rounded-none"
       />
 
-      <Card className="mt-8 border-border shadow-none rounded-none bg-card">
-        <CardHeader className="space-y-1 pb-6 border-b border-border/50 bg-muted/10">
-          <CardTitle className="text-lg uppercase tracking-widest font-bold">Equipe</CardTitle>
-          <CardDescription className="text-xs">
-            <strong className="text-foreground">Criar acesso:</strong> preencha senha e confirmação, depois clique em &quot;Criar acesso no sistema&quot;.
-            <span className="mx-2 text-muted-foreground">·</span>
-            <strong className="text-foreground">Convite:</strong> apenas e-mail (o utilizador define a senha ao aceitar).
-          </CardDescription>
+      <Card className="mt-8 border border-border/40 shadow-none bg-card">
+        <CardHeader className="space-y-1 pb-6 border-b border-border/20">
+          <CardTitle className="text-lg font-medium">Equipe</CardTitle>
         </CardHeader>
         <CardContent className="space-y-0 pt-0 px-0">
           {crm.users.length === 0 ? (
@@ -103,18 +95,18 @@ export function UsersPage() {
                   >
                     <div className="grid gap-6 lg:grid-cols-[2fr_2fr_minmax(0,14rem)_auto] lg:items-end">
                       <div className="grid gap-2">
-                        <Label htmlFor={`name-${user.id}`} className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                        <Label htmlFor={`name-${user.id}`} className="text-xs font-medium text-muted-foreground">
                           Nome
                         </Label>
                         <Input
                           id={`name-${user.id}`}
                           value={user.name}
                           onChange={(e) => crm.updateUser(user.id, { name: e.target.value })}
-                          className="h-10 rounded-none border-foreground/20 font-bold"
+                          className="h-9 rounded-md border-border/40"
                         />
                       </div>
                       <div className="grid gap-2">
-                        <Label htmlFor={`email-${user.id}`} className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                        <Label htmlFor={`email-${user.id}`} className="text-xs font-medium text-muted-foreground">
                           E-mail
                         </Label>
                         <Input
@@ -123,11 +115,11 @@ export function UsersPage() {
                           value={user.email}
                           onChange={(e) => crm.updateUser(user.id, { email: e.target.value })}
                           placeholder="nome@empresa.com"
-                          className="h-10 rounded-none border-foreground/20"
+                          className="h-9 rounded-md border-border/40"
                         />
                       </div>
                       <div className="grid gap-2">
-                        <Label htmlFor={`role-${user.id}`} className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                        <Label htmlFor={`role-${user.id}`} className="text-xs font-medium text-muted-foreground">
                           Papel / Função
                         </Label>
                         <Select
@@ -136,7 +128,7 @@ export function UsersPage() {
                             crm.updateUser(user.id, { role: value as 'admin' | 'gestor' | 'sdr' })
                           }
                         >
-                          <SelectTrigger id={`role-${user.id}`} className="h-10 rounded-none font-semibold uppercase tracking-wide w-full">
+                          <SelectTrigger id={`role-${user.id}`} className="h-9 rounded-md border-border/40 w-full">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -153,7 +145,7 @@ export function UsersPage() {
                           checked={user.active}
                           onCheckedChange={(checked) => crm.updateUser(user.id, { active: checked })}
                         />
-                        <Label className="text-[10px] font-bold uppercase tracking-widest cursor-pointer">
+                        <Label className="text-xs font-medium cursor-pointer">
                           Ativo
                         </Label>
                       </div>
@@ -163,7 +155,7 @@ export function UsersPage() {
 
                     <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                       <div className="grid gap-2">
-                        <Label htmlFor={`pw-${user.id}`} className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">
+                        <Label htmlFor={`pw-${user.id}`} className="text-xs font-medium text-muted-foreground">
                           Senha inicial
                         </Label>
                         <div className="relative">
@@ -174,13 +166,13 @@ export function UsersPage() {
                             value={draft.password}
                             onChange={(e) => setDraft(user.id, { password: e.target.value })}
                             placeholder="Mín. 8 caracteres"
-                            className="h-10 rounded-none font-mono pr-10"
+                            className="h-9 rounded-md border-border/40 font-mono pr-10"
                           />
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0"
+                            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0"
                             onClick={() => setDraft(user.id, { visible: !draft.visible })}
                           >
                             {draft.visible ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
@@ -188,7 +180,7 @@ export function UsersPage() {
                         </div>
                       </div>
                       <div className="grid gap-2">
-                        <Label htmlFor={`pwc-${user.id}`} className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">
+                        <Label htmlFor={`pwc-${user.id}`} className="text-xs font-medium text-muted-foreground">
                           Confirmar senha
                         </Label>
                         <Input
@@ -197,13 +189,13 @@ export function UsersPage() {
                           autoComplete="new-password"
                           value={draft.confirm}
                           onChange={(e) => setDraft(user.id, { confirm: e.target.value })}
-                          className="h-10 rounded-none font-mono"
+                          className="h-9 rounded-md border-border/40 font-mono"
                         />
                       </div>
                       <div className="flex flex-col gap-2 sm:col-span-2 lg:col-span-1 lg:justify-end">
                         <Button
                           type="button"
-                          className="h-10 w-full lg:w-auto rounded-none uppercase tracking-widest font-bold text-[10px]"
+                          className="h-9 w-full lg:w-auto rounded-md font-medium"
                           disabled={crm.isLoading || !user.email?.includes('@') || !draft.password}
                           onClick={() => {
                             void (async () => {
