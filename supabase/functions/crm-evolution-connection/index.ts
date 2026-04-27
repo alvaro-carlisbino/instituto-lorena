@@ -1,11 +1,19 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-type Action = 'snapshot' | 'status' | 'qrcode' | 'connect' | 'logout' | 'restart'
+type Action =
+  | 'snapshot'
+  | 'status'
+  | 'qrcode'
+  | 'connect'
+  | 'logout'
+  | 'restart'
+  | 'create_instance'
+  | 'delete_instance'
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -26,7 +34,8 @@ async function callEvolution(
   baseUrl: string,
   apiKey: string,
   path: string,
-  method: 'GET' | 'POST' = 'GET',
+  method: 'GET' | 'POST' | 'DELETE' = 'GET',
+  jsonBody?: Record<string, unknown>,
 ): Promise<{ ok: boolean; status: number; data: unknown; raw: string; url: string }> {
   const url = `${baseUrl}${path}`
   const res = await fetch(url, {
@@ -35,6 +44,7 @@ async function callEvolution(
       apikey: apiKey,
       'Content-Type': 'application/json',
     },
+    body: method === 'POST' && jsonBody !== undefined ? JSON.stringify(jsonBody) : undefined,
   })
 
   const raw = await res.text()
@@ -153,7 +163,12 @@ async function readQrCode(baseUrl: string, apiKey: string, instance: string) {
   return { ok: false, qrCode: '', errors }
 }
 
-async function performAction(baseUrl: string, apiKey: string, instance: string, action: Action) {
+async function performAction(
+  baseUrl: string,
+  apiKey: string,
+  instance: string,
+  action: 'connect' | 'logout' | 'restart',
+) {
   const actionMap: Record<'connect' | 'restart', { path: string; method: 'GET' | 'POST' }> = {
     connect: { path: `/instance/connect/${instance}`, method: 'GET' },
     restart: { path: `/instance/restart/${instance}`, method: 'POST' },
@@ -174,6 +189,44 @@ async function performAction(baseUrl: string, apiKey: string, instance: string, 
   return { ok: true, raw: res.data }
 }
 
+function normalizeInstanceNameForApi(raw: string): string {
+  const s = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+  return s.slice(0, 60)
+}
+
+function extractCreatedInstanceNameFromPayload(data: unknown): string {
+  if (!data || typeof data !== 'object') return ''
+  const d = data as Record<string, unknown>
+  const inst = d['instance']
+  if (inst && typeof inst === 'object') {
+    const ir = inst as Record<string, unknown>
+    return stringVal(ir['instanceName']) || stringVal(ir['name'])
+  }
+  return stringVal(d['instanceName'])
+}
+
+async function callerCanManageUsers(
+  admin: SupabaseClient,
+  authUserId: string,
+): Promise<boolean> {
+  const { data: profile, error } = await admin.from('app_profiles').select('role').eq('auth_user_id', authUserId).maybeSingle()
+  if (error || !profile || typeof (profile as { role?: string }).role !== 'string') return false
+  const r = String((profile as { role: string }).role).trim().toLowerCase()
+  if (r === 'admin') return true
+  const { data: perm } = await admin
+    .from('permission_profiles')
+    .select('can_manage_users')
+    .eq('role', r)
+    .limit(1)
+    .maybeSingle()
+  return Boolean((perm as { can_manage_users?: boolean } | null)?.can_manage_users)
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -189,6 +242,15 @@ Deno.serve(async (req) => {
   const { data: authData, error: authError } = await userClient.auth.getUser()
   if (authError || !authData.user) return json({ error: 'unauthorized' }, 401)
 
+  const serviceKey = env('SUPABASE_SERVICE_ROLE_KEY')
+  if (!serviceKey) {
+    return json(
+      { error: 'server_misconfigured', message: 'Defina SUPABASE_SERVICE_ROLE_KEY na função (gestão de instâncias).' },
+      500,
+    )
+  }
+  const admin = createClient(supabaseUrl, serviceKey)
+
   const base = env('EVOLUTION_API_BASE')
   const key = env('EVOLUTION_API_KEY')
   const defaultInstance = env('EVOLUTION_INSTANCE')
@@ -196,13 +258,86 @@ Deno.serve(async (req) => {
     return json({ error: 'missing_env', message: 'Configure EVOLUTION_API_BASE e EVOLUTION_API_KEY.' }, 500)
   }
 
-  let body: { action?: Action; instanceId?: string }
+  type BodyShape = { action?: Action; instanceId?: string; instanceName?: string }
+  let body: BodyShape
   try {
-    body = (await req.json()) as { action?: Action; instanceId?: string }
+    body = (await req.json()) as BodyShape
   } catch {
     body = {}
   }
-  const action = body.action ?? 'snapshot'
+  const action: Action = body.action ?? 'snapshot'
+  const baseUrl = normalizedBaseUrl(base)
+
+  if (action === 'create_instance') {
+    if (!(await callerCanManageUsers(admin, authData.user.id))) {
+      return json({ error: 'forbidden' }, 403)
+    }
+    const raw = String(body.instanceName ?? '').trim()
+    if (!raw) {
+      return json(
+        { error: 'instance_name_required', message: 'Indique o identificador da instância (ex.: comercial-1).' },
+        400,
+      )
+    }
+    const instanceName = normalizeInstanceNameForApi(raw) || `il-${Date.now().toString(36)}`
+    const createBodies: Record<string, unknown>[] = [
+      { instanceName, integration: 'WHATSAPP-BAILEYS' },
+      { instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' },
+    ]
+    for (const createBody of createBodies) {
+      const res = await callEvolution(baseUrl, key, '/instance/create', 'POST', createBody)
+      if (res.ok) {
+        const name = extractCreatedInstanceNameFromPayload(res.data) || instanceName
+        return json(
+          { ok: true, provider: 'evolution', instance: name, created: res.data },
+          201,
+        )
+      }
+    }
+    const last = await callEvolution(baseUrl, key, '/instance/create', 'POST', createBodies[0]!)
+    return json(
+      {
+        ok: false,
+        error: 'evolution_create_failed',
+        status: last.status,
+        details: last.data,
+        message: 'A Evolution rejeitou a criação. Verifique se o nome já existe ou se a API corresponde à v2 (POST /instance/create).',
+      },
+      502,
+    )
+  }
+
+  if (action === 'delete_instance') {
+    if (!(await callerCanManageUsers(admin, authData.user.id))) {
+      return json({ error: 'forbidden' }, 403)
+    }
+    const id = String(body.instanceId ?? '').trim()
+    if (!id) {
+      return json({ error: 'instance_id_required' }, 400)
+    }
+    const { data: row } = await userClient
+      .from('whatsapp_channel_instances')
+      .select('evolution_instance_name')
+      .eq('id', id)
+      .maybeSingle()
+    const ename = String((row as { evolution_instance_name?: string } | null)?.evolution_instance_name ?? '').trim()
+    if (!ename) {
+      return json({ error: 'not_found' }, 404)
+    }
+    const del = await callEvolution(baseUrl, key, `/instance/delete/${encodeURIComponent(ename)}`, 'DELETE')
+    if (!del.ok && del.status !== 404) {
+      return json(
+        {
+          ok: false,
+          error: 'evolution_delete_failed',
+          status: del.status,
+          details: del.data,
+        },
+        502,
+      )
+    }
+    return json({ ok: true, provider: 'evolution', instance: ename, evolutionDelete: del.data })
+  }
 
   let instance = defaultInstance
   if (body.instanceId) {
@@ -217,13 +352,15 @@ Deno.serve(async (req) => {
     }
   }
   if (!instance) {
-    return json({ error: 'missing_instance', message: 'Defina EVOLUTION_INSTANCE ou registe um telefone com nome de instância.' }, 500)
+    return json({
+      error: 'missing_instance',
+      message:
+        'Crie uma linha no CRM (instância criada no Evolution) ou defina o fallback EVOLUTION_INSTANCE no servidor.',
+    }, 500)
   }
   if (!['snapshot', 'status', 'qrcode', 'connect', 'logout', 'restart'].includes(action)) {
     return json({ error: 'invalid_action' }, 400)
   }
-
-  const baseUrl = normalizedBaseUrl(base)
 
   if (action === 'status') {
     const status = await readStatus(baseUrl, key, instance)

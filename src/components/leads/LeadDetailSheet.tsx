@@ -21,6 +21,8 @@ import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { workflowFieldsForContext } from '@/lib/leadFields'
 import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
+import { fetchWhatsappChannelInstances } from '@/services/whatsappChannelInstances'
+import { fetchLeadWaLineEvents, type LeadWaLineEvent } from '@/services/leadWaLineEvents'
 
 type Props = {
   open: boolean
@@ -44,6 +46,27 @@ export function LeadDetailSheet({ open, onOpenChange }: Props) {
   )
   const [destPipelineId, setDestPipelineId] = useState('')
   const [destStageId, setDestStageId] = useState('')
+  const [waLineEvents, setWaLineEvents] = useState<LeadWaLineEvent[]>([])
+  const [waInstanceLabels, setWaInstanceLabels] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (!open || !lead || crm.dataMode !== 'supabase') {
+      setWaLineEvents([])
+      return
+    }
+    void fetchLeadWaLineEvents(lead.id)
+      .then(setWaLineEvents)
+      .catch(() => {
+        setWaLineEvents([])
+      })
+    void fetchWhatsappChannelInstances()
+      .then((rows) => {
+        setWaInstanceLabels(Object.fromEntries(rows.map((r) => [r.id, r.label])))
+      })
+      .catch(() => {
+        setWaInstanceLabels({})
+      })
+  }, [open, lead?.id, crm.dataMode])
 
   useEffect(() => {
     if (!lead || otherPipelines.length === 0) {
@@ -245,6 +268,41 @@ export function LeadDetailSheet({ open, onOpenChange }: Props) {
                       Aplicar encaminhamento
                     </Button>
                   </div>
+                </section>
+              ) : null}
+
+              {waLineEvents.length > 0 && crm.currentPermission.canRouteLeads ? (
+                <section
+                  aria-labelledby="lead-wa-line-history-heading"
+                  className="rounded-md border border-border/80 bg-muted/10 p-3"
+                >
+                  <h2
+                    id="lead-wa-line-history-heading"
+                    className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground"
+                  >
+                    Histórico de linhas WhatsApp
+                  </h2>
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    O contacto manteve o mesmo número; a conversa passou a ser tratada noutro telefone/instância. O
+                    atendimento continua no mesmo lead.
+                  </p>
+                  <ul className="m-0 list-none space-y-2 p-0 text-xs">
+                    {waLineEvents.map((e) => {
+                      const from = e.fromInstanceId
+                        ? (waInstanceLabels[e.fromInstanceId] ?? e.fromInstanceId)
+                        : '—'
+                      const to = waInstanceLabels[e.toInstanceId] ?? e.toInstanceId
+                      const t = new Date(e.createdAt).toLocaleString('pt-PT', {
+                        dateStyle: 'short',
+                        timeStyle: 'short',
+                      })
+                      return (
+                        <li key={e.id} className="rounded border border-border/50 bg-card/30 px-2 py-1.5">
+                          <span className="text-muted-foreground">{t}</span> — de «{from}» → «{to}»
+                        </li>
+                      )
+                    })}
+                  </ul>
                 </section>
               ) : null}
 

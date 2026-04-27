@@ -20,7 +20,7 @@ import {
   Users,
   CheckSquare,
   ChatsCircle,
-  QrCode,
+  ArrowsLeftRight,
   Calendar,
 } from 'phosphor-react'
 
@@ -128,6 +128,7 @@ export function AppSidebar() {
               <NavItem to="/metricas" label="Métricas" icon={ChartBar} />
               {showBoards ? <NavItem to="/boards" label="Funis" icon={CirclesThreePlus} /> : null}
               {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table} /> : null}
+              {showAdmin ? <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowsLeftRight} /> : null}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -158,7 +159,6 @@ export function AppSidebar() {
                 <NavItem to="/usuarios" label="Usuários" icon={Users} />
                 <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
                 <NavItem to="/admin-operacao" label="Operação Admin" icon={Gear} />
-                <NavItem to="/admin-whatsapp" label="WhatsApp Evolution" icon={QrCode} />
                 <NavItem to="/admin-lab" label="Ferramentas" icon={Flask} />
               </SidebarMenu>
             </SidebarGroupContent>

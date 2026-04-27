@@ -149,50 +149,260 @@ export async function resolveDefaultRouting(admin: SupabaseClient): Promise<{
   return { ownerId, pipelineId, stageId }
 }
 
+async function resolveEntryStageId(
+  admin: SupabaseClient,
+  pipelineId: string,
+  stageId: string | null,
+): Promise<string> {
+  if (stageId) {
+    const { data: byId } = await admin
+      .from('pipeline_stages')
+      .select('id')
+      .eq('id', stageId)
+      .eq('pipeline_id', pipelineId)
+      .maybeSingle()
+    if (byId?.id) return String(byId.id)
+  }
+  const { data: first } = await admin
+    .from('pipeline_stages')
+    .select('id')
+    .eq('pipeline_id', pipelineId)
+    .order('position', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  return first?.id ? String(first.id) : ''
+}
+
+type WaInstanceRow = {
+  id: string
+  label: string
+  entry_pipeline_id: string | null
+  entry_stage_id: string | null
+  default_owner_id: string | null
+  on_line_change: string
+}
+
+export async function resolveRoutingForInstance(
+  admin: SupabaseClient,
+  instanceId: string | null,
+): Promise<{ ownerId: string; pipelineId: string; stageId: string }> {
+  const fallback = await resolveDefaultRouting(admin)
+  if (!instanceId) return fallback
+  const { data: row } = await admin
+    .from('whatsapp_channel_instances')
+    .select('entry_pipeline_id, entry_stage_id, default_owner_id')
+    .eq('id', instanceId)
+    .maybeSingle()
+  if (!row) return fallback
+  const r = row as Record<string, unknown>
+  const ep = r.entry_pipeline_id != null && String(r.entry_pipeline_id) ? String(r.entry_pipeline_id) : null
+  if (!ep) {
+    return {
+      ownerId: (r.default_owner_id != null && String(r.default_owner_id) ? String(r.default_owner_id) : null) ??
+        fallback.ownerId,
+      pipelineId: fallback.pipelineId,
+      stageId: fallback.stageId,
+    }
+  }
+  const es = r.entry_stage_id != null && String(r.entry_stage_id) ? String(r.entry_stage_id) : null
+  const stageResolved = (await resolveEntryStageId(admin, ep, es)) || fallback.stageId
+  return {
+    ownerId: (r.default_owner_id != null && String(r.default_owner_id) ? String(r.default_owner_id) : null) ??
+      fallback.ownerId,
+    pipelineId: ep,
+    stageId: stageResolved,
+  }
+}
+
+async function recordLineHandoff(
+  admin: SupabaseClient,
+  leadId: string,
+  fromId: string | null,
+  toId: string,
+) {
+  if (toId && fromId === toId) return
+  const { error } = await admin.from('lead_wa_line_events').insert({
+    lead_id: leadId,
+    from_instance_id: fromId,
+    to_instance_id: toId,
+  })
+  if (error) {
+    console.warn('lead_wa_line_events insert:', error.message)
+  }
+}
+
+async function fetchWhatsAppInstanceForHandoff(
+  admin: SupabaseClient,
+  id: string,
+): Promise<WaInstanceRow | null> {
+  const { data } = await admin
+    .from('whatsapp_channel_instances')
+    .select('id, label, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change')
+    .eq('id', id)
+    .maybeSingle()
+  if (!data) return null
+  return data as WaInstanceRow
+}
+
+function mergeCustomFields(
+  prev: Record<string, unknown> | null | undefined,
+  patch: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!patch || Object.keys(patch).length === 0) return prev && typeof prev === 'object' ? { ...prev } : {}
+  const base = prev && typeof prev === 'object' && !Array.isArray(prev) ? { ...(prev as Record<string, unknown>) } : {}
+  return { ...base, ...patch }
+}
+
 export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLeadInput): Promise<UpsertLeadResult> {
   const phone = normalizePhone(input.phone)
   if (phone.length < 10) {
     throw new Error('Telefone deve ter pelo menos 10 dígitos')
   }
 
-  const routing = await resolveDefaultRouting(admin)
-  const ownerId = input.ownerId ?? routing.ownerId
-  const pipelineId = input.pipelineId ?? routing.pipelineId
-  const stageId = input.stageId ?? routing.stageId
+  const instanceId = input.whatsappInstanceId && String(input.whatsappInstanceId).length > 0
+    ? String(input.whatsappInstanceId)
+    : null
+
+  const useWhatsappUnify = input.source === 'whatsapp'
+  const existingId = useWhatsappUnify
+    ? ((await findLeadByPhone(admin, phone)) ?? undefined)
+    : (await findLeadIdByPhoneAndInstance(admin, phone, instanceId)) ?? undefined
+
   const score = Number(input.score ?? 50) || 50
   const temperature = temperatureForSource(input.source, input.temperature)
-  const instanceId = input.whatsappInstanceId && String(input.whatsappInstanceId).length > 0 ? String(input.whatsappInstanceId) : null
-  const existingId = await findLeadIdByPhoneAndInstance(admin, phone, instanceId)
 
-  const row: Record<string, unknown> = {
-    patient_name: input.patientName || 'Lead webhook',
-    phone,
-    source: input.source,
-    summary: input.summary || '',
-    owner_id: ownerId,
-    pipeline_id: pipelineId,
-    stage_id: stageId,
-    score,
-    temperature,
-    custom_fields: input.customFields ?? {},
-  }
-  if (instanceId) {
-    row.whatsapp_instance_id = instanceId
-  }
+  const newLeadRouting = instanceId
+    ? await resolveRoutingForInstance(admin, instanceId)
+    : await resolveDefaultRouting(admin)
+
+  const ownerIdForCreate = input.ownerId?.trim() || newLeadRouting.ownerId
+  const pipelineIdForCreate = input.pipelineId?.trim() || newLeadRouting.pipelineId
+  const stageIdForCreate = input.stageId?.trim() || newLeadRouting.stageId
 
   if (existingId) {
-    const { error: updateError } = await admin.from('leads').update(row).eq('id', existingId)
+    const { data: cur, error: curErr } = await admin
+      .from('leads')
+      .select(
+        'id, custom_fields, pipeline_id, stage_id, owner_id, score, whatsapp_instance_id, patient_name',
+      )
+      .eq('id', existingId)
+      .maybeSingle()
+    if (curErr) throw new Error(curErr.message)
+    const current = (cur ?? {}) as Record<string, unknown>
+
+    const customMerged = mergeCustomFields(
+      current.custom_fields as Record<string, unknown> | undefined,
+      input.customFields,
+    )
+    const patch: Record<string, unknown> = {
+      patient_name: input.patientName || String(current.patient_name ?? 'Lead'),
+      phone,
+      source: input.source,
+      summary: input.summary || '',
+      custom_fields: customMerged,
+    }
+
+    if (useWhatsappUnify) {
+      patch.whatsapp_instance_id = instanceId
+    } else if (instanceId) {
+      patch.whatsapp_instance_id = instanceId
+    }
+
+    const prevInst = current.whatsapp_instance_id != null && String(current.whatsapp_instance_id)
+      ? String(current.whatsapp_instance_id)
+      : null
+    const isHandoff = Boolean(
+      useWhatsappUnify && instanceId && prevInst && prevInst !== instanceId,
+    )
+
+    if (isHandoff && instanceId) {
+      const toId = instanceId
+      await recordLineHandoff(admin, existingId, prevInst, toId)
+      const toDef = (await fetchWhatsAppInstanceForHandoff(admin, toId)) as WaInstanceRow | null
+      if (toDef && toDef.on_line_change === 'use_entry' && toDef.entry_pipeline_id) {
+        const r = await resolveRoutingForInstance(admin, toId)
+        patch.pipeline_id = r.pipelineId
+        patch.stage_id = r.stageId
+        patch.owner_id = r.ownerId
+      } else {
+        if (String(current.pipeline_id ?? '')) {
+          patch.pipeline_id = String(current.pipeline_id)
+        }
+        if (String(current.stage_id ?? '')) {
+          patch.stage_id = String(current.stage_id)
+        }
+        if (String(current.owner_id ?? '')) {
+          patch.owner_id = String(current.owner_id)
+        }
+      }
+      if (toDef) {
+        try {
+          const fromL = (await fetchWhatsAppInstanceForHandoff(admin, prevInst!))?.label ?? 'linha anterior'
+          const lineNote = `Atendimento contínuo: mensagem agora pela linha «${toDef.label}» (antes: «${fromL}»).`
+          await insertInteraction(admin, {
+            leadId: existingId,
+            patientName: String(current.patient_name ?? input.patientName),
+            channel: 'system',
+            direction: 'system',
+            author: 'CRM',
+            content: lineNote,
+            happenedAt: new Date().toISOString(),
+          })
+        } catch {
+          // ignore
+        }
+      }
+    } else {
+      if (String(current.pipeline_id ?? '')) {
+        patch.pipeline_id = String(current.pipeline_id)
+      }
+      if (String(current.stage_id ?? '')) {
+        patch.stage_id = String(current.stage_id)
+      }
+      if (String(current.owner_id ?? '')) {
+        patch.owner_id = String(current.owner_id)
+      }
+    }
+
+    if (!useWhatsappUnify && (input.pipelineId || input.stageId)) {
+      if (input.ownerId) patch.owner_id = input.ownerId
+      if (input.pipelineId) patch.pipeline_id = input.pipelineId
+      if (input.stageId) patch.stage_id = input.stageId
+    }
+    if (input.score !== undefined && input.score !== null) {
+      patch.score = score
+    } else if (Number.isFinite(current.score as number)) {
+      patch.score = current.score
+    } else {
+      patch.score = score
+    }
+    patch.temperature = temperature
+
+    const { error: updateError } = await admin.from('leads').update(patch).eq('id', existingId)
     if (updateError) throw new Error(updateError.message)
     return { leadId: existingId, status: 'updated' }
   }
 
   const newId = input.preferredLeadId?.trim() || `lead-${crypto.randomUUID().slice(0, 12)}`
-  const { error: insertError } = await admin.from('leads').insert({
+  const row: Record<string, unknown> = {
     id: newId,
-    ...row,
+    patient_name: input.patientName || 'Lead webhook',
+    phone,
+    source: input.source,
+    summary: input.summary || '',
+    owner_id: ownerIdForCreate,
+    pipeline_id: pipelineIdForCreate,
+    stage_id: stageIdForCreate,
+    score,
+    temperature,
+    custom_fields: input.customFields ?? {},
     created_at: new Date().toISOString(),
     position: 1,
-  })
+  }
+  if (instanceId) {
+    row.whatsapp_instance_id = instanceId
+  }
+  const { error: insertError } = await admin.from('leads').insert(row)
   if (insertError) throw new Error(insertError.message)
   return { leadId: newId, status: 'created' }
 }

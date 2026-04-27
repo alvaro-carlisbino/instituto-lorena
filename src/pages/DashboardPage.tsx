@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { KanbanSquare, LayoutListIcon, MoreHorizontal, RefreshCw, SlidersHorizontal, UsersIcon } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, LabelList } from 'recharts'
@@ -17,6 +17,9 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import { isSameLocalDayInTimezone } from '@/lib/sameLocalDayInTimezone'
+import { fetchHandoffEventCountForTodayInTimezone } from '@/services/leadWaLineEvents'
+import { fetchWhatsappChannelInstances } from '@/services/whatsappChannelInstances'
 import { cn } from '@/lib/utils'
 
 const CHART_COLORS = [
@@ -60,6 +63,50 @@ export function DashboardPage() {
     [crm.workloadBySdr],
   )
 
+  const orgTz = crm.orgSettings.timezone || 'America/Sao_Paulo'
+  const leadsNewToday = useMemo(
+    () => crm.leads.filter((l) => isSameLocalDayInTimezone(l.createdAt, orgTz)),
+    [crm.leads, orgTz],
+  )
+  const newWhatsappToday = useMemo(
+    () => leadsNewToday.filter((l) => l.source === 'whatsapp'),
+    [leadsNewToday],
+  )
+  const [lineLabels, setLineLabels] = useState<Record<string, string>>({})
+  const [handoffsToday, setHandoffsToday] = useState(0)
+
+  const newWaByLine = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const l of newWhatsappToday) {
+      const k = l.whatsappInstanceId ?? '—'
+      m.set(k, (m.get(k) ?? 0) + 1)
+    }
+    return Array.from(m.entries())
+      .map(([id, c]) => ({
+        name: id === '—' ? 'Sem linha' : (lineLabels[id] ?? `Linha ${id.slice(0, 6)}…`),
+        leads: c,
+      }))
+      .sort((a, b) => b.leads - a.leads)
+  }, [newWhatsappToday, lineLabels])
+
+  useEffect(() => {
+    if (crm.dataMode !== 'supabase') {
+      return
+    }
+    void fetchWhatsappChannelInstances().then((rows) => {
+      setLineLabels(Object.fromEntries(rows.map((r) => [r.id, r.label])))
+    })
+  }, [crm.dataMode])
+
+  useEffect(() => {
+    if (crm.isLoading) return
+    if (crm.dataMode !== 'supabase') {
+      setHandoffsToday(0)
+      return
+    }
+    void fetchHandoffEventCountForTodayInTimezone(orgTz).then(setHandoffsToday)
+  }, [crm.isLoading, crm.dataMode, orgTz, crm.leads.length])
+
   if (crm.isLoading) {
     return (
       <AppLayout title="Painel comercial" subtitle="Carregando dados...">
@@ -71,7 +118,7 @@ export function DashboardPage() {
   return (
     <AppLayout
       title="Painel comercial"
-      subtitle="Visão geral com indicadores ajustáveis e operação do dia."
+      subtitle={`Indicadores, novos hoje (fuso ${orgTz}) e mão-de-telefone entre linhas WhatsApp.`}
       actions={
         <>
           {crm.currentPermission.canRouteLeads ? (
@@ -127,6 +174,77 @@ export function DashboardPage() {
           ))}
         </section>
       )}
+
+      {crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers ? (
+        <section className="mb-6 grid gap-px border border-border bg-border/50 sm:grid-cols-2 lg:grid-cols-4">
+          <Card className="border-0 rounded-none shadow-none bg-card">
+            <CardHeader className="pb-2 pt-4">
+              <CardTitle className="text-2xl font-light tabular-nums tracking-tight">{leadsNewToday.length}</CardTitle>
+              <CardDescription className="text-[0.65rem] uppercase tracking-widest">Novos leads hoje</CardDescription>
+            </CardHeader>
+          </Card>
+          <Card className="border-0 rounded-none shadow-none bg-card">
+            <CardHeader className="pb-2 pt-4">
+              <CardTitle className="text-2xl font-light tabular-nums tracking-tight">{newWhatsappToday.length}</CardTitle>
+              <CardDescription className="text-[0.65rem] uppercase tracking-widest">Entradas via WhatsApp hoje</CardDescription>
+            </CardHeader>
+          </Card>
+          <Card className="border-0 rounded-none shadow-none bg-card">
+            <CardHeader className="pb-2 pt-4">
+              <CardTitle className="text-2xl font-light tabular-nums tracking-tight">{handoffsToday}</CardTitle>
+              <CardDescription className="text-[0.65rem] uppercase tracking-widest">Mudanças de linha hoje</CardDescription>
+            </CardHeader>
+          </Card>
+          <Card className="border-0 rounded-none shadow-none bg-card">
+            <CardHeader className="pb-2 pt-4">
+              <Link
+                to="/admin-whatsapp"
+                className="text-sm font-medium text-primary underline-offset-2 hover:underline"
+              >
+                Roteamento por telefone
+              </Link>
+              <CardDescription className="pt-2 text-[0.65rem] uppercase tracking-widest">Funis por instância</CardDescription>
+            </CardHeader>
+          </Card>
+        </section>
+      ) : null}
+
+      {newWhatsappToday.length > 0 && (crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers) ? (
+        <Card className="mb-8 border-border shadow-none rounded-none">
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-widest">WhatsApp: novos hoje por linha</CardTitle>
+            <CardDescription className="text-xs">Baseado no primeiro registo de cada contacto; o mesmo lead pode migrar de linha ao longo do dia.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {newWaByLine.length > 0 ? (
+              <div className="h-[min(20rem,24rem)] w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={newWaByLine}
+                    layout="vertical"
+                    margin={{ top: 4, right: 16, left: 4, bottom: 4 }}
+                  >
+                    <XAxis type="number" allowDecimals={false} hide />
+                    <YAxis
+                      dataKey="name"
+                      type="category"
+                      width={120}
+                      tick={{ fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <Bar dataKey="leads" radius={[0, 4, 4, 0]} maxBarSize={28}>
+                      {newWaByLine.map((_, i) => (
+                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {crm.captureNotice ? (
         <p className="rounded-lg border border-success/35 bg-success/10 px-4 py-3 text-sm text-success-foreground">

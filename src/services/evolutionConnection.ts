@@ -1,6 +1,14 @@
 import { supabase } from '@/lib/supabaseClient'
 
-export type EvolutionAction = 'snapshot' | 'status' | 'qrcode' | 'connect' | 'logout' | 'restart'
+export type EvolutionAction =
+  | 'snapshot'
+  | 'status'
+  | 'qrcode'
+  | 'connect'
+  | 'logout'
+  | 'restart'
+  | 'create_instance'
+  | 'delete_instance'
 
 export type EvolutionSnapshotResult = {
   ok: boolean
@@ -54,5 +62,49 @@ export async function evolutionConnectionAction(
     error: typeof parsed.error === 'string' ? parsed.error : undefined,
     message: typeof parsed.message === 'string' ? parsed.message : undefined,
   }
+}
+
+export type EvolutionInstanceLifecycleResult = {
+  ok: boolean
+  instance?: string
+  created?: unknown
+  error?: string
+  message?: string
+  status?: number
+}
+
+/**
+ * Cria ou remove instância na API Evolution (Mutation via Edge; requer can_manage_users).
+ */
+export async function evolutionInstanceLifecycle(
+  action: 'create_instance' | 'delete_instance',
+  options: { instanceName?: string; instanceId?: string },
+): Promise<EvolutionInstanceLifecycleResult> {
+  if (!supabase) {
+    return { ok: false, error: 'Sistema não configurado.' }
+  }
+  const { data, error } = await supabase.functions.invoke('crm-evolution-connection', {
+    body: { action, instanceName: options.instanceName, instanceId: options.instanceId },
+  })
+  const p = data && typeof data === 'object' ? (data as Record<string, unknown>) : null
+  if (p && p.ok === true) {
+    return {
+      ok: true,
+      instance: typeof p.instance === 'string' ? p.instance : options.instanceName,
+      created: p.created,
+    }
+  }
+  if (p && p.ok === false) {
+    return {
+      ok: false,
+      error: typeof p.error === 'string' ? p.error : 'Operação rejeitada',
+      message: typeof p.message === 'string' ? p.message : undefined,
+      status: typeof p.status === 'number' ? p.status : undefined,
+    }
+  }
+  if (error) {
+    return { ok: false, error: error.message || 'Falha ao falar com o servidor.' }
+  }
+  return { ok: false, error: 'resposta_inesperada' }
 }
 
