@@ -59,7 +59,7 @@ export function TasksPage() {
   }
 
   return (
-    <AppLayout title="Tarefas e NPS" subtitle="Lista de follow-up; registro manual de resposta NPS (MVP).">
+    <AppLayout title="Tarefas e NPS" subtitle="Follow-up e NPS (registro manual, MVP).">
       <div className="mb-4 flex flex-wrap gap-2">
         <Button type="button" size="sm" variant={filter === 'open' ? 'default' : 'outline'} onClick={() => setFilter('open')}>
           Abertas

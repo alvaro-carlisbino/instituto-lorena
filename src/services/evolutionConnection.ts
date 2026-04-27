@@ -40,18 +40,25 @@ export async function evolutionConnectionAction(
     body: { action, instanceId: extra?.instanceId },
   })
 
-  if (error) {
+  const parsed = (data && typeof data === 'object' ? (data as Record<string, unknown>) : null) ?? {}
+  const messageFromServer =
+    typeof parsed.message === 'string' ? parsed.message : undefined
+  const errFromServer = typeof parsed.error === 'string' ? parsed.error : undefined
+
+  if (error && !('ok' in parsed)) {
+    const is502 = /502|bad gateway|non-2xx|edge function/i.test(String(error.message ?? ''))
     return {
       ok: false,
       provider: 'evolution',
       instance: '',
       status: 'error',
       connected: null,
-      error: error.message || 'Falha ao consultar Evolution.',
+      error: is502
+        ? 'O gateway devolveu 502: faça deploy de supabase/functions/crm-evolution-connection, confirme secrets (EVOLUTION_*) e veja os logs da função. Se a Evolution estiver lenta, tente de novo em instantes.'
+        : error.message || 'Não foi possível falar com o servidor de WhatsApp.',
     }
   }
 
-  const parsed = data && typeof data === 'object' ? (data as Record<string, unknown>) : {}
   return {
     ok: parsed.ok === true,
     provider: String(parsed.provider ?? 'evolution'),
@@ -59,8 +66,8 @@ export async function evolutionConnectionAction(
     status: String(parsed.status ?? 'unknown'),
     connected: typeof parsed.connected === 'boolean' ? parsed.connected : null,
     qrCode: typeof parsed.qrCode === 'string' ? parsed.qrCode : undefined,
-    error: typeof parsed.error === 'string' ? parsed.error : undefined,
-    message: typeof parsed.message === 'string' ? parsed.message : undefined,
+    error: errFromServer,
+    message: messageFromServer || (parsed.ok === false && error ? error.message : undefined),
   }
 }
 
@@ -102,8 +109,21 @@ export async function evolutionInstanceLifecycle(
       status: typeof p.status === 'number' ? p.status : undefined,
     }
   }
+  if (p && typeof p.error === 'string') {
+    return {
+      ok: false,
+      error: p.error,
+      message: typeof p.message === 'string' ? p.message : undefined,
+    }
+  }
   if (error) {
-    return { ok: false, error: error.message || 'Falha ao falar com o servidor.' }
+    const is502 = /502|bad gateway|non-2xx|edge function/i.test(String(error.message ?? ''))
+    return {
+      ok: false,
+      error: is502
+        ? '502 no gateway: redeploy crm-evolution-connection e confirme secrets (Supabase + Evolution).'
+        : error.message || 'Não foi possível concluir a operação.',
+    }
   }
   return { ok: false, error: 'resposta_inesperada' }
 }

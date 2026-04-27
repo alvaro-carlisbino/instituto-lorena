@@ -62,7 +62,7 @@ export function UsersPage() {
   return (
     <AppLayout
       title="Usuários e permissões"
-      subtitle="Defina e-mail e papel na operação. Crie acesso com senha (login imediato) ou envie convite por e-mail."
+      subtitle="E-mail, papel (admin, gestor, SDR) e acesso: senha agora ou convite."
     >
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <Button type="button" onClick={() => { crm.addUser(); toast.success('Usuário adicionado à lista.') }} className="rounded-none uppercase tracking-widest font-bold">

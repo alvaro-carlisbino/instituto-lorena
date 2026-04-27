@@ -81,7 +81,7 @@ export function AuditPage() {
   const totalPages = Math.max(1, Math.ceil(crm.auditTotal / pageSize))
 
   return (
-    <AppLayout title="Auditoria" subtitle="Registro de ações realizadas no sistema.">
+    <AppLayout title="Auditoria" subtitle="Trilha de ações (quem fez o quê e quando).">
       <Card className="shadow-sm">
         <CardContent className="space-y-4 pt-6">
           <div className="flex flex-wrap items-center gap-2">

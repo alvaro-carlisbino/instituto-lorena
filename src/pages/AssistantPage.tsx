@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { PageHelp } from '@/components/page/PageHelp'
 import { useCrm } from '@/context/CrmContext'
 import { cn } from '@/lib/utils'
 import {
@@ -102,16 +103,20 @@ export function AssistantPage() {
   return (
     <AppLayout
       title="Assistente"
-      subtitle="Pergunte sobre contatos, equipe e resultados. As respostas usam só a informação que você tem acesso."
+      subtitle="Perguntas com base no que a sua função pode ver no CRM."
+      actions={
+        <PageHelp title="Sobre o assistente" label="Ajuda, assistente">
+          <p>As respostas usam leads, equipe e números que a sua sessão tem permissão de ler — não vê o que o perfil bloqueia.</p>
+          <p>O tipo de resposta (visão geral, semana, uma pessoa) orienta o contexto, como no painel esquerdo.</p>
+        </PageHelp>
+      }
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,19rem)_1fr]">
         <div className="flex flex-col gap-4">
           <Card className="h-fit border-border shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Como você quer perguntar</CardTitle>
-              <CardDescription className="text-xs leading-relaxed">
-                Isto orienta o assistente: visão geral, números da semana, ou uma pessoa em concreto quando está falando de alguém do quadro.
-              </CardDescription>
+              <CardDescription className="text-xs">Contexto: geral, semana ou ficha de uma pessoa.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4">
               <div className="grid gap-2">
@@ -138,9 +143,7 @@ export function AssistantPage() {
                   </Button>
                 </div>
               ) : (
-                <p className="m-0 text-xs text-muted-foreground leading-relaxed">
-                  Se você abrir o assistente a partir de um contato no quadro de leads, essa pessoa aparece aqui e as respostas se concentram nela.
-                </p>
+                <p className="m-0 text-xs text-muted-foreground">Abra a partir de um lead: a ficha fica fixa e as respostas focam nela.</p>
               )}
             </CardContent>
           </Card>
@@ -152,9 +155,7 @@ export function AssistantPage() {
                   <History className="size-4 text-muted-foreground" />
                   Histórico
                 </CardTitle>
-                <CardDescription className="text-xs leading-relaxed">
-                  As conversas anteriores ficam aqui. "Nova conversa" inicia uma conversa limpa à direita.
-                </CardDescription>
+                <CardDescription className="text-xs">Lista à esquerda; <strong>Nova conversa</strong> limpa o painel de chat.</CardDescription>
                 <Button
                   type="button"
                   variant="secondary"

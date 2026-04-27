@@ -7,10 +7,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { PageHelp } from '@/components/page/PageHelp'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { pageQuietCardClass } from '@/components/page/PageSection'
 import { evolutionConnectionAction, evolutionInstanceLifecycle } from '@/services/evolutionConnection'
+import { cn } from '@/lib/utils'
 import {
   deleteWhatsappChannelInstance,
   fetchWhatsappChannelInstances,
@@ -117,8 +120,8 @@ export function WhatsappConnectionPage() {
         error: result.error ?? '',
         message: result.message ?? '',
       })
-      if (!result.ok && result.error) {
-        toast.error(result.error)
+      if (!result.ok) {
+        toast.error(result.message || result.error || 'Não foi possível obter o estado do WhatsApp.')
       }
     } finally {
       setLoadingAction(null)
@@ -130,7 +133,7 @@ export function WhatsappConnectionPage() {
     try {
       const result = await evolutionConnectionAction(action, { instanceId: selectedInstanceId ?? undefined })
       if (!result.ok) {
-        toast.error(result.error ?? 'Falha ao executar ação na Evolution.')
+        toast.error(result.message || result.error || 'Não foi possível fazer isso. Tente de novo.')
       } else {
         toast.success(successMsg)
       }
@@ -172,14 +175,14 @@ export function WhatsappConnectionPage() {
     }
     const instanceNameRequest = (createTechId.trim() || suggestInstanceNameFromLabel(createLabel)).trim()
     if (!instanceNameRequest) {
-      toast.error('O identificador técnico gerado é inválido. Preencha o identificador ou ajuste o rótulo.')
+      toast.error('O identificador técnico gerado é inválido. Preencha o nome interno ou ajuste o nome mostrado.')
       return
     }
     setSavingInstance(true)
     try {
       const res = await evolutionInstanceLifecycle('create_instance', { instanceName: instanceNameRequest })
       if (!res.ok) {
-        toast.error(res.message || res.error || 'A Evolution rejeitou a criação da instância.')
+        toast.error(res.message || res.error || 'Não foi possível criar o número no servidor. O nome pode já existir — escolha outro.')
         return
       }
       const evoName = (res.instance ?? instanceNameRequest).trim()
@@ -200,9 +203,9 @@ export function WhatsappConnectionPage() {
       setCreatePhone('')
       await loadInstances()
       setSelectedInstanceId(id)
-      toast.success('Instância criada no Evolution e linha adicionada ao CRM. Gere o QR abaixo.')
+      toast.success('Número criado. Abaixo, peça o código QR e conecte o celular.')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao guardar.')
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar.')
     } finally {
       setSavingInstance(false)
     }
@@ -210,7 +213,7 @@ export function WhatsappConnectionPage() {
 
   const handleLinkExistingInstance = async () => {
     if (!linkLabel.trim() || !linkEvoName.trim()) {
-      toast.error('Preencha o rótulo e o nome exato da instância que já existe na Evolution.')
+      toast.error('Preencha o nome e o identificador exato que já existe no servidor (Evolution).')
       return
     }
     setSavingInstance(true)
@@ -235,7 +238,7 @@ export function WhatsappConnectionPage() {
       setSelectedInstanceId(id)
       toast.success('Linha associada. Use os botões de QR se precisar de ligação.')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao guardar.')
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar.')
     } finally {
       setSavingInstance(false)
     }
@@ -244,7 +247,7 @@ export function WhatsappConnectionPage() {
   const handleRemoveInstance = async (id: string) => {
     if (
       !window.confirm(
-        'Remover esta linha? Será apagada no servidor Evolution (se ainda existir) e o registo sai do CRM.',
+        'Apagar este telefone? O WhatsApp desta linha deixa de receber mensagens no CRM, e a sessão no servidor (se ainda existir) será removida.',
       )
     ) {
       return
@@ -253,7 +256,7 @@ export function WhatsappConnectionPage() {
     try {
       const res = await evolutionInstanceLifecycle('delete_instance', { instanceId: id })
       if (!res.ok) {
-        toast.error(res.message || res.error || 'Falha ao apagar a instância no Evolution. O registo mantém-se.')
+        toast.error(res.message || res.error || 'Não foi possível apagar no servidor. Tente de novo; o registro do CRM foi mantido.')
         return
       }
       await deleteWhatsappChannelInstance(id)
@@ -261,7 +264,7 @@ export function WhatsappConnectionPage() {
         setSelectedInstanceId(null)
       }
       await loadInstances()
-      toast.success('Linha removida do Evolution (ou já inexistente) e do CRM.')
+      toast.success('Telefone removido: já não aparece no CRM; o servidor removido ou já estava inexistente.')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao remover.')
     } finally {
@@ -284,9 +287,9 @@ export function WhatsappConnectionPage() {
     try {
       await upsertWhatsappChannelInstance(row)
       await loadInstances()
-      toast.success('Roteamento guardado para esta linha.')
+      toast.success('Regras salvas para este telefone.')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao guardar roteamento.')
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar as regras.')
     } finally {
       setSavingRouteId(null)
     }
@@ -294,19 +297,24 @@ export function WhatsappConnectionPage() {
 
   return (
     <AppLayout
-      title="Conexão WhatsApp (Evolution)"
-      subtitle="Crie linhas, defina em que funil e etapa entram os contactos, e acompanhe o handoff entre telefones (o mesmo lead continua a conversa ao mudar de instância)."
+      title="WhatsApp"
+      subtitle="Cada item é um número conectado ao serviço de mensagens; use o QR abaixo para conectar o celular."
+      actions={
+        <PageHelp title="WhatsApp no CRM">
+          <p>Um &quot;telefone&quot; aqui é a conexão com o serviço de mensagens. Novos contatos podem entrar no processo (funil) que você marcar abaixo.</p>
+          <p>No celular, use o QR: <strong>WhatsApp</strong> → <strong>Aparelhos conectados</strong> (menu) e leia o código exibido ao lado.</p>
+          <p>Mesma pessoa em outro número cadastrado: a ficha (lead) segue a mesma; use <strong>Já estava em outro lugar</strong> se o suporte criou a conta em outro painel.</p>
+        </PageHelp>
+      }
     >
-      <Card className="mb-4">
+      <Card className={cn('mb-4', pageQuietCardClass)}>
         <CardHeader>
-          <CardTitle>Telefones (linhas / instâncias)</CardTitle>
-          <CardDescription>
-            O passo normal é <strong>criar a instância no servidor Evolution</strong> a partir do botão (POST na API) e, em
-            seguida, conectar o WhatsApp com o QR. Se a instância já existir noutro painel, abra a secção opcional para
-            vinculá‑la só no CRM.
+          <CardTitle>Meus telefones</CardTitle>
+          <CardDescription className="max-w-2xl">
+            Adicione, selecione a linha e use o QR no bloco Estado e código.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-5">
           {instances.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {instances.map((inst) => (
@@ -322,38 +330,34 @@ export function WhatsappConnectionPage() {
               ))}
             </div>
           ) : (
-            <p className="m-0 text-sm text-muted-foreground">
-              Ainda sem linhas. Use o formulário abaixo para criar a primeira instância no Evolution, ou o link opcional
-              se já tiver o nome noutro painel.
-            </p>
+            <p className="m-0 text-sm text-muted-foreground">Ainda nenhum. Crie a primeira linha com o formulário e abra o bloco de QR em baixo.</p>
           )}
 
           {selectedInstance ? (
-            <p className="m-0 text-sm text-muted-foreground">
-              Selecionado: <strong>{selectedInstance.label}</strong> — Evolution:{' '}
-              <code className="text-xs">{selectedInstance.evolutionInstanceName}</code>
+            <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="m-0 text-sm font-medium">Trabalhando com: {selectedInstance.label}</p>
+                <p className="m-0 mt-1 text-xs text-muted-foreground">
+                  <span className="font-mono text-[0.7rem]">{selectedInstance.evolutionInstanceName}</span> — id interno
+                </p>
+              </div>
               <Button
                 type="button"
-                variant="link"
-                className="h-auto px-2 py-0 text-destructive"
+                variant="outline"
+                className="shrink-0 border-destructive/50 text-destructive hover:bg-destructive/10"
                 disabled={removingInstance}
                 onClick={() => void handleRemoveInstance(selectedInstance.id)}
               >
-                {removingInstance ? 'A remover…' : 'Remover'}
+                {removingInstance ? 'Apagando…' : 'Apagar este telefone'}
               </Button>
-            </p>
+            </div>
           ) : null}
 
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold">1. Criar nova instância no Evolution</h3>
-            <p className="text-xs text-muted-foreground">
-              O rótulo é o que a equipa vê no CRM. O identificador técnico pode ficar vazio: será gerado (ex.{' '}
-              <code className="text-[0.7rem]">il-recepcao-x7ab</code>) a partir do rótulo, ou preencha um nome único em
-              letras minúsculas, números e hífen, compatível com a Evolution.
-            </p>
+            <h3 className="m-0 text-sm font-semibold">Novo telefone</h3>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="wa-create-label">Rótulo no CRM (obrigatório)</Label>
+                <Label htmlFor="wa-create-label">Nome no CRM (obrigatório)</Label>
                 <Input
                   id="wa-create-label"
                   value={createLabel}
@@ -362,16 +366,16 @@ export function WhatsappConnectionPage() {
                 />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="wa-create-tech">Identificador na Evolution (opcional)</Label>
+                <Label htmlFor="wa-create-tech">Nome interno (opcional)</Label>
                 <Input
                   id="wa-create-tech"
                   value={createTechId}
                   onChange={(e) => setCreateTechId(e.target.value)}
-                  placeholder="vazio = gerado a partir do rótulo"
+                  placeholder="Só se o suporte pediu; senão, deixe vazio"
                 />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="wa-create-phone">Telefone de referência (opcional)</Label>
+                <Label htmlFor="wa-create-phone">Número para referência (opcional)</Label>
                 <Input
                   id="wa-create-phone"
                   value={createPhone}
@@ -385,7 +389,7 @@ export function WhatsappConnectionPage() {
                   disabled={savingInstance}
                   onClick={() => void handleCreateInstanceOnServer()}
                 >
-                  {savingInstance ? 'A criar…' : 'Criar no Evolution e adicionar ao CRM'}
+                  {savingInstance ? 'Adicionando…' : 'Criar e salvar no CRM'}
                 </Button>
               </div>
             </div>
@@ -393,16 +397,12 @@ export function WhatsappConnectionPage() {
 
           <Collapsible open={linkOpen} onOpenChange={setLinkOpen} className="border-t border-border/60 pt-4">
             <CollapsibleTrigger className="flex w-full items-center justify-between text-left text-sm font-medium text-muted-foreground hover:text-foreground">
-              Já existe uma instância noutro painel — só vincular no CRM
+              O número já estava em outro lugar (só vincular aqui)
             </CollapsibleTrigger>
             <CollapsibleContent className="mt-4 block">
-              <p className="mb-3 text-xs text-muted-foreground">
-                Use quando a instância foi criada manualmente: indique o <strong>nome exatamente</strong> como na Evolution
-                (webhook/QR).
-              </p>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1.5 sm:col-span-2">
-                  <Label htmlFor="wa-link-label">Rótulo no CRM</Label>
+                  <Label htmlFor="wa-link-label">Nome no CRM</Label>
                   <Input
                     id="wa-link-label"
                     value={linkLabel}
@@ -411,16 +411,16 @@ export function WhatsappConnectionPage() {
                   />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
-                  <Label htmlFor="wa-link-evo">Nome da instância na Evolution</Label>
+                  <Label htmlFor="wa-link-evo">Nome que o serviço já conhece</Label>
                   <Input
                     id="wa-link-evo"
                     value={linkEvoName}
                     onChange={(e) => setLinkEvoName(e.target.value)}
-                    placeholder="nome exato"
+                    placeholder="mesmo que no painel do fornecedor"
                   />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
-                  <Label htmlFor="wa-link-phone">Telefone (opcional)</Label>
+                  <Label htmlFor="wa-link-phone">Número (opcional)</Label>
                   <Input
                     id="wa-link-phone"
                     value={linkPhone}
@@ -435,7 +435,7 @@ export function WhatsappConnectionPage() {
                     disabled={savingInstance}
                     onClick={() => void handleLinkExistingInstance()}
                   >
-                    Só vincular no CRM
+                    Salvar vínculo no CRM
                   </Button>
                 </div>
               </div>
@@ -445,15 +445,18 @@ export function WhatsappConnectionPage() {
       </Card>
 
       {instances.length > 0 ? (
-        <Card className="mb-4">
-          <CardHeader>
-            <CardTitle>Roteamento: funil e etapa por telefone</CardTitle>
-            <CardDescription>
-              Contactos <strong>novos</strong> (primeira mensagem nesta linha) entram no funil/etapa escolhidos. O mesmo
-              telefone no WhatsApp é <strong>um único lead</strong>: se o contacto passar a escrever por outra instância,
-              escolha se mantém a etapa no Kanban ou se aplica de novo a entrada desta linha. Fica registo de mudança de
-              linha no histórico do lead.
-            </CardDescription>
+        <Card className={cn('mb-4', pageQuietCardClass)}>
+          <CardHeader className="space-y-1">
+            <div className="flex flex-col gap-2 min-[500px]:flex-row min-[500px]:items-start min-[500px]:justify-between">
+              <div>
+                <CardTitle>Onde a primeira conversa cai</CardTitle>
+                <CardDescription>Primeira mensagem, por telefone. Salve com o botão em cada linha.</CardDescription>
+              </div>
+              <PageHelp title="Regras do primeiro contato" label="Regras do primeiro contato, ajuda">
+                <p>Vale só para a <strong>primeira mensagem</strong> de um <strong>contato novo</strong> nesse telefone.</p>
+                <p>Se a pessoa manda de outro número (também listado), a ficha continua: escolhe se a conversa fica <strong>na mesma coluna</strong> do quadro ou aplica de novo a entrada desta linha. O histórico registra troca de linha.</p>
+              </PageHelp>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             {instances.map((inst) => {
@@ -468,11 +471,11 @@ export function WhatsappConnectionPage() {
                   <div className="md:col-span-2">
                     <p className="m-0 text-sm font-medium">{row.label}</p>
                     <p className="m-0 text-xs text-muted-foreground">
-                      <code className="text-[0.65rem]">{row.evolutionInstanceName}</code>
+                      Cód. sistema: <span className="font-mono text-[0.65rem]">{row.evolutionInstanceName}</span>
                     </p>
                   </div>
                   <div className="md:col-span-3">
-                    <Label className="text-xs">Entrar no funil</Label>
+                    <Label className="text-xs">Processo (equipe)</Label>
                     <Select
                       value={row.entryPipelineId ?? '__default__'}
                       onValueChange={(v) => {
@@ -489,11 +492,11 @@ export function WhatsappConnectionPage() {
                       }}
                     >
                       <SelectTrigger className="mt-1 h-9 text-xs">
-                        <SelectValue placeholder="Padrão global" />
+                        <SelectValue placeholder="Padrão geral" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__default__" className="text-xs">
-                          Padrão (primeiro funil do CRM)
+                          Mesmo padrão do restante do CRM
                         </SelectItem>
                         {crm.pipelineCatalog.map((p) => (
                           <SelectItem key={p.id} value={p.id} className="text-xs">
@@ -504,7 +507,7 @@ export function WhatsappConnectionPage() {
                     </Select>
                   </div>
                   <div className="md:col-span-2">
-                    <Label className="text-xs">Etapa inicial</Label>
+                    <Label className="text-xs">Fase nesse processo</Label>
                     <Select
                       value={row.entryStageId ?? '__no_stage__'}
                       onValueChange={(v) => {
@@ -529,7 +532,7 @@ export function WhatsappConnectionPage() {
                     </Select>
                   </div>
                   <div className="md:col-span-2">
-                    <Label className="text-xs">Responsável padrão</Label>
+                    <Label className="text-xs">Quem fica com a conversa de entrada</Label>
                     <Select
                       value={row.defaultOwnerId ?? '__balance__'}
                       onValueChange={(v) => {
@@ -541,11 +544,11 @@ export function WhatsappConnectionPage() {
                       }}
                     >
                       <SelectTrigger className="mt-1 h-9 text-xs">
-                        <SelectValue placeholder="Equilíbrio global" />
+                        <SelectValue placeholder="Dividir entre a equipe" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__balance__" className="text-xs">
-                          Equilíbrio (SDR)
+                          Alternar de forma justa na equipe
                         </SelectItem>
                         {crm.sdrMembers
                           .filter((s) => s.active)
@@ -558,7 +561,7 @@ export function WhatsappConnectionPage() {
                     </Select>
                   </div>
                   <div className="md:col-span-2">
-                    <Label className="text-xs">Mudou de outro telefone</Label>
+                    <Label className="text-xs">Se já fala a partir de outro nosso telefone</Label>
                     <Select
                       value={row.onLineChange}
                       onValueChange={(v) => {
@@ -572,10 +575,10 @@ export function WhatsappConnectionPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="keep_stage" className="text-xs">
-                          Manter etapa no Kanban
+                          Manter a mesma coluna no quadro
                         </SelectItem>
                         <SelectItem value="use_entry" className="text-xs">
-                          Aplicar esta entrada
+                          Aplicar outra vez as regras desta linha
                         </SelectItem>
                       </SelectContent>
                     </Select>
@@ -588,7 +591,7 @@ export function WhatsappConnectionPage() {
                       disabled={savingRouteId === inst.id}
                       onClick={() => void handleSaveRoute(inst.id)}
                     >
-                      {savingRouteId === inst.id ? '…' : 'Guardar'}
+                      {savingRouteId === inst.id ? '…' : 'Salvar'}
                     </Button>
                   </div>
                 </div>
@@ -599,58 +602,90 @@ export function WhatsappConnectionPage() {
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card className={cn('lg:col-span-2', pageQuietCardClass)}>
           <CardHeader>
-            <CardTitle>Status da instância</CardTitle>
-            <CardDescription>Atualização em tempo real da conexão com a Evolution.</CardDescription>
+            <CardTitle>Estado e conexão</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-2 sm:grid-cols-2">
-              <p className="m-0 text-sm"><strong>Provider:</strong> {snapshot.provider}</p>
-              <p className="m-0 text-sm"><strong>Instância:</strong> {snapshot.instance || 'Não informada'}</p>
               <p className="m-0 flex items-center gap-2 text-sm">
-                <strong>Status:</strong>
+                <span className="text-muted-foreground">Está ligado agora</span>
                 <Badge className={statusBadgeClass(snapshot.status)}>{statusLabel(snapshot.status)}</Badge>
               </p>
               <p className="m-0 text-sm">
-                <strong>Conectado:</strong> {snapshot.connected === null ? 'Indefinido' : snapshot.connected ? 'Sim' : 'Não'}
+                <span className="text-muted-foreground">Recebe e envia no CRM: </span>
+                {snapshot.connected === null
+                  ? 'Ainda verificando'
+                  : snapshot.connected
+                    ? 'Sim'
+                    : 'Ainda não. Use o QR ao lado'}
               </p>
             </div>
+            {snapshot.instance ? (
+              <p className="m-0 text-xs text-muted-foreground">
+                Linha com nome interno <span className="font-mono">{snapshot.instance}</span> (não muda o que a equipe
+                vê)
+              </p>
+            ) : null}
 
-            {snapshot.error ? (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                {snapshot.error}
+            {(snapshot.error || snapshot.message) ? (
+              <div
+                className={
+                  'rounded-lg border p-3 text-sm ' +
+                  (snapshot.error
+                    ? 'border-destructive/30 bg-destructive/5 text-destructive'
+                    : 'border-amber-200/60 bg-amber-50/80 text-amber-950')
+                }
+              >
+                {snapshot.message || snapshot.error}
               </div>
             ) : null}
 
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" disabled={isBusy} onClick={() => void refreshSnapshot()}>
-                {loadingAction === 'snapshot' ? 'Atualizando...' : 'Atualizar status'}
+                {loadingAction === 'snapshot' ? 'Atualizando…' : 'Atualizar agora'}
               </Button>
-              <Button type="button" disabled={isBusy} onClick={() => void runAction('connect', 'Solicitação de conexão enviada.')}>
-                Gerar conexão / QR
+              <Button
+                type="button"
+                disabled={isBusy}
+                onClick={() => void runAction('connect', 'Código de ligação pedido. Se não aparecer o QR, toque de novo.')}
+              >
+                Pedir código (QR) para ligação
               </Button>
-              <Button type="button" variant="outline" disabled={isBusy} onClick={() => void runAction('restart', 'Instância reiniciada.')}>
-                Reiniciar instância
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isBusy}
+                onClick={() => void runAction('restart', 'Serviço de WhatsApp reiniciado. Verifique a ligação.')}
+              >
+                Reiniciar a ligação
               </Button>
-              <Button type="button" variant="destructive" disabled={isBusy} onClick={() => void runAction('logout', 'Instância desconectada.')}>
-                Desconectar sessão
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={isBusy}
+                onClick={() => void runAction('logout', 'Número desconectou: é preciso escanear o QR de novo.')}
+              >
+                Sair desta conta
               </Button>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className={pageQuietCardClass}>
           <CardHeader>
-            <CardTitle>QR Code</CardTitle>
-            <CardDescription>Escaneie com o WhatsApp para conectar a instância.</CardDescription>
+            <CardTitle>QR</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {qrCode ? (
-              <img src={qrCode} alt="QR Code da conexão Evolution" className="mx-auto aspect-square w-full max-w-[18rem] rounded-lg border border-border bg-white p-2" />
+              <img
+                src={qrCode}
+                alt="Código para ligar o WhatsApp"
+                className="mx-auto aspect-square w-full max-w-[18rem] rounded-lg border border-border bg-white p-2"
+              />
             ) : (
               <div className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
-                Sem QR Code disponível no momento. Clique em "Gerar conexão / QR".
+                Ainda não há código. Use “Pedir código (QR) para ligação” ao lado.
               </div>
             )}
           </CardContent>

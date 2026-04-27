@@ -59,7 +59,7 @@ export function AdminOperationsPage() {
   }
 
   return (
-    <AppLayout title="Operação Admin" subtitle="Atalhos rápidos para gestão completa e automações comerciais.">
+    <AppLayout title="Operação Admin" subtitle="Atalhos de gestão e automação (só admin).">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
           <CardHeader>

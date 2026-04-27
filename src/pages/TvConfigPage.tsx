@@ -24,7 +24,7 @@ export function TvConfigPage() {
   return (
     <AppLayout
       title="Configuração da tela TV"
-      subtitle="Defina widgets, ordem e o que aparece no painel de TV — sem código, só formulários."
+      subtitle="O que a TV mostra: widgets e ordem, só com formulário."
     >
       <Card className="mb-4 border-border/80 shadow-sm">
         <CardContent className="pt-4 text-sm text-muted-foreground">

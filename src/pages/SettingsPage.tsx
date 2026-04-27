@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { BellIcon, FileTextIcon, ShieldIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { PageHelp } from '@/components/page/PageHelp'
+import { pageQuietCardClass } from '@/components/page/PageSection'
+import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { NoticeBanner } from '@/components/NoticeBanner'
@@ -129,7 +132,20 @@ export function SettingsPage() {
   }, [crm.dataMode])
 
   return (
-    <AppLayout title="Configurações gerais" subtitle="Permissões, campos personalizados e regras de notificação.">
+    <AppLayout
+      title="Configurações gerais"
+      subtitle="Estrutura do CRM, atendimento com IA e regras da equipe."
+      actions={
+        <PageHelp title="Blocos desta página" label="Ajuda, configurações gerais">
+          <p>
+            <strong>IA</strong> — liga a assistente, modo padrão, prompt e limites. <strong>Etiquetas e salas</strong> — apoio
+            ao Kanban e à agenda. <strong>Campos</strong> — dados extra por lead; chave técnica fica no avançado.{' '}
+            <strong>Permissões</strong> — o que admin, gestor e atendente podem fazer. <strong>Notificações</strong> — canal
+            (app, e-mail, WhatsApp) e gatilho. <strong>Organização</strong> — fuso e formatos de data/hora.
+          </p>
+        </PageHelp>
+      }
+    >
       <NoticeBanner
         message={crm.syncNotice}
         variant={noticeVariantFromMessage(crm.syncNotice)}
@@ -137,12 +153,9 @@ export function SettingsPage() {
       />
 
       {crm.currentPermission.canManageUsers ? (
-        <Card className="mb-6 border-border/80 shadow-sm">
+        <Card className={cn('mb-6', pageQuietCardClass)}>
           <CardHeader>
-            <CardTitle className="text-base">Atendimento com IA (configuração)</CardTitle>
-            <CardDescription>
-              Defina prompt global, modo padrão e limites de segurança para o atendimento automático.
-            </CardDescription>
+            <CardTitle className="text-base">Atendimento com IA</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-5">
             <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-gradient-to-r from-primary/[0.04] to-transparent p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
@@ -159,14 +172,11 @@ export function SettingsPage() {
                   </Label>
                 </div>
                 <p className="m-0 text-xs text-muted-foreground sm:text-sm">
-                  Com desligado, a assistente nunca gera respostas — mesmo com modo <strong>IA</strong> ou <strong>Misto</strong> numa conversa.
+                  Desligado: a assistente nunca gera, mesmo com modo <strong>IA</strong> ou <strong>Misto</strong> na ficha.
                 </p>
               </div>
             </div>
             <div className="min-w-0 max-w-2xl">
-              <p className="m-0 mb-2 text-xs text-muted-foreground sm:text-sm">
-                Valor sugerido quando entra um <strong>lead novo</strong> (pode mudar por conversa no chat).
-              </p>
               <ConversationModeSwitch
                 title="Modo padrão de novas conversas"
                 value={aiDefaultMode}
@@ -239,10 +249,9 @@ export function SettingsPage() {
 
       {crm.currentPermission.canRouteLeads ? (
         <div className="mb-8 grid gap-4 md:grid-cols-2">
-          <Card>
+          <Card className={pageQuietCardClass}>
             <CardHeader>
               <CardTitle className="text-base">Etiquetas (Kanban)</CardTitle>
-              <CardDescription>Usadas para filtros e chips no quadro. Cores em hex.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               <ul className="m-0 list-none space-y-1 p-0 text-sm">
@@ -256,10 +265,9 @@ export function SettingsPage() {
               <TagDefForm crm={crm} />
             </CardContent>
           </Card>
-          <Card>
+          <Card className={pageQuietCardClass}>
             <CardHeader>
               <CardTitle className="text-base">Salas (agenda)</CardTitle>
-              <CardDescription>Recursos para marcações e função de primeiro horário livre.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               <ul className="m-0 list-none space-y-1 p-0 text-sm">
@@ -275,14 +283,12 @@ export function SettingsPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2">
         <Card className="border-border shadow-none rounded-none bg-card">
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
-            <div className="space-y-1">
+            <div>
               <CardTitle className="tracking-widest uppercase text-base font-bold">Campos personalizados</CardTitle>
-              <CardDescription className="text-xs">
-                Use o nome visível; o identificador interno é gerado automaticamente. Só abra &quot;Identificador interno&quot; se a equipe técnica pedir.
-              </CardDescription>
+              <p className="mt-1 m-0 max-w-xl text-xs text-muted-foreground">Nome exibido; a chave nasce sozinha (detalhe técnico no bloco de cada campo).</p>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => { crm.addWorkflowField(); toast.success('Campo criado.') }} className="rounded-none uppercase tracking-widest font-bold">
               Novo campo
@@ -504,9 +510,8 @@ export function SettingsPage() {
 
         <Card className="border-border shadow-none rounded-none bg-card">
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
-            <div className="space-y-1">
+            <div>
               <CardTitle className="tracking-widest uppercase text-base font-bold">Permissões por papel</CardTitle>
-              <CardDescription className="text-xs">Combinações de permissões por função (administrador, gestor, atendente).</CardDescription>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => { crm.addPermissionProfile(); toast.success('Perfil criado.') }} className="rounded-none uppercase tracking-widest font-bold">
               Novo perfil
@@ -601,9 +606,8 @@ export function SettingsPage() {
 
         <Card className="border-border shadow-none rounded-none bg-card lg:col-span-2">
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/50 bg-muted/10">
-            <div className="space-y-1">
+            <div>
               <CardTitle className="tracking-widest uppercase text-base font-bold">Notificações</CardTitle>
-              <CardDescription className="text-xs">Canais e gatilhos para alertas operacionais.</CardDescription>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => { crm.addNotificationRule(); toast.success('Regra criada.') }} className="rounded-none uppercase tracking-widest font-bold">
               Nova regra
@@ -679,10 +683,10 @@ export function SettingsPage() {
       </div>
 
       {crm.currentPermission.canEditBoards ? (
-        <Card className="mt-6 border-border/80 shadow-sm">
+        <Card className={cn('mt-6', pageQuietCardClass)}>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Organização (datas e idioma)</CardTitle>
-            <CardDescription>Fuso e formato usados em relatórios e listagens.</CardDescription>
+            <CardTitle className="text-base">Organização</CardTitle>
+            <p className="m-0 mt-1 text-xs text-muted-foreground">Fuso e data para listas e relatórios.</p>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="grid gap-2">

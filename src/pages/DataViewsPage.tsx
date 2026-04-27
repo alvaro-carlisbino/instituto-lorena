@@ -55,7 +55,7 @@ export function DataViewsPage() {
   return (
     <AppLayout
       title="Visões de dados"
-      subtitle="Escolha as colunas da tabela marcando as opções desejadas."
+      subtitle="Colunas visíveis por visão salva; marque o que precisar."
     >
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={crm.addDataView}>

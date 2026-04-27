@@ -40,7 +40,7 @@ export function BoardsPage() {
   }
 
   return (
-    <AppLayout title="Funis e etapas" subtitle="Configure funis, etapas e regras de movimentação.">
+    <AppLayout title="Funis e etapas" subtitle="Criar funis, ordenar etapas e regras de movimento.">
       <div className="flex flex-wrap gap-2 mb-8">
         <Button type="button" onClick={() => { crm.addPipeline(); toast.success('Funil criado.') }} className="rounded-none uppercase tracking-widest font-bold">
           Novo pipeline

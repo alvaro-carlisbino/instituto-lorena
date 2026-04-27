@@ -241,7 +241,7 @@ export function LeadsPage() {
   return (
     <AppLayout
       title="Todos os leads"
-      subtitle="Filtros, tabela em qualquer ecrã, importação por ficheiro e detalhe em painel."
+      subtitle="Filtros, tabela, importação e ficha no painel."
     >
       {crm.isLoading ? <SkeletonBlocks rows={3} /> : null}
 
@@ -367,7 +367,7 @@ export function LeadsPage() {
       <Card className="mb-4 rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
         <CardHeader className="pb-2 sm:pb-3">
           <CardTitle className="text-base sm:text-lg">Ações em lote</CardTitle>
-          <CardDescription className="text-xs sm:text-sm">Selecione na lista e aplique etapa ou responsável.</CardDescription>
+          <CardDescription className="text-xs sm:text-sm">Marque linhas; depois mude etapa e/ou responsável e aplique.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col flex-wrap items-stretch gap-3 sm:flex-row sm:items-end sm:gap-4">
           <div className="grid min-w-0 flex-1 gap-1.5 sm:max-w-[16rem]">
@@ -427,7 +427,7 @@ export function LeadsPage() {
       <Card className="mb-6 overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-sm backdrop-blur-sm sm:mb-8">
         <CardHeader className="space-y-1 border-b border-border/60 bg-muted/15 px-4 py-3 sm:px-5 sm:py-4">
           <CardTitle className="text-base sm:text-lg">Leads — {filteredLeads.length} resultado(s)</CardTitle>
-          <CardDescription className="text-xs sm:text-sm">Toque no cartão (telemóvel) ou na linha (ecrã grande) para detalhes. Em lote, use a caixa à esquerda.</CardDescription>
+          <CardDescription className="text-xs sm:text-sm">Abre o lead com um toque. Caixa à esquerda: seleção em lote.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <ul className="m-0 flex list-none flex-col divide-y divide-border/60 md:hidden">
@@ -609,9 +609,8 @@ export function LeadsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Importar leads (CSV)</CardTitle>
-            <CardDescription>
-              Selecione um ficheiro .csv: primeira linha com cabeçalhos (ex.: patient_name, phone, summary, source,
-              temperature). O funil escolhido nos filtros acima define o destino; usa-se a primeira etapa desse funil.
+            <CardDescription className="text-xs sm:text-sm">
+              .csv com cabeçalho; primeira etapa = a do funil ativo no filtro do topo.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
@@ -654,9 +653,7 @@ export function LeadsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Importar conversas</CardTitle>
-            <CardDescription>
-              Selecione um arquivo de conversas já exportado pelo sistema para incluir o histórico dos atendimentos.
-            </CardDescription>
+            <CardDescription className="text-xs sm:text-sm">JSON de conversa exportado por este CRM.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
             <input

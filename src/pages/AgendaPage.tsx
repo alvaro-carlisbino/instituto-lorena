@@ -106,7 +106,7 @@ export function AgendaPage() {
   return (
     <AppLayout
       title="Agenda"
-      subtitle="Marcações internas, salas e registo de presença. Integração com calendários externos fica para uma fase posterior."
+      subtitle="Marcações, salas e presença. (Calendário externo: em breve.)"
     >
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">

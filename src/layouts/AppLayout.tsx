@@ -49,7 +49,7 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
       <main
         id="main-content"
         aria-labelledby={titleId}
-        className="mx-auto flex min-h-0 w-full max-w-[min(100%,1800px)] min-w-0 flex-1 flex-col space-y-6 px-4 py-5 sm:space-y-8 sm:px-6 sm:py-8 lg:px-8 relative"
+        className="mx-auto flex min-h-0 w-full max-w-[min(100%,1800px)] min-w-0 flex-1 flex-col space-y-5 px-4 py-5 sm:space-y-6 sm:px-6 sm:py-6 lg:px-8 relative"
       >
         {children}
       </main>

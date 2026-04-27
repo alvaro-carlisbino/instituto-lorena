@@ -109,7 +109,7 @@ export function AdminLabPage() {
   }
 
   return (
-    <AppLayout title="Ferramentas" subtitle="Atalhos de apoio para testes e manutenção.">
+    <AppLayout title="Ferramentas" subtitle="Testes e manutenção (só quem tem acesso).">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="shadow-sm">
           <CardHeader>

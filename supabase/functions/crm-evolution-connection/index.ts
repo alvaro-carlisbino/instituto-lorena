@@ -5,6 +5,8 @@ const cors = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const EVOLUTION_FETCH_TIMEOUT_MS = 25_000
+
 type Action =
   | 'snapshot'
   | 'status'
@@ -38,14 +40,28 @@ async function callEvolution(
   jsonBody?: Record<string, unknown>,
 ): Promise<{ ok: boolean; status: number; data: unknown; raw: string; url: string }> {
   const url = `${baseUrl}${path}`
-  const res = await fetch(url, {
-    method,
-    headers: {
-      apikey: apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: method === 'POST' && jsonBody !== undefined ? JSON.stringify(jsonBody) : undefined,
-  })
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        apikey: apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: method === 'POST' && jsonBody !== undefined ? JSON.stringify(jsonBody) : undefined,
+      signal: AbortSignal.timeout(EVOLUTION_FETCH_TIMEOUT_MS),
+    })
+  } catch (e) {
+    const name = e instanceof Error ? e.name : ''
+    const isAbort = name === 'TimeoutError' || name === 'AbortError'
+    return {
+      ok: false,
+      status: isAbort ? 408 : 0,
+      data: { _fetchError: isAbort ? 'timeout' : (e instanceof Error ? e.message : String(e)) },
+      raw: '',
+      url,
+    }
+  }
 
   const raw = await res.text()
   let parsed: unknown = {}
@@ -228,6 +244,7 @@ async function callerCanManageUsers(
 }
 
 Deno.serve(async (req) => {
+  try {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
@@ -235,7 +252,21 @@ Deno.serve(async (req) => {
   if (!authHeader) return json({ error: 'unauthorized' }, 401)
   const supabaseUrl = env('SUPABASE_URL')
   const anonKey = env('SUPABASE_ANON_KEY')
-  if (!supabaseUrl || !anonKey) return json({ error: 'server_misconfigured' }, 500)
+  if (!supabaseUrl || !anonKey) {
+    return json(
+      {
+        ok: false,
+        error: 'server_misconfigured',
+        message: 'Função sem SUPABASE_URL ou SUPABASE_ANON_KEY. Confirme as secrets e faça deploy de crm-evolution-connection.',
+        provider: 'evolution',
+        instance: '',
+        status: 'error',
+        connected: null,
+      },
+      200,
+    )
+  }
+
   const userClient = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: authHeader } },
   })
@@ -243,19 +274,26 @@ Deno.serve(async (req) => {
   if (authError || !authData.user) return json({ error: 'unauthorized' }, 401)
 
   const serviceKey = env('SUPABASE_SERVICE_ROLE_KEY')
-  if (!serviceKey) {
-    return json(
-      { error: 'server_misconfigured', message: 'Defina SUPABASE_SERVICE_ROLE_KEY na função (gestão de instâncias).' },
-      500,
-    )
-  }
-  const admin = createClient(supabaseUrl, serviceKey)
+  const admin = serviceKey
+    ? createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
+    : null
 
   const base = env('EVOLUTION_API_BASE')
   const key = env('EVOLUTION_API_KEY')
   const defaultInstance = env('EVOLUTION_INSTANCE')
   if (!base || !key) {
-    return json({ error: 'missing_env', message: 'Configure EVOLUTION_API_BASE e EVOLUTION_API_KEY.' }, 500)
+    return json(
+      {
+        ok: false,
+        error: 'missing_env',
+        message: 'Falta configurar o gateway de WhatsApp. Peça a quem cuida do sistema para preencher EVOLUTION_API_BASE e EVOLUTION_API_KEY no painel Supabase (Edge Functions, secrets).',
+        provider: 'evolution',
+        instance: '',
+        status: 'unconfigured',
+        connected: null,
+      },
+      200,
+    )
   }
 
   type BodyShape = { action?: Action; instanceId?: string; instanceName?: string }
@@ -269,14 +307,29 @@ Deno.serve(async (req) => {
   const baseUrl = normalizedBaseUrl(base)
 
   if (action === 'create_instance') {
+    if (!admin || !serviceKey) {
+      return json(
+        {
+          ok: false,
+          error: 'server_misconfigured',
+          message:
+            'Para criar ou apagar contas de WhatsApp no servidor, adicione SUPABASE_SERVICE_ROLE_KEY nas secrets desta função (Dashboard). QR e estado da linha funcionam sem isto.',
+        },
+        200,
+      )
+    }
     if (!(await callerCanManageUsers(admin, authData.user.id))) {
       return json({ error: 'forbidden' }, 403)
     }
     const raw = String(body.instanceName ?? '').trim()
     if (!raw) {
       return json(
-        { error: 'instance_name_required', message: 'Indique o identificador da instância (ex.: comercial-1).' },
-        400,
+        {
+          ok: false,
+          error: 'instance_name_required',
+          message: 'Indique o nome interno do telefone (letras, números e hífen) ou o rótulo a partir do qual o CRM gera o nome.',
+        },
+        200,
       )
     }
     const instanceName = normalizeInstanceNameForApi(raw) || `il-${Date.now().toString(36)}`
@@ -301,13 +354,23 @@ Deno.serve(async (req) => {
         error: 'evolution_create_failed',
         status: last.status,
         details: last.data,
-        message: 'A Evolution rejeitou a criação. Verifique se o nome já existe ou se a API corresponde à v2 (POST /instance/create).',
+        message: 'Não foi possível criar no servidor. O nome pode já existir, ou a API de WhatsApp recusou o pedido.',
       },
-      502,
+      200,
     )
   }
 
   if (action === 'delete_instance') {
+    if (!admin || !serviceKey) {
+      return json(
+        {
+          ok: false,
+          error: 'server_misconfigured',
+          message: 'Defina SUPABASE_SERVICE_ROLE_KEY nas secrets desta função para apagar a conta de WhatsApp no servidor.',
+        },
+        200,
+      )
+    }
     if (!(await callerCanManageUsers(admin, authData.user.id))) {
       return json({ error: 'forbidden' }, 403)
     }
@@ -322,7 +385,14 @@ Deno.serve(async (req) => {
       .maybeSingle()
     const ename = String((row as { evolution_instance_name?: string } | null)?.evolution_instance_name ?? '').trim()
     if (!ename) {
-      return json({ error: 'not_found' }, 404)
+      return json(
+        {
+          ok: false,
+          error: 'not_found',
+          message: 'Não foi encontrada esta linha no CRM. Atualize a lista ou escolha outro telefone.',
+        },
+        200,
+      )
     }
     const del = await callEvolution(baseUrl, key, `/instance/delete/${encodeURIComponent(ename)}`, 'DELETE')
     if (!del.ok && del.status !== 404) {
@@ -332,8 +402,9 @@ Deno.serve(async (req) => {
           error: 'evolution_delete_failed',
           status: del.status,
           details: del.data,
+          message: 'Não foi possível apagar no servidor de WhatsApp. Tente de novo ou apague no painel do fornecedor.',
         },
-        502,
+        200,
       )
     }
     return json({ ok: true, provider: 'evolution', instance: ename, evolutionDelete: del.data })
@@ -353,10 +424,14 @@ Deno.serve(async (req) => {
   }
   if (!instance) {
     return json({
+      ok: false,
       error: 'missing_instance',
-      message:
-        'Crie uma linha no CRM (instância criada no Evolution) ou defina o fallback EVOLUTION_INSTANCE no servidor.',
-    }, 500)
+      message: 'Crie um telefone/linha em baixo, ou defina a variável EVOLUTION_INSTANCE no painel (fallback).',
+      provider: 'evolution',
+      instance: '',
+      status: 'unconfigured',
+      connected: null,
+    }, 200)
   }
   if (!['snapshot', 'status', 'qrcode', 'connect', 'logout', 'restart'].includes(action)) {
     return json({ error: 'invalid_action' }, 400)
@@ -397,5 +472,24 @@ Deno.serve(async (req) => {
     actionResult: executed,
     status: snapshot.state,
     connected: snapshot.connected,
-  }, executed.ok ? 200 : 502)
+    error: executed.ok ? undefined : 'action_failed',
+    message: executed.ok
+      ? undefined
+      : 'Não foi possível ligar este número ao WhatsApp. Confirme se o serviço está a correr, a linha e a rede, e tente de novo.',
+  }, 200)
+  } catch (e) {
+    console.error('crm-evolution-connection', e)
+    return json(
+      {
+        ok: false,
+        error: 'internal_error',
+        message: 'Ocorreu um erro inesperado. Tente de novo; se continuar, confira o deploy da função e os logs no Supabase.',
+        provider: 'evolution',
+        instance: '',
+        status: 'error',
+        connected: null,
+      },
+      200,
+    )
+  }
 })

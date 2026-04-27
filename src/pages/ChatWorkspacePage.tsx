@@ -90,7 +90,7 @@ export function ChatWorkspacePage() {
   }, [dataMode, refreshChatFromSupabase])
 
   return (
-    <AppLayout title="Central de conversas" subtitle="Atendimento rápido, organizado e fácil para toda a equipe.">
+    <AppLayout title="Central de conversas" subtitle="Fila, conversa e ficha aberta na mesma tela.">
       <div className="grid min-h-0 w-full flex-1 grid-cols-1 gap-4 xl:min-h-[min(calc(100dvh-10.5rem),64rem)] xl:grid-cols-12 xl:gap-5">
         <Card className="order-1 flex min-h-0 flex-col overflow-hidden rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm xl:col-span-3">
           <CardHeader className="shrink-0 border-b border-border/60 bg-muted/20 p-3 sm:p-4">

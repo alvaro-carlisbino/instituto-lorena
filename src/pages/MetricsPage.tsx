@@ -49,7 +49,7 @@ export function MetricsPage() {
   }
 
   return (
-    <AppLayout title="Métricas ajustáveis" subtitle="Defina metas e acompanhe performance em tempo real.">
+    <AppLayout title="Métricas ajustáveis" subtitle="Metas e acompanhamento (cartões do painel).">
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={() => { crm.addMetric(); toast.success('Métrica criada.') }}>
           Nova métrica

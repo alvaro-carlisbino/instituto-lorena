@@ -75,7 +75,7 @@ export function KanbanPage() {
   return (
     <AppLayout
       title="Quadro de leads"
-      subtitle="Funis e etapas configuráveis por processo."
+      subtitle="Arraste o cartão entre as etapas do funil selecionado."
       actions={
         <>
           <Link

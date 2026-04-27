@@ -118,7 +118,7 @@ export function DashboardPage() {
   return (
     <AppLayout
       title="Painel comercial"
-      subtitle={`Indicadores, novos hoje (fuso ${orgTz}) e mão-de-telefone entre linhas WhatsApp.`}
+      subtitle={`Resumo, novos hoje (${orgTz}) e trocas entre linhas de WhatsApp.`}
       actions={
         <>
           {crm.currentPermission.canRouteLeads ? (

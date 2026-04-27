@@ -24,7 +24,7 @@ export function DashboardConfigPage() {
   return (
     <AppLayout
       title="Configuração do dashboard"
-      subtitle="Escolha títulos, métricas e ordem dos cards de forma simples."
+      subtitle="Títulos, métricas e ordem dos blocos do painel."
     >
       <Card className="mb-4 border-border/80 shadow-sm">
         <CardContent className="pt-4">

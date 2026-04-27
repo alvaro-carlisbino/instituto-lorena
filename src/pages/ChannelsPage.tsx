@@ -48,7 +48,7 @@ export function ChannelsPage() {
   return (
     <AppLayout
       title="Canais configuráveis"
-      subtitle="Ative canais, prioridade, prazo e conexão dos campos do lead."
+      subtitle="Canais ativos, prioridade, prazos e ligação aos campos do lead."
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <Button
