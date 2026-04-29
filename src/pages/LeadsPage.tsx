@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { MessageCircle, Search } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { LeadDetailSheet } from '@/components/leads/LeadDetailSheet'
+import { LeadDetailModal } from '@/components/leads/LeadDetailModal'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -771,7 +771,7 @@ export function LeadsPage() {
         </Card>
       </div>
 
-      <LeadDetailSheet open={sheetOpen} onOpenChange={handleSheetChange} />
+      <LeadDetailModal open={sheetOpen} onOpenChange={handleSheetChange} />
     </AppLayout>
   )
 }

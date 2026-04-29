@@ -935,6 +935,11 @@ export const saveMetricConfig = async (metric: MetricConfig): Promise<void> => {
   if (error) throw error
 }
 
+export const deleteLead = async (leadId: string): Promise<void> => {
+  const { error } = await supabase.from('crm_leads').delete().eq('id', leadId)
+  if (error) throw new Error(error.message)
+}
+
 export const saveLeadTask = async (task: LeadTask): Promise<void> => {
   const client = assertSupabase()
   const { error } = await client.from('lead_tasks').upsert({

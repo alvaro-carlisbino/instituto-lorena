@@ -42,6 +42,11 @@ WEB (React, Vite, Tailwind v4, Shadcn)
 - **Agent:** `frontend-specialist`
 - **STATUS:** COMPLETED
 
+### Task 5: Central Full-Screen Lead Modal & Lead Management
+- **Agent:** `frontend-specialist`
+- **STATUS:** IN PROGRESS
+- **Description:** Replace the side sheet modal (`LeadDetailSheet`) with a central, wide dialog modal (`LeadDetailModal`) that gives more space for visualizing lead details. Add a "Delete Lead" (Soft delete) feature with a confirmation dialog, and integrate this into `CrmContext` and `useCrmState`.
+
 ## Phase X: Verification
 - [x] UX and Functional layout checks passed visually.
 - [x] Custom default Data added to `crmMock.ts`.

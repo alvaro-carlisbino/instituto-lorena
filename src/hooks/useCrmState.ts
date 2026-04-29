@@ -27,6 +27,7 @@ import {
   deleteDataView,
   deleteWorkflowField,
   deleteLeadTask,
+  deleteLead as deleteLeadSupabase,
   saveAutomationRule,
   deleteAutomationRule,
   insertInteraction,
@@ -644,6 +645,8 @@ export const useCrmState = () => {
     }
   }
 
+
+
   const refreshChatFromSupabase = useCallback(async () => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured) return
     try {
@@ -1129,6 +1132,29 @@ export const useCrmState = () => {
       }
       return normalized
     })
+  }
+
+  const removeLead = async (leadId: string) => {
+    const targetLead = leads.find((lead) => lead.id === leadId)
+    if (!targetLead) return
+
+    setLeads((previous) => previous.filter((lead) => lead.id !== leadId))
+    
+    if (selectedLeadId === leadId) {
+      setSelectedLeadId('')
+    }
+
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      try {
+        await deleteLeadSupabase(leadId)
+        toast.success('Lead removido permanentemente.')
+      } catch (err) {
+        toast.error('Falha ao remover lead. Tente novamente.')
+        console.error(err)
+      }
+    } else {
+      toast.success('Lead removido (mock).')
+    }
   }
 
   const persistLeadPatch = (next: Lead) => {
@@ -1942,6 +1968,7 @@ export const useCrmState = () => {
     importInteractionsFromPayload,
     addLeadTask,
     updateLeadTask,
+    removeLead,
     removeLeadTask,
     reorderLeadTasks,
     recordSurveyResponse,

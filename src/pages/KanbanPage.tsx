@@ -4,7 +4,7 @@ import { Bot, History, LayoutDashboard, LayoutGrid, List, MoreHorizontal, Refres
 
 import { KanbanListView } from '@/components/kanban/KanbanListView'
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
-import { LeadDetailSheet } from '@/components/leads/LeadDetailSheet'
+import { LeadDetailModal } from '@/components/leads/LeadDetailModal'
 import { KanbanToolbar } from '@/components/kanban/KanbanToolbar'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { buttonVariants } from '@/components/ui/button'
@@ -270,8 +270,7 @@ export function KanbanPage() {
           })}
         </div>
       )}
-
-      <LeadDetailSheet open={detailOpen} onOpenChange={setDetailOpen} />
+      <LeadDetailModal open={detailOpen} onOpenChange={setDetailOpen} />
     </AppLayout>
   )
 }
