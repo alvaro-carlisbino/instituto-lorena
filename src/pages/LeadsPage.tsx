@@ -1,6 +1,40 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { MessageCircle, Search } from 'lucide-react'
+import { HelpDrawer } from '@/components/page/HelpDrawer'
+
+const LEADS_HELP = [
+  {
+    icon: '👥',
+    title: 'Gestão de Pacientes',
+    content: (
+      <p>
+        Esta é a lista central de todos os seus leads. Você pode filtrar por funil, etapa,
+        responsável ou origem para encontrar exatamente quem procura.
+      </p>
+    ),
+  },
+  {
+    icon: '📦',
+    title: 'Ações em Lote',
+    content: (
+      <p>
+        Selecione vários leads usando as caixas de seleção à esquerda para mudar o responsável
+        ou a etapa de todos ao mesmo tempo. Economiza tempo em redistribuições de equipe.
+      </p>
+    ),
+  },
+  {
+    icon: '📥',
+    title: 'Importação',
+    content: (
+      <p>
+        Você pode trazer leads de outras planilhas via CSV ou importar históricos de conversas
+        via JSON no final desta página.
+      </p>
+    ),
+  },
+]
 import { toast } from 'sonner'
 
 import { LeadDetailModal } from '@/components/leads/LeadDetailModal'
@@ -340,7 +374,10 @@ export function LeadsPage() {
   }
 
   return (
-    <AppLayout title="Leads">
+    <AppLayout
+      title="Leads"
+      actions={<HelpDrawer title="Ajuda com Leads" sections={LEADS_HELP} />}
+    >
       {crm.isLoading ? <SkeletonBlocks rows={3} /> : null}
 
       <div className="mb-4 grid w-full max-w-full gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm backdrop-blur-sm sm:p-5 lg:grid-cols-2 lg:items-end xl:grid-cols-3 2xl:grid-cols-4">

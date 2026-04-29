@@ -1,8 +1,25 @@
 import { useEffect, useState } from 'react'
-import { BellIcon, FileTextIcon, ShieldIcon, Trash2Icon } from 'lucide-react'
+import { BellIcon, Building2, Clock, FileTextIcon, GripVertical, Mail, MapPin, Phone, ShieldIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
-import { PageHelp } from '@/components/page/PageHelp'
+import { HelpDrawer } from '@/components/page/HelpDrawer'
 import { pageQuietCardClass } from '@/components/page/PageSection'
 import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -28,17 +45,17 @@ import type { FieldVisibilityContext, WorkflowField, Room } from '@/mocks/crmMoc
 import { getAiConfig, saveAiConfig, type ConversationOwnerMode } from '@/services/conversationControl'
 
 const FIELD_TYPE_OPTIONS = [
-  { value: 'text', label: 'Texto livre' },
-  { value: 'select', label: 'Lista de opções' },
-  { value: 'number', label: 'Número' },
-  { value: 'date', label: 'Data' },
-  { value: 'boolean', label: 'Sim/Não (Checkbox)' },
+  { value: 'text', label: '📝 Texto livre' },
+  { value: 'select', label: '📋 Lista de opções' },
+  { value: 'number', label: '🔢 Número' },
+  { value: 'date', label: '📅 Data' },
+  { value: 'boolean', label: '✅ Sim / Não' },
 ] as const
 
 const ROLE_OPTIONS = [
-  { value: 'admin', label: 'Administrador' },
-  { value: 'gestor', label: 'Gestor comercial' },
-  { value: 'sdr', label: 'Atendente' },
+  { value: 'admin', label: '👑 Administrador' },
+  { value: 'gestor', label: '📊 Gestor comercial' },
+  { value: 'sdr', label: '💬 Atendente' },
 ] as const
 
 const CHANNEL_OPTIONS = [
@@ -47,14 +64,80 @@ const CHANNEL_OPTIONS = [
   { value: 'whatsapp', label: 'WhatsApp' },
 ] as const
 
-const VISIBILITY_CONTEXTS: { value: FieldVisibilityContext; label: string }[] = [
-  { value: 'kanban_card', label: 'Quadro' },
-  { value: 'lead_detail', label: 'Detalhe' },
-  { value: 'list', label: 'Lista' },
-  { value: 'capture_form', label: 'Formulário' },
+const VISIBILITY_CONTEXTS: { value: FieldVisibilityContext; label: string; description: string }[] = [
+  { value: 'kanban_card', label: 'Quadro Kanban', description: 'Aparece nos cartões do quadro' },
+  { value: 'lead_detail', label: 'Ficha do lead', description: 'Aparece ao abrir o lead' },
+  { value: 'list', label: 'Lista de leads', description: 'Aparece na tabela de leads' },
+  { value: 'capture_form', label: 'Formulário', description: 'Aparece no formulário de captura' },
 ]
 
+const PERMISSION_LABELS: Record<string, { label: string; description: string; emoji: string }> = {
+  canRouteLeads: {
+    emoji: '🎯',
+    label: 'Gerenciar leads',
+    description: 'Ver, mover e editar fichas de leads. Encaminhar entre funis.',
+  },
+  canEditBoards: {
+    emoji: '🗂️',
+    label: 'Configurar funis e etapas',
+    description: 'Criar e editar funis, etapas e automações de mensagem.',
+  },
+  canViewTvPanel: {
+    emoji: '📺',
+    label: 'Ver painel de TV',
+    description: 'Acesso à tela de painel para exibição em monitor.',
+  },
+  canManageUsers: {
+    emoji: '👥',
+    label: 'Administrar usuários',
+    description: 'Convidar usuários, alterar papéis e configurações gerais.',
+  },
+}
+
 type DeleteTarget = { type: 'field' | 'profile' | 'rule'; id: string; name?: string } | null
+
+const SETTINGS_HELP = [
+  {
+    icon: '🤖',
+    title: 'Atendimento com IA',
+    content: (
+      <p>
+        Controla se a assistente pode enviar respostas automáticas. O prompt define o tom
+        e o comportamento. Limite por hora evita spam.
+      </p>
+    ),
+  },
+  {
+    icon: '📝',
+    title: 'Campos personalizados',
+    content: (
+      <p>
+        Crie campos extras para guardar informações específicas de cada lead — como
+        convênio, procedimento desejado ou data de retorno. Arraste para reordenar.
+      </p>
+    ),
+  },
+  {
+    icon: '🔐',
+    title: 'Permissões por papel',
+    content: (
+      <p>
+        Define o que cada tipo de usuário pode fazer. Um Atendente, por exemplo, pode
+        gerenciar leads mas não criar funis ou convidar outros usuários.
+      </p>
+    ),
+  },
+  {
+    icon: '🔔',
+    title: 'Notificações',
+    content: (
+      <p>
+        Crie regras para avisar a equipe sobre eventos — ex.: quando um lead fica parado
+        mais de 2 horas ou quando uma etapa é concluída.
+      </p>
+    ),
+  },
+]
 
 export function SettingsPage() {
   const crm = useCrm()
@@ -66,6 +149,11 @@ export function SettingsPage() {
   const [aiMaxPerHour, setAiMaxPerHour] = useState(2)
   const [aiCooldownSeconds, setAiCooldownSeconds] = useState(240)
   const [aiLoading, setAiLoading] = useState(false)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
 
   const canAccessSettings = crm.currentPermission.canEditBoards || crm.currentPermission.canManageUsers
 
@@ -84,17 +172,7 @@ export function SettingsPage() {
     setDeleteTarget(null)
   }
 
-  if (!canAccessSettings) {
-    return (
-      <AppLayout title="Configurações gerais">
-        <Card className="border-border shadow-none bg-muted/10 rounded-none">
-          <CardContent className="pt-6 text-sm text-destructive font-bold uppercase tracking-widest">
-            <p className="m-0">Peça acesso a um administrador (workflow, perfis de permissão e notificações).</p>
-          </CardContent>
-        </Card>
-      </AppLayout>
-    )
-  }
+
 
   const loadAiConfig = () => {
     if (crm.dataMode !== 'supabase') return
@@ -132,13 +210,23 @@ export function SettingsPage() {
     })()
   }, [crm.dataMode])
 
+  if (!canAccessSettings) {
+    return (
+      <AppLayout title="Configurações gerais">
+        <Card className="border-border shadow-none bg-muted/10 rounded-none">
+          <CardContent className="pt-6 text-sm text-destructive font-bold uppercase tracking-widest">
+            <p className="m-0">Peça acesso a um administrador (workflow, perfis de permissão e notificações).</p>
+          </CardContent>
+        </Card>
+      </AppLayout>
+    )
+  }
+
   return (
     <AppLayout
       title="Configurações gerais"
       actions={
-        <PageHelp title="O que está em cada bloco" label="Ajuda">
-          <p>IA, etiquetas, campos, permissões, notificações e fuso/horas.</p>
-        </PageHelp>
+        <HelpDrawer title="Como usar as configurações" sections={SETTINGS_HELP} />
       }
     >
       <NoticeBanner
@@ -242,6 +330,126 @@ export function SettingsPage() {
         </Card>
       ) : null}
 
+      <Card className={cn('mb-6', pageQuietCardClass)}>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Building2 className="size-5 text-primary" />
+            Identidade da Clínica
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label className="flex items-center gap-1.5">
+                <Building2 className="size-3 text-muted-foreground" />
+                Nome da Clínica
+              </Label>
+              <Input
+                placeholder="Ex: Instituto Lorena"
+                value={crm.orgSettings.clinicName || ''}
+                onChange={(e) => crm.updateOrgSettings({ clinicName: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label className="flex items-center gap-1.5">
+                <Phone className="size-3 text-muted-foreground" />
+                Telefone Principal
+              </Label>
+              <Input
+                placeholder="(11) 99999-9999"
+                value={crm.orgSettings.clinicPhone || ''}
+                onChange={(e) => crm.updateOrgSettings({ clinicPhone: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label className="flex items-center gap-1.5">
+                <Mail className="size-3 text-muted-foreground" />
+                E-mail de Contato
+              </Label>
+              <Input
+                placeholder="contato@lorena.com"
+                value={crm.orgSettings.clinicEmail || ''}
+                onChange={(e) => crm.updateOrgSettings({ clinicEmail: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label className="flex items-center gap-1.5">
+                <MapPin className="size-3 text-muted-foreground" />
+                Endereço
+              </Label>
+              <Input
+                placeholder="Rua Exemplo, 123"
+                value={crm.orgSettings.clinicAddress || ''}
+                onChange={(e) => crm.updateOrgSettings({ clinicAddress: e.target.value })}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className={cn('mb-6', pageQuietCardClass)}>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Clock className="size-5 text-primary" />
+            Horário de Funcionamento
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label>Abertura</Label>
+              <Input
+                type="time"
+                value={crm.orgSettings.workingHours?.start || '08:00'}
+                onChange={(e) => crm.updateOrgSettings({
+                  workingHours: { ...crm.orgSettings.workingHours!, start: e.target.value }
+                })}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Fechamento</Label>
+              <Input
+                type="time"
+                value={crm.orgSettings.workingHours?.end || '18:00'}
+                onChange={(e) => crm.updateOrgSettings({
+                  workingHours: { ...crm.orgSettings.workingHours!, end: e.target.value }
+                })}
+              />
+            </div>
+          </div>
+          <div className="space-y-3">
+            <Label>Dias de Atendimento</Label>
+            <div className="flex flex-wrap gap-2">
+              {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day, idx) => {
+                const isSelected = crm.orgSettings.workingHours?.days.includes(idx)
+                return (
+                  <Button
+                    key={day}
+                    size="sm"
+                    variant={isSelected ? 'default' : 'outline'}
+                    className={cn(
+                      "w-12 h-9 rounded-xl transition-all",
+                      isSelected ? "shadow-md shadow-primary/20" : "opacity-60 hover:opacity-100"
+                    )}
+                    onClick={() => {
+                      const currentDays = crm.orgSettings.workingHours?.days || []
+                      const newDays = isSelected
+                        ? currentDays.filter(d => d !== idx)
+                        : [...currentDays, idx].sort()
+                      crm.updateOrgSettings({
+                        workingHours: { ...crm.orgSettings.workingHours!, days: newDays }
+                      })
+                    }}
+                  >
+                    {day}
+                  </Button>
+                )
+              })}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {crm.currentPermission.canRouteLeads ? (
         <div className="mb-8 grid gap-4 md:grid-cols-2">
           <Card className={pageQuietCardClass}>
@@ -283,10 +491,12 @@ export function SettingsPage() {
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/20">
             <div>
               <CardTitle className="text-lg font-medium">Campos personalizados</CardTitle>
-              <p className="mt-1 m-0 max-w-xl text-xs text-muted-foreground">Nome exibido; a chave nasce sozinha (detalhe técnico no bloco de cada campo).</p>
+              <p className="mt-1 m-0 max-w-xl text-xs text-muted-foreground">
+                Crie campos para guardar informações específicas dos seus pacientes. Arraste para reordenar.
+              </p>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => { crm.addWorkflowField(); toast.success('Campo criado.') }} className="rounded-md font-medium">
-              Novo campo
+              + Novo campo
             </Button>
           </CardHeader>
           <CardContent className="pt-0 px-0">
@@ -298,207 +508,37 @@ export function SettingsPage() {
                 className="py-8"
               />
             ) : (
-              <ul className="m-0 list-none space-y-0 p-0 divide-y divide-border">
-                {crm.workflowFields.map((field) => {
-                  const toggleVis = (ctx: FieldVisibilityContext, checked: boolean) => {
-                    const next = checked
-                      ? Array.from(new Set([...field.visibleIn, ctx]))
-                      : field.visibleIn.filter((c) => c !== ctx)
-                    crm.updateWorkflowField(field.id, { visibleIn: next as FieldVisibilityContext[] })
-                  }
-                  return (
-                    <li
-                      key={field.id}
-                      data-testid={`workflow-field-${field.fieldKey}`}
-                      className="flex flex-col gap-6 bg-transparent hover:bg-muted/5 transition-colors p-6"
-                    >
-                      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                        <div className="grid gap-2 sm:col-span-2 lg:col-span-1">
-                          <Label className="text-xs font-medium text-muted-foreground">
-                            Nome no cadastro
-                          </Label>
-                          <Input
-                            value={field.label}
-                            onChange={(event) => crm.updateWorkflowField(field.id, { label: event.target.value })}
-                            onBlur={(event) => {
-                              const label = event.target.value.trim()
-                              if (!workflowKeyManual[field.id] && label) {
-                                crm.updateWorkflowField(field.id, { fieldKey: slugifyLabel(label) })
-                              }
-                            }}
-                            className="rounded-md border-border/40 font-medium h-9"
-                          />
-                        </div>
-                        <div className="grid gap-1">
-                          <Label className="text-xs text-muted-foreground">Seção / ordem</Label>
-                          <div className="flex gap-2">
-                            <Input
-                              value={field.section}
-                              onChange={(event) => crm.updateWorkflowField(field.id, { section: event.target.value })}
-                              placeholder="Seção"
-                            />
-                            <Input
-                              type="number"
-                              className="w-20"
-                              value={field.sortOrder}
-                              onChange={(event) =>
-                                crm.updateWorkflowField(field.id, { sortOrder: Number(event.target.value) || 0 })
-                              }
-                            />
-                          </div>
-                        </div>
-                        <details className="sm:col-span-2 lg:col-span-3 rounded-md border border-dashed border-border/80 bg-muted/10 p-3">
-                          <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-                            Identificador interno (avançado)
-                          </summary>
-                          <div className="mt-3 grid gap-2 max-w-md">
-                            <Label className="text-[10px] uppercase text-muted-foreground">Chave técnica (não alterar sem orientação)</Label>
-                            <Input
-                              value={field.fieldKey}
-                              onChange={(event) => {
-                                setWorkflowKeyManual((m) => ({ ...m, [field.id]: true }))
-                                crm.updateWorkflowField(field.id, { fieldKey: event.target.value })
-                              }}
-                              className="text-sm rounded-none border-foreground/20"
-                            />
-                          </div>
-                        </details>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <Select
-                          value={field.fieldType}
-                          onValueChange={(value) => {
-                            const fieldType = value as 'text' | 'select' | 'number' | 'date' | 'boolean'
-                            const updates: Partial<WorkflowField> = { fieldType }
-                            if (fieldType === 'select' && field.options.length === 0) {
-                              updates.options = [{ value: 'nova-opcao', label: 'Nova opção' }]
-                            }
-                            crm.updateWorkflowField(field.id, updates)
-                          }}
-                        >
-                          <SelectTrigger className="w-[180px]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {FIELD_TYPE_OPTIONS.map((o) => (
-                              <SelectItem key={o.value} value={o.value}>
-                                {o.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            checked={field.required}
-                            onCheckedChange={(checked) => crm.updateWorkflowField(field.id, { required: checked })}
-                          />
-                          <Label className="text-sm cursor-pointer">Obrigatório</Label>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-3 text-xs">
-                        <span className="text-muted-foreground">Visível em:</span>
-                        {VISIBILITY_CONTEXTS.map(({ value: ctx, label }) => (
-                          <label key={ctx} className="flex cursor-pointer items-center gap-1.5">
-                            <Switch
-                              size="sm"
-                              checked={field.visibleIn.includes(ctx)}
-                              onCheckedChange={(checked) => toggleVis(ctx, checked)}
-                            />
-                            {label}
-                          </label>
-                        ))}
-                      </div>
-                      {field.fieldType === 'select' ? (
-                        <div className="grid gap-2 rounded-md border border-border/60 bg-muted/5 p-3 sm:col-span-2">
-                          <Label className="text-xs text-muted-foreground">
-                            Opções (valor interno estável + rótulo exibido)
-                          </Label>
-                          <ul className="m-0 list-none space-y-2 p-0">
-                            {(field.options.length > 0 ? normalizeFieldSelectOptions(field.options as unknown[]) : [{ value: '', label: '' }]).map((pair, optIndex) => (
-                              <li key={`${field.id}-opt-${optIndex}`} className="grid gap-2 rounded-md border border-border/40 p-2 sm:grid-cols-2">
-                                <div className="grid gap-1">
-                                  <Label className="text-[10px] uppercase text-muted-foreground">Rótulo</Label>
-                                  <Input
-                                    value={pair.label}
-                                    onChange={(event) => {
-                                      const pairs = normalizeFieldSelectOptions(
-                                        field.options.length > 0 ? (field.options as unknown[]) : [''],
-                                      )
-                                      const nextPairs = [...pairs]
-                                      const label = event.target.value
-                                      const others = new Set(
-                                        pairs.map((p, i) => (i !== optIndex ? p.value : '')).filter(Boolean),
-                                      )
-                                      let value = nextPairs[optIndex]?.value ?? ''
-                                      if (!value || value === slugifyLabel(pair.label)) {
-                                        value = ensureOptionValue(label || 'opcao', others)
-                                      }
-                                      nextPairs[optIndex] = { value, label }
-                                      crm.updateWorkflowField(field.id, { options: toStoredOptions(nextPairs) })
-                                    }}
-                                    placeholder={`Opção ${optIndex + 1}`}
-                                  />
-                                </div>
-                                <div className="grid gap-1">
-                                  <Label className="text-[10px] uppercase text-muted-foreground">Valor (chave)</Label>
-                                  <Input
-                                    value={pair.value}
-                                    onChange={(event) => {
-                                      const pairs = normalizeFieldSelectOptions(field.options as unknown[])
-                                      const nextPairs = [...pairs]
-                                      nextPairs[optIndex] = { ...nextPairs[optIndex]!, value: event.target.value }
-                                      crm.updateWorkflowField(field.id, { options: toStoredOptions(nextPairs) })
-                                    }}
-                                    className="font-mono text-xs"
-                                  />
-                                </div>
-                                <div className="sm:col-span-2 flex justify-end">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      const pairs = normalizeFieldSelectOptions(field.options as unknown[])
-                                      pairs.splice(optIndex, 1)
-                                      crm.updateWorkflowField(field.id, {
-                                        options: toStoredOptions(pairs.length ? pairs : [{ value: 'a', label: 'Nova opção' }]),
-                                      })
-                                    }}
-                                    disabled={normalizeFieldSelectOptions(field.options as unknown[]).length <= 1}
-                                  >
-                                    Remover
-                                  </Button>
-                                </div>
-                              </li>
-                            ))}
-                          </ul>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="w-fit"
-                            onClick={() => {
-                              const pairs = normalizeFieldSelectOptions(field.options as unknown[])
-                              const used = new Set(pairs.map((p) => p.value))
-                              const label = `Nova opção ${pairs.length + 1}`
-                              pairs.push({ value: ensureOptionValue(label, used), label })
-                              crm.updateWorkflowField(field.id, { options: toStoredOptions(pairs) })
-                            }}
-                          >
-                            Adicionar opção
-                          </Button>
-                        </div>
-                      ) : null}
-                      <div className="flex justify-end">
-                        <Button type="button" variant="destructive" size="sm" onClick={() => setDeleteTarget({ type: 'field', id: field.id, name: field.label })}>
-                          <Trash2Icon className="size-4 mr-1" />
-                          Remover
-                        </Button>
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={(event: DragEndEvent) => {
+                  const { active, over } = event
+                  if (!over || active.id === over.id) return
+                  const fields = crm.workflowFields
+                  const oldIdx = fields.findIndex((f) => f.id === active.id)
+                  const newIdx = fields.findIndex((f) => f.id === over.id)
+                  if (oldIdx === -1 || newIdx === -1) return
+                  const reordered = arrayMove(fields, oldIdx, newIdx)
+                  reordered.forEach((f, i) => crm.updateWorkflowField(f.id, { sortOrder: i }))
+                }}
+              >
+                <SortableContext
+                  items={crm.workflowFields.map((f) => f.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <ul className="m-0 list-none space-y-0 p-0 divide-y divide-border">
+                    {crm.workflowFields.map((field) => {
+                      const toggleVis = (ctx: FieldVisibilityContext, checked: boolean) => {
+                        const next = checked
+                          ? Array.from(new Set([...field.visibleIn, ctx]))
+                          : field.visibleIn.filter((c) => c !== ctx)
+                        crm.updateWorkflowField(field.id, { visibleIn: next as FieldVisibilityContext[] })
+                      }
+                      return <SortableFieldRow key={field.id} field={field} toggleVis={toggleVis} setDeleteTarget={setDeleteTarget} workflowKeyManual={workflowKeyManual} setWorkflowKeyManual={setWorkflowKeyManual} crm={crm} />
+                    })}
+                  </ul>
+                </SortableContext>
+              </DndContext>
             )}
           </CardContent>
         </Card>
@@ -506,91 +546,84 @@ export function SettingsPage() {
         <Card className="border border-border/40 shadow-none bg-card">
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/20">
             <div>
-              <CardTitle className="text-lg font-medium">Permissões por papel</CardTitle>
+              <CardTitle className="text-lg font-medium">O que cada papel pode fazer</CardTitle>
+              <p className="mt-1 m-0 text-xs text-muted-foreground">Configure as permissões de cada tipo de usuário no sistema.</p>
             </div>
             <Button type="button" variant="outline" size="sm" onClick={() => { crm.addPermissionProfile(); toast.success('Perfil criado.') }} className="rounded-md font-medium">
-              Novo perfil
+              + Novo perfil
             </Button>
           </CardHeader>
           <CardContent className="pt-0 px-0">
             {crm.permissions.length === 0 ? (
               <EmptyState
                 icon={ShieldIcon}
-                title="Nenhum perfil de permissão"
-                description="Crie perfis para definir o que cada papel pode fazer no sistema."
+                title="Nenhum perfil configurado"
+                description="Crie perfis para definir o que cada tipo de usuário pode fazer."
                 className="py-8"
               />
             ) : (
-              <ul className="m-0 list-none space-y-0 p-0 divide-y divide-border">
+              <ul className="m-0 list-none p-0 divide-y divide-border">
                 {crm.permissions.map((profile) => (
-                  <li
-                    key={profile.id}
-                    className="space-y-6 hover:bg-muted/5 transition-colors p-6"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
+                  <li key={profile.id} className="p-5 space-y-4 hover:bg-muted/5 transition-colors">
+                    {/* Role selector */}
+                    <div className="flex items-center justify-between gap-3">
                       <Select
                         value={profile.role}
                         onValueChange={(value) =>
-                          crm.updatePermissionProfile(profile.id, {
-                            role: value as 'admin' | 'gestor' | 'sdr',
-                          })
+                          crm.updatePermissionProfile(profile.id, { role: value as 'admin' | 'gestor' | 'sdr' })
                         }
                       >
-                        <SelectTrigger className="w-[220px] rounded-md font-medium h-9 border-border/40">
+                        <SelectTrigger className="w-[220px] font-semibold h-9 border-border/40">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {ROLE_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
+                          {ROLE_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
-                    <div className="flex flex-wrap gap-4 text-sm">
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={profile.canEditBoards}
-                          onCheckedChange={(checked) =>
-                            crm.updatePermissionProfile(profile.id, { canEditBoards: checked })
-                          }
-                        />
-                        <Label className="cursor-pointer">Editar quadros e etapas</Label>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={profile.canRouteLeads}
-                          onCheckedChange={(checked) =>
-                            crm.updatePermissionProfile(profile.id, { canRouteLeads: checked })
-                          }
-                        />
-                        <Label className="cursor-pointer">Roteamento de leads</Label>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={profile.canViewTvPanel}
-                          onCheckedChange={(checked) =>
-                            crm.updatePermissionProfile(profile.id, { canViewTvPanel: checked })
-                          }
-                        />
-                        <Label className="cursor-pointer">Ver painel TV</Label>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={profile.canManageUsers}
-                          onCheckedChange={(checked) =>
-                            crm.updatePermissionProfile(profile.id, { canManageUsers: checked })
-                          }
-                        />
-                        <Label className="cursor-pointer">Gerenciar usuários</Label>
-                      </div>
-                      <Button type="button" variant="destructive" size="sm" onClick={() => setDeleteTarget({ type: 'profile', id: profile.id })}>
-                        <Trash2Icon className="size-4 mr-1" />
-                        Remover
+                      <Button
+                        type="button" variant="ghost" size="sm"
+                        className="text-destructive/60 hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setDeleteTarget({ type: 'profile', id: profile.id })}
+                      >
+                        <Trash2Icon className="size-4" />
                       </Button>
+                    </div>
+                    {/* Permission cards */}
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {([
+                        { key: 'canRouteLeads', value: profile.canRouteLeads, onChange: (v: boolean) => crm.updatePermissionProfile(profile.id, { canRouteLeads: v }) },
+                        { key: 'canEditBoards', value: profile.canEditBoards, onChange: (v: boolean) => crm.updatePermissionProfile(profile.id, { canEditBoards: v }) },
+                        { key: 'canViewTvPanel', value: profile.canViewTvPanel, onChange: (v: boolean) => crm.updatePermissionProfile(profile.id, { canViewTvPanel: v }) },
+                        { key: 'canManageUsers', value: profile.canManageUsers, onChange: (v: boolean) => crm.updatePermissionProfile(profile.id, { canManageUsers: v }) },
+                      ] as const).map(({ key, value, onChange }) => {
+                        const meta = PERMISSION_LABELS[key]!
+                        return (
+                          <div
+                            key={key}
+                            className={`flex items-start gap-3 rounded-lg border p-3 transition-colors cursor-pointer ${
+                              value ? 'border-primary/30 bg-primary/5' : 'border-border/40 bg-muted/5'
+                            }`}
+                            onClick={() => onChange(!value)}
+                          >
+                            <Switch
+                              checked={value}
+                              onCheckedChange={onChange}
+                              onClick={(e) => e.stopPropagation()}
+                              className="mt-0.5 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium leading-tight">
+                                {meta.emoji} {meta.label}
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+                                {meta.description}
+                              </p>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </li>
                 ))}
@@ -598,6 +631,7 @@ export function SettingsPage() {
             )}
           </CardContent>
         </Card>
+
 
         <Card className="border border-border/40 shadow-none bg-card lg:col-span-2">
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0 pb-6 border-b border-border/20">
@@ -737,6 +771,233 @@ export function SettingsPage() {
         onConfirm={handleConfirmDelete}
       />
     </AppLayout>
+  )
+}
+
+function SortableFieldRow({
+  field,
+  toggleVis,
+  setDeleteTarget,
+  workflowKeyManual,
+  setWorkflowKeyManual,
+  crm,
+}: {
+  field: WorkflowField
+  toggleVis: (ctx: FieldVisibilityContext, checked: boolean) => void
+  setDeleteTarget: (target: DeleteTarget) => void
+  workflowKeyManual: Record<string, boolean>
+  setWorkflowKeyManual: React.Dispatch<React.SetStateAction<Record<string, boolean>>>
+  crm: CrmApi
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.id })
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : undefined,
+    opacity: isDragging ? 0.5 : undefined,
+  }
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex flex-col gap-5 p-5 bg-card transition-colors border-b last:border-0",
+        isDragging && "shadow-xl border-primary/20 bg-muted/20"
+      )}
+    >
+      <div className="flex items-start gap-4">
+        <button
+          type="button"
+          className="mt-1 shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-primary transition-colors"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="size-5" />
+        </button>
+
+        <div className="flex-1 grid gap-5">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-2 sm:col-span-2 lg:col-span-1">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Nome do campo
+              </Label>
+              <Input
+                value={field.label}
+                onChange={(e) => crm.updateWorkflowField(field.id, { label: e.target.value })}
+                onBlur={(e) => {
+                  const label = e.target.value.trim()
+                  if (!workflowKeyManual[field.id] && label) {
+                    crm.updateWorkflowField(field.id, { fieldKey: slugifyLabel(label) })
+                  }
+                }}
+                className="h-9 border-border/60 bg-background/50 focus:bg-background"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Tipo de dado
+              </Label>
+              <Select
+                value={field.fieldType}
+                onValueChange={(value) => {
+                  const ft = value as WorkflowField['fieldType']
+                  const updates: Partial<WorkflowField> = { fieldType: ft }
+                  if (ft === 'select' && field.options.length === 0) {
+                    updates.options = [{ value: 'opcao-1', label: 'Opção 1' }]
+                  }
+                  crm.updateWorkflowField(field.id, updates)
+                }}
+              >
+                <SelectTrigger className="h-9 border-border/60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FIELD_TYPE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-end gap-3 pb-0.5">
+              <div className="flex items-center gap-2 rounded-md border border-border/40 px-3 h-9 bg-muted/10">
+                <Switch
+                  id={`req-${field.id}`}
+                  checked={field.required}
+                  onCheckedChange={(v) => crm.updateWorkflowField(field.id, { required: v })}
+                />
+                <Label htmlFor={`req-${field.id}`} className="text-sm cursor-pointer whitespace-nowrap">Obrigatório</Label>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Onde este campo deve aparecer?
+            </Label>
+            <div className="flex flex-wrap gap-2">
+              {VISIBILITY_CONTEXTS.map((ctx) => (
+                <div
+                  key={ctx.value}
+                  className={cn(
+                    "flex items-center gap-2 rounded-full border px-3 py-1 transition-colors cursor-pointer",
+                    field.visibleIn.includes(ctx.value)
+                      ? "border-primary/30 bg-primary/5 text-primary"
+                      : "border-border/40 bg-muted/5 text-muted-foreground hover:bg-muted/10"
+                  )}
+                  onClick={() => toggleVis(ctx.value, !field.visibleIn.includes(ctx.value))}
+                >
+                  <Switch
+                    size="sm"
+                    checked={field.visibleIn.includes(ctx.value)}
+                    onCheckedChange={(v) => toggleVis(ctx.value, v)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <span className="text-xs font-medium">{ctx.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {field.fieldType === 'select' && (
+            <div className="space-y-3 rounded-xl border border-dashed border-border/60 p-4 bg-muted/5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Opções da lista
+                </Label>
+                <Button
+                  size="sm" variant="ghost"
+                  className="h-7 text-xs text-primary hover:text-primary hover:bg-primary/10"
+                  onClick={() => {
+                    const pairs = normalizeFieldSelectOptions(field.options)
+                    const used = new Set(pairs.map(p => p.value))
+                    const label = `Nova opção ${pairs.length + 1}`
+                    pairs.push({ value: ensureOptionValue(label, used), label })
+                    crm.updateWorkflowField(field.id, { options: toStoredOptions(pairs) })
+                  }}
+                >
+                  + Adicionar opção
+                </Button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {normalizeFieldSelectOptions(field.options).map((opt, i) => (
+                  <div key={i} className="flex items-center gap-2 group">
+                    <Input
+                      value={opt.label}
+                      onChange={(e) => {
+                        const pairs = normalizeFieldSelectOptions(field.options)
+                        const others = new Set(pairs.filter((_, idx) => idx !== i).map(p => p.value))
+                        const label = e.target.value
+                        let value = pairs[i]!.value
+                        if (!value || value === slugifyLabel(pairs[i]!.label)) {
+                          value = ensureOptionValue(label || 'opcao', others)
+                        }
+                        pairs[i] = { value, label }
+                        crm.updateWorkflowField(field.id, { options: toStoredOptions(pairs) })
+                      }}
+                      placeholder="Nome da opção"
+                      className="h-8 text-xs border-border/40 bg-background"
+                    />
+                    <Button
+                      size="icon" variant="ghost"
+                      className="size-8 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => {
+                        const pairs = normalizeFieldSelectOptions(field.options)
+                        if (pairs.length <= 1) return
+                        pairs.splice(i, 1)
+                        crm.updateWorkflowField(field.id, { options: toStoredOptions(pairs) })
+                      }}
+                    >
+                      <Trash2Icon className="size-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-4 pt-2">
+            <details className="group">
+              <summary className="text-[10px] uppercase font-bold text-muted-foreground/60 cursor-pointer hover:text-muted-foreground transition-colors list-none flex items-center gap-1">
+                <span className="group-open:rotate-90 transition-transform">▶</span> Configurações avançadas
+              </summary>
+              <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label className="text-[10px] text-muted-foreground uppercase">Chave técnica (API)</Label>
+                  <Input
+                    value={field.fieldKey}
+                    onChange={(e) => {
+                      setWorkflowKeyManual(m => ({ ...m, [field.id]: true }))
+                      crm.updateWorkflowField(field.id, { fieldKey: e.target.value })
+                    }}
+                    className="h-8 text-xs font-mono bg-muted/10 border-border/40"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-[10px] text-muted-foreground uppercase">Seção de agrupamento</Label>
+                  <Input
+                    value={field.section}
+                    onChange={(e) => crm.updateWorkflowField(field.id, { section: e.target.value })}
+                    className="h-8 text-xs border-border/40"
+                  />
+                </div>
+              </div>
+            </details>
+
+            <Button
+              variant="ghost" size="sm"
+              className="text-destructive/60 hover:text-destructive hover:bg-destructive/10 h-8"
+              onClick={() => setDeleteTarget({ type: 'field', id: field.id, name: field.label })}
+            >
+              <Trash2Icon className="size-4 mr-1.5" />
+              Remover campo
+            </Button>
+          </div>
+        </div>
+      </div>
+    </li>
   )
 }
 

@@ -250,6 +250,18 @@ export type OrgSettings = {
   timezone: string
   dateFormat: string
   weekStartsOn: number
+  // Clinic Info
+  clinicName?: string
+  clinicLogo?: string
+  clinicPhone?: string
+  clinicEmail?: string
+  clinicAddress?: string
+  // Working Hours (Simplified)
+  workingHours?: {
+    start: string // "08:00"
+    end: string   // "18:00"
+    days: number[] // [1,2,3,4,5]
+  }
 }
 
 /**
@@ -858,6 +870,15 @@ export const initialOrgSettings: OrgSettings = {
   timezone: 'America/Sao_Paulo',
   dateFormat: 'dd/MM/yyyy',
   weekStartsOn: 1,
+  clinicName: 'Instituto Lorena',
+  clinicPhone: '',
+  clinicEmail: '',
+  clinicAddress: '',
+  workingHours: {
+    start: '08:00',
+    end: '18:00',
+    days: [1, 2, 3, 4, 5],
+  },
 }
 
 export const initialLeadTasks: LeadTask[] = [

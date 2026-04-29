@@ -21,6 +21,39 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { getLeadFieldValue } from '@/lib/leadFields'
 import { cn } from '@/lib/utils'
 import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
+import { HelpDrawer } from '@/components/page/HelpDrawer'
+
+const KANBAN_HELP = [
+  {
+    icon: '📋',
+    title: 'Quadro de Leads',
+    content: (
+      <p>
+        Visualize seus pacientes por etapa do atendimento. Arraste um cartão para
+        mudar o lead de coluna. O tempo em cada etapa é monitorado para evitar atrasos.
+      </p>
+    ),
+  },
+  {
+    icon: '🔥',
+    title: 'Temperatura do Lead',
+    content: (
+      <p>
+        Diferencie o nível de interesse: <strong>Hot</strong> (pronto para agendar),
+        <strong>Warm</strong> (em dúvida) ou <strong>Cold</strong> (curioso). A IA ajuda a classificar automaticamente.
+      </p>
+    ),
+  },
+  {
+    icon: '🔍',
+    title: 'Filtros Rápidos',
+    content: (
+      <p>
+        Use a barra superior para buscar por nome ou filtrar por responsável e etiquetas específicas.
+      </p>
+    ),
+  },
+]
 
 export function KanbanPage() {
   const crm = useCrm()
@@ -110,7 +143,7 @@ export function KanbanPage() {
     <AppLayout
       title="Quadro de leads"
       actions={
-        <>
+        <div className="flex items-center gap-2">
           <Link
             to="/dashboard"
             className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'inline-flex gap-1.5')}
