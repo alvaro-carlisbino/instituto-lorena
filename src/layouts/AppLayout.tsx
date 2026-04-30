@@ -12,9 +12,10 @@ type Props = {
   actions?: ReactNode
   children: ReactNode
   mainClassName?: string
+  fullHeight?: boolean
 }
 
-export function AppLayout({ title, subtitle, actions, children, mainClassName }: Props) {
+export function AppLayout({ title, subtitle, actions, children, mainClassName, fullHeight }: Props) {
   const location = useLocation()
   const [scrolled, setScrolled] = useState(false)
   const titleId = useId()
@@ -51,7 +52,8 @@ export function AppLayout({ title, subtitle, actions, children, mainClassName }:
         id="main-content"
         aria-labelledby={titleId}
         className={cn(
-          "mx-auto flex min-h-0 w-full max-w-[min(100%,1800px)] min-w-0 flex-1 flex-col space-y-5 px-4 py-5 sm:space-y-6 sm:px-6 sm:py-6 lg:px-8 relative",
+          "mx-auto w-full max-w-[min(100%,1800px)] min-w-0 relative flex-1 flex flex-col min-h-0",
+          fullHeight ? "overflow-hidden" : "space-y-5 px-4 py-5 sm:space-y-6 sm:px-6 sm:py-6 lg:px-8",
           mainClassName
         )}
       >

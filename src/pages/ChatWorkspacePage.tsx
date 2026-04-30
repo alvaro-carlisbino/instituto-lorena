@@ -110,174 +110,163 @@ export function ChatWorkspacePage() {
   }, [dataMode, refreshChatFromSupabase])
 
   return (
-    <AppLayout title="Conversas" mainClassName="py-2 sm:py-3 space-y-0 lg:pb-4">
-      <div className="flex w-full min-h-0 flex-1 flex-col gap-3 overflow-hidden lg:flex-row lg:items-stretch lg:gap-4 lg:h-[calc(100vh-10rem)]">
-        <Card className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none
-          h-[25vh] min-h-[160px] sm:h-[30vh]
-          lg:h-full lg:w-[min(260px,30vw)] lg:max-w-[280px] lg:min-w-[240px]
-          xl:w-[min(300px,24vw)] xl:max-w-[300px] w-full">
+    <AppLayout title="Conversas" fullHeight={true} mainClassName="p-2 sm:p-4">
+      <div className="flex h-full w-full min-h-0 flex-col gap-3 overflow-hidden lg:flex-row lg:gap-4">
+        {/* Left Column: Lead List */}
+        <Card className="flex w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card/50 shadow-sm backdrop-blur-sm 
+          h-[35dvh] lg:h-full lg:w-[min(280px,30vw)] lg:max-w-[320px] lg:min-w-[260px]">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
-            <div className="flex items-baseline justify-between gap-2">
-              <CardTitle className="m-0 text-sm font-semibold">Lista</CardTitle>
-              <span className="text-xs font-mono font-medium tabular-nums text-muted-foreground" aria-live="polite">
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-sm font-semibold">Mensagens</CardTitle>
+              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] tabular-nums">
                 {conversations.length}
-              </span>
+              </Badge>
             </div>
-            <div className="grid gap-2">
+            <div className="mt-3 space-y-2">
               <div className="relative">
-                <Search className="absolute left-2 top-2.5 size-4 text-muted-foreground" />
-                <Input value={search} onChange={(e) => setSearch(e.target.value)} className="rounded-xl border-border/70 pl-8" placeholder="Buscar conversa..." />
+                <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground/70" />
+                <Input 
+                  value={search} 
+                  onChange={(e) => setSearch(e.target.value)} 
+                  className="h-9 rounded-lg border-border/60 bg-background/50 pl-8 text-xs focus:bg-background" 
+                  placeholder="Buscar contato..." 
+                />
               </div>
-                <Select value={ownerFilter} onValueChange={(value) => setOwnerFilter(value ?? 'all')}>
-                  <LabeledSelectTrigger className="rounded-lg border-border/40 font-medium" size="sm">
-                    {ownerSelectLabel}
-                  </LabeledSelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos responsáveis</SelectItem>
-                    {crm.users.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-          </CardHeader>
-          <CardContent className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
-            {conversations.map((lead) => (
-              <button
-                key={lead.id}
-                type="button"
-                className={`w-full rounded-xl border px-3 py-2 text-left transition-all duration-200 hover:-translate-y-0.5 ${
-                  crm.selectedLeadId === lead.id ? 'border-primary bg-primary/10 shadow-sm' : 'border-border/70 hover:bg-muted/40'
-                }`}
-                aria-label={`Abrir conversa com ${lead.patientName}`}
-                onClick={() => crm.setSelectedLeadId(lead.id)}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="m-0 truncate text-sm font-medium">{lead.patientName}</p>
-                  <Badge variant="outline">{lead.temperature}</Badge>
-                </div>
-                <p className="m-0 truncate text-xs text-muted-foreground">{lead.summary}</p>
-              </button>
-            ))}
-            {conversations.length === 0 ? (
-              <div className="px-2 py-8 text-center">
-                <p className="m-0 text-sm font-medium text-foreground">Nenhuma conversa por aqui</p>
-                <p className="m-0 mt-1 text-xs text-muted-foreground">Tente outro termo de busca ou ajuste os filtros.</p>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
-
-        <Card className="flex min-h-0 min-w-[320px] flex-[2] basis-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none lg:h-full">
-          <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-              <div className="min-w-0 flex-1 overflow-hidden">
-                <CardTitle className="truncate text-base font-semibold sm:text-lg" aria-live="polite">
-                  {activeLead?.patientName ?? 'Sem conversa selecionada'}
-                </CardTitle>
-                <p className="m-0 text-xs text-muted-foreground sm:text-sm">
-                  {activeLead?.phone ?? 'Selecione um lead na lista em cima (ou à esquerda)'}
-                </p>
-                {activeLead ? (
-                  <>
-                    <details className="mt-2 max-w-2xl rounded-lg border border-border/50 bg-muted/15 lg:hidden">
-                      <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
-                        <span className="text-muted-foreground">Modo de atendimento:</span>{' '}
-                        {MODE_SUMMARY[leadMode]}
-                        <span className="ml-1 text-xs font-normal text-muted-foreground">(tocar para alterar)</span>
-                      </summary>
-                      <div className="border-t border-border/40 px-2 pb-2 pt-2">
-                        <ConversationModeSwitch
-                          value={leadMode}
-                          loading={modeLoading}
-                          showFooterHint={false}
-                          onChange={(next) => {
-                            setModeLoading(true)
-                            void setConversationMode(activeLead.id, next)
-                              .then((state) => {
-                                setLeadMode(state.owner_mode)
-                                if (next === 'human') toast.success('Atendimento: só a equipe.')
-                                else if (next === 'ai') toast.success('Atendimento: assistente de IA ativa nesta conversa.')
-                                else toast.success('Atendimento: modo misto (regras + equipe).')
-                              })
-                              .catch((error) =>
-                                toast.error(error instanceof Error ? error.message : 'Não foi possível alterar o modo.'),
-                              )
-                              .finally(() => setModeLoading(false))
-                          }}
-                        />
-                      </div>
-                    </details>
-                    <div className="mt-3 hidden max-w-2xl lg:block">
-                      <ConversationModeSwitch
-                        value={leadMode}
-                        loading={modeLoading}
-                        onChange={(next) => {
-                          setModeLoading(true)
-                          void setConversationMode(activeLead.id, next)
-                            .then((state) => {
-                              setLeadMode(state.owner_mode)
-                              if (next === 'human') toast.success('Atendimento: só a equipe.')
-                              else if (next === 'ai') toast.success('Atendimento: assistente de IA ativa nesta conversa.')
-                              else toast.success('Atendimento: modo misto (regras + equipe).')
-                            })
-                            .catch((error) => toast.error(error instanceof Error ? error.message : 'Não foi possível alterar o modo.'))
-                            .finally(() => setModeLoading(false))
-                        }}
-                      />
-                    </div>
-                  </>
-                ) : null}
-              </div>
-              <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:max-w-none lg:max-w-[min(100%,26rem)]">
-                {activeLead ? (
-                  <Link
-                    to={`/leads?leadId=${encodeURIComponent(activeLead.id)}`}
-                    className={buttonVariants({
-                      variant: 'outline',
-                      size: 'sm',
-                      className: '2xl:hidden rounded-lg text-xs sm:text-sm',
-                    })}
-                  >
-                    Ficha completa
-                  </Link>
-                ) : null}
-                {!waComposeBlocked ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="rounded-lg border-border/70 text-xs transition-all duration-200 hover:-translate-y-0.5 sm:text-sm"
-                    onClick={() => crm.setDraftMessage('Oi! Tudo bem? Posso te ajudar com valores e horários?')}
-                  >
-                    Mensagem Padrão
-                  </Button>
-                ) : null}
-              </div>
+              <Select value={ownerFilter} onValueChange={(value) => setOwnerFilter(value ?? 'all')}>
+                <LabeledSelectTrigger className="h-8 rounded-lg border-border/30 bg-background/30 text-[11px]" size="sm">
+                  {ownerSelectLabel}
+                </LabeledSelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">Todos responsáveis</SelectItem>
+                  {crm.users.map((u) => (
+                    <SelectItem key={u.id} value={u.id} className="text-xs">
+                      {u.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </CardHeader>
-          <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-muted/25 p-2 sm:p-3 dark:bg-background/80">
-            {activeLead ? (
-              <LeadChatThread
-                leadId={activeLead.id}
-                history={activeHistory}
-                canCompose={crm.currentPermission.canRouteLeads && !waComposeBlocked}
-                readOnlyInstagramHint={waComposeBlocked}
-              />
+          <CardContent className="min-h-0 flex-1 overflow-y-auto p-0 scrollbar-thin scrollbar-thumb-border/40">
+            {conversations.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center p-6 text-center text-muted-foreground/60">
+                <p className="text-xs">Nenhuma conversa encontrada</p>
+              </div>
             ) : (
-              <div className="m-auto text-center flex flex-col items-center justify-center h-full">
-                <p className="text-lg font-medium text-foreground">Selecione uma conversa</p>
-                <p className="mt-2 text-sm text-muted-foreground">Escolha um lead na lista para visualizar o histórico de mensagens.</p>
+              <div className="divide-y divide-border/5">
+                {conversations.map((lead) => (
+                  <button
+                    key={lead.id}
+                    onClick={() => crm.setSelectedLeadId(lead.id)}
+                    className={cn(
+                      'flex w-full flex-col gap-1 p-3 text-left transition-all duration-200 hover:bg-muted/30 sm:px-4',
+                      crm.selectedLeadId === lead.id ? 'bg-primary/5 shadow-[inset_3px_0_0_0_hsl(var(--primary))]' : 'transparent',
+                    )}
+                  >
+                    <div className="flex w-full items-center justify-between gap-2">
+                      <span className={cn(
+                        "truncate text-sm font-medium tracking-tight",
+                        crm.selectedLeadId === lead.id ? "text-primary" : "text-foreground"
+                      )}>
+                        {lead.patientName}
+                      </span>
+                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">
+                        {lead.createdAt ? format(new Date(lead.createdAt), 'HH:mm', { locale: ptBR }) : ''}
+                      </span>
+                    </div>
+                    <p className="line-clamp-1 w-full text-xs text-muted-foreground/70 leading-normal">
+                      {lead.summary || 'Sem resumo disponível'}
+                    </p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <span className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        lead.temperature === 'hot' ? "bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.3)]" : 
+                        lead.temperature === 'warm' ? "bg-yellow-500" : "bg-blue-500"
+                      )} title={lead.temperature} />
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground/40">
+                        {lead.source === 'whatsapp' ? 'WhatsApp' : lead.source === 'meta_instagram' ? 'Instagram' : 'CRM'}
+                      </span>
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
           </CardContent>
         </Card>
 
-        {activeLead ? (
-          <WorkspaceLeadSidebar lead={activeLead} history={activeHistory} />
-        ) : null}
+        {/* Middle Column: Chat Area */}
+        <Card className="flex min-w-0 flex-[3] flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-md lg:h-full">
+          {activeLead ? (
+            <>
+              <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-3 sm:px-5 sm:py-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="truncate text-base font-bold tracking-tight sm:text-lg">
+                        {activeLead.patientName}
+                      </CardTitle>
+                      {activeLead.temperature === 'hot' && (
+                        <Badge className="bg-orange-500/10 text-orange-600 hover:bg-orange-500/10 dark:text-orange-400 border-none px-1.5 py-0 text-[10px]">
+                          HOT
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground/80">
+                      <span className="font-mono">{activeLead.phone ? activeLead.phone : 'Sem telefone'}</span>
+                      <span className="text-muted-foreground/30">•</span>
+                      <span className="capitalize">{activeLead.source.replace('meta_', '')}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="hidden lg:block">
+                    <ConversationModeSwitch
+                      value={leadMode}
+                      loading={modeLoading}
+                      size="sm"
+                      onChange={(next) => {
+                        setModeLoading(true)
+                        void setConversationMode(activeLead.id, next)
+                          .then((state) => {
+                            setLeadMode(state.owner_mode as ConversationOwnerMode)
+                            toast.success(`Modo alterado para ${MODE_SUMMARY[next]}`)
+                          })
+                          .catch(() => toast.error('Falha ao alterar modo'))
+                          .finally(() => setModeLoading(false))
+                      }}
+                    />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/10 p-2 sm:p-4 dark:bg-background/20">
+                <LeadChatThread
+                  leadId={activeLead.id}
+                  history={activeHistory}
+                  canCompose={crm.currentPermission.canRouteLeads && !waComposeBlocked}
+                  readOnlyInstagramHint={waComposeBlocked}
+                />
+              </CardContent>
+            </>
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center p-12 text-center">
+              <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-primary/5 shadow-inner">
+                <span className="text-3xl grayscale-[0.5] opacity-50">📬</span>
+              </div>
+              <h3 className="text-lg font-semibold tracking-tight">Sua Central de Mensagens</h3>
+              <p className="mt-2 max-w-sm text-sm text-muted-foreground/80">
+                Selecione um lead na lista lateral para iniciar o atendimento ou ver o histórico completo.
+              </p>
+            </div>
+          )}
+        </Card>
+
+        {/* Right Column: Lead Sidebar */}
+        {activeLead && (
+          <WorkspaceLeadSidebar 
+            lead={activeLead} 
+            history={activeHistory}
+            className="hidden h-full 2xl:flex 2xl:w-[380px] 2xl:shrink-0" 
+          />
+        )}
       </div>
     </AppLayout>
   )

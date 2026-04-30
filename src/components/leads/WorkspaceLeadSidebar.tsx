@@ -13,6 +13,7 @@ import type { Lead, Interaction, WorkflowField } from '@/mocks/crmMock'
 type Props = {
   lead: Lead
   history: Interaction[]
+  className?: string
 }
 
 function groupFieldsBySection(fields: WorkflowField[]): [string, WorkflowField[]][] {
@@ -33,7 +34,7 @@ function groupFieldsBySection(fields: WorkflowField[]): [string, WorkflowField[]
   })
 }
 
-export function WorkspaceLeadSidebar({ lead, history }: Props) {
+export function WorkspaceLeadSidebar({ lead, history, className }: Props) {
   const crm = useCrm()
 
   const handleUpdateLead = (updatedLead: Lead) => {
@@ -47,7 +48,7 @@ export function WorkspaceLeadSidebar({ lead, history }: Props) {
   const sections = useMemo(() => groupFieldsBySection(sidebarFields), [sidebarFields])
 
   return (
-    <Card className="hidden h-full min-h-0 min-w-0 w-full max-w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none 2xl:flex 2xl:basis-[min(380px,30vw)] 2xl:max-w-[400px]">
+    <Card className={cn("hidden h-full min-h-0 min-w-0 w-full max-w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none 2xl:flex 2xl:basis-[min(380px,30vw)] 2xl:max-w-[400px]", className)}>
       <CardHeader className="shrink-0 space-y-2 border-b border-border/20 bg-muted/5 p-3 sm:p-4">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-sm font-semibold leading-tight">Ficha do lead</CardTitle>

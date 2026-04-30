@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
+import { format } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
 import { CalendarPlus } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -37,6 +39,13 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
   const crm = useCrm()
   const [filter, setFilter] = useState<ChatFilter>(whatsappOnly ? 'whatsapp' : 'all')
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [items, leadId])
 
   const items = useMemo(() => {
     const list = [...history].sort(
@@ -120,16 +129,20 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
       </div>
 
       <div
+        ref={scrollRef}
         role="log"
         aria-live="polite"
         aria-relevant="additions"
         aria-label="Histórico de mensagens"
-        className="flex-1 min-h-0 min-w-0 w-full overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/35 p-3 shadow-inner dark:bg-[#0b141a]"
+        className="flex-1 min-h-0 min-w-0 w-full overflow-y-auto overscroll-contain rounded-xl border border-border/20 bg-muted/20 p-4 scrollbar-thin scrollbar-thumb-border/30 dark:bg-[#0b141a]/50"
       >
-        <ul className="m-0 flex list-none flex-col gap-2.5 p-0 sm:gap-3">
+        <ul className="m-0 flex list-none flex-col gap-4 p-0">
           {items.length === 0 ? (
-            <li className="rounded-lg border border-dashed border-border/60 bg-background/80 px-3 py-8 text-center text-sm text-muted-foreground">
-              Nenhuma mensagem neste filtro.
+            <li className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="mb-3 h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center opacity-40">
+                <span className="text-xl">📥</span>
+              </div>
+              <p className="text-xs text-muted-foreground font-medium">Nenhuma mensagem neste filtro</p>
             </li>
           ) : (
             items.map((msg) => {
@@ -138,25 +151,28 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
                 <li
                   key={msg.id}
                   className={cn(
-                    'flex w-full max-w-full flex-col gap-0.5 sm:max-w-[min(100%,32rem)]',
-                    out ? 'ml-auto items-end' : 'mr-auto items-start',
+                    'flex w-full flex-col gap-1',
+                    out ? 'items-end' : 'items-start',
                   )}
                 >
                   <div
                     className={cn(
-                      'max-w-full rounded-xl px-3 py-2.5 text-sm leading-relaxed shadow-sm sm:px-4 sm:text-[0.9375rem]',
+                      'relative max-w-[85%] rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed shadow-sm sm:max-w-[75%]',
                       out
                         ? 'rounded-tr-none bg-primary text-primary-foreground'
-                        : 'rounded-tl-none bg-card text-foreground ring-1 ring-border/80 dark:bg-[#202c33] dark:text-white/95 dark:ring-white/10',
+                        : 'rounded-tl-none bg-card text-foreground border border-border/50 dark:bg-[#202c33] dark:text-white/95 dark:border-white/5',
                     )}
                   >
-                    <p className="m-0 max-w-full whitespace-pre-wrap break-words">{msg.content}</p>
+                    <p className="m-0 whitespace-pre-wrap break-words">{msg.content}</p>
                   </div>
-                  <div className="flex max-w-full flex-wrap items-center gap-1.5 px-0.5 text-[10px] text-muted-foreground dark:text-white/55">
-                    <span className="truncate">{msg.author}</span>
-                    <span aria-hidden>·</span>
-                    <time dateTime={msg.happenedAt}>{new Date(msg.happenedAt).toLocaleString('pt-BR')}</time>
-                    <span className="rounded bg-muted px-1 font-medium text-foreground/80 dark:bg-white/10 dark:text-white/90">
+                  <div className={cn(
+                    "flex items-center gap-2 px-1 text-[10px] font-medium tracking-tight",
+                    out ? "flex-row-reverse text-muted-foreground/80" : "text-muted-foreground/60"
+                  )}>
+                    <span className="truncate max-w-[100px]">{msg.author}</span>
+                    <span className="opacity-30">•</span>
+                    <time dateTime={msg.happenedAt}>{format(new Date(msg.happenedAt), 'HH:mm', { locale: ptBR })}</time>
+                    <span className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] uppercase tracking-wider dark:bg-white/5">
                       {CHANNEL_SHORT[msg.channel] ?? msg.channel}
                     </span>
                   </div>
