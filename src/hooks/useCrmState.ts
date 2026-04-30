@@ -115,7 +115,7 @@ import type {
   WorkflowField,
 } from '../mocks/crmMock'
 import { isWorkloadExcludedStageId, pickNpsTemplateForPipeline, shouldDispatchNpsForStage } from '../lib/followUpNps'
-import { mergeKanbanFieldOrder } from '../lib/leadFields'
+import { mergeKanbanFieldOrder, isLeadWhatsappComposeBlocked } from '../lib/leadFields'
 import { getDataProviderMode } from '../services/dataMode'
 import { sendWhatsappMessage } from '../services/crmWhatsapp'
 import { supabase } from '../lib/supabaseClient'
@@ -554,6 +554,13 @@ export const useCrmState = () => {
   const sendMessage = async () => {
     if (!selectedLead || !draftMessage.trim()) return
 
+    if (isLeadWhatsappComposeBlocked(selectedLead)) {
+      toast.error(
+        'Lead do Instagram ainda com telefone sintético: responda no Instagram ou ManyChat. Quando o número for o WhatsApp real, o envio pelo CRM fica disponível.',
+      )
+      return
+    }
+
     const outbound = draftMessage.trim()
     setDraftMessage('')
     const attachments = [...draftAttachments]
@@ -600,6 +607,12 @@ export const useCrmState = () => {
   }
 
   const sendAutomatedMessage = async (lead: Lead, message: string) => {
+    if (isLeadWhatsappComposeBlocked(lead)) {
+      toast.error(
+        'Automação por WhatsApp não dispara enquanto o lead Instagram tiver telefone sintético (ManyChat).',
+      )
+      return
+    }
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       const result = await sendWhatsappMessage({
         leadId: lead.id,

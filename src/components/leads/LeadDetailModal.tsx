@@ -22,7 +22,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Trash2 } from 'lucide-react'
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
-import { workflowFieldsForContext } from '@/lib/leadFields'
+import { workflowFieldsForContext, isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
 import { labelForIdName } from '@/lib/selectDisplay'
 import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
 import { fetchWhatsappChannelInstances } from '@/services/whatsappChannelInstances'
@@ -43,6 +43,8 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
     if (!lead) return []
     return crm.interactions.filter((i) => i.leadId === lead.id)
   }, [crm.interactions, lead])
+
+  const waComposeBlocked = lead ? isLeadWhatsappComposeBlocked(lead) : false
 
   const otherPipelines = useMemo(
     () => (lead ? crm.pipelineCatalog.filter((p) => p.id !== lead.pipelineId) : []),
@@ -416,7 +418,8 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                   <LeadChatThread
                     leadId={lead.id}
                     history={leadHistory}
-                    canCompose={crm.currentPermission.canRouteLeads}
+                    canCompose={crm.currentPermission.canRouteLeads && !waComposeBlocked}
+                    readOnlyInstagramHint={waComposeBlocked}
                   />
                 </div>
               </section>

@@ -17,6 +17,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { labelForIdName } from '@/lib/selectDisplay'
 import { getConversationState, setConversationMode, type ConversationOwnerMode } from '@/services/conversationControl'
+import { isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
 
 
 export function ChatWorkspacePage() {
@@ -55,6 +56,7 @@ export function ChatWorkspacePage() {
   }, [crm.leads, crm.interactions, ownerFilter, search])
 
   const activeLead = crm.selectedLead ?? conversations[0] ?? null
+  const waComposeBlocked = activeLead ? isLeadWhatsappComposeBlocked(activeLead) : false
   const activeHistory = useMemo(
     () => (activeLead ? crm.interactions.filter((i) => i.leadId === activeLead.id) : []),
     [crm.interactions, activeLead],
@@ -204,21 +206,28 @@ export function ChatWorkspacePage() {
                     Ficha completa
                   </Link>
                 ) : null}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="rounded-lg border-border/70 text-xs transition-all duration-200 hover:-translate-y-0.5 sm:text-sm"
-                  onClick={() => crm.setDraftMessage('Oi! Tudo bem? Posso te ajudar com valores e horários?')}
-                >
-                  Mensagem Padrão
-                </Button>
+                {!waComposeBlocked ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="rounded-lg border-border/70 text-xs transition-all duration-200 hover:-translate-y-0.5 sm:text-sm"
+                    onClick={() => crm.setDraftMessage('Oi! Tudo bem? Posso te ajudar com valores e horários?')}
+                  >
+                    Mensagem Padrão
+                  </Button>
+                ) : null}
               </div>
             </div>
           </CardHeader>
           <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-muted/25 p-2 sm:p-3 dark:bg-background/80">
             {activeLead ? (
-              <LeadChatThread leadId={activeLead.id} history={activeHistory} canCompose={crm.currentPermission.canRouteLeads} />
+              <LeadChatThread
+                leadId={activeLead.id}
+                history={activeHistory}
+                canCompose={crm.currentPermission.canRouteLeads && !waComposeBlocked}
+                readOnlyInstagramHint={waComposeBlocked}
+              />
             ) : (
               <div className="m-auto text-center flex flex-col items-center justify-center h-full">
                 <p className="text-lg font-medium text-foreground">Selecione uma conversa</p>

@@ -1,5 +1,29 @@
 import type { FieldVisibilityContext, Lead, WorkflowField } from '@/mocks/crmMock'
 
+/** Prefixo alinhado a `syntheticPhoneFromManychatSubscriberId` no Edge (`_shared/crm.ts`). */
+const MANYCHAT_SYNTHETIC_PHONE_PREFIX = '888001'
+
+export function isLeadSourceInstagram(source: Lead['source']): boolean {
+  return source === 'meta_instagram'
+}
+
+/** Telefone gerado para subscriber ManyChat até existir número real (merge / ingest). */
+export function isManychatSyntheticPhone(phone: string): boolean {
+  const digits = String(phone ?? '').replace(/\D/g, '')
+  return digits.length >= 10 && digits.startsWith(MANYCHAT_SYNTHETIC_PHONE_PREFIX)
+}
+
+/**
+ * Sem compositor / envio `crm-send-message`: lead Instagram sem número utilizável **ou** ainda com telefone sintético.
+ * Com ≥10 dígitos e **não** prefixo `888001…`, o CRM permite WhatsApp manual (ex.: após merge com WA real).
+ */
+export function isLeadWhatsappComposeBlocked(lead: Pick<Lead, 'source' | 'phone'>): boolean {
+  if (!isLeadSourceInstagram(lead.source)) return false
+  const digits = String(lead.phone ?? '').replace(/\D/g, '')
+  if (digits.length < 10) return true
+  return isManychatSyntheticPhone(lead.phone)
+}
+
 /** Campos persistidos em colunas SQL (além de custom_fields). */
 export const CORE_LEAD_FIELD_KEYS = [
   'patient_name',

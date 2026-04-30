@@ -23,9 +23,11 @@ type Props = {
   /** Se true, inicia o filtro em só WhatsApp (compat). */
   whatsappOnly?: boolean
   canCompose?: boolean
+  /** Mostra aviso no lugar do compositor (lead Instagram; envio só fora do CRM até haver WhatsApp). */
+  readOnlyInstagramHint?: boolean
 }
 
-export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Props) {
+export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, readOnlyInstagramHint }: Props) {
   const crm = useCrm()
   const [filter, setFilter] = useState<ChatFilter>(whatsappOnly ? 'whatsapp' : 'all')
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
@@ -141,6 +143,27 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
           )}
         </ul>
       </div>
+
+      {readOnlyInstagramHint && isActiveLead ? (
+        <div className="flex shrink-0 flex-col gap-2 rounded-xl border border-border/70 bg-muted/30 px-3 py-3 sm:px-4">
+          <p className="m-0 text-sm font-medium text-foreground">Lead do Instagram</p>
+          <p className="m-0 text-sm leading-relaxed text-muted-foreground">
+            O envio pelo CRM usa WhatsApp. Enquanto o número for o sintético ManyChat (prefixo 888001…), responda no
+            Instagram ou ManyChat. Quando o lead passar a ter o número de WhatsApp real (merge / ingest), o campo de
+            envio volta a aparecer aqui mesmo com origem Instagram.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-1 w-fit rounded-xl"
+            onClick={() => setIsScheduleOpen(true)}
+          >
+            <CalendarPlus className="mr-2 h-4 w-4" />
+            Agendar consulta
+          </Button>
+        </div>
+      ) : null}
 
       {canCompose && isActiveLead ? (
         <div className="flex shrink-0 flex-col gap-2 border-t border-border/70 bg-background/60 pt-2 sm:gap-3 sm:pt-3">
