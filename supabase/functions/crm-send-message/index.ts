@@ -136,6 +136,7 @@ Deno.serve(async (req) => {
       direction: 'out',
       author: user.email ?? 'Operador',
       content: text,
+      externalMessageId: sent.externalMessageId,
     })
     if (attachments.length > 0) {
       await admin.from('crm_media_items').insert(

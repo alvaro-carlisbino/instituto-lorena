@@ -89,6 +89,7 @@ export type Interaction = {
   author: string
   content: string
   happenedAt: string
+  externalMessageId?: string
 }
 
 export type TriageResult = {

@@ -120,19 +120,14 @@ Deno.serve(async (req) => {
         },
       })
 
-      const sinceIso = new Date(Date.now() - 120 * 1000).toISOString()
-      const { data: crmEchoRows } = await admin
+      const { data: existingInt } = await admin
         .from('interactions')
         .select('id')
         .eq('lead_id', lead.leadId)
-        .eq('channel', 'whatsapp')
-        .eq('direction', 'out')
-        .eq('content', normalized.text)
-        .gte('happened_at', sinceIso)
-        .like('author', '%@%')
-        .limit(1)
+        .eq('external_message_id', normalized.externalMessageId)
+        .maybeSingle()
 
-      const skipAsCrmEcho = Boolean(crmEchoRows && crmEchoRows.length > 0)
+      const skipAsCrmEcho = Boolean(existingInt?.id)
 
       const { data: outLeadRow } = await admin.from('leads').select('patient_name').eq('id', lead.leadId).maybeSingle()
       const outboundPatientLabel = String(outLeadRow?.patient_name ?? normalized.fromName ?? 'Lead')
@@ -146,6 +141,7 @@ Deno.serve(async (req) => {
           author: normalized.fromName || 'WhatsApp',
           content: normalized.text,
           happenedAt: normalized.happenedAt,
+          externalMessageId: normalized.externalMessageId,
         })
 
         const outMedia = normalized.mediaItems ?? []
@@ -243,6 +239,7 @@ Deno.serve(async (req) => {
       author: normalized.fromName,
       content: normalized.text,
       happenedAt: normalized.happenedAt,
+      externalMessageId: normalized.externalMessageId,
     })
 
     let mediaIntelForAi = ''

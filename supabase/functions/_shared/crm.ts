@@ -424,6 +424,7 @@ export async function insertInteraction(
     author: string
     content: string
     happenedAt?: string
+    externalMessageId?: string
   },
 ): Promise<string> {
   const { data, error } = await admin
@@ -436,6 +437,7 @@ export async function insertInteraction(
       author: input.author,
       content: input.content,
       happened_at: input.happenedAt ?? new Date().toISOString(),
+      external_message_id: input.externalMessageId || null,
     })
     .select('id')
     .single()

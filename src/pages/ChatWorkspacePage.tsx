@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { Search } from 'lucide-react'
+import { format } from 'date-fns'
+import { ptBR } from 'date-fns/locale'
+import { useMemo, useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
+import { Search } from 'lucide-react'
 
 import { ConversationModeSwitch } from '@/components/leads/ConversationModeSwitch'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { Badge } from '@/components/ui/badge'
-import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
@@ -14,6 +15,7 @@ import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { WorkspaceLeadSidebar } from '@/components/leads/WorkspaceLeadSidebar'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import { cn } from '@/lib/utils'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { labelForIdName } from '@/lib/selectDisplay'
 import { getConversationState, setConversationMode, type ConversationOwnerMode } from '@/services/conversationControl'
@@ -222,7 +224,6 @@ export function ChatWorkspacePage() {
                     <ConversationModeSwitch
                       value={leadMode}
                       loading={modeLoading}
-                      size="sm"
                       onChange={(next) => {
                         setModeLoading(true)
                         void setConversationMode(activeLead.id, next)

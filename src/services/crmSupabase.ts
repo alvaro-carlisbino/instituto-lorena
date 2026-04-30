@@ -93,6 +93,7 @@ type DbInteraction = {
   author: string
   content: string
   happened_at: string
+  external_message_id?: string | null
 }
 
 export type CrmDataSnapshot = {
@@ -256,7 +257,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       .order('position', { ascending: true }),
     client
       .from('interactions')
-      .select('id, lead_id, patient_name, channel, direction, author, content, happened_at')
+      .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
       .order('happened_at', { ascending: false }),
     client
       .from('channel_configs')
@@ -397,6 +398,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
         author: interaction.author,
         content: interaction.content,
         happenedAt: interaction.happened_at,
+        externalMessageId: interaction.external_message_id || undefined,
       }))
     : initialInteractions
 
@@ -588,7 +590,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
       .order('position', { ascending: true }),
     client
       .from('interactions')
-      .select('id, lead_id, patient_name, channel, direction, author, content, happened_at')
+      .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
       .order('happened_at', { ascending: false }),
     client.from('lead_tag_assignments').select('lead_id, tag_id'),
   ])
@@ -641,6 +643,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
     author: interaction.author,
     content: interaction.content,
     happenedAt: interaction.happened_at,
+    externalMessageId: interaction.external_message_id || undefined,
   }))
 
   return { leads: builtLeads, interactions: builtInteractions }

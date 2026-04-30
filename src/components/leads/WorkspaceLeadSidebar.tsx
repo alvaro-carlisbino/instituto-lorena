@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 import { useCrm } from '@/context/CrmContext'
 import { AiCopilotWidget } from '@/components/leads/AiCopilotWidget'

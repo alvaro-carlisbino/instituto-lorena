@@ -215,6 +215,7 @@ export async function runWhatsappAiAutoReply(
     author: 'Assistente IA',
     content: aiReply,
     happenedAt: nowIso(),
+    externalMessageId: sent.externalMessageId,
   })
   await admin.from('crm_conversation_states').upsert({
     lead_id: options.leadId,

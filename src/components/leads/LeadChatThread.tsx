@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { CalendarPlus } from 'lucide-react'
+import { 
+  CalendarPlus,
+  Video as VideoIcon,
+  Music as MusicIcon,
+  File as FileIcon,
+  Image as ImageIcon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -90,11 +96,21 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
     const groups: Interaction[][] = []
     let currentGroup: Interaction[] = []
 
-    items.forEach((item, index) => {
+    // Deduplicate items with same externalMessageId (frontend safety layer)
+    const seenExternalIds = new Set<string>()
+    const dedupedItems = items.filter(item => {
+      if (item.externalMessageId) {
+        if (seenExternalIds.has(item.externalMessageId)) return false
+        seenExternalIds.add(item.externalMessageId)
+      }
+      return true
+    })
+
+    dedupedItems.forEach((item, index) => {
       if (index === 0) {
         currentGroup.push(item)
       } else {
-        const prev = items[index - 1]
+        const prev = dedupedItems[index - 1]
         const timeDiff = Math.abs(new Date(item.happenedAt).getTime() - new Date(prev.happenedAt).getTime())
         
         if (item.author === prev.author && item.direction === prev.direction && timeDiff < 10000) {
@@ -105,7 +121,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
         }
       }
       
-      if (index === items.length - 1) {
+      if (index === dedupedItems.length - 1) {
         groups.push(currentGroup)
       }
     })
@@ -117,11 +133,33 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
     const mediaMatch = content.match(/\[mídia recebida: (.*)\]/)
     if (mediaMatch) {
       const type = mediaMatch[1]
-      const icon = type === 'image' ? '🖼️' : type === 'video' ? '🎥' : type === 'audio' ? '🎵' : '📄'
+      let Icon = FileIcon
+      let label = 'Documento'
+      let color = 'bg-blue-500/10 text-blue-500'
+
+      if (type === 'image') {
+        Icon = ImageIcon
+        label = 'Foto'
+        color = 'bg-emerald-500/10 text-emerald-500'
+      } else if (type === 'video') {
+        Icon = VideoIcon
+        label = 'Vídeo'
+        color = 'bg-orange-500/10 text-orange-500'
+      } else if (type === 'audio') {
+        Icon = MusicIcon
+        label = 'Áudio'
+        color = 'bg-amber-500/10 text-amber-500'
+      }
+
       return (
-        <div className="flex items-center gap-2 py-1 italic text-muted-foreground/90">
-          <span className="text-lg grayscale-[0.3]">{icon}</span>
-          <span className="text-xs font-medium uppercase tracking-wide">Mídia: {type}</span>
+        <div className="flex items-center gap-3 py-1">
+          <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl", color)}>
+            <Icon className="h-5 w-5" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[11px] font-bold uppercase tracking-wider opacity-60">Mídia Recebida</span>
+            <span className="text-sm font-semibold">{label}</span>
+          </div>
         </div>
       )
     }
