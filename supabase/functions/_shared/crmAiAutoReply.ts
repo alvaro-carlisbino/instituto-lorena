@@ -12,6 +12,26 @@ export function stripManychatHandoffMarker(reply: string): { clean: string; hand
   return { clean, handoffSuggested: has }
 }
 
+const TRIAGE_MAPPING: Record<string, { pipelineId: string; stageId: string }> = {
+  '1': { pipelineId: 'pipeline-tratamento-capilar', stageId: 'tc-triagem' },
+  '2': { pipelineId: 'pipeline-tratamento-capilar', stageId: 'tc-triagem' },
+  '3': { pipelineId: 'pipeline-clinica', stageId: 'triagem' },
+  '4': { pipelineId: 'pipeline-clinica', stageId: 'triagem' },
+  '5': { pipelineId: 'pipeline-tratamento-capilar', stageId: 'tc-triagem' },
+}
+
+const INITIAL_TRIAGE_MESSAGE_TEMPLATE = `Olá, {name}! Boa tarde, tudo bem? Seja muito bem-vindo ao Instituto Lorena Visentainer. 💆
+
+Eu sou o assistente virtual da clínica e vou realizar o seu primeiro atendimento para que, em instantes, a nossa consultora Dandara assuma a nossa conversa.
+
+Para começarmos da melhor forma, seria uma consulta para Transplante Capilar ou Consulta Clínica? Por favor, digite o número da opção desejada:
+
+1. Transplante Capilar Masculino
+2. Transplante Capilar Feminino
+3. Consulta Clínica Masculino
+4. Consulta Clínica Feminino
+5. Transplante de Sobrancelha`
+
 export function isWithinQuietHours(date: Date, startHour = 8, endHour = 20): boolean {
   const h = date.getHours()
   return h >= startHour && h < endHour
@@ -186,6 +206,73 @@ export async function runWhatsappAiAutoReply(
     sendProvider: WhatsappProvider
   },
 ): Promise<{ replied: boolean; replyText?: string }> {
+  // --- Triage Logic ---
+  const { data: lead } = await admin
+    .from('leads')
+    .select('pipeline_id, stage_id')
+    .eq('id', options.leadId)
+    .maybeSingle()
+
+  if (lead) {
+    const isEntry = lead.stage_id === 'novo' || lead.stage_id === 'tc-novo'
+    if (isEntry) {
+      const normalized = options.aiInboundUserText.trim()
+      if (TRIAGE_MAPPING[normalized]) {
+        const target = TRIAGE_MAPPING[normalized]
+        await admin
+          .from('leads')
+          .update({
+            pipeline_id: target.pipelineId,
+            stage_id: target.stageId,
+            updated_at: nowIso(),
+          })
+          .eq('id', options.leadId)
+        
+        // Lead moved. AI will now generate a response based on the NEW stage in the snapshot.
+      } else {
+        // Not a valid option yet. Check if we should send the initial question.
+        const { data: state } = await admin
+          .from('crm_conversation_states')
+          .select('last_ai_reply_at')
+          .eq('lead_id', options.leadId)
+          .maybeSingle()
+
+        if (!state?.last_ai_reply_at) {
+          const welcome = INITIAL_TRIAGE_MESSAGE_TEMPLATE.replace('{name}', options.patientName)
+          
+          const sent = await options.sendProvider.sendMessage({
+            to: options.fromPhone,
+            text: welcome,
+            leadId: options.leadId,
+          })
+          
+          await insertInteraction(admin, {
+            leadId: options.leadId,
+            patientName: options.patientName,
+            channel: 'whatsapp',
+            direction: 'out',
+            author: 'Assistente IA',
+            content: welcome,
+            happenedAt: nowIso(),
+            externalMessageId: sent.externalMessageId,
+          })
+
+          await admin.from('crm_conversation_states').upsert({
+            lead_id: options.leadId,
+            owner_mode: options.ownerMode,
+            ai_enabled: options.aiEnabled,
+            last_inbound_at: options.inboundHappenedAt,
+            last_ai_reply_at: nowIso(),
+            updated_at: nowIso(),
+          })
+
+          return { replied: true, replyText: welcome }
+        }
+      }
+    }
+  }
+  // --- End Triage Logic ---
+
   const aiReply = await invokeCrmAiAssistantForLead(
     admin,
     options.leadId,
@@ -247,6 +334,66 @@ export async function runManychatAiAutoReply(
     aiJobSource: string
   },
 ): Promise<{ replied: boolean; replyText?: string; handoffSuggested?: boolean }> {
+  // --- Triage Logic ---
+  const { data: lead } = await admin
+    .from('leads')
+    .select('pipeline_id, stage_id')
+    .eq('id', options.leadId)
+    .maybeSingle()
+
+  if (lead) {
+    const isEntry = lead.stage_id === 'novo' || lead.stage_id === 'tc-novo'
+    if (isEntry) {
+      const normalized = options.aiInboundUserText.trim()
+      if (TRIAGE_MAPPING[normalized]) {
+        const target = TRIAGE_MAPPING[normalized]
+        await admin
+          .from('leads')
+          .update({
+            pipeline_id: target.pipelineId,
+            stage_id: target.stageId,
+            updated_at: nowIso(),
+          })
+          .eq('id', options.leadId)
+        
+        // Lead moved. AI will now generate a response based on the NEW stage in the snapshot.
+      } else {
+        // Not a valid option yet. Check if we should send the initial question.
+        const { data: state } = await admin
+          .from('crm_conversation_states')
+          .select('last_ai_reply_at')
+          .eq('lead_id', options.leadId)
+          .maybeSingle()
+
+        if (!state?.last_ai_reply_at) {
+          const welcome = INITIAL_TRIAGE_MESSAGE_TEMPLATE.replace('{name}', options.patientName)
+          
+          await insertInteraction(admin, {
+            leadId: options.leadId,
+            patientName: options.patientName,
+            channel: 'meta',
+            direction: 'out',
+            author: 'Assistente IA',
+            content: welcome,
+            happenedAt: nowIso(),
+          })
+
+          await admin.from('crm_conversation_states').upsert({
+            lead_id: options.leadId,
+            owner_mode: options.ownerMode,
+            ai_enabled: options.aiEnabled,
+            last_inbound_at: options.inboundHappenedAt,
+            last_ai_reply_at: nowIso(),
+            updated_at: nowIso(),
+          })
+
+          return { replied: true, replyText: welcome }
+        }
+      }
+    }
+  }
+  // --- End Triage Logic ---
+
   const aiReplyRaw = await invokeCrmAiAssistantForLead(
     admin,
     options.leadId,
