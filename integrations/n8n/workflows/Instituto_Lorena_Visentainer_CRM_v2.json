@@ -1,0 +1,906 @@
+{
+  "name": "Instituto Lorena Visentainer + CRM Supabase",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "33491d45-lorena-crm",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -6208,
+        1264
+      ],
+      "id": "b25185ca-0939-4d91-aae2-c73ccbd962d1",
+      "name": "Webhook",
+      "webhookId": "ecc5a8b3-8404-42e2-aef5-958fcab44b2d"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS lorena_debounce (\n  subscriber_id TEXT PRIMARY KEY,\n  messages      TEXT NOT NULL DEFAULT '',\n  last_ts       BIGINT NOT NULL\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5984,
+        1264
+      ],
+      "id": "f35cd87d-7d9b-47b8-b3a7-d1107f090cd6",
+      "name": "Criar tabela debounce",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO lorena_debounce (subscriber_id, messages, last_ts)\nVALUES (\n  '{{ $('Webhook').item.json.body.data.id }}',\n  '{{ $('Webhook').item.json.body.msg.replace(/'/g, \"''\") }}',\n  {{ Date.now() }}\n)\nON CONFLICT (subscriber_id) DO UPDATE SET\n  messages = lorena_debounce.messages || E'\\n' || EXCLUDED.messages,\n  last_ts  = EXCLUDED.last_ts\nRETURNING last_ts;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5760,
+        1264
+      ],
+      "id": "06a8ee4b-ad32-4360-9c1d-fd9cc9336a90",
+      "name": "Gravar msg no Postgres"
+    },
+    {
+      "parameters": {
+        "amount": 6
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -5536,
+        1264
+      ],
+      "id": "5f19cef1-7019-4d06-b1ef-3ce8ac90ac07",
+      "name": "Aguardar 6s",
+      "webhookId": "9649e5b7-77d7-4477-8a1d-4720d27700dd"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT last_ts FROM lorena_debounce\nWHERE subscriber_id = '{{ $('Webhook').item.json.body.data.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5312,
+        1264
+      ],
+      "id": "e3b43f01-bce3-4bb0-9477-3a658e1c5142",
+      "name": "Checar timestamp"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Debounce: se outro webhook chegou DEPOIS de mim, o last_ts no banco\n// será diferente do meu. Nesse caso, descarto esta execução —\n// a execução mais recente vai processar todas as mensagens acumuladas.\n\n// Recuperar MEU timestamp (do INSERT/UPDATE que eu mesmo fiz)\nconst gravar = $('Gravar msg no Postgres').item.json;\nconst myTs = Number(\n  Array.isArray(gravar) ? gravar[0]?.last_ts :\n  gravar?.[0]?.last_ts ?? gravar?.last_ts ?? 0\n);\n\n// Recuperar timestamp ATUAL do banco (depois dos 4s de espera)\nconst checar = $input.item.json;\nconst dbTs = Number(\n  Array.isArray(checar) ? checar[0]?.last_ts :\n  checar?.[0]?.last_ts ?? checar?.last_ts ?? 0\n);\n\n// Se algum dos dois é inválido, melhor descartar para evitar duplicação\nif (!myTs || !dbTs) {\n  console.log('[debounce] timestamps inválidos, descartando', { myTs, dbTs });\n  return [];\n}\n\n// Se uma mensagem mais nova chegou, o dbTs será maior — descarto esta\nif (dbTs !== myTs) {\n  console.log('[debounce] não sou o último, descartando', { myTs, dbTs });\n  return [];\n}\n\nconsole.log('[debounce] sou o último, prosseguindo', { myTs });\nreturn [{ json: $input.item.json }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5088,
+        1264
+      ],
+      "id": "28820fbb-7a3b-4808-9d66-27ecd6689393",
+      "name": "Sou o último?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM lorena_debounce\nWHERE subscriber_id = '{{ $('Webhook').item.json.body.data.id }}'\nRETURNING messages;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -4864,
+        1264
+      ],
+      "id": "cd463584-8967-4ce2-abd8-8997cedf6525",
+      "name": "Deletar e recuperar msgs"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.manychat.com/fb/subscriber/getInfo?subscriber_id={{ $('Webhook').item.json.body.data.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -4640,
+        1264
+      ],
+      "id": "abcaa49d-c445-4758-8730-05768d649242",
+      "name": "Buscar dados do usuário",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookData  = $('Webhook').item.json;\nconst subscriberId = webhookData.body.data.id;\n\nconst rawMsgs = $('Deletar e recuperar msgs').item.json[0]?.messages\n             ?? $('Deletar e recuperar msgs').item.json?.messages\n             ?? webhookData.body.msg ?? '';\nconst msg = rawMsgs.trim();\n\nlet userInfo = {};\ntry {\n  const raw = $('Buscar dados do usuário').item.json;\n  if (raw && raw.data) userInfo = raw.data;\n} catch(e) {}\n\nconst firstName = userInfo.first_name || '';\nconst lastName  = userInfo.last_name  || '';\nconst fullName  = [firstName, lastName].filter(Boolean).join(' ') || 'Cliente';\nconst city      = userInfo.city   || '';\nconst gender    = userInfo.gender || '';\nconst tags      = (userInfo.tags || []).map(t => t.name).join(', ') || 'nenhuma';\n\nconst contextBlock = [\n  `Nome do cliente: ${fullName}`,\n  city   ? `Cidade: ${city}`   : null,\n  gender ? `Gênero: ${gender}` : null,\n  `Tags ManyChat: ${tags}`,\n].filter(Boolean).join('\\n');\n\nreturn [{\n  json: { subscriberId, msg, fullName, userContext: contextBlock }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4416,
+        1264
+      ],
+      "id": "89327422-fc10-41e4-8bf5-5763209d03c2",
+      "name": "Montar contexto"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detecta se o agente respondeu corretamente e se está pronto para handoff\nconst raw = $input.item.json;\nconst agentOutput = (raw?.output || '').toString().trim();\nconst agentError = !agentOutput;\nconst readyForHuman = !agentError && agentOutput.includes('[PRONTO_PARA_CONSULTOR]');\nconst cleanOutput = agentOutput.replace('[PRONTO_PARA_CONSULTOR]', '').trim();\n\nconst ctx = $('Montar contexto').item.json;\n\nreturn [{\n  json: {\n    output: cleanOutput,\n    readyForHuman,\n    agentError,\n    subscriberId: ctx.subscriberId,\n    userContext: ctx.userContext,\n    msg: ctx.msg,\n    fullName: ctx.fullName\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3840,
+        1264
+      ],
+      "id": "34d90c73-1be4-441e-9434-ac8093fdbf49",
+      "name": "Detectar intenção"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-err",
+              "leftValue": "={{ $json.agentError }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -3616,
+        1264
+      ],
+      "id": "b30ee703-d67e-4e43-992d-d04ac61d184b",
+      "name": "Erro no agente?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Montar contexto').item.json;\nreturn [{ json: {\n  subscriberId: ctx.subscriberId,\n  output: 'Olá! Estamos verificando sua solicitação. Em instantes, uma de nossas consultoras do Instituto Lorena Visentainer entrará em contato. 💆'\n}}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3392,
+        1072
+      ],
+      "id": "9bb1955b-1695-44c4-93a1-2e8404321c00",
+      "name": "Fallback de erro"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendFlow",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($('Montar contexto').item.json.subscriberId) || $('Montar contexto').item.json.subscriberId,\n  flow_ns: 'content20260430143025_638461',\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2944,
+        1072
+      ],
+      "id": "238a948e-ca08-4085-8236-57a95f5a13ed",
+      "name": "Enviar flow ManyChat (fallback)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-ready",
+              "leftValue": "={{ $json.readyForHuman }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -3392,
+        1360
+      ],
+      "id": "0c76f43e-3f2d-4818-bdb7-1efc4b62e021",
+      "name": "Pronto para consultor?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendFlow",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($('Montar contexto').item.json.subscriberId) || $('Montar contexto').item.json.subscriberId,\n  flow_ns: 'content20260430143025_638461',\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2944,
+        1264
+      ],
+      "id": "1e97a0b4-bce4-4d2b-924e-3485e00a0518",
+      "name": "Enviar flow ManyChat (normal)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── GERAR RESUMO PARA O CONSULTOR ────────────────────────────────────────\n// Monta um briefing estruturado com tudo que foi coletado na conversa.\n\nconst output      = $json.output      || '';\nconst msg         = $json.msg         || '';\nconst fullName    = $json.fullName    || 'Não identificado';\nconst userContext = $json.userContext || '';\nconst subscriberId = $json.subscriberId;\n\nconst now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nconst summary = [\n  '💆 *Instituto Lorena Visentainer — Paciente qualificado para atendimento*',\n  '',\n  `📋 *Cliente:* ${fullName}`,\n  `🕐 *Horário:* ${now}`,\n  `🆔 *Subscriber ID:* ${subscriberId}`,\n  '',\n  `📊 *Dados do perfil:*`,\n  userContext,\n  '',\n  `💬 *Última mensagem do cliente:*`,\n  `\"${msg}\"`,\n  '',\n  `🤖 *Última resposta do assistente:*`,\n  output,\n  '',\n  '✅ *Ação:* O paciente demonstrou interesse concreto no transplante capilar. Por favor, assuma o atendimento.'\n].join('\\n');\n\nreturn [\n  {\n    json: {\n      ...$json,\n      consultorSummary: summary\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3168,
+        1456
+      ],
+      "id": "421bac41-e4e0-4f09-a463-36eb9dd07e16",
+      "name": "Gerar resumo para consultor"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendFlow",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($('Montar contexto').item.json.subscriberId) || $('Montar contexto').item.json.subscriberId,\n  flow_ns: 'content20260430143025_638461',\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2720,
+        1456
+      ],
+      "id": "464fa120-b8da-460e-a60c-2bce3930ef9b",
+      "name": "Enviar flow ManyChat (handoff)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  action: 'ingest',\n  subscriber_id: $('Montar contexto').item.json.subscriberId,\n  user_name: $('Montar contexto').item.json.fullName,\n  text: $('Montar contexto').item.json.msg,\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -4080,
+        1264
+      ],
+      "id": "5e7eeb1a-9688-404a-ac5d-7ee01be60eb1",
+      "name": "CRM Ingest"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  action: 'get_thread',\n  subscriber_id: $('Montar contexto').item.json.subscriberId,\n  lead_id: $json.leadId,\n  limit: 50,\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3856,
+        1264
+      ],
+      "id": "99dfe0d6-f75f-4fee-8bd8-a04555c5ebde",
+      "name": "CRM get thread"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Montar contexto').first().json;\nconst ingest = $('CRM Ingest').first().json;\nconst getThread = $('CRM get thread').first().json;\nconst interactions = getThread.interactions || [];\nconst lines = interactions.map((i) =>\n  (i.direction === 'in' ? 'Cliente' : 'Assistente') + ': ' + String(i.content || ''),\n);\nconst historyBlock = lines.filter(Boolean).join('\\n');\nlet SYSTEM = \"# CONTEXTO E IDENTIDADE\\nVocê é o assistente virtual de triagem do \\\"Instituto Lorena Visentainer\\\", uma clínica especializada em transplante capilar em Maringá, referência na região com altíssima avaliação de clientes.\\nSeu papel é recepcionar os pacientes de forma acolhedora, profissional e humanizada, realizar a triagem inicial com base no motivo do contato e preparar o terreno para o atendimento humano especializado (como o da consultora Dandara).\\n\\n# INFORMAÇÕES DA CLÍNICA (Base de Conhecimento)\\n- Nome: Instituto Lorena Visentainer TRANSPLANTE CAPILAR\\n- Especialidade: Clínica de implante capilar em Maringá, Paraná\\n- Reputação: Altamente avaliada pelos pacientes (5,0 estrelas · mais de 405 avaliações no Google).\\n- Site: https://www.institutolorenavisentainer.com.br/\\n- Endereço: Av. Nóbrega, 814 - Zona 04, Maringá - PR, 87014-180\\n- Telefone: (44) 99149-3656\\n- Horário de Funcionamento: Segunda a sexta, abre às 08:00 e fecha às 18:00.\\n- Equipe Médica: Dra. Lorena Visentainer, Dr. Matheus Amaral e Dra. Jaqueline Augusto.\\n\\n# DADOS DO CLIENTE (use para personalizar o atendimento)\\n{{ $json.userContext }}\\n\\n# REGRAS DE ATENDIMENTO E FLUXO OBRIGATÓRIO\\n\\n1. A PRIMEIRA MENSAGEM: Logo no primeiro contato, você deve OBRIGATORIAMENTE:\\n   - Dar as boas-vindas ao Instituto Lorena Visentainer, apresentando-se como assistente virtual e usando o nome do cliente se disponível.\\n   - Informar de forma sutil que você iniciará a triagem, mas que em breve uma de nossas consultoras (como a Dandara) assumirá para dar continuidade.\\n   - Apresentar o menu com as opções exatas de atendimento para que o paciente escolha.\\n\\n2. MENU DE OPÇÕES (Apresentar na primeira mensagem):\\n   1. Transplante Capilar Masculino\\n   2. Transplante Capilar Feminino\\n   3. Consulta Clínica Masculino\\n   4. Consulta Clínica Feminino\\n   5. Transplante de Sobrancelha\\n\\n3. A SEGUNDA MENSAGEM (PERGUNTA SOBRE O MÉDICO): Assim que o paciente responder escolhendo uma das opções (1 a 5), você OBRIGATORIAMENTE deve questionar se ele tem preferência por ser atendido por algum médico específico da nossa equipe (Dra. Lorena Visentainer, Dr. Matheus Amaral ou Dra. Jaqueline Augusto) ou se pode ser o especialista com a agenda mais próxima.\\n\\n4. TOM DE VOZ: Acolhedor, empático, profissional e confiante. Transmita segurança sobre os procedimentos. Evite gírias.\\n\\n5. LIMITAÇÃO DE ESCOPO: Não invente procedimentos, valores ou prazos que não estejam descritos no seu contexto. Se o cliente pedir preços, detalhes técnicos do procedimento ou antes/depois, informe que a consultora especializada fornecerá todas as informações assim que assumir a conversa.\\n\\n6. QUANDO ENCAMINHAR: Após o cliente responder sobre a preferência do médico, ou se ele ignorar o fluxo e fizer perguntas diretas sobre valores e agendamentos com urgência, SEMPRE finalize sua resposta com a tag exata: [PRONTO_PARA_CONSULTOR]\\n\\n# EXEMPLO DE PRIMEIRA MENSAGEM:\\n\\\"Olá, {{ $json.fullName }}! Bom dia, tudo bem? Seja muito bem-vindo(a) ao Instituto Lorena Visentainer. 💆\\n\\nEu sou o assistente virtual da clínica e vou realizar o seu primeiro atendimento para que, em instantes, a nossa consultora Dandara assuma a nossa conversa.\\n\\nPara começarmos da melhor forma, seria uma consulta para Transplante Capilar ou Consulta Clínica? Por favor, digite o número da opção desejada:\\n\\n1. Transplante Capilar Masculino\\n2. Transplante Capilar Feminino\\n3. Consulta Clínica Masculino\\n4. Consulta Clínica Feminino\\n5. Transplante de Sobrancelha\\\"\";\nSYSTEM = SYSTEM.replace(/\\{\\{\\s*\\$json\\.fullName\\s*\\}\\}/g, String(ctx.fullName || 'Cliente'));\nSYSTEM = SYSTEM.replace(/\\{\\{\\s*\\$json\\.userContext\\s*\\}\\}/g, String(ctx.userContext || ''));\nconst userContent = [\n  ctx.userContext && 'Dados do perfil:\\n' + ctx.userContext,\n  historyBlock && 'Histórico recente (CRM):\\n' + historyBlock,\n  'Última mensagem do cliente:\\n' + String(ctx.msg || ''),\n]\n  .filter(Boolean)\n  .join('\\n\\n---\\n\\n');\nreturn [\n  {\n    json: {\n      leadId: ingest.leadId,\n      subscriberId: ctx.subscriberId,\n      fullName: ctx.fullName,\n      userContext: ctx.userContext,\n      msg: ctx.msg,\n      zaiBody: {\n        model: 'glm-4.7',\n        messages: [\n          { role: 'system', content: SYSTEM },\n          { role: 'user', content: userContent },\n        ],\n        temperature: 0.4,\n      },\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3632,
+        1264
+      ],
+      "id": "39f0ec35-a9a3-40ab-b554-aa7f6d1ed34e",
+      "name": "Preparar body Z.ai"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.z.ai/api/paas/v4/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.zaiBody) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3408,
+        1264
+      ],
+      "id": "0f0b39e1-ab7e-44c8-8a5a-9e24e8646062",
+      "name": "Z.ai chat completions",
+      "notesInFlow": true,
+      "notes": "Credencial Header Auth: Name = Authorization, Value = Bearer + espaço + a tua ZAI_API_KEY (ex.: Bearer abc123...)."
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nlet text = '';\ntry {\n  const body =\n    raw && raw.body !== undefined && raw.body !== null\n      ? typeof raw.body === 'string'\n        ? JSON.parse(raw.body)\n        : raw.body\n      : raw;\n  text = String(body?.choices?.[0]?.message?.content ?? '').trim();\n} catch (e) {\n  text = '';\n}\nconst agentError = !text;\nconst readyForHuman = !agentError && text.includes('[PRONTO_PARA_CONSULTOR]');\nconst cleanOutput = text.replace(/\\[PRONTO_PARA_CONSULTOR\\]/g, '').trim();\nconst ctx = $('Montar contexto').first().json;\nreturn [\n  {\n    json: {\n      output: cleanOutput || text,\n      readyForHuman,\n      agentError,\n      subscriberId: ctx.subscriberId,\n      userContext: ctx.userContext,\n      msg: ctx.msg,\n      fullName: ctx.fullName,\n      leadId: $('CRM Ingest').first().json.leadId,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3184,
+        1264
+      ],
+      "id": "715eb395-a730-4ff4-880d-876e0baf3e31",
+      "name": "Processar resposta Z.ai"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/subscriber/setCustomField",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($json.subscriberId) || $json.subscriberId,\n  field_id: 14539456,\n  field_value: String($json.output || ''),\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3168,
+        1072
+      ],
+      "id": "50fe60b2-b02f-4079-9a61-1f787e9ca9dd",
+      "name": "ManyChat set field (fallback)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/subscriber/setCustomField",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($json.subscriberId) || $json.subscriberId,\n  field_id: 14539456,\n  field_value: String($json.output || ''),\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3168,
+        1264
+      ],
+      "id": "1c6673e5-c520-4fc9-968e-da39f4533c46",
+      "name": "ManyChat set field (normal)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/subscriber/setCustomField",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($json.subscriberId) || $json.subscriberId,\n  field_id: 14539456,\n  field_value: String($json.output || ''),\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2944,
+        1456
+      ],
+      "id": "4d922cde-99c0-424e-9889-eb0838f85899",
+      "name": "ManyChat set field (handoff)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  action: 'record_outbound',\n  subscriber_id: $('Montar contexto').item.json.subscriberId,\n  user_name: $('Montar contexto').item.json.fullName,\n  reply: $('Fallback de erro').item.json.output,\n  lead_id: $('CRM Ingest').item.json.leadId,\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2496,
+        1072
+      ],
+      "id": "f21e9794-7c2f-4fef-b6e6-b86561e917a9",
+      "name": "CRM record outbound (fallback)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  action: 'record_outbound',\n  subscriber_id: $('Montar contexto').item.json.subscriberId,\n  user_name: $('Montar contexto').item.json.fullName,\n  reply: $('Detectar intenção').item.json.output,\n  lead_id: $('CRM Ingest').item.json.leadId,\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2496,
+        1264
+      ],
+      "id": "db71ba17-3fb3-4aea-8fb3-6236e4f74431",
+      "name": "CRM record outbound (normal)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  action: 'record_outbound',\n  subscriber_id: $('Montar contexto').item.json.subscriberId,\n  user_name: $('Montar contexto').item.json.fullName,\n  reply: $('Detectar intenção').item.json.output,\n  lead_id: $('CRM Ingest').item.json.leadId,\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2272,
+        1456
+      ],
+      "id": "5233ed10-c51e-4202-998f-ad1d2aa3102e",
+      "name": "CRM record outbound (handoff)"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Criar tabela debounce",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar tabela debounce": {
+      "main": [
+        [
+          {
+            "node": "Gravar msg no Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar msg no Postgres": {
+      "main": [
+        [
+          {
+            "node": "Aguardar 6s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checar timestamp": {
+      "main": [
+        [
+          {
+            "node": "Sou o último?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sou o último?": {
+      "main": [
+        [
+          {
+            "node": "Deletar e recuperar msgs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deletar e recuperar msgs": {
+      "main": [
+        [
+          {
+            "node": "Buscar dados do usuário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar dados do usuário": {
+      "main": [
+        [
+          {
+            "node": "Montar contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar contexto": {
+      "main": [
+        [
+          {
+            "node": "CRM Ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar intenção": {
+      "main": [
+        [
+          {
+            "node": "Erro no agente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Erro no agente?": {
+      "main": [
+        [
+          {
+            "node": "Fallback de erro",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pronto para consultor?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback de erro": {
+      "main": [
+        [
+          {
+            "node": "ManyChat set field (fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pronto para consultor?": {
+      "main": [
+        [
+          {
+            "node": "Gerar resumo para consultor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ManyChat set field (normal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar resumo para consultor": {
+      "main": [
+        [
+          {
+            "node": "ManyChat set field (handoff)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar 6s": {
+      "main": [
+        [
+          {
+            "node": "Checar timestamp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM Ingest": {
+      "main": [
+        [
+          {
+            "node": "CRM get thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM get thread": {
+      "main": [
+        [
+          {
+            "node": "Preparar body Z.ai",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar body Z.ai": {
+      "main": [
+        [
+          {
+            "node": "Z.ai chat completions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Z.ai chat completions": {
+      "main": [
+        [
+          {
+            "node": "Processar resposta Z.ai",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processar resposta Z.ai": {
+      "main": [
+        [
+          {
+            "node": "Detectar intenção",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ManyChat set field (fallback)": {
+      "main": [
+        [
+          {
+            "node": "Enviar flow ManyChat (fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar flow ManyChat (fallback)": {
+      "main": [
+        [
+          {
+            "node": "CRM record outbound (fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ManyChat set field (normal)": {
+      "main": [
+        [
+          {
+            "node": "Enviar flow ManyChat (normal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar flow ManyChat (normal)": {
+      "main": [
+        [
+          {
+            "node": "CRM record outbound (normal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ManyChat set field (handoff)": {
+      "main": [
+        [
+          {
+            "node": "Enviar flow ManyChat (handoff)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar flow ManyChat (handoff)": {
+      "main": [
+        [
+          {
+            "node": "CRM record outbound (handoff)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "406680f1-c106-427a-9f05-99912a613f3a",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "tags": []
+}

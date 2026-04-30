@@ -4,7 +4,8 @@ Esta pasta guarda **exports de referência** dos fluxos n8n usados com ManyChat 
 
 | Ficheiro | Descrição |
 |----------|-----------|
-| [workflows/Instituto_Lorena_Visentainer_FIXED.json](workflows/Instituto_Lorena_Visentainer_FIXED.json) | Referência legada: ManyChat → debounce Postgres → OpenAI Agent + memória Postgres → setField **14539456** + **sendFlow** `content20260430143025_638461`. No produto actual o mesmo raciocínio corre no CRM com **Z.ai**. |
+| [workflows/Instituto_Lorena_Visentainer_FIXED.json](workflows/Instituto_Lorena_Visentainer_FIXED.json) | Referência legada: ManyChat → debounce Postgres → OpenAI Agent + memória Postgres → setField **14539456** + **sendFlow** `content20260430143025_638461`. |
+| [workflows/Instituto_Lorena_Visentainer_CRM_v2.json](workflows/Instituto_Lorena_Visentainer_CRM_v2.json) | **Importar no n8n:** mesmo debounce + ManyChat getInfo + contexto; **CRM Ingest** + **get thread** + **Z.ai** (HTTP) + **set field/sendFlow** + **CRM record outbound** nos três ramos. Credenciais: Postgres (debounce), Header Auth CRM (`x-manychat-crm-secret`), Header Auth Z.ai (`Authorization: Bearer …`), Bearer ManyChat. |
 
 **Segurança:** o JSON do n8n contém IDs de credenciais e metadados da instância; **não** inclui passwords em texto claro, mas não publiques o repositório como público sem rever o export.
 

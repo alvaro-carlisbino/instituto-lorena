@@ -4,6 +4,7 @@ Documento operacional: **URLs fixas**, **headers** e **corpos JSON** para montar
 
 **Ligações úteis**
 
+- **Workflow JSON pronto a importar (n8n):** [../integrations/n8n/workflows/Instituto_Lorena_Visentainer_CRM_v2.json](../integrations/n8n/workflows/Instituto_Lorena_Visentainer_CRM_v2.json) — após importar, associa credenciais (§2) e copia a URL do **Webhook** para o ManyChat External Request.  
 - Contrato detalhado e erros: [crm-external-http-api.md](crm-external-http-api.md)  
 - Visão das “tools”: [n8n-crm-tools.md](n8n-crm-tools.md)
 
