@@ -412,7 +412,7 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                 <h2 id="lead-chat-heading" className="mb-0 text-xs font-bold uppercase tracking-widest text-muted-foreground">
                   Conversas
                 </h2>
-                <div className="flex h-[min(48dvh,26rem)] min-h-0 max-h-[min(56dvh,32rem)] flex-col overflow-hidden rounded-md border border-border bg-card p-2 sm:h-[min(50dvh,28rem)]">
+                <div className="flex h-[min(58dvh,30rem)] min-h-0 flex-col overflow-hidden rounded-md border border-border bg-card p-2 sm:h-[min(60dvh,32rem)] lg:max-h-[min(70dvh,36rem)]">
                   <LeadChatThread
                     leadId={lead.id}
                     history={leadHistory}
