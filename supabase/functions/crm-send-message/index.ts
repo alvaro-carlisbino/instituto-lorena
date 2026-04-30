@@ -1,11 +1,8 @@
-/**
- * Envio manual WhatsApp (Evolution / Cloud). Opcional (Secrets): CRM_MANUAL_SEND_MIN_GAP_SECONDS,
- * CRM_SEND_MESSAGE_HOURLY_CAP. Instagram/ManyChat: não usar esta função — sendFlow + record_outbound.
- */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
 import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
+import { pushManychatInstagramDmAfterReply, readManychatPushConfigFromEnv } from '../_shared/manychatPublicApi.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -59,16 +56,68 @@ Deno.serve(async (req) => {
   const to = String(body.to ?? '').trim()
   const text = String(body.text ?? '').trim()
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
-  if (!leadId || !to || !text) return json({ error: 'missing_fields' }, 400)
+  
+  // Se explicitamente Instagram ou ManyChat
+  const isManychat = to.startsWith('888001') || body.channel === 'instagram'
+
+  if (!leadId || !text) return json({ error: 'missing_fields' }, 400)
 
   const { data: lead, error: leadErr } = await admin
     .from('leads')
-    .select('id, patient_name, whatsapp_instance_id')
+    .select('id, patient_name, phone, whatsapp_instance_id, custom_fields, source')
     .eq('id', leadId)
     .maybeSingle()
   if (leadErr || !lead) return json({ error: 'lead_not_found' }, 404)
 
-  const row = lead as { id: string; patient_name: string; whatsapp_instance_id: string | null }
+  const row = lead as { 
+    id: string; 
+    patient_name: string; 
+    phone: string; 
+    whatsapp_instance_id: string | null;
+    custom_fields: Record<string, unknown>;
+    source: string;
+  }
+
+  // --- Instagram / ManyChat Path ---
+  if (isManychat || row.source === 'meta_instagram') {
+    const subscriberId = String(row.custom_fields?.manychat_subscriber_id ?? '').trim()
+    if (!subscriberId) {
+       // Fallback para WA se tiver telefone real, senão erro
+       if (!row.phone || row.phone.startsWith('888001')) {
+         return json({ error: 'manychat_id_missing', message: 'Lead de Instagram sem ID do ManyChat' }, 400)
+       }
+    } else {
+      const mcCfg = readManychatPushConfigFromEnv()
+      if (!mcCfg) return json({ error: 'manychat_not_configured' }, 500)
+
+      const push = await pushManychatInstagramDmAfterReply({
+        apiKey: mcCfg.apiKey,
+        subscriberId,
+        replyText: text,
+        fieldId: mcCfg.fieldId,
+        flowNs: mcCfg.flowNs,
+        messageTag: mcCfg.messageTag || undefined,
+      })
+
+      if (!push.ok) {
+        return json({ error: 'manychat_push_failed', message: push.error }, 500)
+      }
+
+      await insertInteraction(admin, {
+        leadId: row.id,
+        patientName: row.patient_name,
+        channel: 'meta',
+        direction: 'out',
+        author: user.email || 'Consultor',
+        content: text,
+        happenedAt: nowIso(),
+      })
+
+      return json({ ok: true, provider: 'manychat', status: 'delivered' })
+    }
+  }
+
+  // --- WhatsApp Path ---
   const waProvider = (Deno.env.get('WHATSAPP_PROVIDER') ?? 'evolution').trim().toLowerCase()
   let provider: WhatsappProvider
   try {

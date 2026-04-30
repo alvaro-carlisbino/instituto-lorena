@@ -17,8 +17,12 @@ export function isManychatSyntheticPhone(phone: string): boolean {
  * Sem compositor / envio `crm-send-message`: lead Instagram sem número utilizável **ou** ainda com telefone sintético.
  * Com ≥10 dígitos e **não** prefixo `888001…`, o CRM permite WhatsApp manual (ex.: após merge com WA real).
  */
-export function isLeadWhatsappComposeBlocked(lead: Pick<Lead, 'source' | 'phone'>): boolean {
+export function isLeadWhatsappComposeBlocked(lead: Pick<Lead, 'source' | 'phone' | 'customFields'>): boolean {
   if (!isLeadSourceInstagram(lead.source)) return false
+  
+  // Se tiver ID do ManyChat, permitimos envio (será via ManyChat API no Edge)
+  if (lead.customFields?.manychat_subscriber_id) return false
+
   const digits = String(lead.phone ?? '').replace(/\D/g, '')
   if (digits.length < 10) return true
   return isManychatSyntheticPhone(lead.phone)
