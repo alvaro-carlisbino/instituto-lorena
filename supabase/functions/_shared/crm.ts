@@ -39,11 +39,26 @@ function temperatureForSource(source: LeadSource, override: string | undefined):
   return 'cold'
 }
 
-async function findLeadByPhone(admin: SupabaseClient, phone: string): Promise<string | null> {
+export async function findLeadByPhone(admin: SupabaseClient, phone: string): Promise<string | null> {
   const { data: fromRpc, error: findError } = await admin.rpc('find_lead_id_by_phone_digits', { p_digits: phone })
   if (!findError && fromRpc) return String(fromRpc)
   const { data: byEq } = await admin.from('leads').select('id').eq('phone', phone).maybeSingle()
   return byEq?.id ?? null
+}
+
+export function isPlaceholderName(name: string): boolean {
+  const n = name.toLowerCase().trim()
+  return (
+    !n ||
+    n === 'lead' ||
+    n === 'lead webhook' ||
+    n === 'novo contato' ||
+    n === 'atendimento' ||
+    n === 'atendimento comercial' ||
+    n === 'whatsapp' ||
+    n === 'lead instagram' ||
+    n === 'instagram user'
+  )
 }
 
 async function findLeadIdByPhoneAndInstance(
@@ -294,10 +309,7 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
       current.custom_fields as Record<string, unknown> | undefined,
       input.customFields,
     )
-    const isPlaceholder = (name: string) => {
-      const n = name.toLowerCase().trim()
-      return !n || n === 'lead' || n === 'lead webhook' || n === 'novo contato' || n === 'atendimento' || n === 'atendimento comercial' || n === 'whatsapp'
-    }
+    const isPlaceholder = isPlaceholderName
 
     const patch: Record<string, unknown> = {
       patient_name: (current.patient_name && !isPlaceholder(String(current.patient_name))) 
@@ -456,12 +468,33 @@ export async function findSyntheticInstagramLeadByName(
   patientName: string,
 ): Promise<string | null> {
   const name = (patientName ?? '').trim()
-  if (name.length < 3) return null
+  if (name.length < 3 || isPlaceholderName(name)) return null
   const { data, error } = await admin
     .from('leads')
     .select('id')
     .ilike('patient_name', name)
     .like('phone', '888001%')
+    .limit(1)
+    .maybeSingle()
+  if (error || !data) return null
+  return String((data as { id: unknown }).id)
+}
+
+/** 
+ * Busca um lead real de WhatsApp pelo nome do paciente.
+ * Usado no merge cross-channel inverso: quando um lead de Instagram entra e já existe um lead de WA com o mesmo nome.
+ */
+export async function findRealWhatsappLeadByName(
+  admin: SupabaseClient,
+  patientName: string,
+): Promise<string | null> {
+  const name = (patientName ?? '').trim()
+  if (name.length < 3 || isPlaceholderName(name)) return null
+  const { data, error } = await admin
+    .from('leads')
+    .select('id')
+    .ilike('patient_name', name)
+    .not('phone', 'like', '888001%')
     .limit(1)
     .maybeSingle()
   if (error || !data) return null

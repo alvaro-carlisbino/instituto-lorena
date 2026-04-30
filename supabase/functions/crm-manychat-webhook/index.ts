@@ -8,7 +8,9 @@ import {
 } from '../_shared/crmAiAutoReply.ts'
 import {
   findLeadIdByManychatSubscriberId,
+  findRealWhatsappLeadByName,
   insertInteraction,
+  mergeLeadDropIntoKeep,
   promoteManychatLeadToRealPhone,
   syntheticPhoneFromManychatSubscriberId,
   upsertLeadByPhone,
@@ -59,6 +61,27 @@ async function ensureManychatLeadId(
       channel: 'instagram',
     },
   })
+
+  // Cross-channel merge: Instagram message from someone already known via WhatsApp
+  if (lead.status === 'created' && input.userName) {
+    const waLeadId = await findRealWhatsappLeadByName(admin, input.userName)
+    if (waLeadId) {
+      await mergeLeadDropIntoKeep(admin, waLeadId, lead.leadId)
+      try {
+        await insertInteraction(admin, {
+          leadId: waLeadId,
+          patientName: input.userName,
+          channel: 'system',
+          direction: 'system',
+          author: 'CRM',
+          content: 'Lead do Instagram vinculado ao WhatsApp por nome idêntico.',
+          happenedAt: nowIso(),
+        })
+      } catch { /* ignore */ }
+      return waLeadId
+    }
+  }
+
   return lead.leadId
 }
 
