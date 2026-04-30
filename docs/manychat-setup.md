@@ -69,6 +69,10 @@ Ajusta `{{...}}` ao que o editor do ManyChat mostrar (por exemplo `user.first_na
 
 ### 2.3 Depois do External Request — usar a resposta
 
+**Importante (diferença do n8n):** o CRM **só devolve JSON** no HTTP. **Não** envia mensagem ao Instagram por conta própria. No ManyChat tens de ter **sempre um segundo passo** (ex. **Send Message** com o corpo = `reply` do JSON parseado, ou custom field + **Flow**) — era isso que o n8n fazia depois do HTTP.
+
+Se vires `status: "already_processed"` e `reply` vazio: o **`external_message_id`** deste pedido **já foi usado** noutra chamada (idempotência). Gera um **id único por mensagem** (ex. `{{message.id}}` ou `{{conversation.id}}-{{message.id}}-{{timestamp}}`) ou muda o id para voltar a correr a IA.
+
 A resposta HTTP 200 é JSON, por exemplo:
 
 ```json

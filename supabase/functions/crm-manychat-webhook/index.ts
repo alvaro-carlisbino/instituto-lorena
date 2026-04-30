@@ -206,7 +206,15 @@ Deno.serve(async (req) => {
     .eq('note', dedupKey)
     .maybeSingle()
   if (existing?.id) {
-    return json({ ok: true, status: 'already_processed', reply: '', handoff_suggested: false })
+    return json({
+      ok: true,
+      status: 'already_processed',
+      reply: '',
+      handoff_suggested: false,
+      routing: 'dedupe_hit',
+      hint:
+        'Este external_message_id já foi processado uma vez — a IA não volta a correr. Usa um id único por mensagem (ex. {{message.id}} ou timestamp) ou outro external_message_id para testar de novo. O Supabase não chama a API do ManyChat: no fluxo ManyChat, depois do External Request, tens de ter um passo (Send Message / Flow) que envie o campo reply ao cliente.',
+    })
   }
 
   const { data: jobRow, error: jobInsertError } = await admin

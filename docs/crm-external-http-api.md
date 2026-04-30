@@ -57,7 +57,7 @@ Corpo JSON:
 
 - `handoff_suggested`: `true` quando a IA sinalizou handoff com `[PRONTO_PARA_CONSULTOR]` (ramifica no ManyChat).
 - No ManyChat: usar `reply` + `handoff_suggested` no passo seguinte ao External Request.
-- Se repetires o mesmo `external_message_id` no modo `message`, a API devolve `status: "already_processed"` e `reply` vazio — gera um **id único por mensagem** ou usa `action: "ingest"` para cenários especiais (ver §1.3).
+- Se repetires o mesmo `external_message_id` no modo `message`, a API devolve `status: "already_processed"`, `reply` vazio e um campo **`hint`** (a IA **não** corre outra vez). Gera um **id único por mensagem** ou usa `action: "ingest"` (§1.3). O CRM **não** chama a API do ManyChat: o envio ao cliente é **sempre** um passo seguinte no ManyChat (Send Message / Flow com `reply`).
 
 ### 1.2 `action: "merge_phone"` — utilizador enviou telefone no Instagram
 
