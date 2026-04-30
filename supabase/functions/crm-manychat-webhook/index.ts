@@ -13,6 +13,7 @@ import {
   syntheticPhoneFromManychatSubscriberId,
   upsertLeadByPhone,
 } from '../_shared/crm.ts'
+import { pushManychatInstagramDmAfterReply, readManychatPushConfigFromEnv } from '../_shared/manychatPublicApi.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -283,6 +284,42 @@ Deno.serve(async (req) => {
       })
     }
 
+    let manychatPush: Record<string, unknown> = { attempted: false, skipped_reason: 'empty_reply' }
+    const replyTrimmed = reply.trim()
+    const pushDisabledEnv =
+      (Deno.env.get('MANYCHAT_PUSH_DISABLED') ?? '').trim().toLowerCase() === 'true'
+    const skipPushBody =
+      body.manychat_skip_push === true ||
+      String(body.manychat_skip_push ?? '').trim().toLowerCase() === 'true'
+
+    if (pushDisabledEnv) {
+      manychatPush = { attempted: false, skipped_reason: 'MANYCHAT_PUSH_DISABLED' }
+    } else if (skipPushBody) {
+      manychatPush = { attempted: false, skipped_reason: 'manychat_skip_push' }
+    } else if (replyTrimmed) {
+      const mcCfg = readManychatPushConfigFromEnv()
+      if (!mcCfg) {
+        manychatPush = { attempted: false, skipped_reason: 'no_manychat_api_key' }
+      } else {
+        const pushResult = await pushManychatInstagramDmAfterReply({
+          apiKey: mcCfg.apiKey,
+          subscriberId,
+          replyText: replyTrimmed,
+          fieldId: mcCfg.fieldId,
+          flowNs: mcCfg.flowNs,
+          messageTag: mcCfg.messageTag || undefined,
+        })
+        manychatPush = {
+          attempted: true,
+          ok: pushResult.ok,
+          ...(pushResult.ok ? {} : { error: pushResult.error }),
+        }
+        if (!pushResult.ok) {
+          console.warn('crm-manychat-webhook manychat_push:', pushResult.error)
+        }
+      }
+    }
+
     await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', String(jobRow.id))
 
     return json({
@@ -291,6 +328,13 @@ Deno.serve(async (req) => {
       reply,
       handoff_suggested: handoffSuggested,
       routing: gate.canAutoReply ? 'ai_auto_reply_attempted' : 'manual_handoff',
+      manychat_push: manychatPush,
+      ...(gate.canAutoReply
+        ? {}
+        : {
+            ai_skip_reasons: gate.skipReasons,
+            hint: gate.skipHint ?? null,
+          }),
     })
   } catch (e) {
     await admin

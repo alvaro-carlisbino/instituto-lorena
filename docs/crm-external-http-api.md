@@ -17,7 +17,7 @@ Todas as respostas são JSON. Erros comuns: `401 unauthorized`, `400 invalid_jso
 - `Content-Type: application/json`
 - `x-manychat-crm-secret`: igual ao secret `MANYCHAT_CRM_SECRET` no Supabase (Edge Functions → Secrets).
 
-**Secrets Supabase:** `MANYCHAT_CRM_SECRET` (header ManyChat `x-manychat-crm-secret`) e **`CRM_AI_INTERNAL_SECRET`** (≥16 caracteres; usado só entre Edge Functions para o `crm-ai-assistant` devolver texto em `reply`). Sem o segundo, a resposta pode ser `200` com `reply: ""`.
+**Secrets Supabase:** `MANYCHAT_CRM_SECRET` (header ManyChat `x-manychat-crm-secret`) e **`CRM_AI_INTERNAL_SECRET`** (≥16 caracteres; usado só entre Edge Functions para o `crm-ai-assistant` devolver texto em `reply`). Sem o segundo, a resposta pode ser `200` com `reply: ""`. Opcional: **`MANYCHAT_API_KEY`** (+ `MANYCHAT_DM_FIELD_ID`, `MANYCHAT_DM_FLOW_NS`, …) para o CRM chamar a API ManyChat (`setCustomField` + `sendFlow`) após a IA — ver [manychat-setup.md](manychat-setup.md) §1.
 
 ### 1.1 `action` omitido ou `message` — mensagem + resposta IA
 
@@ -41,6 +41,7 @@ Corpo JSON:
 | `phone` | não | Se tiver ≥10 dígitos, faz merge com lead existente por telefone (`promoteManychatLeadToRealPhone`) |
 | `external_message_id` ou `message_id` | não | Idempotência em `webhook_jobs` (recomendado em produção) |
 | `context_append` ou `user_context` | não | Texto extra (ex. tags ManyChat, cidade) enviado **só** ao modelo de IA, após `---`; a interação “in” no CRM continua a guardar só `text` |
+| `manychat_skip_push` | não | Se `true`, não chama a API ManyChat mesmo com `MANYCHAT_API_KEY` (evita DM duplicada em testes) |
 | `phone` | não | ≥10 dígitos: atualiza / funde lead com telefone real |
 
 **Resposta 200**
@@ -51,13 +52,18 @@ Corpo JSON:
   "leadId": "lead-…",
   "reply": "Texto para o ManyChat (tag [PRONTO_PARA_CONSULTOR] removida se existir)",
   "handoff_suggested": false,
-  "routing": "ai_auto_reply_attempted | manual_handoff"
+  "routing": "ai_auto_reply_attempted | manual_handoff",
+  "manychat_push": {
+    "attempted": true,
+    "ok": true
+  }
 }
 ```
 
+- `manychat_push`: se `MANYCHAT_API_KEY` estiver definido e houver `reply`, o CRM tenta **setCustomField** + **sendFlow**; `attempted: false` com `skipped_reason` quando não há key, `reply` vazio, `manychat_skip_push`, ou `MANYCHAT_PUSH_DISABLED`. Erro ManyChat em `manychat_push.error` (HTTP 200 na mesma — o histórico CRM já foi gravado).
 - `handoff_suggested`: `true` quando a IA sinalizou handoff com `[PRONTO_PARA_CONSULTOR]` (ramifica no ManyChat).
-- No ManyChat: usar `reply` + `handoff_suggested` no passo seguinte ao External Request.
-- Se repetires o mesmo `external_message_id` no modo `message`, a API devolve `status: "already_processed"`, `reply` vazio e um campo **`hint`** (a IA **não** corre outra vez). Gera um **id único por mensagem** ou usa `action: "ingest"` (§1.3). O CRM **não** chama a API do ManyChat: o envio ao cliente é **sempre** um passo seguinte no ManyChat (Send Message / Flow com `reply`).
+- Se **não** usares `MANYCHAT_API_KEY`: no ManyChat, usa `reply` + `handoff_suggested` no passo seguinte ao External Request (Send Message / Flow).
+- Se repetires o mesmo `external_message_id` no modo `message`, a API devolve `status: "already_processed"`, `reply` vazio e um campo **`hint`** (a IA **não** corre outra vez). Gera um **id único por mensagem** ou usa `action: "ingest"` (§1.3).
 
 ### 1.2 `action: "merge_phone"` — utilizador enviou telefone no Instagram
 

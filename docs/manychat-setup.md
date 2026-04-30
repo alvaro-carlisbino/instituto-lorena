@@ -20,6 +20,18 @@ Dashboard Supabase deste projeto: `https://supabase.com/dashboard/project/fgyfpm
 | `MANYCHAT_CRM_SECRET` | Uma string longa e aleatória (ex. 32+ caracteres). **A mesma** vais colar no ManyChat. |
 | `CRM_AI_INTERNAL_SECRET` | **Obrigatório** para resposta IA no ManyChat: string aleatória com **pelo menos 16 caracteres** (ex. 32+). O `crm-manychat-webhook` envia este valor no header `x-crm-ai-internal-secret` ao chamar `crm-ai-assistant` (chamada servidor-a-servidor, sem JWT de utilizador). |
 
+**Opcional — envio automático Instagram (API ManyChat a partir do CRM):**
+
+| Nome | Valor |
+|------|--------|
+| `MANYCHAT_API_KEY` | Token **Settings → API** no ManyChat (Bearer). Se existir, após gerar `reply` a função chama `POST /fb/subscriber/setCustomField` + `POST /fb/sending/sendFlow` para o subscriber. |
+| `MANYCHAT_DM_FIELD_ID` | ID numérico do custom field da DM (omissão: **14539456** / `ENVIAR-DM`). |
+| `MANYCHAT_DM_FLOW_NS` | `flow_ns` do flow de entrega (omissão: **`content20260430143025_638461`**). |
+| `MANYCHAT_SEND_FLOW_MESSAGE_TAG` | Só se a ManyChat/Meta exigir tag no `sendFlow` (ex. valor permitido pela tua conta). |
+| `MANYCHAT_PUSH_DISABLED` | `true` para desligar o push mantendo a key (testes). |
+
+Com `MANYCHAT_API_KEY` definido, **remove** do automation ManyChat os passos duplicados **Set Custom Field + Send Flow** logo a seguir ao External Request — senão o cliente pode receber **duas** DMs. Podes forçar só JSON com `"manychat_skip_push": true` no body do `POST` (testes).
+
 3. Garante também os secrets da IA usados por `crm-ai-assistant` (ex. `ZAI_API_KEY`), conforme o [README](../README.md).
 
 Sem `MANYCHAT_CRM_SECRET`, a função responde `401 unauthorized`.
@@ -30,7 +42,7 @@ Sem `CRM_AI_INTERNAL_SECRET` válido (≥16 caracteres) nas Edge Functions, o pe
 
 ## 2. No ManyChat — fluxo geral
 
-Objetivo: quando o utilizador enviar mensagem (Instagram), o ManyChat faz um **External Request** ao CRM (Supabase), recebe JSON com `reply` (e opcionalmente `handoff_suggested`) e no passo seguinte **envia essa resposta** na conversa (mensagem direta ou custom field + flow no próprio ManyChat). **Sem n8n** no meio.
+Objetivo: quando o utilizador enviar mensagem (Instagram), o CRM (`crm-manychat-webhook`) gera o texto da IA e regista no histórico; **no Instagram**, a entrega faz-se via **ManyChat** — ou **automaticamente** (secret `MANYCHAT_API_KEY`, §1) ou à mão / segundo flow (§2.3.1–2.3.2). **Sem n8n** no meio.
 
 ### 2.1 Criar ou editar um Automation / Flow
 
@@ -69,7 +81,23 @@ Ajusta `{{...}}` ao que o editor do ManyChat mostrar (por exemplo `user.first_na
 
 ### 2.3 Depois do External Request — usar a resposta
 
-**Importante (diferença do n8n):** o CRM **só devolve JSON** no HTTP. **Não** envia mensagem ao Instagram por conta própria. No ManyChat tens de ter **sempre um segundo passo** (ex. **Send Message** com o corpo = `reply` do JSON parseado, ou custom field + **Flow**) — era isso que o n8n fazia depois do HTTP.
+**Importante (diferença do n8n):** o CRM **só devolve JSON** no HTTP. **Não** envia mensagem ao Instagram por conta própria. Tens de **publicar** o `reply` no canal Meta via ManyChat — seja no **mesmo** automation (§2.3.2) ou no **padrão em dois flows + API** (§2.3.1), que a equipa usa quando a IA demora e não se quer depender de encadear “reply → Send Message” logo a seguir ao External Request.
+
+### 2.3.1 Padrão em dois flows + variável pela API ManyChat (recomendado quando a IA demora)
+
+**Com `MANYCHAT_API_KEY` no Supabase (§1):** o próprio `crm-manychat-webhook` já faz **setCustomField + sendFlow** depois da IA — o Flow A no ManyChat pode ser **apenas** o External Request (sem Set Field / Send Flow a seguir, para não duplicar DM).
+
+**Sem** esse secret (ou com orquestrador externo), o padrão manual é:
+
+1. **Flow A** — **External Request** ao `crm-manychat-webhook` (…). O CRM devolve JSON com **`reply`**. Se a IA corre **toda** nesta chamada, aplica-se o **limite ~10 s** do ManyChat (§2.7); para contornar, endpoint intermédio que responde rápido + processo assíncrono, etc.
+2. **Orquestrador** — [API ManyChat](https://api.manychat.com/swagger): `setCustomField` / `setCustomFieldByName` com o `reply`, depois **`sendFlow`** com o `flow_ns` do Flow B.
+3. **Flow B** — **Send Message** no Instagram (ou lê **ENVIAR-DM** / id **14539456**, flow `content20260430143025_638461`).
+
+Assim o tempo da IA **não** fica acoplado ao bloco que manda a DM quando tudo corre **fora** do ManyChat; com push no CRM, o ManyChat só precisa de esperar **uma** resposta HTTP (atenção ao §2.7 se a IA + API ManyChat somarem > ~10 s).
+
+### 2.3.2 Variante simples — tudo no mesmo automation (quando cabe em ~10 s)
+
+**Importante:** só faz sentido se o External Request **voltar a tempo** com JSON completo; caso contrário preferir §2.3.1 ou §2.7.
 
 Se vires `status: "already_processed"` e `reply` vazio: o **`external_message_id`** deste pedido **já foi usado** noutra chamada (idempotência). Gera um **id único por mensagem** (ex. `{{message.id}}` ou `{{conversation.id}}-{{message.id}}-{{timestamp}}`) ou muda o id para voltar a correr a IA.
 
@@ -91,7 +119,9 @@ No ManyChat:
 2. Se usas **Custom Field** + **Flow** para publicar: grava `reply` no custom field e dispara o **Flow** que lê esse campo.
 3. **`handoff_suggested`** = `true` → ramifica no ManyChat (notificar consultor, tag, outro flow, etc.). O CRM remove a marca `[PRONTO_PARA_CONSULTOR]` do texto em `reply` antes de devolver.
 
-#### Exemplo Instituto Lorena — campo **ENVIAR-DM** + Flow (DM ao utilizador)
+#### Exemplo Instituto Lorena — campo **ENVIAR-DM** + Flow (DM ao utilizador), em série no mesmo automation
+
+Útil quando o JSON com `reply` chega dentro do timeout do ManyChat; em alternativa ver **§2.3.1** (dois flows + API).
 
 Valores da conta ManyChat (rever no editor se ManyChat renumerar campos/flows):
 
@@ -107,6 +137,12 @@ Valores da conta ManyChat (rever no editor se ManyChat renumerar campos/flows):
 2. **Send Flow** / **Start Flow** / **Execute Flow** (conforme o teu ManyChat): enviar o subscriber para o flow **`content20260430143025_638461`**, que no ManyChat deve estar configurado para **ler o campo `ENVIAR-DM`** e enviar essa mensagem ao utilizador no Instagram.
 
 Sem o passo (1) o flow pode ficar vazio; sem o passo (2) o texto fica no campo mas o cliente não recebe DM.
+
+**Sintoma:** a resposta aparece no **painel do CRM** (histórico), mas o cliente **não** vê mensagem no Instagram.
+
+- O webhook **já fez a parte dele**: gravou a linha `out` na BD. Isso **não** chama a API do ManyChat.
+- Falta **publicar** o `reply` no Instagram: ou **(A)+(B)** no **mesmo** automation após o External Request (§2.3.2), ou o **Flow B** depois de **set via API ManyChat** + disparo do flow (§2.3.1). Sem a entrega no ManyChat, o Instagram fica mudo mesmo com CRM correcto.
+- Se o ManyChat mostrou **timeout ~10 s** (§2.7), o fluxo pode **nunca ter corrido** os passos (A)+(B) porque o pedido HTTP foi cortado antes de devolver JSON — nesse caso o CRM pode ainda ter registado resposta (ex. pedido completou no Supabase depois), mas o ManyChat não recebeu `reply` a tempo para mapear para o campo / flow.
 
 ### 2.4 Debounce (várias mensagens seguidas)
 
@@ -134,6 +170,16 @@ Para o operador responder no **Instagram** como já fazias:
 
 Assim o histórico no painel fica alinhado com o que o cliente recebeu no DM, **sem** passar por `crm-send-message`.
 
+### 2.7 Erro **Operation timed out after ~10002 ms** (0 bytes received)
+
+O ManyChat impõe um **timeout curto (~10 s)** nos pedidos **External Request** para domínios que **não** sejam `openai.com` (não há como aumentar esse valor no editor). Se o External Request ManyChat → `crm-manychat-webhook` fizer **IA completa na mesma chamada**, o caminho é:
+
+`ManyChat → crm-manychat-webhook` (Edge) → base de dados → **`functions.invoke('crm-ai-assistant')`** (outra Edge) → **Z.ai**.
+
+Cold start, rede e o tempo do modelo podem **ultrapassar 10 s**; o ManyChat corta e mostra erro de timeout / 0 bytes, mesmo que o Supabase acabe por concluir depois.
+
+**Mitigações práticas:** modelo mais rápido (*flash*), `system_prompt` mais curto, menos cold start. Para não depender destes ~10 s na mesma chamada, usar o **padrão §2.3.1** (Flow A + **API ManyChat** para gravar campo + **Flow B** para Send Message) ou um webhook que devolve **200 logo** e outro processo gera o `reply` e chama a **API ManyChat** + `sendFlow` — alinhado ao que a comunidade ManyChat recomenda quando a IA não cabe no timeout do External Request.
+
 ---
 
 ## 3. Testar no Admin Lab (opcional)
@@ -148,9 +194,10 @@ No CRM, **Ferramentas** → origem **ManyChat / Instagram (IA)** permite simular
 - [ ] Mesmo `MANYCHAT_CRM_SECRET` no header ManyChat  
 - [ ] URL correta da função `crm-manychat-webhook`  
 - [ ] Body JSON com `subscriber_id` e `text`  
-- [ ] Depois do External Request: **Set Custom Field** `ENVIAR-DM` (id **14539456**) = `reply`, depois **Send Flow** `content20260430143025_638461`  
+- [ ] Entrega Instagram: secret **`MANYCHAT_API_KEY`** (push no CRM, §1) **ou** **§2.3.2** (Set Field + **Send Flow** no ManyChat) **ou** orquestração externa §2.3.1 — **nunca** dois destes ao mesmo tempo (evita DM duplicada)  
 - [ ] (Opcional) Ramo se `handoff_suggested` for true  
 - [ ] Prompt de triagem no **Dashboard Supabase** → tabela `crm_ai_configs` (`system_prompt`)  
+- [ ] Se aparecer timeout ~10 s no ManyChat: ver §2.7 (limite do ManyChat, não do Supabase)  
 
 ---
 

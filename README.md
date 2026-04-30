@@ -82,6 +82,7 @@ Defina no Supabase:
 - Meta Cloud **direto** no CRM (`WHATSAPP_PROVIDER=official`, sem ManyChat neste leg): `WHATSAPP_CLOUD_APP_SECRET`, `WHATSAPP_CLOUD_ACCESS_TOKEN`, `WHATSAPP_CLOUD_PHONE_NUMBER_ID`, `WHATSAPP_CLOUD_VERIFY_TOKEN`, opcional `WHATSAPP_CLOUD_API_VERSION`
 - `MANYCHAT_CRM_SECRET` (ManyChat → `crm-manychat-webhook` — **canais Meta “oficiais” via ManyChat, sem n8n**)
 - `CRM_AI_INTERNAL_SECRET` (≥16 caracteres): `crm-manychat-webhook` / WhatsApp auto-reply chamam `crm-ai-assistant` com header `x-crm-ai-internal-secret`; sem isto o JSON pode vir com `reply` vazio
+- Opcional — Instagram DM após IA: `MANYCHAT_API_KEY` (ManyChat **Settings → API**), `MANYCHAT_DM_FIELD_ID`, `MANYCHAT_DM_FLOW_NS`, opcional `MANYCHAT_SEND_FLOW_MESSAGE_TAG`, `MANYCHAT_PUSH_DISABLED` — ver [docs/manychat-setup.md](docs/manychat-setup.md) §1
 - `CRM_WEBHOOK_SECRET` (webhook genérico `crm-ingest-webhook`)
 - Opcional — `crm-send-message`: `CRM_MANUAL_SEND_MIN_GAP_SECONDS` (segundos entre envios manuais por lead; `0` desativa), `CRM_SEND_MESSAGE_HOURLY_CAP` (máx. de envios WhatsApp contados na última hora antes de 429)
 
