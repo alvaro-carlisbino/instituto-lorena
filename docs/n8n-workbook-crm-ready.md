@@ -32,16 +32,19 @@ Documento operacional: **URLs fixas**, **headers** e **corpos JSON** para montar
 
 ### 2.1 CRM (header secreto)
 
-1. **Credentials → Create → Header Auth** (ou “Generic Credential Type” com header custom).  
+1. **Credentials → Create → Header Auth**.  
 2. Nome sugerido: `IL CRM ManyChat Webhook`.  
-3. **Header name:** `x-manychat-crm-secret`  
-4. **Header value:** o mesmo string que definiste em `MANYCHAT_CRM_SECRET` no Supabase.
+3. **Name** (nome do header HTTP): `x-manychat-crm-secret` — **minúsculas**, com hífens; **não** uses `Authorization` nem `X-Api-Key` nesta credencial (isso é para o Z.ai / ManyChat).  
+4. **Value:** o mesmo texto que `MANYCHAT_CRM_SECRET` no Supabase (Project Settings → Edge Functions → Secrets), **sem** prefixo `Bearer ` e sem aspas.
 
-**Nó HTTP Request → Authentication:** escolhe esta credencial (o n8n envia o header em todos os pedidos ao CRM).
+**Nó HTTP Request (CRM Ingest, CRM get thread, CRM record outbound):** em **Authentication** escolhe **Header Auth** e esta credencial. O n8n junta o header da credencial ao pedido; **não** adiciones outro header manual com o mesmo nome.
 
-**Importante:** em cada nó HTTP ao CRM, adiciona manualmente (se o nó não juntar automaticamente):
+**Se receberes 401 `unauthorized`:**  
+- Confirma que `MANYCHAT_CRM_SECRET` existe no Supabase (se estiver vazio, a Edge devolve 401 com `hint` no JSON — faz `deploy` da função após criar o secret).  
+- No n8n, abre o pedido falhado em **Executions** e vê o corpo da resposta: a função devolve `hint` a explicar (header em falta, secret no servidor vazio, ou valor diferente).  
+- Credencial **errada** no nó (ex.: a do Z.ai): o header enviado não é `x-manychat-crm-secret` → 401.
 
-- **Name:** `Content-Type` → **Value:** `application/json`
+**Content-Type:** com corpo JSON, o n8n costuma enviar `application/json` automaticamente; não é obrigatório duplicar em “Send Headers” nos nós CRM do workflow importado.
 
 ### 2.2 ManyChat (Bearer)
 

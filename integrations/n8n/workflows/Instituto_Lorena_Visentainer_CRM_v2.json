@@ -306,16 +306,6 @@
         "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "specifyHeaders": "keypair",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({\n  action: 'ingest',\n  subscriber_id: $('Montar contexto').item.json.subscriberId,\n  user_name: $('Montar contexto').item.json.fullName,\n  text: $('Montar contexto').item.json.msg,\n}) }}",
@@ -328,7 +318,9 @@
         1264
       ],
       "id": "5e7eeb1a-9688-404a-ac5d-7ee01be60eb1",
-      "name": "CRM Ingest"
+      "name": "CRM Ingest",
+      "notesInFlow": true,
+      "notes": "401: credencial Header Auth com Name EXACTAMENTE x-manychat-crm-secret (não Authorization). Value = MANYCHAT_CRM_SECRET no Supabase (sem Bearer). Não mistures com a credencial do Z.ai. Ver resposta HTTP (body JSON hint) após deploy da função."
     },
     {
       "parameters": {
@@ -336,16 +328,6 @@
         "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "specifyHeaders": "keypair",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({\n  action: 'get_thread',\n  subscriber_id: $('Montar contexto').item.json.subscriberId,\n  lead_id: $json.leadId,\n  limit: 50,\n}) }}",
@@ -514,16 +496,6 @@
         "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "specifyHeaders": "keypair",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({\n  action: 'record_outbound',\n  subscriber_id: $('Montar contexto').item.json.subscriberId,\n  user_name: $('Montar contexto').item.json.fullName,\n  reply: $('Fallback de erro').item.json.output,\n  lead_id: $('CRM Ingest').item.json.leadId,\n}) }}",
@@ -544,16 +516,6 @@
         "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "specifyHeaders": "keypair",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({\n  action: 'record_outbound',\n  subscriber_id: $('Montar contexto').item.json.subscriberId,\n  user_name: $('Montar contexto').item.json.fullName,\n  reply: $('Detectar intenção').item.json.output,\n  lead_id: $('CRM Ingest').item.json.leadId,\n}) }}",
@@ -574,16 +536,6 @@
         "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "specifyHeaders": "keypair",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({\n  action: 'record_outbound',\n  subscriber_id: $('Montar contexto').item.json.subscriberId,\n  user_name: $('Montar contexto').item.json.fullName,\n  reply: $('Detectar intenção').item.json.output,\n  lead_id: $('CRM Ingest').item.json.leadId,\n}) }}",

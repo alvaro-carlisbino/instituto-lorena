@@ -246,7 +246,12 @@ Deno.serve(async (req) => {
   const secret = (Deno.env.get('MANYCHAT_CRM_SECRET') ?? '').trim()
   const hdr = (req.headers.get('x-manychat-crm-secret') ?? '').trim()
   if (!secret || hdr !== secret) {
-    return json({ error: 'unauthorized' }, 401)
+    const hint = !secret
+      ? 'MANYCHAT_CRM_SECRET não está definido nas Edge Functions (Supabase → Secrets).'
+      : !hdr
+        ? 'Falta o header HTTP x-manychat-crm-secret (credencial Header Auth no n8n: Name exactamente x-manychat-crm-secret).'
+        : 'O valor do header não coincide com MANYCHAT_CRM_SECRET (espaços extra, secret errado ou credencial ligada a outro header).'
+    return json({ error: 'unauthorized', hint }, 401)
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
