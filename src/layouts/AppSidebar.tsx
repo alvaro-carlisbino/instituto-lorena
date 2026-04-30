@@ -110,7 +110,7 @@ export function AppSidebar() {
 
       <SidebarContent className="px-3 gap-0">
         <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
+          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
             Operação
           </SidebarGroupLabel>
           <SidebarGroupContent>
@@ -128,7 +128,7 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
+          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
             Dados e canais
           </SidebarGroupLabel>
           <SidebarGroupContent>
@@ -144,7 +144,7 @@ export function AppSidebar() {
 
         {(showDashboardConfig || showAdmin) && (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
               Configuração
             </SidebarGroupLabel>
             <SidebarGroupContent>
@@ -160,7 +160,7 @@ export function AppSidebar() {
 
         {showAdmin ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
               Administração
             </SidebarGroupLabel>
             <SidebarGroupContent>
@@ -176,7 +176,7 @@ export function AppSidebar() {
 
         {showTv ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
               TV
             </SidebarGroupLabel>
             <SidebarGroupContent>

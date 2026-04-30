@@ -232,8 +232,10 @@ export async function runWhatsappAiAutoReply(
     const isEntry = lead.stage_id === 'novo' || lead.stage_id === 'tc-novo'
     if (isEntry) {
       const normalized = options.aiInboundUserText.trim()
-      if (TRIAGE_MAPPING[normalized]) {
-        const target = TRIAGE_MAPPING[normalized]
+      const firstChar = normalized.charAt(0)
+      const target = TRIAGE_MAPPING[normalized] || TRIAGE_MAPPING[firstChar]
+
+      if (target) {
         await admin
           .from('leads')
           .update({
@@ -366,8 +368,10 @@ export async function runManychatAiAutoReply(
     const isEntry = lead.stage_id === 'novo' || lead.stage_id === 'tc-novo'
     if (isEntry) {
       const normalized = options.aiInboundUserText.trim()
-      if (TRIAGE_MAPPING[normalized]) {
-        const target = TRIAGE_MAPPING[normalized]
+      const firstChar = normalized.charAt(0)
+      const target = TRIAGE_MAPPING[normalized] || TRIAGE_MAPPING[firstChar]
+
+      if (target) {
         await admin
           .from('leads')
           .update({

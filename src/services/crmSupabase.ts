@@ -245,6 +245,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     dashboardWidgetsRes,
     dataViewsRes,
     orgSettingsRes,
+    mediaItemsRes,
   ] = await Promise.all([
     client.from('pipelines').select('id, name, board_config').order('name', { ascending: true }),
     client.from('pipeline_stages').select('id, pipeline_id, name, position').order('position', { ascending: true }),
@@ -280,6 +281,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       .order('position', { ascending: true }),
     client.from('data_views').select('id, name, config').order('name', { ascending: true }),
     client.from('org_settings').select('id, timezone, date_format, week_starts_on').eq('id', 'default').maybeSingle(),
+    client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, metadata'),
   ])
 
   if (pipelinesRes.error) throw pipelinesRes.error
@@ -296,6 +298,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   if (dashboardWidgetsRes.error) throw dashboardWidgetsRes.error
   if (dataViewsRes.error) throw dataViewsRes.error
   if (orgSettingsRes.error) throw orgSettingsRes.error
+  if (mediaItemsRes.error) throw mediaItemsRes.error
 
   const [tasksRes, rulesRes, tmplRes, dispRes, respRes, tagAssignRes] = await Promise.all([
     client
@@ -388,6 +391,23 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       }))
     : initialLeads
 
+  const mediaByInteraction = new Map<string, Interaction['media']>()
+  if (mediaItemsRes.data) {
+    for (const row of mediaItemsRes.data) {
+      const iid = String(row.interaction_id)
+      if (!iid || iid === 'null') continue
+      const list = mediaByInteraction.get(iid) ?? []
+      list.push({
+        id: String(row.id),
+        type: row.media_type as any,
+        mimeType: row.mime_type,
+        base64: row.media_base64,
+        caption: (row.metadata as any)?.caption,
+      })
+      mediaByInteraction.set(iid, list)
+    }
+  }
+
   const builtInteractions: Interaction[] = interactionRows.length
     ? interactionRows.map((interaction) => ({
         id: interaction.id,
@@ -399,6 +419,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
         content: interaction.content,
         happenedAt: interaction.happened_at,
         externalMessageId: interaction.external_message_id || undefined,
+        media: mediaByInteraction.get(interaction.id),
       }))
     : initialInteractions
 

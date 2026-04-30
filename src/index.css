@@ -223,7 +223,7 @@
 
     /* Barra lateral: tinta do logo */
     --sidebar: oklch(0.21 0.028 265);
-    --sidebar-foreground: oklch(0.96 0.01 85);
+    --sidebar-foreground: oklch(1 0 0);
     --sidebar-primary: var(--brand-salmon);
     --sidebar-primary-foreground: var(--brand-ink);
     --sidebar-accent: oklch(0.28 0.022 265);
