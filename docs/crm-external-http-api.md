@@ -2,7 +2,7 @@
 
 Base URL das Edge Functions: `https://<SUPABASE_PROJECT_REF>.supabase.co/functions/v1/<nome-da-função>`
 
-Todas as respostas são JSON. Erros comuns: `401 unauthorized` (header `x-manychat-crm-secret` ≠ `MANYCHAT_CRM_SECRET` ou secret vazio no Supabase), `400 invalid_json` / `missing_*`, `500 processing_failed`.
+Todas as respostas são JSON. Erros comuns: `401 unauthorized` (nem `x-manychat-crm-secret` nem `Authorization: Bearer …` coincide com `MANYCHAT_CRM_SECRET`, ou secret vazio no Supabase), `400 invalid_json` / `missing_*`, `500 processing_failed`.
 
 **Canais “oficiais” Meta (Instagram / WhatsApp no ecossistema Meta):** o caminho recomendado é o **ManyChat** (já integrado às APIs da Meta), chamando o CRM com `crm-manychat-webhook`. Assim evitas duplicar webhooks e tokens Meta no Supabase para o que o ManyChat já cobre. A integração **direta** Meta Cloud no CRM (`crm-whatsapp-webhook` com `WHATSAPP_PROVIDER=official`) fica como opção avançada quando precisas de WhatsApp no CRM sem ManyChat nesse leg.
 
@@ -12,10 +12,13 @@ Todas as respostas são JSON. Erros comuns: `401 unauthorized` (header `x-manych
 
 ## 1. `crm-manychat-webhook` — ManyChat (Meta) + IA CRM
 
-**Headers obrigatórios**
+**Headers obrigatórios** (um dos dois)
 
 - `Content-Type: application/json`
-- `x-manychat-crm-secret`: igual ao secret `MANYCHAT_CRM_SECRET` no Supabase (Edge Functions → Secrets).
+- **Opção A:** `x-manychat-crm-secret`: igual ao `MANYCHAT_CRM_SECRET` no Supabase (Edge Functions → Secrets).  
+- **Opção B (n8n / Postman):** `Authorization: Bearer <MANYCHAT_CRM_SECRET>` — o mesmo valor do secret, com o prefixo `Bearer ` e um espaço.
+
+Se nenhum dos dois coincidir com o secret configurado, resposta `401` com `{ "error": "unauthorized" }`.
 
 **Secrets Supabase:** `MANYCHAT_CRM_SECRET` (header ManyChat `x-manychat-crm-secret`) e **`CRM_AI_INTERNAL_SECRET`** (≥16 caracteres; usado só entre Edge Functions para o `crm-ai-assistant` devolver texto em `reply`). Sem o segundo, a resposta pode ser `200` com `reply: ""`. Opcional: **`MANYCHAT_API_KEY`** (+ `MANYCHAT_DM_FIELD_ID`, `MANYCHAT_DM_FLOW_NS`, …) para o CRM chamar a API ManyChat (`setCustomField` + `sendFlow`) após a IA — ver [manychat-setup.md](manychat-setup.md) §1.
 

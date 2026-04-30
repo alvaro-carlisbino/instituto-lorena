@@ -30,9 +30,18 @@ Documento operacional: **URLs fixas**, **headers** e **corpos JSON** para montar
 
 ## 2. Credenciais no n8n (criar uma vez)
 
-### 2.1 CRM (header secreto)
+### 2.1 CRM (autenticação no n8n)
 
-Credencial **Header Auth**: nome do header `x-manychat-crm-secret`, valor = `MANYCHAT_CRM_SECRET` no Supabase (sem `Bearer`). Nos nós **CRM Ingest / get thread / record outbound**, Authentication → essa credencial (não misturar com a do Z.ai). **401:** secret no Supabase vazio ou valor diferente do header.
+Escolhe **uma** destas formas na credencial **Header Auth** (nos nós **CRM Ingest / get thread / record outbound**):
+
+| Name | Value |
+|------|--------|
+| `x-manychat-crm-secret` | o texto exacto de `MANYCHAT_CRM_SECRET` (sem `Bearer`) |
+| **ou** `Authorization` | `Bearer ` + espaço + o mesmo `MANYCHAT_CRM_SECRET` (ex.: `Bearer abc123...`) |
+
+O Supabase aceita **A ou B**. Não mistures esta credencial com a do Z.ai (outro host / outro Bearer).
+
+**401:** `MANYCHAT_CRM_SECRET` não existe no projeto Supabase, ou o valor no n8n não é igual ao do Dashboard (espaços, aspas, credencial não seleccionada no nó).
 
 ### 2.2 ManyChat (Bearer)
 

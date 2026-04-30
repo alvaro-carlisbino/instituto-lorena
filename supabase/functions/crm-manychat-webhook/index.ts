@@ -244,8 +244,12 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
   const secret = (Deno.env.get('MANYCHAT_CRM_SECRET') ?? '').trim()
-  const hdr = (req.headers.get('x-manychat-crm-secret') ?? '').trim()
-  if (!secret || hdr !== secret) {
+  const hdrMc = (req.headers.get('x-manychat-crm-secret') ?? '').trim()
+  const authRaw = (req.headers.get('authorization') ?? '').trim()
+  const bearer = /^Bearer\s+(.+)$/i.exec(authRaw)
+  const hdrBearer = bearer ? bearer[1].trim() : ''
+  const authorized = Boolean(secret) && (hdrMc === secret || hdrBearer === secret)
+  if (!authorized) {
     return json({ error: 'unauthorized' }, 401)
   }
 

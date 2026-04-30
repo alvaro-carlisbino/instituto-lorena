@@ -258,7 +258,9 @@
         1264
       ],
       "id": "5e7eeb1a-9688-404a-ac5d-7ee01be60eb1",
-      "name": "CRM Ingest"
+      "name": "CRM Ingest",
+      "notesInFlow": true,
+      "notes": "Header Auth: (1) Name x-manychat-crm-secret, Value = MANYCHAT_CRM_SECRET OU (2) Name Authorization, Value = Bearer + espaço + MANYCHAT_CRM_SECRET. Não uses a anon key do Supabase aqui."
     },
     {
       "parameters": {
