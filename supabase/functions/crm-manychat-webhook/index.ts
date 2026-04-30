@@ -62,6 +62,177 @@ async function ensureManychatLeadId(
   return lead.leadId
 }
 
+type AdminClient = ReturnType<typeof createClient>
+
+type ManychatPipelineCtx = {
+  jobRowId: string
+  dedupKey: string
+  subscriberId: string
+  userName: string
+  text: string
+  phoneOpt?: string
+  aiInboundUserText: string
+  skipManychatPush: boolean
+}
+
+type ManychatPipelineResult = {
+  leadId: string
+  reply: string
+  handoff_suggested: boolean
+  routing: string
+  manychat_push: Record<string, unknown>
+  ai_skip_reasons?: string[]
+  hint?: string | null
+}
+
+function scheduleEdgeBackground(task: Promise<void>): void {
+  try {
+    const wu = (globalThis as unknown as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } })
+      .EdgeRuntime?.waitUntil
+    if (typeof wu === 'function') {
+      wu(task)
+      return
+    }
+  } catch {
+    /* ignore */
+  }
+  void task
+}
+
+/** Por omissão assíncrono (evita timeout ~10s do ManyChat). `manychat_sync: true` força resposta completa no mesmo HTTP. */
+function isManychatAsyncAck(body: Record<string, unknown>): boolean {
+  if (body.manychat_sync === true || String(body.manychat_sync ?? '').trim().toLowerCase() === 'true') {
+    return false
+  }
+  if (body.manychat_async === true || String(body.manychat_async ?? '').trim().toLowerCase() === 'true') {
+    return true
+  }
+  const v = (Deno.env.get('MANYCHAT_ASYNC_ACK') ?? '').trim().toLowerCase()
+  if (v === 'false' || v === '0' || v === 'sync') return false
+  if (v === 'true' || v === '1') return true
+  return true
+}
+
+async function runManychatMessagePipeline(
+  admin: AdminClient,
+  ctx: ManychatPipelineCtx,
+): Promise<ManychatPipelineResult> {
+  try {
+    const leadId = await ensureManychatLeadId(admin, {
+      subscriberId: ctx.subscriberId,
+      userName: ctx.userName,
+      text: ctx.text,
+      phone: ctx.phoneOpt,
+    })
+
+    await insertInteraction(admin, {
+      leadId,
+      patientName: ctx.userName,
+      channel: 'meta',
+      direction: 'in',
+      author: ctx.userName,
+      content: ctx.text,
+      happenedAt: nowIso(),
+    })
+
+    const { data: state } = await admin
+      .from('crm_conversation_states')
+      .select('*')
+      .eq('lead_id', leadId)
+      .maybeSingle()
+    const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
+    const statePrompt = String(state?.prompt_override ?? config?.system_prompt ?? '').trim()
+
+    const gate = await evaluateCrmAiAutoReplyGate(admin, leadId, {
+      directionIsInbound: true,
+      rateLimitJobSources: [...AI_RATE_SOURCES],
+    })
+
+    let reply = ''
+    let handoffSuggested = false
+    if (gate.canAutoReply) {
+      const { replyText, handoffSuggested: ho } = await runManychatAiAutoReply(admin, {
+        leadId,
+        patientName: ctx.userName,
+        aiInboundUserText: ctx.aiInboundUserText,
+        inboundHappenedAt: nowIso(),
+        ownerMode: gate.ownerMode,
+        aiEnabled: gate.aiEnabled,
+        statePrompt,
+        aiJobSource: 'manychat-webhook',
+      })
+      reply = replyText ?? ''
+      handoffSuggested = Boolean(ho)
+    } else {
+      await upsertConversationStateInboundOnly(admin, {
+        leadId,
+        ownerMode: gate.ownerMode,
+        aiEnabled: gate.aiEnabled,
+        inboundHappenedAt: nowIso(),
+      })
+    }
+
+    let manychatPush: Record<string, unknown> = { attempted: false, skipped_reason: 'empty_reply' }
+    const replyTrimmed = reply.trim()
+    const pushDisabledEnv =
+      (Deno.env.get('MANYCHAT_PUSH_DISABLED') ?? '').trim().toLowerCase() === 'true'
+
+    if (pushDisabledEnv) {
+      manychatPush = { attempted: false, skipped_reason: 'MANYCHAT_PUSH_DISABLED' }
+    } else if (ctx.skipManychatPush) {
+      manychatPush = { attempted: false, skipped_reason: 'manychat_skip_push' }
+    } else if (replyTrimmed) {
+      const mcCfg = readManychatPushConfigFromEnv()
+      if (!mcCfg) {
+        manychatPush = { attempted: false, skipped_reason: 'no_manychat_api_key' }
+      } else {
+        const pushResult = await pushManychatInstagramDmAfterReply({
+          apiKey: mcCfg.apiKey,
+          subscriberId: ctx.subscriberId,
+          replyText: replyTrimmed,
+          fieldId: mcCfg.fieldId,
+          flowNs: mcCfg.flowNs,
+          messageTag: mcCfg.messageTag || undefined,
+        })
+        manychatPush = {
+          attempted: true,
+          ok: pushResult.ok,
+          ...(pushResult.ok ? {} : { error: pushResult.error }),
+        }
+        if (!pushResult.ok) {
+          console.warn('crm-manychat-webhook manychat_push:', pushResult.error)
+        }
+      }
+    }
+
+    await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', ctx.jobRowId)
+
+    const routing = gate.canAutoReply ? 'ai_auto_reply_attempted' : 'manual_handoff'
+    return {
+      leadId,
+      reply,
+      handoff_suggested: handoffSuggested,
+      routing,
+      manychat_push: manychatPush,
+      ...(gate.canAutoReply
+        ? {}
+        : {
+            ai_skip_reasons: gate.skipReasons,
+            hint: gate.skipHint ?? null,
+          }),
+    }
+  } catch (e) {
+    await admin
+      .from('webhook_jobs')
+      .update({
+        status: 'retry',
+        note: `${ctx.dedupKey}|error:${e instanceof Error ? e.message : String(e)}`.slice(0, 500),
+      })
+      .eq('id', ctx.jobRowId)
+    throw e
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -229,121 +400,55 @@ Deno.serve(async (req) => {
     .single()
   if (jobInsertError) return json({ error: jobInsertError.message }, 400)
 
-  try {
-    const leadId = await ensureManychatLeadId(admin, {
-      subscriberId,
-      userName,
-      text,
-      phone: phoneOpt,
-    })
+  const skipManychatPush =
+    body.manychat_skip_push === true ||
+    String(body.manychat_skip_push ?? '').trim().toLowerCase() === 'true'
 
-    await insertInteraction(admin, {
-      leadId,
-      patientName: userName,
-      channel: 'meta',
-      direction: 'in',
-      author: userName,
-      content: text,
-      happenedAt: nowIso(),
-    })
+  const pipelineCtx: ManychatPipelineCtx = {
+    jobRowId: String(jobRow.id),
+    dedupKey,
+    subscriberId,
+    userName,
+    text,
+    phoneOpt,
+    aiInboundUserText,
+    skipManychatPush,
+  }
 
-    const { data: state } = await admin
-      .from('crm_conversation_states')
-      .select('*')
-      .eq('lead_id', leadId)
-      .maybeSingle()
-    const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
-    const statePrompt = String(state?.prompt_override ?? config?.system_prompt ?? '').trim()
-
-    const gate = await evaluateCrmAiAutoReplyGate(admin, leadId, {
-      directionIsInbound: true,
-      rateLimitJobSources: [...AI_RATE_SOURCES],
-    })
-
-    let reply = ''
-    let handoffSuggested = false
-    if (gate.canAutoReply) {
-      const { replyText, handoffSuggested: ho } = await runManychatAiAutoReply(admin, {
-        leadId,
-        patientName: userName,
-        aiInboundUserText,
-        inboundHappenedAt: nowIso(),
-        ownerMode: gate.ownerMode,
-        aiEnabled: gate.aiEnabled,
-        statePrompt,
-        aiJobSource: 'manychat-webhook',
-      })
-      reply = replyText ?? ''
-      handoffSuggested = Boolean(ho)
-    } else {
-      await upsertConversationStateInboundOnly(admin, {
-        leadId,
-        ownerMode: gate.ownerMode,
-        aiEnabled: gate.aiEnabled,
-        inboundHappenedAt: nowIso(),
-      })
-    }
-
-    let manychatPush: Record<string, unknown> = { attempted: false, skipped_reason: 'empty_reply' }
-    const replyTrimmed = reply.trim()
-    const pushDisabledEnv =
-      (Deno.env.get('MANYCHAT_PUSH_DISABLED') ?? '').trim().toLowerCase() === 'true'
-    const skipPushBody =
-      body.manychat_skip_push === true ||
-      String(body.manychat_skip_push ?? '').trim().toLowerCase() === 'true'
-
-    if (pushDisabledEnv) {
-      manychatPush = { attempted: false, skipped_reason: 'MANYCHAT_PUSH_DISABLED' }
-    } else if (skipPushBody) {
-      manychatPush = { attempted: false, skipped_reason: 'manychat_skip_push' }
-    } else if (replyTrimmed) {
-      const mcCfg = readManychatPushConfigFromEnv()
-      if (!mcCfg) {
-        manychatPush = { attempted: false, skipped_reason: 'no_manychat_api_key' }
-      } else {
-        const pushResult = await pushManychatInstagramDmAfterReply({
-          apiKey: mcCfg.apiKey,
-          subscriberId,
-          replyText: replyTrimmed,
-          fieldId: mcCfg.fieldId,
-          flowNs: mcCfg.flowNs,
-          messageTag: mcCfg.messageTag || undefined,
-        })
-        manychatPush = {
-          attempted: true,
-          ok: pushResult.ok,
-          ...(pushResult.ok ? {} : { error: pushResult.error }),
-        }
-        if (!pushResult.ok) {
-          console.warn('crm-manychat-webhook manychat_push:', pushResult.error)
-        }
-      }
-    }
-
-    await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', String(jobRow.id))
-
+  if (isManychatAsyncAck(body)) {
+    scheduleEdgeBackground(
+      runManychatMessagePipeline(admin, pipelineCtx).catch((err) => {
+        console.error('crm-manychat-webhook async pipeline:', err)
+      }),
+    )
     return json({
       ok: true,
-      leadId,
-      reply,
-      handoff_suggested: handoffSuggested,
-      routing: gate.canAutoReply ? 'ai_auto_reply_attempted' : 'manual_handoff',
-      manychat_push: manychatPush,
-      ...(gate.canAutoReply
-        ? {}
-        : {
-            ai_skip_reasons: gate.skipReasons,
-            hint: gate.skipHint ?? null,
-          }),
+      accepted: true,
+      routing: 'queued',
+      external_message_id: externalMessageId,
+      subscriber_id: subscriberId,
+      reply: '',
+      handoff_suggested: false,
+      manychat_push: { attempted: false, skipped_reason: 'async_pending' },
+      hint:
+        'Processamento IA + ManyChat em segundo plano (evita timeout ~10s do External Request). Este corpo não traz reply; com MANYCHAT_API_KEY a DM segue quando a IA terminar. Para obter reply no mesmo HTTP (ex.: Admin Lab), envia manychat_sync: true ou define secret MANYCHAT_ASYNC_ACK=false.',
+    })
+  }
+
+  try {
+    const r = await runManychatMessagePipeline(admin, pipelineCtx)
+    return json({
+      ok: true,
+      leadId: r.leadId,
+      reply: r.reply,
+      handoff_suggested: r.handoff_suggested,
+      routing: r.routing,
+      manychat_push: r.manychat_push,
+      ...(r.routing === 'manual_handoff'
+        ? { ai_skip_reasons: r.ai_skip_reasons ?? [], hint: r.hint ?? null }
+        : {}),
     })
   } catch (e) {
-    await admin
-      .from('webhook_jobs')
-      .update({
-        status: 'retry',
-        note: `${dedupKey}|error:${e instanceof Error ? e.message : String(e)}`.slice(0, 500),
-      })
-      .eq('id', String(jobRow.id))
     return json({ error: 'processing_failed', message: e instanceof Error ? e.message : String(e) }, 500)
   }
 })

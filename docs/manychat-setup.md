@@ -29,6 +29,7 @@ Dashboard Supabase deste projeto: `https://supabase.com/dashboard/project/fgyfpm
 | `MANYCHAT_DM_FLOW_NS` | `flow_ns` do flow de entrega (omissão: **`content20260430143025_638461`**). |
 | `MANYCHAT_SEND_FLOW_MESSAGE_TAG` | Só se a ManyChat/Meta exigir tag no `sendFlow` (ex. valor permitido pela tua conta). |
 | `MANYCHAT_PUSH_DISABLED` | `true` para desligar o push mantendo a key (testes). |
+| `MANYCHAT_ASYNC_ACK` | `false` para **resposta síncrona** com `reply` no mesmo JSON (timeout ~10s no ManyChat). **Omisso ou `true`:** o webhook devolve logo `accepted` + `routing: queued` e corre IA + push em segundo plano (recomendado no External Request). |
 
 Com `MANYCHAT_API_KEY` definido, **remove** do automation ManyChat os passos duplicados **Set Custom Field + Send Flow** logo a seguir ao External Request — senão o cliente pode receber **duas** DMs. Podes forçar só JSON com `"manychat_skip_push": true` no body do `POST` (testes).
 
@@ -182,7 +183,9 @@ O ManyChat impõe um **timeout curto (~10 s)** nos pedidos **External Request** 
 
 Cold start, rede e o tempo do modelo podem **ultrapassar 10 s**; o ManyChat corta e mostra erro de timeout / 0 bytes, mesmo que o Supabase acabe por concluir depois.
 
-**Mitigações práticas:** modelo mais rápido (*flash*), `system_prompt` mais curto, menos cold start. Para não depender destes ~10 s na mesma chamada, usar o **padrão §2.3.1** (Flow A + **API ManyChat** para gravar campo + **Flow B** para Send Message) ou um webhook que devolve **200 logo** e outro processo gera o `reply` e chama a **API ManyChat** + `sendFlow` — alinhado ao que a comunidade ManyChat recomenda quando a IA não cabe no timeout do External Request.
+**Comportamento actual do CRM:** por omissão o `crm-manychat-webhook` responde **já** com `200` + `accepted: true` + `routing: queued` e trata **IA + `MANYCHAT_API_KEY` push** em **segundo plano** (`EdgeRuntime.waitUntil`), para o ManyChat não ficar sem bytes até passar o limite ~10 s. O corpo **não** traz `reply` nesse modo — o Instagram recebe texto via API ManyChat quando a IA termina. Para testar com `reply` no mesmo HTTP (Admin Lab, depuração), envia **`manychat_sync: true`** no JSON ou define **`MANYCHAT_ASYNC_ACK=false`** no Supabase.
+
+**Outras mitigações:** modelo *flash*, `system_prompt` mais curto; ou o padrão manual §2.3.1 (dois flows + API ManyChat).
 
 ---
 

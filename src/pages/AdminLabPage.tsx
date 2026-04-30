@@ -79,6 +79,7 @@ export function AdminLabPage() {
                   user_name: webhookName,
                   text: 'Mensagem de teste via AdminLab (ManyChat)',
                   external_message_id: `lab-${Date.now()}`,
+                  manychat_sync: true,
                 }
               : {
                   patient_name: webhookName,
@@ -104,15 +105,26 @@ export function AdminLabPage() {
           toast.error(error.message)
           return
         }
-        const d = data as { leadId?: string; status?: string; error?: string; reply?: string; routing?: string }
+        const d = data as {
+          leadId?: string
+          status?: string
+          error?: string
+          reply?: string
+          routing?: string
+          accepted?: boolean
+        }
         if (d.error) {
           toast.error(d.error)
           return
         }
         if (webhookSource === 'manychat') {
-          toast.success(
-            d.reply ? `Resposta IA (${(d.routing ?? '').trim() || 'ok'}).` : 'Pedido ManyChat processado (sem texto de IA).',
-          )
+          if (d.accepted && d.routing === 'queued') {
+            toast.success('Pedido aceite — IA em segundo plano (modo ManyChat). Sincroniza o CRM daqui a pouco para ver a resposta.')
+          } else {
+            toast.success(
+              d.reply ? `Resposta IA (${(d.routing ?? '').trim() || 'ok'}).` : 'Pedido ManyChat processado (sem texto de IA).',
+            )
+          }
         } else {
           toast.success(d.status === 'updated' ? 'Lead atualizado com sucesso.' : 'Lead criado com sucesso.')
         }

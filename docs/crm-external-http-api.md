@@ -42,9 +42,26 @@ Corpo JSON:
 | `external_message_id` ou `message_id` | não | Idempotência em `webhook_jobs` (recomendado em produção) |
 | `context_append` ou `user_context` | não | Texto extra (ex. tags ManyChat, cidade) enviado **só** ao modelo de IA, após `---`; a interação “in” no CRM continua a guardar só `text` |
 | `manychat_skip_push` | não | Se `true`, não chama a API ManyChat mesmo com `MANYCHAT_API_KEY` (evita DM duplicada em testes) |
-| `phone` | não | ≥10 dígitos: atualiza / funde lead com telefone real |
+| `manychat_sync` | não | Se `true`, resposta **síncrona** com `reply` no mesmo JSON (pode estourar ~10s no ManyChat). **Omisso:** modo **assíncrono** (`accepted` + `queued`) — recomendado no External Request |
+| `manychat_async` | não | Se `true`, força modo assíncrono mesmo com `MANYCHAT_ASYNC_ACK=false` |
 
-**Resposta 200**
+**Resposta 200 (modo assíncrono — omissão no ManyChat)**
+
+```json
+{
+  "ok": true,
+  "accepted": true,
+  "routing": "queued",
+  "external_message_id": "…",
+  "subscriber_id": "…",
+  "reply": "",
+  "handoff_suggested": false,
+  "manychat_push": { "attempted": false, "skipped_reason": "async_pending" },
+  "hint": "…"
+}
+```
+
+**Resposta 200 (modo síncrono — `manychat_sync: true` ou `MANYCHAT_ASYNC_ACK=false`)**
 
 ```json
 {
