@@ -1,6 +1,6 @@
 # ManyChat — ligar o Instagram ao CRM (Supabase)
 
-Este guia assume que **não usas n8n** no meio: o ManyChat chama **diretamente** a Edge Function do projeto. Se migraste do workflow **Instituto Lorena Visentainer FIXED** (OpenAI + debounce + setField/sendFlow no n8n), o mapa nó-a-nó com **Z.ai** no CRM está em [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md#mapa-n8n-fixed-zai).
+**Caminho A — sem n8n:** o ManyChat chama **diretamente** a Edge Function (`crm-manychat-webhook` com IA no Supabase + Z.ai). **Caminho B — com n8n:** ManyChat → webhook n8n → CRM como [tools HTTP](n8n-crm-tools.md) (`ingest`, `get_thread`, …) e Z.ai **dentro do n8n**; o mapa do fluxo antigo FIXED está em [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md#mapa-n8n-fixed-zai).
 
 **URL da função** (substitui pelo teu project ref se for outro):
 
@@ -43,7 +43,7 @@ Sem `CRM_AI_INTERNAL_SECRET` válido (≥16 caracteres) nas Edge Functions, o pe
 
 ## 2. No ManyChat — fluxo geral
 
-Objetivo: quando o utilizador enviar mensagem (Instagram), o CRM (`crm-manychat-webhook`) gera o texto da IA e regista no histórico; **no Instagram**, a entrega faz-se via **ManyChat** — ou **automaticamente** (secret `MANYCHAT_API_KEY`, §1) ou à mão / segundo flow (§2.3.1–2.3.2). **Sem n8n** no meio.
+Objetivo (caminho A): quando o utilizador enviar mensagem (Instagram), o CRM (`crm-manychat-webhook`) gera o texto da IA e regista no histórico; **no Instagram**, a entrega faz-se via **ManyChat** — ou **automaticamente** (secret `MANYCHAT_API_KEY`, §1) ou à mão / segundo flow (§2.3.1–2.3.2). No **caminho B** (n8n), o External Request aponta para o **n8n**; o CRM só recebe `ingest` / `record_outbound` etc. conforme [n8n-crm-tools.md](n8n-crm-tools.md).
 
 ### 2.1 Criar ou editar um Automation / Flow
 
@@ -211,6 +211,7 @@ No CRM, **Ferramentas** → origem **ManyChat / Instagram (IA)** permite simular
 ## 5. Referência técnica
 
 - Contrato HTTP completo: [crm-external-http-api.md](crm-external-http-api.md)  
-- Legado / migração a partir de n8n (opcional): [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md)  
+- n8n como orquestrador + CRM como tools: [n8n-crm-tools.md](n8n-crm-tools.md)  
+- Mapa do fluxo FIXED (referência): [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md)  
 
 Se o ManyChat mostrar erros **401**, verifica o header `x-manychat-crm-secret`. Erros **500** → logs em **Supabase → Edge Functions → crm-manychat-webhook → Logs**.

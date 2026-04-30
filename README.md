@@ -54,15 +54,16 @@ A função antiga `user-ai-assistant` foi substituída por esta. Integrações f
 
 ## Canais Meta (oficial) via ManyChat
 
-**Operação sem n8n:** o **ManyChat** fala com a Meta (Instagram, etc.); o **CRM** (Supabase) recebe cada mensagem por HTTPS, grava lead + histórico e gera a resposta da IA no **Edge** (`crm-ai-assistant` + Z.ai). O ManyChat só precisa de **External Request** + passo que envia o campo **`reply`** ao cliente.
+**ManyChat → CRM (directo):** o ManyChat fala com a Meta; o CRM recebe por HTTPS, grava lead + histórico e pode gerar a IA no **Edge** (`crm-ai-assistant` + Z.ai). External Request + passo que envia **`reply`** ao cliente.
+
+**ManyChat → n8n → CRM (tools):** o n8n orquestra debounce e Z.ai; o CRM expõe acções HTTP no `crm-manychat-webhook` (`ingest`, `get_thread`, `record_outbound`, …) — [docs/n8n-crm-tools.md](docs/n8n-crm-tools.md).
 
 **Recomendação de produto:** ManyChat como camada “oficial” para Instagram (e WhatsApp se esse número estiver no ManyChat em paralelo à linha Evolution do CRM).
 
-- Edge Function **`crm-manychat-webhook`**: ManyChat **External Request** com `subscriber_id`, `text`, opcionalmente `phone`; resposta JSON com **`reply`** e `handoff_suggested`.
-- Secrets: **`MANYCHAT_CRM_SECRET`**, **`CRM_AI_INTERNAL_SECRET`**, **`ZAI_API_KEY`** (ver [docs/manychat-setup.md](docs/manychat-setup.md)).
-- Contratos: [docs/crm-external-http-api.md](docs/crm-external-http-api.md).
-- **Passo a passo ManyChat + CRM:** [docs/manychat-setup.md](docs/manychat-setup.md).
-- Legado (export n8n / guia de migração antigo): [integrations/n8n/](integrations/n8n/), [docs/n8n-crm-manychat-bridge.md](docs/n8n-crm-manychat-bridge.md) — **não** necessário para o arranque atual.
+- Edge Function **`crm-manychat-webhook`**: External Request com `subscriber_id`, `text`, opcionalmente `phone`; resposta com **`reply`** (modo directo), ou campo **`action`** para tools — [docs/crm-external-http-api.md](docs/crm-external-http-api.md).
+- Secrets (modo directo): **`MANYCHAT_CRM_SECRET`**, **`CRM_AI_INTERNAL_SECRET`**, **`ZAI_API_KEY`** — [docs/manychat-setup.md](docs/manychat-setup.md).
+- **Passo a passo ManyChat:** [docs/manychat-setup.md](docs/manychat-setup.md).
+- Export n8n + mapa FIXED: [integrations/n8n/](integrations/n8n/), [docs/n8n-crm-manychat-bridge.md](docs/n8n-crm-manychat-bridge.md).
 
 ## WhatsApp (linha técnica no CRM: Evolution ou Meta Cloud direto)
 

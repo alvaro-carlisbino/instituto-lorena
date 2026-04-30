@@ -1,6 +1,6 @@
-# n8n + CRM: migrar a triagem IA para o Supabase
+# n8n + CRM: duas formas de operar
 
-> **Estado actual do produto:** Instagram + IA correm **só no CRM** (ManyChat → `crm-manychat-webhook` → Supabase / Z.ai). **Não precisas de n8n** para arrancar. Este documento e o JSON em `integrations/n8n/` ficam como **referência de migração** a partir do fluxo antigo.
+> **Directo (simples):** ManyChat → `crm-manychat-webhook` (sem `action` ou `action: message`) → IA no Edge com **Z.ai** + histórico em `interactions`. **Com n8n (orquestração):** ManyChat → n8n (debounce, Z.ai no n8n) → CRM só como **tools HTTP** — ver [n8n-crm-tools.md](n8n-crm-tools.md) (`ingest`, `get_thread`, `record_outbound`, `merge_phone`). Este ficheiro mantém o **mapa nó-a-nó** do export antigo para perceberes o equivalente no CRM.
 
 ---
 
@@ -12,7 +12,7 @@ O export [integrations/n8n/workflows/Instituto_Lorena_Visentainer_FIXED.json](..
 4. **AI Agent** (OpenAI `gpt-4o`) + memória `n8n_chat_histories_lorena`.
 5. **Detectar intenção** (`[PRONTO_PARA_CONSULTOR]`) → ramos erro / normal / handoff → **setCustomField** + **sendFlow**.
 
-Se **ainda** usares n8n, faz sentido **manter no n8n** só o que for orquestração extra (debounce, flows) e **mover para o CRM** a IA + histórico + Kanban via `crm-manychat-webhook`. Quem **não** usa n8n faz tudo no ManyChat + Supabase conforme [manychat-setup.md](manychat-setup.md).
+Se **mantiveres o n8n** como cérebro (debounce + modelo Z.ai no n8n), usa o CRM como **persistência e Kanban** via as actions documentadas em [n8n-crm-tools.md](n8n-crm-tools.md). Se **retirares o n8n**, a IA e o histórico ficam no Edge — [manychat-setup.md](manychat-setup.md).
 
 ## Mapa workflow FIXED n8n para CRM com Z.ai {#mapa-n8n-fixed-zai}
 

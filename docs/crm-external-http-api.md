@@ -1,4 +1,4 @@
-# APIs HTTP externas (ManyChat, webhooks CRM; n8n opcional)
+# APIs HTTP externas (ManyChat, webhooks CRM; n8n como orquestrador opcional)
 
 Base URL das Edge Functions: `https://<SUPABASE_PROJECT_REF>.supabase.co/functions/v1/<nome-da-função>`
 
@@ -159,6 +159,51 @@ Depois de enviares a mensagem ao cliente (ManyChat: `sendFlow` / custom field / 
 
 `handoff_suggested` reflete se o texto continha `[PRONTO_PARA_CONSULTOR]` (removido ao guardar no CRM).
 
+### 1.5 `action: "get_thread"` — ler histórico do CRM (n8n / agente externo)
+
+Para **orquestração no n8n** com Z.ai (ou outro modelo) no n8n: depois de `ingest`, podes obter as últimas interações do lead em ordem cronológica e montar o contexto no agente.
+
+**Corpo JSON** — envia **`subscriber_id`** ou **`lead_id`** (pelo menos um):
+
+```json
+{
+  "action": "get_thread",
+  "subscriber_id": "123456789",
+  "limit": 40
+}
+```
+
+| Campo | Obrigatório | Descrição |
+|--------|-------------|-----------|
+| `subscriber_id` | um dos dois | Resolve `lead_id` pelo custom field ManyChat no lead |
+| `lead_id` | um dos dois | Atalho quando já tens o `leadId` do `ingest` |
+| `limit` | não | Máximo de mensagens (1–100; omissão **40**) |
+
+**Resposta 200** (`status: "ok"`)
+
+```json
+{
+  "ok": true,
+  "leadId": "lead-…",
+  "status": "ok",
+  "interactions": [
+    {
+      "id": "…",
+      "channel": "meta",
+      "direction": "in",
+      "author": "Nome",
+      "content": "Olá",
+      "happened_at": "2026-04-30T12:00:00.000Z"
+    }
+  ],
+  "action": "get_thread"
+}
+```
+
+Se ainda não existir lead: `leadId: null`, `interactions: []`, `status: "no_lead"` e **`hint`** (HTTP 200).
+
+Catálogo n8n (HTTP Request / AI Tool): [n8n-crm-tools.md](n8n-crm-tools.md).
+
 ---
 
 ## 2. `crm-ingest-webhook` — ingestão genérica (forms, integrações)
@@ -196,8 +241,11 @@ Envia texto pela instância WhatsApp (Evolution ou Cloud) associada ao lead. **N
 
 ---
 
-## 4. Orquestração externa (opcional — legado n8n)
+## 4. Orquestração no n8n (ManyChat → n8n → CRM como “tools”)
 
-O arranque **atual** é **ManyChat → `crm-manychat-webhook` direto** (sem n8n). Se ainda tiveres **n8n** à frente (formulários, debounce antigo, outras integrações), o padrão é: webhook n8n → **HTTP Request** a `crm-manychat-webhook` ou `crm-ingest-webhook` com o secret correto → usar `reply` nos nós ManyChat seguintes. Ver [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md) só como referência de migração.
+Há dois arranques válidos:
 
-Limites de taxa de IA automática contam em conjunto `whatsapp-webhook` + `manychat-webhook` (`max_ai_replies_per_hour` em `crm_ai_configs`).
+1. **Directo:** ManyChat → `crm-manychat-webhook` (IA no Edge + Z.ai) — [manychat-setup.md](manychat-setup.md).
+2. **Com n8n:** ManyChat → **n8n** (debounce, ramos, **Z.ai no n8n**) → o CRM expõe **ações HTTP** no mesmo `crm-manychat-webhook` (`ingest`, `get_thread`, `record_outbound`, `merge_phone`) como *tools*; ver [n8n-crm-tools.md](n8n-crm-tools.md).
+
+Limites de taxa de IA automática no Edge (`action` omitido / `message`) contam em conjunto `whatsapp-webhook` + `manychat-webhook` (`max_ai_replies_per_hour` em `crm_ai_configs`). Se a IA corre **só no n8n** e usas apenas `ingest` / `get_thread` / `record_outbound`, esses limites **não** aplicam-se à geração de texto no n8n.

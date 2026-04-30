@@ -8,4 +8,4 @@ Esta pasta guarda **exports de referência** dos fluxos n8n usados com ManyChat 
 
 **Segurança:** o JSON do n8n contém IDs de credenciais e metadados da instância; **não** inclui passwords em texto claro, mas não publiques o repositório como público sem rever o export.
 
-**Operação actual:** IA (Z.ai) e histórico no CRM **sem** n8n — ver [docs/manychat-setup.md](../../docs/manychat-setup.md). O guia [docs/n8n-crm-manychat-bridge.md](../../docs/n8n-crm-manychat-bridge.md#mapa-n8n-fixed-zai) descreve o **mapa 1:1** do `Instituto_Lorena_Visentainer_FIXED.json` (OpenAI) para o stack Supabase + Z.ai; o JSON em `workflows/` espelha o export que tinhas no n8n.
+**Duas operações:** (1) ManyChat → CRM directo com IA no Edge (Z.ai) — [docs/manychat-setup.md](../../docs/manychat-setup.md). (2) ManyChat → **n8n** (debounce, Z.ai no n8n) → CRM como **tools** HTTP — [docs/n8n-crm-tools.md](../../docs/n8n-crm-tools.md). O guia [docs/n8n-crm-manychat-bridge.md](../../docs/n8n-crm-manychat-bridge.md#mapa-n8n-fixed-zai) compara nó-a-nó o `Instituto_Lorena_Visentainer_FIXED.json` com o stack actual.

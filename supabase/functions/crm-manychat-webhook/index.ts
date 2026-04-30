@@ -263,6 +263,50 @@ Deno.serve(async (req) => {
 
   const action = String(body.action ?? 'message').trim().toLowerCase()
   const subscriberId = String(body.subscriber_id ?? '').trim()
+  const leadIdParam = String(body.lead_id ?? '').trim()
+
+  if (action === 'get_thread') {
+    if (!subscriberId && !leadIdParam) {
+      return json(
+        { error: 'missing_identifiers', message: 'Para get_thread envia subscriber_id ou lead_id.' },
+        400,
+      )
+    }
+    let resolvedLeadId = leadIdParam
+    if (!resolvedLeadId && subscriberId) {
+      resolvedLeadId = (await findLeadIdByManychatSubscriberId(admin, subscriberId)) ?? ''
+    }
+    if (!resolvedLeadId) {
+      return json({
+        ok: true,
+        leadId: null,
+        interactions: [],
+        status: 'no_lead',
+        hint: 'Ainda não existe lead — chama action ingest (ou message) antes.',
+        action: 'get_thread',
+      })
+    }
+    const limitRaw = Number(body.limit)
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(100, Math.floor(limitRaw)) : 40
+    const { data: rows, error: threadError } = await admin
+      .from('interactions')
+      .select('id, channel, direction, author, content, happened_at')
+      .eq('lead_id', resolvedLeadId)
+      .order('happened_at', { ascending: true })
+      .limit(limit)
+    if (threadError) {
+      return json({ error: 'get_thread_failed', message: threadError.message }, 500)
+    }
+    return json({
+      ok: true,
+      leadId: resolvedLeadId,
+      status: 'ok',
+      interactions: rows ?? [],
+      action: 'get_thread',
+    })
+  }
+
   if (!subscriberId) return json({ error: 'missing_subscriber_id' }, 400)
 
   if (action === 'merge_phone') {
@@ -332,9 +376,7 @@ Deno.serve(async (req) => {
   }
 
   if (action === 'record_outbound') {
-    const leadIdFromBody = String(body.lead_id ?? '').trim()
-    const leadId =
-      leadIdFromBody || (await findLeadIdByManychatSubscriberId(admin, subscriberId))
+    const leadId = leadIdParam || (await findLeadIdByManychatSubscriberId(admin, subscriberId))
     if (!leadId) {
       return json(
         {
