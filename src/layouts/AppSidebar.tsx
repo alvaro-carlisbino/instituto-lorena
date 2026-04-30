@@ -59,7 +59,7 @@ function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon
           "h-10 rounded-xl px-3 transition-all duration-200 font-bold text-[13px]",
           isActive 
             ? "bg-primary shadow-lg shadow-primary/20 text-primary-foreground font-black" 
-            : "hover:bg-muted/40 text-muted-foreground/80 hover:text-foreground"
+            : "hover:bg-sidebar-accent/50 text-sidebar-foreground/70 hover:text-sidebar-foreground"
         )}
       >
         <NavIcon className={cn("size-[18px] shrink-0", isActive ? "opacity-100" : "opacity-70")} aria-hidden />
@@ -95,9 +95,9 @@ export function AppSidebar() {
                 </div>
                 <div className="grid min-w-0 flex-1 text-left leading-tight ml-1">
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-sm font-black uppercase tracking-tight">{APP_NAME}</span>
+                    <span className="truncate text-sm font-black uppercase tracking-tight text-sidebar-foreground">{APP_NAME}</span>
                   </span>
-                  <span className="truncate text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">{APP_TAGLINE}</span>
+                  <span className="truncate text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/60">{APP_TAGLINE}</span>
                 </div>
               </SidebarMenuButton>
               <div className="group-data-[collapsible=icon]:hidden">
@@ -110,7 +110,7 @@ export function AppSidebar() {
 
       <SidebarContent className="px-3 gap-0">
         <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
+          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
             Operação
           </SidebarGroupLabel>
           <SidebarGroupContent>
@@ -128,7 +128,7 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
+          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
             Dados e canais
           </SidebarGroupLabel>
           <SidebarGroupContent>
@@ -144,7 +144,7 @@ export function AppSidebar() {
 
         {(showDashboardConfig || showAdmin) && (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
               Configuração
             </SidebarGroupLabel>
             <SidebarGroupContent>
@@ -160,7 +160,7 @@ export function AppSidebar() {
 
         {showAdmin ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
               Administração
             </SidebarGroupLabel>
             <SidebarGroupContent>
@@ -176,7 +176,7 @@ export function AppSidebar() {
 
         {showTv ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
               TV
             </SidebarGroupLabel>
             <SidebarGroupContent>
@@ -190,7 +190,7 @@ export function AppSidebar() {
 
         {!showDashboardConfig && !showAdmin ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
               Geral
             </SidebarGroupLabel>
             <SidebarGroupContent>
@@ -208,7 +208,7 @@ export function AppSidebar() {
           <Badge variant="outline" className="w-fit h-5 px-1.5 text-[9px] font-black uppercase tracking-widest border-primary/30 text-primary bg-primary/5">
             {APP_ENV_BADGE}
           </Badge>
-          <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40 mt-1">
+          <span className="text-[9px] font-bold uppercase tracking-widest text-sidebar-foreground/40 mt-1">
             Gestão da Clínica · 2026
           </span>
         </div>
