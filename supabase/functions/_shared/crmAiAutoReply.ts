@@ -304,6 +304,12 @@ export async function runWhatsappAiAutoReply(
     return { replied: false }
   }
 
+  // --- Humanization: Typing Simulation ---
+  // Adiciona um pequeno delay aleatório para simular o tempo de leitura e digitação (3 a 8 segundos)
+  // Isso ajuda a evitar bloqueios do WhatsApp por resposta instantânea de robô.
+  const typingDelayMs = 3000 + Math.random() * 5000
+  await new Promise((resolve) => setTimeout(resolve, typingDelayMs))
+
   const sent = await options.sendProvider.sendMessage({
     to: options.fromPhone,
     text: aiReply,
