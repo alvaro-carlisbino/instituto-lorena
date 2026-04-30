@@ -19,6 +19,11 @@ import { labelForIdName } from '@/lib/selectDisplay'
 import { getConversationState, setConversationMode, type ConversationOwnerMode } from '@/services/conversationControl'
 import { isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
 
+const MODE_SUMMARY: Record<ConversationOwnerMode, string> = {
+  human: 'Humano',
+  ai: 'IA',
+  auto: 'Misto',
+}
 
 export function ChatWorkspacePage() {
   const crm = useCrm()
@@ -106,7 +111,7 @@ export function ChatWorkspacePage() {
 
   return (
     <AppLayout title="Conversas">
-      <div className="flex min-h-0 w-full max-h-[min(calc(100dvh-10rem),920px)] flex-1 flex-col gap-3 overflow-hidden sm:gap-4 lg:flex-row lg:items-stretch lg:gap-4 lg:max-h-[min(calc(100dvh-9rem),960px)]">
+      <div className="flex min-h-0 w-full max-h-[min(calc(100dvh-10rem),920px)] flex-1 basis-0 flex-col gap-3 overflow-hidden sm:gap-4 lg:flex-row lg:items-stretch lg:gap-4 lg:max-h-[min(calc(100dvh-9rem),960px)]">
         <Card className="flex max-h-[min(30vh,220px)] min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none sm:max-h-[min(32vh,240px)] lg:h-full lg:max-h-none lg:w-[min(260px,34vw)] lg:max-w-[300px] xl:w-[min(300px,28vw)]">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
             <div className="flex items-baseline justify-between gap-2">
@@ -162,7 +167,7 @@ export function ChatWorkspacePage() {
           </CardContent>
         </Card>
 
-        <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none lg:h-full lg:min-h-0">
+        <Card className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none lg:h-full lg:min-h-0">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
               <div className="min-w-0 flex-1 overflow-hidden">
@@ -173,24 +178,54 @@ export function ChatWorkspacePage() {
                   {activeLead?.phone ?? 'Selecione um lead na lista em cima (ou à esquerda)'}
                 </p>
                 {activeLead ? (
-                  <div className="mt-3 max-w-2xl">
-                    <ConversationModeSwitch
-                      value={leadMode}
-                      loading={modeLoading}
-                      onChange={(next) => {
-                        setModeLoading(true)
-                        void setConversationMode(activeLead.id, next)
-                          .then((state) => {
-                            setLeadMode(state.owner_mode)
-                            if (next === 'human') toast.success('Atendimento: só a equipe.')
-                            else if (next === 'ai') toast.success('Atendimento: assistente de IA ativa nesta conversa.')
-                            else toast.success('Atendimento: modo misto (regras + equipe).')
-                          })
-                          .catch((error) => toast.error(error instanceof Error ? error.message : 'Não foi possível alterar o modo.'))
-                          .finally(() => setModeLoading(false))
-                      }}
-                    />
-                  </div>
+                  <>
+                    <details className="mt-2 max-w-2xl rounded-lg border border-border/50 bg-muted/15 lg:hidden">
+                      <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+                        <span className="text-muted-foreground">Modo de atendimento:</span>{' '}
+                        {MODE_SUMMARY[leadMode]}
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">(tocar para alterar)</span>
+                      </summary>
+                      <div className="border-t border-border/40 px-2 pb-2 pt-2">
+                        <ConversationModeSwitch
+                          value={leadMode}
+                          loading={modeLoading}
+                          showFooterHint={false}
+                          onChange={(next) => {
+                            setModeLoading(true)
+                            void setConversationMode(activeLead.id, next)
+                              .then((state) => {
+                                setLeadMode(state.owner_mode)
+                                if (next === 'human') toast.success('Atendimento: só a equipe.')
+                                else if (next === 'ai') toast.success('Atendimento: assistente de IA ativa nesta conversa.')
+                                else toast.success('Atendimento: modo misto (regras + equipe).')
+                              })
+                              .catch((error) =>
+                                toast.error(error instanceof Error ? error.message : 'Não foi possível alterar o modo.'),
+                              )
+                              .finally(() => setModeLoading(false))
+                          }}
+                        />
+                      </div>
+                    </details>
+                    <div className="mt-3 hidden max-w-2xl lg:block">
+                      <ConversationModeSwitch
+                        value={leadMode}
+                        loading={modeLoading}
+                        onChange={(next) => {
+                          setModeLoading(true)
+                          void setConversationMode(activeLead.id, next)
+                            .then((state) => {
+                              setLeadMode(state.owner_mode)
+                              if (next === 'human') toast.success('Atendimento: só a equipe.')
+                              else if (next === 'ai') toast.success('Atendimento: assistente de IA ativa nesta conversa.')
+                              else toast.success('Atendimento: modo misto (regras + equipe).')
+                            })
+                            .catch((error) => toast.error(error instanceof Error ? error.message : 'Não foi possível alterar o modo.'))
+                            .finally(() => setModeLoading(false))
+                        }}
+                      />
+                    </div>
+                  </>
                 ) : null}
               </div>
               <div className="flex w-full max-w-full shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:max-w-[min(100%,28rem)]">
@@ -220,7 +255,7 @@ export function ChatWorkspacePage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-muted/25 p-2 sm:p-3 dark:bg-background/80">
+          <CardContent className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden bg-muted/25 p-2 sm:p-3 dark:bg-background/80">
             {activeLead ? (
               <LeadChatThread
                 leadId={activeLead.id}

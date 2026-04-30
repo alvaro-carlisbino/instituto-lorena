@@ -42,7 +42,6 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
   }, [history, filter])
 
   const isActiveLead = crm.selectedLeadId === leadId
-  const useIgHintLayout = Boolean(readOnlyInstagramHint && isActiveLead)
 
   const handleAttachFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -63,14 +62,8 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
   }
 
   return (
-    <div
-      className={cn(
-        'min-h-0 min-w-0 flex-1 overflow-hidden',
-        useIgHintLayout
-          ? 'grid h-full grid-rows-[auto_minmax(min(22dvh,7.5rem),1fr)_auto] gap-2 sm:gap-3'
-          : 'flex h-full flex-col gap-2 sm:gap-3',
-      )}
-    >
+    <>
+    <div className="grid h-full min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(min(36dvh,12rem),1fr)_auto] gap-2 overflow-hidden sm:gap-3">
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -109,10 +102,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
         aria-live="polite"
         aria-relevant="additions"
         aria-label="Histórico de mensagens"
-        className={cn(
-          'min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/35 p-3 shadow-inner dark:bg-[#0b141a]',
-          useIgHintLayout ? 'min-h-0' : 'flex-1 basis-0',
-        )}
+        className="min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/35 p-3 shadow-inner dark:bg-[#0b141a]"
       >
         <ul className="m-0 flex list-none flex-col gap-2.5 p-0 sm:gap-3">
           {items.length === 0 ? (
@@ -155,27 +145,28 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
         </ul>
       </div>
 
-      {readOnlyInstagramHint && isActiveLead ? (
-        <div className="flex max-h-[min(28dvh,8.75rem)] min-h-0 shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5 sm:px-4">
-          <p className="m-0 text-sm font-medium text-foreground">Lead do Instagram</p>
-          <p className="m-0 text-xs leading-snug text-muted-foreground sm:text-sm sm:leading-relaxed">
-            Envio pelo CRM = WhatsApp. Com número sintético ManyChat (888001…), responda no IG/ManyChat. Com número WA
-            real, o campo de envio volta aqui.
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-0.5 w-fit shrink-0 rounded-xl"
-            onClick={() => setIsScheduleOpen(true)}
-          >
-            <CalendarPlus className="mr-2 h-4 w-4" />
-            Agendar consulta
-          </Button>
-        </div>
-      ) : null}
+      <div className="flex min-h-0 flex-col gap-2">
+        {readOnlyInstagramHint && isActiveLead ? (
+          <div className="flex max-h-[min(32dvh,10rem)] min-h-0 shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5 sm:max-h-none sm:px-4">
+            <p className="m-0 text-sm font-medium text-foreground">Lead do Instagram</p>
+            <p className="m-0 text-xs leading-snug text-muted-foreground sm:text-sm sm:leading-relaxed">
+              Envio pelo CRM = WhatsApp. Com número sintético ManyChat (888001…), responda no IG/ManyChat. Com número WA
+              real, o campo de envio volta aqui.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-0.5 w-fit shrink-0 rounded-xl"
+              onClick={() => setIsScheduleOpen(true)}
+            >
+              <CalendarPlus className="mr-2 h-4 w-4" />
+              Agendar consulta
+            </Button>
+          </div>
+        ) : null}
 
-      {canCompose && isActiveLead ? (
+        {canCompose && isActiveLead ? (
         <div className="flex shrink-0 flex-col gap-2 border-t border-border/70 bg-background/60 pt-2 sm:gap-3 sm:pt-3">
           <label htmlFor={`lead-chat-draft-${leadId}`} className="text-xs font-medium text-muted-foreground sm:text-sm">
             Mensagem para o cliente
@@ -226,13 +217,14 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
             </Button>
           </div>
         </div>
-      ) : null}
-
-      <ScheduleAppointmentDialog 
-        isOpen={isScheduleOpen} 
-        onClose={() => setIsScheduleOpen(false)} 
-        leadId={leadId} 
-      />
+        ) : null}
+      </div>
     </div>
+    <ScheduleAppointmentDialog
+      isOpen={isScheduleOpen}
+      onClose={() => setIsScheduleOpen(false)}
+      leadId={leadId}
+    />
+    </>
   )
 }
