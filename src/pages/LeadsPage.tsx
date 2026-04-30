@@ -489,7 +489,7 @@ export function LeadsPage() {
           <CardTitle className="text-base sm:text-lg">Ações em lote</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col flex-wrap items-stretch gap-3 sm:flex-row sm:items-end sm:gap-4">
-          <div className="grid min-w-0 flex-1 gap-1.5 sm:max-w-[16rem]">
+          <div className="grid min-w-0 w-full flex-1 gap-1.5 sm:max-w-none lg:max-w-[18rem]">
             <Label className="text-xs sm:text-sm">Responsável</Label>
             <Select value={bulkOwnerId} onValueChange={(value) => setBulkOwnerId(value ?? 'all')}>
             <LabeledSelectTrigger className="h-10 w-full rounded-xl border-border/70 sm:h-11" size="default">
@@ -505,7 +505,7 @@ export function LeadsPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="grid min-w-0 flex-1 gap-1.5 sm:max-w-[16rem]">
+          <div className="grid min-w-0 w-full flex-1 gap-1.5 sm:max-w-none lg:max-w-[18rem]">
             <Label className="text-xs sm:text-sm">Etapa</Label>
             <Select value={bulkStageId} onValueChange={(value) => setBulkStageId(value ?? 'all')}>
             <LabeledSelectTrigger className="h-10 w-full rounded-xl border-border/70 sm:h-11" size="default">

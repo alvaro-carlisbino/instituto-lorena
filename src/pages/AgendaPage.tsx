@@ -56,6 +56,7 @@ export function AgendaPage() {
   }, [crm.leads, crm.rooms, leadId, roomId])
 
   const activeRooms = useMemo(() => crm.rooms.filter(r => r.active), [crm.rooms])
+  const timelineMinWidth = Math.max(720, 60 + Math.max(activeRooms.length, 1) * 180)
 
   const appointmentsForDay = useMemo(() => {
     const startOfDay = new Date(currentDate)
@@ -205,10 +206,10 @@ export function AgendaPage() {
         </Card>
 
         {/* Main: Visual Timeline */}
-        <Card className="xl:col-span-3 flex flex-col min-h-[600px] shadow-sm overflow-hidden">
+        <Card className="xl:col-span-3 flex flex-col min-h-[min(72dvh,600px)] lg:min-h-[600px] shadow-sm overflow-hidden">
           {/* Calendar Header Controls */}
-          <CardHeader className="flex flex-row items-center justify-between border-b border-border/40 bg-muted/20 py-3">
-            <div className="flex items-center gap-2">
+          <CardHeader className="flex flex-wrap items-center justify-between gap-2 border-b border-border/40 bg-muted/20 py-3">
+            <div className="flex min-w-0 items-center gap-2">
               <div className="flex items-center rounded-xl border border-border/70 bg-background overflow-hidden p-0.5">
                 <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => navigateDays(-1)}>
                   <CaretLeft className="h-4 w-4" />
@@ -220,30 +221,37 @@ export function AgendaPage() {
                   <CaretRight className="h-4 w-4" />
                 </Button>
               </div>
-              <h2 className="ml-2 text-base font-semibold">
+              <h2 className="ml-1 truncate text-sm font-semibold sm:ml-2 sm:text-base">
                 {currentDate.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
               </h2>
             </div>
-            <Button size="sm" className="rounded-xl gap-1">
+            <Button size="sm" className="w-full rounded-xl gap-1 sm:w-auto">
               <Plus className="h-4 w-4" /> Novo Agendamento
             </Button>
           </CardHeader>
 
           {/* Timeline Grid */}
           <div className="flex flex-1 flex-col overflow-hidden bg-background">
-            {/* Rooms Header */}
-            <div className="grid border-b border-border/50 bg-muted/10" style={{ gridTemplateColumns: `60px repeat(${activeRooms.length}, minmax(0, 1fr))` }}>
-              <div className="w-[60px]" />
-              {activeRooms.map(r => (
-                <div key={r.id} className="py-2.5 px-3 border-l border-border/50 text-center text-sm font-medium text-foreground truncate">
-                  {r.name}
-                </div>
-              ))}
-            </div>
+            <div className="flex-1 overflow-x-auto">
+              {/* Rooms Header */}
+              <div
+                className="grid border-b border-border/50 bg-muted/10"
+                style={{ minWidth: `${timelineMinWidth}px`, gridTemplateColumns: `60px repeat(${activeRooms.length}, minmax(0, 1fr))` }}
+              >
+                <div className="w-[60px]" />
+                {activeRooms.map(r => (
+                  <div key={r.id} className="py-2.5 px-3 border-l border-border/50 text-center text-sm font-medium text-foreground truncate">
+                    {r.name}
+                  </div>
+                ))}
+              </div>
 
-            {/* Scrollable Timeline Area */}
-            <div className="flex-1 overflow-y-auto">
-              <div className="relative grid" style={{ gridTemplateColumns: `60px repeat(${activeRooms.length}, minmax(0, 1fr))` }}>
+              {/* Scrollable Timeline Area */}
+              <div className="h-full overflow-y-auto">
+                <div
+                  className="relative grid"
+                  style={{ minWidth: `${timelineMinWidth}px`, gridTemplateColumns: `60px repeat(${activeRooms.length}, minmax(0, 1fr))` }}
+                >
                 {/* Y-Axis: Time Labels */}
                 <div className="w-[60px] flex flex-col border-r border-border/50 bg-muted/5">
                   {HOURS.map(h => (
@@ -306,6 +314,7 @@ export function AgendaPage() {
                     </div>
                   )
                 })}
+                </div>
               </div>
             </div>
           </div>

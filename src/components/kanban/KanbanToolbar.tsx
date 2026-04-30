@@ -112,7 +112,7 @@ export function KanbanToolbar({
 
         <Select value={pipelineId} onValueChange={(v) => v && onPipelineChange(v)}>
           <LabeledSelectTrigger
-            className="w-full min-w-[12rem] sm:w-[min(100%,13rem)] rounded-md border-border/40 text-xs font-medium"
+            className="w-full min-w-0 sm:w-[min(100%,13rem)] sm:min-w-[12rem] rounded-md border-border/40 text-xs font-medium"
             size="default"
           >
             {pipelineLabel}
@@ -128,7 +128,7 @@ export function KanbanToolbar({
 
         <Select value={ownerFilter} onValueChange={(v) => v && onOwnerChange(v)}>
           <LabeledSelectTrigger
-            className="w-full min-w-[12rem] sm:w-[min(100%,11rem)] rounded-md border-border/40 text-xs font-medium"
+            className="w-full min-w-0 sm:w-[min(100%,11rem)] sm:min-w-[12rem] rounded-md border-border/40 text-xs font-medium"
             size="default"
           >
             {ownerLabel}
@@ -145,7 +145,7 @@ export function KanbanToolbar({
 
         <Select value={tagFilter} onValueChange={(v) => v && onTagFilterChange(v)}>
           <LabeledSelectTrigger
-            className="w-full min-w-[10rem] sm:w-[min(100%,10rem)] rounded-md border-border/40 text-xs font-medium"
+            className="w-full min-w-0 sm:w-[min(100%,10rem)] sm:min-w-[10rem] rounded-md border-border/40 text-xs font-medium"
             size="default"
           >
             {tagLabel}

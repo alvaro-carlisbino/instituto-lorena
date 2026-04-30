@@ -183,12 +183,14 @@ export function DashboardPage() {
           className="border-0 shadow-none mb-6"
         />
       ) : (
-        <section className="grid gap-1 sm:grid-cols-2 xl:grid-cols-4 mb-6">
+        <section className="mb-6 grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
           {dashboardCards.map((card, index) => (
             <Card key={card.id} className={cn("border border-border/40 shadow-none bg-card transition-all duration-300 hover:bg-muted/20", index === 0 ? "xl:col-span-1 border-t-2 border-t-primary" : "")}>
-              <CardHeader className="pb-4 pt-6 px-6">
-                <CardDescription className="text-sm font-medium text-muted-foreground mb-2">{card.title}</CardDescription>
-                <CardTitle className="text-5xl font-light tabular-nums tracking-tighter text-foreground">{getDashboardValue(card.metricKey)}</CardTitle>
+              <CardHeader className="px-4 pb-4 pt-5 sm:px-6 sm:pt-6">
+                <CardDescription className="mb-2 text-sm font-medium text-muted-foreground">{card.title}</CardDescription>
+                <CardTitle className="text-3xl font-light tabular-nums tracking-tighter text-foreground sm:text-4xl md:text-5xl">
+                  {getDashboardValue(card.metricKey)}
+                </CardTitle>
               </CardHeader>
             </Card>
           ))}
@@ -199,19 +201,23 @@ export function DashboardPage() {
         <section className="mb-6 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
           <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors">
             <CardHeader className="pb-4 pt-6 text-center">
-              <CardTitle className="text-4xl font-light tabular-nums tracking-tight text-foreground">{leadsNewToday.length}</CardTitle>
+              <CardTitle className="text-3xl font-light tabular-nums tracking-tight text-foreground sm:text-4xl">
+                {leadsNewToday.length}
+              </CardTitle>
               <CardDescription className="text-xs uppercase tracking-widest mt-2 font-medium">Novos leads hoje</CardDescription>
             </CardHeader>
           </Card>
           <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors">
             <CardHeader className="pb-4 pt-6 text-center">
-              <CardTitle className="text-4xl font-light tabular-nums tracking-tight text-foreground">{newWhatsappToday.length}</CardTitle>
+              <CardTitle className="text-3xl font-light tabular-nums tracking-tight text-foreground sm:text-4xl">
+                {newWhatsappToday.length}
+              </CardTitle>
               <CardDescription className="text-xs uppercase tracking-widest mt-2 font-medium">Entradas via WhatsApp</CardDescription>
             </CardHeader>
           </Card>
           <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors">
             <CardHeader className="pb-4 pt-6 text-center">
-              <CardTitle className="text-4xl font-light tabular-nums tracking-tight text-foreground">{handoffsToday}</CardTitle>
+              <CardTitle className="text-3xl font-light tabular-nums tracking-tight text-foreground sm:text-4xl">{handoffsToday}</CardTitle>
               <CardDescription className="text-xs uppercase tracking-widest mt-2 font-medium">Mudanças de linha</CardDescription>
             </CardHeader>
           </Card>
@@ -236,19 +242,19 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             {newWaByLine.length > 0 ? (
-              <div className="h-[min(20rem,24rem)] w-full min-w-0">
+              <div className="h-[min(18rem,42dvh)] w-full min-w-0 sm:h-[min(20rem,24rem)]">
                 <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                   <BarChart
                     data={newWaByLine}
                     layout="vertical"
-                    margin={{ top: 4, right: 16, left: 4, bottom: 4 }}
+                    margin={{ top: 4, right: 8, left: 0, bottom: 4 }}
                   >
                     <XAxis type="number" allowDecimals={false} hide />
                     <YAxis
                       dataKey="name"
                       type="category"
-                      width={120}
-                      tick={{ fontSize: 11 }}
+                      width={96}
+                      tick={{ fontSize: 10 }}
                       axisLine={false}
                       tickLine={false}
                     />
@@ -296,7 +302,7 @@ export function DashboardPage() {
               </SelectContent>
             </Select>
           </CardHeader>
-          <CardContent className="p-6">
+          <CardContent className="p-4 sm:p-6">
             {crm.selectedPipeline.stages.length === 0 ? (
               <EmptyState
                 icon={LayoutListIcon}
@@ -305,11 +311,18 @@ export function DashboardPage() {
                 className="py-4"
               />
             ) : (
-              <div className="h-[260px] w-full">
+              <div className="h-[min(14rem,38dvh)] w-full sm:h-[220px] lg:h-[260px]">
                 <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                  <BarChart data={funnelData} layout="vertical" margin={{ left: 0, right: 24, top: 8, bottom: 8 }}>
+                  <BarChart data={funnelData} layout="vertical" margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
                     <XAxis type="number" hide />
-                    <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12, fontWeight: 600 }} axisLine={false} tickLine={false} />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      width={88}
+                      tick={{ fontSize: 11, fontWeight: 600 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
                     <Bar dataKey="leads" radius={[0, 4, 4, 0]} maxBarSize={36}>
                       {funnelData.map((_entry, index) => (
                         <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
@@ -338,11 +351,18 @@ export function DashboardPage() {
               />
             ) : (
               <div className="px-4 py-4">
-                <div className="h-[200px] w-full">
+                <div className="h-[min(12rem,34dvh)] w-full sm:h-[180px] lg:h-[200px]">
                   <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                    <BarChart data={workloadData} layout="vertical" margin={{ left: 0, right: 16, top: 4, bottom: 4 }}>
+                    <BarChart data={workloadData} layout="vertical" margin={{ left: 0, right: 12, top: 4, bottom: 4 }}>
                       <XAxis type="number" hide />
-                      <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 13, fill: 'currentColor', fontWeight: 500 }} axisLine={false} tickLine={false} />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        width={72}
+                        tick={{ fontSize: 11, fill: 'currentColor', fontWeight: 500 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
                       <Bar dataKey="leads" radius={[0, 4, 4, 0]} maxBarSize={28} fill="currentColor" className="fill-primary/20">
                         <LabelList dataKey="leads" position="right" style={{ fontSize: 13, fontWeight: 600, fill: 'currentColor' }} />
                       </Bar>

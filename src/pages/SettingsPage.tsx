@@ -566,14 +566,14 @@ export function SettingsPage() {
                 {crm.permissions.map((profile) => (
                   <li key={profile.id} className="p-5 space-y-4 hover:bg-muted/5 transition-colors">
                     {/* Role selector */}
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
                       <Select
                         value={profile.role}
                         onValueChange={(value) =>
                           crm.updatePermissionProfile(profile.id, { role: value as 'admin' | 'gestor' | 'sdr' })
                         }
                       >
-                        <SelectTrigger className="w-[220px] font-semibold h-9 border-border/40">
+                        <SelectTrigger className="w-full sm:w-[220px] font-semibold h-9 border-border/40">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -671,7 +671,7 @@ export function SettingsPage() {
                             })
                           }
                         >
-                          <SelectTrigger className="w-[180px]">
+                          <SelectTrigger className="w-full sm:w-[180px]">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -686,7 +686,7 @@ export function SettingsPage() {
                           value={rule.trigger}
                           onChange={(event) => crm.updateNotificationRule(rule.id, { trigger: event.target.value })}
                           placeholder="Quando avisar"
-                          className="max-w-[12rem]"
+                          className="w-full sm:max-w-[12rem]"
                         />
                       </div>
                     </div>

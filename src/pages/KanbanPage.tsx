@@ -110,7 +110,7 @@ export function KanbanPage() {
     <AppLayout
       title="Quadro de leads"
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Link
             to="/dashboard"
             className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'inline-flex gap-1.5')}
@@ -203,14 +203,14 @@ export function KanbanPage() {
           stageSlaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes}
         />
       ) : (
-        <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))]">
           {crm.isLoading ? <SkeletonRows /> : null}
           {crm.selectedPipeline.stages.map((stage) => {
             const stageLeads = visibleLeads.filter((lead) => lead.stageId === stage.id)
             return (
               <article
                 key={stage.id}
-                className="flex min-h-[28rem] flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none transition-colors hover:border-border/80"
+                className="flex min-h-[min(36dvh,22rem)] flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none transition-colors hover:border-border/80 sm:min-h-[24rem] lg:min-h-[28rem]"
               >
                 <header className="flex items-center justify-between border-b border-border/20 px-4 py-3">
                   <div className="min-w-0 flex-1">
