@@ -31,7 +31,10 @@ export function AppLayout({ title, subtitle, actions, children, mainClassName, f
   }, [])
 
   return (
-    <SidebarInset className="flex min-h-0 min-h-svh w-full min-w-0 flex-1 flex-col bg-transparent transition-all duration-300 ease-in-out">
+    <SidebarInset className={cn(
+      "flex w-full min-w-0 flex-1 flex-col bg-transparent transition-all duration-300 ease-in-out",
+      fullHeight ? "h-svh overflow-hidden" : "min-h-0 min-h-svh"
+    )}>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_10%,oklch(0.95_0.03_50/.6),transparent_28%),radial-gradient(circle_at_88%_4%,oklch(0.93_0.03_250/.5),transparent_22%)]" />
       <header
         role="banner"

@@ -28,10 +28,8 @@ type ChatFilter = 'all' | 'whatsapp' | 'meta'
 type Props = {
   leadId: string
   history: Interaction[]
-  /** Se true, inicia o filtro em só WhatsApp (compat). */
   whatsappOnly?: boolean
   canCompose?: boolean
-  /** Mostra aviso no lugar do compositor (lead Instagram; envio só fora do CRM até haver WhatsApp). */
   readOnlyInstagramHint?: boolean
 }
 
@@ -40,12 +38,6 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
   const [filter, setFilter] = useState<ChatFilter>(whatsappOnly ? 'whatsapp' : 'all')
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [items, leadId])
 
   const items = useMemo(() => {
     const list = [...history].sort(
@@ -56,6 +48,12 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
     if (filter === 'meta') return withoutMergeNoise.filter((m) => m.channel === 'meta')
     return withoutMergeNoise
   }, [history, filter])
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [items, leadId])
 
   const hasWaInstagramMerge = useMemo(() => history.some(isWaInstagramMergeNotice), [history])
 
@@ -87,12 +85,55 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
     crm.setDraftAttachments([...(crm.draftAttachments ?? []), ...next])
   }
 
+  // Group messages by author and timestamp (within 10 seconds)
+  const groupedItems = useMemo(() => {
+    const groups: Interaction[][] = []
+    let currentGroup: Interaction[] = []
+
+    items.forEach((item, index) => {
+      if (index === 0) {
+        currentGroup.push(item)
+      } else {
+        const prev = items[index - 1]
+        const timeDiff = Math.abs(new Date(item.happenedAt).getTime() - new Date(prev.happenedAt).getTime())
+        
+        if (item.author === prev.author && item.direction === prev.direction && timeDiff < 10000) {
+          currentGroup.push(item)
+        } else {
+          groups.push(currentGroup)
+          currentGroup = [item]
+        }
+      }
+      
+      if (index === items.length - 1) {
+        groups.push(currentGroup)
+      }
+    })
+
+    return groups
+  }, [items])
+
+  const renderContent = (content: string) => {
+    const mediaMatch = content.match(/\[mídia recebida: (.*)\]/)
+    if (mediaMatch) {
+      const type = mediaMatch[1]
+      const icon = type === 'image' ? '🖼️' : type === 'video' ? '🎥' : type === 'audio' ? '🎵' : '📄'
+      return (
+        <div className="flex items-center gap-2 py-1 italic text-muted-foreground/90">
+          <span className="text-lg grayscale-[0.3]">{icon}</span>
+          <span className="text-xs font-medium uppercase tracking-wide">Mídia: {type}</span>
+        </div>
+      )
+    }
+    return <p className="m-0 whitespace-pre-wrap break-words">{content}</p>
+  }
+
   return (
-    <>
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden sm:gap-3">
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      {/* Header / Filters */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-1 py-2 sm:gap-2">
         {hasWaInstagramMerge ? (
-          <Badge variant="secondary" className="max-w-full shrink truncate rounded-lg px-2 py-1 text-[10px] font-normal sm:text-xs">
+          <Badge variant="secondary" className="max-w-full shrink truncate rounded-lg px-2 py-0.5 text-[10px] font-normal sm:text-xs">
             IG → WhatsApp vinculado
           </Badge>
         ) : null}
@@ -100,80 +141,84 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
           type="button"
           size="sm"
           variant={filter === 'whatsapp' ? 'default' : 'outline'}
-          className="h-8 rounded-lg px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm"
+          className="h-7 rounded-lg px-2 text-[10px] sm:h-8 sm:px-3 sm:text-xs"
           onClick={() => setFilter('whatsapp')}
-          aria-pressed={filter === 'whatsapp'}
         >
-          Só WhatsApp
+          WhatsApp
         </Button>
         <Button
           type="button"
           size="sm"
           variant={filter === 'meta' ? 'default' : 'outline'}
-          className="h-8 rounded-lg px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm"
+          className="h-7 rounded-lg px-2 text-[10px] sm:h-8 sm:px-3 sm:text-xs"
           onClick={() => setFilter('meta')}
-          aria-pressed={filter === 'meta'}
         >
-          Só Instagram
+          Instagram
         </Button>
         <Button
           type="button"
           size="sm"
           variant={filter === 'all' ? 'default' : 'outline'}
-          className="h-8 rounded-lg px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm"
+          className="h-7 rounded-lg px-2 text-[10px] sm:h-8 sm:px-3 sm:text-xs"
           onClick={() => setFilter('all')}
-          aria-pressed={filter === 'all'}
         >
-          Todas
+          Tudo
         </Button>
       </div>
 
+      {/* Message History */}
       <div
         ref={scrollRef}
         role="log"
-        aria-live="polite"
-        aria-relevant="additions"
-        aria-label="Histórico de mensagens"
-        className="flex-1 min-h-0 min-w-0 w-full overflow-y-auto overscroll-contain rounded-xl border border-border/20 bg-muted/20 p-4 scrollbar-thin scrollbar-thumb-border/30 dark:bg-[#0b141a]/50"
+        className="flex-1 min-h-0 min-w-0 w-full overflow-y-auto overscroll-contain rounded-xl border border-border/20 bg-muted/10 p-4 scrollbar-thin scrollbar-thumb-border/30 dark:bg-[#0b141a]/50"
       >
-        <ul className="m-0 flex list-none flex-col gap-4 p-0">
-          {items.length === 0 ? (
+        <ul className="m-0 flex list-none flex-col gap-6 p-0">
+          {groupedItems.length === 0 ? (
             <li className="flex flex-col items-center justify-center py-12 text-center">
               <div className="mb-3 h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center opacity-40">
                 <span className="text-xl">📥</span>
               </div>
-              <p className="text-xs text-muted-foreground font-medium">Nenhuma mensagem neste filtro</p>
+              <p className="text-xs text-muted-foreground font-medium">Nenhuma mensagem encontrada</p>
             </li>
           ) : (
-            items.map((msg) => {
-              const out = msg.direction === 'out'
+            groupedItems.map((group, gIdx) => {
+              const first = group[0]
+              const out = first.direction === 'out'
+              
               return (
                 <li
-                  key={msg.id}
+                  key={`group-${gIdx}`}
                   className={cn(
                     'flex w-full flex-col gap-1',
                     out ? 'items-end' : 'items-start',
                   )}
                 >
-                  <div
-                    className={cn(
-                      'relative max-w-[85%] rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed shadow-sm sm:max-w-[75%]',
-                      out
-                        ? 'rounded-tr-none bg-primary text-primary-foreground'
-                        : 'rounded-tl-none bg-card text-foreground border border-border/50 dark:bg-[#202c33] dark:text-white/95 dark:border-white/5',
-                    )}
-                  >
-                    <p className="m-0 whitespace-pre-wrap break-words">{msg.content}</p>
+                  <div className="flex flex-col gap-1.5 w-full max-w-[85%] sm:max-w-[75%]">
+                    {group.map((msg, mIdx) => (
+                      <div
+                        key={msg.id}
+                        className={cn(
+                          'relative rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed shadow-sm transition-all',
+                          out
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-foreground border border-border/50 dark:bg-[#202c33] dark:text-white/95 dark:border-white/5',
+                          out ? (mIdx === 0 ? 'rounded-tr-none' : '') : (mIdx === 0 ? 'rounded-tl-none' : '')
+                        )}
+                      >
+                        {renderContent(msg.content)}
+                      </div>
+                    ))}
                   </div>
+                  
                   <div className={cn(
-                    "flex items-center gap-2 px-1 text-[10px] font-medium tracking-tight",
+                    "flex items-center gap-2 px-1 mt-1 text-[10px] font-medium tracking-tight",
                     out ? "flex-row-reverse text-muted-foreground/80" : "text-muted-foreground/60"
                   )}>
-                    <span className="truncate max-w-[100px]">{msg.author}</span>
+                    <span className="truncate max-w-[100px]">{first.author}</span>
                     <span className="opacity-30">•</span>
-                    <time dateTime={msg.happenedAt}>{format(new Date(msg.happenedAt), 'HH:mm', { locale: ptBR })}</time>
+                    <time dateTime={first.happenedAt}>{format(new Date(first.happenedAt), 'HH:mm', { locale: ptBR })}</time>
                     <span className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] uppercase tracking-wider dark:bg-white/5">
-                      {CHANNEL_SHORT[msg.channel] ?? msg.channel}
+                      {CHANNEL_SHORT[first.channel] ?? first.channel}
                     </span>
                   </div>
                 </li>
@@ -183,19 +228,19 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
         </ul>
       </div>
 
-      <div className="flex shrink-0 flex-col gap-2">
+      {/* Input Area */}
+      <div className="flex shrink-0 flex-col gap-2 pt-3">
         {readOnlyInstagramHint && isActiveLead ? (
-          <div className="flex max-h-[min(32dvh,10rem)] min-h-0 shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5 sm:max-h-none sm:px-4">
+          <div className="shrink-0 flex flex-col gap-1.5 rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5">
             <p className="m-0 text-sm font-medium text-foreground">Lead do Instagram</p>
-            <p className="m-0 text-xs leading-snug text-muted-foreground sm:text-sm sm:leading-relaxed">
-              Envio pelo CRM = WhatsApp. Com número sintético ManyChat (888001…), responda no IG/ManyChat. Com número WA
-              real, o campo de envio volta aqui.
+            <p className="m-0 text-xs leading-snug text-muted-foreground">
+              Envio pelo CRM = WhatsApp. Com número ManyChat, responda lá. Com número WA real, o campo volta aqui.
             </p>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="mt-0.5 w-fit shrink-0 rounded-xl"
+              className="mt-0.5 w-fit rounded-xl"
               onClick={() => setIsScheduleOpen(true)}
             >
               <CalendarPlus className="mr-2 h-4 w-4" />
@@ -205,69 +250,64 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
         ) : null}
 
         {canCompose && isActiveLead ? (
-        <div className="flex shrink-0 flex-col gap-2 border-t border-border/70 bg-background/60 pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-2 sm:gap-3 sm:pb-0 sm:pt-3">
-          <label htmlFor={`lead-chat-draft-${leadId}`} className="text-xs font-medium text-muted-foreground sm:text-sm">
-            Mensagem para o cliente
-          </label>
-          <Textarea
-            id={`lead-chat-draft-${leadId}`}
-            rows={2}
-            value={crm.draftMessage}
-            onChange={(e) => {
-              const val = e.target.value
-              crm.setDraftMessage(val)
-              if (val.endsWith('/agendar ')) {
-                crm.setDraftMessage(val.replace('/agendar ', ''))
-                setIsScheduleOpen(true)
-              }
-            }}
-            placeholder="Mensagem..."
-            className="min-h-[3.5rem] resize-none rounded-xl border-border/70 bg-background text-sm [field-sizing:content] sm:min-h-[5rem] sm:text-base sm:resize-y"
-          />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
-              <input
-                type="file"
-                multiple
-                accept="audio/*,image/*,.pdf,.doc,.docx,.txt"
-                className="sr-only"
-                onChange={(e) => void handleAttachFiles(e.target.files)}
-              />
-              Anexar áudio/arquivo
-            </label>
-            {crm.draftAttachments.length > 0 ? (
-              <span className="text-xs text-muted-foreground">{crm.draftAttachments.length} anexo(s) pronto(s)</span>
-            ) : null}
+          <div className="flex shrink-0 flex-col gap-2 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
+            <Textarea
+              id={`lead-chat-draft-${leadId}`}
+              rows={1}
+              value={crm.draftMessage}
+              onChange={(e) => {
+                const val = e.target.value
+                crm.setDraftMessage(val)
+                if (val.endsWith('/agendar ')) {
+                  crm.setDraftMessage(val.replace('/agendar ', ''))
+                  setIsScheduleOpen(true)
+                }
+              }}
+              placeholder="Digite sua mensagem..."
+              className="min-h-[2.5rem] max-h-[8rem] resize-none rounded-xl border-border/70 bg-background text-sm [field-sizing:content] sm:text-base"
+            />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/50 transition-colors">
+                  <input
+                    type="file"
+                    multiple
+                    accept="audio/*,image/*,.pdf,.doc,.docx,.txt"
+                    className="sr-only"
+                    onChange={(e) => void handleAttachFiles(e.target.files)}
+                  />
+                  📎 {crm.draftAttachments.length > 0 ? `${crm.draftAttachments.length} arquivos` : 'Anexar'}
+                </label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 rounded-lg text-[10px]"
+                  onClick={() => setIsScheduleOpen(true)}
+                >
+                  <CalendarPlus className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                  Agendar
+                </Button>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-xl px-5"
+                disabled={!crm.draftMessage.trim() && crm.draftAttachments.length === 0}
+                onClick={() => void crm.sendMessage()}
+              >
+                Enviar
+              </Button>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="flex h-9 shrink-0 items-center gap-2 rounded-xl px-2.5 sm:h-10 sm:px-3"
-              onClick={() => setIsScheduleOpen(true)}
-              title="Agendar consulta"
-            >
-              <CalendarPlus className="h-4 w-4 text-primary" />
-              <span className="hidden min-[400px]:inline">Agendar</span>
-            </Button>
-            <Button
-              type="button"
-              className="ml-auto min-h-10 min-w-0 shrink-0 rounded-xl px-5 sm:ml-auto sm:px-6"
-              onClick={() => void crm.sendMessage()}
-            >
-              Enviar
-            </Button>
-          </div>
-        </div>
         ) : null}
       </div>
+
+      <ScheduleAppointmentDialog
+        isOpen={isScheduleOpen}
+        onClose={() => setIsScheduleOpen(false)}
+        leadId={leadId}
+      />
     </div>
-    <ScheduleAppointmentDialog
-      isOpen={isScheduleOpen}
-      onClose={() => setIsScheduleOpen(false)}
-      leadId={leadId}
-    />
-    </>
   )
 }

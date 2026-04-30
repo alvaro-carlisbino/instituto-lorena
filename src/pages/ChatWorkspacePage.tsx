@@ -110,12 +110,12 @@ export function ChatWorkspacePage() {
   }, [dataMode, refreshChatFromSupabase])
 
   return (
-    <AppLayout title="Conversas" fullHeight={true} mainClassName="p-2 sm:p-4">
+    <AppLayout title="Conversas" fullHeight={true} mainClassName="p-3 sm:p-4 bg-muted/30 dark:bg-transparent">
       <div className="flex h-full w-full min-h-0 flex-col gap-3 overflow-hidden lg:flex-row lg:gap-4">
         {/* Left Column: Lead List */}
-        <Card className="flex w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card/50 shadow-sm backdrop-blur-sm 
-          h-[35dvh] lg:h-full lg:w-[min(280px,30vw)] lg:max-w-[320px] lg:min-w-[260px]">
-          <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
+        <Card className="flex w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border/40 bg-card/70 shadow-xl backdrop-blur-md 
+          h-[40dvh] lg:h-full lg:w-[min(320px,32vw)] lg:max-w-[340px] lg:min-w-[280px]">
+          <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-4">
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="text-sm font-semibold">Mensagens</CardTitle>
               <Badge variant="secondary" className="px-1.5 py-0 text-[10px] tabular-nums">
@@ -195,7 +195,7 @@ export function ChatWorkspacePage() {
         </Card>
 
         {/* Middle Column: Chat Area */}
-        <Card className="flex min-w-0 flex-[3] flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-md lg:h-full">
+        <Card className="flex min-w-0 flex-[3] flex-col overflow-hidden rounded-2xl border border-border/40 bg-card shadow-xl lg:h-full">
           {activeLead ? (
             <>
               <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-3 sm:px-5 sm:py-4">
