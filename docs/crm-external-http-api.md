@@ -6,6 +6,8 @@ Todas as respostas são JSON. Erros comuns: `401 unauthorized`, `400 invalid_jso
 
 **Canais “oficiais” Meta (Instagram / WhatsApp no ecossistema Meta):** o caminho recomendado é o **ManyChat** (já integrado às APIs da Meta), chamando o CRM com `crm-manychat-webhook`. Assim evitas duplicar webhooks e tokens Meta no Supabase para o que o ManyChat já cobre. A integração **direta** Meta Cloud no CRM (`crm-whatsapp-webhook` com `WHATSAPP_PROVIDER=official`) fica como opção avançada quando precisas de WhatsApp no CRM sem ManyChat nesse leg.
 
+**Configurar o ManyChat (External Request, checklist):** ver [manychat-setup.md](manychat-setup.md).
+
 ---
 
 ## 1. `crm-manychat-webhook` — ManyChat (Meta) + IA CRM
