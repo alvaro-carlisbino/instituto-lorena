@@ -21,7 +21,6 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { isSameLocalDayInTimezone } from '@/lib/sameLocalDayInTimezone'
 import { labelForIdName } from '@/lib/selectDisplay'
 import { fetchHandoffEventCountForTodayInTimezone } from '@/services/leadWaLineEvents'
-import { fetchWhatsappChannelInstances } from '@/services/whatsappChannelInstances'
 import { cn } from '@/lib/utils'
 
 const CHART_COLORS = [
@@ -85,31 +84,7 @@ export function DashboardPage() {
     () => leadsNewToday.filter((l) => l.source === 'whatsapp'),
     [leadsNewToday],
   )
-  const [lineLabels, setLineLabels] = useState<Record<string, string>>({})
   const [handoffsToday, setHandoffsToday] = useState(0)
-
-  const newWaByLine = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const l of newWhatsappToday) {
-      const k = l.whatsappInstanceId ?? '—'
-      m.set(k, (m.get(k) ?? 0) + 1)
-    }
-    return Array.from(m.entries())
-      .map(([id, c]) => ({
-        name: id === '—' ? 'Sem linha' : (lineLabels[id] ?? `Linha ${id.slice(0, 6)}…`),
-        leads: c,
-      }))
-      .sort((a, b) => b.leads - a.leads)
-  }, [newWhatsappToday, lineLabels])
-
-  useEffect(() => {
-    if (crm.dataMode !== 'supabase') {
-      return
-    }
-    void fetchWhatsappChannelInstances().then((rows) => {
-      setLineLabels(Object.fromEntries(rows.map((r) => [r.id, r.label])))
-    })
-  }, [crm.dataMode])
 
   useEffect(() => {
     if (crm.isLoading) return
@@ -138,59 +113,69 @@ export function DashboardPage() {
 
   return (
     <AppLayout
-      title="Painel comercial"
+      title="Painel de Performance"
       actions={
-        <>
+        <div className="flex items-center gap-2">
           {crm.currentPermission.canRouteLeads ? (
-            <Link to="/kanban" className={cn(buttonVariants({ size: 'sm' }), 'inline-flex gap-1.5')}>
-              <KanbanSquare className="size-4" />
-              Abrir quadro
+            <Link to="/kanban" className={cn(buttonVariants({ size: 'sm' }), 'bg-primary/90 hover:bg-primary shadow-lg shadow-primary/20 transition-all active:scale-95 rounded-xl px-4')}>
+              <KanbanSquare className="size-4 mr-2" />
+              Ver Quadro
             </Link>
           ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger
-              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-1.5')}
+              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-xl border-border/40 bg-background/50 backdrop-blur-sm')}
             >
-              <MoreHorizontal className="size-4" />
-              Mais ações
+              <MoreHorizontal className="size-4 mr-2" />
+              Ações
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-52">
+            <DropdownMenuContent align="end" className="min-w-56 rounded-xl p-2">
               {crm.currentPermission.canRouteLeads ? (
-                <DropdownMenuItem onClick={() => navigate('/dashboard-config')}>
-                  <SlidersHorizontal className="size-4" />
-                  Ajustar widgets do dashboard
+                <DropdownMenuItem onClick={() => navigate('/dashboard-config')} className="rounded-lg py-2">
+                  <SlidersHorizontal className="size-4 mr-2" />
+                  Customizar Widgets
                 </DropdownMenuItem>
               ) : null}
-              <DropdownMenuItem onClick={() => navigate('/configuracoes')}>Configurações gerais</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate('/configuracoes')} className="rounded-lg py-2">
+                Configurações do Sistema
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 disabled={crm.isLoading || !canSync}
                 onClick={() => void crm.syncFromSupabase()}
+                className="rounded-lg py-2 text-primary font-medium"
               >
-                <RefreshCw className={cn('size-4', crm.isLoading && 'animate-spin')} />
-                {crm.isLoading ? 'Sincronizando…' : 'Sincronizar dados'}
+                <RefreshCw className={cn('size-4 mr-2', crm.isLoading && 'animate-spin')} />
+                {crm.isLoading ? 'Sincronizando…' : 'Sincronizar Agora'}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </>
+        </div>
       }
     >
       {dashboardCards.length === 0 ? (
         <EmptyState
           icon={LayoutListIcon}
-          title="Visão Geral"
-          description="Acompanhe seus indicadores principais aqui."
-          className="border-0 shadow-none mb-6"
+          title="Pronto para Decolar"
+          description="Seus indicadores de performance aparecerão aqui assim que os primeiros leads forem processados."
+          className="border-0 shadow-none mb-10 py-20"
         />
       ) : (
-        <section className="mb-6 grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
-          {dashboardCards.map((card, index) => (
-            <Card key={card.id} className={cn("border border-border/40 shadow-none bg-card transition-all duration-300 hover:bg-muted/20", index === 0 ? "xl:col-span-1 border-t-2 border-t-primary" : "")}>
-              <CardHeader className="px-4 pb-4 pt-5 sm:px-6 sm:pt-6">
-                <CardDescription className="mb-2 text-sm font-medium text-muted-foreground">{card.title}</CardDescription>
-                <CardTitle className="text-3xl font-light tabular-nums tracking-tighter text-foreground sm:text-4xl md:text-5xl">
-                  {getDashboardValue(card.metricKey)}
-                </CardTitle>
+        <section className="mb-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {dashboardCards.map((card) => (
+            <Card key={card.id} className="relative overflow-hidden border border-border/40 bg-card/60 backdrop-blur-sm transition-all duration-300 hover:bg-card hover:shadow-xl hover:-translate-y-1 rounded-3xl p-2">
+              <div className="absolute top-0 right-0 p-6 opacity-[0.03]">
+                <UsersIcon className="size-20" />
+              </div>
+              <CardHeader className="p-6">
+                <CardDescription className="text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 mb-2">
+                  {card.title}
+                </CardDescription>
+                <div className="flex items-baseline gap-1">
+                  <CardTitle className="text-5xl font-black tracking-tighter text-foreground tabular-nums">
+                    {getDashboardValue(card.metricKey)}
+                  </CardTitle>
+                </div>
               </CardHeader>
             </Card>
           ))}
@@ -198,91 +183,55 @@ export function DashboardPage() {
       )}
 
       {crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers ? (
-        <section className="mb-6 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors">
-            <CardHeader className="pb-4 pt-6 text-center">
-              <CardTitle className="text-3xl font-light tabular-nums tracking-tight text-foreground sm:text-4xl">
-                {leadsNewToday.length}
-              </CardTitle>
-              <CardDescription className="text-xs uppercase tracking-widest mt-2 font-medium">Novos leads hoje</CardDescription>
-            </CardHeader>
-          </Card>
-          <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors">
-            <CardHeader className="pb-4 pt-6 text-center">
-              <CardTitle className="text-3xl font-light tabular-nums tracking-tight text-foreground sm:text-4xl">
-                {newWhatsappToday.length}
-              </CardTitle>
-              <CardDescription className="text-xs uppercase tracking-widest mt-2 font-medium">Entradas via WhatsApp</CardDescription>
-            </CardHeader>
-          </Card>
-          <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors">
-            <CardHeader className="pb-4 pt-6 text-center">
-              <CardTitle className="text-3xl font-light tabular-nums tracking-tight text-foreground sm:text-4xl">{handoffsToday}</CardTitle>
-              <CardDescription className="text-xs uppercase tracking-widest mt-2 font-medium">Mudanças de linha</CardDescription>
-            </CardHeader>
-          </Card>
-          <Card className="border border-border/40 shadow-none bg-card hover:bg-muted/20 transition-colors flex flex-col justify-center items-center text-center">
-            <CardHeader className="pb-4 pt-6">
-              <Link
-                to="/admin-whatsapp"
-                className="text-base font-medium text-primary underline-offset-4 hover:underline"
-              >
-                Gerenciar Linhas
-              </Link>
-              <CardDescription className="mt-2 text-xs uppercase tracking-widest font-medium">Roteamento por telefone</CardDescription>
-            </CardHeader>
-          </Card>
-        </section>
-      ) : null}
-
-      {newWhatsappToday.length > 0 && (crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers) ? (
-        <Card className="mb-8 border-border shadow-none rounded-none">
-          <CardHeader>
-            <CardTitle className="text-sm uppercase tracking-widest">WhatsApp: novos hoje (por linha)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {newWaByLine.length > 0 ? (
-              <div className="h-[min(18rem,42dvh)] w-full min-w-0 sm:h-[min(20rem,24rem)]">
-                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                  <BarChart
-                    data={newWaByLine}
-                    layout="vertical"
-                    margin={{ top: 4, right: 8, left: 0, bottom: 4 }}
-                  >
-                    <XAxis type="number" allowDecimals={false} hide />
-                    <YAxis
-                      dataKey="name"
-                      type="category"
-                      width={96}
-                      tick={{ fontSize: 10 }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <Bar dataKey="leads" radius={[0, 4, 4, 0]} maxBarSize={28}>
-                      {newWaByLine.map((_, i) => (
-                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+        <div className="mb-10">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="h-px flex-1 bg-border/40" />
+            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/40">Resumo Diário</h3>
+            <div className="h-px flex-1 bg-border/40" />
+          </div>
+          
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="group rounded-3xl border border-border/40 bg-card/40 p-6 transition-all hover:bg-card/80">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Entradas Hoje</p>
+              <h4 className="text-3xl font-black text-foreground tabular-nums">{leadsNewToday.length}</h4>
+              <div className="mt-3 h-1 w-full rounded-full bg-primary/10 overflow-hidden">
+                <div className="h-full bg-primary transition-all duration-1000" style={{ width: `${Math.min(100, (leadsNewToday.length / 20) * 100)}%` }} />
               </div>
-            ) : null}
-          </CardContent>
-        </Card>
+            </div>
+
+            <div className="group rounded-3xl border border-border/40 bg-card/40 p-6 transition-all hover:bg-card/80">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Via WhatsApp</p>
+              <h4 className="text-3xl font-black text-foreground tabular-nums">{newWhatsappToday.length}</h4>
+              <div className="mt-3 h-1 w-full rounded-full bg-emerald-500/10 overflow-hidden">
+                <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${Math.min(100, (newWhatsappToday.length / 20) * 100)}%` }} />
+              </div>
+            </div>
+
+            <div className="group rounded-3xl border border-border/40 bg-card/40 p-6 transition-all hover:bg-card/80">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Handoffs IA</p>
+              <h4 className="text-3xl font-black text-foreground tabular-nums">{handoffsToday}</h4>
+              <div className="mt-3 h-1 w-full rounded-full bg-amber-500/10 overflow-hidden">
+                <div className="h-full bg-amber-500 transition-all duration-1000" style={{ width: `${Math.min(100, (handoffsToday / 10) * 100)}%` }} />
+              </div>
+            </div>
+
+            <Link
+              to="/admin-whatsapp"
+              className="group flex flex-col items-center justify-center rounded-3xl border border-primary/20 bg-primary/[0.03] p-6 transition-all hover:bg-primary/[0.08] hover:shadow-lg hover:shadow-primary/5 active:scale-[0.98]"
+            >
+              <RefreshCw className="size-6 text-primary mb-2 group-hover:rotate-180 transition-transform duration-500" />
+              <span className="text-[11px] font-black uppercase tracking-widest text-primary">Gerenciar Canais</span>
+            </Link>
+          </section>
+        </div>
       ) : null}
 
-      {crm.captureNotice ? (
-        <p className="rounded-lg border border-success/35 bg-success/10 px-4 py-3 text-sm text-success-foreground">
-          {crm.captureNotice}
-        </p>
-      ) : null}
-
-      <section className="grid gap-6 lg:grid-cols-12 mt-8">
-        <Card className="shadow-none border border-border/40 lg:col-span-8">
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-4 pb-6">
+      <section className="grid gap-8 lg:grid-cols-12">
+        <Card className="rounded-[2rem] border-border/30 bg-card/40 shadow-sm lg:col-span-8 overflow-hidden">
+          <CardHeader className="flex flex-row items-center justify-between gap-4 p-8 border-b border-border/10">
             <div className="min-w-0">
-              <CardTitle className="text-lg font-medium text-foreground">Funil de Triagem</CardTitle>
-              <CardDescription className="mt-1">Visão atual do andamento dos leads</CardDescription>
+              <CardTitle className="text-xl font-black tracking-tight text-foreground/90">Funil de Vendas</CardTitle>
+              <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/50 mt-1">Volume de leads por estágio</CardDescription>
             </div>
             <Select
               value={crm.selectedPipelineId}
@@ -290,44 +239,53 @@ export function DashboardPage() {
                 if (value) crm.setSelectedPipelineId(value)
               }}
             >
-              <LabeledSelectTrigger className="w-[min(100%,16rem)] border-border/40 font-medium bg-muted/20" size="sm">
+              <LabeledSelectTrigger className="w-[180px] rounded-xl border-border/40 bg-muted/40 text-[10px] font-black uppercase tracking-widest" size="sm">
                 {pipelineSelectLabel}
               </LabeledSelectTrigger>
-              <SelectContent className="rounded-none font-medium">
+              <SelectContent className="rounded-xl p-2">
                 {crm.pipelineCatalog.map((pipeline) => (
-                  <SelectItem key={pipeline.id} value={pipeline.id}>
+                  <SelectItem key={pipeline.id} value={pipeline.id} className="rounded-lg text-[10px] font-bold uppercase">
                     {pipeline.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </CardHeader>
-          <CardContent className="p-4 sm:p-6">
+          <CardContent className="p-8">
             {crm.selectedPipeline.stages.length === 0 ? (
               <EmptyState
                 icon={LayoutListIcon}
-                title="Nenhuma etapa configurada"
-                description="Adicione etapas ao funil em 'Funis e etapas'."
-                className="py-4"
+                title="Funil não configurado"
+                description="Configure as etapas do seu processo comercial para começar a medir a conversão."
+                className="py-12"
               />
             ) : (
-              <div className="h-[min(14rem,38dvh)] w-full sm:h-[220px] lg:h-[260px]">
-                <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                  <BarChart data={funnelData} layout="vertical" margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={funnelData} layout="vertical" margin={{ left: 0, right: 40, top: 0, bottom: 0 }}>
                     <XAxis type="number" hide />
                     <YAxis
                       type="category"
                       dataKey="name"
-                      width={88}
-                      tick={{ fontSize: 11, fontWeight: 600 }}
+                      width={100}
+                      tick={{ fontSize: 10, fontWeight: 800, fill: 'currentColor' }}
                       axisLine={false}
                       tickLine={false}
+                      className="text-muted-foreground/60 uppercase tracking-tighter"
                     />
-                    <Bar dataKey="leads" radius={[0, 4, 4, 0]} maxBarSize={36}>
+                    <Bar dataKey="leads" radius={[0, 10, 10, 0]} maxBarSize={40}>
                       {funnelData.map((_entry, index) => (
-                        <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                        <Cell 
+                          key={index} 
+                          fill={CHART_COLORS[index % CHART_COLORS.length]} 
+                          className="transition-all duration-500 hover:opacity-80"
+                        />
                       ))}
-                      <LabelList dataKey="leads" position="right" style={{ fontSize: 13, fontWeight: 700, fontFamily: 'monospace' }} />
+                      <LabelList 
+                        dataKey="leads" 
+                        position="right" 
+                        className="fill-foreground/80 text-[14px] font-black tabular-nums"
+                      />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
@@ -336,39 +294,36 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-none border border-border/40 lg:col-span-4 bg-card">
-          <CardHeader className="pb-6">
-            <CardTitle className="text-lg font-medium text-foreground">Carga da Equipe</CardTitle>
-            <CardDescription className="mt-1">Distribuição de leads por atendente</CardDescription>
+        <Card className="rounded-[2rem] border-border/30 bg-card/40 shadow-sm lg:col-span-4 overflow-hidden flex flex-col">
+          <CardHeader className="p-8 border-b border-border/10">
+            <CardTitle className="text-xl font-black tracking-tight text-foreground/90">Top SDRs</CardTitle>
+            <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/50 mt-1">Produtividade individual</CardDescription>
           </CardHeader>
-          <CardContent className="p-0">
+          <CardContent className="p-8 flex-1 flex flex-col">
             {crm.workloadBySdr.length === 0 ? (
-              <EmptyState
-                icon={UsersIcon}
-                title="Nenhum atendente ativo"
-                description="Adicione membros à equipe e atribua leads."
-                className="py-8 text-primary-foreground [&_p]:text-primary-foreground/70 [&_*]:text-primary-foreground/70"
-              />
+              <div className="flex-1 flex flex-col items-center justify-center py-20 text-center opacity-20">
+                <UsersIcon className="size-10 mb-4" />
+                <p className="text-[11px] font-black uppercase tracking-widest">Sem dados de equipe</p>
+              </div>
             ) : (
-              <div className="px-4 py-4">
-                <div className="h-[min(12rem,34dvh)] w-full sm:h-[180px] lg:h-[200px]">
-                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                    <BarChart data={workloadData} layout="vertical" margin={{ left: 0, right: 12, top: 4, bottom: 4 }}>
-                      <XAxis type="number" hide />
-                      <YAxis
-                        type="category"
-                        dataKey="name"
-                        width={72}
-                        tick={{ fontSize: 11, fill: 'currentColor', fontWeight: 500 }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                      <Bar dataKey="leads" radius={[0, 4, 4, 0]} maxBarSize={28} fill="currentColor" className="fill-primary/20">
-                        <LabelList dataKey="leads" position="right" style={{ fontSize: 13, fontWeight: 600, fill: 'currentColor' }} />
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="h-[300px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={workloadData} layout="vertical" margin={{ left: 0, right: 30, top: 0, bottom: 0 }}>
+                    <XAxis type="number" hide />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      width={80}
+                      tick={{ fontSize: 10, fontWeight: 700, fill: 'currentColor' }}
+                      axisLine={false}
+                      tickLine={false}
+                      className="text-muted-foreground/60 uppercase tracking-tighter"
+                    />
+                    <Bar dataKey="leads" radius={[0, 8, 8, 0]} maxBarSize={30} className="fill-primary/20">
+                      <LabelList dataKey="leads" position="right" className="fill-primary font-black tabular-nums text-[12px]" />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             )}
           </CardContent>

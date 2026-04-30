@@ -581,7 +581,7 @@ export type ChatSlice = {
 
 export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
   const client = assertSupabase()
-  const [leadsRes, interactionsRes, tagAssignRes] = await Promise.all([
+  const [leadsRes, interactionsRes, tagAssignRes, mediaRes] = await Promise.all([
     client
       .from('leads')
       .select(
@@ -593,6 +593,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
       .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
       .order('happened_at', { ascending: false }),
     client.from('lead_tag_assignments').select('lead_id, tag_id'),
+    client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, metadata'),
   ])
   if (leadsRes.error) throw leadsRes.error
   if (interactionsRes.error) throw interactionsRes.error
@@ -634,6 +635,23 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
     tagIds: tagIdsByLead.get(lead.id) ?? [],
   }))
 
+  const mediaByInteraction = new Map<string, Interaction['media']>()
+  if (!mediaRes.error && mediaRes.data) {
+    for (const row of mediaRes.data) {
+      const iid = String(row.interaction_id)
+      if (!iid) continue
+      const list = mediaByInteraction.get(iid) ?? []
+      list.push({
+        id: String(row.id),
+        type: row.media_type as any,
+        mimeType: row.mime_type,
+        base64: row.media_base64,
+        caption: (row.metadata as any)?.caption,
+      })
+      mediaByInteraction.set(iid, list)
+    }
+  }
+
   const builtInteractions: Interaction[] = interactionRows.map((interaction) => ({
     id: interaction.id,
     leadId: interaction.lead_id,
@@ -644,6 +662,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
     content: interaction.content,
     happenedAt: interaction.happened_at,
     externalMessageId: interaction.external_message_id || undefined,
+    media: mediaByInteraction.get(interaction.id),
   }))
 
   return { leads: builtLeads, interactions: builtInteractions }

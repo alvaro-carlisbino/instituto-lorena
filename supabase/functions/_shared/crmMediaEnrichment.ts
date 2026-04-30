@@ -176,6 +176,7 @@ export async function enrichInboundWhatsappMediaAndAppendContext(options: {
     .update({
       transcribed_text: transcribed,
       extracted_text: extracted,
+      media_base64: payload.base64,
     })
     .eq('id', row.id)
 

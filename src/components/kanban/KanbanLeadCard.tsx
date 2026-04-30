@@ -58,9 +58,9 @@ export function KanbanLeadCard({
   return (
     <div
       className={cn(
-        'cursor-grab flex flex-col gap-2 rounded-xl border-l-4 bg-card p-3 shadow-sm transition-colors hover:shadow-md active:cursor-grabbing',
-        selected ? 'ring-2 ring-primary/25 shadow-md' : '',
-        isSlaBreached ? 'border-destructive shadow-[0_0_10px_var(--destructive)]' : 'border-border hover:border-primary/50'
+        'group cursor-grab flex flex-col gap-2.5 rounded-2xl border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-lg active:cursor-grabbing hover:-translate-y-0.5',
+        selected ? 'ring-2 ring-primary/30 border-primary/40 bg-primary/[0.02]' : 'border-border/60 hover:border-primary/40',
+        isSlaBreached && 'border-destructive/50 bg-destructive/[0.02] shadow-[0_0_15px_-5px_rgba(239,68,68,0.3)]'
       )}
       draggable
       onDragStart={(event) => {
@@ -85,64 +85,77 @@ export function KanbanLeadCard({
       }}
     >
       {isSlaBreached && (
-        <div className="mb-2 flex w-full items-center gap-1 rounded-lg border border-destructive/20 bg-destructive/10 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-destructive">
-          <span className="size-2 rounded-full bg-destructive animate-pulse" />
-          PRAZO EXCEDIDO ({elapsedMinutes - (slaMinutes ?? 0)}m)
+        <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-destructive ring-1 ring-destructive/20">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-destructive"></span>
+          </span>
+          ATENÇÃO: {elapsedMinutes - (slaMinutes ?? 0)}m ATRASADO
         </div>
       )}
+      
       <div className="flex items-start justify-between gap-2">
-        <p className="m-0 text-sm font-semibold leading-tight tracking-tight">{title}</p>
-        <span className={temperaturePillClass(temperature)}>{formatTemperature(tempRaw, lead.temperature)}</span>
+        <h3 className="m-0 text-[15px] font-bold leading-tight tracking-tight text-foreground/90">{title}</h3>
+        <span className={cn(temperaturePillClass(temperature), "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-tight")}>
+          {formatTemperature(tempRaw, lead.temperature)}
+        </span>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5 mt-1">
-        <small className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">{sourceLabel}</small>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="inline-flex items-center rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          {sourceLabel}
+        </span>
         {tagPills.map((t) => (
           <span
             key={t.id}
-            className="inline-flex max-w-[7rem] truncate rounded-md border border-border/60 px-1.5 py-0.5 text-[10px] font-medium"
-            style={{ borderColor: t.color, color: t.color }}
+            className="inline-flex max-w-[7rem] truncate rounded-md border border-border/60 px-2 py-0.5 text-[10px] font-semibold"
+            style={{ borderColor: `${t.color}33`, color: t.color, backgroundColor: `${t.color}11` }}
             title={t.name}
           >
             {t.name}
           </span>
         ))}
       </div>
-      {detailFields.map((field) => {
-        const v = getLeadFieldValue(lead, field.fieldKey)
-        if (v === undefined || v === null || v === '') return null
 
-        if (field.fieldType === 'boolean') {
-          const isChecked = Boolean(v === 'true' || v === true || v === 1)
+      <div className="space-y-1.5 py-1">
+        {detailFields.map((field) => {
+          const v = getLeadFieldValue(lead, field.fieldKey)
+          if (v === undefined || v === null || v === '') return null
+
+          if (field.fieldType === 'boolean') {
+            const isChecked = Boolean(v === 'true' || v === true || v === 1)
+            return (
+               <div key={field.id} className="flex items-center gap-2 text-[11px] text-muted-foreground/90">
+                  <span className={isChecked ? "text-emerald-500" : "text-muted-foreground/30"}>
+                    {isChecked ? "●" : "○"}
+                  </span>
+                  <span className="font-medium">{field.label}</span>
+               </div>
+            )
+          }
+
           return (
-             <p key={field.id} className="m-0 text-xs flex items-center gap-1.5 text-muted-foreground">
-                <span className={isChecked ? "text-green-500" : "text-muted-foreground/50"}>
-                  {isChecked ? "✅" : "⬜"}
-                </span>
-                <span className="font-medium text-foreground/80">{field.label}</span>
-             </p>
+            <div key={field.id} className="text-[11px] leading-snug">
+              <span className="font-semibold text-muted-foreground/70">{field.label}:</span>{' '}
+              <span className="text-foreground/80 font-medium">{String(v)}</span>
+            </div>
           )
-        }
-
-        return (
-          <p key={field.id} className="m-0 line-clamp-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground/80">{field.label}:</span> {String(v)}
-          </p>
-        )
-      })}
-      <div className="flex justify-between text-xs text-muted-foreground">
-        <span>
-          {kanbanFields.some((f) => f.fieldKey === 'score')
-            ? `Pontuação ${getLeadFieldValue(lead, 'score') ?? lead.score}`
-            : `Pontuação ${lead.score}`}
-        </span>
-        <span>{ownerName}</span>
+        })}
       </div>
-      <div className="mt-1 flex gap-1 border-t border-border/40 pt-2">
+
+      <div className="flex items-center justify-between border-t border-border/40 pt-3 mt-1 text-[11px] font-semibold text-muted-foreground/60">
+        <div className="flex items-center gap-1.5">
+          <div className="size-1.5 rounded-full bg-primary/40" />
+          <span>Score: {String(getLeadFieldValue(lead, 'score') ?? lead.score)}</span>
+        </div>
+        <span className="truncate max-w-[100px]">{ownerName}</span>
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
         <Button
           type="button"
-          variant="ghost"
-          size="sm"
-          className="flex-1 h-7 text-xs font-medium text-muted-foreground hover:text-foreground"
+          variant="secondary"
+          className="h-7 text-[10px] font-bold uppercase tracking-wider bg-secondary/50 hover:bg-secondary"
           onClick={(e) => {
             e.stopPropagation()
             onMovePrev()
@@ -150,12 +163,10 @@ export function KanbanLeadCard({
         >
           Voltar
         </Button>
-        <div className="w-px bg-border/40" />
         <Button
           type="button"
-          variant="ghost"
-          size="sm"
-          className="flex-1 h-7 text-xs font-medium text-muted-foreground hover:text-foreground"
+          variant="secondary"
+          className="h-7 text-[10px] font-bold uppercase tracking-wider bg-secondary/50 hover:bg-secondary"
           onClick={(e) => {
             e.stopPropagation()
             onMoveNext()

@@ -43,6 +43,7 @@ import {
   SidebarRail,
   SidebarSeparator,
 } from '@/components/ui/sidebar'
+import { cn } from '@/lib/utils'
 
 function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon: Icon }) {
   const location = useLocation()
@@ -54,9 +55,14 @@ function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon
         isActive={isActive}
         render={<NavLink to={to} />}
         tooltip={label}
-        className="transition-colors data-[active=true]:bg-sidebar-accent/90"
+        className={cn(
+          "h-10 rounded-xl px-3 transition-all duration-200 font-bold text-[13px]",
+          isActive 
+            ? "bg-primary shadow-lg shadow-primary/20 text-primary-foreground font-black" 
+            : "hover:bg-muted/40 text-muted-foreground/80 hover:text-foreground"
+        )}
       >
-        <NavIcon className="size-[18px] shrink-0 opacity-90" aria-hidden />
+        <NavIcon className={cn("size-[18px] shrink-0", isActive ? "opacity-100" : "opacity-70")} aria-hidden />
         <span>{label}</span>
       </SidebarMenuButton>
     </SidebarMenuItem>
@@ -73,45 +79,48 @@ export function AppSidebar() {
   const showTv = crm.currentPermission.canViewTvPanel
 
   return (
-    <Sidebar collapsible="icon" variant="sidebar">
-      <IconContext.Provider value={{ size: 18, weight: 'regular', mirrored: false }}>
-      <SidebarHeader className="border-b border-sidebar-border/80">
+    <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border/50">
+      <IconContext.Provider value={{ size: 18, weight: 'bold', mirrored: false }}>
+      <SidebarHeader className="px-4 py-6">
         <SidebarMenu>
           <SidebarMenuItem>
-            <div className="flex w-full items-center gap-1 pr-1">
-              <SidebarMenuButton size="lg" className="min-w-0 flex-1" render={<Link to="/dashboard" />}>
-                <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-sidebar-primary/10 p-1 ring-1 ring-sidebar-border/50">
-                  <img src={BRAND_FAVICON_URL} alt="" className="size-full object-contain" />
+            <div className="flex w-full items-center gap-3">
+              <SidebarMenuButton 
+                size="lg" 
+                className="min-w-0 flex-1 hover:bg-transparent" 
+                render={<Link to="/dashboard" />}
+              >
+                <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-primary shadow-xl shadow-primary/20 p-1.5 transition-transform hover:scale-105 active:scale-95">
+                  <img src={BRAND_FAVICON_URL} alt="" className="size-full object-contain brightness-0 invert" />
                 </div>
-                <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
+                <div className="grid min-w-0 flex-1 text-left leading-tight ml-1">
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate font-semibold">{APP_NAME}</span>
-                    <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px] font-semibold uppercase">
-                      {APP_ENV_BADGE}
-                    </Badge>
+                    <span className="truncate text-sm font-black uppercase tracking-tight">{APP_NAME}</span>
                   </span>
-                  <span className="truncate text-xs text-sidebar-foreground/70">{APP_TAGLINE}</span>
+                  <span className="truncate text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">{APP_TAGLINE}</span>
                 </div>
               </SidebarMenuButton>
-              <InboxMenu />
+              <div className="group-data-[collapsible=icon]:hidden">
+                <InboxMenu />
+              </div>
             </div>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
-        <SidebarGroup className="pt-1">
-          <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+      <SidebarContent className="px-3 gap-0">
+        <SidebarGroup>
+          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
             Operação
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="gap-1">
               <NavItem to="/dashboard" label="Painel" icon={ChartLineUp} />
               <NavItem to="/kanban" label="Quadro de leads" icon={SquaresFour} />
               {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={ListBullets} /> : null}
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={ChatsCircle} /> : null}
               <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />
-              {showLeadsHub ?               <NavItem to="/tarefas" label="Tarefas e NPS" icon={CheckSquare} /> : null}
+              {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={CheckSquare} /> : null}
               {showLeadsHub ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
               <NavItem to="/assistente" label="Assistente IA" icon={Robot} />
             </SidebarMenu>
@@ -119,11 +128,11 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
             Dados e canais
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="gap-1">
               <NavItem to="/canais" label="Canais" icon={Radio} />
               <NavItem to="/metricas" label="Métricas" icon={ChartBar} />
               {showBoards ? <NavItem to="/boards" label="Funis" icon={CirclesThreePlus} /> : null}
@@ -135,11 +144,11 @@ export function AppSidebar() {
 
         {(showDashboardConfig || showAdmin) && (
           <SidebarGroup>
-            <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
               Configuração
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="gap-1">
                 {showDashboardConfig ? (
                   <NavItem to="/dashboard-config" label="Painel" icon={SlidersHorizontal} />
                 ) : null}
@@ -151,11 +160,11 @@ export function AppSidebar() {
 
         {showAdmin ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
               Administração
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="gap-1">
                 <NavItem to="/usuarios" label="Usuários" icon={Users} />
                 <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
                 <NavItem to="/admin-operacao" label="Operação Admin" icon={Gear} />
@@ -167,11 +176,11 @@ export function AppSidebar() {
 
         {showTv ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
               TV
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="gap-1">
                 <NavItem to="/tv-config" label="Config. TV" icon={Television} />
                 <NavItem to="/tv" label="Tela TV" icon={Monitor} />
               </SidebarMenu>
@@ -181,11 +190,11 @@ export function AppSidebar() {
 
         {!showDashboardConfig && !showAdmin ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="text-[11px] font-semibold uppercase tracking-wide text-sidebar-foreground/55">
+            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/40">
               Geral
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="gap-1">
                 <NavItem to="/configuracoes" label="Configurações" icon={Gear} />
               </SidebarMenu>
             </SidebarGroupContent>
@@ -193,9 +202,16 @@ export function AppSidebar() {
         ) : null}
       </SidebarContent>
 
-      <SidebarSeparator />
-      <SidebarFooter className="px-2 pb-4 text-[10px] leading-relaxed text-sidebar-foreground/55 group-data-[collapsible=icon]:hidden">
-        {APP_ENV_BADGE} · Gestão da Clínica
+      <SidebarSeparator className="mx-6 opacity-50" />
+      <SidebarFooter className="px-6 py-8">
+        <div className="flex flex-col gap-1 group-data-[collapsible=icon]:hidden">
+          <Badge variant="outline" className="w-fit h-5 px-1.5 text-[9px] font-black uppercase tracking-widest border-primary/30 text-primary bg-primary/5">
+            {APP_ENV_BADGE}
+          </Badge>
+          <span className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40 mt-1">
+            Gestão da Clínica · 2026
+          </span>
+        </div>
       </SidebarFooter>
       <SidebarRail />
       </IconContext.Provider>

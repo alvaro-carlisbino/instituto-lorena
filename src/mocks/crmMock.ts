@@ -90,6 +90,13 @@ export type Interaction = {
   content: string
   happenedAt: string
   externalMessageId?: string
+  media?: Array<{
+    id: string
+    type: 'audio' | 'image' | 'video' | 'document' | 'other'
+    mimeType?: string
+    base64?: string
+    caption?: string
+  }>
 }
 
 export type TriageResult = {

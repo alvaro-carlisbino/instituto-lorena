@@ -129,7 +129,70 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
     return groups
   }, [items])
 
-  const renderContent = (content: string) => {
+  const renderContent = (msg: Interaction) => {
+    const { content, media } = msg
+    
+    // If we have actual media objects attached
+    if (media && media.length > 0) {
+      return (
+        <div className="flex flex-col gap-2 py-1">
+          {media.map((item) => {
+            if (item.type === 'image' && item.base64) {
+              return (
+                <div key={item.id} className="overflow-hidden rounded-lg border border-border/20">
+                  <img 
+                    src={`data:${item.mimeType || 'image/jpeg'};base64,${item.base64}`} 
+                    alt={item.caption || 'Foto'} 
+                    className="max-h-64 w-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                    onClick={() => window.open(`data:${item.mimeType || 'image/jpeg'};base64,${item.base64}`, '_blank')}
+                  />
+                  {item.caption && <p className="mt-1 px-2 pb-1 text-xs opacity-80">{item.caption}</p>}
+                </div>
+              )
+            }
+            if (item.type === 'audio' && item.base64) {
+              return (
+                <div key={item.id} className="flex flex-col gap-1">
+                  <audio controls className="h-8 w-full min-w-[200px]">
+                    <source src={`data:${item.mimeType || 'audio/ogg'};base64,${item.base64}`} type={item.mimeType || 'audio/ogg'} />
+                    Seu navegador não suporta áudio.
+                  </audio>
+                  <span className="text-[10px] opacity-60 px-1">Áudio recebido</span>
+                </div>
+              )
+            }
+            if (item.type === 'document' && item.base64) {
+              return (
+                <div 
+                  key={item.id} 
+                  className="flex items-center gap-3 rounded-lg bg-black/5 p-2 transition-colors hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10 cursor-pointer"
+                  onClick={() => {
+                    const link = document.createElement('a')
+                    link.href = `data:${item.mimeType || 'application/octet-stream'};base64,${item.base64}`
+                    link.download = item.caption || 'documento'
+                    link.click()
+                  }}
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/20 text-blue-500">
+                    <FileIcon className="h-5 w-5" />
+                  </div>
+                  <div className="flex flex-col overflow-hidden">
+                    <span className="truncate text-sm font-semibold">{item.caption || 'Documento'}</span>
+                    <span className="text-[10px] uppercase opacity-60">Clique para baixar</span>
+                  </div>
+                </div>
+              )
+            }
+            return null
+          })}
+          {content && !content.includes('[mídia recebida:') && (
+            <p className="m-0 whitespace-pre-wrap break-words">{content}</p>
+          )}
+        </div>
+      )
+    }
+
+    // Legacy fallback for string-based media markers
     const mediaMatch = content.match(/\[mídia recebida: (.*)\]/)
     if (mediaMatch) {
       const type = mediaMatch[1]
@@ -243,7 +306,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
                           out ? (mIdx === 0 ? 'rounded-tr-none' : '') : (mIdx === 0 ? 'rounded-tl-none' : '')
                         )}
                       >
-                        {renderContent(msg.content)}
+                        {renderContent(msg)}
                       </div>
                     ))}
                   </div>

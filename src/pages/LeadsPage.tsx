@@ -380,89 +380,94 @@ export function LeadsPage() {
     >
       {crm.isLoading ? <SkeletonBlocks rows={3} /> : null}
 
-      <div className="mb-4 grid w-full max-w-full gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm backdrop-blur-sm sm:p-5 lg:grid-cols-2 lg:items-end xl:grid-cols-3 2xl:grid-cols-4">
-        <div className="grid min-w-0 gap-1.5 lg:col-span-2 xl:col-span-1 2xl:col-span-2">
-          <Label htmlFor="leads-search" className="text-xs sm:text-sm">
-            Busca
+      <div className="mb-6 grid w-full max-w-full gap-4 rounded-[2rem] border border-border/30 bg-card/40 p-6 shadow-sm backdrop-blur-md lg:grid-cols-4 lg:items-end">
+        <div className="flex flex-col gap-2 lg:col-span-2">
+          <Label htmlFor="leads-search" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">
+            Pesquisa Inteligente
           </Label>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+          <div className="relative group">
+            <Search className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/40 group-focus-within:text-primary transition-colors" />
             <Input
               id="leads-search"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Nome, telefone, resumo, campos personalizados…"
-              className="h-10 min-w-0 rounded-xl border-border/70 pl-9 pr-3 text-sm sm:h-11 sm:text-base"
+              placeholder="Buscar por nome, telefone ou contexto..."
+              className="h-12 rounded-2xl border-border/40 bg-muted/20 pl-11 pr-4 text-sm font-medium transition-all focus:bg-background"
             />
           </div>
         </div>
-        <div className="grid min-w-0 gap-1.5">
-          <Label className="text-xs sm:text-sm">Funil</Label>
+
+        <div className="flex flex-col gap-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Funil</Label>
           <Select value={pipelineFilter} onValueChange={(v) => { if (v) { setPipelineFilter(v); setStageFilter('all') } }}>
-            <LabeledSelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11" size="default">
+            <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
               {pipelineSelectLabel}
             </LabeledSelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os funis</SelectItem>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="all" className="text-xs font-bold uppercase">Todos os funis</SelectItem>
               {crm.pipelineCatalog.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
+                <SelectItem key={p.id} value={p.id} className="text-xs font-bold uppercase">
                   {p.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-        <div className="grid min-w-0 gap-1.5">
-          <Label className="text-xs sm:text-sm">Etapa</Label>
+
+        <div className="flex flex-col gap-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Etapa</Label>
           <Select value={stageFilter} onValueChange={(v) => v && setStageFilter(v)} disabled={pipelineFilter === 'all'}>
-            <LabeledSelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11" size="default">
+            <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
               {stageSelectLabel}
             </LabeledSelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas</SelectItem>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="all" className="text-xs font-bold uppercase">Todas as etapas</SelectItem>
               {stagesInFilterPipeline.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
+                <SelectItem key={s.id} value={s.id} className="text-xs font-bold uppercase">
                   {s.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-        <div className="grid min-w-0 gap-1.5">
-          <Label className="text-xs sm:text-sm">Responsável</Label>
+
+        <div className="flex flex-col gap-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Responsável</Label>
           <Select value={ownerFilter} onValueChange={(v) => v && setOwnerFilter(v)}>
-            <LabeledSelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11" size="default">
+            <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
               {ownerSelectLabel}
             </LabeledSelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="all" className="text-xs font-bold uppercase">Todos</SelectItem>
               {crm.users.map((u) => (
-                <SelectItem key={u.id} value={u.id}>
+                <SelectItem key={u.id} value={u.id} className="text-xs font-bold uppercase">
                   {u.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-        <div className="grid min-w-0 gap-1.5">
-          <Label className="text-xs sm:text-sm">Origem</Label>
+
+        <div className="flex flex-col gap-2">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Origem</Label>
           <Select value={sourceFilter} onValueChange={(v) => v && setSourceFilter(v)}>
-            <LabeledSelectTrigger className="h-10 w-full min-w-0 rounded-xl border-border/70 sm:h-11" size="default">
+            <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
               {sourceSelectLabel}
             </LabeledSelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas</SelectItem>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="all" className="text-xs font-bold uppercase">Todas</SelectItem>
               {(Object.keys(sourceLabel) as (keyof typeof sourceLabel)[]).map((k) => (
-                <SelectItem key={k} value={k}>
+                <SelectItem key={k} value={k} className="text-xs font-bold uppercase">
                   {sourceLabel[k]}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-        <div className="grid min-w-0 gap-1.5 sm:col-span-2 lg:col-span-2 2xl:col-span-4">
-          <Label className="text-xs sm:text-sm">Colunas</Label>
-          <div className="flex flex-wrap gap-1.5 sm:gap-2">
+
+        <div className="lg:col-span-2 flex flex-col gap-3">
+          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Visibilidade de Colunas</Label>
+          <div className="flex flex-wrap gap-2">
             {TABLE_COLUMNS.map((col) => {
               const active = visibleColumns.includes(col)
               return (
@@ -471,7 +476,10 @@ export function LeadsPage() {
                   type="button"
                   size="sm"
                   variant={active ? 'default' : 'outline'}
-                  className="rounded-lg text-xs sm:text-sm"
+                  className={cn(
+                    "h-8 rounded-xl text-[10px] font-bold uppercase tracking-tight transition-all",
+                    active ? "bg-primary shadow-lg shadow-primary/20 border-transparent" : "border-border/40 hover:bg-muted/30"
+                  )}
                   onClick={() =>
                     setVisibleColumns((prev) => (active ? prev.filter((c) => c !== col) : [...prev, col]))
                   }
@@ -484,37 +492,40 @@ export function LeadsPage() {
         </div>
       </div>
 
-      <Card className="mb-4 rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
-        <CardHeader className="pb-2 sm:pb-3">
-          <CardTitle className="text-base sm:text-lg">Ações em lote</CardTitle>
+      <Card className="mb-6 rounded-[2rem] border-border/30 bg-card/40 shadow-sm backdrop-blur-md overflow-hidden">
+        <CardHeader className="px-8 pt-8 pb-4 border-b border-border/10">
+          <div className="flex items-center gap-3">
+            <div className="size-2 rounded-full bg-primary" />
+            <CardTitle className="text-base font-black uppercase tracking-[0.15em] text-foreground/80">Ações em Lote</CardTitle>
+          </div>
         </CardHeader>
-        <CardContent className="flex flex-col flex-wrap items-stretch gap-3 sm:flex-row sm:items-end sm:gap-4">
-          <div className="grid min-w-0 w-full flex-1 gap-1.5 sm:max-w-none lg:max-w-[18rem]">
-            <Label className="text-xs sm:text-sm">Responsável</Label>
+        <CardContent className="p-8 flex flex-col lg:flex-row lg:items-end gap-6">
+          <div className="flex flex-col gap-2 flex-1">
+            <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Novo Responsável</Label>
             <Select value={bulkOwnerId} onValueChange={(value) => setBulkOwnerId(value ?? 'all')}>
-            <LabeledSelectTrigger className="h-10 w-full rounded-xl border-border/70 sm:h-11" size="default">
+              <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
                 {bulkOwnerLabel}
               </LabeledSelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Escolher responsável</SelectItem>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="all" className="text-xs font-bold uppercase">Escolher responsável</SelectItem>
                 {crm.users.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
+                  <SelectItem key={u.id} value={u.id} className="text-xs font-bold uppercase">
                     {u.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="grid min-w-0 w-full flex-1 gap-1.5 sm:max-w-none lg:max-w-[18rem]">
-            <Label className="text-xs sm:text-sm">Etapa</Label>
+          <div className="flex flex-col gap-2 flex-1">
+            <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Nova Etapa</Label>
             <Select value={bulkStageId} onValueChange={(value) => setBulkStageId(value ?? 'all')}>
-            <LabeledSelectTrigger className="h-10 w-full rounded-xl border-border/70 sm:h-11" size="default">
+              <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
                 {bulkStageLabel}
               </LabeledSelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Escolher etapa</SelectItem>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="all" className="text-xs font-bold uppercase">Escolher etapa</SelectItem>
                 {stagesForBulk.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
+                  <SelectItem key={s.id} value={s.id} className="text-xs font-bold uppercase">
                     {s.name}
                   </SelectItem>
                 ))}
@@ -523,7 +534,7 @@ export function LeadsPage() {
           </div>
           <Button
             type="button"
-            className="h-10 w-full shrink-0 sm:mt-6 sm:h-11 sm:w-auto"
+            className="h-12 px-8 rounded-2xl bg-primary shadow-xl shadow-primary/20 font-black uppercase tracking-[0.1em] text-[11px] disabled:opacity-30 transition-all hover:-translate-y-0.5 active:translate-y-0"
             disabled={selectedLeadIds.length === 0}
             onClick={() => {
               const patch: Record<string, unknown> = {}
@@ -538,63 +549,56 @@ export function LeadsPage() {
               setSelectedLeadIds([])
             }}
           >
-            Aplicar em selecionados ({selectedLeadIds.length})
+            Atualizar Selecionados ({selectedLeadIds.length})
           </Button>
         </CardContent>
       </Card>
 
-      <Card className="mb-6 overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-sm backdrop-blur-sm sm:mb-8">
-        <CardHeader className="space-y-1 border-b border-border/60 bg-muted/15 px-4 py-3 sm:px-5 sm:py-4">
-          <CardTitle className="text-base sm:text-lg">Leads · {filteredLeads.length}</CardTitle>
-        </CardHeader>
+      <Card className="mb-8 overflow-hidden rounded-[2.5rem] border-border/30 bg-card/60 shadow-xl backdrop-blur-xl">
+        <header className="px-8 py-6 border-b border-border/10 bg-muted/10 backdrop-blur-md flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h2 className="text-xl font-black tracking-tight text-foreground/90">Repositório de Leads</h2>
+            <span className="flex items-center justify-center min-w-[32px] h-8 rounded-full bg-primary/10 px-3 text-sm font-black text-primary">
+              {filteredLeads.length}
+            </span>
+          </div>
+        </header>
+        
         <CardContent className="p-0">
-          <ul className="m-0 flex list-none flex-col divide-y divide-border/60 md:hidden">
+          <ul className="m-0 flex list-none flex-col divide-y divide-border/10 md:hidden">
             {filteredLeads.map((lead) => {
               const pipe = crm.pipelineCatalog.find((p) => p.id === lead.pipelineId)
               const stage = pipe?.stages.find((s) => s.id === lead.stageId)
               return (
-                <li key={lead.id} className="bg-card">
-                  <div className="flex gap-3 p-4">
-                    <div className="pt-0.5" onClick={(e) => e.stopPropagation()}>
+                <li key={lead.id} className="p-6 transition-all active:bg-muted/20">
+                  <div className="flex gap-4">
+                    <div className="pt-1">
                       <input
                         type="checkbox"
                         checked={selectedLeadIds.includes(lead.id)}
                         onChange={() => toggleLeadSelection(lead.id)}
-                        className="size-4"
-                        aria-label={`Selecionar ${lead.patientName}`}
+                        className="size-5 rounded-lg border-border/40"
                       />
                     </div>
-                    <button
-                      type="button"
-                      className="min-w-0 flex-1 rounded-xl p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                      onClick={() => openLead(lead.id)}
-                    >
-                      <p className="m-0 text-base font-semibold leading-tight text-foreground">{lead.patientName}</p>
-                      <p className="m-0 mt-0.5 text-sm text-muted-foreground">{lead.phone}</p>
-                      <p className="m-0 mt-1 line-clamp-2 text-xs text-muted-foreground sm:text-sm">{lead.summary || '—'}</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <Badge variant="outline" className="text-[10px] sm:text-xs">
+                    <div className="flex-1 min-w-0" onClick={() => openLead(lead.id)}>
+                      <h3 className="text-lg font-bold text-foreground/90 leading-tight">{lead.patientName}</h3>
+                      <p className="text-[13px] font-bold text-muted-foreground/60 mt-0.5">{lead.phone}</p>
+                      {lead.summary && <p className="mt-2 text-xs font-medium text-muted-foreground/80 line-clamp-2 leading-relaxed">{lead.summary}</p>}
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tight rounded-md border-border/40">
                           {stage?.name ?? lead.stageId}
                         </Badge>
-                        <Badge variant="secondary" className="text-[10px] sm:text-xs">
+                        <Badge variant="secondary" className="text-[9px] font-black uppercase tracking-tight rounded-md bg-muted/40 text-muted-foreground">
                           {sourceLabel[lead.source]}
                         </Badge>
-                        <span
-                          className={cn(
-                            'inline-flex items-center rounded-4xl border px-2 py-0.5 text-[10px] font-medium sm:text-xs',
-                            temperatureBadgeClass(lead.temperature),
-                          )}
-                        >
+                        <span className={cn('px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider', temperatureBadgeClass(lead.temperature))}>
                           {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
                         </span>
-                        <span className="text-[10px] text-muted-foreground sm:text-xs">{crm.getOwnerName(lead.ownerId)}</span>
                       </div>
-                    </button>
+                    </div>
                     <Link
                       to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center self-center rounded-xl text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                      onClick={(e) => e.stopPropagation()}
-                      aria-label={`Abrir conversa com ${lead.patientName}`}
+                      className="size-11 rounded-2xl bg-primary/[0.08] text-primary flex items-center justify-center transition-all hover:bg-primary/20 active:scale-90"
                     >
                       <MessageCircle className="size-5" />
                     </Link>
@@ -603,114 +607,83 @@ export function LeadsPage() {
               )
             })}
           </ul>
-          {filteredLeads.length === 0 ? (
-            <div className="p-8 text-center md:p-12">
-              <p className="m-0 text-sm text-muted-foreground">Nada neste filtro</p>
-            </div>
-          ) : null}
 
-          <div className="hidden w-full min-w-0 max-w-full overflow-x-auto md:block">
-            <table className="w-full min-w-[56rem] border-collapse text-left text-sm">
+          <div className="hidden w-full overflow-x-auto md:block">
+            <table className="w-full border-collapse text-left">
               <thead>
-                <tr className="sticky top-0 z-10 border-b border-border/80 bg-muted/40 text-left shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-muted/30">
-                  <th className="w-10 p-2.5 pl-3 sm:pl-4" scope="col" />
+                <tr className="border-b border-border/20 bg-muted/10 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/50">
+                  <th className="w-16 px-8 py-5">
+                    <div className="flex items-center justify-center">
+                      <div className="size-4 rounded border-border/40 border" />
+                    </div>
+                  </th>
                   {visibleColumns.map((col) => (
-                    <th
-                      key={col}
-                      scope="col"
-                      className="p-2.5 pl-0 pr-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:p-3 sm:text-xs"
-                    >
+                    <th key={col} className="px-4 py-5 font-black">
                       {columnLabel(col, crm.workflowFields)}
                     </th>
                   ))}
-                  <th className="p-2.5 pr-3 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground sm:p-3 sm:text-xs" scope="col">
-                    Conversa
-                  </th>
+                  <th className="px-8 py-5 text-right">Interação</th>
                 </tr>
               </thead>
-              <tbody>
-                {filteredLeads.map((lead, index) => {
+              <tbody className="divide-y divide-border/5">
+                {filteredLeads.map((lead) => {
                   const pipe = crm.pipelineCatalog.find((p) => p.id === lead.pipelineId)
                   const stage = pipe?.stages.find((s) => s.id === lead.stageId)
+                  const selected = selectedLeadIds.includes(lead.id)
                   return (
                     <tr
                       key={lead.id}
                       className={cn(
-                        'cursor-pointer border-b border-border/50 transition-colors hover:bg-primary/[0.04] focus-within:bg-muted/20',
-                        index % 2 === 1 && 'bg-muted/10',
-                        crm.selectedLeadId === lead.id && 'bg-primary/[0.08]',
+                        'group transition-all duration-200 cursor-pointer',
+                        selected ? 'bg-primary/[0.03]' : 'hover:bg-muted/20'
                       )}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`Abrir detalhes do lead ${lead.patientName}`}
                       onClick={() => openLead(lead.id)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault()
-                          openLead(lead.id)
-                        }
-                      }}
                     >
-                      <td className="p-2.5 pl-3 align-middle sm:p-3 sm:pl-4" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          className="size-4"
-                          checked={selectedLeadIds.includes(lead.id)}
-                          onChange={() => toggleLeadSelection(lead.id)}
-                          aria-label={`Selecionar ${lead.patientName}`}
-                        />
+                      <td className="px-8 py-5" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleLeadSelection(lead.id)}
+                            className="size-5 rounded-lg border-border/40 checked:bg-primary"
+                          />
+                        </div>
                       </td>
                       {visibleColumns.map((col) => (
-                        <td
-                          key={col}
-                          className="max-w-[20rem] p-2.5 pr-3 text-[13px] align-middle text-foreground/90 sm:max-w-[18rem] sm:p-3 sm:text-sm"
-                        >
-                          {col === 'patient_name' ? <span className="font-medium text-foreground">{lead.patientName}</span> : null}
-                          {col === 'phone' ? <span className="whitespace-nowrap text-muted-foreground">{lead.phone}</span> : null}
-                          {col === 'summary' ? (
-                            <span className="line-clamp-2 text-muted-foreground" title={String(lead.summary ?? '')}>
-                              {String(lead.summary ?? '')}
-                            </span>
-                          ) : null}
-                          {col === 'pipeline_id' ? <span>{pipe?.name ?? lead.pipelineId}</span> : null}
-                          {col === 'stage_id' ? <span>{stage?.name ?? lead.stageId}</span> : null}
-                          {col === 'owner_id' ? <span className="text-muted-foreground">{crm.getOwnerName(lead.ownerId)}</span> : null}
-                          {col === 'source' ? (
-                            <Badge variant="secondary" className="font-normal">
+                        <td key={col} className="px-4 py-5 max-w-[20rem]">
+                          {col === 'patient_name' && (
+                            <div className="flex flex-col">
+                              <span className="text-[14px] font-bold text-foreground/90 group-hover:text-primary transition-colors">{lead.patientName}</span>
+                            </div>
+                          )}
+                          {col === 'phone' && <span className="text-[13px] font-bold tabular-nums text-muted-foreground/70">{lead.phone}</span>}
+                          {col === 'summary' && <span className="text-xs font-medium text-muted-foreground/60 line-clamp-1">{lead.summary || '—'}</span>}
+                          {col === 'pipeline_id' && <span className="text-[10px] font-black uppercase tracking-tight text-muted-foreground/80">{pipe?.name ?? lead.pipelineId}</span>}
+                          {col === 'stage_id' && <span className="text-[10px] font-black uppercase tracking-tight text-muted-foreground/80">{stage?.name ?? lead.stageId}</span>}
+                          {col === 'owner_id' && <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/60">{crm.getOwnerName(lead.ownerId)}</span>}
+                          {col === 'source' && (
+                            <Badge variant="secondary" className="bg-muted/40 text-muted-foreground/80 text-[9px] font-black uppercase tracking-tight rounded-md border-border/20">
                               {sourceLabel[lead.source]}
                             </Badge>
-                          ) : null}
-                          {col === 'temperature' ? (
-                            <span
-                              className={cn(
-                                'inline-flex items-center rounded-4xl border px-2 py-0.5 text-xs font-medium',
-                                temperatureBadgeClass(lead.temperature),
-                              )}
-                            >
+                          )}
+                          {col === 'temperature' && (
+                            <span className={cn('px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider', temperatureBadgeClass(lead.temperature))}>
                               {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
                             </span>
-                          ) : null}
+                          )}
                           {![
-                            'patient_name',
-                            'phone',
-                            'summary',
-                            'pipeline_id',
-                            'stage_id',
-                            'owner_id',
-                            'source',
-                            'temperature',
-                          ].includes(col) ? (
-                            <span className="truncate text-muted-foreground">{String(getLeadFieldValue(lead, col) ?? '')}</span>
-                          ) : null}
+                            'patient_name', 'phone', 'summary', 'pipeline_id', 'stage_id', 'owner_id', 'source', 'temperature'
+                          ].includes(col) && (
+                            <span className="text-xs font-medium text-muted-foreground/60">{String(getLeadFieldValue(lead, col) ?? '—')}</span>
+                          )}
                         </td>
                       ))}
-                      <td className="p-2.5 pr-3 text-right align-middle sm:p-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-8 py-5 text-right" onClick={(e) => e.stopPropagation()}>
                         <Link
                           to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
-                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:h-9 sm:px-3"
+                          className="inline-flex size-10 items-center justify-center rounded-2xl bg-primary/[0.08] text-primary transition-all hover:bg-primary/20 active:scale-90"
                         >
                           <MessageCircle className="size-4" />
-                          Chat
                         </Link>
                       </td>
                     </tr>
@@ -719,96 +692,79 @@ export function LeadsPage() {
               </tbody>
             </table>
           </div>
+          {filteredLeads.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-24 text-center opacity-30">
+              <div className="mb-4 text-5xl">🔭</div>
+              <h3 className="text-sm font-black uppercase tracking-[0.3em]">Nenhum lead encontrado</h3>
+              <p className="text-xs font-bold text-muted-foreground mt-2">Tente ajustar seus filtros de busca</p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Importar leads (CSV)</CardTitle>
+      <section className="grid gap-6 lg:grid-cols-2 mb-20">
+        <Card className="rounded-[2.5rem] border-border/30 bg-card/40 backdrop-blur-md overflow-hidden">
+          <CardHeader className="p-8 border-b border-border/10">
+            <CardTitle className="text-base font-black uppercase tracking-widest text-foreground/80">Importação (CSV)</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3">
-            <input
-              ref={csvInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="sr-only"
-              aria-label="Ficheiro CSV de leads"
-              onChange={onCsvInputChange}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" onClick={() => csvInputRef.current?.click()}>
-                Escolher ficheiro CSV
+          <CardContent className="p-8 flex flex-col gap-6">
+            <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="sr-only" onChange={onCsvInputChange} />
+            <div className="flex flex-col items-center justify-center border-2 border-dashed border-border/40 rounded-[2rem] p-8 transition-all hover:bg-muted/20">
+              <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-4 text-xl">📄</div>
+              <Button type="button" variant="link" className="font-bold text-primary" onClick={() => csvInputRef.current?.click()}>
+                Selecionar Ficheiro CSV
               </Button>
-              {csvFileLabel ? (
-                <span className="text-sm text-muted-foreground">
-                  {csvFileLabel}
-                  {csvPreviewRows != null ? ` · ${csvPreviewRows} linha(s) de dados` : null}
-                </span>
-              ) : (
-                <span className="text-sm text-muted-foreground">Nenhum ficheiro selecionado.</span>
-              )}
+              <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest text-center mt-2">
+                {csvFileLabel || "Nenhum ficheiro selecionado"}
+                {csvPreviewRows != null && ` · ${csvPreviewRows} leads`}
+              </p>
             </div>
             <Button
               type="button"
+              className="h-14 rounded-2xl bg-foreground text-background font-black uppercase tracking-widest text-[11px] disabled:opacity-30 transition-all hover:scale-[1.02]"
               disabled={!pendingCsvFile}
-              onClick={() => {
-                if (!pendingCsvFile) {
-                  toast.error('Selecione um ficheiro CSV primeiro.')
-                  return
-                }
-                void runCsvImportFromFile(pendingCsvFile)
-              }}
+              onClick={() => pendingCsvFile && runCsvImportFromFile(pendingCsvFile)}
             >
-              Importar leads
+              Iniciar Importação
             </Button>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Importar conversas (JSON)</CardTitle>
+
+        <Card className="rounded-[2.5rem] border-border/30 bg-card/40 backdrop-blur-md overflow-hidden">
+          <CardHeader className="p-8 border-b border-border/10">
+            <CardTitle className="text-base font-black uppercase tracking-widest text-foreground/80">Histórico de Conversas (JSON)</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3">
-            <input
-              ref={jsonInputRef}
-              type="file"
-              accept=".json,application/json"
-              className="sr-only"
-              aria-label="Arquivo de conversas"
-              onChange={onJsonInputChange}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" onClick={() => jsonInputRef.current?.click()}>
-                Escolher arquivo de conversas
+          <CardContent className="p-8 flex flex-col gap-6">
+            <input ref={jsonInputRef} type="file" accept=".json,application/json" className="sr-only" onChange={onJsonInputChange} />
+            <div className="flex flex-col items-center justify-center border-2 border-dashed border-border/40 rounded-[2rem] p-8 transition-all hover:bg-muted/20">
+              <div className="size-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 mb-4 text-xl">💬</div>
+              <Button type="button" variant="link" className="font-bold text-amber-600" onClick={() => jsonInputRef.current?.click()}>
+                Selecionar Ficheiro JSON
               </Button>
-              {jsonFileLabel ? (
-                <span className="text-sm text-muted-foreground">
-                  {jsonFileLabel}
-                  {jsonPreviewCount != null ? ` · ${jsonPreviewCount} interação(ões)` : null}
-                </span>
-              ) : (
-                <span className="text-sm text-muted-foreground">Nenhum ficheiro selecionado.</span>
-              )}
+              <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest text-center mt-2">
+                {jsonFileLabel || "Nenhum ficheiro selecionado"}
+                {jsonPreviewCount != null && ` · ${jsonPreviewCount} interações`}
+              </p>
             </div>
             <Button
               type="button"
               variant="secondary"
+              className="h-14 rounded-2xl bg-amber-500 text-white font-black uppercase tracking-widest text-[11px] disabled:opacity-30 transition-all hover:scale-[1.02] border-none"
               disabled={!pendingJsonFile}
-              onClick={() => {
-                if (!pendingJsonFile) {
-                  toast.error('Selecione um arquivo primeiro.')
-                  return
-                }
-                void runJsonImportFromFile(pendingJsonFile)
-              }}
+              onClick={() => pendingJsonFile && runJsonImportFromFile(pendingJsonFile)}
             >
-              Importar interações
+              Importar Conversas
             </Button>
           </CardContent>
         </Card>
-      </div>
+      </section>
 
-      <LeadDetailModal open={sheetOpen} onOpenChange={handleSheetChange} />
+      {leadIdParam && (
+        <LeadDetailModal
+          open={sheetOpen}
+          onOpenChange={handleSheetChange}
+        />
+      )}
     </AppLayout>
   )
 }

@@ -6,7 +6,6 @@ import { KanbanListView } from '@/components/kanban/KanbanListView'
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
 import { LeadDetailModal } from '@/components/leads/LeadDetailModal'
 import { KanbanToolbar } from '@/components/kanban/KanbanToolbar'
-import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -199,34 +198,36 @@ export function KanbanPage() {
           }}
           getOwnerName={crm.getOwnerName}
           tagPillsForLead={tagPillsForLead}
-          kanbanFieldsOrdered={crm.kanbanFieldsOrdered}
           stageSlaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes}
         />
       ) : (
-        <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))]">
-          {crm.isLoading ? <SkeletonRows /> : null}
+        <div className="flex flex-1 gap-6 overflow-x-auto pb-6 scrollbar-thin scrollbar-thumb-border/30">
           {crm.selectedPipeline.stages.map((stage) => {
             const stageLeads = visibleLeads.filter((lead) => lead.stageId === stage.id)
             return (
               <article
                 key={stage.id}
-                className="flex min-h-[min(36dvh,22rem)] flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none transition-colors hover:border-border/80 sm:min-h-[24rem] lg:min-h-[28rem]"
+                className="flex flex-col w-[320px] shrink-0 overflow-hidden rounded-2xl border border-border/40 bg-muted/5 shadow-none transition-all duration-300 hover:bg-muted/10"
               >
-                <header className="flex items-center justify-between border-b border-border/20 px-4 py-3">
+                <header className="flex items-center justify-between px-5 py-4 bg-background/50 backdrop-blur-sm border-b border-border/20">
                   <div className="min-w-0 flex-1">
-                    <h2 className="m-0 text-sm font-bold uppercase tracking-widest text-foreground">{stage.name}</h2>
+                    <div className="flex items-center gap-2">
+                      <div className="size-2 rounded-full bg-primary" />
+                      <h2 className="m-0 text-[13px] font-black uppercase tracking-[0.1em] text-foreground/80">{stage.name}</h2>
+                    </div>
                     {crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id] != null ? (
-                      <p className="m-0 text-[10px] uppercase font-bold text-destructive mt-1">
-                        Prazo {crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id]} min
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-1 text-[10px] font-bold text-destructive/80 uppercase tracking-wider">
+                        <RefreshCw className="size-3" />
+                        SLA: {crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id]}m
+                      </div>
                     ) : null}
                   </div>
-                  <span className="rounded-full bg-muted/50 px-3 py-1 text-xs tabular-nums font-mono font-medium text-muted-foreground">
+                  <span className="flex items-center justify-center min-w-[24px] h-6 rounded-full bg-primary/10 px-2 text-[11px] font-black text-primary">
                     {stageLeads.length}
                   </span>
                 </header>
 
-                <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3 bg-muted/10">
+                <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 scrollbar-none">
                   {stageLeads.map((lead) => (
                     <KanbanLeadCard
                       key={lead.id}
@@ -252,7 +253,10 @@ export function KanbanPage() {
                   ))}
 
                   {stageLeads.length === 0 && !crm.isLoading && (
-                    <p className="py-8 text-center text-xs text-muted-foreground">Nenhum lead nesta etapa</p>
+                    <div className="flex flex-col items-center justify-center py-12 text-center opacity-40">
+                      <div className="mb-2 text-2xl">📥</div>
+                      <p className="text-[10px] font-bold uppercase tracking-widest">Sem leads aqui</p>
+                    </div>
                   )}
 
                   <KanbanColumnDropZone
@@ -275,10 +279,3 @@ export function KanbanPage() {
   )
 }
 
-function SkeletonRows() {
-  return (
-    <div className="col-span-full">
-      <SkeletonBlocks rows={6} card={false} />
-    </div>
-  )
-}

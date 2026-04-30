@@ -71,128 +71,133 @@ export function KanbanToolbar({
   )
 
   return (
-    <div className="flex flex-col gap-4 border-b border-border/30 pb-5 mb-5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-      <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-        <div
-          className="inline-flex w-full min-w-0 max-w-full rounded-md bg-muted/30 p-1 sm:w-auto"
-          role="group"
-          aria-label="Modo de visualização do quadro"
-        >
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className={cn(
-              'h-8 flex-1 gap-1.5 rounded-lg sm:flex-none',
-              viewMode === 'board' && 'bg-background text-foreground shadow-sm',
-            )}
-            aria-pressed={viewMode === 'board'}
-            onClick={() => onViewModeChange('board')}
-            title="Colunas (kanban)"
+    <div className="flex flex-col gap-5 border-b border-border/20 pb-6 mb-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center flex-1 min-w-0">
+          <div
+            className="inline-flex shrink-0 rounded-xl bg-muted/40 p-1.5 backdrop-blur-sm"
+            role="group"
+            aria-label="Modo de visualização"
           >
-            <LayoutGrid className="size-3.5 shrink-0" />
-            <span className="text-xs font-medium">Colunas</span>
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className={cn(
-              'h-8 flex-1 gap-1.5 rounded-lg sm:flex-none',
-              viewMode === 'list' && 'bg-background text-foreground shadow-sm',
-            )}
-            aria-pressed={viewMode === 'list'}
-            onClick={() => onViewModeChange('list')}
-            title="Lista"
-          >
-            <List className="size-3.5 shrink-0" />
-            <span className="text-xs font-medium">Lista</span>
-          </Button>
-        </div>
-
-        <Select value={pipelineId} onValueChange={(v) => v && onPipelineChange(v)}>
-          <LabeledSelectTrigger
-            className="w-full min-w-0 sm:w-[min(100%,13rem)] sm:min-w-[12rem] rounded-md border-border/40 text-xs font-medium"
-            size="default"
-          >
-            {pipelineLabel}
-          </LabeledSelectTrigger>
-          <SelectContent>
-            {pipelineOptions.map((pipeline) => (
-              <SelectItem key={pipeline.id} value={pipeline.id}>
-                {pipeline.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={ownerFilter} onValueChange={(v) => v && onOwnerChange(v)}>
-          <LabeledSelectTrigger
-            className="w-full min-w-0 sm:w-[min(100%,11rem)] sm:min-w-[12rem] rounded-md border-border/40 text-xs font-medium"
-            size="default"
-          >
-            {ownerLabel}
-          </LabeledSelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            {ownerOptions.map((owner) => (
-              <SelectItem key={owner.id} value={owner.id}>
-                {owner.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={tagFilter} onValueChange={(v) => v && onTagFilterChange(v)}>
-          <LabeledSelectTrigger
-            className="w-full min-w-0 sm:w-[min(100%,10rem)] sm:min-w-[10rem] rounded-md border-border/40 text-xs font-medium"
-            size="default"
-          >
-            {tagLabel}
-          </LabeledSelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas as etiquetas</SelectItem>
-            {tagOptions.map((t) => (
-              <SelectItem key={t.id} value={t.id}>
-                {t.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <InputGroup className="w-full max-w-md sm:min-w-[14rem] sm:flex-1">
-          <InputGroupAddon>
-            <Search aria-hidden />
-            <span className="sr-only">Buscar</span>
-          </InputGroupAddon>
-          <InputGroupInput
-            value={searchTerm}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Buscar paciente ou resumo"
-            aria-label="Buscar paciente ou resumo"
-          />
-        </InputGroup>
-
-        <div
-          role="group"
-          aria-label="Filtrar por temperatura"
-          className="flex w-full flex-wrap gap-1 rounded-md bg-muted/30 p-1 sm:w-auto"
-        >
-          {TEMP_OPTIONS.map((opt) => (
             <Button
-              key={opt.value}
               type="button"
               size="sm"
-              variant={temperatureFilter === opt.value ? 'secondary' : 'ghost'}
+              variant="ghost"
               className={cn(
-                'h-7 flex-1 rounded-md sm:flex-none',
-                temperatureFilter === opt.value && 'bg-background shadow-sm ring-1 ring-border'
+                'h-8 px-4 gap-2 rounded-lg transition-all duration-200',
+                viewMode === 'board' 
+                  ? 'bg-background text-primary shadow-sm ring-1 ring-border/50' 
+                  : 'text-muted-foreground hover:text-foreground',
               )}
-              onClick={() => onTemperatureChange(opt.value)}
+              onClick={() => onViewModeChange('board')}
             >
-              {opt.label}
+              <LayoutGrid className="size-3.5" />
+              <span className="text-[11px] font-bold uppercase tracking-wider">Quadro</span>
             </Button>
-          ))}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className={cn(
+                'h-8 px-4 gap-2 rounded-lg transition-all duration-200',
+                viewMode === 'list' 
+                  ? 'bg-background text-primary shadow-sm ring-1 ring-border/50' 
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+              onClick={() => onViewModeChange('list')}
+            >
+              <List className="size-3.5" />
+              <span className="text-[11px] font-bold uppercase tracking-wider">Lista</span>
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={pipelineId} onValueChange={(v) => v && onPipelineChange(v)}>
+              <LabeledSelectTrigger
+                className="min-w-[140px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
+                size="default"
+              >
+                {pipelineLabel}
+              </LabeledSelectTrigger>
+              <SelectContent className="rounded-xl">
+                {pipelineOptions.map((pipeline) => (
+                  <SelectItem key={pipeline.id} value={pipeline.id} className="text-xs uppercase font-bold tracking-tight">
+                    {pipeline.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={ownerFilter} onValueChange={(v) => v && onOwnerChange(v)}>
+              <LabeledSelectTrigger
+                className="min-w-[140px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
+                size="default"
+              >
+                {ownerLabel}
+              </LabeledSelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="all" className="text-xs uppercase font-bold tracking-tight">Todos</SelectItem>
+                {ownerOptions.map((owner) => (
+                  <SelectItem key={owner.id} value={owner.id} className="text-xs uppercase font-bold tracking-tight">
+                    {owner.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={tagFilter} onValueChange={(v) => v && onTagFilterChange(v)}>
+              <LabeledSelectTrigger
+                className="min-w-[140px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
+                size="default"
+              >
+                {tagLabel}
+              </LabeledSelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="all" className="text-xs uppercase font-bold tracking-tight">Todas as etiquetas</SelectItem>
+                {tagOptions.map((t) => (
+                  <SelectItem key={t.id} value={t.id} className="text-xs uppercase font-bold tracking-tight">
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center gap-3 lg:shrink-0">
+          <InputGroup className="w-full sm:w-[260px]">
+            <InputGroupAddon className="bg-muted/20 border-border/40 rounded-l-xl">
+              <Search className="size-3.5 opacity-50" />
+            </InputGroupAddon>
+            <InputGroupInput
+              value={searchTerm}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder="Buscar paciente..."
+              className="rounded-r-xl border-border/40 bg-muted/10 text-xs font-medium placeholder:text-muted-foreground/50"
+            />
+          </InputGroup>
+
+          <div
+            className="flex items-center gap-1 rounded-xl bg-muted/40 p-1.5 backdrop-blur-sm"
+          >
+            {TEMP_OPTIONS.map((opt) => (
+              <Button
+                key={opt.value}
+                type="button"
+                size="sm"
+                variant="ghost"
+                className={cn(
+                  'h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all duration-200',
+                  temperatureFilter === opt.value 
+                    ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' 
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+                onClick={() => onTemperatureChange(opt.value)}
+              >
+                {opt.label}
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
     </div>
