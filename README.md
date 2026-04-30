@@ -79,6 +79,7 @@ Defina no Supabase:
 - Evolution: `EVOLUTION_API_BASE`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`, `EVOLUTION_WEBHOOK_SECRET` (opcional)
 - Meta Cloud **direto** no CRM (`WHATSAPP_PROVIDER=official`, sem ManyChat neste leg): `WHATSAPP_CLOUD_APP_SECRET`, `WHATSAPP_CLOUD_ACCESS_TOKEN`, `WHATSAPP_CLOUD_PHONE_NUMBER_ID`, `WHATSAPP_CLOUD_VERIFY_TOKEN`, opcional `WHATSAPP_CLOUD_API_VERSION`
 - `MANYCHAT_CRM_SECRET` (ManyChat / n8n → `crm-manychat-webhook` — **caminho preferido para canais Meta “oficiais” via ManyChat**)
+- `CRM_AI_INTERNAL_SECRET` (≥16 caracteres): `crm-manychat-webhook` / WhatsApp auto-reply chamam `crm-ai-assistant` com header `x-crm-ai-internal-secret`; sem isto o JSON pode vir com `reply` vazio
 - `CRM_WEBHOOK_SECRET` (webhook genérico `crm-ingest-webhook`)
 
 Deploy:
@@ -87,6 +88,7 @@ Deploy:
 supabase functions deploy crm-whatsapp-webhook
 supabase functions deploy crm-send-message
 supabase functions deploy crm-manychat-webhook
+supabase functions deploy crm-ai-assistant
 supabase functions deploy ai-triage
 supabase functions deploy crm-ingest-webhook
 ```

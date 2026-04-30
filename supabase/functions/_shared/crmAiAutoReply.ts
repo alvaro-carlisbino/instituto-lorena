@@ -86,13 +86,21 @@ export async function invokeCrmAiAssistantForLead(
 ): Promise<string> {
   const aiMessages = [{ role: 'user', content: aiInboundUserText }]
   const aiCtx = { leadId, focus: 'lead' }
-  const { data: aiResult } = await admin.functions.invoke('crm-ai-assistant', {
+  const internalSecret = (Deno.env.get('CRM_AI_INTERNAL_SECRET') ?? '').trim()
+  const headers =
+    internalSecret.length >= 16 ? { 'x-crm-ai-internal-secret': internalSecret } : undefined
+
+  const { data: aiResult, error: invokeErr } = await admin.functions.invoke('crm-ai-assistant', {
     body: {
       messages: aiMessages,
       context: aiCtx,
       promptOverride: promptOverride || undefined,
     },
+    ...(headers ? { headers } : {}),
   })
+  if (invokeErr) {
+    console.warn('invokeCrmAiAssistantForLead:', invokeErr.message)
+  }
   const aiObj = (aiResult && typeof aiResult === 'object' ? aiResult : {}) as Record<string, unknown>
   return typeof aiObj.reply === 'string' ? aiObj.reply.trim() : ''
 }

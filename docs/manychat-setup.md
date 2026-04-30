@@ -18,10 +18,13 @@ Dashboard Supabase deste projeto: `https://supabase.com/dashboard/project/fgyfpm
 | Nome | Valor |
 |------|--------|
 | `MANYCHAT_CRM_SECRET` | Uma string longa e aleatória (ex. 32+ caracteres). **A mesma** vais colar no ManyChat. |
+| `CRM_AI_INTERNAL_SECRET` | **Obrigatório** para resposta IA no ManyChat: string aleatória com **pelo menos 16 caracteres** (ex. 32+). O `crm-manychat-webhook` envia este valor no header `x-crm-ai-internal-secret` ao chamar `crm-ai-assistant` (chamada servidor-a-servidor, sem JWT de utilizador). |
 
 3. Garante também os secrets da IA usados por `crm-ai-assistant` (ex. `ZAI_API_KEY`), conforme o [README](../README.md).
 
 Sem `MANYCHAT_CRM_SECRET`, a função responde `401 unauthorized`.
+
+Sem `CRM_AI_INTERNAL_SECRET` válido (≥16 caracteres) nas Edge Functions, o pedido pode devolver `200` com **`reply` vazio**: o webhook chama `crm-ai-assistant`, que até aqui só aceitava JWT de utilizador. Depois de definires o secret, faz **deploy** de `crm-ai-assistant` e `crm-manychat-webhook` (o bundle partilha o código).
 
 ---
 
@@ -101,7 +104,8 @@ No CRM, **Ferramentas** → origem **ManyChat / Instagram (IA)** permite simular
 
 ## 4. Checklist rápido
 
-- [ ] Secret `MANYCHAT_CRM_SECRET` no Supabase + mesmo valor no header ManyChat  
+- [ ] Secrets `MANYCHAT_CRM_SECRET` e **`CRM_AI_INTERNAL_SECRET`** (≥16 caracteres) no Supabase; o segundo evita `reply` vazio no JSON  
+- [ ] Mesmo `MANYCHAT_CRM_SECRET` no header ManyChat  
 - [ ] URL correta da função `crm-manychat-webhook`  
 - [ ] Body JSON com `subscriber_id` e `text`  
 - [ ] Passo ManyChat a enviar `reply` ao utilizador  

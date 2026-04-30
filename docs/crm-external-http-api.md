@@ -17,7 +17,7 @@ Todas as respostas são JSON. Erros comuns: `401 unauthorized`, `400 invalid_jso
 - `Content-Type: application/json`
 - `x-manychat-crm-secret`: igual ao secret `MANYCHAT_CRM_SECRET` no Supabase (Edge Functions → Secrets).
 
-**Secret Supabase:** `MANYCHAT_CRM_SECRET`
+**Secrets Supabase:** `MANYCHAT_CRM_SECRET` (header ManyChat `x-manychat-crm-secret`) e **`CRM_AI_INTERNAL_SECRET`** (≥16 caracteres; usado só entre Edge Functions para o `crm-ai-assistant` devolver texto em `reply`). Sem o segundo, a resposta pode ser `200` com `reply: ""`.
 
 ### 1.1 `action` omitido ou `message` — mensagem + resposta IA
 

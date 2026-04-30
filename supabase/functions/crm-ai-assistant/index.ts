@@ -11,14 +11,21 @@
  *   O código do modelo é o mesmo nos dois; não use prefixo zai-coding-plan/ nesta API.
  * Deploy: supabase functions deploy crm-ai-assistant
  *
+ * Chamadas **internas** (ManyChat / WhatsApp auto-reply): header `x-crm-ai-internal-secret`
+ * igual ao secret `CRM_AI_INTERNAL_SECRET` (≥16 caracteres) nas Edge Functions; usa
+ * service role para o snapshot (sem JWT de utilizador).
+ *
  * Nota: respostas de negócio usam HTTP 200 + `{ ok: false, ... }` para o cliente
  * `functions.invoke` conseguir ler sempre o corpo (evita 502 opaco no browser).
  */
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
+const MIN_INTERNAL_SECRET_LEN = 16
+
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-crm-ai-internal-secret',
 }
 
 /** Limite aproximado do system prompt (caracteres) para evitar rejeição / timeout na Z.ai. */
@@ -138,7 +145,11 @@ function parseContext(raw: unknown): AiContext {
   return { leadId, weekStartIso, focus }
 }
 
-async function buildCrmSnapshot(userClient: SupabaseClient, ctx: AiContext): Promise<Record<string, unknown>> {
+async function buildCrmSnapshot(
+  userClient: SupabaseClient,
+  ctx: AiContext,
+  opts?: { skipAppProfile?: boolean },
+): Promise<Record<string, unknown>> {
   const interactionSince = ctx.weekStartIso
     ? `${ctx.weekStartIso}T00:00:00.000Z`
     : (() => {
@@ -146,6 +157,10 @@ async function buildCrmSnapshot(userClient: SupabaseClient, ctx: AiContext): Pro
         d.setUTCDate(d.getUTCDate() - 14)
         return d.toISOString()
       })()
+
+  const profilePromise = opts?.skipAppProfile
+    ? Promise.resolve({ data: null, error: null })
+    : userClient.from('app_profiles').select('email, display_name, role').maybeSingle()
 
   const [
     profileRes,
@@ -158,7 +173,7 @@ async function buildCrmSnapshot(userClient: SupabaseClient, ctx: AiContext): Pro
     interactionsRes,
     usersRes,
   ] = await Promise.all([
-    userClient.from('app_profiles').select('email, display_name, role').maybeSingle(),
+    profilePromise,
     userClient.from('metric_configs').select('id, label, value, target, unit').order('label', { ascending: true }).limit(40),
     userClient
       .from('channel_configs')
@@ -297,6 +312,12 @@ async function buildCrmSnapshot(userClient: SupabaseClient, ctx: AiContext): Pro
       interactions: ctx.weekStartIso
         ? `Interações desde ${ctx.weekStartIso} (pedido do cliente).`
         : 'Interações dos últimos 14 dias.',
+      ...(opts?.skipAppProfile
+        ? {
+            internalService:
+              'Snapshot via service role (auto-reply ManyChat/WhatsApp). Sem perfil de utilizador.',
+          }
+        : {}),
     },
   }
 }
@@ -343,27 +364,53 @@ Deno.serve(async (req) => {
       })
     }
 
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return jsonResponse({ ok: false, error: 'unauthorized' }, 401)
-    }
-
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    })
-    const {
-      data: { user },
-      error: userErr,
-    } = await userClient.auth.getUser()
-    if (userErr || !user) {
-      return jsonResponse({ ok: false, error: 'unauthorized', message: userErr?.message ?? 'Sessão inválida.' }, 401)
-    }
-
+    const rawBody = await req.text()
     let body: { messages?: unknown; model?: string; context?: unknown; promptOverride?: unknown }
     try {
-      body = (await req.json()) as { messages?: unknown; model?: string; context?: unknown; promptOverride?: unknown }
+      body = JSON.parse(rawBody) as {
+        messages?: unknown
+        model?: string
+        context?: unknown
+        promptOverride?: unknown
+      }
     } catch {
       return jsonResponse({ ok: false, error: 'invalid_json' }, 400)
+    }
+
+    const internalHdr = (req.headers.get('x-crm-ai-internal-secret') ?? '').trim()
+    const internalEnv = (Deno.env.get('CRM_AI_INTERNAL_SECRET') ?? '').trim()
+    const isInternal = internalEnv.length >= MIN_INTERNAL_SECRET_LEN && internalHdr === internalEnv
+
+    let dbClient: SupabaseClient
+    if (isInternal) {
+      const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      if (!serviceRole) {
+        return jsonResponse(
+          {
+            ok: false,
+            error: 'server_misconfigured',
+            message: 'SUPABASE_SERVICE_ROLE_KEY em falta para chamada interna.',
+          },
+          500,
+        )
+      }
+      dbClient = createClient(supabaseUrl, serviceRole)
+    } else {
+      const authHeader = req.headers.get('Authorization')
+      if (!authHeader) {
+        return jsonResponse({ ok: false, error: 'unauthorized' }, 401)
+      }
+
+      dbClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      })
+      const {
+        data: { user },
+        error: userErr,
+      } = await dbClient.auth.getUser()
+      if (userErr || !user) {
+        return jsonResponse({ ok: false, error: 'unauthorized', message: userErr?.message ?? 'Sessão inválida.' }, 401)
+      }
     }
 
     const clientMessages = sanitizeMessages(body.messages)
@@ -383,7 +430,7 @@ Deno.serve(async (req) => {
 
     let snapshot: Record<string, unknown>
     try {
-      snapshot = await buildCrmSnapshot(userClient, context)
+      snapshot = await buildCrmSnapshot(dbClient, context, isInternal ? { skipAppProfile: true } : undefined)
     } catch (e) {
       return jsonResponse({
         ok: false,
@@ -403,7 +450,9 @@ Deno.serve(async (req) => {
       'Você é o assistente de IA do CRM Instituto Lorena (operação comercial / clínica).',
       'Use APENAS o snapshot JSON abaixo; não invente números, leads ou interações que não apareçam.',
       'Quando existir leadFocus.recent_media_intel, use audio_transcript e document_or_image_text como parte do contexto da conversa (transcrições e OCR/extração de documentos).',
-      'Os dados respeitam as permissões (RLS) da conta do utilizador — pode ser uma amostra parcial.',
+      isInternal
+        ? 'Contexto: resposta automática a um contacto (ManyChat/Instagram ou WhatsApp). O snapshot vem de leitura de serviço; responda de forma breve e útil ao último texto do cliente.'
+        : 'Os dados respeitam as permissões (RLS) da conta do utilizador — pode ser uma amostra parcial.',
       'Responda em português de Portugal ou Brasil, de forma clara e profissional.',
       'Não peça nem repita senhas. Não confirme envio de mensagens a pacientes: pode sugerir RASCUNHOS; o humano envia.',
       'Para "churn" ou risco sem dados explícitos no snapshot, diga que faltam dados e sugira que métricas ou campos registar.',
