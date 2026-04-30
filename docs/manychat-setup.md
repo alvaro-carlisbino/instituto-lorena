@@ -59,6 +59,10 @@ Objetivo: quando o utilizador enviar mensagem (Instagram), o CRM (`crm-manychat-
 | **Headers** | Adiciona um header: nome `x-manychat-crm-secret`, valor = **o mesmo** que definiste em `MANYCHAT_CRM_SECRET` no Supabase. |
 | **Content-Type** | `application/json` (se o ManyChat não preencher sozinho, adiciona header `Content-Type: application/json`). |
 
+**Erro `UNAUTHORIZED_NO_AUTH_HEADER` / `Missing authorization header`:** o gateway do Supabase, por defeito, exige `Authorization: Bearer …` **antes** de o teu código correr. Neste repo, `supabase/config.toml` define **`verify_jwt = false`** para `crm-manychat-webhook` (e outros webhooks). Depois de alterar o ficheiro, faz deploy: `supabase functions deploy crm-manychat-webhook` (com o CLI autenticado no projecto). **Workaround** no ManyChat: acrescenta também `Authorization: Bearer <anon key>` e header `apikey` com o **mesmo** valor da anon key (chave pública do projecto — menos ideal que desligar o JWT na função).
+
+Garante que `x-manychat-crm-secret` está configurado **uma vez** (evita duplicar o mesmo header no pedido).
+
 **Body (JSON)** — usa as variáveis do ManyChat para subscriber e texto. Os nomes exatos dos campos dependem do ManyChat; abaixo está o **contrato** que o CRM espera:
 
 ```json
