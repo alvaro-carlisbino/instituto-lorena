@@ -40,6 +40,10 @@ export type CrmAiAutoReplyGate = {
   canAutoReply: boolean
   ownerMode: string
   aiEnabled: boolean
+  /** Preenchido quando `canAutoReply` é false — códigos estáveis para suporte e automações. */
+  skipReasons: string[]
+  /** Dica curta para humanos (ManyChat / logs). */
+  skipHint?: string
 }
 
 export async function evaluateCrmAiAutoReplyGate(
@@ -68,6 +72,21 @@ export async function evaluateCrmAiAutoReplyGate(
 
   const aiRepliesLastHour = await countAiAutoRepliesLastHour(admin, options.rateLimitJobSources)
 
+  const skipReasons: string[] = []
+  if (!aiEnabled) skipReasons.push('ai_disabled')
+  if (!options.directionIsInbound) skipReasons.push('not_inbound')
+  if (!shouldAiByMode) {
+    if (ownerMode === 'human') skipReasons.push('owner_mode_human')
+    else if (ownerMode === 'auto' && !withinWindow) skipReasons.push('outside_quiet_hours')
+    else skipReasons.push(`owner_mode_${ownerMode || 'unknown'}`)
+  }
+  if (elapsedSinceAi < minSecondsBetween) {
+    skipReasons.push('min_seconds_between_ai_replies')
+  }
+  if (aiRepliesLastHour >= maxPerHour) {
+    skipReasons.push('max_ai_replies_per_hour')
+  }
+
   const canAutoReply =
     aiEnabled &&
     shouldAiByMode &&
@@ -75,7 +94,36 @@ export async function evaluateCrmAiAutoReplyGate(
     elapsedSinceAi >= minSecondsBetween &&
     aiRepliesLastHour < maxPerHour
 
-  return { canAutoReply, ownerMode, aiEnabled }
+  const hintParts: string[] = []
+  if (skipReasons.includes('ai_disabled')) {
+    hintParts.push('IA desligada em crm_ai_configs ou neste lead (crm_conversation_states.ai_enabled).')
+  }
+  if (skipReasons.includes('owner_mode_human')) {
+    hintParts.push('Modo de atendimento = humano: só a equipa responde.')
+  }
+  if (skipReasons.includes('outside_quiet_hours')) {
+    hintParts.push(
+      'Modo auto fora da janela 8h–20h (hora do servidor da Edge Function, normalmente UTC). Ajusta default_owner_mode para "ai" ou alarga horários no código se precisares.',
+    )
+  }
+  if (skipReasons.includes('min_seconds_between_ai_replies')) {
+    hintParts.push(
+      `Aguarda ${Math.ceil(minSecondsBetween - elapsedSinceAi)}s ou reduz min_seconds_between_ai_replies em crm_ai_configs (atual mínimo ${minSecondsBetween}s entre respostas IA).`,
+    )
+  }
+  if (skipReasons.includes('max_ai_replies_per_hour')) {
+    hintParts.push(
+      `Limite de ${maxPerHour} respostas IA na última hora (whatsapp + manychat). Aumenta max_ai_replies_per_hour em crm_ai_configs ou espera.`,
+    )
+  }
+
+  return {
+    canAutoReply,
+    ownerMode,
+    aiEnabled,
+    skipReasons: canAutoReply ? [] : skipReasons,
+    skipHint: canAutoReply ? undefined : hintParts.join(' '),
+  }
 }
 
 export async function invokeCrmAiAssistantForLead(

@@ -298,6 +298,12 @@ Deno.serve(async (req) => {
       status: lead.status,
       provider: provider.name,
       routing,
+      ...(!gate.canAutoReply
+        ? {
+            ai_skip_reasons: gate.skipReasons,
+            hint: gate.skipHint ?? null,
+          }
+        : {}),
     })
   } catch (e) {
     await admin
