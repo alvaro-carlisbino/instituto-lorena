@@ -1,6 +1,6 @@
 # ManyChat — ligar o Instagram ao CRM (Supabase)
 
-Este guia assume que **não usas n8n** no meio: o ManyChat chama **diretamente** a Edge Function do projeto.
+Este guia assume que **não usas n8n** no meio: o ManyChat chama **diretamente** a Edge Function do projeto. Se migraste do workflow **Instituto Lorena Visentainer FIXED** (OpenAI + debounce + setField/sendFlow no n8n), o mapa nó-a-nó com **Z.ai** no CRM está em [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md#mapa-n8n-fixed-zai).
 
 **URL da função** (substitui pelo teu project ref se for outro):
 
