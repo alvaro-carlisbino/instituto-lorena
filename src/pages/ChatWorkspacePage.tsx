@@ -104,7 +104,7 @@ export function ChatWorkspacePage() {
 
   return (
     <AppLayout title="Conversas">
-      <div className="flex min-h-0 w-full flex-1 flex-col gap-3 sm:gap-4 lg:h-[min(calc(100dvh-10rem),960px)] lg:flex-row lg:items-stretch lg:gap-4">
+      <div className="flex h-[calc(100dvh-10rem)] max-h-[calc(100dvh-10rem)] min-h-0 w-full flex-1 flex-col gap-3 sm:gap-4 lg:h-[min(calc(100dvh-9rem),960px)] lg:max-h-[min(calc(100dvh-9rem),960px)] lg:flex-row lg:items-stretch lg:gap-4">
         <Card className="flex max-h-[40vh] min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none sm:max-h-[44vh] lg:h-full lg:max-h-none lg:w-[min(260px,34vw)] lg:max-w-[300px] xl:w-[min(300px,28vw)]">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
             <div className="flex items-baseline justify-between gap-2">
@@ -160,7 +160,7 @@ export function ChatWorkspacePage() {
           </CardContent>
         </Card>
 
-        <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none">
+        <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none lg:min-h-0 lg:h-full">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
               <div className="min-w-0 flex-1 overflow-hidden">

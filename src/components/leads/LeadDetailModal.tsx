@@ -408,11 +408,11 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                 )}
               </section>
 
-              <section aria-labelledby="lead-chat-heading" className="flex min-h-[min(40dvh,22rem)] flex-col lg:col-span-2">
-                <h2 id="lead-chat-heading" className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              <section aria-labelledby="lead-chat-heading" className="flex min-h-0 flex-col gap-2 lg:col-span-2">
+                <h2 id="lead-chat-heading" className="mb-0 text-xs font-bold uppercase tracking-widest text-muted-foreground">
                   Conversas
                 </h2>
-                <div className="flex min-h-[min(36dvh,20rem)] flex-1 flex-col rounded-md border border-border bg-card p-2 sm:min-h-[min(40dvh,24rem)]">
+                <div className="flex h-[min(48dvh,26rem)] min-h-0 max-h-[min(56dvh,32rem)] flex-col overflow-hidden rounded-md border border-border bg-card p-2 sm:h-[min(50dvh,28rem)]">
                   <LeadChatThread
                     leadId={lead.id}
                     history={leadHistory}

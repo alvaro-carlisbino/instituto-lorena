@@ -60,7 +60,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
   }
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2 sm:gap-3">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden sm:gap-3">
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -99,7 +99,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
         aria-live="polite"
         aria-relevant="additions"
         aria-label="Histórico de mensagens"
-        className="min-h-[12rem] w-full min-w-0 flex-1 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/35 p-3 shadow-inner sm:min-h-[14rem] dark:bg-[#0b141a]"
+        className="min-h-0 w-full min-w-0 flex-1 basis-0 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/35 p-3 shadow-inner dark:bg-[#0b141a]"
       >
         <ul className="m-0 flex list-none flex-col gap-2.5 p-0 sm:gap-3">
           {items.length === 0 ? (
