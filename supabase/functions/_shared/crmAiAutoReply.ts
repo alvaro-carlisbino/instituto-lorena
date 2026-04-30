@@ -170,7 +170,17 @@ export async function invokeCrmAiAssistantForLead(
     console.warn('invokeCrmAiAssistantForLead:', invokeErr.message)
   }
   const aiObj = (aiResult && typeof aiResult === 'object' ? aiResult : {}) as Record<string, unknown>
-  return typeof aiObj.reply === 'string' ? aiObj.reply.trim() : ''
+  let reply = typeof aiObj.reply === 'string' ? aiObj.reply.trim() : ''
+
+  // Clean up potential leak of internal reasoning/meta-talk
+  // 1. Remove numbered steps like "1. Analyze the Request:" or "1. *Analyze the Request:*"
+  reply = reply.replace(/^(?:\d+\.\s+\*?Analyze[\s\S]*?)(?:\n\n|\n[A-Z\xC0-\xDF]|$)/gi, '').trim()
+  // 2. Remove thinking tags
+  reply = reply.replace(/<(thinking|thought|reasoning)>[\s\S]*?<\/\1>/gi, '').trim()
+  // 3. Remove Markdown thinking blocks
+  reply = reply.replace(/```(?:thinking|thought|reasoning)[\s\S]*?```/gi, '').trim()
+
+  return reply
 }
 
 export async function upsertConversationStateInboundOnly(

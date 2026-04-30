@@ -451,7 +451,13 @@ Deno.serve(async (req) => {
       'Use APENAS o snapshot JSON abaixo; não invente números, leads ou interações que não apareçam.',
       'Quando existir leadFocus.recent_media_intel, use audio_transcript e document_or_image_text como parte do contexto da conversa (transcrições e OCR/extração de documentos).',
       isInternal
-        ? 'Contexto: resposta automática a um contacto (ManyChat/Instagram ou WhatsApp). O snapshot vem de leitura de serviço; responda de forma breve e útil ao último texto do cliente.'
+        ? [
+            '--- MODO RESPOSTA DIRETA AO PACIENTE ---',
+            'Sua resposta será enviada IMEDIATAMENTE ao paciente. Você deve agir como o assistente virtual da clínica.',
+            'MANDATORY: Não inclua análises, explicações internas, raciocínios, etapas (ex: "1. Analisar...") ou qualquer texto que não seja para o paciente.',
+            'MANDATORY: Responda APENAS com a mensagem final em português. Seja direto, cordial e profissional.',
+            'Não use rascunhos ou comentários internos.',
+          ].join('\n')
         : 'Os dados respeitam as permissões (RLS) da conta do utilizador — pode ser uma amostra parcial.',
       'Responda em português de Portugal ou Brasil, de forma clara e profissional.',
       'Não peça nem repita senhas. Não confirme envio de mensagens a pacientes: pode sugerir RASCUNHOS; o humano envia.',
