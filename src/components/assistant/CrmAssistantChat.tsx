@@ -198,7 +198,7 @@ export function CrmAssistantChat({
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Versão</span>
             <Select value={model} onValueChange={(v) => v && setModel(v as GlmModelId)}>
-              <SelectTrigger size="sm" className="w-[min(100%,11rem)]">
+              <SelectTrigger size="sm" className="w-full min-w-0 sm:w-[min(100%,11rem)]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -225,7 +225,7 @@ export function CrmAssistantChat({
       <CardContent className="space-y-3 pt-4">
         {notice ? <NoticeBanner message={notice} variant={noticeVariantFromMessage(notice)} className="rounded-none" /> : null}
 
-        <ScrollArea className="h-[min(28rem,55vh)] rounded-md border border-border bg-muted/20 p-3">
+        <ScrollArea className="h-[min(20rem,min(52dvh,60svh))] rounded-md border border-border bg-muted/20 p-3 sm:h-[min(28rem,55vh)]">
           <ul className="m-0 list-none space-y-3 p-0">
             {loadingThread ? (
               <li className="px-3 py-2 text-sm text-muted-foreground">A carregar conversa…</li>

@@ -54,13 +54,13 @@ export function DataViewsPage() {
 
   return (
     <AppLayout title="Visões">
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={crm.addDataView}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <Button type="button" className="w-full sm:w-auto" onClick={crm.addDataView}>
           Nova visão
         </Button>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,18rem)_1fr]">
+      <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,18rem)_1fr]">
         <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Visões salvas</CardTitle>
@@ -92,11 +92,11 @@ export function DataViewsPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="min-w-0 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Pré-visualização</CardTitle>
           </CardHeader>
-          <CardContent className="overflow-x-auto">
+          <CardContent className="min-w-0 overflow-x-auto">
             {activeView ? (
               <table className="w-full min-w-[28rem] border-collapse text-sm">
                 <thead>

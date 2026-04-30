@@ -229,7 +229,7 @@ export function AdminLabPage() {
                 value={webhookSource}
                 onValueChange={(v) => setWebhookSource(v as (typeof WEBHOOK_SOURCES)[number]['value'])}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full min-w-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -245,6 +245,7 @@ export function AdminLabPage() {
           <CardFooter>
             <Button
               type="button"
+              className="w-full sm:w-auto"
               onClick={handleTestWebhook}
               disabled={webhookSending || crm.isLoading}
             >

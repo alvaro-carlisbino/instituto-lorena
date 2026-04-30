@@ -93,7 +93,7 @@ export function ChannelsPage() {
                     min={1}
                     value={channel.slaMinutes}
                     onChange={(event) => crm.updateChannel(channel.id, { slaMinutes: Number(event.target.value) })}
-                    className="w-full max-w-full min-[380px]:max-w-[10rem]"
+                    className="w-full max-w-[10rem]"
                   />
                 </div>
                 <div className="flex w-full min-w-0 flex-wrap items-center gap-2">

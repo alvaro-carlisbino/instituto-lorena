@@ -55,7 +55,7 @@ export function HistoryPage() {
 
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Input
-              className="max-w-xs"
+              className="w-full min-w-0 sm:max-w-xs"
               value={searchTerm}
               onChange={(event) => {
                 setSearchTerm(event.target.value)
@@ -76,8 +76,8 @@ export function HistoryPage() {
             </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,280px)_1fr]">
-            <aside className="flex flex-col gap-px border border-border bg-border/50">
+          <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,280px)_1fr]">
+            <aside className="flex max-h-[min(40dvh,18rem)] flex-col gap-px overflow-y-auto border border-border bg-border/50 lg:max-h-none">
               {paginatedLeads.length === 0 && !crm.isLoading ? (
                 <EmptyState
                   icon={UserIcon}
@@ -103,7 +103,7 @@ export function HistoryPage() {
               )}
             </aside>
 
-            <article className="min-h-[12rem] bg-card border-none shadow-none">
+            <article className="min-h-[min(24dvh,12rem)] min-w-0 bg-card border-none shadow-none lg:min-h-[12rem]">
               {crm.selectedLead ? (
                 <>
                   <h3 className="mt-0 pb-4 text-sm tracking-widest uppercase font-bold text-foreground border-b border-border mb-6">{crm.selectedLead.patientName}</h3>

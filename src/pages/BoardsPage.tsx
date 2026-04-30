@@ -473,7 +473,7 @@ export function BoardsPage() {
         open={automationTarget !== null}
         onOpenChange={(open) => !open && setAutomationTarget(null)}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[min(92dvh,calc(100dvh-2rem))] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
               ⚡ Automação: {automationTarget?.name}
@@ -508,7 +508,7 @@ export function BoardsPage() {
                   })
                 }
                 placeholder="Ex: Olá {{nome}}, sua consulta está confirmada! 😊"
-                className="min-h-[120px]"
+                className="min-h-[min(7.5rem,28dvh)] sm:min-h-[120px]"
                 disabled={!draftAutomation.enabled}
               />
               <div className="space-y-1.5">

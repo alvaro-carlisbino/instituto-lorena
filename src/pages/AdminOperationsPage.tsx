@@ -114,9 +114,17 @@ export function AdminOperationsPage() {
             ) : null}
             {crm.automationRules.map((rule) => (
               <div key={rule.id} className="rounded-xl border border-border/70 bg-background/70 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <Input className="rounded-lg border-border/70" value={rule.name} onChange={(e) => crm.updateAutomationRule(rule.id, { name: e.target.value })} />
-                  <Switch checked={rule.enabled} onCheckedChange={(checked) => crm.updateAutomationRule(rule.id, { enabled: checked })} />
+                <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <Input
+                    className="min-w-0 flex-1 rounded-lg border-border/70"
+                    value={rule.name}
+                    onChange={(e) => crm.updateAutomationRule(rule.id, { name: e.target.value })}
+                  />
+                  <Switch
+                    className="shrink-0 sm:mt-0"
+                    checked={rule.enabled}
+                    onCheckedChange={(checked) => crm.updateAutomationRule(rule.id, { enabled: checked })}
+                  />
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div>
@@ -145,7 +153,7 @@ export function AdminOperationsPage() {
           <CardContent className="space-y-2">
             <p className="m-0 text-sm"><strong>Mensagens em processamento:</strong> {crm.queueJobs.length}</p>
             <p className="m-0 text-sm"><strong>Registros de atividade:</strong> {crm.auditTotal}</p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" disabled={isRefreshingQueue} onClick={() => void handleRefreshQueue()}>
                 {isRefreshingQueue ? 'Atualizando fila...' : 'Atualizar fila'}
               </Button>

@@ -73,9 +73,11 @@ export function MetricsPage() {
                   <Input
                     value={metric.label}
                     onChange={(event) => crm.updateMetric(metric.id, { label: event.target.value })}
-                    className="max-w-[14rem] font-medium"
+                    className="min-w-0 w-full flex-1 font-medium sm:max-w-[14rem]"
                   />
-                  <span className="text-lg font-semibold tabular-nums">{formatMetricValue(metric.value, metric.unit)}</span>
+                  <span className="shrink-0 text-base font-semibold tabular-nums sm:text-lg">
+                    {formatMetricValue(metric.value, metric.unit)}
+                  </span>
                 </CardHeader>
                 <CardContent className="grid gap-4">
                   <div className="h-3 w-full overflow-hidden rounded-full bg-muted relative">

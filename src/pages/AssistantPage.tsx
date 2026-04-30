@@ -109,8 +109,8 @@ export function AssistantPage() {
         </PageHelp>
       }
     >
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,19rem)_1fr]">
-        <div className="flex flex-col gap-4">
+      <div className="grid min-h-0 min-w-0 gap-6 lg:grid-cols-[minmax(0,19rem)_1fr]">
+        <div className="flex min-w-0 flex-col gap-4">
           <Card className="h-fit border-border shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Contexto</CardTitle>
@@ -165,7 +165,7 @@ export function AssistantPage() {
                 {threads.length === 0 ? (
                   <p className="m-0 text-xs text-muted-foreground">Ainda não há conversas salvas.</p>
                 ) : (
-                  <ScrollArea className="h-[min(20rem,40vh)] pr-2">
+                  <ScrollArea className="h-[min(16rem,min(42dvh,50svh))] pr-2 sm:h-[min(20rem,40vh)]">
                     <ul className="m-0 list-none space-y-1 p-0">
                       {threads.map((t) => {
                         const active = threadIdParam === t.id
@@ -208,13 +208,15 @@ export function AssistantPage() {
           ) : null}
         </div>
 
-        <CrmAssistantChat
-          dataMode={crm.dataMode}
-          context={context}
-          activeThreadId={threadIdParam}
-          onActiveThreadChange={setThreadId}
-          onThreadListInvalidate={reloadThreads}
-        />
+        <div className="min-h-0 min-w-0">
+          <CrmAssistantChat
+            dataMode={crm.dataMode}
+            context={context}
+            activeThreadId={threadIdParam}
+            onActiveThreadChange={setThreadId}
+            onThreadListInvalidate={reloadThreads}
+          />
+        </div>
       </div>
     </AppLayout>
   )
