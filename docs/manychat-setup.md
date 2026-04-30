@@ -211,7 +211,8 @@ No CRM, **Ferramentas** → origem **ManyChat / Instagram (IA)** permite simular
 ## 5. Referência técnica
 
 - Contrato HTTP completo: [crm-external-http-api.md](crm-external-http-api.md)  
-- n8n como orquestrador + CRM como tools: [n8n-crm-tools.md](n8n-crm-tools.md)  
+- n8n — workbook com URL Supabase e nós prontos: [n8n-workbook-crm-ready.md](n8n-workbook-crm-ready.md)  
+- n8n como orquestrador + CRM como tools (visão): [n8n-crm-tools.md](n8n-crm-tools.md)  
 - Mapa do fluxo FIXED (referência): [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md)  
 
 Se o ManyChat mostrar erros **401**, verifica o header `x-manychat-crm-secret`. Erros **500** → logs em **Supabase → Edge Functions → crm-manychat-webhook → Logs**.

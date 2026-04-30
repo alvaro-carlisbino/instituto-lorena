@@ -1,5 +1,7 @@
 # Tools HTTP do CRM para o n8n (ManyChat + Z.ai no n8n)
 
+**Workbook passo-a-passo (URLs prontas, nós, JSON copy-paste):** [n8n-workbook-crm-ready.md](n8n-workbook-crm-ready.md)
+
 Este guia descreve como usar o **n8n** como orquestrador (debounce, AI Agent com **Z.ai**, ramos ManyChat) e o **Supabase** como **fonte de verdade** do lead e do histórico (`interactions`), sem depender da IA automática da Edge.
 
 **URL base:** `https://<SUPABASE_PROJECT_REF>.supabase.co/functions/v1/crm-manychat-webhook`
