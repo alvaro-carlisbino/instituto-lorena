@@ -54,7 +54,13 @@ const GLM_MODEL_IDS = [
 const ALLOWED_MODELS = new Set<string>([...GLM_MODEL_IDS])
 
 function zaiApiRootFromEnv(): string {
-  return (Deno.env.get('ZAI_API_BASE') ?? 'https://api.z.ai/api/paas/v4').trim().replace(/\/$/, '')
+  const envBase = (Deno.env.get('ZAI_API_BASE') ?? '').trim().replace(/\/$/, '')
+  // Se o usuário quer usar o saldo (pay-as-you-go), o endpoint deve ser /paas/v4.
+  // Se o secret estiver vazio ou ainda apontar para /coding/, forçamos o endpoint de saldo.
+  if (!envBase || envBase.includes('/coding/')) {
+    return 'https://api.z.ai/api/paas/v4'
+  }
+  return envBase
 }
 
 /** Alguns clientes usam zai-coding-plan/glm-*; a REST Z.ai espera só glm-*. */
