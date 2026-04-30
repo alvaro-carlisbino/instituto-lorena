@@ -54,13 +54,15 @@ A função antiga `user-ai-assistant` foi substituída por esta. Integrações f
 
 ## Canais Meta (oficial) via ManyChat
 
-**Recomendação de produto:** usar o **ManyChat** como camada “oficial” para Instagram (e, quando aplicável, WhatsApp ligado ao ManyChat), porque o ManyChat já fala com as APIs da Meta do lado deles, com automação, fluxos e compliance em curso. O CRM recebe eventos por HTTPS (`crm-manychat-webhook`), aplica a mesma IA e histórico, e devolve `reply` para o ManyChat enviar ao utilizador.
+**Operação sem n8n:** o **ManyChat** fala com a Meta (Instagram, etc.); o **CRM** (Supabase) recebe cada mensagem por HTTPS, grava lead + histórico e gera a resposta da IA no **Edge** (`crm-ai-assistant` + Z.ai). O ManyChat só precisa de **External Request** + passo que envia o campo **`reply`** ao cliente.
 
-- Edge Function **`crm-manychat-webhook`**: ManyChat (External Request / n8n) envia `subscriber_id`, `text`, opcionalmente `phone`; resposta JSON inclui **`reply`** para o passo seguinte do fluxo ManyChat.
-- Secret: **`MANYCHAT_CRM_SECRET`** (header `x-manychat-crm-secret`).
+**Recomendação de produto:** ManyChat como camada “oficial” para Instagram (e WhatsApp se esse número estiver no ManyChat em paralelo à linha Evolution do CRM).
+
+- Edge Function **`crm-manychat-webhook`**: ManyChat **External Request** com `subscriber_id`, `text`, opcionalmente `phone`; resposta JSON com **`reply`** e `handoff_suggested`.
+- Secrets: **`MANYCHAT_CRM_SECRET`**, **`CRM_AI_INTERNAL_SECRET`**, **`ZAI_API_KEY`** (ver [docs/manychat-setup.md](docs/manychat-setup.md)).
 - Contratos: [docs/crm-external-http-api.md](docs/crm-external-http-api.md).
-- Migração do fluxo n8n (OpenAI → CRM): [docs/n8n-crm-manychat-bridge.md](docs/n8n-crm-manychat-bridge.md) e export em [integrations/n8n/](integrations/n8n/).
-- **Passo a passo no ManyChat** (External Request, secrets, checklist): [docs/manychat-setup.md](docs/manychat-setup.md).
+- **Passo a passo ManyChat + CRM:** [docs/manychat-setup.md](docs/manychat-setup.md).
+- Legado (export n8n / guia de migração antigo): [integrations/n8n/](integrations/n8n/), [docs/n8n-crm-manychat-bridge.md](docs/n8n-crm-manychat-bridge.md) — **não** necessário para o arranque atual.
 
 ## WhatsApp (linha técnica no CRM: Evolution ou Meta Cloud direto)
 
@@ -78,7 +80,7 @@ Defina no Supabase:
 - `WHATSAPP_PROVIDER` (`evolution` por padrão)
 - Evolution: `EVOLUTION_API_BASE`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`, `EVOLUTION_WEBHOOK_SECRET` (opcional)
 - Meta Cloud **direto** no CRM (`WHATSAPP_PROVIDER=official`, sem ManyChat neste leg): `WHATSAPP_CLOUD_APP_SECRET`, `WHATSAPP_CLOUD_ACCESS_TOKEN`, `WHATSAPP_CLOUD_PHONE_NUMBER_ID`, `WHATSAPP_CLOUD_VERIFY_TOKEN`, opcional `WHATSAPP_CLOUD_API_VERSION`
-- `MANYCHAT_CRM_SECRET` (ManyChat / n8n → `crm-manychat-webhook` — **caminho preferido para canais Meta “oficiais” via ManyChat**)
+- `MANYCHAT_CRM_SECRET` (ManyChat → `crm-manychat-webhook` — **canais Meta “oficiais” via ManyChat, sem n8n**)
 - `CRM_AI_INTERNAL_SECRET` (≥16 caracteres): `crm-manychat-webhook` / WhatsApp auto-reply chamam `crm-ai-assistant` com header `x-crm-ai-internal-secret`; sem isto o JSON pode vir com `reply` vazio
 - `CRM_WEBHOOK_SECRET` (webhook genérico `crm-ingest-webhook`)
 - Opcional — `crm-send-message`: `CRM_MANUAL_SEND_MIN_GAP_SECONDS` (segundos entre envios manuais por lead; `0` desativa), `CRM_SEND_MESSAGE_HOURLY_CAP` (máx. de envios WhatsApp contados na última hora antes de 429)

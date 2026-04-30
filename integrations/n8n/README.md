@@ -8,4 +8,4 @@ Esta pasta guarda **exports de referência** dos fluxos n8n usados com ManyChat 
 
 **Segurança:** o JSON do n8n contém IDs de credenciais e metadados da instância; **não** inclui passwords em texto claro, mas não publiques o repositório como público sem rever o export.
 
-**Próximo passo (IA no CRM):** seguir [docs/n8n-crm-manychat-bridge.md](../../docs/n8n-crm-manychat-bridge.md) para substituir o nó **AI Agent** por um pedido HTTP ao `crm-manychat-webhook`, mantendo debounce e envio ManyChat no n8n.
+**Operação actual:** IA e histórico no CRM **sem** n8n — ver [docs/manychat-setup.md](../../docs/manychat-setup.md). O guia [docs/n8n-crm-manychat-bridge.md](../../docs/n8n-crm-manychat-bridge.md) descreve a migração a partir deste export se ainda usares n8n noutro ambiente.

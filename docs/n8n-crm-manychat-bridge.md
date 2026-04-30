@@ -1,6 +1,10 @@
 # n8n + CRM: migrar a triagem IA para o Supabase
 
-O export [integrations/n8n/workflows/Instituto_Lorena_Visentainer_FIXED.json](../integrations/n8n/workflows/Instituto_Lorena_Visentainer_FIXED.json) faz hoje:
+> **Estado actual do produto:** Instagram + IA correm **só no CRM** (ManyChat → `crm-manychat-webhook` → Supabase / Z.ai). **Não precisas de n8n** para arrancar. Este documento e o JSON em `integrations/n8n/` ficam como **referência de migração** a partir do fluxo antigo.
+
+---
+
+O export [integrations/n8n/workflows/Instituto_Lorena_Visentainer_FIXED.json](../integrations/n8n/workflows/Instituto_Lorena_Visentainer_FIXED.json) fazia:
 
 1. **Webhook** (payload ManyChat: `body.data.id` = subscriber, `body.msg` = texto).
 2. **Debounce** em Postgres (`lorena_debounce`) + espera 6s + “sou o último?” — evita disparar a IA a cada tecla.
@@ -8,7 +12,7 @@ O export [integrations/n8n/workflows/Instituto_Lorena_Visentainer_FIXED.json](..
 4. **AI Agent** (OpenAI `gpt-4o`) + memória `n8n_chat_histories_lorena`.
 5. **Detectar intenção** (`[PRONTO_PARA_CONSULTOR]`) → ramos erro / normal / handoff → **setCustomField** + **sendFlow**.
 
-Faz sentido **manter no n8n** o que é orquestração ManyChat (debounce, flows, custom fields) e **mover para o CRM** a IA + histórico comercial + lead Kanban (já exposto em `crm-manychat-webhook`).
+Se **ainda** usares n8n, faz sentido **manter no n8n** só o que for orquestração extra (debounce, flows) e **mover para o CRM** a IA + histórico + Kanban via `crm-manychat-webhook`. Quem **não** usa n8n faz tudo no ManyChat + Supabase conforme [manychat-setup.md](manychat-setup.md).
 
 ## Arquitetura alvo
 

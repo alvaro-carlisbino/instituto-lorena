@@ -1,4 +1,4 @@
-# APIs HTTP externas (ManyChat, n8n, webhooks CRM)
+# APIs HTTP externas (ManyChat, webhooks CRM; n8n opcional)
 
 Base URL das Edge Functions: `https://<SUPABASE_PROJECT_REF>.supabase.co/functions/v1/<nome-da-função>`
 
@@ -55,9 +55,9 @@ Corpo JSON:
 }
 ```
 
-- `handoff_suggested`: `true` quando a IA sinalizou handoff com `[PRONTO_PARA_CONSULTOR]` (compatível com o fluxo n8n antigo “Detectar intenção”).
-- No n8n: após **HTTP Request**, usar `reply` + `handoff_suggested` nos nós ManyChat existentes. Guia: [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md).
-- Se repetires o mesmo `external_message_id` no modo `message`, a API devolve `status: "already_processed"` e `reply` vazio — usa `action: "ingest"` no fluxo assíncrono ou gera um id único por tentativa (ex. `$execution.id` do n8n).
+- `handoff_suggested`: `true` quando a IA sinalizou handoff com `[PRONTO_PARA_CONSULTOR]` (ramifica no ManyChat).
+- No ManyChat: usar `reply` + `handoff_suggested` no passo seguinte ao External Request.
+- Se repetires o mesmo `external_message_id` no modo `message`, a API devolve `status: "already_processed"` e `reply` vazio — gera um **id único por mensagem** ou usa `action: "ingest"` para cenários especiais (ver §1.3).
 
 ### 1.2 `action: "merge_phone"` — utilizador enviou telefone no Instagram
 
@@ -81,7 +81,7 @@ Corpo JSON:
 
 ### 1.3 `action: "ingest"` — só CRM (sem IA, sem idempotência do fluxo `message`)
 
-Para **Z.ai Coding Plan no n8n** (ou outro motor de IA fora do Supabase): grava lead + mensagem **entrada** no CRM e devolve `leadId` **sem** chamar `crm-ai-assistant` e **sem** usar a fila `webhook_jobs` do modo `message`. Assim evitas `already_processed` ao re-testar com o mesmo `external_message_id` que já foi usado no modo síncrono.
+Para **ingestar só no CRM** sem IA no Supabase (motor de IA externo, testes, ou evitar `already_processed` com o mesmo `external_message_id` do modo `message`): grava lead + mensagem **entrada** e devolve `leadId` **sem** chamar `crm-ai-assistant` e **sem** a idempotência do modo `message`.
 
 ```json
 {
@@ -105,9 +105,9 @@ Para **Z.ai Coding Plan no n8n** (ou outro motor de IA fora do Supabase): grava 
 }
 ```
 
-### 1.4 `action: "record_outbound"` — gravar resposta da IA no CRM (depois do ManyChat / n8n)
+### 1.4 `action: "record_outbound"` — gravar resposta **saída** no CRM (depois do ManyChat)
 
-Depois do n8n correr o modelo (Coding Plan), enviar a mensagem ao cliente via ManyChat (`sendFlow` / custom field) e **registar** a mesma linha no histórico do CRM:
+Depois de enviares a mensagem ao cliente (ManyChat: `sendFlow` / custom field / mensagem directa) e quiseres **espelhar** essa linha no histórico do CRM:
 
 ```json
 {
@@ -138,7 +138,7 @@ Depois do n8n correr o modelo (Coding Plan), enviar a mensagem ao cliente via Ma
 
 ---
 
-## 2. `crm-ingest-webhook` — ingestão genérica (forms, n8n)
+## 2. `crm-ingest-webhook` — ingestão genérica (forms, integrações)
 
 **Header:** `x-webhook-secret` = `CRM_WEBHOOK_SECRET`
 
@@ -173,10 +173,8 @@ Envia texto pela instância WhatsApp (Evolution ou Cloud) associada ao lead. **N
 
 ---
 
-## 4. n8n — padrão recomendado
+## 4. Orquestração externa (opcional — legado n8n)
 
-1. **Webhook** n8n recebe evento (ManyChat, formulário, etc.).
-2. Nó **HTTP Request** para `crm-manychat-webhook` ou `crm-ingest-webhook` com o header de secret correto.
-3. Para ManyChat com IA: usar a resposta `reply` noutro nó HTTP que chama a API do ManyChat para enviar a mensagem ao utilizador (se não enviares só pelo fluxo ManyChat com o valor devolvido).
+O arranque **atual** é **ManyChat → `crm-manychat-webhook` direto** (sem n8n). Se ainda tiveres **n8n** à frente (formulários, debounce antigo, outras integrações), o padrão é: webhook n8n → **HTTP Request** a `crm-manychat-webhook` ou `crm-ingest-webhook` com o secret correto → usar `reply` nos nós ManyChat seguintes. Ver [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md) só como referência de migração.
 
 Limites de taxa de IA automática contam em conjunto `whatsapp-webhook` + `manychat-webhook` (`max_ai_replies_per_hour` em `crm_ai_configs`).

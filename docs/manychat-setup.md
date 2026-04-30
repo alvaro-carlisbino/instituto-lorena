@@ -24,13 +24,13 @@ Dashboard Supabase deste projeto: `https://supabase.com/dashboard/project/fgyfpm
 
 Sem `MANYCHAT_CRM_SECRET`, a função responde `401 unauthorized`.
 
-Sem `CRM_AI_INTERNAL_SECRET` válido (≥16 caracteres) nas Edge Functions, o pedido pode devolver `200` com **`reply` vazio**: o webhook chama `crm-ai-assistant`, que até aqui só aceitava JWT de utilizador. Depois de definires o secret, faz **deploy** de `crm-ai-assistant` e `crm-manychat-webhook` (o bundle partilha o código).
+Sem `CRM_AI_INTERNAL_SECRET` válido (≥16 caracteres) nas Edge Functions, o pedido pode devolver `200` com **`reply` vazio** (a chamada interna ao `crm-ai-assistant` falha). Define o secret e faz **deploy** de `crm-ai-assistant` e `crm-manychat-webhook` quando alterares código ou secrets.
 
 ---
 
 ## 2. No ManyChat — fluxo geral
 
-Objetivo: quando o utilizador enviar mensagem (Instagram), o ManyChat faz um **External Request** ao CRM, recebe JSON com `reply` (e opcionalmente `handoff_suggested`) e no passo seguinte **envia essa resposta** na conversa (texto ou custom field + flow, como já fazias com n8n).
+Objetivo: quando o utilizador enviar mensagem (Instagram), o ManyChat faz um **External Request** ao CRM (Supabase), recebe JSON com `reply` (e opcionalmente `handoff_suggested`) e no passo seguinte **envia essa resposta** na conversa (mensagem direta ou custom field + flow no próprio ManyChat). **Sem n8n** no meio.
 
 ### 2.1 Criar ou editar um Automation / Flow
 
@@ -84,26 +84,22 @@ A resposta HTTP 200 é JSON, por exemplo:
 No ManyChat:
 
 1. **Send Message** (ou **Reply**) — corpo da mensagem = campo **`reply`** da resposta (no mapeamento do External Request costuma aparecer como corpo JSON parseado; se vier string bruta, usa um passo “Set Custom Field” intermédio).
-2. Se usas **Custom Field** + **Flow** para publicar (como no n8n antigo): grava `reply` no custom field e dispara o **Flow** que lê esse campo.
-3. **`handoff_suggested`** = `true` → podes ramificar para “notificar consultor”, “tag”, “outro flow”, etc. (substitui a lógica da tag `[PRONTO_PARA_CONSULTOR]` no n8n; o CRM já remove a tag do texto em `reply`).
+2. Se usas **Custom Field** + **Flow** para publicar: grava `reply` no custom field e dispara o **Flow** que lê esse campo.
+3. **`handoff_suggested`** = `true` → ramifica no ManyChat (notificar consultor, tag, outro flow, etc.). O CRM remove a marca `[PRONTO_PARA_CONSULTOR]` do texto em `reply` antes de devolver.
 
 ### 2.4 Debounce (várias mensagens seguidas)
 
-O CRM **não** replica o wait de 6s do n8n. Opções:
+O CRM **não** inclui debounce de 6s (isso era padrão antigo com orquestrador externo). Opções:
 
-- Configurar no ManyChat um **Smart Delay** ou só disparar o External Request quando o utilizador “parar” (regra de negócio no fluxo), ou
-- Aceitar uma chamada por mensagem (cada uma com `external_message_id` diferente).
+- Configurar no ManyChat um **Smart Delay** ou só disparar o External Request quando o utilizador “parar”, ou
+- Uma chamada por mensagem com `external_message_id` estável e único por mensagem.
 
-### 2.5 Z.ai **Coding Plan** no n8n (recomendado se a IA no Supabase não for opção)
+### 2.5 IA **só no CRM** (recomendado — sem n8n)
 
-O modelo no **Coding Plan** da Z.ai corre melhor **no n8n** (ou noutro worker) do que dentro da Edge Function. O padrão é o mesmo que já usavas: **ManyChat → n8n → IA → custom field + `sendFlow` / API ManyChat** para enviar ao Instagram.
+- Corpo **sem** `action` (ou `"action": "message"`): o ManyChat envia `subscriber_id` + `text` → `crm-manychat-webhook` cria/atualiza o lead, grava a interação e chama **`crm-ai-assistant`** no Supabase (Z.ai com `ZAI_API_KEY`). A resposta traz **`reply`** para o passo seguinte no ManyChat.
+- Secrets: `MANYCHAT_CRM_SECRET`, `CRM_AI_INTERNAL_SECRET`, `ZAI_API_KEY` (e, se precisares, `ZAI_API_BASE` / modelo — ver [README](../README.md) sobre **pay-as-you-go** `…/paas/v4` vs endpoint **Coding** `…/coding/…` no Edge).
 
-1. **ManyChat** (após debounce, se quiseres) chama o CRM com **`"action": "ingest"`** — grava lead + mensagem de entrada, resposta imediata com `leadId` (sem `reply` de IA, sem bloqueio `already_processed` do modo `message`).
-2. **n8n**: nó **Z.ai** (Coding Plan) ou HTTP à API Z.ai com o contexto que montares (incluindo histórico do CRM se fizeres outro GET, ou só o texto atual).
-3. **ManyChat**: gravar o texto da IA num **custom field** e executar **Send Flow** (ou o endpoint HTTP da ManyChat que já usas no fluxo antigo) para o subscriber receber a mensagem.
-4. **n8n** (opcional mas recomendado): segundo HTTP ao CRM com **`"action": "record_outbound"`** e o mesmo `subscriber_id` + campo **`reply`** com o texto enviado ao cliente — o histórico **saída** fica igual no painel do CRM.
-
-Contrato: [crm-external-http-api.md](crm-external-http-api.md) (secções 1.3 e 1.4). Detalhe do fluxo n8n: [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md).
+Ações opcionais **`ingest`** e **`record_outbound`** continuam disponíveis para testes, reenvio manual ou integrações à parte — **não** são necessárias para o fluxo principal ManyChat + IA no CRM. Contrato: [crm-external-http-api.md](crm-external-http-api.md) §1.3–1.4.
 
 ### 2.6 Resposta **manual** da equipa (Instagram) — mesmo esquema que `sendFlow`
 
@@ -112,7 +108,7 @@ O botão **Enviar** do CRM chama `crm-send-message`, que fala com **Evolution / 
 Para o operador responder no **Instagram** como já fazias:
 
 1. No **ManyChat**, define um **custom field** (ex. `crm_outbound_text`) e um **Flow** “enviar mensagem de texto” que lê esse campo e envia ao subscriber.
-2. No CRM/n8n, quando o texto estiver pronto: **HTTP** à API ManyChat que **preenche o custom field** e dispara **Send Flow** / execução manual do flow (o mesmo padrão do `sendFlow` com variável).
+2. Quando o texto estiver pronto (CRM ou operador): **HTTP** à API ManyChat que **preenche o custom field** e dispara **Send Flow** / execução do flow (variável + `sendFlow`).
 3. **Registar no CRM** com `POST` a `crm-manychat-webhook`, `"action": "record_outbound"`, `subscriber_id` + `reply` com o texto enviado (ver §1.4 em [crm-external-http-api.md](crm-external-http-api.md)).
 
 Assim o histórico no painel fica alinhado com o que o cliente recebeu no DM, **sem** passar por `crm-send-message`.
@@ -133,13 +129,13 @@ No CRM, **Ferramentas** → origem **ManyChat / Instagram (IA)** permite simular
 - [ ] Body JSON com `subscriber_id` e `text`  
 - [ ] Passo ManyChat a enviar `reply` ao utilizador  
 - [ ] (Opcional) Ramo se `handoff_suggested` for true  
-- [ ] Prompt de triagem no **Dashboard Supabase** → tabela `crm_ai_configs` (`system_prompt`), alinhado ao que tinhas no n8n  
+- [ ] Prompt de triagem no **Dashboard Supabase** → tabela `crm_ai_configs` (`system_prompt`)  
 
 ---
 
 ## 5. Referência técnica
 
 - Contrato HTTP completo: [crm-external-http-api.md](crm-external-http-api.md)  
-- Arquitetura ManyChat vs n8n: [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md)  
+- Legado / migração a partir de n8n (opcional): [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md)  
 
 Se o ManyChat mostrar erros **401**, verifica o header `x-manychat-crm-secret`. Erros **500** → logs em **Supabase → Edge Functions → crm-manychat-webhook → Logs**.
