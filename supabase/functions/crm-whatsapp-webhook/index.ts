@@ -6,7 +6,8 @@ import {
   upsertConversationStateInboundOnly,
 } from '../_shared/crmAiAutoReply.ts'
 import { enrichInboundWhatsappMediaAndAppendContext } from '../_shared/crmMediaEnrichment.ts'
-import { insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
+import { findSyntheticInstagramLeadByName, insertInteraction, mergeLeadDropIntoKeep, upsertLeadByPhone } from '../_shared/crm.ts'
+import { WA_INSTAGRAM_MERGE_NOTICE_CONTENT } from '../_shared/waInstagramMergeNotice.ts'
 import { getWhatsappProviderFromEnv } from '../_shared/whatsapp/provider.ts'
 import { getWhatsappProviderForEvent, resolveWhatsappInstanceRowForProvider } from '../_shared/whatsapp/evolutionConfig.ts'
 
@@ -190,7 +191,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    const lead = await upsertLeadByPhone(admin, {
+    let lead = await upsertLeadByPhone(admin, {
       patientName: normalized.fromName,
       phone: normalized.fromPhone,
       summary: normalized.text.slice(0, 500),
@@ -201,6 +202,38 @@ Deno.serve(async (req) => {
         externalMessageId: normalized.externalMessageId,
       },
     })
+
+    // Cross-channel merge: WhatsApp message from someone already known via Instagram
+    // (their lead has a synthetic phone 888001... — no phone match possible until now)
+    if (lead.status === 'created' && normalized.fromName) {
+      const instagramLeadId = await findSyntheticInstagramLeadByName(admin, normalized.fromName)
+      if (instagramLeadId) {
+        // Keep Instagram lead (full history + subscriber_id), drop the new WhatsApp lead
+        await mergeLeadDropIntoKeep(admin, instagramLeadId, lead.leadId)
+        // Promote the Instagram lead with real phone + WhatsApp instance
+        const realPhone = String(normalized.fromPhone ?? '').replace(/\D/g, '')
+        await admin
+          .from('leads')
+          .update({
+            phone: realPhone,
+            source: 'whatsapp',
+            ...(wInstanceId ? { whatsapp_instance_id: wInstanceId } : {}),
+          })
+          .eq('id', instagramLeadId)
+        try {
+          await insertInteraction(admin, {
+            leadId: instagramLeadId,
+            patientName: normalized.fromName,
+            channel: 'system',
+            direction: 'system',
+            author: 'CRM',
+            content: WA_INSTAGRAM_MERGE_NOTICE_CONTENT,
+            happenedAt: new Date().toISOString(),
+          })
+        } catch { /* ignore */ }
+        lead = { leadId: instagramLeadId, status: 'updated' }
+      }
+    }
 
     const inboundInteractionId = await insertInteraction(admin, {
       leadId: lead.leadId,

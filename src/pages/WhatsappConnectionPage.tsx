@@ -15,6 +15,7 @@ import { pageQuietCardClass } from '@/components/page/PageSection'
 import { evolutionConnectionAction, evolutionInstanceLifecycle } from '@/services/evolutionConnection'
 import { cn } from '@/lib/utils'
 import {
+  configureEvolutionWebhook,
   deleteWhatsappChannelInstance,
   fetchWhatsappChannelInstances,
   upsertWhatsappChannelInstance,
@@ -73,6 +74,7 @@ export function WhatsappConnectionPage() {
   const [savingInstance, setSavingInstance] = useState(false)
   const [removingInstance, setRemovingInstance] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
+  const [configuringWebhook, setConfiguringWebhook] = useState(false)
   const [loadingAction, setLoadingAction] = useState<ConnectionAction | null>(null)
   const [routeDraft, setRouteDraft] = useState<Record<string, WhatsappChannelInstance>>({})
   const [savingRouteId, setSavingRouteId] = useState<string | null>(null)
@@ -204,6 +206,10 @@ export function WhatsappConnectionPage() {
       await loadInstances()
       setSelectedInstanceId(id)
       toast.success('Número criado. Abaixo, peça o código QR e conecte o celular.')
+      // Auto-register the webhook so messages arrive immediately
+      configureEvolutionWebhook(id).then((wh) => {
+        if (!wh.ok) toast.warning(`Número criado, mas o webhook não foi registado automaticamente: ${wh.message}. Use o botão "Registar Webhook" na área de conexão.`)
+      }).catch(() => { /* silent */ })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao salvar.')
     } finally {
@@ -237,6 +243,10 @@ export function WhatsappConnectionPage() {
       await loadInstances()
       setSelectedInstanceId(id)
       toast.success('Linha associada. Use os botões de QR se precisar de ligação.')
+      // Auto-register the webhook so messages arrive immediately
+      configureEvolutionWebhook(id).then((wh) => {
+        if (!wh.ok) toast.warning(`Linha salva, mas o webhook não foi registado automaticamente: ${wh.message}. Use o botão "Registar Webhook" na área de conexão.`)
+      }).catch(() => { /* silent */ })
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao salvar.')
     } finally {
@@ -269,6 +279,26 @@ export function WhatsappConnectionPage() {
       toast.error(e instanceof Error ? e.message : 'Falha ao remover.')
     } finally {
       setRemovingInstance(false)
+    }
+  }
+
+  const handleConfigureWebhook = async () => {
+    if (!selectedInstanceId) {
+      toast.error('Selecione um telefone primeiro.')
+      return
+    }
+    setConfiguringWebhook(true)
+    try {
+      const res = await configureEvolutionWebhook(selectedInstanceId)
+      if (res.ok) {
+        toast.success(res.message || 'Webhook configurado! Mensagens novas já chegam ao CRM.')
+      } else {
+        toast.error(res.message || 'Falha ao configurar o webhook. Verifique os logs.')
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro inesperado.')
+    } finally {
+      setConfiguringWebhook(false)
     }
   }
 
@@ -651,6 +681,15 @@ export function WhatsappConnectionPage() {
                 onClick={() => void runAction('restart', 'Serviço de WhatsApp reiniciado. Verifique a ligação.')}
               >
                 Reiniciar a ligação
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isBusy || configuringWebhook}
+                onClick={() => void handleConfigureWebhook()}
+                className="border-blue-300 text-blue-700 hover:bg-blue-50"
+              >
+                {configuringWebhook ? 'Registando…' : 'Registar Webhook'}
               </Button>
               <Button
                 type="button"

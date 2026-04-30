@@ -110,9 +110,12 @@ export function ChatWorkspacePage() {
   }, [dataMode, refreshChatFromSupabase])
 
   return (
-    <AppLayout title="Conversas">
-      <div className="flex min-h-0 w-full max-h-[min(calc(100dvh-10rem),920px)] flex-1 basis-0 flex-col gap-3 overflow-hidden sm:gap-4 lg:flex-row lg:items-stretch lg:gap-4 lg:max-h-[min(calc(100dvh-9rem),960px)]">
-        <Card className="flex max-h-[min(30vh,220px)] min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none sm:max-h-[min(32vh,240px)] lg:h-full lg:max-h-none lg:w-[min(260px,34vw)] lg:max-w-[300px] xl:w-[min(300px,28vw)]">
+    <AppLayout title="Conversas" mainClassName="py-2 sm:py-3 space-y-0 lg:pb-4">
+      <div className="flex w-full min-h-0 flex-col gap-3 lg:flex-row lg:items-stretch lg:gap-4" style={{ height: 'calc(100dvh - 10rem)', maxHeight: '920px' }}>
+        <Card className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none
+          max-h-[min(28vh,200px)] sm:max-h-[min(32vh,240px)]
+          lg:h-full lg:max-h-none lg:w-[min(260px,32vw)] lg:max-w-[280px]
+          xl:w-[min(300px,26vw)] xl:max-w-[300px] w-full min-h-0">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
             <div className="flex items-baseline justify-between gap-2">
               <CardTitle className="m-0 text-sm font-semibold">Lista</CardTitle>
@@ -169,7 +172,7 @@ export function ChatWorkspacePage() {
 
         <Card className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none lg:h-full lg:min-h-0">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
               <div className="min-w-0 flex-1 overflow-hidden">
                 <CardTitle className="text-base font-semibold sm:text-lg" aria-live="polite">
                   {activeLead?.patientName ?? 'Sem conversa selecionada'}
@@ -228,7 +231,7 @@ export function ChatWorkspacePage() {
                   </>
                 ) : null}
               </div>
-              <div className="flex w-full max-w-full shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:max-w-[min(100%,28rem)]">
+              <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:max-w-none lg:max-w-[min(100%,26rem)]">
                 {activeLead ? (
                   <Link
                     to={`/leads?leadId=${encodeURIComponent(activeLead.id)}`}
@@ -255,7 +258,9 @@ export function ChatWorkspacePage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden bg-muted/25 p-2 sm:p-3 dark:bg-background/80">
+          <CardContent className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden bg-muted/25 p-2 sm:p-3 dark:bg-background/80"
+            style={{ minHeight: 'min(52dvh, 24rem)' }}
+          >
             {activeLead ? (
               <LeadChatThread
                 leadId={activeLead.id}

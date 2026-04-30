@@ -11,9 +11,10 @@ type Props = {
   subtitle?: string
   actions?: ReactNode
   children: ReactNode
+  mainClassName?: string
 }
 
-export function AppLayout({ title, subtitle, actions, children }: Props) {
+export function AppLayout({ title, subtitle, actions, children, mainClassName }: Props) {
   const location = useLocation()
   const [scrolled, setScrolled] = useState(false)
   const titleId = useId()
@@ -49,7 +50,10 @@ export function AppLayout({ title, subtitle, actions, children }: Props) {
       <main
         id="main-content"
         aria-labelledby={titleId}
-        className="mx-auto flex min-h-0 w-full max-w-[min(100%,1800px)] min-w-0 flex-1 flex-col space-y-5 px-4 py-5 sm:space-y-6 sm:px-6 sm:py-6 lg:px-8 relative"
+        className={cn(
+          "mx-auto flex min-h-0 w-full max-w-[min(100%,1800px)] min-w-0 flex-1 flex-col space-y-5 px-4 py-5 sm:space-y-6 sm:px-6 sm:py-6 lg:px-8 relative",
+          mainClassName
+        )}
       >
         {children}
       </main>

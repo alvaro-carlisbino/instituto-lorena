@@ -1,10 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CalendarPlus } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { ScheduleAppointmentDialog } from '@/components/leads/ScheduleAppointmentDialog'
 import { useCrm } from '@/context/CrmContext'
+import {
+  isWaInstagramMergeNotice,
+  tryConsumeWaInstagramMergeToast,
+} from '@/lib/waInstagramMergeNotice'
 import { cn } from '@/lib/utils'
 import type { Interaction } from '@/mocks/crmMock'
 
@@ -36,10 +42,21 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
     const list = [...history].sort(
       (a, b) => new Date(a.happenedAt).getTime() - new Date(b.happenedAt).getTime(),
     )
-    if (filter === 'whatsapp') return list.filter((m) => m.channel === 'whatsapp')
-    if (filter === 'meta') return list.filter((m) => m.channel === 'meta')
-    return list
+    const withoutMergeNoise = list.filter((m) => !isWaInstagramMergeNotice(m))
+    if (filter === 'whatsapp') return withoutMergeNoise.filter((m) => m.channel === 'whatsapp')
+    if (filter === 'meta') return withoutMergeNoise.filter((m) => m.channel === 'meta')
+    return withoutMergeNoise
   }, [history, filter])
+
+  const hasWaInstagramMerge = useMemo(() => history.some(isWaInstagramMergeNotice), [history])
+
+  useEffect(() => {
+    for (const row of history) {
+      if (!isWaInstagramMergeNotice(row)) continue
+      if (!tryConsumeWaInstagramMergeToast(row)) continue
+      toast.success('WhatsApp ligado ao Instagram: número real guardado. Já pode responder pelo CRM.')
+    }
+  }, [history])
 
   const isActiveLead = crm.selectedLeadId === leadId
 
@@ -63,13 +80,18 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
 
   return (
     <>
-    <div className="grid h-full min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(min(36dvh,12rem),1fr)_auto] gap-2 overflow-hidden sm:gap-3">
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden sm:gap-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2">
+        {hasWaInstagramMerge ? (
+          <Badge variant="secondary" className="max-w-full shrink truncate rounded-lg px-2 py-1 text-[10px] font-normal sm:text-xs">
+            IG → WhatsApp vinculado
+          </Badge>
+        ) : null}
         <Button
           type="button"
           size="sm"
           variant={filter === 'whatsapp' ? 'default' : 'outline'}
-          className="rounded-lg"
+          className="h-8 rounded-lg px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm"
           onClick={() => setFilter('whatsapp')}
           aria-pressed={filter === 'whatsapp'}
         >
@@ -79,21 +101,21 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
           type="button"
           size="sm"
           variant={filter === 'meta' ? 'default' : 'outline'}
-          className="rounded-lg"
+          className="h-8 rounded-lg px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm"
           onClick={() => setFilter('meta')}
           aria-pressed={filter === 'meta'}
         >
-          Só Instagram / Meta
+          Só Instagram
         </Button>
         <Button
           type="button"
           size="sm"
           variant={filter === 'all' ? 'default' : 'outline'}
-          className="rounded-lg"
+          className="h-8 rounded-lg px-2.5 text-xs sm:h-9 sm:px-3 sm:text-sm"
           onClick={() => setFilter('all')}
           aria-pressed={filter === 'all'}
         >
-          Todas as conversas
+          Todas
         </Button>
       </div>
 
@@ -102,7 +124,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
         aria-live="polite"
         aria-relevant="additions"
         aria-label="Histórico de mensagens"
-        className="min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/35 p-3 shadow-inner dark:bg-[#0b141a]"
+        className="min-h-[min(28dvh,10rem)] flex-1 min-w-0 w-full overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/35 p-3 shadow-inner sm:min-h-0 dark:bg-[#0b141a]"
       >
         <ul className="m-0 flex list-none flex-col gap-2.5 p-0 sm:gap-3">
           {items.length === 0 ? (
@@ -145,7 +167,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
         </ul>
       </div>
 
-      <div className="flex min-h-0 flex-col gap-2">
+      <div className="flex shrink-0 flex-col gap-2">
         {readOnlyInstagramHint && isActiveLead ? (
           <div className="flex max-h-[min(32dvh,10rem)] min-h-0 shrink-0 flex-col gap-1.5 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5 sm:max-h-none sm:px-4">
             <p className="m-0 text-sm font-medium text-foreground">Lead do Instagram</p>
@@ -167,13 +189,13 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
         ) : null}
 
         {canCompose && isActiveLead ? (
-        <div className="flex shrink-0 flex-col gap-2 border-t border-border/70 bg-background/60 pt-2 sm:gap-3 sm:pt-3">
+        <div className="flex shrink-0 flex-col gap-2 border-t border-border/70 bg-background/60 pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-2 sm:gap-3 sm:pb-0 sm:pt-3">
           <label htmlFor={`lead-chat-draft-${leadId}`} className="text-xs font-medium text-muted-foreground sm:text-sm">
             Mensagem para o cliente
           </label>
           <Textarea
             id={`lead-chat-draft-${leadId}`}
-            rows={3}
+            rows={2}
             value={crm.draftMessage}
             onChange={(e) => {
               const val = e.target.value
@@ -183,8 +205,8 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
                 setIsScheduleOpen(true)
               }
             }}
-            placeholder="Digite uma mensagem... (dica: digite /agendar para marcar)"
-            className="min-h-[5.5rem] resize-y rounded-xl border-border/70 bg-background text-base sm:min-h-[6rem]"
+            placeholder="Mensagem..."
+            className="min-h-[3.5rem] resize-none rounded-xl border-border/70 bg-background text-sm [field-sizing:content] sm:min-h-[5rem] sm:text-base sm:resize-y"
           />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
@@ -201,18 +223,23 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
               <span className="text-xs text-muted-foreground">{crm.draftAttachments.length} anexo(s) pronto(s)</span>
             ) : null}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="rounded-xl flex items-center gap-2 h-10 px-3"
+              className="flex h-9 shrink-0 items-center gap-2 rounded-xl px-2.5 sm:h-10 sm:px-3"
               onClick={() => setIsScheduleOpen(true)}
+              title="Agendar consulta"
             >
-              <CalendarPlus className="w-4 h-4 text-primary" />
-              <span className="hidden sm:inline">Agendar</span>
+              <CalendarPlus className="h-4 w-4 text-primary" />
+              <span className="hidden min-[400px]:inline">Agendar</span>
             </Button>
-            <Button type="button" className="rounded-xl h-10 px-6 ml-auto" onClick={() => void crm.sendMessage()}>
+            <Button
+              type="button"
+              className="ml-auto min-h-10 min-w-0 shrink-0 rounded-xl px-5 sm:ml-auto sm:px-6"
+              onClick={() => void crm.sendMessage()}
+            >
               Enviar
             </Button>
           </div>

@@ -437,6 +437,28 @@ export async function insertInteraction(
   return String(data.id)
 }
 
+/**
+ * Finds an existing Instagram lead (synthetic phone prefix 888001) by patient name.
+ * Used for cross-channel merge when a WhatsApp message arrives from someone
+ * already known via Instagram/ManyChat — no phone match is possible until now.
+ */
+export async function findSyntheticInstagramLeadByName(
+  admin: SupabaseClient,
+  patientName: string,
+): Promise<string | null> {
+  const name = (patientName ?? '').trim()
+  if (name.length < 3) return null
+  const { data, error } = await admin
+    .from('leads')
+    .select('id')
+    .ilike('patient_name', name)
+    .like('phone', '888001%')
+    .limit(1)
+    .maybeSingle()
+  if (error || !data) return null
+  return String((data as { id: unknown }).id)
+}
+
 /** Telefone sintético estável para leads só Instagram (ManyChat) até haver telefone real (prefixo 888001). */
 export function syntheticPhoneFromManychatSubscriberId(subscriberId: string): string {
   const raw = String(subscriberId).replace(/\D/g, '')

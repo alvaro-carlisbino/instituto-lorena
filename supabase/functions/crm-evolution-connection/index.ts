@@ -16,6 +16,7 @@ type Action =
   | 'restart'
   | 'create_instance'
   | 'delete_instance'
+  | 'configure_webhook'
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -408,6 +409,53 @@ Deno.serve(async (req) => {
       )
     }
     return json({ ok: true, provider: 'evolution', instance: ename, evolutionDelete: del.data })
+  }
+
+  if (action === 'configure_webhook') {
+    if (!(await callerCanManageUsers(admin!, authData.user.id))) {
+      return json({ error: 'forbidden' }, 403)
+    }
+    // Resolve which evolution instance to configure
+    let targetInstance = defaultInstance
+    if (body.instanceId) {
+      const { data: row } = await userClient
+        .from('whatsapp_channel_instances')
+        .select('evolution_instance_name')
+        .eq('id', String(body.instanceId).trim())
+        .maybeSingle()
+      const n = String((row as { evolution_instance_name?: string } | null)?.evolution_instance_name ?? '').trim()
+      if (n) targetInstance = n
+    }
+    if (!targetInstance) {
+      return json({ ok: false, error: 'missing_instance', message: 'Nenhuma instância identificada.' }, 200)
+    }
+    const webhookUrl = `${env('SUPABASE_URL')}/functions/v1/crm-whatsapp-webhook`
+    const webhookBody = {
+      webhook: {
+        enabled: true,
+        url: webhookUrl,
+        webhook_by_events: false,
+        webhook_base64: false,
+        events: [
+          'MESSAGES_UPSERT',
+          'MESSAGES_UPDATE',
+          'CONNECTION_UPDATE',
+          'SEND_MESSAGE',
+        ],
+      },
+    }
+    const res = await callEvolution(baseUrl, key, `/webhook/set/${encodeURIComponent(targetInstance)}`, 'POST', webhookBody)
+    return json({
+      ok: res.ok,
+      provider: 'evolution',
+      instance: targetInstance,
+      webhook_url: webhookUrl,
+      evolution_status: res.status,
+      evolution_response: res.data,
+      message: res.ok
+        ? `Webhook configurado com sucesso na instância «${targetInstance}».`
+        : `Evolution devolveu ${res.status}. Verifique se a instância existe e a API key está correcta.`,
+    })
   }
 
   let instance = defaultInstance

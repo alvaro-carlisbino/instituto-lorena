@@ -47,7 +47,7 @@ export function WorkspaceLeadSidebar({ lead, history }: Props) {
   const sections = useMemo(() => groupFieldsBySection(sidebarFields), [sidebarFields])
 
   return (
-    <Card className="hidden h-full min-h-0 min-w-0 w-full max-w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none 2xl:flex 2xl:max-w-[min(100%,420px)] 2xl:basis-[min(400px,32vw)]">
+    <Card className="hidden h-full min-h-0 min-w-0 w-full max-w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none xl:flex xl:basis-[min(320px,28vw)] xl:max-w-[360px]">
       <CardHeader className="shrink-0 space-y-2 border-b border-border/20 bg-muted/5 p-3 sm:p-4">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-sm font-semibold leading-tight">Ficha do lead</CardTitle>

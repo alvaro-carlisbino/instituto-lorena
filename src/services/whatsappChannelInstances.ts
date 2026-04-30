@@ -77,3 +77,30 @@ export async function deleteWhatsappChannelInstance(id: string): Promise<void> {
   const { error } = await supabase.from('whatsapp_channel_instances').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }
+
+export type ConfigureWebhookResult = {
+  ok: boolean
+  message: string
+  webhookUrl?: string
+}
+
+/**
+ * Calls Evolution API via the edge function to register the Supabase
+ * webhook URL on the given instance. Requires admin role.
+ */
+export async function configureEvolutionWebhook(instanceId: string): Promise<ConfigureWebhookResult> {
+  if (!supabase) return { ok: false, message: 'Supabase não configurado.' }
+  const { data, error } = await supabase.functions.invoke('crm-evolution-connection', {
+    body: { action: 'configure_webhook', instanceId },
+  })
+  const p = data && typeof data === 'object' ? (data as Record<string, unknown>) : {}
+  if (error && !('ok' in p)) {
+    return { ok: false, message: String(error.message || 'Erro ao configurar webhook.') }
+  }
+  return {
+    ok: p.ok === true,
+    message: String(p.message || (p.ok ? 'Webhook configurado.' : 'Falha na configuração.')),
+    webhookUrl: typeof p.webhook_url === 'string' ? p.webhook_url : undefined,
+  }
+}
+
