@@ -2,7 +2,7 @@
 
 Base URL das Edge Functions: `https://<SUPABASE_PROJECT_REF>.supabase.co/functions/v1/<nome-da-função>`
 
-Todas as respostas são JSON. Erros comuns: `401 unauthorized` (campo opcional **`hint`**: secret não configurado no Supabase, header `x-manychat-crm-secret` em falta, ou valor diferente de `MANYCHAT_CRM_SECRET`), `400 invalid_json` / `missing_*`, `500 processing_failed`.
+Todas as respostas são JSON. Erros comuns: `401 unauthorized` (header `x-manychat-crm-secret` ≠ `MANYCHAT_CRM_SECRET` ou secret vazio no Supabase), `400 invalid_json` / `missing_*`, `500 processing_failed`.
 
 **Canais “oficiais” Meta (Instagram / WhatsApp no ecossistema Meta):** o caminho recomendado é o **ManyChat** (já integrado às APIs da Meta), chamando o CRM com `crm-manychat-webhook`. Assim evitas duplicar webhooks e tokens Meta no Supabase para o que o ManyChat já cobre. A integração **direta** Meta Cloud no CRM (`crm-whatsapp-webhook` com `WHATSAPP_PROVIDER=official`) fica como opção avançada quando precisas de WhatsApp no CRM sem ManyChat nesse leg.
 

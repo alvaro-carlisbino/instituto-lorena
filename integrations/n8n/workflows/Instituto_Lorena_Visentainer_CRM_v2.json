@@ -196,26 +196,6 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://api.manychat.com/fb/sending/sendFlow",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBearerAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($('Montar contexto').item.json.subscriberId) || $('Montar contexto').item.json.subscriberId,\n  flow_ns: 'content20260430143025_638461',\n}) }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
-      "position": [
-        -2944,
-        1072
-      ],
-      "id": "238a948e-ca08-4085-8236-57a95f5a13ed",
-      "name": "Enviar flow ManyChat (fallback)"
-    },
-    {
-      "parameters": {
         "conditions": {
           "options": {
             "caseSensitive": true,
@@ -249,26 +229,6 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://api.manychat.com/fb/sending/sendFlow",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBearerAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($('Montar contexto').item.json.subscriberId) || $('Montar contexto').item.json.subscriberId,\n  flow_ns: 'content20260430143025_638461',\n}) }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
-      "position": [
-        -2944,
-        1264
-      ],
-      "id": "1e97a0b4-bce4-4d2b-924e-3485e00a0518",
-      "name": "Enviar flow ManyChat (normal)"
-    },
-    {
-      "parameters": {
         "jsCode": "// ─── GERAR RESUMO PARA O CONSULTOR ────────────────────────────────────────\n// Monta um briefing estruturado com tudo que foi coletado na conversa.\n\nconst output      = $json.output      || '';\nconst msg         = $json.msg         || '';\nconst fullName    = $json.fullName    || 'Não identificado';\nconst userContext = $json.userContext || '';\nconst subscriberId = $json.subscriberId;\n\nconst now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nconst summary = [\n  '💆 *Instituto Lorena Visentainer — Paciente qualificado para atendimento*',\n  '',\n  `📋 *Cliente:* ${fullName}`,\n  `🕐 *Horário:* ${now}`,\n  `🆔 *Subscriber ID:* ${subscriberId}`,\n  '',\n  `📊 *Dados do perfil:*`,\n  userContext,\n  '',\n  `💬 *Última mensagem do cliente:*`,\n  `\"${msg}\"`,\n  '',\n  `🤖 *Última resposta do assistente:*`,\n  output,\n  '',\n  '✅ *Ação:* O paciente demonstrou interesse concreto no transplante capilar. Por favor, assuma o atendimento.'\n].join('\\n');\n\nreturn [\n  {\n    json: {\n      ...$json,\n      consultorSummary: summary\n    }\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
@@ -279,26 +239,6 @@
       ],
       "id": "421bac41-e4e0-4f09-a463-36eb9dd07e16",
       "name": "Gerar resumo para consultor"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.manychat.com/fb/sending/sendFlow",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBearerAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($('Montar contexto').item.json.subscriberId) || $('Montar contexto').item.json.subscriberId,\n  flow_ns: 'content20260430143025_638461',\n}) }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
-      "position": [
-        -2720,
-        1456
-      ],
-      "id": "464fa120-b8da-460e-a60c-2bce3930ef9b",
-      "name": "Enviar flow ManyChat (handoff)"
     },
     {
       "parameters": {
@@ -318,9 +258,7 @@
         1264
       ],
       "id": "5e7eeb1a-9688-404a-ac5d-7ee01be60eb1",
-      "name": "CRM Ingest",
-      "notesInFlow": true,
-      "notes": "401: credencial Header Auth com Name EXACTAMENTE x-manychat-crm-secret (não Authorization). Value = MANYCHAT_CRM_SECRET no Supabase (sem Bearer). Não mistures com a credencial do Z.ai. Ver resposta HTTP (body JSON hint) após deploy da função."
+      "name": "CRM Ingest"
     },
     {
       "parameters": {
@@ -403,96 +341,6 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.manychat.com/fb/subscriber/setCustomField",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBearerAuth",
-        "sendHeaders": true,
-        "specifyHeaders": "keypair",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($json.subscriberId) || $json.subscriberId,\n  field_id: 14539456,\n  field_value: String($json.output || ''),\n}) }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -3168,
-        1072
-      ],
-      "id": "50fe60b2-b02f-4079-9a61-1f787e9ca9dd",
-      "name": "ManyChat set field (fallback)"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.manychat.com/fb/subscriber/setCustomField",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBearerAuth",
-        "sendHeaders": true,
-        "specifyHeaders": "keypair",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($json.subscriberId) || $json.subscriberId,\n  field_id: 14539456,\n  field_value: String($json.output || ''),\n}) }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -3168,
-        1264
-      ],
-      "id": "1c6673e5-c520-4fc9-968e-da39f4533c46",
-      "name": "ManyChat set field (normal)"
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "https://api.manychat.com/fb/subscriber/setCustomField",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpBearerAuth",
-        "sendHeaders": true,
-        "specifyHeaders": "keypair",
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($json.subscriberId) || $json.subscriberId,\n  field_id: 14539456,\n  field_value: String($json.output || ''),\n}) }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -2944,
-        1456
-      ],
-      "id": "4d922cde-99c0-424e-9889-eb0838f85899",
-      "name": "ManyChat set field (handoff)"
-    },
-    {
-      "parameters": {
-        "method": "POST",
         "url": "https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "httpHeaderAuth",
@@ -549,6 +397,72 @@
       ],
       "id": "5233ed10-c51e-4202-998f-ad1d2aa3102e",
       "name": "CRM record outbound (handoff)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($json.subscriberId) || $json.subscriberId,\n  data: {\n    version: 'v2',\n    content: {\n      messages: [{ type: 'text', text: String($json.output || '').slice(0, 18000) }],\n    },\n  },\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3056,
+        1072
+      ],
+      "id": "4ab8d354-3eb5-40db-865b-ad6972680bc9",
+      "name": "ManyChat enviar DM (fallback)",
+      "notesInFlow": true,
+      "notes": "Um único POST sendContent = uma DM (evita duplicar setCustomField + sendFlow). Se não entregar, reverte para sendFlow no ManyChat."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($json.subscriberId) || $json.subscriberId,\n  data: {\n    version: 'v2',\n    content: {\n      messages: [{ type: 'text', text: String($json.output || '').slice(0, 18000) }],\n    },\n  },\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3056,
+        1264
+      ],
+      "id": "d5cdd9cc-6e89-4cf5-927e-2147089d9594",
+      "name": "ManyChat enviar DM (normal)",
+      "notesInFlow": true,
+      "notes": "Um único POST sendContent = uma DM (evita duplicar setCustomField + sendFlow). Se não entregar, reverte para sendFlow no ManyChat."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  subscriber_id: Number($json.subscriberId) || $json.subscriberId,\n  data: {\n    version: 'v2',\n    content: {\n      messages: [{ type: 'text', text: String($json.output || '').slice(0, 18000) }],\n    },\n  },\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3056,
+        1456
+      ],
+      "id": "c1e67930-1b26-4091-b307-0e6b48c5dc61",
+      "name": "ManyChat enviar DM (handoff)",
+      "notesInFlow": true,
+      "notes": "Um único POST sendContent = uma DM (evita duplicar setCustomField + sendFlow). Se não entregar, reverte para sendFlow no ManyChat."
     }
   ],
   "pinData": {},
@@ -674,7 +588,7 @@
       "main": [
         [
           {
-            "node": "ManyChat set field (fallback)",
+            "node": "ManyChat enviar DM (fallback)",
             "type": "main",
             "index": 0
           }
@@ -692,7 +606,7 @@
         ],
         [
           {
-            "node": "ManyChat set field (normal)",
+            "node": "ManyChat enviar DM (normal)",
             "type": "main",
             "index": 0
           }
@@ -703,7 +617,7 @@
       "main": [
         [
           {
-            "node": "ManyChat set field (handoff)",
+            "node": "ManyChat enviar DM (handoff)",
             "type": "main",
             "index": 0
           }
@@ -776,18 +690,7 @@
         ]
       ]
     },
-    "ManyChat set field (fallback)": {
-      "main": [
-        [
-          {
-            "node": "Enviar flow ManyChat (fallback)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Enviar flow ManyChat (fallback)": {
+    "ManyChat enviar DM (fallback)": {
       "main": [
         [
           {
@@ -798,18 +701,7 @@
         ]
       ]
     },
-    "ManyChat set field (normal)": {
-      "main": [
-        [
-          {
-            "node": "Enviar flow ManyChat (normal)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Enviar flow ManyChat (normal)": {
+    "ManyChat enviar DM (normal)": {
       "main": [
         [
           {
@@ -820,18 +712,7 @@
         ]
       ]
     },
-    "ManyChat set field (handoff)": {
-      "main": [
-        [
-          {
-            "node": "Enviar flow ManyChat (handoff)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Enviar flow ManyChat (handoff)": {
+    "ManyChat enviar DM (handoff)": {
       "main": [
         [
           {
@@ -849,7 +730,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "406680f1-c106-427a-9f05-99912a613f3a",
+  "versionId": "7ba2c4e5-c7fc-4000-8f70-ea3cb2ab69f4",
   "meta": {
     "templateCredsSetupCompleted": false
   },
