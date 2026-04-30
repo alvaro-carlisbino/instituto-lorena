@@ -111,11 +111,11 @@ export function ChatWorkspacePage() {
 
   return (
     <AppLayout title="Conversas" mainClassName="py-2 sm:py-3 space-y-0 lg:pb-4">
-      <div className="flex w-full min-h-0 flex-col gap-3 lg:flex-row lg:items-stretch lg:gap-4" style={{ height: 'calc(100dvh - 10rem)', maxHeight: '920px' }}>
+      <div className="flex w-full min-h-0 flex-1 basis-0 flex-col gap-3 overflow-hidden lg:flex-row lg:items-stretch lg:gap-4" style={{ height: 'calc(100dvh - 10.5rem)', maxHeight: '940px' }}>
         <Card className="flex shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none
           max-h-[min(28vh,200px)] sm:max-h-[min(32vh,240px)]
-          lg:h-full lg:max-h-none lg:w-[min(260px,32vw)] lg:max-w-[280px]
-          xl:w-[min(300px,26vw)] xl:max-w-[300px] w-full min-h-0">
+          lg:h-full lg:max-h-none lg:w-[min(260px,30vw)] lg:max-w-[280px] lg:min-w-[240px]
+          xl:w-[min(300px,24vw)] xl:max-w-[300px] w-full min-h-0">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
             <div className="flex items-baseline justify-between gap-2">
               <CardTitle className="m-0 text-sm font-semibold">Lista</CardTitle>
@@ -170,11 +170,11 @@ export function ChatWorkspacePage() {
           </CardContent>
         </Card>
 
-        <Card className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none lg:h-full lg:min-h-0">
+        <Card className="flex min-h-0 min-w-[320px] flex-[2] basis-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none lg:h-full">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
               <div className="min-w-0 flex-1 overflow-hidden">
-                <CardTitle className="text-base font-semibold sm:text-lg" aria-live="polite">
+                <CardTitle className="truncate text-base font-semibold sm:text-lg" aria-live="polite">
                   {activeLead?.patientName ?? 'Sem conversa selecionada'}
                 </CardTitle>
                 <p className="m-0 text-xs text-muted-foreground sm:text-sm">
