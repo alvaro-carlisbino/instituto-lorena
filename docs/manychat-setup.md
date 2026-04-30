@@ -91,6 +91,23 @@ No ManyChat:
 2. Se usas **Custom Field** + **Flow** para publicar: grava `reply` no custom field e dispara o **Flow** que lê esse campo.
 3. **`handoff_suggested`** = `true` → ramifica no ManyChat (notificar consultor, tag, outro flow, etc.). O CRM remove a marca `[PRONTO_PARA_CONSULTOR]` do texto em `reply` antes de devolver.
 
+#### Exemplo Instituto Lorena — campo **ENVIAR-DM** + Flow (DM ao utilizador)
+
+Valores da conta ManyChat (rever no editor se ManyChat renumerar campos/flows):
+
+| O quê | Valor |
+|--------|--------|
+| **Custom field** (nome) | `ENVIAR-DM` |
+| **Field ID** (API / Set Custom Field) | `14539456` |
+| **Flow** (ID / namespace a disparar depois de preencher o campo) | `content20260430143025_638461` |
+
+**Ordem no automation (após o External Request ao CRM):**
+
+1. **Set Custom Field** (ou “Set Subscriber Custom Field”): campo **14539456** / `ENVIAR-DM` ← valor = **`reply`** vindo do corpo JSON da resposta do `crm-manychat-webhook` (mapeamento do External Request).
+2. **Send Flow** / **Start Flow** / **Execute Flow** (conforme o teu ManyChat): enviar o subscriber para o flow **`content20260430143025_638461`**, que no ManyChat deve estar configurado para **ler o campo `ENVIAR-DM`** e enviar essa mensagem ao utilizador no Instagram.
+
+Sem o passo (1) o flow pode ficar vazio; sem o passo (2) o texto fica no campo mas o cliente não recebe DM.
+
 ### 2.4 Debounce (várias mensagens seguidas)
 
 O CRM **não** inclui debounce de 6s (isso era padrão antigo com orquestrador externo). Opções:
@@ -111,7 +128,7 @@ O botão **Enviar** do CRM chama `crm-send-message`, que fala com **Evolution / 
 
 Para o operador responder no **Instagram** como já fazias:
 
-1. No **ManyChat**, define um **custom field** (ex. `crm_outbound_text`) e um **Flow** “enviar mensagem de texto” que lê esse campo e envia ao subscriber.
+1. No **ManyChat**, podes reutilizar o mesmo campo **`ENVIAR-DM` (14539456)** e o flow **`content20260430143025_638461`** (ver tabela acima), ou outro campo + flow dedicados a mensagens manuais.
 2. Quando o texto estiver pronto (CRM ou operador): **HTTP** à API ManyChat que **preenche o custom field** e dispara **Send Flow** / execução do flow (variável + `sendFlow`).
 3. **Registar no CRM** com `POST` a `crm-manychat-webhook`, `"action": "record_outbound"`, `subscriber_id` + `reply` com o texto enviado (ver §1.4 em [crm-external-http-api.md](crm-external-http-api.md)).
 
@@ -131,7 +148,7 @@ No CRM, **Ferramentas** → origem **ManyChat / Instagram (IA)** permite simular
 - [ ] Mesmo `MANYCHAT_CRM_SECRET` no header ManyChat  
 - [ ] URL correta da função `crm-manychat-webhook`  
 - [ ] Body JSON com `subscriber_id` e `text`  
-- [ ] Passo ManyChat a enviar `reply` ao utilizador  
+- [ ] Depois do External Request: **Set Custom Field** `ENVIAR-DM` (id **14539456**) = `reply`, depois **Send Flow** `content20260430143025_638461`  
 - [ ] (Opcional) Ramo se `handoff_suggested` for true  
 - [ ] Prompt de triagem no **Dashboard Supabase** → tabela `crm_ai_configs` (`system_prompt`)  
 
