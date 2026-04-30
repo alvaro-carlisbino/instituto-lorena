@@ -3,9 +3,16 @@ import {
   evaluateCrmAiAutoReplyGate,
   nowIso,
   runManychatAiAutoReply,
+  stripManychatHandoffMarker,
   upsertConversationStateInboundOnly,
 } from '../_shared/crmAiAutoReply.ts'
-import { insertInteraction, promoteManychatLeadToRealPhone, syntheticPhoneFromManychatSubscriberId, upsertLeadByPhone } from '../_shared/crm.ts'
+import {
+  findLeadIdByManychatSubscriberId,
+  insertInteraction,
+  promoteManychatLeadToRealPhone,
+  syntheticPhoneFromManychatSubscriberId,
+  upsertLeadByPhone,
+} from '../_shared/crm.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -102,13 +109,92 @@ Deno.serve(async (req) => {
   }
 
   const text = String(body.text ?? body.message ?? '').trim()
-  if (!text) return json({ error: 'missing_text' }, 400)
+  const replyOnly = String(body.reply ?? '').trim()
+  if (!text && !(action === 'record_outbound' && replyOnly)) {
+    return json({ error: 'missing_text' }, 400)
+  }
 
   const contextAppend = String(body.context_append ?? body.user_context ?? '').trim()
   const aiInboundUserText = contextAppend ? `${text}\n\n---\n${contextAppend}` : text
 
   const userName = String(body.user_name ?? body.name ?? 'Lead Instagram').trim() || 'Lead Instagram'
   const phoneOpt = String(body.phone ?? '').trim() || undefined
+
+  if (action === 'ingest') {
+    try {
+      const leadId = await ensureManychatLeadId(admin, {
+        subscriberId,
+        userName,
+        text,
+        phone: phoneOpt,
+      })
+      await insertInteraction(admin, {
+        leadId,
+        patientName: userName,
+        channel: 'meta',
+        direction: 'in',
+        author: userName,
+        content: text,
+        happenedAt: nowIso(),
+      })
+      return json({
+        ok: true,
+        leadId,
+        status: 'ingested',
+        reply: '',
+        handoff_suggested: false,
+        routing: 'ingest_only',
+      })
+    } catch (e) {
+      return json(
+        { error: 'ingest_failed', message: e instanceof Error ? e.message : String(e) },
+        500,
+      )
+    }
+  }
+
+  if (action === 'record_outbound') {
+    const leadIdFromBody = String(body.lead_id ?? '').trim()
+    const leadId =
+      leadIdFromBody || (await findLeadIdByManychatSubscriberId(admin, subscriberId))
+    if (!leadId) {
+      return json(
+        {
+          error: 'lead_not_found',
+          message: 'Não existe lead para este subscriber_id. Chame antes action ingest (ou merge_phone).',
+        },
+        400,
+      )
+    }
+    const rawOutbound = String(body.reply ?? body.text ?? '').trim()
+    if (!rawOutbound) return json({ error: 'missing_text' }, 400)
+    const { clean: outboundText, handoffSuggested } = stripManychatHandoffMarker(rawOutbound)
+    const author = String(body.author ?? 'Assistente IA').trim() || 'Assistente IA'
+    try {
+      await insertInteraction(admin, {
+        leadId,
+        patientName: userName,
+        channel: 'meta',
+        direction: 'out',
+        author,
+        content: outboundText || rawOutbound,
+        happenedAt: nowIso(),
+      })
+      return json({
+        ok: true,
+        leadId,
+        status: 'outbound_recorded',
+        handoff_suggested: handoffSuggested,
+        routing: 'record_outbound',
+      })
+    } catch (e) {
+      return json(
+        { error: 'record_outbound_failed', message: e instanceof Error ? e.message : String(e) },
+        500,
+      )
+    }
+  }
+
   const externalMessageId = String(body.external_message_id ?? body.message_id ?? '').trim() ||
     `mc-${subscriberId}-${crypto.randomUUID()}`
 

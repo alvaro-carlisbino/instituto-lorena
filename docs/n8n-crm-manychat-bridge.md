@@ -27,6 +27,34 @@ flowchart LR
   N8 --> MC2
 ```
 
+### Variante: Z.ai **Coding Plan** no n8n (CRM só histórico + lead)
+
+Quando a resposta síncrona `action: message` não serve (ex. **Coding Plan** só no n8n, ou evitar `already_processed` ao reutilizar o mesmo id de teste):
+
+```mermaid
+flowchart LR
+  MC[ManyChat]
+  N8[n8n]
+  CRM1[CRM_ingest]
+  Z[Z.ai_Coding_Plan]
+  MC2[ManyChat_sendFlow]
+  CRM2[CRM_record_outbound]
+
+  MC --> N8
+  N8 -->|POST action ingest| CRM1
+  N8 --> Z
+  Z -->|texto| MC2
+  MC2 --> MC
+  N8 -->|POST action record_outbound| CRM2
+```
+
+1. **HTTP Request** → `crm-manychat-webhook` com `"action":"ingest"`, `subscriber_id`, `user_name`, `text` (mesmo header `x-manychat-crm-secret`).
+2. Nó **Z.ai** (Coding Plan) com o prompt/contexto que já usavas.
+3. **ManyChat**: `setCustomField` + **sendFlow** (ou API dinâmica) com o texto gerado.
+4. **HTTP Request** → `crm-manychat-webhook` com `"action":"record_outbound"`, `subscriber_id`, `reply` (texto enviado), opcional `lead_id` do passo 1.
+
+Contrato: [crm-external-http-api.md](crm-external-http-api.md) §1.3–1.4.
+
 ## 1. System prompt no CRM
 
 Copia o texto longo do **AI Agent** (system message do Instituto Lorena) para o registo **`crm_ai_configs`** (`system_prompt` do id `default`) no Supabase, ou usa `prompt_override` por lead em `crm_conversation_states` quando precisares de exceções.

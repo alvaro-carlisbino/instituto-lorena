@@ -94,6 +94,17 @@ O CRM **não** replica o wait de 6s do n8n. Opções:
 - Configurar no ManyChat um **Smart Delay** ou só disparar o External Request quando o utilizador “parar” (regra de negócio no fluxo), ou
 - Aceitar uma chamada por mensagem (cada uma com `external_message_id` diferente).
 
+### 2.5 Z.ai **Coding Plan** no n8n (recomendado se a IA no Supabase não for opção)
+
+O modelo no **Coding Plan** da Z.ai corre melhor **no n8n** (ou noutro worker) do que dentro da Edge Function. O padrão é o mesmo que já usavas: **ManyChat → n8n → IA → custom field + `sendFlow` / API ManyChat** para enviar ao Instagram.
+
+1. **ManyChat** (após debounce, se quiseres) chama o CRM com **`"action": "ingest"`** — grava lead + mensagem de entrada, resposta imediata com `leadId` (sem `reply` de IA, sem bloqueio `already_processed` do modo `message`).
+2. **n8n**: nó **Z.ai** (Coding Plan) ou HTTP à API Z.ai com o contexto que montares (incluindo histórico do CRM se fizeres outro GET, ou só o texto atual).
+3. **ManyChat**: gravar o texto da IA num **custom field** e executar **Send Flow** (ou o endpoint HTTP da ManyChat que já usas no fluxo antigo) para o subscriber receber a mensagem.
+4. **n8n** (opcional mas recomendado): segundo HTTP ao CRM com **`"action": "record_outbound"`** e o mesmo `subscriber_id` + campo **`reply`** com o texto enviado ao cliente — o histórico **saída** fica igual no painel do CRM.
+
+Contrato: [crm-external-http-api.md](crm-external-http-api.md) (secções 1.3 e 1.4). Detalhe do fluxo n8n: [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md).
+
 ---
 
 ## 3. Testar no Admin Lab (opcional)

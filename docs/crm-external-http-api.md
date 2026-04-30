@@ -57,6 +57,7 @@ Corpo JSON:
 
 - `handoff_suggested`: `true` quando a IA sinalizou handoff com `[PRONTO_PARA_CONSULTOR]` (compatível com o fluxo n8n antigo “Detectar intenção”).
 - No n8n: após **HTTP Request**, usar `reply` + `handoff_suggested` nos nós ManyChat existentes. Guia: [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md).
+- Se repetires o mesmo `external_message_id` no modo `message`, a API devolve `status: "already_processed"` e `reply` vazio — usa `action: "ingest"` no fluxo assíncrono ou gera um id único por tentativa (ex. `$execution.id` do n8n).
 
 ### 1.2 `action: "merge_phone"` — utilizador enviou telefone no Instagram
 
@@ -77,6 +78,63 @@ Corpo JSON:
 ```
 
 `merged: true` quando existia lead sintético ManyChat e um lead distinto com o mesmo telefone — dados foram fundidos no lead do telefone.
+
+### 1.3 `action: "ingest"` — só CRM (sem IA, sem idempotência do fluxo `message`)
+
+Para **Z.ai Coding Plan no n8n** (ou outro motor de IA fora do Supabase): grava lead + mensagem **entrada** no CRM e devolve `leadId` **sem** chamar `crm-ai-assistant` e **sem** usar a fila `webhook_jobs` do modo `message`. Assim evitas `already_processed` ao re-testar com o mesmo `external_message_id` que já foi usado no modo síncrono.
+
+```json
+{
+  "action": "ingest",
+  "subscriber_id": "123456789",
+  "user_name": "Nome no Instagram",
+  "text": "Olá"
+}
+```
+
+**Resposta 200**
+
+```json
+{
+  "ok": true,
+  "leadId": "lead-…",
+  "status": "ingested",
+  "reply": "",
+  "handoff_suggested": false,
+  "routing": "ingest_only"
+}
+```
+
+### 1.4 `action: "record_outbound"` — gravar resposta da IA no CRM (depois do ManyChat / n8n)
+
+Depois do n8n correr o modelo (Coding Plan), enviar a mensagem ao cliente via ManyChat (`sendFlow` / custom field) e **registar** a mesma linha no histórico do CRM:
+
+```json
+{
+  "action": "record_outbound",
+  "subscriber_id": "123456789",
+  "user_name": "Nome no Instagram",
+  "reply": "Texto enviado ao cliente (pode incluir [PRONTO_PARA_CONSULTOR])",
+  "lead_id": "lead-…"
+}
+```
+
+- `reply` ou `text`: corpo gravado como interação **out** (canal `meta`). Preferir `reply` para não confundir com a mensagem do cliente.
+- `lead_id`: opcional; se omitido, resolve pelo `manychat_subscriber_id` no lead.
+
+**Resposta 200**
+
+```json
+{
+  "ok": true,
+  "leadId": "lead-…",
+  "status": "outbound_recorded",
+  "handoff_suggested": false,
+  "routing": "record_outbound"
+}
+```
+
+`handoff_suggested` reflete se o texto continha `[PRONTO_PARA_CONSULTOR]` (removido ao guardar no CRM).
 
 ---
 
