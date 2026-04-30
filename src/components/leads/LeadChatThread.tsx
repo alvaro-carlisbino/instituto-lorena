@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { CalendarPlus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { ScheduleAppointmentDialog } from '@/components/leads/ScheduleAppointmentDialog'
 import { useCrm } from '@/context/CrmContext'
@@ -61,8 +60,8 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2 sm:gap-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         <Button
           type="button"
           size="sm"
@@ -95,48 +94,56 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
         </Button>
       </div>
 
-      <ScrollArea className="min-h-[min(50dvh,24rem)] w-full flex-1 rounded-xl border border-border/70 bg-[#0b141a] p-3 shadow-inner sm:min-h-[min(55dvh,32rem)] md:min-h-0">
-        <ul className="m-0 flex list-none flex-col gap-2 p-0">
+      <div
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label="Histórico de mensagens"
+        className="min-h-[12rem] w-full min-w-0 flex-1 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/35 p-3 shadow-inner sm:min-h-[14rem] dark:bg-[#0b141a]"
+      >
+        <ul className="m-0 flex list-none flex-col gap-2.5 p-0 sm:gap-3">
           {items.length === 0 ? (
-            <li className="text-center text-xs text-white/60">Nenhuma mensagem neste filtro.</li>
+            <li className="rounded-lg border border-dashed border-border/60 bg-background/80 px-3 py-8 text-center text-sm text-muted-foreground">
+              Nenhuma mensagem neste filtro.
+            </li>
           ) : (
             items.map((msg) => {
               const out = msg.direction === 'out'
-              const wa = msg.channel === 'whatsapp'
               return (
                 <li
                   key={msg.id}
                   className={cn(
-                    'flex w-full max-w-[min(100%,28rem)] flex-col gap-0.5 transition-all duration-200 sm:max-w-[min(100%,40rem)] md:max-w-[min(100%,48rem)]',
+                    'flex w-full max-w-full flex-col gap-0.5 sm:max-w-[min(100%,32rem)]',
                     out ? 'ml-auto items-end' : 'mr-auto items-start',
                   )}
                 >
                   <div
                     className={cn(
-                      'rounded-xl px-3 py-2.5 text-sm shadow-sm sm:px-4 sm:text-base',
+                      'max-w-full rounded-xl px-3 py-2.5 text-sm leading-relaxed shadow-sm sm:px-4 sm:text-[0.9375rem]',
                       out
-                        ? 'rounded-tr-none bg-[#005c4b] text-white'
-                        : 'rounded-tl-none bg-[#202c33] text-white/95',
-                      !wa && 'ring-1 ring-white/10',
+                        ? 'rounded-tr-none bg-primary text-primary-foreground'
+                        : 'rounded-tl-none bg-card text-foreground ring-1 ring-border/80 dark:bg-[#202c33] dark:text-white/95 dark:ring-white/10',
                     )}
                   >
-                    <p className="m-0 whitespace-pre-wrap break-words leading-relaxed">{msg.content}</p>
+                    <p className="m-0 max-w-full whitespace-pre-wrap break-words">{msg.content}</p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-1.5 px-0.5 text-[10px] text-white/50">
-                    <span>{msg.author}</span>
+                  <div className="flex max-w-full flex-wrap items-center gap-1.5 px-0.5 text-[10px] text-muted-foreground dark:text-white/55">
+                    <span className="truncate">{msg.author}</span>
                     <span aria-hidden>·</span>
                     <time dateTime={msg.happenedAt}>{new Date(msg.happenedAt).toLocaleString('pt-BR')}</time>
-                    <span className="rounded bg-white/10 px-1 font-medium">{CHANNEL_SHORT[msg.channel] ?? msg.channel}</span>
+                    <span className="rounded bg-muted px-1 font-medium text-foreground/80 dark:bg-white/10 dark:text-white/90">
+                      {CHANNEL_SHORT[msg.channel] ?? msg.channel}
+                    </span>
                   </div>
                 </li>
               )
             })
           )}
         </ul>
-      </ScrollArea>
+      </div>
 
       {canCompose && isActiveLead ? (
-        <div className="flex flex-col gap-2 border-t border-border pt-2 sm:gap-3 sm:pt-3">
+        <div className="flex shrink-0 flex-col gap-2 border-t border-border/70 bg-background/60 pt-2 sm:gap-3 sm:pt-3">
           <label htmlFor={`lead-chat-draft-${leadId}`} className="text-xs font-medium text-muted-foreground sm:text-sm">
             Mensagem para o cliente
           </label>

@@ -104,8 +104,8 @@ export function ChatWorkspacePage() {
 
   return (
     <AppLayout title="Conversas">
-      <div className="flex h-[calc(100dvh-8rem)] w-full flex-col lg:flex-row gap-4">
-        <Card className="flex h-[35vh] lg:h-full lg:w-[320px] xl:w-[380px] shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none">
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-3 sm:gap-4 lg:h-[min(calc(100dvh-10rem),960px)] lg:flex-row lg:items-stretch lg:gap-4">
+        <Card className="flex max-h-[40vh] min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none sm:max-h-[44vh] lg:h-full lg:max-h-none lg:w-[min(260px,34vw)] lg:max-w-[300px] xl:w-[min(300px,28vw)]">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
             <div className="flex items-baseline justify-between gap-2">
               <CardTitle className="m-0 text-sm font-semibold">Lista</CardTitle>
@@ -160,10 +160,10 @@ export function ChatWorkspacePage() {
           </CardContent>
         </Card>
 
-        <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none">
+        <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none">
           <CardHeader className="shrink-0 border-b border-border/20 p-3 sm:p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0 flex-1">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
+              <div className="min-w-0 flex-1 overflow-hidden">
                 <CardTitle className="text-base font-semibold sm:text-lg" aria-live="polite">
                   {activeLead?.patientName ?? 'Sem conversa selecionada'}
                 </CardTitle>
@@ -204,7 +204,7 @@ export function ChatWorkspacePage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex min-h-0 flex-1 flex-col bg-[#f7f9fc] p-2 sm:p-3 dark:bg-background">
+          <CardContent className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-muted/25 p-2 sm:p-3 dark:bg-background/80">
             {activeLead ? (
               <LeadChatThread leadId={activeLead.id} history={activeHistory} canCompose={crm.currentPermission.canRouteLeads} />
             ) : (
