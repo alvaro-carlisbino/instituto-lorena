@@ -16,25 +16,29 @@ const CHANNEL_SHORT: Record<string, string> = {
   ai: 'IA',
 }
 
+type ChatFilter = 'all' | 'whatsapp' | 'meta'
+
 type Props = {
   leadId: string
   history: Interaction[]
-  /** Se true, mostra só mensagens cujo canal é WhatsApp. */
+  /** Se true, inicia o filtro em só WhatsApp (compat). */
   whatsappOnly?: boolean
   canCompose?: boolean
 }
 
 export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Props) {
   const crm = useCrm()
-  const [onlyWa, setOnlyWa] = useState(Boolean(whatsappOnly))
+  const [filter, setFilter] = useState<ChatFilter>(whatsappOnly ? 'whatsapp' : 'all')
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
 
   const items = useMemo(() => {
     const list = [...history].sort(
       (a, b) => new Date(a.happenedAt).getTime() - new Date(b.happenedAt).getTime(),
     )
-    return onlyWa ? list.filter((m) => m.channel === 'whatsapp') : list
-  }, [history, onlyWa])
+    if (filter === 'whatsapp') return list.filter((m) => m.channel === 'whatsapp')
+    if (filter === 'meta') return list.filter((m) => m.channel === 'meta')
+    return list
+  }, [history, filter])
 
   const isActiveLead = crm.selectedLeadId === leadId
 
@@ -62,20 +66,30 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose }: Pr
         <Button
           type="button"
           size="sm"
-          variant={onlyWa ? 'default' : 'outline'}
+          variant={filter === 'whatsapp' ? 'default' : 'outline'}
           className="rounded-lg"
-          onClick={() => setOnlyWa(true)}
-          aria-pressed={onlyWa}
+          onClick={() => setFilter('whatsapp')}
+          aria-pressed={filter === 'whatsapp'}
         >
           Só WhatsApp
         </Button>
         <Button
           type="button"
           size="sm"
-          variant={!onlyWa ? 'default' : 'outline'}
+          variant={filter === 'meta' ? 'default' : 'outline'}
           className="rounded-lg"
-          onClick={() => setOnlyWa(false)}
-          aria-pressed={!onlyWa}
+          onClick={() => setFilter('meta')}
+          aria-pressed={filter === 'meta'}
+        >
+          Só Instagram / Meta
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={filter === 'all' ? 'default' : 'outline'}
+          className="rounded-lg"
+          onClick={() => setFilter('all')}
+          aria-pressed={filter === 'all'}
         >
           Todas as conversas
         </Button>

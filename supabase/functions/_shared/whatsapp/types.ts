@@ -25,6 +25,8 @@ export type NormalizedInboundMessage = {
   happenedAt: string
   /** Evolution API: instance that received/sent the message, for multi-line routing. */
   evolutionInstanceName?: string
+  /** Meta Cloud API: metadata.phone_number_id (roteamento multi-linha oficial). */
+  metaPhoneNumberId?: string
   mediaItems?: Array<{
     type: 'audio' | 'image' | 'video' | 'document' | 'other'
     mimeType?: string
@@ -38,7 +40,8 @@ export interface WhatsappProvider {
   readonly name: 'evolution' | 'official'
   sendMessage(input: SendWhatsappMessageInput): Promise<SendWhatsappMessageResult>
   normalizeInbound(payload: Record<string, unknown>, headers: Headers): NormalizedInboundMessage | null
-  validateWebhookSignature(rawBody: string, headers: Headers): boolean
+  /** Evolution: síncrono. Meta Cloud: pode ser assíncrono (HMAC Web Crypto). */
+  validateWebhookSignature(rawBody: string, headers: Headers): boolean | Promise<boolean>
 }
 
 export function digitsOnly(value: string): string {

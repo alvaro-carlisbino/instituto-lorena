@@ -70,7 +70,7 @@ export class EvolutionProvider implements WhatsappProvider {
     })
   }
 
-  validateWebhookSignature(_rawBody: string, headers: Headers): boolean {
+  validateWebhookSignature(_rawBody: string, headers: Headers): boolean | Promise<boolean> {
     if (!this.webhookSecret) return true
     const headerSecret = headers.get('x-webhook-secret')?.trim() ?? ''
     return Boolean(this.webhookSecret && headerSecret === this.webhookSecret)

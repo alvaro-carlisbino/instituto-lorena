@@ -26,7 +26,7 @@ export function AiCopilotWidget({ lead, interactions }: Props) {
     setLoading(true)
     try {
       const historyText = interactions
-        .filter((i) => i.channel === 'whatsapp')
+        .filter((i) => i.channel === 'whatsapp' || i.channel === 'meta')
         .slice(-10)
         .map((i) => `[${i.direction === 'in' ? 'Paciente' : 'Clínica'}]: ${i.content}`)
         .join('\n')

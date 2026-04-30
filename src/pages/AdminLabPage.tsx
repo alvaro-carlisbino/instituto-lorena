@@ -26,8 +26,9 @@ const WEBHOOK_SOURCES = [
   { value: 'meta_facebook' as const, label: 'Meta (Facebook)' },
   { value: 'meta_instagram' as const, label: 'Meta (Instagram)' },
   { value: 'whatsapp' as const, label: 'WhatsApp' },
+  { value: 'manychat' as const, label: 'ManyChat / Instagram (IA)' },
   { value: 'manual' as const, label: 'Manual' },
-]
+] as const
 
 export function AdminLabPage() {
   const crm = useCrm()
@@ -42,9 +43,11 @@ export function AdminLabPage() {
       return
     }
     const secret =
-      (webhookSource === 'whatsapp'
-        ? import.meta.env.VITE_EVOLUTION_WEBHOOK_SECRET
-        : import.meta.env.VITE_CRM_WEBHOOK_SECRET) ?? ''
+      webhookSource === 'whatsapp'
+        ? (import.meta.env.VITE_EVOLUTION_WEBHOOK_SECRET ?? '')
+        : webhookSource === 'manychat'
+          ? (import.meta.env.VITE_MANYCHAT_CRM_SECRET ?? '')
+          : (import.meta.env.VITE_CRM_WEBHOOK_SECRET ?? '')
     const requiresSecret = webhookSource !== 'whatsapp'
     if (requiresSecret && !secret.trim()) {
       toast.error('Configuração de segurança ausente. Contate o suporte técnico.')
@@ -53,7 +56,12 @@ export function AdminLabPage() {
     setWebhookSending(true)
     void (async () => {
       try {
-        const targetFn = webhookSource === 'whatsapp' ? 'crm-whatsapp-webhook' : 'crm-ingest-webhook'
+        const targetFn =
+          webhookSource === 'whatsapp'
+            ? 'crm-whatsapp-webhook'
+            : webhookSource === 'manychat'
+              ? 'crm-manychat-webhook'
+              : 'crm-ingest-webhook'
         const body =
           webhookSource === 'whatsapp'
             ? {
@@ -65,28 +73,49 @@ export function AdminLabPage() {
                   messageTimestamp: Math.floor(Date.now() / 1000),
                 },
               }
-            : {
-                patient_name: webhookName,
-                phone: webhookPhone,
-                source: webhookSource,
-                summary: 'Carga de teste (demonstração)',
-              }
+            : webhookSource === 'manychat'
+              ? {
+                  subscriber_id: webhookPhone.replace(/\D/g, '') || `sub-${Date.now()}`,
+                  user_name: webhookName,
+                  text: 'Mensagem de teste via AdminLab (ManyChat)',
+                  external_message_id: `lab-${Date.now()}`,
+                }
+              : {
+                  patient_name: webhookName,
+                  phone: webhookPhone,
+                  source: webhookSource,
+                  summary: 'Carga de teste (demonstração)',
+                }
 
-        const headers = secret.trim() ? { 'x-webhook-secret': secret.trim() } : undefined
+        const headers: Record<string, string> = {}
+        if (secret.trim()) {
+          if (webhookSource === 'manychat') {
+            headers['x-manychat-crm-secret'] = secret.trim()
+          } else {
+            headers['x-webhook-secret'] = secret.trim()
+          }
+        }
+        const invokeHeaders = Object.keys(headers).length > 0 ? headers : undefined
         const { data, error } = await supabase.functions.invoke(targetFn, {
           body,
-          headers,
+          headers: invokeHeaders,
         })
         if (error) {
           toast.error(error.message)
           return
         }
-        const d = data as { leadId?: string; status?: string; error?: string }
+        const d = data as { leadId?: string; status?: string; error?: string; reply?: string; routing?: string }
         if (d.error) {
           toast.error(d.error)
           return
         }
-        toast.success(d.status === 'updated' ? 'Lead atualizado com sucesso.' : 'Lead criado com sucesso.')
+        if (webhookSource === 'manychat') {
+          toast.success(
+            d.reply ? `Resposta IA (${(d.routing ?? '').trim() || 'ok'}).` : 'Pedido ManyChat processado (sem texto de IA).',
+          )
+        } else {
+          toast.success(d.status === 'updated' ? 'Lead atualizado com sucesso.' : 'Lead criado com sucesso.')
+        }
         await crm.syncFromSupabase()
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Falha na comunicação. Tente novamente.')
@@ -177,7 +206,9 @@ export function AdminLabPage() {
               <Input id="wh-name" value={webhookName} onChange={(e) => setWebhookName(e.target.value)} />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="wh-phone">Telefone (mín. 10 dígitos)</Label>
+              <Label htmlFor="wh-phone">
+                {webhookSource === 'manychat' ? 'Subscriber ID ManyChat (só dígitos ou texto)' : 'Telefone (mín. 10 dígitos)'}
+              </Label>
               <Input id="wh-phone" value={webhookPhone} onChange={(e) => setWebhookPhone(e.target.value)} inputMode="tel" />
             </div>
             <div className="grid gap-2 sm:col-span-2">

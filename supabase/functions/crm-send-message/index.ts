@@ -1,7 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
-import { getWhatsappProviderFromEnv } from '../_shared/whatsapp/provider.ts'
-import { getEvolutionProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
+import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
 
 const cors = {
@@ -65,13 +64,13 @@ Deno.serve(async (req) => {
     .maybeSingle()
   if (leadErr || !lead) return json({ error: 'lead_not_found' }, 404)
 
+  const row = lead as { id: string; patient_name: string; whatsapp_instance_id: string | null }
   const waProvider = (Deno.env.get('WHATSAPP_PROVIDER') ?? 'evolution').trim().toLowerCase()
   let provider: WhatsappProvider
   try {
     if (waProvider === 'official') {
-      provider = getWhatsappProviderFromEnv()
+      provider = await getOfficialProviderForLead(admin, row.whatsapp_instance_id)
     } else {
-      const row = lead as { id: string; patient_name: string; whatsapp_instance_id: string | null }
       provider = await getEvolutionProviderForLead(admin, row.whatsapp_instance_id)
     }
   } catch (e) {

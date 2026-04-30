@@ -437,3 +437,184 @@ export async function insertInteraction(
   return String(data.id)
 }
 
+/** Telefone sintético estável para leads só Instagram (ManyChat) até haver telefone real (prefixo 888001). */
+export function syntheticPhoneFromManychatSubscriberId(subscriberId: string): string {
+  const raw = String(subscriberId).replace(/\D/g, '')
+  const suffix = (raw + '0000000000').slice(0, 10)
+  return `888001${suffix}`
+}
+
+export async function findLeadIdByManychatSubscriberId(
+  admin: SupabaseClient,
+  subscriberId: string,
+): Promise<string | null> {
+  const sid = String(subscriberId).trim()
+  if (!sid) return null
+  const { data, error } = await admin
+    .from('leads')
+    .select('id')
+    .contains('custom_fields', { manychat_subscriber_id: sid })
+    .limit(1)
+    .maybeSingle()
+  if (error || !data) return null
+  return String((data as { id: unknown }).id)
+}
+
+async function resolvePhoneLeadIdByDigits(admin: SupabaseClient, digits: string): Promise<string | null> {
+  const { data: fromRpc, error: findError } = await admin.rpc('find_lead_id_by_phone_digits', { p_digits: digits })
+  if (!findError && fromRpc) return String(fromRpc)
+  const { data: byEq } = await admin.from('leads').select('id').eq('phone', digits).maybeSingle()
+  return byEq?.id ? String(byEq.id) : null
+}
+
+function maxIso(a: string | null | undefined, b: string | null | undefined): string | null {
+  if (!a) return b ?? null
+  if (!b) return a
+  return new Date(a).getTime() >= new Date(b).getTime() ? a : b
+}
+
+/**
+ * Move dados do lead `dropLeadId` para `keepLeadId` e apaga o drop.
+ * Usado quando o mesmo contacto passa de ID sintético ManyChat para telefone real já existente.
+ */
+export async function mergeLeadDropIntoKeep(
+  admin: SupabaseClient,
+  keepLeadId: string,
+  dropLeadId: string,
+): Promise<void> {
+  if (keepLeadId === dropLeadId) return
+
+  const { data: dropLead } = await admin.from('leads').select('custom_fields').eq('id', dropLeadId).maybeSingle()
+  const { data: keepLead } = await admin.from('leads').select('custom_fields').eq('id', keepLeadId).maybeSingle()
+  const mergedCf = mergeCustomFields(
+    keepLead?.custom_fields as Record<string, unknown> | undefined,
+    dropLead?.custom_fields as Record<string, unknown> | undefined,
+  )
+  await admin.from('leads').update({ custom_fields: mergedCf }).eq('id', keepLeadId)
+
+  const fkTables = [
+    'interactions',
+    'crm_media_items',
+    'lead_tasks',
+    'survey_dispatches',
+    'appointments',
+    'lead_wa_line_events',
+  ] as const
+  for (const t of fkTables) {
+    const { error } = await admin.from(t).update({ lead_id: keepLeadId }).eq('lead_id', dropLeadId)
+    if (error) console.warn(`mergeLeadDropIntoKeep ${t}:`, error.message)
+  }
+
+  const { data: dropTags } = await admin
+    .from('lead_tag_assignments')
+    .select('tag_id')
+    .eq('lead_id', dropLeadId)
+  const { data: keepTags } = await admin.from('lead_tag_assignments').select('tag_id').eq('lead_id', keepLeadId)
+  const keepSet = new Set((keepTags ?? []).map((r) => String((r as { tag_id: unknown }).tag_id)))
+  for (const row of dropTags ?? []) {
+    const tid = String((row as { tag_id: unknown }).tag_id)
+    if (keepSet.has(tid)) {
+      await admin.from('lead_tag_assignments').delete().eq('lead_id', dropLeadId).eq('tag_id', tid)
+    }
+  }
+  await admin.from('lead_tag_assignments').update({ lead_id: keepLeadId }).eq('lead_id', dropLeadId)
+
+  const { data: dropSt } = await admin.from('crm_conversation_states').select('*').eq('lead_id', dropLeadId).maybeSingle()
+  const { data: keepSt } = await admin.from('crm_conversation_states').select('*').eq('lead_id', keepLeadId).maybeSingle()
+  if (dropSt) {
+    if (!keepSt) {
+      await admin.from('crm_conversation_states').update({ lead_id: keepLeadId }).eq('lead_id', dropLeadId)
+    } else {
+      const d = dropSt as Record<string, unknown>
+      const k = keepSt as Record<string, unknown>
+      const mergedState: Record<string, unknown> = {
+        lead_id: keepLeadId,
+        owner_mode: String(k.owner_mode ?? 'auto'),
+        ai_enabled: Boolean(k.ai_enabled ?? true),
+        prompt_override: k.prompt_override ?? d.prompt_override ?? null,
+        context_summary: [k.context_summary, d.context_summary].filter(Boolean).join('\n---\n').slice(0, 1200),
+        last_inbound_at: maxIso(
+          k.last_inbound_at ? String(k.last_inbound_at) : null,
+          d.last_inbound_at ? String(d.last_inbound_at) : null,
+        ),
+        last_ai_reply_at: maxIso(
+          k.last_ai_reply_at ? String(k.last_ai_reply_at) : null,
+          d.last_ai_reply_at ? String(d.last_ai_reply_at) : null,
+        ),
+        last_human_reply_at: maxIso(
+          k.last_human_reply_at ? String(k.last_human_reply_at) : null,
+          d.last_human_reply_at ? String(d.last_human_reply_at) : null,
+        ),
+        updated_at: new Date().toISOString(),
+      }
+      await admin.from('crm_conversation_states').update(mergedState).eq('lead_id', keepLeadId)
+      await admin.from('crm_conversation_states').delete().eq('lead_id', dropLeadId)
+    }
+  }
+
+  const { error: delErr } = await admin.from('leads').delete().eq('id', dropLeadId)
+  if (delErr) throw new Error(delErr.message)
+}
+
+/**
+ * Liga o subscriber ManyChat a um telefone real (merge se já existir lead com esse telefone).
+ */
+export async function promoteManychatLeadToRealPhone(
+  admin: SupabaseClient,
+  input: {
+    subscriberId: string
+    patientName: string
+    realPhoneDigits: string
+    summary: string
+  },
+): Promise<{ leadId: string; merged: boolean }> {
+  const sid = String(input.subscriberId).trim()
+  const phone = normalizePhone(input.realPhoneDigits)
+  if (phone.length < 10) {
+    throw new Error('Telefone deve ter pelo menos 10 dígitos')
+  }
+
+  const mcLeadId = await findLeadIdByManychatSubscriberId(admin, sid)
+  const phoneLeadId = await resolvePhoneLeadIdByDigits(admin, phone)
+
+  if (mcLeadId && phoneLeadId && mcLeadId !== phoneLeadId) {
+    await mergeLeadDropIntoKeep(admin, phoneLeadId, mcLeadId)
+    await upsertLeadByPhone(admin, {
+      patientName: input.patientName,
+      phone,
+      summary: input.summary,
+      source: 'meta_instagram',
+      customFields: { manychat_subscriber_id: sid },
+    })
+    return { leadId: phoneLeadId, merged: true }
+  }
+
+  if (mcLeadId && !phoneLeadId) {
+    const { data: cur } = await admin.from('leads').select('custom_fields').eq('id', mcLeadId).maybeSingle()
+    const customMerged = mergeCustomFields(cur?.custom_fields as Record<string, unknown> | undefined, {
+      manychat_subscriber_id: sid,
+    })
+    const { error } = await admin
+      .from('leads')
+      .update({
+        phone,
+        patient_name: input.patientName || 'Lead',
+        summary: input.summary || '',
+        source: 'meta_instagram',
+        custom_fields: customMerged,
+      })
+      .eq('id', mcLeadId)
+    if (error) throw new Error(error.message)
+    return { leadId: mcLeadId, merged: false }
+  }
+
+  const r = await upsertLeadByPhone(admin, {
+    patientName: input.patientName,
+    phone,
+    summary: input.summary,
+    source: 'meta_instagram',
+    customFields: { manychat_subscriber_id: sid },
+  })
+  return { leadId: r.leadId, merged: false }
+}
+

@@ -1,0 +1,739 @@
+{
+  "name": "Instituto Lorena Visentainer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "10b5ac72-9f65-4c75-806e-bb8fd4c52de1",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -6032,
+        1472
+      ],
+      "id": "2afe567b-9305-4c20-a1bb-5bcd1a48d83a",
+      "name": "Webhook",
+      "webhookId": "10b5ac72-9f65-4c75-806e-bb8fd4c52de1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS lorena_debounce (\n  subscriber_id TEXT PRIMARY KEY,\n  messages      TEXT NOT NULL DEFAULT '',\n  last_ts       BIGINT NOT NULL\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5808,
+        1472
+      ],
+      "id": "64de1d3d-7d3c-48e7-86c4-dd5ace6edf15",
+      "name": "Criar tabela debounce",
+      "credentials": {
+        "postgres": {
+          "id": "bJp6Acg96hMmJwLn",
+          "name": "Postgres account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO lorena_debounce (subscriber_id, messages, last_ts)\nVALUES (\n  '{{ $('Webhook').item.json.body.data.id }}',\n  '{{ $('Webhook').item.json.body.msg.replace(/'/g, \"''\") }}',\n  {{ Date.now() }}\n)\nON CONFLICT (subscriber_id) DO UPDATE SET\n  messages = lorena_debounce.messages || E'\\n' || EXCLUDED.messages,\n  last_ts  = EXCLUDED.last_ts\nRETURNING last_ts;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5584,
+        1472
+      ],
+      "id": "90cf4572-3442-4203-9638-882967f0c2db",
+      "name": "Gravar msg no Postgres",
+      "credentials": {
+        "postgres": {
+          "id": "bJp6Acg96hMmJwLn",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 6
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -5360,
+        1472
+      ],
+      "id": "54966c71-3c03-4bca-942a-980244a38778",
+      "name": "Aguardar 6s",
+      "webhookId": "9649e5b7-77d7-4477-8a1d-4720d27700dd"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT last_ts FROM lorena_debounce\nWHERE subscriber_id = '{{ $('Webhook').item.json.body.data.id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -5136,
+        1472
+      ],
+      "id": "541cd5cc-d811-4428-96f1-fd826400008a",
+      "name": "Checar timestamp",
+      "credentials": {
+        "postgres": {
+          "id": "bJp6Acg96hMmJwLn",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Debounce: se outro webhook chegou DEPOIS de mim, o last_ts no banco\n// será diferente do meu. Nesse caso, descarto esta execução —\n// a execução mais recente vai processar todas as mensagens acumuladas.\n\n// Recuperar MEU timestamp (do INSERT/UPDATE que eu mesmo fiz)\nconst gravar = $('Gravar msg no Postgres').item.json;\nconst myTs = Number(\n  Array.isArray(gravar) ? gravar[0]?.last_ts :\n  gravar?.[0]?.last_ts ?? gravar?.last_ts ?? 0\n);\n\n// Recuperar timestamp ATUAL do banco (depois dos 4s de espera)\nconst checar = $input.item.json;\nconst dbTs = Number(\n  Array.isArray(checar) ? checar[0]?.last_ts :\n  checar?.[0]?.last_ts ?? checar?.last_ts ?? 0\n);\n\n// Se algum dos dois é inválido, melhor descartar para evitar duplicação\nif (!myTs || !dbTs) {\n  console.log('[debounce] timestamps inválidos, descartando', { myTs, dbTs });\n  return [];\n}\n\n// Se uma mensagem mais nova chegou, o dbTs será maior — descarto esta\nif (dbTs !== myTs) {\n  console.log('[debounce] não sou o último, descartando', { myTs, dbTs });\n  return [];\n}\n\nconsole.log('[debounce] sou o último, prosseguindo', { myTs });\nreturn [{ json: $input.item.json }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4912,
+        1472
+      ],
+      "id": "bac61b00-3ae0-49fe-81a9-c815aaa93d2c",
+      "name": "Sou o último?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM lorena_debounce\nWHERE subscriber_id = '{{ $('Webhook').item.json.body.data.id }}'\nRETURNING messages;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -4688,
+        1472
+      ],
+      "id": "3dcd3566-9c23-444d-b95a-27e8991e3bbb",
+      "name": "Deletar e recuperar msgs",
+      "credentials": {
+        "postgres": {
+          "id": "bJp6Acg96hMmJwLn",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.manychat.com/fb/subscriber/getInfo?subscriber_id={{ $('Webhook').item.json.body.data.id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -4464,
+        1472
+      ],
+      "id": "7f28dc4f-c1b8-423a-a6f5-964c1decc33e",
+      "name": "Buscar dados do usuário",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "ANgRaH1UcL9aFbn7",
+          "name": "Instituto Lorena"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookData  = $('Webhook').item.json;\nconst subscriberId = webhookData.body.data.id;\n\nconst rawMsgs = $('Deletar e recuperar msgs').item.json[0]?.messages\n             ?? $('Deletar e recuperar msgs').item.json?.messages\n             ?? webhookData.body.msg ?? '';\nconst msg = rawMsgs.trim();\n\nlet userInfo = {};\ntry {\n  const raw = $('Buscar dados do usuário').item.json;\n  if (raw && raw.data) userInfo = raw.data;\n} catch(e) {}\n\nconst firstName = userInfo.first_name || '';\nconst lastName  = userInfo.last_name  || '';\nconst fullName  = [firstName, lastName].filter(Boolean).join(' ') || 'Cliente';\nconst city      = userInfo.city   || '';\nconst gender    = userInfo.gender || '';\nconst tags      = (userInfo.tags || []).map(t => t.name).join(', ') || 'nenhuma';\n\nconst contextBlock = [\n  `Nome do cliente: ${fullName}`,\n  city   ? `Cidade: ${city}`   : null,\n  gender ? `Gênero: ${gender}` : null,\n  `Tags ManyChat: ${tags}`,\n].filter(Boolean).join('\\n');\n\nreturn [{\n  json: { subscriberId, msg, fullName, userContext: contextBlock }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4240,
+        1472
+      ],
+      "id": "3b17ef93-2a5d-4158-bb4c-a2592da8a50c",
+      "name": "Montar contexto"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.msg }}",
+        "options": {
+          "systemMessage": "# CONTEXTO E IDENTIDADE\nVocê é o assistente virtual de triagem do \"Instituto Lorena Visentainer\", uma clínica especializada em transplante capilar em Maringá, referência na região com altíssima avaliação de clientes.\nSeu papel é recepcionar os pacientes de forma acolhedora, profissional e humanizada, realizar a triagem inicial com base no motivo do contato e preparar o terreno para o atendimento humano especializado (como o da consultora Dandara).\n\n# INFORMAÇÕES DA CLÍNICA (Base de Conhecimento)\n- Nome: Instituto Lorena Visentainer TRANSPLANTE CAPILAR\n- Especialidade: Clínica de implante capilar em Maringá, Paraná\n- Reputação: Altamente avaliada pelos pacientes (5,0 estrelas · mais de 405 avaliações no Google).\n- Site: https://www.institutolorenavisentainer.com.br/\n- Endereço: Av. Nóbrega, 814 - Zona 04, Maringá - PR, 87014-180\n- Telefone: (44) 99149-3656\n- Horário de Funcionamento: Segunda a sexta, abre às 08:00 e fecha às 18:00.\n- Equipe Médica: Dra. Lorena Visentainer, Dr. Matheus Amaral e Dra. Jaqueline Augusto.\n\n# DADOS DO CLIENTE (use para personalizar o atendimento)\n{{ $json.userContext }}\n\n# REGRAS DE ATENDIMENTO E FLUXO OBRIGATÓRIO\n\n1. A PRIMEIRA MENSAGEM: Logo no primeiro contato, você deve OBRIGATORIAMENTE:\n   - Dar as boas-vindas ao Instituto Lorena Visentainer, apresentando-se como assistente virtual e usando o nome do cliente se disponível.\n   - Informar de forma sutil que você iniciará a triagem, mas que em breve uma de nossas consultoras (como a Dandara) assumirá para dar continuidade.\n   - Apresentar o menu com as opções exatas de atendimento para que o paciente escolha.\n\n2. MENU DE OPÇÕES (Apresentar na primeira mensagem):\n   1. Transplante Capilar Masculino\n   2. Transplante Capilar Feminino\n   3. Consulta Clínica Masculino\n   4. Consulta Clínica Feminino\n   5. Transplante de Sobrancelha\n\n3. A SEGUNDA MENSAGEM (PERGUNTA SOBRE O MÉDICO): Assim que o paciente responder escolhendo uma das opções (1 a 5), você OBRIGATORIAMENTE deve questionar se ele tem preferência por ser atendido por algum médico específico da nossa equipe (Dra. Lorena Visentainer, Dr. Matheus Amaral ou Dra. Jaqueline Augusto) ou se pode ser o especialista com a agenda mais próxima.\n\n4. TOM DE VOZ: Acolhedor, empático, profissional e confiante. Transmita segurança sobre os procedimentos. Evite gírias.\n\n5. LIMITAÇÃO DE ESCOPO: Não invente procedimentos, valores ou prazos que não estejam descritos no seu contexto. Se o cliente pedir preços, detalhes técnicos do procedimento ou antes/depois, informe que a consultora especializada fornecerá todas as informações assim que assumir a conversa.\n\n6. QUANDO ENCAMINHAR: Após o cliente responder sobre a preferência do médico, ou se ele ignorar o fluxo e fizer perguntas diretas sobre valores e agendamentos com urgência, SEMPRE finalize sua resposta com a tag exata: [PRONTO_PARA_CONSULTOR]\n\n# EXEMPLO DE PRIMEIRA MENSAGEM:\n\"Olá, {{ $json.fullName }}! Bom dia, tudo bem? Seja muito bem-vindo(a) ao Instituto Lorena Visentainer. 💆\n\nEu sou o assistente virtual da clínica e vou realizar o seu primeiro atendimento para que, em instantes, a nossa consultora Dandara assuma a nossa conversa.\n\nPara começarmos da melhor forma, seria uma consulta para Transplante Capilar ou Consulta Clínica? Por favor, digite o número da opção desejada:\n\n1. Transplante Capilar Masculino\n2. Transplante Capilar Feminino\n3. Consulta Clínica Masculino\n4. Consulta Clínica Feminino\n5. Transplante de Sobrancelha\""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -4016,
+        1472
+      ],
+      "id": "7473f30c-ffdc-48e0-bb0e-11fcabcdd563",
+      "name": "AI Agent",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -4176,
+        1696
+      ],
+      "id": "9a9cac21-236e-45ed-a2ee-05d73902e955",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "wJbbCneZOnwrnOe8",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Montar contexto').item.json.subscriberId }}",
+        "tableName": "n8n_chat_histories_lorena"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        -4064,
+        1824
+      ],
+      "id": "227717fc-6d66-4bb5-93f6-2c396ea4fbe3",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "bJp6Acg96hMmJwLn",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detecta se o agente respondeu corretamente e se está pronto para handoff\nconst raw = $input.item.json;\nconst agentOutput = (raw?.output || '').toString().trim();\nconst agentError = !agentOutput;\nconst readyForHuman = !agentError && agentOutput.includes('[PRONTO_PARA_CONSULTOR]');\nconst cleanOutput = agentOutput.replace('[PRONTO_PARA_CONSULTOR]', '').trim();\n\nconst ctx = $('Montar contexto').item.json;\n\nreturn [{\n  json: {\n    output: cleanOutput,\n    readyForHuman,\n    agentError,\n    subscriberId: ctx.subscriberId,\n    userContext: ctx.userContext,\n    msg: ctx.msg,\n    fullName: ctx.fullName\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3664,
+        1472
+      ],
+      "id": "d07f2495-ca0d-4def-bf6d-4b6dbe17db6d",
+      "name": "Detectar intenção"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-err",
+              "leftValue": "={{ $json.agentError }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -3440,
+        1472
+      ],
+      "id": "711c530b-ef6a-44ab-bcc3-4fc64ef30628",
+      "name": "Erro no agente?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Montar contexto').item.json;\nreturn [{ json: {\n  subscriberId: ctx.subscriberId,\n  output: 'Olá! Estamos verificando sua solicitação. Em instantes, uma de nossas consultoras do Instituto Lorena Visentainer entrará em contato. 💆'\n}}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3216,
+        1280
+      ],
+      "id": "41287205-50f8-4c42-8103-1648712f545e",
+      "name": "Fallback de erro"
+    },
+    {
+      "parameters": {
+        "resource": "subscriber",
+        "operation": "setCustomField",
+        "subscriber_id": "={{ $json.subscriberId }}",
+        "value": "14539456",
+        "fieldValue": "={{ $json.output }}",
+        "requestOptions": {}
+      },
+      "type": "n8n-nodes-manychat.manyChat",
+      "typeVersion": 1,
+      "position": [
+        -2992,
+        1280
+      ],
+      "id": "30dd679e-ef6f-443b-bb4d-70f314b6b8fb",
+      "name": "Salvar resposta (fallback)",
+      "credentials": {
+        "manyChatApi": {
+          "id": "CxREENznsFn1D5Ua",
+          "name": "Instituto Lorena"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendFlow",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"subscriber_id\": \"{{ $('Webhook').item.json.body.data.id }}\",\n  \"flow_ns\": \"content20260430143025_638461\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2768,
+        1280
+      ],
+      "id": "bf8b5724-8ee9-4266-b64f-9002856adc5f",
+      "name": "Enviar flow ManyChat (fallback)",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "ANgRaH1UcL9aFbn7",
+          "name": "Instituto Lorena"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "cond-ready",
+              "leftValue": "={{ $json.readyForHuman }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -3216,
+        1568
+      ],
+      "id": "ca6c9db2-a890-44c6-bcbf-bbdc0f85fd9e",
+      "name": "Pronto para consultor?"
+    },
+    {
+      "parameters": {
+        "resource": "subscriber",
+        "operation": "setCustomField",
+        "subscriber_id": "={{ $json.subscriberId }}",
+        "value": "14539456",
+        "fieldValue": "={{ $json.output }}",
+        "requestOptions": {}
+      },
+      "type": "n8n-nodes-manychat.manyChat",
+      "typeVersion": 1,
+      "position": [
+        -2992,
+        1472
+      ],
+      "id": "649ab013-f03b-4c6a-9f68-3d562fe3c969",
+      "name": "Salvar resposta (normal)",
+      "credentials": {
+        "manyChatApi": {
+          "id": "CxREENznsFn1D5Ua",
+          "name": "Instituto Lorena"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendFlow",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"subscriber_id\": \"{{ $('Webhook').item.json.body.data.id }}\",\n  \"flow_ns\": \"content20260430143025_638461\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2768,
+        1472
+      ],
+      "id": "6081f93c-1589-4766-bbe7-38443a4f553e",
+      "name": "Enviar flow ManyChat (normal)",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "ANgRaH1UcL9aFbn7",
+          "name": "Instituto Lorena"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─── GERAR RESUMO PARA O CONSULTOR ────────────────────────────────────────\n// Monta um briefing estruturado com tudo que foi coletado na conversa.\n\nconst output      = $json.output      || '';\nconst msg         = $json.msg         || '';\nconst fullName    = $json.fullName    || 'Não identificado';\nconst userContext = $json.userContext || '';\nconst subscriberId = $json.subscriberId;\n\nconst now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });\n\nconst summary = [\n  '💆 *Instituto Lorena Visentainer — Paciente qualificado para atendimento*',\n  '',\n  `📋 *Cliente:* ${fullName}`,\n  `🕐 *Horário:* ${now}`,\n  `🆔 *Subscriber ID:* ${subscriberId}`,\n  '',\n  `📊 *Dados do perfil:*`,\n  userContext,\n  '',\n  `💬 *Última mensagem do cliente:*`,\n  `\"${msg}\"`,\n  '',\n  `🤖 *Última resposta do assistente:*`,\n  output,\n  '',\n  '✅ *Ação:* O paciente demonstrou interesse concreto no transplante capilar. Por favor, assuma o atendimento.'\n].join('\\n');\n\nreturn [\n  {\n    json: {\n      ...$json,\n      consultorSummary: summary\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2992,
+        1664
+      ],
+      "id": "c785a8e2-1ffb-4c51-9b21-a4516b0adce5",
+      "name": "Gerar resumo para consultor"
+    },
+    {
+      "parameters": {
+        "resource": "subscriber",
+        "operation": "setCustomField",
+        "subscriber_id": "={{ $json.subscriberId }}",
+        "value": "14539456",
+        "fieldValue": "={{ $json.output }}",
+        "requestOptions": {}
+      },
+      "type": "n8n-nodes-manychat.manyChat",
+      "typeVersion": 1,
+      "position": [
+        -2768,
+        1664
+      ],
+      "id": "c8d75ad6-9e3d-4901-8c3c-f6370bd0c472",
+      "name": "Salvar resposta (handoff)",
+      "credentials": {
+        "manyChatApi": {
+          "id": "CxREENznsFn1D5Ua",
+          "name": "Instituto Lorena"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.manychat.com/fb/sending/sendFlow",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"subscriber_id\": \"{{ $('Webhook').item.json.body.data.id }}\",\n  \"flow_ns\": \"content20260430143025_638461\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2544,
+        1664
+      ],
+      "id": "8e8b50d8-68dd-4a07-8423-97b37ef0d554",
+      "name": "Enviar flow ManyChat (handoff)",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "ANgRaH1UcL9aFbn7",
+          "name": "Instituto Lorena"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Criar tabela debounce",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar tabela debounce": {
+      "main": [
+        [
+          {
+            "node": "Gravar msg no Postgres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gravar msg no Postgres": {
+      "main": [
+        [
+          {
+            "node": "Aguardar 6s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checar timestamp": {
+      "main": [
+        [
+          {
+            "node": "Sou o último?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sou o último?": {
+      "main": [
+        [
+          {
+            "node": "Deletar e recuperar msgs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deletar e recuperar msgs": {
+      "main": [
+        [
+          {
+            "node": "Buscar dados do usuário",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar dados do usuário": {
+      "main": [
+        [
+          {
+            "node": "Montar contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar contexto": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Detectar intenção",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar intenção": {
+      "main": [
+        [
+          {
+            "node": "Erro no agente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Erro no agente?": {
+      "main": [
+        [
+          {
+            "node": "Fallback de erro",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pronto para consultor?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback de erro": {
+      "main": [
+        [
+          {
+            "node": "Salvar resposta (fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar resposta (fallback)": {
+      "main": [
+        [
+          {
+            "node": "Enviar flow ManyChat (fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pronto para consultor?": {
+      "main": [
+        [
+          {
+            "node": "Gerar resumo para consultor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Salvar resposta (normal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar resposta (normal)": {
+      "main": [
+        [
+          {
+            "node": "Enviar flow ManyChat (normal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gerar resumo para consultor": {
+      "main": [
+        [
+          {
+            "node": "Salvar resposta (handoff)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar resposta (handoff)": {
+      "main": [
+        [
+          {
+            "node": "Enviar flow ManyChat (handoff)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aguardar 6s": {
+      "main": [
+        [
+          {
+            "node": "Checar timestamp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "4f3beaca-4c16-4d12-bed6-d743e5a8381b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2f941a03d66835d606f8c848058a57b6e4c2c23513560a713ced37ce69e58147"
+  },
+  "id": "6DtWebWxrkPB6WFV",
+  "tags": []
+}

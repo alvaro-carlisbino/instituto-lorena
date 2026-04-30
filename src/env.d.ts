@@ -12,6 +12,8 @@ interface ImportMetaEnv {
   readonly VITE_CRM_WEBHOOK_SECRET?: string
   /** Segredo do webhook Evolution (apenas homologacao / Admin Lab; nao commitar em producao publica) */
   readonly VITE_EVOLUTION_WEBHOOK_SECRET?: string
+  /** Segredo do webhook ManyChat → CRM (Admin Lab; nao commitar em producao publica) */
+  readonly VITE_MANYCHAT_CRM_SECRET?: string
 }
 
 interface ImportMeta {

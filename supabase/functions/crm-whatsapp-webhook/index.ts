@@ -1,13 +1,22 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import {
+  evaluateCrmAiAutoReplyGate,
+  nowIso,
+  runWhatsappAiAutoReply,
+  upsertConversationStateInboundOnly,
+} from '../_shared/crmAiAutoReply.ts'
 import { enrichInboundWhatsappMediaAndAppendContext } from '../_shared/crmMediaEnrichment.ts'
 import { insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
 import { getWhatsappProviderFromEnv } from '../_shared/whatsapp/provider.ts'
-import { getWhatsappProviderForEvent, resolveWhatsappInstanceRow } from '../_shared/whatsapp/evolutionConfig.ts'
+import { getWhatsappProviderForEvent, resolveWhatsappInstanceRowForProvider } from '../_shared/whatsapp/evolutionConfig.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-secret',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-webhook-secret, x-hub-signature-256',
 }
+
+const AI_RATE_SOURCES = ['whatsapp-webhook', 'manychat-webhook'] as const
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -16,23 +25,29 @@ function json(body: Record<string, unknown>, status = 200): Response {
   })
 }
 
-function nowIso(): string {
-  return new Date().toISOString()
-}
-
-function isWithinQuietHours(date: Date, startHour = 8, endHour = 20): boolean {
-  const h = date.getHours()
-  return h >= startHour && h < endHour
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
-  if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   if (!supabaseUrl || !serviceRole) return json({ error: 'server_misconfigured' }, 500)
   const admin = createClient(supabaseUrl, serviceRole)
+
+  const envProvider = (Deno.env.get('WHATSAPP_PROVIDER') ?? 'evolution').trim().toLowerCase()
+
+  if (req.method === 'GET' && envProvider === 'official') {
+    const url = new URL(req.url)
+    const mode = url.searchParams.get('hub.mode')
+    const token = url.searchParams.get('hub.verify_token')
+    const challenge = url.searchParams.get('hub.challenge')
+    const verifyToken = (Deno.env.get('WHATSAPP_CLOUD_VERIFY_TOKEN') ?? '').trim()
+    if (mode === 'subscribe' && token && verifyToken && token === verifyToken && challenge) {
+      return new Response(challenge, { status: 200, headers: cors })
+    }
+    return new Response('Forbidden', { status: 403, headers: cors })
+  }
+
+  if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
   const rawBody = await req.text()
   let payload: Record<string, unknown>
@@ -49,16 +64,27 @@ Deno.serve(async (req) => {
     return json({ error: 'provider_not_configured', message: e instanceof Error ? e.message : String(e) }, 500)
   }
 
-  if (!provider.validateWebhookSignature(rawBody, req.headers)) {
+  const sigResult = provider.validateWebhookSignature(rawBody, req.headers)
+  if (!(await Promise.resolve(sigResult))) {
     return json({ error: 'unauthorized' }, 401)
   }
 
   const normalized = provider.normalizeInbound(payload, req.headers)
   if (!normalized) return json({ ok: true, skipped: 'event_not_supported' }, 202)
 
-  const wInstance = await resolveWhatsappInstanceRow(admin, normalized.evolutionInstanceName ?? '')
+  const wInstance = await resolveWhatsappInstanceRowForProvider(admin, {
+    provider: envProvider,
+    evolutionInstanceName: normalized.evolutionInstanceName ?? '',
+    metaPhoneNumberId: normalized.metaPhoneNumberId ?? '',
+  })
   const wInstanceId = wInstance?.id ?? null
-  const dedupKey = `event:${provider.name}:${String(normalized.evolutionInstanceName ?? 'default')}:${normalized.externalMessageId}`
+
+  const instanceKey =
+    envProvider === 'official'
+      ? String(normalized.metaPhoneNumberId ?? wInstance?.meta_phone_number_id ?? 'default')
+      : String(normalized.evolutionInstanceName ?? 'default')
+
+  const dedupKey = `event:${provider.name}:${instanceKey}:${normalized.externalMessageId}`
   const { data: existing } = await admin
     .from('webhook_jobs')
     .select('id')
@@ -225,96 +251,43 @@ Deno.serve(async (req) => {
       .select('*')
       .eq('lead_id', lead.leadId)
       .maybeSingle()
-    const { data: config } = await admin
-      .from('crm_ai_configs')
-      .select('*')
-      .eq('id', 'default')
-      .maybeSingle()
+    const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
 
-    const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
-    const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
-    const maxPerHour = Number(config?.max_ai_replies_per_hour ?? 2)
-    const minSecondsBetween = Number(config?.min_seconds_between_ai_replies ?? 240)
-    const latestAiReplyAt = state?.last_ai_reply_at ? new Date(String(state.last_ai_reply_at)).getTime() : 0
-    const elapsedSinceAi = latestAiReplyAt ? (Date.now() - latestAiReplyAt) / 1000 : Number.POSITIVE_INFINITY
-    const withinWindow = isWithinQuietHours(new Date(), 8, 20)
-    const shouldAiByMode = ownerMode === 'ai' || (ownerMode === 'auto' && withinWindow)
+    const gate = await evaluateCrmAiAutoReplyGate(admin, lead.leadId, {
+      directionIsInbound: normalized.direction === 'in',
+      rateLimitJobSources: [...AI_RATE_SOURCES],
+    })
 
-    const oneHourAgoIso = new Date(Date.now() - 60 * 60 * 1000).toISOString()
-    const { count: aiRepliesLastHour } = await admin
-      .from('webhook_jobs')
-      .select('id', { count: 'exact', head: true })
-      .eq('source', 'whatsapp-webhook')
-      .like('note', 'ai_auto_reply:%')
-      .gte('created_at', oneHourAgoIso)
+    const statePrompt = String(state?.prompt_override ?? config?.system_prompt ?? '').trim()
 
-    const canAutoReply =
-      aiEnabled &&
-      shouldAiByMode &&
-      normalized.direction === 'in' &&
-      elapsedSinceAi >= minSecondsBetween &&
-      (aiRepliesLastHour ?? 0) < maxPerHour
-
-    if (canAutoReply) {
-      const aiMessages = [{ role: 'user', content: aiInboundUserText }]
-      const aiCtx = { leadId: lead.leadId, focus: 'lead' }
-      const aiPrompt = String(state?.prompt_override ?? config?.system_prompt ?? '').trim()
-      const { data: aiResult } = await admin.functions.invoke('crm-ai-assistant', {
-        body: {
-          messages: aiMessages,
-          context: aiCtx,
-          promptOverride: aiPrompt || undefined,
-        },
+    let routing: string
+    if (gate.canAutoReply) {
+      const sendProvider = await getWhatsappProviderForEvent(admin, {
+        evolutionInstanceName: normalized.evolutionInstanceName ?? '',
+        provider: envProvider,
+        metaPhoneNumberId: normalized.metaPhoneNumberId ?? '',
       })
-
-      const aiObj = (aiResult && typeof aiResult === 'object' ? aiResult : {}) as Record<string, unknown>
-      const aiReply = typeof aiObj.reply === 'string' ? aiObj.reply.trim() : ''
-      if (aiReply) {
-        const sendProvider = await getWhatsappProviderForEvent(admin, {
-          evolutionInstanceName: normalized.evolutionInstanceName ?? '',
-          provider: (Deno.env.get('WHATSAPP_PROVIDER') ?? 'evolution').trim().toLowerCase(),
-        })
-        const sent = await sendProvider.sendMessage({
-          to: normalized.fromPhone,
-          text: aiReply,
-          leadId: lead.leadId,
-        })
-        await insertInteraction(admin, {
-          leadId: lead.leadId,
-          patientName: normalized.fromName,
-          channel: 'whatsapp',
-          direction: 'out',
-          author: 'Assistente IA',
-          content: aiReply,
-          happenedAt: nowIso(),
-        })
-        await admin
-          .from('crm_conversation_states')
-          .upsert({
-            lead_id: lead.leadId,
-            owner_mode: ownerMode,
-            ai_enabled: aiEnabled,
-            last_inbound_at: normalized.happenedAt,
-            last_ai_reply_at: nowIso(),
-            context_summary: `${aiInboundUserText.slice(0, 280)}\nIA: ${aiReply.slice(0, 220)}`.slice(0, 1200),
-            updated_at: nowIso(),
-          })
-        await admin.from('webhook_jobs').insert({
-          source: 'whatsapp-webhook',
-          status: 'done',
-          note: `ai_auto_reply:${sendProvider.name}:${sent.externalMessageId}`.slice(0, 500),
-        })
-      }
+      const { replied } = await runWhatsappAiAutoReply(admin, {
+        leadId: lead.leadId,
+        patientName: normalized.fromName,
+        fromPhone: normalized.fromPhone,
+        aiInboundUserText,
+        inboundHappenedAt: normalized.happenedAt,
+        ownerMode: gate.ownerMode,
+        aiEnabled: gate.aiEnabled,
+        statePrompt,
+        aiJobSource: 'whatsapp-webhook',
+        sendProvider,
+      })
+      routing = replied ? 'ai_auto_reply_attempted' : 'manual_handoff'
     } else {
-      await admin
-        .from('crm_conversation_states')
-        .upsert({
-          lead_id: lead.leadId,
-          owner_mode: ownerMode,
-          ai_enabled: aiEnabled,
-          last_inbound_at: normalized.happenedAt,
-          updated_at: nowIso(),
-        })
+      await upsertConversationStateInboundOnly(admin, {
+        leadId: lead.leadId,
+        ownerMode: gate.ownerMode,
+        aiEnabled: gate.aiEnabled,
+        inboundHappenedAt: normalized.happenedAt,
+      })
+      routing = 'manual_handoff'
     }
 
     await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', String(jobRow.id))
@@ -324,7 +297,7 @@ Deno.serve(async (req) => {
       leadId: lead.leadId,
       status: lead.status,
       provider: provider.name,
-      routing: canAutoReply ? 'ai_auto_reply_attempted' : 'manual_handoff',
+      routing,
     })
   } catch (e) {
     await admin
@@ -337,4 +310,3 @@ Deno.serve(async (req) => {
     return json({ error: 'processing_failed', message: e instanceof Error ? e.message : String(e) }, 500)
   }
 })
-
