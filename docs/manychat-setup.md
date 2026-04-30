@@ -105,6 +105,18 @@ O modelo no **Coding Plan** da Z.ai corre melhor **no n8n** (ou noutro worker) d
 
 Contrato: [crm-external-http-api.md](crm-external-http-api.md) (secções 1.3 e 1.4). Detalhe do fluxo n8n: [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md).
 
+### 2.6 Resposta **manual** da equipa (Instagram) — mesmo esquema que `sendFlow`
+
+O botão **Enviar** do CRM chama `crm-send-message`, que fala com **Evolution / WhatsApp Cloud** no número do lead. Leads só **Instagram (ManyChat)** usam telefone sintético `888001…`: **não** há linha WhatsApp nesse número, e podes ver **429** por limites de segurança da função.
+
+Para o operador responder no **Instagram** como já fazias:
+
+1. No **ManyChat**, define um **custom field** (ex. `crm_outbound_text`) e um **Flow** “enviar mensagem de texto” que lê esse campo e envia ao subscriber.
+2. No CRM/n8n, quando o texto estiver pronto: **HTTP** à API ManyChat que **preenche o custom field** e dispara **Send Flow** / execução manual do flow (o mesmo padrão do `sendFlow` com variável).
+3. **Registar no CRM** com `POST` a `crm-manychat-webhook`, `"action": "record_outbound"`, `subscriber_id` + `reply` com o texto enviado (ver §1.4 em [crm-external-http-api.md](crm-external-http-api.md)).
+
+Assim o histórico no painel fica alinhado com o que o cliente recebeu no DM, **sem** passar por `crm-send-message`.
+
 ---
 
 ## 3. Testar no Admin Lab (opcional)

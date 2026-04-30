@@ -81,6 +81,7 @@ Defina no Supabase:
 - `MANYCHAT_CRM_SECRET` (ManyChat / n8n → `crm-manychat-webhook` — **caminho preferido para canais Meta “oficiais” via ManyChat**)
 - `CRM_AI_INTERNAL_SECRET` (≥16 caracteres): `crm-manychat-webhook` / WhatsApp auto-reply chamam `crm-ai-assistant` com header `x-crm-ai-internal-secret`; sem isto o JSON pode vir com `reply` vazio
 - `CRM_WEBHOOK_SECRET` (webhook genérico `crm-ingest-webhook`)
+- Opcional — `crm-send-message`: `CRM_MANUAL_SEND_MIN_GAP_SECONDS` (segundos entre envios manuais por lead; `0` desativa), `CRM_SEND_MESSAGE_HOURLY_CAP` (máx. de envios WhatsApp contados na última hora antes de 429)
 
 Deploy:
 

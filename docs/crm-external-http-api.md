@@ -161,6 +161,16 @@ Secrets Cloud API (só se usares Meta **sem** ManyChat neste leg):
 
 **Multi-linha Meta direta:** `meta_phone_number_id` em `whatsapp_channel_instances` (migração `20260430140000_wa_meta_phone_number_id.sql`).
 
+### 3.1 `crm-send-message` — envio manual pela equipa (só WhatsApp)
+
+**Auth:** `Authorization: Bearer <JWT do utilizador>` (sessão Supabase).
+
+Envia texto pela instância WhatsApp (Evolution ou Cloud) associada ao lead. **Não** serve para Instagram DM via ManyChat; para isso usa ManyChat (custom field + `sendFlow`) e `crm-manychat-webhook` com `action: record_outbound` ([manychat-setup.md](manychat-setup.md) §2.6).
+
+**429 `cooldown`:** intervalo mínimo entre envios manuais **no mesmo lead** (por defeito **10 s**). Secrets opcionais: `CRM_MANUAL_SEND_MIN_GAP_SECONDS` (`0` = desativar).
+
+**429 `rate_limited`:** teto de linhas `webhook_jobs` com `outbound:%` na última hora (por defeito **180**). Secret opcional: `CRM_SEND_MESSAGE_HOURLY_CAP`.
+
 ---
 
 ## 4. n8n — padrão recomendado

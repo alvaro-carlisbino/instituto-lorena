@@ -1,3 +1,7 @@
+/**
+ * Envio manual WhatsApp (Evolution / Cloud). Opcional (Secrets): CRM_MANUAL_SEND_MIN_GAP_SECONDS,
+ * CRM_SEND_MESSAGE_HOURLY_CAP. Instagram/ManyChat: não usar esta função — sendFlow + record_outbound.
+ */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
 import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
@@ -78,9 +82,10 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { data: aiConfig } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
-    const maxPerHour = Number(aiConfig?.max_ai_replies_per_hour ?? 2)
-    const minSecondsBetween = Number(aiConfig?.min_seconds_between_ai_replies ?? 240)
+    const hourlyCap = Math.max(
+      30,
+      Math.min(2000, Number(Deno.env.get('CRM_SEND_MESSAGE_HOURLY_CAP') ?? '180')),
+    )
     const oneHourAgoIso = new Date(Date.now() - 60 * 60 * 1000).toISOString()
     const { count: outboundLastHour } = await admin
       .from('webhook_jobs')
@@ -88,18 +93,39 @@ Deno.serve(async (req) => {
       .eq('source', 'whatsapp-webhook')
       .like('note', 'outbound:%')
       .gte('created_at', oneHourAgoIso)
-    if ((outboundLastHour ?? 0) > Math.max(10, maxPerHour * 8)) {
-      return json({ error: 'rate_limited', message: 'Limite de segurança atingido. Tente novamente em alguns minutos.' }, 429)
+    if ((outboundLastHour ?? 0) > hourlyCap) {
+      return json(
+        {
+          error: 'rate_limited',
+          message:
+            'Limite horário de envios WhatsApp atingido. Aguarde ou ajuste CRM_SEND_MESSAGE_HOURLY_CAP (Edge Functions → Secrets). Para Instagram via ManyChat use sendFlow + record_outbound.',
+        },
+        429,
+      )
     }
 
+    const manualGapSeconds = Math.max(
+      0,
+      Math.min(600, Number(Deno.env.get('CRM_MANUAL_SEND_MIN_GAP_SECONDS') ?? '10')),
+    )
     const { data: state } = await admin
       .from('crm_conversation_states')
       .select('last_human_reply_at')
       .eq('lead_id', leadId)
       .maybeSingle()
     const lastHumanAt = state?.last_human_reply_at ? new Date(String(state.last_human_reply_at)).getTime() : 0
-    if (lastHumanAt && (Date.now() - lastHumanAt) / 1000 < Math.min(120, minSecondsBetween)) {
-      return json({ error: 'cooldown', message: 'Aguarde alguns segundos antes de enviar outra mensagem.' }, 429)
+    if (
+      manualGapSeconds > 0 &&
+      lastHumanAt > 0 &&
+      (Date.now() - lastHumanAt) / 1000 < manualGapSeconds
+    ) {
+      return json(
+        {
+          error: 'cooldown',
+          message: `Aguarde ${manualGapSeconds}s entre envios manuais neste lead (ou defina CRM_MANUAL_SEND_MIN_GAP_SECONDS=0 para desativar).`,
+        },
+        429,
+      )
     }
 
     const sent = await provider.sendMessage({ to, text, leadId })
