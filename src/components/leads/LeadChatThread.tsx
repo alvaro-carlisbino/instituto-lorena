@@ -101,7 +101,7 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
         aria-live="polite"
         aria-relevant="additions"
         aria-label="Histórico de mensagens"
-        className="min-h-0 w-full min-w-0 flex-1 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/35 p-3 shadow-inner dark:bg-[#0b141a]"
+        className="min-h-0 w-full min-w-0 flex-1 basis-0 overflow-y-auto overscroll-contain rounded-xl border border-border/70 bg-muted/35 p-3 shadow-inner dark:bg-[#0b141a]"
       >
         <ul className="m-0 flex list-none flex-col gap-2.5 p-0 sm:gap-3">
           {items.length === 0 ? (
