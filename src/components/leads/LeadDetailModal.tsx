@@ -127,13 +127,13 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[90vw] max-w-5xl gap-0 overflow-y-auto max-h-[90vh] p-0">
+        <DialogContent className="flex h-[min(92dvh,calc(100dvh-1rem))] w-[min(100vw-1rem,72rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:h-[min(90dvh,880px)]">
           {lead ? (
             <>
-              <DialogHeader className="border-b border-border p-4 text-left">
-                <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-4">
-                  <div className="flex-1">
-                    <DialogTitle className="text-left text-xl">{lead.patientName}</DialogTitle>
+              <DialogHeader className="shrink-0 border-b border-border p-3 text-left sm:p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                  <div className="min-w-0 flex-1 pr-8 sm:pr-0">
+                    <DialogTitle className="text-left text-lg sm:text-xl">{lead.patientName}</DialogTitle>
                     <DialogDescription className="text-left mt-1.5">
                       <span className="flex flex-wrap gap-2">
                         <Badge variant="secondary">{pipeline?.name ?? lead.pipelineId}</Badge>
@@ -143,7 +143,7 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                       </span>
                     </DialogDescription>
                   </div>
-                  <div className="flex flex-wrap gap-2 shrink-0">
+                  <div className="flex flex-wrap gap-2 sm:shrink-0 sm:justify-end">
                     <Link
                       to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
                       className={buttonVariants({ variant: 'default', size: 'sm' })}
@@ -166,7 +166,8 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                 </div>
               </DialogHeader>
 
-              <div className="grid gap-4 p-4 overflow-y-auto lg:grid-cols-2">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4">
+                <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
               <section aria-labelledby="lead-profile-heading">
                 <h2 id="lead-profile-heading" className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">
                   Perfil completo
@@ -407,11 +408,11 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                 )}
               </section>
 
-              <section aria-labelledby="lead-chat-heading" className="flex min-h-[18rem] flex-col lg:col-span-2">
+              <section aria-labelledby="lead-chat-heading" className="flex min-h-[min(40dvh,22rem)] flex-col lg:col-span-2">
                 <h2 id="lead-chat-heading" className="mb-2 text-xs font-bold uppercase tracking-widest text-muted-foreground">
                   Conversas
                 </h2>
-                <div className="flex min-h-0 flex-1 flex-col rounded-md border border-border bg-card p-2">
+                <div className="flex min-h-[min(36dvh,20rem)] flex-1 flex-col rounded-md border border-border bg-card p-2 sm:min-h-[min(40dvh,24rem)]">
                   <LeadChatThread
                     leadId={lead.id}
                     history={leadHistory}
@@ -419,7 +420,8 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                   />
                 </div>
               </section>
-            </div>
+                </div>
+              </div>
           </>
           ) : (
             <DialogHeader className="p-4">
