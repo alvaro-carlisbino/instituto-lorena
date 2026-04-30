@@ -83,11 +83,16 @@ export async function evaluateCrmAiAutoReplyGate(
 
   const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
   const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
-  const maxPerHour = Number(config?.max_ai_replies_per_hour ?? 2)
-  const minSecondsBetween = Number(config?.min_seconds_between_ai_replies ?? 240)
+  const maxPerHour = Number(config?.max_ai_replies_per_hour ?? 20)
+  const minSecondsBetween = Number(config?.min_seconds_between_ai_replies ?? 30)
   const latestAiReplyAt = state?.last_ai_reply_at ? new Date(String(state.last_ai_reply_at)).getTime() : 0
   const elapsedSinceAi = latestAiReplyAt ? (Date.now() - latestAiReplyAt) / 1000 : Number.POSITIVE_INFINITY
-  const withinWindow = isWithinQuietHours(new Date(), 8, 20)
+
+  // Parse business hours from config (format "HH:mm:ss")
+  const startH = Number.parseInt(String(config?.business_hours_start ?? '08').split(':')[0], 10) || 8
+  const endH = Number.parseInt(String(config?.business_hours_end ?? '20').split(':')[0], 10) || 20
+  
+  const withinWindow = isWithinQuietHours(new Date(), startH, endH)
   const shouldAiByMode = ownerMode === 'ai' || (ownerMode === 'auto' && withinWindow)
 
   const aiRepliesLastHour = await countAiAutoRepliesLastHour(admin, options.rateLimitJobSources)
