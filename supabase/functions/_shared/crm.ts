@@ -294,8 +294,15 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
       current.custom_fields as Record<string, unknown> | undefined,
       input.customFields,
     )
+    const isPlaceholder = (name: string) => {
+      const n = name.toLowerCase().trim()
+      return !n || n === 'lead' || n === 'lead webhook' || n === 'novo contato' || n === 'atendimento' || n === 'atendimento comercial' || n === 'whatsapp'
+    }
+
     const patch: Record<string, unknown> = {
-      patient_name: input.patientName || String(current.patient_name ?? 'Lead'),
+      patient_name: (current.patient_name && !isPlaceholder(String(current.patient_name))) 
+        ? String(current.patient_name) 
+        : (input.patientName || String(current.patient_name ?? 'Lead')),
       phone,
       source: input.source,
       summary: input.summary || '',
