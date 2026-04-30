@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Search } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ConversationModeSwitch } from '@/components/leads/ConversationModeSwitch'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
@@ -191,7 +191,19 @@ export function ChatWorkspacePage() {
                   </div>
                 ) : null}
               </div>
-              <div className="flex w-full max-w-full shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap lg:max-w-[min(100%,24rem)] xl:max-w-[min(100%,20rem)]">
+              <div className="flex w-full max-w-full shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:max-w-[min(100%,28rem)]">
+                {activeLead ? (
+                  <Link
+                    to={`/leads?leadId=${encodeURIComponent(activeLead.id)}`}
+                    className={buttonVariants({
+                      variant: 'outline',
+                      size: 'sm',
+                      className: '2xl:hidden rounded-lg text-xs sm:text-sm',
+                    })}
+                  >
+                    Ficha completa
+                  </Link>
+                ) : null}
                 <Button
                   type="button"
                   size="sm"

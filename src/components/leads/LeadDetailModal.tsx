@@ -127,7 +127,7 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex h-[min(92dvh,calc(100dvh-1rem))] w-[min(100vw-1rem,72rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:h-[min(90dvh,880px)]">
+        <DialogContent className="flex h-[min(92dvh,calc(100dvh-1rem))] w-[min(100vw-1rem,88rem)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:h-[min(90dvh,900px)] lg:w-[min(100vw-2rem,90rem)]">
           {lead ? (
             <>
               <DialogHeader className="shrink-0 border-b border-border p-3 text-left sm:p-4">
@@ -393,7 +393,7 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                   Campos
                 </h2>
                 {crm.currentPermission.canRouteLeads ? (
-                  <div className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-2">
+                  <div className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-2 xl:grid-cols-3 xl:gap-4">
                     {workflowFieldsForContext(crm.workflowFields, 'lead_detail').map((field) => (
                       <DynamicFieldRenderer
                         key={field.id}

@@ -17,16 +17,75 @@ type Props = {
   onChange: (next: Lead) => void
 }
 
+function fieldControlId(field: WorkflowField): string {
+  return `wf-${field.id}`
+}
+
+function FieldBlock({
+  field,
+  compact,
+  children,
+  layout = 'stack',
+}: {
+  field: WorkflowField
+  compact?: boolean
+  children: React.ReactNode
+  layout?: 'stack' | 'boolean-row'
+}) {
+  if (layout === 'boolean-row') {
+    return (
+      <div
+        className={cn(
+          'flex min-w-0 items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/90 p-2.5 shadow-sm ring-1 ring-black/[0.04] dark:border-border dark:bg-muted/15 dark:ring-white/[0.06]',
+          !compact && 'mt-1 border-border/80 bg-transparent p-0 shadow-none ring-0',
+        )}
+      >
+        <Label
+          htmlFor={fieldControlId(field)}
+          className={cn('cursor-pointer font-medium text-foreground', compact ? 'text-xs leading-snug' : 'text-sm')}
+        >
+          {field.label}
+          {field.required ? <span className="ml-1 text-destructive">*</span> : null}
+        </Label>
+        {children}
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={cn(
+        'min-w-0 flex flex-col gap-1.5',
+        compact &&
+          'rounded-lg border border-border/60 bg-background/90 p-2.5 shadow-sm ring-1 ring-black/[0.04] dark:border-border dark:bg-muted/15 dark:ring-white/[0.06]',
+      )}
+    >
+      <Label
+        htmlFor={fieldControlId(field)}
+        className={cn(
+          'font-medium leading-snug text-foreground',
+          compact ? 'text-xs' : 'text-xs text-muted-foreground',
+        )}
+      >
+        {field.label}
+        {field.required ? <span className="ml-1 text-destructive">*</span> : null}
+      </Label>
+      {children}
+    </div>
+  )
+}
+
 export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) {
   const raw = getLeadFieldValue(lead, field.fieldKey)
+  const controlId = fieldControlId(field)
 
   const apply = (value: unknown) => {
     onChange(setLeadFieldValue(lead, field.fieldKey, value))
   }
 
   const selectTriggerClass = cn(
-    'w-full min-w-0 justify-between',
-    compact ? 'h-7' : 'h-9'
+    'w-full min-w-0 max-w-full justify-between [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate',
+    compact ? 'h-8' : 'h-9',
   )
   const selectSize = compact ? 'sm' : 'default'
 
@@ -36,10 +95,9 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
     const value = keys.includes(rawStr as Lead['source']) ? rawStr : keys[0]
     const selectedSourceLabel = sourceLabel[value as Lead['source']] ?? 'Origem'
     return (
-      <div className={compact ? 'contents' : 'grid gap-2'}>
-        {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
+      <FieldBlock field={field} compact={compact}>
         <Select value={value} onValueChange={(v) => v && apply(v)}>
-          <SelectTrigger className={selectTriggerClass} size={selectSize}>
+          <SelectTrigger id={controlId} className={selectTriggerClass} size={selectSize}>
             <SelectValue>{selectedSourceLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -50,7 +108,7 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
             ))}
           </SelectContent>
         </Select>
-      </div>
+      </FieldBlock>
     )
   }
 
@@ -64,8 +122,7 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
       ? '—'
       : pairs.find((p) => p.value === rawStr)?.label ?? `${rawStr} (valor fora da lista)`
     return (
-      <div className={compact ? 'contents' : 'grid gap-2'}>
-        {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
+      <FieldBlock field={field} compact={compact}>
         <Select
           value={selectValue}
           onValueChange={(v) => {
@@ -73,7 +130,7 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
             apply(v === EMPTY_SELECT ? '' : v)
           }}
         >
-          <SelectTrigger className={selectTriggerClass} size={selectSize}>
+          <SelectTrigger id={controlId} className={selectTriggerClass} size={selectSize}>
             <SelectValue>{selectedOptionLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -90,49 +147,70 @@ export function DynamicFieldRenderer({ field, lead, compact, onChange }: Props) 
             ))}
           </SelectContent>
         </Select>
-      </div>
+      </FieldBlock>
     )
   }
 
   if (field.fieldType === 'number') {
+    const numVal = raw === undefined || raw === null ? '' : String(raw)
     return (
-      <div className={compact ? 'contents' : 'grid gap-2'}>
-        {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
+      <FieldBlock field={field} compact={compact}>
         <Input
+          id={controlId}
           type="number"
-          value={raw === undefined || raw === null ? '' : Number(raw)}
-          onChange={(e) => apply(e.target.value === '' ? 0 : Number(e.target.value))}
+          inputMode="decimal"
+          className="h-9 font-mono text-sm tabular-nums"
+          value={numVal}
+          onChange={(e) => {
+            const v = e.target.value
+            apply(v === '' ? '' : Number(v))
+          }}
         />
-      </div>
+      </FieldBlock>
     )
   }
 
   if (field.fieldType === 'date') {
     return (
-      <div className={compact ? 'contents' : 'grid gap-2'}>
-        {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
-        <Input type="date" value={raw ? String(raw).slice(0, 10) : ''} onChange={(e) => apply(e.target.value)} />
-      </div>
+      <FieldBlock field={field} compact={compact}>
+        <Input
+          id={controlId}
+          type="date"
+          className="h-9 font-mono text-sm"
+          value={raw ? String(raw).slice(0, 10) : ''}
+          onChange={(e) => apply(e.target.value)}
+        />
+      </FieldBlock>
     )
   }
 
   if (field.fieldType === 'boolean') {
     const isChecked = Boolean(raw === 'true' || raw === true || raw === 1)
+    if (compact) {
+      return (
+        <FieldBlock field={field} compact layout="boolean-row">
+          <Switch id={controlId} checked={isChecked} onCheckedChange={(checked) => apply(checked)} />
+        </FieldBlock>
+      )
+    }
     return (
-      <div className={compact ? 'flex items-center justify-between w-full' : 'flex items-center gap-2 mt-2'}>
-        <Label className={cn("text-xs cursor-pointer", compact ? "text-muted-foreground" : "")}>{field.label}</Label>
-        <Switch 
-          checked={isChecked} 
-          onCheckedChange={(checked) => apply(checked)} 
-        />
+      <div className="mt-1 flex items-center gap-3">
+        <Label htmlFor={controlId} className="cursor-pointer text-sm font-medium">
+          {field.label}
+        </Label>
+        <Switch id={controlId} checked={isChecked} onCheckedChange={(checked) => apply(checked)} />
       </div>
     )
   }
 
   return (
-    <div className={compact ? 'contents' : 'grid gap-2'}>
-      {!compact ? <Label className="text-xs text-muted-foreground">{field.label}</Label> : null}
-      <Input value={raw === undefined || raw === null ? '' : String(raw)} onChange={(e) => apply(e.target.value)} />
-    </div>
+    <FieldBlock field={field} compact={compact}>
+      <Input
+        id={controlId}
+        className="min-h-9 text-sm"
+        value={raw === undefined || raw === null ? '' : String(raw)}
+        onChange={(e) => apply(e.target.value)}
+      />
+    </FieldBlock>
   )
 }
