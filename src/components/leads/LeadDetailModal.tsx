@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
@@ -22,9 +22,16 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Trash2 } from 'lucide-react'
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
+import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { workflowFieldsForContext, isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
 import { labelForIdName } from '@/lib/selectDisplay'
+import { businessHoursFromAiConfig } from '@/lib/aiTypingIndicator'
 import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
+import {
+  getAiConfig,
+  getConversationState,
+  type ConversationOwnerMode,
+} from '@/services/conversationControl'
 import { fetchWhatsappChannelInstances } from '@/services/whatsappChannelInstances'
 import { fetchLeadWaLineEvents, type LeadWaLineEvent } from '@/services/leadWaLineEvents'
 
@@ -55,10 +62,41 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
   const [waLineEvents, setWaLineEvents] = useState<LeadWaLineEvent[]>([])
   const [waInstanceLabels, setWaInstanceLabels] = useState<Record<string, string>>({})
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [modalLeadAiGate, setModalLeadAiGate] = useState<{
+    ownerMode: ConversationOwnerMode
+    aiEnabled: boolean
+    businessHoursStartHour: number
+    businessHoursEndHour: number
+  } | null>(null)
+
+  const loadModalLeadAiGate = useCallback(async (leadId: string) => {
+    if (crm.dataMode !== 'supabase') {
+      setModalLeadAiGate(null)
+      return
+    }
+    try {
+      const [state, cfg] = await Promise.all([getConversationState(leadId), getAiConfig()])
+      const bh = cfg ? businessHoursFromAiConfig(cfg) : { startHour: 8, endHour: 20 }
+      setModalLeadAiGate({
+        ownerMode: (state.owner_mode as ConversationOwnerMode) ?? 'auto',
+        aiEnabled: state.ai_enabled !== false,
+        businessHoursStartHour: bh.startHour,
+        businessHoursEndHour: bh.endHour,
+      })
+    } catch {
+      setModalLeadAiGate(null)
+    }
+  }, [crm.dataMode])
 
   useEffect(() => {
-    if (!open || !lead || crm.dataMode !== 'supabase') {
+    if (!open || !lead) {
       setWaLineEvents([])
+      setModalLeadAiGate(null)
+      return
+    }
+    if (crm.dataMode !== 'supabase') {
+      setWaLineEvents([])
+      setModalLeadAiGate(null)
       return
     }
     void fetchLeadWaLineEvents(lead.id)
@@ -73,7 +111,25 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
       .catch(() => {
         setWaInstanceLabels({})
       })
-  }, [open, lead?.id, crm.dataMode])
+    void loadModalLeadAiGate(lead.id)
+  }, [open, lead?.id, crm.dataMode, loadModalLeadAiGate])
+
+  useEffect(() => {
+    if (!open || !lead || crm.dataMode !== 'supabase') return
+    if (!isSupabaseConfigured || !supabase) return
+    const client = supabase
+    const lid = lead.id
+    const channel = client
+      .channel(`lead-modal-conv-${lid}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_conversation_states' }, (payload) => {
+        const row = payload.new as { lead_id?: string } | undefined
+        if (row?.lead_id === lid) void loadModalLeadAiGate(lid)
+      })
+      .subscribe()
+    return () => {
+      void client.removeChannel(channel)
+    }
+  }, [open, lead?.id, crm.dataMode, loadModalLeadAiGate])
 
   useEffect(() => {
     if (!lead || otherPipelines.length === 0) {
@@ -420,6 +476,7 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                     history={leadHistory}
                     canCompose={crm.currentPermission.canRouteLeads && !waComposeBlocked}
                     readOnlyInstagramHint={waComposeBlocked}
+                    aiConversationBase={crm.dataMode === 'supabase' ? modalLeadAiGate : null}
                   />
                 </div>
               </section>

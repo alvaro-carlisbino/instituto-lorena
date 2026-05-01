@@ -299,6 +299,21 @@
     }
 }
 
+@keyframes crm-ai-indeterminate {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0.75;
+  }
+  100% {
+    transform: translateX(380%);
+    opacity: 1;
+  }
+}
+
+.crm-ai-progress-strip {
+  animation: crm-ai-indeterminate 1.35s ease-in-out infinite;
+}
+
 @layer utilities {
   .skip-link {
     position: fixed;

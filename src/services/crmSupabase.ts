@@ -956,6 +956,18 @@ export const insertInteraction = async (interaction: Omit<Interaction, 'id'>): P
   if (error) throw error
 }
 
+export const updateInteractionContent = async (interactionId: string, content: string): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('interactions').update({ content }).eq('id', interactionId)
+  if (error) throw error
+}
+
+export const deleteInteractionRow = async (interactionId: string): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('interactions').delete().eq('id', interactionId)
+  if (error) throw error
+}
+
 export const saveChannelConfig = async (channel: ChannelConfig): Promise<void> => {
   const client = assertSupabase()
   const { error } = await client.from('channel_configs').upsert({

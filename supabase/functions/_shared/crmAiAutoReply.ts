@@ -12,6 +12,24 @@ export function stripManychatHandoffMarker(reply: string): { clean: string; hand
   return { clean, handoffSuggested: has }
 }
 
+/**
+ * Texto visível ao paciente / ManyChat: remove marca de handoff e vazamentos comuns de "tools"
+ * (blocos fenced, XML de function_call, etc.). Não substitui o system prompt — só a saída.
+ */
+export function sanitizeCrmAiPatientReply(reply: string): { clean: string; handoffSuggested: boolean } {
+  const { clean: afterHandoff, handoffSuggested } = stripManychatHandoffMarker(reply)
+  let t = afterHandoff.replace(/\r\n/g, '\n')
+
+  t = t.replace(/```(?:tool|json|typescript|javascript|xml|yaml)\s*[\s\S]*?```/gi, '')
+  t = t.replace(/<function_calls>[\s\S]*?<\/function_calls>/gi, '')
+  t = t.replace(/<function_call[\s\S]*?<\/function_call>/gi, '')
+  t = t.replace(/<invoke[\s\S]*?<\/invoke>/gi, '')
+  t = t.replace(/<tool_call[\s\S]*?<\/tool_call>/gi, '')
+  t = t.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+  t = t.replace(/\n{3,}/g, '\n\n').trim()
+  return { clean: t, handoffSuggested }
+}
+
 const TRIAGE_MAPPING: Record<string, { pipelineId: string; stageId: string }> = {
   '1': { pipelineId: 'pipeline-tratamento-capilar', stageId: 'tc-triagem' },
   '2': { pipelineId: 'pipeline-tratamento-capilar', stageId: 'tc-triagem' },
@@ -71,7 +89,6 @@ export async function evaluateCrmAiAutoReplyGate(
   leadId: string,
   options: {
     directionIsInbound: boolean
-    rateLimitJobSources: string[]
   },
 ): Promise<CrmAiAutoReplyGate> {
   const { data: state } = await admin
@@ -83,8 +100,8 @@ export async function evaluateCrmAiAutoReplyGate(
 
   const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
   const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
-  const maxPerHour = Number(config?.max_ai_replies_per_hour ?? 20)
-  const minSecondsBetween = Number(config?.min_seconds_between_ai_replies ?? 30)
+  /** 0 = sem espera mínima entre respostas da IA (cada mensagem inbound pode gerar resposta). */
+  const minSecondsBetween = Math.max(0, Number(config?.min_seconds_between_ai_replies ?? 10))
   const latestAiReplyAt = state?.last_ai_reply_at ? new Date(String(state.last_ai_reply_at)).getTime() : 0
   const elapsedSinceAi = latestAiReplyAt ? (Date.now() - latestAiReplyAt) / 1000 : Number.POSITIVE_INFINITY
 
@@ -95,8 +112,6 @@ export async function evaluateCrmAiAutoReplyGate(
   const withinWindow = isWithinQuietHours(new Date(), startH, endH)
   const shouldAiByMode = ownerMode === 'ai' || (ownerMode === 'auto' && withinWindow)
 
-  const aiRepliesLastHour = await countAiAutoRepliesLastHour(admin, options.rateLimitJobSources)
-
   const skipReasons: string[] = []
   if (!aiEnabled) skipReasons.push('ai_disabled')
   if (!options.directionIsInbound) skipReasons.push('not_inbound')
@@ -105,19 +120,18 @@ export async function evaluateCrmAiAutoReplyGate(
     else if (ownerMode === 'auto' && !withinWindow) skipReasons.push('outside_quiet_hours')
     else skipReasons.push(`owner_mode_${ownerMode || 'unknown'}`)
   }
-  if (elapsedSinceAi < minSecondsBetween) {
+  if (minSecondsBetween > 0 && elapsedSinceAi < minSecondsBetween) {
     skipReasons.push('min_seconds_between_ai_replies')
   }
-  if (aiRepliesLastHour >= maxPerHour) {
-    skipReasons.push('max_ai_replies_per_hour')
-  }
+
+  // max_ai_replies_per_hour em crm_ai_configs mantém-se para métricas/UI; não bloqueia mais o auto-reply
+  // (limite global fazia a IA “parar” em conversas com várias mensagens).
 
   const canAutoReply =
     aiEnabled &&
     shouldAiByMode &&
     options.directionIsInbound &&
-    elapsedSinceAi >= minSecondsBetween &&
-    aiRepliesLastHour < maxPerHour
+    (minSecondsBetween === 0 || elapsedSinceAi >= minSecondsBetween)
 
   const hintParts: string[] = []
   if (skipReasons.includes('ai_disabled')) {
@@ -133,12 +147,7 @@ export async function evaluateCrmAiAutoReplyGate(
   }
   if (skipReasons.includes('min_seconds_between_ai_replies')) {
     hintParts.push(
-      `Aguarda ${Math.ceil(minSecondsBetween - elapsedSinceAi)}s ou reduz min_seconds_between_ai_replies em crm_ai_configs (atual mínimo ${minSecondsBetween}s entre respostas IA).`,
-    )
-  }
-  if (skipReasons.includes('max_ai_replies_per_hour')) {
-    hintParts.push(
-      `Limite de ${maxPerHour} respostas IA na última hora (whatsapp + manychat). Aumenta max_ai_replies_per_hour em crm_ai_configs ou espera.`,
+      `Aguarda ${Math.ceil(minSecondsBetween - elapsedSinceAi)}s ou reduz min_seconds_between_ai_replies em crm_ai_configs (atual ${minSecondsBetween}s; 0 = sem espera).`,
     )
   }
 
@@ -223,6 +232,8 @@ export async function runWhatsappAiAutoReply(
     statePrompt: string
     aiJobSource: string
     sendProvider: WhatsappProvider
+    /** Omisso: 3–8 s (simulação de digitação). Use 0 no retry manual para resposta mais rápida. */
+    typingDelayMs?: number
   },
 ): Promise<{ replied: boolean; replyText?: string }> {
   // --- Triage Logic ---
@@ -294,12 +305,13 @@ export async function runWhatsappAiAutoReply(
   }
   // --- End Triage Logic ---
 
-  const aiReply = await invokeCrmAiAssistantForLead(
+  const aiReplyRaw = await invokeCrmAiAssistantForLead(
     admin,
     options.leadId,
     options.aiInboundUserText,
     options.statePrompt,
   )
+  const { clean: aiReply } = sanitizeCrmAiPatientReply(aiReplyRaw)
   if (!aiReply) {
     await upsertConversationStateInboundOnly(admin, {
       leadId: options.leadId,
@@ -311,10 +323,11 @@ export async function runWhatsappAiAutoReply(
   }
 
   // --- Humanization: Typing Simulation ---
-  // Adiciona um pequeno delay aleatório para simular o tempo de leitura e digitação (3 a 8 segundos)
-  // Isso ajuda a evitar bloqueios do WhatsApp por resposta instantânea de robô.
-  const typingDelayMs = 3000 + Math.random() * 5000
-  await new Promise((resolve) => setTimeout(resolve, typingDelayMs))
+  const delay =
+    options.typingDelayMs !== undefined
+      ? Math.max(0, options.typingDelayMs)
+      : 3000 + Math.random() * 5000
+  if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
 
   const sent = await options.sendProvider.sendMessage({
     to: options.fromPhone,
@@ -343,7 +356,7 @@ export async function runWhatsappAiAutoReply(
   await admin.from('webhook_jobs').insert({
     source: options.aiJobSource,
     status: 'done',
-    note: `ai_auto_reply:${sent.provider}:${sent.externalMessageId}`.slice(0, 500),
+    note: `ai_auto_reply:${sent.provider}:${options.leadId}:${sent.externalMessageId}`.slice(0, 500),
   })
   return { replied: true, replyText: aiReply }
 }
@@ -439,7 +452,7 @@ export async function runManychatAiAutoReply(
     return { replied: false }
   }
 
-  const { clean: aiReply, handoffSuggested } = stripManychatHandoffMarker(aiReplyRaw)
+  const { clean: aiReply, handoffSuggested } = sanitizeCrmAiPatientReply(aiReplyRaw)
   if (!aiReply) {
     await upsertConversationStateInboundOnly(admin, {
       leadId: options.leadId,

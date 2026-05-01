@@ -1,26 +1,51 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { 
+import {
   CalendarPlus,
   Video as VideoIcon,
   Music as MusicIcon,
   File as FileIcon,
   Image as ImageIcon,
+  RefreshCw,
+  MoreVertical,
+  Pencil,
+  Trash2,
+  Smile,
+  Sticker,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { ScheduleAppointmentDialog } from '@/components/leads/ScheduleAppointmentDialog'
 import { useCrm } from '@/context/CrmContext'
 import {
   isWaInstagramMergeNotice,
   tryConsumeWaInstagramMergeToast,
 } from '@/lib/waInstagramMergeNotice'
+import { isAiReplyLikelyPending, type AiConversationGate } from '@/lib/aiTypingIndicator'
+import { isSupabaseConfigured } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
 import type { Interaction } from '@/mocks/crmMock'
+import { forceAiReply, type ConversationOwnerMode } from '@/services/conversationControl'
 
 const CHANNEL_SHORT: Record<string, string> = {
   whatsapp: 'WA',
@@ -28,6 +53,50 @@ const CHANNEL_SHORT: Record<string, string> = {
   system: 'Sys',
   ai: 'IA',
 }
+
+/** Emojis frequentes para inserir no rascunho (UTF-8). */
+const CHAT_QUICK_EMOJIS = [
+  '😀',
+  '😃',
+  '😄',
+  '😁',
+  '😅',
+  '😂',
+  '🤣',
+  '😊',
+  '🙂',
+  '😉',
+  '😍',
+  '🥰',
+  '😘',
+  '😇',
+  '🤔',
+  '😮',
+  '😢',
+  '😭',
+  '🙏',
+  '👍',
+  '👎',
+  '👏',
+  '🙌',
+  '💪',
+  '❤️',
+  '💙',
+  '✨',
+  '🔥',
+  '⭐',
+  '✅',
+  '❌',
+  '⚠️',
+  '📅',
+  '⏰',
+  '💬',
+  '📞',
+  '🏥',
+  '💊',
+  '🦷',
+  '✍️',
+]
 
 type ChatFilter = 'all' | 'whatsapp' | 'meta'
 
@@ -37,13 +106,128 @@ type Props = {
   whatsappOnly?: boolean
   canCompose?: boolean
   readOnlyInstagramHint?: boolean
+  /** Modo + IA activa + horário (Supabase). Sem isto o indicador de “IA a responder” não aparece. */
+  aiConversationBase?: {
+    ownerMode: ConversationOwnerMode
+    aiEnabled: boolean
+    businessHoursStartHour: number
+    businessHoursEndHour: number
+  } | null
 }
 
-export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, readOnlyInstagramHint }: Props) {
+export function LeadChatThread({
+  leadId,
+  history,
+  whatsappOnly,
+  canCompose,
+  readOnlyInstagramHint,
+  aiConversationBase,
+}: Props) {
   const crm = useCrm()
+  const draftTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const stickerInputRef = useRef<HTMLInputElement>(null)
+  const isActiveLead = crm.selectedLeadId === leadId
   const [filter, setFilter] = useState<ChatFilter>(whatsappOnly ? 'whatsapp' : 'all')
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [aiUiTick, setAiUiTick] = useState(0)
+  const [forceAiLoading, setForceAiLoading] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editDraft, setEditDraft] = useState('')
+  const [editTarget, setEditTarget] = useState<Interaction | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const [deleteMsgOpen, setDeleteMsgOpen] = useState(false)
+  const [deleteMsgTarget, setDeleteMsgTarget] = useState<Interaction | null>(null)
+
+  useEffect(() => {
+    if (!aiConversationBase) return
+    const id = window.setInterval(() => setAiUiTick((t) => t + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [aiConversationBase, leadId])
+
+  const aiGate: AiConversationGate | null = useMemo(() => {
+    if (!aiConversationBase) return null
+    return {
+      ownerMode: aiConversationBase.ownerMode,
+      aiEnabled: aiConversationBase.aiEnabled,
+      businessHoursStartHour: aiConversationBase.businessHoursStartHour,
+      businessHoursEndHour: aiConversationBase.businessHoursEndHour,
+    }
+  }, [aiConversationBase])
+
+  const showAiResponding = useMemo(() => {
+    void aiUiTick
+    if (!aiGate) return false
+    return isAiReplyLikelyPending({ history, gate: aiGate })
+  }, [history, aiGate, aiUiTick])
+
+  const showForceAiButton =
+    Boolean(aiConversationBase) &&
+    isSupabaseConfigured &&
+    canCompose &&
+    isActiveLead &&
+    aiConversationBase!.aiEnabled &&
+    aiConversationBase!.ownerMode !== 'human'
+
+  const handleForceAiReply = async () => {
+    if (!showForceAiButton || forceAiLoading) return
+    setForceAiLoading(true)
+    try {
+      const r = await forceAiReply(leadId)
+      if (r.replied) {
+        toast.success('Resposta da IA enviada.')
+        if (r.channel === 'meta' && r.manychat_push && r.manychat_push.attempted && r.manychat_push.ok === false) {
+          toast.message('ManyChat: mensagem gravada no CRM; o envio ao Instagram pode ter falhado.', {
+            description: String((r.manychat_push as { error?: string }).error ?? ''),
+          })
+        }
+      } else {
+        toast.message(r.message ?? 'A IA não enviou mensagem.', {
+          description: r.error ? `Código: ${r.error}` : undefined,
+        })
+      }
+      await crm.refreshChatFromSupabase()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao pedir resposta da IA.')
+    } finally {
+      setForceAiLoading(false)
+    }
+  }
+
+  const canEditOutboundText = (msg: Interaction) => msg.direction === 'out'
+
+  const openEditDialog = (msg: Interaction) => {
+    setEditTarget(msg)
+    setEditDraft(msg.content)
+    setEditOpen(true)
+  }
+
+  const saveEditedMessage = async () => {
+    if (!editTarget) return
+    setEditSaving(true)
+    try {
+      await crm.updateInteractionMessage(editTarget.id, editDraft)
+      toast.success('Mensagem atualizada no CRM.')
+      setEditOpen(false)
+      setEditTarget(null)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Não foi possível guardar.')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const runDeleteMessage = async () => {
+    if (!deleteMsgTarget) return
+    try {
+      await crm.deleteInteractionMessage(deleteMsgTarget.id)
+      toast.success('Mensagem removida do histórico do CRM.')
+      setDeleteMsgOpen(false)
+      setDeleteMsgTarget(null)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Não foi possível apagar.')
+    }
+  }
 
   const items = useMemo(() => {
     const list = [...history].sort(
@@ -71,8 +255,6 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
     }
   }, [history])
 
-  const isActiveLead = crm.selectedLeadId === leadId
-
   const handleAttachFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
     const next: Array<{ name: string; mimeType: string; base64: string }> = []
@@ -89,6 +271,51 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
       })
     }
     crm.setDraftAttachments([...(crm.draftAttachments ?? []), ...next])
+  }
+
+  const insertEmojiIntoDraft = (emoji: string) => {
+    if (showAiResponding) return
+    const el = draftTextareaRef.current
+    if (!el) {
+      crm.setDraftMessage((prev) => prev + emoji)
+      return
+    }
+    const start = el.selectionStart ?? crm.draftMessage.length
+    const end = el.selectionEnd ?? start
+    const before = crm.draftMessage.slice(0, start)
+    const after = crm.draftMessage.slice(end)
+    crm.setDraftMessage(before + emoji + after)
+    window.requestAnimationFrame(() => {
+      el.focus()
+      const pos = start + emoji.length
+      el.setSelectionRange(pos, pos)
+    })
+  }
+
+  const handleStickerFile = async (files: FileList | null) => {
+    const input = stickerInputRef.current
+    if (input) input.value = ''
+    if (!files?.length || showAiResponding) return
+    const file = files[0]
+    const okType = file.type === 'image/webp' || file.name.toLowerCase().endsWith('.webp')
+    if (!okType) {
+      toast.error('Figurinha tem de ser WebP (.webp), formato usado pelo WhatsApp.')
+      return
+    }
+    if (file.size > 350 * 1024) {
+      toast.error('Ficheiro demasiado grande. Experimente uma figurinha até ~350 KB.')
+      return
+    }
+    try {
+      const raw = await file.arrayBuffer()
+      const bytes = new Uint8Array(raw)
+      let binary = ''
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i] as number)
+      const base64 = btoa(binary)
+      await crm.sendStickerMessage(base64)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Não foi possível ler a figurinha.')
+    }
   }
 
   // Group messages by author and timestamp (within 10 seconds)
@@ -265,6 +492,21 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
         >
           Tudo
         </Button>
+        {showForceAiButton ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="ml-auto h-7 gap-1 rounded-lg px-2 text-[10px] sm:h-8 sm:px-2.5 sm:text-xs"
+            disabled={forceAiLoading}
+            title="Gera e envia outra resposta com base na última mensagem do paciente (ignora limites de ritmo da IA)."
+            onClick={() => void handleForceAiReply()}
+          >
+            <RefreshCw className={cn('h-3 w-3 shrink-0', forceAiLoading && 'animate-spin')} aria-hidden />
+            <span className="hidden sm:inline">Pedir IA de novo</span>
+            <span className="sm:hidden">IA</span>
+          </Button>
+        ) : null}
       </div>
 
       {/* Message History */}
@@ -299,13 +541,55 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
                       <div
                         key={msg.id}
                         className={cn(
-                          'relative rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed shadow-sm transition-all',
+                          'group/msg relative rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed shadow-sm transition-all',
                           out
                             ? 'bg-primary text-primary-foreground'
                             : 'bg-card text-foreground border border-border/50 dark:bg-[#202c33] dark:text-white/95 dark:border-white/5',
-                          out ? (mIdx === 0 ? 'rounded-tr-none' : '') : (mIdx === 0 ? 'rounded-tl-none' : '')
+                          out ? (mIdx === 0 ? 'rounded-tr-none' : '') : (mIdx === 0 ? 'rounded-tl-none' : ''),
+                          canCompose && out && 'pr-9',
+                          canCompose && !out && 'pl-9',
                         )}
                       >
+                        {canCompose ? (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              type="button"
+                              className={cn(
+                                'absolute top-1 z-10 flex h-7 w-7 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                                out
+                                  ? 'right-1 text-primary-foreground/80 hover:bg-primary-foreground/15'
+                                  : 'left-1 text-muted-foreground hover:bg-muted/80 dark:hover:bg-white/10',
+                                'opacity-70 sm:opacity-0 sm:group-hover/msg:opacity-100',
+                              )}
+                              aria-label="Opções da mensagem"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align={out ? 'end' : 'start'} className="min-w-44">
+                              {canEditOutboundText(msg) ? (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    openEditDialog(msg)
+                                  }}
+                                >
+                                  <Pencil className="size-4" />
+                                  Editar texto
+                                </DropdownMenuItem>
+                              ) : null}
+                              {canEditOutboundText(msg) ? <DropdownMenuSeparator /> : null}
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onClick={() => {
+                                  setDeleteMsgTarget(msg)
+                                  setDeleteMsgOpen(true)
+                                }}
+                              >
+                                <Trash2 className="size-4" />
+                                Apagar do CRM
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        ) : null}
                         {renderContent(msg)}
                       </div>
                     ))}
@@ -328,6 +612,25 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
           )}
         </ul>
       </div>
+
+      {showAiResponding ? (
+        <div
+          className="shrink-0 space-y-1.5 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2.5 dark:bg-primary/10"
+          role="status"
+          aria-live="polite"
+          aria-label="Assistente de IA a gerar resposta"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+              IA a responder…
+            </span>
+            <span className="text-[10px] text-muted-foreground">Aguarde antes de enviar</span>
+          </div>
+          <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-primary/15">
+            <div className="crm-ai-progress-strip absolute inset-y-0 left-0 w-[38%] rounded-full bg-primary shadow-[0_0_12px_hsl(var(--primary)/0.45)]" />
+          </div>
+        </div>
+      ) : null}
 
       {/* Input Area */}
       <div className="flex shrink-0 flex-col gap-2 pt-3">
@@ -354,8 +657,10 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
           <div className="flex shrink-0 flex-col gap-2 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
             <Textarea
               id={`lead-chat-draft-${leadId}`}
+              ref={draftTextareaRef}
               rows={1}
               value={crm.draftMessage}
+              readOnly={showAiResponding}
               onChange={(e) => {
                 const val = e.target.value
                 crm.setDraftMessage(val)
@@ -364,11 +669,16 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
                   setIsScheduleOpen(true)
                 }
               }}
-              placeholder="Digite sua mensagem..."
-              className="min-h-[2.5rem] max-h-[8rem] resize-none rounded-xl border-border/70 bg-background text-sm [field-sizing:content] sm:text-base"
+              placeholder={
+                showAiResponding ? 'A IA está a preparar resposta ao paciente…' : 'Digite sua mensagem...'
+              }
+              className={cn(
+                'min-h-[2.5rem] max-h-[8rem] resize-none rounded-xl border-border/70 bg-background text-sm [field-sizing:content] sm:text-base',
+                showAiResponding && 'cursor-not-allowed opacity-80',
+              )}
             />
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/50 transition-colors">
                   <input
                     type="file"
@@ -379,6 +689,53 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
                   />
                   📎 {crm.draftAttachments.length > 0 ? `${crm.draftAttachments.length} arquivos` : 'Anexar'}
                 </label>
+                <input
+                  ref={stickerInputRef}
+                  type="file"
+                  accept=".webp,image/webp"
+                  className="sr-only"
+                  onChange={(e) => void handleStickerFile(e.target.files)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 rounded-lg px-2 text-[10px]"
+                  disabled={showAiResponding}
+                  title="Figurinha WebP (WhatsApp)"
+                  onClick={() => stickerInputRef.current?.click()}
+                >
+                  <Sticker className="h-4 w-4" />
+                  <span className="sr-only">Enviar figurinha WebP</span>
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    type="button"
+                    disabled={showAiResponding}
+                    title="Inserir emoji"
+                    className={cn(
+                      buttonVariants({ variant: 'ghost', size: 'sm' }),
+                      'h-8 rounded-lg px-2 text-[10px]',
+                    )}
+                  >
+                    <Smile className="h-4 w-4" />
+                    <span className="sr-only">Emojis</span>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="max-h-56 w-[min(100vw-2rem,15rem)] overflow-y-auto p-2">
+                    <div className="grid grid-cols-8 gap-0.5">
+                      {CHAT_QUICK_EMOJIS.map((em) => (
+                        <button
+                          key={em}
+                          type="button"
+                          className="flex h-8 w-8 items-center justify-center rounded-md text-base leading-none hover:bg-muted"
+                          onClick={() => insertEmojiIntoDraft(em)}
+                        >
+                          {em}
+                        </button>
+                      ))}
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button
                   type="button"
                   variant="ghost"
@@ -394,7 +751,9 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
                 type="button"
                 size="sm"
                 className="h-8 rounded-xl px-5"
-                disabled={!crm.draftMessage.trim() && crm.draftAttachments.length === 0}
+                disabled={
+                  showAiResponding || (!crm.draftMessage.trim() && crm.draftAttachments.length === 0)
+                }
                 onClick={() => void crm.sendMessage()}
               >
                 Enviar
@@ -403,6 +762,59 @@ export function LeadChatThread({ leadId, history, whatsappOnly, canCompose, read
           </div>
         ) : null}
       </div>
+
+      <Dialog
+        open={editOpen}
+        onOpenChange={(o) => {
+          setEditOpen(o)
+          if (!o) {
+            setEditTarget(null)
+            setEditDraft('')
+          }
+        }}
+      >
+        <DialogContent showCloseButton className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar mensagem</DialogTitle>
+            <DialogDescription>
+              A alteração fica apenas no histórico do CRM; não altera texto já entregue no WhatsApp ou Instagram do
+              cliente.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={editDraft}
+            onChange={(e) => setEditDraft(e.target.value)}
+            rows={6}
+            className="min-h-[8rem] rounded-lg border-border text-sm"
+          />
+          <DialogFooter className="gap-2 sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={editSaving}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => void saveEditedMessage()} disabled={editSaving || !editDraft.trim()}>
+              {editSaving ? 'A guardar…' : 'Guardar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={deleteMsgOpen}
+        onOpenChange={(o) => {
+          setDeleteMsgOpen(o)
+          if (!o) setDeleteMsgTarget(null)
+        }}
+        title="Apagar mensagem do CRM?"
+        description={
+          deleteMsgTarget?.direction === 'in'
+            ? 'Esta linha deixa de aparecer no CRM. A mensagem continua no telemóvel ou na app do cliente.'
+            : 'Esta linha deixa de aparecer no CRM. Se a mensagem já tiver sido entregue, o cliente mantém a cópia no dispositivo.'
+        }
+        confirmLabel="Apagar"
+        cancelLabel="Cancelar"
+        variant="destructive"
+        onConfirm={() => void runDeleteMessage()}
+      />
 
       <ScheduleAppointmentDialog
         isOpen={isScheduleOpen}

@@ -44,10 +44,12 @@ Deno.serve(async (req) => {
     leadId?: string
     to?: string
     text?: string
+    channel?: string
+    stickerWebpBase64?: string
     attachments?: Array<{ name?: string; mimeType?: string; base64?: string }>
   }
   try {
-    body = (await req.json()) as { leadId?: string; to?: string; text?: string }
+    body = (await req.json()) as typeof body
   } catch {
     return json({ error: 'invalid_json' }, 400)
   }
@@ -55,12 +57,10 @@ Deno.serve(async (req) => {
   const leadId = String(body.leadId ?? '').trim()
   const to = String(body.to ?? '').trim()
   const text = String(body.text ?? '').trim()
+  const stickerWebpBase64 = typeof body.stickerWebpBase64 === 'string' ? body.stickerWebpBase64.trim() : ''
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
-  
-  // Se explicitamente Instagram ou ManyChat
-  const isManychat = to.startsWith('888001') || body.channel === 'instagram'
 
-  if (!leadId || !text) return json({ error: 'missing_fields' }, 400)
+  if (!leadId) return json({ error: 'missing_fields', message: 'leadId obrigatório' }, 400)
 
   const { data: lead, error: leadErr } = await admin
     .from('leads')
@@ -78,6 +78,11 @@ Deno.serve(async (req) => {
     source: string;
   }
 
+  const effectiveTo = to || String(row.phone ?? '').trim()
+  // Se explicitamente Instagram ou ManyChat (telefone sintético ou canal explícito)
+  const isManychat =
+    effectiveTo.startsWith('888001') || String(body.channel ?? '').toLowerCase() === 'instagram'
+
   // --- Instagram / ManyChat Path ---
   if (isManychat || row.source === 'meta_instagram') {
     const subscriberId = String(row.custom_fields?.manychat_subscriber_id ?? '').trim()
@@ -87,6 +92,18 @@ Deno.serve(async (req) => {
          return json({ error: 'manychat_id_missing', message: 'Lead de Instagram sem ID do ManyChat' }, 400)
        }
     } else {
+      if (stickerWebpBase64) {
+        return json(
+          {
+            error: 'sticker_not_supported',
+            message: 'Figurinhas WebP só pelo WhatsApp. No Instagram/ManyChat use texto ou fluxo.',
+          },
+          400,
+        )
+      }
+      if (!text) {
+        return json({ error: 'missing_fields', message: 'Texto obrigatório para envio via ManyChat' }, 400)
+      }
       const mcCfg = readManychatPushConfigFromEnv()
       if (!mcCfg) return json({ error: 'manychat_not_configured' }, 500)
 
@@ -177,21 +194,70 @@ Deno.serve(async (req) => {
       )
     }
 
-    const sent = await provider.sendMessage({ to, text, leadId })
+    if (!stickerWebpBase64 && !text.trim()) {
+      if (attachments.length === 0) {
+        return json({ error: 'missing_fields', message: 'Envie texto ou figurinha WebP.' }, 400)
+      }
+      return json(
+        { error: 'missing_fields', message: 'Texto obrigatório ao enviar anexos (figurinha não conta como anexo).' },
+        400,
+      )
+    }
+
+    let sent = await provider.sendMessage({
+      to: effectiveTo,
+      text,
+      leadId,
+      stickerWebpBase64: stickerWebpBase64 || undefined,
+    })
+    let externalMessageId = sent.externalMessageId
+    if (stickerWebpBase64 && text.trim()) {
+      const textSent = await provider.sendMessage({
+        to: effectiveTo,
+        text,
+        leadId,
+      })
+      externalMessageId = `${sent.externalMessageId}|${textSent.externalMessageId}`.slice(0, 240)
+    }
+    const outboundContent = stickerWebpBase64
+      ? text
+        ? `${text}\n🎭 Figurinha enviada`
+        : '🎭 Figurinha enviada'
+      : text
     await insertInteraction(admin, {
       leadId: String(lead.id),
       patientName: String(lead.patient_name ?? 'Lead'),
       channel: 'whatsapp',
       direction: 'out',
       author: user.email ?? 'Operador',
-      content: text,
-      externalMessageId: sent.externalMessageId,
+      content: outboundContent,
+      externalMessageId,
     })
+    const mediaRows: Array<{
+      lead_id: string
+      direction: 'out'
+      media_type: string
+      mime_type: string
+      metadata: Record<string, unknown>
+    }> = []
+    if (stickerWebpBase64) {
+      mediaRows.push({
+        lead_id: leadId,
+        direction: 'out',
+        media_type: 'image',
+        mime_type: 'image/webp',
+        metadata: {
+          name: 'figurinha.webp',
+          size_base64: stickerWebpBase64.length,
+          outbound_mode: 'sticker_webp',
+        },
+      })
+    }
     if (attachments.length > 0) {
-      await admin.from('crm_media_items').insert(
-        attachments.map((file) => ({
+      mediaRows.push(
+        ...attachments.map((file) => ({
           lead_id: leadId,
-          direction: 'out',
+          direction: 'out' as const,
           media_type: String(file.mimeType ?? '').startsWith('audio/')
             ? 'audio'
             : String(file.mimeType ?? '').startsWith('image/')
@@ -206,11 +272,14 @@ Deno.serve(async (req) => {
         })),
       )
     }
+    if (mediaRows.length > 0) {
+      await admin.from('crm_media_items').insert(mediaRows)
+    }
 
     await admin.from('webhook_jobs').insert({
       source: 'whatsapp-webhook',
       status: 'done',
-      note: `outbound:${provider.name}:${sent.externalMessageId}`.slice(0, 500),
+      note: `outbound:${provider.name}:${externalMessageId}`.slice(0, 500),
     })
     await admin.from('crm_conversation_states').upsert({
       lead_id: leadId,
@@ -223,7 +292,7 @@ Deno.serve(async (req) => {
     return json({
       ok: true,
       provider: provider.name,
-      externalMessageId: sent.externalMessageId,
+      externalMessageId,
       status: sent.status,
     })
   } catch (e) {

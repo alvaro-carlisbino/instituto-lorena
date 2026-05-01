@@ -17,8 +17,6 @@ const cors = {
     'authorization, x-client-info, apikey, content-type, x-webhook-secret, x-hub-signature-256',
 }
 
-const AI_RATE_SOURCES = ['whatsapp-webhook', 'manychat-webhook'] as const
-
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -285,7 +283,6 @@ Deno.serve(async (req) => {
 
     const gate = await evaluateCrmAiAutoReplyGate(admin, lead.leadId, {
       directionIsInbound: normalized.direction === 'in',
-      rateLimitJobSources: [...AI_RATE_SOURCES],
     })
 
     const statePrompt = String(state?.prompt_override ?? config?.system_prompt ?? '').trim()

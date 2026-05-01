@@ -22,8 +22,6 @@ const cors = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-manychat-crm-secret',
 }
 
-const AI_RATE_SOURCES = ['whatsapp-webhook', 'manychat-webhook'] as const
-
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -174,7 +172,6 @@ async function runManychatMessagePipeline(
 
     const gate = await evaluateCrmAiAutoReplyGate(admin, leadId, {
       directionIsInbound: true,
-      rateLimitJobSources: [...AI_RATE_SOURCES],
     })
 
     let reply = ''

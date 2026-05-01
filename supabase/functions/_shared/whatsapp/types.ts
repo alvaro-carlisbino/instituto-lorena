@@ -4,6 +4,8 @@ export type SendWhatsappMessageInput = {
   to: string
   text: string
   leadId?: string
+  /** Base64 do ficheiro WebP (com ou sem prefixo data:image/webp;base64,). Só WhatsApp (Evolution / Cloud). */
+  stickerWebpBase64?: string
   metadata?: Record<string, unknown>
 }
 

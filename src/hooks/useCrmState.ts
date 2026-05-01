@@ -31,6 +31,8 @@ import {
   saveAutomationRule,
   deleteAutomationRule,
   insertInteraction,
+  updateInteractionContent,
+  deleteInteractionRow,
   insertLead,
   loadWebhookJobs,
   loadCrmData,
@@ -606,6 +608,47 @@ export const useCrmState = () => {
     }
   }
 
+  const sendStickerMessage = async (stickerWebpBase64: string) => {
+    const raw = String(stickerWebpBase64 ?? '').trim()
+    if (!selectedLead || !raw) return
+
+    if (isLeadWhatsappComposeBlocked(selectedLead)) {
+      toast.error(
+        'Lead do Instagram ainda com telefone sintético: responda no Instagram ou ManyChat. Quando o número for o WhatsApp real, o envio pelo CRM fica disponível.',
+      )
+      return
+    }
+
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      const result = await sendWhatsappMessage({
+        leadId: selectedLead.id,
+        to: selectedLead.phone,
+        text: '',
+        stickerWebpBase64: raw,
+      })
+
+      if (!result.ok) {
+        toast.error(`Falha no envio da figurinha: ${result.error}${result.detail ? ` (${result.detail})` : ''}`)
+        return
+      }
+
+      await refreshChatFromSupabase()
+      toast.success('Figurinha enviada.')
+      return
+    }
+
+    addInteraction({
+      leadId: selectedLead.id,
+      patientName: selectedLead.patientName,
+      channel: 'whatsapp',
+      direction: 'out',
+      author: getOwnerName(selectedLead.ownerId),
+      content: '🎭 Figurinha enviada',
+      happenedAt: new Date().toISOString(),
+    })
+    toast.success('Figurinha enviada (modo mock).')
+  }
+
   const sendAutomatedMessage = async (lead: Lead, message: string) => {
     if (isLeadWhatsappComposeBlocked(lead)) {
       toast.error(
@@ -670,6 +713,32 @@ export const useCrmState = () => {
       // noop
     }
   }, [dataMode])
+
+  const updateInteractionMessage = useCallback(
+    async (interactionId: string, content: string) => {
+      const next = content.trim()
+      if (!next) throw new Error('O texto não pode ficar vazio.')
+      if (dataMode === 'supabase' && isSupabaseConfigured) {
+        await updateInteractionContent(interactionId, next)
+        await refreshChatFromSupabase()
+      } else {
+        setInteractions((prev) => prev.map((i) => (i.id === interactionId ? { ...i, content: next } : i)))
+      }
+    },
+    [dataMode, refreshChatFromSupabase],
+  )
+
+  const deleteInteractionMessage = useCallback(
+    async (interactionId: string) => {
+      if (dataMode === 'supabase' && isSupabaseConfigured) {
+        await deleteInteractionRow(interactionId)
+        await refreshChatFromSupabase()
+      } else {
+        setInteractions((prev) => prev.filter((i) => i.id !== interactionId))
+      }
+    },
+    [dataMode, refreshChatFromSupabase],
+  )
 
   const syncFromSupabase = async () => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured) return
@@ -1988,6 +2057,9 @@ export const useCrmState = () => {
     dispatchNpsForLead,
     simulateMetaCapture,
     sendMessage,
+    sendStickerMessage,
+    updateInteractionMessage,
+    deleteInteractionMessage,
     retryFailedJobs,
     syncFromSupabase,
     refreshChatFromSupabase,

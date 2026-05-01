@@ -251,4 +251,4 @@ Há dois arranques válidos:
 1. **Directo:** ManyChat → `crm-manychat-webhook` (IA no Edge + Z.ai) — [manychat-setup.md](manychat-setup.md).
 2. **Com n8n:** ManyChat → **n8n** (debounce, ramos, **Z.ai no n8n**) → o CRM expõe **ações HTTP** no mesmo `crm-manychat-webhook` (`ingest`, `get_thread`, `record_outbound`, `merge_phone`) como *tools*; ver [n8n-crm-tools.md](n8n-crm-tools.md).
 
-Limites de taxa de IA automática no Edge (`action` omitido / `message`) contam em conjunto `whatsapp-webhook` + `manychat-webhook` (`max_ai_replies_per_hour` em `crm_ai_configs`). Se a IA corre **só no n8n** e usas apenas `ingest` / `get_thread` / `record_outbound`, esses limites **não** aplicam-se à geração de texto no n8n.
+O campo `max_ai_replies_per_hour` em `crm_ai_configs` mantém-se para referência/relatórios; o auto-reply no Edge **já não bloqueia** por esse teto global. O intervalo `min_seconds_between_ai_replies` (0 = desligado) ainda pode impor uma pausa mínima entre respostas da IA no mesmo lead. Se a IA corre **só no n8n** e usas apenas `ingest` / `get_thread` / `record_outbound`, a geração de texto no n8n não passa por esta gate.

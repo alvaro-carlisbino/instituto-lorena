@@ -18,7 +18,13 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { cn } from '@/lib/utils'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { labelForIdName } from '@/lib/selectDisplay'
-import { getConversationState, setConversationMode, type ConversationOwnerMode } from '@/services/conversationControl'
+import { businessHoursFromAiConfig } from '@/lib/aiTypingIndicator'
+import {
+  getAiConfig,
+  getConversationState,
+  setConversationMode,
+  type ConversationOwnerMode,
+} from '@/services/conversationControl'
 import { isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
 
 const MODE_SUMMARY: Record<ConversationOwnerMode, string> = {
@@ -35,6 +41,12 @@ export function ChatWorkspacePage() {
   const [ownerFilter, setOwnerFilter] = useState('all')
   const [leadMode, setLeadMode] = useState<ConversationOwnerMode>('auto')
   const [modeLoading, setModeLoading] = useState(false)
+  const [aiConversationBase, setAiConversationBase] = useState<{
+    ownerMode: ConversationOwnerMode
+    aiEnabled: boolean
+    businessHoursStartHour: number
+    businessHoursEndHour: number
+  } | null>(null)
 
   const ownerSelectLabel = useMemo(
     () =>
@@ -84,13 +96,33 @@ export function ChatWorkspacePage() {
   }, [crm.users, ownerFilter])
 
   useEffect(() => {
-    if (!activeLead || crm.dataMode !== 'supabase') return
+    if (!activeLead || crm.dataMode !== 'supabase') {
+      setAiConversationBase(null)
+      return
+    }
     setModeLoading(true)
-    void getConversationState(activeLead.id)
-      .then((state) => setLeadMode((state.owner_mode as ConversationOwnerMode) ?? 'auto'))
-      .catch(() => setLeadMode('auto'))
+    void Promise.all([getConversationState(activeLead.id), getAiConfig()])
+      .then(([state, cfg]) => {
+        setLeadMode((state.owner_mode as ConversationOwnerMode) ?? 'auto')
+        const bh = cfg ? businessHoursFromAiConfig(cfg) : { startHour: 8, endHour: 20 }
+        setAiConversationBase({
+          ownerMode: (state.owner_mode as ConversationOwnerMode) ?? 'auto',
+          aiEnabled: state.ai_enabled !== false,
+          businessHoursStartHour: bh.startHour,
+          businessHoursEndHour: bh.endHour,
+        })
+      })
+      .catch(() => {
+        setLeadMode('auto')
+        setAiConversationBase(null)
+      })
       .finally(() => setModeLoading(false))
   }, [activeLead, crm.dataMode])
+
+  const aiGateForThread = useMemo(() => {
+    if (!aiConversationBase) return null
+    return { ...aiConversationBase, ownerMode: leadMode }
+  }, [aiConversationBase, leadMode])
 
   useEffect(() => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured || !supabase) return
@@ -104,12 +136,27 @@ export function ChatWorkspacePage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
         void refreshChatFromSupabase()
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_conversation_states' }, (payload) => {
+        const lid = activeLead?.id
+        const row = payload.new as { lead_id?: string } | undefined
+        if (lid && row?.lead_id === lid) {
+          void getConversationState(lid).then((state) => {
+            setLeadMode((state.owner_mode as ConversationOwnerMode) ?? 'auto')
+            setAiConversationBase((prev) => ({
+              ownerMode: (state.owner_mode as ConversationOwnerMode) ?? 'auto',
+              aiEnabled: state.ai_enabled !== false,
+              businessHoursStartHour: prev?.businessHoursStartHour ?? 8,
+              businessHoursEndHour: prev?.businessHoursEndHour ?? 20,
+            }))
+          })
+        }
+      })
       .subscribe()
 
     return () => {
       void client.removeChannel(channel)
     }
-  }, [dataMode, refreshChatFromSupabase])
+  }, [dataMode, refreshChatFromSupabase, activeLead?.id])
 
   return (
     <AppLayout title="Conversas" fullHeight={true} mainClassName="p-3 sm:p-4 bg-muted/30 dark:bg-transparent">
@@ -244,6 +291,7 @@ export function ChatWorkspacePage() {
                   history={activeHistory}
                   canCompose={crm.currentPermission.canRouteLeads && !waComposeBlocked}
                   readOnlyInstagramHint={waComposeBlocked}
+                  aiConversationBase={crm.dataMode === 'supabase' ? aiGateForThread : null}
                 />
               </CardContent>
             </>

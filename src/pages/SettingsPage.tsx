@@ -146,8 +146,8 @@ export function SettingsPage() {
   const [aiEnabled, setAiEnabled] = useState(true)
   const [aiDefaultMode, setAiDefaultMode] = useState<ConversationOwnerMode>('auto')
   const [aiPrompt, setAiPrompt] = useState('')
-  const [aiMaxPerHour, setAiMaxPerHour] = useState(2)
-  const [aiCooldownSeconds, setAiCooldownSeconds] = useState(240)
+  const [aiMaxPerHour, setAiMaxPerHour] = useState(400)
+  const [aiCooldownSeconds, setAiCooldownSeconds] = useState(10)
   const [aiLoading, setAiLoading] = useState(false)
 
   const sensors = useSensors(
@@ -183,8 +183,8 @@ export function SettingsPage() {
         setAiEnabled(Boolean(cfg.enabled))
         setAiDefaultMode(cfg.default_owner_mode)
         setAiPrompt(cfg.system_prompt ?? '')
-        setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 2))
-        setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 240))
+        setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 400))
+        setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 10))
       })
       .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao carregar configuração da IA.'))
       .finally(() => setAiLoading(false))
@@ -200,8 +200,8 @@ export function SettingsPage() {
         setAiEnabled(Boolean(cfg.enabled))
         setAiDefaultMode(cfg.default_owner_mode)
         setAiPrompt(cfg.system_prompt ?? '')
-        setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 2))
-        setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 240))
+        setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 400))
+        setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 10))
       } catch {
         // noop
       } finally {
@@ -280,26 +280,32 @@ export function SettingsPage() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2 sm:max-w-xl">
               <div className="grid gap-2">
-                <Label htmlFor="ai-max-hour">Máximo de respostas IA por hora</Label>
+                <Label htmlFor="ai-max-hour">Meta de respostas IA por hora (referência)</Label>
                 <Input
                   id="ai-max-hour"
                   type="number"
                   min={1}
-                  max={20}
+                  max={5000}
                   value={aiMaxPerHour}
-                  onChange={(e) => setAiMaxPerHour(Number(e.target.value) || 2)}
+                  onChange={(e) => setAiMaxPerHour(Number(e.target.value) || 400)}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Guardado na base para relatórios; o envio automático já não bloqueia quando este número é ultrapassado.
+                </p>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="ai-cooldown">Cooldown mínimo entre respostas IA (segundos)</Label>
+                <Label htmlFor="ai-cooldown">Espera mínima entre respostas IA (segundos)</Label>
                 <Input
                   id="ai-cooldown"
                   type="number"
-                  min={30}
+                  min={0}
                   max={3600}
                   value={aiCooldownSeconds}
-                  onChange={(e) => setAiCooldownSeconds(Number(e.target.value) || 240)}
+                  onChange={(e) => setAiCooldownSeconds(Number(e.target.value) || 0)}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Use 0 para responder a cada mensagem recebida (o atraso natural de “a digitar” no WhatsApp continua a aplicar-se).
+                </p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">

@@ -37,6 +37,13 @@ function normalizePhone(raw: string): string {
   return digitsOnly(raw)
 }
 
+/** Aceita base64 cru ou data URL WebP. */
+function normalizeStickerBase64(raw: string): string {
+  const t = raw.trim()
+  const m = t.match(/^data:image\/webp;base64,(.+)$/i)
+  return (m ? m[1] : t).replace(/\s/g, '')
+}
+
 export type EvolutionProviderConfig = {
   baseUrl: string
   apiKey: string
@@ -163,6 +170,56 @@ export class EvolutionProvider implements WhatsappProvider {
   async sendMessage(input: SendWhatsappMessageInput): Promise<SendWhatsappMessageResult> {
     const to = normalizePhone(input.to)
     if (to.length < 10) throw new Error('invalid_phone')
+
+    const stickerRaw = String(input.stickerWebpBase64 ?? '').trim()
+    if (stickerRaw) {
+      const b64 = normalizeStickerBase64(stickerRaw)
+      if (b64.length < 32) throw new Error('invalid_sticker')
+      if (b64.length > 700_000) throw new Error('sticker_too_large')
+      const sticker =
+        stickerRaw.startsWith('data:') && /image\/webp/i.test(stickerRaw)
+          ? stickerRaw.trim()
+          : `data:image/webp;base64,${b64}`
+
+      const url = `${this.baseUrl}/message/sendSticker/${this.instance}`
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: this.apiKey,
+        },
+        body: JSON.stringify({
+          number: to,
+          sticker,
+        }),
+      })
+
+      const responseText = await res.text()
+      let parsed: Record<string, unknown> = {}
+      try {
+        parsed = responseText ? (JSON.parse(responseText) as Record<string, unknown>) : {}
+      } catch {
+        parsed = { raw: responseText }
+      }
+
+      if (!res.ok) {
+        throw new Error(`evolution_send_sticker_failed_${res.status}`)
+      }
+
+      const externalMessageId =
+        safeString(getByPath(parsed, 'key.id')) ||
+        safeString(getByPath(parsed, 'data.key.id')) ||
+        safeString(getByPath(parsed, 'messageId')) ||
+        `evo-sticker-${crypto.randomUUID()}`
+
+      return {
+        provider: this.name,
+        externalMessageId,
+        status: 'queued',
+        raw: parsed,
+      }
+    }
+
     const text = input.text.trim()
     if (!text) throw new Error('empty_message')
 

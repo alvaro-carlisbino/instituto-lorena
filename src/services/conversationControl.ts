@@ -19,6 +19,9 @@ export type AiConfig = {
   system_prompt: string
   max_ai_replies_per_hour: number
   min_seconds_between_ai_replies: number
+  /** `HH:mm` ou `HH:mm:ss` — opcional; vindo de `crm_ai_configs` */
+  business_hours_start?: string | null
+  business_hours_end?: string | null
 }
 
 async function invokeControl(body: Record<string, unknown>) {
@@ -43,6 +46,23 @@ export async function setConversationMode(leadId: string, ownerMode: Conversatio
 export async function getAiConfig(): Promise<AiConfig | null> {
   const parsed = await invokeControl({ action: 'get_config' })
   return (parsed.config ?? null) as AiConfig | null
+}
+
+export type ForceAiReplyResult = {
+  ok: true
+  replied: boolean
+  channel?: string
+  error?: string
+  message?: string
+  replyPreview?: string | null
+  handoffSuggested?: boolean
+  manychat_push?: Record<string, unknown>
+}
+
+/** Reenvia resposta da IA com base na última mensagem de entrada (WhatsApp ou Meta). */
+export async function forceAiReply(leadId: string): Promise<ForceAiReplyResult> {
+  const parsed = await invokeControl({ action: 'force_ai_reply', leadId })
+  return parsed as ForceAiReplyResult
 }
 
 export async function saveAiConfig(payload: {

@@ -20,6 +20,12 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>
 }
 
+function normalizeStickerBase64(raw: string): string {
+  const t = raw.trim()
+  const m = t.match(/^data:image\/webp;base64,(.+)$/i)
+  return (m ? m[1] : t).replace(/\s/g, '')
+}
+
 async function hmacSha256Hex(secret: string, payload: string): Promise<string> {
   const enc = new TextEncoder()
   const key = await crypto.subtle.importKey(
@@ -137,11 +143,98 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
     }
   }
 
+  private stickerBase64ToBytes(b64: string): Uint8Array {
+    try {
+      const bin = atob(b64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
+      return bytes
+    } catch {
+      throw new Error('invalid_sticker_base64')
+    }
+  }
+
+  /** Upload WebP → id para mensagem type sticker (WhatsApp Cloud). */
+  private async uploadStickerMedia(stickerInput: string): Promise<string> {
+    const b64 = normalizeStickerBase64(stickerInput)
+    if (b64.length < 32) throw new Error('invalid_sticker')
+    if (b64.length > 700_000) throw new Error('sticker_too_large')
+    const bytes = this.stickerBase64ToBytes(b64)
+    const form = new FormData()
+    form.set('messaging_product', 'whatsapp')
+    form.set('type', 'image/webp')
+    form.set('file', new Blob([bytes], { type: 'image/webp' }), 'sticker.webp')
+
+    const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/media`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.accessToken}` },
+      body: form,
+    })
+    const responseText = await res.text()
+    let parsed: Record<string, unknown> = {}
+    try {
+      parsed = responseText ? (JSON.parse(responseText) as Record<string, unknown>) : {}
+    } catch {
+      parsed = { raw: responseText }
+    }
+    if (!res.ok) {
+      const errMsg = safeString((parsed.error as Record<string, unknown>)?.message ?? parsed.error ?? responseText)
+        .slice(0, 240)
+      throw new Error(`whatsapp_cloud_sticker_upload_${res.status}:${errMsg}`)
+    }
+    const id = safeString(parsed.id)
+    if (!id) throw new Error('whatsapp_cloud_sticker_upload_no_id')
+    return id
+  }
+
   async sendMessage(input: SendWhatsappMessageInput): Promise<SendWhatsappMessageResult> {
     if (!this.phoneNumberId) throw new Error('missing_WHATSAPP_CLOUD_PHONE_NUMBER_ID')
     if (!this.accessToken) throw new Error('missing_WHATSAPP_CLOUD_ACCESS_TOKEN')
     const to = digitsOnly(input.to)
     if (to.length < 10) throw new Error('invalid_phone')
+
+    const stickerRaw = String(input.stickerWebpBase64 ?? '').trim()
+    if (stickerRaw) {
+      const mediaId = await this.uploadStickerMedia(stickerRaw)
+      const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to,
+          type: 'sticker',
+          sticker: { id: mediaId },
+        }),
+      })
+      const responseText = await res.text()
+      let parsed: Record<string, unknown> = {}
+      try {
+        parsed = responseText ? (JSON.parse(responseText) as Record<string, unknown>) : {}
+      } catch {
+        parsed = { raw: responseText }
+      }
+      if (!res.ok) {
+        const errMsg = safeString((parsed.error as Record<string, unknown>)?.message ?? parsed.error ?? responseText)
+          .slice(0, 240)
+        throw new Error(`whatsapp_cloud_send_failed_${res.status}:${errMsg}`)
+      }
+      const messages = Array.isArray(parsed.messages) ? (parsed.messages as unknown[]) : []
+      const m0 = asRecord(messages[0])
+      const externalMessageId = safeString(m0?.id) || `wa-cloud-sticker-${crypto.randomUUID()}`
+      return {
+        provider: 'official',
+        externalMessageId,
+        status: 'sent',
+        raw: parsed,
+      }
+    }
+
     const bodyText = input.text.trim()
     if (!bodyText) throw new Error('empty_message')
 

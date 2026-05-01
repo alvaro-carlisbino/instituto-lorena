@@ -4,6 +4,8 @@ export type SendWhatsappPayload = {
   leadId: string
   to: string
   text: string
+  /** Base64 WebP (cru ou data URL). Só WhatsApp; Instagram/ManyChat devolve erro na Edge. */
+  stickerWebpBase64?: string
   attachments?: Array<{
     name: string
     mimeType: string

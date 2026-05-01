@@ -20,6 +20,8 @@
  */
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
+import { sanitizeCrmAiPatientReply } from '../_shared/crmAiAutoReply.ts'
+
 const MIN_INTERNAL_SECRET_LEN = 16
 
 const cors = {
@@ -584,6 +586,7 @@ Deno.serve(async (req) => {
     if (isInternal) {
       reply = stripInternalPatientReply(reply)
     }
+    reply = sanitizeCrmAiPatientReply(reply).clean
 
     return jsonResponse({ ok: true, reply, model })
   } catch (e) {
