@@ -177,12 +177,16 @@ export async function invokeCrmAiAssistantForLead(
   const aiObj = (aiResult && typeof aiResult === 'object' ? aiResult : {}) as Record<string, unknown>
   let reply = typeof aiObj.reply === 'string' ? aiObj.reply.trim() : ''
 
-  // Clean up potential leak of internal reasoning/meta-talk
-  // 1. Remove numbered steps like "1. Analyze the Request:" or "1. *Analyze the Request:*"
+  const patientMarker = '<<<PACIENTE>>>'
+  const mi = reply.indexOf(patientMarker)
+  if (mi >= 0) reply = reply.slice(mi + patientMarker.length).trim()
+
+  // Clean up potential leak of internal reasoning / English analyst script (GLM)
+  reply = reply
+    .replace(/^(?:\d+\.\s+\*{0,2}Analyze the User[\s\S]*?)(?=\n\n(?:Bom dia|Boa tarde|Boa noite|Olá|Oi)\b)/gi, '')
+    .trim()
   reply = reply.replace(/^(?:\d+\.\s+\*?Analyze[\s\S]*?)(?:\n\n|\n[A-Z\xC0-\xDF]|$)/gi, '').trim()
-  // 2. Remove thinking tags
   reply = reply.replace(/<(thinking|thought|reasoning)>[\s\S]*?<\/\1>/gi, '').trim()
-  // 3. Remove Markdown thinking blocks
   reply = reply.replace(/```(?:thinking|thought|reasoning)[\s\S]*?```/gi, '').trim()
 
   return reply

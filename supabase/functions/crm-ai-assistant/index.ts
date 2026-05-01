@@ -328,6 +328,10 @@ async function buildCrmSnapshot(
   }
 }
 
+/**
+ * Só `message.content` é texto destinado ao utilizador/paciente.
+ * `reasoning_content` (modelos com "thinking") é raciocínio interno — nunca enviar ao WhatsApp.
+ */
 function extractReplyFromZai(parsed: unknown): string {
   if (!parsed || typeof parsed !== 'object') return ''
   const p = parsed as {
@@ -336,9 +340,44 @@ function extractReplyFromZai(parsed: unknown): string {
   const msg = p.choices?.[0]?.message
   const c = msg?.content
   if (typeof c === 'string' && c.trim()) return c.trim()
-  const r = msg?.reasoning_content
-  if (typeof r === 'string' && r.trim()) return r.trim()
   return ''
+}
+
+const PATIENT_REPLY_MARKER = '<<<PACIENTE>>>'
+
+/**
+ * Modelos GLM por vezes devolvem monólogos em inglês ("Analyze the User's Input…") em `content`.
+ * Tenta recuperar só a parte em português (saudação + corpo) ou o bloco após o marcador.
+ */
+function stripInternalPatientReply(raw: string): string {
+  const t = raw.trim()
+  if (!t) return t
+
+  const marked = t.indexOf(PATIENT_REPLY_MARKER)
+  if (marked >= 0) {
+    const after = t.slice(marked + PATIENT_REPLY_MARKER.length).trim()
+    if (after) return after
+  }
+
+  const cotSignature = /Analyze the User'?s?\s+Input|Interpretation:\s*\*\*|Constraint Check:/i
+  if (!cotSignature.test(t)) return t
+
+  let lastGreeting: string | undefined
+  for (const m of t.matchAll(/\n\n((?:Bom dia|Boa tarde|Boa noite|Olá|Oi)\b[\s\S]+)/gi)) {
+    lastGreeting = m[1].trim()
+  }
+  if (lastGreeting && lastGreeting.length >= 12 && !/^(\d+\.|Analyze)/i.test(lastGreeting)) {
+    return lastGreeting
+  }
+
+  const blocks = t.split(/\n{2,}/)
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i].trim()
+    if (b.length < 16) continue
+    if (/Analyze|Interpretation|Constraint Check|leadFocus|`channel`|^\d+\.\s+\*{0,2}Analyze/i.test(b)) continue
+    if (/^(Olá|Oi|Bom dia|Boa tarde|Boa noite|Seja)/i.test(b)) return b
+  }
+  return t
 }
 
 Deno.serve(async (req) => {
@@ -461,7 +500,9 @@ Deno.serve(async (req) => {
             '--- MODO RESPOSTA DIRETA AO PACIENTE ---',
             'Sua resposta será enviada IMEDIATAMENTE ao paciente. Você deve agir como o assistente virtual da clínica.',
             'MANDATORY: Não inclua análises, explicações internas, raciocínios, etapas (ex: "1. Analisar...") ou qualquer texto que não seja para o paciente.',
-            'MANDATORY: Responda APENAS com a mensagem final em português. Seja direto, cordial e profissional.',
+            'MANDATORY: Não escreva em inglês planeamento do tipo "Analyze the User", "Interpretation", "Decision", "Strategy" nem listas numeradas de raciocínio.',
+            'MANDATORY: A primeira linha da sua resposta DEVE ser exactamente: <<<PACIENTE>>>',
+            'MANDATORY: Na linha seguinte, escreva APENAS a mensagem WhatsApp em português (cordial, profissional). Nada antes de <<<PACIENTE>>>.',
             'Não use rascunhos ou comentários internos.',
           ].join('\n')
         : 'Os dados respeitam as permissões (RLS) da conta do utilizador — pode ser uma amostra parcial.',
@@ -531,13 +572,17 @@ Deno.serve(async (req) => {
       })
     }
 
-    const reply = extractReplyFromZai(parsed)
+    let reply = extractReplyFromZai(parsed)
     if (!reply) {
       return jsonResponse({
         ok: false,
         error: 'zai_empty_reply',
         message: trunc(zaiText, 800),
       })
+    }
+
+    if (isInternal) {
+      reply = stripInternalPatientReply(reply)
     }
 
     return jsonResponse({ ok: true, reply, model })

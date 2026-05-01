@@ -7,6 +7,9 @@
     "packageJson": {
       "dependencies": [
         "npm:@base-ui/react@^1.4.0",
+        "npm:@dnd-kit/core@^6.3.1",
+        "npm:@dnd-kit/sortable@10",
+        "npm:@dnd-kit/utilities@^3.2.2",
         "npm:@eslint/js@^9.39.4",
         "npm:@fontsource-variable/geist@^5.2.8",
         "npm:@fontsource-variable/plus-jakarta-sans@^5.2.8",
