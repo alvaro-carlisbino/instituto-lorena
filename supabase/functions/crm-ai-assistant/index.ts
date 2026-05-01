@@ -23,8 +23,11 @@ import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supa
 import { sanitizeCrmAiPatientReply } from '../_shared/crmAiAutoReply.ts'
 import {
   executeCrmAiOpsFromModel,
+  executeListLeadsFilteredOps,
+  isListLeadsFilteredOp,
   peelCrmOpsFromModelReply,
   type CrmAiActionResult,
+  type ListedLeadRow,
 } from '../_shared/crmAiOpsExecutor.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
@@ -547,6 +550,7 @@ Deno.serve(async (req) => {
                   '{"version":1,"ops":[{"type":"move_lead","stage_id":"<id>"}]}',
                   'Tipos: move_lead (opcional pipeline_id), set_temperature (value: cold|warm|hot), update_summary (text), book_appointment (duration_minutes, notes).',
                   'Consulte leadFocus.upcoming_appointments antes de marcar de novo. Omita <<<CRM_OPS>>> se não houver acção.',
+                  'Não use list_leads_filtered neste modo (só na consola CRM autenticada).',
                 ]
               : []),
           ].join('\n')
@@ -555,6 +559,16 @@ Deno.serve(async (req) => {
       'Não peça nem repita senhas. Não confirme envio de mensagens a pacientes: pode sugerir RASCUNHOS; o humano envia.',
       'Para "churn" ou risco sem dados explícitos no snapshot, diga que faltam dados e sugira que métricas ou campos registar.',
       'Integrações futuras (Meta Graph API, WhatsApp Cloud, Evolution API) podem enriquecer canais — mencione só se relevante.',
+      ...(!isInternal
+        ? [
+            '',
+            '--- Consola CRM (sessão autenticada; RLS aplica-se às consultas) ---',
+            'Pode usar <<<CRM_OPS>>> com list_leads_filtered para obter uma lista filtrada de leads (o servidor devolve os dados em list_leads no JSON da API).',
+            'Exemplo: {"version":1,"ops":[{"type":"list_leads_filtered","search":"Maria","temperature":"hot","limit":20}]}',
+            'Campos opcionais: stage_id, pipeline_id, temperature (cold|warm|hot), search (nome, resumo ou telefone), limit entre 5 e 50.',
+            'Resuma os resultados em linguagem natural para o utilizador; não exponha este JSON na mensagem ao paciente (em modo WhatsApp isto não está disponível).',
+          ]
+        : []),
       '',
       focusHint,
       '',
@@ -629,16 +643,42 @@ Deno.serve(async (req) => {
     const peeled = peelCrmOpsFromModelReply(reply)
     reply = peeled.remainder
 
-    let crm_actions: CrmAiActionResult[] | undefined
-    if (context.leadId && peeled.ops.length > 0) {
+    const leadScopedOps = peeled.ops.filter((o) => !isListLeadsFilteredOp(o))
+    const listQueries = peeled.ops.filter(isListLeadsFilteredOp)
+
+    const actionChunks: CrmAiActionResult[] = []
+    let list_leads: ListedLeadRow[] | undefined
+
+    if (context.leadId && leadScopedOps.length > 0) {
       const lf = snapshot.leadFocus as Record<string, unknown> | null | undefined
-      crm_actions = await executeCrmAiOpsFromModel(dbClient, {
+      const leadResults = await executeCrmAiOpsFromModel(dbClient, {
         allowedLeadId: context.leadId,
-        ops: peeled.ops,
+        ops: leadScopedOps,
         patientLabel: typeof lf?.patient_name === 'string' ? lf.patient_name : 'Paciente',
         logToInteractions: true,
       })
+      actionChunks.push(...leadResults)
+    } else if (!context.leadId && leadScopedOps.length > 0) {
+      actionChunks.push({
+        type: 'lead_scoped_ops',
+        ok: false,
+        detail: 'missing_lead_id_in_context',
+      })
     }
+
+    if (!isInternal && listQueries.length > 0) {
+      const listRun = await executeListLeadsFilteredOps(dbClient, listQueries)
+      actionChunks.push(...listRun.results)
+      if (listRun.rows && listRun.rows.length > 0) list_leads = listRun.rows
+    } else if (isInternal && listQueries.length > 0) {
+      actionChunks.push({
+        type: 'list_leads_filtered',
+        ok: false,
+        detail: 'only_available_in_console_session',
+      })
+    }
+
+    const crm_actions = actionChunks.length > 0 ? actionChunks : undefined
 
     if (isInternal) {
       reply = stripInternalPatientReply(reply)
@@ -649,7 +689,8 @@ Deno.serve(async (req) => {
       ok: true,
       reply,
       model,
-      ...(crm_actions && crm_actions.length > 0 ? { crm_actions } : {}),
+      ...(crm_actions ? { crm_actions } : {}),
+      ...(list_leads && list_leads.length > 0 ? { list_leads } : {}),
     })
   } catch (e) {
     return jsonResponse(

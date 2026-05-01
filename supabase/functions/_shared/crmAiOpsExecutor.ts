@@ -22,6 +22,122 @@ export function peelCrmOpsFromModelReply(raw: string): { remainder: string; ops:
 
 export type CrmAiActionResult = { type: string; ok: boolean; detail?: string }
 
+/** Token para ilike: remove wildcards problemáticos. */
+export function sanitizeLeadSearchToken(raw: string): string {
+  return raw
+    .replace(/[%_\\"'\n\r\t]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+}
+
+export function isListLeadsFilteredOp(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  return String((raw as Record<string, unknown>).type ?? '').trim().toLowerCase() === 'list_leads_filtered'
+}
+
+export type ListedLeadRow = {
+  id: string
+  patient_name: string | null
+  phone: string | null
+  source: string | null
+  score: number | null
+  temperature: string | null
+  stage_id: string | null
+  pipeline_id: string | null
+  summary: string | null
+  created_at: string | null
+}
+
+/**
+ * Lista leads com filtros seguros (RLS do cliente). Só deve ser chamado com JWT de utilizador autenticado.
+ * Processa apenas a primeira operação do array (evita abuso).
+ */
+export async function executeListLeadsFilteredOps(
+  admin: SupabaseClient,
+  listQueries: unknown[],
+): Promise<{ results: CrmAiActionResult[]; rows?: ListedLeadRow[] }> {
+  const results: CrmAiActionResult[] = []
+  if (listQueries.length === 0) return { results }
+
+  if (listQueries.length > 1) {
+    results.push({
+      type: 'list_leads_filtered',
+      ok: false,
+      detail: 'only_first_query_executed',
+    })
+  }
+
+  const rawOp = listQueries[0]
+  if (!rawOp || typeof rawOp !== 'object' || Array.isArray(rawOp)) {
+    results.push({ type: 'list_leads_filtered', ok: false, detail: 'invalid_op' })
+    return { results }
+  }
+  const op = rawOp as Record<string, unknown>
+  const limitRaw = Number(op.limit ?? 25)
+  const limit = Math.min(50, Math.max(5, Number.isFinite(limitRaw) ? limitRaw : 25))
+
+  const stageId = op.stage_id != null ? String(op.stage_id).trim() : ''
+  const pipelineId = op.pipeline_id != null ? String(op.pipeline_id).trim() : ''
+  const temperature = String(op.temperature ?? op.temp ?? '').trim().toLowerCase()
+  const search = op.search != null ? String(op.search) : ''
+
+  try {
+    let q = admin
+      .from('leads')
+      .select('id, patient_name, phone, source, score, temperature, stage_id, pipeline_id, summary, created_at')
+      .order('created_at', { ascending: false })
+      .limit(limit)
+
+    if (stageId) q = q.eq('stage_id', stageId)
+    if (pipelineId) q = q.eq('pipeline_id', pipelineId)
+    if (temperature && ['cold', 'warm', 'hot'].includes(temperature)) {
+      q = q.eq('temperature', temperature)
+    }
+    const token = sanitizeLeadSearchToken(search)
+    if (token.length >= 2) {
+      q = q.or(`patient_name.ilike.%${token}%,summary.ilike.%${token}%,phone.ilike.%${token}%`)
+    }
+
+    const { data, error } = await q
+    if (error) {
+      results.push({
+        type: 'list_leads_filtered',
+        ok: false,
+        detail: error.message.slice(0, 220),
+      })
+      return { results }
+    }
+
+    const rows = (data ?? []).map((r: Record<string, unknown>) => ({
+      id: String(r.id ?? ''),
+      patient_name: r.patient_name != null ? String(r.patient_name) : null,
+      phone: r.phone != null ? String(r.phone) : null,
+      source: r.source != null ? String(r.source) : null,
+      score: typeof r.score === 'number' ? r.score : null,
+      temperature: r.temperature != null ? String(r.temperature) : null,
+      stage_id: r.stage_id != null ? String(r.stage_id) : null,
+      pipeline_id: r.pipeline_id != null ? String(r.pipeline_id) : null,
+      summary: r.summary != null ? String(r.summary).slice(0, 280) : null,
+      created_at: r.created_at != null ? String(r.created_at) : null,
+    }))
+
+    results.push({
+      type: 'list_leads_filtered',
+      ok: true,
+      detail: `count=${rows.length}`,
+    })
+    return { results, rows }
+  } catch (e) {
+    results.push({
+      type: 'list_leads_filtered',
+      ok: false,
+      detail: e instanceof Error ? e.message.slice(0, 160) : String(e),
+    })
+    return { results }
+  }
+}
+
 function ymdUtc(d: Date): string {
   return d.toISOString().slice(0, 10)
 }

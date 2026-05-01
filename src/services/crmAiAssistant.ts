@@ -32,8 +32,28 @@ export type CrmAiAssistantContext = {
   focus?: CrmAiAssistantFocus
 }
 
+export type CrmListedLeadRow = {
+  id: string
+  patient_name: string | null
+  phone: string | null
+  source: string | null
+  score: number | null
+  temperature: string | null
+  stage_id: string | null
+  pipeline_id: string | null
+  summary: string | null
+  created_at: string | null
+}
+
 export type CrmAiAssistantResult =
-  | { ok: true; reply: string; model: string }
+  | {
+      ok: true
+      reply: string
+      model: string
+      /** Lista filtrada devolvida pela Edge (consola CRM; RLS). */
+      list_leads?: CrmListedLeadRow[]
+      crm_actions?: unknown[]
+    }
   | { ok: false; error: string; detail?: string }
 
 function detailFromPayload(p: Record<string, unknown>): string | undefined {
@@ -114,14 +134,36 @@ export async function invokeCrmAiAssistant(params: {
   if (payload?.ok === true && typeof payload.reply === 'string') {
     const reply = payload.reply.trim()
     if (!reply) return { ok: false, error: 'O assistente não retornou uma resposta. Tente novamente.' }
-    return { ok: true, reply, model: String(payload.model ?? params.model) }
+    const listRaw = payload.list_leads
+    const list_leads = Array.isArray(listRaw)
+      ? (listRaw.filter((r) => r && typeof r === 'object') as CrmListedLeadRow[])
+      : undefined
+    const crm_actions = Array.isArray(payload.crm_actions) ? payload.crm_actions : undefined
+    return {
+      ok: true,
+      reply,
+      model: String(payload.model ?? params.model),
+      ...(list_leads?.length ? { list_leads } : {}),
+      ...(crm_actions?.length ? { crm_actions } : {}),
+    }
   }
 
   if (data && typeof data === 'object' && 'reply' in data) {
-    const d = data as { reply?: string; model?: string }
+    const d = data as { reply?: string; model?: string; list_leads?: unknown; crm_actions?: unknown }
     const reply = String(d.reply ?? '').trim()
     if (!reply) return { ok: false, error: 'O assistente não retornou uma resposta. Tente novamente.' }
-    return { ok: true, reply, model: String(d.model ?? params.model) }
+    const listRaw = d.list_leads
+    const list_leads = Array.isArray(listRaw)
+      ? (listRaw.filter((r) => r && typeof r === 'object') as CrmListedLeadRow[])
+      : undefined
+    const crm_actions = Array.isArray(d.crm_actions) ? d.crm_actions : undefined
+    return {
+      ok: true,
+      reply,
+      model: String(d.model ?? params.model),
+      ...(list_leads?.length ? { list_leads } : {}),
+      ...(crm_actions?.length ? { crm_actions } : {}),
+    }
   }
 
   return { ok: false, error: 'Erro inesperado. Tente novamente.' }

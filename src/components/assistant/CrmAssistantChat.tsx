@@ -20,11 +20,25 @@ import {
   GLM_MODEL_OPTIONS,
   type CrmAiAssistantContext,
   type CrmAiChatMessage,
+  type CrmListedLeadRow,
   type GlmModelId,
   invokeCrmAiAssistant,
 } from '@/services/crmAiAssistant'
 
 const DEFAULT_MODEL: GlmModelId = 'glm-4.7'
+
+function appendListedLeadsToAssistantReply(reply: string, rows?: CrmListedLeadRow[]): string {
+  if (!rows?.length) return reply
+  const lines = rows.slice(0, 35).map((r, i) => {
+    const name = r.patient_name?.trim() || '—'
+    const phone = r.phone?.trim() || '—'
+    const stage = r.stage_id?.trim() || '—'
+    const temp = r.temperature?.trim() || '—'
+    const sum = (r.summary ?? '').trim().slice(0, 110)
+    return `${i + 1}. **${name}** · ${phone} · etapa \`${stage}\` · ${temp}${sum ? `\n   _${sum}${sum.length >= 110 ? '…' : ''}_` : ''}`
+  })
+  return `${reply}\n\n---\n### Leads encontrados (${rows.length})\n\n${lines.join('\n\n')}`
+}
 
 function titleFromFirstMessage(text: string): string {
   const line = text.split('\n')[0]?.trim() ?? text
@@ -134,11 +148,12 @@ export function CrmAssistantChat({
         return
       }
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: result.reply }])
+      const assistantContent = appendListedLeadsToAssistantReply(result.reply, result.list_leads)
+      setMessages((prev) => [...prev, { role: 'assistant', content: assistantContent }])
       scrollToEnd()
 
       if (persist && tid) {
-        await insertAssistantMessage(tid, 'assistant', result.reply)
+        await insertAssistantMessage(tid, 'assistant', assistantContent)
         await touchAssistantThread(tid, { context, model })
         if (startedWithoutThread) {
           onActiveThreadChange(tid)
