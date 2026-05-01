@@ -21,6 +21,11 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
 import { sanitizeCrmAiPatientReply } from '../_shared/crmAiAutoReply.ts'
+import {
+  executeCrmAiOpsFromModel,
+  peelCrmOpsFromModelReply,
+  type CrmAiActionResult,
+} from '../_shared/crmAiOpsExecutor.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
 
@@ -254,7 +259,8 @@ async function buildCrmSnapshot(
 
   let leadFocus: Record<string, unknown> | null = null
   if (ctx.leadId) {
-    const [leadRes, mediaRes] = await Promise.all([
+    const nowIso = new Date().toISOString()
+    const [leadRes, mediaRes, apptRes, roomsRes] = await Promise.all([
       userClient
         .from('leads')
         .select('id, patient_name, phone, source, score, temperature, stage_id, pipeline_id, summary, created_at, custom_fields')
@@ -266,9 +272,19 @@ async function buildCrmSnapshot(
         .eq('lead_id', ctx.leadId)
         .order('created_at', { ascending: false })
         .limit(24),
+      userClient
+        .from('appointments')
+        .select('id, starts_at, ends_at, status, room_id, notes')
+        .eq('lead_id', ctx.leadId)
+        .gte('starts_at', nowIso)
+        .order('starts_at', { ascending: true })
+        .limit(12),
+      userClient.from('rooms').select('id, name, active').eq('active', true).order('name', { ascending: true }).limit(24),
     ])
     if (leadRes.error) queryWarnings.push(`lead_focus: ${leadRes.error.message}`)
     if (mediaRes.error) queryWarnings.push(`crm_media_items: ${mediaRes.error.message}`)
+    if (apptRes.error) queryWarnings.push(`appointments_lead: ${apptRes.error.message}`)
+    if (roomsRes.error) queryWarnings.push(`rooms: ${roomsRes.error.message}`)
     if (leadRes.data && typeof leadRes.data === 'object') {
       const d = leadRes.data as Record<string, unknown>
       let cf: string | null = null
@@ -288,11 +304,25 @@ async function buildCrmSnapshot(
         audio_transcript: row.transcribed_text ? trunc(String(row.transcribed_text), 3500) : null,
         document_or_image_text: row.extracted_text ? trunc(String(row.extracted_text), 3500) : null,
       }))
+      const upcomingAppointments = (apptRes.data ?? []).map((row: Record<string, unknown>) => ({
+        id: row.id,
+        starts_at: row.starts_at,
+        ends_at: row.ends_at,
+        status: row.status,
+        room_id: row.room_id,
+        notes: row.notes ? trunc(String(row.notes), 200) : null,
+      }))
+      const rooms_catalog = (roomsRes.data ?? []).map((row: Record<string, unknown>) => ({
+        id: row.id,
+        name: row.name,
+      }))
       leadFocus = {
         ...d,
         summary: trunc(String(d.summary ?? ''), 500),
         custom_fields: cf,
         recent_media_intel,
+        upcoming_appointments: upcomingAppointments,
+        rooms_catalog,
       }
     }
   }
@@ -503,9 +533,22 @@ Deno.serve(async (req) => {
             'Sua resposta será enviada IMEDIATAMENTE ao paciente. Você deve agir como o assistente virtual da clínica.',
             'MANDATORY: Não inclua análises, explicações internas, raciocínios, etapas (ex: "1. Analisar...") ou qualquer texto que não seja para o paciente.',
             'MANDATORY: Não escreva em inglês planeamento do tipo "Analyze the User", "Interpretation", "Decision", "Strategy" nem listas numeradas de raciocínio.',
+            'MANDATORY: Não escreva nomes de ferramentas, JSON de chamadas de API nem texto técnico para o paciente.',
             'MANDATORY: A primeira linha da sua resposta DEVE ser exactamente: <<<PACIENTE>>>',
             'MANDATORY: Na linha seguinte, escreva APENAS a mensagem WhatsApp em português (cordial, profissional). Nada antes de <<<PACIENTE>>>.',
             'Não use rascunhos ou comentários internos.',
+            ...(context.leadId
+              ? [
+                  '',
+                  '--- ACÇÕES CRM AUTOMÁTICAS (invisíveis ao paciente; só este lead) ---',
+                  `lead_id em foco: ${context.leadId}. Use apenas ids de pipelineStages e pipelines do snapshot.`,
+                  'Depois da mensagem ao paciente, pode opcionalmente acrescentar por último:',
+                  '<<<CRM_OPS>>>',
+                  '{"version":1,"ops":[{"type":"move_lead","stage_id":"<id>"}]}',
+                  'Tipos: move_lead (opcional pipeline_id), set_temperature (value: cold|warm|hot), update_summary (text), book_appointment (duration_minutes, notes).',
+                  'Consulte leadFocus.upcoming_appointments antes de marcar de novo. Omita <<<CRM_OPS>>> se não houver acção.',
+                ]
+              : []),
           ].join('\n')
         : 'Os dados respeitam as permissões (RLS) da conta do utilizador — pode ser uma amostra parcial.',
       'Responda em português de Portugal ou Brasil, de forma clara e profissional.',
@@ -583,12 +626,31 @@ Deno.serve(async (req) => {
       })
     }
 
+    const peeled = peelCrmOpsFromModelReply(reply)
+    reply = peeled.remainder
+
+    let crm_actions: CrmAiActionResult[] | undefined
+    if (context.leadId && peeled.ops.length > 0) {
+      const lf = snapshot.leadFocus as Record<string, unknown> | null | undefined
+      crm_actions = await executeCrmAiOpsFromModel(dbClient, {
+        allowedLeadId: context.leadId,
+        ops: peeled.ops,
+        patientLabel: typeof lf?.patient_name === 'string' ? lf.patient_name : 'Paciente',
+        logToInteractions: true,
+      })
+    }
+
     if (isInternal) {
       reply = stripInternalPatientReply(reply)
     }
     reply = sanitizeCrmAiPatientReply(reply).clean
 
-    return jsonResponse({ ok: true, reply, model })
+    return jsonResponse({
+      ok: true,
+      reply,
+      model,
+      ...(crm_actions && crm_actions.length > 0 ? { crm_actions } : {}),
+    })
   } catch (e) {
     return jsonResponse(
       {

@@ -17,7 +17,8 @@ export function stripManychatHandoffMarker(reply: string): { clean: string; hand
  * (blocos fenced, XML de function_call, etc.). Não substitui o system prompt — só a saída.
  */
 export function sanitizeCrmAiPatientReply(reply: string): { clean: string; handoffSuggested: boolean } {
-  const { clean: afterHandoff, handoffSuggested } = stripManychatHandoffMarker(reply)
+  let stripped = reply.replace(/\r\n/g, '\n').replace(/<<<CRM_OPS>>>[\s\S]*$/m, '').trim()
+  const { clean: afterHandoff, handoffSuggested } = stripManychatHandoffMarker(stripped)
   let t = afterHandoff.replace(/\r\n/g, '\n')
 
   t = t.replace(/```(?:tool|json|typescript|javascript|xml|yaml)\s*[\s\S]*?```/gi, '')
