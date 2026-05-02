@@ -151,10 +151,12 @@ Sem o passo (1) o flow pode ficar vazio; sem o passo (2) o texto fica no campo m
 
 ### 2.4 Debounce (várias mensagens seguidas)
 
-O CRM **não** inclui debounce de 6s (isso era padrão antigo com orquestrador externo). Opções:
+O CRM **não** replica o debounce de 6s do n8n antigo; cada pedido HTTP é **uma mensagem**. Para não “perder contexto” quando o cliente manda **várias linhas seguidas**:
 
-- Configurar no ManyChat um **Smart Delay** ou só disparar o External Request quando o utilizador “parar”, ou
-- Uma chamada por mensagem com `external_message_id` estável e único por mensagem.
+- **`external_message_id` único por mensagem** — cada envio dispara a IA; o snapshot inclui **`leadFocus.recent_conversation`** (histórico deste lead), para o modelo ver mensagens anteriores mesmo que `recentInteractions` global esteja ruidoso.
+- **`min_seconds_between_ai_replies`** na tabela **`crm_ai_configs`** — por defeito **0** (migração `20260502100000_*`): não bloqueia a segunda mensagem por uma espera artificial. Se precisares de teto anti-spam, aumenta este valor no Dashboard.
+- **ManyChat:** Smart Delay ou “só quando parar de escrever” **reduz** chamadas; garante que o passo seguinte envia **todo** o texto acumulado (ou várias chamadas com ids distintos — ambos válidos).
+- **n8n com Postgres debounce:** o fluxo correcto **concatena** mensagens (`messages || E'\n' || …`) e envia **um** bloco `text` ao CRM — evita que só a última frase chegue. Se descartares execuções intermédias **sem** acumular texto na linha `messages`, o cliente perde contexto.
 
 ### 2.5 IA **só no CRM** (recomendado — sem n8n)
 

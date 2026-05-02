@@ -101,8 +101,8 @@ export async function evaluateCrmAiAutoReplyGate(
 
   const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
   const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
-  /** 0 = sem espera mínima entre respostas da IA (cada mensagem inbound pode gerar resposta). */
-  const minSecondsBetween = Math.max(0, Number(config?.min_seconds_between_ai_replies ?? 10))
+  /** 0 = sem espera mínima (várias mensagens seguidas do mesmo cliente podem gerar resposta a cada uma). */
+  const minSecondsBetween = Math.max(0, Number(config?.min_seconds_between_ai_replies ?? 0))
   const latestAiReplyAt = state?.last_ai_reply_at ? new Date(String(state.last_ai_reply_at)).getTime() : 0
   const elapsedSinceAi = latestAiReplyAt ? (Date.now() - latestAiReplyAt) / 1000 : Number.POSITIVE_INFINITY
 

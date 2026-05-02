@@ -263,7 +263,7 @@ async function buildCrmSnapshot(
   let leadFocus: Record<string, unknown> | null = null
   if (ctx.leadId) {
     const nowIso = new Date().toISOString()
-    const [leadRes, mediaRes, apptRes, roomsRes] = await Promise.all([
+    const [leadRes, mediaRes, apptRes, roomsRes, threadRes] = await Promise.all([
       userClient
         .from('leads')
         .select('id, patient_name, phone, source, score, temperature, stage_id, pipeline_id, summary, created_at, custom_fields')
@@ -283,11 +283,18 @@ async function buildCrmSnapshot(
         .order('starts_at', { ascending: true })
         .limit(12),
       userClient.from('rooms').select('id, name, active').eq('active', true).order('name', { ascending: true }).limit(24),
+      userClient
+        .from('interactions')
+        .select('id, channel, direction, author, content, happened_at')
+        .eq('lead_id', ctx.leadId)
+        .order('happened_at', { ascending: false })
+        .limit(36),
     ])
     if (leadRes.error) queryWarnings.push(`lead_focus: ${leadRes.error.message}`)
     if (mediaRes.error) queryWarnings.push(`crm_media_items: ${mediaRes.error.message}`)
     if (apptRes.error) queryWarnings.push(`appointments_lead: ${apptRes.error.message}`)
     if (roomsRes.error) queryWarnings.push(`rooms: ${roomsRes.error.message}`)
+    if (threadRes.error) queryWarnings.push(`lead_thread: ${threadRes.error.message}`)
     if (leadRes.data && typeof leadRes.data === 'object') {
       const d = leadRes.data as Record<string, unknown>
       let cf: string | null = null
@@ -319,6 +326,14 @@ async function buildCrmSnapshot(
         id: row.id,
         name: row.name,
       }))
+      const threadRows = [...((threadRes.data ?? []) as Record<string, unknown>[])].reverse()
+      const recent_conversation = threadRows.map((row) => ({
+        channel: row.channel,
+        direction: row.direction,
+        author: row.author,
+        happened_at: row.happened_at,
+        content: trunc(String(row.content ?? ''), 420),
+      }))
       leadFocus = {
         ...d,
         summary: trunc(String(d.summary ?? ''), 500),
@@ -326,6 +341,7 @@ async function buildCrmSnapshot(
         recent_media_intel,
         upcoming_appointments: upcomingAppointments,
         rooms_catalog,
+        recent_conversation,
       }
     }
   }
@@ -530,6 +546,7 @@ Deno.serve(async (req) => {
       'Você é o assistente de IA do CRM Instituto Lorena (operação comercial / clínica).',
       'Use APENAS o snapshot JSON abaixo; não invente números, leads ou interações que não apareçam.',
       'Quando existir leadFocus.recent_media_intel, use audio_transcript e document_or_image_text como parte do contexto da conversa (transcrições e OCR/extração de documentos).',
+      'Quando existir leadFocus.recent_conversation, é o histórico cronológico deste paciente no CRM — use-o sempre: o cliente pode enviar o mesmo pedido em várias mensagens seguidas; una o sentido e não peça de novo o que já está nas linhas anteriores.',
       isInternal
         ? [
             '--- MODO RESPOSTA DIRETA AO PACIENTE ---',
@@ -546,6 +563,7 @@ Deno.serve(async (req) => {
             'Antes de usar a tag [PRONTO_PARA_CONSULTOR], quando fizer sentido deve ficar claro: tipo de atendimento (menu 1–5 ou equivalente); preferência de médico ou "primeira vaga disponível"; período do dia (manhã/tarde) e dias da semana preferidos; se é primeira consulta ou retorno; e um resumo explícito do pedido (ex.: consulta clínica feminina, prefere manhã, terça ou quinta).',
             'Use [PRONTO_PARA_CONSULTOR] só quando: o paciente pedir explicitamente falar com uma pessoa; já tiver o pacote acima e precise que a equipa confirme e feche o horário na agenda (diga que vai pedir confirmação); ou quando pedirem preços, valores, parecer médico, antes/depois ou pormenores clínicos que não constem do contexto — nesse caso explique que a equipa enviará esses detalhes e coloque a tag no fim dessa mensagem.',
             'Não encerre com mensagens vagas ("já vão falar consigo") logo após a escolha do médico se ainda faltam dados de disponibilidade. Horário de referência da clínica no contexto do negócio: segunda a sexta, 08:00–18:00 (Maringá) — sugira janelas plausíveis sem garantir vagas que não possa confirmar.',
+            'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do paciente antes da sua resposta, trate como um único contexto — responda de forma completa, citando o essencial que já disseram.',
             ...(context.leadId
               ? [
                   '',
