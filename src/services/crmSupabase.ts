@@ -1443,6 +1443,12 @@ export const upsertAppointment = async (a: Appointment): Promise<void> => {
   if (error) throw error
 }
 
+export const deleteAppointmentRow = async (appointmentId: string): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client.from('appointments').delete().eq('id', appointmentId)
+  if (error) throw error
+}
+
 export const findFirstFreeSlot = async (params: {
   startsOn: string
   endsOn: string

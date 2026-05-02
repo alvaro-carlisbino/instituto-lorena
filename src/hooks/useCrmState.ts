@@ -61,6 +61,7 @@ import {
   setLeadTagIdsForLead,
   updateLeadStage,
   upsertAppointment,
+  deleteAppointmentRow,
   upsertLeadTagDefinition,
   upsertRoom,
 } from '../services/crmSupabase'
@@ -2016,6 +2017,15 @@ export const useCrmState = () => {
     }
   }
 
+  const removeAppointmentRow = (appointmentId: string) => {
+    setAppointments((p) => p.filter((x) => x.id !== appointmentId))
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void deleteAppointmentRow(appointmentId).catch(() => {
+        void syncFromSupabase()
+      })
+    }
+  }
+
   return {
     dataMode,
     pipelineCatalog,
@@ -2062,6 +2072,7 @@ export const useCrmState = () => {
     appointments,
     saveRoomRow,
     saveAppointmentRow,
+    removeAppointmentRow,
     myAppUserId,
     draftMessage,
     draftAttachments,

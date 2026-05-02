@@ -18,6 +18,7 @@ import {
   SelectTrigger,
 } from '@/components/ui/select'
 
+import { EditAppointmentDialog } from '@/components/agenda/EditAppointmentDialog'
 import type { Appointment, Room } from '@/mocks/crmMock'
 import {
   addCalendarDaysInTimezone,
@@ -57,6 +58,7 @@ export function AgendaPage() {
   const [roomId, setRoomId] = useState(crm.rooms[0]?.id ?? '')
   const [duration, setDuration] = useState(30)
   const [notes, setNotes] = useState('')
+  const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null)
 
   useEffect(() => {
     if (leadId && !crm.leads.some((l) => l.id === leadId)) {
@@ -155,11 +157,6 @@ export function AgendaPage() {
 
   const navigateDays = (days: number) => {
     setCurrentDate((prev) => addCalendarDaysInTimezone(prev, days, DEFAULT_CLINIC_TIMEZONE))
-  }
-
-  const handleMarkAttendance = (a: Appointment, s: Appointment['attendanceStatus']) => {
-    crm.saveAppointmentRow({ ...a, attendanceStatus: s, updatedAt: new Date().toISOString() })
-    toast.success('Status atualizado.')
   }
 
   if (!crm.currentPermission.canRouteLeads) {
@@ -348,11 +345,7 @@ export function AgendaPage() {
                             key={appt.id}
                             className={`absolute left-1 right-1 rounded-md border p-2 overflow-hidden shadow-sm transition-colors cursor-pointer ${blockClass}`}
                             style={{ top: `${top}px`, height: `${height}px` }}
-                            onClick={() => {
-                              if (appt.attendanceStatus === 'expected') {
-                                handleMarkAttendance(appt, 'checked_in')
-                              }
-                            }}
+                            onClick={() => setEditingAppointment(appt)}
                           >
                             <p className="text-xs font-semibold leading-tight truncate">{leadName(appt.leadId)}</p>
                             <div className="flex items-center gap-1 mt-0.5 opacity-80">
@@ -377,6 +370,7 @@ export function AgendaPage() {
           </div>
         </Card>
       </div>
+      <EditAppointmentDialog appointment={editingAppointment} onClose={() => setEditingAppointment(null)} />
     </AppLayout>
   )
 }
