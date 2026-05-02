@@ -20,7 +20,7 @@
  */
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
-import { sanitizeCrmAiPatientReply } from '../_shared/crmAiAutoReply.ts'
+import { normalizeWhatsappPatientFormatting, sanitizeCrmAiPatientReply } from '../_shared/crmAiAutoReply.ts'
 import {
   executeCrmAiOpsFromModel,
   executeListLeadsFilteredOps,
@@ -556,6 +556,7 @@ Deno.serve(async (req) => {
             'MANDATORY: Não escreva nomes de ferramentas, JSON de chamadas de API nem texto técnico para o paciente.',
             'MANDATORY: A primeira linha da sua resposta DEVE ser exactamente: <<<PACIENTE>>>',
             'MANDATORY: Na linha seguinte, escreva APENAS a mensagem WhatsApp em português (cordial, profissional). Nada antes de <<<PACIENTE>>>.',
+            'Formatação WhatsApp: para destacar nomes ou palavras importantes use **negrito assim** (dois asteriscos antes e depois). Não use quatro asteriscos seguidos (****). Não use um único asterisco *assim* para ênfase — no WhatsApp isso é ambíguo; prefira sempre **duplo**.',
             'Não use rascunhos ou comentários internos.',
             '',
             '--- AGENDAMENTO (OBRIGATÓRIO NESTE CANAL) ---',
@@ -709,6 +710,9 @@ Deno.serve(async (req) => {
       reply = stripInternalPatientReply(reply)
     }
     reply = sanitizeCrmAiPatientReply(reply).clean
+    if (isInternal) {
+      reply = normalizeWhatsappPatientFormatting(reply)
+    }
 
     if (isInternal && context.leadId && actionChunks.length > 0 && reply.trim()) {
       const booked = actionChunks.find(

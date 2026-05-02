@@ -31,6 +31,23 @@ export function sanitizeCrmAiPatientReply(reply: string): { clean: string; hando
   return { clean: t, handoffSuggested }
 }
 
+/**
+ * WhatsApp (Evolution / Cloud): negrito no telefone é `*texto*` (um par de asteriscos).
+ * Modelos costumam escrever `**markdown**` ou `****erro****`. Normaliza para um único par,
+ * sem asteriscos duplicados visíveis.
+ */
+export function normalizeWhatsappPatientFormatting(text: string): string {
+  let s = text.replace(/\r\n/g, '\n')
+  s = s.replace(/\*{4}([^*\n]{1,400}?)\*{4}/g, '*$1*')
+  s = s.replace(/\*{4}/g, '')
+  let prev = ''
+  while (prev !== s) {
+    prev = s
+    s = s.replace(/\*\*([^*\n]{1,400}?)\*\*/g, '*$1*')
+  }
+  return s
+}
+
 const TRIAGE_MAPPING: Record<string, { pipelineId: string; stageId: string }> = {
   '1': { pipelineId: 'pipeline-tratamento-capilar', stageId: 'tc-triagem' },
   '2': { pipelineId: 'pipeline-tratamento-capilar', stageId: 'tc-triagem' },
