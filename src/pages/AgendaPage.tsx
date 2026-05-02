@@ -18,7 +18,7 @@ import {
   SelectTrigger,
 } from '@/components/ui/select'
 
-import type { Appointment } from '@/mocks/crmMock'
+import type { Appointment, Room } from '@/mocks/crmMock'
 import {
   addCalendarDaysInTimezone,
   calendarDayKeyInTimezone,
@@ -68,13 +68,46 @@ export function AgendaPage() {
   }, [crm.leads, crm.rooms, leadId, roomId])
 
   const activeRooms = useMemo(() => crm.rooms.filter(r => r.active), [crm.rooms])
-  const timelineMinWidth = Math.max(720, 60 + Math.max(activeRooms.length, 1) * 180)
 
   const appointmentsForDay = useMemo(() => {
     return crm.appointments.filter((a) =>
       isSameCalendarDayAsAnchor(a.startsAt, currentDate, DEFAULT_CLINIC_TIMEZONE),
     )
   }, [crm.appointments, currentDate])
+
+  /** Colunas da grelha: salas ativas + salas com marcação neste dia (ex.: inativas ou só usadas pela IA). */
+  const timelineRooms = useMemo(() => {
+    const idsActive = new Set(activeRooms.map((r) => r.id))
+    const extraIds = [...new Set(appointmentsForDay.map((a) => a.roomId).filter((id) => !idsActive.has(id)))]
+    const byId = new Map(crm.rooms.map((r) => [r.id, r]))
+    const extras: Room[] = []
+    for (const id of extraIds) {
+      const r = byId.get(id)
+      if (r) {
+        extras.push(r)
+      } else {
+        extras.push({
+          id,
+          name: 'Sala (referência)',
+          active: false,
+          slotMinutes: 30,
+          sortOrder: 999,
+          createdAt: new Date().toISOString(),
+        })
+      }
+    }
+    return [...activeRooms, ...extras].sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'pt'),
+    )
+  }, [activeRooms, appointmentsForDay, crm.rooms])
+
+  const gridRooms = timelineRooms.length > 0 ? timelineRooms : activeRooms
+  const timelineMinWidth = Math.max(720, 60 + Math.max(gridRooms.length, 1) * 180)
+
+  useEffect(() => {
+    if (!online) return
+    void crm.refreshChatFromSupabase()
+  }, [online, crm.refreshChatFromSupabase])
 
   const leadName = (id: string) => crm.leads.find((l) => l.id === id)?.patientName ?? id
 
@@ -244,10 +277,10 @@ export function AgendaPage() {
               {/* Rooms Header */}
               <div
                 className="grid border-b border-border/50 bg-muted/10"
-                style={{ minWidth: `${timelineMinWidth}px`, gridTemplateColumns: `60px repeat(${activeRooms.length}, minmax(0, 1fr))` }}
+                style={{ minWidth: `${timelineMinWidth}px`, gridTemplateColumns: `60px repeat(${gridRooms.length}, minmax(0, 1fr))` }}
               >
                 <div className="w-[60px]" />
-                {activeRooms.map(r => (
+                {gridRooms.map(r => (
                   <div key={r.id} className="py-2.5 px-3 border-l border-border/50 text-center text-sm font-medium text-foreground truncate">
                     {r.name}
                   </div>
@@ -258,7 +291,7 @@ export function AgendaPage() {
               <div className="h-full overflow-y-auto">
                 <div
                   className="relative grid"
-                  style={{ minWidth: `${timelineMinWidth}px`, gridTemplateColumns: `60px repeat(${activeRooms.length}, minmax(0, 1fr))` }}
+                  style={{ minWidth: `${timelineMinWidth}px`, gridTemplateColumns: `60px repeat(${gridRooms.length}, minmax(0, 1fr))` }}
                 >
                 {/* Y-Axis: Time Labels */}
                 <div className="w-[60px] flex flex-col border-r border-border/50 bg-muted/5">
@@ -270,7 +303,7 @@ export function AgendaPage() {
                 </div>
                 
                 {/* X-Axis: Room Columns */}
-                {activeRooms.map(room => {
+                {gridRooms.map(room => {
                   const roomAppts = appointmentsForDay.filter(a => a.roomId === room.id)
 
                   return (

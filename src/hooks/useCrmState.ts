@@ -37,6 +37,7 @@ import {
   loadWebhookJobs,
   loadCrmData,
   loadChatSliceFromSupabase,
+  loadRoomsAndAppointmentsFromSupabase,
   loadAuditLogsPage,
   createWebhookReplayJob,
   persistLead,
@@ -710,6 +711,13 @@ export const useCrmState = () => {
     } catch {
       // noop
     }
+    try {
+      const agendaSlice = await loadRoomsAndAppointmentsFromSupabase()
+      setRooms(agendaSlice.rooms)
+      setAppointments(agendaSlice.appointments)
+    } catch {
+      // noop
+    }
   }, [dataMode])
 
   useEffect(() => {
@@ -729,6 +737,8 @@ export const useCrmState = () => {
       .channel('crm-global-chat-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, scheduleSliceRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, scheduleSliceRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, scheduleSliceRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, scheduleSliceRefresh)
       .subscribe()
 
     const pollMs = 12000

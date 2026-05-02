@@ -690,6 +690,52 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
   return { leads: builtLeads, interactions: builtInteractions }
 }
 
+export type RoomsAndAppointmentsSlice = {
+  rooms: Room[]
+  appointments: Appointment[]
+}
+
+/** Salas + marcações para atualizar a agenda sem refazer o snapshot completo do CRM. */
+export const loadRoomsAndAppointmentsFromSupabase = async (): Promise<RoomsAndAppointmentsSlice> => {
+  const client = assertSupabase()
+  const [roomsRes, apptRes] = await Promise.all([
+    client.from('rooms').select('id, name, active, slot_minutes, sort_order, created_at').order('sort_order', { ascending: true }),
+    client
+      .from('appointments')
+      .select('id, lead_id, room_id, starts_at, ends_at, status, attendance_status, notes, created_at, updated_at')
+      .order('starts_at', { ascending: true })
+      .limit(500),
+  ])
+  if (roomsRes.error) throw roomsRes.error
+  if (apptRes.error) throw apptRes.error
+
+  const builtRooms: Room[] = ((roomsRes.data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    name: String(r.name),
+    active: r.active !== false,
+    slotMinutes: typeof r.slot_minutes === 'number' ? r.slot_minutes : Number(r.slot_minutes) || 30,
+    sortOrder: typeof r.sort_order === 'number' ? r.sort_order : Number(r.sort_order) || 0,
+    createdAt: String(r.created_at ?? new Date().toISOString()),
+  }))
+
+  const builtAppointments: Appointment[] = ((apptRes.data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    leadId: String(r.lead_id),
+    roomId: String(r.room_id),
+    startsAt: String(r.starts_at),
+    endsAt: String(r.ends_at),
+    status: (['draft', 'confirmed', 'cancelled'].includes(String(r.status)) ? r.status : 'confirmed') as Appointment['status'],
+    attendanceStatus: (['expected', 'checked_in', 'no_show'].includes(String(r.attendance_status))
+      ? r.attendance_status
+      : 'expected') as Appointment['attendanceStatus'],
+    notes: r.notes != null && String(r.notes).length ? String(r.notes) : null,
+    createdAt: String(r.created_at ?? new Date().toISOString()),
+    updatedAt: String(r.updated_at ?? r.created_at ?? new Date().toISOString()),
+  }))
+
+  return { rooms: builtRooms, appointments: builtAppointments }
+}
+
 export const seedTestUsers = async (): Promise<void> => {
   const client = assertSupabase()
   const payload = [
