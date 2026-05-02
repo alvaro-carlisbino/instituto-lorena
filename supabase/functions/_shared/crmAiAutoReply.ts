@@ -147,6 +147,104 @@ async function appendInboundBurstBuffer(
   })
 }
 
+/** Hora local 0–23 no fuso IANA (Edge corre em UTC; não usar `Date#getHours()` para regra de negócio). */
+export function hourInTimeZone(d: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    hour12: false,
+  }).formatToParts(d)
+  const raw = parts.find((p) => p.type === 'hour')?.value ?? ''
+  let h = Number(raw)
+  if (!Number.isFinite(h)) return -1
+  if (h === 24) h = 0
+  return h
+}
+
+export function isWithinQuietHours(
+  date: Date,
+  startHour = 8,
+  endHour = 20,
+  timeZone = 'America/Sao_Paulo',
+): boolean {
+  const h = hourInTimeZone(date, timeZone)
+  if (h < 0) return true
+  return h >= startHour && h < endHour
+}
+
+function patientAiFallbackMessagePt(): string {
+  const t = (Deno.env.get('CRM_AI_FALLBACK_MESSAGE_PT') ?? '').trim()
+  const fallback =
+    'Peço desculpa — não consegui responder agora. Por favor, volte a enviar a sua mensagem dentro de alguns segundos. 🙏'
+  return t.length >= 8 ? t : fallback
+}
+
+async function sleepMs(ms: number): Promise<void> {
+  await new Promise((r) => setTimeout(r, ms))
+}
+
+async function sendWhatsappPatientFallbackReply(
+  admin: SupabaseClient,
+  opts: {
+    leadId: string
+    patientName: string
+    fromPhone: string
+    inboundHappenedAt: string
+    ownerMode: string
+    aiEnabled: boolean
+    sendProvider: WhatsappProvider
+    aiJobSource: string
+    typingDelayMs?: number
+    contextSnippet: string
+    noteSuffix: string
+  },
+): Promise<void> {
+  const text = normalizeWhatsappPatientFormatting(patientAiFallbackMessagePt())
+  const envTyping = (Deno.env.get('WHATSAPP_AI_TYPING_DELAY_MS') ?? '').trim()
+  const envTypingN = envTyping ? Number.parseInt(envTyping, 10) : Number.NaN
+  const delayFromEnv = Number.isFinite(envTypingN) ? Math.max(0, envTypingN) : null
+  const delay =
+    opts.typingDelayMs !== undefined
+      ? Math.max(0, opts.typingDelayMs)
+      : delayFromEnv !== null
+        ? delayFromEnv
+        : 200
+  if (delay > 0) await sleepMs(delay)
+
+  const sent = await opts.sendProvider.sendMessage({
+    to: opts.fromPhone,
+    text,
+    leadId: opts.leadId,
+  })
+  await insertInteraction(admin, {
+    leadId: opts.leadId,
+    patientName: opts.patientName,
+    channel: 'whatsapp',
+    direction: 'out',
+    author: 'Assistente IA',
+    content: text,
+    happenedAt: nowIso(),
+    externalMessageId: sent.externalMessageId,
+  })
+  await admin.from('crm_conversation_states').upsert({
+    lead_id: opts.leadId,
+    owner_mode: opts.ownerMode,
+    ai_enabled: opts.aiEnabled,
+    last_inbound_at: opts.inboundHappenedAt,
+    last_ai_reply_at: nowIso(),
+    context_summary: `${opts.contextSnippet}\nIA (fallback): ${text.slice(0, 120)}`.slice(0, 1200),
+    updated_at: nowIso(),
+  })
+  await admin.from('webhook_jobs').insert({
+    source: opts.aiJobSource,
+    status: 'done',
+    note: `ai_fallback_reply:${opts.noteSuffix}:${sent.provider}:${opts.leadId}:${sent.externalMessageId}`.slice(
+      0,
+      500,
+    ),
+  })
+}
+
 type WhatsappBurstFlushOpts = {
   leadId: string
   patientName: string
@@ -200,6 +298,23 @@ function scheduleWhatsappInboundBurstFlush(
         })
       } catch (e) {
         console.error('scheduleWhatsappInboundBurstFlush:', e)
+        try {
+          await sendWhatsappPatientFallbackReply(admin, {
+            leadId: opts.leadId,
+            patientName: opts.patientName,
+            fromPhone: opts.fromPhone,
+            inboundHappenedAt: opts.inboundHappenedAt,
+            ownerMode: opts.ownerMode,
+            aiEnabled: opts.aiEnabled,
+            sendProvider: opts.sendProvider,
+            aiJobSource: opts.aiJobSource,
+            typingDelayMs: opts.typingDelayMs,
+            contextSnippet: combined.slice(0, 280),
+            noteSuffix: 'burst_flush_error',
+          })
+        } catch (e2) {
+          console.error('scheduleWhatsappInboundBurstFlush fallback:', e2)
+        }
       }
       return
     }
@@ -217,11 +332,6 @@ Para começarmos, digite o número da opção desejada:
 3. Consulta Clínica Masculino
 4. Consulta Clínica Feminino
 5. Transplante de Sobrancelha`
-
-export function isWithinQuietHours(date: Date, startHour = 8, endHour = 20): boolean {
-  const h = date.getHours()
-  return h >= startHour && h < endHour
-}
 
 export function nowIso(): string {
   return new Date().toISOString()
@@ -265,6 +375,8 @@ export async function evaluateCrmAiAutoReplyGate(
     .eq('lead_id', leadId)
     .maybeSingle()
   const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
+  const { data: orgRow } = await admin.from('org_settings').select('timezone').eq('id', 'default').maybeSingle()
+  const orgTz = String(orgRow?.timezone ?? 'America/Sao_Paulo').trim() || 'America/Sao_Paulo'
 
   const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
   const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
@@ -276,8 +388,8 @@ export async function evaluateCrmAiAutoReplyGate(
   // Parse business hours from config (format "HH:mm:ss")
   const startH = Number.parseInt(String(config?.business_hours_start ?? '08').split(':')[0], 10) || 8
   const endH = Number.parseInt(String(config?.business_hours_end ?? '20').split(':')[0], 10) || 20
-  
-  const withinWindow = isWithinQuietHours(new Date(), startH, endH)
+
+  const withinWindow = isWithinQuietHours(new Date(), startH, endH, orgTz)
   const shouldAiByMode = ownerMode === 'ai' || (ownerMode === 'auto' && withinWindow)
 
   const skipReasons: string[] = []
@@ -310,7 +422,7 @@ export async function evaluateCrmAiAutoReplyGate(
   }
   if (skipReasons.includes('outside_quiet_hours')) {
     hintParts.push(
-      'Modo auto fora da janela 8h–20h (hora do servidor da Edge Function, normalmente UTC). Ajusta default_owner_mode para "ai" ou alarga horários no código se precisares.',
+      `Modo auto fora da janela ${startH}h–${endH}h no fuso ${orgTz} (crm_ai_configs.business_hours_*). Para responder 24h em auto, alargue o intervalo ou use owner_mode "ai".`,
     )
   }
   if (skipReasons.includes('min_seconds_between_ai_replies')) {
@@ -340,33 +452,53 @@ export async function invokeCrmAiAssistantForLead(
   const headers =
     internalSecret.length >= 16 ? { 'x-crm-ai-internal-secret': internalSecret } : undefined
 
-  const { data: aiResult, error: invokeErr } = await admin.functions.invoke('crm-ai-assistant', {
-    body: {
-      messages: aiMessages,
-      context: aiCtx,
-      promptOverride: promptOverride || undefined,
-    },
-    ...(headers ? { headers } : {}),
-  })
-  if (invokeErr) {
-    console.warn('invokeCrmAiAssistantForLead:', invokeErr.message)
+  const attempts = Math.max(1, Math.min(5, Number.parseInt(Deno.env.get('CRM_AI_INVOKE_ATTEMPTS') ?? '3', 10) || 3))
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const { data: aiResult, error: invokeErr } = await admin.functions.invoke('crm-ai-assistant', {
+      body: {
+        messages: aiMessages,
+        context: aiCtx,
+        promptOverride: promptOverride || undefined,
+      },
+      ...(headers ? { headers } : {}),
+    })
+
+    if (invokeErr) {
+      console.warn(`invokeCrmAiAssistantForLead attempt ${attempt + 1}/${attempts}:`, invokeErr.message)
+      if (attempt < attempts - 1) await sleepMs(700 * (attempt + 1))
+      continue
+    }
+
+    const aiObj = (aiResult && typeof aiResult === 'object' ? aiResult : {}) as Record<string, unknown>
+    if (aiObj.ok === false) {
+      console.warn(
+        `invokeCrmAiAssistantForLead ok:false`,
+        aiObj.error,
+        aiObj.message ?? aiObj.detail ?? '',
+      )
+      if (attempt < attempts - 1) await sleepMs(700 * (attempt + 1))
+      continue
+    }
+
+    let reply = typeof aiObj.reply === 'string' ? aiObj.reply.trim() : ''
+
+    const patientMarker = '<<<PACIENTE>>>'
+    const mi = reply.indexOf(patientMarker)
+    if (mi >= 0) reply = reply.slice(mi + patientMarker.length).trim()
+
+    reply = reply
+      .replace(/^(?:\d+\.\s+\*{0,2}Analyze the User[\s\S]*?)(?=\n\n(?:Bom dia|Boa tarde|Boa noite|Olá|Oi)\b)/gi, '')
+      .trim()
+    reply = reply.replace(/^(?:\d+\.\s+\*?Analyze[\s\S]*?)(?:\n\n|\n[A-Z\xC0-\xDF]|$)/gi, '').trim()
+    reply = reply.replace(/<(thinking|thought|reasoning)>[\s\S]*?<\/\1>/gi, '').trim()
+    reply = reply.replace(/```(?:thinking|thought|reasoning)[\s\S]*?```/gi, '').trim()
+
+    if (reply.trim()) return reply
+    if (attempt < attempts - 1) await sleepMs(500 * (attempt + 1))
   }
-  const aiObj = (aiResult && typeof aiResult === 'object' ? aiResult : {}) as Record<string, unknown>
-  let reply = typeof aiObj.reply === 'string' ? aiObj.reply.trim() : ''
 
-  const patientMarker = '<<<PACIENTE>>>'
-  const mi = reply.indexOf(patientMarker)
-  if (mi >= 0) reply = reply.slice(mi + patientMarker.length).trim()
-
-  // Clean up potential leak of internal reasoning / English analyst script (GLM)
-  reply = reply
-    .replace(/^(?:\d+\.\s+\*{0,2}Analyze the User[\s\S]*?)(?=\n\n(?:Bom dia|Boa tarde|Boa noite|Olá|Oi)\b)/gi, '')
-    .trim()
-  reply = reply.replace(/^(?:\d+\.\s+\*?Analyze[\s\S]*?)(?:\n\n|\n[A-Z\xC0-\xDF]|$)/gi, '').trim()
-  reply = reply.replace(/<(thinking|thought|reasoning)>[\s\S]*?<\/\1>/gi, '').trim()
-  reply = reply.replace(/```(?:thinking|thought|reasoning)[\s\S]*?```/gi, '').trim()
-
-  return reply
+  return ''
 }
 
 export async function upsertConversationStateInboundOnly(
@@ -514,64 +646,125 @@ export async function runWhatsappAiAutoReply(
   }
   // --- End Triage Logic ---
 
-  const aiReplyRaw = await invokeCrmAiAssistantForLead(
-    admin,
-    options.leadId,
-    options.aiInboundUserText,
-    options.statePrompt,
-  )
-  const { clean: aiReply } = sanitizeCrmAiPatientReply(aiReplyRaw)
-  if (!aiReply) {
-    await upsertConversationStateInboundOnly(admin, {
-      leadId: options.leadId,
-      ownerMode: options.ownerMode,
-      aiEnabled: options.aiEnabled,
-      inboundHappenedAt: options.inboundHappenedAt,
-    })
-    return { replied: false }
+  let aiReplyRaw = ''
+  try {
+    aiReplyRaw = await invokeCrmAiAssistantForLead(
+      admin,
+      options.leadId,
+      options.aiInboundUserText,
+      options.statePrompt,
+    )
+  } catch (e) {
+    console.error('runWhatsappAiAutoReply invoke:', e)
   }
 
-  const envTyping = (Deno.env.get('WHATSAPP_AI_TYPING_DELAY_MS') ?? '').trim()
-  const envTypingN = envTyping ? Number.parseInt(envTyping, 10) : Number.NaN
-  const delayFromEnv = Number.isFinite(envTypingN) ? Math.max(0, envTypingN) : null
-  const delay =
-    options.typingDelayMs !== undefined
-      ? Math.max(0, options.typingDelayMs)
-      : delayFromEnv !== null
-        ? delayFromEnv
-        : 400 + Math.floor(Math.random() * 500)
-  if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
+  const { clean: aiReplySanitized } = sanitizeCrmAiPatientReply(aiReplyRaw)
+  const aiReply = aiReplySanitized.trim()
 
-  const sent = await options.sendProvider.sendMessage({
-    to: options.fromPhone,
-    text: aiReply,
-    leadId: options.leadId,
-  })
-  await insertInteraction(admin, {
-    leadId: options.leadId,
-    patientName: options.patientName,
-    channel: 'whatsapp',
-    direction: 'out',
-    author: 'Assistente IA',
-    content: aiReply,
-    happenedAt: nowIso(),
-    externalMessageId: sent.externalMessageId,
-  })
-  await admin.from('crm_conversation_states').upsert({
-    lead_id: options.leadId,
-    owner_mode: options.ownerMode,
-    ai_enabled: options.aiEnabled,
-    last_inbound_at: options.inboundHappenedAt,
-    last_ai_reply_at: nowIso(),
-    context_summary: `${options.aiInboundUserText.slice(0, 280)}\nIA: ${aiReply.slice(0, 220)}`.slice(0, 1200),
-    updated_at: nowIso(),
-  })
-  await admin.from('webhook_jobs').insert({
-    source: options.aiJobSource,
-    status: 'done',
-    note: `ai_auto_reply:${sent.provider}:${options.leadId}:${sent.externalMessageId}`.slice(0, 500),
-  })
-  return { replied: true, replyText: aiReply }
+  if (!aiReply) {
+    try {
+      await sendWhatsappPatientFallbackReply(admin, {
+        leadId: options.leadId,
+        patientName: options.patientName,
+        fromPhone: options.fromPhone,
+        inboundHappenedAt: options.inboundHappenedAt,
+        ownerMode: options.ownerMode,
+        aiEnabled: options.aiEnabled,
+        sendProvider: options.sendProvider,
+        aiJobSource: options.aiJobSource,
+        typingDelayMs: options.typingDelayMs,
+        contextSnippet: options.aiInboundUserText.slice(0, 280),
+        noteSuffix: 'empty_ai_reply',
+      })
+      return {
+        replied: true,
+        replyText: normalizeWhatsappPatientFormatting(patientAiFallbackMessagePt()),
+      }
+    } catch (e) {
+      console.error('runWhatsappAiAutoReply fallback:', e)
+      await upsertConversationStateInboundOnly(admin, {
+        leadId: options.leadId,
+        ownerMode: options.ownerMode,
+        aiEnabled: options.aiEnabled,
+        inboundHappenedAt: options.inboundHappenedAt,
+      })
+      return { replied: false }
+    }
+  }
+
+  try {
+    const envTyping = (Deno.env.get('WHATSAPP_AI_TYPING_DELAY_MS') ?? '').trim()
+    const envTypingN = envTyping ? Number.parseInt(envTyping, 10) : Number.NaN
+    const delayFromEnv = Number.isFinite(envTypingN) ? Math.max(0, envTypingN) : null
+    const delay =
+      options.typingDelayMs !== undefined
+        ? Math.max(0, options.typingDelayMs)
+        : delayFromEnv !== null
+          ? delayFromEnv
+          : 400 + Math.floor(Math.random() * 500)
+    if (delay > 0) await sleepMs(delay)
+
+    const sent = await options.sendProvider.sendMessage({
+      to: options.fromPhone,
+      text: aiReply,
+      leadId: options.leadId,
+    })
+    await insertInteraction(admin, {
+      leadId: options.leadId,
+      patientName: options.patientName,
+      channel: 'whatsapp',
+      direction: 'out',
+      author: 'Assistente IA',
+      content: aiReply,
+      happenedAt: nowIso(),
+      externalMessageId: sent.externalMessageId,
+    })
+    await admin.from('crm_conversation_states').upsert({
+      lead_id: options.leadId,
+      owner_mode: options.ownerMode,
+      ai_enabled: options.aiEnabled,
+      last_inbound_at: options.inboundHappenedAt,
+      last_ai_reply_at: nowIso(),
+      context_summary: `${options.aiInboundUserText.slice(0, 280)}\nIA: ${aiReply.slice(0, 220)}`.slice(0, 1200),
+      updated_at: nowIso(),
+    })
+    await admin.from('webhook_jobs').insert({
+      source: options.aiJobSource,
+      status: 'done',
+      note: `ai_auto_reply:${sent.provider}:${options.leadId}:${sent.externalMessageId}`.slice(0, 500),
+    })
+    return { replied: true, replyText: aiReply }
+  } catch (e) {
+    console.error('runWhatsappAiAutoReply send:', e)
+    try {
+      await sendWhatsappPatientFallbackReply(admin, {
+        leadId: options.leadId,
+        patientName: options.patientName,
+        fromPhone: options.fromPhone,
+        inboundHappenedAt: options.inboundHappenedAt,
+        ownerMode: options.ownerMode,
+        aiEnabled: options.aiEnabled,
+        sendProvider: options.sendProvider,
+        aiJobSource: options.aiJobSource,
+        typingDelayMs: options.typingDelayMs,
+        contextSnippet: options.aiInboundUserText.slice(0, 280),
+        noteSuffix: 'primary_send_failed',
+      })
+      return {
+        replied: true,
+        replyText: normalizeWhatsappPatientFormatting(patientAiFallbackMessagePt()),
+      }
+    } catch (e2) {
+      console.error('runWhatsappAiAutoReply fallback after send error:', e2)
+      await upsertConversationStateInboundOnly(admin, {
+        leadId: options.leadId,
+        ownerMode: options.ownerMode,
+        aiEnabled: options.aiEnabled,
+        inboundHappenedAt: options.inboundHappenedAt,
+      })
+      return { replied: false }
+    }
+  }
 }
 
 export async function runManychatAiAutoReply(
@@ -648,55 +841,83 @@ export async function runManychatAiAutoReply(
   }
   // --- End Triage Logic ---
 
-  const aiReplyRaw = await invokeCrmAiAssistantForLead(
-    admin,
-    options.leadId,
-    options.aiInboundUserText,
-    options.statePrompt,
-  )
-  if (!aiReplyRaw) {
-    await upsertConversationStateInboundOnly(admin, {
-      leadId: options.leadId,
-      ownerMode: options.ownerMode,
-      aiEnabled: options.aiEnabled,
-      inboundHappenedAt: options.inboundHappenedAt,
-    })
-    return { replied: false }
+  let aiReplyRaw = ''
+  try {
+    aiReplyRaw = await invokeCrmAiAssistantForLead(
+      admin,
+      options.leadId,
+      options.aiInboundUserText,
+      options.statePrompt,
+    )
+  } catch (e) {
+    console.error('runManychatAiAutoReply invoke:', e)
   }
 
-  const { clean: aiReply, handoffSuggested } = sanitizeCrmAiPatientReply(aiReplyRaw)
+  const sanitizedManychat = sanitizeCrmAiPatientReply(aiReplyRaw)
+  const aiReply = sanitizedManychat.clean.trim()
+  const handoffSuggested = sanitizedManychat.handoffSuggested
+
+  const commitManychatReply = async (text: string, noteMid: string): Promise<void> => {
+    await insertInteraction(admin, {
+      leadId: options.leadId,
+      patientName: options.patientName,
+      channel: 'meta',
+      direction: 'out',
+      author: 'Assistente IA',
+      content: text,
+      happenedAt: nowIso(),
+    })
+    await admin.from('crm_conversation_states').upsert({
+      lead_id: options.leadId,
+      owner_mode: options.ownerMode,
+      ai_enabled: options.aiEnabled,
+      last_inbound_at: options.inboundHappenedAt,
+      last_ai_reply_at: nowIso(),
+      context_summary: `${options.aiInboundUserText.slice(0, 280)}\nIA: ${text.slice(0, 220)}`.slice(0, 1200),
+      updated_at: nowIso(),
+    })
+    await admin.from('webhook_jobs').insert({
+      source: options.aiJobSource,
+      status: 'done',
+      note: `ai_auto_reply:manychat:${noteMid}:${options.leadId}`.slice(0, 500),
+    })
+  }
+
   if (!aiReply) {
-    await upsertConversationStateInboundOnly(admin, {
-      leadId: options.leadId,
-      ownerMode: options.ownerMode,
-      aiEnabled: options.aiEnabled,
-      inboundHappenedAt: options.inboundHappenedAt,
-    })
-    return { replied: false, handoffSuggested: handoffSuggested || false }
+    const fb = patientAiFallbackMessagePt()
+    try {
+      await commitManychatReply(fb, 'fallback_empty')
+      return { replied: true, replyText: fb, handoffSuggested: false }
+    } catch (e) {
+      console.error('runManychatAiAutoReply fallback commit:', e)
+      await upsertConversationStateInboundOnly(admin, {
+        leadId: options.leadId,
+        ownerMode: options.ownerMode,
+        aiEnabled: options.aiEnabled,
+        inboundHappenedAt: options.inboundHappenedAt,
+      })
+      return { replied: false, handoffSuggested: false }
+    }
   }
 
-  await insertInteraction(admin, {
-    leadId: options.leadId,
-    patientName: options.patientName,
-    channel: 'meta',
-    direction: 'out',
-    author: 'Assistente IA',
-    content: aiReply,
-    happenedAt: nowIso(),
-  })
-  await admin.from('crm_conversation_states').upsert({
-    lead_id: options.leadId,
-    owner_mode: options.ownerMode,
-    ai_enabled: options.aiEnabled,
-    last_inbound_at: options.inboundHappenedAt,
-    last_ai_reply_at: nowIso(),
-    context_summary: `${options.aiInboundUserText.slice(0, 280)}\nIA: ${aiReply.slice(0, 220)}`.slice(0, 1200),
-    updated_at: nowIso(),
-  })
-  await admin.from('webhook_jobs').insert({
-    source: options.aiJobSource,
-    status: 'done',
-    note: `ai_auto_reply:manychat:${options.leadId}`.slice(0, 500),
-  })
-  return { replied: true, replyText: aiReply, handoffSuggested }
+  try {
+    await commitManychatReply(aiReply, 'reply')
+    return { replied: true, replyText: aiReply, handoffSuggested }
+  } catch (e) {
+    console.error('runManychatAiAutoReply commit:', e)
+    const fb = patientAiFallbackMessagePt()
+    try {
+      await commitManychatReply(fb, 'fallback_send')
+      return { replied: true, replyText: fb, handoffSuggested: false }
+    } catch (e2) {
+      console.error('runManychatAiAutoReply fallback_send:', e2)
+      await upsertConversationStateInboundOnly(admin, {
+        leadId: options.leadId,
+        ownerMode: options.ownerMode,
+        aiEnabled: options.aiEnabled,
+        inboundHappenedAt: options.inboundHappenedAt,
+      })
+      return { replied: false, handoffSuggested: false }
+    }
+  }
 }
