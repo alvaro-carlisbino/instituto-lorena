@@ -19,16 +19,28 @@ import {
 } from '@/components/ui/select'
 
 import type { Appointment } from '@/mocks/crmMock'
+import {
+  addCalendarDaysInTimezone,
+  calendarDayKeyInTimezone,
+  DEFAULT_CLINIC_TIMEZONE,
+  isSameCalendarDayAsAnchor,
+  minutesSinceMidnightInTimezone,
+} from '@/lib/sameLocalDayInTimezone'
 
 const START_HOUR = 8
 const END_HOUR = 19
 const HOURS = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i)
 const PIXELS_PER_HOUR = 80 // Height of each hour block
+const VISUAL_START_MIN = START_HOUR * 60
+const VISUAL_END_MIN = (END_HOUR + 1) * 60
 
 function formatTime(iso: string) {
   try {
-    const d = new Date(iso)
-    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    return new Date(iso).toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: DEFAULT_CLINIC_TIMEZONE,
+    })
   } catch {
     return ''
   }
@@ -59,15 +71,9 @@ export function AgendaPage() {
   const timelineMinWidth = Math.max(720, 60 + Math.max(activeRooms.length, 1) * 180)
 
   const appointmentsForDay = useMemo(() => {
-    const startOfDay = new Date(currentDate)
-    startOfDay.setHours(0, 0, 0, 0)
-    const endOfDay = new Date(currentDate)
-    endOfDay.setHours(23, 59, 59, 999)
-
-    return crm.appointments.filter(a => {
-      const d = new Date(a.startsAt)
-      return d >= startOfDay && d <= endOfDay
-    })
+    return crm.appointments.filter((a) =>
+      isSameCalendarDayAsAnchor(a.startsAt, currentDate, DEFAULT_CLINIC_TIMEZONE),
+    )
   }, [crm.appointments, currentDate])
 
   const leadName = (id: string) => crm.leads.find((l) => l.id === id)?.patientName ?? id
@@ -78,9 +84,8 @@ export function AgendaPage() {
       return
     }
     const start = new Date()
-    const end = new Date()
-    end.setDate(end.getDate() + 14)
-    const ymd = (d: Date) => d.toISOString().slice(0, 10)
+    const end = addCalendarDaysInTimezone(start, 14, DEFAULT_CLINIC_TIMEZONE)
+    const ymd = (d: Date) => calendarDayKeyInTimezone(d, DEFAULT_CLINIC_TIMEZONE)
     try {
       const slot = await findFirstFreeSlot({
         startsOn: ymd(start),
@@ -116,9 +121,7 @@ export function AgendaPage() {
   }
 
   const navigateDays = (days: number) => {
-    const next = new Date(currentDate)
-    next.setDate(next.getDate() + days)
-    setCurrentDate(next)
+    setCurrentDate((prev) => addCalendarDaysInTimezone(prev, days, DEFAULT_CLINIC_TIMEZONE))
   }
 
   const handleMarkAttendance = (a: Appointment, s: Appointment['attendanceStatus']) => {
@@ -222,7 +225,12 @@ export function AgendaPage() {
                 </Button>
               </div>
               <h2 className="ml-1 truncate text-sm font-semibold sm:ml-2 sm:text-base">
-                {currentDate.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
+                {currentDate.toLocaleDateString('pt-BR', {
+                  weekday: 'long',
+                  day: '2-digit',
+                  month: 'long',
+                  timeZone: DEFAULT_CLINIC_TIMEZONE,
+                })}
               </h2>
             </div>
             <Button size="sm" className="w-full rounded-xl gap-1 sm:w-auto">
@@ -276,12 +284,17 @@ export function AgendaPage() {
                       {roomAppts.map(appt => {
                         const start = new Date(appt.startsAt)
                         const end = new Date(appt.endsAt)
-                        
-                        // Prevent out of bounds render
-                        if (start.getHours() >= END_HOUR + 1 || end.getHours() < START_HOUR) return null
+                        const startMin = minutesSinceMidnightInTimezone(appt.startsAt, DEFAULT_CLINIC_TIMEZONE)
+                        const endMin = minutesSinceMidnightInTimezone(appt.endsAt, DEFAULT_CLINIC_TIMEZONE)
 
-                        const top = ((start.getHours() - START_HOUR) * PIXELS_PER_HOUR) + (start.getMinutes() / 60) * PIXELS_PER_HOUR
-                        const height = Math.max(24, ((end.getTime() - start.getTime()) / (1000 * 60 * 60)) * PIXELS_PER_HOUR)
+                        if (startMin >= VISUAL_END_MIN || endMin <= VISUAL_START_MIN) return null
+
+                        const top =
+                          ((startMin - VISUAL_START_MIN) / 60) * PIXELS_PER_HOUR
+                        const height = Math.max(
+                          24,
+                          ((end.getTime() - start.getTime()) / (1000 * 60 * 60)) * PIXELS_PER_HOUR,
+                        )
                         
                         // Visual styles based on status
                         let blockClass = "bg-primary/10 border-primary/30 text-primary-foreground/90 hover:bg-primary/20"

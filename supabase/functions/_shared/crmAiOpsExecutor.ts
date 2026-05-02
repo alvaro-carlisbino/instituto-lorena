@@ -166,17 +166,28 @@ function weekdayInSaoPaulo(ymd: string): number {
   return map[w] ?? 0
 }
 
+/** Resolve weekday (0=dom … 6=sáb) a partir das notas; evita "segunda opção" como segunda-feira. */
+function weekdayTargetFromNotes(notes: string): number | null {
+  const n = notes.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+  const notOpcaoSegunda = !/\bsegunda\s+op(c(c|ç)ao|ção)\b/.test(n)
+  const notOpcaoTerca = !/\bter[cç]a\s+op(c(c|ç)ao|ção)\b/.test(n)
+  const notOpcaoQuarta = !/\bquarta\s+op(c(c|ç)ao|ção)\b/.test(n)
+  const notOpcaoQuinta = !/\bquinta\s+op(c(c|ç)ao|ção)\b/.test(n)
+  const notOpcaoSexta = !/\bsexta\s+op(c(c|ç)ao|ção)\b/.test(n)
+
+  if (/\bdomingo\b/.test(n)) return 0
+  if (/\b(segunda-feira|segunda\s+feira)\b/.test(n) || (/\bsegunda\b/.test(n) && notOpcaoSegunda)) return 1
+  if (/\b(ter[cç]a-feira|ter[cç]a\s+feira)\b/.test(n) || (/\bter[cç]a\b/.test(n) && notOpcaoTerca)) return 2
+  if (/\b(quarta-feira|quarta\s+feira)\b/.test(n) || (/\bquarta\b/.test(n) && notOpcaoQuarta)) return 3
+  if (/\b(quinta-feira|quinta\s+feira)\b/.test(n) || (/\bquinta\b/.test(n) && notOpcaoQuinta)) return 4
+  if (/\b(sexta-feira|sexta\s+feira)\b/.test(n) || (/\bsexta\b/.test(n) && notOpcaoSexta)) return 5
+  if (/\bs[aá]bado\b/.test(n)) return 6
+  return null
+}
+
 /** Primeira data (YYYY-MM-DD) em SP, a partir de `base`, cujo weekday coincide com o texto (segunda…sexta). */
 function firstYmdMatchingWeekdayFromNotes(notes: string, base: Date): string | null {
-  const n = notes.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
-  let target: number | null = null
-  if (/domingo/.test(n)) target = 0
-  else if (/segunda/.test(n)) target = 1
-  else if (/ter[cç]a/.test(n)) target = 2
-  else if (/quarta/.test(n)) target = 3
-  else if (/quinta/.test(n)) target = 4
-  else if (/sexta/.test(n)) target = 5
-  else if (/s[aá]bado/.test(n)) target = 6
+  const target = weekdayTargetFromNotes(notes)
   if (target === null) return null
   let ymd = getYmdInTimeZone(base, SAO_PAULO_TZ)
   for (let i = 0; i < 21; i += 1) {
