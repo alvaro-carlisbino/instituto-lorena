@@ -41,9 +41,9 @@ const TRIAGE_MAPPING: Record<string, { pipelineId: string; stageId: string }> = 
 
 const INITIAL_TRIAGE_MESSAGE_TEMPLATE = `Olá, {name}! Boa tarde, tudo bem? Seja muito bem-vindo ao Instituto Lorena Visentainer. 💆
 
-Eu sou o assistente virtual da clínica e vou realizar o seu primeiro atendimento para que, em instantes, a nossa consultora Dandara assuma a nossa conversa.
+Eu sou o assistente virtual da clínica. Posso ajudá-lo a escolher o tipo de atendimento e a reunir as informações para o agendamento — a nossa equipa confirma depois o melhor horário na agenda.
 
-Para começarmos da melhor forma, seria uma consulta para Transplante Capilar ou Consulta Clínica? Por favor, digite o número da opção desejada:
+Para começarmos, digite o número da opção desejada:
 
 1. Transplante Capilar Masculino
 2. Transplante Capilar Feminino

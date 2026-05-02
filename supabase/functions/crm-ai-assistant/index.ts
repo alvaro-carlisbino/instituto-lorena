@@ -540,6 +540,12 @@ Deno.serve(async (req) => {
             'MANDATORY: A primeira linha da sua resposta DEVE ser exactamente: <<<PACIENTE>>>',
             'MANDATORY: Na linha seguinte, escreva APENAS a mensagem WhatsApp em português (cordial, profissional). Nada antes de <<<PACIENTE>>>.',
             'Não use rascunhos ou comentários internos.',
+            '',
+            '--- AGENDAMENTO (OBRIGATÓRIO NESTE CANAL) ---',
+            'Objetivo principal: conduzir o agendamento com naturalidade — perguntas curtas e uma ou duas dúvidas por mensagem — sem encaminhar para humano de forma prematura.',
+            'Antes de usar a tag [PRONTO_PARA_CONSULTOR], quando fizer sentido deve ficar claro: tipo de atendimento (menu 1–5 ou equivalente); preferência de médico ou "primeira vaga disponível"; período do dia (manhã/tarde) e dias da semana preferidos; se é primeira consulta ou retorno; e um resumo explícito do pedido (ex.: consulta clínica feminina, prefere manhã, terça ou quinta).',
+            'Use [PRONTO_PARA_CONSULTOR] só quando: o paciente pedir explicitamente falar com uma pessoa; já tiver o pacote acima e precise que a equipa confirme e feche o horário na agenda (diga que vai pedir confirmação); ou quando pedirem preços, valores, parecer médico, antes/depois ou pormenores clínicos que não constem do contexto — nesse caso explique que a equipa enviará esses detalhes e coloque a tag no fim dessa mensagem.',
+            'Não encerre com mensagens vagas ("já vão falar consigo") logo após a escolha do médico se ainda faltam dados de disponibilidade. Horário de referência da clínica no contexto do negócio: segunda a sexta, 08:00–18:00 (Maringá) — sugira janelas plausíveis sem garantir vagas que não possa confirmar.',
             ...(context.leadId
               ? [
                   '',
