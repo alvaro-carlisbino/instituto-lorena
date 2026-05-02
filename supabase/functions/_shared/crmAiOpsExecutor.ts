@@ -138,8 +138,68 @@ export async function executeListLeadsFilteredOps(
   }
 }
 
-function ymdUtc(d: Date): string {
-  return d.toISOString().slice(0, 10)
+const SAO_PAULO_TZ = 'America/Sao_Paulo'
+
+function getYmdInTimeZone(d: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d)
+}
+
+function addDaysToYmd(ymd: string, days: number): string {
+  const [y, m, da] = ymd.split('-').map(Number)
+  const next = new Date(Date.UTC(y, m - 1, da + days, 12, 0, 0))
+  return next.toISOString().slice(0, 10)
+}
+
+function weekdayInSaoPaulo(ymd: string): number {
+  const [y, m, da] = ymd.split('-').map(Number)
+  const utcMid = Date.UTC(y, m - 1, da, 15, 0, 0)
+  const w = new Intl.DateTimeFormat('en-US', {
+    timeZone: SAO_PAULO_TZ,
+    weekday: 'short',
+  }).format(new Date(utcMid))
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  return map[w] ?? 0
+}
+
+/** Primeira data (YYYY-MM-DD) em SP, a partir de `base`, cujo weekday coincide com o texto (segunda…sexta). */
+function firstYmdMatchingWeekdayFromNotes(notes: string, base: Date): string | null {
+  const n = notes.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+  let target: number | null = null
+  if (/domingo/.test(n)) target = 0
+  else if (/segunda/.test(n)) target = 1
+  else if (/ter[cç]a/.test(n)) target = 2
+  else if (/quarta/.test(n)) target = 3
+  else if (/quinta/.test(n)) target = 4
+  else if (/sexta/.test(n)) target = 5
+  else if (/s[aá]bado/.test(n)) target = 6
+  if (target === null) return null
+  let ymd = getYmdInTimeZone(base, SAO_PAULO_TZ)
+  for (let i = 0; i < 21; i += 1) {
+    if (weekdayInSaoPaulo(ymd) === target) return ymd
+    ymd = addDaysToYmd(ymd, 1)
+  }
+  return null
+}
+
+/** Janela de hora local (início do slot) para filtrar vagas; alinhado a notas da IA (tarde, manhã, "15h"). */
+function localHourWindowFromNotes(notes: string): { min: number; max: number } | null {
+  const n = notes.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+  const approx = n.match(/(?:por\s*volta\s*(?:de|das)?|às|as)\s*(\d{1,2})\s*h\b/)
+  const hApprox = approx ? parseInt(approx[1], 10) : NaN
+  const hasTarde = /\btarde\b/.test(n)
+  const hasManha = /\bmanh[aã]\b/.test(n)
+
+  if (Number.isFinite(hApprox) && hApprox >= 8 && hApprox <= 19) {
+    return { min: Math.max(8, hApprox - 1), max: Math.min(17, hApprox + 1) }
+  }
+  if (hasTarde && !hasManha) return { min: 13, max: 17 }
+  if (hasManha && !hasTarde) return { min: 8, max: 11 }
+  return null
 }
 
 async function validateStage(
@@ -264,15 +324,26 @@ export async function executeCrmAiOpsFromModel(
           Math.max(15, Number(op.duration_minutes ?? op.duration ?? 30) || 30),
         )
         const notes = op.notes != null ? String(op.notes).trim().slice(0, 500) : ''
-        const start = new Date()
-        const end = new Date(start)
-        end.setUTCDate(end.getUTCDate() + 14)
+        const now = new Date()
+        const searchStartYmd =
+          firstYmdMatchingWeekdayFromNotes(notes, now) ?? getYmdInTimeZone(now, SAO_PAULO_TZ)
+        const searchEndYmd = addDaysToYmd(searchStartYmd, 14)
+        const hourWin = localHourWindowFromNotes(notes)
 
-        const { data: rpcData, error: rpcErr } = await admin.rpc('find_first_appointment_slot', {
-          p_starts_on: ymdUtc(start),
-          p_ends_on: ymdUtc(end),
+        const rpcPayload: Record<string, unknown> = {
+          p_starts_on: searchStartYmd,
+          p_ends_on: searchEndYmd,
           p_duration_minutes: duration,
-        })
+        }
+        if (hourWin) {
+          rpcPayload.p_local_hour_min = hourWin.min
+          rpcPayload.p_local_hour_max = hourWin.max
+        }
+
+        const { data: rpcData, error: rpcErr } = await admin.rpc(
+          'find_first_appointment_slot',
+          rpcPayload,
+        )
         if (rpcErr) {
           results.push({ type, ok: false, detail: rpcErr.message.slice(0, 200) })
           continue
