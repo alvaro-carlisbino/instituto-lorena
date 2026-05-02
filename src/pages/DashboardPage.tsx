@@ -260,8 +260,8 @@ export function DashboardPage() {
                 className="py-12"
               />
             ) : (
-              <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] w-full min-h-[240px] min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minHeight={240} minWidth={0}>
                   <BarChart data={funnelData} layout="vertical" margin={{ left: 0, right: 40, top: 0, bottom: 0 }}>
                     <XAxis type="number" hide />
                     <YAxis
@@ -306,8 +306,8 @@ export function DashboardPage() {
                 <p className="text-[11px] font-black uppercase tracking-widest">Sem dados de equipe</p>
               </div>
             ) : (
-              <div className="h-[300px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[300px] w-full min-h-[240px] min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minHeight={240} minWidth={0}>
                   <BarChart data={workloadData} layout="vertical" margin={{ left: 0, right: 30, top: 0, bottom: 0 }}>
                     <XAxis type="number" hide />
                     <YAxis

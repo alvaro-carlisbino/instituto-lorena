@@ -256,6 +256,8 @@ type WhatsappBurstFlushOpts = {
   aiJobSource: string
   sendProvider: WhatsappProvider
   typingDelayMs?: number
+  /** Omisso: CRM_AI_INVOKE_ATTEMPTS / 3. Menor evita 504 em chamadas síncronas (ex.: force_ai_reply). */
+  invokeMaxAttempts?: number
 }
 
 function scheduleWhatsappInboundBurstFlush(
@@ -445,6 +447,7 @@ export async function invokeCrmAiAssistantForLead(
   leadId: string,
   aiInboundUserText: string,
   promptOverride: string,
+  opts?: { maxAttempts?: number },
 ): Promise<string> {
   const aiMessages = [{ role: 'user', content: aiInboundUserText }]
   const aiCtx = { leadId, focus: 'lead' }
@@ -452,7 +455,11 @@ export async function invokeCrmAiAssistantForLead(
   const headers =
     internalSecret.length >= 16 ? { 'x-crm-ai-internal-secret': internalSecret } : undefined
 
-  const attempts = Math.max(1, Math.min(5, Number.parseInt(Deno.env.get('CRM_AI_INVOKE_ATTEMPTS') ?? '3', 10) || 3))
+  const envAttempts = Math.max(1, Math.min(5, Number.parseInt(Deno.env.get('CRM_AI_INVOKE_ATTEMPTS') ?? '3', 10) || 3))
+  const attempts =
+    opts?.maxAttempts !== undefined
+      ? Math.max(1, Math.min(5, opts.maxAttempts))
+      : envAttempts
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     const { data: aiResult, error: invokeErr } = await admin.functions.invoke('crm-ai-assistant', {
@@ -536,6 +543,8 @@ export async function runWhatsappAiAutoReply(
     typingDelayMs?: number
     /** True: executar já o texto acumulado (flush da rajada); não voltar a enfileirar. */
     burstFlush?: boolean
+    /** Omisso: env CRM_AI_INVOKE_ATTEMPTS. Reduzir em fluxos síncronos evita 504 no gateway. */
+    invokeMaxAttempts?: number
   },
 ): Promise<{ replied: boolean; replyText?: string; burstPending?: boolean }> {
   const { data: burstCfg } = await admin
@@ -574,6 +583,7 @@ export async function runWhatsappAiAutoReply(
       aiJobSource: options.aiJobSource,
       sendProvider: options.sendProvider,
       typingDelayMs: options.typingDelayMs,
+      invokeMaxAttempts: options.invokeMaxAttempts,
     })
     return { replied: false, burstPending: true }
   }
@@ -653,6 +663,7 @@ export async function runWhatsappAiAutoReply(
       options.leadId,
       options.aiInboundUserText,
       options.statePrompt,
+      options.invokeMaxAttempts !== undefined ? { maxAttempts: options.invokeMaxAttempts } : undefined,
     )
   } catch (e) {
     console.error('runWhatsappAiAutoReply invoke:', e)
@@ -778,6 +789,7 @@ export async function runManychatAiAutoReply(
     aiEnabled: boolean
     statePrompt: string
     aiJobSource: string
+    invokeMaxAttempts?: number
   },
 ): Promise<{ replied: boolean; replyText?: string; handoffSuggested?: boolean }> {
   // --- Triage Logic ---
@@ -848,6 +860,7 @@ export async function runManychatAiAutoReply(
       options.leadId,
       options.aiInboundUserText,
       options.statePrompt,
+      options.invokeMaxAttempts !== undefined ? { maxAttempts: options.invokeMaxAttempts } : undefined,
     )
   } catch (e) {
     console.error('runManychatAiAutoReply invoke:', e)

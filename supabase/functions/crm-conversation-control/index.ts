@@ -227,7 +227,8 @@ Deno.serve(async (req) => {
         statePrompt,
         aiJobSource: 'crm-force-ai-reply',
         sendProvider,
-        typingDelayMs: 800,
+        typingDelayMs: 0,
+        invokeMaxAttempts: 2,
       })
       return json({
         ok: true,
@@ -247,6 +248,7 @@ Deno.serve(async (req) => {
         aiEnabled,
         statePrompt,
         aiJobSource: 'crm-force-ai-reply',
+        invokeMaxAttempts: 2,
       })
       const replyTrimmed = String(replyText ?? '').trim()
       let manychatPush: Record<string, unknown> = { attempted: false }

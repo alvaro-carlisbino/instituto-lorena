@@ -122,8 +122,8 @@ export function TvDashboardPage() {
             {barChartData.length === 0 ? (
               <p className="text-sm text-white/50">Sem dados de captação.</p>
             ) : (
-              <div className="h-[240px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[240px] w-full min-h-[200px] min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minHeight={200} minWidth={0}>
                   <BarChart data={barChartData} layout="vertical" margin={{ left: 8, right: 24, top: 8, bottom: 8 }}>
                     <XAxis type="number" hide domain={[0, maxLeads]} />
                     <YAxis type="category" dataKey="label" width={72} tick={{ fontSize: 12, fill: 'rgba(255,255,255,0.6)' }} axisLine={false} tickLine={false} />
