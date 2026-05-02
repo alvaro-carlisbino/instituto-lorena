@@ -197,11 +197,27 @@ function firstYmdMatchingWeekdayFromNotes(notes: string, base: Date): string | n
   return null
 }
 
-/** Janela de hora local (início do slot) para filtrar vagas; alinhado a notas da IA (tarde, manhã, "15h"). */
+/** Hora local (0–23) do instante ISO no fuso indicado. */
+function slotLocalHourInTimeZone(iso: string, timeZone: string): number {
+  const d = new Date(iso)
+  const p = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
+  return Number(p.find((x) => x.type === 'hour')?.value ?? -1)
+}
+
+/** Janela de hora local (início do slot) para filtrar vagas; alinhado a notas da IA (tarde, manhã, "15h", "~15h"). */
 function localHourWindowFromNotes(notes: string): { min: number; max: number } | null {
   const n = notes.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
-  const approx = n.match(/(?:por\s*volta\s*(?:de|das)?|às|as)\s*(\d{1,2})\s*h\b/)
-  const hApprox = approx ? parseInt(approx[1], 10) : NaN
+  const approxStd = n.match(/(?:por\s*volta\s*(?:de|das)?|às|as)\s*(\d{1,2})\s*h\b/)
+  const approxParen = n.match(/\(\s*~?\s*(\d{1,2})\s*h\s*\)/)
+  const approxTilde = n.match(/~\s*(\d{1,2})\s*h\b/)
+  const hApprox = parseInt(
+    approxStd?.[1] ?? approxParen?.[1] ?? approxTilde?.[1] ?? '',
+    10,
+  )
   const hasTarde = /\btarde\b/.test(n)
   const hasManha = /\bmanh[aã]\b/.test(n)
 
@@ -368,6 +384,15 @@ export async function executeCrmAiOpsFromModel(
           results.push({ type, ok: false, detail: 'no_slot_available' })
           continue
         }
+        const slotHour = slotLocalHourInTimeZone(String(row.slot_start), SAO_PAULO_TZ)
+        if (slotHour < 8 || slotHour >= 20) {
+          results.push({
+            type,
+            ok: false,
+            detail: 'invalid_slot_outside_business_hours',
+          })
+          continue
+        }
         const id = `appt-${crypto.randomUUID()}`
         const nowIso = new Date().toISOString()
         const { error: insErr } = await admin.from('appointments').insert({
@@ -391,7 +416,18 @@ export async function executeCrmAiOpsFromModel(
           ok: true,
           detail: `${row.slot_start}`,
         })
-        summaries.push(`Marcação criada (${String(row.slot_start).slice(0, 16)}…)`)
+        const summaryWhen = (() => {
+          try {
+            return new Date(String(row.slot_start)).toLocaleString('pt-BR', {
+              dateStyle: 'short',
+              timeStyle: 'short',
+              timeZone: SAO_PAULO_TZ,
+            })
+          } catch {
+            return String(row.slot_start).slice(0, 16)
+          }
+        })()
+        summaries.push(`Marcação criada (${summaryWhen}, horário de Maringá)`)
         continue
       }
 

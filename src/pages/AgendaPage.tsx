@@ -287,26 +287,32 @@ export function AgendaPage() {
                         const startMin = minutesSinceMidnightInTimezone(appt.startsAt, DEFAULT_CLINIC_TIMEZONE)
                         const endMin = minutesSinceMidnightInTimezone(appt.endsAt, DEFAULT_CLINIC_TIMEZONE)
 
-                        if (startMin >= VISUAL_END_MIN || endMin <= VISUAL_START_MIN) return null
+                        if (startMin >= VISUAL_END_MIN) return null
 
-                        const top =
-                          ((startMin - VISUAL_START_MIN) / 60) * PIXELS_PER_HOUR
-                        const height = Math.max(
-                          24,
-                          ((end.getTime() - start.getTime()) / (1000 * 60 * 60)) * PIXELS_PER_HOUR,
-                        )
-                        
-                        // Visual styles based on status
-                        let blockClass = "bg-primary/10 border-primary/30 text-primary-foreground/90 hover:bg-primary/20"
-                        if (appt.attendanceStatus === 'checked_in') {
-                          blockClass = "bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25"
-                        } else if (appt.attendanceStatus === 'no_show') {
-                          blockClass = "bg-red-500/15 border-red-500/30 text-red-700 dark:text-red-300 hover:bg-red-500/25"
+                        const endsBeforeGrid = endMin <= VISUAL_START_MIN
+                        const top = endsBeforeGrid
+                          ? 2
+                          : ((startMin - VISUAL_START_MIN) / 60) * PIXELS_PER_HOUR
+                        const height = endsBeforeGrid
+                          ? 44
+                          : Math.max(
+                              24,
+                              ((end.getTime() - start.getTime()) / (1000 * 60 * 60)) * PIXELS_PER_HOUR,
+                            )
+
+                        let blockClass = endsBeforeGrid
+                          ? 'bg-amber-500/15 border-amber-600/40 text-amber-950 dark:text-amber-100 hover:bg-amber-500/25'
+                          : 'bg-primary/10 border-primary/30 text-primary-foreground/90 hover:bg-primary/20'
+                        if (!endsBeforeGrid && appt.attendanceStatus === 'checked_in') {
+                          blockClass =
+                            'bg-emerald-500/15 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/25'
+                        } else if (!endsBeforeGrid && appt.attendanceStatus === 'no_show') {
+                          blockClass = 'bg-red-500/15 border-red-500/30 text-red-700 dark:text-red-300 hover:bg-red-500/25'
                         }
 
                         return (
-                          <div 
-                            key={appt.id} 
+                          <div
+                            key={appt.id}
                             className={`absolute left-1 right-1 rounded-md border p-2 overflow-hidden shadow-sm transition-colors cursor-pointer ${blockClass}`}
                             style={{ top: `${top}px`, height: `${height}px` }}
                             onClick={() => {
@@ -320,6 +326,11 @@ export function AgendaPage() {
                               <Clock className="w-3 h-3" />
                               <span className="text-[10px]">{formatTime(appt.startsAt)} - {formatTime(appt.endsAt)}</span>
                             </div>
+                            {endsBeforeGrid && (
+                              <p className="text-[10px] mt-0.5 font-medium opacity-90">
+                                Fora do horário da grelha — apague ou reagende no CRM.
+                              </p>
+                            )}
                             {appt.notes && <p className="text-[10px] mt-1 opacity-70 truncate">{appt.notes}</p>}
                           </div>
                         )
