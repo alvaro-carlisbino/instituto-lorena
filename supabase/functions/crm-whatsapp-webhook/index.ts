@@ -294,7 +294,7 @@ Deno.serve(async (req) => {
         provider: envProvider,
         metaPhoneNumberId: normalized.metaPhoneNumberId ?? '',
       })
-      const { replied } = await runWhatsappAiAutoReply(admin, {
+      const { replied, burstPending } = await runWhatsappAiAutoReply(admin, {
         leadId: lead.leadId,
         patientName: normalized.fromName,
         fromPhone: normalized.fromPhone,
@@ -306,7 +306,11 @@ Deno.serve(async (req) => {
         aiJobSource: 'whatsapp-webhook',
         sendProvider,
       })
-      routing = replied ? 'ai_auto_reply_attempted' : 'manual_handoff'
+      routing = replied
+        ? 'ai_auto_reply_attempted'
+        : burstPending
+          ? 'ai_inbound_burst_pending'
+          : 'manual_handoff'
     } else {
       await upsertConversationStateInboundOnly(admin, {
         leadId: lead.leadId,

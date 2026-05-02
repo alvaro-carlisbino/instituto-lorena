@@ -158,6 +158,8 @@ O CRM **não** replica o debounce de 6s do n8n antigo; cada pedido HTTP é **uma
 - **ManyChat:** Smart Delay ou “só quando parar de escrever” **reduz** chamadas; garante que o passo seguinte envia **todo** o texto acumulado (ou várias chamadas com ids distintos — ambos válidos).
 - **n8n com Postgres debounce:** o fluxo correcto **concatena** mensagens (`messages || E'\n' || …`) e envia **um** bloco `text` ao CRM — evita que só a última frase chegue. Se descartares execuções intermédias **sem** acumular texto na linha `messages`, o cliente perde contexto.
 
+**WhatsApp (Edge `crm-whatsapp-webhook`):** com migração `20260502120000_*`, o CRM pode **acumular** mensagens curtas do mesmo lead (`crm_conversation_states.ai_inbound_burst_*`) e responder **uma vez** após `inbound_burst_debounce_ms` (omissão 4000 ms). Mensagens que já trazem intenção clara (ex.: “transplante capilar masculino”) respondem na hora **sem** esperar; se já existir texto pendente no buffer, a linha seguinte junta-se ao buffer (ex.: “bom dia” + pedido). Para desligar: `inbound_burst_debounce_ms = 0` em `crm_ai_configs`.
+
 ### 2.5 IA **só no CRM** (recomendado — sem n8n)
 
 - Corpo **sem** `action` (ou `"action": "message"`): o ManyChat envia `subscriber_id` + `text` → `crm-manychat-webhook` cria/atualiza o lead, grava a interação e chama **`crm-ai-assistant`** no Supabase (Z.ai com `ZAI_API_KEY`). A resposta traz **`reply`** para o passo seguinte no ManyChat.

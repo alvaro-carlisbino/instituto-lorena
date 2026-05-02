@@ -39,6 +39,156 @@ const TRIAGE_MAPPING: Record<string, { pipelineId: string; stageId: string }> = 
   '5': { pipelineId: 'pipeline-tratamento-capilar', stageId: 'tc-triagem' },
 }
 
+/** Detecta opção 1–5 em texto livre (várias linhas, erros comuns de escrita). */
+export function inferTriageTargetFromText(raw: string): { pipelineId: string; stageId: string } | null {
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const joined = lines.join(' ')
+  const t = joined.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+  const opt = joined.match(/(?:^|\s)(?:opc[aã]o|op[cç][aã]o|numero|n[º°]?)\s*([1-5])(?:\s|$|[).:,])/i)
+  if (opt?.[1] && TRIAGE_MAPPING[opt[1]]) return TRIAGE_MAPPING[opt[1]]
+  const loneLine = lines.find((l) => /^[1-5]$/.test(l))
+  if (loneLine && TRIAGE_MAPPING[loneLine]) return TRIAGE_MAPPING[loneLine]
+  if (/transplante\s+capilar\s+masculin|transplate\s+capilar\s+masculin|capilar\s+masculino\b/.test(t)) {
+    return TRIAGE_MAPPING['1']
+  }
+  if (/transplante\s+capilar\s+feminin|capilar\s+feminina\b|capilar\s+feminino\b/.test(t)) {
+    return TRIAGE_MAPPING['2']
+  }
+  if (/consulta\s+cl[ií]nica\s+masculin/.test(t)) return TRIAGE_MAPPING['3']
+  if (/consulta\s+cl[ií]nica\s+feminin/.test(t)) return TRIAGE_MAPPING['4']
+  if (/\bsobrancelha/.test(t)) return TRIAGE_MAPPING['5']
+  return null
+}
+
+function resolveTriageTarget(normalized: string): { pipelineId: string; stageId: string } | null {
+  const n = normalized.trim()
+  if (!n) return null
+  if (TRIAGE_MAPPING[n]) return TRIAGE_MAPPING[n]
+  return inferTriageTargetFromText(n)
+}
+
+/** Só junta rajada quando o texto parece cumprimento curto / incompleto — evita atrasar quem já pediu o serviço numa linha. */
+function shouldDeferReplyForBurstMerge(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  if (resolveTriageTarget(t)) return false
+  if (/transplante|consulta|sobrancelh|marcar|agendar|implante\s+capilar|\bop[cç][aã]o\s*[1-5]\b/i.test(t)) {
+    return false
+  }
+  return t.length <= 96
+}
+
+function scheduleEdgeBackground(task: Promise<void>): void {
+  try {
+    const wu = (globalThis as unknown as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } })
+      .EdgeRuntime?.waitUntil
+    if (typeof wu === 'function') {
+      wu(task)
+      return
+    }
+  } catch {
+    /* ignore */
+  }
+  void task
+}
+
+async function appendInboundBurstBuffer(
+  admin: SupabaseClient,
+  leadId: string,
+  line: string,
+  inboundHappenedAt: string,
+): Promise<void> {
+  const chunk = line.trim()
+  if (!chunk) return
+  const { data: row } = await admin
+    .from('crm_conversation_states')
+    .select('ai_inbound_burst_text')
+    .eq('lead_id', leadId)
+    .maybeSingle()
+  const prev = String(row?.ai_inbound_burst_text ?? '').trim()
+  const next = prev ? `${prev}\n${chunk}` : chunk
+  const up = await admin
+    .from('crm_conversation_states')
+    .update({
+      ai_inbound_burst_text: next,
+      ai_inbound_burst_updated_at: nowIso(),
+      last_inbound_at: inboundHappenedAt,
+      updated_at: nowIso(),
+    })
+    .eq('lead_id', leadId)
+    .select('lead_id')
+  const rows = up.data as unknown[] | null
+  if (rows && rows.length > 0) return
+  await admin.from('crm_conversation_states').insert({
+    lead_id: leadId,
+    owner_mode: 'auto',
+    ai_enabled: true,
+    ai_inbound_burst_text: chunk,
+    ai_inbound_burst_updated_at: nowIso(),
+    last_inbound_at: inboundHappenedAt,
+    updated_at: nowIso(),
+  })
+}
+
+type WhatsappBurstFlushOpts = {
+  leadId: string
+  patientName: string
+  fromPhone: string
+  inboundHappenedAt: string
+  ownerMode: string
+  aiEnabled: boolean
+  statePrompt: string
+  aiJobSource: string
+  sendProvider: WhatsappProvider
+  typingDelayMs?: number
+}
+
+function scheduleWhatsappInboundBurstFlush(
+  admin: SupabaseClient,
+  debounceMs: number,
+  opts: WhatsappBurstFlushOpts,
+): void {
+  scheduleEdgeBackground((async () => {
+    const maxRounds = 24
+    for (let r = 0; r < maxRounds; r++) {
+      await new Promise((res) => setTimeout(res, debounceMs))
+      const { data: st } = await admin
+        .from('crm_conversation_states')
+        .select('ai_inbound_burst_text, ai_inbound_burst_updated_at')
+        .eq('lead_id', opts.leadId)
+        .maybeSingle()
+      const buf = String(st?.ai_inbound_burst_text ?? '').trim()
+      if (!buf) return
+      const updRaw = st?.ai_inbound_burst_updated_at
+      const upd = updRaw ? new Date(String(updRaw)).getTime() : 0
+      if (Date.now() - upd < debounceMs) continue
+      const { data: claimed } = await admin
+        .from('crm_conversation_states')
+        .update({
+          ai_inbound_burst_text: null,
+          ai_inbound_burst_updated_at: null,
+          updated_at: nowIso(),
+        })
+        .eq('lead_id', opts.leadId)
+        .not('ai_inbound_burst_text', 'is', null)
+        .select('ai_inbound_burst_text')
+        .maybeSingle()
+      const combined = String(claimed?.ai_inbound_burst_text ?? '').trim()
+      if (!combined) return
+      try {
+        await runWhatsappAiAutoReply(admin, {
+          ...opts,
+          aiInboundUserText: combined,
+          burstFlush: true,
+        })
+      } catch (e) {
+        console.error('scheduleWhatsappInboundBurstFlush:', e)
+      }
+      return
+    }
+  })())
+}
+
 const INITIAL_TRIAGE_MESSAGE_TEMPLATE = `Olá, {name}! Boa tarde, tudo bem? Seja muito bem-vindo ao Instituto Lorena Visentainer. 💆
 
 Eu sou o assistente virtual da clínica. Posso ajudá-lo a escolher o tipo de atendimento e a reunir as informações para o agendamento — a nossa equipa confirma depois o melhor horário na agenda.
@@ -235,8 +385,50 @@ export async function runWhatsappAiAutoReply(
     sendProvider: WhatsappProvider
     /** Omisso: 3–8 s (simulação de digitação). Use 0 no retry manual para resposta mais rápida. */
     typingDelayMs?: number
+    /** True: executar já o texto acumulado (flush da rajada); não voltar a enfileirar. */
+    burstFlush?: boolean
   },
-): Promise<{ replied: boolean; replyText?: string }> {
+): Promise<{ replied: boolean; replyText?: string; burstPending?: boolean }> {
+  const { data: burstCfg } = await admin
+    .from('crm_ai_configs')
+    .select('inbound_burst_debounce_ms')
+    .eq('id', 'default')
+    .maybeSingle()
+  const burstMs = Math.max(0, Number(burstCfg?.inbound_burst_debounce_ms ?? 4000))
+
+  const { data: existingBurst } = await admin
+    .from('crm_conversation_states')
+    .select('ai_inbound_burst_text')
+    .eq('lead_id', options.leadId)
+    .maybeSingle()
+  const hasPendingBurst = String(existingBurst?.ai_inbound_burst_text ?? '').trim().length > 0
+
+  if (
+    !options.burstFlush &&
+    burstMs > 0 &&
+    (hasPendingBurst || shouldDeferReplyForBurstMerge(options.aiInboundUserText))
+  ) {
+    await appendInboundBurstBuffer(
+      admin,
+      options.leadId,
+      options.aiInboundUserText,
+      options.inboundHappenedAt,
+    )
+    scheduleWhatsappInboundBurstFlush(admin, burstMs, {
+      leadId: options.leadId,
+      patientName: options.patientName,
+      fromPhone: options.fromPhone,
+      inboundHappenedAt: options.inboundHappenedAt,
+      ownerMode: options.ownerMode,
+      aiEnabled: options.aiEnabled,
+      statePrompt: options.statePrompt,
+      aiJobSource: options.aiJobSource,
+      sendProvider: options.sendProvider,
+      typingDelayMs: options.typingDelayMs,
+    })
+    return { replied: false, burstPending: true }
+  }
+
   // --- Triage Logic ---
   const { data: lead } = await admin
     .from('leads')
@@ -248,8 +440,7 @@ export async function runWhatsappAiAutoReply(
     const isEntry = lead.stage_id === 'novo' || lead.stage_id === 'tc-novo'
     if (isEntry) {
       const normalized = options.aiInboundUserText.trim()
-      const firstChar = normalized.charAt(0)
-      const target = TRIAGE_MAPPING[normalized] || TRIAGE_MAPPING[firstChar]
+      const target = resolveTriageTarget(normalized)
 
       if (target) {
         await admin
@@ -386,8 +577,7 @@ export async function runManychatAiAutoReply(
     const isEntry = lead.stage_id === 'novo' || lead.stage_id === 'tc-novo'
     if (isEntry) {
       const normalized = options.aiInboundUserText.trim()
-      const firstChar = normalized.charAt(0)
-      const target = TRIAGE_MAPPING[normalized] || TRIAGE_MAPPING[firstChar]
+      const target = resolveTriageTarget(normalized)
 
       if (target) {
         await admin
