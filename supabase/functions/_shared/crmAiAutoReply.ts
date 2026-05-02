@@ -383,7 +383,7 @@ export async function runWhatsappAiAutoReply(
     statePrompt: string
     aiJobSource: string
     sendProvider: WhatsappProvider
-    /** Omisso: 3–8 s (simulação de digitação). Use 0 no retry manual para resposta mais rápida. */
+    /** Omisso: atraso curto (ou secret WHATSAPP_AI_TYPING_DELAY_MS em ms, ou 0 = sem espera). */
     typingDelayMs?: number
     /** True: executar já o texto acumulado (flush da rajada); não voltar a enfileirar. */
     burstFlush?: boolean
@@ -394,7 +394,7 @@ export async function runWhatsappAiAutoReply(
     .select('inbound_burst_debounce_ms')
     .eq('id', 'default')
     .maybeSingle()
-  const burstMs = Math.max(0, Number(burstCfg?.inbound_burst_debounce_ms ?? 4000))
+  const burstMs = Math.max(0, Number(burstCfg?.inbound_burst_debounce_ms ?? 0))
 
   const { data: existingBurst } = await admin
     .from('crm_conversation_states')
@@ -514,11 +514,15 @@ export async function runWhatsappAiAutoReply(
     return { replied: false }
   }
 
-  // --- Humanization: Typing Simulation ---
+  const envTyping = (Deno.env.get('WHATSAPP_AI_TYPING_DELAY_MS') ?? '').trim()
+  const envTypingN = envTyping ? Number.parseInt(envTyping, 10) : Number.NaN
+  const delayFromEnv = Number.isFinite(envTypingN) ? Math.max(0, envTypingN) : null
   const delay =
     options.typingDelayMs !== undefined
       ? Math.max(0, options.typingDelayMs)
-      : 3000 + Math.random() * 5000
+      : delayFromEnv !== null
+        ? delayFromEnv
+        : 400 + Math.floor(Math.random() * 500)
   if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
 
   const sent = await options.sendProvider.sendMessage({

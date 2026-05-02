@@ -561,7 +561,7 @@ Deno.serve(async (req) => {
             '--- AGENDAMENTO (OBRIGATÓRIO NESTE CANAL) ---',
             'Objetivo principal: conduzir o agendamento com naturalidade — perguntas curtas e uma ou duas dúvidas por mensagem — sem encaminhar para humano de forma prematura.',
             'Antes de usar a tag [PRONTO_PARA_CONSULTOR], quando fizer sentido deve ficar claro: tipo de atendimento (menu 1–5 ou equivalente); preferência de médico ou "primeira vaga disponível"; período do dia (manhã/tarde) e dias da semana preferidos; se é primeira consulta ou retorno; e um resumo explícito do pedido (ex.: consulta clínica feminina, prefere manhã, terça ou quinta).',
-            'Use [PRONTO_PARA_CONSULTOR] só quando: o paciente pedir explicitamente falar com uma pessoa; já tiver o pacote acima e precise que a equipa confirme e feche o horário na agenda (diga que vai pedir confirmação); ou quando pedirem preços, valores, parecer médico, antes/depois ou pormenores clínicos que não constem do contexto — nesse caso explique que a equipa enviará esses detalhes e coloque a tag no fim dessa mensagem.',
+            'Use [PRONTO_PARA_CONSULTOR] só quando: o paciente pedir explicitamente falar com uma pessoa; a marcação automática (book_appointment) falhar ou não houver vaga/salas no sistema; ou quando pedirem preços, valores, parecer médico, antes/depois ou pormenores clínicos que não constem do contexto.',
             'Não encerre com mensagens vagas ("já vão falar consigo") logo após a escolha do médico se ainda faltam dados de disponibilidade. Horário de referência da clínica no contexto do negócio: segunda a sexta, 08:00–18:00 (Maringá) — sugira janelas plausíveis sem garantir vagas que não possa confirmar.',
             'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do paciente antes da sua resposta, trate como um único contexto — responda de forma completa, citando o essencial que já disseram.',
             ...(context.leadId
@@ -573,6 +573,7 @@ Deno.serve(async (req) => {
                   '<<<CRM_OPS>>>',
                   '{"version":1,"ops":[{"type":"move_lead","stage_id":"<id>"}]}',
                   'Tipos: move_lead (opcional pipeline_id), set_temperature (value: cold|warm|hot), update_summary (text), book_appointment (duration_minutes, notes).',
+                  'MARCAÇÃO AUTOMÁTICA: quando o paciente aceitar agendar, disser "pode marcar", "quero a primeira vaga", confirmar período (manhã/tarde) ou aceitar proposta sua, inclua na MESMA resposta (após o texto ao paciente) o bloco <<<CRM_OPS>>> com book_appointment. Ex.: {"version":1,"ops":[{"type":"book_appointment","duration_minutes":30,"notes":"Transplante capilar masculino; prefere manhã"}]} — duration_minutes: 30 para consulta/triagem habitual, 60 se pedirem avaliação mais longa. O servidor usa salas ativas (snapshot) e find_first_appointment_slot nas próximas 2 semanas; não prometa data concreta ao paciente antes do texto da mensagem — o sistema acrescenta confirmação de horário quando a marcação for criada.',
                   'Consulte leadFocus.upcoming_appointments antes de marcar de novo. Omita <<<CRM_OPS>>> se não houver acção.',
                   'Não use list_leads_filtered neste modo (só na consola CRM autenticada).',
                 ]
@@ -708,6 +709,33 @@ Deno.serve(async (req) => {
       reply = stripInternalPatientReply(reply)
     }
     reply = sanitizeCrmAiPatientReply(reply).clean
+
+    if (isInternal && context.leadId && actionChunks.length > 0 && reply.trim()) {
+      const booked = actionChunks.find(
+        (c) =>
+          (c.type === 'book_appointment' || c.type === 'schedule_appointment') &&
+          c.ok &&
+          typeof c.detail === 'string' &&
+          c.detail.length >= 12,
+      )
+      if (booked?.detail) {
+        try {
+          const d = new Date(booked.detail)
+          if (!Number.isNaN(d.getTime())) {
+            const nice = d.toLocaleString('pt-BR', {
+              dateStyle: 'short',
+              timeStyle: 'short',
+              timeZone: 'America/Sao_Paulo',
+            })
+            if (!reply.includes(nice)) {
+              reply = `${reply.trim()}\n\n✅ Horário reservado automaticamente na nossa agenda: ${nice} (horário de Brasília/Maringá).`
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
 
     return jsonResponse({
       ok: true,
