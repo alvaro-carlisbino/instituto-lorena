@@ -35,7 +35,7 @@ const MODE_SUMMARY: Record<ConversationOwnerMode, string> = {
 
 export function ChatWorkspacePage() {
   const crm = useCrm()
-  const { dataMode, refreshChatFromSupabase } = crm
+  const { dataMode } = crm
   const [searchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [ownerFilter, setOwnerFilter] = useState('all')
@@ -129,13 +129,7 @@ export function ChatWorkspacePage() {
     const client = supabase
 
     const channel = client
-      .channel('crm-chat-interactions-leads')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, () => {
-        void refreshChatFromSupabase()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, () => {
-        void refreshChatFromSupabase()
-      })
+      .channel('crm-chat-conversation-mode')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'crm_conversation_states' }, (payload) => {
         const lid = activeLead?.id
         const row = payload.new as { lead_id?: string } | undefined
@@ -156,7 +150,7 @@ export function ChatWorkspacePage() {
     return () => {
       void client.removeChannel(channel)
     }
-  }, [dataMode, refreshChatFromSupabase, activeLead?.id])
+  }, [dataMode, activeLead?.id])
 
   return (
     <AppLayout title="Conversas" fullHeight={true} mainClassName="p-3 sm:p-4 bg-muted/30 dark:bg-transparent">

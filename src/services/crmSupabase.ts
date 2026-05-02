@@ -612,7 +612,8 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
     client
       .from('interactions')
       .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
-      .order('happened_at', { ascending: false }),
+      .order('happened_at', { ascending: false })
+      .limit(3200),
     client.from('lead_tag_assignments').select('lead_id, tag_id'),
     client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, metadata'),
   ])

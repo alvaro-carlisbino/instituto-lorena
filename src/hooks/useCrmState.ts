@@ -63,7 +63,7 @@ import {
   upsertLeadTagDefinition,
   upsertRoom,
 } from '../services/crmSupabase'
-import { isSupabaseConfigured } from '../lib/supabaseClient'
+import { isSupabaseConfigured, supabase } from '../lib/supabaseClient'
 import {
   initialDashboardWidgets,
   initialAppUsers,
@@ -120,8 +120,6 @@ import { isWorkloadExcludedStageId, pickNpsTemplateForPipeline, shouldDispatchNp
 import { mergeKanbanFieldOrder, isLeadWhatsappComposeBlocked } from '../lib/leadFields'
 import { getDataProviderMode } from '../services/dataMode'
 import { sendWhatsappMessage } from '../services/crmWhatsapp'
-import { supabase } from '../lib/supabaseClient'
-
 import type { WebhookJob, AuditLogEntry } from '../services/crmSupabase'
 
 export type QueueJob = WebhookJob
@@ -713,6 +711,44 @@ export const useCrmState = () => {
       // noop
     }
   }, [dataMode])
+
+  useEffect(() => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured || !supabase) return
+    const client = supabase
+
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined
+    const scheduleSliceRefresh = () => {
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        debounceTimer = undefined
+        void refreshChatFromSupabase()
+      }, 260)
+    }
+
+    const channel = client
+      .channel('crm-global-chat-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, scheduleSliceRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, scheduleSliceRefresh)
+      .subscribe()
+
+    const pollMs = 12000
+    const pollId = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      void refreshChatFromSupabase()
+    }, pollMs)
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void refreshChatFromSupabase()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(pollId)
+      if (debounceTimer) clearTimeout(debounceTimer)
+      void client.removeChannel(channel)
+    }
+  }, [dataMode, refreshChatFromSupabase])
 
   const updateInteractionMessage = useCallback(
     async (interactionId: string, content: string) => {
