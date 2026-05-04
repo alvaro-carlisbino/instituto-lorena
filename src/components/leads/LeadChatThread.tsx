@@ -42,7 +42,7 @@ import {
   tryConsumeWaInstagramMergeToast,
 } from '@/lib/waInstagramMergeNotice'
 import { isAiReplyLikelyPending, type AiConversationGate } from '@/lib/aiTypingIndicator'
-import { isSupabaseConfigured } from '@/lib/supabaseClient'
+import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
 import type { Interaction } from '@/mocks/crmMock'
 import { forceAiReply, type ConversationOwnerMode } from '@/services/conversationControl'
@@ -152,8 +152,7 @@ export function LeadChatThread({
   }, [aiConversationBase, leadId])
 
   useEffect(() => {
-    if (!isSupabaseConfigured) return
-    const { supabase } = require('@/lib/supabaseClient')
+    if (!isSupabaseConfigured || !supabase) return
     supabase.from('crm_quick_messages')
       .select('id, title, content')
       .order('sort_order', { ascending: true })

@@ -2042,7 +2042,7 @@ export const useCrmState = () => {
     })
     
     // Automação: Se a consulta foi realizada, mover para o funil de Tratamento
-    if (a.status === 'completed') {
+    if ((a.status as string) === 'completed') {
       const targetLead = leads.find(l => l.id === a.leadId)
       if (targetLead && targetLead.pipelineId === 'pipeline-clinica') {
         moveLeadToPipeline(targetLead.id, 'pipeline-tratamento-capilar', 'tc-novo')
@@ -2139,6 +2139,7 @@ export const useCrmState = () => {
     moveLead,
     moveLeadToPipeline,
     reorderLeadCard,
+    closeLead,
     persistLeadPatch,
     importLeadsFromParsed,
     importInteractionsFromPayload,

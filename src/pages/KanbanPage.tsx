@@ -78,7 +78,7 @@ export function KanbanPage() {
 
   const visibleLeads = useMemo(() => {
     const normalized = searchTerm.trim().toLowerCase()
-    return crm.filteredLeads.filter((lead) => {
+    const filtered = crm.filteredLeads.filter((lead) => {
       const customText = lead.customFields
         ? Object.values(lead.customFields as Record<string, unknown>)
             .map((v) => (v != null ? String(v) : ''))
@@ -99,8 +99,8 @@ export function KanbanPage() {
     // Aplicar ordenação
     return filtered.sort((a, b) => {
       if (sortOrder === 'idle_time') {
-        const timeA = new Date(a.last_interaction_at || a.createdAt).getTime()
-        const timeB = new Date(b.last_interaction_at || b.createdAt).getTime()
+        const timeA = new Date(a.createdAt).getTime()
+        const timeB = new Date(b.createdAt).getTime()
         return timeA - timeB // Mais antigo primeiro (mais ocioso)
       }
       if (sortOrder === 'score') {
@@ -275,7 +275,7 @@ export function KanbanPage() {
                       kanbanFields={crm.kanbanFieldsOrdered}
                       slaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id]}
                       selected={crm.selectedLeadId === lead.id}
-                      sourceLabel={sourceLabel[lead.source]}
+                      sourceLabel={(sourceLabel as any)[lead.source] || lead.source}
                       ownerName={crm.getOwnerName(lead.ownerId)}
                       tagPills={tagPillsForLead(lead.id)}
                       onSelect={() => {
@@ -291,7 +291,7 @@ export function KanbanPage() {
                         }
                       }}
                       stageLeadsOrdered={stageLeads}
-                      onReorderDrop={(draggedLeadId, targetIndex) => {
+                      onReorderDrop={(draggedLeadId, _targetIndex) => {
                         const draggedLead = crm.leads.find(l => l.id === draggedLeadId)
                         handleLeadMove(draggedLeadId, stage.id, draggedLead?.patientName || '')
                       }}
