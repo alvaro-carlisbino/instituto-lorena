@@ -153,12 +153,20 @@ export function LeadChatThread({
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return
-    supabase.from('crm_quick_messages')
-      .select('id, title, content')
-      .order('sort_order', { ascending: true })
-      .then(({ data }: any) => {
-        if (data) setQuickMessages(data)
-      })
+    void (async () => {
+      const { data, error } = await supabase
+        .from('crm_quick_messages')
+        .select('id, shortcut, content')
+        .order('sort_order', { ascending: true })
+      if (error || !data) return
+      setQuickMessages(
+        (data as { id: string; shortcut: string; content: string }[]).map((row) => ({
+          id: row.id,
+          title: row.shortcut,
+          content: row.content,
+        })),
+      )
+    })()
   }, [])
 
   const filteredQuick = useMemo(() => {

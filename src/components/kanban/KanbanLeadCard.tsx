@@ -22,6 +22,7 @@ type Props = {
   stageLeadsOrdered: Lead[]
   onReorderDrop: (draggedLeadId: string, targetIndex: number) => void
   onDragEnterColumn?: () => void
+  lastAiSnippet?: string | null
 }
 
 export function KanbanLeadCard({
@@ -38,6 +39,7 @@ export function KanbanLeadCard({
   stageLeadsOrdered,
   onReorderDrop,
   onDragEnterColumn,
+  lastAiSnippet,
 }: Props) {
   const nowMs = useNowMs(30_000)
   const title =
@@ -101,6 +103,13 @@ export function KanbanLeadCard({
         </span>
       </div>
 
+      {lead.conversation_status === 'waiting_human' && lead.last_interaction_at ? (
+        <p className="m-0 text-[9px] font-bold uppercase tracking-wide text-red-600/85">
+          Aguardando há{' '}
+          {Math.max(0, Math.floor((nowMs - new Date(lead.last_interaction_at).getTime()) / 3_600_000))}h
+        </p>
+      ) : null}
+
       {/* Badges de Status da Conversa */}
       <div className="flex flex-wrap gap-1.5 mt-0.5">
         {lead.conversation_status === 'ai_triaging' && (
@@ -124,7 +133,33 @@ export function KanbanLeadCard({
             👤 Atendimento Humano
           </div>
         )}
+        {lead.followup_status === 'active' &&
+        lead.followup_current_step != null &&
+        lead.followup_current_step < 3 ? (
+          <div className="flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 ring-1 ring-amber-500/25">
+            {lead.followup_current_step === 0
+              ? 'Follow-up D1/D3/D5'
+              : lead.followup_current_step === 1
+                ? 'Follow-up: D1 enviado'
+                : 'Follow-up: D1+D3'}
+          </div>
+        ) : null}
       </div>
+
+      {lastAiSnippet?.trim() ? (
+        <p className="m-0 text-[10px] leading-snug text-muted-foreground line-clamp-2" title={lastAiSnippet}>
+          Última IA: {lastAiSnippet}
+        </p>
+      ) : null}
+
+      {lead.lost_reason?.trim() ? (
+        <p
+          className="m-0 text-[10px] font-semibold leading-snug text-destructive/90 line-clamp-2"
+          title={lead.lost_reason}
+        >
+          Perda: {lead.lost_reason}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="inline-flex items-center rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">

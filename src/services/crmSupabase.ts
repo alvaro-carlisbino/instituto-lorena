@@ -83,6 +83,9 @@ type DbLead = {
   summary: string
   custom_fields?: Record<string, unknown> | null
   whatsapp_instance_id?: string | null
+  conversation_status?: string | null
+  lost_reason?: string | null
+  last_interaction_at?: string | null
 }
 type DbInteraction = {
   id: string
@@ -188,6 +191,58 @@ const mapLeadTaskFromDb = (row: Record<string, unknown>): LeadTask => ({
   sortOrder: typeof row.sort_order === 'number' ? row.sort_order : Number(row.sort_order) || 0,
 })
 
+type DbFollowupStateRow = { lead_id: string; current_step: number; status: string }
+
+const normalizeConversationStatus = (
+  raw: string | null | undefined,
+): NonNullable<Lead['conversation_status']> => {
+  const v = String(raw ?? '').toLowerCase()
+  if (v === 'ai_triaging' || v === 'waiting_human' || v === 'human_active' || v === 'new') return v
+  return 'new'
+}
+
+const normalizeFollowupStatus = (raw: string | null | undefined): Lead['followup_status'] => {
+  if (raw === 'active' || raw === 'completed' || raw === 'interrupted') return raw
+  return 'active'
+}
+
+const mapDbLeadToLead = (lead: DbLead, tagIds: string[], followup: DbFollowupStateRow | undefined): Lead => {
+  const out: Lead = {
+    id: lead.id,
+    patientName: lead.patient_name,
+    phone: lead.phone,
+    source: lead.source,
+    createdAt: lead.created_at,
+    position: lead.position,
+    score: lead.score,
+    temperature: lead.temperature,
+    ownerId: lead.owner_id,
+    pipelineId: lead.pipeline_id,
+    stageId: lead.stage_id,
+    summary: lead.summary,
+    customFields: (lead.custom_fields && typeof lead.custom_fields === 'object' ? lead.custom_fields : {}) as Record<
+      string,
+      unknown
+    >,
+    whatsappInstanceId: lead.whatsapp_instance_id != null && String(lead.whatsapp_instance_id).length > 0
+      ? String(lead.whatsapp_instance_id)
+      : null,
+    tagIds,
+    conversation_status: normalizeConversationStatus(lead.conversation_status),
+    lost_reason: lead.lost_reason != null && String(lead.lost_reason).length > 0 ? String(lead.lost_reason) : null,
+    last_interaction_at:
+      lead.last_interaction_at != null && String(lead.last_interaction_at).length > 0
+        ? String(lead.last_interaction_at)
+        : lead.created_at,
+  }
+  if (followup) {
+    out.followup_current_step =
+      typeof followup.current_step === 'number' ? followup.current_step : Number(followup.current_step) || 0
+    out.followup_status = normalizeFollowupStatus(followup.status)
+  }
+  return out
+}
+
 const mapAutomationFromDb = (row: Record<string, unknown>): AutomationRule => ({
   id: String(row.id),
   name: String(row.name),
@@ -253,7 +308,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     client
       .from('leads')
       .select(
-        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id',
+        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at',
       )
       .order('position', { ascending: true }),
     client
@@ -280,7 +335,11 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       .select('id, title, metric_key, enabled, position, layout, widget_config')
       .order('position', { ascending: true }),
     client.from('data_views').select('id, name, config').order('name', { ascending: true }),
-    client.from('org_settings').select('id, timezone, date_format, week_starts_on').eq('id', 'default').maybeSingle(),
+    client
+      .from('org_settings')
+      .select('id, timezone, date_format, week_starts_on, appointment_completed_routing')
+      .eq('id', 'default')
+      .maybeSingle(),
     client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, metadata'),
   ])
 
@@ -300,7 +359,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   if (orgSettingsRes.error) throw orgSettingsRes.error
   if (mediaItemsRes.error) throw mediaItemsRes.error
 
-  const [tasksRes, rulesRes, tmplRes, dispRes, respRes, tagAssignRes] = await Promise.all([
+  const [tasksRes, rulesRes, tmplRes, dispRes, respRes, tagAssignRes, followupRes] = await Promise.all([
     client
       .from('lead_tasks')
       .select('id, lead_id, title, assignee_id, due_at, status, task_type, metadata, created_at, sort_order')
@@ -311,6 +370,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     client.from('survey_dispatches').select('id, template_id, lead_id, sent_at, channel'),
     client.from('survey_responses').select('id, dispatch_id, score, comment, responded_at'),
     client.from('lead_tag_assignments').select('lead_id, tag_id'),
+    client.from('crm_lead_followup_state').select('lead_id, current_step, status'),
   ])
 
   const builtLeadTasks: LeadTask[] = !tasksRes.error
@@ -337,6 +397,13 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       const list = tagIdsByLead.get(lid) ?? []
       list.push(t)
       tagIdsByLead.set(lid, list)
+    }
+  }
+
+  const followupByLeadId = new Map<string, DbFollowupStateRow>()
+  if (!followupRes.error && followupRes.data) {
+    for (const row of followupRes.data as DbFollowupStateRow[]) {
+      followupByLeadId.set(String(row.lead_id), row)
     }
   }
 
@@ -367,28 +434,9 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     : sdrTeam
 
   const builtLeads: Lead[] = leadRows.length
-    ? leadRows.map((lead) => ({
-        id: lead.id,
-        patientName: lead.patient_name,
-        phone: lead.phone,
-        source: lead.source,
-        createdAt: lead.created_at,
-        position: lead.position,
-        score: lead.score,
-        temperature: lead.temperature,
-        ownerId: lead.owner_id,
-        pipelineId: lead.pipeline_id,
-        stageId: lead.stage_id,
-        summary: lead.summary,
-        customFields: (lead.custom_fields && typeof lead.custom_fields === 'object' ? lead.custom_fields : {}) as Record<
-          string,
-          unknown
-        >,
-        whatsappInstanceId: lead.whatsapp_instance_id != null && String(lead.whatsapp_instance_id).length > 0
-          ? String(lead.whatsapp_instance_id)
-          : null,
-        tagIds: tagIdsByLead.get(lead.id) ?? [],
-      }))
+    ? leadRows.map((lead) =>
+        mapDbLeadToLead(lead, tagIdsByLead.get(lead.id) ?? [], followupByLeadId.get(lead.id)),
+      )
     : initialLeads
 
   const mediaByInteraction = new Map<string, Interaction['media']>()
@@ -513,12 +561,25 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     : initialDataViews
 
   const orgRow = orgSettingsRes.data as Record<string, unknown> | null
+  const routingRaw = orgRow?.appointment_completed_routing
+  let appointmentCompletedRouting: OrgSettings['appointmentCompletedRouting'] | undefined
+  if (routingRaw && typeof routingRaw === 'object' && !Array.isArray(routingRaw)) {
+    const r = routingRaw as Record<string, unknown>
+    const sourcePipelineId = String(r.sourcePipelineId ?? '')
+    const targetPipelineId = String(r.targetPipelineId ?? '')
+    const targetStageId = String(r.targetStageId ?? '')
+    if (sourcePipelineId && targetPipelineId && targetStageId) {
+      appointmentCompletedRouting = { sourcePipelineId, targetPipelineId, targetStageId }
+    }
+  }
   const builtOrgSettings: OrgSettings = orgRow
     ? {
         id: String(orgRow.id ?? 'default'),
         timezone: String(orgRow.timezone ?? initialOrgSettings.timezone),
         dateFormat: String(orgRow.date_format ?? initialOrgSettings.dateFormat),
         weekStartsOn: typeof orgRow.week_starts_on === 'number' ? orgRow.week_starts_on : Number(orgRow.week_starts_on) || 1,
+        appointmentCompletedRouting:
+          appointmentCompletedRouting ?? initialOrgSettings.appointmentCompletedRouting,
       }
     : initialOrgSettings
 
@@ -559,7 +620,9 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
         roomId: String(r.room_id),
         startsAt: String(r.starts_at),
         endsAt: String(r.ends_at),
-        status: (['draft', 'confirmed', 'cancelled'].includes(String(r.status)) ? r.status : 'confirmed') as Appointment['status'],
+        status: (['draft', 'confirmed', 'cancelled', 'completed'].includes(String(r.status))
+          ? r.status
+          : 'confirmed') as Appointment['status'],
         attendanceStatus: (['expected', 'checked_in', 'no_show'].includes(String(r.attendance_status))
           ? r.attendance_status
           : 'expected') as Appointment['attendanceStatus'],
@@ -602,11 +665,11 @@ export type ChatSlice = {
 
 export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
   const client = assertSupabase()
-  const [leadsRes, interactionsRes, tagAssignRes, mediaRes] = await Promise.all([
+  const [leadsRes, interactionsRes, tagAssignRes, mediaRes, followupRes] = await Promise.all([
     client
       .from('leads')
       .select(
-        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id',
+        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at',
       )
       .order('position', { ascending: true }),
     client
@@ -616,6 +679,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
       .limit(3200),
     client.from('lead_tag_assignments').select('lead_id, tag_id'),
     client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, metadata'),
+    client.from('crm_lead_followup_state').select('lead_id, current_step, status'),
   ])
   if (leadsRes.error) throw leadsRes.error
   if (interactionsRes.error) throw interactionsRes.error
@@ -634,28 +698,16 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
     }
   }
 
-  const builtLeads: Lead[] = leadRows.map((lead) => ({
-    id: lead.id,
-    patientName: lead.patient_name,
-    phone: lead.phone,
-    source: lead.source,
-    createdAt: lead.created_at,
-    position: lead.position,
-    score: lead.score,
-    temperature: lead.temperature,
-    ownerId: lead.owner_id,
-    pipelineId: lead.pipeline_id,
-    stageId: lead.stage_id,
-    summary: lead.summary,
-    customFields: (lead.custom_fields && typeof lead.custom_fields === 'object' ? lead.custom_fields : {}) as Record<
-      string,
-      unknown
-    >,
-    whatsappInstanceId: lead.whatsapp_instance_id != null && String(lead.whatsapp_instance_id).length > 0
-      ? String(lead.whatsapp_instance_id)
-      : null,
-    tagIds: tagIdsByLead.get(lead.id) ?? [],
-  }))
+  const followupByLeadId = new Map<string, DbFollowupStateRow>()
+  if (!followupRes.error && followupRes.data) {
+    for (const row of followupRes.data as DbFollowupStateRow[]) {
+      followupByLeadId.set(String(row.lead_id), row)
+    }
+  }
+
+  const builtLeads: Lead[] = leadRows.map((lead) =>
+    mapDbLeadToLead(lead, tagIdsByLead.get(lead.id) ?? [], followupByLeadId.get(lead.id)),
+  )
 
   const mediaByInteraction = new Map<string, Interaction['media']>()
   if (!mediaRes.error && mediaRes.data) {
@@ -780,6 +832,9 @@ export const seedDemoData = async (): Promise<void> => {
     summary: lead.summary,
     custom_fields: lead.customFields ?? {},
     whatsapp_instance_id: lead.whatsappInstanceId,
+    conversation_status: lead.conversation_status ?? 'new',
+    lost_reason: lead.lost_reason ?? null,
+    last_interaction_at: lead.last_interaction_at ?? lead.createdAt,
   }))
 
   const interactionPayload = initialInteractions.map((interaction) => ({
@@ -961,6 +1016,9 @@ export const insertLead = async (lead: Lead): Promise<void> => {
     summary: lead.summary,
     custom_fields: lead.customFields ?? {},
     whatsapp_instance_id: lead.whatsappInstanceId,
+    conversation_status: lead.conversation_status ?? 'new',
+    lost_reason: lead.lost_reason ?? null,
+    last_interaction_at: lead.last_interaction_at ?? lead.createdAt,
   })
   if (error) throw error
 }
@@ -983,6 +1041,9 @@ export const persistLead = async (lead: Lead): Promise<void> => {
       summary: lead.summary,
       custom_fields: lead.customFields ?? {},
       whatsapp_instance_id: lead.whatsappInstanceId,
+      conversation_status: lead.conversation_status ?? 'new',
+      lost_reason: lead.lost_reason ?? null,
+      last_interaction_at: lead.last_interaction_at ?? lead.createdAt,
     },
     { onConflict: 'id' },
   )
@@ -1283,11 +1344,18 @@ export const deleteDataView = async (viewId: string): Promise<void> => {
 
 export const saveOrgSettings = async (settings: OrgSettings): Promise<void> => {
   const client = assertSupabase()
+  const routing =
+    settings.appointmentCompletedRouting ?? {
+      sourcePipelineId: 'pipeline-clinica',
+      targetPipelineId: 'pipeline-tratamento-capilar',
+      targetStageId: 'tc-novo',
+    }
   const { error } = await client.from('org_settings').upsert({
     id: settings.id,
     timezone: settings.timezone,
     date_format: settings.dateFormat,
     week_starts_on: settings.weekStartsOn,
+    appointment_completed_routing: routing,
     updated_at: new Date().toISOString(),
   })
   if (error) throw error

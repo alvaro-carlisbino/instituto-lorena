@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils'
 type Temperature = 'all' | 'hot' | 'warm' | 'cold'
 export type SortOption = 'position' | 'idle_time' | 'score'
 
+export type ConversationFilterOption = 'all' | 'new' | 'ai_triaging' | 'waiting_human' | 'human_active'
+
 const TEMP_OPTIONS: { value: Temperature; label: string }[] = [
   { value: 'all', label: 'Todas' },
   { value: 'hot', label: 'Quente' },
@@ -35,6 +37,8 @@ type Props = {
   onViewModeChange: (mode: 'board' | 'list') => void
   sortOrder: SortOption
   onSortOrderChange: (order: SortOption) => void
+  conversationFilter: ConversationFilterOption
+  onConversationFilterChange: (value: ConversationFilterOption) => void
 }
 
 export function KanbanToolbar({
@@ -55,6 +59,8 @@ export function KanbanToolbar({
   onViewModeChange,
   sortOrder,
   onSortOrderChange,
+  conversationFilter,
+  onConversationFilterChange,
 }: Props) {
   const pipelineLabel = labelForIdName(
     pipelineId,
@@ -74,6 +80,17 @@ export function KanbanToolbar({
     { value: 'all', label: 'Todas as etiquetas' },
     'Etiqueta',
   )
+
+  const conversationLabel =
+    conversationFilter === 'all'
+      ? 'Conversa'
+      : conversationFilter === 'ai_triaging'
+        ? 'Triagem IA'
+        : conversationFilter === 'waiting_human'
+          ? 'Aguardando SDR'
+          : conversationFilter === 'human_active'
+            ? 'Humano ativo'
+            : 'Novo'
 
   return (
     <div className="flex flex-col gap-5 border-b border-border/20 pb-6 mb-6">
@@ -178,6 +195,35 @@ export function KanbanToolbar({
                 <SelectItem value="position" className="text-xs uppercase font-bold tracking-tight">📋 Ordem Padrão</SelectItem>
                 <SelectItem value="idle_time" className="text-xs uppercase font-bold tracking-tight">⏳ Mais tempo sem resposta</SelectItem>
                 <SelectItem value="score" className="text-xs uppercase font-bold tracking-tight">⭐ Melhor Score</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={conversationFilter}
+              onValueChange={(v) => v && onConversationFilterChange(v as ConversationFilterOption)}
+            >
+              <LabeledSelectTrigger
+                className="min-w-[160px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
+                size="default"
+              >
+                {conversationLabel}
+              </LabeledSelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="all" className="text-xs uppercase font-bold tracking-tight">
+                  Todas (conversa)
+                </SelectItem>
+                <SelectItem value="new" className="text-xs uppercase font-bold tracking-tight">
+                  Novo
+                </SelectItem>
+                <SelectItem value="ai_triaging" className="text-xs uppercase font-bold tracking-tight">
+                  Triagem IA
+                </SelectItem>
+                <SelectItem value="waiting_human" className="text-xs uppercase font-bold tracking-tight">
+                  Aguardando SDR
+                </SelectItem>
+                <SelectItem value="human_active" className="text-xs uppercase font-bold tracking-tight">
+                  Atendimento humano
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>

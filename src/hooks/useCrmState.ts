@@ -2041,11 +2041,17 @@ export const useCrmState = () => {
       return n
     })
     
-    // Automação: Se a consulta foi realizada, mover para o funil de Tratamento
-    if ((a.status as string) === 'completed') {
-      const targetLead = leads.find(l => l.id === a.leadId)
-      if (targetLead && targetLead.pipelineId === 'pipeline-clinica') {
-        moveLeadToPipeline(targetLead.id, 'pipeline-tratamento-capilar', 'tc-novo')
+    const routing =
+      orgSettings.appointmentCompletedRouting ?? {
+        sourcePipelineId: 'pipeline-clinica',
+        targetPipelineId: 'pipeline-tratamento-capilar',
+        targetStageId: 'tc-novo',
+      }
+    const consultaRealizada = a.status === 'completed' || a.attendanceStatus === 'checked_in'
+    if (consultaRealizada) {
+      const targetLead = leads.find((l) => l.id === a.leadId)
+      if (targetLead && targetLead.pipelineId === routing.sourcePipelineId) {
+        moveLeadToPipeline(targetLead.id, routing.targetPipelineId, routing.targetStageId)
       }
     }
 

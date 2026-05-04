@@ -26,6 +26,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { NoticeBanner } from '@/components/NoticeBanner'
 import { noticeVariantFromMessage } from '@/lib/noticeVariant'
+import { CrmPhase3OperationalSettings } from '@/components/settings/CrmPhase3OperationalSettings'
 import { ConversationModeSwitch } from '@/components/leads/ConversationModeSwitch'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -739,6 +740,8 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {crm.currentPermission.canEditBoards ? <CrmPhase3OperationalSettings /> : null}
 
       {crm.currentPermission.canEditBoards ? (
         <Card className={cn('mt-6', pageQuietCardClass)}>

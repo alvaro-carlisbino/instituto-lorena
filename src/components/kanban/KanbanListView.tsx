@@ -19,6 +19,7 @@ type Props = {
   getOwnerName: (ownerId: string) => string
   tagPillsForLead: (leadId: string) => TagPill[]
   stageSlaMinutes: Record<string, number> | undefined
+  getLastAiSnippet?: (leadId: string) => string | undefined
 }
 
 function effectiveTemperature(lead: Lead): 'hot' | 'warm' | 'cold' {
@@ -39,6 +40,7 @@ export function KanbanListView({
   getOwnerName,
   tagPillsForLead,
   stageSlaMinutes,
+  getLastAiSnippet,
 }: Props) {
   if (isLoading) {
     return (
@@ -116,6 +118,16 @@ export function KanbanListView({
                             </span>
                           </div>
                           <p className="m-0 mt-1.5 line-clamp-2 text-xs text-muted-foreground/70 font-medium">{lead.summary || 'Sem resumo disponível'}</p>
+                          {getLastAiSnippet?.(lead.id)?.trim() ? (
+                            <p className="m-0 mt-1 line-clamp-2 text-[10px] text-muted-foreground/80">
+                              IA: {getLastAiSnippet(lead.id)}
+                            </p>
+                          ) : null}
+                          {lead.lost_reason?.trim() ? (
+                            <p className="m-0 mt-1 line-clamp-2 text-[10px] font-semibold text-destructive/90">
+                              Perda: {lead.lost_reason}
+                            </p>
+                          ) : null}
                           <div className="mt-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
                             <span>{getOwnerName(lead.ownerId)}</span>
                             <div className="size-1 rounded-full bg-border" />
@@ -178,6 +190,16 @@ export function KanbanListView({
                                 <span className="text-[14px] font-bold text-foreground/90 group-hover:text-primary transition-colors">{lead.patientName}</span>
                                 {lead.summary ? (
                                   <p className="m-0 mt-0.5 line-clamp-1 text-[11px] font-medium text-muted-foreground/60">{lead.summary}</p>
+                                ) : null}
+                                {getLastAiSnippet?.(lead.id)?.trim() ? (
+                                  <p className="m-0 mt-0.5 line-clamp-1 text-[10px] text-muted-foreground/75">
+                                    IA: {getLastAiSnippet(lead.id)}
+                                  </p>
+                                ) : null}
+                                {lead.lost_reason?.trim() ? (
+                                  <p className="m-0 mt-0.5 line-clamp-1 text-[10px] font-semibold text-destructive/85">
+                                    Perda: {lead.lost_reason}
+                                  </p>
                                 ) : null}
                               </div>
                             </td>

@@ -199,6 +199,11 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                         <Badge variant="outline">{sourceLabel[lead.source]}</Badge>
                         <Badge variant="outline">{crm.getOwnerName(lead.ownerId)}</Badge>
                       </span>
+                      {lead.lost_reason?.trim() ? (
+                        <span className="mt-2 block rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-left text-sm font-medium text-destructive">
+                          Motivo do encerramento: {lead.lost_reason}
+                        </span>
+                      ) : null}
                     </DialogDescription>
                   </div>
                   <div className="flex flex-wrap gap-2 sm:shrink-0 sm:justify-end">

@@ -44,7 +44,7 @@ export type Appointment = {
   roomId: string
   startsAt: string
   endsAt: string
-  status: 'draft' | 'confirmed' | 'cancelled'
+  status: 'draft' | 'confirmed' | 'cancelled' | 'completed'
   attendanceStatus: 'expected' | 'checked_in' | 'no_show'
   notes: string | null
   createdAt: string
@@ -80,6 +80,11 @@ export type Lead = {
   tagIds: string[]
   conversation_status?: 'new' | 'ai_triaging' | 'waiting_human' | 'human_active'
   lost_reason?: string | null
+  /** ISO timestamp of last inbound/outbound touch (Supabase). */
+  last_interaction_at?: string | null
+  /** Follow-up automático D1/D3/D5 (Supabase). */
+  followup_current_step?: number
+  followup_status?: 'active' | 'completed' | 'interrupted'
 }
 
 export type Interaction = {
@@ -255,11 +260,19 @@ export type DataView = {
   config: DataViewConfig
 }
 
+export type AppointmentCompletedRouting = {
+  sourcePipelineId: string
+  targetPipelineId: string
+  targetStageId: string
+}
+
 export type OrgSettings = {
   id: string
   timezone: string
   dateFormat: string
   weekStartsOn: number
+  /** Quando consulta é marcada como realizada, mover lead deste funil para o destino. */
+  appointmentCompletedRouting?: AppointmentCompletedRouting
   // Clinic Info
   clinicName?: string
   clinicLogo?: string
@@ -880,6 +893,11 @@ export const initialOrgSettings: OrgSettings = {
   timezone: 'America/Sao_Paulo',
   dateFormat: 'dd/MM/yyyy',
   weekStartsOn: 1,
+  appointmentCompletedRouting: {
+    sourcePipelineId: 'pipeline-clinica',
+    targetPipelineId: 'pipeline-tratamento-capilar',
+    targetStageId: 'tc-novo',
+  },
   clinicName: 'Instituto Lorena',
   clinicPhone: '',
   clinicEmail: '',

@@ -230,10 +230,15 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
                     <SelectItem value="confirmed">Confirmado</SelectItem>
                     <SelectItem value="draft">Rascunho</SelectItem>
                     <SelectItem value="cancelled">Cancelado</SelectItem>
+                    <SelectItem value="completed">Realizada</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
+            <p className="m-0 text-[11px] text-muted-foreground">
+              Marcar como <strong>Realizada</strong> ou presença <strong>Compareceu</strong> pode mover o lead para o
+              funil configurado em Configurações gerais.
+            </p>
           </div>
         ) : null}
         <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">

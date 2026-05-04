@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { Interaction } from '@/mocks/crmMock'
 import { Link, useNavigate } from 'react-router-dom'
 import { Bot, History, LayoutDashboard, LayoutGrid, List, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react'
 
 import { KanbanListView } from '@/components/kanban/KanbanListView'
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
 import { LeadDetailModal } from '@/components/leads/LeadDetailModal'
-import { KanbanToolbar, type SortOption } from '@/components/kanban/KanbanToolbar'
+import { KanbanToolbar, type ConversationFilterOption, type SortOption } from '@/components/kanban/KanbanToolbar'
 import { buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -37,6 +38,7 @@ export function KanbanPage() {
     return sessionStorage.getItem('crm-kanban-view-mode') === 'list' ? 'list' : 'board'
   })
   const [sortOrder, setSortOrder] = useState<SortOption>('position')
+  const [conversationFilter, setConversationFilter] = useState<ConversationFilterOption>('all')
 
   // Estados para captura de motivo de perda
   const [lossDialogOpen, setLossDialogOpen] = useState(false)
@@ -76,6 +78,27 @@ export function KanbanPage() {
     }
   }, [crm.leadTagDefinitions, tagFilter])
 
+  const lastAiSnippetByLeadId = useMemo(() => {
+    const map = new Map<string, string>()
+    const byLead = new Map<string, Interaction[]>()
+    for (const it of crm.interactions) {
+      const list = byLead.get(it.leadId) ?? []
+      list.push(it)
+      byLead.set(it.leadId, list)
+    }
+    for (const [leadId, list] of byLead) {
+      const sorted = [...list].sort(
+        (x, y) => new Date(y.happenedAt).getTime() - new Date(x.happenedAt).getTime(),
+      )
+      const lastAi = sorted.find((i) => i.channel === 'ai')
+      if (lastAi) {
+        const t = lastAi.content.replace(/\s+/g, ' ').trim()
+        map.set(leadId, t.length > 100 ? `${t.slice(0, 100)}…` : t)
+      }
+    }
+    return map
+  }, [crm.interactions])
+
   const visibleLeads = useMemo(() => {
     const normalized = searchTerm.trim().toLowerCase()
     const filtered = crm.filteredLeads.filter((lead) => {
@@ -93,22 +116,33 @@ export function KanbanPage() {
       const matchesOwner = ownerFilter === 'all' || lead.ownerId === ownerFilter
       const matchesTag =
         tagFilter === 'all' || (Array.isArray(lead.tagIds) && lead.tagIds.includes(tagFilter))
-      return matchesText && matchesTemperature && matchesOwner && matchesTag
+      const effConv = lead.conversation_status ?? 'new'
+      const matchesConversation =
+        conversationFilter === 'all' || effConv === conversationFilter
+      return matchesText && matchesTemperature && matchesOwner && matchesTag && matchesConversation
     })
 
     // Aplicar ordenação
     return filtered.sort((a, b) => {
       if (sortOrder === 'idle_time') {
-        const timeA = new Date(a.createdAt).getTime()
-        const timeB = new Date(b.createdAt).getTime()
-        return timeA - timeB // Mais antigo primeiro (mais ocioso)
+        const ta = new Date(a.last_interaction_at || a.createdAt).getTime()
+        const tb = new Date(b.last_interaction_at || b.createdAt).getTime()
+        return ta - tb
       }
       if (sortOrder === 'score') {
         return (b.score || 0) - (a.score || 0)
       }
       return a.position - b.position
     })
-  }, [crm.filteredLeads, searchTerm, temperatureFilter, ownerFilter, tagFilter, sortOrder])
+  }, [
+    crm.filteredLeads,
+    searchTerm,
+    temperatureFilter,
+    ownerFilter,
+    tagFilter,
+    sortOrder,
+    conversationFilter,
+  ])
 
   const tagPillsForLead = (leadId: string) => {
     const lead = crm.leads.find((l) => l.id === leadId)
@@ -224,6 +258,8 @@ export function KanbanPage() {
         onViewModeChange={setViewMode}
         sortOrder={sortOrder}
         onSortOrderChange={setSortOrder}
+        conversationFilter={conversationFilter}
+        onConversationFilterChange={setConversationFilter}
       />
 
       {viewMode === 'list' ? (
@@ -239,6 +275,7 @@ export function KanbanPage() {
           getOwnerName={crm.getOwnerName}
           tagPillsForLead={tagPillsForLead}
           stageSlaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes}
+          getLastAiSnippet={(leadId) => lastAiSnippetByLeadId.get(leadId)}
         />
       ) : (
         <div className="flex flex-1 gap-6 overflow-x-auto pb-6 scrollbar-thin scrollbar-thumb-border/30">
@@ -275,8 +312,9 @@ export function KanbanPage() {
                       kanbanFields={crm.kanbanFieldsOrdered}
                       slaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id]}
                       selected={crm.selectedLeadId === lead.id}
-                      sourceLabel={(sourceLabel as any)[lead.source] || lead.source}
+                      sourceLabel={sourceLabel[lead.source]}
                       ownerName={crm.getOwnerName(lead.ownerId)}
+                      lastAiSnippet={lastAiSnippetByLeadId.get(lead.id)}
                       tagPills={tagPillsForLead(lead.id)}
                       onSelect={() => {
                         crm.setSelectedLeadId(lead.id)

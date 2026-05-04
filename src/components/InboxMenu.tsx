@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Bell } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -21,20 +21,37 @@ export function InboxMenu() {
   const [items, setItems] = useState<AppInboxItem[]>([])
   const [open, setOpen] = useState(false)
 
-  const load = () => {
+  const load = useCallback(() => {
     if (!online) return
     void fetchInboxForCurrentUser(25)
       .then(setItems)
       .catch(() => {
         // tabela pode não existir antes da migração
       })
-  }
+  }, [online])
 
   useEffect(() => {
     if (open) {
       load()
     }
-  }, [open, online])
+  }, [open, load])
+
+  useEffect(() => {
+    if (!online) return
+    void load()
+  }, [online, load])
+
+  useEffect(() => {
+    if (!online) return
+    const id = window.setInterval(() => {
+      void fetchInboxForCurrentUser(25)
+        .then(setItems)
+        .catch(() => {
+          /* ignore */
+        })
+    }, 30_000)
+    return () => window.clearInterval(id)
+  }, [online])
 
   const unread = items.filter((i) => !i.readAt).length
 
