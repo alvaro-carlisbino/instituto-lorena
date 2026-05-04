@@ -139,11 +139,36 @@ export function LeadChatThread({
   const [deleteMsgOpen, setDeleteMsgOpen] = useState(false)
   const [deleteMsgTarget, setDeleteMsgTarget] = useState<Interaction | null>(null)
 
+  // Quick Messages
+  const [quickMessages, setQuickMessages] = useState<Array<{ id: string; title: string; content: string }>>([])
+  const [showQuickMenu, setShowQuickMenu] = useState(false)
+  const [quickFilter, setQuickFilter] = useState('')
+  const [selectedQuickIdx, setSelectedQuickIdx] = useState(0)
+
   useEffect(() => {
     if (!aiConversationBase) return
     const id = window.setInterval(() => setAiUiTick((t) => t + 1), 1000)
     return () => window.clearInterval(id)
   }, [aiConversationBase, leadId])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return
+    const { supabase } = require('@/lib/supabaseClient')
+    supabase.from('crm_quick_messages')
+      .select('id, title, content')
+      .order('sort_order', { ascending: true })
+      .then(({ data }: any) => {
+        if (data) setQuickMessages(data)
+      })
+  }, [])
+
+  const filteredQuick = useMemo(() => {
+    if (!quickFilter) return quickMessages
+    return quickMessages.filter(m => 
+      m.title.toLowerCase().includes(quickFilter.toLowerCase()) || 
+      m.content.toLowerCase().includes(quickFilter.toLowerCase())
+    )
+  }, [quickMessages, quickFilter])
 
   const aiGate: AiConversationGate | null = useMemo(() => {
     if (!aiConversationBase) return null
@@ -664,9 +689,47 @@ export function LeadChatThread({
               onChange={(e) => {
                 const val = e.target.value
                 crm.setDraftMessage(val)
+                
+                // Detecta atalho de mensagens rápidas
+                const lastSlashIdx = val.lastIndexOf('/')
+                if (lastSlashIdx !== -1 && (lastSlashIdx === 0 || val[lastSlashIdx - 1] === ' ' || val[lastSlashIdx - 1] === '\n')) {
+                  const filter = val.slice(lastSlashIdx + 1)
+                  if (!filter.includes(' ')) {
+                    setQuickFilter(filter)
+                    setShowQuickMenu(true)
+                    setSelectedQuickIdx(0)
+                  } else {
+                    setShowQuickMenu(false)
+                  }
+                } else {
+                  setShowQuickMenu(false)
+                }
+
                 if (val.endsWith('/agendar ')) {
                   crm.setDraftMessage(val.replace('/agendar ', ''))
                   setIsScheduleOpen(true)
+                }
+              }}
+              onKeyDown={(e) => {
+                if (showQuickMenu) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setSelectedQuickIdx(prev => (prev + 1) % filteredQuick.length)
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setSelectedQuickIdx(prev => (prev - 1 + filteredQuick.length) % filteredQuick.length)
+                  } else if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault()
+                    const msg = filteredQuick[selectedQuickIdx]
+                    if (msg) {
+                      const lastSlashIdx = crm.draftMessage.lastIndexOf('/')
+                      const before = crm.draftMessage.slice(0, lastSlashIdx)
+                      crm.setDraftMessage(before + msg.content)
+                    }
+                    setShowQuickMenu(false)
+                  } else if (e.key === 'Escape') {
+                    setShowQuickMenu(false)
+                  }
                 }
               }}
               placeholder={
@@ -677,6 +740,36 @@ export function LeadChatThread({
                 showAiResponding && 'cursor-not-allowed opacity-80',
               )}
             />
+
+            {/* Menu de Mensagens Rápidas */}
+            {showQuickMenu && filteredQuick.length > 0 && (
+              <div className="absolute bottom-full left-0 mb-2 w-full max-w-sm z-50 rounded-xl border border-border bg-popover shadow-xl overflow-hidden">
+                <div className="px-3 py-2 border-b border-border bg-muted/30">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Mensagens Rápidas</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto p-1">
+                  {filteredQuick.map((m, idx) => (
+                    <button
+                      key={m.id}
+                      className={cn(
+                        "w-full flex flex-col items-start px-3 py-2 rounded-lg text-left transition-colors",
+                        idx === selectedQuickIdx ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+                      )}
+                      onClick={() => {
+                        const lastSlashIdx = crm.draftMessage.lastIndexOf('/')
+                        const before = crm.draftMessage.slice(0, lastSlashIdx)
+                        crm.setDraftMessage(before + m.content)
+                        setShowQuickMenu(false)
+                        draftTextareaRef.current?.focus()
+                      }}
+                    >
+                      <span className={cn("text-xs font-bold", idx === selectedQuickIdx ? "text-white" : "text-foreground")}>{m.title}</span>
+                      <span className={cn("text-[10px] line-clamp-1", idx === selectedQuickIdx ? "text-white/80" : "text-muted-foreground")}>{m.content}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/50 transition-colors">

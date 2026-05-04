@@ -78,6 +78,8 @@ export type Lead = {
   /** CRM line (Evolution instance) when using multi-phone. */
   whatsappInstanceId: string | null
   tagIds: string[]
+  conversation_status?: 'new' | 'ai_triaging' | 'waiting_human' | 'human_active'
+  lost_reason?: string | null
 }
 
 export type Interaction = {

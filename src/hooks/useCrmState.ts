@@ -477,6 +477,34 @@ export const useCrmState = () => {
     runStageEnteredSideEffects(updated, nextStage)
   }
 
+  const closeLead = (leadId: string, reason: string, targetStageId: string) => {
+    const targetLead = leads.find((lead) => lead.id === leadId)
+    if (!targetLead) return
+
+    const updated: Lead = {
+      ...targetLead,
+      stageId: targetStageId,
+      lost_reason: reason,
+      position: 999,
+    }
+
+    setLeads((previous) => previous.map((lead) => (lead.id === leadId ? updated : lead)))
+
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      void persistLead(updated)
+    }
+
+    addInteraction({
+      leadId: targetLead.id,
+      patientName: targetLead.patientName,
+      channel: 'system',
+      direction: 'system',
+      author: 'Quadro (Encerramento)',
+      content: `Lead encerrado. Motivo: ${reason}`,
+      happenedAt: new Date().toISOString(),
+    })
+  }
+
   const getRoundRobinOwner = () => {
     const active = workloadBySdr.filter((sdr) => sdr.active)
     if (active.length === 0) return sdrMembers[0] ?? sdrTeam[0]
@@ -2012,6 +2040,15 @@ export const useCrmState = () => {
       n[i] = a
       return n
     })
+    
+    // Automação: Se a consulta foi realizada, mover para o funil de Tratamento
+    if (a.status === 'completed') {
+      const targetLead = leads.find(l => l.id === a.leadId)
+      if (targetLead && targetLead.pipelineId === 'pipeline-clinica') {
+        moveLeadToPipeline(targetLead.id, 'pipeline-tratamento-capilar', 'tc-novo')
+      }
+    }
+
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void upsertAppointment(a)
     }

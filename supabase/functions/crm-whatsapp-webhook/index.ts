@@ -246,6 +246,13 @@ Deno.serve(async (req) => {
       externalMessageId: normalized.externalMessageId,
     })
 
+    // Interrompe follow-up ativo em qualquer nova mensagem (entrada ou saída)
+    await admin
+      .from('crm_lead_followup_state')
+      .update({ status: 'interrupted', updated_at: new Date().toISOString() })
+      .eq('lead_id', lead.leadId)
+      .eq('status', 'active')
+
     let mediaIntelForAi = ''
     const mediaItems = normalized.mediaItems ?? []
     if (mediaItems.length > 0) {
@@ -300,7 +307,7 @@ Deno.serve(async (req) => {
         provider: envProvider,
         metaPhoneNumberId: normalized.metaPhoneNumberId ?? '',
       })
-      const { replied, burstPending } = await runWhatsappAiAutoReply(admin, {
+      const { replied, burstPending, handoffSuggested } = await runWhatsappAiAutoReply(admin, {
         leadId: lead.leadId,
         patientName: normalized.fromName,
         fromPhone: normalized.fromPhone,
@@ -312,6 +319,42 @@ Deno.serve(async (req) => {
         aiJobSource: 'whatsapp-webhook',
         sendProvider,
       })
+
+      if (handoffSuggested) {
+        await admin.from('leads').update({
+          updated_at: new Date().toISOString(),
+          last_interaction_at: new Date().toISOString(),
+          conversation_status: 'waiting_human'
+        }).eq('id', lead.leadId)
+        
+        // Busca usuários que devem receber a notificação (SDRs e Gestores)
+        const { data: usersToNotify } = await admin
+          .from('app_users')
+          .select('auth_user_id')
+          .in('role', ['admin', 'gestor', 'sdr'])
+
+        if (usersToNotify?.length) {
+          await admin.from('app_inbox_notifications').insert(
+            usersToNotify.map(u => ({
+              auth_user_id: u.auth_user_id,
+              title: 'Triagem Finalizada',
+              body: `A IA terminou a triagem de ${normalized.fromName}. Pronto para assumir!`,
+              kind: 'urgent',
+              metadata: { leadId: lead.leadId }
+            }))
+          )
+        }
+      } else if (replied) {
+        // Se a IA respondeu mas ainda está triando
+        await admin.from('leads').update({ conversation_status: 'ai_triaging' }).eq('id', lead.leadId)
+      }
+
+      // Sempre atualiza o timestamp de última interação
+      await admin.from('leads').update({
+        updated_at: new Date().toISOString(),
+        last_interaction_at: new Date().toISOString()
+      }).eq('id', lead.leadId)
+
       routing = replied
         ? 'ai_auto_reply_attempted'
         : burstPending

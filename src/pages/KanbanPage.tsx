@@ -5,7 +5,7 @@ import { Bot, History, LayoutDashboard, LayoutGrid, List, MoreHorizontal, Refres
 import { KanbanListView } from '@/components/kanban/KanbanListView'
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
 import { LeadDetailModal } from '@/components/leads/LeadDetailModal'
-import { KanbanToolbar } from '@/components/kanban/KanbanToolbar'
+import { KanbanToolbar, type SortOption } from '@/components/kanban/KanbanToolbar'
 import { buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -20,6 +20,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { getLeadFieldValue } from '@/lib/leadFields'
 import { cn } from '@/lib/utils'
 import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
+import { LeadLossReasonDialog } from '@/components/kanban/LeadLossReasonDialog'
 
 export function KanbanPage() {
   const crm = useCrm()
@@ -35,6 +36,15 @@ export function KanbanPage() {
     if (typeof sessionStorage === 'undefined') return 'board'
     return sessionStorage.getItem('crm-kanban-view-mode') === 'list' ? 'list' : 'board'
   })
+  const [sortOrder, setSortOrder] = useState<SortOption>('position')
+
+  // Estados para captura de motivo de perda
+  const [lossDialogOpen, setLossDialogOpen] = useState(false)
+  const [pendingMove, setPendingMove] = useState<{
+    leadId: string
+    targetStageId: string
+    patientName: string
+  } | null>(null)
 
   if (crm.pipelineCatalog.length === 0) crm.ensureStandardKanbanSetup()
 
@@ -85,7 +95,20 @@ export function KanbanPage() {
         tagFilter === 'all' || (Array.isArray(lead.tagIds) && lead.tagIds.includes(tagFilter))
       return matchesText && matchesTemperature && matchesOwner && matchesTag
     })
-  }, [crm.filteredLeads, searchTerm, temperatureFilter, ownerFilter, tagFilter])
+
+    // Aplicar ordenação
+    return filtered.sort((a, b) => {
+      if (sortOrder === 'idle_time') {
+        const timeA = new Date(a.last_interaction_at || a.createdAt).getTime()
+        const timeB = new Date(b.last_interaction_at || b.createdAt).getTime()
+        return timeA - timeB // Mais antigo primeiro (mais ocioso)
+      }
+      if (sortOrder === 'score') {
+        return (b.score || 0) - (a.score || 0)
+      }
+      return a.position - b.position
+    })
+  }, [crm.filteredLeads, searchTerm, temperatureFilter, ownerFilter, tagFilter, sortOrder])
 
   const tagPillsForLead = (leadId: string) => {
     const lead = crm.leads.find((l) => l.id === leadId)
@@ -103,6 +126,21 @@ export function KanbanPage() {
         </div>
       </AppLayout>
     )
+  }
+
+  const isClosingStage = (stageId: string) => {
+    const pipeline = crm.selectedPipeline
+    const lastStage = pipeline.stages[pipeline.stages.length - 1]
+    return stageId === lastStage?.id
+  }
+
+  const handleLeadMove = (leadId: string, stageId: string, patientName: string) => {
+    if (isClosingStage(stageId)) {
+      setPendingMove({ leadId, targetStageId: stageId, patientName })
+      setLossDialogOpen(true)
+    } else {
+      crm.reorderLeadCard(leadId, { stageId, index: 0 })
+    }
   }
 
   return (
@@ -184,6 +222,8 @@ export function KanbanPage() {
         tagOptions={crm.leadTagDefinitions.map((t) => ({ id: t.id, name: t.name }))}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
+        sortOrder={sortOrder}
+        onSortOrderChange={setSortOrder}
       />
 
       {viewMode === 'list' ? (
@@ -243,11 +283,18 @@ export function KanbanPage() {
                         setDetailOpen(true)
                       }}
                       onMovePrev={() => crm.moveLead(lead.id, 'prev')}
-                      onMoveNext={() => crm.moveLead(lead.id, 'next')}
+                      onMoveNext={() => {
+                        const stages = crm.selectedPipeline.stages
+                        const currentIndex = stages.findIndex(s => s.id === lead.stageId)
+                        if (currentIndex < stages.length - 1) {
+                          handleLeadMove(lead.id, stages[currentIndex + 1].id, lead.patientName)
+                        }
+                      }}
                       stageLeadsOrdered={stageLeads}
-                      onReorderDrop={(draggedLeadId, targetIndex) =>
-                        crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: targetIndex })
-                      }
+                      onReorderDrop={(draggedLeadId, targetIndex) => {
+                        const draggedLead = crm.leads.find(l => l.id === draggedLeadId)
+                        handleLeadMove(draggedLeadId, stage.id, draggedLead?.patientName || '')
+                      }}
                       onDragEnterColumn={() => setDragOverStageId(stage.id)}
                     />
                   ))}
@@ -265,7 +312,8 @@ export function KanbanPage() {
                     onDragLeave={() => setDragOverStageId(null)}
                     onDropEnd={(draggedLeadId) => {
                       setDragOverStageId(null)
-                      crm.reorderLeadCard(draggedLeadId, { stageId: stage.id, index: stageLeads.length })
+                      const draggedLead = crm.leads.find(l => l.id === draggedLeadId)
+                      handleLeadMove(draggedLeadId, stage.id, draggedLead?.patientName || '')
                     }}
                   />
                 </div>
@@ -275,6 +323,19 @@ export function KanbanPage() {
         </div>
       )}
       <LeadDetailModal open={detailOpen} onOpenChange={setDetailOpen} />
+      
+      {pendingMove && (
+        <LeadLossReasonDialog
+          open={lossDialogOpen}
+          onOpenChange={setLossDialogOpen}
+          patientName={pendingMove.patientName}
+          onConfirm={(reason) => {
+            crm.closeLead(pendingMove.leadId, reason, pendingMove.targetStageId)
+            setLossDialogOpen(false)
+            setPendingMove(null)
+          }}
+        />
+      )}
     </AppLayout>
   )
 }

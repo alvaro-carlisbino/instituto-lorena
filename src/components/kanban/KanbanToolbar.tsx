@@ -8,6 +8,7 @@ import { labelForIdName } from '@/lib/selectDisplay'
 import { cn } from '@/lib/utils'
 
 type Temperature = 'all' | 'hot' | 'warm' | 'cold'
+export type SortOption = 'position' | 'idle_time' | 'score'
 
 const TEMP_OPTIONS: { value: Temperature; label: string }[] = [
   { value: 'all', label: 'Todas' },
@@ -32,6 +33,8 @@ type Props = {
   tagOptions: { id: string; name: string }[]
   viewMode: 'board' | 'list'
   onViewModeChange: (mode: 'board' | 'list') => void
+  sortOrder: SortOption
+  onSortOrderChange: (order: SortOption) => void
 }
 
 export function KanbanToolbar({
@@ -50,6 +53,8 @@ export function KanbanToolbar({
   tagOptions,
   viewMode,
   onViewModeChange,
+  sortOrder,
+  onSortOrderChange,
 }: Props) {
   const pipelineLabel = labelForIdName(
     pipelineId,
@@ -159,6 +164,20 @@ export function KanbanToolbar({
                     {t.name}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={sortOrder} onValueChange={(v) => v && onSortOrderChange(v as SortOption)}>
+              <LabeledSelectTrigger
+                className="min-w-[140px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
+                size="default"
+              >
+                {sortOrder === 'idle_time' ? '⏳ Mais tempo sem resposta' : sortOrder === 'score' ? '⭐ Melhor Score' : '📋 Ordem Padrão'}
+              </LabeledSelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="position" className="text-xs uppercase font-bold tracking-tight">📋 Ordem Padrão</SelectItem>
+                <SelectItem value="idle_time" className="text-xs uppercase font-bold tracking-tight">⏳ Mais tempo sem resposta</SelectItem>
+                <SelectItem value="score" className="text-xs uppercase font-bold tracking-tight">⭐ Melhor Score</SelectItem>
               </SelectContent>
             </Select>
           </div>

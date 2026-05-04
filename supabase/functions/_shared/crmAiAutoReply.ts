@@ -546,7 +546,7 @@ export async function runWhatsappAiAutoReply(
     /** Omisso: env CRM_AI_INVOKE_ATTEMPTS. Reduzir em fluxos síncronos evita 504 no gateway. */
     invokeMaxAttempts?: number
   },
-): Promise<{ replied: boolean; replyText?: string; burstPending?: boolean }> {
+): Promise<{ replied: boolean; replyText?: string; burstPending?: boolean; handoffSuggested?: boolean }> {
   const { data: burstCfg } = await admin
     .from('crm_ai_configs')
     .select('inbound_burst_debounce_ms')
@@ -669,7 +669,7 @@ export async function runWhatsappAiAutoReply(
     console.error('runWhatsappAiAutoReply invoke:', e)
   }
 
-  const { clean: aiReplySanitized } = sanitizeCrmAiPatientReply(aiReplyRaw)
+  const { clean: aiReplySanitized, handoffSuggested } = sanitizeCrmAiPatientReply(aiReplyRaw)
   const aiReply = aiReplySanitized.trim()
 
   if (!aiReply) {
@@ -744,7 +744,7 @@ export async function runWhatsappAiAutoReply(
       status: 'done',
       note: `ai_auto_reply:${sent.provider}:${options.leadId}:${sent.externalMessageId}`.slice(0, 500),
     })
-    return { replied: true, replyText: aiReply }
+    return { replied: true, replyText: aiReply, handoffSuggested }
   } catch (e) {
     console.error('runWhatsappAiAutoReply send:', e)
     try {
