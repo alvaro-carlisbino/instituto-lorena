@@ -19,6 +19,7 @@ export type AiConfig = {
   system_prompt: string
   max_ai_replies_per_hour: number
   min_seconds_between_ai_replies: number
+  business_rules: Record<string, any>
   /** `HH:mm` ou `HH:mm:ss` — opcional; vindo de `crm_ai_configs` */
   business_hours_start?: string | null
   business_hours_end?: string | null
@@ -71,6 +72,7 @@ export async function saveAiConfig(payload: {
   systemPrompt: string
   maxAiRepliesPerHour: number
   minSecondsBetweenAiReplies: number
+  businessRules: Record<string, any>
 }): Promise<AiConfig> {
   const parsed = await invokeControl({
     action: 'set_config',
@@ -79,6 +81,7 @@ export async function saveAiConfig(payload: {
     systemPrompt: payload.systemPrompt,
     maxAiRepliesPerHour: payload.maxAiRepliesPerHour,
     minSecondsBetweenAiReplies: payload.minSecondsBetweenAiReplies,
+    businessRules: payload.businessRules,
   })
   return parsed.config as AiConfig
 }

@@ -148,6 +148,7 @@ export function SettingsPage() {
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiMaxPerHour, setAiMaxPerHour] = useState(400)
   const [aiCooldownSeconds, setAiCooldownSeconds] = useState(10)
+  const [aiBusinessRules, setAiBusinessRules] = useState<Record<string, any>>({})
   const [aiLoading, setAiLoading] = useState(false)
 
   const sensors = useSensors(
@@ -185,6 +186,7 @@ export function SettingsPage() {
         setAiPrompt(cfg.system_prompt ?? '')
         setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 400))
         setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 10))
+        setAiBusinessRules(cfg.business_rules || {})
       })
       .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao carregar configuração da IA.'))
       .finally(() => setAiLoading(false))
@@ -202,6 +204,7 @@ export function SettingsPage() {
         setAiPrompt(cfg.system_prompt ?? '')
         setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 400))
         setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 10))
+        setAiBusinessRules(cfg.business_rules || {})
       } catch {
         // noop
       } finally {
@@ -274,9 +277,28 @@ export function SettingsPage() {
                 id="ai-prompt"
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
-                className="min-h-32 rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                className="min-h-32 rounded-lg border border-input bg-background px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
                 placeholder="Defina como a IA deve se comportar no atendimento..."
               />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ai-rules">Regras de Negócio e Valores (JSON)</Label>
+              <textarea
+                id="ai-rules"
+                value={JSON.stringify(aiBusinessRules, null, 2)}
+                onChange={(e) => {
+                  try {
+                    setAiBusinessRules(JSON.parse(e.target.value))
+                  } catch {
+                    // Ignora erro de parse enquanto digita
+                  }
+                }}
+                className="min-h-48 font-mono text-xs rounded-lg border border-input bg-background px-3 py-2 focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                placeholder='{ "prices": { "consulta": "R$ 300" } }'
+              />
+              <p className="text-xs text-muted-foreground">
+                Configure preços e regras específicas aqui em formato JSON.
+              </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 sm:max-w-xl">
               <div className="grid gap-2">
@@ -320,6 +342,7 @@ export function SettingsPage() {
                     systemPrompt: aiPrompt,
                     maxAiRepliesPerHour: aiMaxPerHour,
                     minSecondsBetweenAiReplies: aiCooldownSeconds,
+                    businessRules: aiBusinessRules,
                   })
                     .then(() => toast.success('Configuração da IA salva com sucesso.'))
                     .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao salvar configuração da IA.'))

@@ -69,7 +69,13 @@ Deno.serve(async (req) => {
   }
 
   const normalized = provider.normalizeInbound(payload, req.headers)
-  if (!normalized) return json({ ok: true, skipped: 'event_not_supported' }, 202)
+  if (!normalized) {
+    const event = String(payload.event || 'unknown')
+    console.log(`[Webhook Skip] Event: ${event}, Reason: normalizeInbound returned null. Payload summary:`, JSON.stringify(payload).slice(0, 200))
+    return json({ ok: true, skipped: 'event_not_supported', event }, 202)
+  }
+
+  console.log(`[Webhook Process] ${normalized.direction.toUpperCase()} | From: ${normalized.fromPhone} | Text: ${normalized.text.slice(0, 50)}`)
 
   const wInstance = await resolveWhatsappInstanceRowForProvider(admin, {
     provider: envProvider,

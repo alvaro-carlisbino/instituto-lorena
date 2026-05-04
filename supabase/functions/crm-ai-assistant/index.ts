@@ -188,6 +188,7 @@ async function buildCrmSnapshot(
     leadsSampleRes,
     interactionsRes,
     usersRes,
+    aiConfigRes,
   ] = await Promise.all([
     profilePromise,
     userClient.from('metric_configs').select('id, label, value, target, unit').order('label', { ascending: true }).limit(40),
@@ -211,6 +212,7 @@ async function buildCrmSnapshot(
       .order('happened_at', { ascending: false })
       .limit(40),
     userClient.from('app_users').select('id, name, role, active').order('name', { ascending: true }).limit(80),
+    userClient.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle(),
   ])
 
   const queryWarnings: string[] = []
@@ -224,6 +226,7 @@ async function buildCrmSnapshot(
     ['leads_sample', leadsSampleRes],
     ['interactions', interactionsRes],
     ['app_users', usersRes],
+    ['crm_ai_configs', aiConfigRes],
   ] as const) {
     if (res.error) queryWarnings.push(`${name}: ${res.error.message}`)
   }
@@ -561,27 +564,12 @@ Deno.serve(async (req) => {
             'Se usar <<<CRM_OPS>>> com book_appointment na mesma resposta, NÃO escreva "estou verificando a agenda agora", "aguarde um instante" nem prometa confirmação futura como se o horário ainda não existisse — o servidor pode confirmar o horário na mesma mensagem. Mantenha um tom direto (preferências anotadas e segue a confirmação automática do horário).',
             'Não use rascunhos ou comentários internos.',
             '',
-            '--- AGENDAMENTO (OBRIGATÓRIO NESTE CANAL) ---',
-            'Objetivo principal: conduzir o agendamento com naturalidade — perguntas curtas e uma ou duas dúvidas por mensagem — sem encaminhar para humano de forma prematura.',
-            'Marcação automática primeiro: com tipo de atendimento, médico (ou primeira vaga), manhã/tarde e dias da semana preferidos, use book_appointment na mesma rodada quando fizer sentido — não diga que "a consultora Dandara precisa verificar na agenda" como passo obrigatório; diga que vai registar as preferências e que enviamos a confirmação do horário aqui no WhatsApp quando a vaga for reservada. A consultora pode apenas conferir ou ajustar depois, se necessário.',
-            'Antes de usar a tag [PRONTO_PARA_CONSULTOR], quando fizer sentido deve ficar claro: tipo de atendimento (menu 1–5 ou equivalente); preferência de médico ou "primeira vaga disponível"; período do dia (manhã/tarde) e dias da semana preferidos; se é primeira consulta ou retorno; e um resumo explícito do pedido (ex.: consulta clínica feminina, prefere manhã, terça ou quinta).',
-            'Use [PRONTO_PARA_CONSULTOR] só quando: o paciente pedir explicitamente falar com uma pessoa; a marcação automática (book_appointment) falhar ou não houver vaga/salas no sistema; ou quando pedirem preços, valores, parecer médico, antes/depois ou pormenores clínicos que não constem do contexto.',
-            'Não encerre com mensagens vagas ("já vão falar consigo") logo após a escolha do médico se ainda faltam dados de disponibilidade. Horário de referência da clínica no contexto do negócio: segunda a sexta, 08:00–18:00 (Maringá) — sugira janelas plausíveis sem garantir vagas que não possa confirmar.',
+            '--- TRIAGEM E ENCAMINHAMENTO ---',
+            'Objetivo principal: identificar o tipo de atendimento desejado (1 a 5) e entender a preferência de período (manhã/tarde).',
+            'NÃO prometa horários específicos nem use ferramentas de agendamento.',
+            'Informe ao paciente que a equipe de consultoria (como a Dandara) entrará em contato em breve para confirmar o melhor horário na agenda.',
+            'Após identificar o serviço e a preferência de período, ou se o paciente fizer perguntas sobre valores/detalhes clínicos, use a tag [PRONTO_PARA_CONSULTOR] para sinalizar o fim da triagem inicial.',
             'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do paciente antes da sua resposta, trate como um único contexto — responda de forma completa, citando o essencial que já disseram.',
-            ...(context.leadId
-              ? [
-                  '',
-                  '--- ACÇÕES CRM AUTOMÁTICAS (invisíveis ao paciente; só este lead) ---',
-                  `lead_id em foco: ${context.leadId}. Use apenas ids de pipelineStages e pipelines do snapshot.`,
-                  'Depois da mensagem ao paciente, pode opcionalmente acrescentar por último:',
-                  '<<<CRM_OPS>>>',
-                  '{"version":1,"ops":[{"type":"move_lead","stage_id":"<id>"}]}',
-                  'Tipos: move_lead (opcional pipeline_id), set_temperature (value: cold|warm|hot), update_summary (text), book_appointment (duration_minutes, notes).',
-                  'MARCAÇÃO AUTOMÁTICA: quando o paciente aceitar agendar, disser "pode marcar", "quero a primeira vaga", confirmar período (manhã/tarde), dias da semana ou aceitar proposta sua, inclua na MESMA resposta (após o texto ao paciente) o bloco <<<CRM_OPS>>> com book_appointment. No campo notes inclua SEMPRE o dia da semana por extenso quando o paciente disser (ex.: segunda-feira) e manhã/tarde ou hora aproximada (ex.: tarde, por volta das 15h) — o servidor usa isto para escolher a primeira vaga compatível dentro do horário comercial. Ex.: {"version":1,"ops":[{"type":"book_appointment","duration_minutes":30,"notes":"Transplante capilar; Dra. Lorena; segunda-feira à tarde, por volta das 15h"}]} — duration_minutes: 30 para consulta/triagem habitual, 60 se pedirem avaliação mais longa. O servidor usa salas ativas e find_first_appointment_slot (janela configurável em crm_ai_configs); não invente data/hora na mensagem ao paciente antes do resultado — o sistema acrescenta confirmação com data e hora quando a marcação for criada. Não convide o paciente a olhar agenda ou plataforma — isso é interno.',
-                  'Consulte leadFocus.upcoming_appointments antes de marcar de novo. Omita <<<CRM_OPS>>> se não houver acção.',
-                  'Não use list_leads_filtered neste modo (só na consola CRM autenticada).',
-                ]
-              : []),
           ].join('\n')
         : 'Os dados respeitam as permissões (RLS) da conta do utilizador — pode ser uma amostra parcial.',
       'Responda em português de Portugal ou Brasil, de forma clara e profissional.',
@@ -601,8 +589,14 @@ Deno.serve(async (req) => {
       '',
       focusHint,
       '',
-      'Snapshot CRM (JSON):',
-      JSON.stringify(snapshot),
+      '# REGRAS E VALORES DINÂMICOS (Configurado no CRM)',
+      JSON.stringify(snapshot.crm_ai_configs?.business_rules || {}, null, 2),
+      '',
+      '# PROMPT ADICIONAL (SISTEMA)',
+      snapshot.crm_ai_configs?.system_prompt || '',
+      '',
+      '# CONTEXTO DO CRM (SNAPSHOT)',
+      JSON.stringify(snapshot, null, 2),
     ].join('\n')
 
     if (promptOverride) {

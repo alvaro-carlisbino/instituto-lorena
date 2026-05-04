@@ -102,6 +102,7 @@ Deno.serve(async (req) => {
       min_seconds_between_ai_replies: Number.isFinite(minSecondsBetweenAiReplies)
         ? Math.max(0, Math.min(3600, minSecondsBetweenAiReplies))
         : 10,
+      business_rules: body.businessRules || {},
       updated_at: new Date().toISOString(),
     }
     const { data, error } = await admin.from('crm_ai_configs').upsert(payload).select('*').single()
