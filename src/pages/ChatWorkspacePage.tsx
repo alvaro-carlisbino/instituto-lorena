@@ -3,15 +3,17 @@ import { ptBR } from 'date-fns/locale'
 import { useMemo, useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Search } from 'lucide-react'
+import { Search, UserRound } from 'lucide-react'
 
 import { ConversationModeSwitch } from '@/components/leads/ConversationModeSwitch'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { WorkspaceLeadSidebar } from '@/components/leads/WorkspaceLeadSidebar'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
@@ -41,6 +43,7 @@ export function ChatWorkspacePage() {
   const [ownerFilter, setOwnerFilter] = useState('all')
   const [leadMode, setLeadMode] = useState<ConversationOwnerMode>('auto')
   const [modeLoading, setModeLoading] = useState(false)
+  const [leadSheetOpen, setLeadSheetOpen] = useState(false)
   const [aiConversationBase, setAiConversationBase] = useState<{
     ownerMode: ConversationOwnerMode
     aiEnabled: boolean
@@ -261,21 +264,32 @@ export function ChatWorkspacePage() {
                     </div>
                   </div>
                   
-                  <div className="hidden lg:block">
-                    <ConversationModeSwitch
-                      value={leadMode}
-                      loading={modeLoading}
-                      onChange={(next) => {
-                        setModeLoading(true)
-                        void setConversationMode(activeLead.id, next)
-                          .then((state) => {
-                            setLeadMode(state.owner_mode as ConversationOwnerMode)
-                            toast.success(`Modo alterado para ${MODE_SUMMARY[next]}`)
-                          })
-                          .catch(() => toast.error('Falha ao alterar modo'))
-                          .finally(() => setModeLoading(false))
-                      }}
-                    />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="lg:hidden rounded-xl gap-1.5 text-xs"
+                      onClick={() => setLeadSheetOpen(true)}
+                    >
+                      <UserRound className="size-3.5" />
+                      Ficha
+                    </Button>
+                    <div className="hidden lg:block">
+                      <ConversationModeSwitch
+                        value={leadMode}
+                        loading={modeLoading}
+                        onChange={(next) => {
+                          setModeLoading(true)
+                          void setConversationMode(activeLead.id, next)
+                            .then((state) => {
+                              setLeadMode(state.owner_mode as ConversationOwnerMode)
+                              toast.success(`Modo alterado para ${MODE_SUMMARY[next]}`)
+                            })
+                            .catch(() => toast.error('Falha ao alterar modo'))
+                            .finally(() => setModeLoading(false))
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
               </CardHeader>
@@ -302,13 +316,30 @@ export function ChatWorkspacePage() {
           )}
         </Card>
 
-        {/* Right Column: Lead Sidebar */}
+        {/* Right Column: Lead Sidebar (desktop lg+) */}
         {activeLead && (
           <WorkspaceLeadSidebar 
             lead={activeLead} 
             history={activeHistory}
-            className="hidden h-full 2xl:flex 2xl:w-[380px] 2xl:shrink-0" 
+            className="hidden h-full lg:flex lg:w-[min(340px,28vw)] lg:shrink-0" 
           />
+        )}
+
+        {/* Lead Sheet (mobile/tablet) */}
+        {activeLead && (
+          <Sheet open={leadSheetOpen} onOpenChange={setLeadSheetOpen}>
+            <SheetContent side="right" className="w-[min(100vw,420px)] p-0 overflow-hidden">
+              <SheetHeader className="sr-only">
+                <SheetTitle>Ficha do lead</SheetTitle>
+                <SheetDescription>Campos e etapa do lead na conversa</SheetDescription>
+              </SheetHeader>
+              <WorkspaceLeadSidebar
+                lead={activeLead}
+                history={activeHistory}
+                className="flex h-full w-full rounded-none border-0 shadow-none"
+              />
+            </SheetContent>
+          </Sheet>
         )}
       </div>
     </AppLayout>

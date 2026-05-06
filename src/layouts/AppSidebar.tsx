@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { BRAND_FAVICON_URL } from '@/config/brandAssets'
 import { APP_ENV_BADGE, APP_NAME, APP_TAGLINE } from '@/config/branding'
 import { useCrm } from '@/context/CrmContext'
+import { useIsMobile } from '@/hooks/use-mobile'
 import {
   Sidebar,
   SidebarContent,
@@ -71,6 +72,9 @@ function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon
 
 export function AppSidebar() {
   const crm = useCrm()
+  const isMobile = useIsMobile()
+
+  if (isMobile) return null
 
   const showDashboardConfig = crm.currentPermission.canRouteLeads
   const showLeadsHub = crm.currentPermission.canRouteLeads

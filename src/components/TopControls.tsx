@@ -37,7 +37,7 @@ export function TopControls() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="hidden md:flex shrink-0 items-center gap-2">
         <SidebarTrigger className="-ml-1" />
       </div>
 

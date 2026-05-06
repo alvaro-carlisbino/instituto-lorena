@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, FolderOpen } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 import { useCrm } from '@/context/CrmContext'
@@ -8,6 +9,8 @@ import { AiCopilotWidget } from '@/components/leads/AiCopilotWidget'
 import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
 import { buttonVariants } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { workflowFieldsForContext } from '@/lib/leadFields'
 import type { Lead, Interaction, WorkflowField } from '@/mocks/crmMock'
 
@@ -42,6 +45,26 @@ export function WorkspaceLeadSidebar({ lead, history, className }: Props) {
     crm.persistLeadPatch(updatedLead)
   }
 
+  const handleStageChange = (value: string | null) => {
+    const stageId = value ?? ''
+    if (!stageId || stageId === lead.stageId) return
+    crm.reorderLeadCard(lead.id, { stageId, index: 0 })
+    const stageName = crm.pipelineCatalog
+      .flatMap((p) => p.stages)
+      .find((s) => s.id === stageId)?.name ?? 'Nova etapa'
+    toast.success(`Lead movido para "${stageName}"`)
+  }
+
+  const currentPipeline = useMemo(
+    () => crm.pipelineCatalog.find((p) => p.id === lead.pipelineId) ?? crm.selectedPipeline,
+    [crm.pipelineCatalog, lead.pipelineId, crm.selectedPipeline],
+  )
+
+  const currentStageName = useMemo(
+    () => currentPipeline.stages.find((s) => s.id === lead.stageId)?.name ?? '—',
+    [currentPipeline.stages, lead.stageId],
+  )
+
   const sidebarFields = useMemo(() => {
     return workflowFieldsForContext(crm.workflowFields, 'lead_detail').filter((f) => f.fieldKey !== 'patient_name')
   }, [crm.workflowFields])
@@ -49,7 +72,7 @@ export function WorkspaceLeadSidebar({ lead, history, className }: Props) {
   const sections = useMemo(() => groupFieldsBySection(sidebarFields), [sidebarFields])
 
   return (
-    <Card className={cn("hidden h-full min-h-0 min-w-0 w-full max-w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none 2xl:flex 2xl:basis-[min(380px,30vw)] 2xl:max-w-[400px]", className)}>
+    <Card className={cn("h-full min-h-0 min-w-0 w-full max-w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border/40 bg-card shadow-none", className)}>
       <CardHeader className="shrink-0 space-y-2 border-b border-border/20 bg-muted/5 p-3 sm:p-4">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-sm font-semibold leading-tight">Ficha do lead</CardTitle>
@@ -60,6 +83,28 @@ export function WorkspaceLeadSidebar({ lead, history, className }: Props) {
             Abrir no Kanban
           </Link>
         </div>
+
+        <div className="space-y-2 rounded-lg border border-border/40 bg-background/50 p-2.5">
+          <div className="flex items-center gap-2">
+            <FolderOpen className="size-3.5 shrink-0 text-muted-foreground/60" />
+            <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+              Funil · {currentPipeline.name}
+            </Label>
+          </div>
+          <Select value={lead.stageId} onValueChange={handleStageChange}>
+            <SelectTrigger className="h-8 w-full rounded-lg border-border/50 bg-background text-xs font-medium">
+              <SelectValue placeholder={currentStageName} />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl">
+              {currentPipeline.stages.map((stage) => (
+                <SelectItem key={stage.id} value={stage.id} className="text-xs">
+                  {stage.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <p className="m-0 text-[11px] leading-snug text-muted-foreground">
           Campos com o mesmo critério do detalhe do lead; o nome do paciente está na coluna do meio.
         </p>
