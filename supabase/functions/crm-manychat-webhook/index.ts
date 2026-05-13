@@ -15,7 +15,12 @@ import {
   syntheticPhoneFromManychatSubscriberId,
   upsertLeadByPhone,
 } from '../_shared/crm.ts'
-import { pushManychatInstagramDmAfterReply, readManychatPushConfigFromEnv } from '../_shared/manychatPublicApi.ts'
+import {
+  pushManychatInstagramDmAfterReply,
+  pushManychatWhatsappDmAfterReply,
+  readManychatPushConfigFromEnv,
+  readManychatWaPushConfigFromEnv,
+} from '../_shared/manychatPublicApi.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -94,6 +99,7 @@ type ManychatPipelineCtx = {
   phoneOpt?: string
   aiInboundUserText: string
   skipManychatPush: boolean
+  channel?: string
 }
 
 type ManychatPipelineResult = {
@@ -208,18 +214,25 @@ async function runManychatMessagePipeline(
     } else if (ctx.skipManychatPush) {
       manychatPush = { attempted: false, skipped_reason: 'manychat_skip_push' }
     } else if (replyTrimmed) {
-      const mcCfg = readManychatPushConfigFromEnv()
+      const isWa = ctx.channel === 'whatsapp' || ctx.channel === 'wa'
+      const mcCfg = isWa ? readManychatWaPushConfigFromEnv() : readManychatPushConfigFromEnv()
+      
       if (!mcCfg) {
-        manychatPush = { attempted: false, skipped_reason: 'no_manychat_api_key' }
+        manychatPush = { attempted: false, skipped_reason: 'no_manychat_api_key_or_config_missing' }
       } else {
-        const pushResult = await pushManychatInstagramDmAfterReply({
+        const pushArgs = {
           apiKey: mcCfg.apiKey,
           subscriberId: ctx.subscriberId,
           replyText: replyTrimmed,
           fieldId: mcCfg.fieldId,
           flowNs: mcCfg.flowNs,
           messageTag: mcCfg.messageTag || undefined,
-        })
+        }
+        
+        const pushResult = isWa 
+          ? await pushManychatWhatsappDmAfterReply(pushArgs)
+          : await pushManychatInstagramDmAfterReply(pushArgs)
+          
         manychatPush = {
           attempted: true,
           ok: pushResult.ok,
@@ -476,6 +489,8 @@ Deno.serve(async (req) => {
     body.manychat_skip_push === true ||
     String(body.manychat_skip_push ?? '').trim().toLowerCase() === 'true'
 
+  const channelRaw = String(body.channel ?? '').trim().toLowerCase()
+
   const pipelineCtx: ManychatPipelineCtx = {
     jobRowId: String(jobRow.id),
     dedupKey,
@@ -485,6 +500,7 @@ Deno.serve(async (req) => {
     phoneOpt,
     aiInboundUserText,
     skipManychatPush,
+    channel: channelRaw,
   }
 
   if (isManychatAsyncAck(body)) {

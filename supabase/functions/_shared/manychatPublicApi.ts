@@ -104,6 +104,70 @@ export async function pushManychatInstagramDmAfterReply(input: {
   return { ok: true, set_field_status: 'success', send_flow_status: 'success' }
 }
 
+/**
+ * Grava o texto no custom field do subscriber e dispara o flow de entrega (WhatsApp).
+ * Usa as rotas fb/ que o ManyChat utiliza globalmente para custom fields e flows.
+ */
+export async function pushManychatWhatsappDmAfterReply(input: {
+  apiKey: string
+  subscriberId: string
+  replyText: string
+  fieldId: number
+  flowNs: string
+  /** Ex.: CONFIRMED_EVENT_UPDATE — só enviado se definido */
+  messageTag?: string
+}): Promise<{ ok: boolean; error?: string; set_field_status?: string; send_flow_status?: string }> {
+  const value = input.replyText.trim().slice(0, MAX_DM_FIELD_CHARS)
+  if (!value) {
+    return { ok: false, error: 'empty_reply_text' }
+  }
+
+  const sid = normalizeSubscriberId(input.subscriberId)
+
+  const setBody: Record<string, unknown> = {
+    subscriber_id: sid,
+    field_id: input.fieldId,
+    field_value: value,
+  }
+
+  const setRes = await manychatPost('/fb/subscriber/setCustomField', setBody, input.apiKey)
+  if (!setRes.ok || !manychatSuccess(setRes.json)) {
+    const msg =
+      typeof setRes.json.message === 'string'
+        ? setRes.json.message
+        : `setCustomField_http_${setRes.status}`
+    return {
+      ok: false,
+      error: `manychat_wa_set_custom_field:${msg}`,
+      set_field_status: String(setRes.json.status ?? ''),
+    }
+  }
+
+  const flowBody: Record<string, unknown> = {
+    subscriber_id: sid,
+    flow_ns: input.flowNs.trim(),
+  }
+  if (input.messageTag?.trim()) {
+    flowBody.message_tag = input.messageTag.trim()
+  }
+
+  const flowRes = await manychatPost('/fb/sending/sendFlow', flowBody, input.apiKey)
+  if (!flowRes.ok || !manychatSuccess(flowRes.json)) {
+    const msg =
+      typeof flowRes.json.message === 'string'
+        ? flowRes.json.message
+        : `sendFlow_http_${flowRes.status}`
+    return {
+      ok: false,
+      error: `manychat_wa_send_flow:${msg}`,
+      set_field_status: 'success',
+      send_flow_status: String(flowRes.json.status ?? ''),
+    }
+  }
+
+  return { ok: true, set_field_status: 'success', send_flow_status: 'success' }
+}
+
 export function readManychatPushConfigFromEnv(): {
   apiKey: string
   fieldId: number
@@ -130,6 +194,38 @@ export function readManychatPushConfigFromEnv(): {
   return {
     apiKey,
     fieldId: Number.isFinite(fieldId) && fieldId > 0 ? fieldId : 14539456,
+    flowNs,
+    messageTag,
+  }
+}
+
+export function readManychatWaPushConfigFromEnv(): {
+  apiKey: string
+  fieldId: number
+  flowNs: string
+  messageTag: string
+} | null {
+  const apiKey = (Deno.env.get('MANYCHAT_API_KEY') ?? '').trim()
+  if (!apiKey) return null
+
+  const fieldIdRaw = (Deno.env.get('MANYCHAT_WA_DM_FIELD_ID') ?? '').trim()
+  const fieldId = Number.parseInt(fieldIdRaw, 10)
+  if (!Number.isFinite(fieldId) || fieldId <= 0) {
+    console.warn('manychatPublicApi: MANYCHAT_WA_DM_FIELD_ID invalido ou ausente')
+    return null
+  }
+
+  const flowNs = (Deno.env.get('MANYCHAT_WA_DM_FLOW_NS') ?? '').trim()
+  if (!flowNs) {
+    console.warn('manychatPublicApi: MANYCHAT_WA_DM_FLOW_NS vazio')
+    return null
+  }
+
+  const messageTag = (Deno.env.get('MANYCHAT_WA_SEND_FLOW_MESSAGE_TAG') ?? '').trim()
+
+  return {
+    apiKey,
+    fieldId,
     flowNs,
     messageTag,
   }
