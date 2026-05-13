@@ -276,16 +276,8 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
-  const secret = (Deno.env.get('MANYCHAT_CRM_SECRET') ?? '').trim()
-  const hdrMc = (req.headers.get('x-manychat-crm-secret') ?? '').trim()
-  const authRaw = (req.headers.get('authorization') ?? '').trim()
-  const bearer = /^Bearer\s+(.+)$/i.exec(authRaw)
-  const hdrBearer = bearer ? bearer[1].trim() : ''
-  const authorized = Boolean(secret) && (hdrMc === secret || hdrBearer === secret)
-  if (!authorized) {
-    return json({ error: 'unauthorized' }, 401)
-  }
-
+  // A verificação de secret do ManyChat foi removida a pedido do usuário
+  
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   if (!supabaseUrl || !serviceRole) return json({ error: 'server_misconfigured' }, 500)
