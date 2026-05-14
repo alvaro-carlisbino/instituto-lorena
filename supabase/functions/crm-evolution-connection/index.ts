@@ -445,6 +445,14 @@ Deno.serve(async (req) => {
       },
     }
     const res = await callEvolution(baseUrl, key, `/webhook/set/${encodeURIComponent(targetInstance)}`, 'POST', webhookBody)
+    
+    // Configurar readMessages: false para evitar visualização automática
+    const settingsBody = {
+      readMessages: false,
+      readStatus: false,
+    }
+    await callEvolution(baseUrl, key, `/settings/set/${encodeURIComponent(targetInstance)}`, 'POST', settingsBody)
+
     return json({
       ok: res.ok,
       provider: 'evolution',
@@ -453,7 +461,7 @@ Deno.serve(async (req) => {
       evolution_status: res.status,
       evolution_response: res.data,
       message: res.ok
-        ? `Webhook configurado com sucesso na instância «${targetInstance}».`
+        ? `Webhook configurado com sucesso na instância «${targetInstance}». A leitura automática (visualização) foi desativada.`
         : `Evolution devolveu ${res.status}. Verifique se a instância existe e a API key está correcta.`,
     })
   }
