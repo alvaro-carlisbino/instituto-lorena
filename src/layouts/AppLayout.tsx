@@ -33,7 +33,7 @@ export function AppLayout({ title, subtitle, actions, children, mainClassName, f
   return (
     <SidebarInset className={cn(
       "flex w-full min-w-0 flex-1 flex-col bg-transparent transition-all duration-300 ease-in-out",
-      fullHeight ? "h-svh overflow-hidden" : "min-h-0 min-h-svh"
+      fullHeight ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 min-h-svh"
     )}>
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_10%,oklch(0.95_0.03_50/.6),transparent_28%),radial-gradient(circle_at_88%_4%,oklch(0.93_0.03_250/.5),transparent_22%)]" />
       <header
@@ -55,7 +55,7 @@ export function AppLayout({ title, subtitle, actions, children, mainClassName, f
         id="main-content"
         aria-labelledby={titleId}
         className={cn(
-          "mx-auto w-full max-w-[min(100%,1800px)] min-w-0 relative flex-1 flex flex-col min-h-0",
+          "mx-auto w-full max-w-[min(100%,1800px)] min-w-0 relative flex flex-col min-h-0 flex-1",
           fullHeight ? "overflow-hidden" : "space-y-5 px-4 py-5 sm:space-y-6 sm:px-6 sm:py-6 lg:px-8",
           mainClassName
         )}

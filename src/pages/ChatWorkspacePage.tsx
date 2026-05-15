@@ -156,11 +156,10 @@ export function ChatWorkspacePage() {
   }, [dataMode, activeLead?.id])
 
   return (
-    <AppLayout title="Conversas" fullHeight={true} mainClassName="p-3 sm:p-4 bg-muted/30 dark:bg-transparent">
-      <div className="flex h-full w-full min-h-0 flex-col gap-3 overflow-hidden lg:flex-row lg:gap-4">
+    <AppLayout title="Conversas" fullHeight={true} mainClassName="min-h-0 p-2 sm:p-3 md:p-4 bg-muted/30 dark:bg-transparent">
+      <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2 overflow-hidden sm:gap-3 md:flex-row md:gap-4">
         {/* Left Column: Lead List */}
-        <Card className="flex w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border/40 bg-card/70 shadow-xl backdrop-blur-md 
-          h-[40dvh] lg:h-full lg:w-[min(320px,32vw)] lg:max-w-[340px] lg:min-w-[280px]">
+        <Card className="flex max-h-[38dvh] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border/40 bg-card/70 shadow-xl backdrop-blur-md min-[480px]:max-h-[42dvh] md:h-full md:max-h-none md:min-h-0 md:w-[min(300px,34vw)] md:max-w-[340px] md:min-w-[260px]">
           <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-4">
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="text-sm font-semibold">Mensagens</CardTitle>
@@ -241,11 +240,11 @@ export function ChatWorkspacePage() {
         </Card>
 
         {/* Middle Column: Chat Area */}
-        <Card className="flex min-w-0 flex-[3] flex-col overflow-hidden rounded-2xl border border-border/40 bg-card shadow-xl lg:h-full">
+        <Card className="flex min-h-[min(46dvh,320px)] min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/40 bg-card shadow-xl md:min-h-0 md:flex-[3]">
           {activeLead ? (
             <>
               <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-3 sm:px-5 sm:py-4">
-                <div className="flex items-center justify-between gap-4">
+                <div className="flex flex-wrap items-start justify-between gap-2 sm:items-center sm:gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <CardTitle className="truncate text-base font-bold tracking-tight sm:text-lg">

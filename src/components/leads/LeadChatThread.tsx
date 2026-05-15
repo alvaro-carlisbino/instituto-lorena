@@ -545,7 +545,7 @@ export function LeadChatThread({
       <div
         ref={scrollRef}
         role="log"
-        className="flex-1 min-h-0 min-w-0 w-full overflow-y-auto overscroll-contain rounded-xl border border-border/20 bg-muted/10 p-4 scrollbar-thin scrollbar-thumb-border/30 dark:bg-[#0b141a]/50"
+        className="flex-1 min-h-0 min-w-0 w-full overflow-y-auto overscroll-contain rounded-xl border border-border/20 bg-muted/10 p-3 scrollbar-thin scrollbar-thumb-border/30 dark:bg-[#0b141a]/50 sm:p-4"
       >
         <ul className="m-0 flex list-none flex-col gap-6 p-0">
           {groupedItems.length === 0 ? (
@@ -568,7 +568,7 @@ export function LeadChatThread({
                     out ? 'items-end' : 'items-start',
                   )}
                 >
-                  <div className="flex flex-col gap-1.5 w-full max-w-[85%] sm:max-w-[75%]">
+                  <div className="flex w-full max-w-[min(92%,28rem)] flex-col gap-1.5 sm:max-w-[min(85%,32rem)] lg:max-w-[75%]">
                     {group.map((msg, mIdx) => (
                       <div
                         key={msg.id}

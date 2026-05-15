@@ -102,8 +102,8 @@ function App() {
         <SidebarProvider>
           <AppSidebar />
           <CommandPalette />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <div className="md:hidden">
+          <div className="flex min-h-svh min-h-0 min-w-0 flex-1 flex-col">
+            <div className="shrink-0 md:hidden">
               <TopNav />
             </div>
             <RouteTransition>
