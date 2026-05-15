@@ -247,17 +247,10 @@ export function SettingsPage() {
           <CardContent className="grid gap-5">
             <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-gradient-to-r from-primary/[0.04] to-transparent p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <div className="min-w-0 space-y-1 sm:pr-2">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="ai-enabled"
-                    checked={aiEnabled}
-                    onCheckedChange={setAiEnabled}
-                    className="shrink-0"
-                  />
-                  <Label htmlFor="ai-enabled" className="cursor-pointer text-sm font-medium sm:text-base">
-                    Permitir respostas automáticas da IA
-                  </Label>
-                </div>
+                <label className="flex cursor-pointer items-center gap-2 select-none">
+                  <Switch checked={aiEnabled} onCheckedChange={setAiEnabled} className="shrink-0" />
+                  <span className="text-sm font-medium sm:text-base">Permitir respostas automáticas da IA</span>
+                </label>
                 <p className="m-0 text-xs text-muted-foreground sm:text-sm">
                   Desligado: a assistente nunca gera, mesmo com modo <strong>IA</strong> ou <strong>Misto</strong> na ficha.
                 </p>

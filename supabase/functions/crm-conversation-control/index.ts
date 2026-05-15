@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { coercePgBoolean } from '../_shared/coercePgBoolean.ts'
 import { runManychatAiAutoReply, runWhatsappAiAutoReply } from '../_shared/crmAiAutoReply.ts'
 import { pushManychatInstagramDmAfterReply, readManychatPushConfigFromEnv } from '../_shared/manychatPublicApi.ts'
 import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
@@ -57,7 +58,17 @@ Deno.serve(async (req) => {
     if (!leadId) return json({ error: 'missing_lead' }, 400)
     const { data, error } = await admin.from('crm_conversation_states').select('*').eq('lead_id', leadId).maybeSingle()
     if (error) return json({ error: error.message }, 400)
-    return json({ ok: true, state: data ?? { lead_id: leadId, owner_mode: 'auto', ai_enabled: true } })
+    if (!data) {
+      return json({ ok: true, state: { lead_id: leadId, owner_mode: 'auto', ai_enabled: true } })
+    }
+    const row = data as Record<string, unknown>
+    return json({
+      ok: true,
+      state: {
+        ...row,
+        ai_enabled: coercePgBoolean(row.ai_enabled, true),
+      },
+    })
   }
 
   if (action === 'set_mode') {
@@ -73,19 +84,36 @@ Deno.serve(async (req) => {
     if (ownerMode === 'human') patch.last_human_reply_at = new Date().toISOString()
     const { data, error } = await admin.from('crm_conversation_states').upsert(patch).select('*').single()
     if (error) return json({ error: error.message }, 400)
-    return json({ ok: true, state: data })
+    const row = data as Record<string, unknown>
+    return json({
+      ok: true,
+      state: {
+        ...row,
+        ai_enabled: coercePgBoolean(row.ai_enabled, true),
+      },
+    })
   }
 
   if (action === 'get_config') {
     const { data, error } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
     if (error) return json({ error: error.message }, 400)
-    return json({ ok: true, config: data })
+    if (!data) return json({ ok: true, config: null })
+    const row = data as Record<string, unknown>
+    return json({
+      ok: true,
+      config: {
+        ...row,
+        enabled: coercePgBoolean(row.enabled, true),
+      },
+    })
   }
 
   if (action === 'set_config') {
     if (!canManageConfig) return json({ error: 'forbidden' }, 403)
     const systemPrompt = String(body.systemPrompt ?? '')
-    const enabled = Boolean(body.enabled ?? true)
+    const enabled = Object.prototype.hasOwnProperty.call(body, 'enabled')
+      ? coercePgBoolean(body.enabled, true)
+      : true
     const defaultOwnerMode = String(body.defaultOwnerMode ?? 'auto').toLowerCase()
     if (!['human', 'ai', 'auto'].includes(defaultOwnerMode)) return json({ error: 'invalid_default_mode' }, 400)
     const maxAiRepliesPerHour = Number(body.maxAiRepliesPerHour ?? 400)
@@ -115,7 +143,14 @@ Deno.serve(async (req) => {
       target_id: 'default',
       metadata: { updated_by: userEmail || authUserId },
     })
-    return json({ ok: true, config: data })
+    const row = data as Record<string, unknown>
+    return json({
+      ok: true,
+      config: {
+        ...row,
+        enabled: coercePgBoolean(row.enabled, true),
+      },
+    })
   }
 
   if (action === 'force_ai_reply') {
@@ -145,7 +180,9 @@ Deno.serve(async (req) => {
     const { data: state } = await admin.from('crm_conversation_states').select('*').eq('lead_id', leadId).maybeSingle()
     const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
     const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
-    const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
+    const aiEnabled = Boolean(
+      coercePgBoolean(state?.ai_enabled, true) && coercePgBoolean(config?.enabled, true),
+    )
 
     if (!aiEnabled) {
       return json({

@@ -176,7 +176,7 @@ Deno.serve(async (req) => {
     )
     const { data: state } = await admin
       .from('crm_conversation_states')
-      .select('last_human_reply_at')
+      .select('last_human_reply_at, ai_enabled')
       .eq('lead_id', leadId)
       .maybeSingle()
     const lastHumanAt = state?.last_human_reply_at ? new Date(String(state.last_human_reply_at)).getTime() : 0
@@ -281,10 +281,13 @@ Deno.serve(async (req) => {
       status: 'done',
       note: `outbound:${provider.name}:${externalMessageId}`.slice(0, 500),
     })
+    const preservedAiEnabled =
+      state?.ai_enabled !== undefined && state?.ai_enabled !== null ? Boolean(state.ai_enabled) : true
+
     await admin.from('crm_conversation_states').upsert({
       lead_id: leadId,
       owner_mode: 'human',
-      ai_enabled: true,
+      ai_enabled: preservedAiEnabled,
       last_human_reply_at: nowIso(),
       updated_at: nowIso(),
     })
