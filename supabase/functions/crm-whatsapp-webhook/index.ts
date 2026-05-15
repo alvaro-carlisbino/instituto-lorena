@@ -334,15 +334,28 @@ Deno.serve(async (req) => {
           .in('role', ['admin', 'gestor', 'sdr'])
 
         if (usersToNotify?.length) {
-          await admin.from('app_inbox_notifications').insert(
-            usersToNotify.map(u => ({
-              auth_user_id: u.auth_user_id,
-              title: 'Triagem Finalizada',
-              body: `A IA terminou a triagem de ${normalized.fromName}. Pronto para assumir!`,
-              kind: 'urgent',
-              metadata: { leadId: lead.leadId }
-            }))
-          )
+          const authIds = [
+            ...new Set(
+              usersToNotify
+                .map((u) => u.auth_user_id as string | null | undefined)
+                .filter((id): id is string => typeof id === 'string' && id.length > 0),
+            ),
+          ]
+          if (authIds.length > 0) {
+            try {
+              await admin.from('app_inbox_notifications').insert(
+                authIds.map((auth_user_id) => ({
+                  auth_user_id,
+                  title: 'Triagem Finalizada',
+                  body: `A IA terminou a triagem de ${normalized.fromName}. Pronto para assumir!`,
+                  kind: 'urgent',
+                  metadata: { leadId: lead.leadId },
+                })),
+              )
+            } catch (notifyErr) {
+              console.warn('[whatsapp-webhook] app_inbox_notifications:', notifyErr)
+            }
+          }
         }
       } else if (replied) {
         // Se a IA respondeu mas ainda está triando

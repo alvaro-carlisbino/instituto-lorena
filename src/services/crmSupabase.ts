@@ -437,7 +437,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     ? leadRows.map((lead) =>
         mapDbLeadToLead(lead, tagIdsByLead.get(lead.id) ?? [], followupByLeadId.get(lead.id)),
       )
-    : initialLeads
+    : []
 
   const mediaByInteraction = new Map<string, Interaction['media']>()
   if (mediaItemsRes.data) {
@@ -1279,12 +1279,35 @@ export const saveAppUser = async (user: AppUser): Promise<void> => {
   if (error) throw error
 }
 
-/** Reatribui leads antes de apagar (FK owner_id → app_users). */
+/** Reatribui leads antes de apagar (FK owner_id → app_users). Sempre tenta outro usuário ativo se o fallback não for válido. */
 export const deleteAppUser = async (userId: string, reassignOwnerId?: string): Promise<void> => {
   const client = assertSupabase()
-  if (reassignOwnerId && reassignOwnerId !== userId) {
-    const { error: reassignErr } = await client.from('leads').update({ owner_id: reassignOwnerId }).eq('owner_id', userId)
+  let target = reassignOwnerId?.trim()
+  if (!target || target === userId) {
+    const { data } = await client
+      .from('app_users')
+      .select('id')
+      .neq('id', userId)
+      .eq('active', true)
+      .order('name', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    target = data?.id ?? undefined
+  }
+  if (target && target !== userId) {
+    const { error: reassignErr } = await client.from('leads').update({ owner_id: target }).eq('owner_id', userId)
     if (reassignErr) throw reassignErr
+  } else {
+    const { count, error: countErr } = await client
+      .from('leads')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_id', userId)
+    if (countErr) throw countErr
+    if ((count ?? 0) > 0) {
+      throw new Error(
+        'Existem leads atribuídos a este usuário e não há outro usuário ativo na equipe para recebê-los. Crie ou ative outro usuário, ou reatribua os leads manualmente, antes de remover.',
+      )
+    }
   }
   const { error } = await client.from('app_users').delete().eq('id', userId)
   if (error) throw error

@@ -696,7 +696,16 @@ export function LeadsPage() {
             <div className="flex flex-col items-center justify-center py-24 text-center opacity-30">
               <div className="mb-4 text-5xl">🔭</div>
               <h3 className="text-sm font-black uppercase tracking-[0.3em]">Nenhum lead encontrado</h3>
-              <p className="text-xs font-bold text-muted-foreground mt-2">Tente ajustar seus filtros de busca</p>
+              <p className="text-xs font-bold text-muted-foreground mt-2 max-w-md">
+                {crm.leads.length === 0 &&
+                pipelineFilter === 'all' &&
+                stageFilter === 'all' &&
+                ownerFilter === 'all' &&
+                sourceFilter === 'all' &&
+                !searchTerm.trim()
+                  ? 'Ainda não há leads na base. Importe um CSV abaixo, conecte canais que criem leads ou, se for administrador, use Laboratório para dados de demonstração.'
+                  : 'Tente ajustar filtros ou o termo de busca.'}
+              </p>
             </div>
           )}
         </CardContent>

@@ -86,6 +86,19 @@ async function findLeadIdByPhoneAndInstance(
   return findLeadByPhone(admin, phone)
 }
 
+/** Evita FK em `leads.owner_id` quando `whatsapp_channel_instances.default_owner_id` ou payload apontam para `app_users` inexistente. */
+async function coerceOwnerIdToExistingAppUser(
+  admin: SupabaseClient,
+  candidate: string,
+  fallback: string,
+): Promise<string> {
+  const c = String(candidate ?? '').trim()
+  if (!c) return fallback
+  const { data } = await admin.from('app_users').select('id').eq('id', c).maybeSingle()
+  if (data?.id) return String(data.id)
+  return fallback
+}
+
 export async function resolveDefaultRouting(admin: SupabaseClient): Promise<{
   ownerId: string
   pipelineId: string
@@ -210,11 +223,17 @@ export async function resolveRoutingForInstance(
     .maybeSingle()
   if (!row) return fallback
   const r = row as Record<string, unknown>
+  const rawOwner =
+    r.default_owner_id != null && String(r.default_owner_id).trim()
+      ? String(r.default_owner_id).trim()
+      : ''
+  const ownerId = rawOwner
+    ? await coerceOwnerIdToExistingAppUser(admin, rawOwner, fallback.ownerId)
+    : fallback.ownerId
   const ep = r.entry_pipeline_id != null && String(r.entry_pipeline_id) ? String(r.entry_pipeline_id) : null
   if (!ep) {
     return {
-      ownerId: (r.default_owner_id != null && String(r.default_owner_id) ? String(r.default_owner_id) : null) ??
-        fallback.ownerId,
+      ownerId,
       pipelineId: fallback.pipelineId,
       stageId: fallback.stageId,
     }
@@ -222,8 +241,7 @@ export async function resolveRoutingForInstance(
   const es = r.entry_stage_id != null && String(r.entry_stage_id) ? String(r.entry_stage_id) : null
   const stageResolved = (await resolveEntryStageId(admin, ep, es)) || fallback.stageId
   return {
-    ownerId: (r.default_owner_id != null && String(r.default_owner_id) ? String(r.default_owner_id) : null) ??
-      fallback.ownerId,
+    ownerId,
     pipelineId: ep,
     stageId: stageResolved,
   }
@@ -293,6 +311,7 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
   const ownerIdForCreate = input.ownerId?.trim() || newLeadRouting.ownerId
   const pipelineIdForCreate = input.pipelineId?.trim() || newLeadRouting.pipelineId
   const stageIdForCreate = input.stageId?.trim() || newLeadRouting.stageId
+  const routingFallback = await resolveDefaultRouting(admin)
 
   if (existingId) {
     const { data: cur, error: curErr } = await admin
@@ -397,19 +416,28 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
     }
     patch.temperature = temperature
 
+    if (patch.owner_id != null && String(patch.owner_id).trim()) {
+      patch.owner_id = await coerceOwnerIdToExistingAppUser(
+        admin,
+        String(patch.owner_id),
+        routingFallback.ownerId,
+      )
+    }
+
     const { error: updateError } = await admin.from('leads').update(patch).eq('id', existingId)
     if (updateError) throw new Error(updateError.message)
     return { leadId: existingId, status: 'updated' }
   }
 
   const newId = input.preferredLeadId?.trim() || `lead-${crypto.randomUUID().slice(0, 12)}`
+  const safeOwnerId = await coerceOwnerIdToExistingAppUser(admin, ownerIdForCreate, routingFallback.ownerId)
   const row: Record<string, unknown> = {
     id: newId,
     patient_name: input.patientName || 'Lead webhook',
     phone,
     source: input.source,
     summary: input.summary || '',
-    owner_id: ownerIdForCreate,
+    owner_id: safeOwnerId,
     pipeline_id: pipelineIdForCreate,
     stage_id: stageIdForCreate,
     score,
