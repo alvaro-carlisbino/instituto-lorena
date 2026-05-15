@@ -208,20 +208,32 @@ export function readManychatWaPushConfigFromEnv(): {
   const apiKey = (Deno.env.get('MANYCHAT_API_KEY') ?? '').trim()
   if (!apiKey) return null
 
-  const fieldIdRaw = (Deno.env.get('MANYCHAT_WA_DM_FIELD_ID') ?? '').trim()
+  const fieldIdRaw = (
+    Deno.env.get('MANYCHAT_WA_DM_FIELD_ID') ??
+    Deno.env.get('MANYCHAT_DM_FIELD_ID') ??
+    '14539456'
+  ).trim()
   const fieldId = Number.parseInt(fieldIdRaw, 10)
   if (!Number.isFinite(fieldId) || fieldId <= 0) {
-    console.warn('manychatPublicApi: MANYCHAT_WA_DM_FIELD_ID invalido ou ausente')
+    console.warn('manychatPublicApi: MANYCHAT_WA_DM_FIELD_ID / MANYCHAT_DM_FIELD_ID inválido')
     return null
   }
 
-  const flowNs = (Deno.env.get('MANYCHAT_WA_DM_FLOW_NS') ?? '').trim()
+  const flowNs = (
+    Deno.env.get('MANYCHAT_WA_DM_FLOW_NS') ??
+    Deno.env.get('MANYCHAT_DM_FLOW_NS') ??
+    'content20260430143025_638461'
+  ).trim()
   if (!flowNs) {
-    console.warn('manychatPublicApi: MANYCHAT_WA_DM_FLOW_NS vazio')
+    console.warn('manychatPublicApi: MANYCHAT_WA_DM_FLOW_NS / MANYCHAT_DM_FLOW_NS vazio')
     return null
   }
 
-  const messageTag = (Deno.env.get('MANYCHAT_WA_SEND_FLOW_MESSAGE_TAG') ?? '').trim()
+  const messageTag = (
+    Deno.env.get('MANYCHAT_WA_SEND_FLOW_MESSAGE_TAG') ??
+    Deno.env.get('MANYCHAT_SEND_FLOW_MESSAGE_TAG') ??
+    ''
+  ).trim()
 
   return {
     apiKey,
@@ -229,4 +241,16 @@ export function readManychatWaPushConfigFromEnv(): {
     flowNs,
     messageTag,
   }
+}
+
+/** Config de push ManyChat (custom field + flow) conforme o canal do pedido. */
+export function readManychatPushConfigForChannel(channelRaw: string): {
+  apiKey: string
+  fieldId: number
+  flowNs: string
+  messageTag: string
+} | null {
+  const c = channelRaw.trim().toLowerCase()
+  const isWa = c === 'whatsapp' || c === 'wa'
+  return isWa ? readManychatWaPushConfigFromEnv() : readManychatPushConfigFromEnv()
 }

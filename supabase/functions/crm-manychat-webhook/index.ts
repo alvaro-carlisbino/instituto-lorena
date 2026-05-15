@@ -18,8 +18,7 @@ import {
 import {
   pushManychatInstagramDmAfterReply,
   pushManychatWhatsappDmAfterReply,
-  readManychatPushConfigFromEnv,
-  readManychatWaPushConfigFromEnv,
+  readManychatPushConfigForChannel,
 } from '../_shared/manychatPublicApi.ts'
 import { resolveWhatsappLineInstanceId, sanitizeCrmInstanceKey } from '../_shared/manychatInstanceResolve.ts'
 
@@ -130,23 +129,29 @@ function scheduleEdgeBackground(task: Promise<void>): void {
 }
 
 /**
- * Resposta `queued` só faz sentido com `MANYCHAT_API_KEY` (DM via API em segundo plano).
- * Sem key, o ManyChat precisa do `reply` no JSON → modo síncrono por omissão.
- * `manychat_sync: true` força síncrono; `manychat_async: true` força fila (quem sabe que tem API key).
+ * Resposta `queued` só faz sentido quando há config para enviar DM via API ManyChat **neste canal**
+ * (`MANYCHAT_API_KEY` + field + flow; WhatsApp reusa por omissão os mesmos secrets que Instagram).
+ * Sem isso, devolve-se modo síncrono com `reply` no JSON (ManyChat mapeia no passo seguinte).
+ * `manychat_sync: true` força síncrono; `manychat_async: true` só entra em fila se o push estiver configurado.
  */
 function isManychatAsyncAck(body: Record<string, unknown>): boolean {
   if (body.manychat_sync === true || String(body.manychat_sync ?? '').trim().toLowerCase() === 'true') {
     return false
   }
-  if (body.manychat_async === true || String(body.manychat_async ?? '').trim().toLowerCase() === 'true') {
-    return true
+  const channelRaw = String(body.channel ?? '').trim().toLowerCase()
+  const pushCfg = readManychatPushConfigForChannel(channelRaw)
+
+  const forcedAsync =
+    body.manychat_async === true || String(body.manychat_async ?? '').trim().toLowerCase() === 'true'
+  if (forcedAsync) {
+    return pushCfg !== null
   }
   const v = (Deno.env.get('MANYCHAT_ASYNC_ACK') ?? '').trim().toLowerCase()
   if (v === 'false' || v === '0' || v === 'sync') return false
   if (v === 'true' || v === '1') {
-    return readManychatPushConfigFromEnv() !== null
+    return pushCfg !== null
   }
-  return readManychatPushConfigFromEnv() !== null
+  return pushCfg !== null
 }
 
 async function runManychatMessagePipeline(
@@ -231,7 +236,7 @@ async function runManychatMessagePipeline(
       manychatPush = { attempted: false, skipped_reason: 'manychat_skip_push' }
     } else if (replyTrimmed) {
       const isWa = ctx.channel === 'whatsapp' || ctx.channel === 'wa'
-      const mcCfg = isWa ? readManychatWaPushConfigFromEnv() : readManychatPushConfigFromEnv()
+      const mcCfg = readManychatPushConfigForChannel(String(ctx.channel ?? ''))
       
       if (!mcCfg) {
         manychatPush = { attempted: false, skipped_reason: 'no_manychat_api_key_or_config_missing' }
@@ -534,7 +539,7 @@ Deno.serve(async (req) => {
       handoff_suggested: false,
       manychat_push: { attempted: false, skipped_reason: 'async_pending' },
       hint:
-        'Modo fila: IA + envio Instagram via API ManyChat (MANYCHAT_API_KEY) em segundo plano — evita timeout ~10s do External Request. Este JSON não inclui reply. Sem MANYCHAT_API_KEY o CRM usa resposta síncrona com reply; força isso com manychat_sync: true ou MANYCHAT_ASYNC_ACK=false.',
+        'Modo fila: IA + envio DM via API ManyChat em segundo plano (evita timeout ~10s). Este JSON não inclui reply. Exige MANYCHAT_API_KEY e field/flow válidos para o canal (WhatsApp reusa por omissão MANYCHAT_DM_*). Sem push configurado o CRM responde sincronamente com reply; use manychat_sync: true ou não force manychat_async.',
     })
   }
 
