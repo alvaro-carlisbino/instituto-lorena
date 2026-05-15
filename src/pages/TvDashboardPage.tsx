@@ -52,7 +52,7 @@ export function TvDashboardPage() {
 
   if (!crm.currentPermission.canViewTvPanel) {
     return (
-      <div className="bg-brand-tv-gradient min-h-svh px-8 py-10 text-white">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-brand-tv-gradient px-8 py-10 text-white">
         <header className="mb-8">
           <div className="mb-3 flex items-center gap-3">
             <img src={BRAND_LOGO_HORIZONTAL_NEGATIVE_URL} alt="" className="h-9 max-w-[11rem] object-contain object-left opacity-90" />
@@ -66,7 +66,7 @@ export function TvDashboardPage() {
   }
 
   return (
-    <div className="bg-brand-tv-gradient min-h-svh px-8 py-10 text-white">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-brand-tv-gradient px-8 py-10 text-white">
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="mb-3">

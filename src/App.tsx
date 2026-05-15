@@ -102,7 +102,7 @@ function App() {
         <SidebarProvider>
           <AppSidebar />
           <CommandPalette />
-          <div className="flex min-h-svh min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <div className="shrink-0 md:hidden">
               <TopNav />
             </div>

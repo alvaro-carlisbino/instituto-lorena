@@ -159,7 +159,7 @@ export function ChatWorkspacePage() {
     <AppLayout title="Conversas" fullHeight={true} mainClassName="min-h-0 p-2 sm:p-3 md:p-4 bg-muted/30 dark:bg-transparent">
       <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2 overflow-hidden sm:gap-3 md:flex-row md:gap-4">
         {/* Left Column: Lead List */}
-        <Card className="flex max-h-[38dvh] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border/40 bg-card/70 shadow-xl backdrop-blur-md min-[480px]:max-h-[42dvh] md:h-full md:max-h-none md:min-h-0 md:w-[min(300px,34vw)] md:max-w-[340px] md:min-w-[260px]">
+        <Card className="flex max-h-[38dvh] w-full shrink-0 flex-col gap-0 overflow-hidden rounded-2xl border border-border/40 bg-card/70 py-0 shadow-xl backdrop-blur-md min-[480px]:max-h-[42dvh] md:h-full md:max-h-none md:min-h-0 md:w-[min(300px,34vw)] md:max-w-[340px] md:min-w-[260px]">
           <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-4">
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="text-sm font-semibold">Mensagens</CardTitle>
@@ -240,7 +240,7 @@ export function ChatWorkspacePage() {
         </Card>
 
         {/* Middle Column: Chat Area */}
-        <Card className="flex min-h-[min(46dvh,320px)] min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/40 bg-card shadow-xl md:min-h-0 md:flex-[3]">
+        <Card className="flex min-h-0 min-w-0 flex-1 flex-col gap-0 overflow-hidden rounded-2xl border border-border/40 bg-card py-0 shadow-xl md:flex-[3]">
           {activeLead ? (
             <>
               <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-3 sm:px-5 sm:py-4">
@@ -320,7 +320,7 @@ export function ChatWorkspacePage() {
           <WorkspaceLeadSidebar 
             lead={activeLead} 
             history={activeHistory}
-            className="hidden h-full lg:flex lg:w-[min(340px,28vw)] lg:shrink-0" 
+            className="hidden h-full min-h-0 lg:flex lg:w-[min(340px,28vw)] lg:shrink-0" 
           />
         )}
 
