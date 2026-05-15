@@ -2,6 +2,8 @@
 
 **Caminho A — sem n8n:** o ManyChat chama **diretamente** a Edge Function (`crm-manychat-webhook` com IA no Supabase + Z.ai). **Caminho B — com n8n:** ManyChat → webhook n8n → CRM como [tools HTTP](n8n-crm-tools.md) (`ingest`, `get_thread`, …) e Z.ai **dentro do n8n**; o mapa do fluxo antigo FIXED está em [n8n-crm-manychat-bridge.md](n8n-crm-manychat-bridge.md#mapa-n8n-fixed-zai).
 
+Este é o caminho correto para **SDR / telefone** quando a conversa está no ecossistema ManyChat (API Meta): **não** uses Evolution/`crm-whatsapp-webhook` para esse leg. Vários bots ou automations podem variar o comportamento da IA enviando texto diferente em `context_append` / `user_context` no body do POST — ver [crm-external-http-api.md](crm-external-http-api.md) §1.1.
+
 **URL da função** (substitui pelo teu project ref se for outro):
 
 `https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-manychat-webhook`

@@ -1,8 +1,14 @@
 #!/bin/bash
 # ============================================================
 # setup-evolution-webhook.sh
-# Configura o webhook da Evolution API para a instância "sdr"
-# apontar para o crm-whatsapp-webhook do Supabase.
+# Configura o webhook da Evolution API → crm-whatsapp-webhook (Supabase).
+#
+# IMPORTANTE: o atendimento SDR por WhatsApp/Instagram via ManyChat (External
+# Request → crm-manychat-webhook) NÃO passa por Evolution. Este script é só
+# para linhas WhatsApp ligadas ao CRM pela Evolution API.
+#
+# EVOLUTION_INSTANCE por defeito é "sdr" — é apenas um nome de instância na
+# Evolution (exemplo/homologação); não significa "fluxo ManyChat do SDR".
 # ============================================================
 
 EVOLUTION_BASE="${EVOLUTION_API_BASE:-}"

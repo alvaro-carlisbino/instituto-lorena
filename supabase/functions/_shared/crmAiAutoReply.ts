@@ -32,7 +32,7 @@ export function sanitizeCrmAiPatientReply(reply: string): { clean: string; hando
 }
 
 /**
- * WhatsApp (Evolution / Cloud): negrito no telefone é `*texto*` (um par de asteriscos).
+ * WhatsApp no cliente (Evolution, Cloud API ou DM WhatsApp entregue via ManyChat): negrito é `*texto*`.
  * Modelos costumam escrever `**markdown**` ou `****erro****`. Normaliza para um único par,
  * sem asteriscos duplicados visíveis.
  */
@@ -258,6 +258,7 @@ type WhatsappBurstFlushOpts = {
   typingDelayMs?: number
   /** Omisso: CRM_AI_INVOKE_ATTEMPTS / 3. Menor evita 504 em chamadas síncronas (ex.: force_ai_reply). */
   invokeMaxAttempts?: number
+  whatsappInstanceId?: string | null
 }
 
 function scheduleWhatsappInboundBurstFlush(
@@ -447,10 +448,12 @@ export async function invokeCrmAiAssistantForLead(
   leadId: string,
   aiInboundUserText: string,
   promptOverride: string,
-  opts?: { maxAttempts?: number },
+  opts?: { maxAttempts?: number; whatsappInstanceId?: string | null },
 ): Promise<string> {
   const aiMessages = [{ role: 'user', content: aiInboundUserText }]
-  const aiCtx = { leadId, focus: 'lead' }
+  const aiCtx: Record<string, unknown> = { leadId, focus: 'lead' }
+  const wid = opts?.whatsappInstanceId != null ? String(opts.whatsappInstanceId).trim() : ''
+  if (wid) aiCtx.whatsapp_instance_id = wid
   const internalSecret = (Deno.env.get('CRM_AI_INTERNAL_SECRET') ?? '').trim()
   const headers =
     internalSecret.length >= 16 ? { 'x-crm-ai-internal-secret': internalSecret } : undefined
@@ -545,6 +548,8 @@ export async function runWhatsappAiAutoReply(
     burstFlush?: boolean
     /** Omisso: env CRM_AI_INVOKE_ATTEMPTS. Reduzir em fluxos síncronos evita 504 no gateway. */
     invokeMaxAttempts?: number
+    /** Omisso: usa `leads.whatsapp_instance_id` para prompt por linha. */
+    whatsappInstanceId?: string | null
   },
 ): Promise<{ replied: boolean; replyText?: string; burstPending?: boolean; handoffSuggested?: boolean }> {
   const { data: burstCfg } = await admin
@@ -584,6 +589,7 @@ export async function runWhatsappAiAutoReply(
       sendProvider: options.sendProvider,
       typingDelayMs: options.typingDelayMs,
       invokeMaxAttempts: options.invokeMaxAttempts,
+      whatsappInstanceId: options.whatsappInstanceId,
     })
     return { replied: false, burstPending: true }
   }
@@ -658,12 +664,22 @@ export async function runWhatsappAiAutoReply(
 
   let aiReplyRaw = ''
   try {
+    let resolvedWaInst = options.whatsappInstanceId != null ? String(options.whatsappInstanceId).trim() : ''
+    if (!resolvedWaInst) {
+      const { data: lr } = await admin.from('leads').select('whatsapp_instance_id').eq('id', options.leadId).maybeSingle()
+      const wid = lr?.whatsapp_instance_id
+      if (wid) resolvedWaInst = String(wid)
+    }
+    const invokeOpts: { maxAttempts?: number; whatsappInstanceId?: string | null } = {}
+    if (options.invokeMaxAttempts !== undefined) invokeOpts.maxAttempts = options.invokeMaxAttempts
+    if (resolvedWaInst) invokeOpts.whatsappInstanceId = resolvedWaInst
+
     aiReplyRaw = await invokeCrmAiAssistantForLead(
       admin,
       options.leadId,
       options.aiInboundUserText,
       options.statePrompt,
-      options.invokeMaxAttempts !== undefined ? { maxAttempts: options.invokeMaxAttempts } : undefined,
+      Object.keys(invokeOpts).length ? invokeOpts : undefined,
     )
   } catch (e) {
     console.error('runWhatsappAiAutoReply invoke:', e)
@@ -790,6 +806,7 @@ export async function runManychatAiAutoReply(
     statePrompt: string
     aiJobSource: string
     invokeMaxAttempts?: number
+    whatsappInstanceId?: string | null
   },
 ): Promise<{ replied: boolean; replyText?: string; handoffSuggested?: boolean }> {
   // --- Triage Logic ---
@@ -855,12 +872,21 @@ export async function runManychatAiAutoReply(
 
   let aiReplyRaw = ''
   try {
+    const invokeOpts =
+      options.invokeMaxAttempts !== undefined || options.whatsappInstanceId != null
+        ? {
+            ...(options.invokeMaxAttempts !== undefined ? { maxAttempts: options.invokeMaxAttempts } : {}),
+            ...(options.whatsappInstanceId != null && String(options.whatsappInstanceId).trim()
+              ? { whatsappInstanceId: String(options.whatsappInstanceId).trim() }
+              : {}),
+          }
+        : undefined
     aiReplyRaw = await invokeCrmAiAssistantForLead(
       admin,
       options.leadId,
       options.aiInboundUserText,
       options.statePrompt,
-      options.invokeMaxAttempts !== undefined ? { maxAttempts: options.invokeMaxAttempts } : undefined,
+      invokeOpts,
     )
   } catch (e) {
     console.error('runManychatAiAutoReply invoke:', e)

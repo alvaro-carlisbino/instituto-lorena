@@ -21,6 +21,7 @@ import {
   readManychatPushConfigFromEnv,
   readManychatWaPushConfigFromEnv,
 } from '../_shared/manychatPublicApi.ts'
+import { resolveWhatsappLineInstanceId, sanitizeCrmInstanceKey } from '../_shared/manychatInstanceResolve.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -100,6 +101,8 @@ type ManychatPipelineCtx = {
   aiInboundUserText: string
   skipManychatPush: boolean
   channel?: string
+  /** Linha CRM (`whatsapp_channel_instances`) para prompt IA por instância. */
+  whatsappLineInstanceId: string | null
 }
 
 type ManychatPipelineResult = {
@@ -158,6 +161,18 @@ async function runManychatMessagePipeline(
       phone: ctx.phoneOpt,
     })
 
+    let waInstForAi: string | null = ctx.whatsappLineInstanceId
+    if (waInstForAi) {
+      await admin
+        .from('leads')
+        .update({ whatsapp_instance_id: waInstForAi, updated_at: nowIso() })
+        .eq('id', leadId)
+    } else {
+      const { data: lr } = await admin.from('leads').select('whatsapp_instance_id').eq('id', leadId).maybeSingle()
+      const w = lr?.whatsapp_instance_id
+      if (w) waInstForAi = String(w)
+    }
+
     await insertInteraction(admin, {
       leadId,
       patientName: ctx.userName,
@@ -192,6 +207,7 @@ async function runManychatMessagePipeline(
         aiEnabled: gate.aiEnabled,
         statePrompt,
         aiJobSource: 'manychat-webhook',
+        whatsappInstanceId: waInstForAi,
       })
       reply = replyText ?? ''
       handoffSuggested = Boolean(ho)
@@ -483,6 +499,12 @@ Deno.serve(async (req) => {
 
   const channelRaw = String(body.channel ?? '').trim().toLowerCase()
 
+  const instanceKeyRaw = sanitizeCrmInstanceKey(body.crm_instance_key ?? body.whatsapp_instance_id)
+  let whatsappLineInstanceId: string | null = null
+  if (instanceKeyRaw) {
+    whatsappLineInstanceId = await resolveWhatsappLineInstanceId(admin, instanceKeyRaw)
+  }
+
   const pipelineCtx: ManychatPipelineCtx = {
     jobRowId: String(jobRow.id),
     dedupKey,
@@ -493,6 +515,7 @@ Deno.serve(async (req) => {
     aiInboundUserText,
     skipManychatPush,
     channel: channelRaw,
+    whatsappLineInstanceId,
   }
 
   if (isManychatAsyncAck(body)) {

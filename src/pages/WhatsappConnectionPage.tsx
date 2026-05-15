@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHelp } from '@/components/page/PageHelp'
 import { useCrm } from '@/context/CrmContext'
@@ -24,6 +25,7 @@ import {
 
 function statusLabel(status: string) {
   const normalized = status.toLowerCase()
+  if (normalized === 'manychat') return 'ManyChat'
   if (normalized.includes('open') || normalized.includes('connected')) return 'Conectado'
   if (normalized.includes('close') || normalized.includes('disconnected')) return 'Desconectado'
   if (normalized.includes('connecting') || normalized.includes('pair')) return 'Conectando'
@@ -33,6 +35,7 @@ function statusLabel(status: string) {
 
 function statusBadgeClass(status: string) {
   const normalized = status.toLowerCase()
+  if (normalized === 'manychat') return 'border-sky-200 bg-sky-50 text-sky-950'
   if (normalized.includes('open') || normalized.includes('connected')) return 'border-emerald-200 bg-emerald-50 text-emerald-900'
   if (normalized.includes('close') || normalized.includes('disconnected')) return 'border-red-200 bg-red-50 text-red-900'
   if (normalized.includes('connecting') || normalized.includes('pair')) return 'border-amber-200 bg-amber-50 text-amber-900'
@@ -59,6 +62,16 @@ function suggestInstanceNameFromLabel(label: string): string {
   return base ? `il-${base}-${tail}` : `il-linha-${tail}`
 }
 
+function sanitizeManychatKey(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 64)
+}
+
 type ConnectionAction = 'snapshot' | 'status' | 'qrcode' | 'connect' | 'logout' | 'restart'
 
 export function WhatsappConnectionPage() {
@@ -68,6 +81,10 @@ export function WhatsappConnectionPage() {
   const [createLabel, setCreateLabel] = useState('')
   const [createTechId, setCreateTechId] = useState('')
   const [createPhone, setCreatePhone] = useState('')
+  const [mcLabel, setMcLabel] = useState('')
+  const [mcKey, setMcKey] = useState('')
+  const [mcPrompt, setMcPrompt] = useState('')
+  const [mcPhone, setMcPhone] = useState('')
   const [linkLabel, setLinkLabel] = useState('')
   const [linkEvoName, setLinkEvoName] = useState('')
   const [linkPhone, setLinkPhone] = useState('')
@@ -80,7 +97,7 @@ export function WhatsappConnectionPage() {
   const [savingRouteId, setSavingRouteId] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState({
     ok: false,
-    provider: 'evolution',
+    provider: 'evolution' as 'evolution' | 'manychat',
     instance: '',
     status: 'unknown',
     connected: null as boolean | null,
@@ -112,9 +129,10 @@ export function WhatsappConnectionPage() {
     setLoadingAction('snapshot')
     try {
       const result = await evolutionConnectionAction('snapshot', { instanceId: selectedInstanceId ?? undefined })
+      const provider: 'evolution' | 'manychat' = result.provider === 'manychat' ? 'manychat' : 'evolution'
       setSnapshot({
         ok: result.ok,
-        provider: result.provider,
+        provider,
         instance: result.instance,
         status: result.status,
         connected: result.connected,
@@ -150,10 +168,24 @@ export function WhatsappConnectionPage() {
   }, [loadInstances])
 
   useEffect(() => {
-    if (selectedInstanceId) {
-      void refreshSnapshot()
+    if (!selectedInstanceId) return
+    const inst = instances.find((i) => i.id === selectedInstanceId)
+    if (inst?.channelProvider === 'manychat') {
+      setSnapshot({
+        ok: true,
+        provider: 'manychat',
+        instance: '',
+        status: 'manychat',
+        connected: null,
+        qrCode: '',
+        error: '',
+        message: 'Esta linha atende pelo ManyChat — não há código QR nem Evolution neste ecrã.',
+      })
+      setLoadingAction(null)
+      return
     }
-  }, [selectedInstanceId])
+    void refreshSnapshot()
+  }, [selectedInstanceId, instances])
 
   const isBusy = loadingAction !== null
   const qrCode = useMemo(() => normalizeQrCode(snapshot.qrCode), [snapshot.qrCode])
@@ -192,6 +224,7 @@ export function WhatsappConnectionPage() {
       await upsertWhatsappChannelInstance({
         id,
         label: createLabel.trim(),
+        channelProvider: 'evolution',
         evolutionInstanceName: evoName,
         phoneE164: createPhone.trim() || null,
         sortOrder: instances.length,
@@ -228,6 +261,7 @@ export function WhatsappConnectionPage() {
       await upsertWhatsappChannelInstance({
         id,
         label: linkLabel.trim(),
+        channelProvider: 'evolution',
         evolutionInstanceName: linkEvoName.trim().replace(/\s+/g, '-'),
         phoneE164: linkPhone.trim() || null,
         sortOrder: instances.length,
@@ -254,20 +288,68 @@ export function WhatsappConnectionPage() {
     }
   }
 
-  const handleRemoveInstance = async (id: string) => {
-    if (
-      !window.confirm(
-        'Apagar este telefone? O WhatsApp desta linha deixa de receber mensagens no CRM, e a sessão no servidor (se ainda existir) será removida.',
+  const handleAddManychatLine = async () => {
+    if (!mcLabel.trim()) {
+      toast.error('Indique o nome da linha ManyChat.')
+      return
+    }
+    const label = mcLabel.trim()
+    const keyRaw = mcKey.trim() || suggestInstanceNameFromLabel(label)
+    const key = sanitizeManychatKey(keyRaw)
+    if (!key || key.length < 2) {
+      toast.error('Chave inválida — use letras minúsculas, números, _ ou - (ex.: sdr).')
+      return
+    }
+    setSavingInstance(true)
+    try {
+      const id = `mc-${Date.now().toString(36)}`
+      await upsertWhatsappChannelInstance({
+        id,
+        label,
+        channelProvider: 'manychat',
+        evolutionInstanceName: null,
+        manychatInstanceKey: key,
+        aiSystemPrompt: mcPrompt,
+        phoneE164: mcPhone.trim() || null,
+        sortOrder: instances.length,
+        entryPipelineId: null,
+        entryStageId: null,
+        defaultOwnerId: null,
+        onLineChange: 'keep_stage',
+      })
+      setMcLabel('')
+      setMcKey('')
+      setMcPrompt('')
+      setMcPhone('')
+      await loadInstances()
+      setSelectedInstanceId(id)
+      toast.success(
+        `Linha ManyChat criada. No External Request envie "crm_instance_key": "${key}" (ou o id ${id}).`,
       )
-    ) {
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar.')
+    } finally {
+      setSavingInstance(false)
+    }
+  }
+
+  const handleRemoveInstance = async (id: string) => {
+    const target = instances.find((i) => i.id === id)
+    const confirmManychat =
+      target?.channelProvider === 'manychat'
+        ? 'Apagar esta linha ManyChat do CRM? Os fluxos no ManyChat continuam — atualize o External Request se deixar de usar esta chave.'
+        : 'Apagar este telefone? O WhatsApp desta linha deixa de receber mensagens no CRM, e a sessão no servidor (se ainda existir) será removida.'
+    if (!window.confirm(confirmManychat)) {
       return
     }
     setRemovingInstance(true)
     try {
-      const res = await evolutionInstanceLifecycle('delete_instance', { instanceId: id })
-      if (!res.ok) {
-        toast.error(res.message || res.error || 'Não foi possível apagar no servidor. Tente de novo; o registro do CRM foi mantido.')
-        return
+      if (target?.channelProvider !== 'manychat') {
+        const res = await evolutionInstanceLifecycle('delete_instance', { instanceId: id })
+        if (!res.ok) {
+          toast.error(res.message || res.error || 'Não foi possível apagar no servidor. Tente de novo; o registro do CRM foi mantido.')
+          return
+        }
       }
       await deleteWhatsappChannelInstance(id)
       if (selectedInstanceId === id) {
@@ -330,7 +412,10 @@ export function WhatsappConnectionPage() {
       title="WhatsApp"
       actions={
         <PageHelp title="Conexão">
-          <p>QR: WhatsApp → Aparelhos conectados. Cada bloco abaixo é um número/linha; escolha o funil de entrada.</p>
+          <p>
+            Evolution: QR e webhook para WhatsApp directo ao CRM. ManyChat: configure linhas abaixo e envie{' '}
+            <span className="font-mono text-xs">crm_instance_key</span> no External Request — sem Evolution neste ecrã.
+          </p>
         </PageHelp>
       }
     >
@@ -360,9 +445,29 @@ export function WhatsappConnectionPage() {
           {selectedInstance ? (
             <div className="flex flex-col gap-3 rounded-lg border border-border/80 bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="m-0 text-sm font-medium">Trabalhando com: {selectedInstance.label}</p>
+                <p className="m-0 text-sm font-medium">
+                  Trabalhando com: {selectedInstance.label}
+                  {selectedInstance.channelProvider === 'manychat' ? (
+                    <Badge variant="outline" className="ml-2 border-sky-300 text-sky-900">
+                      ManyChat
+                    </Badge>
+                  ) : null}
+                </p>
                 <p className="m-0 mt-1 text-xs text-muted-foreground">
-                  <span className="font-mono text-[0.7rem]">{selectedInstance.evolutionInstanceName}</span> — id interno
+                  {selectedInstance.channelProvider === 'manychat' ? (
+                    <>
+                      Chave webhook:{' '}
+                      <span className="font-mono text-[0.7rem]">
+                        {selectedInstance.manychatInstanceKey ?? '—'}
+                      </span>{' '}
+                      — id <span className="font-mono text-[0.7rem]">{selectedInstance.id}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-mono text-[0.7rem]">{selectedInstance.evolutionInstanceName ?? '—'}</span>{' '}
+                      — Evolution
+                    </>
+                  )}
                 </p>
               </div>
               <Button
@@ -414,6 +519,60 @@ export function WhatsappConnectionPage() {
                   onClick={() => void handleCreateInstanceOnServer()}
                 >
                   {savingInstance ? 'Adicionando…' : 'Criar e salvar no CRM'}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-border/60 pt-4">
+            <h3 className="m-0 text-sm font-semibold">Linha ManyChat (SDR / Meta — sem Evolution)</h3>
+            <p className="m-0 text-xs text-muted-foreground">
+              Cria a linha aqui, define o prompt da IA abaixo em cada registo e envia no External Request o mesmo JSON com{' '}
+              <span className="font-mono">crm_instance_key</span> igual à chave ou ao id da linha.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-mc-label">Nome no CRM</Label>
+                <Input
+                  id="wa-mc-label"
+                  value={mcLabel}
+                  onChange={(e) => setMcLabel(e.target.value)}
+                  placeholder="ex.: SDR WhatsApp"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-mc-key">Chave no webhook (opcional)</Label>
+                <Input
+                  id="wa-mc-key"
+                  value={mcKey}
+                  onChange={(e) => setMcKey(e.target.value)}
+                  placeholder="ex.: sdr — omita para gerar automaticamente"
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-mc-phone">Número referência (opcional)</Label>
+                <Input
+                  id="wa-mc-phone"
+                  value={mcPhone}
+                  onChange={(e) => setMcPhone(e.target.value)}
+                  placeholder="+55..."
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2 lg:col-span-4">
+                <Label htmlFor="wa-mc-prompt">Prompt de sistema desta linha (obrigatório para IA específica)</Label>
+                <Textarea
+                  id="wa-mc-prompt"
+                  value={mcPrompt}
+                  onChange={(e) => setMcPrompt(e.target.value)}
+                  placeholder="Instruções da IA para este número / fluxo ManyChat…"
+                  rows={5}
+                  className="min-h-[120px] text-sm"
+                />
+              </div>
+              <div className="flex items-end sm:col-span-2">
+                <Button type="button" disabled={savingInstance} onClick={() => void handleAddManychatLine()}>
+                  {savingInstance ? 'Salvando…' : 'Adicionar linha ManyChat'}
                 </Button>
               </div>
             </div>
@@ -486,14 +645,22 @@ export function WhatsappConnectionPage() {
               const pipeline = crm.pipelineCatalog.find((p) => p.id === (row.entryPipelineId ?? ''))
               const stages = pipeline?.stages ?? []
               return (
-                <div
-                  key={inst.id}
-                  className="grid gap-3 border-b border-border/50 pb-4 last:border-0 last:pb-0 md:grid-cols-12 md:items-end"
-                >
+                <div key={inst.id} className="flex flex-col gap-3 border-b border-border/50 pb-4 last:border-0 last:pb-0">
+                  <div className="grid gap-3 md:grid-cols-12 md:items-end">
                   <div className="md:col-span-2">
                     <p className="m-0 text-sm font-medium">{row.label}</p>
                     <p className="m-0 text-xs text-muted-foreground">
-                      Cód. sistema: <span className="font-mono text-[0.65rem]">{row.evolutionInstanceName}</span>
+                      {row.channelProvider === 'manychat' ? (
+                        <>
+                          ManyChat ·{' '}
+                          <span className="font-mono text-[0.65rem]">{row.manychatInstanceKey ?? row.id}</span>
+                        </>
+                      ) : (
+                        <>
+                          Evolution ·{' '}
+                          <span className="font-mono text-[0.65rem]">{row.evolutionInstanceName ?? '—'}</span>
+                        </>
+                      )}
                     </p>
                   </div>
                   <div className="md:col-span-3">
@@ -616,6 +783,17 @@ export function WhatsappConnectionPage() {
                       {savingRouteId === inst.id ? '…' : 'Salvar'}
                     </Button>
                   </div>
+                  </div>
+                  <div className="w-full space-y-1.5">
+                    <Label className="text-xs">Prompt IA só desta linha (opcional)</Label>
+                    <Textarea
+                      rows={3}
+                      className="min-h-[72px] text-xs"
+                      value={row.aiSystemPrompt}
+                      onChange={(e) => updateRouteDraft(inst.id, { aiSystemPrompt: e.target.value })}
+                      placeholder="Vazio = prompt global (Configurações). Preenchido = respostas da IA usam este texto para esta linha."
+                    />
+                  </div>
                 </div>
               )
             })}
@@ -623,6 +801,23 @@ export function WhatsappConnectionPage() {
         </Card>
       ) : null}
 
+      {selectedInstance?.channelProvider === 'manychat' ? (
+        <Card className={cn('mb-4', pageQuietCardClass)}>
+          <CardHeader>
+            <CardTitle>Evolution e código QR</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="m-0 text-sm text-muted-foreground">
+              Esta linha atende pelo ManyChat — não há Evolution nem QR aqui. No External Request, inclua no JSON o campo{' '}
+              <span className="font-mono text-[0.7rem]">crm_instance_key</span> com o valor{' '}
+              <span className="font-mono text-[0.7rem]">
+                {selectedInstance.manychatInstanceKey ?? selectedInstance.id}
+              </span>{' '}
+              para a IA usar o prompt desta linha.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className={cn('lg:col-span-2', pageQuietCardClass)}>
           <CardHeader>
@@ -722,6 +917,7 @@ export function WhatsappConnectionPage() {
           </CardContent>
         </Card>
       </div>
+      )}
     </AppLayout>
   )
 }

@@ -118,6 +118,8 @@ type AiContext = {
   leadId?: string
   weekStartIso?: string
   focus?: 'analytics' | 'lead' | 'general'
+  /** Liga o prompt IA à linha em `whatsapp_channel_instances` (Evolution ou ManyChat). */
+  whatsappInstanceId?: string
 }
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -158,7 +160,10 @@ function parseContext(raw: unknown): AiContext {
     typeof o.weekStartIso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.weekStartIso.trim()) ? o.weekStartIso.trim() : undefined
   const f = typeof o.focus === 'string' ? o.focus.trim().toLowerCase() : ''
   const focus = f === 'analytics' || f === 'lead' || f === 'general' ? (f as AiContext['focus']) : undefined
-  return { leadId, weekStartIso, focus }
+  const wiRaw = typeof o.whatsapp_instance_id === 'string' ? o.whatsapp_instance_id.trim() : ''
+  const whatsappInstanceId =
+    wiRaw.length > 0 && wiRaw.length <= 128 && /^[a-zA-Z0-9_-]+$/.test(wiRaw) ? wiRaw : undefined
+  return { leadId, weekStartIso, focus, whatsappInstanceId }
 }
 
 async function buildCrmSnapshot(
@@ -349,6 +354,20 @@ async function buildCrmSnapshot(
     }
   }
 
+  const baseAiCfg = (aiConfigRes.data ?? null) as Record<string, unknown> | null
+  let crm_ai_configs: Record<string, unknown> | null = baseAiCfg ? { ...baseAiCfg } : null
+  if (ctx.whatsappInstanceId) {
+    const instRes = await userClient
+      .from('whatsapp_channel_instances')
+      .select('ai_system_prompt')
+      .eq('id', ctx.whatsappInstanceId)
+      .maybeSingle()
+    const linePrompt = String((instRes.data as { ai_system_prompt?: string } | null)?.ai_system_prompt ?? '').trim()
+    if (linePrompt) {
+      crm_ai_configs = { ...(crm_ai_configs ?? {}), system_prompt: linePrompt }
+    }
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     requestContext: ctx,
@@ -365,6 +384,7 @@ async function buildCrmSnapshot(
     recentInteractions: interactions,
     teamUsers: usersRes.data ?? [],
     leadFocus,
+    crm_ai_configs,
     queryWarnings: queryWarnings.length ? queryWarnings : undefined,
     queryNotes: {
       leadsAggregate: 'Até 200 leads (amostra) para distribuição por etapa/temperatura.',

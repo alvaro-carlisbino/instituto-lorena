@@ -2,10 +2,15 @@ import { supabase } from '@/lib/supabaseClient'
 
 export type WaOnLineChange = 'keep_stage' | 'use_entry'
 
+export type ChannelProvider = 'evolution' | 'manychat'
+
 export type WhatsappChannelInstance = {
   id: string
   label: string
-  evolutionInstanceName: string
+  channelProvider: ChannelProvider
+  evolutionInstanceName: string | null
+  manychatInstanceKey: string | null
+  aiSystemPrompt: string
   phoneE164: string | null
   active: boolean
   sortOrder: number
@@ -18,10 +23,22 @@ export type WhatsappChannelInstance = {
 function mapRow(r: Record<string, unknown>): WhatsappChannelInstance {
   const o = String(r.on_line_change ?? 'keep_stage')
   const onLine: WaOnLineChange = o === 'use_entry' ? 'use_entry' : 'keep_stage'
+  const cp = String(r.channel_provider ?? 'evolution').toLowerCase()
+  const channelProvider: ChannelProvider = cp === 'manychat' ? 'manychat' : 'evolution'
+  const evo = r.evolution_instance_name != null && String(r.evolution_instance_name).trim()
+    ? String(r.evolution_instance_name)
+    : null
+  const mcKey =
+    r.manychat_instance_key != null && String(r.manychat_instance_key).trim()
+      ? String(r.manychat_instance_key).trim()
+      : null
   return {
     id: String(r.id),
     label: String(r.label),
-    evolutionInstanceName: String(r.evolution_instance_name),
+    channelProvider,
+    evolutionInstanceName: evo,
+    manychatInstanceKey: mcKey,
+    aiSystemPrompt: String(r.ai_system_prompt ?? ''),
     phoneE164: r.phone_e164 != null && String(r.phone_e164) ? String(r.phone_e164) : null,
     active: r.active !== false,
     sortOrder: typeof r.sort_order === 'number' ? r.sort_order : Number(r.sort_order) || 0,
@@ -37,7 +54,7 @@ export async function fetchWhatsappChannelInstances(): Promise<WhatsappChannelIn
   const { data, error } = await supabase
     .from('whatsapp_channel_instances')
     .select(
-      'id, label, evolution_instance_name, phone_e164, active, sort_order, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change',
+      'id, label, channel_provider, evolution_instance_name, manychat_instance_key, ai_system_prompt, phone_e164, active, sort_order, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change',
     )
     .order('sort_order', { ascending: true })
   if (error) throw new Error(error.message)
@@ -47,7 +64,10 @@ export async function fetchWhatsappChannelInstances(): Promise<WhatsappChannelIn
 export async function upsertWhatsappChannelInstance(row: {
   id: string
   label: string
-  evolutionInstanceName: string
+  channelProvider?: ChannelProvider
+  evolutionInstanceName?: string | null
+  manychatInstanceKey?: string | null
+  aiSystemPrompt?: string
   phoneE164?: string | null
   active?: boolean
   sortOrder?: number
@@ -57,10 +77,24 @@ export async function upsertWhatsappChannelInstance(row: {
   onLineChange?: WaOnLineChange
 }): Promise<void> {
   if (!supabase) throw new Error('Não configurado')
+  const channelProvider = row.channelProvider ?? 'evolution'
+  const evo =
+    channelProvider === 'manychat'
+      ? null
+      : row.evolutionInstanceName != null && String(row.evolutionInstanceName).trim()
+        ? String(row.evolutionInstanceName).trim()
+        : null
+  const mcKey =
+    channelProvider === 'manychat' && row.manychatInstanceKey != null && String(row.manychatInstanceKey).trim()
+      ? String(row.manychatInstanceKey).trim()
+      : null
   const { error } = await supabase.from('whatsapp_channel_instances').upsert({
     id: row.id,
     label: row.label,
-    evolution_instance_name: row.evolutionInstanceName,
+    channel_provider: channelProvider,
+    evolution_instance_name: evo,
+    manychat_instance_key: mcKey,
+    ai_system_prompt: row.aiSystemPrompt ?? '',
     phone_e164: row.phoneE164 ?? null,
     active: row.active !== false,
     sort_order: row.sortOrder ?? 0,

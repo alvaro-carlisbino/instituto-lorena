@@ -8,6 +8,8 @@ Todas as respostas são JSON. Erros comuns: `401 unauthorized` (nem `x-manychat-
 
 **Configurar o ManyChat (External Request, checklist):** ver [manychat-setup.md](manychat-setup.md).
 
+**SDR / telefone na prática:** quando o número ou DM corre no **ManyChat** (integrações API / External Request), o CRM recebe em **`crm-manychat-webhook`** — **não** pelo webhook Evolution (`crm-whatsapp-webhook`). Cada automation ou página ManyChat pode mandar instruções diferentes ao modelo em `context_append` / `user_context` (ver tabela §1.1). O valor por defeito `EVOLUTION_INSTANCE=sdr` no script [`scripts/setup-evolution-webhook.sh`](../scripts/setup-evolution-webhook.sh) é só nome de instância na Evolution, não o fluxo ManyChat do SDR.
+
 ---
 
 ## 1. `crm-manychat-webhook` — ManyChat (Meta) + IA CRM
@@ -44,6 +46,7 @@ Corpo JSON:
 | `phone` | não | Se tiver ≥10 dígitos, faz merge com lead existente por telefone (`promoteManychatLeadToRealPhone`) |
 | `external_message_id` ou `message_id` | não | Idempotência em `webhook_jobs` (recomendado em produção) |
 | `context_append` ou `user_context` | não | Texto extra (ex. tags ManyChat, cidade) enviado **só** ao modelo de IA, após `---`; a interação “in” no CRM continua a guardar só `text` |
+| `crm_instance_key` ou `whatsapp_instance_id` | não | Identifica a linha em `whatsapp_channel_instances` (mesmo valor que `manychat_instance_key` **ou** o `id` da linha). Usado para **prompt IA por instância** (`ai_system_prompt`). |
 | `manychat_skip_push` | não | Se `true`, não chama a API ManyChat mesmo com `MANYCHAT_API_KEY` (evita DM duplicada em testes) |
 | `manychat_sync` | não | Se `true`, resposta **síncrona** com `reply` no mesmo JSON |
 | `manychat_async` | não | Se `true`, força `queued` em segundo plano (útil com `MANYCHAT_API_KEY`) |
@@ -221,7 +224,7 @@ Não devolve `reply` de IA; serve para criar/atualizar lead sem conversa síncro
 
 ## 3. `crm-whatsapp-webhook` — WhatsApp no CRM (Evolution ou Cloud API **direta**)
 
-Usa-se para a **linha WhatsApp ligada ao CRM** (Evolution ou webhook Meta direto). Para conversas que já correm no **ManyChat** com APIs oficiais Meta, preferir a secção 1 (`crm-manychat-webhook`).
+Usa-se para a **linha WhatsApp ligada ao CRM** (Evolution ou webhook Meta direto). **Não** substitui o fluxo em que o SDR atende pelo **ManyChat**: esse caminho é sempre a secção 1 (`crm-manychat-webhook`).
 
 - **Evolution:** assinatura `x-webhook-secret` se `EVOLUTION_WEBHOOK_SECRET` estiver definido.
 - **Official (`WHATSAPP_PROVIDER=official`):** opcional — assinatura `X-Hub-Signature-256` (Meta). **GET** com `hub.verify_token` = `WHATSAPP_CLOUD_VERIFY_TOKEN` para subscrição do webhook.

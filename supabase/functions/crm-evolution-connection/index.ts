@@ -279,15 +279,216 @@ Deno.serve(async (req) => {
     ? createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
     : null
 
+  type BodyShape = { action?: Action; instanceId?: string; instanceName?: string }
+  let body: BodyShape
+  try {
+    body = (await req.json()) as BodyShape
+  } catch {
+    body = {}
+  }
+  const action: Action = body.action ?? 'snapshot'
+  const defaultInstance = env('EVOLUTION_INSTANCE')
+
+  const earlyInstanceId = String(body.instanceId ?? '').trim()
+  if (
+    earlyInstanceId &&
+    ['snapshot', 'status', 'qrcode', 'connect', 'logout', 'restart'].includes(action)
+  ) {
+    const { data: mcRow } = await userClient
+      .from('whatsapp_channel_instances')
+      .select('channel_provider')
+      .eq('id', earlyInstanceId)
+      .maybeSingle()
+    if (String((mcRow as { channel_provider?: string } | null)?.channel_provider ?? '') === 'manychat') {
+      return json(
+        {
+          ok: true,
+          provider: 'manychat',
+          instance: '',
+          status: 'manychat',
+          connected: null,
+          qrCode: '',
+          message: 'Linha ManyChat — não há Evolution nem código QR neste ecrã.',
+        },
+        200,
+      )
+    }
+  }
+
+  if (action === 'delete_instance') {
+    if (!admin || !serviceKey) {
+      return json(
+        {
+          ok: false,
+          error: 'server_misconfigured',
+          message:
+            'Defina SUPABASE_SERVICE_ROLE_KEY nas secrets desta função para apagar linhas de telefone no CRM.',
+        },
+        200,
+      )
+    }
+    if (!(await callerCanManageUsers(admin, authData.user.id))) {
+      return json({ error: 'forbidden' }, 403)
+    }
+    const id = String(body.instanceId ?? '').trim()
+    if (!id) {
+      return json({ error: 'instance_id_required' }, 400)
+    }
+    const { data: delRow } = await userClient
+      .from('whatsapp_channel_instances')
+      .select('evolution_instance_name, channel_provider')
+      .eq('id', id)
+      .maybeSingle()
+    if (!delRow) {
+      return json(
+        {
+          ok: false,
+          error: 'not_found',
+          message: 'Não foi encontrada esta linha no CRM. Atualize a lista ou escolha outro telefone.',
+        },
+        200,
+      )
+    }
+    const provider = String((delRow as { channel_provider?: string }).channel_provider ?? 'evolution').toLowerCase()
+    const ename = String((delRow as { evolution_instance_name?: string | null }).evolution_instance_name ?? '').trim()
+    if (provider === 'manychat' || !ename) {
+      return json({
+        ok: true,
+        provider: 'manychat',
+        skipped_evolution: true,
+        message: 'Linha ManyChat (ou sem Evolution): confirme no CRM — não há conta a apagar no servidor Evolution.',
+      }, 200)
+    }
+    const baseDel = env('EVOLUTION_API_BASE')
+    const keyDel = env('EVOLUTION_API_KEY')
+    if (!baseDel || !keyDel) {
+      return json(
+        {
+          ok: false,
+          error: 'missing_env',
+          message:
+            'Para apagar esta linha no servidor Evolution, configure EVOLUTION_API_BASE e EVOLUTION_API_KEY nas secrets desta função.',
+          provider: 'evolution',
+          instance: ename,
+          status: 'unconfigured',
+          connected: null,
+        },
+        200,
+      )
+    }
+    const del = await callEvolution(
+      normalizedBaseUrl(baseDel),
+      keyDel,
+      `/instance/delete/${encodeURIComponent(ename)}`,
+      'DELETE',
+    )
+    if (!del.ok && del.status !== 404) {
+      return json(
+        {
+          ok: false,
+          error: 'evolution_delete_failed',
+          status: del.status,
+          details: del.data,
+          message:
+            'Não foi possível apagar no servidor de WhatsApp. Tente de novo ou apague no painel do fornecedor.',
+        },
+        200,
+      )
+    }
+    return json({ ok: true, provider: 'evolution', instance: ename, evolutionDelete: del.data })
+  }
+
+  if (action === 'configure_webhook') {
+    if (!admin) {
+      return json({ error: 'server_misconfigured', message: 'SUPABASE_SERVICE_ROLE_KEY em falta.' }, 500)
+    }
+    if (!(await callerCanManageUsers(admin, authData.user.id))) {
+      return json({ error: 'forbidden' }, 403)
+    }
+    let targetInstance = defaultInstance
+    if (body.instanceId) {
+      const { data: whRow } = await userClient
+        .from('whatsapp_channel_instances')
+        .select('evolution_instance_name, channel_provider')
+        .eq('id', String(body.instanceId).trim())
+        .maybeSingle()
+      if (
+        whRow &&
+        String((whRow as { channel_provider?: string }).channel_provider ?? '').toLowerCase() === 'manychat'
+      ) {
+        return json(
+          {
+            ok: false,
+            error: 'manychat_line',
+            message: 'Esta linha usa ManyChat — não há webhook Evolution para configurar.',
+          },
+          200,
+        )
+      }
+      const n = String((whRow as { evolution_instance_name?: string | null } | null)?.evolution_instance_name ?? '').trim()
+      if (n) targetInstance = n
+    }
+    const baseWh = env('EVOLUTION_API_BASE')
+    const keyWh = env('EVOLUTION_API_KEY')
+    if (!baseWh || !keyWh) {
+      return json(
+        {
+          ok: false,
+          error: 'missing_env',
+          message:
+            'Falta configurar EVOLUTION_API_BASE e EVOLUTION_API_KEY para registar o webhook na Evolution.',
+          provider: 'evolution',
+          instance: targetInstance || '',
+          status: 'unconfigured',
+          connected: null,
+        },
+        200,
+      )
+    }
+    const whBaseUrl = normalizedBaseUrl(baseWh)
+    if (!targetInstance) {
+      return json({ ok: false, error: 'missing_instance', message: 'Nenhuma instância Evolution identificada.' }, 200)
+    }
+    const webhookUrl = `${env('SUPABASE_URL')}/functions/v1/crm-whatsapp-webhook`
+    const webhookBody = {
+      webhook: {
+        enabled: true,
+        url: webhookUrl,
+        webhook_by_events: false,
+        webhook_base64: false,
+        events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'SEND_MESSAGE'],
+      },
+    }
+    const res = await callEvolution(whBaseUrl, keyWh, `/webhook/set/${encodeURIComponent(targetInstance)}`, 'POST', webhookBody)
+
+    const settingsBody = {
+      readMessages: false,
+      readStatus: false,
+    }
+    await callEvolution(whBaseUrl, keyWh, `/settings/set/${encodeURIComponent(targetInstance)}`, 'POST', settingsBody)
+
+    return json({
+      ok: res.ok,
+      provider: 'evolution',
+      instance: targetInstance,
+      webhook_url: webhookUrl,
+      evolution_status: res.status,
+      evolution_response: res.data,
+      message: res.ok
+        ? `Webhook configurado com sucesso na instância «${targetInstance}». A leitura automática (visualização) foi desativada.`
+        : `Evolution devolveu ${res.status}. Verifique se a instância existe e a API key está correcta.`,
+    })
+  }
+
   const base = env('EVOLUTION_API_BASE')
   const key = env('EVOLUTION_API_KEY')
-  const defaultInstance = env('EVOLUTION_INSTANCE')
   if (!base || !key) {
     return json(
       {
         ok: false,
         error: 'missing_env',
-        message: 'Falta configurar o gateway de WhatsApp. Peça a quem cuida do sistema para preencher EVOLUTION_API_BASE e EVOLUTION_API_KEY no painel Supabase (Edge Functions, secrets).',
+        message:
+          'Falta configurar o gateway de WhatsApp. Peça a quem cuida do sistema para preencher EVOLUTION_API_BASE e EVOLUTION_API_KEY no painel Supabase (Edge Functions, secrets).',
         provider: 'evolution',
         instance: '',
         status: 'unconfigured',
@@ -297,14 +498,6 @@ Deno.serve(async (req) => {
     )
   }
 
-  type BodyShape = { action?: Action; instanceId?: string; instanceName?: string }
-  let body: BodyShape
-  try {
-    body = (await req.json()) as BodyShape
-  } catch {
-    body = {}
-  }
-  const action: Action = body.action ?? 'snapshot'
   const baseUrl = normalizedBaseUrl(base)
 
   if (action === 'create_instance') {
@@ -359,111 +552,6 @@ Deno.serve(async (req) => {
       },
       200,
     )
-  }
-
-  if (action === 'delete_instance') {
-    if (!admin || !serviceKey) {
-      return json(
-        {
-          ok: false,
-          error: 'server_misconfigured',
-          message: 'Defina SUPABASE_SERVICE_ROLE_KEY nas secrets desta função para apagar a conta de WhatsApp no servidor.',
-        },
-        200,
-      )
-    }
-    if (!(await callerCanManageUsers(admin, authData.user.id))) {
-      return json({ error: 'forbidden' }, 403)
-    }
-    const id = String(body.instanceId ?? '').trim()
-    if (!id) {
-      return json({ error: 'instance_id_required' }, 400)
-    }
-    const { data: row } = await userClient
-      .from('whatsapp_channel_instances')
-      .select('evolution_instance_name')
-      .eq('id', id)
-      .maybeSingle()
-    const ename = String((row as { evolution_instance_name?: string } | null)?.evolution_instance_name ?? '').trim()
-    if (!ename) {
-      return json(
-        {
-          ok: false,
-          error: 'not_found',
-          message: 'Não foi encontrada esta linha no CRM. Atualize a lista ou escolha outro telefone.',
-        },
-        200,
-      )
-    }
-    const del = await callEvolution(baseUrl, key, `/instance/delete/${encodeURIComponent(ename)}`, 'DELETE')
-    if (!del.ok && del.status !== 404) {
-      return json(
-        {
-          ok: false,
-          error: 'evolution_delete_failed',
-          status: del.status,
-          details: del.data,
-          message: 'Não foi possível apagar no servidor de WhatsApp. Tente de novo ou apague no painel do fornecedor.',
-        },
-        200,
-      )
-    }
-    return json({ ok: true, provider: 'evolution', instance: ename, evolutionDelete: del.data })
-  }
-
-  if (action === 'configure_webhook') {
-    if (!(await callerCanManageUsers(admin!, authData.user.id))) {
-      return json({ error: 'forbidden' }, 403)
-    }
-    // Resolve which evolution instance to configure
-    let targetInstance = defaultInstance
-    if (body.instanceId) {
-      const { data: row } = await userClient
-        .from('whatsapp_channel_instances')
-        .select('evolution_instance_name')
-        .eq('id', String(body.instanceId).trim())
-        .maybeSingle()
-      const n = String((row as { evolution_instance_name?: string } | null)?.evolution_instance_name ?? '').trim()
-      if (n) targetInstance = n
-    }
-    if (!targetInstance) {
-      return json({ ok: false, error: 'missing_instance', message: 'Nenhuma instância identificada.' }, 200)
-    }
-    const webhookUrl = `${env('SUPABASE_URL')}/functions/v1/crm-whatsapp-webhook`
-    const webhookBody = {
-      webhook: {
-        enabled: true,
-        url: webhookUrl,
-        webhook_by_events: false,
-        webhook_base64: false,
-        events: [
-          'MESSAGES_UPSERT',
-          'MESSAGES_UPDATE',
-          'CONNECTION_UPDATE',
-          'SEND_MESSAGE',
-        ],
-      },
-    }
-    const res = await callEvolution(baseUrl, key, `/webhook/set/${encodeURIComponent(targetInstance)}`, 'POST', webhookBody)
-    
-    // Configurar readMessages: false para evitar visualização automática
-    const settingsBody = {
-      readMessages: false,
-      readStatus: false,
-    }
-    await callEvolution(baseUrl, key, `/settings/set/${encodeURIComponent(targetInstance)}`, 'POST', settingsBody)
-
-    return json({
-      ok: res.ok,
-      provider: 'evolution',
-      instance: targetInstance,
-      webhook_url: webhookUrl,
-      evolution_status: res.status,
-      evolution_response: res.data,
-      message: res.ok
-        ? `Webhook configurado com sucesso na instância «${targetInstance}». A leitura automática (visualização) foi desativada.`
-        : `Evolution devolveu ${res.status}. Verifique se a instância existe e a API key está correcta.`,
-    })
   }
 
   let instance = defaultInstance
