@@ -134,12 +134,11 @@ function scheduleEdgeBackground(task: Promise<void>): void {
  * Sem isso, devolve-se modo síncrono com `reply` no JSON (ManyChat mapeia no passo seguinte).
  * `manychat_sync: true` força síncrono; `manychat_async: true` só entra em fila se o push estiver configurado.
  */
-function isManychatAsyncAck(body: Record<string, unknown>): boolean {
+function isManychatAsyncAck(body: Record<string, unknown>, pushChannel: string): boolean {
   if (body.manychat_sync === true || String(body.manychat_sync ?? '').trim().toLowerCase() === 'true') {
     return false
   }
-  const channelRaw = String(body.channel ?? '').trim().toLowerCase()
-  const pushCfg = readManychatPushConfigForChannel(channelRaw)
+  const pushCfg = readManychatPushConfigForChannel(pushChannel)
 
   const forcedAsync =
     body.manychat_async === true || String(body.manychat_async ?? '').trim().toLowerCase() === 'true'
@@ -152,6 +151,22 @@ function isManychatAsyncAck(body: Record<string, unknown>): boolean {
     return pushCfg !== null
   }
   return pushCfg !== null
+}
+
+/** Canal efectivo para push ManyChat (WA vs IG). Sem isto, `channel` vazio usa só secrets IG e o WhatsApp não recebe DM. */
+function resolveEffectiveManychatChannel(
+  body: Record<string, unknown>,
+  whatsappLineInstanceId: string | null,
+  phoneDigits: string,
+): string {
+  let c = String(body.channel ?? '').trim().toLowerCase()
+  if (c === 'wa') c = 'whatsapp'
+  if (c === 'ig') c = 'instagram'
+
+  if (!c && whatsappLineInstanceId) return 'whatsapp'
+  if (!c && phoneDigits.length >= 10 && !phoneDigits.startsWith('888001')) return 'whatsapp'
+
+  return c || 'instagram'
 }
 
 async function runManychatMessagePipeline(
@@ -502,13 +517,14 @@ Deno.serve(async (req) => {
     body.manychat_skip_push === true ||
     String(body.manychat_skip_push ?? '').trim().toLowerCase() === 'true'
 
-  const channelRaw = String(body.channel ?? '').trim().toLowerCase()
-
   const instanceKeyRaw = sanitizeCrmInstanceKey(body.crm_instance_key ?? body.whatsapp_instance_id)
   let whatsappLineInstanceId: string | null = null
   if (instanceKeyRaw) {
     whatsappLineInstanceId = await resolveWhatsappLineInstanceId(admin, instanceKeyRaw)
   }
+
+  const phoneDigitsBody = digitsOnly(String(phoneOpt ?? ''))
+  const effectiveChannel = resolveEffectiveManychatChannel(body, whatsappLineInstanceId, phoneDigitsBody)
 
   const pipelineCtx: ManychatPipelineCtx = {
     jobRowId: String(jobRow.id),
@@ -519,11 +535,11 @@ Deno.serve(async (req) => {
     phoneOpt,
     aiInboundUserText,
     skipManychatPush,
-    channel: channelRaw,
+    channel: effectiveChannel,
     whatsappLineInstanceId,
   }
 
-  if (isManychatAsyncAck(body)) {
+  if (isManychatAsyncAck(body, effectiveChannel)) {
     scheduleEdgeBackground(
       runManychatMessagePipeline(admin, pipelineCtx).catch((err) => {
         console.error('crm-manychat-webhook async pipeline:', err)

@@ -73,9 +73,12 @@ Garante que `x-manychat-crm-secret` está configurado **uma vez** (evita duplica
   "subscriber_id": "{{subscriber.id}}",
   "user_name": "{{subscriber.first_name}} {{subscriber.last_name}}",
   "text": "{{last_input_text}}",
-  "external_message_id": "{{conversation.id}}-{{message.id}}"
+  "external_message_id": "{{conversation.id}}-{{message.id}}",
+  "channel": "whatsapp"
 }
 ```
+
+Para automações **só WhatsApp**, usa sempre **`"channel": "whatsapp"`** no JSON (ou envia **`crm_instance_key`** da linha — o CRM infere WhatsApp). Se omitires o canal no modo **queued/async**, o push pode usar o fluxo/campo de Instagram e o cliente **não recebe** mensagem no WhatsApp mesmo com CRM e base OK.
 
 Ajusta `{{...}}` ao que o editor do ManyChat mostrar (por exemplo `user.first_name`, `last_message`, etc.). O importante é:
 
