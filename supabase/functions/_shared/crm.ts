@@ -508,12 +508,81 @@ export function syntheticPhoneFromManychatSubscriberId(subscriberId: string): st
   return `888001${suffix}`
 }
 
+/**
+ * Consolida vários IDs ManyChat (IG + WA / contas antigas) num único lead sem perder resolução por subscriber.
+ */
+export function normalizeManychatSubscriberCustomFields(
+  cf: Record<string, unknown>,
+  leadPhoneDigitsRaw: string,
+): Record<string, unknown> {
+  const ids = new Set<string>()
+  const pushSid = (v: unknown) => {
+    const s =
+      typeof v === 'number' && Number.isFinite(v)
+        ? String(Math.trunc(v))
+        : typeof v === 'string'
+          ? v.trim()
+          : ''
+    if (s) ids.add(s)
+  }
+  pushSid(cf.manychat_subscriber_id)
+  pushSid(cf.manychat_whatsapp_subscriber_id)
+  const arr = cf.manychat_subscriber_ids
+  if (Array.isArray(arr)) {
+    for (const x of arr) pushSid(x)
+  }
+
+  if (ids.size === 0) return cf
+
+  const phoneDigits = normalizePhone(leadPhoneDigitsRaw)
+  let primary: string | null = null
+  for (const sid of ids) {
+    if (
+      phoneDigits.length >= 10 &&
+      normalizePhone(syntheticPhoneFromManychatSubscriberId(sid)) === phoneDigits
+    ) {
+      primary = sid
+      break
+    }
+  }
+  if (!primary) {
+    const legacy = cf.manychat_subscriber_id
+    if (typeof legacy === 'string') {
+      const t = legacy.trim()
+      if (t && ids.has(t)) primary = t
+    } else if (typeof legacy === 'number' && Number.isFinite(legacy)) {
+      const t = String(Math.trunc(legacy))
+      if (ids.has(t)) primary = t
+    }
+  }
+  if (!primary) {
+    primary = [...ids].sort((a, b) => a.localeCompare(b))[0] ?? null
+  }
+  if (!primary) return cf
+
+  const sorted = [...ids].sort((a, b) => a.localeCompare(b))
+  const secondary = sorted.find((id) => id !== primary)
+  const next: Record<string, unknown> = {
+    ...cf,
+    manychat_subscriber_id: primary,
+    manychat_subscriber_ids: sorted,
+  }
+  if (secondary) next.manychat_whatsapp_subscriber_id = secondary
+  else delete next.manychat_whatsapp_subscriber_id
+  return next
+}
+
 export async function findLeadIdByManychatSubscriberId(
   admin: SupabaseClient,
   subscriberId: string,
 ): Promise<string | null> {
   const sid = String(subscriberId).trim()
   if (!sid) return null
+  const { data: fromRpc, error: rpcErr } = await admin.rpc('find_lead_id_by_manychat_subscriber', {
+    p_subscriber: sid,
+  })
+  if (!rpcErr && fromRpc) return String(fromRpc)
+
   const { data, error } = await admin
     .from('leads')
     .select('id')
@@ -537,6 +606,16 @@ function maxIso(a: string | null | undefined, b: string | null | undefined): str
   return new Date(a).getTime() >= new Date(b).getTime() ? a : b
 }
 
+function preferMergedPatientName(keepName: string, dropName: string): string {
+  const k = keepName.trim()
+  const d = dropName.trim()
+  if (!d) return k || 'Lead'
+  if (!k) return d
+  if (isPlaceholderName(k) && !isPlaceholderName(d)) return d
+  if (isPlaceholderName(d)) return k
+  return d.length > k.length ? d : k
+}
+
 /**
  * Move dados do lead `dropLeadId` para `keepLeadId` e apaga o drop.
  * Usado quando o mesmo contacto passa de ID sintético ManyChat para telefone real já existente.
@@ -548,13 +627,32 @@ export async function mergeLeadDropIntoKeep(
 ): Promise<void> {
   if (keepLeadId === dropLeadId) return
 
-  const { data: dropLead } = await admin.from('leads').select('custom_fields').eq('id', dropLeadId).maybeSingle()
-  const { data: keepLead } = await admin.from('leads').select('custom_fields').eq('id', keepLeadId).maybeSingle()
+  const { data: dropLead } = await admin
+    .from('leads')
+    .select('custom_fields, patient_name')
+    .eq('id', dropLeadId)
+    .maybeSingle()
+  const { data: keepLead } = await admin
+    .from('leads')
+    .select('custom_fields, phone, patient_name')
+    .eq('id', keepLeadId)
+    .maybeSingle()
   const mergedCf = mergeCustomFields(
     keepLead?.custom_fields as Record<string, unknown> | undefined,
     dropLead?.custom_fields as Record<string, unknown> | undefined,
   )
-  await admin.from('leads').update({ custom_fields: mergedCf }).eq('id', keepLeadId)
+  const normalizedCf = normalizeManychatSubscriberCustomFields(
+    mergedCf as Record<string, unknown>,
+    String((keepLead as { phone?: string } | null)?.phone ?? ''),
+  )
+  const patientName = preferMergedPatientName(
+    String((keepLead as { patient_name?: string } | null)?.patient_name ?? ''),
+    String((dropLead as { patient_name?: string } | null)?.patient_name ?? ''),
+  )
+  await admin
+    .from('leads')
+    .update({ custom_fields: normalizedCf, patient_name: patientName })
+    .eq('id', keepLeadId)
 
   const fkTables = [
     'interactions',
@@ -582,6 +680,18 @@ export async function mergeLeadDropIntoKeep(
     }
   }
   await admin.from('lead_tag_assignments').update({ lead_id: keepLeadId }).eq('lead_id', dropLeadId)
+
+  const { data: dropFu } = await admin.from('crm_lead_followup_state').select('lead_id').eq('lead_id', dropLeadId).maybeSingle()
+  const { data: keepFu } = await admin.from('crm_lead_followup_state').select('lead_id').eq('lead_id', keepLeadId).maybeSingle()
+  if (dropFu) {
+    if (!keepFu) {
+      const { error } = await admin.from('crm_lead_followup_state').update({ lead_id: keepLeadId }).eq('lead_id', dropLeadId)
+      if (error) console.warn('mergeLeadDropIntoKeep crm_lead_followup_state:', error.message)
+    } else {
+      const { error } = await admin.from('crm_lead_followup_state').delete().eq('lead_id', dropLeadId)
+      if (error) console.warn('mergeLeadDropIntoKeep crm_lead_followup_state:', error.message)
+    }
+  }
 
   const { data: dropSt } = await admin.from('crm_conversation_states').select('*').eq('lead_id', dropLeadId).maybeSingle()
   const { data: keepSt } = await admin.from('crm_conversation_states').select('*').eq('lead_id', keepLeadId).maybeSingle()

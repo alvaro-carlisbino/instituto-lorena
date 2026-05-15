@@ -272,10 +272,21 @@ async function runManychatMessagePipeline(
         manychatPush = {
           attempted: true,
           ok: pushResult.ok,
+          set_field_ok: pushResult.set_field_ok,
+          send_flow_ok: pushResult.send_flow_ok,
+          skipped_send_flow: pushResult.skipped_send_flow,
           ...(pushResult.ok ? {} : { error: pushResult.error }),
         }
         if (!pushResult.ok) {
-          console.warn('crm-manychat-webhook manychat_push:', pushResult.error)
+          console.warn(
+            'crm-manychat-webhook manychat_push:',
+            pushResult.error,
+            JSON.stringify({
+              set_field_ok: pushResult.set_field_ok,
+              send_flow_ok: pushResult.send_flow_ok,
+              skipped_send_flow: pushResult.skipped_send_flow,
+            }),
+          )
         }
       }
     }

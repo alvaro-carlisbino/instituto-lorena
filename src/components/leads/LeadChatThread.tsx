@@ -208,9 +208,27 @@ export function LeadChatThread({
       const r = await forceAiReply(leadId)
       if (r.replied) {
         toast.success('Resposta da IA enviada.')
-        if (r.channel === 'meta' && r.manychat_push && r.manychat_push.attempted && r.manychat_push.ok === false) {
+        const mc = r.manychat_push as
+          | {
+              attempted?: boolean
+              ok?: boolean
+              error?: string
+              set_field_ok?: boolean
+              send_flow_ok?: boolean
+              skipped_send_flow?: boolean
+            }
+          | undefined
+        if (r.channel === 'meta' && mc?.attempted && mc.skipped_send_flow) {
+          toast.message('ManyChat: só foi gravado o campo ENVIAR-DM (sendFlow pela API desativado). Dispara o flow no ManyChat por automation.', {
+            description: 'MANYCHAT_PUSH_SKIP_SEND_FLOW=true',
+          })
+        } else if (r.channel === 'meta' && mc?.attempted && mc.ok === false && mc.set_field_ok && mc.send_flow_ok === false) {
+          toast.message('ManyChat: campo ENVIAR-DM atualizado, mas sendFlow falhou — o cliente pode não receber DM.', {
+            description: String(mc.error ?? 'Veja MANYCHAT_DM_FLOW_NS, MANYCHAT_SEND_FLOW_MESSAGE_TAG (ex.: HUMAN_AGENT) e logs da Edge Function.'),
+          })
+        } else if (r.channel === 'meta' && mc?.attempted && mc.ok === false) {
           toast.message('ManyChat: mensagem gravada no CRM; o envio ao Instagram pode ter falhado.', {
-            description: String((r.manychat_push as { error?: string }).error ?? ''),
+            description: String(mc.error ?? ''),
           })
         }
       } else {

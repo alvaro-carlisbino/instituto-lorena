@@ -20,8 +20,11 @@ export function isManychatSyntheticPhone(phone: string): boolean {
 export function isLeadWhatsappComposeBlocked(lead: Pick<Lead, 'source' | 'phone' | 'customFields'>): boolean {
   if (!isLeadSourceInstagram(lead.source)) return false
   
-  // Se tiver ID do ManyChat, permitimos envio (será via ManyChat API no Edge)
-  if (lead.customFields?.manychat_subscriber_id) return false
+  const mcPrimary = lead.customFields?.manychat_subscriber_id
+  const mcWa = lead.customFields?.manychat_whatsapp_subscriber_id
+  const mcIds = lead.customFields?.manychat_subscriber_ids
+  const mcAny = Array.isArray(mcIds) && mcIds.filter(Boolean).length > 0
+  if (mcPrimary || mcWa || mcAny) return false
 
   const digits = String(lead.phone ?? '').replace(/\D/g, '')
   if (digits.length < 10) return true

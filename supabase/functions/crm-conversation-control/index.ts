@@ -310,6 +310,9 @@ Deno.serve(async (req) => {
           manychatPush = {
             attempted: true,
             ok: pushResult.ok,
+            set_field_ok: pushResult.set_field_ok,
+            send_flow_ok: pushResult.send_flow_ok,
+            skipped_send_flow: pushResult.skipped_send_flow,
             ...(pushResult.ok ? {} : { error: pushResult.error }),
           }
         }
