@@ -118,8 +118,10 @@ Deno.serve(async (req) => {
     if (!['human', 'ai', 'auto'].includes(defaultOwnerMode)) return json({ error: 'invalid_default_mode' }, 400)
     const maxAiRepliesPerHour = Number(body.maxAiRepliesPerHour ?? 400)
     const minSecondsBetweenAiReplies = Number(body.minSecondsBetweenAiReplies ?? 10)
+    const hasInboundBurst = Object.prototype.hasOwnProperty.call(body, 'inboundBurstDebounceMs')
+    const inboundBurstDebounceMs = hasInboundBurst ? Number(body.inboundBurstDebounceMs) : NaN
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       id: 'default',
       enabled,
       system_prompt: systemPrompt.slice(0, 12000),
@@ -132,6 +134,12 @@ Deno.serve(async (req) => {
         : 10,
       business_rules: body.businessRules || {},
       updated_at: new Date().toISOString(),
+    }
+    if (hasInboundBurst) {
+      /** 0 desativa o agrupamento; máximo 30000 ms (30 s) para evitar atrasos longos. */
+      payload.inbound_burst_debounce_ms = Number.isFinite(inboundBurstDebounceMs)
+        ? Math.max(0, Math.min(30000, inboundBurstDebounceMs))
+        : 4000
     }
     const { data, error } = await admin.from('crm_ai_configs').upsert(payload).select('*').single()
     if (error) return json({ error: error.message }, 400)

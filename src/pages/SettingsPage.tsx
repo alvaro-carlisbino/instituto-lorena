@@ -149,7 +149,8 @@ export function SettingsPage() {
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiMaxPerHour, setAiMaxPerHour] = useState(400)
   const [aiCooldownSeconds, setAiCooldownSeconds] = useState(10)
-  const [aiBusinessRules, setAiBusinessRules] = useState<Record<string, any>>({})
+  const [aiBurstDebounceSeconds, setAiBurstDebounceSeconds] = useState(4)
+  const [aiBusinessRules, setAiBusinessRules] = useState<Record<string, unknown>>({})
   const [aiLoading, setAiLoading] = useState(false)
 
   const sensors = useSensors(
@@ -187,6 +188,7 @@ export function SettingsPage() {
         setAiPrompt(cfg.system_prompt ?? '')
         setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 400))
         setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 10))
+        setAiBurstDebounceSeconds(Math.round(Number(cfg.inbound_burst_debounce_ms ?? 4000) / 1000))
         setAiBusinessRules(cfg.business_rules || {})
       })
       .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao carregar configuração da IA.'))
@@ -205,6 +207,7 @@ export function SettingsPage() {
         setAiPrompt(cfg.system_prompt ?? '')
         setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 400))
         setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 10))
+        setAiBurstDebounceSeconds(Math.round(Number(cfg.inbound_burst_debounce_ms ?? 4000) / 1000))
         setAiBusinessRules(cfg.business_rules || {})
       } catch (e) {
         console.error('[ai-config] failed to load', e)
@@ -323,6 +326,22 @@ export function SettingsPage() {
                   Use 0 para responder a cada mensagem recebida (o atraso natural de “a digitar” no WhatsApp continua a aplicar-se).
                 </p>
               </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ai-burst">Agrupar mensagens em rajada (segundos)</Label>
+                <Input
+                  id="ai-burst"
+                  type="number"
+                  min={0}
+                  max={30}
+                  value={aiBurstDebounceSeconds}
+                  onChange={(e) => setAiBurstDebounceSeconds(Math.max(0, Math.min(30, Number(e.target.value) || 0)))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Quando o paciente envia várias linhas seguidas (ex.: “Bom dia” + “Quero saber o valor”), a IA aguarda
+                  este tempo após a última mensagem antes de responder, juntando tudo num só contexto. Use 0 para responder
+                  imediatamente a cada linha.
+                </p>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -337,6 +356,7 @@ export function SettingsPage() {
                     maxAiRepliesPerHour: aiMaxPerHour,
                     minSecondsBetweenAiReplies: aiCooldownSeconds,
                     businessRules: aiBusinessRules,
+                    inboundBurstDebounceMs: aiBurstDebounceSeconds * 1000,
                   })
                     .then(() => toast.success('Configuração da IA salva com sucesso.'))
                     .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao salvar configuração da IA.'))

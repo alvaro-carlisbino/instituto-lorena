@@ -19,7 +19,9 @@ export type AiConfig = {
   system_prompt: string
   max_ai_replies_per_hour: number
   min_seconds_between_ai_replies: number
-  business_rules: Record<string, any>
+  business_rules: Record<string, unknown>
+  /** Tempo (ms) que a IA aguarda para juntar mensagens curtas enviadas em rajada. 0 = desativado. */
+  inbound_burst_debounce_ms?: number | null
   /** `HH:mm` ou `HH:mm:ss` — opcional; vindo de `crm_ai_configs` */
   business_hours_start?: string | null
   business_hours_end?: string | null
@@ -72,9 +74,10 @@ export async function saveAiConfig(payload: {
   systemPrompt: string
   maxAiRepliesPerHour: number
   minSecondsBetweenAiReplies: number
-  businessRules: Record<string, any>
+  businessRules: Record<string, unknown>
+  inboundBurstDebounceMs?: number
 }): Promise<AiConfig> {
-  const parsed = await invokeControl({
+  const body: Record<string, unknown> = {
     action: 'set_config',
     enabled: payload.enabled,
     defaultOwnerMode: payload.defaultOwnerMode,
@@ -82,7 +85,11 @@ export async function saveAiConfig(payload: {
     maxAiRepliesPerHour: payload.maxAiRepliesPerHour,
     minSecondsBetweenAiReplies: payload.minSecondsBetweenAiReplies,
     businessRules: payload.businessRules,
-  })
+  }
+  if (typeof payload.inboundBurstDebounceMs === 'number') {
+    body.inboundBurstDebounceMs = payload.inboundBurstDebounceMs
+  }
+  const parsed = await invokeControl(body)
   return parsed.config as AiConfig
 }
 
