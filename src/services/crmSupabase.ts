@@ -310,6 +310,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       .select(
         'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at',
       )
+      .is('deleted_at', null)
       .order('position', { ascending: true }),
     client
       .from('interactions')
@@ -671,6 +672,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
       .select(
         'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at',
       )
+      .is('deleted_at', null)
       .order('position', { ascending: true }),
     client
       .from('interactions')
@@ -1100,8 +1102,8 @@ export const saveMetricConfig = async (metric: MetricConfig): Promise<void> => {
 
 export const deleteLead = async (leadId: string): Promise<void> => {
   const client = assertSupabase()
-  const { error } = await client.from('leads').delete().eq('id', leadId)
-  if (error) throw new Error(error.message)
+  const { error } = await client.from('leads').update({ deleted_at: new Date().toISOString() }).eq('id', leadId)
+  if (error) throw error
 }
 
 export const saveLeadTask = async (task: LeadTask): Promise<void> => {

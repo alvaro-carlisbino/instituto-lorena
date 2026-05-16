@@ -518,14 +518,25 @@ export async function upsertConversationStateInboundOnly(
     ownerMode: string
     aiEnabled: boolean
     inboundHappenedAt: string
+    /** Se true, reseta o contador de follow-ups (paciente respondeu). Default: true. */
+    resetFollowups?: boolean
   },
 ): Promise<void> {
+  const resetFollowups = options.resetFollowups !== false
   await admin.from('crm_conversation_states').upsert({
     lead_id: options.leadId,
     owner_mode: options.ownerMode,
     ai_enabled: options.aiEnabled,
     last_inbound_at: options.inboundHappenedAt,
     updated_at: nowIso(),
+    // Reseta a janela de follow-ups quando o lead responde
+    ...(resetFollowups
+      ? {
+          followup_count: 0,
+          followup_window_start: null,
+          last_followup_at: null,
+        }
+      : {}),
   })
 }
 
@@ -653,6 +664,9 @@ export async function runWhatsappAiAutoReply(
             last_inbound_at: options.inboundHappenedAt,
             last_ai_reply_at: nowIso(),
             updated_at: nowIso(),
+            followup_count: 0,
+            followup_window_start: null,
+            last_followup_at: null,
           })
 
           return { replied: true, replyText: welcome }
@@ -754,6 +768,9 @@ export async function runWhatsappAiAutoReply(
       last_ai_reply_at: nowIso(),
       context_summary: `${options.aiInboundUserText.slice(0, 280)}\nIA: ${aiReply.slice(0, 220)}`.slice(0, 1200),
       updated_at: nowIso(),
+      followup_count: 0,
+      followup_window_start: null,
+      last_followup_at: null,
     })
     await admin.from('webhook_jobs').insert({
       source: options.aiJobSource,
@@ -861,6 +878,9 @@ export async function runManychatAiAutoReply(
             last_inbound_at: options.inboundHappenedAt,
             last_ai_reply_at: nowIso(),
             updated_at: nowIso(),
+            followup_count: 0,
+            followup_window_start: null,
+            last_followup_at: null,
           })
 
           return { replied: true, replyText: welcome }
@@ -914,6 +934,9 @@ export async function runManychatAiAutoReply(
       last_ai_reply_at: nowIso(),
       context_summary: `${options.aiInboundUserText.slice(0, 280)}\nIA: ${text.slice(0, 220)}`.slice(0, 1200),
       updated_at: nowIso(),
+      followup_count: 0,
+      followup_window_start: null,
+      last_followup_at: null,
     })
     await admin.from('webhook_jobs').insert({
       source: options.aiJobSource,

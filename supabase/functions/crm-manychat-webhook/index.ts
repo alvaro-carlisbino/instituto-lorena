@@ -40,7 +40,7 @@ function digitsOnly(value: string): string {
 
 async function ensureManychatLeadId(
   admin: ReturnType<typeof createClient>,
-  input: { subscriberId: string; userName: string; text: string; phone?: string },
+  input: { subscriberId: string; userName: string; text: string; phone?: string; channel?: string },
 ): Promise<string> {
   const sid = input.subscriberId.trim()
   const digits = input.phone ? digitsOnly(input.phone) : ''
@@ -54,14 +54,15 @@ async function ensureManychatLeadId(
     return leadId
   }
 
+  const defaultName = input.channel === 'whatsapp' ? 'Lead WhatsApp' : 'Lead Instagram'
   const lead = await upsertLeadByPhone(admin, {
-    patientName: input.userName || 'Lead Instagram',
+    patientName: input.userName || defaultName,
     phone: syntheticPhoneFromManychatSubscriberId(sid),
     summary: input.text.slice(0, 500),
-    source: 'meta_instagram',
+    source: input.channel === 'whatsapp' ? 'meta_whatsapp' : 'meta_instagram',
     customFields: {
       manychat_subscriber_id: sid,
-      channel: 'instagram',
+      channel: input.channel || 'instagram',
     },
   })
 
@@ -179,6 +180,7 @@ async function runManychatMessagePipeline(
       userName: ctx.userName,
       text: ctx.text,
       phone: ctx.phoneOpt,
+      channel: ctx.channel,
     })
 
     let waInstForAi: string | null = ctx.whatsappLineInstanceId
@@ -418,6 +420,15 @@ Deno.serve(async (req) => {
   const userName = String(body.user_name ?? body.name ?? 'Lead Instagram').trim() || 'Lead Instagram'
   const phoneOpt = String(body.phone ?? '').trim() || undefined
 
+  const instanceKeyRaw = sanitizeCrmInstanceKey(body.crm_instance_key ?? body.whatsapp_instance_id)
+  let whatsappLineInstanceId: string | null = null
+  if (instanceKeyRaw) {
+    whatsappLineInstanceId = await resolveWhatsappLineInstanceId(admin, instanceKeyRaw)
+  }
+
+  const phoneDigitsBody = digitsOnly(String(phoneOpt ?? ''))
+  const effectiveChannel = resolveEffectiveManychatChannel(body, whatsappLineInstanceId, phoneDigitsBody)
+
   if (action === 'ingest') {
     try {
       const leadId = await ensureManychatLeadId(admin, {
@@ -425,6 +436,7 @@ Deno.serve(async (req) => {
         userName,
         text,
         phone: phoneOpt,
+        channel: effectiveChannel,
       })
       await insertInteraction(admin, {
         leadId,
@@ -527,15 +539,6 @@ Deno.serve(async (req) => {
   const skipManychatPush =
     body.manychat_skip_push === true ||
     String(body.manychat_skip_push ?? '').trim().toLowerCase() === 'true'
-
-  const instanceKeyRaw = sanitizeCrmInstanceKey(body.crm_instance_key ?? body.whatsapp_instance_id)
-  let whatsappLineInstanceId: string | null = null
-  if (instanceKeyRaw) {
-    whatsappLineInstanceId = await resolveWhatsappLineInstanceId(admin, instanceKeyRaw)
-  }
-
-  const phoneDigitsBody = digitsOnly(String(phoneOpt ?? ''))
-  const effectiveChannel = resolveEffectiveManychatChannel(body, whatsappLineInstanceId, phoneDigitsBody)
 
   const pipelineCtx: ManychatPipelineCtx = {
     jobRowId: String(jobRow.id),

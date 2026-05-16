@@ -42,8 +42,9 @@ function temperatureForSource(source: LeadSource, override: string | undefined):
 export async function findLeadByPhone(admin: SupabaseClient, phone: string): Promise<string | null> {
   const { data: fromRpc, error: findError } = await admin.rpc('find_lead_id_by_phone_digits', { p_digits: phone })
   if (!findError && fromRpc) return String(fromRpc)
-  const { data: byEq } = await admin.from('leads').select('id').eq('phone', phone).maybeSingle()
-  return byEq?.id ?? null
+  const { data, error } = await admin.from('leads').select('id').eq('phone', phone).maybeSingle()
+  if (error || !data) return null
+  return String((data as { id: unknown }).id)
 }
 
 export function isPlaceholderName(name: string): boolean {
@@ -415,6 +416,7 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
       patch.score = score
     }
     patch.temperature = temperature
+    patch.deleted_at = null
 
     if (patch.owner_id != null && String(patch.owner_id).trim()) {
       patch.owner_id = await coerceOwnerIdToExistingAppUser(
@@ -679,7 +681,7 @@ export async function mergeLeadDropIntoKeep(
   )
   await admin
     .from('leads')
-    .update({ custom_fields: normalizedCf, patient_name: patientName })
+    .update({ custom_fields: normalizedCf, patient_name: patientName, deleted_at: null })
     .eq('id', keepLeadId)
 
   const fkTables = [

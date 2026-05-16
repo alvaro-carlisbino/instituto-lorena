@@ -416,3 +416,7 @@ verify_jwt = false
 # Chamada interna Edge→Edge com x-crm-ai-internal-secret (sem Bearer de sessão).
 [functions.crm-ai-assistant]
 verify_jwt = false
+
+# Follow-up scheduler: chamado via pg_cron/pg_net com anon key + x-cron-secret header.
+[functions.crm-followup-scheduler]
+verify_jwt = false
