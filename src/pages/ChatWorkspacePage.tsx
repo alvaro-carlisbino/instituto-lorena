@@ -229,7 +229,13 @@ export function ChatWorkspacePage() {
                         lead.temperature === 'warm' ? "bg-yellow-500" : "bg-blue-500"
                       )} title={lead.temperature} />
                       <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground/40">
-                        {lead.source === 'whatsapp' ? 'WhatsApp' : lead.source === 'meta_instagram' ? 'Instagram' : 'CRM'}
+                        {lead.source === 'whatsapp' || lead.source === 'meta_whatsapp'
+                          ? 'WhatsApp'
+                          : lead.source === 'meta_instagram'
+                            ? 'Instagram'
+                            : lead.source === 'meta_facebook'
+                              ? 'Facebook'
+                              : 'CRM'}
                       </span>
                     </div>
                   </button>

@@ -174,7 +174,12 @@ export function LeadsPage() {
       if (pipelineFilter !== 'all' && lead.pipelineId !== pipelineFilter) return false
       if (stageFilter !== 'all' && lead.stageId !== stageFilter) return false
       if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) return false
-      if (sourceFilter !== 'all' && lead.source !== sourceFilter) return false
+      if (sourceFilter !== 'all') {
+        // Tratar 'whatsapp' (Evolution direta) e 'meta_whatsapp' (ManyChat WhatsApp) como a mesma família.
+        const wa = (s: string) => s === 'whatsapp' || s === 'meta_whatsapp'
+        const matches = lead.source === sourceFilter || (wa(sourceFilter) && wa(lead.source))
+        if (!matches) return false
+      }
       if (!n) return true
       const custom = Object.values(lead.customFields as Record<string, unknown>)
         .map((v) => (v != null ? String(v) : ''))
@@ -460,11 +465,20 @@ export function LeadsPage() {
             </LabeledSelectTrigger>
             <SelectContent className="rounded-xl">
               <SelectItem value="all" className="text-xs font-bold uppercase">Todas</SelectItem>
-              {(Object.keys(sourceLabel) as (keyof typeof sourceLabel)[]).map((k) => (
-                <SelectItem key={k} value={k} className="text-xs font-bold uppercase">
-                  {sourceLabel[k]}
-                </SelectItem>
-              ))}
+              {(() => {
+                const keys = Object.keys(sourceLabel) as (keyof typeof sourceLabel)[]
+                const seen = new Set<string>()
+                return keys.filter((k) => {
+                  const label = sourceLabel[k]
+                  if (seen.has(label)) return false
+                  seen.add(label)
+                  return true
+                }).map((k) => (
+                  <SelectItem key={k} value={k} className="text-xs font-bold uppercase">
+                    {sourceLabel[k]}
+                  </SelectItem>
+                ))
+              })()}
             </SelectContent>
           </Select>
         </div>

@@ -65,7 +65,7 @@ export type Lead = {
   id: string
   patientName: string
   phone: string
-  source: 'meta_facebook' | 'meta_instagram' | 'whatsapp' | 'manual'
+  source: 'meta_facebook' | 'meta_instagram' | 'meta_whatsapp' | 'whatsapp' | 'manual'
   createdAt: string
   position: number
   score: number
@@ -498,6 +498,7 @@ export const initialInteractions: Interaction[] = [
 export const sourceLabel: Record<Lead['source'], string> = {
   meta_facebook: 'Meta Facebook',
   meta_instagram: 'Meta Instagram',
+  meta_whatsapp: 'WhatsApp',
   whatsapp: 'WhatsApp',
   manual: 'Manual',
 }

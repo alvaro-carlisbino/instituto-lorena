@@ -72,7 +72,7 @@ export function setLeadFieldValue(lead: Lead, fieldKey: string, value: unknown):
       return { ...lead, phone: String(value ?? '') }
     case 'source': {
       const v = String(value ?? '')
-      const ok = ['meta_facebook', 'meta_instagram', 'whatsapp', 'manual'] as const
+      const ok = ['meta_facebook', 'meta_instagram', 'meta_whatsapp', 'whatsapp', 'manual'] as const
       const hit = ok.find((s) => s === v)
       return { ...lead, source: hit ?? lead.source }
     }

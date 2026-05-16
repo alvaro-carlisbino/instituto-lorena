@@ -81,7 +81,7 @@ export function DashboardPage() {
     [crm.leads, orgTz],
   )
   const newWhatsappToday = useMemo(
-    () => leadsNewToday.filter((l) => l.source === 'whatsapp'),
+    () => leadsNewToday.filter((l) => l.source === 'whatsapp' || l.source === 'meta_whatsapp'),
     [leadsNewToday],
   )
   const [handoffsToday, setHandoffsToday] = useState(0)
