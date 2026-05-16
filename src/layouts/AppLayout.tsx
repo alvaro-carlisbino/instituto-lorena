@@ -64,7 +64,9 @@ export function AppLayout({ title, subtitle, actions, children, mainClassName, f
         aria-labelledby={titleId}
         className={cn(
           "mx-auto w-full max-w-[min(100%,1800px)] min-w-0 relative flex flex-col min-h-0 flex-1",
-          fullHeight ? "overflow-hidden" : "overflow-y-auto overflow-x-hidden space-y-5 px-4 py-5 sm:space-y-6 sm:px-6 sm:py-6 lg:px-8",
+          fullHeight
+            ? "overflow-hidden"
+            : "overflow-y-auto overflow-x-hidden space-y-5 px-4 py-5 sm:space-y-6 sm:px-6 sm:py-6 lg:px-8 [&>*]:shrink-0",
           mainClassName
         )}
       >

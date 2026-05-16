@@ -33,14 +33,15 @@ export function LeadTaskPanel({ leadId, className }: Props) {
 
   const taskIdKey = tasks.map((t) => t.id).join(',')
   useEffect(() => {
-    if (!supa || tasks.length === 0) {
-      setAttByTask({})
+    if (!supa || taskIdKey === '') {
+      setAttByTask((prev) => (Object.keys(prev).length === 0 ? prev : {}))
       return
     }
     let cancelled = false
+    const ids = taskIdKey.split(',')
     void (async () => {
       try {
-        const rows = await fetchAttachmentsForTaskIds(tasks.map((t) => t.id))
+        const rows = await fetchAttachmentsForTaskIds(ids)
         if (cancelled) return
         const map: Record<string, LeadTaskAttachmentRow[]> = {}
         for (const r of rows) {
@@ -56,7 +57,7 @@ export function LeadTaskPanel({ leadId, className }: Props) {
     return () => {
       cancelled = true
     }
-  }, [supa, taskIdKey, tasks, leadId])
+  }, [supa, taskIdKey, leadId])
 
   const handleAdd = () => {
     const t = newTitle.trim()

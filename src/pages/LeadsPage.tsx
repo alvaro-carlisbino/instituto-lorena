@@ -184,9 +184,12 @@ export function LeadsPage() {
     })
   }, [crm.leads, searchTerm, pipelineFilter, stageFilter, ownerFilter, sourceFilter])
 
+  const crmRef = useRef(crm)
+  crmRef.current = crm
+
   const openLead = useCallback(
     (id: string) => {
-      crm.setSelectedLeadId(id)
+      crmRef.current.setSelectedLeadId(id)
       setSheetOpen(true)
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev)
@@ -194,18 +197,19 @@ export function LeadsPage() {
         return next
       })
     },
-    [crm, setSearchParams],
+    [setSearchParams],
   )
   const toggleLeadSelection = (leadId: string) => {
     setSelectedLeadIds((prev) => (prev.includes(leadId) ? prev.filter((id) => id !== leadId) : [...prev, leadId]))
   }
 
   useEffect(() => {
-    if (leadIdParam && crm.leads.some((l) => l.id === leadIdParam)) {
-      crm.setSelectedLeadId(leadIdParam)
+    if (!leadIdParam) return
+    if (crmRef.current.leads.some((l) => l.id === leadIdParam)) {
+      crmRef.current.setSelectedLeadId(leadIdParam)
       setSheetOpen(true)
     }
-  }, [leadIdParam, crm])
+  }, [leadIdParam])
 
   useEffect(() => {
     if (pipelineFilter !== 'all' && !crm.pipelineCatalog.some((p) => p.id === pipelineFilter)) {

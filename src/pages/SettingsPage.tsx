@@ -206,8 +206,8 @@ export function SettingsPage() {
         setAiMaxPerHour(Number(cfg.max_ai_replies_per_hour ?? 400))
         setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 10))
         setAiBusinessRules(cfg.business_rules || {})
-      } catch {
-        // noop
+      } catch (e) {
+        console.error('[ai-config] failed to load', e)
       } finally {
         setAiLoading(false)
       }
@@ -260,7 +260,7 @@ export function SettingsPage() {
               <ConversationModeSwitch
                 title="Modo padrão de novas conversas"
                 value={aiDefaultMode}
-                loading={false}
+                loading={aiLoading}
                 showFooterHint
                 onChange={setAiDefaultMode}
               />
@@ -410,68 +410,73 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card className={cn('mb-6', pageQuietCardClass)}>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Clock className="size-5 text-primary" />
-            Horário de Funcionamento
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-6">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label>Abertura</Label>
-              <Input
-                type="time"
-                value={crm.orgSettings.workingHours?.start || '08:00'}
-                onChange={(e) => crm.updateOrgSettings({
-                  workingHours: { ...crm.orgSettings.workingHours!, start: e.target.value }
-                })}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Fechamento</Label>
-              <Input
-                type="time"
-                value={crm.orgSettings.workingHours?.end || '18:00'}
-                onChange={(e) => crm.updateOrgSettings({
-                  workingHours: { ...crm.orgSettings.workingHours!, end: e.target.value }
-                })}
-              />
-            </div>
-          </div>
-          <div className="space-y-3">
-            <Label>Dias de Atendimento</Label>
-            <div className="flex flex-wrap gap-2">
-              {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day, idx) => {
-                const isSelected = crm.orgSettings.workingHours?.days.includes(idx)
-                return (
-                  <Button
-                    key={day}
-                    size="sm"
-                    variant={isSelected ? 'default' : 'outline'}
-                    className={cn(
-                      "w-12 h-9 rounded-xl transition-all",
-                      isSelected ? "shadow-md shadow-primary/20" : "opacity-60 hover:opacity-100"
-                    )}
-                    onClick={() => {
-                      const currentDays = crm.orgSettings.workingHours?.days || []
-                      const newDays = isSelected
-                        ? currentDays.filter(d => d !== idx)
-                        : [...currentDays, idx].sort()
-                      crm.updateOrgSettings({
-                        workingHours: { ...crm.orgSettings.workingHours!, days: newDays }
-                      })
-                    }}
-                  >
-                    {day}
-                  </Button>
-                )
-              })}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {(() => {
+        const wh = crm.orgSettings.workingHours ?? { start: '08:00', end: '18:00', days: [1, 2, 3, 4, 5] }
+        return (
+          <Card className={cn('mb-6', pageQuietCardClass)}>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Clock className="size-5 text-primary" />
+                Horário de Funcionamento
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-6">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label>Abertura</Label>
+                  <Input
+                    type="time"
+                    value={wh.start || '08:00'}
+                    onChange={(e) => crm.updateOrgSettings({
+                      workingHours: { ...wh, start: e.target.value }
+                    })}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Fechamento</Label>
+                  <Input
+                    type="time"
+                    value={wh.end || '18:00'}
+                    onChange={(e) => crm.updateOrgSettings({
+                      workingHours: { ...wh, end: e.target.value }
+                    })}
+                  />
+                </div>
+              </div>
+              <div className="space-y-3">
+                <Label>Dias de Atendimento</Label>
+                <div className="flex flex-wrap gap-2">
+                  {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day, idx) => {
+                    const isSelected = wh.days?.includes(idx) ?? false
+                    return (
+                      <Button
+                        key={day}
+                        size="sm"
+                        variant={isSelected ? 'default' : 'outline'}
+                        className={cn(
+                          "w-12 h-9 rounded-xl transition-all",
+                          isSelected ? "shadow-md shadow-primary/20" : "opacity-60 hover:opacity-100"
+                        )}
+                        onClick={() => {
+                          const currentDays = wh.days ?? []
+                          const newDays = isSelected
+                            ? currentDays.filter(d => d !== idx)
+                            : [...currentDays, idx].sort()
+                          crm.updateOrgSettings({
+                            workingHours: { ...wh, days: newDays }
+                          })
+                        }}
+                      >
+                        {day}
+                      </Button>
+                    )
+                  })}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )
+      })()}
 
       {crm.currentPermission.canRouteLeads ? (
         <div className="mb-8 grid gap-4 md:grid-cols-2">
