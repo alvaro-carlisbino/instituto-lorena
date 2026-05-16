@@ -239,7 +239,7 @@ export function SettingsPage() {
         className="mb-2"
       />
 
-      {crm.currentPermission.canManageUsers ? (
+      {canAccessSettings ? (
         <Card className={cn('mb-6', pageQuietCardClass)}>
           <CardHeader>
             <CardTitle className="text-base">Atendimento com IA</CardTitle>
