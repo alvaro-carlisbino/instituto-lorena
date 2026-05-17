@@ -21,6 +21,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { isSameLocalDayInTimezone } from '@/lib/sameLocalDayInTimezone'
 import { labelForIdName } from '@/lib/selectDisplay'
 import { fetchHandoffEventCountForTodayInTimezone } from '@/services/leadWaLineEvents'
+import { PendingHumanHandoffPanel } from '@/components/dashboard/PendingHumanHandoffPanel'
 import { cn } from '@/lib/utils'
 
 const CHART_COLORS = [
@@ -153,6 +154,10 @@ export function DashboardPage() {
         </div>
       }
     >
+      <section className="mb-6">
+        <PendingHumanHandoffPanel />
+      </section>
+
       {dashboardCards.length === 0 ? (
         <EmptyState
           icon={LayoutListIcon}
@@ -161,7 +166,8 @@ export function DashboardPage() {
           className="border-0 shadow-none mb-10 py-20"
         />
       ) : (
-        <section className="mb-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <>
+          <section className="mb-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {dashboardCards.map((card) => (
             <Card key={card.id} className="relative overflow-hidden border border-border/40 bg-card/60 backdrop-blur-sm transition-all duration-300 hover:bg-card hover:shadow-xl hover:-translate-y-1 rounded-3xl p-2">
               <div className="absolute top-0 right-0 p-6 opacity-[0.03]">
@@ -179,7 +185,8 @@ export function DashboardPage() {
               </CardHeader>
             </Card>
           ))}
-        </section>
+          </section>
+        </>
       )}
 
       {crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers ? (
