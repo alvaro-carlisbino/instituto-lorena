@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { temperaturePillClass } from '@/components/kanban/temperatureClass'
 import { sourceLabel } from '@/hooks/useCrmState'
+import { getSourceStyle } from '@/lib/channelStyles'
 import { getLeadFieldValue } from '@/lib/leadFields'
 import { formatTemperature } from '@/lib/fieldLabels'
 import { cn } from '@/lib/utils'
@@ -131,7 +132,15 @@ export function KanbanListView({
                           <div className="mt-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
                             <span>{getOwnerName(lead.ownerId)}</span>
                             <div className="size-1 rounded-full bg-border" />
-                            <span>{sourceLabel[lead.source]}</span>
+                            <span
+                              className={cn(
+                                'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                                getSourceStyle(lead.source).pill,
+                              )}
+                            >
+                              <span className={cn('h-1 w-1 rounded-full', getSourceStyle(lead.source).dot)} aria-hidden />
+                              {sourceLabel[lead.source]}
+                            </span>
                           </div>
                           {tagPillsForLead(lead.id).length > 0 ? (
                             <div className="mt-3 flex flex-wrap gap-1.5">
@@ -212,7 +221,13 @@ export function KanbanListView({
                               <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/80">{getOwnerName(lead.ownerId)}</span>
                             </td>
                             <td className="px-4 py-4">
-                              <span className="inline-flex items-center rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                              <span
+                                className={cn(
+                                  'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                                  getSourceStyle(lead.source).pill,
+                                )}
+                              >
+                                <span className={cn('h-1.5 w-1.5 rounded-full', getSourceStyle(lead.source).dot)} aria-hidden />
                                 {sourceLabel[lead.source]}
                               </span>
                             </td>

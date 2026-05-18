@@ -3,7 +3,7 @@ import { nowIso } from '../_shared/crmAiAutoReply.ts'
 import {
   pushManychatInstagramDmAfterReply,
   pushManychatWhatsappDmAfterReply,
-  readManychatPushConfigForChannel,
+  readManychatPushConfigForTenantChannel,
 } from '../_shared/manychatPublicApi.ts'
 import { insertInteraction } from '../_shared/crm.ts'
 
@@ -136,7 +136,8 @@ Deno.serve(async (req) => {
         custom_fields,
         whatsapp_instance_id,
         deleted_at,
-        conversation_status
+        conversation_status,
+        tenant_id
       )
     `)
     .eq('ai_enabled', true)
@@ -164,6 +165,7 @@ Deno.serve(async (req) => {
       whatsapp_instance_id: string | null
       deleted_at: string | null
       conversation_status: string | null
+      tenant_id: string
     }
 
     if (!lead) { skipped++; continue }
@@ -231,7 +233,7 @@ Deno.serve(async (req) => {
       } else if (subscriberId) {
         // ManyChat (Instagram DM ou WhatsApp via ManyChat)
         const pushChannel = channel === 'whatsapp' ? 'whatsapp' : 'instagram'
-        const mcCfg = readManychatPushConfigForChannel(pushChannel)
+        const mcCfg = await readManychatPushConfigForTenantChannel(admin, lead.tenant_id, pushChannel)
 
         if (!mcCfg) {
           console.warn(`followup: no manychat config for channel=${pushChannel} lead=${leadId}`)

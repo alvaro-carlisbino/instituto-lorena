@@ -341,7 +341,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       .select('id, timezone, date_format, week_starts_on, appointment_completed_routing')
       .eq('id', 'default')
       .maybeSingle(),
-    client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, metadata'),
+    client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, storage_path, metadata'),
   ])
 
   if (pipelinesRes.error) throw pipelinesRes.error
@@ -451,6 +451,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
         type: row.media_type as any,
         mimeType: row.mime_type,
         base64: row.media_base64,
+        url: (row as { storage_path?: string | null }).storage_path ?? undefined,
         caption: (row.metadata as any)?.caption,
       })
       mediaByInteraction.set(iid, list)
@@ -680,7 +681,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
       .order('happened_at', { ascending: false })
       .limit(3200),
     client.from('lead_tag_assignments').select('lead_id, tag_id'),
-    client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, metadata'),
+    client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, storage_path, metadata'),
     client.from('crm_lead_followup_state').select('lead_id, current_step, status'),
   ])
   if (leadsRes.error) throw leadsRes.error
@@ -722,6 +723,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
         type: row.media_type as any,
         mimeType: row.mime_type,
         base64: row.media_base64,
+        url: (row as { storage_path?: string | null }).storage_path ?? undefined,
         caption: (row.metadata as any)?.caption,
       })
       mediaByInteraction.set(iid, list)

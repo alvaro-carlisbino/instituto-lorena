@@ -295,3 +295,79 @@ export function readManychatPushConfigForChannel(channelRaw: string): {
   const isWa = c === 'whatsapp' || c === 'wa'
   return isWa ? readManychatWaPushConfigFromEnv() : readManychatPushConfigFromEnv()
 }
+
+type SupabaseClientLike = {
+  from: (table: string) => {
+    select: (cols: string) => {
+      eq: (col: string, val: string) => {
+        maybeSingle: () => Promise<{ data: unknown; error: unknown }>
+      }
+    }
+  }
+}
+
+type ManychatChannelConfig = {
+  field_id?: number | string
+  flow_ns?: string
+  message_tag?: string
+}
+
+type ManychatTenantConfig = {
+  api_key?: string
+  instagram?: ManychatChannelConfig
+  whatsapp?: ManychatChannelConfig
+}
+
+/**
+ * Config ManyChat por tenant: lê de `tenant_integrations.manychat` primeiro,
+ * caindo para os secrets globais (env) caso o tenant não tenha config própria.
+ *
+ * Permite que cada clínica use sua própria conta ManyChat sem reciclar secrets globais.
+ * O Instituto Lorena continua funcionando porque seu tenant_integrations.manychat está vazio
+ * e os env vars (MANYCHAT_API_KEY etc.) seguem como fallback.
+ */
+export async function readManychatPushConfigForTenantChannel(
+  admin: SupabaseClientLike,
+  tenantId: string,
+  channelRaw: string,
+): Promise<{
+  apiKey: string
+  fieldId: number
+  flowNs: string
+  messageTag: string
+} | null> {
+  const envConfig = readManychatPushConfigForChannel(channelRaw)
+  if (!tenantId) return envConfig
+
+  let tenantConfig: ManychatTenantConfig = {}
+  try {
+    const { data } = await admin
+      .from('tenant_integrations')
+      .select('manychat')
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    const raw = (data as { manychat?: unknown } | null)?.manychat
+    if (raw && typeof raw === 'object') tenantConfig = raw as ManychatTenantConfig
+  } catch {
+    /* ignore — caímos para env */
+  }
+
+  const c = channelRaw.trim().toLowerCase()
+  const isWa = c === 'whatsapp' || c === 'wa'
+  const channelKey = isWa ? 'whatsapp' : 'instagram'
+  const channelConfig: ManychatChannelConfig = tenantConfig[channelKey] ?? {}
+
+  const apiKey = String(tenantConfig.api_key ?? envConfig?.apiKey ?? '').trim()
+  if (!apiKey) return null
+
+  const fieldIdRaw = channelConfig.field_id ?? envConfig?.fieldId
+  const fieldIdNum = Number(fieldIdRaw)
+  const fieldId = Number.isFinite(fieldIdNum) && fieldIdNum > 0 ? fieldIdNum : (envConfig?.fieldId ?? 14539456)
+
+  const flowNs = String(channelConfig.flow_ns ?? envConfig?.flowNs ?? '').trim()
+  if (!flowNs) return null
+
+  const messageTag = String(channelConfig.message_tag ?? envConfig?.messageTag ?? '').trim()
+
+  return { apiKey, fieldId, flowNs, messageTag }
+}

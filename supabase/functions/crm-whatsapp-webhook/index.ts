@@ -7,6 +7,8 @@ import {
 } from '../_shared/crmAiAutoReply.ts'
 import { enrichInboundWhatsappMediaAndAppendContext } from '../_shared/crmMediaEnrichment.ts'
 import { findSyntheticInstagramLeadByName, insertInteraction, mergeLeadDropIntoKeep, upsertLeadByPhone } from '../_shared/crm.ts'
+import { notifyAgents } from '../_shared/notifyAgents.ts'
+import { resolveTenantFromEvolutionInstance, DEFAULT_TENANT_ID } from '../_shared/tenantResolve.ts'
 import { WA_INSTAGRAM_MERGE_NOTICE_CONTENT } from '../_shared/waInstagramMergeNotice.ts'
 import { getWhatsappProviderFromEnv } from '../_shared/whatsapp/provider.ts'
 import { getWhatsappProviderForEvent, resolveWhatsappInstanceRowForProvider } from '../_shared/whatsapp/evolutionConfig.ts'
@@ -83,6 +85,11 @@ Deno.serve(async (req) => {
     metaPhoneNumberId: normalized.metaPhoneNumberId ?? '',
   })
   const wInstanceId = wInstance?.id ?? null
+  // O tenant é resolvido a partir da instância Evolution — cada clínica configura
+  // sua própria linha WhatsApp em `whatsapp_channel_instances.tenant_id`.
+  const tenantId = wInstance?.tenant_id
+    ? String(wInstance.tenant_id)
+    : await resolveTenantFromEvolutionInstance(admin, normalized.evolutionInstanceName ?? '')
 
   const instanceKey =
     envProvider === 'official'
@@ -122,6 +129,7 @@ Deno.serve(async (req) => {
           externalMessageId: normalized.externalMessageId,
           direction: 'out',
         },
+        tenantId,
       })
 
       const { data: existingInt } = await admin
@@ -201,6 +209,7 @@ Deno.serve(async (req) => {
         provider: provider.name,
         externalMessageId: normalized.externalMessageId,
       },
+      tenantId,
     })
 
     // Cross-channel merge: WhatsApp message from someone already known via Instagram
@@ -294,6 +303,18 @@ Deno.serve(async (req) => {
       .maybeSingle()
     const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
 
+    const { data: leadBefore } = await admin
+      .from('leads')
+      .select('conversation_status')
+      .eq('id', lead.leadId)
+      .maybeSingle()
+    const statusBefore = String((leadBefore as { conversation_status?: string | null } | null)?.conversation_status ?? '') as
+      | 'new'
+      | 'ai_triaging'
+      | 'waiting_human'
+      | 'human_active'
+      | ''
+
     const gate = await evaluateCrmAiAutoReplyGate(admin, lead.leadId, {
       directionIsInbound: normalized.direction === 'in',
     })
@@ -326,40 +347,31 @@ Deno.serve(async (req) => {
           last_interaction_at: new Date().toISOString(),
           conversation_status: 'waiting_human'
         }).eq('id', lead.leadId)
-        
-        // Busca usuários que devem receber a notificação (SDRs e Gestores)
-        const { data: usersToNotify } = await admin
-          .from('app_users')
-          .select('auth_user_id')
-          .in('role', ['admin', 'gestor', 'sdr'])
 
-        if (usersToNotify?.length) {
-          const authIds = [
-            ...new Set(
-              usersToNotify
-                .map((u) => u.auth_user_id as string | null | undefined)
-                .filter((id): id is string => typeof id === 'string' && id.length > 0),
-            ),
-          ]
-          if (authIds.length > 0) {
-            try {
-              await admin.from('app_inbox_notifications').insert(
-                authIds.map((auth_user_id) => ({
-                  auth_user_id,
-                  title: 'Triagem Finalizada',
-                  body: `A IA terminou a triagem de ${normalized.fromName}. Pronto para assumir!`,
-                  kind: 'urgent',
-                  metadata: { leadId: lead.leadId },
-                })),
-              )
-            } catch (notifyErr) {
-              console.warn('[whatsapp-webhook] app_inbox_notifications:', notifyErr)
-            }
-          }
-        }
+        await notifyAgents(admin, {
+          leadId: lead.leadId,
+          kind: 'handoff',
+          title: 'Triagem Finalizada',
+          body: `A IA terminou a triagem de ${normalized.fromName}. Pronto para assumir!`,
+          includeOwner: true,
+          tenantId,
+        })
       } else if (replied) {
         // Se a IA respondeu mas ainda está triando
         await admin.from('leads').update({ conversation_status: 'ai_triaging' }).eq('id', lead.leadId)
+      } else if (statusBefore === 'waiting_human' || statusBefore === 'human_active') {
+        // IA não vai responder agora (burst pendente ou skip) e o paciente já estava na fila humana →
+        // notifica que chegou nova mensagem aguardando atendimento.
+        await notifyAgents(admin, {
+          leadId: lead.leadId,
+          kind: 'urgent',
+          title: 'Nova mensagem do paciente',
+          body: `${normalized.fromName} enviou uma nova mensagem e aguarda resposta.`,
+          includeOwner: true,
+          dedupeKey: 'unanswered_inbound',
+          dedupeWindowMinutes: 3,
+          tenantId,
+        })
       }
 
       // Sempre atualiza o timestamp de última interação
@@ -380,6 +392,30 @@ Deno.serve(async (req) => {
         aiEnabled: gate.aiEnabled,
         inboundHappenedAt: normalized.happenedAt,
       })
+
+      // Lead em modo 100% humano: marca como aguardando atendimento e notifica equipa.
+      // Em mensagens subsequentes (statusBefore já era waiting_human/human_active), reaproveita
+      // a key de dedupe para não inundar a caixa com cada palavra do paciente.
+      const isFirstHumanTouch = statusBefore === '' || statusBefore === 'new'
+      if (isFirstHumanTouch) {
+        await admin.from('leads').update({
+          updated_at: new Date().toISOString(),
+          last_interaction_at: new Date().toISOString(),
+          conversation_status: 'waiting_human',
+        }).eq('id', lead.leadId)
+      }
+
+      await notifyAgents(admin, {
+        leadId: lead.leadId,
+        kind: isFirstHumanTouch ? 'handoff' : 'urgent',
+        title: isFirstHumanTouch ? 'Novo lead aguardando' : 'Nova mensagem do paciente',
+        body: `${normalized.fromName} ${isFirstHumanTouch ? 'iniciou uma conversa' : 'enviou uma nova mensagem'} e aguarda atendimento.`,
+        includeOwner: true,
+        dedupeKey: 'unanswered_inbound',
+        dedupeWindowMinutes: isFirstHumanTouch ? 0 : 3,
+        tenantId,
+      })
+
       routing = 'manual_handoff'
     }
 

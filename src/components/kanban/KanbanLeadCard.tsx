@@ -2,6 +2,7 @@ import type { Lead, WorkflowField } from '@/mocks/crmMock'
 
 import { Button } from '@/components/ui/button'
 import { useNowMs } from '@/hooks/useNowMs'
+import { getSourceStyle } from '@/lib/channelStyles'
 import { cn } from '@/lib/utils'
 import { formatTemperature } from '@/lib/fieldLabels'
 import { getLeadFieldValue } from '@/lib/leadFields'
@@ -162,7 +163,13 @@ export function KanbanLeadCard({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="inline-flex items-center rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+        <span
+          className={cn(
+            'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+            getSourceStyle(lead.source).pill,
+          )}
+        >
+          <span className={cn('h-1.5 w-1.5 rounded-full', getSourceStyle(lead.source).dot)} aria-hidden />
           {sourceLabel}
         </span>
         {tagPills.map((t) => (

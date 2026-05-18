@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { notifyAgents } from '../_shared/notifyAgents.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -7,6 +8,24 @@ const cors = {
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
+}
+
+/**
+ * Minutos sem resposta após os quais disparamos lembretes de "alguém sem responder".
+ * Cada nível dispara no máximo uma vez por lead (dedupe por chave dedicada).
+ */
+const STALE_LEVELS: Array<{ minutes: number; key: string; kind: 'urgent' | 'handoff'; title: string }> = [
+  { minutes: 15, key: 'stale_waiting_human_15m', kind: 'urgent', title: 'Lead aguardando há 15 min' },
+  { minutes: 60, key: 'stale_waiting_human_1h', kind: 'urgent', title: 'Lead aguardando há 1 hora' },
+  { minutes: 240, key: 'stale_waiting_human_4h', kind: 'urgent', title: 'Lead aguardando há 4 horas' },
+]
+
+function pickStaleLevel(idleMinutes: number): (typeof STALE_LEVELS)[number] | null {
+  // Devolve o nível mais alto cuja janela já foi cruzada.
+  for (let i = STALE_LEVELS.length - 1; i >= 0; i--) {
+    if (idleMinutes >= STALE_LEVELS[i].minutes) return STALE_LEVELS[i]
+  }
+  return null
 }
 
 Deno.serve(async (req) => {
@@ -68,5 +87,42 @@ Deno.serve(async (req) => {
     }
   }
 
-  return json({ ok: true, remindersCreated: created, dayAppointments: (dayList ?? []).length })
+  // === Lembretes de "alguém sem responder" (leads em waiting_human há muito tempo) ===
+  const fourHoursAgo = new Date(now - 4 * 3600_000).toISOString()
+  const { data: stale } = await admin
+    .from('leads')
+    .select('id, patient_name, last_interaction_at, conversation_status')
+    .eq('conversation_status', 'waiting_human')
+    .gte('last_interaction_at', fourHoursAgo) // só leads recentes; nada de baixar leads antigos do dia anterior
+    .is('deleted_at', null)
+    .limit(200)
+
+  let staleNotified = 0
+  for (const row of stale ?? []) {
+    const r = row as { id: string; patient_name: string; last_interaction_at: string | null }
+    if (!r.last_interaction_at) continue
+    const idleMs = now - new Date(r.last_interaction_at).getTime()
+    const idleMin = Math.floor(idleMs / 60_000)
+    const level = pickStaleLevel(idleMin)
+    if (!level) continue
+
+    const inserted = await notifyAgents(admin, {
+      leadId: String(r.id),
+      kind: level.kind,
+      title: level.title,
+      body: `${r.patient_name || 'Lead'} ainda não foi atendido(a). Vamos responder?`,
+      includeOwner: true,
+      // Cada nível dispara no máximo uma vez por lead durante um intervalo amplo.
+      dedupeKey: level.key,
+      dedupeWindowMinutes: 24 * 60,
+    })
+    if (inserted > 0) staleNotified++
+  }
+
+  return json({
+    ok: true,
+    remindersCreated: created,
+    dayAppointments: (dayList ?? []).length,
+    staleNotified,
+  })
 })

@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { CrmProvider } from './context/CrmContext'
+import { TenantProvider } from './context/TenantContext'
 import { useCrmState } from './hooks/useCrmState'
 import { getDataProviderMode } from './services/dataMode'
 import { DashboardPage } from './pages/DashboardPage'
@@ -23,6 +24,7 @@ import { LeadsPage } from './pages/LeadsPage'
 import { TasksPage } from './pages/TasksPage'
 import { ChatWorkspacePage } from './pages/ChatWorkspacePage'
 import { AdminOperationsPage } from './pages/AdminOperationsPage'
+import { TenantsAdminPage } from './pages/TenantsAdminPage'
 import { WhatsappConnectionPage } from './pages/WhatsappConnectionPage'
 import { AgendaPage } from './pages/AgendaPage'
 import { CommandPalette } from './components/CommandPalette'
@@ -53,6 +55,7 @@ function AppRoutes() {
       <Route path="/auditoria" element={<AuditPage />} />
       <Route path="/admin-lab" element={<AdminLabPage />} />
       <Route path="/admin-operacao" element={<AdminOperationsPage />} />
+      <Route path="/admin-clinicas" element={<TenantsAdminPage />} />
       <Route path="/admin-whatsapp" element={<WhatsappConnectionPage />} />
       <Route path="/configuracoes" element={<SettingsPage />} />
       <Route path="/tv-config" element={<TvConfigPage />} />
@@ -94,26 +97,28 @@ function App() {
   }
 
   return (
-    <CrmProvider value={crmState}>
-      <a href="#main-content" className="skip-link">
-        Pular para o conteúdo principal
-      </a>
-      <TooltipProvider delay={200}>
-        <SidebarProvider>
-          <AppSidebar />
-          <CommandPalette />
-          <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="shrink-0 md:hidden">
-              <TopNav />
+    <TenantProvider>
+      <CrmProvider value={crmState}>
+        <a href="#main-content" className="skip-link">
+          Pular para o conteúdo principal
+        </a>
+        <TooltipProvider delay={200}>
+          <SidebarProvider>
+            <AppSidebar />
+            <CommandPalette />
+            <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+              <div className="shrink-0 md:hidden">
+                <TopNav />
+              </div>
+              <RouteTransition>
+                <AppRoutes />
+              </RouteTransition>
             </div>
-            <RouteTransition>
-              <AppRoutes />
-            </RouteTransition>
-          </div>
-        </SidebarProvider>
-      </TooltipProvider>
-      <Toaster richColors position="top-right" />
-    </CrmProvider>
+          </SidebarProvider>
+        </TooltipProvider>
+        <Toaster richColors position="top-right" />
+      </CrmProvider>
+    </TenantProvider>
   )
 }
 

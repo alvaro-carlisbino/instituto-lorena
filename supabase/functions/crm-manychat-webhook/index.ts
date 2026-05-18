@@ -18,9 +18,16 @@ import {
 import {
   pushManychatInstagramDmAfterReply,
   pushManychatWhatsappDmAfterReply,
-  readManychatPushConfigForChannel,
+  readManychatPushConfigForTenantChannel,
 } from '../_shared/manychatPublicApi.ts'
 import { resolveWhatsappLineInstanceId, sanitizeCrmInstanceKey } from '../_shared/manychatInstanceResolve.ts'
+import {
+  extractManychatMedia,
+  stripManybotUrlsFromText,
+  type ExtractedMedia,
+} from '../_shared/manychatMedia.ts'
+import { notifyAgents } from '../_shared/notifyAgents.ts'
+import { resolveTenantFromManychatBody } from '../_shared/tenantResolve.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -40,7 +47,7 @@ function digitsOnly(value: string): string {
 
 async function ensureManychatLeadId(
   admin: ReturnType<typeof createClient>,
-  input: { subscriberId: string; userName: string; text: string; phone?: string; channel?: string },
+  input: { subscriberId: string; userName: string; text: string; phone?: string; channel?: string; tenantId?: string },
 ): Promise<string> {
   const sid = input.subscriberId.trim()
   const digits = input.phone ? digitsOnly(input.phone) : ''
@@ -50,6 +57,7 @@ async function ensureManychatLeadId(
       patientName: input.userName || 'Lead Instagram',
       realPhoneDigits: digits,
       summary: input.text.slice(0, 500),
+      tenantId: input.tenantId,
     })
     return leadId
   }
@@ -64,6 +72,7 @@ async function ensureManychatLeadId(
       manychat_subscriber_id: sid,
       channel: input.channel || 'instagram',
     },
+    tenantId: input.tenantId,
   })
 
   // Cross-channel merge: Instagram message from someone already known via WhatsApp
@@ -103,6 +112,10 @@ type ManychatPipelineCtx = {
   channel?: string
   /** Linha CRM (`whatsapp_channel_instances`) para prompt IA por instância. */
   whatsappLineInstanceId: string | null
+  /** Anexos extraídos do payload ManyChat (URLs S3 ou similares). */
+  inboundMedia: ExtractedMedia[]
+  /** Tenant resolvido do body (campo `tenant_slug`) ou fallback 'instituto-lorena'. */
+  tenantId: string
 }
 
 type ManychatPipelineResult = {
@@ -113,6 +126,56 @@ type ManychatPipelineResult = {
   manychat_push: Record<string, unknown>
   ai_skip_reasons?: string[]
   hint?: string | null
+}
+
+/**
+ * Constrói o texto que vai no `content` da interaction quando o paciente envia mídia.
+ * Se houver caption/texto, usamos. Senão deixamos uma marca legível por canal.
+ */
+function contentForInboundWithMedia(text: string, media: ExtractedMedia[]): string {
+  const cleanText = stripManybotUrlsFromText(text).trim()
+  if (cleanText) return cleanText
+  if (media.length === 0) return ''
+  const labels = media.map((m) => {
+    if (m.type === 'image') return '🖼️ Foto'
+    if (m.type === 'audio') return '🎙️ Áudio'
+    if (m.type === 'video') return '🎬 Vídeo'
+    if (m.type === 'document') return '📎 Documento'
+    return '📁 Mídia'
+  })
+  return labels.join(' • ')
+}
+
+/**
+ * Grava os anexos extraídos do payload ManyChat em `crm_media_items`, linkando à
+ * interaction recém-criada. A URL do S3 do ManyChat vai em `storage_path` (estável,
+ * público o bastante para renderizar direto no chat sem precisar baixar).
+ */
+async function persistManychatMedia(
+  admin: AdminClient,
+  input: { leadId: string; interactionId: string; media: ExtractedMedia[] },
+): Promise<void> {
+  if (input.media.length === 0) return
+  try {
+    await admin.from('crm_media_items').insert(
+      input.media.map((m) => ({
+        lead_id: input.leadId,
+        interaction_id: input.interactionId,
+        direction: 'in',
+        media_type: m.type === 'other' ? 'document' : m.type,
+        mime_type: m.mimeType ?? null,
+        storage_path: m.url,
+        metadata: {
+          source: 'manychat',
+          original_url: m.url,
+          caption: m.caption ?? null,
+          name: m.name ?? null,
+        },
+      })),
+    )
+  } catch (e) {
+    console.warn('[manychat-webhook] crm_media_items insert failed:', e instanceof Error ? e.message : String(e))
+  }
 }
 
 function scheduleEdgeBackground(task: Promise<void>): void {
@@ -135,11 +198,16 @@ function scheduleEdgeBackground(task: Promise<void>): void {
  * Sem isso, devolve-se modo síncrono com `reply` no JSON (ManyChat mapeia no passo seguinte).
  * `manychat_sync: true` força síncrono; `manychat_async: true` só entra em fila se o push estiver configurado.
  */
-function isManychatAsyncAck(body: Record<string, unknown>, pushChannel: string): boolean {
+async function isManychatAsyncAck(
+  admin: AdminClient,
+  tenantId: string,
+  body: Record<string, unknown>,
+  pushChannel: string,
+): Promise<boolean> {
   if (body.manychat_sync === true || String(body.manychat_sync ?? '').trim().toLowerCase() === 'true') {
     return false
   }
-  const pushCfg = readManychatPushConfigForChannel(pushChannel)
+  const pushCfg = await readManychatPushConfigForTenantChannel(admin, tenantId, pushChannel)
 
   const forcedAsync =
     body.manychat_async === true || String(body.manychat_async ?? '').trim().toLowerCase() === 'true'
@@ -181,6 +249,7 @@ async function runManychatMessagePipeline(
       text: ctx.text,
       phone: ctx.phoneOpt,
       channel: ctx.channel,
+      tenantId: ctx.tenantId,
     })
 
     let waInstForAi: string | null = ctx.whatsappLineInstanceId
@@ -195,15 +264,21 @@ async function runManychatMessagePipeline(
       if (w) waInstForAi = String(w)
     }
 
-    await insertInteraction(admin, {
+    const inboundContent = contentForInboundWithMedia(ctx.text, ctx.inboundMedia)
+    const inboundInteractionId = await insertInteraction(admin, {
       leadId,
       patientName: ctx.userName,
       // Distingue WhatsApp via ManyChat de Instagram via ManyChat para badge correto no chat.
       channel: ctx.channel === 'whatsapp' ? 'whatsapp' : 'meta',
       direction: 'in',
       author: ctx.userName,
-      content: ctx.text,
+      content: inboundContent,
       happenedAt: nowIso(),
+    })
+    await persistManychatMedia(admin, {
+      leadId,
+      interactionId: inboundInteractionId,
+      media: ctx.inboundMedia,
     })
 
     const { data: state } = await admin
@@ -213,6 +288,18 @@ async function runManychatMessagePipeline(
       .maybeSingle()
     const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
     const statePrompt = String(state?.prompt_override ?? config?.system_prompt ?? '').trim()
+
+    const { data: leadBefore } = await admin
+      .from('leads')
+      .select('conversation_status')
+      .eq('id', leadId)
+      .maybeSingle()
+    const statusBefore = String((leadBefore as { conversation_status?: string | null } | null)?.conversation_status ?? '') as
+      | 'new'
+      | 'ai_triaging'
+      | 'waiting_human'
+      | 'human_active'
+      | ''
 
     const gate = await evaluateCrmAiAutoReplyGate(admin, leadId, {
       directionIsInbound: true,
@@ -234,12 +321,62 @@ async function runManychatMessagePipeline(
       })
       reply = replyText ?? ''
       handoffSuggested = Boolean(ho)
+
+      if (handoffSuggested) {
+        await admin.from('leads').update({
+          updated_at: nowIso(),
+          last_interaction_at: nowIso(),
+          conversation_status: 'waiting_human',
+        }).eq('id', leadId)
+
+        await notifyAgents(admin, {
+          leadId,
+          kind: 'handoff',
+          title: 'Triagem Finalizada',
+          body: `A IA terminou a triagem de ${ctx.userName}. Pronto para assumir!`,
+          includeOwner: true,
+          tenantId: ctx.tenantId,
+        })
+      } else if (reply.trim().length > 0) {
+        await admin.from('leads').update({ conversation_status: 'ai_triaging', updated_at: nowIso() }).eq('id', leadId)
+      } else if (statusBefore === 'waiting_human' || statusBefore === 'human_active') {
+        await notifyAgents(admin, {
+          leadId,
+          kind: 'urgent',
+          title: 'Nova mensagem do paciente',
+          body: `${ctx.userName} enviou uma nova mensagem e aguarda resposta.`,
+          includeOwner: true,
+          dedupeKey: 'unanswered_inbound',
+          dedupeWindowMinutes: 3,
+          tenantId: ctx.tenantId,
+        })
+      }
     } else {
       await upsertConversationStateInboundOnly(admin, {
         leadId,
         ownerMode: gate.ownerMode,
         aiEnabled: gate.aiEnabled,
         inboundHappenedAt: nowIso(),
+      })
+
+      const isFirstHumanTouch = statusBefore === '' || statusBefore === 'new'
+      if (isFirstHumanTouch) {
+        await admin.from('leads').update({
+          updated_at: nowIso(),
+          last_interaction_at: nowIso(),
+          conversation_status: 'waiting_human',
+        }).eq('id', leadId)
+      }
+
+      await notifyAgents(admin, {
+        leadId,
+        kind: isFirstHumanTouch ? 'handoff' : 'urgent',
+        title: isFirstHumanTouch ? 'Novo lead aguardando' : 'Nova mensagem do paciente',
+        body: `${ctx.userName} ${isFirstHumanTouch ? 'iniciou uma conversa' : 'enviou uma nova mensagem'} e aguarda atendimento.`,
+        includeOwner: true,
+        dedupeKey: 'unanswered_inbound',
+        dedupeWindowMinutes: isFirstHumanTouch ? 0 : 3,
+        tenantId: ctx.tenantId,
       })
     }
 
@@ -254,7 +391,7 @@ async function runManychatMessagePipeline(
       manychatPush = { attempted: false, skipped_reason: 'manychat_skip_push' }
     } else if (replyTrimmed) {
       const isWa = ctx.channel === 'whatsapp' || ctx.channel === 'wa'
-      const mcCfg = readManychatPushConfigForChannel(String(ctx.channel ?? ''))
+      const mcCfg = await readManychatPushConfigForTenantChannel(admin, ctx.tenantId, String(ctx.channel ?? ''))
       
       if (!mcCfg) {
         manychatPush = { attempted: false, skipped_reason: 'no_manychat_api_key_or_config_missing' }
@@ -388,6 +525,10 @@ Deno.serve(async (req) => {
 
   if (!subscriberId) return json({ error: 'missing_subscriber_id' }, 400)
 
+  // Resolve o tenant a partir do body (tenant_slug). Cada clínica configura este
+  // valor no External Request do seu ManyChat. Sem tenant_slug, cai em fallback.
+  const tenantId = await resolveTenantFromManychatBody(admin, body)
+
   if (action === 'merge_phone') {
     const phone = String(body.phone ?? '').trim()
     const digits = digitsOnly(phone)
@@ -402,6 +543,7 @@ Deno.serve(async (req) => {
         patientName: userName,
         realPhoneDigits: digits,
         summary,
+        tenantId,
       })
       return json({ ok: true, leadId, merged, action: 'merge_phone' })
     } catch (e) {
@@ -411,12 +553,27 @@ Deno.serve(async (req) => {
 
   const text = String(body.text ?? body.message ?? '').trim()
   const replyOnly = String(body.reply ?? '').trim()
-  if (!text && !(action === 'record_outbound' && replyOnly)) {
+  const inboundMedia = extractManychatMedia(body)
+  // Aceitamos uma mensagem só com mídia (paciente envia foto/áudio sem caption).
+  if (!text && inboundMedia.length === 0 && !(action === 'record_outbound' && replyOnly)) {
     return json({ error: 'missing_text' }, 400)
   }
 
   const contextAppend = String(body.context_append ?? body.user_context ?? '').trim()
-  const aiInboundUserText = contextAppend ? `${text}\n\n---\n${contextAppend}` : text
+  // Dá contexto à IA: além do texto e do `context_append`, lista os tipos/URLs de mídia
+  // que vieram, para que o modelo saiba que o paciente mandou um anexo.
+  const mediaContextLine =
+    inboundMedia.length > 0
+      ? '[Anexos recebidos: ' +
+        inboundMedia
+          .map((m) => `${m.type}${m.mimeType ? ` (${m.mimeType})` : ''}${m.url ? ` ${m.url}` : ''}`)
+          .join(' | ') +
+        ']'
+      : ''
+  const aiInboundUserText = [text, contextAppend, mediaContextLine]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join('\n\n---\n')
 
   const userName = String(body.user_name ?? body.name ?? 'Lead Instagram').trim() || 'Lead Instagram'
   const phoneOpt = String(body.phone ?? '').trim() || undefined
@@ -438,15 +595,22 @@ Deno.serve(async (req) => {
         text,
         phone: phoneOpt,
         channel: effectiveChannel,
+        tenantId,
       })
-      await insertInteraction(admin, {
+      const ingestContent = contentForInboundWithMedia(text, inboundMedia)
+      const ingestInteractionId = await insertInteraction(admin, {
         leadId,
         patientName: userName,
         channel: effectiveChannel === 'whatsapp' ? 'whatsapp' : 'meta',
         direction: 'in',
         author: userName,
-        content: text,
+        content: ingestContent,
         happenedAt: nowIso(),
+      })
+      await persistManychatMedia(admin, {
+        leadId,
+        interactionId: ingestInteractionId,
+        media: inboundMedia,
       })
       return json({
         ok: true,
@@ -455,6 +619,7 @@ Deno.serve(async (req) => {
         reply: '',
         handoff_suggested: false,
         routing: 'ingest_only',
+        media_count: inboundMedia.length,
       })
     } catch (e) {
       return json(
@@ -552,9 +717,11 @@ Deno.serve(async (req) => {
     skipManychatPush,
     channel: effectiveChannel,
     whatsappLineInstanceId,
+    inboundMedia,
+    tenantId,
   }
 
-  if (isManychatAsyncAck(body, effectiveChannel)) {
+  if (await isManychatAsyncAck(admin, tenantId, body, effectiveChannel)) {
     scheduleEdgeBackground(
       runManychatMessagePipeline(admin, pipelineCtx).catch((err) => {
         console.error('crm-manychat-webhook async pipeline:', err)

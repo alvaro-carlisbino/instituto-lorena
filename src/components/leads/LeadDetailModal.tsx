@@ -22,6 +22,8 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Trash2 } from 'lucide-react'
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
+import { getSourceStyle } from '@/lib/channelStyles'
+import { cn } from '@/lib/utils'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { workflowFieldsForContext, isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
 import { labelForIdName } from '@/lib/selectDisplay'
@@ -196,7 +198,14 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                       <span className="flex flex-wrap gap-2">
                         <Badge variant="secondary">{pipeline?.name ?? lead.pipelineId}</Badge>
                         <Badge variant="outline">{stageName}</Badge>
-                        <Badge variant="outline">{sourceLabel[lead.source]}</Badge>
+                        <span
+                          className={cn(
+                            'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium',
+                            getSourceStyle(lead.source).pill,
+                          )}
+                        >
+                          {sourceLabel[lead.source]}
+                        </span>
                         <Badge variant="outline">{crm.getOwnerName(lead.ownerId)}</Badge>
                       </span>
                       {lead.lost_reason?.trim() ? (
