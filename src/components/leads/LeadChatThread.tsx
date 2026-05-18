@@ -49,7 +49,10 @@ import { forceAiReply, type ConversationOwnerMode } from '@/services/conversatio
 
 const CHANNEL_SHORT: Record<string, string> = {
   whatsapp: 'WA',
-  meta: 'Meta',
+  // 'meta' é o canal genérico ManyChat usado historicamente para Instagram.
+  // Mensagens WhatsApp via ManyChat agora gravam channel='whatsapp' (ver crm-manychat-webhook),
+  // então 'meta' aqui significa Instagram.
+  meta: 'Insta',
   system: 'Sys',
   ai: 'IA',
 }
@@ -218,15 +221,15 @@ export function LeadChatThread({
               skipped_send_flow?: boolean
             }
           | undefined
-        if (r.channel === 'meta' && mc?.attempted && mc.skipped_send_flow) {
+        if ((r.channel === 'meta' || r.channel === 'whatsapp') && mc?.attempted && mc.skipped_send_flow) {
           toast.message('ManyChat: só foi gravado o campo ENVIAR-DM (sendFlow pela API desativado). Dispara o flow no ManyChat por automation.', {
             description: 'MANYCHAT_PUSH_SKIP_SEND_FLOW=true',
           })
-        } else if (r.channel === 'meta' && mc?.attempted && mc.ok === false && mc.set_field_ok && mc.send_flow_ok === false) {
+        } else if ((r.channel === 'meta' || r.channel === 'whatsapp') && mc?.attempted && mc.ok === false && mc.set_field_ok && mc.send_flow_ok === false) {
           toast.message('ManyChat: campo ENVIAR-DM atualizado, mas sendFlow falhou — o cliente pode não receber DM.', {
             description: String(mc.error ?? 'Veja MANYCHAT_DM_FLOW_NS, MANYCHAT_SEND_FLOW_MESSAGE_TAG (ex.: HUMAN_AGENT) e logs da Edge Function.'),
           })
-        } else if (r.channel === 'meta' && mc?.attempted && mc.ok === false) {
+        } else if ((r.channel === 'meta' || r.channel === 'whatsapp') && mc?.attempted && mc.ok === false) {
           toast.message('ManyChat: mensagem gravada no CRM; o envio ao Instagram pode ter falhado.', {
             description: String(mc.error ?? ''),
           })
