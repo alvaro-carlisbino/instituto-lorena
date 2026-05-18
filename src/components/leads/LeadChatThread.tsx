@@ -755,6 +755,21 @@ export function LeadChatThread({
                   } else if (e.key === 'Escape') {
                     setShowQuickMenu(false)
                   }
+                  return
+                }
+                // Enter envia a mensagem; Shift+Enter quebra linha (padrão WhatsApp/Slack).
+                // e.nativeEvent.isComposing evita envio acidental durante IME (chinês/japonês);
+                // e.repeat evita disparo duplicado ao segurar a tecla.
+                if (
+                  e.key === 'Enter' &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing &&
+                  !e.repeat
+                ) {
+                  e.preventDefault()
+                  if (showAiResponding) return
+                  if (!crm.draftMessage.trim() && crm.draftAttachments.length === 0) return
+                  void crm.sendMessage()
                 }
               }}
               placeholder={
