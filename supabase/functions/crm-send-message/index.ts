@@ -2,7 +2,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
 import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
-import { pushManychatInstagramDmAfterReply, readManychatPushConfigFromEnv } from '../_shared/manychatPublicApi.ts'
+import {
+  pushManychatInstagramDmAfterReply,
+  pushManychatWhatsappDmAfterReply,
+  readManychatPushConfigForChannel,
+} from '../_shared/manychatPublicApi.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -79,24 +83,46 @@ Deno.serve(async (req) => {
   }
 
   const effectiveTo = to || String(row.phone ?? '').trim()
-  // Se explicitamente Instagram ou ManyChat (telefone sintético ou canal explícito)
+  const customFieldsChannel = String(
+    (row.custom_fields as Record<string, unknown> | null)?.channel ?? '',
+  ).toLowerCase()
+  const bodyChannel = String(body.channel ?? '').toLowerCase()
+  // Detecta envio via ManyChat: telefone sintético, canal explícito Instagram,
+  // source meta_instagram/meta_whatsapp ou custom_fields.channel sinalizando ManyChat.
   const isManychat =
-    effectiveTo.startsWith('888001') || String(body.channel ?? '').toLowerCase() === 'instagram'
+    effectiveTo.startsWith('888001') ||
+    bodyChannel === 'instagram' ||
+    row.source === 'meta_instagram' ||
+    row.source === 'meta_whatsapp' ||
+    customFieldsChannel === 'whatsapp' ||
+    customFieldsChannel === 'instagram'
 
-  // --- Instagram / ManyChat Path ---
-  if (isManychat || row.source === 'meta_instagram') {
-    const subscriberId = String(row.custom_fields?.manychat_subscriber_id ?? '').trim()
+  if (isManychat) {
+    const subscriberId = String(
+      (row.custom_fields as Record<string, unknown> | null)?.manychat_subscriber_id ?? '',
+    ).trim()
     if (!subscriberId) {
-       // Fallback para WA se tiver telefone real, senão erro
-       if (!row.phone || row.phone.startsWith('888001')) {
-         return json({ error: 'manychat_id_missing', message: 'Lead de Instagram sem ID do ManyChat' }, 400)
-       }
+      // Sem subscriber ManyChat: se o telefone é sintético, não há canal alternativo.
+      if (!row.phone || row.phone.startsWith('888001')) {
+        return json({ error: 'manychat_id_missing', message: 'Lead ManyChat sem subscriber ID' }, 400)
+      }
     } else {
+      // Decide o canal ManyChat (whatsapp vs instagram). Prioridade:
+      // 1) body.channel explícito, 2) custom_fields.channel, 3) source do lead.
+      const pushChannel =
+        bodyChannel === 'whatsapp' || bodyChannel === 'instagram'
+          ? bodyChannel
+          : customFieldsChannel === 'whatsapp' || customFieldsChannel === 'instagram'
+            ? customFieldsChannel
+            : row.source === 'meta_whatsapp'
+              ? 'whatsapp'
+              : 'instagram'
+
       if (stickerWebpBase64) {
         return json(
           {
             error: 'sticker_not_supported',
-            message: 'Figurinhas WebP só pelo WhatsApp. No Instagram/ManyChat use texto ou fluxo.',
+            message: 'Figurinhas WebP só pelo WhatsApp direto. No ManyChat use texto ou fluxo.',
           },
           400,
         )
@@ -104,17 +130,21 @@ Deno.serve(async (req) => {
       if (!text) {
         return json({ error: 'missing_fields', message: 'Texto obrigatório para envio via ManyChat' }, 400)
       }
-      const mcCfg = readManychatPushConfigFromEnv()
+      const mcCfg = readManychatPushConfigForChannel(pushChannel)
       if (!mcCfg) return json({ error: 'manychat_not_configured' }, 500)
 
-      const push = await pushManychatInstagramDmAfterReply({
+      const pushArgs = {
         apiKey: mcCfg.apiKey,
         subscriberId,
         replyText: text,
         fieldId: mcCfg.fieldId,
         flowNs: mcCfg.flowNs,
         messageTag: mcCfg.messageTag || undefined,
-      })
+      }
+      const push =
+        pushChannel === 'whatsapp'
+          ? await pushManychatWhatsappDmAfterReply(pushArgs)
+          : await pushManychatInstagramDmAfterReply(pushArgs)
 
       if (!push.ok) {
         return json({ error: 'manychat_push_failed', message: push.error }, 500)
@@ -123,14 +153,14 @@ Deno.serve(async (req) => {
       await insertInteraction(admin, {
         leadId: row.id,
         patientName: row.patient_name,
-        channel: 'meta',
+        channel: pushChannel === 'whatsapp' ? 'whatsapp' : 'meta',
         direction: 'out',
         author: user.email || 'Consultor',
         content: text,
         happenedAt: nowIso(),
       })
 
-      return json({ ok: true, provider: 'manychat', status: 'delivered' })
+      return json({ ok: true, provider: `manychat_${pushChannel}`, status: 'delivered' })
     }
   }
 
