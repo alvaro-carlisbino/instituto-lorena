@@ -198,7 +198,8 @@ async function runManychatMessagePipeline(
     await insertInteraction(admin, {
       leadId,
       patientName: ctx.userName,
-      channel: 'meta',
+      // Distingue WhatsApp via ManyChat de Instagram via ManyChat para badge correto no chat.
+      channel: ctx.channel === 'whatsapp' ? 'whatsapp' : 'meta',
       direction: 'in',
       author: ctx.userName,
       content: ctx.text,
@@ -441,7 +442,7 @@ Deno.serve(async (req) => {
       await insertInteraction(admin, {
         leadId,
         patientName: userName,
-        channel: 'meta',
+        channel: effectiveChannel === 'whatsapp' ? 'whatsapp' : 'meta',
         direction: 'in',
         author: userName,
         content: text,
@@ -482,7 +483,7 @@ Deno.serve(async (req) => {
       await insertInteraction(admin, {
         leadId,
         patientName: userName,
-        channel: 'meta',
+        channel: effectiveChannel === 'whatsapp' ? 'whatsapp' : 'meta',
         direction: 'out',
         author,
         content: outboundText || rawOutbound,
