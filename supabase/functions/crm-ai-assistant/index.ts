@@ -565,9 +565,37 @@ Deno.serve(async (req) => {
           ? 'O utilizador pediu ênfase num lead específico (ver leadFocus se existir).'
           : 'Responda de forma equilibrada entre operação, leads e métricas.'
 
+    // Contexto temporal em Maringá/Brasília para saudações apropriadas e janela de atendimento humano.
+    const brasilNow = new Date()
+    const brasilHourBR = Number(
+      new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false }).format(brasilNow),
+    )
+    const brasilWeekday = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      weekday: 'long',
+    }).format(brasilNow)
+    const brasilDateTime = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      dateStyle: 'full',
+      timeStyle: 'short',
+    }).format(brasilNow)
+    const brasilPeriod =
+      brasilHourBR < 5 ? 'madrugada'
+      : brasilHourBR < 12 ? 'manhã'
+      : brasilHourBR < 18 ? 'tarde'
+      : 'noite'
+    const brasilGreeting =
+      brasilHourBR < 5 ? 'Boa noite'
+      : brasilHourBR < 12 ? 'Bom dia'
+      : brasilHourBR < 18 ? 'Boa tarde'
+      : 'Boa noite'
+    const isWeekday = /^(segunda|terça|quarta|quinta|sexta)/i.test(brasilWeekday)
+    const isBusinessHours = isWeekday && brasilHourBR >= 8 && brasilHourBR < 18
+
     let systemContent = [
       'Você é o assistente de IA do CRM Instituto Lorena (operação comercial / clínica).',
       'Use APENAS o snapshot JSON abaixo; não invente números, leads ou interações que não apareçam.',
+      `Contexto temporal (Maringá/Brasília): agora são ${brasilDateTime} — ${brasilWeekday}, período da ${brasilPeriod}. Saudação apropriada para a primeira mensagem ao paciente: "${brasilGreeting}". Atendimento humano (Dandara): segunda a sexta, 08h às 18h — neste momento ${isBusinessHours ? 'estamos DENTRO' : 'estamos FORA'} do horário comercial.`,
       'Quando existir leadFocus.recent_media_intel, use audio_transcript e document_or_image_text como parte do contexto da conversa (transcrições e OCR/extração de documentos).',
       'Quando existir leadFocus.recent_conversation, é o histórico cronológico deste paciente no CRM — use-o sempre: o cliente pode enviar o mesmo pedido em várias mensagens seguidas; una o sentido e não peça de novo o que já está nas linhas anteriores.',
       isInternal
@@ -583,7 +611,7 @@ Deno.serve(async (req) => {
             'Formatação WhatsApp: para destacar nomes ou palavras importantes use **negrito assim** (dois asteriscos antes e depois). Não use quatro asteriscos seguidos (****). Não use um único asterisco *assim* para ênfase — no WhatsApp isso é ambíguo; prefira sempre **duplo**.',
             'Se usar <<<CRM_OPS>>> com book_appointment na mesma resposta, NÃO escreva "estou verificando a agenda agora", "aguarde um instante" nem prometa confirmação futura como se o horário ainda não existisse — o servidor pode confirmar o horário na mesma mensagem. Mantenha um tom direto (preferências anotadas e segue a confirmação automática do horário).',
             'Não use rascunhos ou comentários internos.',
-            'MANDATORY: Não repita saudações (como "Olá", "Bom dia", "Boa tarde") em todas as mensagens. Aja como numa conversa contínua.',
+            'MANDATORY (saudações): use saudação contextual (ex: "Bom dia", "Boa tarde", "Boa noite") APENAS na primeira mensagem de uma nova conversa, escolhendo a saudação indicada no "Contexto temporal" acima. Em mensagens seguintes da mesma conversa NÃO repita "Olá / Bom dia / Boa tarde" — aja como numa conversa contínua.',
             '',
             '--- TRIAGEM E ENCAMINHAMENTO ---',
             'Objetivo principal: identificar o tipo de atendimento desejado (1 a 5) e entender a preferência de período (manhã/tarde).',
