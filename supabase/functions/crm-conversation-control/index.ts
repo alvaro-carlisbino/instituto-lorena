@@ -81,7 +81,14 @@ Deno.serve(async (req) => {
       owner_mode: ownerMode,
       updated_at: new Date().toISOString(),
     }
-    if (ownerMode === 'human') patch.last_human_reply_at = new Date().toISOString()
+    if (ownerMode === 'human') {
+      patch.last_human_reply_at = new Date().toISOString()
+    } else {
+      // 'ai' ou 'auto': se o utilizador escolheu modo IA conscientemente, o flag
+      // `ai_enabled` deve seguir o gesto. Antes ficávamos com `ai_enabled=false`
+      // residual (de algum opt-out anterior) e a IA continuava muda mesmo no modo IA.
+      patch.ai_enabled = true
+    }
     const { data, error } = await admin.from('crm_conversation_states').upsert(patch).select('*').single()
     if (error) return json({ error: error.message }, 400)
     const row = data as Record<string, unknown>

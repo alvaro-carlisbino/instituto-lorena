@@ -17,6 +17,12 @@ export type UpsertLeadInput = {
   preferredLeadId?: string
   /** When set, ties the lead to a DB whatsapp_channel_instances row (multi-line). */
   whatsappInstanceId?: string | null
+  /**
+   * tenant_id explícito. Quando omitido, o trigger BEFORE INSERT em leads cai no
+   * fallback `instituto-lorena`. Edge functions multi-tenant aware devem sempre
+   * passar este campo — o tenant é resolvido a partir do payload do webhook.
+   */
+  tenantId?: string
 }
 
 export type UpsertLeadResult = {
@@ -451,6 +457,9 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
   if (instanceId) {
     row.whatsapp_instance_id = instanceId
   }
+  if (input.tenantId) {
+    row.tenant_id = input.tenantId
+  }
   const { error: insertError } = await admin.from('leads').insert(row)
   if (insertError) throw new Error(insertError.message)
   return { leadId: newId, status: 'created' }
@@ -467,22 +476,26 @@ export async function insertInteraction(
     content: string
     happenedAt?: string
     externalMessageId?: string
+    /**
+     * tenant_id explícito. Quando omitido, o trigger BEFORE INSERT em interactions
+     * cai no fallback `instituto-lorena` (transitório). Edge functions multi-tenant
+     * devem sempre passar este campo para garantir isolamento correto.
+     */
+    tenantId?: string
   },
 ): Promise<string> {
-  const { data, error } = await admin
-    .from('interactions')
-    .insert({
-      lead_id: input.leadId,
-      patient_name: input.patientName,
-      channel: input.channel,
-      direction: input.direction,
-      author: input.author,
-      content: input.content,
-      happened_at: input.happenedAt ?? new Date().toISOString(),
-      external_message_id: input.externalMessageId || null,
-    })
-    .select('id')
-    .single()
+  const row: Record<string, unknown> = {
+    lead_id: input.leadId,
+    patient_name: input.patientName,
+    channel: input.channel,
+    direction: input.direction,
+    author: input.author,
+    content: input.content,
+    happened_at: input.happenedAt ?? new Date().toISOString(),
+    external_message_id: input.externalMessageId || null,
+  }
+  if (input.tenantId) row.tenant_id = input.tenantId
+  const { data, error } = await admin.from('interactions').insert(row).select('id').single()
   if (error) throw new Error(error.message)
   if (!data?.id) throw new Error('insert_interaction_no_id')
   return String(data.id)
@@ -770,6 +783,7 @@ export async function promoteManychatLeadToRealPhone(
     patientName: string
     realPhoneDigits: string
     summary: string
+    tenantId?: string
   },
 ): Promise<{ leadId: string; merged: boolean }> {
   const sid = String(input.subscriberId).trim()
@@ -789,6 +803,7 @@ export async function promoteManychatLeadToRealPhone(
       summary: input.summary,
       source: 'meta_instagram',
       customFields: { manychat_subscriber_id: sid },
+      tenantId: input.tenantId,
     })
     return { leadId: phoneLeadId, merged: true }
   }
@@ -818,6 +833,7 @@ export async function promoteManychatLeadToRealPhone(
     summary: input.summary,
     source: 'meta_instagram',
     customFields: { manychat_subscriber_id: sid },
+    tenantId: input.tenantId,
   })
   return { leadId: r.leadId, merged: false }
 }

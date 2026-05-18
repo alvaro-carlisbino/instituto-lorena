@@ -12,6 +12,7 @@ export type WhatsappInstanceRow = {
   id: string
   evolution_instance_name: string
   meta_phone_number_id?: string | null
+  tenant_id?: string | null
 }
 
 export async function loadWhatsappInstanceByEvolutionName(
@@ -22,7 +23,7 @@ export async function loadWhatsappInstanceByEvolutionName(
   if (!name) return null
   const { data, error } = await admin
     .from('whatsapp_channel_instances')
-    .select('id, evolution_instance_name, meta_phone_number_id')
+    .select('id, evolution_instance_name, meta_phone_number_id, tenant_id')
     .eq('evolution_instance_name', name)
     .eq('active', true)
     .maybeSingle()
@@ -31,6 +32,7 @@ export async function loadWhatsappInstanceByEvolutionName(
     id: String((data as { id: unknown }).id),
     evolution_instance_name: String((data as { evolution_instance_name: unknown }).evolution_instance_name),
     meta_phone_number_id: (data as { meta_phone_number_id?: string | null }).meta_phone_number_id ?? null,
+    tenant_id: (data as { tenant_id?: string | null }).tenant_id ?? null,
   }
 }
 
@@ -42,7 +44,7 @@ export async function loadWhatsappInstanceByMetaPhoneNumberId(
   if (!id) return null
   const { data, error } = await admin
     .from('whatsapp_channel_instances')
-    .select('id, evolution_instance_name, meta_phone_number_id')
+    .select('id, evolution_instance_name, meta_phone_number_id, tenant_id')
     .eq('meta_phone_number_id', id)
     .eq('active', true)
     .maybeSingle()
@@ -51,6 +53,7 @@ export async function loadWhatsappInstanceByMetaPhoneNumberId(
     id: String((data as { id: unknown }).id),
     evolution_instance_name: String((data as { evolution_instance_name: unknown }).evolution_instance_name),
     meta_phone_number_id: (data as { meta_phone_number_id?: string | null }).meta_phone_number_id ?? null,
+    tenant_id: (data as { tenant_id?: string | null }).tenant_id ?? null,
   }
 }
 
@@ -59,7 +62,7 @@ export async function loadDefaultWhatsappInstance(
 ): Promise<WhatsappInstanceRow | null> {
   const { data, error } = await admin
     .from('whatsapp_channel_instances')
-    .select('id, evolution_instance_name, meta_phone_number_id')
+    .select('id, evolution_instance_name, meta_phone_number_id, tenant_id')
     .eq('active', true)
     .order('sort_order', { ascending: true })
     .limit(1)
@@ -69,6 +72,7 @@ export async function loadDefaultWhatsappInstance(
     id: String((data as { id: unknown }).id),
     evolution_instance_name: String((data as { evolution_instance_name: unknown }).evolution_instance_name),
     meta_phone_number_id: (data as { meta_phone_number_id?: string | null }).meta_phone_number_id ?? null,
+    tenant_id: (data as { tenant_id?: string | null }).tenant_id ?? null,
   }
 }
 

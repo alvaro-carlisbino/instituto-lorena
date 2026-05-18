@@ -42,20 +42,11 @@ import {
   tryConsumeWaInstagramMergeToast,
 } from '@/lib/waInstagramMergeNotice'
 import { isAiReplyLikelyPending, type AiConversationGate } from '@/lib/aiTypingIndicator'
+import { getChannelShortLabel, getChannelStyle } from '@/lib/channelStyles'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
 import type { Interaction } from '@/mocks/crmMock'
 import { forceAiReply, type ConversationOwnerMode } from '@/services/conversationControl'
-
-const CHANNEL_SHORT: Record<string, string> = {
-  whatsapp: 'WA',
-  // 'meta' é o canal genérico ManyChat usado historicamente para Instagram.
-  // Mensagens WhatsApp via ManyChat agora gravam channel='whatsapp' (ver crm-manychat-webhook),
-  // então 'meta' aqui significa Instagram.
-  meta: 'Insta',
-  system: 'Sys',
-  ai: 'IA',
-}
 
 /** Emojis frequentes para inserir no rascunho (UTF-8). */
 const CHAT_QUICK_EMOJIS = [
@@ -414,53 +405,77 @@ export function LeadChatThread({
     
     // If we have actual media objects attached
     if (media && media.length > 0) {
+      // ManyChat traz URL S3 (item.url). WhatsApp Evolution traz inline base64.
+      // resolveSrc usa qualquer um — assim o mesmo renderer atende os dois canais.
+      const resolveSrc = (item: NonNullable<Interaction['media']>[number], fallbackMime: string): string | null => {
+        if (item.url && item.url.trim()) return item.url
+        if (item.base64 && item.base64.trim()) return `data:${item.mimeType || fallbackMime};base64,${item.base64}`
+        return null
+      }
       return (
         <div className="flex flex-col gap-2 py-1">
           {media.map((item) => {
-            if (item.type === 'image' && item.base64) {
+            if (item.type === 'image') {
+              const src = resolveSrc(item, 'image/jpeg')
+              if (!src) return null
               return (
                 <div key={item.id} className="overflow-hidden rounded-lg border border-border/20">
-                  <img 
-                    src={`data:${item.mimeType || 'image/jpeg'};base64,${item.base64}`} 
-                    alt={item.caption || 'Foto'} 
+                  <img
+                    src={src}
+                    alt={item.caption || 'Foto'}
                     className="max-h-64 w-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                    onClick={() => window.open(`data:${item.mimeType || 'image/jpeg'};base64,${item.base64}`, '_blank')}
+                    onClick={() => window.open(src, '_blank')}
                   />
                   {item.caption && <p className="mt-1 px-2 pb-1 text-xs opacity-80">{item.caption}</p>}
                 </div>
               )
             }
-            if (item.type === 'audio' && item.base64) {
+            if (item.type === 'audio') {
+              const src = resolveSrc(item, 'audio/ogg')
+              if (!src) return null
               return (
                 <div key={item.id} className="flex flex-col gap-1">
                   <audio controls className="h-8 w-full min-w-[200px]">
-                    <source src={`data:${item.mimeType || 'audio/ogg'};base64,${item.base64}`} type={item.mimeType || 'audio/ogg'} />
+                    <source src={src} type={item.mimeType || 'audio/ogg'} />
                     Seu navegador não suporta áudio.
                   </audio>
                   <span className="text-[10px] opacity-60 px-1">Áudio recebido</span>
                 </div>
               )
             }
-            if (item.type === 'document' && item.base64) {
+            if (item.type === 'video') {
+              const src = resolveSrc(item, 'video/mp4')
+              if (!src) return null
               return (
-                <div 
-                  key={item.id} 
-                  className="flex items-center gap-3 rounded-lg bg-black/5 p-2 transition-colors hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10 cursor-pointer"
-                  onClick={() => {
-                    const link = document.createElement('a')
-                    link.href = `data:${item.mimeType || 'application/octet-stream'};base64,${item.base64}`
-                    link.download = item.caption || 'documento'
-                    link.click()
-                  }}
+                <div key={item.id} className="overflow-hidden rounded-lg border border-border/20">
+                  <video controls className="max-h-72 w-full" preload="metadata">
+                    <source src={src} type={item.mimeType || 'video/mp4'} />
+                    Seu navegador não suporta vídeo.
+                  </video>
+                  {item.caption && <p className="mt-1 px-2 pb-1 text-xs opacity-80">{item.caption}</p>}
+                </div>
+              )
+            }
+            if (item.type === 'document') {
+              const src = resolveSrc(item, 'application/octet-stream')
+              if (!src) return null
+              return (
+                <a
+                  key={item.id}
+                  href={src}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download={item.caption || undefined}
+                  className="flex items-center gap-3 rounded-lg bg-black/5 p-2 transition-colors hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10 no-underline"
                 >
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/20 text-blue-500">
                     <FileIcon className="h-5 w-5" />
                   </div>
                   <div className="flex flex-col overflow-hidden">
                     <span className="truncate text-sm font-semibold">{item.caption || 'Documento'}</span>
-                    <span className="text-[10px] uppercase opacity-60">Clique para baixar</span>
+                    <span className="text-[10px] uppercase opacity-60">Clique para abrir</span>
                   </div>
-                </div>
+                </a>
               )
             }
             return null
@@ -655,8 +670,14 @@ export function LeadChatThread({
                     <span className="truncate max-w-[100px]">{first.author}</span>
                     <span className="opacity-30">•</span>
                     <time dateTime={first.happenedAt}>{format(new Date(first.happenedAt), 'HH:mm', { locale: ptBR })}</time>
-                    <span className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] uppercase tracking-wider dark:bg-white/5">
-                      {CHANNEL_SHORT[first.channel] ?? first.channel}
+                    <span
+                      className={cn(
+                        'rounded-md px-1.5 py-0.5 text-[9px] uppercase tracking-wider',
+                        getChannelStyle(first.channel).pill,
+                      )}
+                      title={getChannelStyle(first.channel).label}
+                    >
+                      {getChannelShortLabel(first.channel)}
                     </span>
                   </div>
                 </li>
@@ -870,6 +891,47 @@ export function LeadChatThread({
                         </button>
                       ))}
                     </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    type="button"
+                    disabled={showAiResponding || quickMessages.length === 0}
+                    title={quickMessages.length === 0 ? 'Sem mensagens rápidas (Configurações)' : 'Mensagens rápidas (atalho: /)'}
+                    className={cn(
+                      buttonVariants({ variant: 'ghost', size: 'sm' }),
+                      'h-8 rounded-lg px-2 text-[10px]',
+                    )}
+                  >
+                    <span className="font-mono font-bold text-primary">/</span>
+                    <span className="sr-only">Mensagens rápidas</span>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="max-h-60 w-[min(100vw-2rem,22rem)] overflow-y-auto p-1">
+                    <div className="px-2 py-1.5 border-b border-border/40 mb-1">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                        Mensagens Rápidas
+                      </span>
+                    </div>
+                    {quickMessages.length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-muted-foreground">
+                        Nenhuma cadastrada. Crie em Configurações → Mensagens Rápidas.
+                      </div>
+                    ) : (
+                      quickMessages.map((m) => (
+                        <DropdownMenuItem
+                          key={m.id}
+                          className="flex cursor-pointer flex-col items-start gap-0.5 whitespace-normal px-3 py-2"
+                          onSelect={() => {
+                            const current = crm.draftMessage
+                            const next = current ? `${current}${current.endsWith(' ') ? '' : ' '}${m.content}` : m.content
+                            crm.setDraftMessage(next)
+                          }}
+                        >
+                          <span className="text-xs font-bold text-primary">/{m.title}</span>
+                          <span className="line-clamp-2 text-xs text-muted-foreground">{m.content}</span>
+                        </DropdownMenuItem>
+                      ))
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Button

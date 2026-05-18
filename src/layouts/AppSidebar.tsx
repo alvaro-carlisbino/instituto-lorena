@@ -22,12 +22,14 @@ import {
   ChatsCircle,
   ArrowsLeftRight,
   Calendar,
+  Buildings,
 } from 'phosphor-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
 import { Badge } from '@/components/ui/badge'
 import { BRAND_FAVICON_URL } from '@/config/brandAssets'
 import { APP_ENV_BADGE, APP_NAME, APP_TAGLINE } from '@/config/branding'
+import { useTenant } from '@/context/TenantContext'
 import { useCrm } from '@/context/CrmContext'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
@@ -73,8 +75,14 @@ function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon
 export function AppSidebar() {
   const crm = useCrm()
   const isMobile = useIsMobile()
+  const { tenant, isSuperAdmin } = useTenant()
 
   if (isMobile) return null
+
+  // Fallback para o constant APP_NAME garante UX continua intacta enquanto a
+  // Fase 0 migration não estiver aplicada ou enquanto o tenant ainda carrega.
+  const displayName = tenant.brand.app_name || APP_NAME
+  const logoUrl = tenant.brand.logo_url || BRAND_FAVICON_URL
 
   const showDashboardConfig = crm.currentPermission.canRouteLeads
   const showLeadsHub = crm.currentPermission.canRouteLeads
@@ -95,11 +103,11 @@ export function AppSidebar() {
                 render={<Link to="/dashboard" />}
               >
                 <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-primary shadow-xl shadow-primary/20 p-1.5 transition-transform hover:scale-105 active:scale-95">
-                  <img src={BRAND_FAVICON_URL} alt="" className="size-full object-contain brightness-0 invert" />
+                  <img src={logoUrl} alt="" className="size-full object-contain brightness-0 invert" />
                 </div>
                 <div className="grid min-w-0 flex-1 text-left leading-tight ml-1">
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-sm font-black uppercase tracking-tight text-sidebar-foreground">{APP_NAME}</span>
+                    <span className="truncate text-sm font-black uppercase tracking-tight text-sidebar-foreground">{displayName}</span>
                   </span>
                   <span className="truncate text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/60">{APP_TAGLINE}</span>
                 </div>
@@ -173,6 +181,7 @@ export function AppSidebar() {
                 <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
                 <NavItem to="/admin-operacao" label="Operação Admin" icon={Gear} />
                 <NavItem to="/admin-lab" label="Ferramentas" icon={Flask} />
+                {isSuperAdmin ? <NavItem to="/admin-clinicas" label="Clínicas" icon={Buildings} /> : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

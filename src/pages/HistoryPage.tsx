@@ -11,18 +11,9 @@ import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
+import { getChannelStyle } from '@/lib/channelStyles'
 import { workflowFieldsForContext } from '@/lib/leadFields'
 import { cn } from '@/lib/utils'
-
-const CHANNEL_LABEL: Record<string, string> = {
-  whatsapp: 'WhatsApp',
-  email: 'E-mail',
-  phone: 'Telefone',
-  meta_lead: 'Meta',
-  manual: 'Manual',
-  webhook: 'Link externo',
-  in_app: 'No app',
-}
 
 const DIRECTION_LABEL: Record<string, string> = {
   inbound: 'Entrada',
@@ -140,7 +131,9 @@ export function HistoryPage() {
                           </div>
                           <p className="my-0 mb-4 text-sm leading-relaxed text-foreground/80">{item.content}</p>
                           <div className="flex gap-2">
-                            <Badge variant="outline" className="rounded-none text-[9px] uppercase tracking-widest">{CHANNEL_LABEL[item.channel] ?? item.channel}</Badge>
+                            <span className={cn('rounded-none px-2 py-0.5 text-[9px] uppercase tracking-widest', getChannelStyle(item.channel).pill)}>
+                              {getChannelStyle(item.channel).label}
+                            </span>
                             <Badge variant="secondary" className="rounded-none text-[9px] uppercase tracking-widest">{DIRECTION_LABEL[item.direction] ?? item.direction}</Badge>
                           </div>
                         </li>

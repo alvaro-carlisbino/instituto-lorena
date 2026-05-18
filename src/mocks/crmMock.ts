@@ -101,7 +101,10 @@ export type Interaction = {
     id: string
     type: 'audio' | 'image' | 'video' | 'document' | 'other'
     mimeType?: string
+    /** Base64 inline (WhatsApp/Evolution direto). Para ManyChat usamos `url` em vez disto. */
     base64?: string
+    /** URL pública (ex.: S3 do ManyChat — manybot-files.s3.eu-central-1.amazonaws.com). */
+    url?: string
     caption?: string
   }>
 }

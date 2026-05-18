@@ -19,6 +19,48 @@ import type { AppInboxItem } from '@/mocks/crmMock'
 import { cn } from '@/lib/utils'
 
 const URGENT_KINDS = new Set(['urgent', 'handoff'])
+const BROWSER_NOTIF_PROMPT_KEY = 'inbox.browserNotifPrompted.v1'
+
+function ensureBrowserNotificationPermission() {
+  if (typeof window === 'undefined') return
+  if (!('Notification' in window)) return
+  if (Notification.permission !== 'default') return
+  // Pede só uma vez por instalação. Se o utilizador disser não, respeitamos para sempre.
+  try {
+    if (window.localStorage.getItem(BROWSER_NOTIF_PROMPT_KEY) === '1') return
+    window.localStorage.setItem(BROWSER_NOTIF_PROMPT_KEY, '1')
+  } catch {
+    // localStorage indisponível em modo privado — segue mesmo assim
+  }
+  void Notification.requestPermission().catch(() => {})
+}
+
+function showBrowserNotification(title: string, body: string, leadId: string | null) {
+  if (typeof window === 'undefined') return
+  if (!('Notification' in window)) return
+  if (Notification.permission !== 'granted') return
+  // Só mostra quando a aba está em background — caso contrário o toast + chime são suficientes.
+  if (document.visibilityState === 'visible') return
+  try {
+    const n = new Notification(title, {
+      body,
+      tag: leadId ? `lead-${leadId}` : 'inbox',
+    })
+    n.onclick = () => {
+      try {
+        window.focus()
+        if (leadId) {
+          window.location.assign(`/chat?leadId=${encodeURIComponent(leadId)}`)
+        }
+      } catch {
+        /* ignore */
+      }
+      n.close()
+    }
+  } catch {
+    /* permissões/ambiente sem suporte — ignora */
+  }
+}
 
 function playInboxChime() {
   try {
@@ -76,6 +118,7 @@ export function InboxMenu() {
 
   useEffect(() => {
     if (!online) return
+    ensureBrowserNotificationPermission()
     void refreshItems().then((list) => {
       seenIdsRef.current = new Set(list.map((i) => i.id))
       initialLoadedRef.current = true
@@ -112,6 +155,7 @@ export function InboxMenu() {
             if (urgent) {
               playInboxChime()
               const leadId = typeof urgent.metadata?.leadId === 'string' ? urgent.metadata.leadId : null
+              showBrowserNotification(urgent.title, urgent.body, leadId)
               toast(urgent.title, {
                 description: urgent.body,
                 duration: 12_000,

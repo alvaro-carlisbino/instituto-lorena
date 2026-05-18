@@ -17,6 +17,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { WorkspaceLeadSidebar } from '@/components/leads/WorkspaceLeadSidebar'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import { getSourceStyle } from '@/lib/channelStyles'
 import { cn } from '@/lib/utils'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { labelForIdName } from '@/lib/selectDisplay'
@@ -225,17 +226,17 @@ export function ChatWorkspacePage() {
                     <div className="mt-1 flex items-center gap-2">
                       <span className={cn(
                         "h-1.5 w-1.5 rounded-full",
-                        lead.temperature === 'hot' ? "bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.3)]" : 
+                        lead.temperature === 'hot' ? "bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.3)]" :
                         lead.temperature === 'warm' ? "bg-yellow-500" : "bg-blue-500"
                       )} title={lead.temperature} />
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground/40">
-                        {lead.source === 'whatsapp' || lead.source === 'meta_whatsapp'
-                          ? 'WhatsApp'
-                          : lead.source === 'meta_instagram'
-                            ? 'Instagram'
-                            : lead.source === 'meta_facebook'
-                              ? 'Facebook'
-                              : 'CRM'}
+                      <span
+                        className={cn(
+                          'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider',
+                          getSourceStyle(lead.source).pill,
+                        )}
+                      >
+                        <span className={cn('h-1 w-1 rounded-full', getSourceStyle(lead.source).dot)} aria-hidden />
+                        {getSourceStyle(lead.source).label}
                       </span>
                     </div>
                   </button>
