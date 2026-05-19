@@ -109,6 +109,14 @@ type ManychatPipelineCtx = {
   phoneOpt?: string
   aiInboundUserText: string
   skipManychatPush: boolean
+  /**
+   * `true` quando este pipeline corre no caminho async (ack rápido + push no fundo).
+   * Em modo síncrono o `reply` volta no JSON e o ManyChat já envia ao paciente —
+   * fazer push nesse caso duplica a mensagem.
+   */
+  isAsyncPipeline: boolean
+  /** Força o push mesmo em modo síncrono (raro: quando o flow ManyChat não usa o campo `reply`). */
+  forceManychatPush: boolean
   channel?: string
   /** Linha CRM (`whatsapp_channel_instances`) para prompt IA por instância. */
   whatsappLineInstanceId: string | null
@@ -389,6 +397,11 @@ async function runManychatMessagePipeline(
       manychatPush = { attempted: false, skipped_reason: 'MANYCHAT_PUSH_DISABLED' }
     } else if (ctx.skipManychatPush) {
       manychatPush = { attempted: false, skipped_reason: 'manychat_skip_push' }
+    } else if (!ctx.isAsyncPipeline && !ctx.forceManychatPush && replyTrimmed) {
+      // Modo síncrono: o reply é devolvido no JSON e o flow do ManyChat já envia ao paciente.
+      // Pushar via API ManyChat aqui duplicaria a mensagem. Use `manychat_force_push: true`
+      // se o flow não estiver configurado para usar o campo `reply`.
+      manychatPush = { attempted: false, skipped_reason: 'sync_mode_reply_returned' }
     } else if (replyTrimmed) {
       const isWa = ctx.channel === 'whatsapp' || ctx.channel === 'wa'
       const mcCfg = await readManychatPushConfigForTenantChannel(admin, ctx.tenantId, String(ctx.channel ?? ''))
@@ -705,6 +718,10 @@ Deno.serve(async (req) => {
   const skipManychatPush =
     body.manychat_skip_push === true ||
     String(body.manychat_skip_push ?? '').trim().toLowerCase() === 'true'
+  const forceManychatPush =
+    body.manychat_force_push === true ||
+    String(body.manychat_force_push ?? '').trim().toLowerCase() === 'true'
+  const useAsyncPipeline = await isManychatAsyncAck(admin, tenantId, body, effectiveChannel)
 
   const pipelineCtx: ManychatPipelineCtx = {
     jobRowId: String(jobRow.id),
@@ -715,13 +732,15 @@ Deno.serve(async (req) => {
     phoneOpt,
     aiInboundUserText,
     skipManychatPush,
+    isAsyncPipeline: useAsyncPipeline,
+    forceManychatPush,
     channel: effectiveChannel,
     whatsappLineInstanceId,
     inboundMedia,
     tenantId,
   }
 
-  if (await isManychatAsyncAck(admin, tenantId, body, effectiveChannel)) {
+  if (useAsyncPipeline) {
     scheduleEdgeBackground(
       runManychatMessagePipeline(admin, pipelineCtx).catch((err) => {
         console.error('crm-manychat-webhook async pipeline:', err)

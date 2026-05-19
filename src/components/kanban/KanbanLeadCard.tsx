@@ -134,15 +134,9 @@ export function KanbanLeadCard({
             👤 Atendimento Humano
           </div>
         )}
-        {lead.followup_status === 'active' &&
-        lead.followup_current_step != null &&
-        lead.followup_current_step < 3 ? (
+        {lead.followup_status === 'active' && lead.followup_current_step != null ? (
           <div className="flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-800 ring-1 ring-amber-500/25">
-            {lead.followup_current_step === 0
-              ? 'Follow-up D1/D3/D5'
-              : lead.followup_current_step === 1
-                ? 'Follow-up: D1 enviado'
-                : 'Follow-up: D1+D3'}
+            Follow-up: {Math.min(lead.followup_current_step + 1, 6)}/6 enviado
           </div>
         ) : null}
       </div>

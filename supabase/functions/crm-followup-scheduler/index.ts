@@ -292,6 +292,18 @@ Deno.serve(async (req) => {
         })
         .eq('lead_id', leadId)
 
+      // Espelha em crm_lead_followup_state para o badge no Kanban (KanbanLeadCard lê current_step/status).
+      // current_step = índice 0-based do último follow-up enviado; status = 'completed' no último (índice 5),
+      // 'active' até lá. Mensagens novas do paciente disparam status='interrupted' no whatsapp-webhook.
+      const isLastFollowup = newCount >= FOLLOWUP_HOURS.length
+      await admin.from('crm_lead_followup_state').upsert({
+        lead_id: leadId,
+        current_step: followupIndex,
+        last_sent_at: nowIso(),
+        status: isLastFollowup ? 'completed' : 'active',
+        updated_at: nowIso(),
+      })
+
       sent++
       results.push({ leadId, status: 'sent', followupIndex })
     } catch (e) {

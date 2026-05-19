@@ -324,9 +324,26 @@ function scheduleWhatsappInboundBurstFlush(
   })())
 }
 
-const INITIAL_TRIAGE_MESSAGE_TEMPLATE = `Olá, {name}! Boa tarde, tudo bem? Seja muito bem-vindo ao Instituto Lorena Visentainer. 💆
+/** Saudação contextual ("Bom dia" / "Boa tarde" / "Boa noite") no fuso de São Paulo. */
+export function brasilGreetingNow(now: Date = new Date()): string {
+  const hour = Number(
+    new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      hour: 'numeric',
+      hour12: false,
+    }).format(now),
+  )
+  if (hour < 5) return 'Boa noite'
+  if (hour < 12) return 'Bom dia'
+  if (hour < 18) return 'Boa tarde'
+  return 'Boa noite'
+}
 
-Eu sou o assistente virtual da clínica. Posso ajudá-lo a escolher o tipo de atendimento e a reunir as informações para o agendamento — a nossa equipa confirma depois o melhor horário na agenda.
+function buildInitialTriageMessage(name: string, now: Date = new Date()): string {
+  const greeting = brasilGreetingNow(now)
+  return `Olá, ${name}! ${greeting}, tudo bem? Eu sou a *Sofia*, assistente virtual do Instituto Lorena Visentainer. 💆
+
+Posso ajudá-lo a escolher o tipo de atendimento e a reunir as informações para o agendamento — a nossa equipa confirma depois o melhor horário na agenda.
 
 Para começarmos, digite o número da opção desejada:
 
@@ -335,6 +352,7 @@ Para começarmos, digite o número da opção desejada:
 3. Consulta Clínica Masculino
 4. Consulta Clínica Feminino
 5. Transplante de Sobrancelha`
+}
 
 export function nowIso(): string {
   return new Date().toISOString()
@@ -638,7 +656,7 @@ export async function runWhatsappAiAutoReply(
           .maybeSingle()
 
         if (!state?.last_ai_reply_at) {
-          const welcome = INITIAL_TRIAGE_MESSAGE_TEMPLATE.replace('{name}', options.patientName)
+          const welcome = buildInitialTriageMessage(options.patientName)
           
           const sent = await options.sendProvider.sendMessage({
             to: options.fromPhone,
@@ -859,7 +877,7 @@ export async function runManychatAiAutoReply(
           .maybeSingle()
 
         if (!state?.last_ai_reply_at) {
-          const welcome = INITIAL_TRIAGE_MESSAGE_TEMPLATE.replace('{name}', options.patientName)
+          const welcome = buildInitialTriageMessage(options.patientName)
           
           await insertInteraction(admin, {
             leadId: options.leadId,
