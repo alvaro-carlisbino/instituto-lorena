@@ -120,7 +120,7 @@ import type {
 import { isWorkloadExcludedStageId, pickNpsTemplateForPipeline, shouldDispatchNpsForStage } from '../lib/followUpNps'
 import { mergeKanbanFieldOrder, isLeadWhatsappComposeBlocked } from '../lib/leadFields'
 import { getDataProviderMode } from '../services/dataMode'
-import { sendWhatsappMessage } from '../services/crmWhatsapp'
+import { notifySendError, sendWhatsappMessage } from '../services/crmWhatsapp'
 import { dispatchNps } from '../services/npsDispatch'
 import type { WebhookJob, AuditLogEntry } from '../services/crmSupabase'
 
@@ -631,7 +631,7 @@ export const useCrmState = () => {
       })
 
       if (!result.ok) {
-        toast.error(`Falha no envio: ${result.error}${result.detail ? ` (${result.detail})` : ''}`)
+        notifySendError(result, 'manual')
         return
       }
 
@@ -681,7 +681,7 @@ export const useCrmState = () => {
       })
 
       if (!result.ok) {
-        toast.error(`Falha no envio da figurinha: ${result.error}${result.detail ? ` (${result.detail})` : ''}`)
+        notifySendError(result, 'sticker')
         return
       }
 
@@ -717,7 +717,7 @@ export const useCrmState = () => {
         attachments: [],
       })
       if (!result.ok) {
-        toast.error(`Falha na automação: ${result.error}`)
+        notifySendError(result, 'automation')
         return
       }
       toast.success('Mensagem automática enviada.')
