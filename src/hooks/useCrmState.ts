@@ -720,7 +720,7 @@ export const useCrmState = () => {
         toast.error(`Falha na automação: ${result.error}`)
         return
       }
-      toast.success('Mensagem automática enviada via Evolution API.')
+      toast.success('Mensagem automática enviada.')
       await refreshChatFromSupabase()
       return
     }
