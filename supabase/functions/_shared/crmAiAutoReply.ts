@@ -203,12 +203,14 @@ async function sendWhatsappPatientFallbackReply(
   const envTyping = (Deno.env.get('WHATSAPP_AI_TYPING_DELAY_MS') ?? '').trim()
   const envTypingN = envTyping ? Number.parseInt(envTyping, 10) : Number.NaN
   const delayFromEnv = Number.isFinite(envTypingN) ? Math.max(0, envTypingN) : null
+  // Default 0 desde a API oficial — sem motivo para simular digitação.
+  // Para reativar, setar env WHATSAPP_AI_TYPING_DELAY_MS=200 (ou outro valor).
   const delay =
     opts.typingDelayMs !== undefined
       ? Math.max(0, opts.typingDelayMs)
       : delayFromEnv !== null
         ? delayFromEnv
-        : 200
+        : 0
   if (delay > 0) await sleepMs(delay)
 
   const sent = await opts.sendProvider.sendMessage({
@@ -755,12 +757,14 @@ export async function runWhatsappAiAutoReply(
     const envTyping = (Deno.env.get('WHATSAPP_AI_TYPING_DELAY_MS') ?? '').trim()
     const envTypingN = envTyping ? Number.parseInt(envTyping, 10) : Number.NaN
     const delayFromEnv = Number.isFinite(envTypingN) ? Math.max(0, envTypingN) : null
+    // Default 0 desde a API oficial — sem motivo para simular digitação.
+    // Para reativar, setar env WHATSAPP_AI_TYPING_DELAY_MS=500 (ou outro valor).
     const delay =
       options.typingDelayMs !== undefined
         ? Math.max(0, options.typingDelayMs)
         : delayFromEnv !== null
           ? delayFromEnv
-          : 400 + Math.floor(Math.random() * 500)
+          : 0
     if (delay > 0) await sleepMs(delay)
 
     const sent = await options.sendProvider.sendMessage({
