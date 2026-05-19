@@ -8,6 +8,7 @@ import {
 import { enrichInboundWhatsappMediaAndAppendContext } from '../_shared/crmMediaEnrichment.ts'
 import { findSyntheticInstagramLeadByName, insertInteraction, mergeLeadDropIntoKeep, upsertLeadByPhone } from '../_shared/crm.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
+import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { resolveTenantFromEvolutionInstance, DEFAULT_TENANT_ID } from '../_shared/tenantResolve.ts'
 import { WA_INSTAGRAM_MERGE_NOTICE_CONTENT } from '../_shared/waInstagramMergeNotice.ts'
 import { getWhatsappProviderFromEnv } from '../_shared/whatsapp/provider.ts'
@@ -314,6 +315,51 @@ Deno.serve(async (req) => {
       | 'waiting_human'
       | 'human_active'
       | ''
+
+    // Captura resposta NPS (nota 0-10) ANTES da IA processar.
+    // Se houver dispatch pendente para o lead e a mensagem for um número solo 0-10,
+    // registra o survey_response, envia agradecimento e curto-circuita o resto do pipeline.
+    if (normalized.direction === 'in') {
+      const npsResult = await captureNpsInboundResponse(admin, {
+        leadId: lead.leadId,
+        inboundText: normalized.text,
+        patientName: normalized.fromName,
+        tenantId,
+      })
+      if (npsResult.captured) {
+        const sendProvider = await getWhatsappProviderForEvent(admin, {
+          evolutionInstanceName: normalized.evolutionInstanceName ?? '',
+          provider: envProvider,
+          metaPhoneNumberId: normalized.metaPhoneNumberId ?? '',
+        })
+        try {
+          const sent = await sendProvider.sendMessage({
+            to: normalized.fromPhone,
+            text: npsResult.thankYouText,
+            leadId: lead.leadId,
+          })
+          await insertInteraction(admin, {
+            leadId: lead.leadId,
+            patientName: normalized.fromName,
+            channel: 'whatsapp',
+            direction: 'out',
+            author: 'NPS (Sofia)',
+            content: npsResult.thankYouText,
+            externalMessageId: sent.externalMessageId,
+            tenantId,
+          })
+        } catch (e) {
+          console.warn('nps thankyou send failed:', e instanceof Error ? e.message : String(e))
+        }
+        await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', String(jobRow.id))
+        return json({
+          ok: true,
+          routing: 'nps_response_captured',
+          score: npsResult.score,
+          dispatchId: npsResult.dispatchId,
+        })
+      }
+    }
 
     const gate = await evaluateCrmAiAutoReplyGate(admin, lead.leadId, {
       directionIsInbound: normalized.direction === 'in',
