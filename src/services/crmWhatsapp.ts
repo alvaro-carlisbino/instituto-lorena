@@ -1,3 +1,5 @@
+import { toast } from 'sonner'
+
 import { supabase } from '@/lib/supabaseClient'
 
 export type SendWhatsappPayload = {
@@ -24,6 +26,23 @@ export type SendWhatsappResult =
       ok: false
       error: string
       detail?: string
+      /**
+       * `true` quando o erro veio do ManyChat sendFlow batendo na janela de 24h do Meta
+       * (sem mensagem do paciente nas últimas 24h, Meta bloqueia DM a menos que se use
+       * tag HUMAN_AGENT). Permite ao consumer mostrar mensagem amigável em vez de "500".
+       */
+      outOfMessagingWindow?: boolean
+      /** Atalho para "manychat_push_failed", "provider_not_configured" etc. */
+      kind?:
+        | 'manychat_push_failed'
+        | 'manychat_not_configured'
+        | 'provider_not_configured'
+        | 'rate_limited'
+        | 'cooldown'
+        | 'lead_not_found'
+        | 'missing_fields'
+        | 'send_failed'
+        | 'unknown'
     }
 
 /**
@@ -54,8 +73,35 @@ async function readEdgeFunctionErrorBody(error: unknown): Promise<Record<string,
   return null
 }
 
+/** Reconhece a assinatura de "fora da janela 24h" no detail do erro. */
+function detectOutOfMessagingWindow(error: string, detail?: string): boolean {
+  const haystack = `${error} ${detail ?? ''}`.toLowerCase()
+  if (!haystack.includes('manychat')) return false
+  return /window|24|tag|messaging|policy|human_agent|outside/i.test(haystack)
+}
+
+const KNOWN_ERROR_KINDS = new Set([
+  'manychat_push_failed',
+  'manychat_not_configured',
+  'provider_not_configured',
+  'rate_limited',
+  'cooldown',
+  'lead_not_found',
+  'missing_fields',
+  'send_failed',
+])
+
+function classifyError(raw: string): SendWhatsappResult extends infer R
+  ? R extends { ok: false; kind?: infer K }
+    ? K
+    : never
+  : never {
+  const k = raw.trim()
+  return (KNOWN_ERROR_KINDS.has(k) ? k : 'unknown') as never
+}
+
 export async function sendWhatsappMessage(payload: SendWhatsappPayload): Promise<SendWhatsappResult> {
-  if (!supabase) return { ok: false, error: 'Sistema não configurado.' }
+  if (!supabase) return { ok: false, error: 'Sistema não configurado.', kind: 'unknown' }
 
   const { data, error } = await supabase.functions.invoke('crm-send-message', {
     body: payload,
@@ -64,13 +110,17 @@ export async function sendWhatsappMessage(payload: SendWhatsappPayload): Promise
   if (error) {
     const body = await readEdgeFunctionErrorBody(error)
     if (body && (body.error || body.message)) {
+      const errStr = String(body.error ?? error.message ?? 'Falha ao enviar mensagem.')
+      const detail = typeof body.message === 'string' ? body.message : undefined
       return {
         ok: false,
-        error: String(body.error ?? error.message ?? 'Falha ao enviar mensagem.'),
-        detail: typeof body.message === 'string' ? body.message : undefined,
+        error: errStr,
+        detail,
+        outOfMessagingWindow: detectOutOfMessagingWindow(errStr, detail),
+        kind: classifyError(errStr),
       }
     }
-    return { ok: false, error: error.message || 'Falha ao enviar mensagem.' }
+    return { ok: false, error: error.message || 'Falha ao enviar mensagem.', kind: 'unknown' }
   }
 
   const parsed = data && typeof data === 'object' ? (data as Record<string, unknown>) : {}
@@ -83,10 +133,50 @@ export async function sendWhatsappMessage(payload: SendWhatsappPayload): Promise
     }
   }
 
+  const errStr = String(parsed.error ?? 'Falha ao enviar mensagem.')
+  const detail = typeof parsed.message === 'string' ? parsed.message : undefined
   return {
     ok: false,
-    error: String(parsed.error ?? 'Falha ao enviar mensagem.'),
-    detail: typeof parsed.message === 'string' ? parsed.message : undefined,
+    error: errStr,
+    detail,
+    outOfMessagingWindow: detectOutOfMessagingWindow(errStr, detail),
+    kind: classifyError(errStr),
   }
+}
+
+/**
+ * Mostra um toast adequado ao tipo de erro de envio. Usar nos consumers em vez de
+ * `toast.error(result.error)` direto — assim janela 24h vira aviso amarelo claro
+ * em vez de "500 Internal Server Error".
+ */
+export function notifySendError(
+  result: Extract<SendWhatsappResult, { ok: false }>,
+  context: 'manual' | 'sticker' | 'automation' = 'manual',
+): void {
+  if (result.outOfMessagingWindow) {
+    toast.warning(
+      'Paciente sem responder há mais de 24h.',
+      {
+        description:
+          'O Instagram/WhatsApp da Meta bloqueia DM nessa situação. Configure o secret MANYCHAT_SEND_FLOW_MESSAGE_TAG=HUMAN_AGENT no Supabase para liberar resposta humana em até 7 dias.',
+      },
+    )
+    return
+  }
+  if (result.kind === 'cooldown') {
+    toast.info('Aguarde alguns segundos entre envios para o mesmo lead.', {
+      description: result.detail,
+    })
+    return
+  }
+  if (result.kind === 'rate_limited') {
+    toast.warning('Limite de envios atingido nesta hora.', { description: result.detail })
+    return
+  }
+  const prefix =
+    context === 'sticker' ? 'Falha no envio da figurinha'
+    : context === 'automation' ? 'Falha na automação'
+    : 'Falha no envio'
+  toast.error(`${prefix}: ${result.error}${result.detail ? ` (${result.detail})` : ''}`)
 }
 
