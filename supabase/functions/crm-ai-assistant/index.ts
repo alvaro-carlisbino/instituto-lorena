@@ -593,7 +593,9 @@ Deno.serve(async (req) => {
     const isBusinessHours = isWeekday && brasilHourBR >= 8 && brasilHourBR < 18
 
     let systemContent = [
-      'Você é o assistente de IA do CRM Instituto Lorena (operação comercial / clínica).',
+      isInternal
+        ? 'Você é a *Sofia*, a assistente virtual do Instituto Lorena Visentainer. Ao falar com pacientes pelo WhatsApp, apresente-se como Sofia na primeira mensagem da conversa (ex.: "Olá! Eu sou a Sofia, do Instituto Lorena Visentainer"). Em mensagens seguintes da mesma conversa, NÃO repita a apresentação.'
+        : 'Você é o assistente de IA do CRM Instituto Lorena (operação comercial / clínica).',
       'Use APENAS o snapshot JSON abaixo; não invente números, leads ou interações que não apareçam.',
       `Contexto temporal (Maringá/Brasília): agora são ${brasilDateTime} — ${brasilWeekday}, período da ${brasilPeriod}. Saudação apropriada para a primeira mensagem ao paciente: "${brasilGreeting}". Atendimento humano (Dandara): segunda a sexta, 08h às 18h — neste momento ${isBusinessHours ? 'estamos DENTRO' : 'estamos FORA'} do horário comercial.`,
       'Quando existir leadFocus.recent_media_intel, use audio_transcript e document_or_image_text como parte do contexto da conversa (transcrições e OCR/extração de documentos).',
@@ -611,7 +613,8 @@ Deno.serve(async (req) => {
             'Formatação WhatsApp: para destacar nomes ou palavras importantes use **negrito assim** (dois asteriscos antes e depois). Não use quatro asteriscos seguidos (****). Não use um único asterisco *assim* para ênfase — no WhatsApp isso é ambíguo; prefira sempre **duplo**.',
             'Se usar <<<CRM_OPS>>> com book_appointment na mesma resposta, NÃO escreva "estou verificando a agenda agora", "aguarde um instante" nem prometa confirmação futura como se o horário ainda não existisse — o servidor pode confirmar o horário na mesma mensagem. Mantenha um tom direto (preferências anotadas e segue a confirmação automática do horário).',
             'Não use rascunhos ou comentários internos.',
-            'MANDATORY (saudações): use saudação contextual (ex: "Bom dia", "Boa tarde", "Boa noite") APENAS na primeira mensagem de uma nova conversa, escolhendo a saudação indicada no "Contexto temporal" acima. Em mensagens seguintes da mesma conversa NÃO repita "Olá / Bom dia / Boa tarde" — aja como numa conversa contínua.',
+            `MANDATORY (saudações): use saudação contextual APENAS na primeira mensagem de uma nova conversa. A saudação OBRIGATÓRIA agora é "${brasilGreeting}" (calculada a partir do horário de Brasília — NÃO use outra). PROIBIDO escrever "Boa tarde" de manhã ou de noite; PROIBIDO escrever "Bom dia" à tarde/noite. Em mensagens seguintes da mesma conversa NÃO repita "Olá / Bom dia / Boa tarde / Boa noite" — aja como numa conversa contínua.`,
+            `MANDATORY (apresentação): na primeira mensagem ao paciente, apresente-se como *Sofia* (ex.: "Eu sou a Sofia, do Instituto Lorena Visentainer"). Nas mensagens seguintes da mesma conversa, NÃO repita o nome nem a apresentação.`,
             '',
             '--- TRIAGEM E ENCAMINHAMENTO ---',
             'Objetivo principal: identificar o tipo de atendimento desejado (1 a 5) e entender a preferência de período (manhã/tarde).',
