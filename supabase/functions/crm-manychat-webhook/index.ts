@@ -27,6 +27,7 @@ import {
   type ExtractedMedia,
 } from '../_shared/manychatMedia.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
+import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { resolveTenantFromManychatBody } from '../_shared/tenantResolve.ts'
 
 const cors = {
@@ -308,6 +309,35 @@ async function runManychatMessagePipeline(
       | 'waiting_human'
       | 'human_active'
       | ''
+
+    // Captura resposta NPS (0-10) antes da IA processar. Se capturado, devolve agradecimento
+    // como `reply` e marca routing = nps_response_captured — nenhum push extra é feito.
+    const npsResult = await captureNpsInboundResponse(admin, {
+      leadId,
+      inboundText: ctx.text,
+      patientName: ctx.userName,
+      tenantId: ctx.tenantId,
+    })
+    if (npsResult.captured) {
+      await insertInteraction(admin, {
+        leadId,
+        patientName: ctx.userName,
+        channel: ctx.channel === 'whatsapp' ? 'whatsapp' : 'meta',
+        direction: 'out',
+        author: 'NPS (Sofia)',
+        content: npsResult.thankYouText,
+        happenedAt: nowIso(),
+        tenantId: ctx.tenantId,
+      })
+      await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', ctx.jobRowId)
+      return {
+        leadId,
+        reply: npsResult.thankYouText,
+        handoff_suggested: false,
+        routing: 'nps_response_captured',
+        manychat_push: { attempted: false, skipped_reason: 'nps_capture' },
+      }
+    }
 
     const gate = await evaluateCrmAiAutoReplyGate(admin, leadId, {
       directionIsInbound: true,

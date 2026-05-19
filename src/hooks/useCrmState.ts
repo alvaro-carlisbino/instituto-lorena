@@ -53,7 +53,6 @@ import {
   saveTvWidget,
   saveWorkflowField,
   saveLeadTask,
-  saveSurveyDispatch,
   saveSurveyResponse,
   seedDemoData,
   seedTestUsers,
@@ -122,6 +121,7 @@ import { isWorkloadExcludedStageId, pickNpsTemplateForPipeline, shouldDispatchNp
 import { mergeKanbanFieldOrder, isLeadWhatsappComposeBlocked } from '../lib/leadFields'
 import { getDataProviderMode } from '../services/dataMode'
 import { sendWhatsappMessage } from '../services/crmWhatsapp'
+import { dispatchNps } from '../services/npsDispatch'
 import type { WebhookJob, AuditLogEntry } from '../services/crmSupabase'
 
 export type QueueJob = WebhookJob
@@ -381,26 +381,51 @@ export const useCrmState = () => {
     if (shouldDispatchNpsForStage(nextStage.id)) {
       const tmpl = pickNpsTemplateForPipeline(targetLead.pipelineId, surveyTemplates)
       if (tmpl) {
-        const dispatch: SurveyDispatch = {
-          id: `disp-${Date.now()}`,
-          templateId: tmpl.id,
-          leadId: targetLead.id,
-          sentAt: new Date().toISOString(),
-          channel: 'in_app',
-        }
-        setSurveyDispatches((prev) => [...prev, dispatch])
+        // Em modo Supabase, dispara via edge function (envia mensagem real ao paciente
+        // por WhatsApp/Instagram e cria o survey_dispatch com canal correto).
+        // Em modo mock/local, mantém comportamento antigo (in-app + nota na ficha).
         if (dataMode === 'supabase' && isSupabaseConfigured) {
-          void saveSurveyDispatch(dispatch)
+          void dispatchNps(targetLead.id, tmpl.id).then((result) => {
+            if (result.ok) {
+              const dispatch: SurveyDispatch = {
+                id: result.dispatchId,
+                templateId: result.templateId || tmpl.id,
+                leadId: targetLead.id,
+                sentAt: new Date().toISOString(),
+                channel: result.channel,
+              }
+              setSurveyDispatches((prev) => [...prev, dispatch])
+            } else {
+              addInteraction({
+                leadId: targetLead.id,
+                patientName: targetLead.patientName,
+                channel: 'system',
+                direction: 'system',
+                author: 'NPS',
+                content: `Falha ao enviar pesquisa NPS: ${result.error}${result.detail ? ` — ${result.detail}` : ''}`,
+                happenedAt: new Date().toISOString(),
+              })
+            }
+          })
+        } else {
+          const dispatch: SurveyDispatch = {
+            id: `disp-${Date.now()}`,
+            templateId: tmpl.id,
+            leadId: targetLead.id,
+            sentAt: new Date().toISOString(),
+            channel: 'in_app',
+          }
+          setSurveyDispatches((prev) => [...prev, dispatch])
+          addInteraction({
+            leadId: targetLead.id,
+            patientName: targetLead.patientName,
+            channel: 'system',
+            direction: 'system',
+            author: 'NPS',
+            content: `Pesquisa "${tmpl.name}" enviada (in-app). Codigo: ${dispatch.id}. Registre a nota em Tarefas e NPS.`,
+            happenedAt: new Date().toISOString(),
+          })
         }
-        addInteraction({
-          leadId: targetLead.id,
-          patientName: targetLead.patientName,
-          channel: 'system',
-          direction: 'system',
-          author: 'NPS',
-          content: `Pesquisa "${tmpl.name}" enviada (in-app). Codigo: ${dispatch.id}. Registre a nota em Tarefas e NPS.`,
-          happenedAt: new Date().toISOString(),
-        })
       }
     }
   }
@@ -1497,6 +1522,44 @@ export const useCrmState = () => {
   }
 
   const dispatchNpsForLead = (templateId: string, leadId: string) => {
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      // Otimista: retorna dispatch local imediato; persistência real acontece via edge function.
+      const optimistic: SurveyDispatch = {
+        id: `disp-${Date.now()}`,
+        templateId,
+        leadId,
+        sentAt: new Date().toISOString(),
+        channel: 'whatsapp',
+      }
+      setSurveyDispatches((prev) => [...prev, optimistic])
+      void dispatchNps(leadId, templateId).then((result) => {
+        if (result.ok) {
+          setSurveyDispatches((prev) =>
+            prev.map((d) =>
+              d.id === optimistic.id
+                ? { ...d, id: result.dispatchId, templateId: result.templateId || d.templateId, channel: result.channel }
+                : d,
+            ),
+          )
+        } else {
+          // Reverte o otimismo e regista o erro na ficha do lead.
+          setSurveyDispatches((prev) => prev.filter((d) => d.id !== optimistic.id))
+          const lead = leads.find((l) => l.id === leadId)
+          if (lead) {
+            addInteraction({
+              leadId,
+              patientName: lead.patientName,
+              channel: 'system',
+              direction: 'system',
+              author: 'NPS',
+              content: `Falha ao enviar pesquisa NPS: ${result.error}${result.detail ? ` — ${result.detail}` : ''}`,
+              happenedAt: new Date().toISOString(),
+            })
+          }
+        }
+      })
+      return optimistic
+    }
     const dispatch: SurveyDispatch = {
       id: `disp-${Date.now()}`,
       templateId,
@@ -1505,9 +1568,6 @@ export const useCrmState = () => {
       channel: 'in_app',
     }
     setSurveyDispatches((prev) => [...prev, dispatch])
-    if (dataMode === 'supabase' && isSupabaseConfigured) {
-      void saveSurveyDispatch(dispatch)
-    }
     return dispatch
   }
 
