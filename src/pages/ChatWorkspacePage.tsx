@@ -42,6 +42,7 @@ export function ChatWorkspacePage() {
   const [searchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [ownerFilter, setOwnerFilter] = useState('all')
+  const [sortMode, setSortMode] = useState<'recent' | 'long_wait'>('recent')
   const [leadMode, setLeadMode] = useState<ConversationOwnerMode>('auto')
   const [modeLoading, setModeLoading] = useState(false)
   const [leadSheetOpen, setLeadSheetOpen] = useState(false)
@@ -63,20 +64,60 @@ export function ChatWorkspacePage() {
     [ownerFilter, crm.users],
   )
 
+  /**
+   * `waitingSinceByLead`: timestamp da última inbound do paciente quando NÃO houve
+   * resposta humana/IA subsequente. `null` quando o lead está em dia. Usado pela
+   * ordenação "Longa espera" (mais antigo primeiro = mais urgente).
+   */
+  const waitingSinceByLead = useMemo(() => {
+    const lastIn = new Map<string, number>()
+    const lastOut = new Map<string, number>()
+    for (const i of crm.interactions) {
+      const t = new Date(i.happenedAt).getTime()
+      if (Number.isNaN(t)) continue
+      if (i.direction === 'in') {
+        if (!lastIn.has(i.leadId) || t > (lastIn.get(i.leadId) ?? 0)) lastIn.set(i.leadId, t)
+      } else if (i.direction === 'out') {
+        if (!lastOut.has(i.leadId) || t > (lastOut.get(i.leadId) ?? 0)) lastOut.set(i.leadId, t)
+      }
+    }
+    const result = new Map<string, number | null>()
+    for (const [leadId, inTs] of lastIn) {
+      const outTs = lastOut.get(leadId) ?? 0
+      result.set(leadId, inTs > outTs ? inTs : null)
+    }
+    return result
+  }, [crm.interactions])
+
   const conversations = useMemo(() => {
     const text = search.trim().toLowerCase()
-    return crm.leads
-      .filter((lead) => {
-        if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) return false
-        if (!text) return true
-        return [lead.patientName, lead.phone, lead.summary].join(' ').toLowerCase().includes(text)
-      })
-      .sort((a, b) => {
+    const filtered = crm.leads.filter((lead) => {
+      if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) return false
+      if (!text) return true
+      return [lead.patientName, lead.phone, lead.summary].join(' ').toLowerCase().includes(text)
+    })
+
+    if (sortMode === 'long_wait') {
+      // Leads aguardando resposta primeiro, mais antigos no topo.
+      // Lead sem espera pendente cai pro fim (ordenado por interação recente).
+      return filtered.sort((a, b) => {
+        const aw = waitingSinceByLead.get(a.id) ?? null
+        const bw = waitingSinceByLead.get(b.id) ?? null
+        if (aw !== null && bw !== null) return aw - bw
+        if (aw !== null) return -1
+        if (bw !== null) return 1
         const ah = crm.interactions.find((i) => i.leadId === a.id)?.happenedAt ?? a.createdAt
         const bh = crm.interactions.find((i) => i.leadId === b.id)?.happenedAt ?? b.createdAt
         return new Date(bh).getTime() - new Date(ah).getTime()
       })
-  }, [crm.leads, crm.interactions, ownerFilter, search])
+    }
+
+    return filtered.sort((a, b) => {
+      const ah = crm.interactions.find((i) => i.leadId === a.id)?.happenedAt ?? a.createdAt
+      const bh = crm.interactions.find((i) => i.leadId === b.id)?.happenedAt ?? b.createdAt
+      return new Date(bh).getTime() - new Date(ah).getTime()
+    })
+  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead])
 
   const activeLead = crm.selectedLead ?? conversations[0] ?? null
   const waComposeBlocked = activeLead ? isLeadWhatsappComposeBlocked(activeLead) : false
@@ -191,6 +232,18 @@ export function ChatWorkspacePage() {
                   ))}
                 </SelectContent>
               </Select>
+              <Select
+                value={sortMode}
+                onValueChange={(value) => setSortMode((value === 'long_wait' ? 'long_wait' : 'recent'))}
+              >
+                <LabeledSelectTrigger className="h-8 rounded-lg border-border/30 bg-background/30 text-[11px]" size="sm">
+                  {sortMode === 'long_wait' ? 'Longa espera' : 'Mais recentes'}
+                </LabeledSelectTrigger>
+                <SelectContent>
+                  <SelectItem value="recent" className="text-xs">Mais recentes</SelectItem>
+                  <SelectItem value="long_wait" className="text-xs">Longa espera</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </CardHeader>
           <CardContent className="min-h-0 flex-1 overflow-y-auto p-0 scrollbar-thin scrollbar-thumb-border/40">
@@ -200,7 +253,13 @@ export function ChatWorkspacePage() {
               </div>
             ) : (
               <div className="divide-y divide-border/5">
-                {conversations.map((lead) => (
+                {conversations.map((lead) => {
+                  const waitingSince = waitingSinceByLead.get(lead.id) ?? null
+                  const waitingMinutes = waitingSince ? Math.floor((Date.now() - waitingSince) / 60000) : 0
+                  const waitingLabel = waitingMinutes >= 60
+                    ? `${Math.floor(waitingMinutes / 60)}h${waitingMinutes % 60 ? ` ${waitingMinutes % 60}m` : ''}`
+                    : `${waitingMinutes}m`
+                  return (
                   <button
                     key={lead.id}
                     onClick={() => crm.setSelectedLeadId(lead.id)}
@@ -238,9 +297,23 @@ export function ChatWorkspacePage() {
                         <span className={cn('h-1 w-1 rounded-full', getSourceStyle(lead.source).dot)} aria-hidden />
                         {getSourceStyle(lead.source).label}
                       </span>
+                      {waitingSince ? (
+                        <span
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider',
+                            waitingMinutes >= 30
+                              ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+                              : 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+                          )}
+                          title={`Última mensagem do paciente sem resposta há ${waitingLabel}`}
+                        >
+                          ⏱ {waitingLabel}
+                        </span>
+                      ) : null}
                     </div>
                   </button>
-                ))}
+                  )
+                })}
               </div>
             )}
           </CardContent>
