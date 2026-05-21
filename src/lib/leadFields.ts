@@ -31,6 +31,68 @@ export function isLeadWhatsappComposeBlocked(lead: Pick<Lead, 'source' | 'phone'
   return isManychatSyntheticPhone(lead.phone)
 }
 
+/**
+ * Tabela de preços Instituto Lorena: [medico][tipo_consulta][genero] → R$.
+ * Quando gênero não afeta o valor, M e F apontam para o mesmo número.
+ */
+export const LORENA_PRICE_TABLE: Record<string, Record<string, Record<string, number>>> = {
+  lorena: {
+    transplante: { masculino: 800, feminino: 1100 },
+    clinica: { masculino: 800, feminino: 1100 },
+    acompanhamento: { masculino: 600, feminino: 600 },
+    online: { masculino: 800, feminino: 800 },
+    sobrancelhas: { masculino: 600, feminino: 600 },
+  },
+  outros: {
+    transplante: { masculino: 600, feminino: 600 },
+    clinica: { masculino: 600, feminino: 600 },
+    acompanhamento: { masculino: 400, feminino: 400 },
+    online: { masculino: 400, feminino: 400 },
+    sobrancelhas: { masculino: 400, feminino: 400 },
+  },
+}
+
+export function formatBRL(value: number): string {
+  return `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+/** Resolve preço a partir de tipo_consulta + medico + genero. '' se faltar dado. */
+export function calculateInvestmentValue(tipoConsulta: unknown, medico: unknown, genero: unknown): string {
+  const t = String(tipoConsulta ?? '').toLowerCase()
+  const m = String(medico ?? '').toLowerCase()
+  const g = String(genero ?? '').toLowerCase()
+  if (!t || !m || !g) return ''
+  const value = LORENA_PRICE_TABLE[m]?.[t]?.[g]
+  if (typeof value !== 'number') return ''
+  return formatBRL(value)
+}
+
+/**
+ * Score 0–100 derivado dos campos do lead. Regras (acertadas com o usuário):
+ * +20 telefone real (≥10 dígitos e não sintético ManyChat)
+ * +20 tipo de consulta definido
+ * +15 faixa de investimento definida
+ * +15 data preferida preenchida
+ * +15 primeira consulta = sim
+ * +15 e-mail válido
+ */
+export function calculateLeadScore(lead: Pick<Lead, 'phone' | 'customFields'>): number {
+  let score = 0
+  const phone = String(lead.phone ?? '')
+  if (phone.replace(/\D/g, '').length >= 10 && !isManychatSyntheticPhone(phone)) score += 20
+
+  const cf = lead.customFields ?? {}
+  if (String(cf.tipo_consulta ?? '').trim()) score += 20
+  if (String(cf.faixa_investimento ?? '').trim()) score += 15
+  if (String(cf.data_preferida ?? '').trim()) score += 15
+  const pc = cf.primeira_consulta
+  if (pc === true || pc === 'true' || pc === 1) score += 15
+  const email = String(cf.email ?? '').trim()
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) score += 15
+
+  return Math.min(100, score)
+}
+
 /** Campos persistidos em colunas SQL (além de custom_fields). */
 export const CORE_LEAD_FIELD_KEYS = [
   'patient_name',
@@ -65,33 +127,54 @@ export function getLeadFieldValue(lead: Lead, fieldKey: string): unknown {
 }
 
 export function setLeadFieldValue(lead: Lead, fieldKey: string, value: unknown): Lead {
+  let next: Lead
   switch (fieldKey) {
     case 'patient_name':
-      return { ...lead, patientName: String(value ?? '') }
+      next = { ...lead, patientName: String(value ?? '') }
+      break
     case 'phone':
-      return { ...lead, phone: String(value ?? '') }
+      next = { ...lead, phone: String(value ?? '') }
+      break
     case 'source': {
       const v = String(value ?? '')
       const ok = ['meta_facebook', 'meta_instagram', 'meta_whatsapp', 'whatsapp', 'manual'] as const
       const hit = ok.find((s) => s === v)
-      return { ...lead, source: hit ?? lead.source }
+      next = { ...lead, source: hit ?? lead.source }
+      break
     }
     case 'summary':
-      return { ...lead, summary: String(value ?? '') }
+      next = { ...lead, summary: String(value ?? '') }
+      break
     case 'score':
-      return { ...lead, score: Number(value) || 0 }
+      next = { ...lead, score: Number(value) || 0 }
+      break
     case 'temperature': {
       const v = String(value ?? '')
       const ok = ['cold', 'warm', 'hot'] as const
       const hit = ok.find((s) => s === v)
-      return { ...lead, temperature: hit ?? lead.temperature }
+      next = { ...lead, temperature: hit ?? lead.temperature }
+      break
     }
     default:
-      return {
-        ...lead,
-        customFields: { ...lead.customFields, [fieldKey]: value },
-      }
+      next = { ...lead, customFields: { ...lead.customFields, [fieldKey]: value } }
   }
+
+  if (fieldKey === 'tipo_consulta' || fieldKey === 'medico' || fieldKey === 'genero_paciente') {
+    const computed = calculateInvestmentValue(
+      next.customFields?.tipo_consulta,
+      next.customFields?.medico,
+      next.customFields?.genero_paciente,
+    )
+    if (computed) {
+      next = { ...next, customFields: { ...next.customFields, faixa_investimento: computed } }
+    }
+  }
+
+  if (fieldKey !== 'score') {
+    next = { ...next, score: calculateLeadScore(next) }
+  }
+
+  return next
 }
 
 export function workflowFieldsForContext(fields: WorkflowField[], ctx: FieldVisibilityContext): WorkflowField[] {

@@ -531,6 +531,88 @@ export async function invokeCrmAiAssistantForLead(
   return ''
 }
 
+/**
+ * Stage destino quando a IA finaliza a triagem (marker [PRONTO_PARA_CONSULTOR]):
+ * o lead sai da triagem da Sofia e passa para a Dandara negociar/agendar manualmente.
+ */
+const HANDOFF_STAGE_BY_PIPELINE: Record<string, string> = {
+  'pipeline-clinica': 'contato',
+  'pipeline-tratamento-capilar': 'tc-avaliacao',
+}
+
+/** Mensagem de transição quando a IA falha 2x seguidas — chama humano sem assustar o paciente. */
+const AI_FAILURE_HANDOVER_TEXT =
+  'Só um momento — vou chamar a nossa equipa para continuar o teu atendimento por aqui. Em instantes responde-te um(a) consultor(a) do Instituto Lorena 🙏'
+
+/** True se a última saída IA neste lead foi a mensagem de fallback "Peço desculpa…". */
+export async function wasLastAiReplyFallback(
+  admin: SupabaseClient,
+  leadId: string,
+): Promise<boolean> {
+  const { data } = await admin
+    .from('interactions')
+    .select('content, author')
+    .eq('lead_id', leadId)
+    .eq('direction', 'out')
+    .eq('author', 'Assistente IA')
+    .order('happened_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (!data) return false
+  const content = String((data as { content?: string }).content ?? '')
+  return /Peço desculpa.*não consegui responder/i.test(content)
+}
+
+/**
+ * Chamada quando a IA produz o marker [PRONTO_PARA_CONSULTOR]: desliga a IA neste lead
+ * (ai_enabled=false + owner_mode=human) e move para o stage da Dandara. Idempotente —
+ * só atualiza o que ainda não está no estado final, e silencia erros para não bloquear o reply.
+ */
+export async function disableAiOnHandoff(
+  admin: SupabaseClient,
+  leadId: string,
+): Promise<void> {
+  try {
+    const { data: lead } = await admin
+      .from('leads')
+      .select('pipeline_id, stage_id, patient_name')
+      .eq('id', leadId)
+      .maybeSingle()
+    const pipelineId = String(lead?.pipeline_id ?? '').trim()
+    const currentStage = String(lead?.stage_id ?? '').trim()
+    const patientName = String(lead?.patient_name ?? '').trim()
+    const targetStage = HANDOFF_STAGE_BY_PIPELINE[pipelineId]
+
+    if (targetStage && currentStage !== targetStage) {
+      await admin
+        .from('leads')
+        .update({ stage_id: targetStage, updated_at: nowIso() })
+        .eq('id', leadId)
+    }
+
+    await admin
+      .from('crm_conversation_states')
+      .upsert({
+        lead_id: leadId,
+        ai_enabled: false,
+        owner_mode: 'human',
+        updated_at: nowIso(),
+      })
+
+    await insertInteraction(admin, {
+      leadId,
+      patientName,
+      channel: 'system',
+      direction: 'system',
+      author: 'CRM',
+      content: 'IA desligada automaticamente: triagem finalizada, lead pronto para a Dandara finalizar o agendamento manualmente.',
+      happenedAt: nowIso(),
+    })
+  } catch (e) {
+    console.warn('disableAiOnHandoff:', e instanceof Error ? e.message : String(e))
+  }
+}
+
 export async function upsertConversationStateInboundOnly(
   admin: SupabaseClient,
   options: {
@@ -723,6 +805,38 @@ export async function runWhatsappAiAutoReply(
   const aiReply = aiReplySanitized.trim()
 
   if (!aiReply) {
+    // Falha consecutiva no WhatsApp também: 2º fallback seguido → handover defensivo.
+    const prevAlsoFallback = await wasLastAiReplyFallback(admin, options.leadId)
+    if (prevAlsoFallback) {
+      try {
+        const handoverText = normalizeWhatsappPatientFormatting(AI_FAILURE_HANDOVER_TEXT)
+        const envTyping = (Deno.env.get('WHATSAPP_AI_TYPING_DELAY_MS') ?? '').trim()
+        const envTypingN = envTyping ? Number.parseInt(envTyping, 10) : Number.NaN
+        const delay = options.typingDelayMs !== undefined
+          ? Math.max(0, options.typingDelayMs)
+          : Number.isFinite(envTypingN) ? Math.max(0, envTypingN) : 200
+        if (delay > 0) await sleepMs(delay)
+        const sent = await options.sendProvider.sendMessage({
+          to: options.fromPhone,
+          text: handoverText,
+          leadId: options.leadId,
+        })
+        await insertInteraction(admin, {
+          leadId: options.leadId,
+          patientName: options.patientName,
+          channel: 'whatsapp',
+          direction: 'out',
+          author: 'Assistente IA',
+          content: handoverText,
+          happenedAt: nowIso(),
+          externalMessageId: sent.externalMessageId,
+        })
+        await disableAiOnHandoff(admin, options.leadId)
+        return { replied: true, replyText: handoverText, handoffSuggested: true }
+      } catch (e) {
+        console.error('runWhatsappAiAutoReply handover send:', e)
+      }
+    }
     try {
       await sendWhatsappPatientFallbackReply(admin, {
         leadId: options.leadId,
@@ -968,6 +1082,18 @@ export async function runManychatAiAutoReply(
   }
 
   if (!aiReply) {
+    // Falha consecutiva — última saída IA já foi fallback → faz handover defensivo
+    // (desliga IA, move stage, envia mensagem útil) em vez de cuspir mais um "Peço desculpa".
+    const prevAlsoFallback = await wasLastAiReplyFallback(admin, options.leadId)
+    if (prevAlsoFallback) {
+      try {
+        await commitManychatReply(AI_FAILURE_HANDOVER_TEXT, 'handover_after_consecutive_failures')
+        await disableAiOnHandoff(admin, options.leadId)
+        return { replied: true, replyText: AI_FAILURE_HANDOVER_TEXT, handoffSuggested: true }
+      } catch (e) {
+        console.error('runManychatAiAutoReply handover commit:', e)
+      }
+    }
     const fb = patientAiFallbackMessagePt()
     try {
       await commitManychatReply(fb, 'fallback_empty')
