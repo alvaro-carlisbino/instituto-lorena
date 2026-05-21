@@ -158,7 +158,8 @@ export function SettingsPage() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 
-  const canAccessSettings = crm.currentPermission.canEditBoards || crm.currentPermission.canManageUsers
+  const isManagerOrAdmin = crm.effectiveRole === 'admin' || crm.effectiveRole === 'gestor'
+  const canAccessSettings = isManagerOrAdmin || crm.currentPermission.canEditBoards || crm.currentPermission.canManageUsers
 
   const handleConfirmDelete = () => {
     if (!deleteTarget) return
@@ -242,7 +243,7 @@ export function SettingsPage() {
         className="mb-2"
       />
 
-      {canAccessSettings ? (
+      {isManagerOrAdmin || canAccessSettings ? (
         <Card className={cn('mb-6', pageQuietCardClass)}>
           <CardHeader>
             <CardTitle className="text-base">Atendimento com IA</CardTitle>

@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import {
+  disableAiOnHandoff,
   evaluateCrmAiAutoReplyGate,
   nowIso,
   runWhatsappAiAutoReply,
@@ -393,6 +394,8 @@ Deno.serve(async (req) => {
           last_interaction_at: new Date().toISOString(),
           conversation_status: 'waiting_human'
         }).eq('id', lead.leadId)
+
+        await disableAiOnHandoff(admin, lead.leadId)
 
         await notifyAgents(admin, {
           leadId: lead.leadId,

@@ -710,7 +710,7 @@ export function LeadsPage() {
               </tbody>
             </table>
           </div>
-          {filteredLeads.length === 0 && (
+          {!crm.isLoading && filteredLeads.length === 0 && (
             <div className="flex flex-col items-center justify-center py-24 text-center opacity-30">
               <div className="mb-4 text-5xl">🔭</div>
               <h3 className="text-sm font-black uppercase tracking-[0.3em]">Nenhum lead encontrado</h3>

@@ -118,7 +118,7 @@ import type {
   WorkflowField,
 } from '../mocks/crmMock'
 import { isWorkloadExcludedStageId, pickNpsTemplateForPipeline, shouldDispatchNpsForStage } from '../lib/followUpNps'
-import { mergeKanbanFieldOrder, isLeadWhatsappComposeBlocked } from '../lib/leadFields'
+import { mergeKanbanFieldOrder, isLeadWhatsappComposeBlocked, calculateLeadScore } from '../lib/leadFields'
 import { getDataProviderMode } from '../services/dataMode'
 import { notifySendError, sendWhatsappMessage } from '../services/crmWhatsapp'
 import { dispatchNps } from '../services/npsDispatch'
@@ -559,13 +559,14 @@ export const useCrmState = () => {
     const candidate = templates[Math.floor(Math.random() * templates.length)]
     const owner = getRoundRobinOwner()
     const firstStage = selectedPipeline.stages[0]
+    const seedPhone = '+55 11 90000-0000'
     const newLead: Lead = {
       id: `lead-${Date.now()}`,
       patientName: candidate.name,
-      phone: '+55 11 90000-0000',
+      phone: seedPhone,
       source: candidate.source,
       createdAt: new Date().toISOString(),
-      score: Math.floor(40 + Math.random() * 50),
+      score: calculateLeadScore({ phone: seedPhone, customFields: {} }),
       temperature: Math.random() > 0.5 ? 'warm' : 'hot',
       position: leads.filter((lead) => lead.stageId === firstStage.id).length + 1,
       ownerId: owner.id,
@@ -1340,9 +1341,10 @@ export const useCrmState = () => {
   }
 
   const persistLeadPatch = (next: Lead) => {
-    setLeads((previous) => previous.map((lead) => (lead.id === next.id ? next : lead)))
+    const scored: Lead = { ...next, score: calculateLeadScore(next) }
+    setLeads((previous) => previous.map((lead) => (lead.id === scored.id ? scored : lead)))
     if (dataMode === 'supabase' && isSupabaseConfigured) {
-      void persistLead(next)
+      void persistLead(scored)
     }
   }
 
@@ -1400,7 +1402,7 @@ export const useCrmState = () => {
         source,
         createdAt: new Date().toISOString(),
         position,
-        score: Number(row.score ?? 0) || 0,
+        score: 0,
         temperature: (['cold', 'warm', 'hot'].includes(String(row.temperature))
           ? row.temperature
           : 'warm') as Lead['temperature'],
@@ -1412,6 +1414,7 @@ export const useCrmState = () => {
         whatsappInstanceId: null,
         tagIds: [],
       }
+      newLead.score = Number(row.score) || calculateLeadScore(newLead)
       if (dataMode === 'supabase' && isSupabaseConfigured) {
         try {
           await insertLead(newLead)
@@ -1925,6 +1928,27 @@ export const useCrmState = () => {
         canRouteLeads: true,
         canManageUsers: true,
         canViewTvPanel: base.canViewTvPanel !== false,
+      }
+    }
+
+    if (effectiveRole === 'gestor') {
+      return {
+        ...base,
+        role: 'gestor',
+        canEditBoards: true,
+        canRouteLeads: true,
+        canManageUsers: false,
+        canViewTvPanel: true,
+      }
+    }
+
+    if (effectiveRole === 'sdr') {
+      return {
+        ...base,
+        role: 'sdr',
+        canEditBoards: false,
+        canRouteLeads: true,
+        canViewTvPanel: true,
       }
     }
 

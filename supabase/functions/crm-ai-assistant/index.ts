@@ -433,6 +433,27 @@ function stripInternalPatientReply(raw: string): string {
     if (after) return after
   }
 
+  // GLM-4.5/4.6 em modo reasoning costuma devolver <thinking>...</thinking> e depois a resposta.
+  // O bloco <thinking> é apagado por sanitizeCrmAiPatientReply; se a saída só tiver thinking
+  // e nada depois, o paciente recebia o fallback. Aqui extraímos o que vier depois do último
+  // fecho de thinking/think — incluindo, se existir, o marcador <<<PACIENTE>>>.
+  const closeTagRe = /<\/think(?:ing)?>/gi
+  let lastCloseEnd = -1
+  for (const m of t.matchAll(closeTagRe)) {
+    if (m.index != null) lastCloseEnd = m.index + m[0].length
+  }
+  if (lastCloseEnd >= 0) {
+    const afterThink = t.slice(lastCloseEnd).trim()
+    if (afterThink.length >= 4) {
+      const m2 = afterThink.indexOf(PATIENT_REPLY_MARKER)
+      if (m2 >= 0) {
+        const after2 = afterThink.slice(m2 + PATIENT_REPLY_MARKER.length).trim()
+        if (after2) return after2
+      }
+      return afterThink
+    }
+  }
+
   const cotSignature = /Analyze the User'?s?\s+Input|Interpretation:\s*\*\*|Constraint Check:/i
   if (!cotSignature.test(t)) return t
 
@@ -610,6 +631,7 @@ Deno.serve(async (req) => {
             'PROIBIDO ao paciente: mencionar CRM, plataforma interna, "ferramentas", "visualize você mesmo / visualize na plataforma", agenda ou sistemas que só a equipa usa. O paciente só fala por WhatsApp — não tem login nem app para ver vagas.',
             'MANDATORY: A primeira linha da sua resposta DEVE ser exactamente: <<<PACIENTE>>>',
             'MANDATORY: Na linha seguinte, escreva APENAS a mensagem WhatsApp em português (cordial, profissional). Nada antes de <<<PACIENTE>>>.',
+            'PROIBIDO ABSOLUTAMENTE: blocos <thinking>, <think>, <reasoning>, <reflection> ou qualquer marcação XML de raciocínio. Se sentir necessidade de raciocinar, faça-o SILENCIOSAMENTE e produza APENAS a linha <<<PACIENTE>>> seguida da mensagem em português. Respostas que contenham apenas raciocínio (sem texto para o paciente após <<<PACIENTE>>>) são DESCARTADAS automaticamente pelo sistema — o paciente fica sem resposta.',
             'Formatação WhatsApp: para destacar nomes ou palavras importantes use **negrito assim** (dois asteriscos antes e depois). Não use quatro asteriscos seguidos (****). Não use um único asterisco *assim* para ênfase — no WhatsApp isso é ambíguo; prefira sempre **duplo**.',
             'Se usar <<<CRM_OPS>>> com book_appointment na mesma resposta, NÃO escreva "estou verificando a agenda agora", "aguarde um instante" nem prometa confirmação futura como se o horário ainda não existisse — o servidor pode confirmar o horário na mesma mensagem. Mantenha um tom direto (preferências anotadas e segue a confirmação automática do horário).',
             'Não use rascunhos ou comentários internos.',
@@ -714,12 +736,26 @@ Deno.serve(async (req) => {
 
     let reply = extractReplyFromZai(parsed)
     if (!reply) {
+      const debugNote = `crm-ai-debug:zai_empty_reply:lead=${context.leadId ?? 'unknown'}:model=${model}:raw=${trunc(zaiText, 400).replace(/[\r\n]+/g, ' ')}`
+      console.warn('crm-ai-assistant zai_empty_reply', {
+        model,
+        leadId: context.leadId ?? null,
+        raw_excerpt: trunc(zaiText, 600),
+      })
+      try {
+        await dbClient.from('webhook_jobs').insert({
+          source: 'crm-ai-assistant',
+          status: 'done',
+          note: debugNote.slice(0, 500),
+        })
+      } catch { /* ignore */ }
       return jsonResponse({
         ok: false,
         error: 'zai_empty_reply',
         message: trunc(zaiText, 800),
       })
     }
+    const rawZaiReply = reply
 
     const peeled = peelCrmOpsFromModelReply(reply)
     reply = peeled.remainder
@@ -767,6 +803,33 @@ Deno.serve(async (req) => {
     reply = sanitizeCrmAiPatientReply(reply).clean
     if (isInternal) {
       reply = normalizeWhatsappPatientFormatting(reply)
+    }
+
+    // Z.ai (GLM) por vezes devolve só monólogo CoT em inglês ou só blocos `<thinking>` /
+    // function_call. Depois da sanitização não sobra texto visível ao paciente. Em vez de
+    // responder ok:true com reply:"" (silenciado pelo caller como fallback), devolve ok:false
+    // para forçar retry no caller e deixar pista nos logs do que o modelo escreveu.
+    if (!reply.trim()) {
+      const debugNote = `crm-ai-debug:sanitized_to_empty:lead=${context.leadId ?? 'unknown'}:model=${model}:raw=${trunc(rawZaiReply, 400).replace(/[\r\n]+/g, ' ')}`
+      console.warn('crm-ai-assistant sanitized_to_empty', {
+        model,
+        leadId: context.leadId ?? null,
+        isInternal,
+        raw_excerpt: trunc(rawZaiReply, 600),
+      })
+      try {
+        await dbClient.from('webhook_jobs').insert({
+          source: 'crm-ai-assistant',
+          status: 'done',
+          note: debugNote.slice(0, 500),
+        })
+      } catch { /* ignore */ }
+      return jsonResponse({
+        ok: false,
+        error: 'sanitized_to_empty',
+        message: 'O modelo respondeu mas o texto foi removido pela sanitização (provavelmente só CoT/thinking).',
+        raw_excerpt: trunc(rawZaiReply, 600),
+      })
     }
 
     if (isInternal && context.leadId && actionChunks.length > 0 && reply.trim()) {

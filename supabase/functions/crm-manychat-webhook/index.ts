@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import {
+  disableAiOnHandoff,
   evaluateCrmAiAutoReplyGate,
   nowIso,
   runManychatAiAutoReply,
@@ -367,6 +368,8 @@ async function runManychatMessagePipeline(
           conversation_status: 'waiting_human',
         }).eq('id', leadId)
 
+        await disableAiOnHandoff(admin, leadId)
+
         await notifyAgents(admin, {
           leadId,
           kind: 'handoff',
@@ -521,6 +524,33 @@ Deno.serve(async (req) => {
   }
 
   const action = String(body.action ?? 'message').trim().toLowerCase()
+
+  // ManyChat às vezes envia o subscriber payload completo em `data` (estilo `{{subscriber_data|to_json:true}}`).
+  // Nesse caso `text`/`phone`/`user_name` podem vir vazios no topo, mas existem dentro de `data`.
+  // Promovemos esses campos para o topo do body antes de seguir o fluxo normal.
+  const dataField = body.data
+  if (dataField && typeof dataField === 'object' && !Array.isArray(dataField)) {
+    const d = dataField as Record<string, unknown>
+    const pick = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+
+    if (!pick(body.subscriber_id) && pick(d.id)) body.subscriber_id = pick(d.id)
+    if (!pick(body.text) && !pick(body.message)) {
+      const fromData = pick(d.last_input_text)
+      if (fromData) body.text = fromData
+    }
+    if (!pick(body.user_name) && !pick(body.name)) {
+      const full = pick(d.name)
+      const first = pick(d.first_name)
+      const last = pick(d.last_name)
+      const composed = full || [first, last].filter(Boolean).join(' ').trim()
+      if (composed) body.user_name = composed
+    }
+    if (!pick(body.phone)) {
+      const fromData = pick(d.whatsapp_phone) || pick(d.phone)
+      if (fromData) body.phone = fromData
+    }
+  }
+
   const subscriberId = String(body.subscriber_id ?? '').trim()
   const leadIdParam = String(body.lead_id ?? '').trim()
 

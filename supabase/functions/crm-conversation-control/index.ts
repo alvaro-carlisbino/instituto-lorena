@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { coercePgBoolean } from '../_shared/coercePgBoolean.ts'
-import { runManychatAiAutoReply, runWhatsappAiAutoReply } from '../_shared/crmAiAutoReply.ts'
+import { disableAiOnHandoff, runManychatAiAutoReply, runWhatsappAiAutoReply } from '../_shared/crmAiAutoReply.ts'
 import { pushManychatInstagramDmAfterReply, readManychatPushConfigFromEnv } from '../_shared/manychatPublicApi.ts'
 import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
@@ -269,7 +269,7 @@ Deno.serve(async (req) => {
         })
       }
 
-      const { replied, replyText } = await runWhatsappAiAutoReply(admin, {
+      const { replied, replyText, handoffSuggested } = await runWhatsappAiAutoReply(admin, {
         leadId,
         patientName,
         fromPhone: to,
@@ -283,10 +283,14 @@ Deno.serve(async (req) => {
         typingDelayMs: 0,
         invokeMaxAttempts: 2,
       })
+      if (handoffSuggested) {
+        await disableAiOnHandoff(admin, leadId)
+      }
       return json({
         ok: true,
         channel: 'whatsapp',
         replied,
+        handoffSuggested: Boolean(handoffSuggested),
         replyPreview: replied ? String(replyText ?? '').slice(0, 280) : null,
       })
     }
@@ -303,6 +307,9 @@ Deno.serve(async (req) => {
         aiJobSource: 'crm-force-ai-reply',
         invokeMaxAttempts: 2,
       })
+      if (handoffSuggested) {
+        await disableAiOnHandoff(admin, leadId)
+      }
       const replyTrimmed = String(replyText ?? '').trim()
       let manychatPush: Record<string, unknown> = { attempted: false }
 
