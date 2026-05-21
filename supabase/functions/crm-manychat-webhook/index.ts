@@ -231,7 +231,18 @@ async function isManychatAsyncAck(
   return pushCfg !== null
 }
 
-/** Canal efectivo para push ManyChat (WA vs IG). Sem isto, `channel` vazio usa só secrets IG e o WhatsApp não recebe DM. */
+/**
+ * Canal efectivo para push ManyChat (WA vs IG).
+ *
+ * Heurísticas (em ordem): `body.channel` explícito → presença de
+ * `whatsappLineInstanceId` → telefone real ≥10 dígitos não-sintético.
+ *
+ * Guarda anti-falso-positivo: se acabou classificado como `whatsapp` mas
+ * **não** existe nenhum sinal de número WA real (phone, data.whatsapp_phone
+ * ou whatsapp_subscriber_id), reverte para `instagram`. Evita o bug em que
+ * um flow ManyChat IG envia `crm_instance_key` por engano e o lead acabava
+ * com `source='meta_whatsapp'` apesar de só haver interações Meta.
+ */
 function resolveEffectiveManychatChannel(
   body: Record<string, unknown>,
   whatsappLineInstanceId: string | null,
@@ -241,10 +252,23 @@ function resolveEffectiveManychatChannel(
   if (c === 'wa') c = 'whatsapp'
   if (c === 'ig') c = 'instagram'
 
-  if (!c && whatsappLineInstanceId) return 'whatsapp'
-  if (!c && phoneDigits.length >= 10 && !phoneDigits.startsWith('888001')) return 'whatsapp'
+  if (!c && whatsappLineInstanceId) c = 'whatsapp'
+  if (!c && phoneDigits.length >= 10 && !phoneDigits.startsWith('888001')) c = 'whatsapp'
 
-  return c || 'instagram'
+  if (!c) return 'instagram'
+
+  if (c === 'whatsapp') {
+    const hasRealTopPhone = phoneDigits.length >= 10 && !phoneDigits.startsWith('888001')
+    const data = body.data && typeof body.data === 'object' ? (body.data as Record<string, unknown>) : null
+    const dataWaPhoneDigits = data ? digitsOnly(String(data.whatsapp_phone ?? '')) : ''
+    const hasRealDataWaPhone = dataWaPhoneDigits.length >= 10 && !dataWaPhoneDigits.startsWith('888001')
+    const hasWaSubscriberId = Boolean(String((body as Record<string, unknown>).whatsapp_subscriber_id ?? '').trim())
+    if (!hasRealTopPhone && !hasRealDataWaPhone && !hasWaSubscriberId) {
+      return 'instagram'
+    }
+  }
+
+  return c
 }
 
 async function runManychatMessagePipeline(
