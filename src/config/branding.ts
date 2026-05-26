@@ -4,9 +4,9 @@ const envName = import.meta.env.VITE_APP_NAME as string | undefined
 const envBadge = import.meta.env.VITE_APP_BADGE as string | undefined
 const envMonogram = import.meta.env.VITE_APP_LOGO_MONOGRAM as string | undefined
 
-export const APP_NAME = (envName?.trim() || 'Instituto Lorena · Gestão de Atendimento').trim()
+export const APP_NAME = (envName?.trim() || 'CRM Clínica · Gestão de Atendimento').trim()
 export const APP_ENV_BADGE = (envBadge?.trim() || 'INTERNO').trim()
-export const APP_LOGO_MONOGRAM = (envMonogram?.trim() || 'IL').trim().slice(0, 3).toUpperCase()
+export const APP_LOGO_MONOGRAM = (envMonogram?.trim() || 'CR').trim().slice(0, 3).toUpperCase()
 
 /** Subtítulo curto na sidebar (linha secundária). */
 export const APP_TAGLINE = 'Atendimento ao Paciente'

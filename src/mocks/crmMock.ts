@@ -291,7 +291,7 @@ export type OrgSettings = {
 }
 
 /**
- * Três funis padrão Lorena (teste com cliente). IDs de etapa são únicos em toda a base (Postgres).
+ * Três funis padrão da clínica demo. IDs de etapa são únicos em toda a base (Postgres).
  * Jornada sugerida: Clínica (entrada) → TRATAMENTO CAPILAR → Processo cirúrgico (após concluir o capilar).
  */
 export const pipelines: Pipeline[] = [
@@ -729,7 +729,7 @@ export const initialWorkflowFields: WorkflowField[] = [
     fieldType: 'select',
     required: false,
     options: [
-      { value: 'lorena', label: 'Dra. Lorena' },
+      { value: 'lorena', label: 'Médico principal' },
       { value: 'outros', label: 'Outros médicos' },
     ],
     section: 'Comercial',
@@ -794,11 +794,11 @@ export const initialNotifications: NotificationRule[] = [
 ]
 
 export const initialAppUsers: AppUser[] = [
-  { id: 'admin-1', name: 'Alvaro', email: 'alvaro@institutolorena.com', role: 'admin', active: true },
-  { id: 'gestor-1', name: 'Diego Moura', email: 'diego@institutolorena.com', role: 'gestor', active: true },
-  { id: 'sdr-1', name: 'Ana Costa', email: 'ana@institutolorena.com', role: 'sdr', active: true },
-  { id: 'sdr-2', name: 'Bruno Lima', email: 'bruno@institutolorena.com', role: 'sdr', active: true },
-  { id: 'sdr-3', name: 'Carla Souza', email: 'carla@institutolorena.com', role: 'sdr', active: true },
+  { id: 'admin-1', name: 'Alvaro', email: 'alvaro@clinicademo.com', role: 'admin', active: true },
+  { id: 'gestor-1', name: 'Diego Moura', email: 'diego@clinicademo.com', role: 'gestor', active: true },
+  { id: 'sdr-1', name: 'Ana Costa', email: 'ana@clinicademo.com', role: 'sdr', active: true },
+  { id: 'sdr-2', name: 'Bruno Lima', email: 'bruno@clinicademo.com', role: 'sdr', active: true },
+  { id: 'sdr-3', name: 'Carla Souza', email: 'carla@clinicademo.com', role: 'sdr', active: true },
 ]
 
 const defaultTvLayout = (position: number) => ({
@@ -902,7 +902,7 @@ export const initialOrgSettings: OrgSettings = {
     targetPipelineId: 'pipeline-tratamento-capilar',
     targetStageId: 'tc-novo',
   },
-  clinicName: 'Instituto Lorena',
+  clinicName: 'Clínica Demo',
   clinicPhone: '',
   clinicEmail: '',
   clinicAddress: '',

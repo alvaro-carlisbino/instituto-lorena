@@ -795,10 +795,10 @@ export const loadRoomsAndAppointmentsFromSupabase = async (): Promise<RoomsAndAp
 export const seedTestUsers = async (): Promise<void> => {
   const client = assertSupabase()
   const payload = [
-    { id: 'sdr-1', name: 'Ana Costa', email: 'ana@institutolorena.com', role: 'sdr', active: true },
-    { id: 'sdr-2', name: 'Bruno Lima', email: 'bruno@institutolorena.com', role: 'sdr', active: true },
-    { id: 'sdr-3', name: 'Carla Souza', email: 'carla@institutolorena.com', role: 'sdr', active: true },
-    { id: 'gestor-1', name: 'Diego Moura', email: 'diego@institutolorena.com', role: 'gestor', active: true },
+    { id: 'sdr-1', name: 'Ana Costa', email: 'ana@clinicademo.com', role: 'sdr', active: true },
+    { id: 'sdr-2', name: 'Bruno Lima', email: 'bruno@clinicademo.com', role: 'sdr', active: true },
+    { id: 'sdr-3', name: 'Carla Souza', email: 'carla@clinicademo.com', role: 'sdr', active: true },
+    { id: 'gestor-1', name: 'Diego Moura', email: 'diego@clinicademo.com', role: 'gestor', active: true },
   ]
   const { error } = await client.from('app_users').upsert(payload)
   if (error) throw error
