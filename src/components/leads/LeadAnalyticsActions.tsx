@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { TriangleAlert, EyeOff, Eye } from 'lucide-react'
+import { TriangleAlert, EyeOff, Eye, BellOff } from 'lucide-react'
 
 import { supabase } from '@/lib/supabaseClient'
 import { Button } from '@/components/ui/button'
@@ -41,6 +41,7 @@ type Props = {
 export function LeadAnalyticsActions({ leadId, canManage }: Props) {
   const [excluded, setExcluded] = useState<boolean>(false)
   const [lostReason, setLostReasonState] = useState<string>('')
+  const [optedOutAt, setOptedOutAt] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [dialogOpen, setDialogOpen] = useState<boolean>(false)
   const [selectedReason, setSelectedReason] = useState<string>(DEFAULT_LOST_REASONS[0])
@@ -53,7 +54,7 @@ export function LeadAnalyticsActions({ leadId, canManage }: Props) {
     setLoading(true)
     void supabase
       .from('leads')
-      .select('lost_reason, excluded_from_metrics')
+      .select('lost_reason, excluded_from_metrics, opted_out_at')
       .eq('id', leadId)
       .maybeSingle()
       .then(({ data, error }) => {
@@ -62,9 +63,14 @@ export function LeadAnalyticsActions({ leadId, canManage }: Props) {
           toast.error(error.message)
           return
         }
-        const row = (data ?? {}) as { lost_reason: string | null; excluded_from_metrics: boolean | null }
+        const row = (data ?? {}) as {
+          lost_reason: string | null
+          excluded_from_metrics: boolean | null
+          opted_out_at: string | null
+        }
         setExcluded(Boolean(row.excluded_from_metrics))
         setLostReasonState(row.lost_reason ?? '')
+        setOptedOutAt(row.opted_out_at)
       })
       .then(() => {
         if (!cancelled) setLoading(false)
@@ -106,6 +112,18 @@ export function LeadAnalyticsActions({ leadId, canManage }: Props) {
     }
   }
 
+  const handleClearOptOut = async () => {
+    if (!supabase) return
+    try {
+      const { error } = await supabase.rpc('clear_lead_opt_out', { p_lead_id: leadId })
+      if (error) throw new Error(error.message)
+      setOptedOutAt(null)
+      toast.success('Lead reativado para receber mensagens.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao reativar.')
+    }
+  }
+
   const handleClearLost = async () => {
     setSaving(true)
     try {
@@ -124,6 +142,17 @@ export function LeadAnalyticsActions({ leadId, canManage }: Props) {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {optedOutAt ? (
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => void handleClearOptOut()}
+          title={`Paciente pediu pra parar (${new Date(optedOutAt).toLocaleString('pt-BR')}). Clique para reativar após contato.`}
+        >
+          <BellOff className="mr-1.5 size-4" />
+          Opt-out — clicar para reativar
+        </Button>
+      ) : null}
       <Button variant={lostReason ? 'destructive' : 'outline'} size="sm" onClick={() => setDialogOpen(true)}>
         <TriangleAlert className="mr-1.5 size-4" />
         {lostReason ? 'Perdido' : 'Marcar perdido'}
