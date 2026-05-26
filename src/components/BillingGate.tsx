@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useTenant } from '@/context/TenantContext'
+import { supabase } from '@/lib/supabaseClient'
 
 /**
  * Gate de billing: se o tenant está suspended/canceled, bloqueia o acesso ao app
@@ -12,10 +13,10 @@ import { useTenant } from '@/context/TenantContext'
  */
 export function BillingGate({ children }: { children: ReactNode }) {
   const { tenant, loading } = useTenant()
-  if (loading) return children as JSX.Element
+  if (loading) return <>{children}</>
 
   const billing = tenant.billing
-  if (!billing) return children as JSX.Element
+  if (!billing) return <>{children}</>
 
   const trialExpired =
     billing.status === 'trial' &&
@@ -27,7 +28,7 @@ export function BillingGate({ children }: { children: ReactNode }) {
     billing.status === 'canceled' ||
     trialExpired
 
-  if (!blocked) return children as JSX.Element
+  if (!blocked) return <>{children}</>
 
   const title =
     billing.status === 'suspended'
@@ -61,7 +62,6 @@ export function BillingGate({ children }: { children: ReactNode }) {
           <Button
             variant="ghost"
             onClick={async () => {
-              const { supabase } = await import('@/lib/supabaseClient')
               await supabase?.auth.signOut()
               window.location.href = '/'
             }}
