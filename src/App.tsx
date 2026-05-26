@@ -9,6 +9,10 @@ import { KanbanPage } from './pages/KanbanPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { ChannelsPage } from './pages/ChannelsPage'
 import { MetricsPage } from './pages/MetricsPage'
+import { AnalyticsPage } from './pages/AnalyticsPage'
+import { MedicalRecordsPage } from './pages/MedicalRecordsPage'
+import { PwaInstallBanner } from './components/PwaInstallBanner'
+import { BillingGate } from './components/BillingGate'
 import { DashboardConfigPage } from './pages/DashboardConfigPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { TvDashboardPage } from './pages/TvDashboardPage'
@@ -51,6 +55,8 @@ function AppRoutes() {
       <Route path="/historico" element={<HistoryPage />} />
       <Route path="/canais" element={<ChannelsPage />} />
       <Route path="/metricas" element={<MetricsPage />} />
+      <Route path="/analytics" element={<AnalyticsPage />} />
+      <Route path="/prontuario" element={<MedicalRecordsPage />} />
       <Route path="/usuarios" element={<UsersPage />} />
       <Route path="/auditoria" element={<AuditPage />} />
       <Route path="/admin-lab" element={<AdminLabPage />} />
@@ -88,9 +94,13 @@ function App() {
     return (
       <OnboardingPage
         displayName={crmState.displayNameDraft}
+        clinicName={crmState.onboardingClinicName}
+        primaryColor={crmState.onboardingPrimaryColor}
         isLoading={crmState.isLoading}
         notice={crmState.authNotice}
         onDisplayNameChange={crmState.setDisplayNameDraft}
+        onClinicNameChange={crmState.setOnboardingClinicName}
+        onPrimaryColorChange={crmState.setOnboardingPrimaryColor}
         onComplete={() => void crmState.completeOnboarding()}
       />
     )
@@ -102,21 +112,24 @@ function App() {
         <a href="#main-content" className="skip-link">
           Pular para o conteúdo principal
         </a>
-        <TooltipProvider delay={200}>
-          <SidebarProvider>
-            <AppSidebar />
-            <CommandPalette />
-            <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-              <div className="shrink-0 md:hidden">
-                <TopNav />
+        <BillingGate>
+          <TooltipProvider delay={200}>
+            <SidebarProvider>
+              <AppSidebar />
+              <CommandPalette />
+              <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                <div className="shrink-0 md:hidden">
+                  <TopNav />
+                </div>
+                <RouteTransition>
+                  <AppRoutes />
+                </RouteTransition>
               </div>
-              <RouteTransition>
-                <AppRoutes />
-              </RouteTransition>
-            </div>
-          </SidebarProvider>
-        </TooltipProvider>
+            </SidebarProvider>
+          </TooltipProvider>
+        </BillingGate>
         <Toaster richColors position="top-right" />
+        <PwaInstallBanner />
       </CrmProvider>
     </TenantProvider>
   )

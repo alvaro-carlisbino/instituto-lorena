@@ -389,7 +389,7 @@ export function SettingsPage() {
                 Nome da Clínica
               </Label>
               <Input
-                placeholder="Ex: Instituto Lorena"
+                placeholder="Ex: Clínica São Lucas"
                 value={crm.orgSettings.clinicName || ''}
                 onChange={(e) => crm.updateOrgSettings({ clinicName: e.target.value })}
               />
@@ -411,7 +411,7 @@ export function SettingsPage() {
                 E-mail de Contato
               </Label>
               <Input
-                placeholder="contato@lorena.com"
+                placeholder="contato@suaclinica.com.br"
                 value={crm.orgSettings.clinicEmail || ''}
                 onChange={(e) => crm.updateOrgSettings({ clinicEmail: e.target.value })}
               />

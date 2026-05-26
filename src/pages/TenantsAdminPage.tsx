@@ -200,7 +200,7 @@ function CreateTenantDialog({ onCreated }: { onCreated: () => Promise<void> }) {
         <DialogTitle>Nova clínica</DialogTitle>
         <DialogDescription>
           Cria um tenant isolado. Marcando "Clonar template", copia pipelines, etapas, campos,
-          salas e configs do Instituto Lorena como ponto de partida.
+          salas e configs da clínica modelo como ponto de partida.
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-3">
@@ -241,7 +241,7 @@ function CreateTenantDialog({ onCreated }: { onCreated: () => Promise<void> }) {
         </div>
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={seed} onChange={(e) => setSeed(e.target.checked)} />
-          Clonar template do Instituto Lorena (pipelines, salas, etiquetas, configs de IA)
+          Clonar template da clínica modelo (pipelines, salas, etiquetas, configs de IA)
         </label>
       </div>
       <DialogFooter>
@@ -258,6 +258,7 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
   const [integrations, setIntegrations] = useState<TenantIntegrations>({
     manychat: {},
     evolution: {},
+    llm: {},
   })
   const [loadingIntegrations, setLoadingIntegrations] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -418,6 +419,55 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
             </div>
           </>
         )}
+      </section>
+
+      <section className="grid gap-3 border-t border-border/40 pt-4">
+        <h3 className="text-xs font-black uppercase tracking-widest text-muted-foreground">
+          LLM (IA)
+        </h3>
+        <p className="text-[11px] text-muted-foreground">
+          Em branco = usa os secrets globais (ZAI_API_KEY / OPENAI_API_KEY) do deploy.
+        </p>
+        <div className="grid gap-2">
+          <Label htmlFor="zai-key" className="text-xs">Z.ai · API key</Label>
+          <Input
+            id="zai-key"
+            type="password"
+            placeholder="Em branco = usa secret global"
+            value={integrations.llm?.zai?.api_key ?? ''}
+            onChange={(e) =>
+              setIntegrations((prev) => ({
+                ...prev,
+                llm: { ...prev.llm, zai: { ...prev.llm?.zai, api_key: e.target.value || undefined } },
+              }))
+            }
+          />
+          <Input
+            placeholder="Modelo (ex: glm-4.7) — opcional"
+            value={integrations.llm?.zai?.model ?? ''}
+            onChange={(e) =>
+              setIntegrations((prev) => ({
+                ...prev,
+                llm: { ...prev.llm, zai: { ...prev.llm?.zai, model: e.target.value || undefined } },
+              }))
+            }
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="openai-key" className="text-xs">OpenAI · API key (análise de mídia)</Label>
+          <Input
+            id="openai-key"
+            type="password"
+            placeholder="Em branco = usa secret global"
+            value={integrations.llm?.openai?.api_key ?? ''}
+            onChange={(e) =>
+              setIntegrations((prev) => ({
+                ...prev,
+                llm: { ...prev.llm, openai: { ...prev.llm?.openai, api_key: e.target.value || undefined } },
+              }))
+            }
+          />
+        </div>
       </section>
 
       <div className={cn('mt-4 rounded-lg border border-border/40 bg-muted/20 p-3 text-[11px] text-muted-foreground')}>

@@ -32,10 +32,14 @@ export function isLeadWhatsappComposeBlocked(lead: Pick<Lead, 'source' | 'phone'
 }
 
 /**
- * Tabela de preços Instituto Lorena: [medico][tipo_consulta][genero] → R$.
+ * Tabelas de preço embutidas por médico: [medico][tipo_consulta][genero] → R$.
  * Quando gênero não afeta o valor, M e F apontam para o mesmo número.
+ *
+ * TODO (Fase 2 do whitelabel): mover para `tenants.brand_config.price_table` e
+ * carregar via `useTenant()` em vez de hardcode. Hoje só o tenant `instituto-lorena`
+ * usa esses valores; demais tenants caem no fallback vazio (sem cálculo automático).
  */
-export const LORENA_PRICE_TABLE: Record<string, Record<string, Record<string, number>>> = {
+export const BUILTIN_PRICE_TABLES: Record<string, Record<string, Record<string, number>>> = {
   lorena: {
     transplante: { masculino: 800, feminino: 1100 },
     clinica: { masculino: 800, feminino: 1100 },
@@ -62,7 +66,7 @@ export function calculateInvestmentValue(tipoConsulta: unknown, medico: unknown,
   const m = String(medico ?? '').toLowerCase()
   const g = String(genero ?? '').toLowerCase()
   if (!t || !m || !g) return ''
-  const value = LORENA_PRICE_TABLE[m]?.[t]?.[g]
+  const value = BUILTIN_PRICE_TABLES[m]?.[t]?.[g]
   if (typeof value !== 'number') return ''
   return formatBRL(value)
 }

@@ -29,6 +29,7 @@ import {
   type CrmAiActionResult,
   type ListedLeadRow,
 } from '../_shared/crmAiOpsExecutor.ts'
+import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
 
@@ -487,22 +488,16 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
-    const zaiKey = Deno.env.get('ZAI_API_KEY') ?? ''
-    const zaiApiRoot = zaiApiRootFromEnv()
-    const zaiChatUrl = `${zaiApiRoot}/chat/completions`
-    const defaultModel = normalizeZaiModelCode(Deno.env.get('ZAI_MODEL')?.trim() || 'glm-4.7')
 
     if (!supabaseUrl || !anonKey) {
       return jsonResponse({ ok: false, error: 'server_misconfigured', message: 'SUPABASE_URL ou ANON_KEY em falta.' }, 500)
     }
 
-    if (!zaiKey) {
-      return jsonResponse({
-        ok: false,
-        error: 'zai_not_configured',
-        message: 'Defina o secret ZAI_API_KEY em Project Settings → Edge Functions → Secrets.',
-      })
-    }
+    // Z.ai key/root/model serão resolvidos por tenant após `dbClient` estar pronto e o context ter sido parseado.
+    let zaiKey = ''
+    let zaiApiRoot = zaiApiRootFromEnv()
+    let zaiChatUrl = `${zaiApiRoot}/chat/completions`
+    let defaultModel = normalizeZaiModelCode(Deno.env.get('ZAI_MODEL')?.trim() || 'glm-4.7')
 
     const rawBody = await req.text()
     let body: { messages?: unknown; model?: string; context?: unknown; promptOverride?: unknown }
@@ -560,13 +555,48 @@ Deno.serve(async (req) => {
 
     const requestedRaw = String(body.model ?? '').trim()
     const requested = normalizeZaiModelCode(requestedRaw)
+    const context = parseContext(body.context)
+    const promptOverride = typeof body.promptOverride === 'string' ? body.promptOverride.trim() : ''
+
+    // ===== Resolução de tenant + carga da config Z.ai por tenant =====
+    // Internal (auto-reply): tenant_id vem do lead (context.leadId).
+    // User session: tenant_id vem de current_tenant_id() RPC.
+    // Fallback: env globais (Instituto Lorena hoje).
+    let tenantId = ''
+    try {
+      if (isInternal && context.leadId) {
+        const { data: leadRow } = await dbClient
+          .from('leads')
+          .select('tenant_id')
+          .eq('id', context.leadId)
+          .maybeSingle()
+        tenantId = String((leadRow as { tenant_id?: string } | null)?.tenant_id ?? '').trim()
+      } else if (!isInternal) {
+        const { data: tid } = await dbClient.rpc('current_tenant_id')
+        tenantId = typeof tid === 'string' ? tid.trim() : ''
+      }
+    } catch (e) {
+      console.warn('crm-ai-assistant: tenant resolution failed, using global env:', e instanceof Error ? e.message : e)
+    }
+
+    const zaiCfg = await readZaiConfigForTenant(dbClient, tenantId)
+    if (!zaiCfg) {
+      return jsonResponse({
+        ok: false,
+        error: 'zai_not_configured',
+        message: 'Defina o secret ZAI_API_KEY (global) ou configure tenant_integrations.llm.zai.api_key.',
+      })
+    }
+    zaiKey = zaiCfg.apiKey
+    zaiApiRoot = zaiCfg.apiRoot
+    zaiChatUrl = `${zaiApiRoot}/chat/completions`
+    defaultModel = normalizeZaiModelCode(zaiCfg.model)
+
     const model = ALLOWED_MODELS.has(requested)
       ? requested
       : ALLOWED_MODELS.has(defaultModel)
         ? defaultModel
         : 'glm-4.7'
-    const context = parseContext(body.context)
-    const promptOverride = typeof body.promptOverride === 'string' ? body.promptOverride.trim() : ''
 
     let snapshot: Record<string, unknown>
     try {
