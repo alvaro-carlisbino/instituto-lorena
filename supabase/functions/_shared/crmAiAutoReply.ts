@@ -398,8 +398,6 @@ export async function evaluateCrmAiAutoReplyGate(
     .eq('lead_id', leadId)
     .maybeSingle()
   const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
-  const { data: orgRow } = await admin.from('org_settings').select('timezone').eq('id', 'default').maybeSingle()
-  const orgTz = String(orgRow?.timezone ?? 'America/Sao_Paulo').trim() || 'America/Sao_Paulo'
 
   const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
   const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
@@ -408,19 +406,16 @@ export async function evaluateCrmAiAutoReplyGate(
   const latestAiReplyAt = state?.last_ai_reply_at ? new Date(String(state.last_ai_reply_at)).getTime() : 0
   const elapsedSinceAi = latestAiReplyAt ? (Date.now() - latestAiReplyAt) / 1000 : Number.POSITIVE_INFINITY
 
-  // Parse business hours from config (format "HH:mm:ss")
-  const startH = Number.parseInt(String(config?.business_hours_start ?? '08').split(':')[0], 10) || 8
-  const endH = Number.parseInt(String(config?.business_hours_end ?? '20').split(':')[0], 10) || 20
-
-  const withinWindow = isWithinQuietHours(new Date(), startH, endH, orgTz)
-  const shouldAiByMode = ownerMode === 'ai' || (ownerMode === 'auto' && withinWindow)
+  // owner_mode 'auto' e 'ai' → IA responde 24h. 'human' → só atendimento humano.
+  // crm_ai_configs.business_hours_* não bloqueia mais o auto-reply; continua a ser
+  // usado por find_first_appointment_slot para sugerir horários de consulta válidos.
+  const shouldAiByMode = ownerMode === 'ai' || ownerMode === 'auto'
 
   const skipReasons: string[] = []
   if (!aiEnabled) skipReasons.push('ai_disabled')
   if (!options.directionIsInbound) skipReasons.push('not_inbound')
   if (!shouldAiByMode) {
     if (ownerMode === 'human') skipReasons.push('owner_mode_human')
-    else if (ownerMode === 'auto' && !withinWindow) skipReasons.push('outside_quiet_hours')
     else skipReasons.push(`owner_mode_${ownerMode || 'unknown'}`)
   }
   if (minSecondsBetween > 0 && elapsedSinceAi < minSecondsBetween) {
@@ -442,11 +437,6 @@ export async function evaluateCrmAiAutoReplyGate(
   }
   if (skipReasons.includes('owner_mode_human')) {
     hintParts.push('Modo de atendimento = humano: só a equipa responde.')
-  }
-  if (skipReasons.includes('outside_quiet_hours')) {
-    hintParts.push(
-      `Modo auto fora da janela ${startH}h–${endH}h no fuso ${orgTz} (crm_ai_configs.business_hours_*). Para responder 24h em auto, alargue o intervalo ou use owner_mode "ai".`,
-    )
   }
   if (skipReasons.includes('min_seconds_between_ai_replies')) {
     hintParts.push(

@@ -27,6 +27,11 @@ export type ExtractedMedia = {
 const MANYBOT_HOST_RX = /manybot-files\.s3[.-][^/]+amazonaws\.com/i
 const URL_RX = /https?:\/\/[^\s"'<>)]+/gi
 
+// Hosts conhecidos de mídia do ecossistema Meta/ManyChat — usados como sinal de
+// "isto é mídia" mesmo quando a URL não tem extensão (ex.: lookaside.fbsbx.com).
+const KNOWN_MEDIA_HOST_RX =
+  /(?:manybot-files\.s3|lookaside\.fbsbx\.com|mmg\.whatsapp\.net|\.cdninstagram\.com|\.fbcdn\.net|cdn\.fbsbx\.com)/i
+
 function classifyByExtension(urlOrName: string): ManychatMediaType {
   const u = urlOrName.toLowerCase()
   if (/\.(jpe?g|png|gif|webp|bmp|heic|heif)(\?|$)/i.test(u)) return 'image'
@@ -151,14 +156,19 @@ export function extractManychatMedia(body: Record<string, unknown>): ExtractedMe
     }
   }
 
-  // Último recurso: se o texto contém uma URL do bucket do ManyChat (manybot-files.s3...),
-  // capta-a como mídia. Útil quando o cliente só mapeou `{{last_input_text}}`.
+  // Quando o ManyChat só expõe `{{last_input_text}}`, a URL do anexo cai dentro do texto.
+  // Capturamos qualquer URL que (a) tenha extensão de mídia conhecida (.mp3/.ogg/.jpg/...)
+  // OU (b) venha de um host conhecido do ecossistema Meta/ManyChat — cobre lookaside.fbsbx,
+  // mmg.whatsapp.net, *.cdninstagram.com, *.fbcdn.net, além do bucket manybot-files.
   const text = String(body.text ?? body.message ?? '')
   if (text) {
     const matches = text.match(URL_RX) ?? []
-    for (const url of matches) {
-      if (!MANYBOT_HOST_RX.test(url)) continue
-      pushIfNew(out, { url, type: classifyByExtension(url) }, seen)
+    for (const raw of matches) {
+      const url = raw.replace(/[).,;!?]+$/, '')
+      const byExt = classifyByExtension(url)
+      const isKnownHost = KNOWN_MEDIA_HOST_RX.test(url)
+      if (byExt === 'other' && !isKnownHost) continue
+      pushIfNew(out, { url, type: byExt }, seen)
     }
   }
 
@@ -166,14 +176,21 @@ export function extractManychatMedia(body: Record<string, unknown>): ExtractedMe
 }
 
 /**
- * Remove URLs do bucket do ManyChat do corpo do texto — usado quando a URL já foi capturada
- * como mídia e queremos uma `interactions.content` limpa.
+ * Remove do texto as URLs já capturadas como mídia, devolvendo um `content` limpo
+ * pra `interactions.content`. Se `mediaUrls` for omitido, mantém o comportamento
+ * legado de strip por host do bucket ManyChat.
  */
-export function stripManybotUrlsFromText(text: string): string {
+export function stripManybotUrlsFromText(text: string, mediaUrls?: string[]): string {
   if (!text) return text
+  const captured = new Set((mediaUrls ?? []).map((u) => u.trim()).filter(Boolean))
   return text
     .split(/\s+/)
-    .filter((token) => !MANYBOT_HOST_RX.test(token))
+    .filter((token) => {
+      const clean = token.replace(/[).,;!?]+$/, '')
+      if (captured.has(clean) || captured.has(token)) return false
+      if (MANYBOT_HOST_RX.test(token)) return false
+      return true
+    })
     .join(' ')
     .trim()
 }

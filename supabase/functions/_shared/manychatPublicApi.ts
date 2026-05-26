@@ -209,6 +209,99 @@ export async function pushManychatWhatsappDmAfterReply(input: {
   })
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Envio nativo de mídia via /fb/sending/sendContent
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// O fluxo setCustomField + sendFlow só transporta texto. Para mandar imagem/áudio
+// como anexo nativo (e não como link colado no texto), o ManyChat expõe a rota
+// `/fb/sending/sendContent` que aceita uma lista de blocos `{type:image|audio|video|file, url}`
+// — exige plano Pro e respeita a janela 24h (use `message_tag` se for fora dela).
+//
+// Estratégia: tentamos sendContent quando o caller passa mídia; se falhar (plano,
+// janela, payload), o caller decide se cai no fallback texto+URL.
+
+export type ManychatContentBlockType = 'text' | 'image' | 'audio' | 'video' | 'file'
+
+export type ManychatContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image' | 'audio' | 'video' | 'file'; url: string; caption?: string }
+
+export type ManychatSendContentResult = {
+  ok: boolean
+  error?: string
+  status?: string
+}
+
+async function sendManychatContentCore(input: {
+  apiKey: string
+  subscriberId: string
+  blocks: ManychatContentBlock[]
+  messageTag?: string
+  errorLabel: string
+}): Promise<ManychatSendContentResult> {
+  if (input.blocks.length === 0) {
+    return { ok: false, error: `${input.errorLabel}:empty_blocks` }
+  }
+
+  const sid = normalizeSubscriberId(input.subscriberId)
+  const messages = input.blocks.map((b) => {
+    if (b.type === 'text') return { type: 'text', text: b.text.slice(0, MAX_DM_FIELD_CHARS) }
+    const block: Record<string, unknown> = { type: b.type, url: b.url }
+    if (b.caption?.trim()) block.caption = b.caption.trim()
+    return block
+  })
+
+  const body: Record<string, unknown> = {
+    subscriber_id: sid,
+    data: {
+      version: 'v2',
+      content: {
+        messages,
+      },
+    },
+  }
+  if (input.messageTag?.trim()) {
+    body.message_tag = input.messageTag.trim()
+    ;(body.data as { content: Record<string, unknown> }).content.message_tag = input.messageTag.trim()
+  }
+
+  const res = await manychatPost('/fb/sending/sendContent', body, input.apiKey)
+  if (res.ok && manychatSuccess(res.json)) {
+    return { ok: true, status: 'success' }
+  }
+  return { ok: false, error: describeManychatFailure(input.errorLabel, res), status: String(res.json.status ?? '') }
+}
+
+/**
+ * Envia mídia (imagem/áudio/vídeo/arquivo) + texto opcional como blocos nativos do ManyChat.
+ * Usa /fb/sending/sendContent — exige plano Pro. Se falhar, o caller pode cair no
+ * fluxo legado (URL no texto + sendFlow).
+ */
+export function pushManychatInstagramContent(input: {
+  apiKey: string
+  subscriberId: string
+  blocks: ManychatContentBlock[]
+  messageTag?: string
+}): Promise<ManychatSendContentResult> {
+  return sendManychatContentCore({
+    ...input,
+    errorLabel: 'manychat_send_content',
+  })
+}
+
+export function pushManychatWhatsappContent(input: {
+  apiKey: string
+  subscriberId: string
+  blocks: ManychatContentBlock[]
+  messageTag?: string
+}): Promise<ManychatSendContentResult> {
+  return sendManychatContentCore({
+    ...input,
+    errorLabel: 'manychat_wa_send_content',
+  })
+}
+
 export function readManychatPushConfigFromEnv(): {
   apiKey: string
   fieldId: number

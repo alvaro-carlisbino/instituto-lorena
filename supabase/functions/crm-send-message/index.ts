@@ -3,9 +3,12 @@ import { insertInteraction } from '../_shared/crm.ts'
 import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
 import {
+  pushManychatInstagramContent,
   pushManychatInstagramDmAfterReply,
+  pushManychatWhatsappContent,
   pushManychatWhatsappDmAfterReply,
   readManychatPushConfigForTenantChannel,
+  type ManychatContentBlock,
 } from '../_shared/manychatPublicApi.ts'
 
 const cors = {
@@ -141,9 +144,11 @@ Deno.serve(async (req) => {
           400,
         )
       }
-      // ManyChat (setCustomField + sendFlow) só envia texto. Para fotos/áudios o caminho
-      // portável é colocar a URL pública no próprio texto — WhatsApp/Instagram fazem o
-      // preview clicável. URLs vão depois do texto, separadas por linha em branco.
+      // Estratégia:
+      // • Se há mídia → tenta /fb/sending/sendContent (blocos nativos image/audio/video/file).
+      //   Requer plano Pro do ManyChat; se falhar (plano, janela, payload), caímos para o
+      //   fluxo legado (URL concatenada no texto + setCustomField+sendFlow).
+      // • Sem mídia → segue direto pelo fluxo legado de texto.
       const mediaUrlsBlock = mediaUrls.length > 0 ? mediaUrls.map((m) => m.url).join('\n') : ''
       const replyText = text && mediaUrlsBlock
         ? `${text}\n\n${mediaUrlsBlock}`
@@ -159,6 +164,66 @@ Deno.serve(async (req) => {
       }
       const mcCfg = await readManychatPushConfigForTenantChannel(admin, row.tenant_id, pushChannel)
       if (!mcCfg) return json({ error: 'manychat_not_configured' }, 500)
+
+      if (mediaUrls.length > 0) {
+        const blocks: ManychatContentBlock[] = mediaUrls.map((m) => ({
+          type: (m.type === 'document' ? 'file' : (m.type ?? 'image')) as 'image' | 'audio' | 'video' | 'file',
+          url: m.url,
+          caption: m.caption,
+        }))
+        if (text) blocks.unshift({ type: 'text', text })
+
+        const contentArgs = {
+          apiKey: mcCfg.apiKey,
+          subscriberId,
+          blocks,
+          messageTag: mcCfg.messageTag || undefined,
+        }
+        const contentRes =
+          pushChannel === 'whatsapp'
+            ? await pushManychatWhatsappContent(contentArgs)
+            : await pushManychatInstagramContent(contentArgs)
+
+        if (contentRes.ok) {
+          const outboundInteractionId = await insertInteraction(admin, {
+            leadId: row.id,
+            patientName: row.patient_name,
+            channel: pushChannel === 'whatsapp' ? 'whatsapp' : 'meta',
+            direction: 'out',
+            author: user.email || 'Consultor',
+            content: text || mediaUrls.map((m) => m.url).join('\n'),
+            happenedAt: nowIso(),
+          })
+          try {
+            await admin.from('crm_media_items').insert(
+              mediaUrls.map((m) => ({
+                lead_id: row.id,
+                interaction_id: outboundInteractionId,
+                direction: 'out',
+                media_type: m.type ?? 'document',
+                storage_path: m.url,
+                metadata: {
+                  source: 'crm_send_message_manychat_send_content',
+                  caption: m.caption ?? null,
+                },
+              })),
+            )
+          } catch (e) {
+            console.warn('[crm-send-message] manychat sendContent media insert failed:', e instanceof Error ? e.message : String(e))
+          }
+          return json({
+            ok: true,
+            provider: `manychat_${pushChannel}`,
+            mode: 'send_content',
+            interaction_id: outboundInteractionId,
+          })
+        }
+        console.warn('[crm-send-message] manychat sendContent failed, falling back to text+url', JSON.stringify({
+          leadId: row.id,
+          pushChannel,
+          error: contentRes.error,
+        }))
+      }
 
       const pushArgs = {
         apiKey: mcCfg.apiKey,

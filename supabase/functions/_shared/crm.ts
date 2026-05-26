@@ -1,6 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
-export type LeadSource = 'meta_facebook' | 'meta_instagram' | 'whatsapp' | 'manual'
+export type LeadSource = 'meta_facebook' | 'meta_instagram' | 'meta_whatsapp' | 'whatsapp' | 'manual'
 export type LeadTemperature = 'cold' | 'warm' | 'hot'
 
 export type UpsertLeadInput = {
@@ -41,7 +41,7 @@ function normalizePhone(value: string): string {
 function temperatureForSource(source: LeadSource, override: string | undefined): LeadTemperature {
   if (override && ['cold', 'warm', 'hot'].includes(override)) return override as LeadTemperature
   if (source === 'meta_facebook' || source === 'meta_instagram') return 'hot'
-  if (source === 'whatsapp') return 'warm'
+  if (source === 'whatsapp' || source === 'meta_whatsapp') return 'warm'
   return 'cold'
 }
 
@@ -784,6 +784,7 @@ export async function promoteManychatLeadToRealPhone(
     realPhoneDigits: string
     summary: string
     tenantId?: string
+    channel?: string
   },
 ): Promise<{ leadId: string; merged: boolean }> {
   const sid = String(input.subscriberId).trim()
@@ -791,6 +792,10 @@ export async function promoteManychatLeadToRealPhone(
   if (phone.length < 10) {
     throw new Error('Telefone deve ter pelo menos 10 dígitos')
   }
+
+  const channel = String(input.channel ?? '').trim().toLowerCase()
+  const source: LeadSource = channel === 'instagram' ? 'meta_instagram' : 'meta_whatsapp'
+  const customChannelTag = channel === 'instagram' ? 'instagram' : 'whatsapp'
 
   const mcLeadId = await findLeadIdByManychatSubscriberId(admin, sid)
   const phoneLeadId = await resolvePhoneLeadIdByDigits(admin, phone)
@@ -801,8 +806,8 @@ export async function promoteManychatLeadToRealPhone(
       patientName: input.patientName,
       phone,
       summary: input.summary,
-      source: 'meta_instagram',
-      customFields: { manychat_subscriber_id: sid },
+      source,
+      customFields: { manychat_subscriber_id: sid, channel: customChannelTag },
       tenantId: input.tenantId,
     })
     return { leadId: phoneLeadId, merged: true }
@@ -812,6 +817,7 @@ export async function promoteManychatLeadToRealPhone(
     const { data: cur } = await admin.from('leads').select('custom_fields').eq('id', mcLeadId).maybeSingle()
     const customMerged = mergeCustomFields(cur?.custom_fields as Record<string, unknown> | undefined, {
       manychat_subscriber_id: sid,
+      channel: customChannelTag,
     })
     const { error } = await admin
       .from('leads')
@@ -819,7 +825,7 @@ export async function promoteManychatLeadToRealPhone(
         phone,
         patient_name: input.patientName || 'Lead',
         summary: input.summary || '',
-        source: 'meta_instagram',
+        source,
         custom_fields: customMerged,
       })
       .eq('id', mcLeadId)
@@ -831,8 +837,8 @@ export async function promoteManychatLeadToRealPhone(
     patientName: input.patientName,
     phone,
     summary: input.summary,
-    source: 'meta_instagram',
-    customFields: { manychat_subscriber_id: sid },
+    source,
+    customFields: { manychat_subscriber_id: sid, channel: customChannelTag },
     tenantId: input.tenantId,
   })
   return { leadId: r.leadId, merged: false }
