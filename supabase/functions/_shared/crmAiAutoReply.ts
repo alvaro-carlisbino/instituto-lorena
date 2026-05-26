@@ -398,6 +398,14 @@ export async function evaluateCrmAiAutoReplyGate(
     .eq('lead_id', leadId)
     .maybeSingle()
   const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
+  const { data: leadRowGate } = await admin
+    .from('leads')
+    .select('opted_out_at')
+    .eq('id', leadId)
+    .maybeSingle()
+  const leadOptedOut = Boolean(
+    (leadRowGate as { opted_out_at?: string | null } | null)?.opted_out_at,
+  )
 
   const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
   const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
@@ -412,6 +420,7 @@ export async function evaluateCrmAiAutoReplyGate(
   const shouldAiByMode = ownerMode === 'ai' || ownerMode === 'auto'
 
   const skipReasons: string[] = []
+  if (leadOptedOut) skipReasons.push('lead_opted_out')
   if (!aiEnabled) skipReasons.push('ai_disabled')
   if (!options.directionIsInbound) skipReasons.push('not_inbound')
   if (!shouldAiByMode) {
@@ -426,6 +435,7 @@ export async function evaluateCrmAiAutoReplyGate(
   // (limite global fazia a IA “parar” em conversas com várias mensagens).
 
   const canAutoReply =
+    !leadOptedOut &&
     aiEnabled &&
     shouldAiByMode &&
     options.directionIsInbound &&

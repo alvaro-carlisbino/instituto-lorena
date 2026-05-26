@@ -11,6 +11,7 @@ import { findSyntheticInstagramLeadByName, insertInteraction, mergeLeadDropIntoK
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { resolveTenantFromEvolutionInstance, DEFAULT_TENANT_ID } from '../_shared/tenantResolve.ts'
+import { applyOptOutToLead, isOptOutMessage } from '../_shared/optOutDetect.ts'
 import { WA_INSTAGRAM_MERGE_NOTICE_CONTENT } from '../_shared/waInstagramMergeNotice.ts'
 import { getWhatsappProviderFromEnv } from '../_shared/whatsapp/provider.ts'
 import { getWhatsappProviderForEvent, resolveWhatsappInstanceRowForProvider } from '../_shared/whatsapp/evolutionConfig.ts'
@@ -244,6 +245,10 @@ Deno.serve(async (req) => {
         } catch { /* ignore */ }
         lead = { leadId: instagramLeadId, status: 'updated' }
       }
+    }
+
+    if (isOptOutMessage(normalized.text)) {
+      await applyOptOutToLead(admin, lead.leadId, 'whatsapp_inbound_opt_out')
     }
 
     const inboundInteractionId = await insertInteraction(admin, {

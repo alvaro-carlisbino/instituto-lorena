@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
 
   const { data: lead, error: leadErr } = await admin
     .from('leads')
-    .select('id, patient_name, phone, whatsapp_instance_id, custom_fields, source, tenant_id')
+    .select('id, patient_name, phone, whatsapp_instance_id, custom_fields, source, tenant_id, opted_out_at')
     .eq('id', leadId)
     .maybeSingle()
   if (leadErr || !lead) return json({ error: 'lead_not_found' }, 404)
@@ -95,8 +95,22 @@ Deno.serve(async (req) => {
     phone: string;
     whatsapp_instance_id: string | null;
     tenant_id: string;
+    opted_out_at: string | null;
     custom_fields: Record<string, unknown>;
     source: string;
+  }
+
+  // Guardrail anti-banimento: bloqueia outbound se paciente optou por sair.
+  // LGPD art. 18 IV + proteção contra denúncias no WhatsApp.
+  if (row.opted_out_at) {
+    return json(
+      {
+        error: 'lead_opted_out',
+        message: 'Este paciente solicitou parar de receber mensagens. Reative em LeadDetail antes de tentar de novo.',
+        opted_out_at: row.opted_out_at,
+      },
+      403,
+    )
   }
 
   const effectiveTo = to || String(row.phone ?? '').trim()

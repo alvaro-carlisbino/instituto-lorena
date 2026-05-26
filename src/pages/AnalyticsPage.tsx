@@ -62,7 +62,7 @@ export function AnalyticsPage() {
   }, [period])
 
   const funnelByPipeline = useMemo(() => {
-    const map: Record<string, { name: string; stages: typeof data.funnel }> = {}
+    const map: Record<string, { name: string; stages: AnalyticsPayload['funnel'] }> = {}
     if (!data) return map
     for (const row of data.funnel) {
       if (!map[row.pipeline_id]) {

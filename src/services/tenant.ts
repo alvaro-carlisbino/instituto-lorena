@@ -185,6 +185,7 @@ export async function createTenant(payload: {
     name: String(data.name),
     brand: normalizeBrand(data.brand_config),
     active: Boolean(data.active),
+    billing: null,
   }
 }
 

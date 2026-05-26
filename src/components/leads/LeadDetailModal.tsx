@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
+import { LeadAnalyticsActions } from '@/components/leads/LeadAnalyticsActions'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { LeadTaskPanel } from '@/components/leads/LeadTaskPanel'
 import { Badge } from '@/components/ui/badge'
@@ -228,6 +229,10 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                     >
                       Assistente
                     </Link>
+                    <LeadAnalyticsActions
+                      leadId={lead.id}
+                      canManage={crm.currentPermission.canRouteLeads}
+                    />
                     {crm.currentPermission.canRouteLeads ? (
                       <Button variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)}>
                         <Trash2 className="size-4 mr-1.5" />

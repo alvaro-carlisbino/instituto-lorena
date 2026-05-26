@@ -30,6 +30,7 @@ import {
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { resolveTenantFromManychatBody } from '../_shared/tenantResolve.ts'
+import { applyOptOutToLead, isOptOutMessage } from '../_shared/optOutDetect.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -286,6 +287,13 @@ async function runManychatMessagePipeline(
     }
 
     const inboundContent = contentForInboundWithMedia(ctx.text, ctx.inboundMedia)
+
+    // Detector de opt-out: se paciente pediu pra parar, marca o lead e
+    // bloqueia respostas automáticas downstream (guardrail anti-banimento).
+    if (isOptOutMessage(ctx.text)) {
+      await applyOptOutToLead(admin, leadId, 'manychat_inbound_opt_out')
+    }
+
     const inboundInteractionId = await insertInteraction(admin, {
       leadId,
       patientName: ctx.userName,

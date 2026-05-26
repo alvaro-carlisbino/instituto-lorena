@@ -144,7 +144,7 @@ export function MedicalRecordsPage() {
             <CardContent className="grid gap-3">
               <div className="grid gap-2">
                 <Label>Tipo</Label>
-                <Select value={recordType} onValueChange={setRecordType}>
+                <Select value={recordType} onValueChange={(v) => setRecordType(v ?? 'evolucao')}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {RECORD_TYPES.map((t) => (
