@@ -53,26 +53,28 @@ async function ensureManychatLeadId(
 ): Promise<string> {
   const sid = input.subscriberId.trim()
   const digits = input.phone ? digitsOnly(input.phone) : ''
+  const channel = String(input.channel ?? '').trim().toLowerCase()
+  const defaultName = channel === 'instagram' ? 'Lead Instagram' : 'Lead WhatsApp'
   if (digits.length >= 10) {
     const { leadId } = await promoteManychatLeadToRealPhone(admin, {
       subscriberId: sid,
-      patientName: input.userName || 'Lead Instagram',
+      patientName: input.userName || defaultName,
       realPhoneDigits: digits,
       summary: input.text.slice(0, 500),
       tenantId: input.tenantId,
+      channel,
     })
     return leadId
   }
 
-  const defaultName = input.channel === 'whatsapp' ? 'Lead WhatsApp' : 'Lead Instagram'
   const lead = await upsertLeadByPhone(admin, {
     patientName: input.userName || defaultName,
     phone: syntheticPhoneFromManychatSubscriberId(sid),
     summary: input.text.slice(0, 500),
-    source: input.channel === 'whatsapp' ? 'meta_whatsapp' : 'meta_instagram',
+    source: channel === 'instagram' ? 'meta_instagram' : 'meta_whatsapp',
     customFields: {
       manychat_subscriber_id: sid,
-      channel: input.channel || 'instagram',
+      channel: channel === 'instagram' ? 'instagram' : 'whatsapp',
     },
     tenantId: input.tenantId,
   })
@@ -143,7 +145,7 @@ type ManychatPipelineResult = {
  * Se houver caption/texto, usamos. Senão deixamos uma marca legível por canal.
  */
 function contentForInboundWithMedia(text: string, media: ExtractedMedia[]): string {
-  const cleanText = stripManybotUrlsFromText(text).trim()
+  const cleanText = stripManybotUrlsFromText(text, media.map((m) => m.url)).trim()
   if (cleanText) return cleanText
   if (media.length === 0) return ''
   const labels = media.map((m) => {
@@ -235,14 +237,10 @@ async function isManychatAsyncAck(
 /**
  * Canal efectivo para push ManyChat (WA vs IG).
  *
- * Heurísticas (em ordem): `body.channel` explícito → presença de
- * `whatsappLineInstanceId` → telefone real ≥10 dígitos não-sintético.
- *
- * Guarda anti-falso-positivo: se acabou classificado como `whatsapp` mas
- * **não** existe nenhum sinal de número WA real (phone, data.whatsapp_phone
- * ou whatsapp_subscriber_id), reverte para `instagram`. Evita o bug em que
- * um flow ManyChat IG envia `crm_instance_key` por engano e o lead acabava
- * com `source='meta_whatsapp'` apesar de só haver interações Meta.
+ * Regra: respeitar o que vem (`body.channel` explícito, presença de
+ * `whatsappLineInstanceId` ou telefone real ≥10 dígitos não-sintético).
+ * WhatsApp e Instagram são distinguidos pelo que o ManyChat envia; quando
+ * não há nenhum sinal, o default é WhatsApp (canal majoritário).
  */
 function resolveEffectiveManychatChannel(
   body: Record<string, unknown>,
@@ -253,23 +251,12 @@ function resolveEffectiveManychatChannel(
   if (c === 'wa') c = 'whatsapp'
   if (c === 'ig') c = 'instagram'
 
-  if (!c && whatsappLineInstanceId) c = 'whatsapp'
-  if (!c && phoneDigits.length >= 10 && !phoneDigits.startsWith('888001')) c = 'whatsapp'
+  if (c === 'whatsapp' || c === 'instagram') return c
 
-  if (!c) return 'instagram'
+  if (whatsappLineInstanceId) return 'whatsapp'
+  if (phoneDigits.length >= 10 && !phoneDigits.startsWith('888001')) return 'whatsapp'
 
-  if (c === 'whatsapp') {
-    const hasRealTopPhone = phoneDigits.length >= 10 && !phoneDigits.startsWith('888001')
-    const data = body.data && typeof body.data === 'object' ? (body.data as Record<string, unknown>) : null
-    const dataWaPhoneDigits = data ? digitsOnly(String(data.whatsapp_phone ?? '')) : ''
-    const hasRealDataWaPhone = dataWaPhoneDigits.length >= 10 && !dataWaPhoneDigits.startsWith('888001')
-    const hasWaSubscriberId = Boolean(String((body as Record<string, unknown>).whatsapp_subscriber_id ?? '').trim())
-    if (!hasRealTopPhone && !hasRealDataWaPhone && !hasWaSubscriberId) {
-      return 'instagram'
-    }
-  }
-
-  return c
+  return 'whatsapp'
 }
 
 async function runManychatMessagePipeline(
@@ -633,14 +620,17 @@ Deno.serve(async (req) => {
       return json({ error: 'invalid_phone', message: 'Telefone deve ter pelo menos 10 dígitos' }, 400)
     }
     try {
-      const userName = String(body.user_name ?? body.name ?? 'Lead Instagram').trim() || 'Lead Instagram'
+      const rawUserName = String(body.user_name ?? body.name ?? '').trim()
       const summary = String(body.summary ?? body.text ?? '').trim().slice(0, 500)
+      const channelHint = String(body.channel ?? '').trim().toLowerCase()
+      const mergeChannel = channelHint === 'instagram' || channelHint === 'ig' ? 'instagram' : 'whatsapp'
       const { leadId, merged } = await promoteManychatLeadToRealPhone(admin, {
         subscriberId,
-        patientName: userName,
+        patientName: rawUserName || (mergeChannel === 'instagram' ? 'Lead Instagram' : 'Lead WhatsApp'),
         realPhoneDigits: digits,
         summary,
         tenantId,
+        channel: mergeChannel,
       })
       return json({ ok: true, leadId, merged, action: 'merge_phone' })
     } catch (e) {
@@ -672,7 +662,7 @@ Deno.serve(async (req) => {
     .filter(Boolean)
     .join('\n\n---\n')
 
-  const userName = String(body.user_name ?? body.name ?? 'Lead Instagram').trim() || 'Lead Instagram'
+  const rawUserName = String(body.user_name ?? body.name ?? '').trim()
   const phoneOpt = String(body.phone ?? '').trim() || undefined
 
   const instanceKeyRaw = sanitizeCrmInstanceKey(body.crm_instance_key ?? body.whatsapp_instance_id)
@@ -683,6 +673,7 @@ Deno.serve(async (req) => {
 
   const phoneDigitsBody = digitsOnly(String(phoneOpt ?? ''))
   const effectiveChannel = resolveEffectiveManychatChannel(body, whatsappLineInstanceId, phoneDigitsBody)
+  const userName = rawUserName || (effectiveChannel === 'instagram' ? 'Lead Instagram' : 'Lead WhatsApp')
 
   if (action === 'ingest') {
     try {
