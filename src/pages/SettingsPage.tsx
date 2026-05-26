@@ -44,6 +44,7 @@ import {
 import { slugifyLabel } from '@/lib/utils'
 import type { FieldVisibilityContext, WorkflowField, Room } from '@/mocks/crmMock'
 import { getAiConfig, saveAiConfig, type ConversationOwnerMode } from '@/services/conversationControl'
+import { AutoSchedulingToggle } from '@/components/settings/AutoSchedulingToggle'
 
 const FIELD_TYPE_OPTIONS = [
   { value: 'text', label: '📝 Texto livre' },
@@ -260,6 +261,7 @@ export function SettingsPage() {
                 </p>
               </div>
             </div>
+            <AutoSchedulingToggle />
             <div className="min-w-0 max-w-2xl">
               <ConversationModeSwitch
                 title="Modo padrão de novas conversas"

@@ -260,7 +260,7 @@ export async function executeCrmAiOpsFromModel(
 
   const { data: leadRow } = await admin
     .from('leads')
-    .select('id, pipeline_id, stage_id, patient_name')
+    .select('id, pipeline_id, stage_id, patient_name, tenant_id')
     .eq('id', opts.allowedLeadId)
     .maybeSingle()
   if (!leadRow) {
@@ -268,6 +268,21 @@ export async function executeCrmAiOpsFromModel(
   }
   const pipelineId = String((leadRow as { pipeline_id?: string }).pipeline_id ?? '')
   const patientName = String((leadRow as { patient_name?: string }).patient_name ?? opts.patientLabel)
+  const leadTenantId = String((leadRow as { tenant_id?: string }).tenant_id ?? '')
+
+  // Feature flag por tenant: auto-agendamento da IA.
+  let autoSchedulingEnabled = false
+  if (leadTenantId) {
+    const { data: cfgRow } = await admin
+      .from('crm_ai_configs')
+      .select('auto_scheduling_enabled')
+      .eq('tenant_id', leadTenantId)
+      .eq('id', 'default')
+      .maybeSingle()
+    autoSchedulingEnabled = Boolean(
+      (cfgRow as { auto_scheduling_enabled?: boolean } | null)?.auto_scheduling_enabled,
+    )
+  }
 
   for (const rawOp of opts.ops) {
     if (!rawOp || typeof rawOp !== 'object' || Array.isArray(rawOp)) continue
@@ -346,6 +361,14 @@ export async function executeCrmAiOpsFromModel(
       }
 
       if (type === 'book_appointment' || type === 'schedule_appointment') {
+        if (!autoSchedulingEnabled) {
+          results.push({
+            type,
+            ok: false,
+            detail: 'auto_scheduling_disabled_for_tenant',
+          })
+          continue
+        }
         const duration = Math.min(
           180,
           Math.max(15, Number(op.duration_minutes ?? op.duration ?? 30) || 30),
