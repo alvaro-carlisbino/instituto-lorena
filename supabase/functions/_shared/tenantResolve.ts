@@ -2,13 +2,15 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 
 /**
  * Tenant default — usado quando o webhook não traz `tenant_slug` e nenhuma outra
- * via de identificação resolve. Mantém o comportamento atual (single-tenant) até
- * que todas as clínicas configurem o `tenant_slug` nos respectivos webhooks.
+ * via de identificação resolve. Configurável via env `FALLBACK_TENANT_ID` (default
+ * `instituto-lorena` por compatibilidade com o cliente piloto). Quando vazio, a
+ * resolução passa a exigir tenant explícito — qualquer webhook sem identificação
+ * receberá `''` e a edge function deve falhar com erro claro.
  *
- * NOTA: depois que todos os clientes estiverem migrados, trocar este fallback por
- * `throw new Error('tenant_required')` para garantir isolamento estrito.
+ * Para um deploy multi-cliente estrito: setar `FALLBACK_TENANT_ID=` (vazio) e
+ * exigir que toda integração externa envie `tenant_slug`.
  */
-export const DEFAULT_TENANT_ID = 'instituto-lorena'
+export const DEFAULT_TENANT_ID = (Deno.env.get('FALLBACK_TENANT_ID') ?? 'instituto-lorena').trim()
 
 async function tenantExists(admin: SupabaseClient, tenantId: string): Promise<boolean> {
   if (!tenantId) return false
