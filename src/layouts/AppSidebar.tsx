@@ -147,6 +147,8 @@ export function AppSidebar() {
             <SidebarMenu className="gap-1">
               <NavItem to="/canais" label="Canais" icon={Radio} />
               <NavItem to="/metricas" label="Métricas" icon={ChartBar} />
+              <NavItem to="/analytics" label="Analytics" icon={ChartBar} />
+              <NavItem to="/prontuario" label="Prontuário" icon={ChartBar} />
               {showBoards ? <NavItem to="/boards" label="Funis" icon={CirclesThreePlus} /> : null}
               {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table} /> : null}
               {showAdmin ? <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowsLeftRight} /> : null}
