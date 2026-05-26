@@ -123,6 +123,7 @@ import { getDataProviderMode } from '../services/dataMode'
 import { notifySendError, sendWhatsappMessage } from '../services/crmWhatsapp'
 import { dispatchNps } from '../services/npsDispatch'
 import type { WebhookJob, AuditLogEntry } from '../services/crmSupabase'
+import { signupCreateTenant } from '../services/tenant'
 
 export type QueueJob = WebhookJob
 
@@ -199,6 +200,8 @@ export const useCrmState = () => {
   const [actingRole, setActingRole] = useState<'admin' | 'gestor' | 'sdr'>('admin')
   const [useRolePreview, setUseRolePreview] = useState<boolean>(false)
   const [displayNameDraft, setDisplayNameDraft] = useState<string>('')
+  const [onboardingClinicName, setOnboardingClinicName] = useState<string>('')
+  const [onboardingPrimaryColor, setOnboardingPrimaryColor] = useState<string>('#0ea5e9')
   const [onboardingDone, setOnboardingDone] = useState<boolean>(false)
   const [auditRows, setAuditRows] = useState<AuditLogEntry[]>([])
   const [auditTotal, setAuditTotal] = useState<number>(0)
@@ -1957,19 +1960,39 @@ export const useCrmState = () => {
 
   const completeOnboarding = async () => {
     const displayName = displayNameDraft.trim()
+    const clinicName = onboardingClinicName.trim()
     if (displayName.length < 2) {
       setAuthNotice('Informe um nome valido para continuar.')
+      return
+    }
+    if (clinicName.length < 2) {
+      setAuthNotice('Informe o nome da clinica para continuar.')
       return
     }
 
     setIsLoading(true)
     try {
+      // Cria (ou recupera, se já existir) o tenant do usuário. Idempotente:
+      // signup_create_tenant devolve o slug do tenant existente se o user já
+      // estiver vinculado a um — caso de SDR/gestor convidado por outro admin.
+      await signupCreateTenant({
+        slug: clinicName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, ''),
+        name: clinicName,
+        brand: {
+          app_name: clinicName,
+          primary_color: onboardingPrimaryColor,
+          accent_color: onboardingPrimaryColor,
+          logo_url: null,
+          support_phone: null,
+          support_email: null,
+        },
+      })
       await updateMyProfile({ displayName })
       setOnboardingDone(true)
-      setAuthNotice('Perfil atualizado com sucesso.')
+      setAuthNotice('Clínica configurada com sucesso.')
       await syncFromSupabase()
     } catch (error) {
-      setAuthNotice(`Falha ao atualizar perfil: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
+      setAuthNotice(`Falha ao concluir onboarding: ${error instanceof Error ? error.message : 'erro desconhecido'}`)
     } finally {
       setIsLoading(false)
     }
@@ -2212,6 +2235,10 @@ export const useCrmState = () => {
     onboardingDone,
     displayNameDraft,
     setDisplayNameDraft,
+    onboardingClinicName,
+    setOnboardingClinicName,
+    onboardingPrimaryColor,
+    setOnboardingPrimaryColor,
     actingRole,
     setActingRole,
     useRolePreview,
