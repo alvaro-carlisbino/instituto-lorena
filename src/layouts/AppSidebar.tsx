@@ -149,6 +149,7 @@ export function AppSidebar() {
               <NavItem to="/metricas" label="Métricas" icon={ChartBar} />
               <NavItem to="/analytics" label="Analytics" icon={ChartBar} />
               <NavItem to="/prontuario" label="Prontuário" icon={ChartBar} />
+              <NavItem to="/planos" label="Planos" icon={ChartBar} />
               {showBoards ? <NavItem to="/boards" label="Funis" icon={CirclesThreePlus} /> : null}
               {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table} /> : null}
               {showAdmin ? <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowsLeftRight} /> : null}

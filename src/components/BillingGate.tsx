@@ -54,7 +54,7 @@ export function BillingGate({ children }: { children: ReactNode }) {
         <CardContent className="grid gap-3">
           <Button
             onClick={() => {
-              window.location.href = '/configuracoes#billing'
+              window.location.href = '/planos'
             }}
           >
             Ver planos
