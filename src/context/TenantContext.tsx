@@ -5,6 +5,7 @@ import {
   applyTenantBrandToCssVars,
   DEFAULT_TENANT,
   fetchCurrentTenant,
+  fetchCurrentTenantBilling,
   fetchIsSuperAdmin,
   type Tenant,
 } from '@/services/tenant'
@@ -34,8 +35,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         }
         setLoading(true)
         try {
-          const [t, sa] = await Promise.all([fetchCurrentTenant(), fetchIsSuperAdmin()])
-          setTenant(t)
+          const [t, sa, billing] = await Promise.all([
+            fetchCurrentTenant(),
+            fetchIsSuperAdmin(),
+            fetchCurrentTenantBilling(),
+          ])
+          setTenant({ ...t, billing })
           setIsSuperAdmin(sa)
           applyTenantBrandToCssVars(t.brand)
         } finally {
