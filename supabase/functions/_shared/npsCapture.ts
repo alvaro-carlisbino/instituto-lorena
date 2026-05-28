@@ -3,14 +3,18 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 /**
  * Tenta interpretar uma mensagem inbound do paciente como resposta NPS (nota 0-10).
  * Se o texto for um número solo entre 0 e 10 E houver um `survey_dispatch` pendente
- * (sem `survey_response` ainda) nas últimas 30 dias para este lead, regista a resposta
- * e devolve um texto de agradecimento adequado à pontuação (detrator/passivo/promotor).
+ * (sem `survey_response` ainda) dentro da janela de captura para este lead, regista a
+ * resposta e devolve um texto de agradecimento adequado à pontuação.
  *
  * Quem chama deve enviar o `thankYouText` pelo canal correto (WhatsApp/ManyChat) e
  * curto-circuitar a IA — assim o paciente não recebe uma resposta genérica depois.
+ *
+ * Janela curta (72h): NPS antigo expira sozinho. Evita colisão com menus numéricos
+ * (ex.: triagem da Sofia 1–5) quando o lead é reaberto por follow-up dias depois.
  */
 
 const SCORE_REGEX = /^\s*(10|[0-9])\s*$/
+const NPS_CAPTURE_WINDOW_MS = 72 * 60 * 60 * 1000
 
 export type NpsCaptureResult =
   | { captured: false }
@@ -49,8 +53,8 @@ export async function captureNpsInboundResponse(
   const score = Number.parseInt(m[1], 10)
   if (!Number.isFinite(score) || score < 0 || score > 10) return { captured: false }
 
-  // Procura dispatch pendente (sem resposta) recente
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  // Procura dispatch pendente (sem resposta) dentro da janela de captura.
+  const since = new Date(Date.now() - NPS_CAPTURE_WINDOW_MS).toISOString()
   const { data: rows } = await admin
     .from('survey_dispatches')
     .select('id, template_id, sent_at, survey_responses(id)')
@@ -60,8 +64,21 @@ export async function captureNpsInboundResponse(
     .limit(5)
   const pending = (rows ?? []).find(
     (r) => !((r as { survey_responses?: unknown[] }).survey_responses?.length),
-  ) as { id: string; template_id: string } | undefined
+  ) as { id: string; template_id: string; sent_at: string } | undefined
   if (!pending) return { captured: false }
+
+  // Se a conversa foi reaberta (qualquer outbound da IA depois do dispatch), o número
+  // provavelmente é resposta de menu/triagem, não NPS. Ex.: Sofia manda menu 1–5
+  // após follow-up e o paciente digita "2".
+  const { data: stateRow } = await admin
+    .from('crm_conversation_states')
+    .select('last_ai_reply_at')
+    .eq('lead_id', opts.leadId)
+    .maybeSingle()
+  const lastAiReplyAt = (stateRow as { last_ai_reply_at?: string | null } | null)?.last_ai_reply_at
+  if (lastAiReplyAt && new Date(lastAiReplyAt).getTime() > new Date(pending.sent_at).getTime()) {
+    return { captured: false }
+  }
 
   const responseId = `resp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const insertRow: Record<string, unknown> = {
