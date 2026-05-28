@@ -627,12 +627,33 @@ export const useCrmState = () => {
     const senderName = getOwnerName(selectedLead.ownerId)
 
     if (dataMode === 'supabase' && isSupabaseConfigured) {
-      const result = await sendWhatsappMessage({
+      let result = await sendWhatsappMessage({
         leadId: selectedLead.id,
         to: selectedLead.phone,
         text: outbound,
         attachments,
       })
+
+      if (!result.ok && result.kind === 'lead_opted_out') {
+        const confirmed = window.confirm(
+          'Este paciente pediu para parar de receber mensagens (opt-out).\n\n' +
+            'Enviar mesmo assim assume o risco de denúncia/banimento do número da clínica pelo WhatsApp. ' +
+            'O envio fica registrado como override humano no histórico do lead.\n\n' +
+            'Confirma o envio?',
+        )
+        if (!confirmed) {
+          setDraftMessage(outbound)
+          setDraftAttachments(attachments)
+          return
+        }
+        result = await sendWhatsappMessage({
+          leadId: selectedLead.id,
+          to: selectedLead.phone,
+          text: outbound,
+          attachments,
+          manualOverride: true,
+        })
+      }
 
       if (!result.ok) {
         notifySendError(result, 'manual')
@@ -677,12 +698,29 @@ export const useCrmState = () => {
     }
 
     if (dataMode === 'supabase' && isSupabaseConfigured) {
-      const result = await sendWhatsappMessage({
+      let result = await sendWhatsappMessage({
         leadId: selectedLead.id,
         to: selectedLead.phone,
         text: '',
         stickerWebpBase64: raw,
       })
+
+      if (!result.ok && result.kind === 'lead_opted_out') {
+        const confirmed = window.confirm(
+          'Este paciente pediu para parar de receber mensagens (opt-out).\n\n' +
+            'Enviar a figurinha assume risco de denúncia/banimento do número da clínica. ' +
+            'O envio fica registrado como override humano.\n\n' +
+            'Confirma o envio?',
+        )
+        if (!confirmed) return
+        result = await sendWhatsappMessage({
+          leadId: selectedLead.id,
+          to: selectedLead.phone,
+          text: '',
+          stickerWebpBase64: raw,
+          manualOverride: true,
+        })
+      }
 
       if (!result.ok) {
         notifySendError(result, 'sticker')

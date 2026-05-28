@@ -13,6 +13,11 @@ export type SendWhatsappPayload = {
     mimeType: string
     base64: string
   }>
+  /**
+   * Override humano explícito após opt-out. Só usar depois de confirmar no diálogo
+   * "assumo risco de ban". Backend registra interaction `system` de auditoria.
+   */
+  manualOverride?: boolean
 }
 
 export type SendWhatsappResult =
@@ -42,6 +47,7 @@ export type SendWhatsappResult =
         | 'lead_not_found'
         | 'missing_fields'
         | 'send_failed'
+        | 'lead_opted_out'
         | 'unknown'
     }
 
@@ -89,6 +95,7 @@ const KNOWN_ERROR_KINDS = new Set([
   'lead_not_found',
   'missing_fields',
   'send_failed',
+  'lead_opted_out',
 ])
 
 function classifyError(raw: string): SendWhatsappResult extends infer R
@@ -171,6 +178,13 @@ export function notifySendError(
   }
   if (result.kind === 'rate_limited') {
     toast.warning('Limite de envios atingido nesta hora.', { description: result.detail })
+    return
+  }
+  if (result.kind === 'lead_opted_out') {
+    toast.warning('Paciente pediu para parar de receber mensagens.', {
+      description:
+        'Para enviar mesmo assim, confirme o override no diálogo. Ou reative o lead em LeadDetail após contato externo.',
+    })
     return
   }
   const prefix =

@@ -60,6 +60,13 @@ Deno.serve(async (req) => {
      * `attachments` com base64; URLs aqui são apenas anexadas ao texto para clicar.
      */
     mediaUrls?: Array<{ url: string; type?: 'image' | 'audio' | 'video' | 'document'; caption?: string }>
+    /**
+     * Override humano explícito após opt-out. Quando true, ignora `leads.opted_out_at`
+     * e libera o envio (apenas via UI humana — IA tem checagem própria em crmAiAutoReply
+     * e não passa por aqui). Registra interaction `system` de auditoria. Usuário precisa
+     * confirmar no frontend ("assumo risco de ban").
+     */
+    manualOverride?: boolean
   }
   try {
     body = (await req.json()) as typeof body
@@ -102,15 +109,33 @@ Deno.serve(async (req) => {
 
   // Guardrail anti-banimento: bloqueia outbound se paciente optou por sair.
   // LGPD art. 18 IV + proteção contra denúncias no WhatsApp.
-  if (row.opted_out_at) {
+  // Override humano explícito (`manualOverride: true`) permite envio com auditoria —
+  // operador assume risco de ban. IA continua bloqueada pois nem passa por aqui.
+  const manualOverride = Boolean(body.manualOverride)
+  if (row.opted_out_at && !manualOverride) {
     return json(
       {
         error: 'lead_opted_out',
-        message: 'Este paciente solicitou parar de receber mensagens. Reative em LeadDetail antes de tentar de novo.',
+        message: 'Este paciente solicitou parar de receber mensagens. Confirme o override em LeadDetail ou clique "Enviar mesmo assim" para assumir o risco de ban.',
         opted_out_at: row.opted_out_at,
       },
       403,
     )
+  }
+  if (row.opted_out_at && manualOverride) {
+    try {
+      await insertInteraction(admin, {
+        leadId: row.id,
+        patientName: row.patient_name,
+        channel: 'system',
+        direction: 'system',
+        author: user.email || 'Operador',
+        content: `Override humano após opt-out (${new Date(row.opted_out_at).toISOString()}). Operador assumiu risco de ban.`,
+        tenantId: row.tenant_id,
+      })
+    } catch (e) {
+      console.warn('[crm-send-message] override audit interaction failed:', e instanceof Error ? e.message : String(e))
+    }
   }
 
   const effectiveTo = to || String(row.phone ?? '').trim()
