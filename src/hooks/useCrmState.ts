@@ -757,12 +757,20 @@ export const useCrmState = () => {
         to: lead.phone,
         text: message,
         attachments: [],
+        source: 'stage_automation',
       })
       if (!result.ok) {
         notifySendError(result, 'automation')
         return
       }
-      toast.success('Mensagem automática enviada.')
+      if (result.provider.startsWith('manychat_')) {
+        toast.success('Automação disparada via ManyChat.', {
+          description:
+            'Entrega depende da janela 24h da Meta. Confirme pela resposta do paciente — o ManyChat não confirma delivery.',
+        })
+      } else {
+        toast.success('Mensagem automática enviada.')
+      }
       await refreshChatFromSupabase()
       return
     }

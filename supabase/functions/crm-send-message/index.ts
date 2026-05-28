@@ -67,6 +67,13 @@ Deno.serve(async (req) => {
      * confirmar no frontend ("assumo risco de ban").
      */
     manualOverride?: boolean
+    /**
+     * Origem do envio. `stage_automation` bloqueia automação para leads ManyChat fora
+     * da janela 24h da Meta — o ManyChat aceita o sendFlow mas a Meta dropa em silêncio,
+     * dando toast verde mentiroso. `followup_scheduler` é o cron de follow-up (já filtra
+     * a janela do lado dele). Demais valores tratados como envio humano.
+     */
+    source?: string
   }
   try {
     body = (await req.json()) as typeof body
@@ -154,6 +161,47 @@ Deno.serve(async (req) => {
     customFieldsChannel === 'instagram'
 
   if (isManychat) {
+    // Automação de stage + ManyChat: bloqueia fora da janela 24h da Meta.
+    // ManyChat retorna `status:success` no sendFlow mesmo quando a Meta dropa a entrega
+    // silenciosamente — frontend mostraria toast verde e paciente não receberia. Esse
+    // bloqueio espelha a regra do `crm-followup-scheduler` (24h após last_inbound_at).
+    if (String(body.source ?? '').trim() === 'stage_automation') {
+      const { data: convState } = await admin
+        .from('crm_conversation_states')
+        .select('last_inbound_at')
+        .eq('lead_id', leadId)
+        .maybeSingle()
+      const lastInboundIso = convState?.last_inbound_at ? String(convState.last_inbound_at) : null
+      const lastInboundMs = lastInboundIso ? new Date(lastInboundIso).getTime() : 0
+      const outOfWindow = !lastInboundMs || (Date.now() - lastInboundMs) > 24 * 3600 * 1000
+      if (outOfWindow) {
+        try {
+          await insertInteraction(admin, {
+            leadId: row.id,
+            patientName: row.patient_name,
+            channel: 'system',
+            direction: 'system',
+            author: 'Automação de etapa',
+            content: lastInboundIso
+              ? `Automação não enviada: paciente sem responder desde ${new Date(lastInboundIso).toISOString()} (>24h). Meta bloqueia DM fora da janela e o ManyChat entrega "ok" mentiroso. Reativar exige resposta do paciente ou template aprovado pela Meta.`
+              : 'Automação não enviada: paciente nunca respondeu via ManyChat. Meta bloqueia DM sem janela 24h aberta.',
+            tenantId: row.tenant_id,
+          })
+        } catch (e) {
+          console.warn('[crm-send-message] out_of_window audit interaction failed:', e instanceof Error ? e.message : String(e))
+        }
+        return json(
+          {
+            error: 'out_of_window',
+            message:
+              'Paciente sem responder há mais de 24h — Meta bloqueia DM fora da janela. Automação de etapa não foi disparada para evitar entrega silenciosamente perdida.',
+            last_inbound_at: lastInboundIso,
+          },
+          403,
+        )
+      }
+    }
+
     const subscriberId = String(
       (row.custom_fields as Record<string, unknown> | null)?.manychat_subscriber_id ?? '',
     ).trim()
