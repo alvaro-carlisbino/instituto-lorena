@@ -18,6 +18,12 @@ export type SendWhatsappPayload = {
    * "assumo risco de ban". Backend registra interaction `system` de auditoria.
    */
   manualOverride?: boolean
+  /**
+   * Origem do envio. `stage_automation` faz a edge bloquear leads ManyChat fora da
+   * janela 24h da Meta (entrega silenciosamente perdida). Demais valores são tratados
+   * como envio humano.
+   */
+  source?: string
 }
 
 export type SendWhatsappResult =
@@ -48,6 +54,7 @@ export type SendWhatsappResult =
         | 'missing_fields'
         | 'send_failed'
         | 'lead_opted_out'
+        | 'out_of_window'
         | 'unknown'
     }
 
@@ -96,6 +103,7 @@ const KNOWN_ERROR_KINDS = new Set([
   'missing_fields',
   'send_failed',
   'lead_opted_out',
+  'out_of_window',
 ])
 
 function classifyError(raw: string): SendWhatsappResult extends infer R
@@ -184,6 +192,13 @@ export function notifySendError(
     toast.warning('Paciente pediu para parar de receber mensagens.', {
       description:
         'Para enviar mesmo assim, confirme o override no diálogo. Ou reative o lead em LeadDetail após contato externo.',
+    })
+    return
+  }
+  if (result.kind === 'out_of_window') {
+    toast.warning('Automação de etapa não disparada — paciente fora da janela 24h.', {
+      description:
+        'Meta bloqueia DM via ManyChat depois de 24h sem resposta do paciente. Aguarde uma nova mensagem do lead ou faça contato manual (que também depende da janela).',
     })
     return
   }
