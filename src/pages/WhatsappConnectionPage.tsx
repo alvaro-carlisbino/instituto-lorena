@@ -795,6 +795,11 @@ export function WhatsappConnectionPage() {
                           ManyChat ·{' '}
                           <span className="font-mono text-[0.65rem]">{row.manychatInstanceKey ?? row.id}</span>
                         </>
+                      ) : row.channelProvider === 'wapi' ? (
+                        <>
+                          W-API ·{' '}
+                          <span className="font-mono text-[0.65rem]">{row.wapiInstanceId ?? '—'}</span>
+                        </>
                       ) : (
                         <>
                           Evolution ·{' '}
