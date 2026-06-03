@@ -85,6 +85,14 @@ export function WhatsappConnectionPage() {
   const [mcKey, setMcKey] = useState('')
   const [mcPrompt, setMcPrompt] = useState('')
   const [mcPhone, setMcPhone] = useState('')
+  // W-API: instância já é criada no painel da W-API; aqui só registramos as
+  // credenciais (instanceId + token) e o prompt da IA pra essa linha.
+  const [waLabel, setWaLabel] = useState('')
+  const [waInstanceId, setWaInstanceId] = useState('')
+  const [waToken, setWaToken] = useState('')
+  const [waPhone, setWaPhone] = useState('')
+  const [waPrompt, setWaPrompt] = useState('')
+  const [waSecret, setWaSecret] = useState('')
   const [linkLabel, setLinkLabel] = useState('')
   const [linkEvoName, setLinkEvoName] = useState('')
   const [linkPhone, setLinkPhone] = useState('')
@@ -333,6 +341,53 @@ export function WhatsappConnectionPage() {
     }
   }
 
+  const handleAddWapiLine = async () => {
+    if (!waLabel.trim()) {
+      toast.error('Indique o nome da linha (ex.: Aline – Comercial TC).')
+      return
+    }
+    if (!waInstanceId.trim()) {
+      toast.error('Informe o instanceId da W-API (copie do painel da W-API).')
+      return
+    }
+    if (!waToken.trim()) {
+      toast.error('Informe o token Bearer da instância (copie do painel da W-API).')
+      return
+    }
+    setSavingInstance(true)
+    try {
+      const id = `wa-wapi-${Date.now().toString(36)}`
+      await upsertWhatsappChannelInstance({
+        id,
+        label: waLabel.trim(),
+        channelProvider: 'wapi',
+        wapiInstanceId: waInstanceId.trim(),
+        wapiToken: waToken.trim(),
+        wapiWebhookSecret: waSecret.trim() || null,
+        aiSystemPrompt: waPrompt,
+        phoneE164: waPhone.trim() || null,
+        sortOrder: instances.length,
+        entryPipelineId: null,
+        entryStageId: null,
+        defaultOwnerId: null,
+        onLineChange: 'keep_stage',
+      })
+      setWaLabel('')
+      setWaInstanceId('')
+      setWaToken('')
+      setWaPhone('')
+      setWaPrompt('')
+      setWaSecret('')
+      await loadInstances()
+      setSelectedInstanceId(id)
+      toast.success('Linha W-API criada. Agora cole o webhook URL no painel da W-API (instruções abaixo).')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar.')
+    } finally {
+      setSavingInstance(false)
+    }
+  }
+
   const handleRemoveInstance = async (id: string) => {
     const target = instances.find((i) => i.id === id)
     const confirmManychat =
@@ -573,6 +628,91 @@ export function WhatsappConnectionPage() {
               <div className="flex items-end sm:col-span-2">
                 <Button type="button" disabled={savingInstance} onClick={() => void handleAddManychatLine()}>
                   {savingInstance ? 'Salvando…' : 'Adicionar linha ManyChat'}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-border/60 pt-4">
+            <h3 className="m-0 text-sm font-semibold">Linha W-API (recomendado para novas linhas)</h3>
+            <p className="m-0 text-xs text-muted-foreground">
+              Crie a instância primeiro no painel da{' '}
+              <a href="https://app.w-api.app" target="_blank" rel="noreferrer" className="underline">
+                W-API
+              </a>{' '}
+              (faz o QR code e mantém a sessão lá). Depois cole aqui o <span className="font-mono">instanceId</span> e o{' '}
+              <span className="font-mono">token</span> da instância, escreva o prompt da IA, e cole o webhook URL abaixo no
+              painel da W-API na opção <span className="font-mono">Mensagens recebidas</span>.
+            </p>
+            <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 font-mono text-[0.7rem] break-all">
+              {(import.meta.env.VITE_SUPABASE_URL ?? '<SUPABASE_URL>').replace(/\/$/, '')}/functions/v1/crm-wapi-webhook
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-wapi-label">Nome no CRM</Label>
+                <Input
+                  id="wa-wapi-label"
+                  value={waLabel}
+                  onChange={(e) => setWaLabel(e.target.value)}
+                  placeholder="ex.: Aline — Comercial TC"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-wapi-phone">Número (opcional)</Label>
+                <Input
+                  id="wa-wapi-phone"
+                  value={waPhone}
+                  onChange={(e) => setWaPhone(e.target.value)}
+                  placeholder="+55..."
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-wapi-instance">instanceId da W-API</Label>
+                <Input
+                  id="wa-wapi-instance"
+                  value={waInstanceId}
+                  onChange={(e) => setWaInstanceId(e.target.value)}
+                  placeholder="copie do painel da W-API"
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-wapi-token">Token Bearer</Label>
+                <Input
+                  id="wa-wapi-token"
+                  type="password"
+                  value={waToken}
+                  onChange={(e) => setWaToken(e.target.value)}
+                  placeholder="token da instância (sensível)"
+                  className="font-mono text-xs"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2 lg:col-span-4">
+                <Label htmlFor="wa-wapi-prompt">Prompt de sistema desta linha (obrigatório para IA específica)</Label>
+                <Textarea
+                  id="wa-wapi-prompt"
+                  value={waPrompt}
+                  onChange={(e) => setWaPrompt(e.target.value)}
+                  placeholder="Instruções da IA para este número (persona, escopo, regras de handoff…)"
+                  rows={5}
+                  className="min-h-[120px] text-sm"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-wapi-secret">Webhook secret (opcional)</Label>
+                <Input
+                  id="wa-wapi-secret"
+                  value={waSecret}
+                  onChange={(e) => setWaSecret(e.target.value)}
+                  placeholder="se configurar no painel da W-API, cole aqui"
+                  className="font-mono text-xs"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="flex items-end sm:col-span-2">
+                <Button type="button" disabled={savingInstance} onClick={() => void handleAddWapiLine()}>
+                  {savingInstance ? 'Salvando…' : 'Adicionar linha W-API'}
                 </Button>
               </div>
             </div>

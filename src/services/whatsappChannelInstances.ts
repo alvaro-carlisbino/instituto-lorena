@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabaseClient'
 
 export type WaOnLineChange = 'keep_stage' | 'use_entry'
 
-export type ChannelProvider = 'evolution' | 'manychat'
+export type ChannelProvider = 'evolution' | 'manychat' | 'wapi'
 
 export type WhatsappChannelInstance = {
   id: string
@@ -10,6 +10,10 @@ export type WhatsappChannelInstance = {
   channelProvider: ChannelProvider
   evolutionInstanceName: string | null
   manychatInstanceKey: string | null
+  wapiInstanceId: string | null
+  wapiToken: string | null
+  wapiBaseUrl: string | null
+  wapiWebhookSecret: string | null
   aiSystemPrompt: string
   phoneE164: string | null
   active: boolean
@@ -20,42 +24,47 @@ export type WhatsappChannelInstance = {
   onLineChange: WaOnLineChange
 }
 
+function strOrNull(value: unknown): string | null {
+  if (value == null) return null
+  const s = String(value).trim()
+  return s ? s : null
+}
+
 function mapRow(r: Record<string, unknown>): WhatsappChannelInstance {
   const o = String(r.on_line_change ?? 'keep_stage')
   const onLine: WaOnLineChange = o === 'use_entry' ? 'use_entry' : 'keep_stage'
   const cp = String(r.channel_provider ?? 'evolution').toLowerCase()
-  const channelProvider: ChannelProvider = cp === 'manychat' ? 'manychat' : 'evolution'
-  const evo = r.evolution_instance_name != null && String(r.evolution_instance_name).trim()
-    ? String(r.evolution_instance_name)
-    : null
-  const mcKey =
-    r.manychat_instance_key != null && String(r.manychat_instance_key).trim()
-      ? String(r.manychat_instance_key).trim()
-      : null
+  const channelProvider: ChannelProvider =
+    cp === 'manychat' ? 'manychat' : cp === 'wapi' ? 'wapi' : 'evolution'
   return {
     id: String(r.id),
     label: String(r.label),
     channelProvider,
-    evolutionInstanceName: evo,
-    manychatInstanceKey: mcKey,
+    evolutionInstanceName: strOrNull(r.evolution_instance_name),
+    manychatInstanceKey: strOrNull(r.manychat_instance_key),
+    wapiInstanceId: strOrNull(r.wapi_instance_id),
+    wapiToken: strOrNull(r.wapi_token),
+    wapiBaseUrl: strOrNull(r.wapi_base_url),
+    wapiWebhookSecret: strOrNull(r.wapi_webhook_secret),
     aiSystemPrompt: String(r.ai_system_prompt ?? ''),
-    phoneE164: r.phone_e164 != null && String(r.phone_e164) ? String(r.phone_e164) : null,
+    phoneE164: strOrNull(r.phone_e164),
     active: r.active !== false,
     sortOrder: typeof r.sort_order === 'number' ? r.sort_order : Number(r.sort_order) || 0,
-    entryPipelineId: r.entry_pipeline_id != null && String(r.entry_pipeline_id) ? String(r.entry_pipeline_id) : null,
-    entryStageId: r.entry_stage_id != null && String(r.entry_stage_id) ? String(r.entry_stage_id) : null,
-    defaultOwnerId: r.default_owner_id != null && String(r.default_owner_id) ? String(r.default_owner_id) : null,
+    entryPipelineId: strOrNull(r.entry_pipeline_id),
+    entryStageId: strOrNull(r.entry_stage_id),
+    defaultOwnerId: strOrNull(r.default_owner_id),
     onLineChange: onLine,
   }
 }
+
+const SELECT_COLS =
+  'id, label, channel_provider, evolution_instance_name, manychat_instance_key, wapi_instance_id, wapi_token, wapi_base_url, wapi_webhook_secret, ai_system_prompt, phone_e164, active, sort_order, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change'
 
 export async function fetchWhatsappChannelInstances(): Promise<WhatsappChannelInstance[]> {
   if (!supabase) return []
   const { data, error } = await supabase
     .from('whatsapp_channel_instances')
-    .select(
-      'id, label, channel_provider, evolution_instance_name, manychat_instance_key, ai_system_prompt, phone_e164, active, sort_order, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change',
-    )
+    .select(SELECT_COLS)
     .order('sort_order', { ascending: true })
   if (error) throw new Error(error.message)
   return (data ?? []).map((r) => mapRow(r as Record<string, unknown>))
@@ -67,6 +76,10 @@ export async function upsertWhatsappChannelInstance(row: {
   channelProvider?: ChannelProvider
   evolutionInstanceName?: string | null
   manychatInstanceKey?: string | null
+  wapiInstanceId?: string | null
+  wapiToken?: string | null
+  wapiBaseUrl?: string | null
+  wapiWebhookSecret?: string | null
   aiSystemPrompt?: string
   phoneE164?: string | null
   active?: boolean
@@ -78,15 +91,33 @@ export async function upsertWhatsappChannelInstance(row: {
 }): Promise<void> {
   if (!supabase) throw new Error('Não configurado')
   const channelProvider = row.channelProvider ?? 'evolution'
+  // Mantém só credenciais do provider escolhido — evita lixo cruzado em linhas que
+  // já tinham campos preenchidos (ex.: linha convertida de manychat pra wapi).
   const evo =
-    channelProvider === 'manychat'
-      ? null
-      : row.evolutionInstanceName != null && String(row.evolutionInstanceName).trim()
-        ? String(row.evolutionInstanceName).trim()
-        : null
+    channelProvider === 'evolution'
+      ? (row.evolutionInstanceName != null && String(row.evolutionInstanceName).trim()
+          ? String(row.evolutionInstanceName).trim()
+          : null)
+      : null
   const mcKey =
     channelProvider === 'manychat' && row.manychatInstanceKey != null && String(row.manychatInstanceKey).trim()
       ? String(row.manychatInstanceKey).trim()
+      : null
+  const wapiId =
+    channelProvider === 'wapi' && row.wapiInstanceId != null && String(row.wapiInstanceId).trim()
+      ? String(row.wapiInstanceId).trim()
+      : null
+  const wapiToken =
+    channelProvider === 'wapi' && row.wapiToken != null && String(row.wapiToken).trim()
+      ? String(row.wapiToken).trim()
+      : null
+  const wapiBaseUrl =
+    channelProvider === 'wapi' && row.wapiBaseUrl != null && String(row.wapiBaseUrl).trim()
+      ? String(row.wapiBaseUrl).trim()
+      : null
+  const wapiSecret =
+    channelProvider === 'wapi' && row.wapiWebhookSecret != null && String(row.wapiWebhookSecret).trim()
+      ? String(row.wapiWebhookSecret).trim()
       : null
   const { error } = await supabase.from('whatsapp_channel_instances').upsert({
     id: row.id,
@@ -94,6 +125,10 @@ export async function upsertWhatsappChannelInstance(row: {
     channel_provider: channelProvider,
     evolution_instance_name: evo,
     manychat_instance_key: mcKey,
+    wapi_instance_id: wapiId,
+    wapi_token: wapiToken,
+    wapi_base_url: wapiBaseUrl,
+    wapi_webhook_secret: wapiSecret,
     ai_system_prompt: row.aiSystemPrompt ?? '',
     phone_e164: row.phoneE164 ?? null,
     active: row.active !== false,
