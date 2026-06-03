@@ -10,14 +10,14 @@ export type SendWhatsappMessageInput = {
 }
 
 export type SendWhatsappMessageResult = {
-  provider: 'evolution' | 'official'
+  provider: 'evolution' | 'official' | 'wapi'
   externalMessageId: string
   status: 'queued' | 'sent' | 'delivered' | 'failed'
   raw?: Record<string, unknown>
 }
 
 export type NormalizedInboundMessage = {
-  provider: 'evolution' | 'official'
+  provider: 'evolution' | 'official' | 'wapi'
   source: 'whatsapp'
   externalMessageId: string
   fromPhone: string
@@ -29,6 +29,8 @@ export type NormalizedInboundMessage = {
   evolutionInstanceName?: string
   /** Meta Cloud API: metadata.phone_number_id (roteamento multi-linha oficial). */
   metaPhoneNumberId?: string
+  /** W-API: id da instância no painel deles, para casar com whatsapp_channel_instances.wapi_instance_id. */
+  wapiInstanceId?: string
   mediaItems?: Array<{
     type: 'audio' | 'image' | 'video' | 'document' | 'other'
     mimeType?: string
@@ -39,7 +41,7 @@ export type NormalizedInboundMessage = {
 }
 
 export interface WhatsappProvider {
-  readonly name: 'evolution' | 'official'
+  readonly name: 'evolution' | 'official' | 'wapi'
   sendMessage(input: SendWhatsappMessageInput): Promise<SendWhatsappMessageResult>
   normalizeInbound(payload: Record<string, unknown>, headers: Headers): NormalizedInboundMessage | null
   /** Evolution: síncrono. Meta Cloud: pode ser assíncrono (HMAC Web Crypto). */

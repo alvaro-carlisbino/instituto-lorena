@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
 import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
+import { getWapiProviderForLead } from '../_shared/whatsapp/wapiConfig.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
 import {
   pushManychatInstagramContent,
@@ -386,10 +387,28 @@ Deno.serve(async (req) => {
   }
 
   // --- WhatsApp Path ---
-  const waProvider = (Deno.env.get('WHATSAPP_PROVIDER') ?? 'evolution').trim().toLowerCase()
+  // Roteamento por linha: o channel_provider da instância vinculada ao lead
+  // sobrescreve a env WHATSAPP_PROVIDER (que segue sendo o default global).
+  // Permite W-API conviver com Evolution/Official no mesmo tenant.
+  let instanceChannelProvider: string | null = null
+  if (row.whatsapp_instance_id) {
+    const { data: instRow } = await admin
+      .from('whatsapp_channel_instances')
+      .select('channel_provider')
+      .eq('id', row.whatsapp_instance_id)
+      .maybeSingle()
+    instanceChannelProvider = String(
+      (instRow as { channel_provider?: string } | null)?.channel_provider ?? '',
+    ).toLowerCase() || null
+  }
+  const waProvider =
+    instanceChannelProvider ||
+    (Deno.env.get('WHATSAPP_PROVIDER') ?? 'evolution').trim().toLowerCase()
   let provider: WhatsappProvider
   try {
-    if (waProvider === 'official') {
+    if (waProvider === 'wapi') {
+      provider = await getWapiProviderForLead(admin, row.whatsapp_instance_id)
+    } else if (waProvider === 'official') {
       provider = await getOfficialProviderForLead(admin, row.whatsapp_instance_id)
     } else {
       provider = await getEvolutionProviderForLead(admin, row.whatsapp_instance_id)
