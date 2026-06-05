@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
 import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
+import { getWapiProviderForLead } from '../_shared/whatsapp/wapiConfig.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
 import {
   pushManychatInstagramDmAfterReply,
@@ -182,16 +183,38 @@ Deno.serve(async (req) => {
     if (!phoneDigits || phoneDigits.length < 10) {
       return json({ error: 'no_channel', message: 'Lead sem WhatsApp e sem subscriber ManyChat' }, 400)
     }
-    // WhatsApp direto: Evolution ou Official, conforme env do tenant/lead
+    // WhatsApp direto: roteia por channel_provider da linha do lead — W-API tem
+    // token+instanceId próprios por linha (Aline / Ingrid), enquanto Evolution/Official
+    // seguem caindo no fallback de env quando o lead não tem instância explícita.
+    let instanceChannelProvider = ''
+    if (lead.whatsapp_instance_id) {
+      const { data: instRow } = await admin
+        .from('whatsapp_channel_instances')
+        .select('channel_provider')
+        .eq('id', lead.whatsapp_instance_id)
+        .maybeSingle()
+      instanceChannelProvider = String(
+        (instRow as { channel_provider?: string } | null)?.channel_provider ?? '',
+      ).toLowerCase()
+    }
+
     let provider: WhatsappProvider | null = null
-    try {
-      provider = await getOfficialProviderForLead(admin, lead.id)
-    } catch { /* tenta evolution */ }
-    if (!provider) {
+    if (instanceChannelProvider === 'wapi') {
       try {
-        provider = await getEvolutionProviderForLead(admin, lead.id)
+        provider = await getWapiProviderForLead(admin, lead.whatsapp_instance_id)
       } catch (e) {
         return json({ error: 'no_provider', message: e instanceof Error ? e.message : String(e) }, 500)
+      }
+    } else {
+      try {
+        provider = await getOfficialProviderForLead(admin, lead.id)
+      } catch { /* tenta evolution */ }
+      if (!provider) {
+        try {
+          provider = await getEvolutionProviderForLead(admin, lead.id)
+        } catch (e) {
+          return json({ error: 'no_provider', message: e instanceof Error ? e.message : String(e) }, 500)
+        }
       }
     }
     if (!provider) return json({ error: 'no_provider' }, 500)
