@@ -196,7 +196,26 @@ export class WapiProvider implements WhatsappProvider {
     }
 
     if (!res.ok) {
-      throw new Error(`wapi_send_failed_${res.status}`)
+      throw new Error(`wapi_send_failed_${res.status}: ${responseText.slice(0, 200)}`)
+    }
+
+    // W-API às vezes retorna HTTP 200 com corpo de erro (instância desconectada,
+    // número inválido/não está no WhatsApp, sessão expirada). Se a gente não checar
+    // o body, o CRM marca como enviado, exibe toast verde, e a paciente nunca recebe.
+    // Sintomas como "Aline mandou e a paciente não recebeu" caíam aqui em silêncio.
+    const apiError =
+      safeString(getByPath(parsed, 'error')) ||
+      safeString(getByPath(parsed, 'errorMessage')) ||
+      safeString(getByPath(parsed, 'data.error')) ||
+      safeString(getByPath(parsed, 'message_error'))
+    const apiStatusRaw = safeString(
+      getByPath(parsed, 'status') ?? getByPath(parsed, 'data.status') ?? '',
+    ).toLowerCase()
+    const successFlagRaw = getByPath(parsed, 'success') ?? getByPath(parsed, 'data.success')
+    const successFlagFalse = successFlagRaw === false || String(successFlagRaw).toLowerCase() === 'false'
+    if (apiError || apiStatusRaw === 'error' || apiStatusRaw === 'failed' || successFlagFalse) {
+      const detail = apiError || apiStatusRaw || 'unknown_api_error'
+      throw new Error(`wapi_send_failed_api: ${detail} | body=${responseText.slice(0, 200)}`)
     }
 
     const externalMessageId =

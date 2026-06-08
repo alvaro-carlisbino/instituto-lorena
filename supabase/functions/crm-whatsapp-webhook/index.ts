@@ -7,12 +7,11 @@ import {
   upsertConversationStateInboundOnly,
 } from '../_shared/crmAiAutoReply.ts'
 import { enrichInboundWhatsappMediaAndAppendContext } from '../_shared/crmMediaEnrichment.ts'
-import { findSyntheticInstagramLeadByName, insertInteraction, mergeLeadDropIntoKeep, upsertLeadByPhone } from '../_shared/crm.ts'
+import { findSyntheticInstagramLeadByName, insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { resolveTenantFromEvolutionInstance, DEFAULT_TENANT_ID } from '../_shared/tenantResolve.ts'
 import { applyOptOutToLead, isOptOutMessage } from '../_shared/optOutDetect.ts'
-import { WA_INSTAGRAM_MERGE_NOTICE_CONTENT } from '../_shared/waInstagramMergeNotice.ts'
 import { getWhatsappProviderFromEnv } from '../_shared/whatsapp/provider.ts'
 import { getWhatsappProviderForEvent, resolveWhatsappInstanceRowForProvider } from '../_shared/whatsapp/evolutionConfig.ts'
 
@@ -215,35 +214,35 @@ Deno.serve(async (req) => {
       tenantId,
     })
 
-    // Cross-channel merge: WhatsApp message from someone already known via Instagram
-    // (their lead has a synthetic phone 888001... — no phone match possible until now)
+    // Cross-channel: novo lead WhatsApp com nome igual a lead Instagram (888001…).
+    // Até 2026-06-08 fazíamos merge automático; foi removido pelo mesmo motivo do
+    // caminho inverso (ensureManychatLeadId): match só por `ilike(patient_name)` causa
+    // colisões em nomes comuns (ex.: dois "Lucas") e mistura as conversas. Agora
+    // deixamos os leads separados e adicionamos um aviso em cada um sugerindo merge
+    // manual via crm-merge-leads se realmente for a mesma pessoa.
     if (lead.status === 'created' && normalized.fromName) {
       const instagramLeadId = await findSyntheticInstagramLeadByName(admin, normalized.fromName)
-      if (instagramLeadId) {
-        // Keep Instagram lead (full history + subscriber_id), drop the new WhatsApp lead
-        await mergeLeadDropIntoKeep(admin, instagramLeadId, lead.leadId)
-        // Promote the Instagram lead with real phone + WhatsApp instance
-        const realPhone = String(normalized.fromPhone ?? '').replace(/\D/g, '')
-        await admin
-          .from('leads')
-          .update({
-            phone: realPhone,
-            source: 'whatsapp',
-            ...(wInstanceId ? { whatsapp_instance_id: wInstanceId } : {}),
-          })
-          .eq('id', instagramLeadId)
+      if (instagramLeadId && instagramLeadId !== lead.leadId) {
         try {
+          await insertInteraction(admin, {
+            leadId: lead.leadId,
+            patientName: normalized.fromName,
+            channel: 'system',
+            direction: 'system',
+            author: 'CRM',
+            content: `Existe outro lead com este mesmo nome no Instagram. Se for a mesma pessoa, use "Mesclar leads" para unificar. Lead Instagram candidato: ${instagramLeadId}.`,
+            happenedAt: new Date().toISOString(),
+          })
           await insertInteraction(admin, {
             leadId: instagramLeadId,
             patientName: normalized.fromName,
             channel: 'system',
             direction: 'system',
             author: 'CRM',
-            content: WA_INSTAGRAM_MERGE_NOTICE_CONTENT,
+            content: `Chegou um novo lead no WhatsApp com o mesmo nome desta paciente. Se for a mesma pessoa, use "Mesclar leads" para unificar. Lead WhatsApp candidato: ${lead.leadId}.`,
             happenedAt: new Date().toISOString(),
           })
         } catch { /* ignore */ }
-        lead = { leadId: instagramLeadId, status: 'updated' }
       }
     }
 

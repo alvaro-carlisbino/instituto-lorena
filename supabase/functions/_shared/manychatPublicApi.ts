@@ -154,16 +154,55 @@ async function pushManychatDmAfterReplyCore(input: {
     }
   }
 
-  const hint =
-    /24|window|tag|messaging|policy|human_agent|HUMAN_AGENT/i.test(lastFlowErr)
-      ? ' Sugestão Meta/ManyChat: defina o secret MANYCHAT_SEND_FLOW_MESSAGE_TAG=HUMAN_AGENT (ou o valor indicado pelo ManyChat) se estiver fora da janela de mensagens.'
+  // Causa #1 de falha do sendFlow no Instagram via ManyChat é a janela de 24h
+  // da Meta. O ManyChat costuma devolver mensagens vagas tipo "Validation error"
+  // — a regex anterior só pegava casos com texto explícito ("window", "24") e
+  // deixava o operador no escuro. Como nosso CRM faz só atendimento humano via
+  // ManyChat, é seguro fazer fallback automático com message_tag=HUMAN_AGENT,
+  // que estende a janela para 7 dias quando a paciente iniciou a conversa.
+  // Só fazemos esse fallback se o caller NÃO passou um tag específico — assim
+  // tags de NPS/confirmação (CONFIRMED_EVENT_UPDATE, etc.) não são sobrescritas.
+  let humanAgentFallbackError = ''
+  let humanAgentFallbackTried = false
+  if (!input.messageTag?.trim() && lastFlowErr) {
+    humanAgentFallbackTried = true
+    const fallbackBody: Record<string, unknown> = { ...flowBody, message_tag: 'HUMAN_AGENT' }
+    const fallbackRes = await manychatPost('/fb/sending/sendFlow', fallbackBody, input.apiKey)
+    if (fallbackRes.ok && manychatSuccess(fallbackRes.json)) {
+      return {
+        ok: true,
+        set_field_status: 'success',
+        send_flow_status: 'success_human_agent_fallback',
+        set_field_ok: true,
+        send_flow_ok: true,
+      }
+    }
+    humanAgentFallbackError = describeManychatFailure(
+      `${input.sendFlowErrorLabel}_humanagent`,
+      fallbackRes,
+    )
+  }
+
+  // Mensagem de erro orientativa para o operador. Detecta tanto sinais explícitos
+  // (24h, window, tag) quanto o "Validation error" genérico do ManyChat. Quando
+  // o fallback HUMAN_AGENT também falhou, deixamos claro que a janela de 7 dias
+  // expirou — único cenário em que nada mais resolve sem a paciente voltar a escrever.
+  const combinedErr = humanAgentFallbackTried
+    ? `${lastFlowErr} | fallback_humanagent: ${humanAgentFallbackError}`
+    : lastFlowErr
+  const looks24hRelated =
+    /24|window|tag|messaging|policy|human_agent|HUMAN_AGENT|Validation/i.test(combinedErr)
+  const hint = humanAgentFallbackTried
+    ? ' Paciente fora da janela de 7 dias do Instagram/Meta — nem o fallback HUMAN_AGENT passou. Aguarde a paciente voltar a escrever antes de tentar novamente.'
+    : looks24hRelated
+      ? ' Provável janela de 24h da Meta fechada. Sugestão: defina o secret MANYCHAT_SEND_FLOW_MESSAGE_TAG=HUMAN_AGENT no Supabase para estender para 7 dias.'
       : ''
 
   return {
     ok: false,
-    error: `${lastFlowErr}${hint}`,
+    error: `${combinedErr}${hint}`,
     set_field_status: 'success',
-    send_flow_status: 'failed',
+    send_flow_status: humanAgentFallbackTried ? 'failed_after_humanagent_fallback' : 'failed',
     set_field_ok: true,
     send_flow_ok: false,
   }

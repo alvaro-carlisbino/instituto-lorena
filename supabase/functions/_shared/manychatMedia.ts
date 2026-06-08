@@ -29,8 +29,10 @@ const URL_RX = /https?:\/\/[^\s"'<>)]+/gi
 
 // Hosts conhecidos de mídia do ecossistema Meta/ManyChat — usados como sinal de
 // "isto é mídia" mesmo quando a URL não tem extensão (ex.: lookaside.fbsbx.com).
+// Inclui CDNs do ManyChat (mcdn.manychat.com, files.manychat.com) e buckets S3
+// genéricos do ManyChat (qualquer região + transfer acceleration).
 const KNOWN_MEDIA_HOST_RX =
-  /(?:manybot-files\.s3|lookaside\.fbsbx\.com|mmg\.whatsapp\.net|\.cdninstagram\.com|\.fbcdn\.net|cdn\.fbsbx\.com)/i
+  /(?:manybot-files\.s3|manychatcdn\.com|mcdn\.manychat\.com|files\.manychat\.com|media\.manychat\.com|lookaside\.fbsbx\.com|mmg\.whatsapp\.net|\.cdninstagram\.com|\.fbcdn\.net|cdn\.fbsbx\.com|\.s3-accelerate\.amazonaws\.com|\.s3\.amazonaws\.com)/i
 
 function classifyByExtension(urlOrName: string): ManychatMediaType {
   const u = urlOrName.toLowerCase()
@@ -157,22 +159,46 @@ export function extractManychatMedia(body: Record<string, unknown>): ExtractedMe
   }
 
   // Quando o ManyChat só expõe `{{last_input_text}}`, a URL do anexo cai dentro do texto.
-  // Capturamos qualquer URL que (a) tenha extensão de mídia conhecida (.mp3/.ogg/.jpg/...)
-  // OU (b) venha de um host conhecido do ecossistema Meta/ManyChat — cobre lookaside.fbsbx,
-  // mmg.whatsapp.net, *.cdninstagram.com, *.fbcdn.net, além do bucket manybot-files.
+  // Capturamos qualquer URL que:
+  //   (a) tenha extensão de mídia conhecida (.mp3/.ogg/.jpg/...),
+  //   (b) venha de um host conhecido do ecossistema Meta/ManyChat (lookaside.fbsbx,
+  //       mmg.whatsapp.net, *.cdninstagram.com, *.fbcdn.net, manybot-files, etc), OU
+  //   (c) seja a única coisa no texto (text="https://..." sem outras palavras
+  //       significativas — sinal forte de anexo, mesmo sem extensão/host conhecido).
   const text = String(body.text ?? body.message ?? '')
   if (text) {
     const matches = text.match(URL_RX) ?? []
+    // Detecta "text é só uma URL": removendo a URL, sobra <8 chars úteis.
+    const textWithoutUrls = text.replace(URL_RX, '').replace(/[\s.,;!?:|]+/g, '').trim()
+    const textIsOnlyUrl = matches.length > 0 && textWithoutUrls.length < 8
     for (const raw of matches) {
       const url = raw.replace(/[).,;!?]+$/, '')
       const byExt = classifyByExtension(url)
       const isKnownHost = KNOWN_MEDIA_HOST_RX.test(url)
-      if (byExt === 'other' && !isKnownHost) continue
+      if (byExt === 'other' && !isKnownHost && !textIsOnlyUrl) continue
       pushIfNew(out, { url, type: byExt }, seen)
     }
   }
 
   return out
+}
+
+/**
+ * Devolve true quando o body contém pistas de mídia (URL https em campos conhecidos
+ * ou no text) sem que `extractManychatMedia` tenha capturado nada. Usado pelo
+ * webhook para logar o payload bruto e diagnosticar formatos novos do ManyChat.
+ */
+export function bodyHasUnDetectedMediaHints(
+  body: Record<string, unknown>,
+  extracted: ExtractedMedia[],
+): boolean {
+  if (extracted.length > 0) return false
+  const text = String(body.text ?? body.message ?? '')
+  if (/https?:\/\//i.test(text)) return true
+  for (const key of ['attachments', 'last_input_attachments', 'media', 'last_input']) {
+    if (body[key] != null) return true
+  }
+  return false
 }
 
 /**

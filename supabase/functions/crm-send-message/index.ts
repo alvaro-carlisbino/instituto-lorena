@@ -333,15 +333,25 @@ Deno.serve(async (req) => {
           subscriberId,
           set_field_ok: push.set_field_ok,
           send_flow_ok: push.send_flow_ok,
+          send_flow_status: push.send_flow_status,
           error: push.error,
         }))
+        const errMsg = String(push.error ?? '')
+        const failedAfterFallback = push.send_flow_status === 'failed_after_humanagent_fallback'
+        const friendly = failedAfterFallback
+          ? `Paciente fora da janela de 7 dias do ${pushChannel === 'whatsapp' ? 'WhatsApp' : 'Instagram'} (Meta). Tentamos enviar com HUMAN_AGENT e também falhou — só dá pra responder depois que a paciente voltar a escrever.`
+          : /Validation|24|window|policy|human_agent|HUMAN_AGENT/i.test(errMsg)
+            ? `Paciente fora da janela de 24h da Meta. A mensagem ficou pendente; ela precisa responder qualquer coisa para reabrir a janela. (Detalhe técnico: ${errMsg})`
+            : errMsg
         return json(
           {
             error: 'manychat_push_failed',
-            message: push.error,
+            message: friendly,
             push_channel: pushChannel,
             set_field_ok: push.set_field_ok,
             send_flow_ok: push.send_flow_ok,
+            send_flow_status: push.send_flow_status,
+            raw_error: errMsg,
           },
           500,
         )

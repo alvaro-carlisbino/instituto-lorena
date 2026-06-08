@@ -11,7 +11,6 @@ import {
   findLeadIdByManychatSubscriberId,
   findRealWhatsappLeadByName,
   insertInteraction,
-  mergeLeadDropIntoKeep,
   promoteManychatLeadToRealPhone,
   syntheticPhoneFromManychatSubscriberId,
   upsertLeadByPhone,
@@ -23,6 +22,7 @@ import {
 } from '../_shared/manychatPublicApi.ts'
 import { resolveWhatsappLineInstanceId, sanitizeCrmInstanceKey } from '../_shared/manychatInstanceResolve.ts'
 import {
+  bodyHasUnDetectedMediaHints,
   extractManychatMedia,
   stripManybotUrlsFromText,
   type ExtractedMedia,
@@ -80,23 +80,36 @@ async function ensureManychatLeadId(
     tenantId: input.tenantId,
   })
 
-  // Cross-channel merge: Instagram message from someone already known via WhatsApp
+  // Cross-channel: novo lead Instagram com nome igual a lead real de WhatsApp.
+  // Até 2026-06-08 fazíamos merge automático aqui. Foi removido porque o critério
+  // era só `ilike(patient_name)` — case-insensitive exato, sem segundo fator —
+  // e dois pacientes diferentes com o mesmo nome (ex.: dois "Lucas") acabavam
+  // unificados em um único lead, com mensagens se misturando no chat.
+  // Agora deixamos os leads separados e adicionamos um aviso de sistema em cada
+  // um, sugerindo merge manual via crm-merge-leads se realmente for a mesma pessoa.
   if (lead.status === 'created' && input.userName) {
     const waLeadId = await findRealWhatsappLeadByName(admin, input.userName)
-    if (waLeadId) {
-      await mergeLeadDropIntoKeep(admin, waLeadId, lead.leadId)
+    if (waLeadId && waLeadId !== lead.leadId) {
       try {
+        await insertInteraction(admin, {
+          leadId: lead.leadId,
+          patientName: input.userName,
+          channel: 'system',
+          direction: 'system',
+          author: 'CRM',
+          content: `Existe outro lead com este mesmo nome no WhatsApp. Se for a mesma pessoa, use "Mesclar leads" para unificar. Lead WhatsApp candidato: ${waLeadId}.`,
+          happenedAt: nowIso(),
+        })
         await insertInteraction(admin, {
           leadId: waLeadId,
           patientName: input.userName,
           channel: 'system',
           direction: 'system',
           author: 'CRM',
-          content: 'Lead do Instagram vinculado ao WhatsApp por nome idêntico.',
+          content: `Chegou um novo lead no Instagram com o mesmo nome desta paciente. Se for a mesma pessoa, use "Mesclar leads" para unificar. Lead Instagram candidato: ${lead.leadId}.`,
           happenedAt: nowIso(),
         })
       } catch { /* ignore */ }
-      return waLeadId
     }
   }
 
@@ -137,6 +150,7 @@ type ManychatPipelineResult = {
   handoff_suggested: boolean
   routing: string
   manychat_push: Record<string, unknown>
+  media_persist?: { inserted: number; error: string | null }
   ai_skip_reasons?: string[]
   hint?: string | null
 }
@@ -163,17 +177,22 @@ function contentForInboundWithMedia(text: string, media: ExtractedMedia[]): stri
  * Grava os anexos extraídos do payload ManyChat em `crm_media_items`, linkando à
  * interaction recém-criada. A URL do S3 do ManyChat vai em `storage_path` (estável,
  * público o bastante para renderizar direto no chat sem precisar baixar).
+ *
+ * Devolve `{ inserted, error }` — o supabase-js NÃO lança em erro lógico (RLS,
+ * check constraint, trigger). Sem capturar o `error` do retorno, falhas viravam
+ * silenciosas e a UI ficava sem a mídia mesmo com o webhook respondendo 200.
  */
 async function persistManychatMedia(
   admin: AdminClient,
-  input: { leadId: string; interactionId: string; media: ExtractedMedia[] },
-): Promise<void> {
-  if (input.media.length === 0) return
+  input: { leadId: string; interactionId: string; media: ExtractedMedia[]; tenantId: string },
+): Promise<{ inserted: number; error: string | null }> {
+  if (input.media.length === 0) return { inserted: 0, error: null }
   try {
-    await admin.from('crm_media_items').insert(
+    const { error } = await admin.from('crm_media_items').insert(
       input.media.map((m) => ({
         lead_id: input.leadId,
         interaction_id: input.interactionId,
+        tenant_id: input.tenantId,
         direction: 'in',
         media_type: m.type === 'other' ? 'document' : m.type,
         mime_type: m.mimeType ?? null,
@@ -186,8 +205,27 @@ async function persistManychatMedia(
         },
       })),
     )
+    if (error) {
+      console.warn(
+        '[manychat-webhook] crm_media_items insert error:',
+        JSON.stringify({
+          message: error.message,
+          code: (error as { code?: string }).code,
+          details: (error as { details?: string }).details,
+          leadId: input.leadId,
+          interactionId: input.interactionId,
+          tenantId: input.tenantId,
+          mediaCount: input.media.length,
+          mediaTypes: input.media.map((m) => m.type),
+        }),
+      )
+      return { inserted: 0, error: error.message }
+    }
+    return { inserted: input.media.length, error: null }
   } catch (e) {
-    console.warn('[manychat-webhook] crm_media_items insert failed:', e instanceof Error ? e.message : String(e))
+    const msg = e instanceof Error ? e.message : String(e)
+    console.warn('[manychat-webhook] crm_media_items insert threw:', msg)
+    return { inserted: 0, error: msg }
   }
 }
 
@@ -304,10 +342,11 @@ async function runManychatMessagePipeline(
       content: inboundContent,
       happenedAt: nowIso(),
     })
-    await persistManychatMedia(admin, {
+    const mediaPersist = await persistManychatMedia(admin, {
       leadId,
       interactionId: inboundInteractionId,
       media: ctx.inboundMedia,
+      tenantId: ctx.tenantId,
     })
 
     const { data: state } = await admin
@@ -505,6 +544,7 @@ async function runManychatMessagePipeline(
       handoff_suggested: handoffSuggested,
       routing,
       manychat_push: manychatPush,
+      media_persist: mediaPersist,
       ...(gate.canAutoReply
         ? {}
         : {
@@ -649,6 +689,18 @@ Deno.serve(async (req) => {
   const text = String(body.text ?? body.message ?? '').trim()
   const replyOnly = String(body.reply ?? '').trim()
   const inboundMedia = extractManychatMedia(body)
+
+  // Diagnóstico: ManyChat ocasionalmente entrega anexos em campos novos que o
+  // detector não conhece. Quando o body tem pista de mídia (URL https no text ou
+  // chaves `attachments*`/`media`) e o extractor não pegou nada, logamos o payload
+  // bruto truncado pra ajustar `manychatMedia.ts` sem precisar repetir o caso.
+  if (bodyHasUnDetectedMediaHints(body, inboundMedia)) {
+    console.warn(
+      '[manychat-webhook] possible media not detected — raw payload sample:',
+      JSON.stringify(body).slice(0, 1500),
+    )
+  }
+
   // Aceitamos uma mensagem só com mídia (paciente envia foto/áudio sem caption).
   if (!text && inboundMedia.length === 0 && !(action === 'record_outbound' && replyOnly)) {
     return json({ error: 'missing_text' }, 400)
@@ -703,10 +755,11 @@ Deno.serve(async (req) => {
         content: ingestContent,
         happenedAt: nowIso(),
       })
-      await persistManychatMedia(admin, {
+      const ingestMediaPersist = await persistManychatMedia(admin, {
         leadId,
         interactionId: ingestInteractionId,
         media: inboundMedia,
+        tenantId,
       })
       return json({
         ok: true,
@@ -716,6 +769,7 @@ Deno.serve(async (req) => {
         handoff_suggested: false,
         routing: 'ingest_only',
         media_count: inboundMedia.length,
+        media_persist: ingestMediaPersist,
       })
     } catch (e) {
       return json(
@@ -852,6 +906,7 @@ Deno.serve(async (req) => {
       handoff_suggested: r.handoff_suggested,
       routing: r.routing,
       manychat_push: r.manychat_push,
+      ...(r.media_persist ? { media_persist: r.media_persist } : {}),
       ...(r.routing === 'manual_handoff'
         ? { ai_skip_reasons: r.ai_skip_reasons ?? [], hint: r.hint ?? null }
         : {}),
