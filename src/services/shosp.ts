@@ -30,7 +30,15 @@ export async function fetchShospAgenda(params: {
   })
   if (error) throw new Error(error.message)
   const dados = (data as { data?: { dados?: unknown } })?.data?.dados
-  const arr = Array.isArray(dados) ? (dados as Record<string, unknown>[]) : []
+  // `dados` vem aninhado da Shosp (ex.: [[{prestador}]]). Achata recursivamente
+  // e fica só com objetos de prestador (que têm `horarios`).
+  const flat: Record<string, unknown>[] = []
+  const walk = (x: unknown) => {
+    if (Array.isArray(x)) x.forEach(walk)
+    else if (x && typeof x === 'object') flat.push(x as Record<string, unknown>)
+  }
+  walk(dados)
+  const arr = flat.filter((o) => 'horarios' in o)
   return arr.map((p) => {
     const horarios = (p.horarios ?? {}) as Record<string, { data: string; diaSemana: string; horario?: Record<string, unknown>[] }>
     return {
@@ -63,4 +71,70 @@ export async function fetchShospPrestadores(): Promise<Array<{ codigo: string; n
     .order('nome')
   if (error) throw new Error(error.message)
   return (data ?? []) as Array<{ codigo: string; nome: string }>
+}
+
+/** Lista de serviços Shosp (da tabela espelho). */
+export async function fetchShospServicos(): Promise<Array<{ codigo: string; nome: string; valor: string | null }>> {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('shosp_reference')
+    .select('codigo, nome, payload')
+    .eq('kind', 'servico')
+    .order('nome')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Array<{ codigo: string; nome: string; payload: { valor?: string | null } }>).map((s) => ({
+    codigo: s.codigo,
+    nome: s.nome,
+    valor: s.payload?.valor ?? null,
+  }))
+}
+
+export type ScheduleInput = {
+  codigoPrestador: number
+  codigoUnidade: number
+  codigoServico: number
+  codigoPlanoSaude: number
+  data: string
+  horario: string
+  codigoHorario: number
+  nome: string
+  telefone: string
+  email: string
+  dataNascimento: string
+  sexo: string
+  codigoPaciente?: number | string
+}
+
+/** Agenda na Shosp (POST /agenda/). Devolve codigoAgendamento + codigoPaciente. */
+export async function scheduleShospAppointment(
+  input: ScheduleInput,
+): Promise<{ ok: boolean; codigoAgendamento?: number; codigoPaciente?: string; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Sistema não configurado.' }
+  const { data, error } = await supabase.functions.invoke('crm-shosp', {
+    body: { mode: 'schedule', agendamento: input },
+  })
+  if (error) return { ok: false, error: error.message }
+  const res = data as { ok?: boolean; data?: { ret?: string; dados?: { codigoAgendamento?: number; codigoPaciente?: string }; error?: string } }
+  const dados = res?.data?.dados
+  if (!res?.ok || !dados?.codigoAgendamento) {
+    return { ok: false, error: res?.data?.error || 'Falha ao agendar na Shosp.' }
+  }
+  return { ok: true, codigoAgendamento: dados.codigoAgendamento, codigoPaciente: dados.codigoPaciente }
+}
+
+/** Cancela um agendamento na Shosp (POST /agenda/cancelaragendamento). */
+export async function cancelShospAppointment(codigoAgendamento: number): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: false, error: 'Sistema não configurado.' }
+  const { data, error } = await supabase.functions.invoke('crm-shosp', {
+    body: { mode: 'cancel', codigoAgendamento },
+  })
+  if (error) return { ok: false, error: error.message }
+  const res = data as { ok?: boolean; data?: { ret?: string } }
+  return { ok: Boolean(res?.ok && res?.data?.ret === '1') }
+}
+
+/** Grava o vínculo lead→paciente Shosp (prontuário) após agendar pelo CRM. */
+export async function linkLeadToShospPatient(leadId: string, prontuario: string | number): Promise<void> {
+  if (!supabase) return
+  await supabase.from('leads').update({ shosp_prontuario: String(prontuario) }).eq('id', leadId)
 }
