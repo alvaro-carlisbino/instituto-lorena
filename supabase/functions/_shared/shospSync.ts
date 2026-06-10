@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { insertInteraction } from './crm.ts'
 import {
   shospAgendaPorPaciente,
   shospListEspecialidades,
@@ -141,7 +142,59 @@ export async function matchLeadsToPatients(admin: SupabaseClient, limit = 15): P
   return { matched, checked }
 }
 
-export async function syncAppointments(admin: SupabaseClient, limit = 25): Promise<{ leads: number; appts: number }> {
+/**
+ * Move o lead para a etapa certa conforme o status real da agenda Shosp (só
+ * AVANÇA, nunca volta). Substitui o gatilho da agenda interna — Shosp é a fonte
+ * da verdade. Casa a etapa pelo NOME dentro do pipeline do lead (sem hardcode de id).
+ */
+async function advanceLeadStageFromShosp(
+  admin: SupabaseClient,
+  leadId: string,
+  hasComparecido: boolean,
+  hasAgendado: boolean,
+): Promise<boolean> {
+  if (!hasComparecido && !hasAgendado) return false
+  const { data: lead } = await admin
+    .from('leads')
+    .select('pipeline_id, stage_id, patient_name')
+    .eq('id', leadId)
+    .maybeSingle()
+  const l = lead as { pipeline_id?: string; stage_id?: string; patient_name?: string } | null
+  if (!l?.pipeline_id) return false
+  const { data: stages } = await admin
+    .from('pipeline_stages')
+    .select('id, name, position')
+    .eq('pipeline_id', l.pipeline_id)
+  const list = (stages ?? []) as Array<{ id: string; name: string; position: number }>
+  if (!list.length) return false
+  const curPos = list.find((s) => s.id === l.stage_id)?.position ?? -1
+  const norm = (s: string) => s.toLowerCase()
+  let target: { id: string; name: string; position: number } | undefined
+  if (hasComparecido) target = list.find((s) => /consulta realizada|atendid|comparec|realizad/.test(norm(s.name)))
+  if (!target && hasAgendado) target = list.find((s) => /consulta agendad|agendad/.test(norm(s.name)))
+  if (!target || target.position <= curPos) return false
+
+  await admin
+    .from('leads')
+    .update({ stage_id: target.id, stage_entered_at: nowIso(), updated_at: nowIso() })
+    .eq('id', leadId)
+  try {
+    await insertInteraction(admin, {
+      leadId,
+      patientName: String(l.patient_name ?? ''),
+      channel: 'system',
+      direction: 'system',
+      author: 'Sincronização Shosp',
+      content: `Lead movido para "${target.name}" pela agenda Shosp (${hasComparecido ? 'paciente compareceu' : 'consulta agendada'}).`,
+      happenedAt: nowIso(),
+    })
+  } catch {
+    // log best-effort
+  }
+  return true
+}
+
+export async function syncAppointments(admin: SupabaseClient, limit = 25): Promise<{ leads: number; appts: number; advanced: number }> {
   const { data: leads } = await admin
     .from('leads')
     .select('id, shosp_prontuario')
@@ -151,6 +204,7 @@ export async function syncAppointments(admin: SupabaseClient, limit = 25): Promi
     .limit(limit)
 
   let appts = 0
+  let advanced = 0
   for (const lead of (leads ?? []) as Array<{ id: string; shosp_prontuario: string }>) {
     const pront = String(lead.shosp_prontuario)
     let byDate: Record<string, Record<string, unknown>[]> = {}
@@ -184,11 +238,19 @@ export async function syncAppointments(admin: SupabaseClient, limit = 25): Promi
     if (rows.length) {
       await admin.from('shosp_appointments').upsert(rows, { onConflict: 'codigo_agendamento' })
       appts += rows.length
+      // Shosp é a fonte da verdade: avança a etapa do lead pelo status real.
+      const hasComparecido = rows.some((r) => /atendid|comparec|realizad/i.test(String(r.status ?? '')))
+      const hasAgendado = rows.some((r) => /agendad|confirmad/i.test(String(r.status ?? '')))
+      try {
+        if (await advanceLeadStageFromShosp(admin, lead.id, hasComparecido, hasAgendado)) advanced++
+      } catch {
+        // best-effort
+      }
     }
   }
 
   await admin.from('shosp_sync_state').update({ last_appointments_sync_at: nowIso() }).eq('id', 'default')
-  return { leads: (leads ?? []).length, appts }
+  return { leads: (leads ?? []).length, appts, advanced }
 }
 
 export async function runShospSync(

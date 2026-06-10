@@ -175,7 +175,11 @@ export function AgendaPage() {
       <div className="mb-4">
         <ShospAgendaPanel />
       </div>
-      <div className="grid gap-4 xl:grid-cols-4">
+      <details className="mt-2 rounded-xl border border-border/20 bg-muted/5">
+        <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
+          Agenda interna do CRM (legado) — a fonte da verdade agora é a Shosp acima. Abra só se precisar.
+        </summary>
+        <div className="grid gap-4 xl:grid-cols-4 p-2">
         {/* Sidebar: Auto Schedule */}
         <Card className="xl:col-span-1 h-fit shadow-sm">
           <CardHeader className="pb-3 border-b border-border/40">
@@ -373,7 +377,8 @@ export function AgendaPage() {
             </div>
           </div>
         </Card>
-      </div>
+        </div>
+      </details>
       <EditAppointmentDialog appointment={editingAppointment} onClose={() => setEditingAppointment(null)} />
     </AppLayout>
   )
