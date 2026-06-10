@@ -2,11 +2,10 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import {
   getOpenAiApiKey,
   getOpenAiDocumentModel,
-  getOpenAiVisionModel,
   openaiExtractDocument,
-  openaiOcrImage,
   openaiTranscribeAudio,
 } from './openaiMediaIntel.ts'
+import { ocrImage, visionConfigured } from './visionOcr.ts'
 
 /**
  * Enriquecimento de mídia para canais que entregam a mídia como URL (ManyChat,
@@ -100,13 +99,14 @@ function trunc(s: string, max: number): string {
 }
 
 async function runMediaIntel(
-  apiKey: string,
+  apiKey: string | null,
   mediaType: string,
   mime: string,
   base64: string,
 ): Promise<{ transcribed: string | null; extracted: string | null }> {
   const mt = mediaType.toLowerCase()
   if (mt === 'audio') {
+    if (!apiKey) return { transcribed: null, extracted: null } // transcrição depende de OpenAI (Whisper)
     const ext = mime.includes('ogg')
       ? 'ogg'
       : mime.includes('webm')
@@ -123,17 +123,17 @@ async function runMediaIntel(
     return { transcribed: trunc(text, 12000) || null, extracted: null }
   }
   if (mt === 'image') {
-    const imgMime = mime.startsWith('image/') ? mime : 'image/jpeg'
-    const text = await openaiOcrImage({ apiKey, model: getOpenAiVisionModel(), base64, mimeType: imgMime })
+    const text = await ocrImage({ base64, mimeType: mime }) // Z.ai/GLM-4V (fallback OpenAI)
     return { transcribed: null, extracted: trunc(text, 8000) || null }
   }
   if (mt === 'document' || mt === 'other') {
     const isPdf = mime.includes('pdf')
     const isWord = mime.includes('wordprocessingml') || mime.includes('msword')
     if (mime.startsWith('image/')) {
-      const text = await openaiOcrImage({ apiKey, model: getOpenAiVisionModel(), base64, mimeType: mime })
+      const text = await ocrImage({ base64, mimeType: mime })
       return { transcribed: null, extracted: trunc(text, 8000) || null }
     }
+    if (!apiKey) return { transcribed: null, extracted: null } // PDF/doc depende de OpenAI Responses
     const docMime = isPdf
       ? 'application/pdf'
       : isWord
@@ -190,8 +190,8 @@ export async function enrichManychatMediaRows(
       .update({ media_base64: dl.base64, mime_type: mime })
       .eq('id', row.id)
 
-    // 2) Inteligência (best-effort, só se houver chave OpenAI).
-    if (!apiKey) continue
+    // 2) Inteligência (best-effort). Imagem usa ZAI; áudio/PDF usam OpenAI.
+    if (!apiKey && !visionConfigured()) continue
     try {
       const { transcribed, extracted } = await runMediaIntel(apiKey, String(row.media_type ?? 'other'), mime, dl.base64)
       if (transcribed || extracted) {

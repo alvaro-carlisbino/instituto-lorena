@@ -200,6 +200,16 @@ Deno.serve(async (req) => {
     return json({ ok: true, fields })
   }
 
+  if (mode === 'ocr_test') {
+    const { ocrImage } = await import('../_shared/visionOcr.ts')
+    try {
+      const text = await ocrImage({ base64: String(body.base64 ?? ''), mimeType: String(body.mimeType ?? 'image/png') })
+      return json({ ok: true, text })
+    } catch (e) {
+      return json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 200)
+    }
+  }
+
   if (mode === 'cancel') {
     const codigo = body.codigoAgendamento
     if (codigo === undefined || codigo === null) return json({ error: 'codigoAgendamento_required' }, 400)
