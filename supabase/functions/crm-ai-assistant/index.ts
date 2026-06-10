@@ -660,6 +660,34 @@ Deno.serve(async (req) => {
     const isWeekday = /^(segunda|terça|quarta|quinta|sexta)/i.test(brasilWeekday)
     const isBusinessHours = isWeekday && brasilHourBR >= 8 && brasilHourBR < 18
 
+    // Agendamento autônomo da Sofia ligado/desligado (kill-switch por tenant).
+    // Desligado = modo "propor": ela só oferece horários reais; a equipe confirma.
+    let autoBookOn = false
+    if (isInternal) {
+      try {
+        const { data: cfgFlag } = await dbClient
+          .from('crm_ai_configs')
+          .select('auto_scheduling_enabled')
+          .eq('id', 'default')
+          .maybeSingle()
+        autoBookOn = Boolean((cfgFlag as { auto_scheduling_enabled?: boolean } | null)?.auto_scheduling_enabled)
+      } catch {
+        autoBookOn = false
+      }
+    }
+    const shospBookingLines = autoBookOn
+      ? [
+          'AGENDAR (você pode agendar sozinha): quando o paciente CONFIRMAR um horário específico de `shosp.disponibilidade`, inclua na MESMA resposta a tag <<<CRM_OPS>>> com um op shosp_book. Formato: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"shosp_book","codigoPrestador":N,"codigoServico":N,"data":"AAAA-MM-DD","horario":"HH:MM","codigoHorario":N}]}',
+          '- codigoPrestador, data, horario e codigoHorario vêm EXATAMENTE do item escolhido em `shosp.disponibilidade` (não invente).',
+          '- codigoServico: escolha em `shosp.servicos_consulta` o serviço do médico certo e do gênero do paciente. Na dúvida do gênero, pergunte antes.',
+          'O servidor executa o op e confirma o horário na MESMA mensagem — então escreva como já agendado (ex.: "Pronto, agendei sua consulta para quinta, 14h! 😊"). NÃO diga "vou verificar" nem invente protocolo.',
+          'Se o op falhar por falta de dados (missing_patient_data), peça ao paciente exatamente os dados que faltam (nome completo, nascimento, sexo, e-mail) e tente de novo. Se falhar por slot_taken, ofereça outro horário da lista.',
+          'A tag <<<CRM_OPS>>> e o JSON NUNCA aparecem para o paciente — escreva só a mensagem natural; o sistema remove a tag.',
+        ]
+      : [
+          'IMPORTANTE — modo PROPOSTA (você NÃO agenda sozinha): quando o paciente escolher um horário de `shosp.disponibilidade`, confirme a preferência dele e diga que a equipe (Dandara) vai garantir esse horário na agenda em seguida. NÃO use a tag <<<CRM_OPS>>>, NÃO diga "já agendei" e não invente protocolo nem confirmação.',
+        ]
+
     let systemContent = [
       isInternal
         ? 'Você é a *Sofia*, a assistente virtual do Instituto Lorena Visentainer. Ao falar com pacientes pelo WhatsApp, apresente-se como Sofia na primeira mensagem da conversa (ex.: "Olá! Eu sou a Sofia, do Instituto Lorena Visentainer"). Em mensagens seguintes da mesma conversa, NÃO repita a apresentação.'
@@ -692,12 +720,7 @@ Deno.serve(async (req) => {
             'Quando o snapshot tiver `shosp.agendamentos`, são as consultas REAIS deste paciente na clínica. Se ele perguntar "que horário tô marcado / quando é minha consulta", responda direto com os dados de lá (data, horário, médico, status). Ex.: "Sua consulta é quinta-feira, 14h, com a Dra. Jaqueline 😊".',
             'Quando o paciente quiser agendar/remarcar e o snapshot tiver `shosp.disponibilidade`, OFEREÇA os horários REAIS dessa lista (o campo horarios_livres traz data+hora de verdade). Apresente 2 ou 3 opções e pergunte qual ele prefere. NUNCA invente horário que não esteja em `shosp.disponibilidade`.',
             'Se o paciente quiser agendar mas NÃO houver `shosp.disponibilidade` no snapshot (ou nenhum horário livre), aí sim diga que a consultora Dandara confirma o melhor horário em breve.',
-            'AGENDAR (você pode agendar sozinha): quando o paciente CONFIRMAR um horário específico de `shosp.disponibilidade`, inclua na MESMA resposta a tag <<<CRM_OPS>>> com um op shosp_book. Formato: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"shosp_book","codigoPrestador":N,"codigoServico":N,"data":"AAAA-MM-DD","horario":"HH:MM","codigoHorario":N}]}',
-            '- codigoPrestador, data, horario e codigoHorario vêm EXATAMENTE do item escolhido em `shosp.disponibilidade` (não invente).',
-            '- codigoServico: escolha em `shosp.servicos_consulta` o serviço do médico certo e do gênero do paciente (ex.: "CONSULTA CLINICA MASCULINA - DRA JAQUELINE"). Na dúvida do gênero, pergunte antes.',
-            'O servidor executa o op e confirma o horário na MESMA mensagem — então escreva como já agendado (ex.: "Pronto, agendei sua consulta para quinta, 14h, com a Dra. Jaqueline! 😊"). NÃO diga "vou verificar" nem invente protocolo.',
-            'Se o op falhar por falta de dados (o sistema responde missing_patient_data), peça ao paciente exatamente os dados que faltam (nome completo, data de nascimento, sexo, e-mail) e tente de novo. Se falhar por slot_taken, ofereça outro horário da lista.',
-            'A tag <<<CRM_OPS>>> e o JSON NUNCA aparecem para o paciente — escreva só a mensagem natural; o sistema remove a tag.',
+            ...shospBookingLines,
             'Após identificar o serviço e a preferência de período, ou se o paciente fizer perguntas sobre valores/detalhes clínicos, use a tag [PRONTO_PARA_CONSULTOR] para sinalizar o fim da triagem inicial.',
             'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do paciente antes da sua resposta, trate como um único contexto — responda de forma completa, citando o essencial que já disseram.',
             '',
