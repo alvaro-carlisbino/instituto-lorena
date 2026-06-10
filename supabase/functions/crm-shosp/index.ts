@@ -4,6 +4,7 @@ import {
   shospListEspecialidades,
   shospListPlanosSaude,
   shospListPrestadores,
+  shospAgendaPorPaciente,
   shospListServicos,
   shospListUnidades,
   shospSearchPaciente,
@@ -42,7 +43,7 @@ function shape(data: unknown): unknown {
   }
   if (data && typeof data === 'object') {
     const obj = data as Record<string, unknown>
-    // Muitas APIs embrulham a lista: { data: [...] } / { result: [...] } / { agendas: [...] }
+    // Muitas APIs embrulham a lista: { dados: [...] } / { result: [...] }
     for (const [k, v] of Object.entries(obj)) {
       if (Array.isArray(v)) {
         return {
@@ -52,6 +53,19 @@ function shape(data: unknown): unknown {
           length: v.length,
           firstItemKeys: v[0] && typeof v[0] === 'object' ? Object.keys(v[0] as object) : null,
           sample: v.slice(0, 2),
+        }
+      }
+      // A Shosp às vezes devolve { dados: { "1": {...}, "2": {...} } } (objeto por código).
+      if (v && typeof v === 'object' && k.toLowerCase() === 'dados') {
+        const inner = v as Record<string, unknown>
+        const firstVal = Object.values(inner)[0]
+        return {
+          kind: 'wrapped_object_map',
+          wrapperKey: k,
+          objectKeys: Object.keys(obj),
+          length: Object.keys(inner).length,
+          firstItemKeys: firstVal && typeof firstVal === 'object' ? Object.keys(firstVal as object) : null,
+          sample: Object.fromEntries(Object.entries(inner).slice(0, 2)),
         }
       }
     }
@@ -76,6 +90,26 @@ function guessFirstUnidadeCodigo(data: unknown): string | number | null {
   for (const [k, v] of Object.entries(first as Record<string, unknown>)) {
     const key = k.toLowerCase()
     if ((key.includes('unidade') || key === 'codigo' || key === 'id' || key.includes('codigounidade')) && (typeof v === 'number' || /^\d+$/.test(String(v)))) {
+      return v as string | number
+    }
+  }
+  return null
+}
+
+/** Acha o codigoPaciente do primeiro paciente retornado pela busca, sem conhecer o shape. */
+function guessFirstCodigoPaciente(data: unknown): string | number | null {
+  let list: unknown[] = []
+  if (Array.isArray(data)) list = data
+  else if (data && typeof data === 'object') {
+    const inner = Object.values(data as Record<string, unknown>).find((v) => v && typeof v === 'object')
+    if (Array.isArray(inner)) list = inner
+    else if (inner && typeof inner === 'object') list = Object.values(inner as Record<string, unknown>)
+  }
+  const first = list[0]
+  if (!first || typeof first !== 'object') return null
+  for (const [k, v] of Object.entries(first as Record<string, unknown>)) {
+    const key = k.toLowerCase()
+    if ((key.includes('codigopaciente') || key === 'codigo') && (typeof v === 'number' || /^\d+$/.test(String(v)))) {
       return v as string | number
     }
   }
@@ -123,16 +157,32 @@ Deno.serve(async (req) => {
   const dataInicial = String(body.dataInicial ?? isoDaysAgo(30))
   const diasMostrar = Number(body.diasMostrar ?? 60)
 
+  // A agenda exige codigoPrestador OU codigoEspecialidade (mesmo sendo "opcional" no spec).
+  const codigoPrestador = body.codigoPrestador as number | undefined
+  const codigoEspecialidade = body.codigoEspecialidade as number | undefined
+
   if (codigoUnidade !== undefined && codigoUnidade !== null) {
-    const agenda = await shospGetAgenda({ codigoUnidade, dataInicial, diasMostrar })
-    out.agenda = { params: { codigoUnidade, dataInicial, diasMostrar }, ...summarize(agenda) }
+    const agenda = await shospGetAgenda({ codigoUnidade, dataInicial, diasMostrar, codigoPrestador, codigoEspecialidade })
+    out.agenda = { params: { codigoUnidade, dataInicial, diasMostrar, codigoPrestador, codigoEspecialidade }, ...summarize(agenda) }
   } else {
     out.agenda = { skipped: 'no_codigoUnidade — passe {"codigoUnidade": N} no body depois de ver o shape de unidade' }
   }
 
-  // 3) Paciente — opcional, só se passar um nome de teste.
+  // 3) Paciente — opcional. Busca por nome e, se achar, puxa a agenda do paciente
+  //    (é AQUI que esperamos ver status de comparecimento / no-show).
   if (body.nome) {
-    out.paciente = { query: { nome: body.nome }, ...summarize(await shospSearchPaciente({ nome: String(body.nome) })) }
+    const pac = await shospSearchPaciente({ nome: String(body.nome) })
+    out.paciente = { query: { nome: body.nome }, ...summarize(pac) }
+    const codigoPaciente = guessFirstCodigoPaciente(pac.data) ?? (body.codigoPaciente as number | undefined)
+    if (codigoPaciente !== undefined && codigoPaciente !== null) {
+      const ag = await shospAgendaPorPaciente(codigoPaciente)
+      out.agendaPorPaciente = { codigoPaciente, ...summarize(ag) }
+    } else {
+      out.agendaPorPaciente = { skipped: 'sem codigoPaciente no retorno da busca' }
+    }
+  } else if (body.codigoPaciente !== undefined) {
+    const ag = await shospAgendaPorPaciente(body.codigoPaciente as number)
+    out.agendaPorPaciente = { codigoPaciente: body.codigoPaciente, ...summarize(ag) }
   }
 
   console.log('[crm-shosp][probe]', JSON.stringify(out).slice(0, 4000))

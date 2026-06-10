@@ -15,14 +15,23 @@
 
 const SHOSP_BASE = 'https://api.shosp.com.br/v1'
 
+// Aceita os dois nomes de secret (SHOSP_API_KEY e SHOSP_APIKEY) para não quebrar
+// se o secret foi cadastrado sem o underscore.
+function shospApiKey(): string {
+  return (Deno.env.get('SHOSP_API_KEY') ?? Deno.env.get('SHOSP_APIKEY') ?? '').trim()
+}
+function shospId(): string {
+  return (Deno.env.get('SHOSP_ID') ?? '').trim()
+}
+
 export function shospConfigured(): boolean {
-  return Boolean((Deno.env.get('SHOSP_API_KEY') ?? '').trim() && (Deno.env.get('SHOSP_ID') ?? '').trim())
+  return Boolean(shospApiKey() && shospId())
 }
 
 function shospHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
-    'x-api-key': (Deno.env.get('SHOSP_API_KEY') ?? '').trim(),
-    id: (Deno.env.get('SHOSP_ID') ?? '').trim(),
+    'x-api-key': shospApiKey(),
+    id: shospId(),
     ...extra,
   }
 }

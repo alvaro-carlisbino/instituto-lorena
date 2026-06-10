@@ -208,15 +208,25 @@ export function bodyHasUnDetectedMediaHints(
  */
 export function stripManybotUrlsFromText(text: string, mediaUrls?: string[]): string {
   if (!text) return text
-  const captured = new Set((mediaUrls ?? []).map((u) => u.trim()).filter(Boolean))
-  return text
-    .split(/\s+/)
-    .filter((token) => {
-      const clean = token.replace(/[).,;!?]+$/, '')
-      if (captured.has(clean) || captured.has(token)) return false
-      if (MANYBOT_HOST_RX.test(token)) return false
-      return true
-    })
-    .join(' ')
-    .trim()
+  const urls = (mediaUrls ?? []).map((u) => u.trim()).filter(Boolean)
+
+  // Remove só as URLs de mídia capturadas — sem destruir a formatação do paciente.
+  // (Antes usávamos split(/\s+/).join(' '), que colapsava TODA quebra de linha numa
+  // só linha: "Nome\nRua\nCidade" virava "Nome Rua Cidade".)
+  let out = text
+  for (const u of urls) out = out.split(u).join(' ')
+
+  // Processa linha a linha: colapsa espaços horizontais e tira tokens de host do
+  // bucket ManyChat, mas PRESERVA as quebras de linha.
+  out = out
+    .split('\n')
+    .map((line) =>
+      line
+        .split(/[ \t]+/)
+        .filter((token) => token.length > 0 && !MANYBOT_HOST_RX.test(token))
+        .join(' '),
+    )
+    .join('\n')
+
+  return out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 }
