@@ -965,9 +965,17 @@ export async function runManychatAiAutoReply(
   // --- Triage Logic ---
   const { data: lead } = await admin
     .from('leads')
-    .select('pipeline_id, stage_id')
+    .select('pipeline_id, stage_id, source')
     .eq('id', options.leadId)
     .maybeSingle()
+
+  // Canal real do lead p/ logar a resposta: meta_whatsapp/whatsapp => whatsapp;
+  // meta_instagram => meta. Antes era 'meta' cravado, marcando resposta de
+  // WhatsApp como Instagram no chat (888 interações erradas).
+  const replyChannel: 'whatsapp' | 'meta' = String((lead as { source?: string } | null)?.source ?? '')
+    .includes('instagram')
+    ? 'meta'
+    : 'whatsapp'
 
   if (lead) {
     const isEntry = lead.stage_id === 'novo' || lead.stage_id === 'tc-novo'
@@ -1000,7 +1008,7 @@ export async function runManychatAiAutoReply(
           await insertInteraction(admin, {
             leadId: options.leadId,
             patientName: options.patientName,
-            channel: 'meta',
+            channel: replyChannel,
             direction: 'out',
             author: 'Assistente IA',
             content: welcome,
@@ -1056,7 +1064,7 @@ export async function runManychatAiAutoReply(
     await insertInteraction(admin, {
       leadId: options.leadId,
       patientName: options.patientName,
-      channel: 'meta',
+      channel: replyChannel,
       direction: 'out',
       author: 'Assistente IA',
       content: text,
