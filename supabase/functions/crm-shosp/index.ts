@@ -1,3 +1,5 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { runShospSync } from '../_shared/shospSync.ts'
 import {
   shospConfigured,
   shospGetAgenda,
@@ -137,8 +139,26 @@ Deno.serve(async (req) => {
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
   const mode = String(body.mode ?? 'probe')
 
+  // mode=sync (Fase 1): espelha referências + match lead↔paciente + agendamentos.
+  if (mode === 'sync') {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    if (!supabaseUrl || !serviceRole) return json({ error: 'server_misconfigured' }, 500)
+    const admin = createClient(supabaseUrl, serviceRole)
+    try {
+      const result = await runShospSync(admin, {
+        matchLimit: body.matchLimit as number | undefined,
+        apptLimit: body.apptLimit as number | undefined,
+        steps: Array.isArray(body.steps) ? (body.steps as string[]) : undefined,
+      })
+      return json({ ok: true, mode: 'sync', syncedAt: new Date().toISOString(), result })
+    } catch (e) {
+      return json({ error: 'sync_failed', message: e instanceof Error ? e.message : String(e) }, 500)
+    }
+  }
+
   if (mode !== 'probe') {
-    return json({ error: 'mode_not_implemented', mode, available: ['probe'] }, 400)
+    return json({ error: 'mode_not_implemented', mode, available: ['probe', 'sync'] }, 400)
   }
 
   const out: Record<string, unknown> = {}
