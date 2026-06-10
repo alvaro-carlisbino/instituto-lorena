@@ -3,6 +3,7 @@ import { CaretLeft, CaretRight, Clock, Plus, Sparkle } from 'phosphor-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
+import { ShospAgendaPanel } from '@/components/agenda/ShospAgendaPanel'
 import { useCrm } from '@/context/CrmContext'
 import { findFirstFreeSlot } from '@/services/crmSupabase'
 import { getDataProviderMode } from '@/services/dataMode'
@@ -171,6 +172,9 @@ export function AgendaPage() {
 
   return (
     <AppLayout title="Agenda Visual">
+      <div className="mb-4">
+        <ShospAgendaPanel />
+      </div>
       <div className="grid gap-4 xl:grid-cols-4">
         {/* Sidebar: Auto Schedule */}
         <Card className="xl:col-span-1 h-fit shadow-sm">
