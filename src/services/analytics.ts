@@ -100,6 +100,25 @@ export async function fetchAnalyticsV2(params: {
   return (data as AnalyticsV2) ?? null
 }
 
+// ---- Métricas da agenda Shosp (clínica inteira) -----------------------------
+
+export type ShospAgendaMetrics = {
+  range_dias: number
+  total: number
+  cancelados: number
+  taxa_cancelamento_pct: number | null
+  por_medico: Array<{ prestador: string; total: number; cancelados: number }>
+  por_plano: Array<{ plano: string; total: number }>
+  por_dia: Array<{ dia: string; total: number }>
+}
+
+export async function fetchShospAgendaMetrics(days = 30): Promise<ShospAgendaMetrics | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('crm_shosp_agenda_metrics', { p_days: days })
+  if (error) throw new Error(error.message)
+  return (data as ShospAgendaMetrics) ?? null
+}
+
 /** Marca um lead como perdido, com motivo. */
 export async function setLeadLostReason(leadId: string, reason: string): Promise<void> {
   if (!supabase) throw new Error('Sistema não configurado.')

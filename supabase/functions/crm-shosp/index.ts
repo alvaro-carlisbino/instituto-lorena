@@ -142,13 +142,6 @@ function isoDaysAgo(days: number): string {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
 
-  // Só equipe autenticada ou chamadas internas (service_role, ex.: cron). A anon key
-  // é pública (vai no frontend) e não pode ler agenda/pacientes nem agendar/cancelar.
-  const role = jwtRole(req)
-  if (role !== 'authenticated' && role !== 'service_role') {
-    return json({ error: 'forbidden_role' }, 403)
-  }
-
   if (!shospConfigured()) {
     return json(
       {
@@ -162,6 +155,14 @@ Deno.serve(async (req) => {
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
   const mode = String(body.mode ?? 'probe')
 
+  // Autorização: o modo `sync` (cron) só escreve no espelho e não devolve dado de
+  // paciente — pode vir com a anon key. Todo o resto (ver agenda/pacientes,
+  // agendar, cancelar) exige equipe autenticada (ou service_role interno).
+  const role = jwtRole(req)
+  if (mode !== 'sync' && role !== 'authenticated' && role !== 'service_role') {
+    return json({ error: 'forbidden_role' }, 403)
+  }
+
   // mode=sync (Fase 1): espelha referências + match lead↔paciente + agendamentos.
   if (mode === 'sync') {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
@@ -172,6 +173,7 @@ Deno.serve(async (req) => {
       const result = await runShospSync(admin, {
         matchLimit: body.matchLimit as number | undefined,
         apptLimit: body.apptLimit as number | undefined,
+        diasTotal: body.diasTotal as number | undefined,
         steps: Array.isArray(body.steps) ? (body.steps as string[]) : undefined,
       })
       return json({ ok: true, mode: 'sync', syncedAt: new Date().toISOString(), result })

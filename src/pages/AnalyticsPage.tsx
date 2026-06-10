@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AnalyticsV2Panel } from '@/components/analytics/AnalyticsV2Panel'
+import { ShospAgendaMetricsPanel } from '@/components/analytics/ShospAgendaMetricsPanel'
 import { AppLayout } from '@/layouts/AppLayout'
 import {
   fetchTenantAnalytics,
@@ -110,6 +111,9 @@ export function AnalyticsPage() {
         </div>
 
         <AnalyticsV2Panel />
+
+        <div className="border-t border-border/30 pt-2" />
+        <ShospAgendaMetricsPanel />
 
         <div className="border-t border-border/30 pt-2">
           <h2 className="text-sm font-semibold text-muted-foreground">Resumo clássico</h2>

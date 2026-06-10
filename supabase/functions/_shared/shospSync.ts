@@ -2,6 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { insertInteraction } from './crm.ts'
 import {
   shospAgendaPorPaciente,
+  shospGetAgenda,
   shospListEspecialidades,
   shospListPlanosSaude,
   shospListPrestadores,
@@ -253,14 +254,92 @@ export async function syncAppointments(admin: SupabaseClient, limit = 25): Promi
   return { leads: (leads ?? []).length, appts, advanced }
 }
 
+function ymdOffset(days: number): string {
+  return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10)
+}
+
+/**
+ * Sync da agenda INTEIRA (todos os prestadores, janela futura) — não só do lead
+ * casado. Extrai os slots OCUPADOS da grade Shosp para `shosp_appointments`,
+ * dando base para métricas de volume/ocupação por médico. Atenção: a grade geral
+ * traz paciente/status/plano, mas NÃO o serviço (esse só vem no por-paciente).
+ */
+export async function syncFullAgenda(
+  admin: SupabaseClient,
+  opts: { diasTotal?: number } = {},
+): Promise<{ appts: number; prestadores: number }> {
+  const diasTotal = Math.min(120, Math.max(7, opts.diasTotal ?? 45))
+  const { data: prestadores } = await admin.from('shosp_reference').select('codigo, nome').eq('kind', 'prestador')
+  const presList = (prestadores ?? []) as Array<{ codigo: string; nome: string }>
+
+  const { data: matched } = await admin.from('leads').select('id, shosp_prontuario').not('shosp_prontuario', 'is', null)
+  const leadByPront = new Map<string, string>()
+  for (const m of (matched ?? []) as Array<{ id: string; shosp_prontuario: string }>) {
+    leadByPront.set(String(m.shosp_prontuario), m.id)
+  }
+
+  let appts = 0
+  for (const p of presList) {
+    for (let offset = 0; offset < diasTotal; offset += 31) {
+      const dias = Math.min(31, diasTotal - offset)
+      let agendaData: unknown = null
+      try {
+        agendaData = (await shospGetAgenda({ codigoUnidade: 1, dataInicial: ymdOffset(offset), diasMostrar: dias, codigoPrestador: Number(p.codigo) })).data
+      } catch {
+        continue
+      }
+      const flat: Record<string, unknown>[] = []
+      const walk = (x: unknown) => {
+        if (Array.isArray(x)) x.forEach(walk)
+        else if (x && typeof x === 'object') flat.push(x as Record<string, unknown>)
+      }
+      walk((agendaData as { dados?: unknown })?.dados ?? null)
+
+      const rows: Array<Record<string, unknown>> = []
+      for (const pr of flat.filter((o) => 'horarios' in o)) {
+        const horarios = (pr.horarios ?? {}) as Record<string, { horario?: Record<string, unknown>[] }>
+        for (const [date, info] of Object.entries(horarios)) {
+          for (const h of info.horario ?? []) {
+            const codigo = String(h.codigoAgendamento ?? '').trim()
+            if (!codigo) continue // só ocupados
+            const pront = h.codigoPaciente != null ? String(h.codigoPaciente) : null
+            rows.push({
+              codigo_agendamento: codigo,
+              prontuario: pront,
+              lead_id: pront ? leadByPront.get(pront) ?? null : null,
+              codigo_unidade: '1',
+              codigo_prestador: String(p.codigo),
+              prestador: pr.nomePrestador != null ? String(pr.nomePrestador) : p.nome,
+              servico: h.servico != null ? String(h.servico) : null,
+              plano_saude: h.planoSaude != null ? String(h.planoSaude) : null,
+              data: date,
+              horario: h.horario != null ? String(h.horario) : null,
+              status: h.status != null ? String(h.status) : null,
+              payload: h,
+              synced_at: nowIso(),
+            })
+          }
+        }
+      }
+      if (rows.length) {
+        await admin.from('shosp_appointments').upsert(rows, { onConflict: 'codigo_agendamento' })
+        appts += rows.length
+      }
+    }
+  }
+  await admin.from('shosp_sync_state').update({ last_appointments_sync_at: nowIso() }).eq('id', 'default')
+  return { appts, prestadores: presList.length }
+}
+
 export async function runShospSync(
   admin: SupabaseClient,
-  opts: { matchLimit?: number; apptLimit?: number; steps?: string[] } = {},
+  opts: { matchLimit?: number; apptLimit?: number; diasTotal?: number; steps?: string[] } = {},
 ): Promise<Record<string, unknown>> {
   const steps = opts.steps ?? ['references', 'match', 'appointments']
   const result: Record<string, unknown> = {}
   if (steps.includes('references')) result.references = await syncShospReferences(admin)
   if (steps.includes('match')) result.match = await matchLeadsToPatients(admin, opts.matchLimit ?? 15)
   if (steps.includes('appointments')) result.appointments = await syncAppointments(admin, opts.apptLimit ?? 25)
+  if (steps.includes('full_agenda')) result.full_agenda = await syncFullAgenda(admin, { diasTotal: opts.diasTotal })
   return result
 }
