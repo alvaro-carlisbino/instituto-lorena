@@ -7,6 +7,7 @@ import {
   upsertConversationStateInboundOnly,
 } from '../_shared/crmAiAutoReply.ts'
 import { insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
+import { captureCadastroForLead } from '../_shared/cadastroExtract.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { applyOptOutToLead, isOptOutMessage } from '../_shared/optOutDetect.ts'
@@ -205,6 +206,13 @@ Deno.serve(async (req) => {
       happenedAt: normalized.happenedAt,
       externalMessageId: normalized.externalMessageId,
     })
+
+    // Captura passiva de dados de cadastro p/ agendar na Shosp sem digitação.
+    try {
+      await captureCadastroForLead(admin, lead.leadId, normalized.text)
+    } catch {
+      // best-effort
+    }
 
     // Interrompe follow-up ativo (mesma regra do crm-whatsapp-webhook).
     await admin

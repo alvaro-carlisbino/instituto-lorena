@@ -28,6 +28,7 @@ import {
   type ExtractedMedia,
 } from '../_shared/manychatMedia.ts'
 import { enrichManychatMediaRows } from '../_shared/manychatMediaEnrich.ts'
+import { captureCadastroForLead } from '../_shared/cadastroExtract.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { resolveTenantFromManychatBody } from '../_shared/tenantResolve.ts'
@@ -361,6 +362,15 @@ async function runManychatMessagePipeline(
       } catch (e) {
         console.warn('[manychat-webhook] media enrich failed:', e instanceof Error ? e.message : String(e))
       }
+    }
+
+    // Captura passiva de dados de cadastro (nome/nascimento/sexo/email/cpf) p/ agendar
+    // na Shosp sem digitação. Best-effort, gateado por pista de cadastro no texto
+    // (o LLM só roda quando há sinal — no caminho comum é instantâneo).
+    try {
+      await captureCadastroForLead(admin, leadId, ctx.text)
+    } catch {
+      // best-effort
     }
 
     const { data: state } = await admin

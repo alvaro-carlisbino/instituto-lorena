@@ -86,11 +86,16 @@ export function ShospAgendaPanel() {
     setSexo('M')
   }
 
-  // Prefill ao escolher o lead.
+  // Prefill ao escolher o lead — inclui o que a IA captou na conversa
+  // (custom_fields.cadastro): nome completo, nascimento, sexo, e-mail.
   useEffect(() => {
     if (!selectedLead) return
-    setNome(selectedLead.patientName ?? '')
+    const cad = ((selectedLead.customFields as Record<string, unknown> | undefined)?.cadastro ?? {}) as Record<string, string>
+    setNome(cad.nomeCompleto || selectedLead.patientName || '')
     setTelefone((selectedLead.phone ?? '').replace(/\D/g, ''))
+    setNascimento(cad.dataNascimento || '')
+    setEmail(cad.email || '')
+    if (cad.sexo === 'M' || cad.sexo === 'F') setSexo(cad.sexo)
   }, [selectedLead])
 
   const submitBooking = async () => {

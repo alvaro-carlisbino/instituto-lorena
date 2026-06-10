@@ -194,6 +194,12 @@ Deno.serve(async (req) => {
     return json({ ok: res.ok, status: res.status, data: res.data })
   }
 
+  if (mode === 'extract_test') {
+    const { extractCadastro } = await import('../_shared/cadastroExtract.ts')
+    const fields = await extractCadastro(String(body.text ?? ''))
+    return json({ ok: true, fields })
+  }
+
   if (mode === 'cancel') {
     const codigo = body.codigoAgendamento
     if (codigo === undefined || codigo === null) return json({ error: 'codigoAgendamento_required' }, 400)
