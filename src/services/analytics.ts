@@ -69,6 +69,37 @@ export async function fetchTenantAnalytics(periodDays = 30): Promise<AnalyticsPa
   }
 }
 
+// ---- Analytics v2 (funil real Shosp + filtros) ------------------------------
+
+export type AnalyticsV2 = {
+  range: { start: string; end: string }
+  summary: { total_leads: number; ativos: number; perdidos: number; com_shosp: number; excluidos: number }
+  by_source: Array<{ source: string; total: number; agendados: number; comparecidos: number; perdidos: number; conversao_pct: number | null }>
+  shosp_funnel: { leads_agendados: number; leads_comparecidos: number; leads_no_show: number; leads_cancelados: number }
+  by_stage: Array<{ pipeline_id: string; stage_id: string; stage_name: string; position: number; count: number }>
+  by_sdr: Array<{ owner_id: string; owner_name: string; total: number; perdidos: number; agendados: number; conversao_pct: number | null }>
+  lost_reasons: Array<{ reason: string; count: number }>
+  time_in_stage: Array<{ stage_id: string; stage_name: string; leads: number; avg_days: number }>
+}
+
+/** Busca o analytics v2 (funil real cruzando agendamentos Shosp) com filtros. */
+export async function fetchAnalyticsV2(params: {
+  start: Date
+  end: Date
+  source?: string | null
+  owner?: string | null
+}): Promise<AnalyticsV2 | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('crm_analytics_v2', {
+    p_start: params.start.toISOString(),
+    p_end: params.end.toISOString(),
+    p_source: params.source ?? null,
+    p_owner: params.owner ?? null,
+  })
+  if (error) throw new Error(error.message)
+  return (data as AnalyticsV2) ?? null
+}
+
 /** Marca um lead como perdido, com motivo. */
 export async function setLeadLostReason(leadId: string, reason: string): Promise<void> {
   if (!supabase) throw new Error('Sistema não configurado.')
