@@ -746,6 +746,60 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
   return { leads: builtLeads, interactions: builtInteractions }
 }
 
+/**
+ * Carrega TODAS as interações de um lead (sem o teto de 1000 linhas do fetch
+ * global). O carregamento global é cortado pelo "Max rows" do PostgREST, então
+ * conversas mais antigas que a janela recente sumiam do chat. Ao abrir um lead,
+ * buscamos o histórico completo dele por lead_id e mesclamos no estado.
+ */
+export const loadLeadInteractionsFromSupabase = async (leadId: string): Promise<Interaction[]> => {
+  const client = assertSupabase()
+  const { data: rows, error } = await client
+    .from('interactions')
+    .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
+    .eq('lead_id', leadId)
+    .order('happened_at', { ascending: false })
+    .limit(2000)
+  if (error) throw error
+  const interactionRows = (rows ?? []) as DbInteraction[]
+  const ids = interactionRows.map((r) => r.id)
+
+  const mediaByInteraction = new Map<string, Interaction['media']>()
+  if (ids.length) {
+    const { data: mediaRows } = await client
+      .from('crm_media_items')
+      .select('id, interaction_id, media_type, mime_type, media_base64, storage_path, metadata')
+      .in('interaction_id', ids)
+    for (const row of mediaRows ?? []) {
+      const iid = String(row.interaction_id)
+      if (!iid) continue
+      const list = mediaByInteraction.get(iid) ?? []
+      list.push({
+        id: String(row.id),
+        type: row.media_type as any,
+        mimeType: row.mime_type,
+        base64: row.media_base64,
+        url: (row as { storage_path?: string | null }).storage_path ?? undefined,
+        caption: (row.metadata as any)?.caption,
+      })
+      mediaByInteraction.set(iid, list)
+    }
+  }
+
+  return interactionRows.map((interaction) => ({
+    id: interaction.id,
+    leadId: interaction.lead_id,
+    patientName: interaction.patient_name,
+    channel: interaction.channel,
+    direction: interaction.direction,
+    author: interaction.author,
+    content: interaction.content,
+    happenedAt: interaction.happened_at,
+    externalMessageId: interaction.external_message_id || undefined,
+    media: mediaByInteraction.get(interaction.id),
+  }))
+}
+
 export type RoomsAndAppointmentsSlice = {
   rooms: Room[]
   appointments: Appointment[]

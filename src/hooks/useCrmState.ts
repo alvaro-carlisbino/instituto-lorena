@@ -37,6 +37,7 @@ import {
   loadWebhookJobs,
   loadCrmData,
   loadChatSliceFromSupabase,
+  loadLeadInteractionsFromSupabase,
   loadRoomsAndAppointmentsFromSupabase,
   loadAuditLogsPage,
   createWebhookReplayJob,
@@ -166,6 +167,9 @@ export const useCrmState = () => {
   const [selectedPipelineId, setSelectedPipelineId] = useState<string>(pipelines[0].id)
   const [leads, setLeads] = useState<Lead[]>(initialLeads)
   const [interactions, setInteractions] = useState<Interaction[]>(initialInteractions)
+  // Histórico completo do lead aberto (carregado por lead_id, sem o teto de 1000
+  // do fetch global). Mantido à parte para sobreviver ao refresh do slice a cada 12s.
+  const [openLeadHistory, setOpenLeadHistory] = useState<{ leadId: string; items: Interaction[] } | null>(null)
   const [selectedLeadId, setSelectedLeadId] = useState<string>(initialLeads[0].id)
   const [draftMessage, setDraftMessage] = useState<string>('')
   const [draftAttachments, setDraftAttachments] = useState<Array<{ name: string; mimeType: string; base64: string }>>([])
@@ -234,9 +238,21 @@ export const useCrmState = () => {
     [leads, selectedLeadId],
   )
 
+  // Interações "visíveis": estado global (janela recente) + histórico completo do
+  // lead aberto. O estado global pode não conter mensagens antigas (teto de 1000),
+  // então mesclamos o openLeadHistory por cima. O estado global vence por id (mais
+  // fresco / inclui mensagens novas que chegam pelo poll).
+  const mergedInteractions = useMemo(() => {
+    if (!openLeadHistory || openLeadHistory.items.length === 0) return interactions
+    const byId = new Map<string, Interaction>()
+    for (const i of openLeadHistory.items) byId.set(i.id, i)
+    for (const i of interactions) byId.set(i.id, i)
+    return Array.from(byId.values())
+  }, [interactions, openLeadHistory])
+
   const selectedLeadHistory = useMemo(
-    () => interactions.filter((interaction) => interaction.leadId === selectedLeadId),
-    [interactions, selectedLeadId],
+    () => mergedInteractions.filter((interaction) => interaction.leadId === selectedLeadId),
+    [mergedInteractions, selectedLeadId],
   )
 
   const workloadBySdr = useMemo(() => {
@@ -863,6 +879,27 @@ export const useCrmState = () => {
       void client.removeChannel(channel)
     }
   }, [dataMode, refreshChatFromSupabase])
+
+  // Ao abrir um lead, carrega o histórico COMPLETO dele (por lead_id) — assim
+  // conversas mais antigas que a janela de 1000 do fetch global voltam a aparecer.
+  useEffect(() => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured || !selectedLeadId) {
+      setOpenLeadHistory(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const items = await loadLeadInteractionsFromSupabase(selectedLeadId)
+        if (!cancelled) setOpenLeadHistory({ leadId: selectedLeadId, items })
+      } catch {
+        if (!cancelled) setOpenLeadHistory(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedLeadId, dataMode])
 
   const updateInteractionMessage = useCallback(
     async (interactionId: string, content: string) => {
@@ -2236,7 +2273,7 @@ export const useCrmState = () => {
     setSelectedLeadId,
     selectedLead,
     selectedLeadHistory,
-    interactions,
+    interactions: mergedInteractions,
     sdrMembers,
     workloadBySdr,
     totalHotLeads,
