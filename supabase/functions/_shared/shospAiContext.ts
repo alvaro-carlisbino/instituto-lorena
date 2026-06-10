@@ -44,27 +44,54 @@ function parsePatientAppointments(data: unknown): Array<Record<string, unknown>>
   return out.slice(0, 12)
 }
 
-/** availability aninhada -> primeiros N horários livres {data, horario}. */
+/** Agora em São Paulo: data YYYY-MM-DD + minutos desde a meia-noite. */
+function nowSaoPaulo(): { ymd: string; minutesOfDay: number } {
+  const now = new Date()
+  const ymd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now)
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(now)
+  const hh = Number(parts.find((p) => p.type === 'hour')?.value ?? '0')
+  const mm = Number(parts.find((p) => p.type === 'minute')?.value ?? '0')
+  return { ymd, minutesOfDay: hh * 60 + mm }
+}
+
+function hhmmToMinutes(horario: string): number {
+  const m = horario.match(/(\d{1,2}):(\d{2})/)
+  if (!m) return -1
+  return Number(m[1]) * 60 + Number(m[2])
+}
+
+/** availability aninhada -> primeiros N horários livres FUTUROS {data, horario}. */
 function freeSlots(data: unknown, max = 4): Array<{ data: string; horario: string }> {
   const flat: Record<string, unknown>[] = []
   flattenDeep(data && typeof data === 'object' ? (data as Record<string, unknown>).dados : null, flat)
+  const { ymd: todayYmd, minutesOfDay: nowMin } = nowSaoPaulo()
+  const BUFFER_MIN = 30 // não oferece horário que começa em menos de 30 min
   const out: Array<{ data: string; horario: string }> = []
   for (const p of flat.filter((o) => 'horarios' in o)) {
     const horarios = (p.horarios ?? {}) as Record<string, { horario?: Record<string, unknown>[] }>
     for (const [date, info] of Object.entries(horarios)) {
+      if (date < todayYmd) continue
       for (const h of info.horario ?? []) {
-        if (h.codigoHorario && !h.codigoAgendamento) {
-          out.push({ data: date, horario: String(h.horario ?? '') })
-          if (out.length >= max) return out
-        }
+        if (!h.codigoHorario || h.codigoAgendamento) continue
+        const horario = String(h.horario ?? '')
+        // Hoje: pula horários que já passaram (+ margem).
+        if (date === todayYmd && hhmmToMinutes(horario) <= nowMin + BUFFER_MIN) continue
+        out.push({ data: date, horario })
+        if (out.length >= max) return out
       }
     }
   }
   return out
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
 }
 
 export async function buildShospAiContext(
@@ -93,7 +120,7 @@ export async function buildShospAiContext(
     const results = await Promise.all(
       MAIN_PRESTADORES.map(async (p) => {
         try {
-          const r = await shospGetAgenda({ codigoUnidade: 1, dataInicial: todayIso(), diasMostrar: 10, codigoPrestador: p.codigo })
+          const r = await shospGetAgenda({ codigoUnidade: 1, dataInicial: nowSaoPaulo().ymd, diasMostrar: 10, codigoPrestador: p.codigo })
           const slots = freeSlots(r.data, 4)
           return slots.length ? { prestador: p.nome, codigoPrestador: p.codigo, horarios_livres: slots } : null
         } catch {
