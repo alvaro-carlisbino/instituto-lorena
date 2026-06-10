@@ -36,6 +36,19 @@ function json(body: Record<string, unknown>, status = 200): Response {
   })
 }
 
+/** Lê o claim `role` do JWT (já validado pelo verify_jwt). 'anon' = chave pública. */
+function jwtRole(req: Request): string {
+  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim()
+  const parts = token.split('.')
+  if (parts.length < 2) return ''
+  try {
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return String((payload as { role?: unknown }).role ?? '')
+  } catch {
+    return ''
+  }
+}
+
 /** Resume o shape de uma resposta: keys + primeiros itens, truncado para leitura. */
 function shape(data: unknown): unknown {
   if (Array.isArray(data)) {
@@ -128,6 +141,13 @@ function isoDaysAgo(days: number): string {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
+
+  // Só equipe autenticada ou chamadas internas (service_role, ex.: cron). A anon key
+  // é pública (vai no frontend) e não pode ler agenda/pacientes nem agendar/cancelar.
+  const role = jwtRole(req)
+  if (role !== 'authenticated' && role !== 'service_role') {
+    return json({ error: 'forbidden_role' }, 403)
+  }
 
   if (!shospConfigured()) {
     return json(

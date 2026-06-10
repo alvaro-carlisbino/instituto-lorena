@@ -1,8 +1,36 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
 import { insertInteraction } from './crm.ts'
+import { shospGetAgenda, shospSchedule } from './shosp.ts'
 
 const CRM_OPS_MARKER = '<<<CRM_OPS>>>'
+
+/** Revalida se o horário ainda está livre na Shosp (anti double-booking). */
+async function shospSlotStillFree(codigoPrestador: number, data: string, horario: string): Promise<boolean> {
+  try {
+    const r = await shospGetAgenda({ codigoUnidade: 1, dataInicial: data, diasMostrar: 1, codigoPrestador })
+    const flat: Record<string, unknown>[] = []
+    const walk = (x: unknown) => {
+      if (Array.isArray(x)) x.forEach(walk)
+      else if (x && typeof x === 'object') flat.push(x as Record<string, unknown>)
+    }
+    walk((r.data as { dados?: unknown })?.dados ?? null)
+    const hhmm = horario.slice(0, 5)
+    for (const p of flat.filter((o) => 'horarios' in o)) {
+      const horarios = (p.horarios ?? {}) as Record<string, { horario?: Record<string, unknown>[] }>
+      const day = horarios[data]
+      if (!day) continue
+      for (const h of day.horario ?? []) {
+        if (String(h.horario ?? '').slice(0, 5) === hhmm) {
+          return Boolean(h.codigoHorario) && !h.codigoAgendamento
+        }
+      }
+    }
+  } catch {
+    // se não der pra checar, é mais seguro abortar
+  }
+  return false
+}
 
 export function peelCrmOpsFromModelReply(raw: string): { remainder: string; ops: unknown[] } {
   const text = raw.replace(/\r\n/g, '\n')
@@ -357,6 +385,84 @@ export async function executeCrmAiOpsFromModel(
         }
         results.push({ type, ok: true })
         summaries.push('Resumo do lead atualizado')
+        continue
+      }
+
+      if (type === 'shosp_book') {
+        if (!autoSchedulingEnabled) {
+          results.push({ type, ok: false, detail: 'auto_scheduling_disabled' })
+          continue
+        }
+        const codigoPrestador = Number(op.codigoPrestador ?? op.codigo_prestador)
+        const dataYmd = String(op.data ?? '').trim()
+        const horario = String(op.horario ?? '').trim()
+        const codigoHorario = Number(op.codigoHorario ?? op.codigo_horario)
+        const codigoServico = Number(op.codigoServico ?? op.codigo_servico)
+        if (!codigoPrestador || !/^\d{4}-\d{2}-\d{2}$/.test(dataYmd) || !horario || !codigoHorario || !codigoServico) {
+          results.push({ type, ok: false, detail: 'missing_or_invalid_params' })
+          continue
+        }
+        // Trava 1: o horário ainda está livre (anti double-booking).
+        if (!(await shospSlotStillFree(codigoPrestador, dataYmd, horario))) {
+          results.push({ type, ok: false, detail: 'slot_taken_or_unavailable' })
+          continue
+        }
+        // Dados do paciente (lead + cadastro captado na conversa).
+        const { data: leadFull } = await admin
+          .from('leads')
+          .select('patient_name, phone, shosp_prontuario, custom_fields')
+          .eq('id', opts.allowedLeadId)
+          .maybeSingle()
+        const lf = leadFull as
+          | { patient_name?: string; phone?: string; shosp_prontuario?: string; custom_fields?: Record<string, unknown> }
+          | null
+        const cad = ((lf?.custom_fields?.cadastro as Record<string, string>) ?? {})
+        const nome = String(cad.nomeCompleto || lf?.patient_name || '').trim()
+        const telefone = String(lf?.phone ?? '').replace(/\D/g, '')
+        const email = String(cad.email ?? '').trim()
+        const dataNascimento = String(cad.dataNascimento ?? '').trim()
+        const sexo = String(cad.sexo ?? '').trim().toUpperCase()
+        const prontuario = lf?.shosp_prontuario ? String(lf.shosp_prontuario) : ''
+        // Trava 2: dados obrigatórios SÓ para paciente novo. Se já tem prontuário,
+        // o codigoPaciente basta (a Shosp usa o cadastro existente).
+        const missing: string[] = []
+        if (!prontuario) {
+          if (nome.split(/\s+/).filter(Boolean).length < 2) missing.push('nome completo')
+          if (telefone.length < 10) missing.push('telefone')
+          if (!/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(dataNascimento)) missing.push('data de nascimento (DD/MM/AAAA)')
+          if (sexo !== 'M' && sexo !== 'F') missing.push('sexo (M/F)')
+          if (!email) missing.push('email')
+        }
+        if (missing.length) {
+          results.push({ type, ok: false, detail: `missing_patient_data: ${missing.join(', ')}` })
+          continue
+        }
+        const sched = await shospSchedule({
+          codigoPrestador,
+          codigoUnidade: 1,
+          codigoServico,
+          codigoPlanoSaude: 1,
+          data: dataYmd,
+          horario,
+          codigoHorario,
+          nome,
+          telefone,
+          email: email || 'naoinformado@institutolorena.com.br',
+          dataNascimento: dataNascimento || '01/01/1990',
+          sexo: sexo || 'M',
+          codigoPaciente: prontuario || undefined,
+        })
+        const dados = (sched.data as { dados?: { codigoAgendamento?: number; codigoPaciente?: string } } | undefined)?.dados
+        if (!sched.ok || !dados?.codigoAgendamento) {
+          results.push({ type, ok: false, detail: `shosp_fail: ${sched.error ?? 'no_codigoAgendamento'}`.slice(0, 200) })
+          continue
+        }
+        if (dados.codigoPaciente && !prontuario) {
+          await admin.from('leads').update({ shosp_prontuario: String(dados.codigoPaciente) }).eq('id', opts.allowedLeadId)
+        }
+        const quando = `${dataYmd.split('-').reverse().join('/')} ${horario.slice(0, 5)}`
+        results.push({ type, ok: true, detail: quando })
+        summaries.push(`Agendado na Shosp (${quando}, agendamento ${dados.codigoAgendamento})`)
         continue
       }
 

@@ -103,6 +103,26 @@ export async function buildShospAiContext(
     )
     const disp = results.filter(Boolean)
     if (disp.length) out.disponibilidade = disp
+
+    // Serviços de CONSULTA dos médicos principais — a Sofia precisa do codigoServico
+    // certo (por médico + masculino/feminino) para agendar.
+    try {
+      const { data: servicos } = await admin
+        .from('shosp_reference')
+        .select('codigo, nome, payload')
+        .eq('kind', 'servico')
+        .ilike('nome', '%consulta%')
+      const consultas = (servicos ?? [])
+        .filter((s: { nome: string }) => /jaqueline|lorena|matheus/i.test(s.nome))
+        .map((s: { codigo: string; nome: string; payload: { valor?: string | null } }) => ({
+          codigoServico: s.codigo,
+          nome: s.nome,
+          valor: s.payload?.valor ?? null,
+        }))
+      if (consultas.length) out.servicos_consulta = consultas
+    } catch {
+      // best-effort
+    }
   }
 
   return Object.keys(out).length ? out : null

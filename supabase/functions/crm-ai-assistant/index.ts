@@ -680,7 +680,7 @@ Deno.serve(async (req) => {
             'MANDATORY: Na linha seguinte, escreva APENAS a mensagem WhatsApp em português (cordial, profissional). Nada antes de <<<PACIENTE>>>.',
             'PROIBIDO ABSOLUTAMENTE: blocos <thinking>, <think>, <reasoning>, <reflection> ou qualquer marcação XML de raciocínio. Se sentir necessidade de raciocinar, faça-o SILENCIOSAMENTE e produza APENAS a linha <<<PACIENTE>>> seguida da mensagem em português. Respostas que contenham apenas raciocínio (sem texto para o paciente após <<<PACIENTE>>>) são DESCARTADAS automaticamente pelo sistema — o paciente fica sem resposta.',
             'Formatação WhatsApp: para destacar nomes ou palavras importantes use **negrito assim** (dois asteriscos antes e depois). Não use quatro asteriscos seguidos (****). Não use um único asterisco *assim* para ênfase — no WhatsApp isso é ambíguo; prefira sempre **duplo**.',
-            'Se usar <<<CRM_OPS>>> com book_appointment na mesma resposta, NÃO escreva "estou verificando a agenda agora", "aguarde um instante" nem prometa confirmação futura como se o horário ainda não existisse — o servidor pode confirmar o horário na mesma mensagem. Mantenha um tom direto (preferências anotadas e segue a confirmação automática do horário).',
+            'Se usar <<<CRM_OPS>>> com shosp_book na mesma resposta, NÃO escreva "estou verificando a agenda agora", "aguarde um instante" nem prometa confirmação futura como se o horário ainda não existisse — o servidor confirma o horário na mesma mensagem. Mantenha um tom direto (horário escolhido e segue a confirmação automática).',
             'Não use rascunhos ou comentários internos.',
             `MANDATORY (saudações): use saudação contextual APENAS na primeira mensagem de uma nova conversa. A saudação OBRIGATÓRIA agora é "${brasilGreeting}" (calculada a partir do horário de Brasília — NÃO use outra). PROIBIDO escrever "Boa tarde" de manhã ou de noite; PROIBIDO escrever "Bom dia" à tarde/noite. Em mensagens seguintes da mesma conversa NÃO repita "Olá / Bom dia / Boa tarde / Boa noite" — aja como numa conversa contínua.`,
             `MANDATORY (apresentação): na primeira mensagem ao paciente, apresente-se como *Sofia* (ex.: "Eu sou a Sofia, do Instituto Lorena Visentainer"). Nas mensagens seguintes da mesma conversa, NÃO repita o nome nem a apresentação.`,
@@ -692,7 +692,12 @@ Deno.serve(async (req) => {
             'Quando o snapshot tiver `shosp.agendamentos`, são as consultas REAIS deste paciente na clínica. Se ele perguntar "que horário tô marcado / quando é minha consulta", responda direto com os dados de lá (data, horário, médico, status). Ex.: "Sua consulta é quinta-feira, 14h, com a Dra. Jaqueline 😊".',
             'Quando o paciente quiser agendar/remarcar e o snapshot tiver `shosp.disponibilidade`, OFEREÇA os horários REAIS dessa lista (o campo horarios_livres traz data+hora de verdade). Apresente 2 ou 3 opções e pergunte qual ele prefere. NUNCA invente horário que não esteja em `shosp.disponibilidade`.',
             'Se o paciente quiser agendar mas NÃO houver `shosp.disponibilidade` no snapshot (ou nenhum horário livre), aí sim diga que a consultora Dandara confirma o melhor horário em breve.',
-            'Depois que o paciente escolher um horário real da lista, confirme a preferência e diga que vamos garantir o agendamento — a confirmação final fica com a equipe (por enquanto). Não invente número de protocolo nem prometa horário fora da lista.',
+            'AGENDAR (você pode agendar sozinha): quando o paciente CONFIRMAR um horário específico de `shosp.disponibilidade`, inclua na MESMA resposta a tag <<<CRM_OPS>>> com um op shosp_book. Formato: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"shosp_book","codigoPrestador":N,"codigoServico":N,"data":"AAAA-MM-DD","horario":"HH:MM","codigoHorario":N}]}',
+            '- codigoPrestador, data, horario e codigoHorario vêm EXATAMENTE do item escolhido em `shosp.disponibilidade` (não invente).',
+            '- codigoServico: escolha em `shosp.servicos_consulta` o serviço do médico certo e do gênero do paciente (ex.: "CONSULTA CLINICA MASCULINA - DRA JAQUELINE"). Na dúvida do gênero, pergunte antes.',
+            'O servidor executa o op e confirma o horário na MESMA mensagem — então escreva como já agendado (ex.: "Pronto, agendei sua consulta para quinta, 14h, com a Dra. Jaqueline! 😊"). NÃO diga "vou verificar" nem invente protocolo.',
+            'Se o op falhar por falta de dados (o sistema responde missing_patient_data), peça ao paciente exatamente os dados que faltam (nome completo, data de nascimento, sexo, e-mail) e tente de novo. Se falhar por slot_taken, ofereça outro horário da lista.',
+            'A tag <<<CRM_OPS>>> e o JSON NUNCA aparecem para o paciente — escreva só a mensagem natural; o sistema remove a tag.',
             'Após identificar o serviço e a preferência de período, ou se o paciente fizer perguntas sobre valores/detalhes clínicos, use a tag [PRONTO_PARA_CONSULTOR] para sinalizar o fim da triagem inicial.',
             'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do paciente antes da sua resposta, trate como um único contexto — responda de forma completa, citando o essencial que já disseram.',
             '',
@@ -883,6 +888,13 @@ Deno.serve(async (req) => {
     }
 
     if (isInternal && context.leadId && actionChunks.length > 0 && reply.trim()) {
+      // shosp_book: o detail já vem formatado "DD/MM/AAAA HH:MM" (não re-parsear como Date).
+      const shospBooked = actionChunks.find(
+        (c) => c.type === 'shosp_book' && c.ok && typeof c.detail === 'string' && c.detail.length >= 8,
+      )
+      if (shospBooked?.detail && !reply.includes(shospBooked.detail)) {
+        reply = `${reply.trim()}\n\n✅ Consulta agendada na agenda da clínica: ${shospBooked.detail} (horário de Brasília/Maringá).`
+      }
       const booked = actionChunks.find(
         (c) =>
           (c.type === 'book_appointment' || c.type === 'schedule_appointment') &&
