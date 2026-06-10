@@ -30,6 +30,7 @@ import {
   type ListedLeadRow,
 } from '../_shared/crmAiOpsExecutor.ts'
 import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
+import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
 
@@ -609,6 +610,22 @@ Deno.serve(async (req) => {
       })
     }
 
+    // Shosp = fonte da verdade da agenda. Injeta os agendamentos REAIS do paciente
+    // (+ disponibilidade real quando há intenção de agendar) para a Sofia responder
+    // "que horário tô marcado?" e propor horários de verdade — só no modo paciente.
+    if (isInternal && context.leadId) {
+      try {
+        const lastUser = [...clientMessages].reverse().find((m) => (m as { role?: string }).role === 'user')
+        const lastText = typeof (lastUser as { content?: unknown })?.content === 'string'
+          ? ((lastUser as { content: string }).content)
+          : ''
+        const shospCtx = await buildShospAiContext(dbClient, context.leadId, lastText)
+        if (shospCtx) (snapshot as Record<string, unknown>).shosp = shospCtx
+      } catch {
+        // best-effort
+      }
+    }
+
     const focusHint =
       context.focus === 'analytics'
         ? 'O utilizador pediu ênfase em analytics, tendências da semana e números.'
@@ -671,8 +688,11 @@ Deno.serve(async (req) => {
             '--- TRIAGEM E ENCAMINHAMENTO ---',
             'Objetivo principal: identificar o tipo de atendimento desejado (1 a 5) e entender a preferência de período (manhã/tarde).',
             'Se o paciente enviar apenas o número da opção (ex: "1", "2"), agradeça a escolha e pergunte IMEDIATAMENTE a sua preferência de período (manhã ou tarde).',
-            'NÃO prometa horários específicos nem use ferramentas de agendamento. Reforce que não é você quem realiza os agendamentos.',
-            'Informe ao paciente que a equipe de consultoria (como a Dandara) entrará em contato em breve para confirmar o melhor horário na agenda.',
+            '--- AGENDA SHOSP (fonte da verdade) ---',
+            'Quando o snapshot tiver `shosp.agendamentos`, são as consultas REAIS deste paciente na clínica. Se ele perguntar "que horário tô marcado / quando é minha consulta", responda direto com os dados de lá (data, horário, médico, status). Ex.: "Sua consulta é quinta-feira, 14h, com a Dra. Jaqueline 😊".',
+            'Quando o paciente quiser agendar/remarcar e o snapshot tiver `shosp.disponibilidade`, OFEREÇA os horários REAIS dessa lista (o campo horarios_livres traz data+hora de verdade). Apresente 2 ou 3 opções e pergunte qual ele prefere. NUNCA invente horário que não esteja em `shosp.disponibilidade`.',
+            'Se o paciente quiser agendar mas NÃO houver `shosp.disponibilidade` no snapshot (ou nenhum horário livre), aí sim diga que a consultora Dandara confirma o melhor horário em breve.',
+            'Depois que o paciente escolher um horário real da lista, confirme a preferência e diga que vamos garantir o agendamento — a confirmação final fica com a equipe (por enquanto). Não invente número de protocolo nem prometa horário fora da lista.',
             'Após identificar o serviço e a preferência de período, ou se o paciente fizer perguntas sobre valores/detalhes clínicos, use a tag [PRONTO_PARA_CONSULTOR] para sinalizar o fim da triagem inicial.',
             'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do paciente antes da sua resposta, trate como um único contexto — responda de forma completa, citando o essencial que já disseram.',
             '',

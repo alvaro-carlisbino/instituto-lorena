@@ -200,6 +200,15 @@ Deno.serve(async (req) => {
     return json({ ok: true, fields })
   }
 
+  if (mode === 'ai_context_test') {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    const admin = createClient(supabaseUrl, serviceRole)
+    const { buildShospAiContext } = await import('../_shared/shospAiContext.ts')
+    const ctx = await buildShospAiContext(admin, String(body.leadId ?? ''), String(body.text ?? ''))
+    return json({ ok: true, shosp: ctx })
+  }
+
   if (mode === 'ocr_test') {
     const { ocrImage } = await import('../_shared/visionOcr.ts')
     try {
