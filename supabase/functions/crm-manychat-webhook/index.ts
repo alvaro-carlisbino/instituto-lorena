@@ -27,6 +27,7 @@ import {
   stripManybotUrlsFromText,
   type ExtractedMedia,
 } from '../_shared/manychatMedia.ts'
+import { enrichManychatMediaRows } from '../_shared/manychatMediaEnrich.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { resolveTenantFromManychatBody } from '../_shared/tenantResolve.ts'
@@ -185,26 +186,29 @@ function contentForInboundWithMedia(text: string, media: ExtractedMedia[]): stri
 async function persistManychatMedia(
   admin: AdminClient,
   input: { leadId: string; interactionId: string; media: ExtractedMedia[]; tenantId: string },
-): Promise<{ inserted: number; error: string | null }> {
-  if (input.media.length === 0) return { inserted: 0, error: null }
+): Promise<{ inserted: number; error: string | null; rowIds: string[] }> {
+  if (input.media.length === 0) return { inserted: 0, error: null, rowIds: [] }
   try {
-    const { error } = await admin.from('crm_media_items').insert(
-      input.media.map((m) => ({
-        lead_id: input.leadId,
-        interaction_id: input.interactionId,
-        tenant_id: input.tenantId,
-        direction: 'in',
-        media_type: m.type === 'other' ? 'document' : m.type,
-        mime_type: m.mimeType ?? null,
-        storage_path: m.url,
-        metadata: {
-          source: 'manychat',
-          original_url: m.url,
-          caption: m.caption ?? null,
-          name: m.name ?? null,
-        },
-      })),
-    )
+    const { data, error } = await admin
+      .from('crm_media_items')
+      .insert(
+        input.media.map((m) => ({
+          lead_id: input.leadId,
+          interaction_id: input.interactionId,
+          tenant_id: input.tenantId,
+          direction: 'in',
+          media_type: m.type === 'other' ? 'document' : m.type,
+          mime_type: m.mimeType ?? null,
+          storage_path: m.url,
+          metadata: {
+            source: 'manychat',
+            original_url: m.url,
+            caption: m.caption ?? null,
+            name: m.name ?? null,
+          },
+        })),
+      )
+      .select('id')
     if (error) {
       console.warn(
         '[manychat-webhook] crm_media_items insert error:',
@@ -219,13 +223,14 @@ async function persistManychatMedia(
           mediaTypes: input.media.map((m) => m.type),
         }),
       )
-      return { inserted: 0, error: error.message }
+      return { inserted: 0, error: error.message, rowIds: [] }
     }
-    return { inserted: input.media.length, error: null }
+    const rowIds = ((data ?? []) as Array<{ id: string }>).map((r) => String(r.id))
+    return { inserted: input.media.length, error: null, rowIds }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     console.warn('[manychat-webhook] crm_media_items insert threw:', msg)
-    return { inserted: 0, error: msg }
+    return { inserted: 0, error: msg, rowIds: [] }
   }
 }
 
@@ -348,6 +353,15 @@ async function runManychatMessagePipeline(
       media: ctx.inboundMedia,
       tenantId: ctx.tenantId,
     })
+    // Best-effort: baixa a mídia (hosts conhecidos), arquiva em base64 (render
+    // durável) e transcreve/OCR. Nunca bloqueia a ingestão.
+    if (mediaPersist.rowIds.length > 0) {
+      try {
+        await enrichManychatMediaRows(admin, { rowIds: mediaPersist.rowIds })
+      } catch (e) {
+        console.warn('[manychat-webhook] media enrich failed:', e instanceof Error ? e.message : String(e))
+      }
+    }
 
     const { data: state } = await admin
       .from('crm_conversation_states')
@@ -761,6 +775,13 @@ Deno.serve(async (req) => {
         media: inboundMedia,
         tenantId,
       })
+      if (ingestMediaPersist.rowIds.length > 0) {
+        try {
+          await enrichManychatMediaRows(admin, { rowIds: ingestMediaPersist.rowIds })
+        } catch (e) {
+          console.warn('[manychat-webhook] media enrich failed (ingest):', e instanceof Error ? e.message : String(e))
+        }
+      }
       return json({
         ok: true,
         leadId,
