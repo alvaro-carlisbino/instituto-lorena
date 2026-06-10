@@ -98,7 +98,9 @@ export async function buildShospAiContext(
   admin: SupabaseClient,
   leadId: string,
   lastUserText: string,
+  opts: { includeAvailability?: boolean } = {},
 ): Promise<Record<string, unknown> | null> {
+  const includeAvailability = opts.includeAvailability !== false
   const { data: lead } = await admin.from('leads').select('shosp_prontuario').eq('id', leadId).maybeSingle()
   const prontuario = (lead as { shosp_prontuario?: string } | null)?.shosp_prontuario
   const out: Record<string, unknown> = {}
@@ -116,7 +118,7 @@ export async function buildShospAiContext(
     }
   }
 
-  if (SCHEDULING_INTENT_RX.test(lastUserText)) {
+  if (includeAvailability && SCHEDULING_INTENT_RX.test(lastUserText)) {
     const results = await Promise.all(
       MAIN_PRESTADORES.map(async (p) => {
         try {
