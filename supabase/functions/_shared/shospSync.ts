@@ -53,7 +53,7 @@ function agendaByDate(data: unknown): Record<string, Record<string, unknown>[]> 
   return out
 }
 
-export async function syncShospReferences(admin: SupabaseClient): Promise<{ upserted: number }> {
+export async function syncShospReferences(admin: SupabaseClient): Promise<{ upserted: number; error?: string | null }> {
   const rows: Array<{ kind: string; codigo: string; nome: string | null; payload: unknown; synced_at: string }> = []
   const push = (kind: string, codigo: unknown, nome: unknown, payload: unknown) => {
     const c = String(codigo ?? '').trim()
@@ -70,9 +70,22 @@ export async function syncShospReferences(admin: SupabaseClient): Promise<{ upse
     if (Array.isArray(planos)) for (const pl of planos) push('planosaude', (pl as Record<string, unknown>).codigoPlanoSaude, (pl as Record<string, unknown>).nomePlanoSaude, pl)
   }
 
-  if (rows.length) await admin.from('shosp_reference').upsert(rows, { onConflict: 'kind,codigo' })
+  // Dedupe por (kind,codigo): o Postgres aborta o upsert inteiro se a mesma chave
+  // aparecer duas vezes no batch ("cannot affect row a second time").
+  const byKey = new Map<string, (typeof rows)[number]>()
+  for (const r of rows) byKey.set(`${r.kind}:${r.codigo}`, r)
+  const deduped = Array.from(byKey.values())
+
+  let error: string | null = null
+  if (deduped.length) {
+    const res = await admin.from('shosp_reference').upsert(deduped, { onConflict: 'kind,codigo' })
+    if (res.error) {
+      error = res.error.message
+      console.warn('[shosp-sync] reference upsert error:', res.error.message)
+    }
+  }
   await admin.from('shosp_sync_state').update({ last_reference_sync_at: nowIso() }).eq('id', 'default')
-  return { upserted: rows.length }
+  return { upserted: error ? 0 : deduped.length, error }
 }
 
 export async function matchLeadsToPatients(admin: SupabaseClient, limit = 15): Promise<{ matched: number; checked: number }> {

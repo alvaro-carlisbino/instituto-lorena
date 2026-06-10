@@ -1,14 +1,17 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { runShospSync } from '../_shared/shospSync.ts'
 import {
+  shospAgendaPorPaciente,
+  shospCancelAgendamento,
   shospConfigured,
+  shospCreatePatient,
   shospGetAgenda,
   shospListEspecialidades,
   shospListPlanosSaude,
   shospListPrestadores,
-  shospAgendaPorPaciente,
   shospListServicos,
   shospListUnidades,
+  shospSchedule,
   shospSearchPaciente,
   type ShospResult,
 } from '../_shared/shosp.ts'
@@ -157,8 +160,53 @@ Deno.serve(async (req) => {
     }
   }
 
+  // --- Fase 4: leitura de disponibilidade + escrita (agendar/cancelar/paciente) ---
+  if (mode === 'find_patient') {
+    const nome = String(body.nome ?? '').trim()
+    if (!nome) return json({ error: 'nome_required' }, 400)
+    const res = await shospSearchPaciente({ nome, cpf: body.cpf as string | undefined, email: body.email as string | undefined })
+    return json({ ok: res.ok, status: res.status, data: res.data })
+  }
+
+  if (mode === 'availability') {
+    if (body.codigoPrestador === undefined && body.codigoEspecialidade === undefined) {
+      return json({ error: 'codigoPrestador_or_codigoEspecialidade_required' }, 400)
+    }
+    const res = await shospGetAgenda({
+      codigoUnidade: (body.codigoUnidade as string | number | undefined) ?? 1,
+      dataInicial: String(body.dataInicial ?? new Date().toISOString().slice(0, 10)),
+      diasMostrar: Math.min(Number(body.diasMostrar ?? 15), 31),
+      codigoPrestador: body.codigoPrestador as number | undefined,
+      codigoEspecialidade: body.codigoEspecialidade as number | undefined,
+    })
+    return json({ ok: res.ok, status: res.status, data: res.data })
+  }
+
+  if (mode === 'create_patient') {
+    const res = await shospCreatePatient(body.paciente as Record<string, string | number | undefined>)
+    return json({ ok: res.ok, status: res.status, data: res.data })
+  }
+
+  if (mode === 'schedule') {
+    const f = body.agendamento as Record<string, unknown> | undefined
+    if (!f) return json({ error: 'agendamento_required' }, 400)
+    const res = await shospSchedule(f as Parameters<typeof shospSchedule>[0])
+    return json({ ok: res.ok, status: res.status, data: res.data })
+  }
+
+  if (mode === 'cancel') {
+    const codigo = body.codigoAgendamento
+    if (codigo === undefined || codigo === null) return json({ error: 'codigoAgendamento_required' }, 400)
+    const res = await shospCancelAgendamento(codigo as string | number)
+    return json({ ok: res.ok, status: res.status, data: res.data })
+  }
+
   if (mode !== 'probe') {
-    return json({ error: 'mode_not_implemented', mode, available: ['probe', 'sync'] }, 400)
+    return json({
+      error: 'mode_not_implemented',
+      mode,
+      available: ['probe', 'sync', 'find_patient', 'availability', 'create_patient', 'schedule', 'cancel'],
+    }, 400)
   }
 
   const out: Record<string, unknown> = {}

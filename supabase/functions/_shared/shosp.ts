@@ -108,3 +108,27 @@ export const shospGetAgenda = (fields: {
   codigoEspecialidade?: number
   codigoPrestador?: number
 }) => shospPostForm('/agenda/get/', fields)
+
+// ---- Escrita (Fase 4) --------------------------------------------------------
+export const shospSchedule = (fields: {
+  codigoPrestador: number | string
+  codigoUnidade: number | string
+  codigoServico: number | string
+  codigoPlanoSaude: number | string
+  data: string
+  horario: string
+  codigoHorario: number | string
+  nome: string
+  telefone: string
+  email: string
+  dataNascimento: string
+  sexo: string
+  codigoEspecialidade?: number | string
+  codigoPaciente?: number | string
+}) => shospPostForm('/agenda/', fields)
+
+export const shospCancelAgendamento = (codigoAgendamento: number | string) =>
+  shospPostForm('/agenda/cancelaragendamento', { codigoAgendamento })
+
+export const shospCreatePatient = (fields: Record<string, string | number | undefined>) =>
+  shospPostForm('/cadastro/paciente', fields)
