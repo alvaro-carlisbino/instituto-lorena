@@ -31,7 +31,8 @@ export async function readRedeConfig(admin: SupabaseClient, tenantId: string): P
   const clientId = typeof cfg.client_id === 'string' ? cfg.client_id.trim() : ''
   const clientSecret = typeof cfg.client_secret === 'string' ? cfg.client_secret.trim() : ''
   const companyNumber = typeof cfg.company_number === 'string' ? cfg.company_number.trim() : ''
-  if (!clientId || !clientSecret || !companyNumber) return null
+  // Company-number (PV) é OPCIONAL — a doc do "Link de Pagamento" não o exige.
+  if (!clientId || !clientSecret) return null
   const env: 'sandbox' | 'prod' = cfg.env === 'prod' ? 'prod' : 'sandbox'
   const tokenBase = (typeof cfg.token_base === 'string' && cfg.token_base.trim()
     ? cfg.token_base.trim()
@@ -121,7 +122,7 @@ export async function createRedePaymentLink(
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Company-number': cfg.companyNumber,
+      ...(cfg.companyNumber ? { 'Company-number': cfg.companyNumber } : {}),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),

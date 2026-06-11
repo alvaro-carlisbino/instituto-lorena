@@ -41,11 +41,20 @@ export async function generateRedeLink(args: {
   description: string
   leadId?: string
 }): Promise<{ payLink: string; amountCents: number }> {
-  const p = await invokeRede({
-    action: 'generate_link',
-    amountCents: args.amountCents,
-    description: args.description,
-    ...(args.leadId ? { leadId: args.leadId } : {}),
-  })
-  return { payLink: String(p.payLink ?? ''), amountCents: Number(p.amountCents ?? 0) }
+  try {
+    const p = await invokeRede({
+      action: 'generate_link',
+      amountCents: args.amountCents,
+      description: args.description,
+      ...(args.leadId ? { leadId: args.leadId } : {}),
+    })
+    return { payLink: String(p.payLink ?? ''), amountCents: Number(p.amountCents ?? 0) }
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e)
+    if (m.includes('rede_nao_configurado')) {
+      throw new Error('Rede não configurada neste polo. Preencha Client ID, Secret e Company-number (PV) em Integrações.')
+    }
+    if (m.includes('rede_valor_invalido')) throw new Error('Informe um valor válido (mínimo R$ 1,00).')
+    throw new Error(m)
+  }
 }
