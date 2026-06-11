@@ -46,28 +46,45 @@ Deno.serve(async (req) => {
   }
 
   const leadId = String(payload.leadId ?? '').trim()
-  if (!leadId) return json({ error: 'missing_lead_id' }, 400)
 
-  // RLS: a leitura via userClient só retorna o lead se ele pertence ao polo ativo do usuário.
-  const { data: lead, error: leadErr } = await userClient
-    .from('leads')
-    .select('id, patient_name, phone, custom_fields, tenant_id')
-    .eq('id', leadId)
-    .maybeSingle()
-  if (leadErr || !lead) return json({ error: 'lead_not_found_or_forbidden' }, 404)
+  let leadForCheckout: { id: string; patient_name?: string; phone?: string; custom_fields?: Record<string, unknown> | null }
+  let tenantId = ''
 
-  const lf = lead as {
-    id: string
-    patient_name?: string
-    phone?: string
-    custom_fields?: Record<string, unknown>
-    tenant_id?: string
+  if (leadId) {
+    // Vinculado a um lead: RLS garante que pertence ao polo ativo do usuário.
+    const { data: lead, error: leadErr } = await userClient
+      .from('leads')
+      .select('id, patient_name, phone, custom_fields, tenant_id')
+      .eq('id', leadId)
+      .maybeSingle()
+    if (leadErr || !lead) return json({ error: 'lead_not_found_or_forbidden' }, 404)
+    const lf = lead as {
+      id: string
+      patient_name?: string
+      phone?: string
+      custom_fields?: Record<string, unknown>
+      tenant_id?: string
+    }
+    tenantId = String(lf.tenant_id ?? '')
+    leadForCheckout = { id: lf.id, patient_name: lf.patient_name, phone: lf.phone, custom_fields: lf.custom_fields ?? null }
+  } else {
+    // Link avulso (fora do chat): resolve o polo ativo e usa um "lead" sintético.
+    const { data: tid } = await userClient.rpc('current_tenant_id')
+    tenantId = typeof tid === 'string' ? tid.trim() : ''
+    if (!tenantId) return json({ error: 'tenant_not_resolved' }, 400)
+    const manualId = `manual-${crypto.randomUUID()}`
+    leadForCheckout = {
+      id: manualId,
+      patient_name: payload.customerName != null ? String(payload.customerName) : 'Cliente Tricopill',
+      phone: payload.phone != null ? String(payload.phone) : '',
+      custom_fields: null,
+    }
   }
 
   try {
     const out = await createPagBankCheckout(admin, {
-      tenantId: String(lf.tenant_id ?? ''),
-      lead: { id: lf.id, patient_name: lf.patient_name, phone: lf.phone, custom_fields: lf.custom_fields ?? null },
+      tenantId,
+      lead: leadForCheckout,
       kit: payload.kit != null ? String(payload.kit) : undefined,
       amountCents: payload.amountCents != null ? Number(payload.amountCents) : undefined,
       description: payload.description != null ? String(payload.description) : undefined,

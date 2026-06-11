@@ -10,14 +10,24 @@ export const PAGBANK_KIT_LABELS: Record<PagbankKit, string> = {
 
 export type PagbankLinkResult = { ok: true; payLink: string; label: string; amountCents: number }
 
-/** Gera um Link de Pagamento PagBank (Pix + cartão) para o lead via edge function. */
+/**
+ * Gera um Link de Pagamento PagBank (Pix + cartão). `leadId` opcional: com lead,
+ * o pagamento move o lead para "Pago"; sem lead, gera um link avulso (fora do chat).
+ */
 export async function generatePagbankLink(args: {
-  leadId: string
+  leadId?: string
   kit: PagbankKit
+  customerName?: string
+  phone?: string
 }): Promise<PagbankLinkResult> {
   if (!supabase) throw new Error('Sistema não configurado.')
   const { data, error } = await supabase.functions.invoke('crm-pagbank-checkout', {
-    body: { leadId: args.leadId, kit: args.kit },
+    body: {
+      ...(args.leadId ? { leadId: args.leadId } : {}),
+      kit: args.kit,
+      ...(args.customerName ? { customerName: args.customerName } : {}),
+      ...(args.phone ? { phone: args.phone } : {}),
+    },
   })
   if (error) {
     const ctx = (error as { context?: { body?: unknown } }).context
@@ -27,4 +37,36 @@ export async function generatePagbankLink(args: {
   const p = (data ?? {}) as { ok?: boolean; payLink?: string; label?: string; amountCents?: number; message?: string }
   if (!p.ok || !p.payLink) throw new Error(String(p.message || 'Falha ao gerar link PagBank'))
   return { ok: true, payLink: p.payLink, label: String(p.label ?? ''), amountCents: Number(p.amountCents ?? 0) }
+}
+
+export type PagbankCheckoutRow = {
+  checkoutId: string
+  leadId: string | null
+  amountCents: number
+  kit: string | null
+  payLink: string
+  status: string
+  createdAt: string
+  paidAt: string | null
+}
+
+/** Lista os links de pagamento gerados (audit table), do polo ativo (RLS). */
+export async function fetchPagbankCheckouts(limit = 50): Promise<PagbankCheckoutRow[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('pagbank_checkouts')
+    .select('checkout_id, lead_id, amount_cents, kit, pay_link, status, created_at, paid_at')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => ({
+    checkoutId: String((r as Record<string, unknown>).checkout_id ?? ''),
+    leadId: (r as Record<string, unknown>).lead_id != null ? String((r as Record<string, unknown>).lead_id) : null,
+    amountCents: Number((r as Record<string, unknown>).amount_cents ?? 0),
+    kit: (r as Record<string, unknown>).kit != null ? String((r as Record<string, unknown>).kit) : null,
+    payLink: String((r as Record<string, unknown>).pay_link ?? ''),
+    status: String((r as Record<string, unknown>).status ?? 'created'),
+    createdAt: String((r as Record<string, unknown>).created_at ?? ''),
+    paidAt: (r as Record<string, unknown>).paid_at != null ? String((r as Record<string, unknown>).paid_at) : null,
+  }))
 }
