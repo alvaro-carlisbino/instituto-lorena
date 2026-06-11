@@ -8,11 +8,17 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useTenant } from '@/context/TenantContext'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   fetchBlingStatus,
   startBlingConnect,
   disconnectBling,
   fetchBlingCatalog,
+  getBlingOrderConfig,
+  setBlingOrderConfig,
+  createBlingTestOrder,
   type BlingStatus,
   type BlingCatalogItem,
 } from '@/services/crmBling'
@@ -26,6 +32,55 @@ export function IntegrationsPage() {
   const [connecting, setConnecting] = useState(false)
   const [catalog, setCatalog] = useState<BlingCatalogItem[]>([])
   const [catalogLoading, setCatalogLoading] = useState(false)
+  const [contatoId, setContatoId] = useState('')
+  const [autoOrder, setAutoOrder] = useState(false)
+  const [savingCfg, setSavingCfg] = useState(false)
+  const [testingOrder, setTestingOrder] = useState(false)
+
+  const loadOrderConfig = async () => {
+    try {
+      const cfg = await getBlingOrderConfig()
+      setContatoId(cfg.defaultContatoId)
+      setAutoOrder(cfg.autoOrderEnabled)
+    } catch {
+      // ignore
+    }
+  }
+
+  const saveContato = async () => {
+    setSavingCfg(true)
+    try {
+      await setBlingOrderConfig({ defaultContatoId: contatoId.trim() })
+      toast.success('Contato padrão salvo.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar')
+    } finally {
+      setSavingCfg(false)
+    }
+  }
+
+  const toggleAuto = async (v: boolean) => {
+    setAutoOrder(v)
+    try {
+      await setBlingOrderConfig({ autoOrderEnabled: v })
+      toast.success(v ? 'Pedido automático ligado.' : 'Pedido automático desligado.')
+    } catch (e) {
+      setAutoOrder(!v)
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar')
+    }
+  }
+
+  const testOrder = async () => {
+    setTestingOrder(true)
+    try {
+      const out = await createBlingTestOrder('3_meses')
+      toast.success(`Pedido de teste criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos). Confira no Bling.`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao criar pedido de teste')
+    } finally {
+      setTestingOrder(false)
+    }
+  }
 
   const loadCatalog = async (refresh = false) => {
     setCatalogLoading(true)
@@ -60,7 +115,10 @@ export function IntegrationsPage() {
     fetchBlingStatus()
       .then((s) => {
         setBling(s)
-        if (s.connected) void loadCatalog(false)
+        if (s.connected) {
+          void loadCatalog(false)
+          void loadOrderConfig()
+        }
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao ler status'))
       .finally(() => setLoading(false))
@@ -208,6 +266,54 @@ export function IntegrationsPage() {
                 ))}
               </div>
             )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* Pedido automático no Bling */}
+      {bling.connected ? (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Package className="size-4 text-primary" weight="bold" /> Pedido automático no Bling
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Quando o pagamento confirma, cria o pedido de venda no Bling com o frasco{' '}
+              <strong>Tricopill - Suplemento Capilar</strong> (1 / 4 / 5 frascos por kit) e valor igual ao pago.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="bl-contato">ID do contato padrão no Bling (cliente das vendas WhatsApp)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="bl-contato"
+                  value={contatoId}
+                  onChange={(e) => setContatoId(e.target.value)}
+                  placeholder="ex.: 16322942669"
+                  className="font-mono text-xs"
+                />
+                <Button size="sm" variant="outline" onClick={() => void saveContato()} disabled={savingCfg}>
+                  {savingCfg ? 'Salvando…' : 'Salvar'}
+                </Button>
+              </div>
+              <p className="text-[0.7rem] text-muted-foreground">
+                Cadastre um contato no Bling (ex.: “Cliente WhatsApp Tricopill”) e cole o ID dele aqui. É o cliente
+                que vai constar nos pedidos automáticos.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
+              <div>
+                <p className="text-sm font-medium">Criar pedido automaticamente na venda</p>
+                <p className="text-xs text-muted-foreground">Ative só depois de validar com o pedido de teste.</p>
+              </div>
+              <Switch checked={autoOrder} onCheckedChange={(v) => void toggleAuto(v)} disabled={!contatoId.trim()} />
+            </div>
+
+            <Button variant="outline" size="sm" onClick={() => void testOrder()} disabled={testingOrder || !contatoId.trim()}>
+              {testingOrder ? 'Criando…' : 'Criar pedido de teste (kit 3 meses)'}
+            </Button>
           </CardContent>
         </Card>
       ) : null}

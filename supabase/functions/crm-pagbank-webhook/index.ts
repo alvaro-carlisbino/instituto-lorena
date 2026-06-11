@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { parsePagBankNotification } from '../_shared/pagbank.ts'
+import { blingCreateSaleOrder } from '../_shared/bling.ts'
 
 // Webhook de pagamento do PagBank. Quando o pagamento confirma, move o lead para a
 // etapa "Pago" do funil e registra a venda. Idempotente via webhook_jobs. Só age
@@ -160,6 +161,58 @@ Deno.serve(async (req) => {
     })
   } catch {
     // ignore
+  }
+
+  // Pedido automático no Bling (best-effort; só roda se auto_order_enabled e o lead tem kit).
+  if (tenantId) {
+    try {
+      const { data: blingRow } = await admin
+        .from('tenant_integrations')
+        .select('bling')
+        .eq('tenant_id', tenantId)
+        .maybeSingle()
+      const blingCfg = ((blingRow as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+      if (blingCfg.auto_order_enabled === true) {
+        const { data: chk } = await admin
+          .from('pagbank_checkouts')
+          .select('kit, amount_cents')
+          .eq('lead_id', leadId)
+          .eq('status', 'paid')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        const kit = (chk as { kit?: string } | null)?.kit
+        if (kit) {
+          try {
+            const out = await blingCreateSaleOrder(admin, tenantId, {
+              kit: String(kit),
+              amountCents: Number((chk as { amount_cents?: number }).amount_cents ?? 0),
+            })
+            await insertInteraction(admin, {
+              leadId,
+              patientName: String(l.patient_name ?? 'Cliente'),
+              channel: 'system',
+              direction: 'system',
+              author: 'Bling',
+              content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`,
+              tenantId,
+            })
+          } catch (e) {
+            await insertInteraction(admin, {
+              leadId,
+              patientName: String(l.patient_name ?? 'Cliente'),
+              channel: 'system',
+              direction: 'system',
+              author: 'Bling',
+              content: `⚠️ Não foi possível criar o pedido no Bling automaticamente: ${(e instanceof Error ? e.message : String(e)).slice(0, 180)}`,
+              tenantId,
+            })
+          }
+        }
+      }
+    } catch {
+      // best-effort
+    }
   }
 
   await markDone()

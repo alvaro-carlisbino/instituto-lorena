@@ -234,6 +234,60 @@ export async function buildBlingCatalog(
   }
 }
 
+// Mapa padrão kit -> frascos a abater (3 meses leva o 4º grátis).
+const DEFAULT_KIT_BOTTLES: Record<string, number> = { '1_mes': 1, '3_meses': 4, '5_meses': 5 }
+const DEFAULT_KIT_PRODUCT_ID = '16322942669' // "Tricopill - Suplemento Capilar" (frasco base)
+
+const KIT_LABEL: Record<string, string> = {
+  '1_mes': 'Tricopill 1 mês (1 frasco)',
+  '3_meses': 'Tricopill 3 meses (3+1 frascos)',
+  '5_meses': 'Tricopill 5 meses (5 frascos)',
+}
+
+/**
+ * Cria um pedido de venda no Bling para uma venda do Tricopill.
+ * Usa um contato padrão configurado (tenant_integrations.bling.default_contato_id),
+ * o frasco base (kit_product_id) e abate frascos conforme o kit. Valor = valor pago.
+ */
+export async function blingCreateSaleOrder(
+  admin: SupabaseClient,
+  tenantId: string,
+  args: { kit: string; amountCents: number; customerName?: string },
+): Promise<{ orderId: string | null; bottles: number }> {
+  const token = await getValidBlingToken(admin, tenantId)
+  if (!token) throw new Error('bling_nao_conectado')
+
+  const { data } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', tenantId).maybeSingle()
+  const cfg = ((data as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+  const contatoId = cfg.default_contato_id != null ? String(cfg.default_contato_id).trim() : ''
+  if (!contatoId) throw new Error('bling_default_contato_nao_configurado')
+
+  const productId = cfg.kit_product_id != null && String(cfg.kit_product_id).trim()
+    ? String(cfg.kit_product_id).trim()
+    : DEFAULT_KIT_PRODUCT_ID
+  const bottlesMap = (cfg.kit_bottles && typeof cfg.kit_bottles === 'object'
+    ? (cfg.kit_bottles as Record<string, unknown>)
+    : {}) as Record<string, unknown>
+  const bottles = Number(bottlesMap[args.kit] ?? DEFAULT_KIT_BOTTLES[args.kit] ?? 1) || 1
+
+  const totalReais = Math.round(args.amountCents) / 100
+  const valorUnit = Math.round((totalReais / bottles) * 100) / 100
+
+  const payload = {
+    contato: { id: Number(contatoId) || contatoId },
+    itens: [
+      {
+        produto: { id: Number(productId) || productId },
+        descricao: KIT_LABEL[args.kit] ?? `Tricopill ${args.kit}`,
+        quantidade: bottles,
+        valor: valorUnit,
+      },
+    ],
+  }
+  const orderId = await blingCreateOrder(token, payload)
+  return { orderId, bottles }
+}
+
 /** Cria um pedido de venda no Bling. Retorna o id do pedido criado. */
 export async function blingCreateOrder(token: string, payload: Record<string, unknown>): Promise<string | null> {
   const res = await blingFetch(token, `/pedidos/vendas`, { method: 'POST', body: JSON.stringify(payload) })

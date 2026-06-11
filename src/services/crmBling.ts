@@ -53,6 +53,41 @@ export async function fetchBlingCatalog(refresh = false): Promise<{ items: Bling
   return { items: Array.isArray(p.items) ? p.items : [], fetchedAt: p.fetchedAt ?? null }
 }
 
+async function invokeBling(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!supabase) throw new Error('Sistema não configurado.')
+  const { data, error } = await supabase.functions.invoke('crm-bling', { body })
+  if (error) {
+    const ctx = (error as { context?: { body?: unknown } }).context
+    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
+    throw new Error(String(msg || 'Falha na operação Bling'))
+  }
+  const p = (data ?? {}) as Record<string, unknown>
+  if (p.ok !== true) throw new Error(String(p.message || p.error || 'Falha na operação Bling'))
+  return p
+}
+
+export type BlingOrderConfig = { defaultContatoId: string; autoOrderEnabled: boolean }
+
+export async function getBlingOrderConfig(): Promise<BlingOrderConfig> {
+  const p = await invokeBling({ action: 'get_order_config' })
+  return {
+    defaultContatoId: String(p.default_contato_id ?? ''),
+    autoOrderEnabled: p.auto_order_enabled === true,
+  }
+}
+
+export async function setBlingOrderConfig(patch: { defaultContatoId?: string; autoOrderEnabled?: boolean }): Promise<void> {
+  const body: Record<string, unknown> = { action: 'set_order_config' }
+  if (patch.defaultContatoId !== undefined) body.default_contato_id = patch.defaultContatoId
+  if (patch.autoOrderEnabled !== undefined) body.auto_order_enabled = patch.autoOrderEnabled
+  await invokeBling(body)
+}
+
+export async function createBlingTestOrder(kit: string): Promise<{ orderId: string | null; bottles: number }> {
+  const p = await invokeBling({ action: 'create_test_order', kit })
+  return { orderId: p.orderId != null ? String(p.orderId) : null, bottles: Number(p.bottles ?? 0) }
+}
+
 /** Inicia o OAuth: pede a URL de autorização do Bling e redireciona o navegador. */
 export async function startBlingConnect(returnUrl: string): Promise<void> {
   if (!supabase) throw new Error('Sistema não configurado.')
