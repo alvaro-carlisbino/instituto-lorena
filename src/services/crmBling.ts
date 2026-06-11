@@ -29,6 +29,30 @@ export async function fetchBlingStatus(): Promise<BlingStatus> {
   }
 }
 
+export type BlingCatalogItem = {
+  id: string
+  nome: string
+  codigo: string
+  preco: number
+  estoque: number | null
+}
+
+/** Lista o catálogo do Bling do polo ativo (com opção de forçar atualização). */
+export async function fetchBlingCatalog(refresh = false): Promise<{ items: BlingCatalogItem[]; fetchedAt: string | null }> {
+  if (!supabase) return { items: [], fetchedAt: null }
+  const { data, error } = await supabase.functions.invoke('crm-bling', {
+    body: { action: 'list_products', refresh },
+  })
+  if (error) {
+    const ctx = (error as { context?: { body?: unknown } }).context
+    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
+    throw new Error(String(msg || 'Falha ao listar catálogo'))
+  }
+  const p = (data ?? {}) as { ok?: boolean; items?: BlingCatalogItem[]; fetchedAt?: string; message?: string }
+  if (!p.ok) throw new Error(String(p.message || 'Falha ao listar catálogo'))
+  return { items: Array.isArray(p.items) ? p.items : [], fetchedAt: p.fetchedAt ?? null }
+}
+
 /** Inicia o OAuth: pede a URL de autorização do Bling e redireciona o navegador. */
 export async function startBlingConnect(returnUrl: string): Promise<void> {
   if (!supabase) throw new Error('Sistema não configurado.')

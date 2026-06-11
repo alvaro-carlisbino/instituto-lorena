@@ -31,6 +31,7 @@ import {
 } from '../_shared/crmAiOpsExecutor.ts'
 import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
+import { buildBlingCatalog } from '../_shared/bling.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
 
@@ -651,6 +652,16 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Catálogo Bling (fonte da verdade de produto/estoque) para os bots de VENDAS.
+    if (isSalesBot && tenantId) {
+      try {
+        const cat = await buildBlingCatalog(dbClient, tenantId)
+        if (cat.items.length) (snapshot as Record<string, unknown>).bling_catalog = cat.items
+      } catch {
+        // best-effort
+      }
+    }
+
     const focusHint =
       context.focus === 'analytics'
         ? 'O utilizador pediu ênfase em analytics, tendências da semana e números.'
@@ -719,6 +730,7 @@ Deno.serve(async (req) => {
       'Objetivo: entender a necessidade do cliente (queixa capilar, há quanto tempo, se já usou algo), apresentar o produto e os kits/preços (use SEMPRE os valores do PROMPT ADICIONAL — NUNCA invente preço, prazo, composição ou promessa de resultado), tirar dúvidas e conduzir à compra.',
       'Seja consultiva, não robótica: faça no máximo 1–2 perguntas por mensagem, conecte o benefício à queixa do cliente e crie um próximo passo claro.',
       'Use APENAS informações do PROMPT ADICIONAL e do snapshot. Se não souber algo (ex.: contraindicação médica específica), seja honesta e ofereça encaminhar para um especialista — não invente.',
+      'Quando existir snapshot.bling_catalog, é o catálogo REAL do Bling (nome, código, preço e estoque). Use-o como fonte da verdade de produtos e disponibilidade: não ofereça item que não esteja no catálogo; se o estoque estiver 0 (ou null = não controlado), não prometa pronta-entrega — avise que vai confirmar o prazo. Os preços dos KITS/link de pagamento seguem o PROMPT ADICIONAL.',
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
       'FECHAMENTO (gerar link de pagamento): quando o cliente CONFIRMAR que quer comprar um kit específico, inclua na MESMA resposta o bloco <<<CRM_OPS>>>{"version":1,"ops":[{"type":"pagbank_checkout","kit":"KIT"}]}, onde KIT é "1_mes", "3_meses" ou "5_meses" conforme o escolhido. O servidor cria o link de pagamento (Pix ou cartão) e o ANEXA automaticamente à sua mensagem — então escreva uma frase calorosa de fechamento (ex.: "Perfeito! Já tô gerando seu link de pagamento 💚"), SEM inventar URL, valor de link nem código. A tag <<<CRM_OPS>>> NUNCA aparece para o cliente.',
       'Só gere o link quando o cliente JÁ escolheu o kit e quer pagar. Se ainda está em dúvida, continue a conversa sem gerar link.',

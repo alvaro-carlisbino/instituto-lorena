@@ -8,7 +8,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useTenant } from '@/context/TenantContext'
-import { fetchBlingStatus, startBlingConnect, disconnectBling, type BlingStatus } from '@/services/crmBling'
+import {
+  fetchBlingStatus,
+  startBlingConnect,
+  disconnectBling,
+  fetchBlingCatalog,
+  type BlingStatus,
+  type BlingCatalogItem,
+} from '@/services/crmBling'
 
 export function IntegrationsPage() {
   const { tenant } = useTenant()
@@ -17,6 +24,21 @@ export function IntegrationsPage() {
   const [bling, setBling] = useState<BlingStatus>({ connected: false, connectedAt: null, accountName: null })
   const [loading, setLoading] = useState(false)
   const [connecting, setConnecting] = useState(false)
+  const [catalog, setCatalog] = useState<BlingCatalogItem[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
+
+  const loadCatalog = async (refresh = false) => {
+    setCatalogLoading(true)
+    try {
+      const out = await fetchBlingCatalog(refresh)
+      setCatalog(out.items)
+      if (refresh) toast.success(`Catálogo atualizado (${out.items.length} produtos).`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao listar catálogo')
+    } finally {
+      setCatalogLoading(false)
+    }
+  }
 
   useEffect(() => {
     // Volta do OAuth do Bling (?bling=ok|erro)
@@ -36,7 +58,10 @@ export function IntegrationsPage() {
     if (!isSalesPolo) return
     setLoading(true)
     fetchBlingStatus()
-      .then(setBling)
+      .then((s) => {
+        setBling(s)
+        if (s.connected) void loadCatalog(false)
+      })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao ler status'))
       .finally(() => setLoading(false))
   }, [isSalesPolo])
@@ -138,6 +163,54 @@ export function IntegrationsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Catálogo Bling */}
+      {bling.connected ? (
+        <Card className="mt-4">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Package className="size-4 text-primary" weight="bold" /> Catálogo do Bling
+              <Badge variant="secondary">{catalog.length}</Badge>
+            </CardTitle>
+            <Button size="sm" variant="ghost" onClick={() => void loadCatalog(true)} disabled={catalogLoading}>
+              {catalogLoading ? 'Atualizando…' : 'Atualizar do Bling'}
+            </Button>
+          </CardHeader>
+          <CardContent className="p-0">
+            {catalog.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                {catalogLoading ? 'Carregando…' : 'Nenhum produto encontrado no Bling.'}
+              </div>
+            ) : (
+              <div className="divide-y divide-border/40">
+                {catalog.map((p) => (
+                  <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{p.nome}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {p.codigo ? `Cód. ${p.codigo} · ` : ''}
+                        {p.preco ? p.preco.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'sem preço'}
+                      </p>
+                    </div>
+                    <Badge
+                      variant="secondary"
+                      className={
+                        p.estoque == null
+                          ? ''
+                          : p.estoque <= 0
+                            ? 'bg-red-500/15 text-red-600'
+                            : 'bg-emerald-500/15 text-emerald-600'
+                      }
+                    >
+                      {p.estoque == null ? 'estoque n/d' : `${p.estoque} un`}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
     </AppLayout>
   )
 }

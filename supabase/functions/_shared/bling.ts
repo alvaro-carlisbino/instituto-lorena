@@ -152,6 +152,88 @@ export async function blingListProducts(
   return Array.isArray(parsed.data) ? parsed.data : []
 }
 
+export type BlingCatalogItem = {
+  id: string
+  nome: string
+  codigo: string
+  preco: number
+  estoque: number | null
+}
+
+function num(v: unknown): number {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Saldos de estoque por id de produto (best-effort). */
+async function blingStockMap(token: string, ids: string[]): Promise<Record<string, number>> {
+  const map: Record<string, number> = {}
+  if (!ids.length) return map
+  try {
+    const qs = ids.slice(0, 100).map((id) => `idsProdutos[]=${encodeURIComponent(id)}`).join('&')
+    const res = await blingFetch(token, `/estoques/saldos?${qs}`)
+    if (!res.ok) return map
+    const parsed = JSON.parse((await res.text()) || '{}') as { data?: Array<Record<string, unknown>> }
+    for (const row of parsed.data ?? []) {
+      const pid = String((row.produto as { id?: unknown } | undefined)?.id ?? row.idProduto ?? '')
+      const saldo = num(row.saldoVirtualTotal ?? row.saldoFisicoTotal ?? row.saldo)
+      if (pid) map[pid] = saldo
+    }
+  } catch {
+    // ignore
+  }
+  return map
+}
+
+/**
+ * Catálogo compacto do Bling (nome, código, preço, estoque) com cache em
+ * tenant_integrations.bling.catalog_cache. Best-effort: em erro devolve o cache
+ * (ou vazio) sem quebrar o fluxo da IA.
+ */
+export async function buildBlingCatalog(
+  admin: SupabaseClient,
+  tenantId: string,
+  opts?: { forceRefresh?: boolean; maxAgeMs?: number },
+): Promise<{ items: BlingCatalogItem[]; fetchedAt: string | null; fromCache: boolean }> {
+  const maxAgeMs = opts?.maxAgeMs ?? 10 * 60 * 1000
+  const { data } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', tenantId).maybeSingle()
+  const cfg = ((data as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+  const cache = Array.isArray(cfg.catalog_cache) ? (cfg.catalog_cache as BlingCatalogItem[]) : []
+  const fetchedAt = typeof cfg.catalog_fetched_at === 'string' ? cfg.catalog_fetched_at : null
+  const fresh = fetchedAt && Date.now() - Date.parse(fetchedAt) < maxAgeMs
+
+  if (!opts?.forceRefresh && fresh) return { items: cache, fetchedAt, fromCache: true }
+
+  try {
+    const token = await getValidBlingToken(admin, tenantId)
+    if (!token) return { items: cache, fetchedAt, fromCache: true }
+    const raw = await blingListProducts(token, { limite: 100 })
+    const ids = raw.map((p) => String(p.id ?? '')).filter(Boolean)
+    const stock = await blingStockMap(token, ids)
+    const items: BlingCatalogItem[] = raw.map((p) => {
+      const id = String(p.id ?? '')
+      const est = (p.estoque ?? {}) as Record<string, unknown>
+      const estoqueFromProduct = p.saldoVirtualTotal ?? p.saldoFisicoTotal ?? est.saldoVirtualTotal ?? est.saldoFisicoTotal
+      const estoque = id in stock ? stock[id] : estoqueFromProduct != null ? num(estoqueFromProduct) : null
+      return {
+        id,
+        nome: String(p.nome ?? p.descricao ?? '').slice(0, 120),
+        codigo: String(p.codigo ?? p.sku ?? ''),
+        preco: num(p.preco),
+        estoque,
+      }
+    })
+    const nowIso = new Date().toISOString()
+    await admin.from('tenant_integrations').upsert({
+      tenant_id: tenantId,
+      bling: { ...cfg, catalog_cache: items, catalog_fetched_at: nowIso },
+    })
+    return { items, fetchedAt: nowIso, fromCache: false }
+  } catch {
+    return { items: cache, fetchedAt, fromCache: true }
+  }
+}
+
 /** Cria um pedido de venda no Bling. Retorna o id do pedido criado. */
 export async function blingCreateOrder(token: string, payload: Record<string, unknown>): Promise<string | null> {
   const res = await blingFetch(token, `/pedidos/vendas`, { method: 'POST', body: JSON.stringify(payload) })
