@@ -7,7 +7,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
  * no WhatsApp; o webhook crm-pagbank-webhook move o lead para "Pago" quando confirma.
  */
 
-export type PagBankConfig = { token: string; baseUrl: string; env: 'sandbox' | 'prod' }
+export type PagBankConfig = { token: string; baseUrl: string; env: 'sandbox' | 'prod'; pixOnly: boolean }
 
 const PROD_BASE = 'https://api.pagseguro.com'
 const SANDBOX_BASE = 'https://sandbox.api.pagseguro.com'
@@ -35,6 +35,7 @@ export async function readPagBankConfig(
   let token = (Deno.env.get('PAGBANK_API_TOKEN') ?? '').trim()
   let env = (Deno.env.get('PAGBANK_ENV') ?? '').trim().toLowerCase()
   let baseUrl = (Deno.env.get('PAGBANK_BASE_URL') ?? '').trim()
+  let pixOnly = (Deno.env.get('PAGBANK_PIX_ONLY') ?? '').trim().toLowerCase() === 'true'
 
   if (tenantId) {
     try {
@@ -48,6 +49,7 @@ export async function readPagBankConfig(
         if (typeof cfg.token === 'string' && cfg.token.trim()) token = cfg.token.trim()
         if (typeof cfg.env === 'string' && cfg.env.trim()) env = cfg.env.trim().toLowerCase()
         if (typeof cfg.base_url === 'string' && cfg.base_url.trim()) baseUrl = cfg.base_url.trim()
+        if (typeof cfg.pix_only === 'boolean') pixOnly = cfg.pix_only
       }
     } catch {
       // best-effort; cai nos secrets globais
@@ -57,7 +59,7 @@ export async function readPagBankConfig(
   if (!token) return null
   const resolvedEnv: 'sandbox' | 'prod' = env === 'prod' ? 'prod' : 'sandbox'
   if (!baseUrl) baseUrl = resolvedEnv === 'prod' ? PROD_BASE : SANDBOX_BASE
-  return { token, baseUrl: baseUrl.replace(/\/$/, ''), env: resolvedEnv }
+  return { token, baseUrl: baseUrl.replace(/\/$/, ''), env: resolvedEnv, pixOnly }
 }
 
 type LeadForCheckout = {
@@ -125,7 +127,7 @@ export async function createPagBankCheckout(
     customer_modifiable: true,
     customer: { name: customerName },
     items: [{ reference_id: kitKey || 'avulso', name: label, quantity: 1, unit_amount: amountCents }],
-    payment_methods: [{ type: 'PIX' }, { type: 'CREDIT_CARD' }],
+    payment_methods: cfg.pixOnly ? [{ type: 'PIX' }] : [{ type: 'PIX' }, { type: 'CREDIT_CARD' }],
     soft_descriptor: 'TRICOPILL',
     expiration_date: expIso,
     notification_urls: [webhookUrl],
