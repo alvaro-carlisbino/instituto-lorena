@@ -7,10 +7,11 @@ import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { useTenant } from '@/context/TenantContext'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useTenant } from '@/context/TenantContext'
 import {
   fetchBlingStatus,
   startBlingConnect,
@@ -22,11 +23,13 @@ import {
   type BlingStatus,
   type BlingCatalogItem,
 } from '@/services/crmBling'
+import { getRedeConfig, setRedeConfig, type RedeConfigStatus } from '@/services/crmRede'
 
 export function IntegrationsPage() {
   const { tenant } = useTenant()
   const isSalesPolo = tenant.poloType === 'sales'
 
+  // === Bling (só polo de vendas) ===
   const [bling, setBling] = useState<BlingStatus>({ connected: false, connectedAt: null, accountName: null })
   const [loading, setLoading] = useState(false)
   const [connecting, setConnecting] = useState(false)
@@ -36,6 +39,27 @@ export function IntegrationsPage() {
   const [autoOrder, setAutoOrder] = useState(false)
   const [savingCfg, setSavingCfg] = useState(false)
   const [testingOrder, setTestingOrder] = useState(false)
+
+  // === Rede (ambos os polos) ===
+  const [rede, setRede] = useState<RedeConfigStatus>({ configured: false, env: 'sandbox', hasLinkPath: false })
+  const [redePv, setRedePv] = useState('')
+  const [redeToken, setRedeToken] = useState('')
+  const [redeEnv, setRedeEnv] = useState('sandbox')
+  const [redeLinkPath, setRedeLinkPath] = useState('')
+  const [savingRede, setSavingRede] = useState(false)
+
+  const loadCatalog = async (refresh = false) => {
+    setCatalogLoading(true)
+    try {
+      const out = await fetchBlingCatalog(refresh)
+      setCatalog(out.items)
+      if (refresh) toast.success(`Catálogo atualizado (${out.items.length} produtos).`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao listar catálogo')
+    } finally {
+      setCatalogLoading(false)
+    }
+  }
 
   const loadOrderConfig = async () => {
     try {
@@ -82,21 +106,28 @@ export function IntegrationsPage() {
     }
   }
 
-  const loadCatalog = async (refresh = false) => {
-    setCatalogLoading(true)
+  const saveRede = async () => {
+    setSavingRede(true)
     try {
-      const out = await fetchBlingCatalog(refresh)
-      setCatalog(out.items)
-      if (refresh) toast.success(`Catálogo atualizado (${out.items.length} produtos).`)
+      await setRedeConfig({
+        pv: redePv.trim(),
+        token: redeToken.trim(),
+        env: redeEnv,
+        linkPath: redeLinkPath.trim(),
+      })
+      toast.success('Rede salva.')
+      const cfg = await getRedeConfig()
+      setRede(cfg)
+      setRedeEnv(cfg.env)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao listar catálogo')
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar Rede')
     } finally {
-      setCatalogLoading(false)
+      setSavingRede(false)
     }
   }
 
   useEffect(() => {
-    // Volta do OAuth do Bling (?bling=ok|erro)
+    // OAuth Bling de volta (?bling=ok|erro)
     const params = new URLSearchParams(window.location.search)
     const b = params.get('bling')
     if (b === 'ok') toast.success('Bling conectado com sucesso!')
@@ -110,6 +141,13 @@ export function IntegrationsPage() {
   }, [])
 
   useEffect(() => {
+    // Rede em qualquer polo
+    getRedeConfig()
+      .then((cfg) => {
+        setRede(cfg)
+        setRedeEnv(cfg.env)
+      })
+      .catch(() => {})
     if (!isSalesPolo) return
     setLoading(true)
     fetchBlingStatus()
@@ -123,20 +161,6 @@ export function IntegrationsPage() {
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao ler status'))
       .finally(() => setLoading(false))
   }, [isSalesPolo])
-
-  if (!isSalesPolo) {
-    return (
-      <AppLayout title="Integrações">
-        <PageHeader title="Integrações" />
-        <Card className="mt-4">
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            As integrações (Bling, Rede) são do polo de vendas. Troque para o polo <strong>Tricopill</strong> no
-            seletor de polo (topo da barra lateral).
-          </CardContent>
-        </Card>
-      </AppLayout>
-    )
-  }
 
   const handleConnect = async () => {
     setConnecting(true)
@@ -160,70 +184,109 @@ export function IntegrationsPage() {
 
   return (
     <AppLayout title="Integrações">
-      <PageHeader title="Integrações" description="Conecte o ERP e os meios de pagamento do Tricopill" />
+      <PageHeader title="Integrações" description="Conecte ERP e meios de pagamento" />
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
-        {/* Bling */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between gap-2 text-sm">
-              <span className="flex items-center gap-2">
-                <Package className="size-4 text-primary" weight="bold" /> Bling (ERP)
-              </span>
-              <Badge
-                variant={bling.connected ? 'default' : 'secondary'}
-                className={bling.connected ? 'bg-emerald-500/15 text-emerald-600' : ''}
-              >
-                {loading ? '...' : bling.connected ? 'Conectado' : 'Desconectado'}
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Catálogo e estoque como fonte da verdade para a IA, e criação automática do pedido de venda quando o
-              pagamento confirma.
-            </p>
-            {bling.connected ? (
-              <div className="space-y-3">
-                {bling.connectedAt ? (
-                  <p className="text-xs text-muted-foreground">
-                    Conectado em {new Date(bling.connectedAt).toLocaleString('pt-BR')}
-                    {bling.accountName ? ` · ${bling.accountName}` : ''}
-                  </p>
-                ) : null}
-                <Button variant="outline" size="sm" onClick={() => void handleDisconnect()}>
-                  <Plugs className="mr-1.5 size-4" /> Desconectar
+        {/* Bling — só polo de vendas */}
+        {isSalesPolo ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between gap-2 text-sm">
+                <span className="flex items-center gap-2">
+                  <Package className="size-4 text-primary" weight="bold" /> Bling (ERP)
+                </span>
+                <Badge
+                  variant={bling.connected ? 'default' : 'secondary'}
+                  className={bling.connected ? 'bg-emerald-500/15 text-emerald-600' : ''}
+                >
+                  {loading ? '...' : bling.connected ? 'Conectado' : 'Desconectado'}
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Catálogo e estoque como fonte da verdade para a IA, e criação automática do pedido de venda quando o
+                pagamento confirma.
+              </p>
+              {bling.connected ? (
+                <div className="space-y-3">
+                  {bling.connectedAt ? (
+                    <p className="text-xs text-muted-foreground">
+                      Conectado em {new Date(bling.connectedAt).toLocaleString('pt-BR')}
+                    </p>
+                  ) : null}
+                  <Button variant="outline" size="sm" onClick={() => void handleDisconnect()}>
+                    <Plugs className="mr-1.5 size-4" /> Desconectar
+                  </Button>
+                </div>
+              ) : (
+                <Button onClick={() => void handleConnect()} disabled={connecting}>
+                  <PlugsConnected className="mr-1.5 size-4" />
+                  {connecting ? 'Redirecionando…' : 'Conectar Bling'}
                 </Button>
-              </div>
-            ) : (
-              <Button onClick={() => void handleConnect()} disabled={connecting}>
-                <PlugsConnected className="mr-1.5 size-4" />
-                {connecting ? 'Redirecionando…' : 'Conectar Bling'}
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
 
-        {/* Rede / Itaú (cartão) */}
+        {/* Rede / Itaú (cartão) — ambos os polos */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-2 text-sm">
               <span className="flex items-center gap-2">
                 <CreditCard className="size-4 text-primary" weight="bold" /> Rede / Itaú (cartão)
               </span>
-              <Badge variant="secondary">Em preparação</Badge>
+              <Badge
+                variant={rede.configured ? 'default' : 'secondary'}
+                className={rede.configured ? 'bg-emerald-500/15 text-emerald-600' : ''}
+              >
+                {rede.configured ? 'Configurada' : 'Pendente'}
+              </Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Link de pagamento via cartão de crédito pela Rede (e.Rede). Pix continua pelo PagBank. Em breve.
+              Link de pagamento por cartão (Rede/Itaú). {isSalesPolo ? 'No Tricopill o Pix continua pelo PagBank.' : ''}
             </p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="rede-pv">PV (filiação)</Label>
+                <Input id="rede-pv" value={redePv} onChange={(e) => setRedePv(e.target.value)} placeholder="número do PV" className="font-mono text-xs" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="rede-env">Ambiente</Label>
+                <Select value={redeEnv} onValueChange={(v) => setRedeEnv(v ?? 'sandbox')}>
+                  <SelectTrigger id="rede-env">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sandbox">Sandbox</SelectItem>
+                    <SelectItem value="prod">Produção</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="rede-token">Token de integração</Label>
+              <Input id="rede-token" type="password" value={redeToken} onChange={(e) => setRedeToken(e.target.value)} placeholder="token (sensível)" className="font-mono text-xs" autoComplete="off" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="rede-path">Endpoint do link de pagamento (quando confirmado)</Label>
+              <Input id="rede-path" value={redeLinkPath} onChange={(e) => setRedeLinkPath(e.target.value)} placeholder="ex.: /v1/links" className="font-mono text-xs" />
+              <p className="text-[0.7rem] text-muted-foreground">
+                A e.Rede padrão é de transações (exige dados do cartão). Para gerar um LINK é preciso o produto “Link de
+                Pagamento” da Rede — informe aqui o caminho do endpoint para ativar a geração.
+              </p>
+            </div>
+            <Button size="sm" onClick={() => void saveRede()} disabled={savingRede}>
+              {savingRede ? 'Salvando…' : 'Salvar Rede'}
+            </Button>
           </CardContent>
         </Card>
       </div>
 
       {/* Catálogo Bling */}
-      {bling.connected ? (
+      {isSalesPolo && bling.connected ? (
         <Card className="mt-4">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="flex items-center gap-2 text-sm">
@@ -240,7 +303,7 @@ export function IntegrationsPage() {
                 {catalogLoading ? 'Carregando…' : 'Nenhum produto encontrado no Bling.'}
               </div>
             ) : (
-              <div className="divide-y divide-border/40">
+              <div className="max-h-96 divide-y divide-border/40 overflow-y-auto">
                 {catalog.map((p) => (
                   <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
                     <div className="min-w-0 flex-1">
@@ -253,11 +316,7 @@ export function IntegrationsPage() {
                     <Badge
                       variant="secondary"
                       className={
-                        p.estoque == null
-                          ? ''
-                          : p.estoque <= 0
-                            ? 'bg-red-500/15 text-red-600'
-                            : 'bg-emerald-500/15 text-emerald-600'
+                        p.estoque == null ? '' : p.estoque <= 0 ? 'bg-red-500/15 text-red-600' : 'bg-emerald-500/15 text-emerald-600'
                       }
                     >
                       {p.estoque == null ? 'estoque n/d' : `${p.estoque} un`}
@@ -270,8 +329,8 @@ export function IntegrationsPage() {
         </Card>
       ) : null}
 
-      {/* Pedido automático no Bling */}
-      {bling.connected ? (
+      {/* Pedido automático Bling */}
+      {isSalesPolo && bling.connected ? (
         <Card className="mt-4">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
@@ -280,29 +339,21 @@ export function IntegrationsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Quando o pagamento confirma, cria o pedido de venda no Bling com o frasco{' '}
-              <strong>Tricopill - Suplemento Capilar</strong> (1 / 4 / 5 frascos por kit) e valor igual ao pago.
+              Quando o pagamento confirma, cria o pedido com o frasco <strong>Tricopill - Suplemento Capilar</strong>{' '}
+              (1 / 4 / 5 frascos por kit) e valor igual ao pago.
             </p>
             <div className="space-y-1.5">
               <Label htmlFor="bl-contato">ID do contato padrão no Bling (cliente das vendas WhatsApp)</Label>
               <div className="flex gap-2">
-                <Input
-                  id="bl-contato"
-                  value={contatoId}
-                  onChange={(e) => setContatoId(e.target.value)}
-                  placeholder="ex.: 16322942669"
-                  className="font-mono text-xs"
-                />
+                <Input id="bl-contato" value={contatoId} onChange={(e) => setContatoId(e.target.value)} placeholder="ex.: 16322942669" className="font-mono text-xs" />
                 <Button size="sm" variant="outline" onClick={() => void saveContato()} disabled={savingCfg}>
                   {savingCfg ? 'Salvando…' : 'Salvar'}
                 </Button>
               </div>
               <p className="text-[0.7rem] text-muted-foreground">
-                Cadastre um contato no Bling (ex.: “Cliente WhatsApp Tricopill”) e cole o ID dele aqui. É o cliente
-                que vai constar nos pedidos automáticos.
+                Cadastre um contato no Bling (ex.: “Cliente WhatsApp Tricopill”) com CPF/CNPJ e cole o ID dele aqui.
               </p>
             </div>
-
             <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 p-3">
               <div>
                 <p className="text-sm font-medium">Criar pedido automaticamente na venda</p>
@@ -310,7 +361,6 @@ export function IntegrationsPage() {
               </div>
               <Switch checked={autoOrder} onCheckedChange={(v) => void toggleAuto(v)} disabled={!contatoId.trim()} />
             </div>
-
             <Button variant="outline" size="sm" onClick={() => void testOrder()} disabled={testingOrder || !contatoId.trim()}>
               {testingOrder ? 'Criando…' : 'Criar pedido de teste (kit 3 meses)'}
             </Button>
