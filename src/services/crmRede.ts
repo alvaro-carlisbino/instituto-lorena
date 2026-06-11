@@ -4,8 +4,17 @@ async function invoke(fn: string, body: Record<string, unknown>): Promise<Record
   if (!supabase) throw new Error('Sistema não configurado.')
   const { data, error } = await supabase.functions.invoke(fn, { body })
   if (error) {
-    const ctx = (error as { context?: { body?: unknown } }).context
-    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
+    // FunctionsHttpError: o corpo real vem no Response em error.context.
+    let msg = error.message
+    const ctx = (error as { context?: unknown }).context as { json?: () => Promise<unknown>; clone?: () => Response } | undefined
+    try {
+      if (ctx && typeof ctx.json === 'function') {
+        const b = (await (ctx.clone ? ctx.clone() : (ctx as unknown as Response)).json()) as { message?: string; error?: string }
+        msg = b?.message || b?.error || msg
+      }
+    } catch {
+      // ignore
+    }
     throw new Error(String(msg || 'Falha na operação'))
   }
   return (data ?? {}) as Record<string, unknown>
