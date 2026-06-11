@@ -1,76 +1,128 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
 /**
- * Rede / Itaú (e.Rede) — link de pagamento por CARTÃO.
- * Config por polo em tenant_integrations.rede: { pv, token, env?, base_url?, link_path? }.
- * Auth: Basic base64(pv:token).
- *
- * IMPORTANTE: a API e.Rede padrão é de TRANSAÇÕES (exige dados do cartão). Para um
- * LINK hospedado é preciso o produto "Link de Pagamento" da Rede e o endpoint correto.
- * Este módulo deixa o ponto de integração pronto e configurável (link_path) — gera o
- * link a partir do campo de retorno assim que credenciais + endpoint forem definidos.
+ * Rede / Itaú — produto "Link de Pagamento" (useredecloud).
+ * OAuth2 client_credentials: Basic(client_id:client_secret) -> access_token (Bearer).
+ * Criar link: POST /payment-link/v1/create com Bearer + header Company-number (PV).
+ * Config por polo em tenant_integrations.rede:
+ *   { client_id, client_secret, company_number, created_by?, env?, token_base?, pay_base?,
+ *     access_token?, token_expires_at? (cache) }
  */
 
-export type RedeConfig = {
-  pv: string
-  token: string
-  baseUrl: string
-  env: 'sandbox' | 'prod'
-  linkPath: string | null
-}
+const SANDBOX_TOKEN_BASE = 'https://rl7-sandbox-api.useredecloud.com.br'
+const SANDBOX_PAY_BASE = 'https://payments-apisandbox.useredecloud.com.br'
+const PROD_TOKEN_BASE = 'https://rl7-api.useredecloud.com.br'
+const PROD_PAY_BASE = 'https://payments-api.useredecloud.com.br'
 
-const PROD_BASE = 'https://api.userede.com.br'
-const SANDBOX_BASE = 'https://rede-sandbox.userede.com.br'
+export type RedeConfig = {
+  clientId: string
+  clientSecret: string
+  companyNumber: string
+  createdBy: string
+  env: 'sandbox' | 'prod'
+  tokenBase: string
+  payBase: string
+}
 
 export async function readRedeConfig(admin: SupabaseClient, tenantId: string): Promise<RedeConfig | null> {
   if (!tenantId) return null
   const { data } = await admin.from('tenant_integrations').select('rede').eq('tenant_id', tenantId).maybeSingle()
   const cfg = ((data as { rede?: Record<string, unknown> } | null)?.rede ?? {}) as Record<string, unknown>
-  const pv = typeof cfg.pv === 'string' ? cfg.pv.trim() : ''
-  const token = typeof cfg.token === 'string' ? cfg.token.trim() : ''
-  // Produto "Link de Pagamento" da Rede = OAuth2/Bearer: basta o token (PV é opcional).
-  if (!token) return null
+  const clientId = typeof cfg.client_id === 'string' ? cfg.client_id.trim() : ''
+  const clientSecret = typeof cfg.client_secret === 'string' ? cfg.client_secret.trim() : ''
+  const companyNumber = typeof cfg.company_number === 'string' ? cfg.company_number.trim() : ''
+  if (!clientId || !clientSecret || !companyNumber) return null
   const env: 'sandbox' | 'prod' = cfg.env === 'prod' ? 'prod' : 'sandbox'
-  const baseUrl = (typeof cfg.base_url === 'string' && cfg.base_url.trim()
-    ? cfg.base_url.trim()
-    : env === 'prod' ? PROD_BASE : SANDBOX_BASE).replace(/\/$/, '')
-  const linkPath = typeof cfg.link_path === 'string' && cfg.link_path.trim() ? cfg.link_path.trim() : null
-  return { pv, token, baseUrl, env, linkPath }
+  const tokenBase = (typeof cfg.token_base === 'string' && cfg.token_base.trim()
+    ? cfg.token_base.trim()
+    : env === 'prod' ? PROD_TOKEN_BASE : SANDBOX_TOKEN_BASE).replace(/\/$/, '')
+  const payBase = (typeof cfg.pay_base === 'string' && cfg.pay_base.trim()
+    ? cfg.pay_base.trim()
+    : env === 'prod' ? PROD_PAY_BASE : SANDBOX_PAY_BASE).replace(/\/$/, '')
+  const createdBy = typeof cfg.created_by === 'string' && cfg.created_by.trim() ? cfg.created_by.trim() : 'crm@institutolorena.com.br'
+  return { clientId, clientSecret, companyNumber, createdBy, env, tokenBase, payBase }
 }
 
-export type RedeLinkResult = { payLink: string; reference: string; amountCents: number }
+async function getRedeAccessToken(admin: SupabaseClient, tenantId: string, cfg: RedeConfig): Promise<string> {
+  const { data } = await admin.from('tenant_integrations').select('rede').eq('tenant_id', tenantId).maybeSingle()
+  const stored = ((data as { rede?: Record<string, unknown> } | null)?.rede ?? {}) as Record<string, unknown>
+  const cached = typeof stored.access_token === 'string' ? stored.access_token : ''
+  const exp = typeof stored.token_expires_at === 'string' ? Date.parse(stored.token_expires_at) : 0
+  if (cached && exp && Date.now() < exp) return cached
 
-/**
- * Gera um link de pagamento por cartão na Rede. Lança erro claro enquanto faltar
- * credencial (rede_nao_configurado) ou o endpoint do produto de link (rede_link_path_nao_configurado).
- */
+  const basic = btoa(`${cfg.clientId}:${cfg.clientSecret}`)
+  const res = await fetch(`${cfg.tokenBase}/oauth/token?grant_type=client_credentials`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json' },
+  })
+  const text = await res.text()
+  let parsed: { access_token?: string; expires_in?: number } = {}
+  try {
+    parsed = text ? JSON.parse(text) : {}
+  } catch {
+    parsed = {}
+  }
+  if (!res.ok || !parsed.access_token) throw new Error(`rede_token_${res.status}: ${text.slice(0, 200)}`)
+
+  const expiresAt = new Date(Date.now() + (Number(parsed.expires_in ?? 300) - 30) * 1000).toISOString()
+  await admin.from('tenant_integrations').upsert({
+    tenant_id: tenantId,
+    rede: { ...stored, access_token: parsed.access_token, token_expires_at: expiresAt },
+  })
+  return parsed.access_token
+}
+
+export type RedeLinkResult = { payLink: string; reference: string; amountCents: number; id: string | null }
+
+function findUrlDeep(node: unknown): string | null {
+  if (typeof node === 'string') return /^https?:\/\//.test(node) ? node : null
+  if (!node || typeof node !== 'object') return null
+  const obj = node as Record<string, unknown>
+  for (const key of ['paymentLink', 'shortUrl', 'url', 'link', 'paymentUrl']) {
+    const v = obj[key]
+    if (typeof v === 'string' && /^https?:\/\//.test(v)) return v
+  }
+  for (const v of Object.values(obj)) {
+    const found = findUrlDeep(v)
+    if (found) return found
+  }
+  return null
+}
+
+/** Cria um link de pagamento por cartão na Rede e devolve a URL. */
 export async function createRedePaymentLink(
   admin: SupabaseClient,
-  args: { tenantId: string; amountCents: number; description: string; reference: string },
+  args: { tenantId: string; amountCents: number; description: string; reference: string; installments?: number },
 ): Promise<RedeLinkResult> {
   const cfg = await readRedeConfig(admin, args.tenantId)
   if (!cfg) throw new Error('rede_nao_configurado')
-  if (!cfg.linkPath) throw new Error('rede_link_path_nao_configurado')
 
   const amountCents = Math.round(args.amountCents)
   if (!Number.isFinite(amountCents) || amountCents < 100) throw new Error('rede_valor_invalido')
+  const amount = Math.round(amountCents) / 100 // reais (decimal)
 
-  // Link de Pagamento da Rede = Bearer. Payload provisório (ajustamos pelo retorno real).
+  // expirationDate no formato MM/DD/YYYY, +7 dias.
+  const exp = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  const mm = String(exp.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(exp.getUTCDate()).padStart(2, '0')
+  const expirationDate = `${mm}/${dd}/${exp.getUTCFullYear()}`
+
+  const token = await getRedeAccessToken(admin, args.tenantId, cfg)
   const body = {
-    ...(cfg.pv ? { pv: cfg.pv } : {}),
-    reference: args.reference,
-    amount: amountCents,
-    description: String(args.description ?? '').slice(0, 100),
-    kind: 'credit',
+    amount,
+    expirationDate,
+    installments: Math.max(1, Math.min(12, args.installments ?? 1)),
+    createdBy: cfg.createdBy,
+    paymentOptions: ['credit'],
+    description: String(args.description ?? 'Pagamento').slice(0, 100),
+    comments: args.reference.slice(0, 100),
   }
-  // link_path pode ser um caminho (/v1/...) ou a URL completa (https://...).
-  const url = cfg.linkPath!.startsWith('http') ? cfg.linkPath! : `${cfg.baseUrl}${cfg.linkPath}`
-  const res = await fetch(url, {
+  const res = await fetch(`${cfg.payBase}/payment-link/v1/create`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${cfg.token}`,
+      Authorization: `Bearer ${token}`,
+      'Company-number': cfg.companyNumber,
       'Content-Type': 'application/json',
-      Accept: 'application/json',
     },
     body: JSON.stringify(body),
   })
@@ -83,15 +135,9 @@ export async function createRedePaymentLink(
   }
   if (!res.ok) throw new Error(`rede_${res.status}: ${text.slice(0, 300)}`)
 
-  // Procura o link de pagamento em campos comuns de retorno.
-  const links = (parsed.links as Array<{ rel?: string; href?: string }> | undefined) ?? []
-  const payLink =
-    (typeof parsed.paymentUrl === 'string' && parsed.paymentUrl) ||
-    (typeof parsed.url === 'string' && parsed.url) ||
-    (typeof parsed.returnUrl === 'string' && parsed.returnUrl) ||
-    links.find((l) => String(l.rel ?? '').toUpperCase().includes('PAY'))?.href ||
-    ''
-  if (!payLink) throw new Error('rede_sem_link_no_retorno')
+  const payLink = findUrlDeep(parsed)
+  if (!payLink) throw new Error(`rede_sem_link_no_retorno: ${text.slice(0, 200)}`)
+  const id = typeof parsed.id === 'string' ? parsed.id : typeof parsed.paymentLinkId === 'string' ? parsed.paymentLinkId : null
 
-  return { payLink, reference: args.reference, amountCents }
+  return { payLink, reference: args.reference, amountCents, id }
 }

@@ -13,26 +13,26 @@ async function invokeRede(body: Record<string, unknown>): Promise<Record<string,
   return p
 }
 
-export type RedeConfigStatus = { configured: boolean; env: string; hasLinkPath: boolean }
+export type RedeConfigStatus = { configured: boolean; env: string }
 
 export async function getRedeConfig(): Promise<RedeConfigStatus> {
   const p = await invokeRede({ action: 'get_config' })
-  return { configured: p.configured === true, env: String(p.env ?? 'sandbox'), hasLinkPath: p.hasLinkPath === true }
+  return { configured: p.configured === true, env: String(p.env ?? 'sandbox') }
 }
 
 export async function setRedeConfig(patch: {
-  pv?: string
-  token?: string
+  clientId?: string
+  clientSecret?: string
+  companyNumber?: string
+  createdBy?: string
   env?: string
-  baseUrl?: string
-  linkPath?: string
 }): Promise<void> {
   const body: Record<string, unknown> = { action: 'set_config' }
-  if (patch.pv !== undefined) body.pv = patch.pv
-  if (patch.token !== undefined) body.token = patch.token
+  if (patch.clientId !== undefined) body.client_id = patch.clientId
+  if (patch.clientSecret !== undefined) body.client_secret = patch.clientSecret
+  if (patch.companyNumber !== undefined) body.company_number = patch.companyNumber
+  if (patch.createdBy !== undefined) body.created_by = patch.createdBy
   if (patch.env !== undefined) body.env = patch.env
-  if (patch.baseUrl !== undefined) body.base_url = patch.baseUrl
-  if (patch.linkPath !== undefined) body.link_path = patch.linkPath
   await invokeRede(body)
 }
 

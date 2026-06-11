@@ -41,11 +41,12 @@ export function IntegrationsPage() {
   const [testingOrder, setTestingOrder] = useState(false)
 
   // === Rede (ambos os polos) ===
-  const [rede, setRede] = useState<RedeConfigStatus>({ configured: false, env: 'sandbox', hasLinkPath: false })
-  const [redePv, setRedePv] = useState('')
-  const [redeToken, setRedeToken] = useState('')
+  const [rede, setRede] = useState<RedeConfigStatus>({ configured: false, env: 'sandbox' })
+  const [redeClientId, setRedeClientId] = useState('')
+  const [redeClientSecret, setRedeClientSecret] = useState('')
+  const [redeCompany, setRedeCompany] = useState('')
+  const [redeCreatedBy, setRedeCreatedBy] = useState('')
   const [redeEnv, setRedeEnv] = useState('sandbox')
-  const [redeLinkPath, setRedeLinkPath] = useState('')
   const [savingRede, setSavingRede] = useState(false)
 
   const loadCatalog = async (refresh = false) => {
@@ -110,10 +111,11 @@ export function IntegrationsPage() {
     setSavingRede(true)
     try {
       await setRedeConfig({
-        pv: redePv.trim(),
-        token: redeToken.trim(),
+        clientId: redeClientId.trim(),
+        clientSecret: redeClientSecret.trim(),
+        companyNumber: redeCompany.trim(),
+        createdBy: redeCreatedBy.trim(),
         env: redeEnv,
-        linkPath: redeLinkPath.trim(),
       })
       toast.success('Rede salva.')
       const cfg = await getRedeConfig()
@@ -246,12 +248,13 @@ export function IntegrationsPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Link de pagamento por cartão (Rede/Itaú). {isSalesPolo ? 'No Tricopill o Pix continua pelo PagBank.' : ''}
+              Link de pagamento por cartão (produto “Link de Pagamento” da Rede).{' '}
+              {isSalesPolo ? 'No Tricopill o Pix continua pelo PagBank.' : ''}
             </p>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">
-                <Label htmlFor="rede-pv">PV (filiação)</Label>
-                <Input id="rede-pv" value={redePv} onChange={(e) => setRedePv(e.target.value)} placeholder="número do PV" className="font-mono text-xs" />
+                <Label htmlFor="rede-company">Company-number (PV)</Label>
+                <Input id="rede-company" value={redeCompany} onChange={(e) => setRedeCompany(e.target.value)} placeholder="número da filiação" className="font-mono text-xs" />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="rede-env">Ambiente</Label>
@@ -267,16 +270,16 @@ export function IntegrationsPage() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="rede-token">Token de integração</Label>
-              <Input id="rede-token" type="password" value={redeToken} onChange={(e) => setRedeToken(e.target.value)} placeholder="token (sensível)" className="font-mono text-xs" autoComplete="off" />
+              <Label htmlFor="rede-cid">Client ID</Label>
+              <Input id="rede-cid" value={redeClientId} onChange={(e) => setRedeClientId(e.target.value)} placeholder="client_id do app" className="font-mono text-xs" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="rede-path">Endpoint do link de pagamento (quando confirmado)</Label>
-              <Input id="rede-path" value={redeLinkPath} onChange={(e) => setRedeLinkPath(e.target.value)} placeholder="ex.: /v1/links" className="font-mono text-xs" />
-              <p className="text-[0.7rem] text-muted-foreground">
-                A e.Rede padrão é de transações (exige dados do cartão). Para gerar um LINK é preciso o produto “Link de
-                Pagamento” da Rede — informe aqui o caminho do endpoint para ativar a geração.
-              </p>
+              <Label htmlFor="rede-secret">Client Secret</Label>
+              <Input id="rede-secret" type="password" value={redeClientSecret} onChange={(e) => setRedeClientSecret(e.target.value)} placeholder="client_secret (sensível)" className="font-mono text-xs" autoComplete="off" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="rede-by">E-mail do criador (createdBy)</Label>
+              <Input id="rede-by" value={redeCreatedBy} onChange={(e) => setRedeCreatedBy(e.target.value)} placeholder="usuario@empresa.com.br" className="text-xs" />
             </div>
             <Button size="sm" onClick={() => void saveRede()} disabled={savingRede}>
               {savingRede ? 'Salvando…' : 'Salvar Rede'}

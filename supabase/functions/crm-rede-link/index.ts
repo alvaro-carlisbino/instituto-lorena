@@ -50,15 +50,20 @@ Deno.serve(async (req) => {
 
   if (action === 'get_config') {
     const cfg = await readRedeConfig(admin, tenantId)
-    return json({ ok: true, configured: cfg != null, env: cfg?.env ?? 'sandbox', hasLinkPath: Boolean(cfg?.linkPath) })
+    return json({ ok: true, configured: cfg != null, env: cfg?.env ?? 'sandbox' })
   }
 
   if (action === 'set_config') {
     const { data } = await admin.from('tenant_integrations').select('rede').eq('tenant_id', tenantId).maybeSingle()
     const cur = ((data as { rede?: Record<string, unknown> } | null)?.rede ?? {}) as Record<string, unknown>
     const next = { ...cur }
-    for (const k of ['pv', 'token', 'env', 'base_url', 'link_path'] as const) {
+    for (const k of ['client_id', 'client_secret', 'company_number', 'created_by', 'env', 'token_base', 'pay_base'] as const) {
       if (payload[k] !== undefined) next[k] = String(payload[k] ?? '').trim()
+    }
+    // Troca de credenciais invalida o token em cache.
+    if (payload.client_id !== undefined || payload.client_secret !== undefined) {
+      delete next.access_token
+      delete next.token_expires_at
     }
     await admin.from('tenant_integrations').upsert({ tenant_id: tenantId, rede: next })
     return json({ ok: true })
