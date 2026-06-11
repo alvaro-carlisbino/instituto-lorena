@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
       !card.expirationYear ||
       card.securityCode.length < 3
     ) {
-      return json({ ok: false, error: 'dados_cartao_invalidos' }, 400)
+      return json({ ok: false, error: 'dados_cartao_invalidos', message: 'Confira os dados do cartão (preencha o CVV).' }, 400)
     }
     try {
       const out = await payRedeIntent(admin, { id, card, installments: payload.installments != null ? Number(payload.installments) : undefined })
