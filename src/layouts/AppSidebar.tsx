@@ -27,6 +27,7 @@ import {
 } from 'phosphor-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
+import { PoloSwitcher } from '@/components/PoloSwitcher'
 import { Badge } from '@/components/ui/badge'
 import { BRAND_FAVICON_URL } from '@/config/brandAssets'
 import { APP_ENV_BADGE, APP_NAME, APP_TAGLINE } from '@/config/branding'
@@ -91,6 +92,10 @@ export function AppSidebar() {
   const showAdmin = crm.currentPermission.canManageUsers
   const showTv = crm.currentPermission.canViewTvPanel
 
+  // Navegação por polo: a clínica tem Agenda/Prontuário; o polo de vendas (Tricopill) não.
+  const isSalesPolo = tenant.poloType === 'sales'
+  const isClinicPolo = !isSalesPolo
+
   return (
     <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border/50">
       <IconContext.Provider value={{ size: 18, weight: 'bold', mirrored: false }}>
@@ -122,6 +127,9 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="px-3 gap-0">
+        <div className="px-1 pb-2 group-data-[collapsible=icon]:hidden">
+          <PoloSwitcher />
+        </div>
         <SidebarGroup>
           <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
             Operação
@@ -132,10 +140,10 @@ export function AppSidebar() {
               <NavItem to="/kanban" label="Quadro de leads" icon={SquaresFour} />
               {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={ListBullets} /> : null}
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={ChatsCircle} /> : null}
-              {showLeadsHub ? <NavItem to="/tricopill" label="Tricopill" icon={Pill} /> : null}
+              {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill" label="Tricopill" icon={Pill} /> : null}
               <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />
               {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={CheckSquare} /> : null}
-              {showLeadsHub ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
+              {showLeadsHub && isClinicPolo ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
               <NavItem to="/assistente" label="Assistente IA" icon={Robot} />
             </SidebarMenu>
           </SidebarGroupContent>
@@ -150,7 +158,7 @@ export function AppSidebar() {
               <NavItem to="/canais" label="Canais" icon={Radio} />
               <NavItem to="/metricas" label="Métricas" icon={ChartBar} />
               <NavItem to="/analytics" label="Analytics" icon={ChartBar} />
-              <NavItem to="/prontuario" label="Prontuário" icon={ChartBar} />
+              {isClinicPolo ? <NavItem to="/prontuario" label="Prontuário" icon={ChartBar} /> : null}
               <NavItem to="/planos" label="Planos" icon={ChartBar} />
               {showBoards ? <NavItem to="/boards" label="Funis" icon={CirclesThreePlus} /> : null}
               {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table} /> : null}

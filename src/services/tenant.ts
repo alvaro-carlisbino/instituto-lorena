@@ -17,12 +17,24 @@ export type TenantBilling = {
   has_stripe: boolean
 }
 
+export type PoloType = 'clinic' | 'sales'
+
 export type Tenant = {
   id: string
   name: string
   brand: TenantBrand
   active: boolean
+  poloType: PoloType
   billing: TenantBilling | null
+}
+
+/** Polo acessível ao usuário logado (item do seletor de polo). */
+export type PoloOption = {
+  id: string
+  name: string
+  brand: TenantBrand
+  poloType: PoloType
+  isActive: boolean
 }
 
 /**
@@ -41,6 +53,7 @@ export const DEFAULT_TENANT: Tenant = {
     support_email: null,
   },
   active: true,
+  poloType: 'clinic',
   billing: null,
 }
 
@@ -87,7 +100,7 @@ export async function fetchCurrentTenant(): Promise<Tenant> {
 
     const { data, error } = await supabase
       .from('tenants')
-      .select('id, name, brand_config, active')
+      .select('id, name, brand_config, active, polo_type')
       .eq('id', tenantId)
       .maybeSingle()
     if (error || !data) {
@@ -99,6 +112,7 @@ export async function fetchCurrentTenant(): Promise<Tenant> {
       name: String(data.name),
       brand: normalizeBrand(data.brand_config),
       active: Boolean(data.active),
+      poloType: (data as { polo_type?: string }).polo_type === 'sales' ? 'sales' : 'clinic',
       billing: null,
     }
   } catch (e) {
@@ -135,7 +149,7 @@ export async function fetchAllTenants(): Promise<Tenant[]> {
   if (!supabase) return [DEFAULT_TENANT]
   const { data, error } = await supabase
     .from('tenants')
-    .select('id, name, brand_config, active')
+    .select('id, name, brand_config, active, polo_type')
     .order('name', { ascending: true })
   if (error) throw new Error(error.message)
   return (data ?? []).map((row) => ({
@@ -143,6 +157,7 @@ export async function fetchAllTenants(): Promise<Tenant[]> {
     name: String(row.name),
     brand: normalizeBrand(row.brand_config),
     active: Boolean(row.active),
+    poloType: (row as { polo_type?: string }).polo_type === 'sales' ? 'sales' : 'clinic',
     billing: null,
   }))
 }
@@ -185,6 +200,7 @@ export async function createTenant(payload: {
     name: String(data.name),
     brand: normalizeBrand(data.brand_config),
     active: Boolean(data.active),
+    poloType: (data as { polo_type?: string }).polo_type === 'sales' ? 'sales' : 'clinic',
     billing: null,
   }
 }
@@ -281,6 +297,38 @@ export async function signupCreateTenant(payload: {
   const slug = typeof data === 'string' ? data.trim() : ''
   if (!slug) throw new Error('signup_create_tenant: resposta vazia.')
   return slug
+}
+
+/**
+ * Polos que o usuário logado pode acessar (RPC `my_tenants`, SECURITY DEFINER).
+ * Vazio em mock/sem sessão ou se a migration de Polo ainda não estiver aplicada.
+ */
+export async function fetchMyTenants(): Promise<PoloOption[]> {
+  if (!supabase) return []
+  try {
+    const { data, error } = await supabase.rpc('my_tenants')
+    if (error) {
+      console.warn('[polo] my_tenants RPC failed:', error.message)
+      return []
+    }
+    return (Array.isArray(data) ? data : []).map((r: Record<string, unknown>) => ({
+      id: String(r.id),
+      name: String(r.name),
+      brand: normalizeBrand(r.brand_config),
+      poloType: r.polo_type === 'sales' ? 'sales' : 'clinic',
+      isActive: Boolean(r.is_active),
+    }))
+  } catch (e) {
+    console.warn('[polo] my_tenants failed:', e instanceof Error ? e.message : String(e))
+    return []
+  }
+}
+
+/** Troca o polo ativo do usuário (RPC `set_active_tenant`; valida pertencimento). */
+export async function setActiveTenant(tenantId: string): Promise<void> {
+  if (!supabase) throw new Error('Sistema não configurado.')
+  const { error } = await supabase.rpc('set_active_tenant', { p_tenant_id: tenantId })
+  if (error) throw new Error(error.message)
 }
 
 /** Indica se o usuário logado é super_admin (pode gerenciar tenants). */
