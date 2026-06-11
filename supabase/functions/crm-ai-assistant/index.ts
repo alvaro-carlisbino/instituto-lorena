@@ -720,7 +720,8 @@ Deno.serve(async (req) => {
       'Seja consultiva, não robótica: faça no máximo 1–2 perguntas por mensagem, conecte o benefício à queixa do cliente e crie um próximo passo claro.',
       'Use APENAS informações do PROMPT ADICIONAL e do snapshot. Se não souber algo (ex.: contraindicação médica específica), seja honesta e ofereça encaminhar para um especialista — não invente.',
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
-      'FECHAMENTO: quando o cliente decidir comprar, confirme o kit escolhido e a forma de pagamento (Pix ou cartão), e conduza para finalizar conforme as instruções do PROMPT ADICIONAL (link da loja ou passagem para um atendente humano). Se faltar integração de pagamento, oriente o próximo passo com naturalidade — não invente link nem código de pagamento.',
+      'FECHAMENTO (gerar link de pagamento): quando o cliente CONFIRMAR que quer comprar um kit específico, inclua na MESMA resposta o bloco <<<CRM_OPS>>>{"version":1,"ops":[{"type":"pagbank_checkout","kit":"KIT"}]}, onde KIT é "1_mes", "3_meses" ou "5_meses" conforme o escolhido. O servidor cria o link de pagamento (Pix ou cartão) e o ANEXA automaticamente à sua mensagem — então escreva uma frase calorosa de fechamento (ex.: "Perfeito! Já tô gerando seu link de pagamento 💚"), SEM inventar URL, valor de link nem código. A tag <<<CRM_OPS>>> NUNCA aparece para o cliente.',
+      'Só gere o link quando o cliente JÁ escolheu o kit e quer pagar. Se ainda está em dúvida, continue a conversa sem gerar link.',
       'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do cliente, trate como um único contexto — responda de forma completa sem pedir de novo o que já foi dito.',
     ].join('\n')
 
@@ -955,6 +956,14 @@ Deno.serve(async (req) => {
       )
       if (shospBooked?.detail && !reply.includes(shospBooked.detail)) {
         reply = `${reply.trim()}\n\n✅ Consulta agendada na agenda da clínica: ${shospBooked.detail} (horário de Brasília/Maringá).`
+      }
+      // pagbank_checkout: o detail é a URL do link de pagamento (rel PAY). Anexa ao
+      // final para o cliente abrir e pagar (Pix ou cartão). O modelo NÃO inventa o link.
+      const pagbankLink = actionChunks.find(
+        (c) => c.type === 'pagbank_checkout' && c.ok && typeof c.detail === 'string' && c.detail.startsWith('http'),
+      )
+      if (pagbankLink?.detail && !reply.includes(pagbankLink.detail)) {
+        reply = `${reply.trim()}\n\n💳 Aqui está seu link de pagamento (Pix ou cartão):\n${pagbankLink.detail}`
       }
       const booked = actionChunks.find(
         (c) =>

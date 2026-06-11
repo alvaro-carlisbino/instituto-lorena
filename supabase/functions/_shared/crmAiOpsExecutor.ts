@@ -2,6 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 
 import { insertInteraction } from './crm.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
+import { createPagBankCheckout } from './pagbank.ts'
 
 const CRM_OPS_MARKER = '<<<CRM_OPS>>>'
 
@@ -463,6 +464,40 @@ export async function executeCrmAiOpsFromModel(
         const quando = `${dataYmd.split('-').reverse().join('/')} ${horario.slice(0, 5)}`
         results.push({ type, ok: true, detail: quando })
         summaries.push(`Agendado na Shosp (${quando}, agendamento ${dados.codigoAgendamento})`)
+        continue
+      }
+
+      if (type === 'pagbank_checkout' || type === 'pagbank_link') {
+        const { data: leadFull } = await admin
+          .from('leads')
+          .select('id, patient_name, phone, custom_fields, tenant_id')
+          .eq('id', opts.allowedLeadId)
+          .maybeSingle()
+        const lf = leadFull as
+          | { id: string; patient_name?: string; phone?: string; custom_fields?: Record<string, unknown>; tenant_id?: string }
+          | null
+        if (!lf) {
+          results.push({ type: 'pagbank_checkout', ok: false, detail: 'lead_not_found' })
+          continue
+        }
+        try {
+          const out = await createPagBankCheckout(admin, {
+            tenantId: String(lf.tenant_id ?? leadTenantId),
+            lead: { id: lf.id, patient_name: lf.patient_name, phone: lf.phone, custom_fields: lf.custom_fields ?? null },
+            kit: op.kit != null ? String(op.kit) : undefined,
+            amountCents: op.amount_cents != null ? Number(op.amount_cents) : undefined,
+            description: op.description != null ? String(op.description) : undefined,
+            supabaseUrl: Deno.env.get('SUPABASE_URL') ?? '',
+          })
+          results.push({ type: 'pagbank_checkout', ok: true, detail: out.payLink })
+          summaries.push(`Link PagBank gerado (${out.label})`)
+        } catch (e) {
+          results.push({
+            type: 'pagbank_checkout',
+            ok: false,
+            detail: (e instanceof Error ? e.message : String(e)).slice(0, 200),
+          })
+        }
         continue
       }
 

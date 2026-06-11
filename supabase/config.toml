@@ -420,3 +420,7 @@ verify_jwt = false
 # Follow-up scheduler: chamado via pg_cron/pg_net com anon key + x-cron-secret header.
 [functions.crm-followup-scheduler]
 verify_jwt = false
+
+# Webhook de pagamento PagBank: chamado pelo PagBank sem JWT (mapeia pelo reference_id).
+[functions.crm-pagbank-webhook]
+verify_jwt = false

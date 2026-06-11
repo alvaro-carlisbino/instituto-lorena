@@ -13,6 +13,7 @@ import {
   Trash2,
   Smile,
   Sticker,
+  CreditCard,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -37,6 +38,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ScheduleAppointmentDialog } from '@/components/leads/ScheduleAppointmentDialog'
 import { useCrm } from '@/context/CrmContext'
+import { useTenant } from '@/context/TenantContext'
+import { generatePagbankLink, PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
 import {
   isWaInstagramMergeNotice,
   tryConsumeWaInstagramMergeToast,
@@ -118,11 +121,32 @@ export function LeadChatThread({
   aiConversationBase,
 }: Props) {
   const crm = useCrm()
+  const { tenant } = useTenant()
+  const isSalesPolo = tenant.poloType === 'sales'
+
+  const handleGeneratePagbank = async (kit: PagbankKit) => {
+    if (pagbankLoading) return
+    setPagbankLoading(true)
+    try {
+      const res = await generatePagbankLink({ leadId, kit })
+      crm.setDraftMessage((prev) => {
+        const base = prev.trim()
+        const linkLine = `💳 Aqui está seu link de pagamento (Pix ou cartão):\n${res.payLink}`
+        return base ? `${base}\n\n${linkLine}` : linkLine
+      })
+      toast.success('Link PagBank gerado — revise e envie.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao gerar link PagBank')
+    } finally {
+      setPagbankLoading(false)
+    }
+  }
   const draftTextareaRef = useRef<HTMLTextAreaElement>(null)
   const stickerInputRef = useRef<HTMLInputElement>(null)
   const isActiveLead = crm.selectedLeadId === leadId
   const [filter, setFilter] = useState<ChatFilter>(whatsappOnly ? 'whatsapp' : 'all')
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
+  const [pagbankLoading, setPagbankLoading] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [aiUiTick, setAiUiTick] = useState(0)
   const [forceAiLoading, setForceAiLoading] = useState(false)
@@ -934,16 +958,40 @@ export function LeadChatThread({
                     )}
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 rounded-lg text-[10px]"
-                  onClick={() => setIsScheduleOpen(true)}
-                >
-                  <CalendarPlus className="mr-1.5 h-3.5 w-3.5 text-primary" />
-                  Agendar
-                </Button>
+                {isSalesPolo ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      type="button"
+                      disabled={pagbankLoading}
+                      title="Gerar link de pagamento PagBank"
+                      className={cn(
+                        buttonVariants({ variant: 'ghost', size: 'sm' }),
+                        'h-8 rounded-lg px-2 text-[10px]',
+                      )}
+                    >
+                      <CreditCard className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                      {pagbankLoading ? 'Gerando…' : 'Link PagBank'}
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      {(Object.keys(PAGBANK_KIT_LABELS) as PagbankKit[]).map((kit) => (
+                        <DropdownMenuItem key={kit} onClick={() => void handleGeneratePagbank(kit)}>
+                          {PAGBANK_KIT_LABELS[kit]}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 rounded-lg text-[10px]"
+                    onClick={() => setIsScheduleOpen(true)}
+                  >
+                    <CalendarPlus className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                    Agendar
+                  </Button>
+                )}
               </div>
               <Button
                 type="button"
