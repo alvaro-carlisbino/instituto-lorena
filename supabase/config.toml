@@ -424,3 +424,8 @@ verify_jwt = false
 # Webhook de pagamento PagBank: chamado pelo PagBank sem JWT (mapeia pelo reference_id).
 [functions.crm-pagbank-webhook]
 verify_jwt = false
+
+# OAuth Bling: o callback (GET) é redirect público do navegador; o POST authorize_url
+# valida a sessão por conta própria (getUser).
+[functions.crm-bling-oauth]
+verify_jwt = false

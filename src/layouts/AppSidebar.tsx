@@ -25,6 +25,7 @@ import {
   Buildings,
   Pill,
   CreditCard,
+  Plugs,
 } from 'phosphor-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
@@ -143,6 +144,7 @@ export function AppSidebar() {
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={ChatsCircle} /> : null}
               {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill" label="Tricopill" icon={Pill} /> : null}
               {showLeadsHub && isSalesPolo ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
+              {showAdmin && isSalesPolo ? <NavItem to="/integracoes" label="Integrações" icon={Plugs} /> : null}
               <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />
               {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={CheckSquare} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
