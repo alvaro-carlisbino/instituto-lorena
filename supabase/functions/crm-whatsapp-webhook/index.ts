@@ -211,6 +211,7 @@ Deno.serve(async (req) => {
         provider: provider.name,
         externalMessageId: normalized.externalMessageId,
       },
+      attribution: normalized.attribution ?? null,
       tenantId,
     })
 

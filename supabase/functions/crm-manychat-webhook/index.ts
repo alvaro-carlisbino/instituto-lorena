@@ -33,6 +33,7 @@ import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { resolveTenantFromManychatBody } from '../_shared/tenantResolve.ts'
 import { applyOptOutToLead, isOptOutMessage } from '../_shared/optOutDetect.ts'
+import { attributionFromManychatBody, type LeadAttribution } from '../_shared/attribution.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -52,7 +53,7 @@ function digitsOnly(value: string): string {
 
 async function ensureManychatLeadId(
   admin: ReturnType<typeof createClient>,
-  input: { subscriberId: string; userName: string; text: string; phone?: string; channel?: string; tenantId?: string },
+  input: { subscriberId: string; userName: string; text: string; phone?: string; channel?: string; tenantId?: string; attribution?: LeadAttribution | null },
 ): Promise<string> {
   const sid = input.subscriberId.trim()
   const digits = input.phone ? digitsOnly(input.phone) : ''
@@ -66,6 +67,7 @@ async function ensureManychatLeadId(
       summary: input.text.slice(0, 500),
       tenantId: input.tenantId,
       channel,
+      attribution: input.attribution ?? null,
     })
     return leadId
   }
@@ -79,6 +81,7 @@ async function ensureManychatLeadId(
       manychat_subscriber_id: sid,
       channel: channel === 'instagram' ? 'instagram' : 'whatsapp',
     },
+    attribution: input.attribution ?? null,
     tenantId: input.tenantId,
   })
 
@@ -144,6 +147,8 @@ type ManychatPipelineCtx = {
   inboundMedia: ExtractedMedia[]
   /** Tenant resolvido do body (campo `tenant_slug`) ou fallback 'instituto-lorena'. */
   tenantId: string
+  /** Atribuição de campanha Meta extraída do corpo (anúncios de conversa). */
+  attribution?: LeadAttribution | null
 }
 
 type ManychatPipelineResult = {
@@ -316,6 +321,7 @@ async function runManychatMessagePipeline(
       phone: ctx.phoneOpt,
       channel: ctx.channel,
       tenantId: ctx.tenantId,
+      attribution: ctx.attribution ?? null,
     })
 
     let waInstForAi: string | null = ctx.whatsappLineInstanceId
@@ -758,6 +764,7 @@ Deno.serve(async (req) => {
   const phoneDigitsBody = digitsOnly(String(phoneOpt ?? ''))
   const effectiveChannel = resolveEffectiveManychatChannel(body, whatsappLineInstanceId, phoneDigitsBody)
   const userName = rawUserName || (effectiveChannel === 'instagram' ? 'Lead Instagram' : 'Lead WhatsApp')
+  const attribution = attributionFromManychatBody(body, effectiveChannel)
 
   if (action === 'ingest') {
     try {
@@ -768,6 +775,7 @@ Deno.serve(async (req) => {
         phone: phoneOpt,
         channel: effectiveChannel,
         tenantId,
+        attribution,
       })
       const ingestContent = contentForInboundWithMedia(text, inboundMedia)
       const ingestInteractionId = await insertInteraction(admin, {
@@ -906,6 +914,7 @@ Deno.serve(async (req) => {
     whatsappLineInstanceId,
     inboundMedia,
     tenantId,
+    attribution,
   }
 
   if (useAsyncPipeline) {

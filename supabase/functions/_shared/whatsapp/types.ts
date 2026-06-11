@@ -1,3 +1,5 @@
+import type { LeadAttribution } from '../attribution.ts'
+
 export type ProviderMessageDirection = 'in' | 'out'
 
 export type SendWhatsappMessageInput = {
@@ -37,6 +39,8 @@ export type NormalizedInboundMessage = {
     externalMediaId?: string
     caption?: string
   }>
+  /** Atribuição Click-to-WhatsApp (msg.referral). Só presente na 1ª mensagem pós-clique. */
+  attribution?: LeadAttribution
   raw: Record<string, unknown>
 }
 

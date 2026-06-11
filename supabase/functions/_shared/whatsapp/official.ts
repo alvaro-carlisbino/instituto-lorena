@@ -5,6 +5,7 @@ import type {
   WhatsappProvider,
 } from './types.ts'
 import { digitsOnly } from './types.ts'
+import { attributionFromMetaReferral } from '../attribution.ts'
 
 function envTrim(key: string): string {
   return (Deno.env.get(key) ?? '').trim()
@@ -129,6 +130,8 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
       ? new Date(tsRaw > 1e12 ? tsRaw : tsRaw * 1000).toISOString()
       : new Date().toISOString()
 
+    const attribution = attributionFromMetaReferral(msg.referral, 'ctwa_whatsapp') ?? undefined
+
     return {
       provider: 'official',
       source: 'whatsapp',
@@ -139,6 +142,7 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
       direction: 'in',
       happenedAt: happenedAtIso,
       metaPhoneNumberId: metaPhoneNumberId || undefined,
+      attribution,
       raw: payload,
     }
   }

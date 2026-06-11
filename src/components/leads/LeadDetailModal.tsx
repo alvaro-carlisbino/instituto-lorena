@@ -318,6 +318,75 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                 </div>
               </section>
 
+              {(() => {
+                const attr = lead.customFields?.attribution
+                if (!attr || typeof attr !== 'object') return null
+                const a = attr as Record<string, unknown>
+                const str = (v: unknown) => (v == null ? '' : String(v))
+                const channelLabels: Record<string, string> = {
+                  ctwa_whatsapp: 'Anúncio → WhatsApp',
+                  ctwa_instagram: 'Anúncio → Instagram',
+                  lead_ads: 'Formulário (Lead Ads)',
+                }
+                const channel = str(a.channel)
+                const channelLabel = channelLabels[channel] ?? channel
+                const campaign = str(a.campaign)
+                const headline = str(a.headline)
+                const adId = str(a.ad_id)
+                const sourceUrl = str(a.source_url)
+                return (
+                  <section
+                    aria-labelledby="lead-attribution-heading"
+                    className="rounded-md border border-border bg-muted/20 p-3"
+                  >
+                    <h2 id="lead-attribution-heading" className="mb-2 text-sm font-semibold">
+                      Origem da campanha
+                    </h2>
+                    <dl className="grid gap-1.5 text-sm sm:grid-cols-2">
+                      {channelLabel ? (
+                        <div className="flex flex-col">
+                          <dt className="text-xs text-muted-foreground">Canal</dt>
+                          <dd>{channelLabel}</dd>
+                        </div>
+                      ) : null}
+                      {campaign ? (
+                        <div className="flex flex-col">
+                          <dt className="text-xs text-muted-foreground">Campanha</dt>
+                          <dd>{campaign}</dd>
+                        </div>
+                      ) : null}
+                      {headline ? (
+                        <div className="flex flex-col sm:col-span-2">
+                          <dt className="text-xs text-muted-foreground">Anúncio</dt>
+                          <dd>{headline}</dd>
+                        </div>
+                      ) : null}
+                      {adId ? (
+                        <div className="flex flex-col">
+                          <dt className="text-xs text-muted-foreground">ID do anúncio</dt>
+                          <dd className="font-mono text-xs">{adId}</dd>
+                        </div>
+                      ) : null}
+                      {sourceUrl ? (
+                        <div className="flex flex-col sm:col-span-2">
+                          <dt className="text-xs text-muted-foreground">Link do anúncio</dt>
+                          <dd className="truncate">
+                            <a
+                              href={sourceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-primary underline underline-offset-2"
+                            >
+                              {sourceUrl}
+                            </a>
+                          </dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </section>
+                )
+              })()}
+
               {crm.currentPermission.canRouteLeads && otherPipelines.length > 0 ? (
                 <section
                   aria-labelledby="lead-funnel-routing-heading"

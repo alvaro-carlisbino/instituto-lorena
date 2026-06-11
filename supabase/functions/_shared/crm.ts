@@ -1,4 +1,8 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import {
+  attributionForCustomFields,
+  type LeadAttribution,
+} from './attribution.ts'
 
 export type LeadSource = 'meta_facebook' | 'meta_instagram' | 'meta_whatsapp' | 'whatsapp' | 'manual'
 export type LeadTemperature = 'cold' | 'warm' | 'hot'
@@ -17,6 +21,12 @@ export type UpsertLeadInput = {
   preferredLeadId?: string
   /** When set, ties the lead to a DB whatsapp_channel_instances row (multi-line). */
   whatsappInstanceId?: string | null
+  /**
+   * Atribuição de campanha (Meta Ads). Aplicada com regra "first-touch":
+   * só grava na criação do lead ou se o lead ainda não tem atribuição — mensagens
+   * seguintes não sobrescrevem (só a 1ª mensagem após o clique carrega o referral).
+   */
+  attribution?: LeadAttribution | null
   /**
    * tenant_id explícito. Quando omitido, o trigger BEFORE INSERT em leads cai no
    * fallback `instituto-lorena`. Edge functions multi-tenant aware devem sempre
@@ -293,6 +303,16 @@ function mergeCustomFields(
   return { ...base, ...patch }
 }
 
+/** Colunas de atribuição (indexadas) a partir do objeto canônico. */
+function attributionColumns(a: LeadAttribution): Record<string, unknown> {
+  return {
+    attribution: a.raw ?? attributionForCustomFields(a),
+    attribution_channel: a.channel,
+    attribution_campaign: a.campaign ?? null,
+    attribution_ad_id: a.adId ?? null,
+  }
+}
+
 export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLeadInput): Promise<UpsertLeadResult> {
   const phone = normalizePhone(input.phone)
   if (phone.length < 10) {
@@ -324,17 +344,27 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
     const { data: cur, error: curErr } = await admin
       .from('leads')
       .select(
-        'id, custom_fields, pipeline_id, stage_id, owner_id, score, whatsapp_instance_id, patient_name',
+        'id, custom_fields, pipeline_id, stage_id, owner_id, score, whatsapp_instance_id, patient_name, attribution_channel',
       )
       .eq('id', existingId)
       .maybeSingle()
     if (curErr) throw new Error(curErr.message)
     const current = (cur ?? {}) as Record<string, unknown>
 
-    const customMerged = mergeCustomFields(
+    let customMerged = mergeCustomFields(
       current.custom_fields as Record<string, unknown> | undefined,
       input.customFields,
     )
+
+    // First-touch: só grava atribuição se o lead ainda não tiver nenhuma.
+    const hasAttribution = Boolean(String(current.attribution_channel ?? '').trim())
+    const applyAttribution = Boolean(input.attribution) && !hasAttribution
+    if (applyAttribution && input.attribution) {
+      customMerged = mergeCustomFields(customMerged, {
+        attribution: attributionForCustomFields(input.attribution),
+      })
+    }
+
     const isPlaceholder = isPlaceholderName
 
     const patch: Record<string, unknown> = {
@@ -432,6 +462,10 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
       )
     }
 
+    if (applyAttribution && input.attribution) {
+      Object.assign(patch, attributionColumns(input.attribution))
+    }
+
     const { error: updateError } = await admin.from('leads').update(patch).eq('id', existingId)
     if (updateError) throw new Error(updateError.message)
     return { leadId: existingId, status: 'updated' }
@@ -439,6 +473,9 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
 
   const newId = input.preferredLeadId?.trim() || `lead-${crypto.randomUUID().slice(0, 12)}`
   const safeOwnerId = await coerceOwnerIdToExistingAppUser(admin, ownerIdForCreate, routingFallback.ownerId)
+  const customFieldsForCreate = input.attribution
+    ? mergeCustomFields(input.customFields, { attribution: attributionForCustomFields(input.attribution) })
+    : (input.customFields ?? {})
   const row: Record<string, unknown> = {
     id: newId,
     patient_name: input.patientName || 'Lead webhook',
@@ -450,9 +487,12 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
     stage_id: stageIdForCreate,
     score,
     temperature,
-    custom_fields: input.customFields ?? {},
+    custom_fields: customFieldsForCreate,
     created_at: new Date().toISOString(),
     position: 1,
+  }
+  if (input.attribution) {
+    Object.assign(row, attributionColumns(input.attribution))
   }
   if (instanceId) {
     row.whatsapp_instance_id = instanceId
@@ -785,6 +825,7 @@ export async function promoteManychatLeadToRealPhone(
     summary: string
     tenantId?: string
     channel?: string
+    attribution?: LeadAttribution | null
   },
 ): Promise<{ leadId: string; merged: boolean }> {
   const sid = String(input.subscriberId).trim()
@@ -808,6 +849,7 @@ export async function promoteManychatLeadToRealPhone(
       summary: input.summary,
       source,
       customFields: { manychat_subscriber_id: sid, channel: customChannelTag },
+      attribution: input.attribution ?? null,
       tenantId: input.tenantId,
     })
     return { leadId: phoneLeadId, merged: true }
@@ -839,6 +881,7 @@ export async function promoteManychatLeadToRealPhone(
     summary: input.summary,
     source,
     customFields: { manychat_subscriber_id: sid, channel: customChannelTag },
+    attribution: input.attribution ?? null,
     tenantId: input.tenantId,
   })
   return { leadId: r.leadId, merged: false }
