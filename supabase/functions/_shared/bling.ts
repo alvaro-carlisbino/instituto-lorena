@@ -17,12 +17,12 @@ export function blingClientCreds(): { clientId: string; clientSecret: string } |
   return { clientId, clientSecret }
 }
 
-export function blingAuthorizeUrl(clientId: string, state: string, redirectUri: string): string {
+export function blingAuthorizeUrl(clientId: string, state: string): string {
+  // Bling v3 usa a "URL de redirecionamento" cadastrada no app — NÃO por parâmetro.
   const u = new URL(AUTHORIZE_URL)
   u.searchParams.set('response_type', 'code')
   u.searchParams.set('client_id', clientId)
   u.searchParams.set('state', state)
-  u.searchParams.set('redirect_uri', redirectUri)
   return u.toString()
 }
 
@@ -86,9 +86,8 @@ export async function blingExchangeCode(
   admin: SupabaseClient,
   tenantId: string,
   code: string,
-  redirectUri: string,
 ): Promise<void> {
-  const tok = await postToken({ grant_type: 'authorization_code', code, redirect_uri: redirectUri })
+  const tok = await postToken({ grant_type: 'authorization_code', code })
   await persistTokens(admin, tenantId, tok)
 }
 

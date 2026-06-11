@@ -24,7 +24,6 @@ Deno.serve(async (req) => {
   const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   if (!supabaseUrl || !serviceRole) return json({ error: 'server_misconfigured' }, 500)
   const admin = createClient(supabaseUrl, serviceRole)
-  const redirectUri = `${supabaseUrl.replace(/\/$/, '')}/functions/v1/crm-bling-oauth`
 
   // === Callback do Bling (GET ?code&state) ===
   if (req.method === 'GET') {
@@ -53,7 +52,7 @@ Deno.serve(async (req) => {
     if (!tenantId) return json({ error: 'state_without_tenant' }, 400)
 
     try {
-      await blingExchangeCode(admin, tenantId, code, redirectUri)
+      await blingExchangeCode(admin, tenantId, code)
       await admin.from('webhook_jobs').delete().eq('id', String((stateRow as { id: string }).id))
       const back = returnUrl || `${supabaseUrl}`
       const sep = back.includes('?') ? '&' : '?'
@@ -105,5 +104,5 @@ Deno.serve(async (req) => {
     note: state,
   })
 
-  return json({ ok: true, authorizeUrl: blingAuthorizeUrl(creds.clientId, state, redirectUri) })
+  return json({ ok: true, authorizeUrl: blingAuthorizeUrl(creds.clientId, state) })
 })
