@@ -28,7 +28,8 @@ export async function readRedeConfig(admin: SupabaseClient, tenantId: string): P
   const cfg = ((data as { rede?: Record<string, unknown> } | null)?.rede ?? {}) as Record<string, unknown>
   const pv = typeof cfg.pv === 'string' ? cfg.pv.trim() : ''
   const token = typeof cfg.token === 'string' ? cfg.token.trim() : ''
-  if (!pv || !token) return null
+  // Produto "Link de Pagamento" da Rede = OAuth2/Bearer: basta o token (PV é opcional).
+  if (!token) return null
   const env: 'sandbox' | 'prod' = cfg.env === 'prod' ? 'prod' : 'sandbox'
   const baseUrl = (typeof cfg.base_url === 'string' && cfg.base_url.trim()
     ? cfg.base_url.trim()
@@ -54,17 +55,20 @@ export async function createRedePaymentLink(
   const amountCents = Math.round(args.amountCents)
   if (!Number.isFinite(amountCents) || amountCents < 100) throw new Error('rede_valor_invalido')
 
-  const basic = btoa(`${cfg.pv}:${cfg.token}`)
+  // Link de Pagamento da Rede = Bearer. Payload provisório (ajustamos pelo retorno real).
   const body = {
+    ...(cfg.pv ? { pv: cfg.pv } : {}),
     reference: args.reference,
     amount: amountCents,
     description: String(args.description ?? '').slice(0, 100),
     kind: 'credit',
   }
-  const res = await fetch(`${cfg.baseUrl}${cfg.linkPath}`, {
+  // link_path pode ser um caminho (/v1/...) ou a URL completa (https://...).
+  const url = cfg.linkPath!.startsWith('http') ? cfg.linkPath! : `${cfg.baseUrl}${cfg.linkPath}`
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Basic ${basic}`,
+      Authorization: `Bearer ${cfg.token}`,
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
