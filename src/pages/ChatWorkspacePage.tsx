@@ -29,6 +29,7 @@ import {
   type ConversationOwnerMode,
 } from '@/services/conversationControl'
 import { isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
+import { fetchWhatsappChannelInstances, type BotKind } from '@/services/whatsappChannelInstances'
 
 const MODE_SUMMARY: Record<ConversationOwnerMode, string> = {
   human: 'Humano',
@@ -36,7 +37,15 @@ const MODE_SUMMARY: Record<ConversationOwnerMode, string> = {
   auto: 'Misto',
 }
 
-export function ChatWorkspacePage() {
+/**
+ * Workspace de conversas. Sem props = inbox comercial completo (todas as linhas).
+ * Com `restrictToBotKind` (ex.: 'sales') só mostra os leads das linhas de WhatsApp
+ * daquele tipo — base da aba Tricopill, que reaproveita esta mesma UI.
+ */
+export function ChatWorkspacePage({
+  title = 'Conversas',
+  restrictToBotKind,
+}: { title?: string; restrictToBotKind?: BotKind } = {}) {
   const crm = useCrm()
   const { dataMode } = crm
   const [searchParams] = useSearchParams()
@@ -46,6 +55,9 @@ export function ChatWorkspacePage() {
   const [leadMode, setLeadMode] = useState<ConversationOwnerMode>('auto')
   const [modeLoading, setModeLoading] = useState(false)
   const [leadSheetOpen, setLeadSheetOpen] = useState(false)
+  // Ids das linhas de WhatsApp do tipo `restrictToBotKind` (ex.: vendas/Tricopill).
+  // null = ainda carregando; Set vazio = nenhuma linha desse tipo configurada.
+  const [restrictInstanceIds, setRestrictInstanceIds] = useState<Set<string> | null>(null)
   const [aiConversationBase, setAiConversationBase] = useState<{
     ownerMode: ConversationOwnerMode
     aiEnabled: boolean
@@ -89,9 +101,34 @@ export function ChatWorkspacePage() {
     return result
   }, [crm.interactions])
 
+  useEffect(() => {
+    if (!restrictToBotKind) {
+      setRestrictInstanceIds(null)
+      return
+    }
+    let alive = true
+    void fetchWhatsappChannelInstances()
+      .then((rows) => {
+        if (!alive) return
+        setRestrictInstanceIds(
+          new Set(rows.filter((r) => r.botKind === restrictToBotKind).map((r) => r.id)),
+        )
+      })
+      .catch(() => {
+        if (alive) setRestrictInstanceIds(new Set())
+      })
+    return () => {
+      alive = false
+    }
+  }, [restrictToBotKind])
+
   const conversations = useMemo(() => {
     const text = search.trim().toLowerCase()
     const filtered = crm.leads.filter((lead) => {
+      if (restrictToBotKind) {
+        if (!restrictInstanceIds) return false
+        if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) return false
+      }
       if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) return false
       if (!text) return true
       return [lead.patientName, lead.phone, lead.summary].join(' ').toLowerCase().includes(text)
@@ -117,7 +154,7 @@ export function ChatWorkspacePage() {
       const bh = crm.interactions.find((i) => i.leadId === b.id)?.happenedAt ?? b.createdAt
       return new Date(bh).getTime() - new Date(ah).getTime()
     })
-  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead])
+  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds])
 
   const activeLead = crm.selectedLead ?? conversations[0] ?? null
   const waComposeBlocked = activeLead ? isLeadWhatsappComposeBlocked(activeLead) : false
@@ -198,7 +235,7 @@ export function ChatWorkspacePage() {
   }, [dataMode, activeLead?.id])
 
   return (
-    <AppLayout title="Conversas" fullHeight={true} mainClassName="min-h-0 p-2 sm:p-3 md:p-4 bg-muted/30 dark:bg-transparent">
+    <AppLayout title={title} fullHeight={true} mainClassName="min-h-0 p-2 sm:p-3 md:p-4 bg-muted/30 dark:bg-transparent">
       <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2 overflow-hidden sm:gap-3 md:flex-row md:gap-4">
         {/* Left Column: Lead List */}
         <Card className="flex max-h-[38dvh] w-full shrink-0 flex-col gap-0 overflow-hidden rounded-2xl border border-border/40 bg-card/70 py-0 shadow-xl backdrop-blur-md min-[480px]:max-h-[42dvh] md:h-full md:max-h-none md:min-h-0 md:w-[min(300px,34vw)] md:max-w-[340px] md:min-w-[260px]">

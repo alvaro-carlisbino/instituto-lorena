@@ -28,6 +28,7 @@ import { AssistantPage } from './pages/AssistantPage'
 import { LeadsPage } from './pages/LeadsPage'
 import { TasksPage } from './pages/TasksPage'
 import { ChatWorkspacePage } from './pages/ChatWorkspacePage'
+import { TricopilPage } from './pages/TricopilPage'
 import { AdminOperationsPage } from './pages/AdminOperationsPage'
 import { TenantsAdminPage } from './pages/TenantsAdminPage'
 import { WhatsappConnectionPage } from './pages/WhatsappConnectionPage'
@@ -52,6 +53,7 @@ function AppRoutes() {
       <Route path="/tarefas" element={<TasksPage />} />
       <Route path="/agenda" element={<AgendaPage />} />
       <Route path="/chat" element={<ChatWorkspacePage />} />
+      <Route path="/tricopill" element={<TricopilPage />} />
       <Route path="/assistente" element={<AssistantPage />} />
       <Route path="/historico" element={<HistoryPage />} />
       <Route path="/canais" element={<ChannelsPage />} />

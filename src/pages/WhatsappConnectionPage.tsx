@@ -20,6 +20,7 @@ import {
   deleteWhatsappChannelInstance,
   fetchWhatsappChannelInstances,
   upsertWhatsappChannelInstance,
+  type BotKind,
   type WhatsappChannelInstance,
 } from '@/services/whatsappChannelInstances'
 
@@ -92,6 +93,7 @@ export function WhatsappConnectionPage() {
   const [waToken, setWaToken] = useState('')
   const [waPhone, setWaPhone] = useState('')
   const [waPrompt, setWaPrompt] = useState('')
+  const [waBotKind, setWaBotKind] = useState<BotKind>('clinic')
   const [waSecret, setWaSecret] = useState('')
   const [linkLabel, setLinkLabel] = useState('')
   const [linkEvoName, setLinkEvoName] = useState('')
@@ -361,6 +363,7 @@ export function WhatsappConnectionPage() {
         id,
         label: waLabel.trim(),
         channelProvider: 'wapi',
+        botKind: waBotKind,
         wapiInstanceId: waInstanceId.trim(),
         wapiToken: waToken.trim(),
         wapiWebhookSecret: waSecret.trim() || null,
@@ -377,6 +380,7 @@ export function WhatsappConnectionPage() {
       setWaToken('')
       setWaPhone('')
       setWaPrompt('')
+      setWaBotKind('clinic')
       setWaSecret('')
       await loadInstances()
       setSelectedInstanceId(id)
@@ -687,6 +691,22 @@ export function WhatsappConnectionPage() {
                   className="font-mono text-xs"
                   autoComplete="off"
                 />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-wapi-kind">Tipo de linha</Label>
+                <Select value={waBotKind} onValueChange={(v) => setWaBotKind(v as BotKind)}>
+                  <SelectTrigger id="wa-wapi-kind">
+                    <SelectValue placeholder="Tipo de linha" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="clinic">Clínica (Sofia — Instituto Lorena, agenda)</SelectItem>
+                    <SelectItem value="sales">Vendas (atendente comercial — ex.: Tricopill)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[0.7rem] text-muted-foreground">
+                  Vendas troca a persona da IA: sem triagem de consulta nem agenda da clínica — foco em
+                  apresentar produto, tirar dúvidas e conduzir à compra.
+                </p>
               </div>
               <div className="space-y-1.5 sm:col-span-2 lg:col-span-4">
                 <Label htmlFor="wa-wapi-prompt">Prompt de sistema desta linha (obrigatório para IA específica)</Label>

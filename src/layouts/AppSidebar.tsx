@@ -23,6 +23,7 @@ import {
   ArrowsLeftRight,
   Calendar,
   Buildings,
+  Pill,
 } from 'phosphor-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
@@ -131,6 +132,7 @@ export function AppSidebar() {
               <NavItem to="/kanban" label="Quadro de leads" icon={SquaresFour} />
               {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={ListBullets} /> : null}
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={ChatsCircle} /> : null}
+              {showLeadsHub ? <NavItem to="/tricopill" label="Tricopill" icon={Pill} /> : null}
               <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />
               {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={CheckSquare} /> : null}
               {showLeadsHub ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}

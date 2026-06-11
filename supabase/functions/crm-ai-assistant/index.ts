@@ -358,21 +358,27 @@ async function buildCrmSnapshot(
 
   const baseAiCfg = (aiConfigRes.data ?? null) as Record<string, unknown> | null
   let crm_ai_configs: Record<string, unknown> | null = baseAiCfg ? { ...baseAiCfg } : null
+  // bot_kind define a PERSONA da linha: 'clinic' (Sofia/Instituto Lorena, agenda Shosp)
+  // ou 'sales' (atendente de vendas — ex.: Tricopill). Default 'clinic' preserva a clínica.
+  let botKind: 'clinic' | 'sales' = 'clinic'
   if (ctx.whatsappInstanceId) {
     const instRes = await userClient
       .from('whatsapp_channel_instances')
-      .select('ai_system_prompt')
+      .select('ai_system_prompt, bot_kind')
       .eq('id', ctx.whatsappInstanceId)
       .maybeSingle()
-    const linePrompt = String((instRes.data as { ai_system_prompt?: string } | null)?.ai_system_prompt ?? '').trim()
+    const inst = instRes.data as { ai_system_prompt?: string; bot_kind?: string } | null
+    const linePrompt = String(inst?.ai_system_prompt ?? '').trim()
     if (linePrompt) {
       crm_ai_configs = { ...(crm_ai_configs ?? {}), system_prompt: linePrompt }
     }
+    if (String(inst?.bot_kind ?? '').toLowerCase() === 'sales') botKind = 'sales'
   }
 
   return {
     generatedAt: new Date().toISOString(),
     requestContext: ctx,
+    botKind,
     interactionWindowSince: interactionSince,
     viewerProfile: profileRes.data ?? null,
     metrics: metricsRes.data ?? [],
@@ -610,10 +616,13 @@ Deno.serve(async (req) => {
       })
     }
 
+    // Persona da linha: linhas de VENDAS (ex.: Tricopill) não usam Sofia/clínica/Shosp.
+    const isSalesBot = (snapshot as { botKind?: string }).botKind === 'sales'
+
     // Agendamento autônomo da Sofia (kill-switch por tenant). false = "meio-termo":
     // a Dandara conduz a marcação; a Sofia só auxilia. true = a Sofia agenda sozinha.
     let autoBookOn = false
-    if (isInternal) {
+    if (isInternal && !isSalesBot) {
       try {
         const { data: cfgFlag } = await dbClient
           .from('crm_ai_configs')
@@ -629,7 +638,7 @@ Deno.serve(async (req) => {
     // Shosp = fonte da verdade da agenda. Injeta os agendamentos REAIS do paciente
     // (sempre) e a disponibilidade real (SÓ no modo auto — no meio-termo a Dandara
     // conduz, então não tentamos a IA com horários livres).
-    if (isInternal && context.leadId) {
+    if (isInternal && !isSalesBot && context.leadId) {
       try {
         const lastUser = [...clientMessages].reverse().find((m) => (m as { role?: string }).role === 'user')
         const lastText = typeof (lastUser as { content?: unknown })?.content === 'string'
@@ -689,16 +698,46 @@ Deno.serve(async (req) => {
           'NÃO fique oferecendo horários específicos, NÃO use ferramentas de agendamento, NÃO diga "já agendei" nem invente protocolo. (Sobre consultas JÁ marcadas, PODE responder usando `shosp.agendamentos`.)',
         ]
 
+    // Persona de VENDAS (ex.: Tricopill). Mantém os tokens/regras agnósticos que o
+    // pipeline exige (marcador <<<PACIENTE>>>, anti-raciocínio, formatação WhatsApp,
+    // saudação contextual) e troca todo o miolo de triagem/agenda da clínica por
+    // condução de venda. O conhecimento do produto (kits, preços) vem do PROMPT
+    // ADICIONAL (ai_system_prompt da linha), editável no DB sem redeploy.
+    const SALES_MODE_BLOCK = [
+      '--- MODO RESPOSTA DIRETA AO CLIENTE (VENDAS) ---',
+      'Sua resposta será enviada IMEDIATAMENTE ao cliente pelo WhatsApp. Você é a atendente comercial da loja — atenda de forma calorosa, consultiva e objetiva, com foco em ajudar e vender.',
+      'MANDATORY: Não inclua análises, explicações internas, raciocínios, etapas (ex: "1. Analisar...") nem qualquer texto que não seja para o cliente.',
+      'MANDATORY: Não escreva planeamento em inglês ("Analyze the User", "Decision", "Strategy") nem listas numeradas de raciocínio.',
+      'MANDATORY: Não escreva nomes de ferramentas, JSON de chamadas de API nem texto técnico para o cliente.',
+      'MANDATORY: A primeira linha da sua resposta DEVE ser exactamente: <<<PACIENTE>>>',
+      'MANDATORY: Na linha seguinte, escreva APENAS a mensagem WhatsApp em português (cordial, vendedora, humana). Nada antes de <<<PACIENTE>>>.',
+      'PROIBIDO ABSOLUTAMENTE: blocos <thinking>, <think>, <reasoning>, <reflection> ou qualquer marcação XML de raciocínio. Raciocine SILENCIOSAMENTE e produza APENAS a linha <<<PACIENTE>>> seguida da mensagem. Respostas só com raciocínio (sem texto após <<<PACIENTE>>>) são DESCARTADAS — o cliente fica sem resposta.',
+      'Formatação WhatsApp: para destacar use **negrito assim** (dois asteriscos). Não use quatro asteriscos (****) nem um único asterisco *assim*.',
+      `MANDATORY (saudações): use saudação contextual APENAS na primeira mensagem de uma nova conversa. A saudação OBRIGATÓRIA agora é "${brasilGreeting}" (horário de Brasília — NÃO use outra). Em mensagens seguintes da mesma conversa NÃO repita "Olá / Bom dia / Boa tarde / Boa noite".`,
+      '',
+      '--- OBJETIVO DE VENDAS ---',
+      'Objetivo: entender a necessidade do cliente (queixa capilar, há quanto tempo, se já usou algo), apresentar o produto e os kits/preços (use SEMPRE os valores do PROMPT ADICIONAL — NUNCA invente preço, prazo, composição ou promessa de resultado), tirar dúvidas e conduzir à compra.',
+      'Seja consultiva, não robótica: faça no máximo 1–2 perguntas por mensagem, conecte o benefício à queixa do cliente e crie um próximo passo claro.',
+      'Use APENAS informações do PROMPT ADICIONAL e do snapshot. Se não souber algo (ex.: contraindicação médica específica), seja honesta e ofereça encaminhar para um especialista — não invente.',
+      'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
+      'FECHAMENTO: quando o cliente decidir comprar, confirme o kit escolhido e a forma de pagamento (Pix ou cartão), e conduza para finalizar conforme as instruções do PROMPT ADICIONAL (link da loja ou passagem para um atendente humano). Se faltar integração de pagamento, oriente o próximo passo com naturalidade — não invente link nem código de pagamento.',
+      'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do cliente, trate como um único contexto — responda de forma completa sem pedir de novo o que já foi dito.',
+    ].join('\n')
+
     let systemContent = [
       isInternal
-        ? 'Você é a *Sofia*, a assistente virtual do Instituto Lorena Visentainer. Ao falar com pacientes pelo WhatsApp, apresente-se como Sofia na primeira mensagem da conversa (ex.: "Olá! Eu sou a Sofia, do Instituto Lorena Visentainer"). Em mensagens seguintes da mesma conversa, NÃO repita a apresentação.'
+        ? (isSalesBot
+            ? 'Você é a *atendente virtual de vendas da Tricopill* (suplemento capilar). Ao falar com clientes pelo WhatsApp, apresente-se de forma calorosa na primeira mensagem da conversa (ex.: "Oi! Aqui é da Tricopill 💚"). Em mensagens seguintes da mesma conversa, NÃO repita a apresentação.'
+            : 'Você é a *Sofia*, a assistente virtual do Instituto Lorena Visentainer. Ao falar com pacientes pelo WhatsApp, apresente-se como Sofia na primeira mensagem da conversa (ex.: "Olá! Eu sou a Sofia, do Instituto Lorena Visentainer"). Em mensagens seguintes da mesma conversa, NÃO repita a apresentação.')
         : 'Você é o assistente de IA do CRM Instituto Lorena (operação comercial / clínica).',
       'Use APENAS o snapshot JSON abaixo; não invente números, leads ou interações que não apareçam.',
       `Contexto temporal (Maringá/Brasília): agora são ${brasilDateTime} — ${brasilWeekday}, período da ${brasilPeriod}. Saudação apropriada para a primeira mensagem ao paciente: "${brasilGreeting}". Atendimento humano (Dandara): segunda a sexta, 08h às 18h — neste momento ${isBusinessHours ? 'estamos DENTRO' : 'estamos FORA'} do horário comercial.`,
       'Quando existir leadFocus.recent_media_intel, use audio_transcript e document_or_image_text como parte do contexto da conversa (transcrições e OCR/extração de documentos).',
       'Quando existir leadFocus.recent_conversation, é o histórico cronológico deste paciente no CRM — use-o sempre: o cliente pode enviar o mesmo pedido em várias mensagens seguidas; una o sentido e não peça de novo o que já está nas linhas anteriores.',
       isInternal
-        ? [
+        ? (isSalesBot
+          ? SALES_MODE_BLOCK
+          : [
             '--- MODO RESPOSTA DIRETA AO PACIENTE ---',
             'Sua resposta será enviada IMEDIATAMENTE ao paciente. Você deve agir como o assistente virtual da clínica.',
             'MANDATORY: Não inclua análises, explicações internas, raciocínios, etapas (ex: "1. Analisar...") ou qualquer texto que não seja para o paciente.',
@@ -727,7 +766,7 @@ Deno.serve(async (req) => {
             '- Dra. Lorena: Só tem agenda para o ano que vem (informar que não tem agenda no momento). Seus horários são terças, quartas e quintas, das 11h30 às 14h15. Após esse horário, é somente retorno.',
             '- Dr. Matheus Amaral: Realiza atendimentos SOMENTE no período da tarde (14h00 às 17h00) às segundas, quartas e sextas-feiras devido à agenda cirúrgica.',
             '- Dra. Jaqueline: Possui horários mais flexíveis, atendendo todos os dias no período da manhã (exceto sextas-feiras). Terças e quintas também atende à tarde (14h00 às 18h00).',
-          ].join('\n')
+          ].join('\n'))
         : 'Os dados respeitam as permissões (RLS) da conta do utilizador — pode ser uma amostra parcial.',
       'Responda em português de Portugal ou Brasil, de forma clara e profissional.',
       'Não peça nem repita senhas. Não confirme envio de mensagens a pacientes: pode sugerir RASCUNHOS; o humano envia.',
