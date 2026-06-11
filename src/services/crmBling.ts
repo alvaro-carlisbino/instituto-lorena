@@ -8,10 +8,17 @@ export type BlingStatus = {
 
 /** Lê o status de conexão do Bling do polo ativo (sem expor tokens na UI). */
 export async function fetchBlingStatus(): Promise<BlingStatus> {
-  if (!supabase) return { connected: false, connectedAt: null, accountName: null }
+  const empty: BlingStatus = { connected: false, connectedAt: null, accountName: null }
+  if (!supabase) return empty
+  // Filtra pelo polo ativo — admins enxergam mais de uma linha de tenant_integrations,
+  // e sem o filtro o maybeSingle() quebra (várias linhas).
+  const { data: tid } = await supabase.rpc('current_tenant_id')
+  const tenantId = typeof tid === 'string' ? tid.trim() : ''
+  if (!tenantId) return empty
   const { data, error } = await supabase
     .from('tenant_integrations')
     .select('bling')
+    .eq('tenant_id', tenantId)
     .maybeSingle()
   if (error) throw new Error(error.message)
   const bling = ((data as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
