@@ -1,60 +1,81 @@
 import { supabase } from '@/lib/supabaseClient'
 
-async function invokeRede(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function invoke(fn: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (!supabase) throw new Error('Sistema não configurado.')
-  const { data, error } = await supabase.functions.invoke('crm-rede-link', { body })
+  const { data, error } = await supabase.functions.invoke(fn, { body })
   if (error) {
     const ctx = (error as { context?: { body?: unknown } }).context
     const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
-    throw new Error(String(msg || 'Falha na operação Rede'))
+    throw new Error(String(msg || 'Falha na operação'))
   }
-  const p = (data ?? {}) as Record<string, unknown>
-  if (p.ok !== true) throw new Error(String(p.message || p.error || 'Falha na operação Rede'))
-  return p
+  return (data ?? {}) as Record<string, unknown>
 }
 
+// === Config (autenticado, no CRM) ===
 export type RedeConfigStatus = { configured: boolean; env: string }
 
 export async function getRedeConfig(): Promise<RedeConfigStatus> {
-  const p = await invokeRede({ action: 'get_config' })
+  const p = await invoke('crm-rede-link', { action: 'get_config' })
+  if (p.ok !== true) throw new Error(String(p.message || p.error || 'Falha'))
   return { configured: p.configured === true, env: String(p.env ?? 'sandbox') }
 }
 
-export async function setRedeConfig(patch: {
-  clientId?: string
-  clientSecret?: string
-  companyNumber?: string
-  createdBy?: string
-  env?: string
-}): Promise<void> {
+export async function setRedeConfig(patch: { pv?: string; token?: string; env?: string }): Promise<void> {
   const body: Record<string, unknown> = { action: 'set_config' }
-  if (patch.clientId !== undefined) body.client_id = patch.clientId
-  if (patch.clientSecret !== undefined) body.client_secret = patch.clientSecret
-  if (patch.companyNumber !== undefined) body.company_number = patch.companyNumber
-  if (patch.createdBy !== undefined) body.created_by = patch.createdBy
+  if (patch.pv !== undefined) body.pv = patch.pv
+  if (patch.token !== undefined) body.token = patch.token
   if (patch.env !== undefined) body.env = patch.env
-  await invokeRede(body)
+  const p = await invoke('crm-rede-link', body)
+  if (p.ok !== true) throw new Error(String(p.message || p.error || 'Falha ao salvar Rede'))
 }
 
+/** Cria a cobrança e devolve a URL do checkout (/pagar/<id>). */
 export async function generateRedeLink(args: {
   amountCents: number
   description: string
   leadId?: string
 }): Promise<{ payLink: string; amountCents: number }> {
-  try {
-    const p = await invokeRede({
-      action: 'generate_link',
-      amountCents: args.amountCents,
-      description: args.description,
-      ...(args.leadId ? { leadId: args.leadId } : {}),
-    })
-    return { payLink: String(p.payLink ?? ''), amountCents: Number(p.amountCents ?? 0) }
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e)
+  const p = await invoke('crm-rede-link', {
+    action: 'generate_link',
+    amountCents: args.amountCents,
+    description: args.description,
+    appBaseUrl: window.location.origin,
+    ...(args.leadId ? { leadId: args.leadId } : {}),
+  })
+  if (p.ok !== true) {
+    const m = String(p.message || p.error || '')
     if (m.includes('rede_nao_configurado')) {
-      throw new Error('Rede não configurada neste polo. Preencha Client ID, Secret e Company-number (PV) em Integrações.')
+      throw new Error('Rede não configurada neste polo. Preencha PV e Token (e.Rede) em Integrações.')
     }
-    if (m.includes('rede_valor_invalido')) throw new Error('Informe um valor válido (mínimo R$ 1,00).')
-    throw new Error(m)
+    if (m.includes('rede_valor')) throw new Error('Informe um valor válido (mínimo R$ 1,00).')
+    throw new Error(m || 'Falha ao gerar cobrança')
   }
+  return { payLink: String(p.payLink ?? ''), amountCents: Number(p.amountCents ?? 0) }
+}
+
+// === Checkout público (cliente, sem login) ===
+export type RedeIntentView = { amountCents: number; description: string; installments: number; status: string }
+
+export async function fetchRedeIntent(id: string): Promise<RedeIntentView> {
+  const p = await invoke('crm-rede-pay', { action: 'get_intent', id })
+  if (p.ok !== true) throw new Error(String(p.error || 'Cobrança não encontrada'))
+  return {
+    amountCents: Number(p.amountCents ?? 0),
+    description: String(p.description ?? ''),
+    installments: Number(p.installments ?? 1),
+    status: String(p.status ?? 'pending'),
+  }
+}
+
+export type RedeCardInput = {
+  cardholderName: string
+  cardNumber: string
+  expirationMonth: number
+  expirationYear: number
+  securityCode: string
+}
+
+export async function payRedeIntent(id: string, card: RedeCardInput, installments?: number): Promise<{ status: string; message: string }> {
+  const p = await invoke('crm-rede-pay', { action: 'pay', id, card, ...(installments ? { installments } : {}) })
+  return { status: String(p.status ?? (p.ok ? 'paid' : 'failed')), message: String(p.message ?? p.error ?? '') }
 }

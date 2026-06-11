@@ -31,6 +31,7 @@ import { ChatWorkspacePage } from './pages/ChatWorkspacePage'
 import { TricopilPage } from './pages/TricopilPage'
 import { PaymentLinksPage } from './pages/PaymentLinksPage'
 import { IntegrationsPage } from './pages/IntegrationsPage'
+import { CheckoutPage } from './pages/CheckoutPage'
 import { AdminOperationsPage } from './pages/AdminOperationsPage'
 import { TenantsAdminPage } from './pages/TenantsAdminPage'
 import { WhatsappConnectionPage } from './pages/WhatsappConnectionPage'
@@ -82,6 +83,15 @@ function AppRoutes() {
 function App() {
   const crmState = useCrmState()
   const dataMode = getDataProviderMode()
+
+  // Checkout de cartão (e.Rede) é PÚBLICO — fora do gate de login/onboarding.
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/pagar/')) {
+    return (
+      <Routes>
+        <Route path="/pagar/:id" element={<CheckoutPage />} />
+      </Routes>
+    )
+  }
 
   if (dataMode === 'supabase' && !crmState.session) {
     return (

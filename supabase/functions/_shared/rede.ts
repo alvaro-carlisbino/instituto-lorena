@@ -1,130 +1,132 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { insertInteraction } from './crm.ts'
 
 /**
- * Rede / Itaú — produto "Link de Pagamento" (useredecloud).
- * OAuth2 client_credentials: Basic(client_id:client_secret) -> access_token (Bearer).
- * Criar link: POST /payment-link/v1/create com Bearer + header Company-number (PV).
- * Config por polo em tenant_integrations.rede:
- *   { client_id, client_secret, company_number, created_by?, env?, token_base?, pay_base?,
- *     access_token?, token_expires_at? (cache) }
+ * e.Rede — transação por CARTÃO (POST /v1/transactions, Basic auth PV:Token).
+ * Fluxo: o CRM cria uma "cobrança" (rede_payments) e devolve /pagar/<id>; o cliente
+ * abre, digita o cartão, e crm-rede-pay autoriza+captura na e.Rede.
+ * Config por polo em tenant_integrations.rede: { pv, token, env?, base_url? }.
+ *
+ * ATENÇÃO PCI: coletar o cartão na nossa página = escopo PCI. OK para sandbox/teste;
+ * para produção com cartão real, migrar para tokenização da Rede (cartão não trafega
+ * pelo nosso servidor).
  */
 
-const SANDBOX_TOKEN_BASE = 'https://rl7-sandbox-api.useredecloud.com.br'
-const SANDBOX_PAY_BASE = 'https://payments-apisandbox.useredecloud.com.br'
-const PROD_TOKEN_BASE = 'https://rl7-api.useredecloud.com.br'
-const PROD_PAY_BASE = 'https://payments-api.useredecloud.com.br'
+const SANDBOX_BASE = 'https://sandbox-erede.useredecloud.com.br'
+const PROD_BASE = 'https://erede.useredecloud.com.br'
 
-export type RedeConfig = {
-  clientId: string
-  clientSecret: string
-  companyNumber: string
-  createdBy: string
-  env: 'sandbox' | 'prod'
-  tokenBase: string
-  payBase: string
-}
+export type RedeConfig = { pv: string; token: string; baseUrl: string; env: 'sandbox' | 'prod' }
 
 export async function readRedeConfig(admin: SupabaseClient, tenantId: string): Promise<RedeConfig | null> {
   if (!tenantId) return null
   const { data } = await admin.from('tenant_integrations').select('rede').eq('tenant_id', tenantId).maybeSingle()
   const cfg = ((data as { rede?: Record<string, unknown> } | null)?.rede ?? {}) as Record<string, unknown>
-  const clientId = typeof cfg.client_id === 'string' ? cfg.client_id.trim() : ''
-  const clientSecret = typeof cfg.client_secret === 'string' ? cfg.client_secret.trim() : ''
-  const companyNumber = typeof cfg.company_number === 'string' ? cfg.company_number.trim() : ''
-  // Company-number (PV) é OPCIONAL — a doc do "Link de Pagamento" não o exige.
-  if (!clientId || !clientSecret) return null
+  const pv = typeof cfg.pv === 'string' ? cfg.pv.trim() : ''
+  const token = typeof cfg.token === 'string' ? cfg.token.trim() : ''
+  if (!pv || !token) return null
   const env: 'sandbox' | 'prod' = cfg.env === 'prod' ? 'prod' : 'sandbox'
-  const tokenBase = (typeof cfg.token_base === 'string' && cfg.token_base.trim()
-    ? cfg.token_base.trim()
-    : env === 'prod' ? PROD_TOKEN_BASE : SANDBOX_TOKEN_BASE).replace(/\/$/, '')
-  const payBase = (typeof cfg.pay_base === 'string' && cfg.pay_base.trim()
-    ? cfg.pay_base.trim()
-    : env === 'prod' ? PROD_PAY_BASE : SANDBOX_PAY_BASE).replace(/\/$/, '')
-  const createdBy = typeof cfg.created_by === 'string' && cfg.created_by.trim() ? cfg.created_by.trim() : 'crm@institutolorena.com.br'
-  return { clientId, clientSecret, companyNumber, createdBy, env, tokenBase, payBase }
+  const baseUrl = (typeof cfg.base_url === 'string' && cfg.base_url.trim()
+    ? cfg.base_url.trim()
+    : env === 'prod' ? PROD_BASE : SANDBOX_BASE).replace(/\/$/, '')
+  return { pv, token, baseUrl, env }
 }
 
-async function getRedeAccessToken(admin: SupabaseClient, tenantId: string, cfg: RedeConfig): Promise<string> {
-  const { data } = await admin.from('tenant_integrations').select('rede').eq('tenant_id', tenantId).maybeSingle()
-  const stored = ((data as { rede?: Record<string, unknown> } | null)?.rede ?? {}) as Record<string, unknown>
-  const cached = typeof stored.access_token === 'string' ? stored.access_token : ''
-  const exp = typeof stored.token_expires_at === 'string' ? Date.parse(stored.token_expires_at) : 0
-  if (cached && exp && Date.now() < exp) return cached
-
-  const basic = btoa(`${cfg.clientId}:${cfg.clientSecret}`)
-  const res = await fetch(`${cfg.tokenBase}/oauth/token?grant_type=client_credentials`, {
-    method: 'POST',
-    headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json' },
-  })
-  const text = await res.text()
-  let parsed: { access_token?: string; expires_in?: number } = {}
-  try {
-    parsed = text ? JSON.parse(text) : {}
-  } catch {
-    parsed = {}
-  }
-  if (!res.ok || !parsed.access_token) throw new Error(`rede_token_${res.status}: ${text.slice(0, 200)}`)
-
-  const expiresAt = new Date(Date.now() + (Number(parsed.expires_in ?? 300) - 30) * 1000).toISOString()
-  await admin.from('tenant_integrations').upsert({
-    tenant_id: tenantId,
-    rede: { ...stored, access_token: parsed.access_token, token_expires_at: expiresAt },
-  })
-  return parsed.access_token
+export type RedeIntent = {
+  id: string
+  tenantId: string
+  leadId: string | null
+  amountCents: number
+  description: string
+  installments: number
+  status: string
 }
 
-export type RedeLinkResult = { payLink: string; reference: string; amountCents: number; id: string | null }
-
-function findUrlDeep(node: unknown): string | null {
-  if (typeof node === 'string') return /^https?:\/\//.test(node) ? node : null
-  if (!node || typeof node !== 'object') return null
-  const obj = node as Record<string, unknown>
-  for (const key of ['paymentLink', 'shortUrl', 'url', 'link', 'paymentUrl']) {
-    const v = obj[key]
-    if (typeof v === 'string' && /^https?:\/\//.test(v)) return v
-  }
-  for (const v of Object.values(obj)) {
-    const found = findUrlDeep(v)
-    if (found) return found
-  }
-  return null
+function shortId(): string {
+  return crypto.randomUUID().replace(/-/g, '').slice(0, 16)
 }
 
-/** Cria um link de pagamento por cartão na Rede e devolve a URL. */
-export async function createRedePaymentLink(
+/** Cria uma cobrança e devolve a URL do checkout (/pagar/<id>). */
+export async function createRedeIntent(
   admin: SupabaseClient,
-  args: { tenantId: string; amountCents: number; description: string; reference: string; installments?: number },
-): Promise<RedeLinkResult> {
+  args: { tenantId: string; amountCents: number; description: string; leadId?: string; installments?: number; appBaseUrl: string },
+): Promise<{ id: string; url: string }> {
   const cfg = await readRedeConfig(admin, args.tenantId)
   if (!cfg) throw new Error('rede_nao_configurado')
-
   const amountCents = Math.round(args.amountCents)
   if (!Number.isFinite(amountCents) || amountCents < 100) throw new Error('rede_valor_invalido')
-  const amount = Math.round(amountCents) / 100 // reais (decimal)
-
-  // expirationDate no formato MM/DD/YYYY, +7 dias.
-  const exp = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-  const mm = String(exp.getUTCMonth() + 1).padStart(2, '0')
-  const dd = String(exp.getUTCDate()).padStart(2, '0')
-  const expirationDate = `${mm}/${dd}/${exp.getUTCFullYear()}`
-
-  const token = await getRedeAccessToken(admin, args.tenantId, cfg)
-  const body = {
-    amount,
-    expirationDate,
+  const id = shortId()
+  await admin.from('rede_payments').insert({
+    id,
+    tenant_id: args.tenantId,
+    lead_id: args.leadId || null,
+    amount_cents: amountCents,
+    description: String(args.description ?? 'Pagamento').slice(0, 120),
     installments: Math.max(1, Math.min(12, args.installments ?? 1)),
-    createdBy: cfg.createdBy,
-    paymentOptions: ['credit'],
-    description: String(args.description ?? 'Pagamento').slice(0, 100),
-    comments: args.reference.slice(0, 100),
+    status: 'pending',
+  })
+  const base = args.appBaseUrl.replace(/\/$/, '')
+  return { id, url: `${base}/pagar/${id}` }
+}
+
+export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<RedeIntent | null> {
+  const { data } = await admin
+    .from('rede_payments')
+    .select('id, tenant_id, lead_id, amount_cents, description, installments, status')
+    .eq('id', id)
+    .maybeSingle()
+  if (!data) return null
+  const r = data as Record<string, unknown>
+  return {
+    id: String(r.id),
+    tenantId: String(r.tenant_id),
+    leadId: r.lead_id != null ? String(r.lead_id) : null,
+    amountCents: Number(r.amount_cents ?? 0),
+    description: String(r.description ?? ''),
+    installments: Number(r.installments ?? 1),
+    status: String(r.status ?? 'pending'),
   }
-  const res = await fetch(`${cfg.payBase}/payment-link/v1/create`, {
+}
+
+export type RedeCard = {
+  cardholderName: string
+  cardNumber: string
+  expirationMonth: number
+  expirationYear: number
+  securityCode: string
+}
+
+export type RedePayResult = { status: 'paid' | 'failed'; returnCode: string; message: string; tid: string | null }
+
+/** Autoriza+captura a cobrança na e.Rede com os dados do cartão. */
+export async function payRedeIntent(
+  admin: SupabaseClient,
+  args: { id: string; card: RedeCard; installments?: number },
+): Promise<RedePayResult> {
+  const intent = await getRedeIntent(admin, args.id)
+  if (!intent) throw new Error('cobranca_nao_encontrada')
+  if (intent.status === 'paid') return { status: 'paid', returnCode: '00', message: 'Já pago', tid: null }
+
+  const cfg = await readRedeConfig(admin, intent.tenantId)
+  if (!cfg) throw new Error('rede_nao_configurado')
+
+  const basic = btoa(`${cfg.pv}:${cfg.token}`)
+  const body = {
+    capture: true,
+    kind: 'credit',
+    reference: intent.id,
+    amount: intent.amountCents, // centavos
+    installments: Math.max(1, Math.min(12, args.installments ?? intent.installments ?? 1)),
+    cardholderName: args.card.cardholderName.slice(0, 50),
+    cardNumber: args.card.cardNumber.replace(/\D/g, ''),
+    expirationMonth: args.card.expirationMonth,
+    expirationYear: args.card.expirationYear,
+    securityCode: args.card.securityCode.replace(/\D/g, ''),
+    softDescriptor: 'PAGAMENTO',
+    subscription: false,
+  }
+  const res = await fetch(`${cfg.baseUrl}/v1/transactions`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(cfg.companyNumber ? { 'Company-number': cfg.companyNumber } : {}),
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   const text = await res.text()
@@ -134,11 +136,51 @@ export async function createRedePaymentLink(
   } catch {
     parsed = {}
   }
-  if (!res.ok) throw new Error(`rede_${res.status}: ${text.slice(0, 300)}`)
+  const returnCode = String(parsed.returnCode ?? `http_${res.status}`)
+  const tid = typeof parsed.tid === 'string' ? parsed.tid : null
+  const message = String(parsed.returnMessage ?? parsed.message ?? (res.ok ? 'ok' : text.slice(0, 160)))
+  // e.Rede: returnCode "00" = aprovado.
+  const approved = returnCode === '00'
 
-  const payLink = findUrlDeep(parsed)
-  if (!payLink) throw new Error(`rede_sem_link_no_retorno: ${text.slice(0, 200)}`)
-  const id = typeof parsed.id === 'string' ? parsed.id : typeof parsed.paymentLinkId === 'string' ? parsed.paymentLinkId : null
+  await admin
+    .from('rede_payments')
+    .update({ status: approved ? 'paid' : 'failed', tid, return_code: returnCode, paid_at: approved ? new Date().toISOString() : null })
+    .eq('id', intent.id)
 
-  return { payLink, reference: args.reference, amountCents, id }
+  if (approved && intent.leadId) {
+    try {
+      const { data: lead } = await admin
+        .from('leads')
+        .select('id, patient_name, pipeline_id, tenant_id')
+        .eq('id', intent.leadId)
+        .maybeSingle()
+      const l = lead as { id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string } | null
+      if (l) {
+        let pagoStageId = 'tricopill__vd-pago'
+        if (l.pipeline_id) {
+          const { data: stage } = await admin
+            .from('pipeline_stages')
+            .select('id')
+            .eq('pipeline_id', l.pipeline_id)
+            .ilike('name', 'pago%')
+            .maybeSingle()
+          if (stage?.id) pagoStageId = String(stage.id)
+        }
+        await admin.from('leads').update({ stage_id: pagoStageId, temperature: 'hot', updated_at: new Date().toISOString() }).eq('id', l.id)
+        await insertInteraction(admin, {
+          leadId: l.id,
+          patientName: String(l.patient_name ?? 'Cliente'),
+          channel: 'system',
+          direction: 'system',
+          author: 'Rede',
+          content: `💳 Pagamento no cartão confirmado (Rede). ${(intent.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`,
+          tenantId: String(l.tenant_id ?? intent.tenantId),
+        })
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  return { status: approved ? 'paid' : 'failed', returnCode, message, tid }
 }

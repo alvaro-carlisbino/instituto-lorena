@@ -429,3 +429,7 @@ verify_jwt = false
 # valida a sessão por conta própria (getUser).
 [functions.crm-bling-oauth]
 verify_jwt = false
+
+# Checkout de cartão (e.Rede): página pública do cliente, sem login.
+[functions.crm-rede-pay]
+verify_jwt = false

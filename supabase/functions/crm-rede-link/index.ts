@@ -1,10 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { createRedePaymentLink, readRedeConfig } from '../_shared/rede.ts'
+import { createRedeIntent, readRedeConfig } from '../_shared/rede.ts'
 
-// Rede/Itaú (cartão) — ações autenticadas.
+// e.Rede (cartão) — ações autenticadas do CRM.
 //  get_config    -> { configured, env }
-//  set_config    -> grava { pv?, token?, env?, base_url?, link_path? }
-//  generate_link -> cria link de cartão { amountCents, description?, leadId? }
+//  set_config    -> grava { pv?, token?, env?, base_url? }
+//  generate_link -> cria cobrança e devolve a URL /pagar/<id> { amountCents, description?, leadId?, appBaseUrl }
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -57,13 +57,8 @@ Deno.serve(async (req) => {
     const { data } = await admin.from('tenant_integrations').select('rede').eq('tenant_id', tenantId).maybeSingle()
     const cur = ((data as { rede?: Record<string, unknown> } | null)?.rede ?? {}) as Record<string, unknown>
     const next = { ...cur }
-    for (const k of ['client_id', 'client_secret', 'company_number', 'created_by', 'env', 'token_base', 'pay_base'] as const) {
+    for (const k of ['pv', 'token', 'env', 'base_url'] as const) {
       if (payload[k] !== undefined) next[k] = String(payload[k] ?? '').trim()
-    }
-    // Troca de credenciais invalida o token em cache.
-    if (payload.client_id !== undefined || payload.client_secret !== undefined) {
-      delete next.access_token
-      delete next.token_expires_at
     }
     await admin.from('tenant_integrations').upsert({ tenant_id: tenantId, rede: next })
     return json({ ok: true })
@@ -72,18 +67,16 @@ Deno.serve(async (req) => {
   if (action === 'generate_link') {
     const amountCents = Math.round(Number(payload.amountCents ?? 0))
     const description = String(payload.description ?? 'Pagamento')
-    const leadId = payload.leadId != null ? String(payload.leadId) : ''
-    const reference = leadId ? `lead:${leadId}` : `manual-${crypto.randomUUID()}`
+    const leadId = payload.leadId != null ? String(payload.leadId) : undefined
+    const installments = payload.installments != null ? Number(payload.installments) : 1
+    const appBaseUrl = String(payload.appBaseUrl ?? '').trim()
+    if (!appBaseUrl) return json({ ok: false, error: 'missing_app_base_url' }, 400)
     try {
-      const out = await createRedePaymentLink(admin, { tenantId, amountCents, description, reference })
-      return json({ ok: true, payLink: out.payLink, amountCents: out.amountCents })
+      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl })
+      return json({ ok: true, payLink: out.url, id: out.id, amountCents })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      const status = msg.startsWith('rede_nao_configurado') || msg.startsWith('rede_link_path') ? 400 : 502
-      // Loga o erro real da Rede para depuração (lido via webhook_jobs).
-      try {
-        await admin.from('webhook_jobs').insert({ source: 'rede-debug', status: 'error', note: msg.slice(0, 490) })
-      } catch { /* ignore */ }
+      const status = msg.startsWith('rede_nao_configurado') || msg.startsWith('rede_valor') ? 400 : 502
       return json({ ok: false, error: 'rede_link_failed', message: msg }, status)
     }
   }
