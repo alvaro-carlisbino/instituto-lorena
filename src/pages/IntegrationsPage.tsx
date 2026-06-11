@@ -253,7 +253,7 @@ export function IntegrationsPage() {
             </p>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">
-                <Label htmlFor="rede-company">Company-number (PV) — opcional</Label>
+                <Label htmlFor="rede-company">Company-number (PV) — exigido no create</Label>
                 <Input id="rede-company" value={redeCompany} onChange={(e) => setRedeCompany(e.target.value)} placeholder="número da filiação" className="font-mono text-xs" />
               </div>
               <div className="space-y-1.5">

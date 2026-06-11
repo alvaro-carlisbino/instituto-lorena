@@ -80,6 +80,10 @@ Deno.serve(async (req) => {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       const status = msg.startsWith('rede_nao_configurado') || msg.startsWith('rede_link_path') ? 400 : 502
+      // Loga o erro real da Rede para depuração (lido via webhook_jobs).
+      try {
+        await admin.from('webhook_jobs').insert({ source: 'rede-debug', status: 'error', note: msg.slice(0, 490) })
+      } catch { /* ignore */ }
       return json({ ok: false, error: 'rede_link_failed', message: msg }, status)
     }
   }
