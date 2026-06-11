@@ -59,27 +59,52 @@ Deno.serve(async (req) => {
     return json({ ok: true, skipped: 'not_paid', status }, 200)
   }
 
-  // Resolve o lead: pela reference_id "lead:<id>" ou por pagbank_checkouts (checkout id).
-  let leadId = refLeadId
-  let checkoutRowId: string | null = null
-  if (!leadId) {
+  const nowIso = new Date().toISOString()
+
+  // 1) Marca o checkout como PAGO — independente de existir lead (links avulsos
+  //    têm lead_id sintético "manual-..."). Casa por reference_id ou checkout id.
+  let markedPaid = false
+  let paidLeadId = ''
+  if (referenceId) {
+    const { data } = await admin
+      .from('pagbank_checkouts')
+      .update({ status: 'paid', paid_at: nowIso })
+      .eq('reference_id', referenceId)
+      .select('lead_id')
+      .maybeSingle()
+    if (data) {
+      markedPaid = true
+      paidLeadId = String((data as { lead_id?: string }).lead_id ?? '')
+    }
+  }
+  if (!markedPaid) {
     for (const id of ids) {
-      const { data: row } = await admin
+      const { data } = await admin
         .from('pagbank_checkouts')
-        .select('checkout_id, lead_id')
+        .update({ status: 'paid', paid_at: nowIso })
         .eq('checkout_id', id)
+        .select('lead_id')
         .maybeSingle()
-      if (row?.lead_id) {
-        leadId = String(row.lead_id)
-        checkoutRowId = String(row.checkout_id)
+      if (data) {
+        markedPaid = true
+        paidLeadId = String((data as { lead_id?: string }).lead_id ?? '')
         break
       }
     }
   }
-  if (!leadId) {
+
+  // 2) Lead REAL (ignora ids sintéticos "manual-" dos links avulsos).
+  const candidate =
+    refLeadId && !refLeadId.startsWith('manual-')
+      ? refLeadId
+      : paidLeadId && !paidLeadId.startsWith('manual-')
+        ? paidLeadId
+        : ''
+  if (!candidate) {
     await markDone()
-    return json({ ok: true, skipped: 'lead_not_resolved' }, 200)
+    return json({ ok: true, marked_paid: markedPaid, lead: 'avulso_ou_sem_lead' }, 200)
   }
+  const leadId = candidate
 
   const { data: lead } = await admin
     .from('leads')
@@ -88,7 +113,7 @@ Deno.serve(async (req) => {
     .maybeSingle()
   if (!lead) {
     await markDone()
-    return json({ ok: true, skipped: 'lead_not_found' }, 200)
+    return json({ ok: true, marked_paid: markedPaid, skipped: 'lead_not_found' }, 200)
   }
   const l = lead as { id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string }
   const tenantId = String(l.tenant_id ?? '')
@@ -107,13 +132,8 @@ Deno.serve(async (req) => {
 
   await admin
     .from('leads')
-    .update({ stage_id: pagoStageId, temperature: 'hot', updated_at: new Date().toISOString() })
+    .update({ stage_id: pagoStageId, temperature: 'hot', updated_at: nowIso })
     .eq('id', leadId)
-
-  await admin
-    .from('pagbank_checkouts')
-    .update({ status: 'paid', paid_at: new Date().toISOString() })
-    .eq(checkoutRowId ? 'checkout_id' : 'lead_id', checkoutRowId ?? leadId)
 
   try {
     await insertInteraction(admin, {

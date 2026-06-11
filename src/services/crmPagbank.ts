@@ -3,9 +3,9 @@ import { supabase } from '@/lib/supabaseClient'
 export type PagbankKit = '1_mes' | '3_meses' | '5_meses'
 
 export const PAGBANK_KIT_LABELS: Record<PagbankKit, string> = {
-  '1_mes': '1 frasco — 1 mês (R$ 199)',
-  '3_meses': '3 frascos — 3 meses + 1 grátis (R$ 597)',
-  '5_meses': '5 frascos — 5 meses (R$ 999)',
+  '1_mes': '1 frasco — 1 mês (Pix R$ 189,05)',
+  '3_meses': '3 frascos — 3 meses + 1 grátis (Pix R$ 567,15)',
+  '5_meses': '5 frascos — 5 meses (Pix R$ 949,05)',
 }
 
 export type PagbankLinkResult = { ok: true; payLink: string; label: string; amountCents: number }

@@ -12,11 +12,11 @@ export type PagBankConfig = { token: string; baseUrl: string; env: 'sandbox' | '
 const PROD_BASE = 'https://api.pagseguro.com'
 const SANDBOX_BASE = 'https://sandbox.api.pagseguro.com'
 
-/** Kits do Tricopill. unit_amount em CENTAVOS (preço cheio/cartão; o link aceita Pix e cartão). */
+/** Kits do Tricopill. unit_amount em CENTAVOS — preço PIX com 5% de desconto (links são só Pix). */
 export const PAGBANK_KITS: Record<string, { label: string; amountCents: number; qty: number }> = {
-  '1_mes': { label: 'Tricopill — 1 frasco (1 mês)', amountCents: 19900, qty: 1 },
-  '3_meses': { label: 'Tricopill — 3 frascos (3 meses) + 1 grátis', amountCents: 59700, qty: 3 },
-  '5_meses': { label: 'Tricopill — 5 frascos (5 meses)', amountCents: 99900, qty: 5 },
+  '1_mes': { label: 'Tricopill — 1 frasco (1 mês)', amountCents: 18905, qty: 1 },
+  '3_meses': { label: 'Tricopill — 3 frascos (3 meses) + 1 grátis', amountCents: 56715, qty: 3 },
+  '5_meses': { label: 'Tricopill — 5 frascos (5 meses)', amountCents: 94905, qty: 5 },
 }
 
 /** Normaliza variações que a IA possa mandar ('3 meses', '3meses', 'kit3') para a chave canônica. */
