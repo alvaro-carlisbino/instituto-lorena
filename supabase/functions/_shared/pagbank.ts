@@ -134,24 +134,41 @@ export async function createPagBankCheckout(
     payment_notification_urls: [webhookUrl],
   }
 
-  const res = await fetch(`${cfg.baseUrl}/checkouts`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${cfg.token}`,
-      'Content-Type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify(body),
-  })
-  const text = await res.text()
+  // Tenta a base configurada (produção) e, em caso de erro, cai para a sandbox.
+  const bases = [cfg.baseUrl]
+  if (!cfg.baseUrl.includes('sandbox')) bases.push(SANDBOX_BASE)
+  let text = ''
   let parsed: Record<string, unknown> = {}
-  try {
-    parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
-  } catch {
-    parsed = {}
+  let ok = false
+  let lastErr = 'pagbank_failed'
+  for (const base of bases) {
+    try {
+      const res = await fetch(`${base}/checkouts`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cfg.token}`,
+          'Content-Type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+      text = await res.text()
+      try {
+        parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+      } catch {
+        parsed = {}
+      }
+      if (res.ok) {
+        ok = true
+        break
+      }
+      lastErr = `pagbank_${res.status}: ${text.slice(0, 300)}`
+    } catch (e) {
+      lastErr = `pagbank_fetch_error: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`
+    }
   }
-  if (!res.ok) {
-    throw new Error(`pagbank_${res.status}: ${text.slice(0, 300)}`)
+  if (!ok) {
+    throw new Error(lastErr)
   }
 
   const links = (parsed.links as Array<{ rel?: string; href?: string }> | undefined) ?? []
