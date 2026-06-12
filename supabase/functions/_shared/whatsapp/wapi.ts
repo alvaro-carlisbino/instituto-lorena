@@ -77,11 +77,25 @@ export class WapiProvider implements WhatsappProvider {
   }
 
   normalizeInbound(payload: Record<string, unknown>, _headers: Headers): NormalizedInboundMessage | null {
-    // Ignora eventos não-mensagem (status, connection, etc) quando o payload sinaliza.
+    // Formato REAL da W-API (confirmado nos logs de webhook 12/jun): chaves minúsculas
+    // e flat — event="webhookReceived", instanceid, messageid, fromme, isgroup,
+    // sender:{id,pushname}, chat:{id}, moment (epoch s), msgcontent:{conversation|...}.
+    // Mantemos fallbacks p/ nomes camelCase/Baileys por robustez.
     const event = safeString(payload.event ?? payload.type).toLowerCase()
-    if (event && !event.includes('message') && !event.includes('msg')) return null
+    // Só descarta se for claramente um evento de não-mensagem (status/conexão/presença).
+    if (event && /(status|connect|disconnect|presence|qrcode|delivery|ack)/.test(event)) {
+      if (!payload.msgcontent && !payload.message) return null
+    }
+
+    // Ignora mensagens de grupo (não viram lead/atendimento 1:1).
+    const isGroup =
+      payload.isgroup === true ||
+      safeString(getByPath(payload, 'chat.id')).toLowerCase().includes('@g.us') ||
+      safeString(getByPath(payload, 'key.remoteJid')).toLowerCase().includes('@g.us')
+    if (isGroup) return null
 
     const messageId = firstString(payload, [
+      'messageid',
       'messageId',
       'message_id',
       'id',
@@ -92,32 +106,37 @@ export class WapiProvider implements WhatsappProvider {
     ])
     if (!messageId) return null
 
-    // W-API normaliza phone como número puro, mas pode vir com sufixo @c.us / @s.whatsapp.net.
+    // Remetente: sender.id (formato real) ou variações. Pode vir com @c.us / @s.whatsapp.net.
     const fromRaw = firstString(payload, [
-      'phone',
+      'sender.id',
       'sender.phone',
+      'phone',
       'data.phone',
       'from',
       'data.from',
       'data.key.remoteJid',
-      'sender.id',
     ])
-    const fromRawNormalized = fromRaw.toLowerCase()
-    if (fromRawNormalized.includes('@g.us')) return null
+    if (fromRaw.toLowerCase().includes('@g.us')) return null
     const fromPhone = digitsOnly(fromRaw)
     if (fromPhone.length < 10) return null
 
     const pushName = firstString(payload, [
+      'sender.pushname',
       'senderName',
       'sender.name',
       'pushName',
       'data.pushName',
-      'data.sender.pushName',
       'contact.name',
     ])
     const fromName = pushName || 'Contato WhatsApp'
 
-    const text = firstString(payload, [
+    // Texto: msgcontent.conversation | extendedTextMessage.text | legenda de mídia.
+    let text = firstString(payload, [
+      'msgcontent.conversation',
+      'msgcontent.extendedTextMessage.text',
+      'msgcontent.imageMessage.caption',
+      'msgcontent.videoMessage.caption',
+      'msgcontent.documentMessage.caption',
       'message',
       'text',
       'body',
@@ -126,21 +145,38 @@ export class WapiProvider implements WhatsappProvider {
       'data.body',
       'data.message.conversation',
       'data.message.extendedTextMessage.text',
-    ])
+    ]).trim()
 
-    const finalText = text.trim()
-    if (!finalText) return null
+    // Mídia sem legenda: usa um marcador para não perder a mensagem no chat.
+    if (!text) {
+      const mc = (payload.msgcontent ?? payload.message ?? {}) as Record<string, unknown>
+      if (mc.imageMessage) text = '📷 Imagem'
+      else if (mc.audioMessage || mc.pttMessage) text = '🎤 Áudio'
+      else if (mc.videoMessage) text = '🎥 Vídeo'
+      else if (mc.documentMessage) text = '📎 Documento'
+      else if (mc.stickerMessage) text = '🌟 Figurinha'
+      else if (mc.locationMessage) text = '📍 Localização'
+      else if (mc.contactMessage || mc.contactsArrayMessage) text = '👤 Contato'
+    }
+    if (!text) return null
 
-    const fromMeRaw = getByPath(payload, 'fromMe') ?? getByPath(payload, 'data.fromMe') ?? getByPath(payload, 'data.key.fromMe')
-    const fromMe = Boolean(fromMeRaw)
+    const fromMe = Boolean(
+      payload.fromme ?? getByPath(payload, 'fromMe') ?? getByPath(payload, 'data.fromMe') ?? getByPath(payload, 'data.key.fromMe'),
+    )
 
     const tsRaw =
-      Number(getByPath(payload, 'timestamp') ?? getByPath(payload, 'data.timestamp') ?? getByPath(payload, 'data.messageTimestamp') ?? 0) ||
-      Math.floor(Date.now() / 1000)
+      Number(
+        payload.moment ??
+          getByPath(payload, 'timestamp') ??
+          getByPath(payload, 'data.timestamp') ??
+          getByPath(payload, 'data.messageTimestamp') ??
+          0,
+      ) || Math.floor(Date.now() / 1000)
     const tsMs = tsRaw > 1e12 ? tsRaw : tsRaw * 1000
     const happenedAtIso = new Date(tsMs).toISOString()
 
     const payloadInstanceId = firstString(payload, [
+      'instanceid',
       'instanceId',
       'instance_id',
       'data.instanceId',
@@ -153,7 +189,7 @@ export class WapiProvider implements WhatsappProvider {
       externalMessageId: messageId,
       fromPhone,
       fromName,
-      text: finalText,
+      text,
       direction: fromMe ? 'out' : 'in',
       happenedAt: happenedAtIso,
       wapiInstanceId: payloadInstanceId || undefined,

@@ -39,6 +39,7 @@ function json(body: Record<string, unknown>, status = 200): Response {
 
 function extractWapiInstanceIdFromPayload(payload: Record<string, unknown>): string {
   const candidates: unknown[] = [
+    (payload as Record<string, unknown>).instanceid,
     (payload as Record<string, unknown>).instanceId,
     (payload as Record<string, unknown>).instance_id,
     ((payload as Record<string, unknown>).data as Record<string, unknown> | undefined)?.instanceId,
