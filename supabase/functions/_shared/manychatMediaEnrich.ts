@@ -3,9 +3,9 @@ import {
   getOpenAiApiKey,
   getOpenAiDocumentModel,
   openaiExtractDocument,
-  openaiTranscribeAudio,
 } from './openaiMediaIntel.ts'
 import { ocrImage, visionConfigured } from './visionOcr.ts'
+import { zaiAsrConfigured, zaiTranscribeAudio } from './zaiAudioAsr.ts'
 
 /**
  * Enriquecimento de mídia para canais que entregam a mídia como URL (ManyChat,
@@ -106,21 +106,11 @@ async function runMediaIntel(
 ): Promise<{ transcribed: string | null; extracted: string | null }> {
   const mt = mediaType.toLowerCase()
   if (mt === 'audio') {
-    if (!apiKey) return { transcribed: null, extracted: null } // transcrição depende de OpenAI (Whisper)
-    const ext = mime.includes('ogg')
-      ? 'ogg'
-      : mime.includes('webm')
-        ? 'webm'
-        : mime.includes('mpeg') || mime.includes('mp3')
-          ? 'mp3'
-          : mime.includes('wav')
-            ? 'wav'
-            : mime.includes('m4a') || mime.includes('mp4') || mime.includes('aac')
-              ? 'm4a'
-              : 'ogg'
+    // Transcrição 100% via z.ai glm-asr (ogg/opus do WhatsApp é decodificado e
+    // cortado em blocos <=25s). Sem dependência de OpenAI.
     const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
-    const text = await openaiTranscribeAudio({ apiKey, bytes, filename: `wa-audio.${ext}`, mimeType: mime })
-    return { transcribed: trunc(text, 12000) || null, extracted: null }
+    const text = await zaiTranscribeAudio(bytes, mime, { maxChars: 12000 })
+    return { transcribed: text || null, extracted: null }
   }
   if (mt === 'image') {
     const text = await ocrImage({ base64, mimeType: mime }) // Z.ai/GLM-4V (fallback OpenAI)
@@ -190,8 +180,9 @@ export async function enrichManychatMediaRows(
       .update({ media_base64: dl.base64, mime_type: mime })
       .eq('id', row.id)
 
-    // 2) Inteligência (best-effort). Imagem usa ZAI; áudio/PDF usam OpenAI.
-    if (!apiKey && !visionConfigured()) continue
+    // 2) Inteligência (best-effort). Imagem usa ZAI (vision); áudio usa ZAI (glm-asr);
+    //    PDF/doc usa OpenAI (se configurado).
+    if (!apiKey && !visionConfigured() && !zaiAsrConfigured()) continue
     try {
       const { transcribed, extracted } = await runMediaIntel(apiKey, String(row.media_type ?? 'other'), mime, dl.base64)
       if (transcribed || extracted) {
