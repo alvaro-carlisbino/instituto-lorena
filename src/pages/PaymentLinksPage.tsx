@@ -49,8 +49,13 @@ export function PaymentLinksPage() {
   const [kit, setKit] = useState<PagbankKit>('3_meses')
   const [amountReais, setAmountReais] = useState('')
   const [description, setDescription] = useState('')
+  const [freightReais, setFreightReais] = useState('')
   const [generating, setGenerating] = useState(false)
   const [lastLink, setLastLink] = useState<{ url: string; via: string } | null>(null)
+
+  const freightCents = freightReais.trim()
+    ? Math.round(Number(freightReais.replace(/\./g, '').replace(',', '.')) * 100)
+    : undefined
 
   const [rows, setRows] = useState<PagbankCheckoutRow[]>([])
   const [loadingRows, setLoadingRows] = useState(false)
@@ -86,7 +91,7 @@ export function PaymentLinksPage() {
     setGenerating(true)
     setLastLink(null)
     try {
-      const res = await generatePagbankLink({ leadId: selectedLeadId, kit, customerName: selectedName })
+      const res = await generatePagbankLink({ leadId: selectedLeadId, kit, customerName: selectedName, freightCents })
       setLastLink({ url: res.payLink, via: `Pix · ${formatBRL(res.amountCents)}` })
       toast.success(`Link Pix gerado (${formatBRL(res.amountCents)}).`)
       await loadRows()
@@ -105,7 +110,7 @@ export function PaymentLinksPage() {
     setGenerating(true)
     setLastLink(null)
     try {
-      const res = await generateRedeLink({ amountCents, description: desc, leadId: selectedLeadId })
+      const res = await generateRedeLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents })
       setLastLink({ url: res.payLink, via: `Cartão · ${formatBRL(res.amountCents)}` })
       toast.success(`Link de cartão gerado (${formatBRL(res.amountCents)}).`)
     } catch (e) {
@@ -156,6 +161,17 @@ export function PaymentLinksPage() {
                 <Input id="pl-customer" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Ex.: Maria Silva" />
               </div>
             ) : null}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="pl-freight">Frete (R$) — cobrado à parte</Label>
+              <Input
+                id="pl-freight"
+                inputMode="decimal"
+                value={freightReais}
+                onChange={(e) => setFreightReais(e.target.value)}
+                placeholder="Ex.: 15,00 (Maringá). Vazio = sem frete."
+              />
+            </div>
 
             {isSalesPolo ? (
               <>

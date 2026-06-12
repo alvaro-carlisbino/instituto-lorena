@@ -43,6 +43,9 @@ export async function generateRedeLink(args: {
   amountCents: number
   description: string
   leadId?: string
+  installments?: number
+  freightCents?: number
+  couponCode?: string
 }): Promise<{ payLink: string; amountCents: number }> {
   const p = await invoke('crm-rede-link', {
     action: 'generate_link',
@@ -50,6 +53,9 @@ export async function generateRedeLink(args: {
     description: args.description,
     appBaseUrl: window.location.origin,
     ...(args.leadId ? { leadId: args.leadId } : {}),
+    ...(args.installments ? { installments: args.installments } : {}),
+    ...(args.freightCents && args.freightCents > 0 ? { freightCents: args.freightCents } : {}),
+    ...(args.couponCode?.trim() ? { couponCode: args.couponCode.trim() } : {}),
   })
   if (p.ok !== true) {
     const m = String(p.message || p.error || '')

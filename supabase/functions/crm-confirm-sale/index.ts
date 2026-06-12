@@ -89,7 +89,10 @@ Deno.serve(async (req) => {
 
   // Cupom (opcional).
   const coupon = await quoteCoupon(admin, tenantId, p.couponCode != null ? String(p.couponCode) : null, baseCents)
-  const finalCents = coupon.finalCents
+  const productCents = coupon.finalCents
+  // Frete cobrado à parte. Total recebido = produto + frete.
+  const freightCents = Math.max(0, Math.round(Number(p.freightCents ?? 0)))
+  const totalCents = productCents + freightCents
   const installments = Math.max(1, Math.min(12, Number(p.installments ?? 1) || 1))
   const customerName = String(
     (lead.custom_fields?.cadastro as Record<string, string> | undefined)?.nomeCompleto || lead.patient_name || 'Cliente Tricopill',
@@ -99,14 +102,14 @@ Deno.serve(async (req) => {
   try {
     if (isCard) {
       await admin.from('rede_payments').insert({
-        id: shortId(), tenant_id: tenantId, lead_id: leadId, amount_cents: finalCents,
-        description: label, installments, status: 'paid', paid_at: new Date().toISOString(),
+        id: shortId(), tenant_id: tenantId, lead_id: leadId, amount_cents: totalCents,
+        description: freightCents > 0 ? `${label} + frete` : label, installments, status: 'paid', paid_at: new Date().toISOString(),
         coupon_code: coupon.applied ? coupon.code : null, discount_cents: coupon.discountCents,
       })
     } else {
       await admin.from('pagbank_checkouts').insert({
         checkout_id: shortId(), tenant_id: tenantId, lead_id: leadId, reference_id: `lead:${leadId}`,
-        amount_cents: finalCents, kit: kitKey, pay_link: 'manual', status: 'paid',
+        amount_cents: totalCents, kit: kitKey, pay_link: 'manual', status: 'paid',
         paid_at: new Date().toISOString(), coupon_code: coupon.applied ? coupon.code : null,
         discount_cents: coupon.discountCents,
       })
@@ -128,9 +131,12 @@ Deno.serve(async (req) => {
   // 3) Registra a interação da venda.
   const couponTxt = coupon.applied ? ` (cupom ${coupon.code} -${formatBRLCents(coupon.discountCents)})` : ''
   const methodTxt = isCard ? `cartão ${installments}x` : method === 'other' ? 'outro' : 'Pix'
+  const freightTxt = freightCents > 0
+    ? ` Produto ${formatBRLCents(productCents)} + frete ${formatBRLCents(freightCents)} = ${formatBRLCents(totalCents)}.`
+    : ''
   await insertInteraction(admin, {
     leadId, patientName: customerName, channel: 'system', direction: 'system', author: user.email || 'Atendente',
-    content: `💰 Venda confirmada: ${label} — ${formatBRLCents(finalCents)}${couponTxt} via ${methodTxt}.`,
+    content: `💰 Venda confirmada: ${label} — ${formatBRLCents(totalCents)}${couponTxt} via ${methodTxt}.${freightTxt}`,
     tenantId,
   })
 
@@ -142,7 +148,7 @@ Deno.serve(async (req) => {
       blingNote = 'Pedido no Bling não criado (venda avulsa sem kit — lance manualmente se precisar).'
     } else {
       try {
-        const out = await blingCreateSaleOrder(admin, tenantId, { kit: kitKey, amountCents: finalCents, customerName })
+        const out = await blingCreateSaleOrder(admin, tenantId, { kit: kitKey, amountCents: productCents, customerName })
         blingOrderId = out.orderId
         blingNote = `Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`
       } catch (e) {
@@ -161,13 +167,13 @@ Deno.serve(async (req) => {
   try {
     await notifyAgents(admin, {
       leadId, kind: 'urgent', title: 'Venda confirmada 🎉',
-      body: `${customerName} — ${formatBRLCents(finalCents)} (${methodTxt}). Confirmada por ${user.email || 'atendente'}.`,
+      body: `${customerName} — ${formatBRLCents(totalCents)} (${methodTxt}). Confirmada por ${user.email || 'atendente'}.`,
       includeOwner: true, tenantId,
     })
   } catch { /* ignore */ }
 
   return json({
-    ok: true, leadId, amountCents: finalCents, discountCents: coupon.discountCents,
+    ok: true, leadId, amountCents: totalCents, productCents, freightCents, discountCents: coupon.discountCents,
     couponCode: coupon.applied ? coupon.code : null, method: methodTxt, stage: pagoStageId,
     blingOrderId, blingNote: blingNote || null,
   })

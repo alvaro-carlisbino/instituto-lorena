@@ -76,10 +76,12 @@ export type CheckoutResult = {
   amountCents: number
   label: string
   referenceId: string
-  /** Valor cheio antes do cupom (= amountCents quando não há desconto). */
+  /** Valor cheio do produto antes do cupom. */
   baseCents: number
   discountCents: number
   couponCode: string | null
+  /** Frete cobrado à parte (incluído em amountCents como item separado). */
+  freightCents: number
 }
 
 /**
@@ -95,6 +97,7 @@ export async function createPagBankCheckout(
     amountCents?: number
     description?: string
     couponCode?: string
+    freightCents?: number
     supabaseUrl: string
   },
 ): Promise<CheckoutResult> {
@@ -120,7 +123,10 @@ export async function createPagBankCheckout(
 
   // Cupom (best-effort): se válido, cobra o valor com desconto. Inválido → valor cheio.
   const coupon = await quoteCoupon(admin, args.tenantId, args.couponCode, baseCents)
-  const amountCents = coupon.finalCents
+  const productCents = coupon.finalCents
+  // Frete cobrado à parte (item separado no checkout). Total = produto + frete.
+  const freightCents = Math.max(0, Math.round(Number(args.freightCents ?? 0)))
+  const amountCents = productCents + freightCents
 
   const referenceId = `lead:${args.lead.id}`
   const cad = ((args.lead.custom_fields?.cadastro as Record<string, string>) ?? {})
@@ -136,7 +142,12 @@ export async function createPagBankCheckout(
     reference_id: referenceId,
     customer_modifiable: true,
     customer: { name: customerName },
-    items: [{ reference_id: kitKey || 'avulso', name: label, quantity: 1, unit_amount: amountCents }],
+    items: freightCents > 0
+      ? [
+          { reference_id: kitKey || 'avulso', name: label, quantity: 1, unit_amount: productCents },
+          { reference_id: 'frete', name: 'Frete / entrega', quantity: 1, unit_amount: freightCents },
+        ]
+      : [{ reference_id: kitKey || 'avulso', name: label, quantity: 1, unit_amount: productCents }],
     payment_methods: cfg.pixOnly ? [{ type: 'PIX' }] : [{ type: 'PIX' }, { type: 'CREDIT_CARD' }],
     soft_descriptor: 'TRICOPILL',
     expiration_date: expIso,
@@ -213,6 +224,7 @@ export async function createPagBankCheckout(
     baseCents,
     discountCents: coupon.discountCents,
     couponCode: coupon.applied ? coupon.code : null,
+    freightCents,
   }
 }
 

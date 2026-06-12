@@ -69,10 +69,12 @@ Deno.serve(async (req) => {
     const description = String(payload.description ?? 'Pagamento')
     const leadId = payload.leadId != null ? String(payload.leadId) : undefined
     const installments = payload.installments != null ? Number(payload.installments) : 1
+    const freightCents = payload.freightCents != null ? Number(payload.freightCents) : undefined
+    const couponCode = payload.couponCode != null ? String(payload.couponCode) : undefined
     const appBaseUrl = String(payload.appBaseUrl ?? '').trim()
     if (!appBaseUrl) return json({ ok: false, error: 'missing_app_base_url' }, 400)
     try {
-      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl })
+      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl, freightCents, couponCode })
       return json({ ok: true, payLink: out.url, id: out.id, amountCents })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

@@ -34,6 +34,7 @@ export function ConfirmSaleDialog({ isOpen, onClose, leadId, onConfirmed }: Prop
   const [method, setMethod] = useState<'pix' | 'card' | 'other'>('pix')
   const [installments, setInstallments] = useState('1')
   const [coupon, setCoupon] = useState('')
+  const [freight, setFreight] = useState('')
   const [createBling, setCreateBling] = useState(true)
   const [loading, setLoading] = useState(false)
 
@@ -57,6 +58,7 @@ export function ConfirmSaleDialog({ isOpen, onClose, leadId, onConfirmed }: Prop
         paymentMethod: method,
         installments: method === 'card' ? Math.max(1, Math.min(12, Number(installments) || 1)) : undefined,
         couponCode: coupon.trim() || undefined,
+        freightCents: freight.trim() ? Math.round(Number(freight.replace(/\./g, '').replace(',', '.')) * 100) : undefined,
         createBlingOrder: createBling,
       })
       const valor = (res.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -196,6 +198,20 @@ export function ConfirmSaleDialog({ isOpen, onClose, leadId, onConfirmed }: Prop
               />
             </div>
           ) : null}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="cs-freight">Frete (R$) — cobrado à parte</Label>
+            <Input
+              id="cs-freight"
+              inputMode="decimal"
+              value={freight}
+              onChange={(e) => setFreight(e.target.value)}
+              placeholder="Ex.: 15,00 (Maringá). Vazio = sem frete."
+            />
+            <p className="text-[0.7rem] text-muted-foreground">
+              Somado ao total recebido. O Bling recebe só o valor do produto.
+            </p>
+          </div>
 
           <div className="flex items-center justify-between rounded-lg border border-border/40 px-3 py-2">
             <div>

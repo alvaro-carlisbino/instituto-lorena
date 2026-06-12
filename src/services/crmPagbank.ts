@@ -19,6 +19,8 @@ export async function generatePagbankLink(args: {
   kit: PagbankKit
   customerName?: string
   phone?: string
+  freightCents?: number
+  couponCode?: string
 }): Promise<PagbankLinkResult> {
   if (!supabase) throw new Error('Sistema não configurado.')
   const { data, error } = await supabase.functions.invoke('crm-pagbank-checkout', {
@@ -27,6 +29,8 @@ export async function generatePagbankLink(args: {
       kit: args.kit,
       ...(args.customerName ? { customerName: args.customerName } : {}),
       ...(args.phone ? { phone: args.phone } : {}),
+      ...(args.freightCents && args.freightCents > 0 ? { freightCents: args.freightCents } : {}),
+      ...(args.couponCode?.trim() ? { couponCode: args.couponCode.trim() } : {}),
     },
   })
   if (error) {

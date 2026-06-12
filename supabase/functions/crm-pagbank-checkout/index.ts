@@ -88,6 +88,8 @@ Deno.serve(async (req) => {
       kit: payload.kit != null ? String(payload.kit) : undefined,
       amountCents: payload.amountCents != null ? Number(payload.amountCents) : undefined,
       description: payload.description != null ? String(payload.description) : undefined,
+      couponCode: payload.couponCode != null ? String(payload.couponCode) : undefined,
+      freightCents: payload.freightCents != null ? Number(payload.freightCents) : undefined,
       supabaseUrl,
     })
     return json({ ok: true, payLink: out.payLink, label: out.label, amountCents: out.amountCents, checkoutId: out.checkoutId })

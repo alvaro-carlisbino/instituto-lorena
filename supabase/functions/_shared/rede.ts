@@ -76,8 +76,9 @@ export async function createRedeIntent(
     installments?: number
     appBaseUrl: string
     couponCode?: string
+    freightCents?: number
   },
-): Promise<{ id: string; url: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null }> {
+): Promise<{ id: string; url: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null; freightCents: number }> {
   const cfg = await readRedeConfig(admin, args.tenantId)
   if (!cfg) throw new Error('rede_nao_configurado')
   const baseCents = Math.round(args.amountCents)
@@ -85,7 +86,12 @@ export async function createRedeIntent(
 
   // Cupom (best-effort): inválido → valor cheio.
   const coupon = await quoteCoupon(admin, args.tenantId, args.couponCode, baseCents)
-  const amountCents = coupon.finalCents
+  const productCents = coupon.finalCents
+  // Frete cobrado à parte, somado ao total (a Rede cobra um único valor).
+  const freightCents = Math.max(0, Math.round(Number(args.freightCents ?? 0)))
+  const amountCents = productCents + freightCents
+  const baseDesc = String(args.description ?? 'Pagamento').slice(0, 100)
+  const description = freightCents > 0 ? `${baseDesc} + frete` : baseDesc
 
   const id = shortId()
   await admin.from('rede_payments').insert({
@@ -93,7 +99,7 @@ export async function createRedeIntent(
     tenant_id: args.tenantId,
     lead_id: args.leadId || null,
     amount_cents: amountCents,
-    description: String(args.description ?? 'Pagamento').slice(0, 120),
+    description: description.slice(0, 120),
     installments: Math.max(1, Math.min(12, args.installments ?? 1)),
     status: 'pending',
     coupon_code: coupon.applied ? coupon.code : null,
@@ -107,6 +113,7 @@ export async function createRedeIntent(
     baseCents,
     discountCents: coupon.discountCents,
     couponCode: coupon.applied ? coupon.code : null,
+    freightCents,
   }
 }
 

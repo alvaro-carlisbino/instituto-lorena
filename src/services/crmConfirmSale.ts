@@ -28,6 +28,7 @@ export type ConfirmSaleInput = {
   paymentMethod: 'pix' | 'card' | 'other'
   installments?: number
   couponCode?: string
+  freightCents?: number
   createBlingOrder?: boolean
 }
 
@@ -53,6 +54,7 @@ export async function confirmSale(input: ConfirmSaleInput): Promise<ConfirmSaleR
   }
   if (input.paymentMethod === 'card') body.installments = input.installments ?? 1
   if (input.couponCode?.trim()) body.couponCode = input.couponCode.trim()
+  if (input.freightCents && input.freightCents > 0) body.freightCents = input.freightCents
 
   const p = await invoke('crm-confirm-sale', body)
   if (p.ok !== true) throw new Error(String(p.message || p.error || 'Falha ao confirmar venda'))
