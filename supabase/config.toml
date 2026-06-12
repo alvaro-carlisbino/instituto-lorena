@@ -410,6 +410,12 @@ verify_jwt = false
 [functions.crm-whatsapp-webhook]
 verify_jwt = false
 
+# Webhook de entrada da W-API (Tricopill/linhas wapi). A W-API faz POST sem JWT de
+# sessão; valida pelo wapi_instance_id + x-webhook-secret no handler. Sem isto, todo
+# evento da W-API tomava 401 no gateway antes de chegar no código (wapi_jobs = 0).
+[functions.crm-wapi-webhook]
+verify_jwt = false
+
 [functions.crm-ingest-webhook]
 verify_jwt = false
 

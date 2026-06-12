@@ -1,5 +1,24 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from './crm.ts'
+import { normalizeKitKey } from './pagbank.ts'
+import { incrementCouponUse, quoteCoupon } from './coupons.ts'
+
+/**
+ * Kits do Tricopill no CARTÃO (e.Rede) — preço CHEIO, sem o desconto de 5% do Pix.
+ * Espelha REDE_KIT_AMOUNTS do frontend (PaymentLinksPage). amountCents em centavos.
+ */
+export const REDE_KITS: Record<string, { label: string; amountCents: number; qty: number }> = {
+  '1_mes': { label: 'Tricopill — 1 frasco (1 mês)', amountCents: 19900, qty: 1 },
+  '3_meses': { label: 'Tricopill — 3 frascos (3 meses) + 1 grátis', amountCents: 59700, qty: 3 },
+  '5_meses': { label: 'Tricopill — 5 frascos (5 meses)', amountCents: 99900, qty: 5 },
+}
+
+/** Resolve um kit do cartão a partir de uma variação ('3 meses', 'kit3'…). */
+export function resolveRedeKit(raw: string): { key: string; label: string; amountCents: number } | null {
+  const key = normalizeKitKey(raw)
+  const kit = key ? REDE_KITS[key] : undefined
+  return kit && key ? { key, label: kit.label, amountCents: kit.amountCents } : null
+}
 
 /**
  * e.Rede — transação por CARTÃO (POST /v1/transactions, Basic auth PV:Token).
@@ -39,6 +58,7 @@ export type RedeIntent = {
   description: string
   installments: number
   status: string
+  couponCode: string | null
 }
 
 function shortId(): string {
@@ -48,12 +68,25 @@ function shortId(): string {
 /** Cria uma cobrança e devolve a URL do checkout (/pagar/<id>). */
 export async function createRedeIntent(
   admin: SupabaseClient,
-  args: { tenantId: string; amountCents: number; description: string; leadId?: string; installments?: number; appBaseUrl: string },
-): Promise<{ id: string; url: string }> {
+  args: {
+    tenantId: string
+    amountCents: number
+    description: string
+    leadId?: string
+    installments?: number
+    appBaseUrl: string
+    couponCode?: string
+  },
+): Promise<{ id: string; url: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null }> {
   const cfg = await readRedeConfig(admin, args.tenantId)
   if (!cfg) throw new Error('rede_nao_configurado')
-  const amountCents = Math.round(args.amountCents)
-  if (!Number.isFinite(amountCents) || amountCents < 100) throw new Error('rede_valor_invalido')
+  const baseCents = Math.round(args.amountCents)
+  if (!Number.isFinite(baseCents) || baseCents < 100) throw new Error('rede_valor_invalido')
+
+  // Cupom (best-effort): inválido → valor cheio.
+  const coupon = await quoteCoupon(admin, args.tenantId, args.couponCode, baseCents)
+  const amountCents = coupon.finalCents
+
   const id = shortId()
   await admin.from('rede_payments').insert({
     id,
@@ -63,15 +96,24 @@ export async function createRedeIntent(
     description: String(args.description ?? 'Pagamento').slice(0, 120),
     installments: Math.max(1, Math.min(12, args.installments ?? 1)),
     status: 'pending',
+    coupon_code: coupon.applied ? coupon.code : null,
+    discount_cents: coupon.discountCents,
   })
   const base = args.appBaseUrl.replace(/\/$/, '')
-  return { id, url: `${base}/pagar/${id}` }
+  return {
+    id,
+    url: `${base}/pagar/${id}`,
+    amountCents,
+    baseCents,
+    discountCents: coupon.discountCents,
+    couponCode: coupon.applied ? coupon.code : null,
+  }
 }
 
 export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<RedeIntent | null> {
   const { data } = await admin
     .from('rede_payments')
-    .select('id, tenant_id, lead_id, amount_cents, description, installments, status')
+    .select('id, tenant_id, lead_id, amount_cents, description, installments, status, coupon_code')
     .eq('id', id)
     .maybeSingle()
   if (!data) return null
@@ -84,6 +126,7 @@ export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<
     description: String(r.description ?? ''),
     installments: Number(r.installments ?? 1),
     status: String(r.status ?? 'pending'),
+    couponCode: r.coupon_code != null ? String(r.coupon_code) : null,
   }
 }
 
@@ -146,6 +189,11 @@ export async function payRedeIntent(
     .from('rede_payments')
     .update({ status: approved ? 'paid' : 'failed', tid, return_code: returnCode, paid_at: approved ? new Date().toISOString() : null })
     .eq('id', intent.id)
+
+  // Pagamento aprovado: conta o uso do cupom (só agora, não na geração do link).
+  if (approved) {
+    await incrementCouponUse(admin, intent.tenantId, intent.couponCode)
+  }
 
   if (approved && intent.leadId) {
     try {

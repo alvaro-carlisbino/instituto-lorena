@@ -3,8 +3,32 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { insertInteraction } from './crm.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout } from './pagbank.ts'
+import { createRedeIntent, resolveRedeKit } from './rede.ts'
+import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 
 const CRM_OPS_MARKER = '<<<CRM_OPS>>>'
+
+/** URL pública do app (rota /pagar/:id do checkout de cartão). */
+const APP_BASE_URL = (Deno.env.get('APP_BASE_URL') ?? 'https://instituto-lorena.vercel.app').trim()
+
+/**
+ * Mensagem ao cliente sobre o cupom: confirma quando aplicou; avisa quando o
+ * código foi informado mas não valeu. Sem código → undefined (nada a dizer).
+ */
+function couponNote(
+  requested: unknown,
+  appliedCode: string | null,
+  baseCents: number,
+  discountCents: number,
+  finalCents: number,
+): string | undefined {
+  if (appliedCode && discountCents > 0) {
+    return `Cupom *${appliedCode}* aplicado: -${formatBRLCents(discountCents)} (de ${formatBRLCents(baseCents)} por ${formatBRLCents(finalCents)}).`
+  }
+  const reqCode = normalizeCouponCode(String(requested ?? ''))
+  if (reqCode) return `O cupom *${reqCode}* não é válido (expirado, esgotado ou inexistente) — segue o valor normal.`
+  return undefined
+}
 
 /** Revalida se o horário ainda está livre na Shosp (anti double-booking). */
 async function shospSlotStillFree(codigoPrestador: number, data: string, horario: string): Promise<boolean> {
@@ -49,7 +73,7 @@ export function peelCrmOpsFromModelReply(raw: string): { remainder: string; ops:
   return { remainder, ops }
 }
 
-export type CrmAiActionResult = { type: string; ok: boolean; detail?: string }
+export type CrmAiActionResult = { type: string; ok: boolean; detail?: string; customerNote?: string }
 
 /** Token para ilike: remove wildcards problemáticos. */
 export function sanitizeLeadSearchToken(raw: string): string {
@@ -487,13 +511,57 @@ export async function executeCrmAiOpsFromModel(
             kit: op.kit != null ? String(op.kit) : undefined,
             amountCents: op.amount_cents != null ? Number(op.amount_cents) : undefined,
             description: op.description != null ? String(op.description) : undefined,
+            couponCode: op.coupon != null ? String(op.coupon) : undefined,
             supabaseUrl: Deno.env.get('SUPABASE_URL') ?? '',
           })
-          results.push({ type: 'pagbank_checkout', ok: true, detail: out.payLink })
-          summaries.push(`Link PagBank gerado (${out.label})`)
+          const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
+          results.push({ type: 'pagbank_checkout', ok: true, detail: out.payLink, customerNote: note })
+          summaries.push(`Link PagBank gerado (${out.label}${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`)
         } catch (e) {
           results.push({
             type: 'pagbank_checkout',
+            ok: false,
+            detail: (e instanceof Error ? e.message : String(e)).slice(0, 200),
+          })
+        }
+        continue
+      }
+
+      if (type === 'rede_link' || type === 'rede_checkout' || type === 'rede_card') {
+        // Cartão (e.Rede), parcelado até 12x. Aceita kit OU amount_cents+description, e cupom.
+        const kitRaw = op.kit != null ? String(op.kit) : ''
+        const resolved = kitRaw ? resolveRedeKit(kitRaw) : null
+        let amountCents = 0
+        let description = ''
+        if (resolved) {
+          amountCents = resolved.amountCents
+          description = resolved.label
+        } else if (op.amount_cents != null) {
+          amountCents = Math.round(Number(op.amount_cents))
+          description = op.description != null ? String(op.description).slice(0, 120) : 'Tricopill'
+        } else {
+          results.push({ type: 'rede_link', ok: false, detail: 'missing_kit_or_amount' })
+          continue
+        }
+        const installments = Math.max(1, Math.min(12, Number(op.installments ?? 12) || 12))
+        try {
+          const out = await createRedeIntent(admin, {
+            tenantId: leadTenantId,
+            amountCents,
+            description,
+            leadId: opts.allowedLeadId,
+            installments,
+            appBaseUrl: APP_BASE_URL,
+            couponCode: op.coupon != null ? String(op.coupon) : undefined,
+          })
+          const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
+          results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: note })
+          summaries.push(
+            `Link cartão e.Rede gerado (${description}, até ${installments}x${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`,
+          )
+        } catch (e) {
+          results.push({
+            type: 'rede_link',
             ok: false,
             detail: (e instanceof Error ? e.message : String(e)).slice(0, 200),
           })

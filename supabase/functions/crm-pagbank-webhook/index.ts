@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { parsePagBankNotification } from '../_shared/pagbank.ts'
+import { incrementCouponUse } from '../_shared/coupons.ts'
 import { blingCreateSaleOrder } from '../_shared/bling.ts'
 
 // Webhook de pagamento do PagBank. Quando o pagamento confirma, move o lead para a
@@ -66,17 +67,25 @@ Deno.serve(async (req) => {
   //    têm lead_id sintético "manual-..."). Casa por reference_id ou checkout id.
   let markedPaid = false
   let paidLeadId = ''
+  // Transição real not-paid -> paid (via `.neq('status','paid')`): só aqui contamos
+  // o cupom, pra não somar duas vezes em notificações repetidas (PAID, AVAILABLE...).
+  const redeemCoupon = async (data: Record<string, unknown> | null) => {
+    if (!data) return
+    markedPaid = true
+    paidLeadId = String((data as { lead_id?: string }).lead_id ?? '')
+    const code = (data as { coupon_code?: string }).coupon_code
+    const tenant = String((data as { tenant_id?: string }).tenant_id ?? '')
+    if (code) await incrementCouponUse(admin, tenant, code)
+  }
   if (referenceId) {
     const { data } = await admin
       .from('pagbank_checkouts')
       .update({ status: 'paid', paid_at: nowIso })
       .eq('reference_id', referenceId)
-      .select('lead_id')
+      .neq('status', 'paid')
+      .select('lead_id, tenant_id, coupon_code')
       .maybeSingle()
-    if (data) {
-      markedPaid = true
-      paidLeadId = String((data as { lead_id?: string }).lead_id ?? '')
-    }
+    await redeemCoupon(data as Record<string, unknown> | null)
   }
   if (!markedPaid) {
     for (const id of ids) {
@@ -84,14 +93,24 @@ Deno.serve(async (req) => {
         .from('pagbank_checkouts')
         .update({ status: 'paid', paid_at: nowIso })
         .eq('checkout_id', id)
-        .select('lead_id')
+        .neq('status', 'paid')
+        .select('lead_id, tenant_id, coupon_code')
         .maybeSingle()
       if (data) {
-        markedPaid = true
-        paidLeadId = String((data as { lead_id?: string }).lead_id ?? '')
+        await redeemCoupon(data as Record<string, unknown>)
         break
       }
     }
+  }
+  // Fallback: nenhuma transição (notificação repetida ou já paga). Recupera o lead
+  // por reference_id só para o restante do fluxo (idempotente) não perder o lead.
+  if (!paidLeadId && referenceId) {
+    const { data } = await admin
+      .from('pagbank_checkouts')
+      .select('lead_id')
+      .eq('reference_id', referenceId)
+      .maybeSingle()
+    if (data) paidLeadId = String((data as { lead_id?: string }).lead_id ?? '')
   }
 
   // 2) Lead REAL (ignora ids sintéticos "manual-" dos links avulsos).

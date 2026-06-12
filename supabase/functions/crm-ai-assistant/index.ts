@@ -739,8 +739,12 @@ Deno.serve(async (req) => {
       'Use APENAS informações do PROMPT ADICIONAL e do snapshot. Se não souber algo (ex.: contraindicação médica específica), seja honesta e ofereça encaminhar para um especialista — não invente.',
       'Quando existir snapshot.bling_catalog, é o catálogo REAL do Bling (nome, código, preço e estoque). Use-o como fonte da verdade de produtos e disponibilidade: não ofereça item que não esteja no catálogo; se o estoque estiver 0 (ou null = não controlado), não prometa pronta-entrega — avise que vai confirmar o prazo. Os preços dos KITS/link de pagamento seguem o PROMPT ADICIONAL.',
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
-      'FECHAMENTO (gerar link de pagamento): quando o cliente CONFIRMAR que quer comprar um kit específico, inclua na MESMA resposta o bloco <<<CRM_OPS>>>{"version":1,"ops":[{"type":"pagbank_checkout","kit":"KIT"}]}, onde KIT é "1_mes", "3_meses" ou "5_meses" conforme o escolhido. O servidor cria o link de pagamento (Pix ou cartão) e o ANEXA automaticamente à sua mensagem — então escreva uma frase calorosa de fechamento (ex.: "Perfeito! Já tô gerando seu link de pagamento 💚"), SEM inventar URL, valor de link nem código. A tag <<<CRM_OPS>>> NUNCA aparece para o cliente.',
-      'Só gere o link quando o cliente JÁ escolheu o kit e quer pagar. Se ainda está em dúvida, continue a conversa sem gerar link.',
+      'FORMAS DE PAGAMENTO: o cliente escolhe entre PIX (com 5% de desconto) ou CARTÃO em até 12x. Quando ele decidir comprar, pergunte a preferência (Pix ou cartão; se cartão, em quantas vezes).',
+      'FECHAMENTO — PIX: quando o cliente quer PIX, inclua na MESMA resposta o bloco <<<CRM_OPS>>>{"version":1,"ops":[{"type":"pagbank_checkout","kit":"KIT"}]}, onde KIT é "1_mes", "3_meses" ou "5_meses".',
+      'FECHAMENTO — CARTÃO: quando o cliente quer CARTÃO/parcelar, use <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_link","kit":"KIT","installments":N}]}, onde N é o número de parcelas que o cliente quer (máximo 12; se ele não disser, use 12).',
+      'CUPOM DE DESCONTO: se o cliente informar um código (ex.: BEMVINDO10), inclua "coupon":"CODIGO" DENTRO da op (vale em pagbank_checkout e em rede_link). O servidor valida, aplica o desconto e te avisa se não valeu — NUNCA invente desconto, NUNCA confirme um cupom por conta própria nem prometa valor com desconto antes de gerar o link.',
+      'O servidor cria o link (já com o desconto do cupom, se houver) e o ANEXA automaticamente à sua mensagem. Você só escreve uma frase calorosa de fechamento (ex.: "Perfeito! Já tô gerando seu link 💚"), SEM inventar URL, valor de link nem código. A tag <<<CRM_OPS>>> NUNCA aparece para o cliente.',
+      'Só gere o link quando o cliente JÁ escolheu o kit E a forma de pagamento. Se ainda está em dúvida, continue a conversa sem gerar link.',
       'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do cliente, trate como um único contexto — responda de forma completa sem pedir de novo o que já foi dito.',
     ].join('\n')
 
@@ -976,13 +980,22 @@ Deno.serve(async (req) => {
       if (shospBooked?.detail && !reply.includes(shospBooked.detail)) {
         reply = `${reply.trim()}\n\n✅ Consulta agendada na agenda da clínica: ${shospBooked.detail} (horário de Brasília/Maringá).`
       }
-      // pagbank_checkout: o detail é a URL do link de pagamento (rel PAY). Anexa ao
-      // final para o cliente abrir e pagar (Pix ou cartão). O modelo NÃO inventa o link.
+      // pagbank_checkout: o detail é a URL do link (rel PAY). Anexa ao final para o
+      // cliente abrir e pagar (Pix com 5% off ou cartão). O modelo NÃO inventa o link.
       const pagbankLink = actionChunks.find(
         (c) => c.type === 'pagbank_checkout' && c.ok && typeof c.detail === 'string' && c.detail.startsWith('http'),
       )
       if (pagbankLink?.detail && !reply.includes(pagbankLink.detail)) {
-        reply = `${reply.trim()}\n\n💳 Aqui está seu link de pagamento (Pix ou cartão):\n${pagbankLink.detail}`
+        const note = pagbankLink.customerNote ? `\n${pagbankLink.customerNote}` : ''
+        reply = `${reply.trim()}\n\n💚 Pague no Pix (5% de desconto) ou cartão por aqui:\n${pagbankLink.detail}${note}`
+      }
+      // rede_link: checkout de CARTÃO próprio (/pagar/:id), parcelado em até 12x.
+      const redeLink = actionChunks.find(
+        (c) => c.type === 'rede_link' && c.ok && typeof c.detail === 'string' && c.detail.startsWith('http'),
+      )
+      if (redeLink?.detail && !reply.includes(redeLink.detail)) {
+        const note = redeLink.customerNote ? `\n${redeLink.customerNote}` : ''
+        reply = `${reply.trim()}\n\n💳 Pague no cartão (em até 12x) por aqui:\n${redeLink.detail}${note}`
       }
       const booked = actionChunks.find(
         (c) =>

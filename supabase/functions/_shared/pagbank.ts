@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { quoteCoupon } from './coupons.ts'
 
 /**
  * PagBank — Checkout / Link de Pagamento (Pix + cartão).
@@ -75,6 +76,10 @@ export type CheckoutResult = {
   amountCents: number
   label: string
   referenceId: string
+  /** Valor cheio antes do cupom (= amountCents quando não há desconto). */
+  baseCents: number
+  discountCents: number
+  couponCode: string | null
 }
 
 /**
@@ -89,6 +94,7 @@ export async function createPagBankCheckout(
     kit?: string
     amountCents?: number
     description?: string
+    couponCode?: string
     supabaseUrl: string
   },
 ): Promise<CheckoutResult> {
@@ -96,21 +102,25 @@ export async function createPagBankCheckout(
   if (!cfg) throw new Error('pagbank_not_configured')
 
   // Resolve item (kit ou valor avulso).
-  let amountCents = 0
+  let baseCents = 0
   let label = ''
   let kitKey = ''
   if (args.kit) {
     const key = normalizeKitKey(args.kit)
     const kit = key ? PAGBANK_KITS[key] : undefined
     if (!kit) throw new Error('pagbank_invalid_kit')
-    amountCents = kit.amountCents
+    baseCents = kit.amountCents
     label = kit.label
     kitKey = key as string
   } else {
-    amountCents = Math.round(Number(args.amountCents ?? 0))
+    baseCents = Math.round(Number(args.amountCents ?? 0))
     label = String(args.description ?? 'Tricopill').slice(0, 100) || 'Tricopill'
   }
-  if (!Number.isFinite(amountCents) || amountCents < 100) throw new Error('pagbank_invalid_amount')
+  if (!Number.isFinite(baseCents) || baseCents < 100) throw new Error('pagbank_invalid_amount')
+
+  // Cupom (best-effort): se válido, cobra o valor com desconto. Inválido → valor cheio.
+  const coupon = await quoteCoupon(admin, args.tenantId, args.couponCode, baseCents)
+  const amountCents = coupon.finalCents
 
   const referenceId = `lead:${args.lead.id}`
   const cad = ((args.lead.custom_fields?.cadastro as Record<string, string>) ?? {})
@@ -187,12 +197,23 @@ export async function createPagBankCheckout(
       kit: kitKey || null,
       pay_link: payLink,
       status: 'created',
+      coupon_code: coupon.applied ? coupon.code : null,
+      discount_cents: coupon.discountCents,
     })
   } catch {
     // ignore
   }
 
-  return { checkoutId, payLink, amountCents, label, referenceId }
+  return {
+    checkoutId,
+    payLink,
+    amountCents,
+    label,
+    referenceId,
+    baseCents,
+    discountCents: coupon.discountCents,
+    couponCode: coupon.applied ? coupon.code : null,
+  }
 }
 
 /** Extrai (leadId, paid?) de um payload de notificação do PagBank, de forma tolerante. */
