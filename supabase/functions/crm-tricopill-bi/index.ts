@@ -43,6 +43,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
+  try {
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
   const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
   if (!supabaseUrl || !serviceRole) return json({ error: 'server_misconfigured' }, 500)
@@ -256,4 +257,10 @@ Deno.serve(async (req) => {
     checkout,
     bling,
   })
+  } catch (e) {
+    // Nunca responder sem CORS: qualquer throw vira 500 com headers (senão o
+    // navegador reporta como erro de CORS e o dashboard inteiro quebra).
+    console.error('[crm-tricopill-bi] erro nao tratado:', e instanceof Error ? e.message : String(e))
+    return json({ error: 'internal_error', message: e instanceof Error ? e.message.slice(0, 200) : String(e) }, 500)
+  }
 })

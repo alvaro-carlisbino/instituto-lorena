@@ -102,10 +102,16 @@ export async function getValidBlingToken(admin: SupabaseClient, tenantId: string
   if (access && expiresAt && Date.now() < expiresAt) return access
   if (!refresh) return access || null
 
-  // Expirado: renova.
-  const tok = await postToken({ grant_type: 'refresh_token', refresh_token: refresh })
-  await persistTokens(admin, tenantId, tok)
-  return tok.access_token ?? null
+  // Expirado: renova. Best-effort — falha de refresh NÃO pode derrubar o chamador
+  // (ex.: o BI). Só significa "Bling indisponível": devolve null e loga.
+  try {
+    const tok = await postToken({ grant_type: 'refresh_token', refresh_token: refresh })
+    await persistTokens(admin, tenantId, tok)
+    return tok.access_token ?? null
+  } catch (e) {
+    console.warn('[bling] refresh token falhou:', e instanceof Error ? e.message : String(e))
+    return null
+  }
 }
 
 export function blingConnectionStatus(cfg: Record<string, unknown> | null | undefined): {
