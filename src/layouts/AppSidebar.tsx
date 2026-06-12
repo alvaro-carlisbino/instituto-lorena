@@ -143,6 +143,7 @@ export function AppSidebar() {
               {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={ListBullets} /> : null}
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={ChatsCircle} /> : null}
               {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill" label="Tricopill" icon={Pill} /> : null}
+              {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill-bi" label="BI Tricopill" icon={ChartBar} /> : null}
               {showLeadsHub ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
               {showAdmin ? <NavItem to="/integracoes" label="Integrações" icon={Plugs} /> : null}
               <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />

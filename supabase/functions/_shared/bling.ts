@@ -288,6 +288,56 @@ export async function blingCreateSaleOrder(
   return { orderId, bottles }
 }
 
+export type BlingSaleOrder = {
+  id: string
+  numero: string
+  data: string // YYYY-MM-DD
+  totalCents: number
+  situacaoId: number | null
+}
+
+/**
+ * Lista pedidos de venda do Bling num intervalo de datas (paginado).
+ * `dataInicial`/`dataFinal` no formato YYYY-MM-DD. Cap de páginas para não
+ * estourar latência — devolve o que conseguiu coletar.
+ */
+export async function blingListSaleOrders(
+  token: string,
+  opts: { dataInicial: string; dataFinal: string; maxPages?: number },
+): Promise<BlingSaleOrder[]> {
+  const maxPages = Math.max(1, Math.min(20, opts.maxPages ?? 10))
+  const out: BlingSaleOrder[] = []
+  for (let pagina = 1; pagina <= maxPages; pagina++) {
+    const qs = new URLSearchParams({
+      dataInicial: opts.dataInicial,
+      dataFinal: opts.dataFinal,
+      limite: '100',
+      pagina: String(pagina),
+    }).toString()
+    const res = await blingFetch(token, `/pedidos/vendas?${qs}`)
+    const text = await res.text()
+    if (!res.ok) throw new Error(`bling_pedidos_list_${res.status}: ${text.slice(0, 200)}`)
+    let parsed: { data?: Array<Record<string, unknown>> } = {}
+    try {
+      parsed = text ? JSON.parse(text) : {}
+    } catch {
+      parsed = {}
+    }
+    const rows = Array.isArray(parsed.data) ? parsed.data : []
+    for (const r of rows) {
+      out.push({
+        id: String(r.id ?? ''),
+        numero: String(r.numero ?? ''),
+        data: String(r.data ?? '').slice(0, 10),
+        totalCents: Math.round(num(r.total) * 100),
+        situacaoId: (r.situacao as { id?: number } | undefined)?.id ?? null,
+      })
+    }
+    if (rows.length < 100) break
+  }
+  return out
+}
+
 /** Cria um pedido de venda no Bling. Retorna o id do pedido criado. */
 export async function blingCreateOrder(token: string, payload: Record<string, unknown>): Promise<string | null> {
   const res = await blingFetch(token, `/pedidos/vendas`, { method: 'POST', body: JSON.stringify(payload) })
