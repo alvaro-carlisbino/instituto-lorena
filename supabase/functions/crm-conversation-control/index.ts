@@ -45,6 +45,17 @@ Deno.serve(async (req) => {
   const role = String((me?.role as string | undefined) ?? 'sdr').toLowerCase()
   const canManageConfig = role === 'admin' || role === 'gestor'
 
+  // crm_ai_configs tem PK (tenant_id, id): toda leitura/escrita precisa escopar pelo
+  // tenant do utilizador, senão com >1 tenant o .maybeSingle()/upsert por id='default'
+  // falha. O tenant vem do RPC current_tenant_id() (sessão autenticada).
+  let tenantId = ''
+  try {
+    const { data: tid } = await userClient.rpc('current_tenant_id')
+    tenantId = typeof tid === 'string' ? tid.trim() : ''
+  } catch {
+    tenantId = ''
+  }
+
   let body: Record<string, unknown> = {}
   try {
     body = (await req.json()) as Record<string, unknown>
@@ -103,7 +114,13 @@ Deno.serve(async (req) => {
   }
 
   if (action === 'get_config') {
-    const { data, error } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
+    if (!tenantId) return json({ ok: true, config: null })
+    const { data, error } = await admin
+      .from('crm_ai_configs')
+      .select('*')
+      .eq('id', 'default')
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
     if (error) return json({ error: error.message }, 400)
     if (!data) return json({ ok: true, config: null })
     const row = data as Record<string, unknown>
@@ -118,6 +135,7 @@ Deno.serve(async (req) => {
 
   if (action === 'set_config') {
     if (!canManageConfig) return json({ error: 'forbidden' }, 403)
+    if (!tenantId) return json({ error: 'tenant_unresolved' }, 400)
     const systemPrompt = String(body.systemPrompt ?? '')
     const enabled = Object.prototype.hasOwnProperty.call(body, 'enabled')
       ? coercePgBoolean(body.enabled, true)
@@ -131,6 +149,7 @@ Deno.serve(async (req) => {
 
     const payload: Record<string, unknown> = {
       id: 'default',
+      tenant_id: tenantId,
       enabled,
       system_prompt: systemPrompt.slice(0, 12000),
       default_owner_mode: defaultOwnerMode,
@@ -149,7 +168,11 @@ Deno.serve(async (req) => {
         ? Math.max(0, Math.min(30000, inboundBurstDebounceMs))
         : 4000
     }
-    const { data, error } = await admin.from('crm_ai_configs').upsert(payload).select('*').single()
+    const { data, error } = await admin
+      .from('crm_ai_configs')
+      .upsert(payload, { onConflict: 'tenant_id,id' })
+      .select('*')
+      .single()
     if (error) return json({ error: error.message }, 400)
     await admin.from('audit_logs').insert({
       actor_id: (me?.id as string | undefined) ?? null,
@@ -194,7 +217,10 @@ Deno.serve(async (req) => {
     }
 
     const { data: state } = await admin.from('crm_conversation_states').select('*').eq('lead_id', leadId).maybeSingle()
-    const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
+    // crm_ai_configs tem PK (tenant_id, id): escopar pelo tenant do utilizador (= do lead, via RLS).
+    const { data: config } = tenantId
+      ? await admin.from('crm_ai_configs').select('*').eq('id', 'default').eq('tenant_id', tenantId).maybeSingle()
+      : { data: null }
     const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
     const aiEnabled = Boolean(
       coercePgBoolean(state?.ai_enabled, true) && coercePgBoolean(config?.enabled, true),

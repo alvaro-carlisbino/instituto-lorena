@@ -172,7 +172,7 @@ function parseContext(raw: unknown): AiContext {
 async function buildCrmSnapshot(
   userClient: SupabaseClient,
   ctx: AiContext,
-  opts?: { skipAppProfile?: boolean },
+  opts?: { skipAppProfile?: boolean; tenantId?: string },
 ): Promise<Record<string, unknown>> {
   const interactionSince = ctx.weekStartIso
     ? `${ctx.weekStartIso}T00:00:00.000Z`
@@ -220,7 +220,13 @@ async function buildCrmSnapshot(
       .order('happened_at', { ascending: false })
       .limit(40),
     userClient.from('app_users').select('id, name, role, active').order('name', { ascending: true }).limit(80),
-    userClient.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle(),
+    // crm_ai_configs tem PK (tenant_id, id): com mais de um tenant, filtrar por id='default'
+    // sozinho devolve várias linhas e o .maybeSingle() falha → config (e o script) somem.
+    // No caminho interno (service-role, sem RLS) o tenant vem do lead; na sessão do utilizador
+    // a RLS já isola, mas escopar por tenant é inócuo e mantém tudo correto.
+    opts?.tenantId
+      ? userClient.from('crm_ai_configs').select('*').eq('id', 'default').eq('tenant_id', opts.tenantId).maybeSingle()
+      : userClient.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle(),
   ])
 
   const queryWarnings: string[] = []
@@ -608,7 +614,7 @@ Deno.serve(async (req) => {
 
     let snapshot: Record<string, unknown>
     try {
-      snapshot = await buildCrmSnapshot(dbClient, context, isInternal ? { skipAppProfile: true } : undefined)
+      snapshot = await buildCrmSnapshot(dbClient, context, { skipAppProfile: isInternal, tenantId })
     } catch (e) {
       return jsonResponse({
         ok: false,
@@ -629,6 +635,7 @@ Deno.serve(async (req) => {
           .from('crm_ai_configs')
           .select('auto_scheduling_enabled')
           .eq('id', 'default')
+          .eq('tenant_id', tenantId)
           .maybeSingle()
         autoBookOn = Boolean((cfgFlag as { auto_scheduling_enabled?: boolean } | null)?.auto_scheduling_enabled)
       } catch {

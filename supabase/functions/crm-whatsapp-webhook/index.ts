@@ -308,7 +308,10 @@ Deno.serve(async (req) => {
       .select('*')
       .eq('lead_id', lead.leadId)
       .maybeSingle()
-    const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
+    // crm_ai_configs tem PK (tenant_id, id): escopar por tenant da linha/lead.
+    const { data: config } = tenantId
+      ? await admin.from('crm_ai_configs').select('*').eq('id', 'default').eq('tenant_id', tenantId).maybeSingle()
+      : { data: null }
 
     const { data: leadBefore } = await admin
       .from('leads')

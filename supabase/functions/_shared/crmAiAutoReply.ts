@@ -397,15 +397,20 @@ export async function evaluateCrmAiAutoReplyGate(
     .select('*')
     .eq('lead_id', leadId)
     .maybeSingle()
-  const { data: config } = await admin.from('crm_ai_configs').select('*').eq('id', 'default').maybeSingle()
   const { data: leadRowGate } = await admin
     .from('leads')
-    .select('opted_out_at')
+    .select('opted_out_at, tenant_id')
     .eq('id', leadId)
     .maybeSingle()
   const leadOptedOut = Boolean(
     (leadRowGate as { opted_out_at?: string | null } | null)?.opted_out_at,
   )
+  // crm_ai_configs tem PK (tenant_id, id): escopar por tenant do lead, senão com >1 tenant
+  // o .maybeSingle() falha e a config (default_owner_mode, enabled) vem nula.
+  const gateTenantId = String((leadRowGate as { tenant_id?: string } | null)?.tenant_id ?? '').trim()
+  const { data: config } = gateTenantId
+    ? await admin.from('crm_ai_configs').select('*').eq('id', 'default').eq('tenant_id', gateTenantId).maybeSingle()
+    : { data: null }
 
   const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
   const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
@@ -665,11 +670,21 @@ export async function runWhatsappAiAutoReply(
     whatsappInstanceId?: string | null
   },
 ): Promise<{ replied: boolean; replyText?: string; burstPending?: boolean; handoffSuggested?: boolean }> {
-  const { data: burstCfg } = await admin
-    .from('crm_ai_configs')
-    .select('inbound_burst_debounce_ms')
-    .eq('id', 'default')
+  // crm_ai_configs tem PK (tenant_id, id): escopar por tenant do lead.
+  const { data: burstLeadRow } = await admin
+    .from('leads')
+    .select('tenant_id')
+    .eq('id', options.leadId)
     .maybeSingle()
+  const burstTenantId = String((burstLeadRow as { tenant_id?: string } | null)?.tenant_id ?? '').trim()
+  const { data: burstCfg } = burstTenantId
+    ? await admin
+        .from('crm_ai_configs')
+        .select('inbound_burst_debounce_ms')
+        .eq('id', 'default')
+        .eq('tenant_id', burstTenantId)
+        .maybeSingle()
+    : { data: null }
   const burstMs = Math.max(0, Number(burstCfg?.inbound_burst_debounce_ms ?? 0))
 
   const { data: existingBurst } = await admin
