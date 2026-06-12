@@ -89,6 +89,7 @@ export class WapiProvider implements WhatsappProvider {
 
     // Ignora mensagens de grupo (não viram lead/atendimento 1:1).
     const isGroup =
+      payload.isGroup === true ||
       payload.isgroup === true ||
       safeString(getByPath(payload, 'chat.id')).toLowerCase().includes('@g.us') ||
       safeString(getByPath(payload, 'key.remoteJid')).toLowerCase().includes('@g.us')
@@ -121,6 +122,7 @@ export class WapiProvider implements WhatsappProvider {
     if (fromPhone.length < 10) return null
 
     const pushName = firstString(payload, [
+      'sender.pushName',
       'sender.pushname',
       'senderName',
       'sender.name',
@@ -132,6 +134,11 @@ export class WapiProvider implements WhatsappProvider {
 
     // Texto: msgcontent.conversation | extendedTextMessage.text | legenda de mídia.
     let text = firstString(payload, [
+      'msgContent.conversation',
+      'msgContent.extendedTextMessage.text',
+      'msgContent.imageMessage.caption',
+      'msgContent.videoMessage.caption',
+      'msgContent.documentMessage.caption',
       'msgcontent.conversation',
       'msgcontent.extendedTextMessage.text',
       'msgcontent.imageMessage.caption',
@@ -149,7 +156,7 @@ export class WapiProvider implements WhatsappProvider {
 
     // Mídia sem legenda: usa um marcador para não perder a mensagem no chat.
     if (!text) {
-      const mc = (payload.msgcontent ?? payload.message ?? {}) as Record<string, unknown>
+      const mc = (payload.msgContent ?? payload.msgcontent ?? payload.message ?? {}) as Record<string, unknown>
       if (mc.imageMessage) text = '📷 Imagem'
       else if (mc.audioMessage || mc.pttMessage) text = '🎤 Áudio'
       else if (mc.videoMessage) text = '🎥 Vídeo'
