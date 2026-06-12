@@ -230,8 +230,10 @@ async function sendWhatsappPatientFallbackReply(
   })
   await admin.from('crm_conversation_states').upsert({
     lead_id: opts.leadId,
-    owner_mode: opts.ownerMode,
-    ai_enabled: opts.aiEnabled,
+    // NÃO regravar owner_mode/ai_enabled aqui: este é um upsert de conclusão da
+    // resposta da IA. Se a equipa trocou para "Humano" durante o processamento,
+    // reescrever o valor capturado revertia para Misto. Em insert (lead novo) os
+    // defaults da coluna (auto / true) aplicam-se.
     last_inbound_at: opts.inboundHappenedAt,
     last_ai_reply_at: nowIso(),
     context_summary: `${opts.contextSnippet}\nIA (fallback): ${text.slice(0, 120)}`.slice(0, 1200),
@@ -632,8 +634,8 @@ export async function upsertConversationStateInboundOnly(
   const resetFollowups = options.resetFollowups !== false
   await admin.from('crm_conversation_states').upsert({
     lead_id: options.leadId,
-    owner_mode: options.ownerMode,
-    ai_enabled: options.aiEnabled,
+    // NÃO regravar owner_mode/ai_enabled: a equipa é dona do modo. Regravar o valor
+    // capturado aqui revertia "Humano" para Misto a cada mensagem do paciente.
     last_inbound_at: options.inboundHappenedAt,
     updated_at: nowIso(),
     // Reseta a janela de follow-ups quando o lead responde
@@ -776,8 +778,8 @@ export async function runWhatsappAiAutoReply(
 
           await admin.from('crm_conversation_states').upsert({
             lead_id: options.leadId,
-            owner_mode: options.ownerMode,
-            ai_enabled: options.aiEnabled,
+            // NÃO regravar owner_mode/ai_enabled (upsert de conclusão da IA): preserva
+            // o modo escolhido pela equipa; defaults da coluna cobrem o lead novo.
             last_inbound_at: options.inboundHappenedAt,
             last_ai_reply_at: nowIso(),
             updated_at: nowIso(),
@@ -913,8 +915,8 @@ export async function runWhatsappAiAutoReply(
     })
     await admin.from('crm_conversation_states').upsert({
       lead_id: options.leadId,
-      owner_mode: options.ownerMode,
-      ai_enabled: options.aiEnabled,
+      // NÃO regravar owner_mode/ai_enabled (upsert de conclusão da IA): preserva
+      // o modo escolhido pela equipa; defaults da coluna cobrem o lead novo.
       last_inbound_at: options.inboundHappenedAt,
       last_ai_reply_at: nowIso(),
       context_summary: `${options.aiInboundUserText.slice(0, 280)}\nIA: ${aiReply.slice(0, 220)}`.slice(0, 1200),
@@ -1032,8 +1034,8 @@ export async function runManychatAiAutoReply(
 
           await admin.from('crm_conversation_states').upsert({
             lead_id: options.leadId,
-            owner_mode: options.ownerMode,
-            ai_enabled: options.aiEnabled,
+            // NÃO regravar owner_mode/ai_enabled (upsert de conclusão da IA): preserva
+            // o modo escolhido pela equipa; defaults da coluna cobrem o lead novo.
             last_inbound_at: options.inboundHappenedAt,
             last_ai_reply_at: nowIso(),
             updated_at: nowIso(),
@@ -1087,8 +1089,8 @@ export async function runManychatAiAutoReply(
     })
     await admin.from('crm_conversation_states').upsert({
       lead_id: options.leadId,
-      owner_mode: options.ownerMode,
-      ai_enabled: options.aiEnabled,
+      // NÃO regravar owner_mode/ai_enabled (upsert de conclusão da IA): preserva
+      // o modo escolhido pela equipa; defaults da coluna cobrem o lead novo.
       last_inbound_at: options.inboundHappenedAt,
       last_ai_reply_at: nowIso(),
       context_summary: `${options.aiInboundUserText.slice(0, 280)}\nIA: ${text.slice(0, 220)}`.slice(0, 1200),
