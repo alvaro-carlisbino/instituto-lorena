@@ -14,6 +14,7 @@ import {
   Smile,
   Sticker,
   CreditCard,
+  CheckCircle2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -37,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ScheduleAppointmentDialog } from '@/components/leads/ScheduleAppointmentDialog'
+import { ConfirmSaleDialog } from '@/components/leads/ConfirmSaleDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { generatePagbankLink, PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
@@ -146,6 +148,7 @@ export function LeadChatThread({
   const isActiveLead = crm.selectedLeadId === leadId
   const [filter, setFilter] = useState<ChatFilter>(whatsappOnly ? 'whatsapp' : 'all')
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
+  const [confirmSaleOpen, setConfirmSaleOpen] = useState(false)
   const [pagbankLoading, setPagbankLoading] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [aiUiTick, setAiUiTick] = useState(0)
@@ -959,6 +962,7 @@ export function LeadChatThread({
                   </DropdownMenuContent>
                 </DropdownMenu>
                 {isSalesPolo ? (
+                  <>
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       type="button"
@@ -980,6 +984,18 @@ export function LeadChatThread({
                       ))}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    title="Confirmar venda fechada (marca pago + Bling)"
+                    className="h-8 rounded-lg px-2 text-[10px]"
+                    onClick={() => setConfirmSaleOpen(true)}
+                  >
+                    <CheckCircle2 className="mr-1.5 h-3.5 w-3.5 text-emerald-600" />
+                    Confirmar venda
+                  </Button>
+                  </>
                 ) : (
                   <Button
                     type="button"
@@ -1066,6 +1082,13 @@ export function LeadChatThread({
         isOpen={isScheduleOpen}
         onClose={() => setIsScheduleOpen(false)}
         leadId={leadId}
+      />
+
+      <ConfirmSaleDialog
+        isOpen={confirmSaleOpen}
+        onClose={() => setConfirmSaleOpen(false)}
+        leadId={leadId}
+        onConfirmed={() => void crm.syncFromSupabase?.()}
       />
     </div>
   )
