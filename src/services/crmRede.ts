@@ -68,6 +68,19 @@ export async function generateRedeLink(args: {
   return { payLink: String(p.payLink ?? ''), amountCents: Number(p.amountCents ?? 0) }
 }
 
+/** Dispara uma autorização de teste (sandbox) para validar PV/token salvos. */
+export async function testRedeTx(): Promise<{ ok: boolean; returnCode: string; message: string }> {
+  try {
+    const p = await invoke('crm-rede-link', { action: 'test_tx' })
+    return { ok: p.ok === true, returnCode: String(p.returnCode ?? ''), message: String(p.message ?? '') }
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e)
+    if (m.includes('rede_nao_configurado')) throw new Error('Rede não configurada. Preencha e salve PV e Token primeiro.')
+    if (m.includes('teste_so_em_sandbox')) throw new Error('O teste de transação só roda no ambiente Sandbox.')
+    throw new Error(m || 'Falha no teste de transação')
+  }
+}
+
 // === Checkout público (cliente, sem login) ===
 export type RedeIntentView = { amountCents: number; description: string; installments: number; status: string }
 

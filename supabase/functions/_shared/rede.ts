@@ -21,33 +21,86 @@ export function resolveRedeKit(raw: string): { key: string; label: string; amoun
 }
 
 /**
- * e.Rede — transação por CARTÃO (POST /v1/transactions, Basic auth PV:Token).
+ * e.Rede — transação por CARTÃO (OAuth 2.0 Bearer + v2).
  * Fluxo: o CRM cria uma "cobrança" (rede_payments) e devolve /pagar/<id>; o cliente
  * abre, digita o cartão, e crm-rede-pay autoriza+captura na e.Rede.
- * Config por polo em tenant_integrations.rede: { pv, token, env?, base_url? }.
+ * Config por polo em tenant_integrations.rede: { pv, token, env? } onde
+ *   pv    = clientId    (Filiação / PV)
+ *   token = clientSecret (Chave de Integração)
+ * Auth: clientId+clientSecret -> POST oauth2/token (Basic, grant_type=client_credentials)
+ * -> access_token (Bearer, ~24min) -> POST .../v2/transactions com Authorization: Bearer.
  *
  * ATENÇÃO PCI: coletar o cartão na nossa página = escopo PCI. OK para sandbox/teste;
  * para produção com cartão real, migrar para tokenização da Rede (cartão não trafega
  * pelo nosso servidor).
  */
 
-const SANDBOX_BASE = 'https://sandbox-erede.useredecloud.com.br'
-const PROD_BASE = 'https://erede.useredecloud.com.br'
+// URLs oficiais e.Rede (confirmadas na doc logada developer.userede.com.br/e-rede).
+const REDE_ENDPOINTS = {
+  sandbox: {
+    token: 'https://rl7-sandbox-api.useredecloud.com.br/oauth2/token',
+    tx: 'https://sandbox-erede.useredecloud.com.br/v2/transactions',
+  },
+  prod: {
+    token: 'https://api.userede.com.br/redelabs/oauth2/token',
+    tx: 'https://api.userede.com.br/erede/v2/transactions',
+  },
+} as const
 
-export type RedeConfig = { pv: string; token: string; baseUrl: string; env: 'sandbox' | 'prod' }
+export type RedeConfig = {
+  clientId: string
+  clientSecret: string
+  env: 'sandbox' | 'prod'
+  tokenUrl: string
+  txUrl: string
+}
 
 export async function readRedeConfig(admin: SupabaseClient, tenantId: string): Promise<RedeConfig | null> {
   if (!tenantId) return null
   const { data } = await admin.from('tenant_integrations').select('rede').eq('tenant_id', tenantId).maybeSingle()
   const cfg = ((data as { rede?: Record<string, unknown> } | null)?.rede ?? {}) as Record<string, unknown>
-  const pv = typeof cfg.pv === 'string' ? cfg.pv.trim() : ''
-  const token = typeof cfg.token === 'string' ? cfg.token.trim() : ''
-  if (!pv || !token) return null
+  // pv = clientId (Filiação) ; token = clientSecret (Chave de Integração)
+  const clientId = typeof cfg.pv === 'string' ? cfg.pv.trim() : ''
+  const clientSecret = typeof cfg.token === 'string' ? cfg.token.trim() : ''
+  if (!clientId || !clientSecret) return null
   const env: 'sandbox' | 'prod' = cfg.env === 'prod' ? 'prod' : 'sandbox'
-  const baseUrl = (typeof cfg.base_url === 'string' && cfg.base_url.trim()
-    ? cfg.base_url.trim()
-    : env === 'prod' ? PROD_BASE : SANDBOX_BASE).replace(/\/$/, '')
-  return { pv, token, baseUrl, env }
+  const ep = REDE_ENDPOINTS[env]
+  const tokenUrl = (typeof cfg.token_url === 'string' && cfg.token_url.trim() ? cfg.token_url.trim() : ep.token).replace(/\/$/, '')
+  const txUrl = (typeof cfg.tx_url === 'string' && cfg.tx_url.trim() ? cfg.tx_url.trim() : ep.tx).replace(/\/$/, '')
+  return { clientId, clientSecret, env, tokenUrl, txUrl }
+}
+
+// Cache do access_token por (env+clientId), reusado enquanto o isolate estiver quente.
+const redeTokenCache = new Map<string, { token: string; expiresAt: number }>()
+
+/** Gera (ou reusa) o access_token OAuth 2.0 (client_credentials). */
+async function getRedeAccessToken(cfg: RedeConfig): Promise<string> {
+  const key = `${cfg.env}:${cfg.clientId}`
+  const now = Date.now()
+  const cached = redeTokenCache.get(key)
+  if (cached && cached.expiresAt - 60_000 > now) return cached.token
+
+  const basic = btoa(`${cfg.clientId}:${cfg.clientSecret}`)
+  const res = await fetch(cfg.tokenUrl, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=client_credentials',
+  })
+  const text = await res.text()
+  let parsed: Record<string, unknown> = {}
+  try {
+    parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+  } catch {
+    parsed = {}
+  }
+  const token = typeof parsed.access_token === 'string' ? parsed.access_token : ''
+  if (!res.ok || !token) {
+    const detail = String(parsed.error_description ?? parsed.error ?? text.slice(0, 140))
+    throw new Error(`rede_oauth_falhou:${res.status}:${detail}`)
+  }
+  const expiresInSec = Number(parsed.expires_in) > 0 ? Number(parsed.expires_in) : 1440 // ~24min
+  redeTokenCache.set(key, { token, expiresAt: now + expiresInSec * 1000 })
+  return token
 }
 
 export type RedeIntent = {
@@ -159,7 +212,7 @@ export async function payRedeIntent(
   const cfg = await readRedeConfig(admin, intent.tenantId)
   if (!cfg) throw new Error('rede_nao_configurado')
 
-  const basic = btoa(`${cfg.pv}:${cfg.token}`)
+  const accessToken = await getRedeAccessToken(cfg)
   const body = {
     capture: true,
     kind: 'credit',
@@ -174,9 +227,9 @@ export async function payRedeIntent(
     softDescriptor: 'PAGAMENTO',
     subscription: false,
   }
-  const res = await fetch(`${cfg.baseUrl}/v1/transactions`, {
+  const res = await fetch(cfg.txUrl, {
     method: 'POST',
-    headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   const text = await res.text()
@@ -238,4 +291,51 @@ export async function payRedeIntent(
   }
 
   return { status: approved ? 'paid' : 'failed', returnCode, message, tid }
+}
+
+/**
+ * Teste de credenciais/conectividade e.Rede: faz uma AUTORIZAÇÃO (capture:false)
+ * de R$20,00 com o cartão oficial de teste e descarta. Serve para validar PV/token
+ * num clique, sem criar cobrança nem mexer em leads. Só permitido em sandbox.
+ */
+export async function testRedeTransaction(
+  admin: SupabaseClient,
+  tenantId: string,
+): Promise<{ ok: boolean; returnCode: string; message: string; tid: string | null; env: 'sandbox' | 'prod' }> {
+  const cfg = await readRedeConfig(admin, tenantId)
+  if (!cfg) throw new Error('rede_nao_configurado')
+  if (cfg.env !== 'sandbox') throw new Error('teste_so_em_sandbox')
+
+  const accessToken = await getRedeAccessToken(cfg)
+  const body = {
+    capture: false, // só autoriza; não captura nada
+    kind: 'credit',
+    reference: `test${shortId().slice(0, 12)}`,
+    amount: 2000, // R$ 20,00 (mesmo valor do exemplo aprovado na collection oficial)
+    installments: 1,
+    cardholderName: 'TESTE TRICOPILL',
+    cardNumber: '5448280000000007', // cartão de teste oficial e.Rede
+    expirationMonth: 1,
+    expirationYear: 2028,
+    securityCode: '123',
+    softDescriptor: 'TESTE',
+    subscription: false,
+  }
+  const res = await fetch(cfg.txUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const text = await res.text()
+  let parsed: Record<string, unknown> = {}
+  try {
+    parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+  } catch {
+    parsed = {}
+  }
+  const returnCode = String(parsed.returnCode ?? `http_${res.status}`)
+  const tid = typeof parsed.tid === 'string' ? parsed.tid : null
+  const message = String(parsed.returnMessage ?? parsed.message ?? (res.ok ? 'ok' : text.slice(0, 160)))
+  // e.Rede: returnCode "00" = aprovado.
+  return { ok: returnCode === '00', returnCode, message, tid, env: cfg.env }
 }

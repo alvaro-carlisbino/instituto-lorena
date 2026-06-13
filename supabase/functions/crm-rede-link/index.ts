@@ -1,10 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { createRedeIntent, readRedeConfig } from '../_shared/rede.ts'
+import { createRedeIntent, readRedeConfig, testRedeTransaction } from '../_shared/rede.ts'
 
 // e.Rede (cartão) — ações autenticadas do CRM.
 //  get_config    -> { configured, env }
 //  set_config    -> grava { pv?, token?, env?, base_url? }
 //  generate_link -> cria cobrança e devolve a URL /pagar/<id> { amountCents, description?, leadId?, appBaseUrl }
+//  test_tx       -> autoriza R$20 com cartão de teste (só sandbox) -> { ok, returnCode, message, tid }
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -80,6 +81,17 @@ Deno.serve(async (req) => {
       const msg = e instanceof Error ? e.message : String(e)
       const status = msg.startsWith('rede_nao_configurado') || msg.startsWith('rede_valor') ? 400 : 502
       return json({ ok: false, error: 'rede_link_failed', message: msg }, status)
+    }
+  }
+
+  if (action === 'test_tx') {
+    try {
+      const out = await testRedeTransaction(admin, tenantId)
+      return json({ ok: out.ok, returnCode: out.returnCode, message: out.message, tid: out.tid, env: out.env })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      const status = msg.startsWith('rede_nao_configurado') || msg.startsWith('teste_so_em_sandbox') ? 400 : 502
+      return json({ ok: false, error: 'rede_test_failed', message: msg }, status)
     }
   }
 

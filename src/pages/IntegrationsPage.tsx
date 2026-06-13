@@ -23,7 +23,7 @@ import {
   type BlingStatus,
   type BlingCatalogItem,
 } from '@/services/crmBling'
-import { getRedeConfig, setRedeConfig, type RedeConfigStatus } from '@/services/crmRede'
+import { getRedeConfig, setRedeConfig, testRedeTx, type RedeConfigStatus } from '@/services/crmRede'
 
 export function IntegrationsPage() {
   const { tenant } = useTenant()
@@ -46,6 +46,8 @@ export function IntegrationsPage() {
   const [redeToken, setRedeToken] = useState('')
   const [redeEnv, setRedeEnv] = useState('sandbox')
   const [savingRede, setSavingRede] = useState(false)
+  const [testingRede, setTestingRede] = useState(false)
+  const [redeTestMsg, setRedeTestMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   const loadCatalog = async (refresh = false) => {
     setCatalogLoading(true)
@@ -117,6 +119,27 @@ export function IntegrationsPage() {
       toast.error(e instanceof Error ? e.message : 'Falha ao salvar Rede')
     } finally {
       setSavingRede(false)
+    }
+  }
+
+  const testRede = async () => {
+    setTestingRede(true)
+    setRedeTestMsg(null)
+    try {
+      const r = await testRedeTx()
+      if (r.ok) {
+        setRedeTestMsg({ ok: true, text: 'Autorização de teste aprovada (returnCode 00). Credenciais válidas.' })
+        toast.success('Transação de teste aprovada! Credenciais OK.')
+      } else {
+        setRedeTestMsg({ ok: false, text: `returnCode ${r.returnCode}: ${r.message}` })
+        toast.error(`Teste recusado (returnCode ${r.returnCode}).`)
+      }
+    } catch (e) {
+      const m = e instanceof Error ? e.message : 'Falha no teste'
+      setRedeTestMsg({ ok: false, text: m })
+      toast.error(m)
+    } finally {
+      setTestingRede(false)
     }
   }
 
@@ -265,9 +288,22 @@ export function IntegrationsPage() {
               <Label htmlFor="rede-token">Token (clientSecret)</Label>
               <Input id="rede-token" type="password" value={redeToken} onChange={(e) => setRedeToken(e.target.value)} placeholder="token (sensível)" className="font-mono text-xs" autoComplete="off" />
             </div>
-            <Button size="sm" onClick={() => void saveRede()} disabled={savingRede}>
-              {savingRede ? 'Salvando…' : 'Salvar Rede'}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" onClick={() => void saveRede()} disabled={savingRede}>
+                {savingRede ? 'Salvando…' : 'Salvar Rede'}
+              </Button>
+              {redeEnv === 'sandbox' && (
+                <Button size="sm" variant="outline" onClick={() => void testRede()} disabled={testingRede || savingRede}>
+                  {testingRede ? 'Testando…' : 'Testar transação (sandbox)'}
+                </Button>
+              )}
+            </div>
+            {redeTestMsg && (
+              <p className={`text-xs ${redeTestMsg.ok ? 'text-emerald-600' : 'text-destructive'}`}>
+                {redeTestMsg.ok ? '✓ ' : '✗ '}
+                {redeTestMsg.text}
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
