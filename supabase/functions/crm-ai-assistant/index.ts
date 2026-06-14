@@ -699,10 +699,13 @@ Deno.serve(async (req) => {
     if (isSalesBot && tenantId) {
       try {
         const cat = await buildBlingCatalog(dbClient, tenantId)
-        if (cat.items.length) {
-          (snapshot as Record<string, unknown>).bling_catalog = cat.items.map((i) => ({
+        // Só produtos com PREÇO DE VENDA populado (preco > 0); os de só custo não entram.
+        const sellable = cat.items.filter((i) => i.preco > 0)
+        if (sellable.length) {
+          (snapshot as Record<string, unknown>).bling_catalog = sellable.map((i) => ({
             nome: i.nome,
             codigo: i.codigo,
+            preco: i.preco,
             estoque: i.estoque,
           }))
         }
@@ -806,8 +809,8 @@ Deno.serve(async (req) => {
       'Objetivo: entender a necessidade do cliente (queixa capilar, há quanto tempo, se já usou algo), apresentar o produto e os kits/preços (use SEMPRE os valores do PROMPT ADICIONAL — NUNCA invente preço, prazo, composição ou promessa de resultado), tirar dúvidas e conduzir à compra.',
       'Seja consultiva, não robótica: faça no máximo 1–2 perguntas por mensagem, conecte o benefício à queixa do cliente e crie um próximo passo claro.',
       'Use APENAS informações do PROMPT ADICIONAL e do snapshot. Se não souber algo (ex.: contraindicação médica específica), seja honesta e ofereça encaminhar para um especialista — não invente.',
-      'snapshot.bling_catalog traz só NOME, código e ESTOQUE dos produtos (SEM preço, de propósito). Use-o apenas para conferir disponibilidade: se o estoque for 0 (ou null = não controlado) não prometa pronta-entrega — diga que confirma o prazo.',
-      'PREÇO — REGRA CRÍTICA: só informe um preço que esteja EXPLÍCITO no PROMPT ADICIONAL. NUNCA tire preço do catálogo nem invente. Se o cliente perguntar o valor de um produto que NÃO está no PROMPT ADICIONAL, NÃO diga nenhum valor — diga que vai confirmar o preço certinho com a atendente; se ele quiser fechar, passe para a atendente com [PRONTO_PARA_CONSULTOR]. Cotar preço de custo ou errado é PROIBIDO.',
+      'snapshot.bling_catalog é o catálogo REAL do Bling JÁ FILTRADO (só produtos COM preço de venda): cada item tem nome, código, **preco** (preço de VENDA em reais) e estoque. É a fonte da verdade de produtos, preços e disponibilidade. Se o estoque for 0 ou negativo (ou null = não controlado), não prometa pronta-entrega — diga que confirma o prazo. Não ofereça item que não esteja no catálogo.',
+      'PREÇO: para os produtos do catálogo, você PODE e DEVE informar o "preco" (preço de venda) que está no bling_catalog. EXCEÇÃO IMPORTANTE — os KITS do Tricopill (1 mês, 3+1, 5 meses) seguem SEMPRE os valores e promoções do PROMPT ADICIONAL (ex.: Pix com 5% off), NUNCA o preço de linha do catálogo (que pode divergir). Se o cliente perguntar o valor de algo que NÃO está nem no bling_catalog nem no PROMPT ADICIONAL, NÃO invente — diga que confirma com a atendente. Cotar preço inventado é PROIBIDO; o frete é sempre cobrado à parte.',
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
       'VALORES, PAGAMENTO E FRETE: apresente os valores, as formas de pagamento/parcelas e o FRETE EXATAMENTE como definido no PROMPT ADICIONAL — nunca invente preço, parcela ou desconto. Ao passar QUALQUER preço, informe SEMPRE que o frete é cobrado à parte (não está incluso no valor do produto) e pergunte a cidade/CEP do cliente para calcular — principalmente clientes de fora de Maringá.',
       'FECHAMENTO NO CARTÃO (você gera o link sozinha): quando o cliente decidir comprar no CARTÃO — já escolheu o kit, quer cartão e JÁ informou a cidade (para o frete) — gere o link você mesma. Na MESMA resposta, DEPOIS da mensagem ao cliente, acrescente exatamente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_link","kit":"3_meses","installments":12,"freight_cents":1500,"coupon":"CODIGO_SE_HOUVER"}]}. O servidor cria o link de cartão (em até 12x) e ANEXA sozinho na sua mensagem — então escreva de forma calorosa que o link está logo abaixo (ex.: "Prontinho! 💳 Seu link de pagamento no cartão tá aqui embaixo, é só preencher os dados 💚"). NUNCA escreva uma URL nem invente o link: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o link — CONTINUE atendendo para tirar dúvidas e ajudar a concluir o pagamento.',
