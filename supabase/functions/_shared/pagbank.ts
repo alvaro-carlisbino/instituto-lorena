@@ -246,6 +246,29 @@ export type PixOrderResult = {
 }
 
 /**
+ * Gera o QR do Pix (a partir do copia-e-cola) como **data URI PNG base64**.
+ * O W-API só aceita imagem em base64 OU URL terminando em .png/.jpg — então o link
+ * hospedado do PagBank não serve para enviar como imagem. Best-effort: '' se falhar.
+ */
+export async function buildQrPngDataUri(text: string): Promise<string> {
+  if (!text) return ''
+  try {
+    const enc = encodeURIComponent(text)
+    const res = await fetch(`https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=12&format=png&data=${enc}`)
+    if (!res.ok) return ''
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    let binary = ''
+    const chunk = 0x8000
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
+    }
+    return `data:image/png;base64,${btoa(binary)}`
+  } catch {
+    return ''
+  }
+}
+
+/**
  * Cria uma ORDER no PagBank com Pix dinâmico (qr_codes) e devolve o copia-e-cola + PNG
  * do QR — melhor que o link do checkout para fechar na conversa. Registra em
  * pagbank_checkouts (reference_id `lead:<id>`) para o webhook marcar "Pago".
@@ -354,12 +377,16 @@ export async function createPagBankPixOrder(
   const qr0 = (qrCodes[0] ?? {}) as Record<string, unknown>
   const qrText = String(qr0.text ?? '')
   const qrLinks = (qr0.links as Array<{ rel?: string; href?: string; media?: string }> | undefined) ?? []
-  const qrImageUrl =
+  const pagbankPng =
     qrLinks.find((l) => String(l.rel ?? '').toUpperCase().includes('PNG'))?.href ??
     qrLinks.find((l) => String(l.media ?? '').includes('image'))?.href ??
     ''
   const orderId = String(parsed.id ?? '')
   if (!qrText) throw new Error('pagbank_no_pix_qr')
+
+  // QR como data URI base64 (gerado do copia-e-cola): é o formato que o W-API aceita
+  // para enviar como imagem. O link PNG do PagBank fica só na auditoria (pay_link).
+  const qrImageUrl = await buildQrPngDataUri(qrText)
 
   try {
     await admin.from('pagbank_checkouts').insert({
@@ -369,7 +396,7 @@ export async function createPagBankPixOrder(
       reference_id: referenceId,
       amount_cents: amountCents,
       kit: kitKey || null,
-      pay_link: qrImageUrl || `pix:${orderId || referenceId}`,
+      pay_link: pagbankPng || `pix:${orderId || referenceId}`,
       status: 'created',
       coupon_code: coupon.applied ? coupon.code : null,
       discount_cents: coupon.discountCents,
