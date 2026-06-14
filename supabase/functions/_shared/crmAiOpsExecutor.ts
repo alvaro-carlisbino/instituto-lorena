@@ -544,6 +544,11 @@ export async function executeCrmAiOpsFromModel(
           continue
         }
         const installments = Math.max(1, Math.min(12, Number(op.installments ?? 12) || 12))
+        // Frete (entrega à parte) somado ao link, em centavos — vem do PROMPT ADICIONAL
+        // conforme a cidade/CEP que a IA perguntou ao cliente.
+        const freightRaw = op.freight_cents ?? op.freightCents
+        const freightCents =
+          freightRaw != null && Number.isFinite(Number(freightRaw)) ? Math.max(0, Math.round(Number(freightRaw))) : undefined
         try {
           const out = await createRedeIntent(admin, {
             tenantId: leadTenantId,
@@ -553,6 +558,7 @@ export async function executeCrmAiOpsFromModel(
             installments,
             appBaseUrl: APP_BASE_URL,
             couponCode: op.coupon != null ? String(op.coupon) : undefined,
+            freightCents,
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: note })

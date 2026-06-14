@@ -749,9 +749,11 @@ Deno.serve(async (req) => {
       'PREÇO — REGRA CRÍTICA: só informe um preço que esteja EXPLÍCITO no PROMPT ADICIONAL. NUNCA tire preço do catálogo nem invente. Se o cliente perguntar o valor de um produto que NÃO está no PROMPT ADICIONAL, NÃO diga nenhum valor — diga que vai confirmar o preço certinho com a atendente; se ele quiser fechar, passe para a atendente com [PRONTO_PARA_CONSULTOR]. Cotar preço de custo ou errado é PROIBIDO.',
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
       'VALORES, PAGAMENTO E FRETE: apresente os valores, as formas de pagamento/parcelas e o FRETE EXATAMENTE como definido no PROMPT ADICIONAL — nunca invente preço, parcela ou desconto. Ao passar QUALQUER preço, informe SEMPRE que o frete é cobrado à parte (não está incluso no valor do produto) e pergunte a cidade/CEP do cliente para calcular — principalmente clientes de fora de Maringá.',
-      'FECHAMENTO (passar para o atendente): você NÃO gera link de pagamento. Quando o cliente decidir comprar (já escolheu o kit e quer pagar), confirme o kit e a forma desejada (Pix ou cartão / nº de parcelas), diga de forma calorosa que um atendente vai te enviar o link de pagamento em instantes (ex.: "Perfeito! Já vou te passar pro nosso time, que te manda o link de pagamento certinho 💚") e termine a sua resposta com o marcador [PRONTO_PARA_CONSULTOR] na última linha.',
-      'O marcador [PRONTO_PARA_CONSULTOR] NUNCA aparece para o cliente (o sistema remove) e sinaliza que o atendente humano deve assumir e gerar o link real. Use-o SOMENTE quando o cliente realmente quer fechar/pagar — nunca enquanto ainda está tirando dúvidas ou em dúvida sobre o kit.',
-      'CUPOM: se o cliente informar um código de cupom, registre na conversa e diga que o atendente aplica o desconto ao gerar o link. NÃO confirme valor com desconto por conta própria.',
+      'FECHAMENTO NO CARTÃO (você gera o link sozinha): quando o cliente decidir comprar no CARTÃO — já escolheu o kit, quer cartão e JÁ informou a cidade (para o frete) — gere o link você mesma. Na MESMA resposta, DEPOIS da mensagem ao cliente, acrescente exatamente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_link","kit":"3_meses","installments":12,"freight_cents":1500,"coupon":"CODIGO_SE_HOUVER"}]}. O servidor cria o link de cartão (em até 12x) e ANEXA sozinho na sua mensagem — então escreva de forma calorosa que o link está logo abaixo (ex.: "Prontinho! 💳 Seu link de pagamento no cartão tá aqui embaixo, é só preencher os dados 💚"). NUNCA escreva uma URL nem invente o link: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o link — CONTINUE atendendo para tirar dúvidas e ajudar a concluir o pagamento.',
+      'KIT no op: passe "kit" com a chave do kit escolhido — "1_mes", "3_meses" ou "5_meses" — exatamente como descrito no PROMPT ADICIONAL. O servidor já aplica o PREÇO CHEIO de cartão desse kit; você NÃO calcula o valor do produto, só informa o frete.',
+      'FRETE NO LINK: "freight_cents" é o frete (do PROMPT ADICIONAL, conforme a cidade/CEP) em CENTAVOS — ex.: R$ 15,00 = 1500. Se ainda não souber a cidade, PERGUNTE antes de gerar o link. Se o frete for grátis/incluso conforme o PROMPT ADICIONAL, use 0 ou omita o campo.',
+      'CUPOM: se o cliente informar um cupom, passe em "coupon":"CODIGO" no op — o servidor valida e aplica o desconto sozinho (cupom inválido = valor cheio). NÃO confirme valor com desconto por conta própria; o link já sai com o preço certo.',
+      'PIX e exceções → HUMANO: você só gera link de CARTÃO (Rede). Se o cliente quiser pagar no PIX, pedir um atendente humano, ou se houver qualquer problema, NÃO tente gerar — diga com cordialidade que um atendente já vai assumir e termine a resposta com o marcador [PRONTO_PARA_CONSULTOR] na última linha (o sistema remove esse marcador; o cliente não vê).',
       'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do cliente, trate como um único contexto — responda de forma completa sem pedir de novo o que já foi dito.',
     ].join('\n')
 
@@ -1003,6 +1005,12 @@ Deno.serve(async (req) => {
       if (redeLink?.detail && !reply.includes(redeLink.detail)) {
         const note = redeLink.customerNote ? `\n${redeLink.customerNote}` : ''
         reply = `${reply.trim()}\n\n💳 Pague no cartão (em até 12x) por aqui:\n${redeLink.detail}${note}`
+      }
+      // Se a IA prometeu o link mas a geração FALHOU (recusa/erro da Rede), não deixa o
+      // cliente esperando um link que não veio — manda um aviso gentil de fallback.
+      const redeFailed = actionChunks.find((c) => c.type === 'rede_link' && !c.ok)
+      if (!redeLink && redeFailed && !reply.includes('probleminha técnico')) {
+        reply = `${reply.trim()}\n\n💚 Tive um probleminha técnico para gerar seu link de cartão agora. Já vou pedir para um atendente finalizar com você em instantes, tá? 🙏`
       }
       const booked = actionChunks.find(
         (c) =>
