@@ -2,7 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 
 import { insertInteraction } from './crm.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
-import { createPagBankCheckout } from './pagbank.ts'
+import { createPagBankCheckout, createPagBankPixOrder } from './pagbank.ts'
 import { createRedeIntent, resolveRedeKit } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 
@@ -73,7 +73,7 @@ export function peelCrmOpsFromModelReply(raw: string): { remainder: string; ops:
   return { remainder, ops }
 }
 
-export type CrmAiActionResult = { type: string; ok: boolean; detail?: string; customerNote?: string }
+export type CrmAiActionResult = { type: string; ok: boolean; detail?: string; customerNote?: string; imageUrl?: string }
 
 /** Token para ilike: remove wildcards problemáticos. */
 export function sanitizeLeadSearchToken(raw: string): string {
@@ -523,6 +523,46 @@ export async function executeCrmAiOpsFromModel(
             ok: false,
             detail: (e instanceof Error ? e.message : String(e)).slice(0, 200),
           })
+        }
+        continue
+      }
+
+      if (type === 'pagbank_pix' || type === 'pix' || type === 'pix_qr') {
+        // Pix DIRETO (copia-e-cola + QR), via PagBank Orders. Aceita kit OU amount_cents, frete e cupom.
+        const { data: leadFull } = await admin
+          .from('leads')
+          .select('id, patient_name, phone, custom_fields, tenant_id')
+          .eq('id', opts.allowedLeadId)
+          .maybeSingle()
+        const lf = leadFull as
+          | { id: string; patient_name?: string; phone?: string; custom_fields?: Record<string, unknown>; tenant_id?: string }
+          | null
+        if (!lf) {
+          results.push({ type: 'pagbank_pix', ok: false, detail: 'lead_not_found' })
+          continue
+        }
+        const freightRaw = op.freight_cents ?? op.freightCents
+        const freightCents =
+          freightRaw != null && Number.isFinite(Number(freightRaw)) ? Math.max(0, Math.round(Number(freightRaw))) : undefined
+        try {
+          const out = await createPagBankPixOrder(admin, {
+            tenantId: String(lf.tenant_id ?? leadTenantId),
+            lead: { id: lf.id, patient_name: lf.patient_name, phone: lf.phone, custom_fields: lf.custom_fields ?? null },
+            kit: op.kit != null ? String(op.kit) : undefined,
+            amountCents: op.amount_cents != null ? Number(op.amount_cents) : undefined,
+            description: op.description != null ? String(op.description) : undefined,
+            couponCode: op.coupon != null ? String(op.coupon) : undefined,
+            freightCents,
+            supabaseUrl: Deno.env.get('SUPABASE_URL') ?? '',
+          })
+          const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
+          // detail = copia-e-cola (vai no texto); imageUrl = PNG do QR (enviado como imagem).
+          results.push({ type: 'pagbank_pix', ok: true, detail: out.qrText, customerNote: note, imageUrl: out.qrImageUrl || undefined })
+          summaries.push(
+            `Pix gerado (${out.label}${out.env === 'sandbox' ? ', sandbox' : ''}${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`,
+          )
+        } catch (e) {
+          results.push({ type: 'pagbank_pix', ok: false, detail: (e instanceof Error ? e.message : String(e)).slice(0, 200) })
         }
         continue
       }

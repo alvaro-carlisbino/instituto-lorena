@@ -476,7 +476,7 @@ export async function invokeCrmAiAssistantForLead(
   aiInboundUserText: string,
   promptOverride: string,
   opts?: { maxAttempts?: number; whatsappInstanceId?: string | null },
-): Promise<string> {
+): Promise<{ reply: string; pixQrUrl?: string }> {
   const aiMessages = [{ role: 'user', content: aiInboundUserText }]
   const aiCtx: Record<string, unknown> = { leadId, focus: 'lead' }
   const wid = opts?.whatsappInstanceId != null ? String(opts.whatsappInstanceId).trim() : ''
@@ -531,11 +531,18 @@ export async function invokeCrmAiAssistantForLead(
     reply = reply.replace(/<(thinking|thought|reasoning)>[\s\S]*?<\/\1>/gi, '').trim()
     reply = reply.replace(/```(?:thinking|thought|reasoning)[\s\S]*?```/gi, '').trim()
 
-    if (reply.trim()) return reply
+    // QR do Pix (op pagbank_pix) para enviar como IMAGEM, propagado via crm_actions.
+    const acts = Array.isArray(aiObj.crm_actions) ? (aiObj.crm_actions as Array<Record<string, unknown>>) : []
+    const pixAct = acts.find(
+      (a) => a && typeof a === 'object' && String(a.type ?? '') === 'pagbank_pix' && a.ok === true && typeof a.imageUrl === 'string' && a.imageUrl,
+    )
+    const pixQrUrl = pixAct ? String(pixAct.imageUrl) : ''
+
+    if (reply.trim()) return { reply, pixQrUrl: pixQrUrl || undefined }
     if (attempt < attempts - 1) await sleepMs(500 * (attempt + 1))
   }
 
-  return ''
+  return { reply: '' }
 }
 
 /**
@@ -796,6 +803,7 @@ export async function runWhatsappAiAutoReply(
   // --- End Triage Logic ---
 
   let aiReplyRaw = ''
+  let pixQrUrl = ''
   try {
     let resolvedWaInst = options.whatsappInstanceId != null ? String(options.whatsappInstanceId).trim() : ''
     if (!resolvedWaInst) {
@@ -807,13 +815,15 @@ export async function runWhatsappAiAutoReply(
     if (options.invokeMaxAttempts !== undefined) invokeOpts.maxAttempts = options.invokeMaxAttempts
     if (resolvedWaInst) invokeOpts.whatsappInstanceId = resolvedWaInst
 
-    aiReplyRaw = await invokeCrmAiAssistantForLead(
+    const invokeRes = await invokeCrmAiAssistantForLead(
       admin,
       options.leadId,
       options.aiInboundUserText,
       options.statePrompt,
       Object.keys(invokeOpts).length ? invokeOpts : undefined,
     )
+    aiReplyRaw = invokeRes.reply
+    pixQrUrl = invokeRes.pixQrUrl ?? ''
   } catch (e) {
     console.error('runWhatsappAiAutoReply invoke:', e)
   }
@@ -903,6 +913,20 @@ export async function runWhatsappAiAutoReply(
       text: aiReply,
       leadId: options.leadId,
     })
+    // QR do Pix como IMAGEM (best-effort): o copia-e-cola já foi no texto, então se o
+    // envio da imagem falhar a venda não trava. Só onde o provider suporta (W-API).
+    if (pixQrUrl && typeof options.sendProvider.sendImageMessage === 'function') {
+      try {
+        await options.sendProvider.sendImageMessage({
+          to: options.fromPhone,
+          imageUrl: pixQrUrl,
+          caption: 'QR Code Pix 💸',
+          leadId: options.leadId,
+        })
+      } catch (e) {
+        console.warn('runWhatsappAiAutoReply pix qr image:', e instanceof Error ? e.message : e)
+      }
+    }
     await insertInteraction(admin, {
       leadId: options.leadId,
       patientName: options.patientName,
@@ -1062,13 +1086,13 @@ export async function runManychatAiAutoReply(
               : {}),
           }
         : undefined
-    aiReplyRaw = await invokeCrmAiAssistantForLead(
+    aiReplyRaw = (await invokeCrmAiAssistantForLead(
       admin,
       options.leadId,
       options.aiInboundUserText,
       options.statePrompt,
       invokeOpts,
-    )
+    )).reply
   } catch (e) {
     console.error('runManychatAiAutoReply invoke:', e)
   }

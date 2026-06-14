@@ -229,6 +229,170 @@ export async function createPagBankCheckout(
   }
 }
 
+export type PixOrderResult = {
+  orderId: string
+  /** Pix copia-e-cola (payload EMV) — vai no texto da mensagem. */
+  qrText: string
+  /** URL do PNG do QR Code (hospedado no PagBank) — enviado como imagem. */
+  qrImageUrl: string
+  amountCents: number
+  label: string
+  referenceId: string
+  baseCents: number
+  discountCents: number
+  couponCode: string | null
+  freightCents: number
+  env: 'sandbox' | 'prod'
+}
+
+/**
+ * Cria uma ORDER no PagBank com Pix dinâmico (qr_codes) e devolve o copia-e-cola + PNG
+ * do QR — melhor que o link do checkout para fechar na conversa. Registra em
+ * pagbank_checkouts (reference_id `lead:<id>`) para o webhook marcar "Pago".
+ */
+export async function createPagBankPixOrder(
+  admin: SupabaseClient,
+  args: {
+    tenantId: string
+    lead: LeadForCheckout
+    kit?: string
+    amountCents?: number
+    description?: string
+    couponCode?: string
+    freightCents?: number
+    supabaseUrl: string
+  },
+): Promise<PixOrderResult> {
+  const cfg = await readPagBankConfig(admin, args.tenantId)
+  if (!cfg) throw new Error('pagbank_not_configured')
+
+  // Item (kit ou avulso) — mesma resolução do checkout.
+  let baseCents = 0
+  let label = ''
+  let kitKey = ''
+  if (args.kit) {
+    const key = normalizeKitKey(args.kit)
+    const kit = key ? PAGBANK_KITS[key] : undefined
+    if (!kit) throw new Error('pagbank_invalid_kit')
+    baseCents = kit.amountCents
+    label = kit.label
+    kitKey = key as string
+  } else {
+    baseCents = Math.round(Number(args.amountCents ?? 0))
+    label = String(args.description ?? 'Tricopill').slice(0, 100) || 'Tricopill'
+  }
+  if (!Number.isFinite(baseCents) || baseCents < 100) throw new Error('pagbank_invalid_amount')
+
+  const coupon = await quoteCoupon(admin, args.tenantId, args.couponCode, baseCents)
+  const productCents = coupon.finalCents
+  const freightCents = Math.max(0, Math.round(Number(args.freightCents ?? 0)))
+  const amountCents = productCents + freightCents
+
+  const referenceId = `lead:${args.lead.id}`
+  const cad = ((args.lead.custom_fields?.cadastro as Record<string, string>) ?? {})
+  const customerName = String(cad.nomeCompleto || args.lead.patient_name || 'Cliente Tricopill').slice(0, 60)
+  const webhookUrl = `${args.supabaseUrl.replace(/\/$/, '')}/functions/v1/crm-pagbank-webhook`
+
+  // Pix expira em ~1h (mantém o formato de offset usado no checkout).
+  const exp = new Date(Date.now() + 60 * 60 * 1000)
+  const expIso = exp.toISOString().replace('Z', '-03:00')
+
+  const items = freightCents > 0
+    ? [
+        { reference_id: kitKey || 'avulso', name: label.slice(0, 100), quantity: 1, unit_amount: productCents },
+        { reference_id: 'frete', name: 'Frete / entrega', quantity: 1, unit_amount: freightCents },
+      ]
+    : [{ reference_id: kitKey || 'avulso', name: label.slice(0, 100), quantity: 1, unit_amount: productCents }]
+
+  // Cliente: PagBank Orders aceita email/tax_id/phones; em sandbox usamos fallback de teste.
+  const customer: Record<string, unknown> = { name: customerName }
+  customer.email = String(cad.email || 'cliente@tricopill.com.br').slice(0, 60)
+  const taxId = String(cad.cpf || cad.taxId || '').replace(/\D/g, '')
+  if (taxId.length === 11) customer.tax_id = taxId
+  else if (cfg.env === 'sandbox') customer.tax_id = '11144477735' // CPF de teste válido (só sandbox)
+  let local = String(args.lead.phone ?? '').replace(/\D/g, '')
+  if ((local.length === 12 || local.length === 13) && local.startsWith('55')) local = local.slice(2)
+  if (local.length === 10 || local.length === 11) {
+    customer.phones = [{ country: '55', area: local.slice(0, 2), number: local.slice(2), type: 'MOBILE' }]
+  }
+
+  const body = {
+    reference_id: referenceId,
+    customer,
+    items,
+    qr_codes: [{ amount: { value: amountCents }, expiration_date: expIso }],
+    notification_urls: [webhookUrl],
+  }
+
+  const bases = [cfg.baseUrl]
+  if (!cfg.baseUrl.includes('sandbox')) bases.push(SANDBOX_BASE)
+  let parsed: Record<string, unknown> = {}
+  let ok = false
+  let lastErr = 'pagbank_failed'
+  for (const base of bases) {
+    try {
+      const res = await fetch(`${base}/orders`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const text = await res.text()
+      try {
+        parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+      } catch {
+        parsed = {}
+      }
+      if (res.ok) { ok = true; break }
+      lastErr = `pagbank_${res.status}: ${text.slice(0, 300)}`
+    } catch (e) {
+      lastErr = `pagbank_fetch_error: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`
+    }
+  }
+  if (!ok) throw new Error(lastErr)
+
+  const qrCodes = (parsed.qr_codes as Array<Record<string, unknown>> | undefined) ?? []
+  const qr0 = (qrCodes[0] ?? {}) as Record<string, unknown>
+  const qrText = String(qr0.text ?? '')
+  const qrLinks = (qr0.links as Array<{ rel?: string; href?: string; media?: string }> | undefined) ?? []
+  const qrImageUrl =
+    qrLinks.find((l) => String(l.rel ?? '').toUpperCase().includes('PNG'))?.href ??
+    qrLinks.find((l) => String(l.media ?? '').includes('image'))?.href ??
+    ''
+  const orderId = String(parsed.id ?? '')
+  if (!qrText) throw new Error('pagbank_no_pix_qr')
+
+  try {
+    await admin.from('pagbank_checkouts').insert({
+      checkout_id: orderId || referenceId,
+      tenant_id: args.tenantId,
+      lead_id: args.lead.id,
+      reference_id: referenceId,
+      amount_cents: amountCents,
+      kit: kitKey || null,
+      pay_link: qrImageUrl || `pix:${orderId || referenceId}`,
+      status: 'created',
+      coupon_code: coupon.applied ? coupon.code : null,
+      discount_cents: coupon.discountCents,
+    })
+  } catch {
+    // ignore (auditoria best-effort)
+  }
+
+  return {
+    orderId,
+    qrText,
+    qrImageUrl,
+    amountCents,
+    label,
+    referenceId,
+    baseCents,
+    discountCents: coupon.discountCents,
+    couponCode: coupon.applied ? coupon.code : null,
+    freightCents,
+    env: cfg.env,
+  }
+}
+
 /** Extrai (leadId, paid?) de um payload de notificação do PagBank, de forma tolerante. */
 export function parsePagBankNotification(payload: unknown): {
   referenceId: string | null

@@ -1,5 +1,6 @@
 import {
   type NormalizedInboundMessage,
+  type SendWhatsappImageInput,
   type SendWhatsappMessageInput,
   type SendWhatsappMessageResult,
   type WhatsappProvider,
@@ -259,6 +260,68 @@ export class WapiProvider implements WhatsappProvider {
     if (apiError || apiStatusRaw === 'error' || apiStatusRaw === 'failed' || successFlagFalse) {
       const detail = apiError || apiStatusRaw || 'unknown_api_error'
       throw new Error(`wapi_send_failed_api: ${detail} | body=${responseText.slice(0, 200)}`)
+    }
+
+    const externalMessageId =
+      safeString(getByPath(parsed, 'messageId')) ||
+      safeString(getByPath(parsed, 'data.messageId')) ||
+      safeString(getByPath(parsed, 'id')) ||
+      safeString(getByPath(parsed, 'data.id')) ||
+      safeString(getByPath(parsed, 'key.id')) ||
+      `wapi-${crypto.randomUUID()}`
+
+    return {
+      provider: this.name,
+      externalMessageId,
+      status: 'queued',
+      raw: parsed,
+    }
+  }
+
+  /** Envia uma IMAGEM por URL (W-API: /message/send-image). Usado p/ o QR do Pix. */
+  async sendImageMessage(input: SendWhatsappImageInput): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    const image = String(input.imageUrl ?? '').trim()
+    if (!image) throw new Error('empty_image')
+
+    const url = `${this.baseUrl}/message/send-image?instanceId=${encodeURIComponent(this.instanceId)}`
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.token}`,
+      },
+      body: JSON.stringify({
+        phone: to,
+        image,
+        caption: (input.caption ?? '').trim() || undefined,
+      }),
+    })
+
+    const responseText = await res.text()
+    let parsed: Record<string, unknown> = {}
+    try {
+      parsed = responseText ? (JSON.parse(responseText) as Record<string, unknown>) : {}
+    } catch {
+      parsed = { raw: responseText }
+    }
+    if (!res.ok) {
+      throw new Error(`wapi_send_image_failed_${res.status}: ${responseText.slice(0, 200)}`)
+    }
+    const apiError =
+      safeString(getByPath(parsed, 'error')) ||
+      safeString(getByPath(parsed, 'errorMessage')) ||
+      safeString(getByPath(parsed, 'data.error')) ||
+      safeString(getByPath(parsed, 'message_error'))
+    const apiStatusRaw = safeString(
+      getByPath(parsed, 'status') ?? getByPath(parsed, 'data.status') ?? '',
+    ).toLowerCase()
+    const successFlagRaw = getByPath(parsed, 'success') ?? getByPath(parsed, 'data.success')
+    const successFlagFalse = successFlagRaw === false || String(successFlagRaw).toLowerCase() === 'false'
+    if (apiError || apiStatusRaw === 'error' || apiStatusRaw === 'failed' || successFlagFalse) {
+      const detail = apiError || apiStatusRaw || 'unknown_api_error'
+      throw new Error(`wapi_send_image_failed_api: ${detail} | body=${responseText.slice(0, 200)}`)
     }
 
     const externalMessageId =

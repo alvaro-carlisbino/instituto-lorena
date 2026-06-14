@@ -18,6 +18,14 @@ export type SendWhatsappMessageResult = {
   raw?: Record<string, unknown>
 }
 
+export type SendWhatsappImageInput = {
+  to: string
+  /** URL pública da imagem (ex.: PNG do QR Pix do PagBank). */
+  imageUrl: string
+  caption?: string
+  leadId?: string
+}
+
 export type NormalizedInboundMessage = {
   provider: 'evolution' | 'official' | 'wapi'
   source: 'whatsapp'
@@ -47,6 +55,8 @@ export type NormalizedInboundMessage = {
 export interface WhatsappProvider {
   readonly name: 'evolution' | 'official' | 'wapi'
   sendMessage(input: SendWhatsappMessageInput): Promise<SendWhatsappMessageResult>
+  /** Opcional: envia uma IMAGEM (ex.: QR Pix). Só implementado onde a API suporta (W-API). */
+  sendImageMessage?(input: SendWhatsappImageInput): Promise<SendWhatsappMessageResult>
   normalizeInbound(payload: Record<string, unknown>, headers: Headers): NormalizedInboundMessage | null
   /** Evolution: síncrono. Meta Cloud: pode ser assíncrono (HMAC Web Crypto). */
   validateWebhookSignature(rawBody: string, headers: Headers): boolean | Promise<boolean>

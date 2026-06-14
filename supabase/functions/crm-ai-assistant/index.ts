@@ -814,7 +814,9 @@ Deno.serve(async (req) => {
       'KIT no op: passe "kit" com a chave do kit escolhido — "1_mes", "3_meses" ou "5_meses" — exatamente como descrito no PROMPT ADICIONAL. O servidor já aplica o PREÇO CHEIO de cartão desse kit; você NÃO calcula o valor do produto, só informa o frete.',
       'FRETE NO LINK: "freight_cents" é o frete em CENTAVOS (ex.: R$ 15,00 = 1500), conforme a cidade no PROMPT ADICIONAL. CIDADE — NUNCA adivinhe a cidade pelo número do CEP (você erra). Se existir snapshot.cep_info, a cidade REAL do cliente é cep_info.localidade/cep_info.uf — use SOMENTE essa, jamais outra. Se o cliente só mandou o CEP e NÃO existir cep_info, NÃO afirme nenhuma cidade — peça a cidade. Se a cidade for MARINGÁ, você JÁ sabe o frete (R$15 = 1500) — GERE o link na hora. Frete grátis/incluso = 0 ou omita.',
       'CUPOM: se o cliente informar um cupom, passe em "coupon":"CODIGO" no op — o servidor valida e aplica o desconto sozinho (cupom inválido = valor cheio). NÃO confirme valor com desconto por conta própria; o link já sai com o preço certo.',
-      'PIX e exceções → HUMANO: você só gera link de CARTÃO (Rede). Passe pro humano com [PRONTO_PARA_CONSULTOR] APENAS se: o cliente quer pagar no PIX, pede um atendente humano, ou a cidade tem frete que você REALMENTE não conhece pelo PROMPT ADICIONAL. NUNCA transfira só para "calcular o frete" de uma cidade cujo valor você já sabe (ex.: Maringá, R$15) — nesse caso GERE o link você mesma. (O sistema remove o marcador; o cliente não vê.)',
+      'FECHAMENTO NO PIX (você gera o Pix sozinha — copia-e-cola + QR): quando o cliente decidir comprar no PIX (escolheu o kit, quer Pix e a cidade do frete já está resolvida), gere o Pix. Na MESMA resposta, DEPOIS da mensagem, acrescente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"pagbank_pix","kit":"3_meses","freight_cents":1500,"coupon":"CODIGO_SE_HOUVER"}]}. O servidor gera o Pix e ANEXA o copia-e-cola no texto + envia o QR Code como imagem — então escreva de forma calorosa que o Pix está logo abaixo (ex.: "Prontinho! 💸 Te mandei o Pix copia e cola e o QR Code aqui embaixo, é só pagar no app do seu banco 💚"). NUNCA escreva/invente um código Pix você mesma: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o Pix — CONTINUE atendendo.',
+      'OBSERVAÇÃO PIX: o "kit"/"freight_cents"/"coupon" do op pagbank_pix seguem as MESMAS regras do cartão (kit do PROMPT ADICIONAL, frete em centavos pela cidade do cep_info, cupom validado pelo servidor). O Pix do PagBank já aplica o desconto de 5% próprio dos kits.',
+      'EXCEÇÕES → HUMANO: passe pro humano com [PRONTO_PARA_CONSULTOR] APENAS se o cliente pedir um atendente humano, ou a cidade tiver frete que você REALMENTE não conhece pelo PROMPT ADICIONAL. NUNCA transfira só para "calcular o frete" de uma cidade cujo valor você já sabe (ex.: Maringá, R$15) — gere o link/Pix você mesma. (O sistema remove o marcador; o cliente não vê.)',
       'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do cliente, trate como um único contexto — responda de forma completa sem pedir de novo o que já foi dito.',
     ].join('\n')
 
@@ -1072,6 +1074,18 @@ Deno.serve(async (req) => {
       const redeFailed = actionChunks.find((c) => c.type === 'rede_link' && !c.ok)
       if (!redeLink && redeFailed && !reply.includes('probleminha técnico')) {
         reply = `${reply.trim()}\n\n💚 Tive um probleminha técnico para gerar seu link de cartão agora. Já vou pedir para um atendente finalizar com você em instantes, tá? 🙏`
+      }
+      // pagbank_pix: Pix DIRETO — copia-e-cola no texto (o QR vai como imagem à parte, via auto-reply).
+      const pixQr = actionChunks.find(
+        (c) => c.type === 'pagbank_pix' && c.ok && typeof c.detail === 'string' && c.detail.length > 20,
+      )
+      if (pixQr?.detail && !reply.includes(pixQr.detail)) {
+        const note = pixQr.customerNote ? `\n${pixQr.customerNote}` : ''
+        reply = `${reply.trim()}\n\n💸 *Pix copia e cola* — toque para copiar e pague no app do seu banco:\n${pixQr.detail}${note}\n\nAssim que o pagamento cair eu confirmo aqui, viu? 💚`
+      }
+      const pixFailed = actionChunks.find((c) => c.type === 'pagbank_pix' && !c.ok)
+      if (!pixQr && pixFailed && !reply.includes('probleminha técnico')) {
+        reply = `${reply.trim()}\n\n💚 Tive um probleminha técnico para gerar o Pix agora. Já vou chamar um atendente pra finalizar com você, tá? 🙏`
       }
       const booked = actionChunks.find(
         (c) =>
