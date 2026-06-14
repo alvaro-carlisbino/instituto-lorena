@@ -659,11 +659,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Catálogo Bling (fonte da verdade de produto/estoque) para os bots de VENDAS.
+    // Catálogo Bling para os bots de VENDAS — APENAS nome/estoque. O `preco` do Bling
+    // costuma ser o CUSTO (não o preço de venda), então é REMOVIDO aqui para a IA NUNCA
+    // cotar custo ao cliente. Preço de venda vem só do PROMPT ADICIONAL.
     if (isSalesBot && tenantId) {
       try {
         const cat = await buildBlingCatalog(dbClient, tenantId)
-        if (cat.items.length) (snapshot as Record<string, unknown>).bling_catalog = cat.items
+        if (cat.items.length) {
+          (snapshot as Record<string, unknown>).bling_catalog = cat.items.map((i) => ({
+            nome: i.nome,
+            codigo: i.codigo,
+            estoque: i.estoque,
+          }))
+        }
       } catch {
         // best-effort
       }
@@ -737,7 +745,8 @@ Deno.serve(async (req) => {
       'Objetivo: entender a necessidade do cliente (queixa capilar, há quanto tempo, se já usou algo), apresentar o produto e os kits/preços (use SEMPRE os valores do PROMPT ADICIONAL — NUNCA invente preço, prazo, composição ou promessa de resultado), tirar dúvidas e conduzir à compra.',
       'Seja consultiva, não robótica: faça no máximo 1–2 perguntas por mensagem, conecte o benefício à queixa do cliente e crie um próximo passo claro.',
       'Use APENAS informações do PROMPT ADICIONAL e do snapshot. Se não souber algo (ex.: contraindicação médica específica), seja honesta e ofereça encaminhar para um especialista — não invente.',
-      'Quando existir snapshot.bling_catalog, é o catálogo REAL do Bling (nome, código, preço e estoque). Use-o como fonte da verdade de produtos e disponibilidade: não ofereça item que não esteja no catálogo; se o estoque estiver 0 (ou null = não controlado), não prometa pronta-entrega — avise que vai confirmar o prazo. Os preços dos KITS/link de pagamento seguem o PROMPT ADICIONAL.',
+      'snapshot.bling_catalog traz só NOME, código e ESTOQUE dos produtos (SEM preço, de propósito). Use-o apenas para conferir disponibilidade: se o estoque for 0 (ou null = não controlado) não prometa pronta-entrega — diga que confirma o prazo.',
+      'PREÇO — REGRA CRÍTICA: só informe um preço que esteja EXPLÍCITO no PROMPT ADICIONAL. NUNCA tire preço do catálogo nem invente. Se o cliente perguntar o valor de um produto que NÃO está no PROMPT ADICIONAL, NÃO diga nenhum valor — diga que vai confirmar o preço certinho com a atendente; se ele quiser fechar, passe para a atendente com [PRONTO_PARA_CONSULTOR]. Cotar preço de custo ou errado é PROIBIDO.',
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
       'VALORES, PAGAMENTO E FRETE: apresente os valores, as formas de pagamento/parcelas e o FRETE EXATAMENTE como definido no PROMPT ADICIONAL — nunca invente preço, parcela ou desconto. Ao passar QUALQUER preço, informe SEMPRE que o frete é cobrado à parte (não está incluso no valor do produto) e pergunte a cidade/CEP do cliente para calcular — principalmente clientes de fora de Maringá.',
       'FECHAMENTO (passar para o atendente): você NÃO gera link de pagamento. Quando o cliente decidir comprar (já escolheu o kit e quer pagar), confirme o kit e a forma desejada (Pix ou cartão / nº de parcelas), diga de forma calorosa que um atendente vai te enviar o link de pagamento em instantes (ex.: "Perfeito! Já vou te passar pro nosso time, que te manda o link de pagamento certinho 💚") e termine a sua resposta com o marcador [PRONTO_PARA_CONSULTOR] na última linha.',
