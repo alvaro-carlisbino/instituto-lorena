@@ -699,8 +699,9 @@ Deno.serve(async (req) => {
     if (isSalesBot && tenantId) {
       try {
         const cat = await buildBlingCatalog(dbClient, tenantId)
-        // Só produtos com PREÇO DE VENDA populado (preco > 0); os de só custo não entram.
-        const sellable = cat.items.filter((i) => i.preco > 0)
+        // Só produtos com PREÇO DE VENDA (preco > 0) E sem estoque NEGATIVO.
+        // estoque null = não controlado (mantém); 0 mantém; < 0 oculta (indisponível/oversold).
+        const sellable = cat.items.filter((i) => i.preco > 0 && (i.estoque === null || i.estoque >= 0))
         if (sellable.length) {
           (snapshot as Record<string, unknown>).bling_catalog = sellable.map((i) => ({
             nome: i.nome,
