@@ -224,7 +224,8 @@ export async function payRedeIntent(
     expirationMonth: args.card.expirationMonth,
     expirationYear: args.card.expirationYear,
     securityCode: args.card.securityCode.replace(/\D/g, ''),
-    softDescriptor: 'PAGAMENTO',
+    // softDescriptor omitido de propósito: o serviço está DESATIVADO na conta e.Rede.
+    // Enviar o campo sem o serviço contratado pode fazer a Rede recusar a transação.
     subscription: false,
   }
   const res = await fetch(cfg.txUrl, {
@@ -264,7 +265,9 @@ export async function payRedeIntent(
         .maybeSingle()
       const l = lead as { id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string } | null
       if (l) {
-        let pagoStageId = 'tricopill__vd-pago'
+        // Procura a etapa "Pago" do PRÓPRIO pipeline do lead — nunca chuta uma etapa fixa
+        // (senão um lead do Instituto cairia na etapa de "Pago" do Tricopill).
+        let pagoStageId: string | null = null
         if (l.pipeline_id) {
           const { data: stage } = await admin
             .from('pipeline_stages')
@@ -274,7 +277,10 @@ export async function payRedeIntent(
             .maybeSingle()
           if (stage?.id) pagoStageId = String(stage.id)
         }
-        await admin.from('leads').update({ stage_id: pagoStageId, temperature: 'hot', updated_at: new Date().toISOString() }).eq('id', l.id)
+        // Só move de etapa se achou a "Pago" no pipeline certo; senão mantém a etapa atual.
+        const leadUpdate: Record<string, unknown> = { temperature: 'hot', updated_at: new Date().toISOString() }
+        if (pagoStageId) leadUpdate.stage_id = pagoStageId
+        await admin.from('leads').update(leadUpdate).eq('id', l.id)
         await insertInteraction(admin, {
           leadId: l.id,
           patientName: String(l.patient_name ?? 'Cliente'),
@@ -318,7 +324,7 @@ export async function testRedeTransaction(
     expirationMonth: 1,
     expirationYear: 2028,
     securityCode: '123',
-    softDescriptor: 'TESTE',
+    // softDescriptor omitido: serviço desativado na conta e.Rede (ver payRedeIntent).
     subscription: false,
   }
   const res = await fetch(cfg.txUrl, {
