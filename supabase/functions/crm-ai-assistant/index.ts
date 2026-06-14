@@ -44,6 +44,40 @@ const cors = {
 /** Limite aproximado do system prompt (caracteres) para evitar rejeição / timeout na Z.ai. */
 const MAX_SYSTEM_CHARS = 95_000
 
+export type CepInfo = { cep: string; localidade: string; uf: string; bairro: string }
+
+/** Acha o CEP mais recente (8 dígitos) num conjunto de textos do cliente. */
+export function extractLatestCep(texts: string[]): string {
+  for (let i = texts.length - 1; i >= 0; i--) {
+    const m = String(texts[i] ?? '').match(/\b(\d{5})-?\s?(\d{3})\b/)
+    if (m) return `${m[1]}${m[2]}`
+  }
+  return ''
+}
+
+/**
+ * Resolve CEP -> cidade/UF no servidor (ViaCEP). A IA NUNCA deve adivinhar a cidade
+ * pelo número do CEP (errava — ex.: tratou 87030-090/Maringá como Cascavel).
+ */
+export async function resolveCepBrasil(rawCep: string): Promise<CepInfo | null> {
+  const digits = String(rawCep ?? '').replace(/\D/g, '')
+  if (digits.length !== 8) return null
+  try {
+    const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`)
+    if (!res.ok) return null
+    const data = (await res.json()) as { localidade?: string; uf?: string; bairro?: string; erro?: boolean }
+    if (data.erro || !data.localidade) return null
+    return {
+      cep: `${digits.slice(0, 5)}-${digits.slice(5)}`,
+      localidade: String(data.localidade),
+      uf: String(data.uf ?? ''),
+      bairro: String(data.bairro ?? ''),
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Alinhado à enum da API Z.ai (chat completions); códigos sem prefixo. */
 const GLM_MODEL_IDS = [
   'glm-5.1',
@@ -677,6 +711,33 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Vendas: se o cliente mandou um CEP, resolve a cidade REAL no servidor (ViaCEP) e
+    // injeta no snapshot. A IA NÃO deve adivinhar a cidade pelo número do CEP (errava o
+    // frete). Varre as mensagens do cliente nesta chamada pegando o CEP mais recente.
+    if (isSalesBot) {
+      try {
+        const userTexts: string[] = []
+        // Histórico do CRM primeiro (mais antigo), só mensagens DO CLIENTE (direction 'in').
+        const lf = snapshot.leadFocus as { recent_conversation?: Array<Record<string, unknown>> } | null | undefined
+        for (const row of lf?.recent_conversation ?? []) {
+          if (String(row.direction ?? '').toLowerCase() === 'in') userTexts.push(String(row.content ?? ''))
+        }
+        // Mensagens desta chamada por último (mais recentes) — têm prioridade.
+        for (const m of clientMessages) {
+          if ((m as { role?: string }).role === 'user' && typeof (m as { content?: unknown }).content === 'string') {
+            userTexts.push((m as { content: string }).content)
+          }
+        }
+        const cep = extractLatestCep(userTexts)
+        if (cep) {
+          const info = await resolveCepBrasil(cep)
+          if (info) (snapshot as Record<string, unknown>).cep_info = info
+        }
+      } catch {
+        // best-effort
+      }
+    }
+
     const focusHint =
       context.focus === 'analytics'
         ? 'O utilizador pediu ênfase em analytics, tendências da semana e números.'
@@ -751,9 +812,9 @@ Deno.serve(async (req) => {
       'VALORES, PAGAMENTO E FRETE: apresente os valores, as formas de pagamento/parcelas e o FRETE EXATAMENTE como definido no PROMPT ADICIONAL — nunca invente preço, parcela ou desconto. Ao passar QUALQUER preço, informe SEMPRE que o frete é cobrado à parte (não está incluso no valor do produto) e pergunte a cidade/CEP do cliente para calcular — principalmente clientes de fora de Maringá.',
       'FECHAMENTO NO CARTÃO (você gera o link sozinha): quando o cliente decidir comprar no CARTÃO — já escolheu o kit, quer cartão e JÁ informou a cidade (para o frete) — gere o link você mesma. Na MESMA resposta, DEPOIS da mensagem ao cliente, acrescente exatamente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_link","kit":"3_meses","installments":12,"freight_cents":1500,"coupon":"CODIGO_SE_HOUVER"}]}. O servidor cria o link de cartão (em até 12x) e ANEXA sozinho na sua mensagem — então escreva de forma calorosa que o link está logo abaixo (ex.: "Prontinho! 💳 Seu link de pagamento no cartão tá aqui embaixo, é só preencher os dados 💚"). NUNCA escreva uma URL nem invente o link: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o link — CONTINUE atendendo para tirar dúvidas e ajudar a concluir o pagamento.',
       'KIT no op: passe "kit" com a chave do kit escolhido — "1_mes", "3_meses" ou "5_meses" — exatamente como descrito no PROMPT ADICIONAL. O servidor já aplica o PREÇO CHEIO de cartão desse kit; você NÃO calcula o valor do produto, só informa o frete.',
-      'FRETE NO LINK: "freight_cents" é o frete (do PROMPT ADICIONAL, conforme a cidade/CEP) em CENTAVOS — ex.: R$ 15,00 = 1500. Se ainda não souber a cidade, PERGUNTE antes de gerar o link. Se o frete for grátis/incluso conforme o PROMPT ADICIONAL, use 0 ou omita o campo.',
+      'FRETE NO LINK: "freight_cents" é o frete em CENTAVOS (ex.: R$ 15,00 = 1500), conforme a cidade no PROMPT ADICIONAL. CIDADE — NUNCA adivinhe a cidade pelo número do CEP (você erra). Se existir snapshot.cep_info, a cidade REAL do cliente é cep_info.localidade/cep_info.uf — use SOMENTE essa, jamais outra. Se o cliente só mandou o CEP e NÃO existir cep_info, NÃO afirme nenhuma cidade — peça a cidade. Se a cidade for MARINGÁ, você JÁ sabe o frete (R$15 = 1500) — GERE o link na hora. Frete grátis/incluso = 0 ou omita.',
       'CUPOM: se o cliente informar um cupom, passe em "coupon":"CODIGO" no op — o servidor valida e aplica o desconto sozinho (cupom inválido = valor cheio). NÃO confirme valor com desconto por conta própria; o link já sai com o preço certo.',
-      'PIX e exceções → HUMANO: você só gera link de CARTÃO (Rede). Se o cliente quiser pagar no PIX, pedir um atendente humano, ou se houver qualquer problema, NÃO tente gerar — diga com cordialidade que um atendente já vai assumir e termine a resposta com o marcador [PRONTO_PARA_CONSULTOR] na última linha (o sistema remove esse marcador; o cliente não vê).',
+      'PIX e exceções → HUMANO: você só gera link de CARTÃO (Rede). Passe pro humano com [PRONTO_PARA_CONSULTOR] APENAS se: o cliente quer pagar no PIX, pede um atendente humano, ou a cidade tem frete que você REALMENTE não conhece pelo PROMPT ADICIONAL. NUNCA transfira só para "calcular o frete" de uma cidade cujo valor você já sabe (ex.: Maringá, R$15) — nesse caso GERE o link você mesma. (O sistema remove o marcador; o cliente não vê.)',
       'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do cliente, trate como um único contexto — responda de forma completa sem pedir de novo o que já foi dito.',
     ].join('\n')
 
