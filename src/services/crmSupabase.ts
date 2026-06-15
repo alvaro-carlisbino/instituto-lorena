@@ -1,7 +1,6 @@
 import {
   initialAutomationRules,
   initialDashboardWidgets,
-  initialAppUsers,
   initialChannels,
   initialDataViews,
   initialInteractions,
@@ -512,16 +511,16 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     ? (notificationsRes.data ?? [])
     : initialNotifications
 
-  const builtUsers: AppUser[] = userRows.length
-    ? userRows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        email: row.email ?? '',
-        role: normalizeAppRole(row.role),
-        active: row.active,
-        authUserId: row.auth_user_id ?? null,
-      }))
-    : initialAppUsers
+  // Em modo Supabase, lista vazia = lista VAZIA (não cai nos usuários demo do mock, que
+  // confundiam — "Diego Moura / Ana Costa / clinicademo" apareciam no lugar da equipe real).
+  const builtUsers: AppUser[] = userRows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email ?? '',
+    role: normalizeAppRole(row.role),
+    active: row.active,
+    authUserId: row.auth_user_id ?? null,
+  }))
 
   const builtTvWidgets: TvWidget[] = (tvWidgetsRes.data ?? []).length
     ? (tvWidgetsRes.data ?? []).map((row) => ({
