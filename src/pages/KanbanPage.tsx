@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useCrm } from '@/context/CrmContext'
+import { useTenant } from '@/context/TenantContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
 import { getLeadFieldValue } from '@/lib/leadFields'
@@ -25,7 +26,30 @@ import { LeadLossReasonDialog } from '@/components/kanban/LeadLossReasonDialog'
 
 export function KanbanPage() {
   const crm = useCrm()
+  const { availableTenants } = useTenant()
   const navigate = useNavigate()
+
+  // Opções de Polo derivadas dos funis visíveis (super-admin enxerga ≥2 polos).
+  // Nome via availableTenants; fallback para o id do tenant.
+  const tenantNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const t of availableTenants) m.set(t.id, t.name)
+    return m
+  }, [availableTenants])
+  const poloOptions = useMemo(() => {
+    const ids: string[] = []
+    for (const p of crm.pipelineCatalog) {
+      if (p.tenantId && !ids.includes(p.tenantId)) ids.push(p.tenantId)
+    }
+    return ids.map((id) => ({ id, name: tenantNameById.get(id) ?? id }))
+  }, [crm.pipelineCatalog, tenantNameById])
+  const pipelineOptions = useMemo(() => {
+    const list =
+      crm.tenantFilter === 'all'
+        ? crm.pipelineCatalog
+        : crm.pipelineCatalog.filter((p) => p.tenantId === crm.tenantFilter)
+    return list.map((p) => ({ id: p.id, name: p.name }))
+  }, [crm.pipelineCatalog, crm.tenantFilter])
   const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [temperatureFilter, setTemperatureFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
@@ -65,6 +89,17 @@ export function KanbanPage() {
       void crm.setSelectedPipelineId(list[0]!.id)
     }
   }, [crm.pipelineCatalog, crm.selectedPipelineId, crm.setSelectedPipelineId])
+
+  // Ao filtrar por Polo, se o funil selecionado não pertencer ao polo, pula para o
+  // primeiro funil do polo (assim o quadro mostra só leads daquele polo).
+  useEffect(() => {
+    if (crm.tenantFilter === 'all') return
+    const inScope = crm.pipelineCatalog.filter((p) => p.tenantId === crm.tenantFilter)
+    if (inScope.length === 0) return
+    if (!inScope.some((p) => p.id === crm.selectedPipelineId)) {
+      void crm.setSelectedPipelineId(inScope[0]!.id)
+    }
+  }, [crm.tenantFilter, crm.pipelineCatalog, crm.selectedPipelineId, crm.setSelectedPipelineId])
 
   useEffect(() => {
     if (ownerFilter !== 'all' && !crm.users.some((u) => u.id === ownerFilter)) {
@@ -242,8 +277,11 @@ export function KanbanPage() {
     >
       <KanbanToolbar
         pipelineId={crm.selectedPipelineId}
-        pipelineOptions={crm.pipelineCatalog.map((p) => ({ id: p.id, name: p.name }))}
+        pipelineOptions={pipelineOptions}
         onPipelineChange={crm.setSelectedPipelineId}
+        poloFilter={crm.tenantFilter}
+        onPoloChange={crm.setTenantFilter}
+        poloOptions={poloOptions}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
         temperatureFilter={temperatureFilter}

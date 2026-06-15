@@ -177,6 +177,10 @@ export const useCrmState = () => {
   const [pipelineCatalog, setPipelineCatalog] = useState<Pipeline[]>(pipelines)
   const [sdrMembers, setSdrMembers] = useState<Sdr[]>(sdrTeam)
   const [selectedPipelineId, setSelectedPipelineId] = useState<string>(pipelines[0].id)
+  // Filtro de Polo (tenant) — exibição apenas. 'all' = ver todos (super-admin vê
+  // todos os polos por RLS); selecionar um polo restringe Kanban/quadro de leads
+  // só àquele polo, sem trocar o polo ativo. Compartilhado entre as telas.
+  const [tenantFilter, setTenantFilter] = useState<string>('all')
   const [leads, setLeads] = useState<Lead[]>(initialLeads)
   const [interactions, setInteractions] = useState<Interaction[]>(initialInteractions)
   // Histórico completo do lead aberto (carregado por lead_id, sem o teto de 1000
@@ -2280,6 +2284,8 @@ export const useCrmState = () => {
     selectedPipelineId,
     setSelectedPipelineId,
     selectedPipeline,
+    tenantFilter,
+    setTenantFilter,
     kanbanFieldsOrdered,
     leads,
     filteredLeads,

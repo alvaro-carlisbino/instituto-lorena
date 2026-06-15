@@ -57,7 +57,7 @@ const normalizeAppRole = (raw: string): PermissionProfile['role'] => {
   return 'sdr'
 }
 
-type DbPipeline = { id: string; name: string; board_config?: Record<string, unknown> | null }
+type DbPipeline = { id: string; name: string; board_config?: Record<string, unknown> | null; tenant_id?: string | null }
 type DbStage = { id: string; pipeline_id: string; name: string; position: number }
 type DbUser = {
   id: string
@@ -85,6 +85,7 @@ type DbLead = {
   conversation_status?: string | null
   lost_reason?: string | null
   last_interaction_at?: string | null
+  tenant_id?: string | null
 }
 type DbInteraction = {
   id: string
@@ -219,6 +220,7 @@ const mapDbLeadToLead = (lead: DbLead, tagIds: string[], followup: DbFollowupSta
     pipelineId: lead.pipeline_id,
     stageId: lead.stage_id,
     summary: lead.summary,
+    tenantId: lead.tenant_id != null && String(lead.tenant_id).length > 0 ? String(lead.tenant_id) : undefined,
     customFields: (lead.custom_fields && typeof lead.custom_fields === 'object' ? lead.custom_fields : {}) as Record<
       string,
       unknown
@@ -301,13 +303,13 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     orgSettingsRes,
     mediaItemsRes,
   ] = await Promise.all([
-    client.from('pipelines').select('id, name, board_config').order('name', { ascending: true }),
+    client.from('pipelines').select('id, name, board_config, tenant_id').order('name', { ascending: true }),
     client.from('pipeline_stages').select('id, pipeline_id, name, position').order('position', { ascending: true }),
     client.from('app_users').select('id, name, email, auth_user_id, active, role').order('name', { ascending: true }),
     client
       .from('leads')
       .select(
-        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at',
+        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at, tenant_id',
       )
       .is('deleted_at', null)
       .order('position', { ascending: true }),
@@ -417,6 +419,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     ? pipelineRows.map((pipeline) => ({
         id: pipeline.id,
         name: pipeline.name,
+        tenantId: pipeline.tenant_id != null && String(pipeline.tenant_id).length > 0 ? String(pipeline.tenant_id) : undefined,
         boardConfig: (pipeline.board_config && typeof pipeline.board_config === 'object'
           ? (pipeline.board_config as Pipeline['boardConfig'])
           : {}) as Pipeline['boardConfig'],
@@ -670,7 +673,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
     client
       .from('leads')
       .select(
-        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at',
+        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at, tenant_id',
       )
       .is('deleted_at', null)
       .order('position', { ascending: true }),

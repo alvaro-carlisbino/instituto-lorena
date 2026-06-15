@@ -47,6 +47,7 @@ import { Label } from '@/components/ui/label'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
+import { useTenant } from '@/context/TenantContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
 import { columnLabel } from '@/lib/leadColumnLabels'
@@ -76,6 +77,7 @@ function temperatureBadgeClass(t: string): string {
 
 export function LeadsPage() {
   const crm = useCrm()
+  const { availableTenants } = useTenant()
   const [searchParams, setSearchParams] = useSearchParams()
   const [sheetOpen, setSheetOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
@@ -97,6 +99,31 @@ export function LeadsPage() {
   const [bulkStageId, setBulkStageId] = useState<string>('all')
 
   const leadIdParam = searchParams.get('leadId')
+
+  // Filtro de Polo (tenant) — só aparece quando o login enxerga ≥2 polos (super-admin).
+  const tenantNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const t of availableTenants) m.set(t.id, t.name)
+    return m
+  }, [availableTenants])
+  const poloOptions = useMemo(() => {
+    const ids: string[] = []
+    for (const l of crm.leads) {
+      if (l.tenantId && !ids.includes(l.tenantId)) ids.push(l.tenantId)
+    }
+    return ids.map((id) => ({ id, name: tenantNameById.get(id) ?? id }))
+  }, [crm.leads, tenantNameById])
+  const showPolo = poloOptions.length >= 2
+  const poloSelectLabel = useMemo(
+    () =>
+      labelForIdName(
+        crm.tenantFilter,
+        poloOptions,
+        { value: 'all', label: 'Todos os polos' },
+        'Polo',
+      ),
+    [crm.tenantFilter, poloOptions],
+  )
 
   const stagesInFilterPipeline = useMemo(() => {
     const p = crm.pipelineCatalog.find((x) => x.id === pipelineFilter)
@@ -171,6 +198,7 @@ export function LeadsPage() {
   const filteredLeads = useMemo(() => {
     const n = searchTerm.trim().toLowerCase()
     return crm.leads.filter((lead) => {
+      if (crm.tenantFilter !== 'all' && lead.tenantId !== crm.tenantFilter) return false
       if (pipelineFilter !== 'all' && lead.pipelineId !== pipelineFilter) return false
       if (stageFilter !== 'all' && lead.stageId !== stageFilter) return false
       if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) return false
@@ -187,7 +215,7 @@ export function LeadsPage() {
       const hay = [lead.patientName, lead.summary, lead.phone, custom].join(' ').toLowerCase()
       return hay.includes(n)
     })
-  }, [crm.leads, searchTerm, pipelineFilter, stageFilter, ownerFilter, sourceFilter])
+  }, [crm.leads, crm.tenantFilter, searchTerm, pipelineFilter, stageFilter, ownerFilter, sourceFilter])
 
   const crmRef = useRef(crm)
   crmRef.current = crm
@@ -405,6 +433,25 @@ export function LeadsPage() {
             />
           </div>
         </div>
+
+        {showPolo ? (
+          <div className="flex flex-col gap-2 lg:col-span-2">
+            <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-primary/70 ml-1">Polo</Label>
+            <Select value={crm.tenantFilter} onValueChange={(v) => v && crm.setTenantFilter(v)}>
+              <LabeledSelectTrigger className="h-12 rounded-2xl border-primary/30 bg-primary/[0.06] text-xs font-bold uppercase" size="default">
+                {poloSelectLabel}
+              </LabeledSelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="all" className="text-xs font-bold uppercase">Todos os polos</SelectItem>
+                {poloOptions.map((p) => (
+                  <SelectItem key={p.id} value={p.id} className="text-xs font-bold uppercase">
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-2">
           <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Funil</Label>

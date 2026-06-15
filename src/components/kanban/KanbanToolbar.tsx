@@ -23,6 +23,10 @@ type Props = {
   pipelineId: string
   pipelineOptions: { id: string; name: string }[]
   onPipelineChange: (id: string) => void
+  /** Filtro de Polo (tenant). Só renderiza quando há ≥2 polos visíveis. */
+  poloFilter?: string
+  onPoloChange?: (value: string) => void
+  poloOptions?: { id: string; name: string }[]
   searchTerm: string
   onSearchChange: (value: string) => void
   temperatureFilter: Temperature
@@ -45,6 +49,9 @@ export function KanbanToolbar({
   pipelineId,
   pipelineOptions,
   onPipelineChange,
+  poloFilter,
+  onPoloChange,
+  poloOptions,
   searchTerm,
   onSearchChange,
   temperatureFilter,
@@ -62,6 +69,13 @@ export function KanbanToolbar({
   conversationFilter,
   onConversationFilterChange,
 }: Props) {
+  const showPolo = !!poloOptions && poloOptions.length >= 2 && !!onPoloChange
+  const poloLabel = labelForIdName(
+    poloFilter ?? 'all',
+    poloOptions ?? [],
+    { value: 'all', label: 'Todos os polos' },
+    'Polo',
+  )
   const pipelineLabel = labelForIdName(
     pipelineId,
     pipelineOptions,
@@ -134,6 +148,27 @@ export function KanbanToolbar({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {showPolo ? (
+              <Select value={poloFilter ?? 'all'} onValueChange={(v) => v && onPoloChange!(v)}>
+                <LabeledSelectTrigger
+                  className="min-w-[140px] rounded-xl border-primary/30 bg-primary/[0.06] text-xs font-bold uppercase tracking-tight"
+                  size="default"
+                >
+                  {poloLabel}
+                </LabeledSelectTrigger>
+                <SelectContent className="rounded-xl">
+                  <SelectItem value="all" className="text-xs uppercase font-bold tracking-tight">
+                    Todos os polos
+                  </SelectItem>
+                  {poloOptions!.map((polo) => (
+                    <SelectItem key={polo.id} value={polo.id} className="text-xs uppercase font-bold tracking-tight">
+                      {polo.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+
             <Select value={pipelineId} onValueChange={(v) => v && onPipelineChange(v)}>
               <LabeledSelectTrigger
                 className="min-w-[140px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"

@@ -14,6 +14,8 @@ export type Pipeline = {
   name: string
   stages: Stage[]
   boardConfig: BoardConfig
+  /** Polo (tenant) dono do funil. Usado pelo filtro de Polo no Kanban. */
+  tenantId?: string
 }
 
 export type Sdr = {
@@ -74,6 +76,8 @@ export type Lead = {
   pipelineId: string
   stageId: string
   summary: string
+  /** Polo (tenant) dono do lead. Usado pelo filtro de Polo (super-admin vê todos). */
+  tenantId?: string
   customFields: Record<string, unknown>
   /** CRM line (Evolution instance) when using multi-phone. */
   whatsappInstanceId: string | null
