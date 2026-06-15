@@ -128,14 +128,17 @@ Deno.serve(async (req) => {
 
   const { data: lead } = await admin
     .from('leads')
-    .select('id, patient_name, pipeline_id, tenant_id, phone')
+    .select('id, patient_name, pipeline_id, tenant_id, phone, custom_fields')
     .eq('id', leadId)
     .maybeSingle()
   if (!lead) {
     await markDone()
     return json({ ok: true, marked_paid: markedPaid, skipped: 'lead_not_found' }, 200)
   }
-  const l = lead as { id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string; phone?: string }
+  const l = lead as {
+    id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string; phone?: string
+    custom_fields?: { cadastro?: Record<string, string> }
+  }
   const tenantId = String(l.tenant_id ?? '')
 
   // Etapa "Pago" do funil do lead (por nome), com fallback ao funil de vendas do Tricopill.
@@ -203,11 +206,14 @@ Deno.serve(async (req) => {
         const kit = (chk as { kit?: string } | null)?.kit
         if (kit) {
           try {
+            const cad = (l.custom_fields?.cadastro ?? {}) as Record<string, string>
             const out = await blingCreateSaleOrder(admin, tenantId, {
               kit: String(kit),
               amountCents: Number((chk as { amount_cents?: number }).amount_cents ?? 0),
-              customerName: String(l.patient_name ?? 'Cliente Tricopill'),
+              customerName: String(cad.nomeCompleto || l.patient_name || 'Cliente Tricopill').trim(),
               phone: l.phone ? String(l.phone) : undefined,
+              cpf: cad.cpf,
+              email: cad.email,
             })
             await insertInteraction(admin, {
               leadId,

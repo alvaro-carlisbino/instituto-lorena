@@ -280,10 +280,13 @@ export async function payRedeIntent(
     try {
       const { data: lead } = await admin
         .from('leads')
-        .select('id, patient_name, pipeline_id, tenant_id, phone')
+        .select('id, patient_name, pipeline_id, tenant_id, phone, custom_fields')
         .eq('id', intent.leadId)
         .maybeSingle()
-      const l = lead as { id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string; phone?: string } | null
+      const l = lead as {
+        id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string; phone?: string
+        custom_fields?: { cadastro?: Record<string, string> }
+      } | null
       if (l) {
         // Procura a etapa "Pago" do PRÓPRIO pipeline do lead — nunca chuta uma etapa fixa
         // (senão um lead do Instituto cairia na etapa de "Pago" do Tricopill).
@@ -323,11 +326,16 @@ export async function payRedeIntent(
               .maybeSingle()
             const blingCfg = ((blingRow as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
             if (blingCfg.auto_order_enabled === true) {
+              // Nome/CPF/e-mail: prioriza o cadastro capturado na conversa, depois o titular
+              // do cartão (pagador real), por fim o pushName do WhatsApp.
+              const cad = (l.custom_fields?.cadastro ?? {}) as Record<string, string>
               const out = await blingCreateSaleOrder(admin, blingTenant, {
                 kit: intent.kit,
                 amountCents: intent.amountCents,
-                customerName: String(l.patient_name ?? 'Cliente Tricopill'),
+                customerName: String(cad.nomeCompleto || args.card.cardholderName || l.patient_name || 'Cliente Tricopill').trim(),
                 phone: l.phone ? String(l.phone) : undefined,
+                cpf: cad.cpf,
+                email: cad.email,
               })
               await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
               await insertInteraction(admin, {
