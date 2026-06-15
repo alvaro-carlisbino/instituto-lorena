@@ -68,7 +68,6 @@ import {
 import { isSupabaseConfigured, supabase } from '../lib/supabaseClient'
 import {
   initialDashboardWidgets,
-  initialAppUsers,
   initialChannels,
   initialDataViews,
   initialInteractions,
@@ -194,7 +193,9 @@ export const useCrmState = () => {
   const [workflowFields, setWorkflowFields] = useState<WorkflowField[]>(initialWorkflowFields)
   const [permissions, setPermissions] = useState<PermissionProfile[]>(initialPermissions)
   const [notifications, setNotifications] = useState<NotificationRule[]>(initialNotifications)
-  const [users, setUsers] = useState<AppUser[]>(initialAppUsers)
+  // Em produção (Supabase) o sync substitui pela equipe real. Inicia VAZIO — nunca
+  // semeia os usuários demo do mock (Diego Moura/Ana Costa) no lugar da equipe.
+  const [users, setUsers] = useState<AppUser[]>([])
   const [tvWidgets, setTvWidgets] = useState<TvWidget[]>(initialTvWidgets)
   const [dashboardWidgets, setDashboardWidgets] = useState<DashboardWidget[]>(initialDashboardWidgets)
   const [dataViews, setDataViews] = useState<DataView[]>(initialDataViews)
