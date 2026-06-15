@@ -397,21 +397,28 @@ export class WapiProvider implements WhatsappProvider {
         const clean = b64raw.includes('base64,') ? b64raw.split('base64,')[1] : b64raw
         return { ok: true, base64: clean, mimeType, debug: `ok_base64_${status}` }
       }
-      // 2) URL hospedada → baixa e converte.
+      // 2) URL hospedada → baixa e converte. O W-API devolve `fileLink` (URL que EXPIRA),
+      // então baixamos os bytes agora e guardamos em base64 (permanente).
       const mediaUrl =
+        safeString(getByPath(parsed, 'fileLink')) ||
         safeString(getByPath(parsed, 'url')) ||
         safeString(getByPath(parsed, 'link')) ||
         safeString(getByPath(parsed, 'fileUrl')) ||
         safeString(getByPath(parsed, 'mediaUrl')) ||
+        safeString(getByPath(parsed, 'data.fileLink')) ||
         safeString(getByPath(parsed, 'data.url'))
       if (mediaUrl && mediaUrl.startsWith('http')) {
-        const r = await fetch(mediaUrl, { signal: AbortSignal.timeout(20000) })
+        const r = await fetch(mediaUrl, { signal: AbortSignal.timeout(25000) })
         if (!r.ok) return { ok: false, debug: `media_url_http_${r.status}` }
-        const bytes = new Uint8Array(await r.arrayBuffer())
+        const buf = await r.arrayBuffer()
+        // Guarda de tamanho: base64 vai no DB (fetch global do chat) — pula arquivos grandes.
+        if (buf.byteLength > 6_000_000) return { ok: false, debug: `too_large_${buf.byteLength}` }
+        const bytes = new Uint8Array(buf)
         let bin = ''
         const ch = 0x8000
         for (let i = 0; i < bytes.length; i += ch) bin += String.fromCharCode(...bytes.subarray(i, i + ch))
-        return { ok: true, base64: btoa(bin), mimeType, debug: `ok_url_${status}` }
+        const ctype = safeString(r.headers.get('content-type')).split(';')[0].trim() || mimeType
+        return { ok: true, base64: btoa(bin), mimeType: ctype, debug: `ok_url_${status}` }
       }
       return { ok: false, debug: `no_media_in_resp_${status}:${bodyText.slice(0, 180)}` }
     } catch (e) {
@@ -421,16 +428,22 @@ export class WapiProvider implements WhatsappProvider {
 }
 
 /**
- * Extrai o objeto de mídia de IMAGEM (ou figurinha) de um payload inbound do W-API, com
- * os campos de descriptografia para o download-media. Só imagem por ora (o que renderiza
- * no chat); áudio tem fluxo próprio (ASR). Devolve null se não houver imagem.
+ * Extrai a mídia inbound do payload W-API (imagem/figurinha, áudio/ptt, vídeo, documento),
+ * com os campos de descriptografia para o download-media. Devolve o tipo + objeto, ou null.
  */
-export function extractInboundImageMedia(
+export function extractInboundMedia(
   payload: Record<string, unknown>,
-): { caption: string; media: Record<string, unknown> } | null {
+): { mediaType: 'image' | 'audio' | 'video' | 'document'; caption: string; media: Record<string, unknown> } | null {
   const mc = (payload?.msgContent ?? payload?.msgcontent ?? payload?.message ?? {}) as Record<string, unknown>
-  const img = (mc.imageMessage ?? mc.stickerMessage) as Record<string, unknown> | undefined
-  if (!img || typeof img !== 'object') return null
-  const caption = typeof img.caption === 'string' ? img.caption : ''
-  return { caption, media: img }
+  const pick = (k: string) => (mc[k] && typeof mc[k] === 'object' ? (mc[k] as Record<string, unknown>) : null)
+  const found =
+    (pick('imageMessage') ?? pick('stickerMessage')) ? { mediaType: 'image' as const, media: (pick('imageMessage') ?? pick('stickerMessage'))! }
+      : (pick('audioMessage') ?? pick('pttMessage')) ? { mediaType: 'audio' as const, media: (pick('audioMessage') ?? pick('pttMessage'))! }
+        : pick('videoMessage') ? { mediaType: 'video' as const, media: pick('videoMessage')! }
+          : pick('documentMessage') ? { mediaType: 'document' as const, media: pick('documentMessage')! }
+            : null
+  if (!found) return null
+  const m = found.media
+  const caption = typeof m.caption === 'string' ? m.caption : typeof m.fileName === 'string' ? m.fileName : ''
+  return { mediaType: found.mediaType, caption, media: m }
 }
