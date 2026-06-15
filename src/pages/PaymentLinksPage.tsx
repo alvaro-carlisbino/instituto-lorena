@@ -49,6 +49,7 @@ export function PaymentLinksPage() {
   const [kit, setKit] = useState<PagbankKit>('3_meses')
   const [amountReais, setAmountReais] = useState('')
   const [description, setDescription] = useState('')
+  const [maxInstallments, setMaxInstallments] = useState(12)
   const [freightReais, setFreightReais] = useState('')
   const [generating, setGenerating] = useState(false)
   const [lastLink, setLastLink] = useState<{ url: string; via: string } | null>(null)
@@ -102,7 +103,7 @@ export function PaymentLinksPage() {
     }
   }
 
-  const handleCard = async (amountCents: number, desc: string) => {
+  const handleCard = async (amountCents: number, desc: string, installments?: number) => {
     if (!Number.isFinite(amountCents) || amountCents < 100) {
       toast.error('Informe um valor válido.')
       return
@@ -110,7 +111,7 @@ export function PaymentLinksPage() {
     setGenerating(true)
     setLastLink(null)
     try {
-      const res = await generateRedeLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents })
+      const res = await generateRedeLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents, installments })
       setLastLink({ url: res.payLink, via: `Cartão · ${formatBRL(res.amountCents)}` })
       toast.success(`Link de cartão gerado (${formatBRL(res.amountCents)}).`)
     } catch (e) {
@@ -193,6 +194,24 @@ export function PaymentLinksPage() {
                     Pix com 5% off (PagBank). Cartão no valor cheio ({formatBRL(REDE_KIT_AMOUNTS[kit])}, Rede).
                   </p>
                 </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="pl-inst">Parcelas máximas no cartão</Label>
+                  <Select value={String(maxInstallments)} onValueChange={(v) => setMaxInstallments(Number(v))}>
+                    <SelectTrigger id="pl-inst">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n === 1 ? 'À vista (1x)' : `até ${n}x`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[0.7rem] text-muted-foreground">O cliente escolhe de 1x até esse máximo na hora de pagar.</p>
+                </div>
+
                 <div className="flex gap-2">
                   <Button className="flex-1" onClick={() => void handlePix()} disabled={generating}>
                     <QrCode className="mr-1.5 size-4" /> Pix (PagBank)
@@ -200,10 +219,36 @@ export function PaymentLinksPage() {
                   <Button
                     className="flex-1"
                     variant="outline"
-                    onClick={() => void handleCard(REDE_KIT_AMOUNTS[kit], `Tricopill ${kit.replace('_', ' ')}`)}
+                    onClick={() => void handleCard(REDE_KIT_AMOUNTS[kit], `Tricopill ${kit.replace('_', ' ')}`, maxInstallments)}
                     disabled={generating}
                   >
                     <CreditCard className="mr-1.5 size-4" /> Cartão (Rede)
+                  </Button>
+                </div>
+
+                <div className="mt-1 space-y-2 rounded-lg border border-dashed border-border/60 p-3">
+                  <p className="text-[0.7rem] font-bold uppercase tracking-widest text-muted-foreground">Ou valor avulso (outros produtos)</p>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="pl-amount">Valor (R$)</Label>
+                    <Input id="pl-amount" inputMode="decimal" value={amountReais} onChange={(e) => setAmountReais(e.target.value)} placeholder="Ex.: 250,00" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="pl-desc">Descrição</Label>
+                    <Input id="pl-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex.: Shampoo / outro produto" />
+                  </div>
+                  <Button
+                    className="w-full"
+                    variant="outline"
+                    onClick={() =>
+                      void handleCard(
+                        Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100),
+                        description.trim() || 'Tricopill',
+                        maxInstallments,
+                      )
+                    }
+                    disabled={generating}
+                  >
+                    <CreditCard className="mr-1.5 size-4" /> Gerar link de cartão (valor avulso)
                   </Button>
                 </div>
               </>
