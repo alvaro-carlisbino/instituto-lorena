@@ -279,8 +279,12 @@ export async function blingCreateSaleOrder(
   const totalReais = Math.round(args.amountCents) / 100
   const valorUnit = Math.round((totalReais / bottles) * 100) / 100
 
+  // Data do pedido (YYYY-MM-DD, fuso de Maringá/Brasília). O Bling EXIGE `data` —
+  // sem ela recusa com "A data para geração das parcelas é inválida".
+  const dataPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
   const payload = {
     contato: { id: Number(contatoId) || contatoId },
+    data: dataPedido,
     itens: [
       {
         produto: { id: Number(productId) || productId },
