@@ -831,6 +831,18 @@ export async function runWhatsappAiAutoReply(
   const { clean: aiReplySanitized, handoffSuggested } = sanitizeCrmAiPatientReply(aiReplyRaw)
   const aiReply = aiReplySanitized.trim()
 
+  // ANTI-ATROPELO: o z.ai leva ~30-120s. Se durante esse tempo o HUMANO assumiu a conversa
+  // (owner_mode=human ou ai_enabled=false), NÃO enviamos mais nada — a equipa é dona do
+  // atendimento agora. Re-checa o gate imediatamente antes de QUALQUER envio.
+  const postGate = await evaluateCrmAiAutoReplyGate(admin, options.leadId, { directionIsInbound: true })
+  if (!postGate.canAutoReply) {
+    console.warn('runWhatsappAiAutoReply: humano assumiu durante a geração — envio abortado', {
+      leadId: options.leadId,
+      skipReasons: postGate.skipReasons,
+    })
+    return { replied: false }
+  }
+
   if (!aiReply) {
     // Falha consecutiva no WhatsApp também: 2º fallback seguido → handover defensivo.
     const prevAlsoFallback = await wasLastAiReplyFallback(admin, options.leadId)
@@ -1100,6 +1112,17 @@ export async function runManychatAiAutoReply(
   const sanitizedManychat = sanitizeCrmAiPatientReply(aiReplyRaw)
   const aiReply = sanitizedManychat.clean.trim()
   const handoffSuggested = sanitizedManychat.handoffSuggested
+
+  // ANTI-ATROPELO (igual ao WhatsApp): se o humano assumiu durante a geração do z.ai,
+  // não envia mais nada. Re-checa o gate antes de qualquer commit/envio ao ManyChat.
+  const postGateMc = await evaluateCrmAiAutoReplyGate(admin, options.leadId, { directionIsInbound: true })
+  if (!postGateMc.canAutoReply) {
+    console.warn('runManychatAiAutoReply: humano assumiu durante a geração — envio abortado', {
+      leadId: options.leadId,
+      skipReasons: postGateMc.skipReasons,
+    })
+    return { replied: false }
+  }
 
   const commitManychatReply = async (text: string, noteMid: string): Promise<void> => {
     await insertInteraction(admin, {
