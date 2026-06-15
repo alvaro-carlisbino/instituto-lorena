@@ -1326,14 +1326,20 @@ export const deletePermissionProfile = async (profileId: string): Promise<void> 
 
 export const saveAppUser = async (user: AppUser): Promise<void> => {
   const client = assertSupabase()
-  const { error } = await client.from('app_users').upsert({
+  const row: Record<string, unknown> = {
     id: user.id,
     name: user.name,
     email: user.email ?? '',
     role: user.role,
     active: user.active,
     auth_user_id: user.authUserId ?? null,
-  })
+  }
+  // app_users.tenant_id é NOT NULL: ao criar um usuário novo precisa do tenant ativo (polo
+  // atual), senão o INSERT viola o not-null. Em update, RLS já garante o tenant correto.
+  const { data: tid } = await client.rpc('current_tenant_id')
+  const tenantId = typeof tid === 'string' ? tid.trim() : ''
+  if (tenantId) row.tenant_id = tenantId
+  const { error } = await client.from('app_users').upsert(row)
   if (error) throw error
 }
 

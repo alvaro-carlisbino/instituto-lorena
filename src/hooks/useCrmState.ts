@@ -154,6 +154,19 @@ export const queueSeed: QueueJob[] = [
 
 export { sourceLabel } from '../mocks/crmMock'
 
+/** Mensagem legível de qualquer erro (Error, PostgrestError {message,details}, etc.) —
+ * evita o "[object Object]" de String(obj) em erros do Supabase. */
+const describeError = (e: unknown): string => {
+  if (e instanceof Error) return e.message
+  if (e && typeof e === 'object') {
+    const o = e as { message?: unknown; details?: unknown }
+    const msg = o.message != null ? String(o.message) : ''
+    const det = o.details != null && String(o.details) ? ` (${String(o.details)})` : ''
+    return msg ? `${msg}${det}` : JSON.stringify(e)
+  }
+  return String(e)
+}
+
 const parseForceAdminEmails = (): string[] => {
   const raw = import.meta.env.VITE_FORCE_ADMIN_EMAILS
   if (typeof raw !== 'string' || !raw.trim()) return []
@@ -1253,7 +1266,7 @@ export const useCrmState = () => {
     setUsers((previous) => [...previous, next])
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void saveAppUser(next).catch((error) => {
-        setAuthNotice(`Falha ao salvar o usuário: ${error instanceof Error ? error.message : String(error)}`)
+        setAuthNotice(`Falha ao salvar o usuário: ${describeError(error)}`)
       })
     }
   }
@@ -1265,7 +1278,7 @@ export const useCrmState = () => {
         const changed = next.find((user) => user.id === userId)
         if (changed) {
           void saveAppUser(changed).catch((error) => {
-            setAuthNotice(`Falha ao salvar o usuário: ${error instanceof Error ? error.message : String(error)}`)
+            setAuthNotice(`Falha ao salvar o usuário: ${describeError(error)}`)
           })
         }
       }
