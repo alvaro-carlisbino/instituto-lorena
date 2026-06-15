@@ -15,6 +15,7 @@ import {
   createWapiProviderForRow,
   loadWhatsappInstanceByWapiId,
 } from '../_shared/whatsapp/wapiConfig.ts'
+import { extractInboundImageMedia, WapiProvider } from '../_shared/whatsapp/wapi.ts'
 
 // Webhook próprio da W-API. Roda em paralelo ao crm-whatsapp-webhook (Evolution/Official).
 // Cada linha em whatsapp_channel_instances com channel_provider='wapi' tem token e
@@ -197,7 +198,7 @@ Deno.serve(async (req) => {
       await applyOptOutToLead(admin, lead.leadId, 'whatsapp_inbound_opt_out')
     }
 
-    await insertInteraction(admin, {
+    const inboundInteractionId = await insertInteraction(admin, {
       leadId: lead.leadId,
       patientName: normalized.fromName,
       channel: 'whatsapp',
@@ -206,7 +207,36 @@ Deno.serve(async (req) => {
       content: normalized.text,
       happenedAt: normalized.happenedAt,
       externalMessageId: normalized.externalMessageId,
+      tenantId,
     })
+
+    // IMAGEM inbound: baixa+descriptografa do W-API e grava em crm_media_items para
+    // renderizar no chat (mesmo destino visual do ManyChat). Best-effort + log de diagnóstico.
+    try {
+      const imgMedia = extractInboundImageMedia(normalized.raw as Record<string, unknown>)
+      if (imgMedia && provider instanceof WapiProvider) {
+        const dl = await provider.downloadMedia(normalized.externalMessageId, 'image', imgMedia.media)
+        await admin.from('webhook_jobs').insert({
+          source: 'wapi-media-debug',
+          status: dl.ok ? 'done' : 'error',
+          note: `img:${normalized.externalMessageId}:${dl.debug}`.slice(0, 490),
+        })
+        if (dl.ok && dl.base64) {
+          await admin.from('crm_media_items').insert({
+            lead_id: lead.leadId,
+            interaction_id: inboundInteractionId,
+            tenant_id: tenantId,
+            direction: 'in',
+            media_type: 'image',
+            mime_type: dl.mimeType ?? 'image/jpeg',
+            media_base64: dl.base64,
+            metadata: { source: 'wapi', caption: imgMedia.caption || null },
+          })
+        }
+      }
+    } catch (e) {
+      console.warn('[wapi-webhook] inbound image media failed:', e instanceof Error ? e.message : String(e))
+    }
 
     // Captura passiva de dados de cadastro p/ agendar na Shosp sem digitação.
     try {

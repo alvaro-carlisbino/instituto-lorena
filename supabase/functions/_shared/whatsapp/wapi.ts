@@ -339,4 +339,98 @@ export class WapiProvider implements WhatsappProvider {
       raw: parsed,
     }
   }
+
+  /**
+   * Baixa+descriptografa uma mídia INBOUND via W-API (/message/download-media). O body é
+   * flat com os campos de descriptografia do WhatsApp (mediaKey/directPath/url/mimetype/...).
+   * Devolve base64 + mimeType. `debug` sempre preenchido (status/erro) para diagnóstico.
+   */
+  async downloadMedia(
+    messageId: string,
+    type: 'image' | 'video' | 'audio' | 'document',
+    media: Record<string, unknown>,
+  ): Promise<{ ok: boolean; base64?: string; mimeType?: string; debug: string }> {
+    const body: Record<string, unknown> = {
+      messageId,
+      type,
+      mediaKey: media.mediaKey,
+      directPath: media.directPath,
+      url: media.url,
+      mimetype: media.mimetype ?? media.mimeType,
+      fileEncSha256: media.fileEncSha256,
+      fileSha256: media.fileSha256,
+    }
+    let status = 0
+    let bodyText = ''
+    try {
+      const res = await fetch(`${this.baseUrl}/message/download-media?instanceId=${encodeURIComponent(this.instanceId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20000),
+      })
+      status = res.status
+      bodyText = await res.text()
+      let parsed: Record<string, unknown> = {}
+      try {
+        parsed = bodyText ? (JSON.parse(bodyText) as Record<string, unknown>) : {}
+      } catch {
+        parsed = {}
+      }
+      if (!res.ok || parsed.error) {
+        return { ok: false, debug: `http_${status}:${bodyText.slice(0, 180)}` }
+      }
+      const mimeType =
+        safeString(getByPath(parsed, 'mimetype')) ||
+        safeString(getByPath(parsed, 'mimeType')) ||
+        String(media.mimetype ?? media.mimeType ?? 'image/jpeg')
+      // 1) base64 direto em algum campo comum.
+      const b64raw =
+        safeString(getByPath(parsed, 'fileBase64')) ||
+        safeString(getByPath(parsed, 'base64')) ||
+        safeString(getByPath(parsed, 'data')) ||
+        safeString(getByPath(parsed, 'media')) ||
+        safeString(getByPath(parsed, 'mediaBase64')) ||
+        safeString(getByPath(parsed, 'data.base64')) ||
+        safeString(getByPath(parsed, 'data.fileBase64'))
+      if (b64raw && b64raw.length > 100) {
+        const clean = b64raw.includes('base64,') ? b64raw.split('base64,')[1] : b64raw
+        return { ok: true, base64: clean, mimeType, debug: `ok_base64_${status}` }
+      }
+      // 2) URL hospedada → baixa e converte.
+      const mediaUrl =
+        safeString(getByPath(parsed, 'url')) ||
+        safeString(getByPath(parsed, 'link')) ||
+        safeString(getByPath(parsed, 'fileUrl')) ||
+        safeString(getByPath(parsed, 'mediaUrl')) ||
+        safeString(getByPath(parsed, 'data.url'))
+      if (mediaUrl && mediaUrl.startsWith('http')) {
+        const r = await fetch(mediaUrl, { signal: AbortSignal.timeout(20000) })
+        if (!r.ok) return { ok: false, debug: `media_url_http_${r.status}` }
+        const bytes = new Uint8Array(await r.arrayBuffer())
+        let bin = ''
+        const ch = 0x8000
+        for (let i = 0; i < bytes.length; i += ch) bin += String.fromCharCode(...bytes.subarray(i, i + ch))
+        return { ok: true, base64: btoa(bin), mimeType, debug: `ok_url_${status}` }
+      }
+      return { ok: false, debug: `no_media_in_resp_${status}:${bodyText.slice(0, 180)}` }
+    } catch (e) {
+      return { ok: false, debug: `exception:${(e instanceof Error ? e.message : String(e)).slice(0, 150)}` }
+    }
+  }
+}
+
+/**
+ * Extrai o objeto de mídia de IMAGEM (ou figurinha) de um payload inbound do W-API, com
+ * os campos de descriptografia para o download-media. Só imagem por ora (o que renderiza
+ * no chat); áudio tem fluxo próprio (ASR). Devolve null se não houver imagem.
+ */
+export function extractInboundImageMedia(
+  payload: Record<string, unknown>,
+): { caption: string; media: Record<string, unknown> } | null {
+  const mc = (payload?.msgContent ?? payload?.msgcontent ?? payload?.message ?? {}) as Record<string, unknown>
+  const img = (mc.imageMessage ?? mc.stickerMessage) as Record<string, unknown> | undefined
+  if (!img || typeof img !== 'object') return null
+  const caption = typeof img.caption === 'string' ? img.caption : ''
+  return { caption, media: img }
 }
