@@ -619,7 +619,7 @@ export async function disableAiOnHandoff(
       channel: 'system',
       direction: 'system',
       author: 'CRM',
-      content: 'IA desligada automaticamente: triagem finalizada, lead pronto para a Dandara finalizar o agendamento manualmente.',
+      content: 'IA desligada automaticamente: triagem finalizada, lead pronto para o atendente humano finalizar manualmente.',
       happenedAt: nowIso(),
     })
   } catch (e) {
