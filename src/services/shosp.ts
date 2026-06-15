@@ -138,3 +138,62 @@ export async function linkLeadToShospPatient(leadId: string, prontuario: string 
   if (!supabase) return
   await supabase.from('leads').update({ shosp_prontuario: String(prontuario) }).eq('id', leadId)
 }
+
+/** Remove o vínculo lead→paciente Shosp. */
+export async function unlinkLeadShospPatient(leadId: string): Promise<void> {
+  if (!supabase) return
+  const { error } = await supabase.from('leads').update({ shosp_prontuario: null }).eq('id', leadId)
+  if (error) throw new Error(error.message)
+}
+
+/** Prontuário Shosp atualmente vinculado ao lead (null se não vinculado). */
+export async function getLeadShospProntuario(leadId: string): Promise<string | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.from('leads').select('shosp_prontuario').eq('id', leadId).maybeSingle()
+  if (error) return null
+  return (data as { shosp_prontuario?: string | null } | null)?.shosp_prontuario ?? null
+}
+
+export type ShospPatientCandidate = {
+  prontuario: string
+  nome: string
+  celular?: string
+  telefone?: string
+  cpf?: string
+  dataNascimento?: string
+}
+
+/** Extrai a lista de pacientes da resposta Shosp (array OU objeto-por-código em `dados`). */
+function shospDadosArray(data: unknown): Record<string, unknown>[] {
+  if (!data || typeof data !== 'object') return []
+  const dados = (data as Record<string, unknown>).dados
+  if (Array.isArray(dados)) return dados as Record<string, unknown>[]
+  if (dados && typeof dados === 'object') return Object.values(dados as Record<string, unknown>) as Record<string, unknown>[]
+  if (Array.isArray(data)) return data as Record<string, unknown>[]
+  return []
+}
+
+/** Busca pacientes na Shosp por nome (para vincular manualmente um lead a um paciente). */
+export async function searchShospPatients(params: { nome: string; cpf?: string }): Promise<ShospPatientCandidate[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.functions.invoke('crm-shosp', {
+    body: { mode: 'find_patient', nome: params.nome, cpf: params.cpf },
+  })
+  if (error) throw new Error(error.message)
+  const res = data as { ok?: boolean; data?: unknown }
+  return shospDadosArray(res?.data)
+    .map((c): ShospPatientCandidate | null => {
+      const prontuario = String(c.prontuario ?? c.codigo ?? '').trim()
+      if (!prontuario) return null
+      return {
+        prontuario,
+        nome: String(c.nome ?? ''),
+        celular: c.celular != null ? String(c.celular) : undefined,
+        telefone: c.telefone != null ? String(c.telefone) : undefined,
+        cpf: c.cpf != null ? String(c.cpf) : undefined,
+        dataNascimento:
+          c.dataNascimento != null ? String(c.dataNascimento) : c.nascimento != null ? String(c.nascimento) : undefined,
+      }
+    })
+    .filter((x): x is ShospPatientCandidate => x !== null)
+}

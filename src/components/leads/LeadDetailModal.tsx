@@ -5,6 +5,7 @@ import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
 import { LeadAnalyticsActions } from '@/components/leads/LeadAnalyticsActions'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { LeadTaskPanel } from '@/components/leads/LeadTaskPanel'
+import { ShospLinkSection } from '@/components/leads/ShospLinkSection'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
@@ -386,6 +387,10 @@ export function LeadDetailModal({ open, onOpenChange }: Props) {
                   </section>
                 )
               })()}
+
+              {crm.currentPermission.canRouteLeads && crm.dataMode === 'supabase' ? (
+                <ShospLinkSection leadId={lead.id} leadName={lead.patientName} />
+              ) : null}
 
               {crm.currentPermission.canRouteLeads && otherPipelines.length > 0 ? (
                 <section

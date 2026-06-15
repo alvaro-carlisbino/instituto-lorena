@@ -139,6 +139,60 @@ export async function matchLeadsToPatients(admin: SupabaseClient, limit = 15): P
     matched++
   }
 
+  // Pass 2: leads com CPF no cadastro extraído da conversa. O telefone do ManyChat
+  // é sintético (não casa), mas o CPF é único e confirma o paciente com segurança —
+  // busca por nome e só vincula quando o CPF do candidato bate exatamente.
+  const { data: cadastroLeads } = await admin
+    .from('leads')
+    .select('id, patient_name, custom_fields')
+    .is('deleted_at', null)
+    .is('shosp_prontuario', null)
+    .not('custom_fields->cadastro->>cpf', 'is', null)
+    .order('last_interaction_at', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  for (const lead of (cadastroLeads ?? []) as Array<{
+    id: string
+    patient_name: string
+    custom_fields: Record<string, unknown> | null
+  }>) {
+    checked++
+    const cadastro = (lead.custom_fields?.cadastro ?? {}) as Record<string, unknown>
+    const cpfDigits = digits(cadastro.cpf)
+    if (cpfDigits.length !== 11) continue
+    const baseName = cleanName(cadastro.nomeCompleto ?? lead.patient_name)
+    if (baseName.length < 3) continue
+    const searchName = baseName.split(' ').slice(0, 2).join(' ')
+
+    let candidates: Record<string, unknown>[] = []
+    try {
+      candidates = dadosArray((await shospSearchPaciente({ nome: searchName })).data)
+    } catch {
+      continue
+    }
+    const hit = candidates.find((c) => digits(c.cpf) === cpfDigits)
+    if (!hit) continue
+    const prontuario = String(hit.prontuario ?? hit.codigo ?? '').trim()
+    if (!prontuario) continue
+
+    await admin.from('shosp_patients').upsert(
+      {
+        prontuario,
+        nome: hit.nome != null ? String(hit.nome) : null,
+        cpf: hit.cpf != null ? String(hit.cpf) : null,
+        celular: hit.celular != null ? String(hit.celular) : null,
+        telefone: hit.telefone != null ? String(hit.telefone) : null,
+        email: hit.email != null ? String(hit.email) : null,
+        lead_id: lead.id,
+        payload: hit,
+        synced_at: nowIso(),
+      },
+      { onConflict: 'prontuario' },
+    )
+    await admin.from('leads').update({ shosp_prontuario: prontuario }).eq('id', lead.id)
+    matched++
+  }
+
   await admin.from('shosp_sync_state').update({ last_match_sync_at: nowIso() }).eq('id', 'default')
   return { matched, checked }
 }
