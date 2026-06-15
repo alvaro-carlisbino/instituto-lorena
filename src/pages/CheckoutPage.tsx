@@ -111,9 +111,9 @@ export function CheckoutPage() {
               onChange={(e) => setInstallments(Number(e.target.value))}
               className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
             >
-              {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+              {Array.from({ length: Math.max(1, Math.min(12, intent.installments || 12)) }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
-                  {n}x de {brl(Math.round(intent.amountCents / n))}
+                  {n === 1 ? `À vista — ${brl(intent.amountCents)}` : `${n}x de ${brl(Math.round(intent.amountCents / n))}`}
                 </option>
               ))}
             </select>

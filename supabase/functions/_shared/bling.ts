@@ -282,9 +282,13 @@ export async function blingCreateSaleOrder(
   // Data do pedido (YYYY-MM-DD, fuso de Maringá/Brasília). O Bling EXIGE `data` —
   // sem ela recusa com "A data para geração das parcelas é inválida".
   const dataPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
+  // Nome do cliente nas observações: o pedido usa um contato genérico (default_contato_id),
+  // então sem isso fica impossível saber de quem é a venda no Bling.
+  const obs = args.customerName ? `Cliente: ${args.customerName} — venda via CRM/WhatsApp` : undefined
   const payload = {
     contato: { id: Number(contatoId) || contatoId },
     data: dataPedido,
+    ...(obs ? { observacoes: obs } : {}),
     itens: [
       {
         produto: { id: Number(productId) || productId },
