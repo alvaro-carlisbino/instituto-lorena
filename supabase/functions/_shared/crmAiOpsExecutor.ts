@@ -599,6 +599,7 @@ export async function executeCrmAiOpsFromModel(
             appBaseUrl: APP_BASE_URL,
             couponCode: op.coupon != null ? String(op.coupon) : undefined,
             freightCents,
+            kit: resolved?.key, // guarda o kit p/ criar o pedido no Bling ao pagar
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: note })

@@ -2,6 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { insertInteraction } from './crm.ts'
 import { normalizeKitKey } from './pagbank.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
+import { blingCreateSaleOrder } from './bling.ts'
 
 /**
  * Kits do Tricopill no CARTÃO (e.Rede) — preço CHEIO, sem o desconto de 5% do Pix.
@@ -112,6 +113,8 @@ export type RedeIntent = {
   installments: number
   status: string
   couponCode: string | null
+  kit: string | null
+  blingOrderId: string | null
 }
 
 function shortId(): string {
@@ -130,6 +133,7 @@ export async function createRedeIntent(
     appBaseUrl: string
     couponCode?: string
     freightCents?: number
+    kit?: string
   },
 ): Promise<{ id: string; url: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null; freightCents: number }> {
   const cfg = await readRedeConfig(admin, args.tenantId)
@@ -157,6 +161,7 @@ export async function createRedeIntent(
     status: 'pending',
     coupon_code: coupon.applied ? coupon.code : null,
     discount_cents: coupon.discountCents,
+    kit: args.kit || null,
   })
   const base = args.appBaseUrl.replace(/\/$/, '')
   return {
@@ -173,7 +178,7 @@ export async function createRedeIntent(
 export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<RedeIntent | null> {
   const { data } = await admin
     .from('rede_payments')
-    .select('id, tenant_id, lead_id, amount_cents, description, installments, status, coupon_code')
+    .select('id, tenant_id, lead_id, amount_cents, description, installments, status, coupon_code, kit, bling_order_id')
     .eq('id', id)
     .maybeSingle()
   if (!data) return null
@@ -187,6 +192,8 @@ export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<
     installments: Number(r.installments ?? 1),
     status: String(r.status ?? 'pending'),
     couponCode: r.coupon_code != null ? String(r.coupon_code) : null,
+    kit: r.kit != null ? String(r.kit) : null,
+    blingOrderId: r.bling_order_id != null ? String(r.bling_order_id) : null,
   }
 }
 
@@ -290,6 +297,47 @@ export async function payRedeIntent(
           content: `💳 Pagamento no cartão confirmado (Rede). ${(intent.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`,
           tenantId: String(l.tenant_id ?? intent.tenantId),
         })
+
+        // Pedido automático no Bling (best-effort): só se auto_order_enabled, o pagamento
+        // tem kit, e ainda não há pedido (idempotente). Espelha o caminho do Pix/PagBank.
+        const blingTenant = String(l.tenant_id ?? intent.tenantId)
+        if (intent.kit && !intent.blingOrderId) {
+          try {
+            const { data: blingRow } = await admin
+              .from('tenant_integrations')
+              .select('bling')
+              .eq('tenant_id', blingTenant)
+              .maybeSingle()
+            const blingCfg = ((blingRow as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+            if (blingCfg.auto_order_enabled === true) {
+              const out = await blingCreateSaleOrder(admin, blingTenant, {
+                kit: intent.kit,
+                amountCents: intent.amountCents,
+                customerName: String(l.patient_name ?? 'Cliente Tricopill'),
+              })
+              await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
+              await insertInteraction(admin, {
+                leadId: l.id,
+                patientName: String(l.patient_name ?? 'Cliente'),
+                channel: 'system',
+                direction: 'system',
+                author: 'Bling',
+                content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`,
+                tenantId: blingTenant,
+              })
+            }
+          } catch (e) {
+            await insertInteraction(admin, {
+              leadId: l.id,
+              patientName: String(l.patient_name ?? 'Cliente'),
+              channel: 'system',
+              direction: 'system',
+              author: 'Bling',
+              content: `⚠️ Não foi possível criar o pedido no Bling automaticamente: ${(e instanceof Error ? e.message : String(e)).slice(0, 180)}`,
+              tenantId: blingTenant,
+            })
+          }
+        }
       }
     } catch {
       // best-effort

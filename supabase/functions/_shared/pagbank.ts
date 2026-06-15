@@ -335,7 +335,7 @@ export async function createPagBankPixOrder(
   customer.email = String(cad.email || 'cliente@tricopill.com.br').slice(0, 60)
   const taxId = String(cad.cpf || cad.taxId || '').replace(/\D/g, '')
   if (taxId.length === 11) customer.tax_id = taxId
-  else if (cfg.env === 'sandbox') customer.tax_id = '11144477735' // CPF de teste válido (só sandbox)
+  // (o Pix só roda em produção — trava acima; o CPF real vem do cadastro do cliente)
   let local = String(args.lead.phone ?? '').replace(/\D/g, '')
   if ((local.length === 12 || local.length === 13) && local.startsWith('55')) local = local.slice(2)
   if (local.length === 10 || local.length === 11) {
