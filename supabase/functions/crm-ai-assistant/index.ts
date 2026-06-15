@@ -32,6 +32,7 @@ import {
 import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
+import { readPagBankConfig } from '../_shared/pagbank.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
 
@@ -715,6 +716,18 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Pix só é oferecido pelo bot quando o PagBank está em PRODUÇÃO. Em sandbox o código
+    // não é pagável, então a IA NÃO gera Pix (faz handoff). Casado com a trava em pagbank.ts.
+    let pixEnabled = false
+    if (isSalesBot && tenantId) {
+      try {
+        const pbCfg = await readPagBankConfig(dbClient, tenantId)
+        pixEnabled = pbCfg?.env === 'prod'
+      } catch {
+        pixEnabled = false
+      }
+    }
+
     // Vendas: se o cliente mandou um CEP, resolve a cidade REAL no servidor (ViaCEP) e
     // injeta no snapshot. A IA NÃO deve adivinhar a cidade pelo número do CEP (errava o
     // frete). Varre as mensagens do cliente nesta chamada pegando o CEP mais recente.
@@ -818,8 +831,14 @@ Deno.serve(async (req) => {
       'KIT no op: passe "kit" com a chave do kit escolhido — "1_mes", "3_meses" ou "5_meses" — exatamente como descrito no PROMPT ADICIONAL. O servidor já aplica o PREÇO CHEIO de cartão desse kit; você NÃO calcula o valor do produto, só informa o frete.',
       'FRETE NO LINK: "freight_cents" é o frete em CENTAVOS (ex.: R$ 15,00 = 1500), conforme a cidade no PROMPT ADICIONAL. CIDADE — NUNCA adivinhe a cidade pelo número do CEP (você erra). Se existir snapshot.cep_info, a cidade REAL do cliente é cep_info.localidade/cep_info.uf — use SOMENTE essa, jamais outra. Se o cliente só mandou o CEP e NÃO existir cep_info, NÃO afirme nenhuma cidade — peça a cidade. Se a cidade for MARINGÁ, você JÁ sabe o frete (R$15 = 1500) — GERE o link na hora. Frete grátis/incluso = 0 ou omita.',
       'CUPOM: se o cliente informar um cupom, passe em "coupon":"CODIGO" no op — o servidor valida e aplica o desconto sozinho (cupom inválido = valor cheio). NÃO confirme valor com desconto por conta própria; o link já sai com o preço certo.',
-      'FECHAMENTO NO PIX (você gera o Pix sozinha — copia-e-cola + QR): quando o cliente decidir comprar no PIX (escolheu o kit, quer Pix e a cidade do frete já está resolvida), gere o Pix. Na MESMA resposta, DEPOIS da mensagem, acrescente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"pagbank_pix","kit":"3_meses","freight_cents":1500,"coupon":"CODIGO_SE_HOUVER"}]}. O servidor gera o Pix e ANEXA o copia-e-cola no texto + envia o QR Code como imagem — então escreva de forma calorosa que o Pix está logo abaixo (ex.: "Prontinho! 💸 Te mandei o Pix copia e cola e o QR Code aqui embaixo, é só pagar no app do seu banco 💚"). NUNCA escreva/invente um código Pix você mesma: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o Pix — CONTINUE atendendo.',
-      'OBSERVAÇÃO PIX: o "kit"/"freight_cents"/"coupon" do op pagbank_pix seguem as MESMAS regras do cartão (kit do PROMPT ADICIONAL, frete em centavos pela cidade do cep_info, cupom validado pelo servidor). O Pix do PagBank já aplica o desconto de 5% próprio dos kits.',
+      ...(pixEnabled
+        ? [
+            'FECHAMENTO NO PIX (você gera o Pix sozinha — copia-e-cola + QR): quando o cliente decidir comprar no PIX (escolheu o kit, quer Pix e a cidade do frete já está resolvida), gere o Pix. Na MESMA resposta, DEPOIS da mensagem, acrescente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"pagbank_pix","kit":"3_meses","freight_cents":1500,"coupon":"CODIGO_SE_HOUVER"}]}. O servidor gera o Pix e ANEXA o copia-e-cola no texto + envia o QR Code como imagem — então escreva de forma calorosa que o Pix está logo abaixo (ex.: "Prontinho! 💸 Te mandei o Pix copia e cola e o QR Code aqui embaixo, é só pagar no app do seu banco 💚"). NUNCA escreva/invente um código Pix você mesma: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o Pix — CONTINUE atendendo.',
+            'OBSERVAÇÃO PIX: o "kit"/"freight_cents"/"coupon" do op pagbank_pix seguem as MESMAS regras do cartão (kit do PROMPT ADICIONAL, frete em centavos pela cidade do cep_info, cupom validado pelo servidor). O Pix do PagBank já aplica o desconto de 5% próprio dos kits.',
+          ]
+        : [
+            'PIX → SEMPRE HUMANO (NÃO gere Pix): o pagamento por PIX está temporariamente INDISPONÍVEL no atendimento automático. Se o cliente quiser pagar no PIX, você NUNCA gera código/QR nem promete um Pix — diga com cordialidade que um atendente já vai te enviar o Pix certinho e termine a resposta com [PRONTO_PARA_CONSULTOR] na última linha. (Apenas o CARTÃO/Rede você gera sozinha; o Pix é só pelo atendente por enquanto.)',
+          ]),
       'EXCEÇÕES → HUMANO: passe pro humano com [PRONTO_PARA_CONSULTOR] APENAS se o cliente pedir um atendente humano, ou a cidade tiver frete que você REALMENTE não conhece pelo PROMPT ADICIONAL. NUNCA transfira só para "calcular o frete" de uma cidade cujo valor você já sabe (ex.: Maringá, R$15) — gere o link/Pix você mesma. (O sistema remove o marcador; o cliente não vê.)',
       'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do cliente, trate como um único contexto — responda de forma completa sem pedir de novo o que já foi dito.',
     ].join('\n')

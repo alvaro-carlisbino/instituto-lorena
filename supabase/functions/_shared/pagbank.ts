@@ -288,6 +288,9 @@ export async function createPagBankPixOrder(
 ): Promise<PixOrderResult> {
   const cfg = await readPagBankConfig(admin, args.tenantId)
   if (!cfg) throw new Error('pagbank_not_configured')
+  // TRAVA DE SEGURANÇA: em SANDBOX o Pix gerado NÃO é pagável — o bot jamais pode enviar
+  // isso a um cliente. Só gera Pix com o PagBank em PRODUÇÃO. NÃO remover sem trocar env.
+  if (cfg.env !== 'prod') throw new Error('pix_indisponivel_sandbox')
 
   // Item (kit ou avulso) — mesma resolução do checkout.
   let baseCents = 0
