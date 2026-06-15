@@ -255,9 +255,16 @@ const KIT_LABEL: Record<string, string> = {
  * NUNCA por nome só (a busca por nome traz xarás → atribuiria a venda à pessoa errada).
  * Devolve o id do contato, ou null (aí o caller cai no contato genérico). Best-effort.
  */
+/** DD/MM/AAAA (cadastro) -> YYYY-MM-DD (formato que o Bling exige). '' se inválido. */
+function ddmmaaaaToYmd(s: string): string {
+  const m = String(s ?? '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (!m) return ''
+  return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+}
+
 async function blingFindOrCreateContato(
   token: string,
-  args: { nome: string; phone?: string; cpf?: string; email?: string },
+  args: { nome: string; phone?: string; cpf?: string; email?: string; dataNascimento?: string; sexo?: string },
 ): Promise<string | null> {
   const nome = String(args.nome ?? '').trim().slice(0, 120)
   if (!nome) return null
@@ -265,6 +272,8 @@ async function blingFindOrCreateContato(
   const tail8 = phoneDigits.length >= 8 ? phoneDigits.slice(-8) : ''
   const cpf = String(args.cpf ?? '').replace(/\D/g, '')
   const email = String(args.email ?? '').trim().slice(0, 120)
+  const nascimento = ddmmaaaaToYmd(args.dataNascimento ?? '')
+  const sexo = ['M', 'F'].includes(String(args.sexo ?? '').trim().toUpperCase()) ? String(args.sexo).trim().toUpperCase() : ''
 
   // 1) Procura por CPF (mais único) e depois por telefone — NUNCA só por nome (xarás).
   for (const term of [cpf.length === 11 ? cpf : '', tail8 ? phoneDigits.slice(-11) : ''].filter(Boolean)) {
@@ -285,24 +294,33 @@ async function blingFindOrCreateContato(
     }
   }
 
-  // 2) Cria. Tenta com cadastro COMPLETO (CPF/e-mail); se a API recusar a estrutura,
-  // cai para o mínimo (nome + telefone) — assim sempre cria um contato no nome certo.
+  // 2) Cria com DEGRADAÇÃO graduada: tenta o cadastro completo; se a API recusar a
+  // estrutura (ex.: dadosAdicionais), tenta sem ela mas com CPF/e-mail; por fim o mínimo.
+  // Assim, no pior caso ainda cria o contato no nome certo.
   const tel = phoneDigits ? phoneDigits.slice(-11) : ''
-  const rich: Record<string, unknown> = { nome, tipo: 'F', situacao: 'A' }
-  if (tel) { rich.telefone = tel; rich.celular = tel }
-  if (cpf.length === 11) rich.numeroDocumento = cpf
-  if (email) rich.email = email
-  const bodies: Record<string, unknown>[] = [rich]
-  if (cpf.length === 11 || email) bodies.push({ nome, tipo: 'F', situacao: 'A', ...(tel ? { telefone: tel, celular: tel } : {}) })
+  const base: Record<string, unknown> = { nome, tipo: 'F', situacao: 'A' }
+  if (tel) { base.telefone = tel; base.celular = tel }
+  const withDoc: Record<string, unknown> = { ...base }
+  if (cpf.length === 11) withDoc.numeroDocumento = cpf
+  if (email) withDoc.email = email
+  const dados: Record<string, unknown> = {}
+  if (nascimento) dados.dataNascimento = nascimento
+  if (sexo) dados.sexo = sexo
+  const full: Record<string, unknown> = Object.keys(dados).length ? { ...withDoc, dadosAdicionais: dados } : { ...withDoc }
+
+  const seen = new Set<string>()
+  const bodies = [full, withDoc, base]
+    .map((b) => JSON.stringify(b))
+    .filter((s) => (seen.has(s) ? false : (seen.add(s), true)))
   for (const body of bodies) {
     try {
-      const res = await blingFetch(token, '/contatos', { method: 'POST', body: JSON.stringify(body) })
+      const res = await blingFetch(token, '/contatos', { method: 'POST', body })
       if (res.ok) {
         const id = (JSON.parse((await res.text()) || '{}')?.data as { id?: number | string } | undefined)?.id
         if (id != null) return String(id)
       }
     } catch {
-      // tenta o próximo (mínimo)
+      // tenta o próximo (menos campos)
     }
   }
   return null
@@ -317,7 +335,10 @@ async function blingFindOrCreateContato(
 export async function blingCreateSaleOrder(
   admin: SupabaseClient,
   tenantId: string,
-  args: { kit: string; amountCents: number; customerName?: string; phone?: string; cpf?: string; email?: string },
+  args: {
+    kit: string; amountCents: number; customerName?: string; phone?: string
+    cpf?: string; email?: string; dataNascimento?: string; sexo?: string
+  },
 ): Promise<{ orderId: string | null; bottles: number }> {
   const token = await getValidBlingToken(admin, tenantId)
   if (!token) throw new Error('bling_nao_conectado')
@@ -329,7 +350,10 @@ export async function blingCreateSaleOrder(
   // Contato REAL do cliente (por telefone): se conseguir, o pedido sai no nome dele;
   // senão mantém o genérico (best-effort, não quebra a venda).
   if (args.customerName) {
-    const realId = await blingFindOrCreateContato(token, { nome: args.customerName, phone: args.phone, cpf: args.cpf, email: args.email })
+    const realId = await blingFindOrCreateContato(token, {
+      nome: args.customerName, phone: args.phone, cpf: args.cpf, email: args.email,
+      dataNascimento: args.dataNascimento, sexo: args.sexo,
+    })
     if (realId) contatoId = realId
   }
 

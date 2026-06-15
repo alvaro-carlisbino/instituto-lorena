@@ -149,7 +149,7 @@ Deno.serve(async (req) => {
     } else {
       try {
         const cad = (lead.custom_fields?.cadastro ?? {}) as Record<string, string>
-        const out = await blingCreateSaleOrder(admin, tenantId, { kit: kitKey, amountCents: productCents, customerName, phone: lead.phone ? String(lead.phone) : undefined, cpf: cad.cpf, email: cad.email })
+        const out = await blingCreateSaleOrder(admin, tenantId, { kit: kitKey, amountCents: productCents, customerName, phone: lead.phone ? String(lead.phone) : undefined, cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo })
         blingOrderId = out.orderId
         blingNote = `Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`
       } catch (e) {

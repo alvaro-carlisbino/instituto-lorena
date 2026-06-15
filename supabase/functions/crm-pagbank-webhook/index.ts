@@ -214,6 +214,8 @@ Deno.serve(async (req) => {
               phone: l.phone ? String(l.phone) : undefined,
               cpf: cad.cpf,
               email: cad.email,
+              dataNascimento: cad.dataNascimento,
+              sexo: cad.sexo,
             })
             await insertInteraction(admin, {
               leadId,
