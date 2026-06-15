@@ -267,10 +267,10 @@ export async function payRedeIntent(
     try {
       const { data: lead } = await admin
         .from('leads')
-        .select('id, patient_name, pipeline_id, tenant_id')
+        .select('id, patient_name, pipeline_id, tenant_id, phone')
         .eq('id', intent.leadId)
         .maybeSingle()
-      const l = lead as { id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string } | null
+      const l = lead as { id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string; phone?: string } | null
       if (l) {
         // Procura a etapa "Pago" do PRÓPRIO pipeline do lead — nunca chuta uma etapa fixa
         // (senão um lead do Instituto cairia na etapa de "Pago" do Tricopill).
@@ -314,6 +314,7 @@ export async function payRedeIntent(
                 kit: intent.kit,
                 amountCents: intent.amountCents,
                 customerName: String(l.patient_name ?? 'Cliente Tricopill'),
+                phone: l.phone ? String(l.phone) : undefined,
               })
               await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
               await insertInteraction(admin, {

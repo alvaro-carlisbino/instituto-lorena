@@ -251,22 +251,75 @@ const KIT_LABEL: Record<string, string> = {
 }
 
 /**
+ * Acha (por TELEFONE) ou cria um contato no Bling para o cliente. Casa por telefone —
+ * NUNCA por nome só (a busca por nome traz xarás → atribuiria a venda à pessoa errada).
+ * Devolve o id do contato, ou null (aí o caller cai no contato genérico). Best-effort.
+ */
+async function blingFindOrCreateContato(token: string, args: { nome: string; phone?: string }): Promise<string | null> {
+  const nome = String(args.nome ?? '').trim().slice(0, 120)
+  if (!nome) return null
+  const phoneDigits = String(args.phone ?? '').replace(/\D/g, '')
+  const tail8 = phoneDigits.length >= 8 ? phoneDigits.slice(-8) : ''
+
+  // 1) Procura por telefone (evita casar com xará de outro número).
+  if (tail8) {
+    try {
+      const res = await blingFetch(token, `/contatos?pesquisa=${encodeURIComponent(phoneDigits.slice(-11))}&limite=20`)
+      if (res.ok) {
+        const data = (JSON.parse((await res.text()) || '{}')?.data ?? []) as Array<Record<string, unknown>>
+        const match = data.find((c) => {
+          const t = String(c.telefone ?? '').replace(/\D/g, '')
+          const cel = String(c.celular ?? '').replace(/\D/g, '')
+          return (t && t.endsWith(tail8)) || (cel && cel.endsWith(tail8))
+        })
+        if (match?.id != null) return String(match.id)
+      }
+    } catch {
+      // segue para criar
+    }
+  }
+
+  // 2) Cria um contato novo (pessoa física) com nome + telefone.
+  try {
+    const tel = phoneDigits ? phoneDigits.slice(-11) : ''
+    const res = await blingFetch(token, '/contatos', {
+      method: 'POST',
+      body: JSON.stringify({ nome, tipo: 'F', situacao: 'A', ...(tel ? { telefone: tel, celular: tel } : {}) }),
+    })
+    if (res.ok) {
+      const id = (JSON.parse((await res.text()) || '{}')?.data as { id?: number | string } | undefined)?.id
+      if (id != null) return String(id)
+    }
+  } catch {
+    // cai no contato genérico
+  }
+  return null
+}
+
+/**
  * Cria um pedido de venda no Bling para uma venda do Tricopill.
- * Usa um contato padrão configurado (tenant_integrations.bling.default_contato_id),
- * o frasco base (kit_product_id) e abate frascos conforme o kit. Valor = valor pago.
+ * Usa o contato REAL do cliente (criado/achado por telefone) ou, em falha, o contato
+ * padrão (tenant_integrations.bling.default_contato_id). Frasco base (kit_product_id),
+ * abate frascos conforme o kit. Valor = valor pago.
  */
 export async function blingCreateSaleOrder(
   admin: SupabaseClient,
   tenantId: string,
-  args: { kit: string; amountCents: number; customerName?: string },
+  args: { kit: string; amountCents: number; customerName?: string; phone?: string },
 ): Promise<{ orderId: string | null; bottles: number }> {
   const token = await getValidBlingToken(admin, tenantId)
   if (!token) throw new Error('bling_nao_conectado')
 
   const { data } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', tenantId).maybeSingle()
   const cfg = ((data as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
-  const contatoId = cfg.default_contato_id != null ? String(cfg.default_contato_id).trim() : ''
+  let contatoId = cfg.default_contato_id != null ? String(cfg.default_contato_id).trim() : ''
   if (!contatoId) throw new Error('bling_default_contato_nao_configurado')
+  // Contato REAL do cliente (por telefone): se conseguir, o pedido sai no nome dele;
+  // senão mantém o genérico (best-effort, não quebra a venda).
+  if (args.customerName) {
+    const realId = await blingFindOrCreateContato(token, { nome: args.customerName, phone: args.phone })
+    if (realId) contatoId = realId
+  }
 
   const productId = cfg.kit_product_id != null && String(cfg.kit_product_id).trim()
     ? String(cfg.kit_product_id).trim()

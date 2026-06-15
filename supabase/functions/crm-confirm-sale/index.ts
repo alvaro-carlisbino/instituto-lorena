@@ -148,7 +148,7 @@ Deno.serve(async (req) => {
       blingNote = 'Pedido no Bling não criado (venda avulsa sem kit — lance manualmente se precisar).'
     } else {
       try {
-        const out = await blingCreateSaleOrder(admin, tenantId, { kit: kitKey, amountCents: productCents, customerName })
+        const out = await blingCreateSaleOrder(admin, tenantId, { kit: kitKey, amountCents: productCents, customerName, phone: lead.phone ? String(lead.phone) : undefined })
         blingOrderId = out.orderId
         blingNote = `Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`
       } catch (e) {
