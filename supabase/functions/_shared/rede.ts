@@ -14,6 +14,13 @@ export const REDE_KITS: Record<string, { label: string; amountCents: number; qty
   '5_meses': { label: 'Tricopill — 5 frascos (5 meses)', amountCents: 99900, qty: 5 },
 }
 
+/**
+ * Parcelamento MÁXIMO no cartão por kit (regra Ingrid 15/jun): só parcela ACIMA de 3
+ * frascos, em até 3x sem juros. 1 frasco = só à vista (1x) ou Pix. Kits 3_meses (3+1=4
+ * frascos) e 5_meses (5) parcelam até 3x. Aplicado no createRedeIntent (a IA não decide).
+ */
+export const REDE_KIT_MAX_INSTALLMENTS: Record<string, number> = { '1_mes': 1, '3_meses': 3, '5_meses': 3 }
+
 /** Resolve um kit do cartão a partir de uma variação ('3 meses', 'kit3'…). */
 export function resolveRedeKit(raw: string): { key: string; label: string; amountCents: number } | null {
   const key = normalizeKitKey(raw)
@@ -150,6 +157,12 @@ export async function createRedeIntent(
   const baseDesc = String(args.description ?? 'Pagamento').slice(0, 100)
   const description = freightCents > 0 ? `${baseDesc} + frete` : baseDesc
 
+  // Parcelas: respeita a regra por kit (1 frasco = 1x; 3+ frascos = até 3x). O kit limita
+  // o máximo independentemente do que a IA/UI pedir — a regra de negócio mora aqui.
+  let installments = Math.max(1, Math.min(12, args.installments ?? 1))
+  const kitCap = args.kit ? REDE_KIT_MAX_INSTALLMENTS[args.kit] : undefined
+  if (kitCap) installments = Math.min(installments, kitCap)
+
   const id = shortId()
   await admin.from('rede_payments').insert({
     id,
@@ -157,7 +170,7 @@ export async function createRedeIntent(
     lead_id: args.leadId || null,
     amount_cents: amountCents,
     description: description.slice(0, 120),
-    installments: Math.max(1, Math.min(12, args.installments ?? 1)),
+    installments,
     status: 'pending',
     coupon_code: coupon.applied ? coupon.code : null,
     discount_cents: coupon.discountCents,

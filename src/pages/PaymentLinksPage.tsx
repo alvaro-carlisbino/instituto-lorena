@@ -25,6 +25,8 @@ const NO_LEAD = '__none__'
 
 // Preço CHEIO para cartão (Rede) — sem o desconto de 5% do Pix.
 const REDE_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99900 }
+// Regra de parcelas por kit: 1 frasco = só à vista (1x); 3+ frascos = até 3x.
+const KIT_MAX_INSTALLMENTS: Record<PagbankKit, number> = { '1_mes': 1, '3_meses': 3, '5_meses': 3 }
 
 function formatBRL(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -49,7 +51,7 @@ export function PaymentLinksPage() {
   const [kit, setKit] = useState<PagbankKit>('3_meses')
   const [amountReais, setAmountReais] = useState('')
   const [description, setDescription] = useState('')
-  const [maxInstallments, setMaxInstallments] = useState(12)
+  const [maxInstallments, setMaxInstallments] = useState(KIT_MAX_INSTALLMENTS['3_meses'])
   const [freightReais, setFreightReais] = useState('')
   const [generating, setGenerating] = useState(false)
   const [lastLink, setLastLink] = useState<{ url: string; via: string } | null>(null)
@@ -178,7 +180,14 @@ export function PaymentLinksPage() {
               <>
                 <div className="space-y-1.5">
                   <Label htmlFor="pl-kit">Kit</Label>
-                  <Select value={kit} onValueChange={(v) => setKit(v as PagbankKit)}>
+                  <Select
+                    value={kit}
+                    onValueChange={(v) => {
+                      const k = v as PagbankKit
+                      setKit(k)
+                      setMaxInstallments(KIT_MAX_INSTALLMENTS[k]) // 1 frasco→1x, kits maiores→3x (Ingrid pode ajustar)
+                    }}
+                  >
                     <SelectTrigger id="pl-kit">
                       <SelectValue />
                     </SelectTrigger>
