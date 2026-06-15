@@ -15,7 +15,7 @@ import {
   createWapiProviderForRow,
   loadWhatsappInstanceByWapiId,
 } from '../_shared/whatsapp/wapiConfig.ts'
-import { extractInboundMedia, WapiProvider } from '../_shared/whatsapp/wapi.ts'
+import { extractInboundMedia, isMediaOnlyMarker, WapiProvider } from '../_shared/whatsapp/wapi.ts'
 
 // Webhook próprio da W-API. Roda em paralelo ao crm-whatsapp-webhook (Evolution/Official).
 // Cada linha em whatsapp_channel_instances com channel_provider='wapi' tem token e
@@ -316,8 +316,19 @@ Deno.serve(async (req) => {
       directionIsInbound: true,
     })
 
+    // Só mídia, sem legenda (texto = "📷 Imagem" etc.): a IA não "vê" o conteúdo, então
+    // NÃO responde (em vez de dizer "não consigo ver"). A mídia já fica no chat; a próxima
+    // mensagem de texto do cliente dispara a IA normalmente.
+    const mediaOnly = isMediaOnlyMarker(normalized.text)
+
     let routing: string
-    if (gate.canAutoReply) {
+    if (mediaOnly) {
+      await admin
+        .from('leads')
+        .update({ updated_at: new Date().toISOString(), last_interaction_at: new Date().toISOString() })
+        .eq('id', lead.leadId)
+      routing = 'media_only_no_reply'
+    } else if (gate.canAutoReply) {
       const { replied, burstPending, handoffSuggested } = await runWhatsappAiAutoReply(admin, {
         leadId: lead.leadId,
         patientName: normalized.fromName,

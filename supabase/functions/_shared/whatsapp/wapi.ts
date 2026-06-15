@@ -447,3 +447,21 @@ export function extractInboundMedia(
   const caption = typeof m.caption === 'string' ? m.caption : typeof m.fileName === 'string' ? m.fileName : ''
   return { mediaType: found.mediaType, caption, media: m }
 }
+
+/**
+ * Marcadores de mídia SEM legenda — quando o cliente manda só uma foto/áudio/etc., o
+ * texto inbound vira só "📷 Imagem". A IA não "vê" o conteúdo, então o bot NÃO deve
+ * responder (em vez de dizer "não consigo ver"). Com legenda, o texto é a legenda real.
+ */
+const WAPI_MEDIA_ONLY_MARKERS = new Set([
+  '📷 Imagem',
+  '🎤 Áudio',
+  '🎥 Vídeo',
+  '📎 Documento',
+  '🌟 Figurinha',
+  '📍 Localização',
+  '👤 Contato',
+])
+export function isMediaOnlyMarker(text: string): boolean {
+  return WAPI_MEDIA_ONLY_MARKERS.has(String(text ?? '').trim())
+}
