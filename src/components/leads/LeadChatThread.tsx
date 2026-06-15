@@ -151,6 +151,9 @@ export function LeadChatThread({
   const [confirmSaleOpen, setConfirmSaleOpen] = useState(false)
   const [pagbankLoading, setPagbankLoading] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Controle de auto-scroll: só descer pro fim se o usuário JÁ estava no fim.
+  const isAtBottomRef = useRef(true)
+  const prevLeadIdRef = useRef(leadId)
   const [aiUiTick, setAiUiTick] = useState(0)
   const [forceAiLoading, setForceAiLoading] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -311,8 +314,19 @@ export function LeadChatThread({
   }, [history, filter])
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    const el = scrollRef.current
+    if (!el) return
+    // Trocou de conversa: vai pro fim (mostra a última msg) e marca como "no fim".
+    if (prevLeadIdRef.current !== leadId) {
+      prevLeadIdRef.current = leadId
+      el.scrollTop = el.scrollHeight
+      isAtBottomRef.current = true
+      return
+    }
+    // Mesma conversa (nova msg ou refresh do polling): só desce pro fim se o usuário
+    // JÁ estava no fim. Se ele rolou pra cima pra ler o histórico, NÃO o puxa de volta.
+    if (isAtBottomRef.current) {
+      el.scrollTop = el.scrollHeight
     }
   }, [items, leadId])
 
@@ -608,6 +622,10 @@ export function LeadChatThread({
       <div
         ref={scrollRef}
         role="log"
+        onScroll={() => {
+          const el = scrollRef.current
+          if (el) isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+        }}
         className="flex-1 min-h-0 min-w-0 w-full overflow-y-auto overscroll-contain rounded-xl border border-border/20 bg-muted/10 p-3 scrollbar-thin scrollbar-thumb-border/30 dark:bg-[#0b141a]/50 sm:p-4"
       >
         <ul className="m-0 flex list-none flex-col gap-6 p-0">
