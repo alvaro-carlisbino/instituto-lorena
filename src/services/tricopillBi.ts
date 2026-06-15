@@ -12,6 +12,7 @@ export type TricopillBi = {
     pagos: number
     conversao_pct: number
     por_stage: Array<{ stage_id: string; name: string; count: number }>
+    etapas: Array<{ stage_id: string; name: string; count: number; atingiram: number; pct: number }>
     por_source: Array<{ source: string; count: number }>
   }
   checkout: {
@@ -22,6 +23,8 @@ export type TricopillBi = {
     cartao: { pagos: number; gerados: number; total_cents: number; parcelamento_medio: number }
     por_kit: Array<{ kit: string; count: number; total_cents: number }>
     por_dia: TricopillDayBucket[]
+    desconto_total_cents: number
+    por_cupom: Array<{ code: string; count: number; total_cents: number }>
   }
   bling: {
     connected: boolean

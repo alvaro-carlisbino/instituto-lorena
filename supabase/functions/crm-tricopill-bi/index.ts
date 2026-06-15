@@ -26,6 +26,13 @@ function isPaidStage(stageId: string | null | undefined, name?: string | null): 
   return s.endsWith('-pago') || s.includes('pago') || n.includes('pago')
 }
 
+// "perdido" = saída lateral do funil (não entra na conversão por etapa).
+function isLossStage(stageId: string | null | undefined, name?: string | null): boolean {
+  const s = String(stageId ?? '').toLowerCase()
+  const n = String(name ?? '').toLowerCase()
+  return s.endsWith('-perdido') || s.includes('perdido') || n.includes('perdido') || n.includes('perda')
+}
+
 type DayBucket = { dia: string; total_cents: number; count: number }
 function bucketByDay(rows: Array<{ day: string; cents: number }>): DayBucket[] {
   const map = new Map<string, DayBucket>()
@@ -108,6 +115,20 @@ Deno.serve(async (req) => {
     bySourceMap.set(src, (bySourceMap.get(src) ?? 0) + 1)
     if (isPaidStage(l.stage_id, stageName.get(l.stage_id ?? ''))) pagosFunnel += 1
   }
+  // Conversão por etapa (snapshot): assume avanço só pra frente — "atingiram" a
+  // etapa = leads nela + em todas as etapas posteriores (exceto Perdido).
+  const stagesFunil = stages.filter((s) => !isLossStage(s.id, s.name))
+  const etapas = stagesFunil.map((s, idx) => {
+    let atingiram = 0
+    for (let j = idx; j < stagesFunil.length; j++) atingiram += byStageMap.get(stagesFunil[j].id) ?? 0
+    return {
+      stage_id: s.id,
+      name: s.name,
+      count: byStageMap.get(s.id) ?? 0,
+      atingiram,
+      pct: leads.length ? Math.round((atingiram / leads.length) * 1000) / 10 : 0,
+    }
+  })
   const funnel = {
     total_leads: leads.length,
     pagos: pagosFunnel,
@@ -115,6 +136,7 @@ Deno.serve(async (req) => {
     por_stage: stages
       .map((s) => ({ stage_id: s.id, name: s.name, count: byStageMap.get(s.id) ?? 0 }))
       .filter((s) => s.count > 0 || stageName.has(s.stage_id)),
+    etapas,
     por_source: [...bySourceMap.entries()]
       .map(([source, count]) => ({ source, count }))
       .sort((a, b) => b.count - a.count),
@@ -126,11 +148,11 @@ Deno.serve(async (req) => {
   const [pagbankRes, redeRes] = await Promise.all([
     admin
       .from('pagbank_checkouts')
-      .select('amount_cents, kit, status, created_at, paid_at')
+      .select('amount_cents, kit, status, created_at, paid_at, coupon_code, discount_cents')
       .eq('tenant_id', tenantId),
     admin
       .from('rede_payments')
-      .select('amount_cents, installments, status, created_at, paid_at')
+      .select('amount_cents, installments, status, created_at, paid_at, kit, coupon_code, discount_cents')
       .eq('tenant_id', tenantId),
   ])
   const pagbank = (pagbankRes.data ?? []) as Array<{
@@ -139,6 +161,8 @@ Deno.serve(async (req) => {
     status: string | null
     created_at: string | null
     paid_at: string | null
+    coupon_code: string | null
+    discount_cents: number | null
   }>
   const rede = (redeRes.data ?? []) as Array<{
     amount_cents: number | null
@@ -146,6 +170,9 @@ Deno.serve(async (req) => {
     status: string | null
     created_at: string | null
     paid_at: string | null
+    kit: string | null
+    coupon_code: string | null
+    discount_cents: number | null
   }>
 
   const startMs = Date.parse(startIso)
@@ -158,11 +185,31 @@ Deno.serve(async (req) => {
   const isPaid = (status: string | null, paidAt: string | null): boolean =>
     !!paidAt || ['paid', 'pago', 'available', 'approved', 'completed'].includes(String(status ?? '').toLowerCase())
 
+  // Mix de kit e cupons consolidam PIX + cartão (antes só PIX entrava no mix).
+  const kitMap = new Map<string, { count: number; total_cents: number }>()
+  const couponMap = new Map<string, { count: number; total_cents: number }>()
+  let descontoTotalCents = 0
+  const addKit = (kit: string | null, cents: number) => {
+    const key = kit || 'avulso'
+    const k = kitMap.get(key) ?? { count: 0, total_cents: 0 }
+    k.count += 1
+    k.total_cents += cents
+    kitMap.set(key, k)
+  }
+  const addCoupon = (code: string | null, discount: number | null, cents: number) => {
+    descontoTotalCents += Number(discount ?? 0) || 0
+    const c = (code ?? '').trim()
+    if (!c) return
+    const v = couponMap.get(c) ?? { count: 0, total_cents: 0 }
+    v.count += 1
+    v.total_cents += cents
+    couponMap.set(c, v)
+  }
+
   // PIX/PagBank
   let pixPagos = 0
   let pixCents = 0
   let pixGerados = 0
-  const kitMap = new Map<string, { count: number; total_cents: number }>()
   const pixDayRows: Array<{ day: string; cents: number }> = []
   for (const r of pagbank) {
     if (inRange(r.created_at)) pixGerados += 1
@@ -171,11 +218,8 @@ Deno.serve(async (req) => {
       pixPagos += 1
       pixCents += cents
       pixDayRows.push({ day: isoDay(r.paid_at ?? r.created_at ?? ''), cents })
-      const kit = r.kit || 'avulso'
-      const k = kitMap.get(kit) ?? { count: 0, total_cents: 0 }
-      k.count += 1
-      k.total_cents += cents
-      kitMap.set(kit, k)
+      addKit(r.kit, cents)
+      addCoupon(r.coupon_code, r.discount_cents, cents)
     }
   }
 
@@ -193,6 +237,8 @@ Deno.serve(async (req) => {
       cardCents += cents
       parcelasSoma += Number(r.installments ?? 1) || 1
       cardDayRows.push({ day: isoDay(r.paid_at ?? r.created_at ?? ''), cents })
+      addKit(r.kit, cents)
+      addCoupon(r.coupon_code, r.discount_cents, cents)
     }
   }
 
@@ -213,6 +259,10 @@ Deno.serve(async (req) => {
       .map(([kit, v]) => ({ kit, count: v.count, total_cents: v.total_cents }))
       .sort((a, b) => b.total_cents - a.total_cents),
     por_dia: bucketByDay([...pixDayRows, ...cardDayRows]),
+    desconto_total_cents: descontoTotalCents,
+    por_cupom: [...couponMap.entries()]
+      .map(([code, v]) => ({ code, count: v.count, total_cents: v.total_cents }))
+      .sort((a, b) => b.total_cents - a.total_cents),
   }
 
   // ---------------------------------------------------------------------------

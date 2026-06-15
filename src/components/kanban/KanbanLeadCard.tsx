@@ -1,6 +1,8 @@
 import type { Lead, WorkflowField } from '@/mocks/crmMock'
+import type { LeadPaymentSummary } from '@/services/crmLeadPayments'
 
 import { Button } from '@/components/ui/button'
+import { PaymentBadge, PoloBadge } from '@/components/leads/PaymentBadge'
 import { useNowMs } from '@/hooks/useNowMs'
 import { getSourceStyle } from '@/lib/channelStyles'
 import { cn } from '@/lib/utils'
@@ -24,6 +26,10 @@ type Props = {
   onReorderDrop: (draggedLeadId: string, targetIndex: number) => void
   onDragEnterColumn?: () => void
   lastAiSnippet?: string | null
+  /** Nome do polo — só preenchido no modo "Todos os polos" (super-admin). */
+  poloName?: string
+  /** Status de pagamento consolidado do lead (polo de vendas). */
+  payment?: LeadPaymentSummary | null
 }
 
 export function KanbanLeadCard({
@@ -41,6 +47,8 @@ export function KanbanLeadCard({
   onReorderDrop,
   onDragEnterColumn,
   lastAiSnippet,
+  poloName,
+  payment,
 }: Props) {
   const nowMs = useNowMs(30_000)
   const title =
@@ -166,6 +174,8 @@ export function KanbanLeadCard({
           <span className={cn('h-1.5 w-1.5 rounded-full', getSourceStyle(lead.source).dot)} aria-hidden />
           {sourceLabel}
         </span>
+        <PoloBadge name={poloName} />
+        <PaymentBadge payment={payment} />
         {tagPills.map((t) => (
           <span
             key={t.id}

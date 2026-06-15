@@ -120,6 +120,7 @@ import type {
 import { isWorkloadExcludedStageId, pickNpsTemplateForPipeline, shouldDispatchNpsForStage } from '../lib/followUpNps'
 import { mergeKanbanFieldOrder, isLeadWhatsappComposeBlocked, calculateLeadScore } from '../lib/leadFields'
 import { getDataProviderMode } from '../services/dataMode'
+import { fetchLeadPaymentSummaries, type LeadPaymentSummary } from '../services/crmLeadPayments'
 import { notifySendError, sendWhatsappMessage } from '../services/crmWhatsapp'
 import { dispatchNps } from '../services/npsDispatch'
 import type { WebhookJob, AuditLogEntry } from '../services/crmSupabase'
@@ -181,6 +182,9 @@ export const useCrmState = () => {
   // todos os polos por RLS); selecionar um polo restringe Kanban/quadro de leads
   // só àquele polo, sem trocar o polo ativo. Compartilhado entre as telas.
   const [tenantFilter, setTenantFilter] = useState<string>('all')
+  // Status de pagamento por lead (polo de vendas / Tricopill). Consolida
+  // rede_payments + pagbank_checkouts; RLS já escopa ao polo ativo.
+  const [paymentByLeadId, setPaymentByLeadId] = useState<Record<string, LeadPaymentSummary>>({})
   const [leads, setLeads] = useState<Lead[]>(initialLeads)
   const [interactions, setInteractions] = useState<Interaction[]>(initialInteractions)
   // Histórico completo do lead aberto (carregado por lead_id, sem o teto de 1000
@@ -855,6 +859,25 @@ export const useCrmState = () => {
       setAppointments(agendaSlice.appointments)
     } catch {
       // noop
+    }
+    try {
+      setPaymentByLeadId(await fetchLeadPaymentSummaries())
+    } catch {
+      // noop
+    }
+  }, [dataMode])
+
+  // Carga inicial do status de pagamento (o poll de chat mantém atualizado depois).
+  useEffect(() => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) return
+    let cancelled = false
+    void fetchLeadPaymentSummaries()
+      .then((m) => {
+        if (!cancelled) setPaymentByLeadId(m)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
     }
   }, [dataMode])
 
@@ -2286,6 +2309,7 @@ export const useCrmState = () => {
     selectedPipeline,
     tenantFilter,
     setTenantFilter,
+    paymentByLeadId,
     kanbanFieldsOrdered,
     leads,
     filteredLeads,

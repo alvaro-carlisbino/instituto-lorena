@@ -38,6 +38,7 @@ const LEADS_HELP = [
 import { toast } from 'sonner'
 
 import { LeadDetailModal } from '@/components/leads/LeadDetailModal'
+import { PaymentBadge, PoloBadge } from '@/components/leads/PaymentBadge'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -114,6 +115,8 @@ export function LeadsPage() {
     return ids.map((id) => ({ id, name: tenantNameById.get(id) ?? id }))
   }, [crm.leads, tenantNameById])
   const showPolo = poloOptions.length >= 2
+  const poloNameForLead = (tenantId?: string) =>
+    showPolo && crm.tenantFilter === 'all' && tenantId ? tenantNameById.get(tenantId) ?? tenantId : undefined
   const poloSelectLabel = useMemo(
     () =>
       labelForIdName(
@@ -650,6 +653,8 @@ export function LeadsPage() {
                       <p className="text-[13px] font-bold text-muted-foreground/60 mt-0.5">{lead.phone}</p>
                       {lead.summary && <p className="mt-2 text-xs font-medium text-muted-foreground/80 line-clamp-2 leading-relaxed">{lead.summary}</p>}
                       <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <PoloBadge name={poloNameForLead(lead.tenantId)} />
+                        <PaymentBadge payment={crm.paymentByLeadId[lead.id] ?? null} />
                         <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tight rounded-md border-border/40">
                           {stage?.name ?? lead.stageId}
                         </Badge>
@@ -717,8 +722,14 @@ export function LeadsPage() {
                       {visibleColumns.map((col) => (
                         <td key={col} className="px-4 py-5 max-w-[20rem]">
                           {col === 'patient_name' && (
-                            <div className="flex flex-col">
+                            <div className="flex flex-col gap-1">
                               <span className="text-[14px] font-bold text-foreground/90 group-hover:text-primary transition-colors">{lead.patientName}</span>
+                              {(poloNameForLead(lead.tenantId) || crm.paymentByLeadId[lead.id]) && (
+                                <div className="flex flex-wrap items-center gap-1">
+                                  <PoloBadge name={poloNameForLead(lead.tenantId)} />
+                                  <PaymentBadge payment={crm.paymentByLeadId[lead.id] ?? null} />
+                                </div>
+                              )}
                             </div>
                           )}
                           {col === 'phone' && <span className="text-[13px] font-bold tabular-nums text-muted-foreground/70">{lead.phone}</span>}

@@ -355,6 +355,36 @@ export function TricopilDashboardPage() {
         </div>
       </section>
 
+      {/* Conversão por etapa (funil) */}
+      <section className="mb-8 rounded-3xl border border-border/30 bg-card/40 p-6">
+        <p className="mb-4 text-sm font-bold text-foreground/90">Conversão por etapa</p>
+        {(funnel?.etapas ?? []).length === 0 ? (
+          <p className="py-8 text-center text-xs text-muted-foreground">Sem leads no período.</p>
+        ) : (
+          <ul className="flex flex-col gap-2.5">
+            {(funnel?.etapas ?? []).map((e, i) => (
+              <li key={e.stage_id} className="flex items-center gap-3">
+                <span className="w-36 shrink-0 truncate text-xs font-semibold text-foreground/80" title={e.name}>
+                  {e.name}
+                </span>
+                <div className="relative h-6 flex-1 overflow-hidden rounded-lg bg-muted/30">
+                  <div
+                    className="h-full rounded-lg transition-all"
+                    style={{ width: `${Math.max(2, e.pct)}%`, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+                  />
+                  <span className="absolute inset-y-0 left-2 flex items-center text-[11px] font-bold tabular-nums text-foreground/80">
+                    {e.atingiram} · {e.pct}%
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-[10px] text-muted-foreground/60">
+          % de leads do período que chegaram a cada etapa (snapshot, avanço só pra frente; "Perdido" fora).
+        </p>
+      </section>
+
       {/* BLOCO 3 — Pagamentos */}
       <SectionTitle>Pagamentos</SectionTitle>
 
@@ -391,10 +421,16 @@ export function TricopilDashboardPage() {
             hint="pagos / links gerados"
             tone="text-amber-600"
           />
+          <StatCard
+            label="Desconto concedido"
+            value={formatBRL(checkout?.desconto_total_cents ?? 0)}
+            hint={`${(checkout?.por_cupom ?? []).length} cupom(ns) usado(s)`}
+            tone="text-rose-600"
+          />
         </div>
 
         <div className="rounded-3xl border border-border/30 bg-card/40 p-6 lg:col-span-5">
-          <p className="mb-4 text-sm font-bold text-foreground/90">Kits vendidos (PIX)</p>
+          <p className="mb-4 text-sm font-bold text-foreground/90">Kits vendidos (PIX + cartão)</p>
           {(checkout?.por_kit ?? []).length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Sem vendas confirmadas no período.</p>
           ) : (
@@ -419,6 +455,32 @@ export function TricopilDashboardPage() {
           )}
         </div>
       </section>
+
+      {(checkout?.por_cupom ?? []).length > 0 ? (
+        <section className="mt-8">
+          <SectionTitle>Cupons</SectionTitle>
+          <div className="rounded-3xl border border-border/30 bg-card/40 p-6">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="pb-2">Cupom</th>
+                  <th className="pb-2 text-right">Usos</th>
+                  <th className="pb-2 text-right">Receita gerada</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(checkout?.por_cupom ?? []).map((c) => (
+                  <tr key={c.code} className="border-t border-border/20">
+                    <td className="py-1.5 font-mono font-semibold uppercase">{c.code}</td>
+                    <td className="py-1.5 text-right tabular-nums">{c.count}</td>
+                    <td className="py-1.5 text-right font-semibold tabular-nums">{formatBRL(c.total_cents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
       {bling?.connected && bling.error ? (
         <p className="mt-6 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700">

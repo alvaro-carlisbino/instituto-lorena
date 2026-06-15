@@ -50,6 +50,10 @@ export function KanbanPage() {
         : crm.pipelineCatalog.filter((p) => p.tenantId === crm.tenantFilter)
     return list.map((p) => ({ id: p.id, name: p.name }))
   }, [crm.pipelineCatalog, crm.tenantFilter])
+  // Selo de Polo no card só faz sentido vendo "Todos os polos" com ≥2 polos.
+  const showPoloBadge = poloOptions.length >= 2 && crm.tenantFilter === 'all'
+  const poloNameForLead = (tenantId?: string) =>
+    showPoloBadge && tenantId ? tenantNameById.get(tenantId) ?? tenantId : undefined
   const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [temperatureFilter, setTemperatureFilter] = useState<'all' | 'hot' | 'warm' | 'cold'>('all')
@@ -354,6 +358,8 @@ export function KanbanPage() {
                       ownerName={crm.getOwnerName(lead.ownerId)}
                       lastAiSnippet={lastAiSnippetByLeadId.get(lead.id)}
                       tagPills={tagPillsForLead(lead.id)}
+                      poloName={poloNameForLead(lead.tenantId)}
+                      payment={crm.paymentByLeadId[lead.id] ?? null}
                       onSelect={() => {
                         crm.setSelectedLeadId(lead.id)
                         setDetailOpen(true)
