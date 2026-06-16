@@ -36,6 +36,15 @@ function json(body: Record<string, unknown>, status = 200): Response {
 
 const FOLLOWUP_HOURS = [1, 2, 4, 8, 16, 24]
 
+// VENDAS (Tricopill): 1º follow-up em 15 MIN (0,25h) — "atendimento sem resposta >15min".
+// Depois reforça em 1h e 4h. Cadência curta porque venda esfria rápido.
+const FOLLOWUP_HOURS_SALES = [0.25, 1, 4]
+const FOLLOWUP_MESSAGES_SALES = [
+  'Oi, {name}! 💚 Vi que ficou pendente aqui — posso te ajudar a finalizar o seu Tricopill? É só me chamar! 🌿',
+  '{name}, ainda dá pra garantir o seu Tricopill 😊 Quer que eu te ajude a fechar agora? Qualquer dúvida (pagamento, frete, prazo) é só perguntar.',
+  'Oi {name}! Última passadinha por aqui 💚 Quando quiser fechar o seu Tricopill, é só responder que eu cuido de tudo pra você!',
+]
+
 const FOLLOWUP_MESSAGES = [
   'Olá, {name}! 😊 Vi que você entrou em contato conosco. Ainda posso te ajudar? É só responder aqui!',
   'Oi, {name}! Estou aqui para te ajudar com qualquer dúvida sobre nossos serviços. Me conta o que você precisa? 💆',
@@ -45,9 +54,9 @@ const FOLLOWUP_MESSAGES = [
   'Oi {name}! Este é nosso último contato por enquanto. Quando estiver pronto(a), pode nos chamar que respondemos rapidinho. Até logo! 👋',
 ]
 
-function getFollowupMessage(followupCount: number, patientName: string): string {
-  const idx = Math.min(followupCount, FOLLOWUP_MESSAGES.length - 1)
-  return FOLLOWUP_MESSAGES[idx].replace(/\{name\}/g, patientName || 'você')
+function getFollowupMessage(followupCount: number, patientName: string, messages: string[] = FOLLOWUP_MESSAGES): string {
+  const idx = Math.min(followupCount, messages.length - 1)
+  return messages[idx].replace(/\{name\}/g, patientName || 'você')
 }
 
 /** Verifica se um lead precisa de follow-up agora. Retorna o índice do follow-up (0-based) ou null. */
@@ -58,7 +67,7 @@ function needsFollowup(state: {
   last_followup_at: string | null
   followup_count: number
   followup_window_start: string | null
-}): { followupIndex: number } | null {
+}, hours: number[] = FOLLOWUP_HOURS): { followupIndex: number } | null {
   const now = Date.now()
 
   // Precisa de inbound
@@ -81,13 +90,13 @@ function needsFollowup(state: {
 
   const elapsedHours = (now - windowStartMs) / (1000 * 60 * 60)
 
-  // Passou mais de 24h → janela expirada, não enviar mais
-  if (elapsedHours > 25) return null
+  // Janela expirada (último intervalo + 1h de margem) → não enviar mais
+  if (elapsedHours > Math.max(...hours) + 1) return null
 
   const followupCount = state.followup_count ?? 0
 
   // Qual é o próximo follow-up a enviar?
-  const nextFollowupHour = FOLLOWUP_HOURS[followupCount]
+  const nextFollowupHour = hours[followupCount]
   if (nextFollowupHour === undefined) return null // Todos já enviados
 
   // Ainda não chegou a hora do próximo follow-up
@@ -185,13 +194,18 @@ Deno.serve(async (req) => {
       followup_window_start: row.followup_window_start ? String(row.followup_window_start) : null,
     }
 
-    const check = needsFollowup(state)
+    // VENDAS (Tricopill): cadência curta (1º em 15min) + mensagens de venda. Clínica: padrão.
+    const isSales = String(lead.tenant_id ?? '') === 'tricopill'
+    const cadenceHours = isSales ? FOLLOWUP_HOURS_SALES : FOLLOWUP_HOURS
+    const cadenceMsgs = isSales ? FOLLOWUP_MESSAGES_SALES : FOLLOWUP_MESSAGES
+
+    const check = needsFollowup(state, cadenceHours)
     if (!check) { skipped++; continue }
 
     const { followupIndex } = check
     const leadId = String(row.lead_id)
     const patientName = String(lead.patient_name || 'você')
-    const followupText = getFollowupMessage(followupIndex, patientName)
+    const followupText = getFollowupMessage(followupIndex, patientName, cadenceMsgs)
 
     // Determina o canal de envio
     const customFields = lead.custom_fields ?? {}
@@ -295,7 +309,7 @@ Deno.serve(async (req) => {
       // Espelha em crm_lead_followup_state para o badge no Kanban (KanbanLeadCard lê current_step/status).
       // current_step = índice 0-based do último follow-up enviado; status = 'completed' no último (índice 5),
       // 'active' até lá. Mensagens novas do paciente disparam status='interrupted' no whatsapp-webhook.
-      const isLastFollowup = newCount >= FOLLOWUP_HOURS.length
+      const isLastFollowup = newCount >= cadenceHours.length
       await admin.from('crm_lead_followup_state').upsert({
         lead_id: leadId,
         current_step: followupIndex,
