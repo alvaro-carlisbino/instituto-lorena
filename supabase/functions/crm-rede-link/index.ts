@@ -82,11 +82,12 @@ Deno.serve(async (req) => {
         const { data: lr } = await admin.from('leads').select('custom_fields').eq('id', leadId).maybeSingle()
         const cf = ((lr as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>
         const cad = (cf.cadastro ?? {}) as Record<string, unknown>
-        await admin.from('leads').update({ custom_fields: { ...cf, cadastro: { ...cad, nomeCompleto: customerName } } }).eq('id', leadId)
+        // Atualiza tb o patient_name → o lead passa a MOSTRAR o nome completo no CRM (não o pushname).
+        await admin.from('leads').update({ patient_name: customerName, custom_fields: { ...cf, cadastro: { ...cad, nomeCompleto: customerName } } }).eq('id', leadId)
       } catch { /* best-effort */ }
     }
     try {
-      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl, freightCents, couponCode })
+      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl, freightCents, couponCode, customerName: customerName || undefined })
       return json({ ok: true, payLink: out.url, id: out.id, amountCents })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

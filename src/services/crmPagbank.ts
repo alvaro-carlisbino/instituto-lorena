@@ -52,25 +52,79 @@ export type PagbankCheckoutRow = {
   status: string
   createdAt: string
   paidAt: string | null
+  customerName: string | null
+  method: 'pix' | 'card'
 }
 
-/** Lista os links de pagamento gerados (audit table), do polo ativo (RLS). */
+const PAID_STATUSES = new Set(['paid', 'pago', 'approved', 'available', 'completed'])
+function normalizeStatus(status: string, paidAt: string | null): string {
+  return paidAt || PAID_STATUSES.has(status.toLowerCase()) ? 'paid' : status
+}
+function asRec(r: unknown): Record<string, unknown> {
+  return r as Record<string, unknown>
+}
+
+/**
+ * Lista TODOS os links de pagamento do polo ativo (RLS): Pix (PagBank) + cartão (Rede),
+ * unificados e ordenados por data. Inclui nome do cliente e quando foi pago.
+ */
 export async function fetchPagbankCheckouts(limit = 50): Promise<PagbankCheckoutRow[]> {
   if (!supabase) return []
-  const { data, error } = await supabase
-    .from('pagbank_checkouts')
-    .select('checkout_id, lead_id, amount_cents, kit, pay_link, status, created_at, paid_at')
-    .order('created_at', { ascending: false })
-    .limit(limit)
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => ({
-    checkoutId: String((r as Record<string, unknown>).checkout_id ?? ''),
-    leadId: (r as Record<string, unknown>).lead_id != null ? String((r as Record<string, unknown>).lead_id) : null,
-    amountCents: Number((r as Record<string, unknown>).amount_cents ?? 0),
-    kit: (r as Record<string, unknown>).kit != null ? String((r as Record<string, unknown>).kit) : null,
-    payLink: String((r as Record<string, unknown>).pay_link ?? ''),
-    status: String((r as Record<string, unknown>).status ?? 'created'),
-    createdAt: String((r as Record<string, unknown>).created_at ?? ''),
-    paidAt: (r as Record<string, unknown>).paid_at != null ? String((r as Record<string, unknown>).paid_at) : null,
-  }))
+  const [pb, rede] = await Promise.all([
+    supabase
+      .from('pagbank_checkouts')
+      .select('checkout_id, lead_id, amount_cents, kit, pay_link, status, created_at, paid_at')
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    supabase
+      .from('rede_payments')
+      .select('id, lead_id, amount_cents, kit, status, created_at, paid_at, customer_name')
+      .order('created_at', { ascending: false })
+      .limit(limit),
+  ])
+  if (pb.error) throw new Error(pb.error.message)
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const rows: PagbankCheckoutRow[] = []
+
+  for (const r of pb.data ?? []) {
+    const rec = asRec(r)
+    const paidAt = rec.paid_at != null ? String(rec.paid_at) : null
+    rows.push({
+      checkoutId: String(rec.checkout_id ?? ''),
+      leadId: rec.lead_id != null ? String(rec.lead_id) : null,
+      amountCents: Number(rec.amount_cents ?? 0),
+      kit: rec.kit != null ? String(rec.kit) : null,
+      payLink: String(rec.pay_link ?? ''),
+      status: normalizeStatus(String(rec.status ?? 'created'), paidAt),
+      createdAt: String(rec.created_at ?? ''),
+      paidAt,
+      customerName: null,
+      method: 'pix',
+    })
+  }
+
+  // rede_payments pode não existir/erro de permissão em alguns polos → best-effort.
+  if (!rede.error) {
+    for (const r of rede.data ?? []) {
+      const rec = asRec(r)
+      const paidAt = rec.paid_at != null ? String(rec.paid_at) : null
+      const id = String(rec.id ?? '')
+      rows.push({
+        checkoutId: id,
+        leadId: rec.lead_id != null ? String(rec.lead_id) : null,
+        amountCents: Number(rec.amount_cents ?? 0),
+        kit: rec.kit != null ? String(rec.kit) : null,
+        payLink: origin ? `${origin}/pagar/${id}` : `/pagar/${id}`,
+        status: normalizeStatus(String(rec.status ?? 'pending'), paidAt),
+        createdAt: String(rec.created_at ?? ''),
+        paidAt,
+        customerName: rec.customer_name != null && String(rec.customer_name).trim() ? String(rec.customer_name) : null,
+        method: 'card',
+      })
+    }
+  }
+
+  rows.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  return rows.slice(0, limit)
 }

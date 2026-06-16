@@ -1,0 +1,177 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Módulo de Estoque — Instituto Lorena</title>
+<style>
+  :root{ --tx:#2C2C2A; --mut:#5F5E5A; --hint:#888780; --line:#D3D1C7; --teal:#0F6E56; --tealbg:#E1F5EE; }
+  *{ box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  html,body{ margin:0; padding:0; background:#ffffff !important; }
+  .page{ background:#ffffff; }
+  @media print{ html,body{ background:#ffffff !important; } }
+  body{ font-family:"Helvetica Neue",Arial,sans-serif; color:var(--tx); font-size:12.5px; line-height:1.48; }
+  .page{ width:760px; margin:0 auto; padding:30px 40px 24px; }
+  .kicker{ font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--teal); font-weight:500; margin:0 0 4px; }
+  h1{ font-size:21px; font-weight:500; margin:0 0 6px; }
+  .lead{ color:var(--mut); margin:0 0 10px; max-width:640px; }
+  h2{ font-size:15px; font-weight:500; margin:15px 0 7px; padding-bottom:5px; border-bottom:1px solid var(--line); }
+  h2:first-of-type{ margin-top:12px; }
+  p{ margin:0 0 8px; }
+  ul{ margin:4px 0 8px; padding-left:18px; }
+  li{ margin:3px 0; }
+  .key{ background:var(--tealbg); border:1px solid #9FE1CB; border-radius:8px; padding:11px 14px; margin:6px 0 4px; }
+  .key b{ font-weight:500; color:#04342C; }
+  svg{ width:100%; height:auto; display:block; margin:6px 0 2px; }
+  table{ width:100%; border-collapse:collapse; margin:6px 0; font-size:12px; }
+  th,td{ text-align:left; padding:7px 9px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ color:var(--mut); font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  td.eff{ white-space:nowrap; color:var(--teal); }
+  .q{ counter-reset:q; margin:6px 0 0; padding:0; list-style:none; }
+  .q li{ counter-increment:q; position:relative; padding:4px 0 4px 26px; border-bottom:1px dotted var(--line); }
+  .q li::before{ content:counter(q); position:absolute; left:0; top:5px; width:18px; height:18px; background:var(--tealbg); color:#04342C; border-radius:50%; font-size:10px; font-weight:500; text-align:center; line-height:18px; }
+  .foot{ margin-top:18px; padding-top:8px; border-top:1px solid var(--line); color:var(--hint); font-size:10.5px; }
+  .warn{ color:#854F0B; }
+  /* diagram classes */
+  .b-teal{ fill:#E1F5EE; stroke:#0F6E56; stroke-width:.8; }
+  .b-amber{ fill:#FAEEDA; stroke:#854F0B; stroke-width:.8; }
+  .b-gray{ fill:#F1EFE8; stroke:#5F5E5A; stroke-width:.8; }
+  .dt{ font-size:14px; font-weight:500; }
+  .ds{ font-size:12px; font-weight:400; }
+  .tt{ fill:#04342C; } .st{ fill:#0F6E56; }
+  .ta{ fill:#412402; } .sa{ fill:#854F0B; }
+  .tg{ fill:#2C2C2A; } .sg{ fill:#5F5E5A; }
+  .arr{ stroke:#5F5E5A; stroke-width:1.4; fill:none; }
+  .led{ stroke:#B4B2A9; stroke-width:.8; stroke-dasharray:3 3; fill:none; }
+  .lg{ font-size:11.5px; fill:#5F5E5A; }
+  @page{ size:A4; margin:14mm 12mm; }
+</style>
+
+<div class="page">
+  <p class="kicker">Instituto Lorena Visentainer · Maringá</p>
+  <h1>Sistema de estoque e kits cirúrgicos</h1>
+  <p class="lead">Proposta de funcionamento para validação da enfermagem. O controle de estoque passa a fazer parte do mesmo sistema da clínica (mesmo login, mesmo cadastro de paciente, mesma agenda Shosp), controlando cada material — da compra até o que é usado no paciente.</p>
+
+  <h2>Como funciona — do fornecedor ao paciente</h2>
+
+  <svg viewBox="0 0 680 694" xmlns="http://www.w3.org/2000/svg" role="img">
+    <title>Fluxo do estoque cirúrgico</title>
+    <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+
+    <rect class="b-teal" x="40" y="42" width="14" height="14" rx="3"/>
+    <text class="lg" x="60" y="53">fluxo do material</text>
+    <rect class="b-amber" x="210" y="42" width="14" height="14" rx="3"/>
+    <text class="lg" x="230" y="53">ação crítica / ANVISA</text>
+    <rect class="b-gray" x="410" y="42" width="14" height="14" rx="3"/>
+    <text class="lg" x="430" y="53">sistema e integração</text>
+
+    <rect class="b-teal" x="240" y="82" width="220" height="52" rx="6"/>
+    <text class="dt tt" x="350" y="103" text-anchor="middle">compra + nota fiscal</text>
+    <text class="ds st" x="350" y="121" text-anchor="middle">fornecedor, NF-e (XML/PDF)</text>
+
+    <rect class="b-teal" x="240" y="174" width="220" height="52" rx="6"/>
+    <text class="dt tt" x="350" y="195" text-anchor="middle">recebimento</text>
+    <text class="ds st" x="350" y="213" text-anchor="middle">lote, validade e custo</text>
+
+    <rect class="b-teal" x="240" y="266" width="220" height="52" rx="6"/>
+    <text class="dt tt" x="350" y="287" text-anchor="middle">estoque por lote</text>
+    <text class="ds st" x="350" y="305" text-anchor="middle">saldo · FEFO (vence sai 1º)</text>
+
+    <rect class="b-teal" x="240" y="358" width="220" height="52" rx="6"/>
+    <text class="dt tt" x="350" y="379" text-anchor="middle">montar kit do paciente</text>
+    <text class="ds st" x="350" y="397" text-anchor="middle">modelo por procedimento</text>
+
+    <rect class="b-teal" x="240" y="450" width="220" height="52" rx="6"/>
+    <text class="dt tt" x="350" y="471" text-anchor="middle">conferência na sala</text>
+    <text class="ds st" x="350" y="489" text-anchor="middle">checa lote/validade do kit</text>
+
+    <rect class="b-teal" x="240" y="542" width="220" height="52" rx="6"/>
+    <text class="dt tt" x="350" y="563" text-anchor="middle">baixa = consumo real</text>
+    <text class="ds st" x="350" y="581" text-anchor="middle">enfermeira confirma o gasto</text>
+
+    <rect class="b-gray" x="140" y="634" width="420" height="52" rx="6"/>
+    <text class="dt tg" x="350" y="655" text-anchor="middle">rastreabilidade e relatórios</text>
+    <text class="ds sg" x="350" y="673" text-anchor="middle">recall por lote · custo por cirurgia · controlados (SNGPC)</text>
+
+    <line class="arr" x1="350" y1="134" x2="350" y2="174" marker-end="url(#arrow)"/>
+    <line class="arr" x1="350" y1="226" x2="350" y2="266" marker-end="url(#arrow)"/>
+    <line class="arr" x1="350" y1="318" x2="350" y2="358" marker-end="url(#arrow)"/>
+    <line class="arr" x1="350" y1="410" x2="350" y2="450" marker-end="url(#arrow)"/>
+    <line class="arr" x1="350" y1="502" x2="350" y2="542" marker-end="url(#arrow)"/>
+    <line class="arr" x1="350" y1="594" x2="350" y2="634" marker-end="url(#arrow)"/>
+
+    <rect class="b-amber" x="486" y="266" width="154" height="52" rx="6"/>
+    <text class="dt ta" x="563" y="285" text-anchor="middle">alertas</text>
+    <text class="ds sa" x="563" y="300" text-anchor="middle">estoque mínimo</text>
+    <text class="ds sa" x="563" y="313" text-anchor="middle">validade próxima</text>
+
+    <rect class="b-amber" x="486" y="450" width="154" height="52" rx="6"/>
+    <text class="dt ta" x="563" y="469" text-anchor="middle">segurança</text>
+    <text class="ds sa" x="563" y="484" text-anchor="middle">bloqueia vencido</text>
+    <text class="ds sa" x="563" y="497" text-anchor="middle">dupla checagem</text>
+
+    <rect class="b-amber" x="486" y="542" width="154" height="52" rx="6"/>
+    <text class="dt ta" x="563" y="561" text-anchor="middle">sobras</text>
+    <text class="ds sa" x="563" y="576" text-anchor="middle">lacrado volta</text>
+    <text class="ds sa" x="563" y="589" text-anchor="middle">aberto = descarte</text>
+
+    <rect class="b-gray" x="40" y="358" width="178" height="52" rx="6"/>
+    <text class="dt tg" x="129" y="377" text-anchor="middle">shosp — só leitura</text>
+    <text class="ds sg" x="129" y="392" text-anchor="middle">paciente + agendamento</text>
+    <text class="ds sg" x="129" y="405" text-anchor="middle">sugere o kit</text>
+
+    <rect class="b-gray" x="40" y="542" width="178" height="52" rx="6"/>
+    <text class="dt tg" x="129" y="561" text-anchor="middle">vínculo rastreável</text>
+    <text class="ds sg" x="129" y="576" text-anchor="middle">paciente · procedimento</text>
+    <text class="ds sg" x="129" y="589" text-anchor="middle">kit · item · lote</text>
+
+    <line class="led" x1="460" y1="292" x2="486" y2="292"/>
+    <line class="led" x1="460" y1="476" x2="486" y2="476"/>
+    <line class="led" x1="460" y1="568" x2="486" y2="568"/>
+    <line class="led" x1="218" y1="384" x2="240" y2="384"/>
+    <line class="led" x1="218" y1="568" x2="240" y2="568"/>
+  </svg>
+
+  <h2>O que muda na prática</h2>
+  <div class="key"><b>A baixa do estoque é a enfermeira que confirma</b> — item a item, depois da cirurgia (o "fechamento da sala"). A agenda da Shosp e o funil apenas <b>sugerem e pré-preenchem</b> o kit; eles não dão baixa sozinhos. É isso que mantém o sistema sempre igual à prateleira física.</div>
+  <ul>
+    <li><b>Entrada por lote e validade:</b> toda compra entra com nota fiscal, lote, validade e custo. Nada entra "solto".</li>
+    <li><b>FEFO automático:</b> ao usar, o sistema já indica o lote que vence primeiro.</li>
+    <li><b>Kit por procedimento:</b> modelos prontos (ex.: "Kit FUE até 3.000 folículos") montam a cirurgia em um clique, com ajuste do que for específico daquele paciente.</li>
+    <li><b>Rastreabilidade total:</b> em segundos responde "qual lote este paciente recebeu?" e "quais pacientes receberam o lote X?" (base para recall do fornecedor).</li>
+    <li><b>Alertas:</b> avisa quando um item está acabando (estoque mínimo) ou perto de vencer.</li>
+    <li><b>Controlados:</b> anestésicos/controlados ganham livro próprio para o SNGPC/ANVISA, com dupla conferência.</li>
+    <li><b>Custo por cirurgia:</b> quanto de material cada procedimento e cada paciente consumiu.</li>
+  </ul>
+
+  <h2>Etapas de entrega (para o orçamento)</h2>
+  <table>
+    <tr><th style="width:34%">Etapa</th><th>O que entrega</th><th style="width:16%">Esforço</th></tr>
+    <tr><td>1 · Fundação</td><td>Cadastro de itens e fornecedores, entrada por nota, lotes, saldo, FEFO, permissões. A clínica já sabe o que tem, por lote e validade.</td><td class="eff">Grande</td></tr>
+    <tr><td>2 · Kits + paciente + baixa</td><td>Modelos de kit, montar kit do paciente, conferência na sala, baixa por confirmação, rastreabilidade lote ↔ paciente.</td><td class="eff">Grande</td></tr>
+    <tr><td>3 · Alertas, controlados e relatórios</td><td>Alertas de mínimo/validade, livro SNGPC, recall por lote, custo por cirurgia/paciente.</td><td class="eff">Médio</td></tr>
+    <tr><td>4 · Integrações (opcional)</td><td>Casar com Bling/NF-e, registro no prontuário, cadeia de frio, instrumental reutilizável.</td><td class="eff">Médio</td></tr>
+  </table>
+
+  <h2>Decisões a confirmar antes (risco regulatório/operacional)</h2>
+  <ul>
+    <li class="warn"><b>Controlados (ANVISA):</b> confirmar com a vigilância/responsável técnico se a clínica transmite SNGPC ou mantém livro próprio. Lidocaína pura não é controlada — o relevante é a associação com vasoconstritor e os sedativos.</li>
+    <li><b>Frasco multidose:</b> abre 20 ml, usa 12, descarta 8 — o resto não volta ao estoque (unidade de compra × unidade de uso).</li>
+    <li><b>Devolução × descarte:</b> só item lacrado volta ao lote; item aberto = descarte obrigatório.</li>
+    <li><b>Reserva com expiração:</b> paciente que falta/remarca libera o material reservado automaticamente.</li>
+  </ul>
+
+  <h2>Para a enfermagem validar</h2>
+  <ol class="q">
+    <li>Você monta o kit <b>antes</b> da cirurgia (separa o material) ou só registra <b>depois</b> o que foi usado?</li>
+    <li>Quais materiais são <b>controlados/anestésicos</b> e precisam do livro SNGPC? Precisa de nº de receita/prescritor?</li>
+    <li>Quais itens controla por <b>lote e validade</b> obrigatoriamente, e quais não vale a pena (ex.: gaze)?</li>
+    <li>Qual a <b>unidade</b> de cada item que importa — anestésico por frasco ou por ml? luva por par ou caixa?</li>
+    <li>Tem <b>instrumental reutilizável</b> (punch, caneta FUE) com controle de esterilização, ou no início basta descartável e medicação?</li>
+    <li>Já tem <b>modelos de kit</b> por tipo de cirurgia? Quais itens e quantidades entram em cada?</li>
+    <li>Quantos dias antes do vencimento quer ser <b>avisada</b> (30/60/90)? Qual estoque mínimo dispara recompra?</li>
+    <li><b>Sobras</b> (frasco aberto, gaze não usada) voltam ao estoque ou são descartadas?</li>
+    <li>Algum material exige <b>refrigeração</b> (cadeia de frio)?</li>
+    <li>O <b>custo do material</b> entra na conta de quanto cada cirurgia custou (margem), ou é só controle físico?</li>
+    <li><b>Quem</b> pode dar entrada, montar kit e dar baixa — todas as enfermeiras ou só a coordenação?</li>
+  </ol>
+
+  <p class="foot">Documento técnico de validação · Instituto Lorena · gerado para discussão de escopo e orçamento. A Shosp permanece como agenda e cadastro; o estoque apenas lê essas informações, sem alterá-las.</p>
+</div>

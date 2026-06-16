@@ -419,7 +419,10 @@ export function PaymentLinksPage() {
                     <div key={r.checkoutId} className="flex items-center gap-3 px-4 py-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="truncate text-sm font-semibold">{leadName(r.leadId)}</span>
+                          <span className="truncate text-sm font-semibold">{r.customerName || leadName(r.leadId)}</span>
+                          <Badge variant="outline" className="shrink-0 text-[10px]">
+                            {r.method === 'card' ? 'Cartão' : 'Pix'}
+                          </Badge>
                           <Badge
                             variant={r.status === 'paid' ? 'default' : 'secondary'}
                             className={r.status === 'paid' ? 'bg-emerald-500/15 text-emerald-600' : ''}
@@ -430,7 +433,11 @@ export function PaymentLinksPage() {
                         <p className="truncate text-xs text-muted-foreground">
                           {formatBRL(r.amountCents)}
                           {r.kit ? ` · ${r.kit.replace('_', ' ')}` : ''}
-                          {r.createdAt ? ` · ${new Date(r.createdAt).toLocaleDateString('pt-BR')}` : ''}
+                          {r.status === 'paid' && r.paidAt
+                            ? ` · pago ${new Date(r.paidAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+                            : r.createdAt
+                              ? ` · gerado ${new Date(r.createdAt).toLocaleDateString('pt-BR')}`
+                              : ''}
                         </p>
                       </div>
                       <Button size="sm" variant="outline" onClick={() => void copy(r.payLink)}>

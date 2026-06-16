@@ -185,6 +185,7 @@ export async function createRedeIntent(
     couponCode?: string
     freightCents?: number
     kit?: string
+    customerName?: string
   },
 ): Promise<{ id: string; url: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null; freightCents: number }> {
   const cfg = await readRedeConfig(admin, args.tenantId)
@@ -219,6 +220,7 @@ export async function createRedeIntent(
     coupon_code: coupon.applied ? coupon.code : null,
     discount_cents: coupon.discountCents,
     kit: args.kit || null,
+    customer_name: args.customerName?.trim() || null,
   })
   const base = args.appBaseUrl.replace(/\/$/, '')
   return {

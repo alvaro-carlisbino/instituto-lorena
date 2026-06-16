@@ -73,7 +73,8 @@ Deno.serve(async (req) => {
       try {
         const cf = (lf.custom_fields ?? {}) as Record<string, unknown>
         const cad = (cf.cadastro ?? {}) as Record<string, unknown>
-        await userClient.from('leads').update({ custom_fields: { ...cf, cadastro: { ...cad, nomeCompleto: cn } } }).eq('id', lf.id)
+        await userClient.from('leads').update({ patient_name: cn, custom_fields: { ...cf, cadastro: { ...cad, nomeCompleto: cn } } }).eq('id', lf.id)
+        leadForCheckout.patient_name = cn
         leadForCheckout.custom_fields = { ...cf, cadastro: { ...cad, nomeCompleto: cn } }
       } catch { /* best-effort */ }
     }
