@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Copy, CreditCard, RefreshCw, ExternalLink, QrCode } from 'lucide-react'
+import { Copy, CreditCard, RefreshCw, ExternalLink, QrCode, Truck } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
@@ -20,6 +20,7 @@ import {
   type PagbankKit,
 } from '@/services/crmPagbank'
 import { generateRedeLink } from '@/services/crmRede'
+import { quoteFrete, type FreteOption } from '@/services/crmFrete'
 
 const NO_LEAD = '__none__'
 
@@ -57,6 +58,12 @@ export function PaymentLinksPage() {
   const [generating, setGenerating] = useState(false)
   const [lastLink, setLastLink] = useState<{ url: string; via: string } | null>(null)
 
+  // Cotação de frete por CEP (preenche o campo de frete acima).
+  const [cep, setCep] = useState('')
+  const [quoting, setQuoting] = useState(false)
+  const [quoteOptions, setQuoteOptions] = useState<FreteOption[]>([])
+  const [quoteMsg, setQuoteMsg] = useState<string | null>(null)
+
   const freightCents = freightReais.trim()
     ? Math.round(Number(freightReais.replace(/\./g, '').replace(',', '.')) * 100)
     : undefined
@@ -90,6 +97,43 @@ export function PaymentLinksPage() {
 
   const selectedLeadId = leadId !== NO_LEAD ? leadId : undefined
   const selectedName = leadId === NO_LEAD && customerName.trim() ? customerName.trim() : undefined
+
+  const applyFreight = (o: FreteOption) => {
+    setFreightReais((o.priceCents / 100).toFixed(2).replace('.', ','))
+    toast.success(`Frete ${o.service} aplicado: ${formatBRL(o.priceCents)}`)
+  }
+
+  const handleQuote = async () => {
+    const digits = cep.replace(/\D/g, '')
+    if (digits.length !== 8) {
+      toast.error('Informe um CEP com 8 dígitos.')
+      return
+    }
+    setQuoting(true)
+    setQuoteOptions([])
+    setQuoteMsg(null)
+    try {
+      const r = await quoteFrete({ toCep: digits, tenantId: tenant.id })
+      if (r.ok && r.options.length) {
+        setQuoteOptions(r.options)
+        setQuoteMsg(
+          r.options.some((o) => o.internal)
+            ? 'Maringá: entrega interna. Clique para aplicar.'
+            : 'Clique numa opção para aplicar no frete.',
+        )
+      } else {
+        setQuoteMsg(
+          r.debug === 'not_connected'
+            ? 'Melhor Envio não conectado.'
+            : 'Não foi possível cotar — confira o CEP.',
+        )
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao cotar frete')
+    } finally {
+      setQuoting(false)
+    }
+  }
 
   const handlePix = async () => {
     setGenerating(true)
@@ -175,6 +219,40 @@ export function PaymentLinksPage() {
                 onChange={(e) => setFreightReais(e.target.value)}
                 placeholder="Ex.: 15,00 (Maringá). Vazio = sem frete."
               />
+            </div>
+
+            <div className="space-y-2 rounded-lg border border-dashed border-border/60 p-3">
+              <Label htmlFor="pl-cep" className="flex items-center gap-1.5">
+                <Truck className="size-3.5 text-primary" /> Cotar frete por CEP
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="pl-cep"
+                  inputMode="numeric"
+                  value={cep}
+                  onChange={(e) => setCep(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleQuote()
+                  }}
+                  placeholder="CEP do cliente"
+                  maxLength={9}
+                />
+                <Button type="button" variant="outline" onClick={() => void handleQuote()} disabled={quoting}>
+                  {quoting ? 'Cotando…' : 'Cotar'}
+                </Button>
+              </div>
+              {quoteMsg ? <p className="text-[0.7rem] text-muted-foreground">{quoteMsg}</p> : null}
+              {quoteOptions.length > 0 ? (
+                <div className="flex flex-wrap gap-2 pt-0.5">
+                  {quoteOptions.map((o) => (
+                    <Button key={o.service} type="button" size="sm" variant="secondary" onClick={() => applyFreight(o)}>
+                      {o.internal ? '🏠 ' : ''}
+                      {o.service} · {formatBRL(o.priceCents)}
+                      {o.deliveryDays ? ` · ${o.deliveryDays}d` : ''}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             {isSalesPolo ? (

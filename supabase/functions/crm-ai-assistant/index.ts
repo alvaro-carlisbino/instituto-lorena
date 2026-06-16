@@ -34,6 +34,7 @@ import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
 import { readPagBankConfig } from '../_shared/pagbank.ts'
 import { melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
+import { extractLatestCep, resolveCepBrasil } from '../_shared/cep.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
 
@@ -46,39 +47,8 @@ const cors = {
 /** Limite aproximado do system prompt (caracteres) para evitar rejeição / timeout na Z.ai. */
 const MAX_SYSTEM_CHARS = 95_000
 
-export type CepInfo = { cep: string; localidade: string; uf: string; bairro: string }
-
-/** Acha o CEP mais recente (8 dígitos) num conjunto de textos do cliente. */
-export function extractLatestCep(texts: string[]): string {
-  for (let i = texts.length - 1; i >= 0; i--) {
-    const m = String(texts[i] ?? '').match(/\b(\d{5})-?\s?(\d{3})\b/)
-    if (m) return `${m[1]}${m[2]}`
-  }
-  return ''
-}
-
-/**
- * Resolve CEP -> cidade/UF no servidor (ViaCEP). A IA NUNCA deve adivinhar a cidade
- * pelo número do CEP (errava — ex.: tratou 87030-090/Maringá como Cascavel).
- */
-export async function resolveCepBrasil(rawCep: string): Promise<CepInfo | null> {
-  const digits = String(rawCep ?? '').replace(/\D/g, '')
-  if (digits.length !== 8) return null
-  try {
-    const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`)
-    if (!res.ok) return null
-    const data = (await res.json()) as { localidade?: string; uf?: string; bairro?: string; erro?: boolean }
-    if (data.erro || !data.localidade) return null
-    return {
-      cep: `${digits.slice(0, 5)}-${digits.slice(5)}`,
-      localidade: String(data.localidade),
-      uf: String(data.uf ?? ''),
-      bairro: String(data.bairro ?? ''),
-    }
-  } catch {
-    return null
-  }
-}
+// CepInfo, extractLatestCep e resolveCepBrasil vivem em ../_shared/cep.ts (compartilhados
+// com a cotação de frete, que aplica a regra de praça local de Maringá).
 
 /** Alinhado à enum da API Z.ai (chat completions); códigos sem prefixo. */
 const GLM_MODEL_IDS = [
@@ -767,7 +737,9 @@ Deno.serve(async (req) => {
             // Best-effort: se a cotação falhar, a IA cai no fluxo de pedir CEP / humano.
             if (melhorEnvioConfigured()) {
               try {
-                const fq = await quoteFreteMelhorEnvio(dbClient, tenantId, info.cep)
+                const fq = await quoteFreteMelhorEnvio(dbClient, tenantId, info.cep, {
+                  cityInfo: { localidade: info.localidade, uf: info.uf },
+                })
                 if (fq.ok) {
                   ;(snapshot as Record<string, unknown>).frete = {
                     origem_cep: fq.fromCep,
@@ -866,7 +838,7 @@ Deno.serve(async (req) => {
       'PREÇO: para os produtos do catálogo, você PODE e DEVE informar o "preco" (preço de venda) que está no bling_catalog. EXCEÇÃO IMPORTANTE — os KITS do Tricopill (1 mês, 3+1, 5 meses) seguem SEMPRE os valores e promoções do PROMPT ADICIONAL (ex.: Pix com 5% off), NUNCA o preço de linha do catálogo (que pode divergir). Se o cliente perguntar o valor de algo que NÃO está nem no bling_catalog nem no PROMPT ADICIONAL, NÃO invente — diga que confirma com a atendente. Cotar preço inventado é PROIBIDO; o frete é sempre cobrado à parte.',
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
       'VALORES, PAGAMENTO E FRETE: apresente os valores e as formas de pagamento/parcelas EXATAMENTE como no PROMPT ADICIONAL — nunca invente preço, parcela ou desconto. Ao passar QUALQUER preço, informe SEMPRE que o frete é cobrado à parte (não incluso no produto) e peça o CEP do cliente para COTAR o frete real.',
-      'FRETE REAL (snapshot.frete): quando existir snapshot.frete, são as opções de frete REAIS cotadas pelos Correios (via Melhor Envio) para o CEP do cliente. Apresente as opções de snapshot.frete.opcoes (ex.: PAC e SEDEX) com o valor (valor_reais) e o prazo (prazo_dias_uteis) EXATAMENTE como vierem — NUNCA invente outro valor — e pergunte qual o cliente prefere. Se o cliente NÃO mandou o CEP ainda, peça o CEP. Só passe para um atendente humano (com [PRONTO_PARA_CONSULTOR]) se, MESMO com o CEP, snapshot.frete não vier (cotação indisponível). Para RETIRADA na clínica (Maringá), não há frete.',
+      'FRETE REAL (snapshot.frete): quando existir snapshot.frete, são as opções de frete REAIS para o CEP do cliente — em geral Correios PAC/SEDEX (via Melhor Envio); mas quando a opção vier marcada como "Entrega interna" (praça local, ex.: Maringá), é ENTREGA LOCAL (não Correios, pode não ter prazo). Apresente as opções de snapshot.frete.opcoes com o valor (valor_reais) e o prazo (prazo_dias_uteis) EXATAMENTE como vierem — NUNCA invente outro valor — e pergunte qual o cliente prefere. Se o cliente NÃO mandou o CEP ainda, peça o CEP. Só passe para um atendente humano (com [PRONTO_PARA_CONSULTOR]) se, MESMO com o CEP, snapshot.frete não vier (cotação indisponível). Para RETIRADA na clínica (Maringá), não há frete.',
       'RETIRADA NA CLÍNICA (só Maringá): quando o cliente optar por RETIRAR o pedido na clínica (em vez de entrega), informe AUTOMATICAMENTE o endereço de retirada, sempre em TERCEIRA PESSOA (impessoal, NÃO "eu te entrego"). Modelo: "Perfeito! O pedido ficará disponível para retirada na clínica da Dra. Lorena. O endereço é: *Av. Nóbrega, 814 - Zona 04, Maringá - PR, 87014-180*. Na retirada não há cobrança de frete 💚". Esse endereço só vale para retirada em Maringá (a clínica fica em Maringá); para outras cidades é entrega com frete, não retirada.',
       'FECHAMENTO NO CARTÃO (você gera o link sozinha): quando o cliente decidir comprar no CARTÃO — já escolheu o kit, quer cartão e JÁ informou a cidade (para o frete) — gere o link você mesma. Na MESMA resposta, DEPOIS da mensagem ao cliente, acrescente exatamente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_link","kit":"3_meses","installments":12,"freight_cents":1500,"coupon":"CODIGO_SE_HOUVER"}]}. O servidor cria o link de cartão (em até 12x) e ANEXA sozinho na sua mensagem — então escreva de forma calorosa que o link está logo abaixo (ex.: "Prontinho! 💳 Seu link de pagamento no cartão tá aqui embaixo, é só preencher os dados 💚"). NUNCA escreva uma URL nem invente o link: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o link — CONTINUE atendendo para tirar dúvidas e ajudar a concluir o pagamento.',
       'KIT no op: passe "kit" com a chave do kit escolhido — "1_mes", "3_meses" ou "5_meses" — exatamente como descrito no PROMPT ADICIONAL. O servidor já aplica o PREÇO CHEIO de cartão desse kit; você NÃO calcula o valor do produto, só informa o frete.',

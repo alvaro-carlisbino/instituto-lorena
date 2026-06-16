@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { isMaringa, resolveCepBrasil } from './cep.ts'
 
 /**
  * Melhor Envio — agregador que cota Correios (PAC/SEDEX) e transportadoras SEM exigir
@@ -32,12 +33,14 @@ const DEFAULT_SCOPES =
   'ecommerce-shipping orders-read products-read'
 
 export type FreteOption = {
-  /** Nome do serviço normalizado: 'PAC', 'SEDEX', etc. */
+  /** Nome do serviço normalizado: 'PAC', 'SEDEX', 'Entrega interna', etc. */
   service: string
   serviceId: number
   company: string
   priceCents: number
   deliveryDays: number | null
+  /** True = entrega interna (praça local, ex.: Maringá) — não é Correios. */
+  internal?: boolean
 }
 
 export type FreteQuote = {
@@ -59,6 +62,13 @@ function envNum(key: string, fallback: number): number {
   const raw = (Deno.env.get(key) ?? '').trim().replace(',', '.')
   const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+/** Valor da entrega interna de Maringá em centavos (default R$ 15,00; aceita 0 = grátis). */
+function maringaCents(): number {
+  const raw = (Deno.env.get('FRETE_MARINGA_CENTS') ?? '').trim()
+  const n = Number(raw)
+  return raw !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n) : 1500
 }
 
 // ─── OAuth2: configuração do app ────────────────────────────────────────────
@@ -232,7 +242,13 @@ export async function quoteFreteMelhorEnvio(
   admin: SupabaseClient,
   tenantId: string,
   rawToCep: string,
-  opts?: { insuranceCents?: number; servicesCsv?: string; box?: FreteBox },
+  opts?: {
+    insuranceCents?: number
+    servicesCsv?: string
+    box?: FreteBox
+    /** Cidade já resolvida (evita 2ª chamada ViaCEP quando o caller já tem). */
+    cityInfo?: { localidade?: string; uf?: string }
+  },
 ): Promise<FreteQuote> {
   const toCep = onlyDigits(rawToCep)
   const fromCep = onlyDigits(Deno.env.get('MELHOR_ENVIO_FROM_CEP') || '87014180')
@@ -242,6 +258,21 @@ export async function quoteFreteMelhorEnvio(
 
   if (toCep.length !== 8) return empty('invalid_to_cep')
   if (fromCep.length !== 8) return empty('invalid_from_cep')
+
+  // Maringá = praça local: entrega INTERNA (não cota Correios). Vale mesmo sem ME conectado.
+  const cityInfo = opts?.cityInfo ?? (await resolveCepBrasil(toCep))
+  if (isMaringa(cityInfo)) {
+    return {
+      ok: true,
+      fromCep,
+      toCep,
+      options: [
+        { service: 'Entrega interna', serviceId: 0, company: 'Maringá (local)', priceCents: maringaCents(), deliveryDays: null, internal: true },
+      ],
+      debug: 'maringa_interno',
+    }
+  }
+
   if (!melhorEnvioConfigured()) return empty('client_not_configured')
 
   const token = await getValidMeToken(admin, tenantId)

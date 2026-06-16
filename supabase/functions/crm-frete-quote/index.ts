@@ -75,7 +75,8 @@ Deno.serve(async (req) => {
       price_reais: o.priceCents / 100,
       price_cents: o.priceCents,
       delivery_days: o.deliveryDays,
+      internal: o.internal ?? false,
     })),
     debug: q.debug,
-  }, q.ok ? 200 : 502)
+  }, 200)
 })
