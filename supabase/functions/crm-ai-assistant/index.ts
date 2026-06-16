@@ -989,8 +989,8 @@ Deno.serve(async (req) => {
 
     // TIMEOUT no LLM: sem isto, um z.ai lento/pendurado trava a função INTEIRA (sem reply,
     // sem erro, sem breadcrumb) — o que derrubou clínica + tricopill juntos. Aborta em
-    // ZAI_TIMEOUT_MS (default 45s) → vira erro tratável (zai_upstream) em vez de hang.
-    const zaiTimeoutMs = Number(Deno.env.get('ZAI_TIMEOUT_MS') ?? '') || 45000
+    // ZAI_TIMEOUT_MS (default 40s — margem p/ o teto de 50s exigido) → vira erro tratável em vez de hang.
+    const zaiTimeoutMs = Number(Deno.env.get('ZAI_TIMEOUT_MS') ?? '') || 40000
     const zaiRes = await fetch(zaiChatUrl, {
       method: 'POST',
       headers: {
