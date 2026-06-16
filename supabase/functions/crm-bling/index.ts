@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { buildBlingCatalog, blingCreateSaleOrder } from '../_shared/bling.ts'
 import { PAGBANK_KITS } from '../_shared/pagbank.ts'
+import { REDE_KITS, inferRedeKit } from '../_shared/rede.ts'
 import { insertInteraction } from '../_shared/crm.ts'
 
 // Ações autenticadas do Bling para o frontend.
@@ -121,12 +122,13 @@ Deno.serve(async (req) => {
       ?? (pb ? { id: (pb as { checkout_id: string }).checkout_id, kit: (pb as { kit?: string }).kit, amount_cents: (pb as { amount_cents?: number }).amount_cents } : null)
     if (!pay) return json({ ok: false, error: 'nenhuma_venda_paga_sem_bling' }, 404)
 
-    const kit = payload.kit != null ? String(payload.kit) : (pay.kit ?? '')
-    if (!kit) return json({ ok: false, error: 'sem_kit', message: 'Pagamento sem kit — informe o kit ou lance manual.' }, 400)
+    // kit: payload > kit salvo > inferido pelo valor pago (cobre o caso do total com frete embutido).
+    const kit = payload.kit != null ? String(payload.kit) : (pay.kit ?? inferRedeKit(Number(pay.amount_cents ?? 0)) ?? '')
+    if (!kit) return json({ ok: false, error: 'sem_kit', message: 'Não deu pra identificar o kit pelo valor — informe o kit.' }, 400)
 
     const cad = ((lead.custom_fields?.cadastro as Record<string, string>) ?? {})
     try {
-      const productCents = PAGBANK_KITS[kit]?.amountCents ?? Number(pay.amount_cents ?? 0)
+      const productCents = REDE_KITS[kit]?.amountCents ?? PAGBANK_KITS[kit]?.amountCents ?? Number(pay.amount_cents ?? 0)
       const out = await blingCreateSaleOrder(admin, 'tricopill', {
         kit, amountCents: productCents,
         customerName: String(cad.nomeCompleto || lead.patient_name || 'Cliente Tricopill').trim(),

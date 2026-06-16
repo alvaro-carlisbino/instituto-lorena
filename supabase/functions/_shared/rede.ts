@@ -22,6 +22,26 @@ export const REDE_KITS: Record<string, { label: string; amountCents: number; qty
  */
 export const REDE_KIT_MAX_INSTALLMENTS: Record<string, number> = { '1_mes': 1, '3_meses': 3, '5_meses': 3 }
 
+/**
+ * Infere o kit a partir de um valor APROXIMADO (total pago, que pode incluir o frete).
+ * Acha o kit cujo preço é <= valor e a diferença (frete) é plausível (<= R$150). Pega o de
+ * MAIOR preço que encaixa. Ex.: 61200 (597 + 15 frete) → '3_meses'; 21400 (199 + 15) → '1_mes'.
+ * Sem isto, a venda no cartão com frete embutido ficava com kit null e não ia pro Bling.
+ */
+export function inferRedeKit(approxCents: number): string | null {
+  const v = Math.round(Number(approxCents) || 0)
+  let best: string | null = null
+  let bestPrice = -1
+  for (const [key, kit] of Object.entries(REDE_KITS)) {
+    const diff = v - kit.amountCents
+    if (diff >= 0 && diff <= 15000 && kit.amountCents > bestPrice) {
+      best = key
+      bestPrice = kit.amountCents
+    }
+  }
+  return best
+}
+
 /** Resolve um kit do cartão a partir de uma variação ('3 meses', 'kit3'…). */
 export function resolveRedeKit(raw: string): { key: string; label: string; amountCents: number } | null {
   const key = normalizeKitKey(raw)
