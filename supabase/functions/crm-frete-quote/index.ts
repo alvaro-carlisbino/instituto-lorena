@@ -78,6 +78,7 @@ Deno.serve(async (req) => {
     to_cep: q.toCep,
     options: q.options.map((o) => ({
       service: o.service,
+      service_id: o.serviceId,
       company: o.company,
       price_reais: o.priceCents / 100,
       price_cents: o.priceCents,

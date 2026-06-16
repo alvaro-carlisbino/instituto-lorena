@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabaseClient'
 
 export type FreteOption = {
   service: string
+  serviceId: number
   company: string
   priceReais: number
   priceCents: number
@@ -46,6 +47,7 @@ export async function quoteFrete(args: {
   const options: FreteOption[] = Array.isArray(p.options)
     ? (p.options as Array<Record<string, unknown>>).map((o) => ({
         service: String(o.service ?? ''),
+        serviceId: Number(o.service_id ?? 0),
         company: String(o.company ?? ''),
         priceReais: Number(o.price_reais ?? 0),
         priceCents: Number(o.price_cents ?? 0),

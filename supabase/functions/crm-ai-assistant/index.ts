@@ -33,7 +33,7 @@ import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
 import { readPagBankConfig } from '../_shared/pagbank.ts'
-import { boxForKit, melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
+import { applyFreightMarkup, boxForKit, melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
 import { extractLatestCep, resolveCepBrasil } from '../_shared/cep.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
@@ -760,13 +760,18 @@ Deno.serve(async (req) => {
                   if (!fq || !fq.ok) return null
                   return {
                     kit: k.label,
-                    opcoes: fq.options.map((o) => ({
-                      servico: o.service,
-                      transportadora: o.company,
-                      valor_reais: o.priceCents / 100,
-                      valor_centavos: o.priceCents,
-                      prazo_dias_uteis: o.deliveryDays,
-                    })),
+                    opcoes: fq.options.map((o) => {
+                      // Valor JÁ COM a margem de segurança (o que o cliente paga). Entrega
+                      // interna de Maringá não recebe markup. Bate com o que será cobrado.
+                      const cents = applyFreightMarkup(o.priceCents, { internal: o.internal })
+                      return {
+                        servico: o.service,
+                        transportadora: o.company,
+                        valor_reais: cents / 100,
+                        valor_centavos: cents,
+                        prazo_dias_uteis: o.deliveryDays,
+                      }
+                    }),
                   }
                 }).filter(Boolean)
                 if (porKit.length > 0) {

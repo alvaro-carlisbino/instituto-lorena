@@ -5,7 +5,7 @@ import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, createPagBankPixOrder } from './pagbank.ts'
 import { createRedeIntent, resolveRedeKit } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
-import { boxForKit, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+import { applyFreightMarkup, boxForKit, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 
 /**
  * Resolve o frete em centavos para um op de fechamento (pix/cartão):
@@ -31,7 +31,9 @@ async function resolveFreightCents(
       const box = boxForKit(op.kit)
       const q = await quoteFreteMelhorEnvio(admin, tenantId, toCep, box ? { box } : undefined)
       const chosen = q.ok ? pickFreteOption(q, service) : null
-      if (chosen) return chosen.priceCents
+      // Política "nunca cobrar menos que o custo": aplica margem (markup + arredonda pra cima),
+      // exceto na entrega interna de Maringá.
+      if (chosen) return applyFreightMarkup(chosen.priceCents, { internal: chosen.internal })
     } catch {
       // cai no literal abaixo
     }

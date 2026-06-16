@@ -90,6 +90,25 @@ export function boxForKit(kitRaw: unknown): FreteBox | null {
 /** Chaves de kit conhecidas (p/ cotar por kit na conversa). */
 export const KIT_KEYS = Object.keys(KIT_BOXES)
 
+/**
+ * Margem de segurança no frete COBRADO do cliente (política "nunca cobrar menos que o custo").
+ * Aplica `FRETE_MARKUP_PCT` (default 10%) e arredonda PRA CIMA até `FRETE_ROUND_CENTS`
+ * (default 100 = próximo R$1). Ex.: custo R$37,49 → ×1,10 = 41,24 → arredonda → R$42,00.
+ * Só vale p/ Correios/transportadora — NÃO mexe na entrega interna de Maringá (taxa local fixa).
+ * Usado no que a IA COBRA (resolveFreightCents) e no que ela MOSTRA (snapshot.frete).
+ * A etiqueta em si paga o custo real (sem markup) — isto é só o que o cliente paga.
+ */
+export function applyFreightMarkup(rawCents: number, opts?: { internal?: boolean }): number {
+  if (opts?.internal) return rawCents
+  if (!Number.isFinite(rawCents) || rawCents <= 0) return rawCents
+  const pctRaw = Number((Deno.env.get('FRETE_MARKUP_PCT') ?? '').trim().replace(',', '.'))
+  const pct = Number.isFinite(pctRaw) && pctRaw >= 0 ? pctRaw : 0.1
+  const roundRaw = Number((Deno.env.get('FRETE_ROUND_CENTS') ?? '').trim())
+  const round = Number.isFinite(roundRaw) && roundRaw >= 1 ? Math.round(roundRaw) : 100
+  const marked = rawCents * (1 + pct)
+  return Math.ceil(marked / round) * round
+}
+
 function envNum(key: string, fallback: number): number {
   const raw = (Deno.env.get(key) ?? '').trim().replace(',', '.')
   const n = Number(raw)

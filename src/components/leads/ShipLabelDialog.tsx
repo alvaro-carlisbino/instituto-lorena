@@ -19,7 +19,9 @@ import { cn } from '@/lib/utils'
 import {
   createShipment,
   getShipConfig,
+  quoteFrete,
   saveShipSender,
+  type FreteOption,
   type MeAddress,
   type ShipConfig,
 } from '@/services/crmFrete'
@@ -58,13 +60,17 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
   const [uf, setUf] = useState('')
 
   // Pedido / frete
-  const [service, setService] = useState<'1' | '2'>('1') // 1=PAC, 2=SEDEX
   const [productName, setProductName] = useState(KIT_PRESETS['3_meses'].name)
   const [productQty, setProductQty] = useState('1')
   const [productReais, setProductReais] = useState(KIT_PRESETS['3_meses'].reais)
   const [finalize, setFinalize] = useState(false)
   const [loading, setLoading] = useState(false)
   const [cepLoading, setCepLoading] = useState(false)
+
+  // Cotação real: só os serviços que ATENDEM aquele CEP (evita "transportadora não atende").
+  const [quoteOptions, setQuoteOptions] = useState<FreteOption[]>([])
+  const [serviceId, setServiceId] = useState<string>('') // serviceId escolhido (string p/ o Select)
+  const [quoting, setQuoting] = useState(false)
 
   // Caixa (peso/dimensões) — vazio usa o padrão do polo. Importante para o preço bater.
   const [weight, setWeight] = useState('')
@@ -117,7 +123,41 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
     } finally {
       setCepLoading(false)
     }
+    void doQuote()
   }
+
+  // Cota o frete real do CEP+caixa atuais e popula só os serviços que ATENDEM o trecho.
+  const doQuote = async () => {
+    const digits = onlyDigits(cep)
+    if (digits.length !== 8) return
+    setQuoting(true)
+    try {
+      const q = await quoteFrete({
+        toCep: digits,
+        tenantId: 'tricopill',
+        weight: Number(weight.replace(',', '.')) || undefined,
+        length: Number(boxL) || undefined,
+        width: Number(boxW) || undefined,
+        height: Number(boxH) || undefined,
+      })
+      const opts = q.options ?? []
+      setQuoteOptions(opts)
+      // Mantém a seleção se ainda válida; senão pega a primeira (mais barata).
+      setServiceId((prev) => {
+        if (prev && opts.some((o) => String(o.serviceId) === prev)) return prev
+        return opts.length ? String(opts[0].serviceId) : ''
+      })
+      if (!q.ok || opts.length === 0) {
+        toast.warning('Nenhuma transportadora cotou esse CEP/caixa. Confira o CEP e o peso.')
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao cotar frete')
+    } finally {
+      setQuoting(false)
+    }
+  }
+
+  const selectedOption = quoteOptions.find((o) => String(o.serviceId) === serviceId) ?? null
 
   const handleSaveSender = async () => {
     setSavingSender(true)
@@ -146,6 +186,10 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
     }
     const valueCents = reaisToCents(productReais)
     if (!Number.isFinite(valueCents) || valueCents < 100) return toast.error('Valor do produto inválido.')
+    if (!serviceId || !selectedOption) return toast.error('Cote o frete e escolha um serviço primeiro.')
+    if (selectedOption.internal) {
+      return toast.error('Maringá é entrega interna (local) — não gera etiqueta dos Correios.')
+    }
     if (config && config.senderMissing.length) {
       setShowSender(true)
       return toast.error(`Remetente incompleto: ${config.senderMissing.join(', ')}`)
@@ -155,7 +199,7 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
     try {
       const res = await createShipment({
         leadId,
-        serviceId: Number(service),
+        serviceId: Number(serviceId),
         to: {
           name: name.trim(),
           phone: onlyDigits(phone),
@@ -290,16 +334,8 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="sl-service">Serviço</Label>
-                <Select value={service} onValueChange={(v) => setService(v as '1' | '2')}>
-                  <SelectTrigger id="sl-service">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">PAC</SelectItem>
-                    <SelectItem value="2">SEDEX</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="sl-val">Valor declarado (R$)</Label>
+                <Input id="sl-val" inputMode="decimal" value={productReais} onChange={(e) => setProductReais(e.target.value)} />
               </div>
               <div className="col-span-2 space-y-1">
                 <Label htmlFor="sl-pname">Descrição do produto</Label>
@@ -309,15 +345,11 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
                 <Label htmlFor="sl-qty">Qtd.</Label>
                 <Input id="sl-qty" inputMode="numeric" value={productQty} onChange={(e) => setProductQty(e.target.value)} />
               </div>
-              <div className="space-y-1">
-                <Label htmlFor="sl-val">Valor declarado (R$)</Label>
-                <Input id="sl-val" inputMode="decimal" value={productReais} onChange={(e) => setProductReais(e.target.value)} />
-              </div>
             </div>
             <div className="grid grid-cols-4 gap-2">
               <div className="space-y-1">
                 <Label htmlFor="sl-wt" className="text-[0.7rem]">Peso (kg)</Label>
-                <Input id="sl-wt" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="0,3" className="h-8 text-xs" />
+                <Input id="sl-wt" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} onBlur={() => void doQuote()} placeholder="0,3" className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="sl-l" className="text-[0.7rem]">Compr. (cm)</Label>
@@ -335,6 +367,46 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
             <p className="text-[0.7rem] text-muted-foreground">
               Vazio = caixa padrão do polo (0,3 kg · 20×20×10). Pra <b>4 frascos</b> use o peso real (≈ 0,6–1 kg) pra o preço bater.
             </p>
+
+            {/* Serviço — cotado de verdade; só aparece o que ATENDE o CEP/caixa */}
+            <div className="space-y-1.5 rounded-lg border border-border/40 px-3 py-2.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="sl-service" className="text-xs font-semibold">Serviço (frete real)</Label>
+                <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-[0.7rem]" disabled={quoting || onlyDigits(cep).length !== 8} onClick={() => void doQuote()}>
+                  {quoting ? 'Cotando…' : 'Cotar'}
+                </Button>
+              </div>
+              {quoteOptions.length > 0 ? (
+                <>
+                  <Select value={serviceId} onValueChange={(v) => setServiceId(v ?? '')}>
+                    <SelectTrigger id="sl-service">
+                      <SelectValue placeholder="Escolha o serviço" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {quoteOptions.map((o) => (
+                        <SelectItem key={o.serviceId} value={String(o.serviceId)}>
+                          {o.service} — R$ {o.priceReais.toFixed(2)}
+                          {o.deliveryDays != null ? ` · ${o.deliveryDays}d` : ''} ({o.company})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedOption ? (
+                    selectedOption.internal ? (
+                      <p className="text-[0.7rem] text-amber-700">Entrega interna (Maringá) — não gera etiqueta dos Correios.</p>
+                    ) : (
+                      <p className="text-[0.7rem] text-muted-foreground">
+                        Custo real da etiqueta: <b>R$ {selectedOption.priceReais.toFixed(2)}</b>. (O que você cobra do cliente é à parte.)
+                      </p>
+                    )
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-[0.7rem] text-muted-foreground">
+                  {quoting ? 'Cotando os serviços que atendem esse CEP…' : 'Preencha o CEP e o peso e clique em "Cotar" para ver os serviços que atendem.'}
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Finalizar */}
