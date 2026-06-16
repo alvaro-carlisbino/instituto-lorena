@@ -679,10 +679,11 @@ Deno.serve(async (req) => {
     if (isSalesBot && tenantId) {
       try {
         // O catálogo é só ENRIQUECIMENTO (preços vêm do prompt). NUNCA pode bloquear a
-        // resposta: corta em 3,5s. Com cache vazio + Bling lento, isso evitava a IA "parar".
+        // resposta: corta em 1,2s. Cache válido por 6h (maxAgeMs) — quando popular (aqui ou
+        // pelo keepalive do site), as próximas respostas usam o cache na hora, sem fetch ao vivo.
         const cat = await Promise.race([
-          buildBlingCatalog(dbClient, tenantId),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
+          buildBlingCatalog(dbClient, tenantId, { maxAgeMs: 6 * 60 * 60 * 1000 }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200)),
         ])
         if (!cat) throw new Error('catalog_timeout')
         // Só produtos com PREÇO DE VENDA (preco > 0) E COM ESTOQUE (> 0). A IA NÃO deve
