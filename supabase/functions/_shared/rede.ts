@@ -3,6 +3,7 @@ import { insertInteraction } from './crm.ts'
 import { normalizeKitKey } from './pagbank.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
 import { blingCreateSaleOrder } from './bling.ts'
+import { autoShipToCart } from './melhorEnvio.ts'
 
 /**
  * Kits do Tricopill no CARTÃO (e.Rede) — preço CHEIO, sem o desconto de 5% do Pix.
@@ -384,6 +385,27 @@ export async function payRedeIntent(
               tenantId: blingTenant,
             })
           }
+        }
+
+        // Envio automático no Melhor Envio (CARRINHO; best-effort, nunca quebra o pagamento).
+        try {
+          const ship = await autoShipToCart(admin, blingTenant, {
+            lead: { id: l.id, patient_name: l.patient_name, phone: l.phone, custom_fields: l.custom_fields },
+            kit: intent.kit ?? null,
+            productName: intent.kit ? `Tricopill (${intent.kit})` : 'Tricopill',
+            productValueCents: intent.amountCents,
+          })
+          if (ship.ok || ship.skipped || ship.reason) {
+            await insertInteraction(admin, {
+              leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author: 'Melhor Envio',
+              content: ship.ok
+                ? `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
+                : `📦 Envio NÃO gerado automaticamente (${ship.reason}). Gere pelo botão se for entrega.`,
+              tenantId: blingTenant,
+            })
+          }
+        } catch {
+          // best-effort: envio nunca derruba o pagamento
         }
       }
     } catch {

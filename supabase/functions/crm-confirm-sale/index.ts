@@ -5,6 +5,7 @@ import { PAGBANK_KITS, normalizeKitKey } from '../_shared/pagbank.ts'
 import { REDE_KITS, resolveRedeKit } from '../_shared/rede.ts'
 import { formatBRLCents, incrementCouponUse, quoteCoupon } from '../_shared/coupons.ts'
 import { blingCreateSaleOrder } from '../_shared/bling.ts'
+import { autoShipToCart } from '../_shared/melhorEnvio.ts'
 
 // Confirmação MANUAL de venda pela atendente (quando o cliente paga via link/Pix
 // e a venda fecha fora do webhook automático — ex.: ambiente sandbox).
@@ -164,6 +165,34 @@ Deno.serve(async (req) => {
     } catch { /* ignore */ }
   }
 
+  // 4b) Envio automático no Melhor Envio (CARRINHO; best-effort, nunca quebra a venda).
+  let shipNote: string | null = null
+  try {
+    const ship = await autoShipToCart(admin, tenantId, {
+      lead: { id: leadId, patient_name: lead.patient_name, phone: lead.phone, custom_fields: lead.custom_fields },
+      kit: kitKey,
+      productName: label,
+      productValueCents: productCents,
+    })
+    if (ship.ok) shipNote = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
+    else if (ship.skipped) {
+      const motivo: Record<string, string> = {
+        maringa_entrega_interna: 'Maringá = entrega interna (sem etiqueta).',
+        sem_cep: 'sem CEP capturado — gere o envio manualmente.',
+        sem_numero: 'sem número do endereço — gere o envio manualmente.',
+        sem_rua: 'endereço sem rua — gere o envio manualmente.',
+        me_nao_configurado: 'Melhor Envio não configurado.',
+        cep_nao_resolvido: 'CEP não encontrado — confira e gere manualmente.',
+      }
+      shipNote = `📦 Envio NÃO gerado: ${motivo[ship.reason ?? ''] ?? ship.reason}`
+    } else {
+      shipNote = `📦 Envio não gerado (${ship.reason}${ship.error ? ': ' + ship.error.slice(0, 120) : ''}). Gere manualmente.`
+    }
+    await insertInteraction(admin, {
+      leadId, patientName: customerName, channel: 'system', direction: 'system', author: 'Melhor Envio', content: shipNote, tenantId,
+    })
+  } catch { /* nunca derruba a venda */ }
+
   // 5) Notifica o time.
   try {
     await notifyAgents(admin, {
@@ -176,6 +205,6 @@ Deno.serve(async (req) => {
   return json({
     ok: true, leadId, amountCents: totalCents, productCents, freightCents, discountCents: coupon.discountCents,
     couponCode: coupon.applied ? coupon.code : null, method: methodTxt, stage: pagoStageId,
-    blingOrderId, blingNote: blingNote || null,
+    blingOrderId, blingNote: blingNote || null, shipNote,
   })
 })

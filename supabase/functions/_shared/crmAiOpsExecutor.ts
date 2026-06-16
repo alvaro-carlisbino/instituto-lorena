@@ -41,6 +41,31 @@ async function resolveFreightCents(
   return literal
 }
 
+/**
+ * Persiste o endereço de entrega capturado na venda em `lead.custom_fields.entrega`
+ * (cep/numero/complemento/serviço). É o que o envio AUTOMÁTICO no Melhor Envio usa no
+ * fechamento. Best-effort: nunca lança. Faz merge (não apaga campos já capturados).
+ */
+async function persistEntrega(admin: SupabaseClient, leadId: string, op: Record<string, unknown>): Promise<void> {
+  try {
+    const cep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
+    if (cep.length !== 8) return
+    const { data } = await admin.from('leads').select('custom_fields').eq('id', leadId).maybeSingle()
+    const cf = ((data as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>
+    const prev = (cf.entrega ?? {}) as Record<string, unknown>
+    const entrega = {
+      ...prev,
+      cep,
+      numero: op.to_number != null ? String(op.to_number).trim() : prev.numero,
+      complemento: op.to_complement != null ? String(op.to_complement).trim() : prev.complemento,
+      service: op.freight_service != null ? String(op.freight_service).trim() : prev.service,
+    }
+    await admin.from('leads').update({ custom_fields: { ...cf, entrega } }).eq('id', leadId)
+  } catch {
+    // best-effort
+  }
+}
+
 const CRM_OPS_MARKER = '<<<CRM_OPS>>>'
 
 /** URL pública do app (rota /pagar/:id do checkout de cartão). */
@@ -577,6 +602,7 @@ export async function executeCrmAiOpsFromModel(
           continue
         }
         const freightCents = await resolveFreightCents(admin, String(lf.tenant_id ?? leadTenantId), op)
+        await persistEntrega(admin, opts.allowedLeadId, op)
         try {
           const out = await createPagBankPixOrder(admin, {
             tenantId: String(lf.tenant_id ?? leadTenantId),
@@ -621,6 +647,7 @@ export async function executeCrmAiOpsFromModel(
         // freight_service ("PAC"/"SEDEX") + to_cep, o servidor recota (Melhor Envio); senão
         // usa o freight_cents literal.
         const freightCents = await resolveFreightCents(admin, leadTenantId, op)
+        await persistEntrega(admin, opts.allowedLeadId, op)
         try {
           const out = await createRedeIntent(admin, {
             tenantId: leadTenantId,

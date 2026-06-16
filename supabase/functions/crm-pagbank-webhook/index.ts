@@ -4,6 +4,7 @@ import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { parsePagBankNotification } from '../_shared/pagbank.ts'
 import { incrementCouponUse } from '../_shared/coupons.ts'
 import { blingCreateSaleOrder } from '../_shared/bling.ts'
+import { autoShipToCart } from '../_shared/melhorEnvio.ts'
 
 // Webhook de pagamento do PagBank. Quando o pagamento confirma, move o lead para a
 // etapa "Pago" do funil e registra a venda. Idempotente via webhook_jobs. Só age
@@ -241,6 +242,37 @@ Deno.serve(async (req) => {
       }
     } catch {
       // best-effort
+    }
+  }
+
+  // Envio automático no Melhor Envio (CARRINHO; best-effort, nunca quebra o webhook).
+  if (tenantId) {
+    try {
+      const { data: chkShip } = await admin
+        .from('pagbank_checkouts')
+        .select('kit, amount_cents')
+        .eq('lead_id', leadId)
+        .eq('status', 'paid')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      const kitShip = (chkShip as { kit?: string } | null)?.kit
+      const ship = await autoShipToCart(admin, tenantId, {
+        lead: { id: leadId, patient_name: l.patient_name, phone: l.phone, custom_fields: l.custom_fields },
+        kit: kitShip ?? null,
+        productName: kitShip ? `Tricopill (${kitShip})` : 'Tricopill',
+        productValueCents: Number((chkShip as { amount_cents?: number } | null)?.amount_cents ?? 0),
+      })
+      if (ship.ok || ship.skipped || ship.reason) {
+        const txt = ship.ok
+          ? `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
+          : `📦 Envio NÃO gerado automaticamente (${ship.reason}). Gere pelo botão se for entrega.`
+        await insertInteraction(admin, {
+          leadId, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author: 'Melhor Envio', content: txt, tenantId,
+        })
+      }
+    } catch {
+      // best-effort: envio nunca derruba o webhook de pagamento
     }
   }
 

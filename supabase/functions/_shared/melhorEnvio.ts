@@ -656,3 +656,76 @@ export async function createMeShipment(
 
   return { ok: true, cartId, finalized: true, tracking, protocol, printUrl, stage: printUrl ? 'print' : 'generate' }
 }
+
+export type AutoShipResult = {
+  ok: boolean
+  skipped?: boolean
+  reason?: string
+  cartId?: string | null
+  error?: string
+}
+
+/**
+ * Envio AUTOMÁTICO no fechamento: monta o frete no CARRINHO do Melhor Envio (NÃO compra —
+ * o operador paga no painel). Best-effort: NUNCA lança (o chamador é o fluxo de pagamento).
+ * Lê o endereço capturado em `lead.custom_fields.entrega` (cep/numero/complemento/service)
+ * + cadastro. Pula Maringá (entrega interna) e endereço incompleto, devolvendo `reason`.
+ */
+export async function autoShipToCart(
+  admin: SupabaseClient,
+  tenantId: string,
+  opts: {
+    lead: { id: string; patient_name?: string | null; phone?: string | null; custom_fields?: Record<string, unknown> | null }
+    kit?: string | null
+    productName: string
+    productValueCents: number
+  },
+): Promise<AutoShipResult> {
+  try {
+    if (!melhorEnvioConfigured()) return { ok: false, skipped: true, reason: 'me_nao_configurado' }
+    const cf = (opts.lead.custom_fields ?? {}) as Record<string, unknown>
+    const entrega = (cf.entrega ?? {}) as Record<string, unknown>
+    const cad = (cf.cadastro ?? {}) as Record<string, string>
+
+    const cep = onlyDigitsStr(entrega.cep ?? entrega.postalCode ?? cad.cep ?? '')
+    if (cep.length !== 8) return { ok: false, skipped: true, reason: 'sem_cep' }
+
+    const cityInfo = await resolveCepBrasil(cep)
+    if (!cityInfo) return { ok: false, skipped: true, reason: 'cep_nao_resolvido' }
+    if (isMaringa(cityInfo)) return { ok: false, skipped: true, reason: 'maringa_entrega_interna' }
+
+    const numero = String(entrega.numero ?? entrega.number ?? cad.numero ?? '').trim()
+    if (!numero) return { ok: false, skipped: true, reason: 'sem_numero' }
+
+    const to: MeAddress = {
+      name: String(cad.nomeCompleto || opts.lead.patient_name || 'Cliente Tricopill').slice(0, 60),
+      phone: opts.lead.phone ? String(opts.lead.phone) : undefined,
+      document: cad.cpf || undefined,
+      postalCode: cep,
+      address: cityInfo.logradouro || String(entrega.address ?? entrega.rua ?? '').trim(),
+      number: numero,
+      complement: String(entrega.complemento ?? entrega.complement ?? '').trim() || undefined,
+      district: cityInfo.bairro || String(entrega.bairro ?? '').trim(),
+      city: cityInfo.localidade,
+      stateAbbr: cityInfo.uf,
+    }
+    if (!to.address) return { ok: false, skipped: true, reason: 'sem_rua' }
+
+    const serviceRaw = String(entrega.service ?? entrega.freight_service ?? '').trim().toUpperCase()
+    const serviceId = serviceRaw.includes('SEDEX') ? 2 : 1 // default PAC
+
+    const res = await createMeShipment(admin, tenantId, {
+      to,
+      serviceId,
+      products: [{ name: opts.productName.slice(0, 120), quantity: 1, unitaryValueCents: Math.max(100, opts.productValueCents) }],
+      box: boxForKit(opts.kit) ?? undefined,
+      insuranceCents: Math.max(0, opts.productValueCents),
+      finalize: false, // só carrinho — o operador compra no painel
+      nonCommercial: true,
+    })
+    if (!res.ok) return { ok: false, reason: 'shipment_failed', error: res.error, cartId: res.cartId }
+    return { ok: true, cartId: res.cartId }
+  } catch (e) {
+    return { ok: false, reason: 'exception', error: e instanceof Error ? e.message : String(e) }
+  }
+}
