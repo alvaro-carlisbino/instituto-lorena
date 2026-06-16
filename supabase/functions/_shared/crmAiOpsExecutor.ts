@@ -3,7 +3,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { insertInteraction } from './crm.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, createPagBankPixOrder } from './pagbank.ts'
-import { createRedeIntent, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS } from './rede.ts'
+import { createRedeIntent, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForKit, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 
@@ -642,11 +642,14 @@ export async function executeCrmAiOpsFromModel(
           results.push({ type: 'rede_link', ok: false, detail: 'missing_kit_or_amount' })
           continue
         }
+        // KIT: prioriza o que a IA mandou; se ela mandou amount_cents (sem kit), INFERE o kit
+        // pelo valor do produto (match exato com REDE_KITS). Sem isso o kit ficava null no
+        // rede_payments e a venda no cartão NÃO ia pro Bling automaticamente.
+        const kitKey = resolved?.key ?? (Object.keys(REDE_KITS).find((k) => REDE_KITS[k].amountCents === amountCents) ?? null)
+
         const installments = Math.max(1, Math.min(12, Number(op.installments ?? 12) || 12))
         // Parcelamento EFETIVO = limitado pela regra do kit (1 frasco=1x; kits 3+1/5=3x).
-        // É o que o link realmente gera (createRedeIntent aplica o mesmo cap) E o que a
-        // mensagem deve dizer — antes o texto mostrava "12x" fixo, divergindo do real.
-        const kitCap = resolved?.key ? REDE_KIT_MAX_INSTALLMENTS[resolved.key] : undefined
+        const kitCap = kitKey ? REDE_KIT_MAX_INSTALLMENTS[kitKey] : undefined
         const effInstallments = kitCap ? Math.min(installments, kitCap) : installments
         // Frete (entrega à parte) somado ao link, em centavos. Cotação real: se a IA mandar
         // freight_service ("PAC"/"SEDEX") + to_cep, o servidor recota (Melhor Envio); senão
@@ -663,7 +666,7 @@ export async function executeCrmAiOpsFromModel(
             appBaseUrl: APP_BASE_URL,
             couponCode: op.coupon != null ? String(op.coupon) : undefined,
             freightCents,
-            kit: resolved?.key, // guarda o kit p/ criar o pedido no Bling ao pagar
+            kit: kitKey ?? undefined, // guarda o kit (ou inferido) p/ criar o pedido no Bling ao pagar
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: note, installments: effInstallments })
