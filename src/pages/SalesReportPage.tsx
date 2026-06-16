@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react'
+import { Fragment, useEffect, useState, useCallback } from 'react'
 import { toast } from 'sonner'
-import { Copy, Download, RefreshCw, FileSpreadsheet } from 'lucide-react'
+import { Copy, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronRight } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
@@ -32,6 +32,7 @@ export function SalesReportPage() {
   const [date, setDate] = useState(todayYmd())
   const [report, setReport] = useState<SalesReport | null>(null)
   const [loading, setLoading] = useState(false)
+  const [openRow, setOpenRow] = useState<number | null>(null)
 
   const load = useCallback(async (ymd: string) => {
     setLoading(true)
@@ -126,6 +127,7 @@ export function SalesReportPage() {
               <table className="w-full text-sm">
                 <thead className="border-b border-border/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
+                    <th className="w-8 px-2 py-3" />
                     <th className="px-4 py-3">Hora</th>
                     <th className="px-4 py-3">Cliente</th>
                     <th className="px-4 py-3">Produto</th>
@@ -136,21 +138,60 @@ export function SalesReportPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {report.rows.map((r, i) => (
-                    <tr key={i} className="border-b border-border/30 last:border-0">
-                      <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{hora(r.paidAt)}</td>
-                      <td className="px-4 py-2.5 font-medium">{r.customerName}</td>
-                      <td className="px-4 py-2.5">{r.product}</td>
-                      <td className="px-4 py-2.5">
-                        <Badge variant="outline" className="text-[0.7rem]">
-                          {r.method === 'card' ? `Cartão${r.installments ? ` ${r.installments}x` : ''}` : 'Pix'}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{brl(r.amountCents)}</td>
-                      <td className="px-4 py-2.5 text-xs text-muted-foreground">{r.couponCode ?? '—'}</td>
-                      <td className="px-4 py-2.5 text-xs text-muted-foreground">{r.blingOrderId ? `#${r.blingOrderId}` : '—'}</td>
-                    </tr>
-                  ))}
+                  {report.rows.map((r, i) => {
+                    const open = openRow === i
+                    const hasDetail = !!(r.cpf || r.email || r.address || r.phone)
+                    return (
+                      <Fragment key={i}>
+                        <tr
+                          className={`border-b border-border/30 last:border-0 ${hasDetail ? 'cursor-pointer hover:bg-muted/40' : ''}`}
+                          onClick={() => hasDetail && setOpenRow(open ? null : i)}
+                        >
+                          <td className="px-2 py-2.5 text-muted-foreground">
+                            {hasDetail ? (open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />) : null}
+                          </td>
+                          <td className="px-4 py-2.5 tabular-nums text-muted-foreground">{hora(r.paidAt)}</td>
+                          <td className="px-4 py-2.5 font-medium">
+                            {r.customerName}
+                            {r.cpf ? <span className="ml-2 text-xs font-normal text-muted-foreground">CPF {r.cpf}</span> : null}
+                          </td>
+                          <td className="px-4 py-2.5">{r.product}</td>
+                          <td className="px-4 py-2.5">
+                            <Badge variant="outline" className="text-[0.7rem]">
+                              {r.method === 'card' ? `Cartão${r.installments ? ` ${r.installments}x` : ''}` : 'Pix'}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{brl(r.amountCents)}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground">{r.couponCode ?? '—'}</td>
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground">{r.blingOrderId ? `#${r.blingOrderId}` : '—'}</td>
+                        </tr>
+                        {open && hasDetail ? (
+                          <tr className="border-b border-border/30 bg-muted/20">
+                            <td />
+                            <td colSpan={7} className="px-4 py-3">
+                              <dl className="grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2">
+                                {r.cpf ? (
+                                  <div className="flex gap-2"><dt className="text-muted-foreground">CPF:</dt><dd className="font-medium">{r.cpf}</dd></div>
+                                ) : null}
+                                {r.phone ? (
+                                  <div className="flex gap-2"><dt className="text-muted-foreground">Telefone:</dt><dd className="font-medium">{r.phone}</dd></div>
+                                ) : null}
+                                {r.email ? (
+                                  <div className="flex gap-2"><dt className="text-muted-foreground">E-mail:</dt><dd className="font-medium">{r.email}</dd></div>
+                                ) : null}
+                                {r.address ? (
+                                  <div className="flex gap-2 sm:col-span-2"><dt className="text-muted-foreground">Endereço:</dt><dd className="font-medium">{r.address}</dd></div>
+                                ) : null}
+                                {!r.address ? (
+                                  <div className="text-muted-foreground sm:col-span-2">Endereço não cadastrado — bot ainda não coletou.</div>
+                                ) : null}
+                              </dl>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
