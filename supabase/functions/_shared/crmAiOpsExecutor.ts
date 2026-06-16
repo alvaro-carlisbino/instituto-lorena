@@ -3,7 +3,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { insertInteraction } from './crm.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, createPagBankPixOrder } from './pagbank.ts'
-import { createRedeIntent, resolveRedeKit } from './rede.ts'
+import { createRedeIntent, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForKit, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 
@@ -133,7 +133,7 @@ export function peelCrmOpsFromModelReply(raw: string): { remainder: string; ops:
   return { remainder, ops }
 }
 
-export type CrmAiActionResult = { type: string; ok: boolean; detail?: string; customerNote?: string; imageUrl?: string }
+export type CrmAiActionResult = { type: string; ok: boolean; detail?: string; customerNote?: string; imageUrl?: string; installments?: number }
 
 /** Token para ilike: remove wildcards problemáticos. */
 export function sanitizeLeadSearchToken(raw: string): string {
@@ -643,6 +643,11 @@ export async function executeCrmAiOpsFromModel(
           continue
         }
         const installments = Math.max(1, Math.min(12, Number(op.installments ?? 12) || 12))
+        // Parcelamento EFETIVO = limitado pela regra do kit (1 frasco=1x; kits 3+1/5=3x).
+        // É o que o link realmente gera (createRedeIntent aplica o mesmo cap) E o que a
+        // mensagem deve dizer — antes o texto mostrava "12x" fixo, divergindo do real.
+        const kitCap = resolved?.key ? REDE_KIT_MAX_INSTALLMENTS[resolved.key] : undefined
+        const effInstallments = kitCap ? Math.min(installments, kitCap) : installments
         // Frete (entrega à parte) somado ao link, em centavos. Cotação real: se a IA mandar
         // freight_service ("PAC"/"SEDEX") + to_cep, o servidor recota (Melhor Envio); senão
         // usa o freight_cents literal.
@@ -661,9 +666,9 @@ export async function executeCrmAiOpsFromModel(
             kit: resolved?.key, // guarda o kit p/ criar o pedido no Bling ao pagar
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
-          results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: note })
+          results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: note, installments: effInstallments })
           summaries.push(
-            `Link cartão e.Rede gerado (${description}, até ${installments}x${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`,
+            `Link cartão e.Rede gerado (${description}, até ${effInstallments}x${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`,
           )
         } catch (e) {
           results.push({
