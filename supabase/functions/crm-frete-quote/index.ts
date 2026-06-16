@@ -63,7 +63,14 @@ Deno.serve(async (req) => {
     heightCm: num(body.height),
   }
 
-  const q = await quoteFreteMelhorEnvio(admin, tenantId, toCep, { insuranceCents, servicesCsv, box })
+  let q = await quoteFreteMelhorEnvio(admin, tenantId, toCep, { insuranceCents, servicesCsv, box })
+  // A conta Melhor Envio é ÚNICA (tenant 'tricopill') e a origem é a clínica em Maringá. Se o
+  // tenant pedido não tem conexão própria (ex.: polo Clínica), recota pela conta do Tricopill —
+  // assim o painel coteia frete de qualquer polo. (Maringá já resolve como entrega interna antes.)
+  const FRETE_FALLBACK_TENANT = 'tricopill'
+  if (!q.ok && q.debug === 'not_connected' && tenantId !== FRETE_FALLBACK_TENANT) {
+    q = await quoteFreteMelhorEnvio(admin, FRETE_FALLBACK_TENANT, toCep, { insuranceCents, servicesCsv, box })
+  }
   return json({
     ok: q.ok,
     tenant_id: tenantId,
