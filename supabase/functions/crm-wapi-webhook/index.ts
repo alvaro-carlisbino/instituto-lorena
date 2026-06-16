@@ -113,6 +113,9 @@ Deno.serve(async (req) => {
 
   const tenantId = instanceRow.tenant_id ? String(instanceRow.tenant_id) : undefined
   const wInstanceId = instanceRow.id
+  // Bot de VENDAS (Tricopill) NUNCA se desliga sozinho: ignora o handoff "triagem finalizada"
+  // (regra da clínica). Aqui a IA continua atendendo até a venda fechar.
+  const isSalesBot = String(instanceRow.bot_kind ?? '').toLowerCase() === 'sales'
 
   const dedupKey = `event:wapi:${payloadInstanceId}:${normalized.externalMessageId}`
   const { data: existing } = await admin
@@ -388,9 +391,10 @@ Deno.serve(async (req) => {
         statePrompt,
         aiJobSource: 'wapi-webhook',
         sendProvider: provider,
+        keepAiOn: isSalesBot,
       })
 
-      if (handoffSuggested) {
+      if (handoffSuggested && !isSalesBot) {
         await admin.from('leads').update({
           updated_at: new Date().toISOString(),
           last_interaction_at: new Date().toISOString(),

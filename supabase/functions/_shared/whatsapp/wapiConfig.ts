@@ -9,10 +9,11 @@ export type WapiInstanceRow = {
   wapi_base_url: string | null
   wapi_webhook_secret: string | null
   tenant_id: string | null
+  bot_kind: string | null
 }
 
 const SELECT_COLS =
-  'id, wapi_instance_id, wapi_token, wapi_base_url, wapi_webhook_secret, tenant_id, channel_provider, active'
+  'id, wapi_instance_id, wapi_token, wapi_base_url, wapi_webhook_secret, tenant_id, bot_kind, channel_provider, active'
 
 function rowToWapi(data: Record<string, unknown>): WapiInstanceRow | null {
   const wapiInstanceId = String(data.wapi_instance_id ?? '').trim()
@@ -25,6 +26,7 @@ function rowToWapi(data: Record<string, unknown>): WapiInstanceRow | null {
     wapi_base_url: (data.wapi_base_url as string | null) ?? null,
     wapi_webhook_secret: (data.wapi_webhook_secret as string | null) ?? null,
     tenant_id: (data.tenant_id as string | null) ?? null,
+    bot_kind: (data.bot_kind as string | null) ?? null,
   }
 }
 

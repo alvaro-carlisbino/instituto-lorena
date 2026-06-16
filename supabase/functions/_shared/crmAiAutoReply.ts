@@ -677,6 +677,8 @@ export async function runWhatsappAiAutoReply(
     invokeMaxAttempts?: number
     /** Omisso: usa `leads.whatsapp_instance_id` para prompt por linha. */
     whatsappInstanceId?: string | null
+    /** True (bot de vendas): NUNCA desliga a IA no handover de falha — mantém atendendo. */
+    keepAiOn?: boolean
   },
 ): Promise<{ replied: boolean; replyText?: string; burstPending?: boolean; handoffSuggested?: boolean }> {
   // crm_ai_configs tem PK (tenant_id, id): escopar por tenant do lead.
@@ -845,8 +847,9 @@ export async function runWhatsappAiAutoReply(
 
   if (!aiReply) {
     // Falha consecutiva no WhatsApp também: 2º fallback seguido → handover defensivo.
+    // EXCETO bot de vendas (keepAiOn): nunca desliga — manda o fallback e segue atendendo.
     const prevAlsoFallback = await wasLastAiReplyFallback(admin, options.leadId)
-    if (prevAlsoFallback) {
+    if (prevAlsoFallback && !options.keepAiOn) {
       try {
         const handoverText = normalizeWhatsappPatientFormatting(AI_FAILURE_HANDOVER_TEXT)
         const envTyping = (Deno.env.get('WHATSAPP_AI_TYPING_DELAY_MS') ?? '').trim()
