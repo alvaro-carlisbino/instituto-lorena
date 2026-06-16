@@ -217,6 +217,7 @@ Deno.serve(async (req) => {
               email: cad.email,
               dataNascimento: cad.dataNascimento,
               sexo: cad.sexo,
+              entrega: ((l.custom_fields as Record<string, unknown> | undefined)?.entrega as { cep?: string; numero?: string; complemento?: string }) ?? undefined,
             })
             await insertInteraction(admin, {
               leadId,

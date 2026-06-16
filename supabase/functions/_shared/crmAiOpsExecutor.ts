@@ -60,7 +60,11 @@ async function persistEntrega(admin: SupabaseClient, leadId: string, op: Record<
       complemento: op.to_complement != null ? String(op.to_complement).trim() : prev.complemento,
       service: op.freight_service != null ? String(op.freight_service).trim() : prev.service,
     }
-    await admin.from('leads').update({ custom_fields: { ...cf, entrega } }).eq('id', leadId)
+    // CPF (NF-e): merge no cadastro quando a IA mandar to_cpf no op.
+    const prevCad = (cf.cadastro ?? {}) as Record<string, unknown>
+    const cpf = op.to_cpf != null ? String(op.to_cpf).replace(/\D/g, '') : ''
+    const cadastro = cpf.length === 11 ? { ...prevCad, cpf } : prevCad
+    await admin.from('leads').update({ custom_fields: { ...cf, entrega, cadastro } }).eq('id', leadId)
   } catch {
     // best-effort
   }

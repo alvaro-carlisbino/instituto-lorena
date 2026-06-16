@@ -385,6 +385,7 @@ export async function payRedeIntent(
                 email: cad.email,
                 dataNascimento: cad.dataNascimento,
                 sexo: cad.sexo,
+                entrega: ((l.custom_fields as Record<string, unknown> | undefined)?.entrega as { cep?: string; numero?: string; complemento?: string }) ?? undefined,
               })
               await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
               await insertInteraction(admin, {

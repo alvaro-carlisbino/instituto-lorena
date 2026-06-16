@@ -153,6 +153,7 @@ Deno.serve(async (req) => {
         kit: kitKey ?? '', amountCents: productCents, description: kitKey ? undefined : label,
         customerName, phone: lead.phone ? String(lead.phone) : undefined,
         cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo,
+        entrega: (lead.custom_fields?.entrega as { cep?: string; numero?: string; complemento?: string }) ?? undefined,
       })
       blingOrderId = out.orderId
       blingNote = kitKey

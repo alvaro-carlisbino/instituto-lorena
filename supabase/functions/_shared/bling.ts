@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { resolveCepBrasil } from './cep.ts'
 
 /**
  * Bling ERP — API v3 (OAuth2 authorization_code + refresh).
@@ -299,7 +300,11 @@ function ddmmaaaaToYmd(s: string): string {
 
 async function blingFindOrCreateContato(
   token: string,
-  args: { nome: string; phone?: string; cpf?: string; email?: string; dataNascimento?: string; sexo?: string },
+  args: {
+    nome: string; phone?: string; cpf?: string; email?: string; dataNascimento?: string; sexo?: string
+    /** Endereço p/ NF-e (Bling exige CPF + endereço completo pra emitir nota). */
+    endereco?: { rua?: string; numero?: string; complemento?: string; bairro?: string; cep?: string; municipio?: string; uf?: string }
+  },
 ): Promise<string | null> {
   const nome = String(args.nome ?? '').trim().slice(0, 120)
   if (!nome) return null
@@ -338,13 +343,33 @@ async function blingFindOrCreateContato(
   const withDoc: Record<string, unknown> = { ...base }
   if (cpf.length === 11) withDoc.numeroDocumento = cpf
   if (email) withDoc.email = email
+
+  // Endereço (geral) p/ NF-e. Só inclui se tiver CEP — senão o Bling reclama de campos vazios.
+  const e = args.endereco ?? {}
+  const cepDigits = String(e.cep ?? '').replace(/\D/g, '')
+  const withEndereco: Record<string, unknown> = { ...withDoc }
+  if (cepDigits.length === 8 && e.rua && e.municipio && e.uf) {
+    withEndereco.endereco = {
+      geral: {
+        endereco: String(e.rua).slice(0, 90),
+        numero: String(e.numero ?? 'S/N').slice(0, 20),
+        complemento: String(e.complemento ?? '').slice(0, 60),
+        bairro: String(e.bairro ?? '').slice(0, 60),
+        cep: cepDigits,
+        municipio: String(e.municipio).slice(0, 60),
+        uf: String(e.uf).toUpperCase().slice(0, 2),
+      },
+    }
+  }
+
   const dados: Record<string, unknown> = {}
   if (nascimento) dados.dataNascimento = nascimento
   if (sexo) dados.sexo = sexo
-  const full: Record<string, unknown> = Object.keys(dados).length ? { ...withDoc, dadosAdicionais: dados } : { ...withDoc }
+  const full: Record<string, unknown> = Object.keys(dados).length ? { ...withEndereco, dadosAdicionais: dados } : { ...withEndereco }
 
   const seen = new Set<string>()
-  const bodies = [full, withDoc, base]
+  // Degradação: completo (c/ endereço) → c/ doc → mínimo. Garante o contato no nome certo.
+  const bodies = [full, withEndereco, withDoc, base]
     .map((b) => JSON.stringify(b))
     .filter((s) => (seen.has(s) ? false : (seen.add(s), true)))
   for (const body of bodies) {
@@ -375,6 +400,8 @@ export async function blingCreateSaleOrder(
     cpf?: string; email?: string; dataNascimento?: string; sexo?: string
     /** Venda AVULSA (sem kit): descrição livre do item (ex.: "Tricopill + Shampoo"). */
     description?: string
+    /** Endereço de entrega capturado (cep/numero/complemento) p/ completar o contato (NF-e). */
+    entrega?: { cep?: string; numero?: string; complemento?: string }
   },
 ): Promise<{ orderId: string | null; bottles: number }> {
   const token = await getValidBlingToken(admin, tenantId)
@@ -387,9 +414,21 @@ export async function blingCreateSaleOrder(
   // Contato REAL do cliente (por telefone): se conseguir, o pedido sai no nome dele;
   // senão mantém o genérico (best-effort, não quebra a venda).
   if (args.customerName) {
+    // Endereço p/ NF-e: resolve rua/bairro/cidade/uf pelo CEP capturado (entrega) + número.
+    let endereco: { rua?: string; numero?: string; complemento?: string; bairro?: string; cep?: string; municipio?: string; uf?: string } | undefined
+    const cepEntrega = String(args.entrega?.cep ?? '').replace(/\D/g, '')
+    if (cepEntrega.length === 8) {
+      const info = await resolveCepBrasil(cepEntrega).catch(() => null)
+      if (info) {
+        endereco = {
+          rua: info.logradouro, numero: args.entrega?.numero, complemento: args.entrega?.complemento,
+          bairro: info.bairro, cep: cepEntrega, municipio: info.localidade, uf: info.uf,
+        }
+      }
+    }
     const realId = await blingFindOrCreateContato(token, {
       nome: args.customerName, phone: args.phone, cpf: args.cpf, email: args.email,
-      dataNascimento: args.dataNascimento, sexo: args.sexo,
+      dataNascimento: args.dataNascimento, sexo: args.sexo, endereco,
     })
     if (realId) contatoId = realId
   }
