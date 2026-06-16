@@ -14,7 +14,11 @@ import { melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from '.
  *  - Caso contrário, usa `freight_cents`/`freightCents` literal (compatível com o fluxo antigo).
  * Devolve `undefined` quando não há frete (ex.: retirada na clínica).
  */
-async function resolveFreightCents(op: Record<string, unknown>): Promise<number | undefined> {
+async function resolveFreightCents(
+  admin: SupabaseClient,
+  tenantId: string,
+  op: Record<string, unknown>,
+): Promise<number | undefined> {
   const literalRaw = op.freight_cents ?? op.freightCents
   const literal =
     literalRaw != null && Number.isFinite(Number(literalRaw)) ? Math.max(0, Math.round(Number(literalRaw))) : undefined
@@ -23,7 +27,7 @@ async function resolveFreightCents(op: Record<string, unknown>): Promise<number 
   const toCep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
   if (service && toCep.length === 8 && melhorEnvioConfigured()) {
     try {
-      const q = await quoteFreteMelhorEnvio(toCep)
+      const q = await quoteFreteMelhorEnvio(admin, tenantId, toCep)
       const chosen = q.ok ? pickFreteOption(q, service) : null
       if (chosen) return chosen.priceCents
     } catch {
@@ -568,7 +572,7 @@ export async function executeCrmAiOpsFromModel(
           results.push({ type: 'pagbank_pix', ok: false, detail: 'lead_not_found' })
           continue
         }
-        const freightCents = await resolveFreightCents(op)
+        const freightCents = await resolveFreightCents(admin, String(lf.tenant_id ?? leadTenantId), op)
         try {
           const out = await createPagBankPixOrder(admin, {
             tenantId: String(lf.tenant_id ?? leadTenantId),
@@ -612,7 +616,7 @@ export async function executeCrmAiOpsFromModel(
         // Frete (entrega à parte) somado ao link, em centavos. Cotação real: se a IA mandar
         // freight_service ("PAC"/"SEDEX") + to_cep, o servidor recota (Melhor Envio); senão
         // usa o freight_cents literal.
-        const freightCents = await resolveFreightCents(op)
+        const freightCents = await resolveFreightCents(admin, leadTenantId, op)
         try {
           const out = await createRedeIntent(admin, {
             tenantId: leadTenantId,

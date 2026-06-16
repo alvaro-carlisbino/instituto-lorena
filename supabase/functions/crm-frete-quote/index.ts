@@ -1,40 +1,46 @@
 /**
  * crm-frete-quote — cotação de frete (Melhor Envio: Correios PAC/SEDEX) por CEP.
  *
- * Uso principal: a cotação real já é injetada no snapshot pelo crm-ai-assistant
- * (snapshot.frete) durante a conversa de vendas. Esta função é um endpoint avulso
- * para TESTAR a credencial/caixa e para futuros usos no painel ("cotar frete").
+ * Endpoint COMPARTILHADO: consumido pelo CRM (painel/bot) e pelo site oficial do Tricopill
+ * (mesmo Supabase). Usa o token OAuth conectado em tenant_integrations.melhorenvio (via
+ * service-role internamente) — então o caller só precisa do anon key (verify_jwt).
  *
- * Secrets/env (ver _shared/melhorEnvio.ts): MELHOR_ENVIO_TOKEN, MELHOR_ENVIO_SANDBOX,
- *   MELHOR_ENVIO_FROM_CEP, MELHOR_ENVIO_USER_AGENT, FRETE_BOX_WEIGHT_KG/LENGTH_CM/WIDTH_CM/HEIGHT_CM.
- *
- * Body: { "toCep": "01002901", "insuranceCents"?: 0, "services"?: "1,2" }
- * Deploy: supabase functions deploy crm-frete-quote
+ * Body: {
+ *   "toCep": "01002901",
+ *   "tenantId"?: "tricopill",          // polo dono da conta ME (default tricopill)
+ *   "weight"?: 0.3, "length"?: 20, "width"?: 20, "height"?: 12,   // caixa por carrinho (cm/kg)
+ *   "insuranceCents"?: 0, "services"?: "1,2"
+ * }
+ * Conectar a conta: edge crm-frete-oauth. Caixa padrão/segredos: ver _shared/melhorEnvio.ts.
  */
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-crm-ai-internal-secret',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 }
 
+function num(v: unknown): number | undefined {
+  if (v == null) return undefined
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ ok: false, error: 'method_not_allowed' }, 405)
 
-  // Gate opcional: quando CRM_AI_INTERNAL_SECRET está setado, exige o header
-  // x-crm-ai-internal-secret (chamadas internas). Sem o secret, fica aberto p/ teste.
-  const internalSecret = (Deno.env.get('CRM_AI_INTERNAL_SECRET') ?? '').trim()
-  if (internalSecret.length >= 16) {
-    const got = (req.headers.get('x-crm-ai-internal-secret') ?? '').trim()
-    if (got !== internalSecret) return json({ ok: false, error: 'unauthorized' }, 401)
-  }
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+  const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  if (!supabaseUrl || !serviceRole) return json({ ok: false, error: 'server_misconfigured' }, 500)
+  const admin = createClient(supabaseUrl, serviceRole)
 
-  let body: { toCep?: unknown; insuranceCents?: unknown; services?: unknown }
+  let body: Record<string, unknown>
   try {
     body = await req.json()
   } catch {
@@ -44,15 +50,23 @@ Deno.serve(async (req) => {
   const toCep = String(body.toCep ?? '').replace(/\D/g, '')
   if (toCep.length !== 8) return json({ ok: false, error: 'invalid_to_cep', hint: 'envie toCep com 8 dígitos' }, 400)
 
+  const tenantId = String(body.tenantId ?? 'tricopill').trim() || 'tricopill'
   const insuranceCents =
     body.insuranceCents != null && Number.isFinite(Number(body.insuranceCents))
       ? Math.max(0, Math.round(Number(body.insuranceCents)))
       : undefined
   const servicesCsv = body.services != null ? String(body.services) : undefined
+  const box = {
+    weightKg: num(body.weight),
+    lengthCm: num(body.length),
+    widthCm: num(body.width),
+    heightCm: num(body.height),
+  }
 
-  const q = await quoteFreteMelhorEnvio(toCep, { insuranceCents, servicesCsv })
+  const q = await quoteFreteMelhorEnvio(admin, tenantId, toCep, { insuranceCents, servicesCsv, box })
   return json({
     ok: q.ok,
+    tenant_id: tenantId,
     from_cep: q.fromCep,
     to_cep: q.toCep,
     options: q.options.map((o) => ({

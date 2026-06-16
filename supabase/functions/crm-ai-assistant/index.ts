@@ -767,7 +767,7 @@ Deno.serve(async (req) => {
             // Best-effort: se a cotação falhar, a IA cai no fluxo de pedir CEP / humano.
             if (melhorEnvioConfigured()) {
               try {
-                const fq = await quoteFreteMelhorEnvio(info.cep)
+                const fq = await quoteFreteMelhorEnvio(dbClient, tenantId, info.cep)
                 if (fq.ok) {
                   ;(snapshot as Record<string, unknown>).frete = {
                     origem_cep: fq.fromCep,

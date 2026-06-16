@@ -439,3 +439,8 @@ verify_jwt = false
 # Checkout de cartão (e.Rede): página pública do cliente, sem login.
 [functions.crm-rede-pay]
 verify_jwt = false
+
+# OAuth Melhor Envio: o callback (GET ?code) é redirect público do navegador; o
+# POST authorize_url valida a sessão por conta própria (getUser).
+[functions.crm-frete-oauth]
+verify_jwt = false
