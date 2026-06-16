@@ -352,3 +352,256 @@ export function pickFreteOption(q: FreteQuote, service: string): FreteOption | n
     null
   )
 }
+
+// ─── Geração de etiqueta (carrinho → compra → etiqueta → impressão) ───────────
+//
+// Fluxo oficial da Melhor Envio para emitir uma etiqueta:
+//   1) POST /me/cart            adiciona o frete ao carrinho (from/to/produtos/volume) → cartId
+//   2) POST /me/shipment/checkout   COMPRA (debita saldo da carteira ME) — gasta dinheiro real
+//   3) POST /me/shipment/generate   gera a etiqueta (emite o código de rastreio nos Correios)
+//   4) POST /me/shipment/print      devolve a URL do PDF para impressão
+//
+// `finalize=false` (default) para SÓ no passo 1: o operador revisa e paga no painel ME.
+// IDs de serviço Correios: 1 = PAC, 2 = SEDEX.
+
+const onlyDigitsStr = (s: unknown) => String(s ?? '').replace(/\D/g, '')
+
+export type MeAddress = {
+  name?: string
+  phone?: string
+  email?: string
+  document?: string // CPF
+  companyDocument?: string // CNPJ
+  stateRegister?: string
+  address?: string
+  number?: string
+  complement?: string
+  district?: string
+  city?: string
+  stateAbbr?: string
+  postalCode?: string
+  note?: string
+}
+
+export type MeProduct = { name: string; quantity: number; unitaryValueCents: number }
+
+export type MeShipmentInput = {
+  to: MeAddress
+  /** Remetente; se ausente, usa o configurado no polo (tenant_integrations.melhorenvio.sender) / env. */
+  from?: MeAddress
+  serviceId: number
+  products: MeProduct[]
+  box?: FreteBox
+  insuranceCents?: number
+  /** true = compra + gera etiqueta + imprime; false = só adiciona ao carrinho. */
+  finalize?: boolean
+  /** Declaração não-comercial (sem NF) — default true para venda direta. */
+  nonCommercial?: boolean
+}
+
+export type MeShipmentResult = {
+  ok: boolean
+  cartId: string | null
+  finalized: boolean
+  tracking: string | null
+  protocol: string | null
+  printUrl: string | null
+  /** Etapa em que parou: 'cart' | 'checkout' | 'generate' | 'print'. */
+  stage: string
+  error?: string
+}
+
+/** Remetente persistido por polo (tenant_integrations.melhorenvio.sender), com fallback em env. */
+export async function getMeSender(admin: SupabaseClient, tenantId: string): Promise<MeAddress> {
+  let saved: Record<string, unknown> = {}
+  try {
+    const { data } = await admin
+      .from('tenant_integrations')
+      .select('melhorenvio')
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    const cfg = ((data as { melhorenvio?: Record<string, unknown> } | null)?.melhorenvio ?? {}) as Record<string, unknown>
+    if (cfg.sender && typeof cfg.sender === 'object') saved = cfg.sender as Record<string, unknown>
+  } catch {
+    // best-effort
+  }
+  const pick = (k: string, env: string, fb = '') =>
+    String((saved[k] as string | undefined) ?? (Deno.env.get(env) ?? '') ?? fb).trim()
+  return {
+    name: pick('name', 'MELHOR_ENVIO_FROM_NAME', 'Instituto Lorena'),
+    phone: pick('phone', 'MELHOR_ENVIO_FROM_PHONE'),
+    email: pick('email', 'MELHOR_ENVIO_FROM_EMAIL'),
+    document: pick('document', 'MELHOR_ENVIO_FROM_DOCUMENT'),
+    companyDocument: pick('companyDocument', 'MELHOR_ENVIO_FROM_CNPJ'),
+    address: pick('address', 'MELHOR_ENVIO_FROM_ADDRESS'),
+    number: pick('number', 'MELHOR_ENVIO_FROM_NUMBER'),
+    complement: pick('complement', 'MELHOR_ENVIO_FROM_COMPLEMENT'),
+    district: pick('district', 'MELHOR_ENVIO_FROM_DISTRICT'),
+    city: pick('city', 'MELHOR_ENVIO_FROM_CITY', 'Maringá'),
+    stateAbbr: pick('stateAbbr', 'MELHOR_ENVIO_FROM_STATE', 'PR'),
+    postalCode: onlyDigitsStr(pick('postalCode', 'MELHOR_ENVIO_FROM_CEP', '87014180')),
+  }
+}
+
+/** Salva/atualiza o remetente do polo (merge no objeto melhorenvio, preserva os tokens). */
+export async function setMeSender(admin: SupabaseClient, tenantId: string, sender: MeAddress): Promise<void> {
+  const { data } = await admin
+    .from('tenant_integrations')
+    .select('melhorenvio')
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  const current = ((data as { melhorenvio?: Record<string, unknown> } | null)?.melhorenvio ?? {}) as Record<string, unknown>
+  const clean: MeAddress = { ...sender, postalCode: onlyDigitsStr(sender.postalCode), phone: onlyDigitsStr(sender.phone) }
+  await admin.from('tenant_integrations').upsert({
+    tenant_id: tenantId,
+    melhorenvio: { ...current, sender: clean, updated_at: new Date().toISOString() },
+  })
+}
+
+/** Valida que um remetente tem os campos mínimos exigidos pela ME para emitir etiqueta. */
+export function meSenderMissing(s: MeAddress): string[] {
+  const miss: string[] = []
+  if (!s.name) miss.push('nome')
+  if (!s.phone) miss.push('telefone')
+  if (!s.document && !s.companyDocument) miss.push('CPF ou CNPJ')
+  if (!s.address) miss.push('rua')
+  if (!s.number) miss.push('número')
+  if (!s.district) miss.push('bairro')
+  if (!s.city) miss.push('cidade')
+  if (!s.stateAbbr) miss.push('UF')
+  if (onlyDigitsStr(s.postalCode).length !== 8) miss.push('CEP')
+  return miss
+}
+
+function meAddressToApi(a: MeAddress): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    name: a.name ?? '',
+    phone: onlyDigitsStr(a.phone),
+    email: a.email ?? '',
+    address: a.address ?? '',
+    number: a.number ?? 's/n',
+    complement: a.complement ?? '',
+    district: a.district ?? '',
+    city: a.city ?? '',
+    state_abbr: (a.stateAbbr ?? '').toUpperCase().slice(0, 2),
+    country_id: 'BR',
+    postal_code: onlyDigitsStr(a.postalCode),
+    note: a.note ?? '',
+  }
+  if (a.document) out.document = onlyDigitsStr(a.document)
+  if (a.companyDocument) out.company_document = onlyDigitsStr(a.companyDocument)
+  if (a.stateRegister) out.state_register = a.stateRegister
+  return out
+}
+
+async function meApiPost(token: string, path: string, body: unknown): Promise<{ ok: boolean; status: number; data: any; text: string }> {
+  const res = await fetch(`${melhorEnvioBaseUrl()}${path}`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'User-Agent': meUserAgent(),
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
+  })
+  const text = await res.text()
+  let data: any = null
+  try {
+    data = text ? JSON.parse(text) : null
+  } catch {
+    data = null
+  }
+  return { ok: res.ok, status: res.status, data, text }
+}
+
+/**
+ * Emite (ou só carrinho) uma etiqueta na Melhor Envio. Conta única do polo (token OAuth no banco).
+ * Devolve o que conseguiu até parar; em erro, `stage` indica a etapa e `error` o motivo.
+ */
+export async function createMeShipment(
+  admin: SupabaseClient,
+  tenantId: string,
+  input: MeShipmentInput,
+): Promise<MeShipmentResult> {
+  const fail = (stage: string, error: string, partial?: Partial<MeShipmentResult>): MeShipmentResult => ({
+    ok: false, cartId: null, finalized: false, tracking: null, protocol: null, printUrl: null, stage, error, ...partial,
+  })
+
+  if (!melhorEnvioConfigured()) return fail('cart', 'client_not_configured')
+  const token = await getValidMeToken(admin, tenantId)
+  if (!token) return fail('cart', 'not_connected')
+
+  const from = input.from ?? (await getMeSender(admin, tenantId))
+  const missingFrom = meSenderMissing(from)
+  if (missingFrom.length) return fail('cart', `remetente_incompleto: ${missingFrom.join(', ')}`)
+
+  const box = input.box ?? {}
+  const insuranceReais = Math.max(0, (input.insuranceCents ?? 0) / 100)
+  const cartBody = {
+    service: input.serviceId,
+    from: meAddressToApi(from),
+    to: meAddressToApi(input.to),
+    products: input.products.map((p) => ({
+      name: p.name.slice(0, 120),
+      quantity: String(Math.max(1, Math.round(p.quantity))),
+      unitary_value: (Math.max(0, p.unitaryValueCents) / 100).toFixed(2),
+    })),
+    volumes: [
+      {
+        height: box.heightCm && box.heightCm > 0 ? box.heightCm : envNum('FRETE_BOX_HEIGHT_CM', 10),
+        width: box.widthCm && box.widthCm > 0 ? box.widthCm : envNum('FRETE_BOX_WIDTH_CM', 20),
+        length: box.lengthCm && box.lengthCm > 0 ? box.lengthCm : envNum('FRETE_BOX_LENGTH_CM', 20),
+        weight: box.weightKg && box.weightKg > 0 ? box.weightKg : envNum('FRETE_BOX_WEIGHT_KG', 0.3),
+      },
+    ],
+    options: {
+      insurance_value: insuranceReais,
+      receipt: false,
+      own_hand: false,
+      reverse: false,
+      non_commercial: input.nonCommercial !== false,
+    },
+  }
+
+  // 1) Carrinho
+  const cart = await meApiPost(token, '/api/v2/me/cart', cartBody)
+  if (!cart.ok || !cart.data?.id) {
+    const detail = cart.data?.message || cart.data?.errors ? JSON.stringify(cart.data).slice(0, 300) : cart.text.slice(0, 300)
+    return fail('cart', `http_${cart.status}: ${detail}`)
+  }
+  const cartId = String(cart.data.id)
+  const protocol = cart.data.protocol ? String(cart.data.protocol) : null
+
+  if (!input.finalize) {
+    return { ok: true, cartId, finalized: false, tracking: null, protocol, printUrl: null, stage: 'cart' }
+  }
+
+  // 2) Compra (debita saldo da carteira ME)
+  const checkout = await meApiPost(token, '/api/v2/me/shipment/checkout', { orders: [cartId] })
+  if (!checkout.ok) {
+    return fail('checkout', `http_${checkout.status}: ${checkout.text.slice(0, 300)}`, { cartId, protocol })
+  }
+
+  // 3) Gera etiqueta (emite rastreio)
+  const gen = await meApiPost(token, '/api/v2/me/shipment/generate', { orders: [cartId] })
+  if (!gen.ok) {
+    return fail('generate', `http_${gen.status}: ${gen.text.slice(0, 300)}`, { cartId, protocol, finalized: true })
+  }
+  // A resposta de generate é { "<cartId>": { tracking, ... } }
+  let tracking: string | null = null
+  try {
+    const entry = gen.data?.[cartId] ?? Object.values(gen.data ?? {})[0]
+    if (entry && typeof entry === 'object') tracking = (entry as Record<string, unknown>).tracking ? String((entry as Record<string, unknown>).tracking) : null
+  } catch {
+    // ignore
+  }
+
+  // 4) Impressão (URL do PDF)
+  let printUrl: string | null = null
+  const print = await meApiPost(token, '/api/v2/me/shipment/print', { mode: 'private', orders: [cartId] })
+  if (print.ok && print.data?.url) printUrl = String(print.data.url)
+
+  return { ok: true, cartId, finalized: true, tracking, protocol, printUrl, stage: printUrl ? 'print' : 'generate' }
+}

@@ -15,6 +15,7 @@ import {
   Sticker,
   CreditCard,
   CheckCircle2,
+  Truck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -39,6 +40,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ScheduleAppointmentDialog } from '@/components/leads/ScheduleAppointmentDialog'
 import { ConfirmSaleDialog } from '@/components/leads/ConfirmSaleDialog'
+import { ShipLabelDialog } from '@/components/leads/ShipLabelDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { generatePagbankLink, PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
@@ -149,6 +151,7 @@ export function LeadChatThread({
   const [filter, setFilter] = useState<ChatFilter>(whatsappOnly ? 'whatsapp' : 'all')
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
   const [confirmSaleOpen, setConfirmSaleOpen] = useState(false)
+  const [shipOpen, setShipOpen] = useState(false)
   const [pagbankLoading, setPagbankLoading] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   // Controle de auto-scroll: só descer pro fim se o usuário JÁ estava no fim.
@@ -1013,6 +1016,17 @@ export function LeadChatThread({
                     <CheckCircle2 className="mr-1.5 h-3.5 w-3.5 text-emerald-600" />
                     Confirmar venda
                   </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    title="Gerar envio no Melhor Envio (carrinho ou etiqueta)"
+                    className="h-8 rounded-lg px-2 text-[10px]"
+                    onClick={() => setShipOpen(true)}
+                  >
+                    <Truck className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                    Gerar envio
+                  </Button>
                   </>
                 ) : (
                   <Button
@@ -1107,6 +1121,16 @@ export function LeadChatThread({
         onClose={() => setConfirmSaleOpen(false)}
         leadId={leadId}
         onConfirmed={() => void crm.syncFromSupabase?.()}
+      />
+
+      <ShipLabelDialog
+        key={`ship-${leadId}-${shipOpen}`}
+        isOpen={shipOpen}
+        onClose={() => setShipOpen(false)}
+        leadId={leadId}
+        defaultName={crm.leads.find((l) => l.id === leadId)?.patientName}
+        defaultPhone={crm.leads.find((l) => l.id === leadId)?.phone}
+        onDone={() => void crm.refreshChatFromSupabase?.()}
       />
     </div>
   )
