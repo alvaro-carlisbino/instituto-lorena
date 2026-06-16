@@ -46,3 +46,16 @@ export function isMaringa(info: { localidade?: string; uf?: string } | null | un
   const city = String(info.localidade ?? '').trim().toLowerCase()
   return (city === 'maringá' || city === 'maringa') && String(info.uf ?? '').toUpperCase() === 'PR'
 }
+
+/**
+ * Cidades atendidas pela ENTREGA INTERNA da equipe (mesma praça de Maringá): Maringá e
+ * as vizinhas Sarandi, Paiçandu e Marialva (PR). Entrega própria (R$ 15 fixo), não Correios.
+ * Fora dessas → envio externo (Melhor Envio). Compara sem acento.
+ */
+const LOCAL_DELIVERY_CITIES = new Set(['maringa', 'sarandi', 'paicandu', 'marialva'])
+const stripAccents = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+export function isLocalDeliveryCity(info: { localidade?: string; uf?: string } | null | undefined): boolean {
+  if (!info) return false
+  const city = stripAccents(String(info.localidade ?? '').trim().toLowerCase())
+  return LOCAL_DELIVERY_CITIES.has(city) && String(info.uf ?? '').toUpperCase() === 'PR'
+}

@@ -187,7 +187,9 @@ Deno.serve(async (req) => {
   }
 
   // Pedido automático no Bling (best-effort; só roda se auto_order_enabled e o lead tem kit).
-  if (tenantId) {
+  // IDEMPOTÊNCIA: só na 1ª confirmação (markedPaid) — webhooks repetidos do PagBank (AUTORIZADO
+  // depois PAGO) não recriam pedido nem reemitem NF-e. (Eventos idênticos já caem no dedup acima.)
+  if (tenantId && markedPaid) {
     try {
       const { data: blingRow } = await admin
         .from('tenant_integrations')
@@ -217,7 +219,10 @@ Deno.serve(async (req) => {
               email: cad.email,
               dataNascimento: cad.dataNascimento,
               sexo: cad.sexo,
-              entrega: ((l.custom_fields as Record<string, unknown> | undefined)?.entrega as { cep?: string; numero?: string; complemento?: string }) ?? undefined,
+              entrega: ((l.custom_fields as Record<string, unknown> | undefined)?.entrega as {
+                cep?: string; numero?: string; complemento?: string
+                bairro?: string; logradouro?: string; cidade?: string; uf?: string; delivery_mode?: string
+              }) ?? undefined,
             })
             await insertInteraction(admin, {
               leadId,

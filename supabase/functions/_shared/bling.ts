@@ -400,10 +400,18 @@ export async function blingCreateSaleOrder(
     cpf?: string; email?: string; dataNascimento?: string; sexo?: string
     /** Venda AVULSA (sem kit): descrição livre do item (ex.: "Tricopill + Shampoo"). */
     description?: string
-    /** Endereço de entrega capturado (cep/numero/complemento) p/ completar o contato (NF-e). */
-    entrega?: { cep?: string; numero?: string; complemento?: string }
+    /** Endereço de entrega capturado p/ completar o contato (NF-e) + modalidade da venda. */
+    entrega?: {
+      cep?: string; numero?: string; complemento?: string
+      bairro?: string; logradouro?: string; cidade?: string; uf?: string
+      delivery_mode?: string
+    }
   },
-): Promise<{ orderId: string | null; bottles: number }> {
+): Promise<{
+  orderId: string | null
+  bottles: number
+  nfe?: { nfeId: string | null; numero?: string; situacao?: string; transmitted: boolean; error?: string }
+}> {
   const token = await getValidBlingToken(admin, tenantId)
   if (!token) throw new Error('bling_nao_conectado')
 
@@ -413,19 +421,23 @@ export async function blingCreateSaleOrder(
   if (!contatoId) throw new Error('bling_default_contato_nao_configurado')
   // Contato REAL do cliente (por telefone): se conseguir, o pedido sai no nome dele;
   // senão mantém o genérico (best-effort, não quebra a venda).
-  if (args.customerName) {
-    // Endereço p/ NF-e: resolve rua/bairro/cidade/uf pelo CEP capturado (entrega) + número.
-    let endereco: { rua?: string; numero?: string; complemento?: string; bairro?: string; cep?: string; municipio?: string; uf?: string } | undefined
-    const cepEntrega = String(args.entrega?.cep ?? '').replace(/\D/g, '')
-    if (cepEntrega.length === 8) {
-      const info = await resolveCepBrasil(cepEntrega).catch(() => null)
-      if (info) {
-        endereco = {
-          rua: info.logradouro, numero: args.entrega?.numero, complemento: args.entrega?.complemento,
-          bairro: info.bairro, cep: cepEntrega, municipio: info.localidade, uf: info.uf,
-        }
-      }
+  // Endereço p/ NF-e: prioriza o que o cliente informou (entrega.*); completa o que faltar
+  // pelo ViaCEP (rua/bairro/cidade/uf). Assim a nota sai com endereço mesmo se o ViaCEP falhar.
+  let endereco: { rua?: string; numero?: string; complemento?: string; bairro?: string; cep?: string; municipio?: string; uf?: string } | undefined
+  const cepEntrega = String(args.entrega?.cep ?? '').replace(/\D/g, '')
+  if (cepEntrega.length === 8) {
+    const info = await resolveCepBrasil(cepEntrega).catch(() => null)
+    endereco = {
+      rua: args.entrega?.logradouro || info?.logradouro,
+      numero: args.entrega?.numero,
+      complemento: args.entrega?.complemento,
+      bairro: args.entrega?.bairro || info?.bairro,
+      cep: cepEntrega,
+      municipio: args.entrega?.cidade || info?.localidade,
+      uf: (args.entrega?.uf || info?.uf || '').toUpperCase() || undefined,
     }
+  }
+  if (args.customerName) {
     const realId = await blingFindOrCreateContato(token, {
       nome: args.customerName, phone: args.phone, cpf: args.cpf, email: args.email,
       dataNascimento: args.dataNascimento, sexo: args.sexo, endereco,
@@ -453,9 +465,28 @@ export async function blingCreateSaleOrder(
   // Data do pedido (YYYY-MM-DD, fuso de Maringá/Brasília). O Bling EXIGE `data` —
   // sem ela recusa com "A data para geração das parcelas é inválida".
   const dataPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
-  // Nome do cliente nas observações: o pedido usa um contato genérico (default_contato_id),
-  // então sem isso fica impossível saber de quem é a venda no Bling.
-  const obs = args.customerName ? `Cliente: ${args.customerName} — venda via CRM/WhatsApp` : undefined
+  // Observações: nome do cliente + MODALIDADE de entrega (a equipe de logística lê aqui no
+  // Bling). Na entrega local da equipe, inclui o endereço operacional (rua, nº, compl., bairro).
+  const modeLabels: Record<string, string> = {
+    retirada_clinica: 'RETIRADA NA CLÍNICA',
+    entrega_local_maringa: 'ENTREGA LOCAL (equipe)',
+    envio_externo: 'ENVIO (Correios/transportadora)',
+  }
+  const mode = String(args.entrega?.delivery_mode ?? '').trim()
+  const obsParts: string[] = []
+  if (args.customerName) obsParts.push(`Cliente: ${args.customerName} — venda via CRM/WhatsApp`)
+  if (mode && modeLabels[mode]) {
+    obsParts.push(`Modalidade: ${modeLabels[mode]}`)
+    if (mode === 'entrega_local_maringa' && endereco) {
+      const linha = [
+        [endereco.rua, endereco.numero].filter(Boolean).join(', '),
+        endereco.complemento, endereco.bairro,
+        [endereco.municipio, endereco.uf].filter(Boolean).join('/'),
+      ].filter(Boolean).join(' - ')
+      if (linha) obsParts.push(`Entregar em: ${linha}`)
+    }
+  }
+  const obs = obsParts.length ? obsParts.join(' | ') : undefined
   const payload = {
     contato: { id: Number(contatoId) || contatoId },
     data: dataPedido,
@@ -470,7 +501,74 @@ export async function blingCreateSaleOrder(
     ],
   }
   const orderId = await blingCreateOrder(token, payload)
-  return { orderId, bottles }
+
+  // NF-e automática (gated): só quando o tenant habilitou (auto_nfe_enabled) E configurou a
+  // natureza de operação (natureza_operacao_id). Emitir nota é AÇÃO FISCAL irreversível — por
+  // isso fica OFF por padrão e a transmissão ao SEFAZ exige auto_nfe_transmit=true. Sem CPF
+  // não tenta (nota PF exige CPF). Best-effort: nunca derruba a venda.
+  let nfe: { nfeId: string | null; numero?: string; situacao?: string; transmitted: boolean; error?: string } | undefined
+  const cpfOk = String(args.cpf ?? '').replace(/\D/g, '').length === 11
+  if (orderId && cfg.auto_nfe_enabled === true && cfg.natureza_operacao_id && cpfOk) {
+    nfe = await blingEmitNfe(token, {
+      naturezaOperacaoId: String(cfg.natureza_operacao_id),
+      contatoId,
+      itens: payload.itens,
+      observacoes: obs,
+      transmit: cfg.auto_nfe_transmit === true,
+    }).catch((e) => ({ nfeId: null, transmitted: false, error: e instanceof Error ? e.message : String(e) }))
+  }
+  return { orderId, bottles, nfe }
+}
+
+/**
+ * Cria (e opcionalmente transmite) uma NF-e no Bling a partir dos itens/contato do pedido.
+ * Bling auto-preenche a tributação a partir do cadastro fiscal do PRODUTO + da natureza de
+ * operação informada. `transmit=false` deixa a nota em rascunho pro operador conferir e
+ * transmitir num clique. Requer `natureza_operacao_id` configurado no tenant.
+ */
+export async function blingEmitNfe(
+  token: string,
+  args: {
+    naturezaOperacaoId: string
+    contatoId: string
+    itens: Array<Record<string, unknown>>
+    observacoes?: string
+    transmit?: boolean
+  },
+): Promise<{ nfeId: string | null; numero?: string; situacao?: string; transmitted: boolean; error?: string }> {
+  const payload: Record<string, unknown> = {
+    tipo: 1, // 1 = saída
+    finalidade: 1, // 1 = NF-e normal
+    naturezaOperacao: { id: Number(args.naturezaOperacaoId) || args.naturezaOperacaoId },
+    contato: { id: Number(args.contatoId) || args.contatoId },
+    itens: args.itens,
+    ...(args.observacoes ? { observacoes: args.observacoes } : {}),
+  }
+  const res = await blingFetch(token, '/nfe', { method: 'POST', body: JSON.stringify(payload) })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`bling_nfe_${res.status}: ${text.slice(0, 300)}`)
+  let parsed: { data?: { id?: number | string; numero?: string | number; situacao?: string | number } } = {}
+  try {
+    parsed = text ? JSON.parse(text) : {}
+  } catch {
+    parsed = {}
+  }
+  const nfeId = parsed.data?.id != null ? String(parsed.data.id) : null
+  const numero = parsed.data?.numero != null ? String(parsed.data.numero) : undefined
+  const situacao = parsed.data?.situacao != null ? String(parsed.data.situacao) : undefined
+  if (!nfeId || !args.transmit) return { nfeId, numero, situacao, transmitted: false }
+
+  // Transmissão ao SEFAZ (envio). Falha aqui não invalida a nota criada (rascunho).
+  try {
+    const send = await blingFetch(token, `/nfe/${nfeId}/enviar`, { method: 'POST' })
+    if (!send.ok) {
+      const t = await send.text()
+      return { nfeId, numero, situacao, transmitted: false, error: `envio_${send.status}: ${t.slice(0, 200)}` }
+    }
+    return { nfeId, numero, situacao, transmitted: true }
+  } catch (e) {
+    return { nfeId, numero, situacao, transmitted: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 export type BlingSaleOrder = {

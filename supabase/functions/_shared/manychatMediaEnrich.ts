@@ -137,6 +137,41 @@ async function runMediaIntel(
 }
 
 /**
+ * Roda inteligência (transcrição/OCR/extração) sobre bytes JÁ disponíveis (base64) e
+ * persiste em `crm_media_items`. Best-effort: nunca lança; falha vira nota em
+ * `extracted_text`. Devolve as linhas de inteligência extraídas (p/ anexar ao contexto).
+ *
+ * Compartilhado entre o caminho URL (ManyChat, abaixo) e os canais que já entregam o
+ * base64 pronto (W-API: webhook + worker de retry) — não duplica a lógica de OCR/ASR.
+ */
+async function runIntelAndPersist(
+  admin: SupabaseClient,
+  rowId: string,
+  mediaType: string,
+  mime: string,
+  base64: string,
+): Promise<{ transcribed: string | null; extracted: string | null }> {
+  const apiKey = getOpenAiApiKey()
+  try {
+    const { transcribed, extracted } = await runMediaIntel(apiKey, mediaType, mime, base64)
+    if (transcribed || extracted) {
+      await admin
+        .from('crm_media_items')
+        .update({ transcribed_text: transcribed, extracted_text: extracted })
+        .eq('id', rowId)
+    }
+    return { transcribed, extracted }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    await admin
+      .from('crm_media_items')
+      .update({ extracted_text: trunc(`[Falha no processamento automático: ${msg}]`, 2000) })
+      .eq('id', rowId)
+    return { transcribed: null, extracted: null }
+  }
+}
+
+/**
  * Baixa + arquiva + transcreve as linhas de mídia indicadas. Devolve um bloco de
  * texto com a inteligência extraída (transcrição/OCR) para anexar ao contexto da IA.
  * Nunca lança: erros viram nota em `extracted_text` e seguem.
@@ -183,23 +218,57 @@ export async function enrichManychatMediaRows(
     // 2) Inteligência (best-effort). Imagem usa ZAI (vision); áudio usa ZAI (glm-asr);
     //    PDF/doc usa OpenAI (se configurado).
     if (!apiKey && !visionConfigured() && !zaiAsrConfigured()) continue
-    try {
-      const { transcribed, extracted } = await runMediaIntel(apiKey, String(row.media_type ?? 'other'), mime, dl.base64)
-      if (transcribed || extracted) {
-        await admin
-          .from('crm_media_items')
-          .update({ transcribed_text: transcribed, extracted_text: extracted })
-          .eq('id', row.id)
-      }
-      if (transcribed) intelLines.push(`[Áudio — transcrição]\n${transcribed}`)
-      if (extracted) intelLines.push(`[Documento/imagem — texto extraído]\n${extracted}`)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      await admin
-        .from('crm_media_items')
-        .update({ extracted_text: trunc(`[Falha no processamento automático: ${msg}]`, 2000) })
-        .eq('id', row.id)
+    const { transcribed, extracted } = await runIntelAndPersist(admin, row.id, String(row.media_type ?? 'other'), mime, dl.base64)
+    if (transcribed) intelLines.push(`[Áudio — transcrição]\n${transcribed}`)
+    if (extracted) intelLines.push(`[Documento/imagem — texto extraído]\n${extracted}`)
+  }
+
+  return intelLines.filter(Boolean).join('\n\n')
+}
+
+/**
+ * Enriquecimento para canais que já entregam o base64 pronto (W-API: webhook em
+ * background + worker crm-wapi-media-retry). Diferente do ManyChat, aqui NÃO há
+ * download por URL — a linha de `crm_media_items` já nasce com `media_base64`. Só
+ * falta rodar OCR/ASR e popular `transcribed_text`/`extracted_text` para a IA enxergar.
+ *
+ * Idempotente (pula linhas já enriquecidas) e best-effort (nunca lança — não pode
+ * derrubar o webhook nem o worker). Reaproveita `runMediaIntel` (mesma lógica do
+ * ManyChat: imagem→ZAI vision, áudio→ZAI glm-asr, PDF/doc→OpenAI se configurado).
+ */
+export async function enrichMediaRowsFromBase64(
+  admin: SupabaseClient,
+  options: { rowIds: string[] },
+): Promise<string> {
+  if (options.rowIds.length === 0) return ''
+
+  const { data, error } = await admin
+    .from('crm_media_items')
+    .select('id, media_type, mime_type, media_base64, transcribed_text, extracted_text')
+    .in('id', options.rowIds)
+  if (error || !data?.length) return ''
+
+  // Sem nenhum provider de inteligência não adianta tentar.
+  if (!getOpenAiApiKey() && !visionConfigured() && !zaiAsrConfigured()) return ''
+
+  const intelLines: string[] = []
+  for (const row of data as MediaRow[]) {
+    const base64 = String(row.media_base64 ?? '').trim()
+    if (!base64) continue // sem bytes (download ainda não concluído) — nada a fazer
+
+    // Idempotente: já tem inteligência extraída.
+    const tPrev = String(row.transcribed_text ?? '').trim()
+    const xPrev = String(row.extracted_text ?? '').trim()
+    if (tPrev || xPrev) {
+      if (tPrev) intelLines.push(`[Áudio — transcrição]\n${tPrev}`)
+      if (xPrev) intelLines.push(`[Documento/imagem — texto extraído]\n${xPrev}`)
+      continue
     }
+
+    const mime = row.mime_type || 'application/octet-stream'
+    const { transcribed, extracted } = await runIntelAndPersist(admin, row.id, String(row.media_type ?? 'other'), mime, base64)
+    if (transcribed) intelLines.push(`[Áudio — transcrição]\n${transcribed}`)
+    if (extracted) intelLines.push(`[Documento/imagem — texto extraído]\n${extracted}`)
   }
 
   return intelLines.filter(Boolean).join('\n\n')

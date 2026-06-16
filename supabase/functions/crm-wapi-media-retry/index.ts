@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { createWapiProviderForRow, loadWapiInstanceByRowId } from '../_shared/whatsapp/wapiConfig.ts'
 import { WapiProvider } from '../_shared/whatsapp/wapi.ts'
+import { enrichMediaRowsFromBase64 } from '../_shared/manychatMediaEnrich.ts'
 
 // Worker (cron, a cada 2 min) que reprocessa downloads de mídia inbound do W-API que
 // FALHARAM no webhook. O áudio (PTT/opus) costuma estourar o timeout na hora da mensagem,
@@ -85,16 +86,28 @@ Deno.serve(async (req) => {
       )
 
       if (dl.ok && dl.base64) {
-        await admin.from('crm_media_items').insert({
-          lead_id: job.lead_id,
-          interaction_id: job.interaction_id,
-          tenant_id: job.tenant_id,
-          direction: 'in',
-          media_type: job.media_type,
-          mime_type: dl.mimeType ?? null,
-          media_base64: dl.base64,
-          metadata: { source: 'wapi-retry', caption: job.caption ?? null },
-        })
+        const { data: inserted } = await admin
+          .from('crm_media_items')
+          .insert({
+            lead_id: job.lead_id,
+            interaction_id: job.interaction_id,
+            tenant_id: job.tenant_id,
+            direction: 'in',
+            media_type: job.media_type,
+            mime_type: dl.mimeType ?? null,
+            media_base64: dl.base64,
+            metadata: { source: 'wapi-retry', caption: job.caption ?? null },
+          })
+          .select('id')
+          .single()
+        // Enriquece (OCR/transcrição) p/ a IA enxergar a mídia — best-effort, não derruba o job.
+        if (inserted?.id) {
+          try {
+            await enrichMediaRowsFromBase64(admin, { rowIds: [String(inserted.id)] })
+          } catch (e) {
+            console.warn('[wapi-media-retry] enrich failed:', e instanceof Error ? e.message : String(e))
+          }
+        }
         await admin
           .from('crm_media_retry_jobs')
           .update({ status: 'done', attempts, last_error: null, updated_at: nowIso() })

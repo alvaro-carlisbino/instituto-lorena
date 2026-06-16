@@ -16,6 +16,7 @@ import {
   loadWhatsappInstanceByWapiId,
 } from '../_shared/whatsapp/wapiConfig.ts'
 import { extractInboundMedia, isMediaOnlyMarker, WapiProvider } from '../_shared/whatsapp/wapi.ts'
+import { enrichMediaRowsFromBase64 } from '../_shared/manychatMediaEnrich.ts'
 
 // Webhook próprio da W-API. Roda em paralelo ao crm-whatsapp-webhook (Evolution/Official).
 // Cada linha em whatsapp_channel_instances com channel_provider='wapi' tem token e
@@ -257,16 +258,29 @@ Deno.serve(async (req) => {
             note: `${med.mediaType}:${messageId}:${dl.debug}`.slice(0, 490),
           })
           if (dl.ok && dl.base64) {
-            await admin.from('crm_media_items').insert({
-              lead_id: leadIdForMedia,
-              interaction_id: inboundInteractionId,
-              tenant_id: tenantId,
-              direction: 'in',
-              media_type: med.mediaType,
-              mime_type: dl.mimeType ?? null,
-              media_base64: dl.base64,
-              metadata: { source: 'wapi', caption: med.caption || null },
-            })
+            const { data: insertedMedia } = await admin
+              .from('crm_media_items')
+              .insert({
+                lead_id: leadIdForMedia,
+                interaction_id: inboundInteractionId,
+                tenant_id: tenantId,
+                direction: 'in',
+                media_type: med.mediaType,
+                mime_type: dl.mimeType ?? null,
+                media_base64: dl.base64,
+                metadata: { source: 'wapi', caption: med.caption || null },
+              })
+              .select('id')
+              .single()
+            // Enriquece (OCR/transcrição) p/ a IA enxergar a mídia — mesmo pipeline do ManyChat,
+            // best-effort (não derruba o background task se o OCR/ASR falhar).
+            if (insertedMedia?.id) {
+              try {
+                await enrichMediaRowsFromBase64(admin, { rowIds: [String(insertedMedia.id)] })
+              } catch (e) {
+                console.warn('[wapi-webhook] media enrich failed:', e instanceof Error ? e.message : String(e))
+              }
+            }
             // Cutuca o realtime de `leads` p/ o chat exibir a mídia na hora (sem esperar o poll de 12s).
             await admin.from('leads').update({ updated_at: new Date().toISOString() }).eq('id', leadIdForMedia)
           } else {

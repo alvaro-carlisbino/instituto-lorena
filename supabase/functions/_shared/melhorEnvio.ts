@@ -1,5 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { isMaringa, resolveCepBrasil } from './cep.ts'
+import { isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
 
 /**
  * Melhor Envio — agregador que cota Correios (PAC/SEDEX) e transportadoras SEM exigir
@@ -115,8 +115,12 @@ function envNum(key: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
-/** Valor da entrega interna de Maringá em centavos (default R$ 15,00; aceita 0 = grátis). */
-function maringaCents(): number {
+/**
+ * Valor da entrega interna da equipe (Maringá + Sarandi/Paiçandu/Marialva) em centavos
+ * (default R$ 15,00; aceita 0 = grátis via FRETE_MARINGA_CENTS). Exportado p/ o executor
+ * de ops cobrar o frete certo no fechamento (modo entrega_local_maringa).
+ */
+export function localDeliveryCents(): number {
   const raw = (Deno.env.get('FRETE_MARINGA_CENTS') ?? '').trim()
   const n = Number(raw)
   return raw !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n) : 1500
@@ -310,17 +314,18 @@ export async function quoteFreteMelhorEnvio(
   if (toCep.length !== 8) return empty('invalid_to_cep')
   if (fromCep.length !== 8) return empty('invalid_from_cep')
 
-  // Maringá = praça local: entrega INTERNA (não cota Correios). Vale mesmo sem ME conectado.
+  // Praça local (Maringá + Sarandi/Paiçandu/Marialva): entrega INTERNA da equipe (não cota
+  // Correios). Vale mesmo sem ME conectado. R$ 15 fixo (localDeliveryCents).
   const cityInfo = opts?.cityInfo ?? (await resolveCepBrasil(toCep))
-  if (isMaringa(cityInfo)) {
+  if (isLocalDeliveryCity(cityInfo)) {
     return {
       ok: true,
       fromCep,
       toCep,
       options: [
-        { service: 'Entrega interna', serviceId: 0, company: 'Maringá (local)', priceCents: maringaCents(), deliveryDays: null, internal: true },
+        { service: 'Entrega interna', serviceId: 0, company: 'Maringá e região (local)', priceCents: localDeliveryCents(), deliveryDays: null, internal: true },
       ],
-      debug: 'maringa_interno',
+      debug: 'entrega_interna_local',
     }
   }
 
@@ -682,17 +687,26 @@ export async function autoShipToCart(
   },
 ): Promise<AutoShipResult> {
   try {
-    if (!melhorEnvioConfigured()) return { ok: false, skipped: true, reason: 'me_nao_configurado' }
     const cf = (opts.lead.custom_fields ?? {}) as Record<string, unknown>
     const entrega = (cf.entrega ?? {}) as Record<string, unknown>
     const cad = (cf.cadastro ?? {}) as Record<string, string>
+
+    // MODALIDADE manda: só 'envio_externo' gera etiqueta. Retirada e entrega local da equipe
+    // NÃO vão pro Melhor Envio (a etiqueta sairia inútil). delivery_mode é gravado pela IA.
+    const deliveryMode = String(entrega.delivery_mode ?? '').trim()
+    if (deliveryMode === 'retirada_clinica') return { ok: false, skipped: true, reason: 'retirada_clinica' }
+    if (deliveryMode === 'entrega_local_maringa') return { ok: false, skipped: true, reason: 'entrega_local_maringa' }
+
+    if (!melhorEnvioConfigured()) return { ok: false, skipped: true, reason: 'me_nao_configurado' }
 
     const cep = onlyDigitsStr(entrega.cep ?? entrega.postalCode ?? cad.cep ?? '')
     if (cep.length !== 8) return { ok: false, skipped: true, reason: 'sem_cep' }
 
     const cityInfo = await resolveCepBrasil(cep)
     if (!cityInfo) return { ok: false, skipped: true, reason: 'cep_nao_resolvido' }
-    if (isMaringa(cityInfo)) return { ok: false, skipped: true, reason: 'maringa_entrega_interna' }
+    // Rede de segurança p/ vendas sem delivery_mode explícito (fluxo antigo): praça local
+    // (Maringá + vizinhas) = entrega interna, não cota Correios.
+    if (!deliveryMode && isLocalDeliveryCity(cityInfo)) return { ok: false, skipped: true, reason: 'entrega_local_maringa' }
 
     const numero = String(entrega.numero ?? entrega.number ?? cad.numero ?? '').trim()
     if (!numero) return { ok: false, skipped: true, reason: 'sem_numero' }

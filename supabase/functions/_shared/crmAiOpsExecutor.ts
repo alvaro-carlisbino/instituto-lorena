@@ -5,7 +5,14 @@ import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, createPagBankPixOrder } from './pagbank.ts'
 import { createRedeIntent, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
-import { applyFreightMarkup, boxForKit, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+import { applyFreightMarkup, boxForKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+
+/** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
+const DELIVERY_MODES = ['retirada_clinica', 'entrega_local_maringa', 'envio_externo'] as const
+function normalizeDeliveryMode(v: unknown): string {
+  const s = String(v ?? '').trim().toLowerCase()
+  return (DELIVERY_MODES as readonly string[]).includes(s) ? s : ''
+}
 
 /**
  * Resolve o frete em centavos para um op de fechamento (pix/cartão):
@@ -23,6 +30,14 @@ async function resolveFreightCents(
   const literal =
     literalRaw != null && Number.isFinite(Number(literalRaw)) ? Math.max(0, Math.round(Number(literalRaw))) : undefined
 
+  // MODALIDADE define o frete antes de qualquer cotação:
+  //  - retirada_clinica   → sem frete (cliente busca na clínica)
+  //  - entrega_local_maringa → R$ 15 fixo (equipe entrega em Maringá + vizinhas)
+  //  - envio_externo / ausente → cota o Melhor Envio (abaixo)
+  const deliveryMode = normalizeDeliveryMode(op.delivery_mode ?? op.to_delivery_mode)
+  if (deliveryMode === 'retirada_clinica') return undefined
+  if (deliveryMode === 'entrega_local_maringa') return localDeliveryCents()
+
   const service = op.freight_service != null ? String(op.freight_service).trim() : ''
   const toCep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
   if (service && toCep.length === 8 && melhorEnvioConfigured()) {
@@ -30,9 +45,10 @@ async function resolveFreightCents(
       // A caixa ESCALA com o kit (peso real): sem isto o frete de 4 frascos saía como o de 1.
       const box = boxForKit(op.kit)
       const q = await quoteFreteMelhorEnvio(admin, tenantId, toCep, box ? { box } : undefined)
-      const chosen = q.ok ? pickFreteOption(q, service) : null
-      // Política "nunca cobrar menos que o custo": aplica margem (markup + arredonda pra cima),
-      // exceto na entrega interna de Maringá.
+      // Se o serviço pedido não casar (ex.: CEP de praça local só devolve "Entrega interna",
+      // ou a rota só tem SEDEX), NÃO cobra R$0: cai na opção mais barata que a cotação trouxe.
+      // Política "nunca cobrar menos que o custo": aplica margem (markup + arredonda pra cima).
+      const chosen = q.ok ? (pickFreteOption(q, service) ?? q.options[0] ?? null) : null
       if (chosen) return applyFreightMarkup(chosen.priceCents, { internal: chosen.internal })
     } catch {
       // cai no literal abaixo
@@ -46,28 +62,75 @@ async function resolveFreightCents(
  * (cep/numero/complemento/serviço). É o que o envio AUTOMÁTICO no Melhor Envio usa no
  * fechamento. Best-effort: nunca lança. Faz merge (não apaga campos já capturados).
  */
-async function persistEntrega(admin: SupabaseClient, leadId: string, op: Record<string, unknown>): Promise<void> {
+type CadastroSnapshot = Record<string, unknown>
+type EntregaSnapshot = Record<string, unknown>
+
+async function persistEntrega(
+  admin: SupabaseClient,
+  leadId: string,
+  op: Record<string, unknown>,
+): Promise<{ cadastro: CadastroSnapshot; entrega: EntregaSnapshot }> {
   try {
-    const cep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
-    if (cep.length !== 8) return
     const { data } = await admin.from('leads').select('custom_fields').eq('id', leadId).maybeSingle()
     const cf = ((data as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>
     const prev = (cf.entrega ?? {}) as Record<string, unknown>
-    const entrega = {
-      ...prev,
-      cep,
-      numero: op.to_number != null ? String(op.to_number).trim() : prev.numero,
-      complemento: op.to_complement != null ? String(op.to_complement).trim() : prev.complemento,
-      service: op.freight_service != null ? String(op.freight_service).trim() : prev.service,
-    }
-    // CPF (NF-e): merge no cadastro quando a IA mandar to_cpf no op.
     const prevCad = (cf.cadastro ?? {}) as Record<string, unknown>
-    const cpf = op.to_cpf != null ? String(op.to_cpf).replace(/\D/g, '') : ''
-    const cadastro = cpf.length === 11 ? { ...prevCad, cpf } : prevCad
+
+    const cep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
+    const str = (v: unknown) => (v == null ? undefined : String(v).trim() || undefined)
+
+    // ENTREGA: só sobrescreve campos que vieram no op (merge — nunca apaga o já capturado).
+    const entrega: EntregaSnapshot = {
+      ...prev,
+      ...(cep.length === 8 ? { cep } : {}),
+      numero: str(op.to_number) ?? prev.numero,
+      complemento: str(op.to_complement) ?? prev.complemento,
+      bairro: str(op.to_neighborhood ?? op.to_bairro) ?? prev.bairro,
+      logradouro: str(op.to_street ?? op.to_logradouro ?? op.to_address) ?? prev.logradouro,
+      cidade: str(op.to_city ?? op.to_cidade) ?? prev.cidade,
+      uf: (str(op.to_uf ?? op.to_state) ?? (prev.uf as string | undefined))?.toUpperCase(),
+      service: str(op.freight_service) ?? prev.service,
+      delivery_mode: normalizeDeliveryMode(op.delivery_mode ?? op.to_delivery_mode) || prev.delivery_mode,
+    }
+
+    // CADASTRO completo (NF-e): nome, CPF, e-mail, nascimento, sexo — merge quando vierem no op.
+    const cpf = String(op.to_cpf ?? op.cpf ?? '').replace(/\D/g, '')
+    const sexoRaw = String(op.to_sex ?? op.to_sexo ?? '').trim().toUpperCase()
+    const cadastro: CadastroSnapshot = {
+      ...prevCad,
+      nomeCompleto: str(op.to_name ?? op.to_nome ?? op.customer_name) ?? prevCad.nomeCompleto,
+      ...(cpf.length === 11 ? { cpf } : {}),
+      email: str(op.to_email ?? op.email) ?? prevCad.email,
+      dataNascimento: str(op.to_birthdate ?? op.to_nascimento) ?? prevCad.dataNascimento,
+      ...(['M', 'F'].includes(sexoRaw) ? { sexo: sexoRaw } : {}),
+    }
+
     await admin.from('leads').update({ custom_fields: { ...cf, entrega, cadastro } }).eq('id', leadId)
+    return { cadastro, entrega }
   } catch {
-    // best-effort
+    return { cadastro: {}, entrega: {} }
   }
+}
+
+/**
+ * Trava de prontidão antes de gerar QUALQUER link/Pix: como a NF-e é emitida automática no
+ * fechamento, o pedido precisa de cadastro completo SEMPRE (inclusive retirada). Exige nome
+ * completo + CPF(11) + CEP(8) + número. Devolve o que falta (em pt-BR) p/ a IA pedir.
+ */
+function validateOrderReadiness(
+  cadastro: CadastroSnapshot,
+  entrega: EntregaSnapshot,
+): { ok: boolean; missing: string[] } {
+  const missing: string[] = []
+  const nome = String(cadastro.nomeCompleto ?? '').trim()
+  const cpf = String(cadastro.cpf ?? '').replace(/\D/g, '')
+  const cep = String(entrega.cep ?? '').replace(/\D/g, '')
+  const numero = String(entrega.numero ?? '').trim()
+  if (nome.split(/\s+/).filter(Boolean).length < 2) missing.push('nome completo')
+  if (cpf.length !== 11) missing.push('CPF')
+  if (cep.length !== 8) missing.push('CEP')
+  if (!numero) missing.push('número do endereço')
+  return { ok: missing.length === 0, missing }
 }
 
 const CRM_OPS_MARKER = '<<<CRM_OPS>>>'
@@ -606,7 +669,18 @@ export async function executeCrmAiOpsFromModel(
           continue
         }
         const freightCents = await resolveFreightCents(admin, String(lf.tenant_id ?? leadTenantId), op)
-        await persistEntrega(admin, opts.allowedLeadId, op)
+        const snapPix = await persistEntrega(admin, opts.allowedLeadId, op)
+        // MESMA trava NF-e do cartão: não gera Pix sem cadastro completo (nome+CPF+CEP+número).
+        const readyPix = validateOrderReadiness(snapPix.cadastro, snapPix.entrega)
+        if (!readyPix.ok) {
+          results.push({
+            type: 'pagbank_pix',
+            ok: false,
+            detail: `cadastro_incompleto: ${readyPix.missing.join(', ')}`,
+            customerNote: `Pra finalizar e já emitir sua nota fiscal, só preciso de: ${readyPix.missing.join(', ')}. Pode me mandar? 💚`,
+          })
+          continue
+        }
         try {
           const out = await createPagBankPixOrder(admin, {
             tenantId: String(lf.tenant_id ?? leadTenantId),
@@ -659,7 +733,19 @@ export async function executeCrmAiOpsFromModel(
         // freight_service ("PAC"/"SEDEX") + to_cep, o servidor recota (Melhor Envio); senão
         // usa o freight_cents literal.
         const freightCents = await resolveFreightCents(admin, leadTenantId, op)
-        await persistEntrega(admin, opts.allowedLeadId, op)
+        const snap = await persistEntrega(admin, opts.allowedLeadId, op)
+        // TRAVA NF-e: não gera o link sem cadastro completo (nome+CPF+CEP+número). A nota é
+        // emitida automática no fechamento, então o pedido precisa estar pronto p/ NF-e.
+        const ready = validateOrderReadiness(snap.cadastro, snap.entrega)
+        if (!ready.ok) {
+          results.push({
+            type: 'rede_link',
+            ok: false,
+            detail: `cadastro_incompleto: ${ready.missing.join(', ')}`,
+            customerNote: `Pra finalizar e já emitir sua nota fiscal, só preciso de: ${ready.missing.join(', ')}. Pode me mandar? 💚`,
+          })
+          continue
+        }
         try {
           const out = await createRedeIntent(admin, {
             tenantId: leadTenantId,

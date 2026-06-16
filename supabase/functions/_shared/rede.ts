@@ -387,16 +387,26 @@ export async function payRedeIntent(
                 email: cad.email,
                 dataNascimento: cad.dataNascimento,
                 sexo: cad.sexo,
-                entrega: ((l.custom_fields as Record<string, unknown> | undefined)?.entrega as { cep?: string; numero?: string; complemento?: string }) ?? undefined,
+                entrega: ((l.custom_fields as Record<string, unknown> | undefined)?.entrega as {
+                  cep?: string; numero?: string; complemento?: string
+                  bairro?: string; logradouro?: string; cidade?: string; uf?: string; delivery_mode?: string
+                }) ?? undefined,
               })
               await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
+              const nfeNote = out.nfe
+                ? (out.nfe.transmitted
+                    ? ` · NF-e ${out.nfe.numero ? '#' + out.nfe.numero + ' ' : ''}transmitida ✅`
+                    : out.nfe.nfeId
+                      ? ` · NF-e gerada (rascunho${out.nfe.error ? ': ' + out.nfe.error : ''}) — transmita no Bling`
+                      : ` · NF-e não emitida${out.nfe.error ? ': ' + out.nfe.error : ''}`)
+                : ''
               await insertInteraction(admin, {
                 leadId: l.id,
                 patientName: String(l.patient_name ?? 'Cliente'),
                 channel: 'system',
                 direction: 'system',
                 author: 'Bling',
-                content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`,
+                content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).${nfeNote}`,
                 tenantId: blingTenant,
               })
             }
@@ -422,12 +432,28 @@ export async function payRedeIntent(
             productValueCents: intent.amountCents,
           })
           if (ship.ok || ship.skipped || ship.reason) {
+            const ent = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>
+            const ster = (v: unknown) => String(v ?? '').trim()
+            const endLinha = [
+              [ster(ent.logradouro), ster(ent.numero)].filter(Boolean).join(', '),
+              ster(ent.complemento), ster(ent.bairro), [ster(ent.cidade), ster(ent.uf)].filter(Boolean).join('/'),
+            ].filter(Boolean).join(' - ')
+            let content: string
+            let author = 'Melhor Envio'
+            if (ship.ok) {
+              content = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
+            } else if (ship.reason === 'entrega_local_maringa') {
+              author = 'Logística'
+              content = `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`
+            } else if (ship.reason === 'retirada_clinica') {
+              author = 'Logística'
+              content = `🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)`
+            } else {
+              content = `📦 Envio NÃO gerado automaticamente (${ship.reason}). Gere pelo botão se for envio externo.`
+            }
             await insertInteraction(admin, {
-              leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author: 'Melhor Envio',
-              content: ship.ok
-                ? `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
-                : `📦 Envio NÃO gerado automaticamente (${ship.reason}). Gere pelo botão se for entrega.`,
-              tenantId: blingTenant,
+              leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author,
+              content, tenantId: blingTenant,
             })
           }
         } catch {

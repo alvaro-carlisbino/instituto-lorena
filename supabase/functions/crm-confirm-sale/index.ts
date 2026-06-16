@@ -153,7 +153,10 @@ Deno.serve(async (req) => {
         kit: kitKey ?? '', amountCents: productCents, description: kitKey ? undefined : label,
         customerName, phone: lead.phone ? String(lead.phone) : undefined,
         cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo,
-        entrega: (lead.custom_fields?.entrega as { cep?: string; numero?: string; complemento?: string }) ?? undefined,
+        entrega: (lead.custom_fields?.entrega as {
+          cep?: string; numero?: string; complemento?: string
+          bairro?: string; logradouro?: string; cidade?: string; uf?: string; delivery_mode?: string
+        }) ?? undefined,
       })
       blingOrderId = out.orderId
       blingNote = kitKey
@@ -182,6 +185,8 @@ Deno.serve(async (req) => {
     if (ship.ok) shipNote = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
     else if (ship.skipped) {
       const motivo: Record<string, string> = {
+        retirada_clinica: 'Retirada na clínica (sem envio).',
+        entrega_local_maringa: 'Entrega local da equipe (sem etiqueta dos Correios).',
         maringa_entrega_interna: 'Maringá = entrega interna (sem etiqueta).',
         sem_cep: 'sem CEP capturado — gere o envio manualmente.',
         sem_numero: 'sem número do endereço — gere o envio manualmente.',

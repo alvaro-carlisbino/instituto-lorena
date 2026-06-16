@@ -146,7 +146,10 @@ Deno.serve(async (req) => {
         customerName: String(cad.nomeCompleto || lead.patient_name || 'Cliente Tricopill').trim(),
         phone: lead.phone ? String(lead.phone) : undefined,
         cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo,
-        entrega: ((lead.custom_fields as Record<string, unknown> | undefined)?.entrega as { cep?: string; numero?: string; complemento?: string }) ?? undefined,
+        entrega: ((lead.custom_fields as Record<string, unknown> | undefined)?.entrega as {
+          cep?: string; numero?: string; complemento?: string
+          bairro?: string; logradouro?: string; cidade?: string; uf?: string; delivery_mode?: string
+        }) ?? undefined,
       })
       if (rede) await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', (rede as { id: string }).id)
       await insertInteraction(admin, {
