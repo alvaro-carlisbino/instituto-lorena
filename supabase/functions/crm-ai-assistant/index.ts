@@ -986,6 +986,10 @@ Deno.serve(async (req) => {
     const useCodingMerge = isCodingPlanApiRoot(zaiApiRoot)
     const messages = buildMessagesForZaiRequest(systemContent, clientMessages, useCodingMerge)
 
+    // TIMEOUT no LLM: sem isto, um z.ai lento/pendurado trava a função INTEIRA (sem reply,
+    // sem erro, sem breadcrumb) — o que derrubou clínica + tricopill juntos. Aborta em
+    // ZAI_TIMEOUT_MS (default 45s) → vira erro tratável (zai_upstream) em vez de hang.
+    const zaiTimeoutMs = Number(Deno.env.get('ZAI_TIMEOUT_MS') ?? '') || 45000
     const zaiRes = await fetch(zaiChatUrl, {
       method: 'POST',
       headers: {
@@ -999,6 +1003,7 @@ Deno.serve(async (req) => {
         temperature: temperatureForModel(model),
         max_tokens: 2048,
       }),
+      signal: AbortSignal.timeout(zaiTimeoutMs),
     })
 
     const zaiText = await zaiRes.text()
@@ -1010,6 +1015,13 @@ Deno.serve(async (req) => {
         useCodingMerge && looksLikeGenericFail
           ? 'O endpoint …/coding/paas/v4 (GLM Coding Plan) na documentação Z.ai destina-se a integrações listadas (IDEs, agentes de código). Um assistente CRM no Supabase pode não ser suportado e devolver 500 genérico. Para uso geral na app, use https://api.z.ai/api/paas/v4 com saldo pay-as-you-go (ajuste o secret ZAI_API_BASE).'
           : undefined
+      try {
+        await dbClient.from('webhook_jobs').insert({
+          source: 'crm-ai-assistant',
+          status: 'done',
+          note: `crm-ai-debug:zai_upstream:status=${zaiRes.status}:lead=${context.leadId ?? '?'}:${bodyText.replace(/[\r\n]+/g, ' ')}`.slice(0, 480),
+        })
+      } catch { /* ignore */ }
       return jsonResponse({
         ok: false,
         error: 'zai_upstream',
@@ -1205,6 +1217,13 @@ Deno.serve(async (req) => {
       ...(list_leads && list_leads.length > 0 ? { list_leads } : {}),
     })
   } catch (e) {
+    try {
+      await dbClient.from('webhook_jobs').insert({
+        source: 'crm-ai-assistant',
+        status: 'done',
+        note: `crm-ai-debug:unhandled:${(e instanceof Error ? e.message : String(e)).replace(/[\r\n]+/g, ' ')}`.slice(0, 480),
+      })
+    } catch { /* ignore */ }
     return jsonResponse(
       {
         ok: false,
