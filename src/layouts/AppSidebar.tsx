@@ -36,7 +36,6 @@ import { BRAND_FAVICON_URL } from '@/config/brandAssets'
 import { APP_ENV_BADGE, APP_NAME, APP_TAGLINE } from '@/config/branding'
 import { useTenant } from '@/context/TenantContext'
 import { useCrm } from '@/context/CrmContext'
-import { useIsMobile } from '@/hooks/use-mobile'
 import {
   Sidebar,
   SidebarContent,
@@ -64,10 +63,10 @@ function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon
         render={<NavLink to={to} />}
         tooltip={label}
         className={cn(
-          "h-10 rounded-xl px-3 transition-all duration-200 font-bold text-[13px]",
-          isActive 
-            ? "bg-primary shadow-lg shadow-primary/20 text-primary-foreground font-black" 
-            : "hover:bg-sidebar-accent/50 text-sidebar-foreground/70 hover:text-sidebar-foreground"
+          "h-9 rounded-lg px-3 text-[13px] transition-colors duration-150",
+          isActive
+            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+            : "font-normal text-sidebar-foreground hover:bg-sidebar-accent/40 hover:text-sidebar-accent-foreground"
         )}
       >
         <NavIcon className={cn("size-[18px] shrink-0", isActive ? "opacity-100" : "opacity-70")} aria-hidden />
@@ -79,10 +78,10 @@ function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon
 
 export function AppSidebar() {
   const crm = useCrm()
-  const isMobile = useIsMobile()
   const { tenant, isSuperAdmin } = useTenant()
 
-  if (isMobile) return null
+  // No mobile, o primitivo Sidebar renderiza um drawer (Sheet) sozinho — NÃO retornar null
+  // aqui, senão o celular fica sem navegação (o hamburger no header abre este drawer).
 
   // Fallback para o constant APP_NAME garante UX continua intacta enquanto a
   // Fase 0 migration não estiver aplicada ou enquanto o tenant ainda carrega.
@@ -133,35 +132,46 @@ export function AppSidebar() {
           <PoloSwitcher />
         </div>
         <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
-            Operação
+          <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+            Trabalho
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu className="gap-1">
+            <SidebarMenu className="gap-0.5">
               <NavItem to="/dashboard" label="Painel" icon={TrendingUp} />
               <NavItem to="/kanban" label="Quadro de leads" icon={LayoutGrid} />
               {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={List} /> : null}
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={MessagesSquare} /> : null}
-              {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill" label="Tricopill" icon={Pill} /> : null}
-              {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill-bi" label="BI Tricopill" icon={ChartColumn} /> : null}
-              {showLeadsHub ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
-              {showLeadsHub && isSalesPolo ? <NavItem to="/relatorio-vendas" label="Relatório de vendas" icon={Receipt} /> : null}
-              {showLeadsHub && isSalesPolo ? <NavItem to="/cupons" label="Cupons" icon={Ticket} /> : null}
-              {showAdmin ? <NavItem to="/integracoes" label="Integrações" icon={Unplug} /> : null}
-              <NavItem to="/historico" label="Histórico" icon={History} />
-              {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={SquareCheck} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
+              {showLeadsHub ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
+              {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={SquareCheck} /> : null}
+              <NavItem to="/historico" label="Histórico" icon={History} />
               <NavItem to="/assistente" label="Assistente IA" icon={Bot} />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
+        {showLeadsHub && isSalesPolo ? (
+          <SidebarGroup>
+            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+              Vendas
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                <NavItem to="/tricopill" label="Tricopill" icon={Pill} />
+                <NavItem to="/tricopill-bi" label="BI Tricopill" icon={ChartColumn} />
+                <NavItem to="/relatorio-vendas" label="Relatório de vendas" icon={Receipt} />
+                <NavItem to="/cupons" label="Cupons" icon={Ticket} />
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
+
         <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
+          <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
             Dados e canais
           </SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu className="gap-1">
+            <SidebarMenu className="gap-0.5">
               <NavItem to="/canais" label="Canais" icon={Radio} />
               <NavItem to="/metricas" label="Métricas" icon={ChartColumn} />
               <NavItem to="/analytics" label="Analytics" icon={ChartColumn} />
@@ -169,21 +179,21 @@ export function AppSidebar() {
               <NavItem to="/planos" label="Planos" icon={ChartColumn} />
               {showBoards ? <NavItem to="/boards" label="Funis" icon={Boxes} /> : null}
               {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table2} /> : null}
-              {showAdmin ? <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowLeftRight} /> : null}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
         {(showDashboardConfig || showAdmin) && (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
+            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
               Configuração
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-1">
+              <SidebarMenu className="gap-0.5">
                 {showDashboardConfig ? (
-                  <NavItem to="/dashboard-config" label="Painel" icon={SlidersHorizontal} />
+                  <NavItem to="/dashboard-config" label="Painel (widgets)" icon={SlidersHorizontal} />
                 ) : null}
+                {showAdmin ? <NavItem to="/integracoes" label="Integrações" icon={Unplug} /> : null}
                 <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
               </SidebarMenu>
             </SidebarGroupContent>
@@ -192,12 +202,13 @@ export function AppSidebar() {
 
         {showAdmin ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
+            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
               Administração
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-1">
+              <SidebarMenu className="gap-0.5">
                 <NavItem to="/usuarios" label="Usuários" icon={Users} />
+                <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowLeftRight} />
                 <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
                 <NavItem to="/admin-operacao" label="Operação Admin" icon={Settings} />
                 <NavItem to="/admin-lab" label="Ferramentas" icon={FlaskConical} />
@@ -209,11 +220,11 @@ export function AppSidebar() {
 
         {showTv ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/60">
+            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
               TV
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-1">
+              <SidebarMenu className="gap-0.5">
                 <NavItem to="/tv-config" label="Config. TV" icon={Tv} />
                 <NavItem to="/tv" label="Tela TV" icon={Monitor} />
               </SidebarMenu>
@@ -223,11 +234,11 @@ export function AppSidebar() {
 
         {!showDashboardConfig && !showAdmin ? (
           <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-4 text-[10px] font-black uppercase tracking-[0.25em] text-sidebar-foreground/40">
+            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/40">
               Geral
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-1">
+              <SidebarMenu className="gap-0.5">
                 <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
               </SidebarMenu>
             </SidebarGroupContent>
