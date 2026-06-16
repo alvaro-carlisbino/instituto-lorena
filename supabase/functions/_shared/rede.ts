@@ -340,7 +340,10 @@ export async function payRedeIntent(
 
         // Pedido automático no Bling (best-effort): só se auto_order_enabled, o pagamento
         // tem kit, e ainda não há pedido (idempotente). Espelha o caminho do Pix/PagBank.
-        const blingTenant = String(l.tenant_id ?? intent.tenantId)
+        // KIT = produto Tricopill → Bling/ME vivem no tenant 'tricopill', NÃO no tenant do
+        // lead. Sem isto, um lead que veio pelo canal da CLÍNICA comprando Tricopill tentava
+        // criar o pedido no Bling da clínica (inexistente) e não ia pro Bling (bug Fabricio).
+        const blingTenant = intent.kit ? 'tricopill' : String(l.tenant_id ?? intent.tenantId)
         if (intent.kit && !intent.blingOrderId) {
           try {
             const { data: blingRow } = await admin
