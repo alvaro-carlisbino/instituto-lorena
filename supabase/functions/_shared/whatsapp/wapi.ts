@@ -350,15 +350,14 @@ export class WapiProvider implements WhatsappProvider {
     type: 'image' | 'video' | 'audio' | 'document',
     media: Record<string, unknown>,
   ): Promise<{ ok: boolean; base64?: string; mimeType?: string; debug: string }> {
+    // Body conforme a doc OFICIAL da W-API (/v1/message/download-media): só os 4 obrigatórios.
+    // Mandar `url`/sha extras fazia o W-API devolver um fileLink (CDN que pendura >90s no
+    // áudio) em vez do base64 direto. Com o body mínimo ele tende a devolver o base64 na hora.
     const body: Record<string, unknown> = {
-      messageId,
-      type,
       mediaKey: media.mediaKey,
       directPath: media.directPath,
-      url: media.url,
-      mimetype: media.mimetype ?? media.mimeType,
-      fileEncSha256: media.fileEncSha256,
-      fileSha256: media.fileSha256,
+      type,
+      mimetype: media.mimetype ?? media.mimeType ?? (type === 'audio' ? 'audio/ogg' : undefined),
     }
     let status = 0
     let bodyText = ''
@@ -367,9 +366,9 @@ export class WapiProvider implements WhatsappProvider {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` },
         body: JSON.stringify(body),
-        // 45s: a W-API às vezes demora pra preparar a mídia; 20s estourava (áudios "sumiam").
-        // Roda em background no webhook, então o tempo extra não atrasa a resposta.
-        signal: AbortSignal.timeout(45000),
+        // 90s: a W-API demora MUITO pra preparar ÁUDIO (todos estouravam a 45s). O worker
+        // dedicado crm-wapi-media-retry roda fora da requisição, então aguenta o tempo extra.
+        signal: AbortSignal.timeout(Number(Deno.env.get('WAPI_MEDIA_TIMEOUT_MS') ?? '') || 90000),
       })
       status = res.status
       bodyText = await res.text()
@@ -410,7 +409,19 @@ export class WapiProvider implements WhatsappProvider {
         safeString(getByPath(parsed, 'data.fileLink')) ||
         safeString(getByPath(parsed, 'data.url'))
       if (mediaUrl && mediaUrl.startsWith('http')) {
-        const r = await fetch(mediaUrl, { signal: AbortSignal.timeout(40000) })
+        const mediaTimeout = Number(Deno.env.get('WAPI_MEDIA_TIMEOUT_MS') ?? '') || 90000
+        // Alguns CDNs da W-API exigem o Bearer pra servir o fileLink (sem ele a conexão pendura).
+        const isWapiHost = /w-api\.app|wapi/i.test(mediaUrl)
+        let r: Response
+        try {
+          r = await fetch(mediaUrl, {
+            signal: AbortSignal.timeout(mediaTimeout),
+            ...(isWapiHost ? { headers: { Authorization: `Bearer ${this.token}` } } : {}),
+          })
+        } catch (e) {
+          const host = (() => { try { return new URL(mediaUrl).host } catch { return '?' } })()
+          return { ok: false, debug: `filelink_timeout:${host}:${(e instanceof Error ? e.message : String(e)).slice(0, 60)}` }
+        }
         if (!r.ok) return { ok: false, debug: `media_url_http_${r.status}` }
         const buf = await r.arrayBuffer()
         // Guarda de tamanho: base64 vai no DB (fetch global do chat) — pula arquivos grandes.
