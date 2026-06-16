@@ -51,7 +51,8 @@ export function PaymentLinksPage() {
   const [kit, setKit] = useState<PagbankKit>('3_meses')
   const [amountReais, setAmountReais] = useState('')
   const [description, setDescription] = useState('')
-  const [maxInstallments, setMaxInstallments] = useState(KIT_MAX_INSTALLMENTS['3_meses'])
+  // Clínica parcela até 12x; vendas (Tricopill) começa no teto do kit padrão.
+  const [maxInstallments, setMaxInstallments] = useState(isSalesPolo ? KIT_MAX_INSTALLMENTS['3_meses'] : 12)
   const [freightReais, setFreightReais] = useState('')
   const [generating, setGenerating] = useState(false)
   const [lastLink, setLastLink] = useState<{ url: string; via: string } | null>(null)
@@ -277,9 +278,25 @@ export function PaymentLinksPage() {
                   <Label htmlFor="pl-desc">Descrição</Label>
                   <Input id="pl-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex.: Consulta / procedimento" />
                 </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="pl-inst">Parcelas máximas no cartão</Label>
+                  <Select value={String(maxInstallments)} onValueChange={(v) => setMaxInstallments(Number(v))}>
+                    <SelectTrigger id="pl-inst">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n === 1 ? 'À vista (1x)' : `até ${n}x`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[0.7rem] text-muted-foreground">O cliente escolhe de 1x até esse máximo na hora de pagar.</p>
+                </div>
                 <Button
                   className="w-full"
-                  onClick={() => void handleCard(Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100), description.trim() || 'Pagamento')}
+                  onClick={() => void handleCard(Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100), description.trim() || 'Pagamento', maxInstallments)}
                   disabled={generating}
                 >
                   <CreditCard className="mr-1.5 size-4" /> {generating ? 'Gerando…' : 'Gerar link de cartão (Rede)'}

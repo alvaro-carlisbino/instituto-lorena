@@ -63,10 +63,16 @@ export type RedeConfig = {
   txUrl: string
 }
 
-export async function readRedeConfig(admin: SupabaseClient, tenantId: string): Promise<RedeConfig | null> {
-  if (!tenantId) return null
-  const { data } = await admin.from('tenant_integrations').select('rede').eq('tenant_id', tenantId).maybeSingle()
-  const cfg = ((data as { rede?: Record<string, unknown> } | null)?.rede ?? {}) as Record<string, unknown>
+/**
+ * Polo "dono" da conta e.Rede. A conta é UMA só (CNPJ do Instituto Lorena) e é
+ * compartilhada entre os polos (clínica + Tricopill). Quando um polo não tem PV/Token
+ * próprios, cai para a config do dono — assim a clínica cobra no cartão usando a MESMA
+ * conta do Tricopill, sem precisar duplicar credenciais.
+ */
+const REDE_OWNER_TENANT = 'instituto-lorena'
+
+/** Monta a RedeConfig a partir do jsonb `rede` de um polo; null se faltar PV/Token. */
+function parseRedeConfig(cfg: Record<string, unknown>): RedeConfig | null {
   // pv = clientId (Filiação) ; token = clientSecret (Chave de Integração)
   const clientId = typeof cfg.pv === 'string' ? cfg.pv.trim() : ''
   const clientSecret = typeof cfg.token === 'string' ? cfg.token.trim() : ''
@@ -76,6 +82,23 @@ export async function readRedeConfig(admin: SupabaseClient, tenantId: string): P
   const tokenUrl = (typeof cfg.token_url === 'string' && cfg.token_url.trim() ? cfg.token_url.trim() : ep.token).replace(/\/$/, '')
   const txUrl = (typeof cfg.tx_url === 'string' && cfg.tx_url.trim() ? cfg.tx_url.trim() : ep.tx).replace(/\/$/, '')
   return { clientId, clientSecret, env, tokenUrl, txUrl }
+}
+
+/** Lê e monta a config e.Rede de UM polo específico (sem fallback). */
+async function readTenantRede(admin: SupabaseClient, tenantId: string): Promise<RedeConfig | null> {
+  if (!tenantId) return null
+  const { data } = await admin.from('tenant_integrations').select('rede').eq('tenant_id', tenantId).maybeSingle()
+  const cfg = ((data as { rede?: Record<string, unknown> } | null)?.rede ?? {}) as Record<string, unknown>
+  return parseRedeConfig(cfg)
+}
+
+export async function readRedeConfig(admin: SupabaseClient, tenantId: string): Promise<RedeConfig | null> {
+  // Config do próprio polo tem prioridade; sem PV/Token, usa a conta do polo dono
+  // (e.Rede é uma conta só, compartilhada entre os polos do Instituto Lorena).
+  const own = await readTenantRede(admin, tenantId)
+  if (own) return own
+  if (tenantId !== REDE_OWNER_TENANT) return readTenantRede(admin, REDE_OWNER_TENANT)
+  return null
 }
 
 // Cache do access_token por (env+clientId), reusado enquanto o isolate estiver quente.
