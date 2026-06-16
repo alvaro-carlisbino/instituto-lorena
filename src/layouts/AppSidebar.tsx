@@ -25,6 +25,7 @@ import {
   Buildings,
   Pill,
   CreditCard,
+  Receipt,
   Ticket,
   Plugs,
 } from 'phosphor-react'
@@ -146,6 +147,7 @@ export function AppSidebar() {
               {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill" label="Tricopill" icon={Pill} /> : null}
               {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill-bi" label="BI Tricopill" icon={ChartBar} /> : null}
               {showLeadsHub ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
+              {showLeadsHub && isSalesPolo ? <NavItem to="/relatorio-vendas" label="Relatório de vendas" icon={Receipt} /> : null}
               {showLeadsHub && isSalesPolo ? <NavItem to="/cupons" label="Cupons" icon={Ticket} /> : null}
               {showAdmin ? <NavItem to="/integracoes" label="Integrações" icon={Plugs} /> : null}
               <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />
