@@ -38,6 +38,22 @@ function json(body: Record<string, unknown>, status = 200): Response {
   })
 }
 
+/** Roda uma tarefa após o webhook responder (não bloqueia a entrega do W-API). */
+function scheduleBackground(task: Promise<void>): void {
+  const safe = task.catch((e) => console.warn('[wapi-webhook] bg task:', e instanceof Error ? e.message : String(e)))
+  try {
+    const wu = (globalThis as unknown as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } })
+      .EdgeRuntime?.waitUntil
+    if (typeof wu === 'function') {
+      wu(safe)
+      return
+    }
+  } catch {
+    /* ignore */
+  }
+  void safe
+}
+
 function extractWapiInstanceIdFromPayload(payload: Record<string, unknown>): string {
   const candidates: unknown[] = [
     (payload as Record<string, unknown>).instanceid,
@@ -212,28 +228,44 @@ Deno.serve(async (req) => {
 
     // MÍDIA inbound (imagem/áudio/vídeo/documento): baixa+descriptografa do W-API e grava
     // em crm_media_items pra renderizar no chat (mesmo destino visual do ManyChat).
-    // Best-effort + log de diagnóstico em webhook_jobs (source wapi-media-debug).
+    // Roda em BACKGROUND (não atrasa a resposta do webhook) com timeout generoso + RETRY:
+    // o fileLink do W-API EXPIRA, então um timeout na 1ª tentativa perdia a mídia pra sempre
+    // (era o caso dos áudios "sumindo" — só ficava o placeholder "🎤 Áudio").
     try {
       const med = extractInboundMedia(normalized.raw as Record<string, unknown>)
       if (med && provider instanceof WapiProvider) {
-        const dl = await provider.downloadMedia(normalized.externalMessageId, med.mediaType, med.media)
-        await admin.from('webhook_jobs').insert({
-          source: 'wapi-media-debug',
-          status: dl.ok ? 'done' : 'error',
-          note: `${med.mediaType}:${normalized.externalMessageId}:${dl.debug}`.slice(0, 490),
-        })
-        if (dl.ok && dl.base64) {
-          await admin.from('crm_media_items').insert({
-            lead_id: lead.leadId,
-            interaction_id: inboundInteractionId,
-            tenant_id: tenantId,
-            direction: 'in',
-            media_type: med.mediaType,
-            mime_type: dl.mimeType ?? null,
-            media_base64: dl.base64,
-            metadata: { source: 'wapi', caption: med.caption || null },
+        const wapiProvider = provider
+        const messageId = normalized.externalMessageId
+        const leadIdForMedia = lead.leadId
+        scheduleBackground((async () => {
+          let dl = await wapiProvider.downloadMedia(messageId, med.mediaType, med.media)
+          // Retry do zero (o POST refaz o fileLink) em timeout / erro transitório (5xx).
+          for (
+            let attempt = 1;
+            attempt <= 2 && !dl.ok && /timed out|exception|http_5\d\d|media_url_http_5\d\d/i.test(dl.debug);
+            attempt++
+          ) {
+            await new Promise((r) => setTimeout(r, 1500 * attempt))
+            dl = await wapiProvider.downloadMedia(messageId, med.mediaType, med.media)
+          }
+          await admin.from('webhook_jobs').insert({
+            source: 'wapi-media-debug',
+            status: dl.ok ? 'done' : 'error',
+            note: `${med.mediaType}:${messageId}:${dl.debug}`.slice(0, 490),
           })
-        }
+          if (dl.ok && dl.base64) {
+            await admin.from('crm_media_items').insert({
+              lead_id: leadIdForMedia,
+              interaction_id: inboundInteractionId,
+              tenant_id: tenantId,
+              direction: 'in',
+              media_type: med.mediaType,
+              mime_type: dl.mimeType ?? null,
+              media_base64: dl.base64,
+              metadata: { source: 'wapi', caption: med.caption || null },
+            })
+          }
+        })())
       }
     } catch (e) {
       console.warn('[wapi-webhook] inbound media failed:', e instanceof Error ? e.message : String(e))

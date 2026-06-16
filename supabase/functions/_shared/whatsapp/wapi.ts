@@ -367,7 +367,9 @@ export class WapiProvider implements WhatsappProvider {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.token}` },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(20000),
+        // 45s: a W-API às vezes demora pra preparar a mídia; 20s estourava (áudios "sumiam").
+        // Roda em background no webhook, então o tempo extra não atrasa a resposta.
+        signal: AbortSignal.timeout(45000),
       })
       status = res.status
       bodyText = await res.text()
@@ -408,7 +410,7 @@ export class WapiProvider implements WhatsappProvider {
         safeString(getByPath(parsed, 'data.fileLink')) ||
         safeString(getByPath(parsed, 'data.url'))
       if (mediaUrl && mediaUrl.startsWith('http')) {
-        const r = await fetch(mediaUrl, { signal: AbortSignal.timeout(25000) })
+        const r = await fetch(mediaUrl, { signal: AbortSignal.timeout(40000) })
         if (!r.ok) return { ok: false, debug: `media_url_http_${r.status}` }
         const buf = await r.arrayBuffer()
         // Guarda de tamanho: base64 vai no DB (fetch global do chat) — pula arquivos grandes.
