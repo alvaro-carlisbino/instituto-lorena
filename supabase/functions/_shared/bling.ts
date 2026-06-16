@@ -164,11 +164,33 @@ export type BlingCatalogItem = {
   codigo: string
   preco: number
   estoque: number | null
+  /** URL da foto do produto (preservada no cache p/ a loja pública do site Tricopill). */
+  imagem?: string
 }
 
 function num(v: unknown): number {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
+}
+
+/**
+ * Extrai a URL da imagem de um produto do Bling (imagemURL OU midia.imagens.externas/internas).
+ * Mesma regra do tricopill-bling-keepalive (site) — o catalog_cache é compartilhado, então
+ * AMBOS os escritores precisam manter o campo `imagem` (senão o filtro de foto da loja some).
+ */
+function pickBlingImg(p: Record<string, unknown>): string {
+  const url = p.imagemURL
+  if (typeof url === 'string' && url.trim()) return url.trim()
+  const m = (p.midia && typeof p.midia === 'object' ? p.midia : {}) as Record<string, unknown>
+  const imgs = (m.imagens && typeof m.imagens === 'object' ? m.imagens : {}) as Record<string, unknown>
+  for (const a of [imgs.externas, imgs.internas]) {
+    if (Array.isArray(a) && a[0] && typeof a[0] === 'object') {
+      const o = a[0] as Record<string, unknown>
+      const v = o.link ?? o.url ?? o.linkMiniatura
+      if (typeof v === 'string' && v) return v
+    }
+  }
+  return ''
 }
 
 /** Saldos de estoque por id de produto (best-effort). */
@@ -216,6 +238,11 @@ export async function buildBlingCatalog(
     const raw = await blingListProducts(token, { limite: 100 })
     const ids = raw.map((p) => String(p.id ?? '')).filter(Boolean)
     const stock = await blingStockMap(token, ids)
+    // Imagens já no cache (populadas pelo keepalive do site, que faz fetch detalhado): preserva
+    // por id quando a listagem não traz a foto — assim a reescrita do bot NÃO apaga as imagens.
+    const priorImg = new Map(
+      cache.map((c) => [c.id, typeof c.imagem === 'string' ? c.imagem : '']).filter(([, v]) => v),
+    )
     const items: BlingCatalogItem[] = raw.map((p) => {
       const id = String(p.id ?? '')
       const est = (p.estoque ?? {}) as Record<string, unknown>
@@ -227,6 +254,7 @@ export async function buildBlingCatalog(
         codigo: String(p.codigo ?? p.sku ?? ''),
         preco: num(p.preco),
         estoque,
+        imagem: pickBlingImg(p) || priorImg.get(id) || '',
       }
     })
     const nowIso = new Date().toISOString()

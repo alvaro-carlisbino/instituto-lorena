@@ -671,9 +671,10 @@ Deno.serve(async (req) => {
     if (isSalesBot && tenantId) {
       try {
         const cat = await buildBlingCatalog(dbClient, tenantId)
-        // Só produtos com PREÇO DE VENDA (preco > 0) E sem estoque NEGATIVO.
-        // estoque null = não controlado (mantém); 0 mantém; < 0 oculta (indisponível/oversold).
-        let sellable = cat.items.filter((i) => i.preco > 0 && (i.estoque === null || i.estoque >= 0))
+        // Só produtos com PREÇO DE VENDA (preco > 0) E COM ESTOQUE (> 0). A IA NÃO deve
+        // falar/ofertar item esgotado: estoque 0 ou negativo (oversold) é OCULTADO.
+        // estoque null = não controlado no Bling (mantém — não é "esgotado", só não é rastreado).
+        let sellable = cat.items.filter((i) => i.preco > 0 && (i.estoque === null || i.estoque > 0))
         // O bot do Tricopill vende SOMENTE o Tricopill. A conta Bling é compartilhada com a
         // clínica (Grandha, Alkymia, shampoos, óleos…), então o catálogo do bot é restrito aos
         // itens "tricopill" — e tiramos a variante ERRADA "HDS TRICOPILL - 800 MG - 60 CAPSULAS"
