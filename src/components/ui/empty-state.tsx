@@ -1,4 +1,4 @@
-import { Tray } from 'phosphor-react'
+import { Inbox } from 'lucide-react'
 import type { ComponentType } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -14,7 +14,7 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({
-  icon: Icon = Tray,
+  icon: Icon = Inbox,
   title,
   description,
   className,

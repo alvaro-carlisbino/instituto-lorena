@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Package, Warning, Truck, Gear } from 'phosphor-react'
+import { Package, TriangleAlert, Truck, Settings } from 'lucide-react'
 
 import {
   Dialog,
@@ -251,7 +251,7 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
 
         {config && !config.connected ? (
           <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            <Warning className="size-4 shrink-0" /> Conta Melhor Envio não conectada neste polo.
+            <TriangleAlert className="size-4 shrink-0" /> Conta Melhor Envio não conectada neste polo.
           </div>
         ) : null}
         {config?.sandbox ? (
@@ -430,7 +430,7 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
               className="flex w-full items-center justify-between px-3 py-2 text-left"
             >
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-                <Gear className="size-3.5" /> Remetente
+                <Settings className="size-3.5" /> Remetente
                 {config?.senderMissing.length ? (
                   <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[0.65rem] font-medium text-amber-700">
                     incompleto

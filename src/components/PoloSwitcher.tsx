@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Buildings, CaretDown, Check, Pill } from 'phosphor-react'
+import { Building2, ChevronDown, Check, Pill } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -35,9 +35,9 @@ export function PoloSwitcher() {
         )}
       >
         {tenant.poloType === 'sales' ? (
-          <Pill className="size-4 shrink-0 text-sidebar-foreground/80" weight="bold" />
+          <Pill className="size-4 shrink-0 text-sidebar-foreground/80" />
         ) : (
-          <Buildings className="size-4 shrink-0 text-sidebar-foreground/80" weight="bold" />
+          <Building2 className="size-4 shrink-0 text-sidebar-foreground/80" />
         )}
         <div className="grid min-w-0 flex-1 leading-tight">
           <span className="truncate text-[11px] font-black uppercase tracking-wide text-sidebar-foreground">
@@ -47,7 +47,7 @@ export function PoloSwitcher() {
             {tenant.poloType === 'sales' ? 'Polo · Vendas' : 'Polo · Clínica'}
           </span>
         </div>
-        <CaretDown className="size-3.5 shrink-0 text-sidebar-foreground/50" />
+        <ChevronDown className="size-3.5 shrink-0 text-sidebar-foreground/50" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
         <DropdownMenuLabel className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -69,9 +69,9 @@ export function PoloSwitcher() {
               className="gap-2"
             >
               {polo.poloType === 'sales' ? (
-                <Pill className="size-4 shrink-0" weight="bold" />
+                <Pill className="size-4 shrink-0" />
               ) : (
-                <Buildings className="size-4 shrink-0" weight="bold" />
+                <Building2 className="size-4 shrink-0" />
               )}
               <div className="grid min-w-0 flex-1 leading-tight">
                 <span className="truncate text-xs font-semibold">{polo.brand.app_name || polo.name}</span>
@@ -79,7 +79,7 @@ export function PoloSwitcher() {
                   {polo.poloType === 'sales' ? 'Vendas' : 'Clínica'}
                 </span>
               </div>
-              {isActive ? <Check className="size-4 shrink-0 text-primary" weight="bold" /> : null}
+              {isActive ? <Check className="size-4 shrink-0 text-primary" /> : null}
             </DropdownMenuItem>
           )
         })}

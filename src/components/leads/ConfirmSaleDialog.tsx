@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { CheckCircle } from 'phosphor-react'
+import { CircleCheck } from 'lucide-react'
 
 import {
   Dialog,
@@ -77,7 +77,7 @@ export function ConfirmSaleDialog({ isOpen, onClose, leadId, onConfirmed }: Prop
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CheckCircle className="size-5 text-emerald-600" /> Confirmar venda
+            <CircleCheck className="size-5 text-emerald-600" /> Confirmar venda
           </DialogTitle>
           <DialogDescription>
             Marca o lead como pago, registra a venda no faturamento e cria o pedido no Bling.

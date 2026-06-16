@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Radio, Trash } from 'phosphor-react'
+import { Radio, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ChannelFieldMappingEditor } from '@/components/config/ChannelFieldMappingEditor'
@@ -168,7 +168,7 @@ export function ChannelsPage() {
                   className="w-full min-[380px]:w-fit"
                   onClick={() => setDeleteTarget({ id: channel.id, name: channel.name })}
                 >
-                  <Trash className="mr-1 size-4" weight="duotone" />
+                  <Trash2 className="mr-1 size-4" />
                   Remover canal
                 </Button>
               </CardContent>

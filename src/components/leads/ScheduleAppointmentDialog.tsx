@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarBlank, Clock } from 'phosphor-react'
+import { Calendar, Clock } from 'lucide-react'
 
 import {
   Dialog,
@@ -115,7 +115,7 @@ export function ScheduleAppointmentDialog({ isOpen, onClose, leadId }: Props) {
       <DialogContent className="sm:max-w-[425px] rounded-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CalendarBlank className="w-5 h-5 text-primary" /> Agendar Consulta
+            <Calendar className="w-5 h-5 text-primary" /> Agendar Consulta
           </DialogTitle>
           <DialogDescription>
             Encontraremos o primeiro horário livre para este paciente.

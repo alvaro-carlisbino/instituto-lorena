@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Plugs, PlugsConnected, Package, CreditCard } from 'phosphor-react'
+import { Unplug, Plug, Package, CreditCard } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
@@ -210,7 +210,7 @@ export function IntegrationsPage() {
             <CardHeader>
               <CardTitle className="flex items-center justify-between gap-2 text-sm">
                 <span className="flex items-center gap-2">
-                  <Package className="size-4 text-primary" weight="bold" /> Bling (ERP)
+                  <Package className="size-4 text-primary" /> Bling (ERP)
                 </span>
                 <Badge
                   variant={bling.connected ? 'default' : 'secondary'}
@@ -233,12 +233,12 @@ export function IntegrationsPage() {
                     </p>
                   ) : null}
                   <Button variant="outline" size="sm" onClick={() => void handleDisconnect()}>
-                    <Plugs className="mr-1.5 size-4" /> Desconectar
+                    <Unplug className="mr-1.5 size-4" /> Desconectar
                   </Button>
                 </div>
               ) : (
                 <Button onClick={() => void handleConnect()} disabled={connecting}>
-                  <PlugsConnected className="mr-1.5 size-4" />
+                  <Plug className="mr-1.5 size-4" />
                   {connecting ? 'Redirecionando…' : 'Conectar Bling'}
                 </Button>
               )}
@@ -251,7 +251,7 @@ export function IntegrationsPage() {
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-2 text-sm">
               <span className="flex items-center gap-2">
-                <CreditCard className="size-4 text-primary" weight="bold" /> Rede / Itaú (cartão)
+                <CreditCard className="size-4 text-primary" /> Rede / Itaú (cartão)
               </span>
               <Badge
                 variant={rede.configured ? 'default' : 'secondary'}
@@ -313,7 +313,7 @@ export function IntegrationsPage() {
         <Card className="mt-4">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="flex items-center gap-2 text-sm">
-              <Package className="size-4 text-primary" weight="bold" /> Catálogo do Bling
+              <Package className="size-4 text-primary" /> Catálogo do Bling
               <Badge variant="secondary">{catalog.length}</Badge>
             </CardTitle>
             <Button size="sm" variant="ghost" onClick={() => void loadCatalog(true)} disabled={catalogLoading}>
@@ -357,7 +357,7 @@ export function IntegrationsPage() {
         <Card className="mt-4">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <Package className="size-4 text-primary" weight="bold" /> Pedido automático no Bling
+              <Package className="size-4 text-primary" /> Pedido automático no Bling
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">

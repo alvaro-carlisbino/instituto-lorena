@@ -1,34 +1,33 @@
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
-  type Icon,
-  IconContext,
-  ChartBar,
-  ChartLineUp,
-  CirclesThreePlus,
-  ClockCounterClockwise,
-  Flask,
-  Gear,
+  type LucideIcon,
+  ChartColumn,
+  TrendingUp,
+  Boxes,
+  History,
+  FlaskConical,
+  Settings,
   Monitor,
   Radio,
-  Robot,
+  Bot,
   Shield,
-  ListBullets,
+  List,
   SlidersHorizontal,
-  SquaresFour,
-  Table,
-  Television,
+  LayoutGrid,
+  Table2,
+  Tv,
   Users,
-  CheckSquare,
-  ChatsCircle,
-  ArrowsLeftRight,
+  SquareCheck,
+  MessagesSquare,
+  ArrowLeftRight,
   Calendar,
-  Buildings,
+  Building2,
   Pill,
   CreditCard,
   Receipt,
   Ticket,
-  Plugs,
-} from 'phosphor-react'
+  Unplug,
+} from 'lucide-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
 import { PoloSwitcher } from '@/components/PoloSwitcher'
@@ -54,7 +53,7 @@ import {
 } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
 
-function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon: Icon }) {
+function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon: LucideIcon }) {
   const location = useLocation()
   const isActive = location.pathname === to || location.pathname.startsWith(`${to}/`)
 
@@ -102,7 +101,6 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border/50">
-      <IconContext.Provider value={{ size: 18, weight: 'bold', mirrored: false }}>
       <SidebarHeader className="px-4 py-6">
         <SidebarMenu>
           <SidebarMenuItem>
@@ -140,20 +138,20 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-1">
-              <NavItem to="/dashboard" label="Painel" icon={ChartLineUp} />
-              <NavItem to="/kanban" label="Quadro de leads" icon={SquaresFour} />
-              {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={ListBullets} /> : null}
-              {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={ChatsCircle} /> : null}
+              <NavItem to="/dashboard" label="Painel" icon={TrendingUp} />
+              <NavItem to="/kanban" label="Quadro de leads" icon={LayoutGrid} />
+              {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={List} /> : null}
+              {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={MessagesSquare} /> : null}
               {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill" label="Tricopill" icon={Pill} /> : null}
-              {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill-bi" label="BI Tricopill" icon={ChartBar} /> : null}
+              {showLeadsHub && isSalesPolo ? <NavItem to="/tricopill-bi" label="BI Tricopill" icon={ChartColumn} /> : null}
               {showLeadsHub ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
               {showLeadsHub && isSalesPolo ? <NavItem to="/relatorio-vendas" label="Relatório de vendas" icon={Receipt} /> : null}
               {showLeadsHub && isSalesPolo ? <NavItem to="/cupons" label="Cupons" icon={Ticket} /> : null}
-              {showAdmin ? <NavItem to="/integracoes" label="Integrações" icon={Plugs} /> : null}
-              <NavItem to="/historico" label="Histórico" icon={ClockCounterClockwise} />
-              {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={CheckSquare} /> : null}
+              {showAdmin ? <NavItem to="/integracoes" label="Integrações" icon={Unplug} /> : null}
+              <NavItem to="/historico" label="Histórico" icon={History} />
+              {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={SquareCheck} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
-              <NavItem to="/assistente" label="Assistente IA" icon={Robot} />
+              <NavItem to="/assistente" label="Assistente IA" icon={Bot} />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -165,13 +163,13 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu className="gap-1">
               <NavItem to="/canais" label="Canais" icon={Radio} />
-              <NavItem to="/metricas" label="Métricas" icon={ChartBar} />
-              <NavItem to="/analytics" label="Analytics" icon={ChartBar} />
-              {isClinicPolo ? <NavItem to="/prontuario" label="Prontuário" icon={ChartBar} /> : null}
-              <NavItem to="/planos" label="Planos" icon={ChartBar} />
-              {showBoards ? <NavItem to="/boards" label="Funis" icon={CirclesThreePlus} /> : null}
-              {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table} /> : null}
-              {showAdmin ? <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowsLeftRight} /> : null}
+              <NavItem to="/metricas" label="Métricas" icon={ChartColumn} />
+              <NavItem to="/analytics" label="Analytics" icon={ChartColumn} />
+              {isClinicPolo ? <NavItem to="/prontuario" label="Prontuário" icon={ChartColumn} /> : null}
+              <NavItem to="/planos" label="Planos" icon={ChartColumn} />
+              {showBoards ? <NavItem to="/boards" label="Funis" icon={Boxes} /> : null}
+              {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table2} /> : null}
+              {showAdmin ? <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowLeftRight} /> : null}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -186,7 +184,7 @@ export function AppSidebar() {
                 {showDashboardConfig ? (
                   <NavItem to="/dashboard-config" label="Painel" icon={SlidersHorizontal} />
                 ) : null}
-                <NavItem to="/configuracoes" label="Configurações" icon={Gear} />
+                <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -201,9 +199,9 @@ export function AppSidebar() {
               <SidebarMenu className="gap-1">
                 <NavItem to="/usuarios" label="Usuários" icon={Users} />
                 <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
-                <NavItem to="/admin-operacao" label="Operação Admin" icon={Gear} />
-                <NavItem to="/admin-lab" label="Ferramentas" icon={Flask} />
-                {isSuperAdmin ? <NavItem to="/admin-clinicas" label="Clínicas" icon={Buildings} /> : null}
+                <NavItem to="/admin-operacao" label="Operação Admin" icon={Settings} />
+                <NavItem to="/admin-lab" label="Ferramentas" icon={FlaskConical} />
+                {isSuperAdmin ? <NavItem to="/admin-clinicas" label="Clínicas" icon={Building2} /> : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -216,7 +214,7 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-1">
-                <NavItem to="/tv-config" label="Config. TV" icon={Television} />
+                <NavItem to="/tv-config" label="Config. TV" icon={Tv} />
                 <NavItem to="/tv" label="Tela TV" icon={Monitor} />
               </SidebarMenu>
             </SidebarGroupContent>
@@ -230,7 +228,7 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-1">
-                <NavItem to="/configuracoes" label="Configurações" icon={Gear} />
+                <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -249,7 +247,6 @@ export function AppSidebar() {
         </div>
       </SidebarFooter>
       <SidebarRail />
-      </IconContext.Provider>
     </Sidebar>
   )
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarBlank, Trash } from 'phosphor-react'
+import { Calendar, Trash2 } from 'lucide-react'
 
 import {
   Dialog,
@@ -130,7 +130,7 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
       <DialogContent className="sm:max-w-[440px] rounded-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CalendarBlank className="h-5 w-5 text-primary" />
+            <Calendar className="h-5 w-5 text-primary" />
             Editar agendamento
           </DialogTitle>
           <DialogDescription>
@@ -249,7 +249,7 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
             onClick={() => void handleDelete()}
             disabled={!appointment}
           >
-            <Trash className="mr-2 h-4 w-4" />
+            <Trash2 className="mr-2 h-4 w-4" />
             Excluir
           </Button>
           <div className="flex gap-2 justify-end w-full sm:w-auto">

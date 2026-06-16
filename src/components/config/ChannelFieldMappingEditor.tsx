@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { CaretRight, Plus, Trash } from 'phosphor-react'
+import { ChevronRight, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -169,7 +169,7 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
 
       <details className="group rounded-xl border border-border/50 bg-muted/25 px-3 py-2 text-left text-sm">
         <summary className="flex cursor-pointer list-none items-center gap-2 text-foreground/90">
-          <CaretRight className="size-4 shrink-0 transition group-open:rotate-90" weight="bold" />
+          <ChevronRight className="size-4 shrink-0 transition group-open:rotate-90" />
           <span>Referência técnica (integração / API / formato do aviso)</span>
         </summary>
         <div className="mt-2 space-y-2 border-t border-border/50 pt-3 text-xs text-muted-foreground">
@@ -244,7 +244,7 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
                   onClick={() => setRows((prev) => prev.filter((_, i) => i !== index))}
                   disabled={rows.length <= 1}
                 >
-                  <Trash className="mr-1.5 size-4 opacity-70" weight="duotone" />
+                  <Trash2 className="mr-1.5 size-4 opacity-70" />
                   Remover linha
                 </Button>
               </div>
@@ -260,7 +260,7 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
           className="w-full sm:w-auto"
           onClick={() => setRows((prev) => [...prev, { fieldKey: fieldOptions[0]?.key ?? 'patient_name', path: '' }])}
         >
-          <Plus className="mr-1.5 size-4" weight="bold" />
+          <Plus className="mr-1.5 size-4" />
           Adicionar linha
         </Button>
         <Button type="button" size="sm" className="w-full sm:w-auto" onClick={apply}>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { LinkBreak, LinkSimple, MagnifyingGlass } from 'phosphor-react'
+import { Link2Off, Link2, Search } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -102,10 +102,10 @@ export function ShospLinkSection({ leadId, leadName }: Props) {
       {prontuario ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-0.5 text-sm font-medium text-emerald-600">
-            <LinkSimple className="size-4" /> Vinculado — prontuário {prontuario}
+            <Link2 className="size-4" /> Vinculado — prontuário {prontuario}
           </span>
           <Button variant="ghost" size="sm" disabled={linking} onClick={() => void handleUnlink()}>
-            <LinkBreak className="size-4 mr-1.5" /> Desvincular
+            <Link2Off className="size-4 mr-1.5" /> Desvincular
           </Button>
         </div>
       ) : (
@@ -124,7 +124,7 @@ export function ShospLinkSection({ leadId, leadName }: Props) {
               }}
             />
             <Button type="button" size="sm" disabled={searching} onClick={() => void handleSearch()}>
-              <MagnifyingGlass className="size-4 mr-1.5" /> {searching ? 'Buscando…' : 'Buscar'}
+              <Search className="size-4 mr-1.5" /> {searching ? 'Buscando…' : 'Buscar'}
             </Button>
           </div>
 
