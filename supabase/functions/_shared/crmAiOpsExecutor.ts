@@ -5,7 +5,7 @@ import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, createPagBankPixOrder } from './pagbank.ts'
 import { createRedeIntent, resolveRedeKit } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
-import { melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+import { boxForKit, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 
 /**
  * Resolve o frete em centavos para um op de fechamento (pix/cartão):
@@ -27,7 +27,9 @@ async function resolveFreightCents(
   const toCep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
   if (service && toCep.length === 8 && melhorEnvioConfigured()) {
     try {
-      const q = await quoteFreteMelhorEnvio(admin, tenantId, toCep)
+      // A caixa ESCALA com o kit (peso real): sem isto o frete de 4 frascos saía como o de 1.
+      const box = boxForKit(op.kit)
+      const q = await quoteFreteMelhorEnvio(admin, tenantId, toCep, box ? { box } : undefined)
       const chosen = q.ok ? pickFreteOption(q, service) : null
       if (chosen) return chosen.priceCents
     } catch {

@@ -58,6 +58,38 @@ export type FreteBox = {
   heightCm?: number
 }
 
+/**
+ * Caixa REAL por kit do Tricopill (peso + dimensões), calibrada com a cotação real dos
+ * Correios (Melhor Envio prod, 16/jun): 1 frasco ≈ 0,3 kg; 4 frascos ≈ 0,65 kg; 5 ≈ 0,9 kg.
+ * Sem isto a cotação usava SEMPRE a caixa padrão (0,3 kg = 1 frasco), cobrando frete de
+ * 1 frasco num pedido de 4 (ex.: R$31,96 quando o real é R$37,49). O frete agora escala
+ * com o kit, tanto no que a IA COBRA (resolveFreightCents) quanto no que ela COTA na conversa.
+ */
+const KIT_BOXES: Record<string, FreteBox> = {
+  '1_mes': { weightKg: 0.3, lengthCm: 16, widthCm: 11, heightCm: 11 },
+  '3_meses': { weightKg: 0.75, lengthCm: 20, widthCm: 15, heightCm: 12 },
+  '5_meses': { weightKg: 0.95, lengthCm: 22, widthCm: 16, heightCm: 13 },
+}
+
+/** Normaliza variações de kit ('3 meses', '3+1', 'kit3', '4 frascos') para a chave canônica. */
+function normalizeKitKeyLocal(raw: unknown): string | null {
+  const s = String(raw ?? '').toLowerCase().replace(/[^0-9a-z]/g, '')
+  if (!s) return null
+  if (s.includes('5')) return '5_meses'
+  if (s.includes('4') || s.includes('3')) return '3_meses' // 3+1 = 4 frascos
+  if (s.includes('1')) return '1_mes'
+  return null
+}
+
+/** Caixa do kit (peso/dimensões reais). null quando o kit é desconhecido (cai na caixa padrão). */
+export function boxForKit(kitRaw: unknown): FreteBox | null {
+  const key = normalizeKitKeyLocal(kitRaw)
+  return key ? KIT_BOXES[key] : null
+}
+
+/** Chaves de kit conhecidas (p/ cotar por kit na conversa). */
+export const KIT_KEYS = Object.keys(KIT_BOXES)
+
 function envNum(key: string, fallback: number): number {
   const raw = (Deno.env.get(key) ?? '').trim().replace(',', '.')
   const n = Number(raw)

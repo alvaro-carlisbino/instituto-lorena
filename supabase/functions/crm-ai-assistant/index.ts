@@ -33,7 +33,7 @@ import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
 import { readPagBankConfig } from '../_shared/pagbank.ts'
-import { melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
+import { boxForKit, melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
 import { extractLatestCep, resolveCepBrasil } from '../_shared/cep.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
@@ -738,14 +738,28 @@ Deno.serve(async (req) => {
             // Best-effort: se a cotação falhar, a IA cai no fluxo de pedir CEP / humano.
             if (melhorEnvioConfigured()) {
               try {
-                const fq = await quoteFreteMelhorEnvio(dbClient, tenantId, info.cep, {
-                  cityInfo: { localidade: info.localidade, uf: info.uf },
-                })
-                if (fq.ok) {
-                  ;(snapshot as Record<string, unknown>).frete = {
-                    origem_cep: fq.fromCep,
-                    destino_cep: fq.toCep,
-                    destino: `${info.localidade}/${info.uf}`,
+                // Cota POR KIT — a caixa escala com a quantidade de frascos. Antes usava a
+                // caixa padrão (1 frasco) p/ qualquer kit, então a IA dizia o frete de 1
+                // frasco num pedido de 4 (ex.: R$31,96 em vez de R$37,49). Paralelo p/ latência.
+                const KITS: Array<{ key: string; label: string }> = [
+                  { key: '1_mes', label: '1 frasco' },
+                  { key: '3_meses', label: 'Kit 3+1 (4 frascos)' },
+                  { key: '5_meses', label: '5 frascos' },
+                ]
+                const cityInfo = { localidade: info.localidade, uf: info.uf }
+                const quotes = await Promise.all(
+                  KITS.map((k) =>
+                    quoteFreteMelhorEnvio(dbClient, tenantId, info.cep, {
+                      box: boxForKit(k.key) ?? undefined,
+                      cityInfo,
+                    }).catch(() => null),
+                  ),
+                )
+                const porKit = KITS.map((k, i) => {
+                  const fq = quotes[i]
+                  if (!fq || !fq.ok) return null
+                  return {
+                    kit: k.label,
                     opcoes: fq.options.map((o) => ({
                       servico: o.service,
                       transportadora: o.company,
@@ -753,6 +767,16 @@ Deno.serve(async (req) => {
                       valor_centavos: o.priceCents,
                       prazo_dias_uteis: o.deliveryDays,
                     })),
+                  }
+                }).filter(Boolean)
+                if (porKit.length > 0) {
+                  const first = quotes.find((q) => q && q.ok)
+                  ;(snapshot as Record<string, unknown>).frete = {
+                    origem_cep: first?.fromCep,
+                    destino_cep: first?.toCep,
+                    destino: `${info.localidade}/${info.uf}`,
+                    observacao: 'Frete varia conforme o kit (peso). Use a linha do kit que o cliente escolher.',
+                    por_kit: porKit,
                   }
                 }
               } catch {
@@ -839,12 +863,12 @@ Deno.serve(async (req) => {
       'PREÇO: para os produtos do catálogo, você PODE e DEVE informar o "preco" (preço de venda) que está no bling_catalog. EXCEÇÃO IMPORTANTE — os KITS do Tricopill (1 mês, 3+1, 5 meses) seguem SEMPRE os valores e promoções do PROMPT ADICIONAL (ex.: Pix com 5% off), NUNCA o preço de linha do catálogo (que pode divergir). Se o cliente perguntar o valor de algo que NÃO está nem no bling_catalog nem no PROMPT ADICIONAL, NÃO invente — diga que confirma com a atendente. Cotar preço inventado é PROIBIDO; o frete é sempre cobrado à parte.',
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
       'VALORES, PAGAMENTO E FRETE: apresente os valores e as formas de pagamento/parcelas EXATAMENTE como no PROMPT ADICIONAL — nunca invente preço, parcela ou desconto. Ao passar QUALQUER preço, informe SEMPRE que o frete é cobrado à parte (não incluso no produto) e peça o CEP do cliente para COTAR o frete real.',
-      'FRETE REAL (snapshot.frete): quando existir snapshot.frete, são as opções de frete REAIS para o CEP do cliente — em geral Correios PAC/SEDEX (via Melhor Envio); mas quando a opção vier marcada como "Entrega interna" (praça local, ex.: Maringá), é ENTREGA LOCAL (não Correios, pode não ter prazo). Apresente as opções de snapshot.frete.opcoes com o valor (valor_reais) e o prazo (prazo_dias_uteis) EXATAMENTE como vierem — NUNCA invente outro valor — e pergunte qual o cliente prefere. Se o cliente NÃO mandou o CEP ainda, peça o CEP. Só passe para um atendente humano (com [PRONTO_PARA_CONSULTOR]) se, MESMO com o CEP, snapshot.frete não vier (cotação indisponível). Para RETIRADA na clínica (Maringá), não há frete.',
+      'FRETE REAL (snapshot.frete): quando existir snapshot.frete, são as opções de frete REAIS para o CEP do cliente — em geral Correios PAC/SEDEX (via Melhor Envio); mas quando a opção vier marcada como "Entrega interna" (praça local, ex.: Maringá), é ENTREGA LOCAL (não Correios, pode não ter prazo). O FRETE VARIA CONFORME O KIT (peso): snapshot.frete.por_kit traz uma lista, cada item com o "kit" (ex.: "1 frasco", "Kit 3+1 (4 frascos)", "5 frascos") e suas "opcoes". Apresente o frete da LINHA do kit que o cliente escolheu (ou, se ele ainda não escolheu, mostre o frete do kit que vocês estão conversando — NUNCA misture o frete de 1 frasco com um pedido de 4). Use valor_reais e prazo_dias_uteis EXATAMENTE como vierem — NUNCA invente outro valor — e pergunte qual serviço (PAC/SEDEX) o cliente prefere. Se o cliente NÃO mandou o CEP ainda, peça o CEP. Só passe para um atendente humano (com [PRONTO_PARA_CONSULTOR]) se, MESMO com o CEP, snapshot.frete não vier (cotação indisponível). Para RETIRADA na clínica (Maringá), não há frete.',
       'RETIRADA NA CLÍNICA (só Maringá): quando o cliente optar por RETIRAR o pedido na clínica (em vez de entrega), informe AUTOMATICAMENTE o endereço de retirada, sempre em TERCEIRA PESSOA (impessoal, NÃO "eu te entrego"). Modelo: "Perfeito! O pedido ficará disponível para retirada na clínica da Dra. Lorena. O endereço é: *Av. Nóbrega, 814 - Zona 04, Maringá - PR, 87014-180*. Na retirada não há cobrança de frete 💚". Esse endereço só vale para retirada em Maringá (a clínica fica em Maringá); para outras cidades é entrega com frete, não retirada.',
       'FECHAMENTO NO CARTÃO (você gera o link sozinha): quando o cliente decidir comprar no CARTÃO — já escolheu o kit, quer cartão e JÁ informou a cidade (para o frete) — gere o link você mesma. Na MESMA resposta, DEPOIS da mensagem ao cliente, acrescente exatamente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_link","kit":"3_meses","installments":12,"freight_cents":1500,"coupon":"CODIGO_SE_HOUVER"}]}. O servidor cria o link de cartão (em até 12x) e ANEXA sozinho na sua mensagem — então escreva de forma calorosa que o link está logo abaixo (ex.: "Prontinho! 💳 Seu link de pagamento no cartão tá aqui embaixo, é só preencher os dados 💚"). NUNCA escreva uma URL nem invente o link: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o link — CONTINUE atendendo para tirar dúvidas e ajudar a concluir o pagamento.',
       'KIT no op: passe "kit" com a chave do kit escolhido — "1_mes", "3_meses" ou "5_meses" — exatamente como descrito no PROMPT ADICIONAL. O servidor já aplica o PREÇO CHEIO de cartão desse kit; você NÃO calcula o valor do produto, só informa o frete.',
       'PARCELAS (REGRA FIXA por kit): **1 frasco (1_mes)** → NÃO parcela: ofereça só PIX ou cartão À VISTA (1x). **Kits de 3+ frascos (3_meses, 5_meses)** → cartão em ATÉ 3x sem juros: ofereça PIX, à vista, ou parcelado (o cliente escolhe 1x, 2x ou 3x). NUNCA ofereça mais de 3x, nem parcelamento para 1 frasco. O link de cartão já sai com o limite certo automático; o cliente escolhe o nº de parcelas (até o máximo) na própria página de pagamento — então é só dizer as opções disponíveis conforme o kit.',
-      'FRETE NO LINK: "freight_cents" é o frete em CENTAVOS. Use o "valor_centavos" da opção de frete que o cliente ESCOLHEU em snapshot.frete.opcoes (cotação real) — NUNCA invente o valor. Alternativa robusta: em vez de freight_cents, passe "freight_service" com o nome do serviço escolhido ("PAC" ou "SEDEX") + "to_cep" com o CEP do cliente, que o servidor recota e aplica o frete certo sozinho. CIDADE — NUNCA adivinhe a cidade pelo CEP; se existir snapshot.cep_info, a cidade real é cep_info.localidade/cep_info.uf. Retirada na clínica (Maringá) ou frete grátis = 0 ou omita.',
+      'FRETE NO LINK: PREFIRA o caminho robusto — em vez de "freight_cents", passe SEMPRE "freight_service" com o serviço escolhido ("PAC" ou "SEDEX") + "to_cep" com o CEP do cliente. O servidor recota o frete já com a CAIXA DO KIT que você mandou no op (kit), aplicando o valor certo sozinho — assim o frete cobrado é o do kit certo, nunca o de 1 frasco. Só use "freight_cents" (em CENTAVOS) como último recurso, e nesse caso copie o valor_centavos da LINHA do kit escolhido em snapshot.frete.por_kit — NUNCA invente nem use o de outro kit. CIDADE — NUNCA adivinhe a cidade pelo CEP; se existir snapshot.cep_info, a cidade real é cep_info.localidade/cep_info.uf. Retirada na clínica (Maringá) ou frete grátis = 0 ou omita.',
       'CUPOM: se o cliente informar um cupom, passe em "coupon":"CODIGO" no op — o servidor valida e aplica o desconto sozinho (cupom inválido = valor cheio). NÃO confirme valor com desconto por conta própria; o link já sai com o preço certo.',
       ...(pixEnabled
         ? [
