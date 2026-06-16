@@ -96,7 +96,9 @@ export function PaymentLinksPage() {
   }, [loadRows])
 
   const selectedLeadId = leadId !== NO_LEAD ? leadId : undefined
-  const selectedName = leadId === NO_LEAD && customerName.trim() ? customerName.trim() : undefined
+  // Nome digitado SEMPRE usado (mesmo com lead): vai pro contato do Bling/NF. Se vazio,
+  // o servidor cai no nome do lead. Assim o operador garante o NOME COMPLETO certo no Bling.
+  const selectedName = customerName.trim() || undefined
 
   const applyFreight = (o: FreteOption) => {
     setFreightReais((o.priceCents / 100).toFixed(2).replace('.', ','))
@@ -158,7 +160,7 @@ export function PaymentLinksPage() {
     setGenerating(true)
     setLastLink(null)
     try {
-      const res = await generateRedeLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents, installments })
+      const res = await generateRedeLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents, installments, customerName: selectedName })
       setLastLink({ url: res.payLink, via: `Cartão · ${formatBRL(res.amountCents)}` })
       toast.success(`Link de cartão gerado (${formatBRL(res.amountCents)}).`)
     } catch (e) {
@@ -203,12 +205,11 @@ export function PaymentLinksPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {leadField}
-            {leadId === NO_LEAD ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="pl-customer">Nome do cliente (opcional)</Label>
-                <Input id="pl-customer" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Ex.: Maria Silva" />
-              </div>
-            ) : null}
+            <div className="space-y-1.5">
+              <Label htmlFor="pl-customer">Nome completo do cliente</Label>
+              <Input id="pl-customer" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Ex.: Maria Silva Santos" />
+              <p className="text-[0.7rem] text-muted-foreground">Vai pro pedido no Bling (e na nota fiscal). Se vazio, usa o nome do lead.</p>
+            </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="pl-freight">Frete (R$) — cobrado à parte</Label>

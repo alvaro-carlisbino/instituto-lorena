@@ -72,8 +72,19 @@ Deno.serve(async (req) => {
     const installments = payload.installments != null ? Number(payload.installments) : 1
     const freightCents = payload.freightCents != null ? Number(payload.freightCents) : undefined
     const couponCode = payload.couponCode != null ? String(payload.couponCode) : undefined
+    const customerName = payload.customerName != null ? String(payload.customerName).trim() : ''
     const appBaseUrl = String(payload.appBaseUrl ?? '').trim()
     if (!appBaseUrl) return json({ ok: false, error: 'missing_app_base_url' }, 400)
+    // Nome completo digitado no link → grava em cadastro.nomeCompleto do lead, pra o pedido
+    // no Bling (criado no pagamento) sair com o NOME COMPLETO certo, não o pushname parcial.
+    if (leadId && customerName) {
+      try {
+        const { data: lr } = await admin.from('leads').select('custom_fields').eq('id', leadId).maybeSingle()
+        const cf = ((lr as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>
+        const cad = (cf.cadastro ?? {}) as Record<string, unknown>
+        await admin.from('leads').update({ custom_fields: { ...cf, cadastro: { ...cad, nomeCompleto: customerName } } }).eq('id', leadId)
+      } catch { /* best-effort */ }
+    }
     try {
       const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl, freightCents, couponCode })
       return json({ ok: true, payLink: out.url, id: out.id, amountCents })

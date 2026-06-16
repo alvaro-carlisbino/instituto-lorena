@@ -67,6 +67,16 @@ Deno.serve(async (req) => {
     }
     tenantId = String(lf.tenant_id ?? '')
     leadForCheckout = { id: lf.id, patient_name: lf.patient_name, phone: lf.phone, custom_fields: lf.custom_fields ?? null }
+    // Nome completo digitado no link → cadastro.nomeCompleto do lead, pra o Bling sair certo.
+    const cn = payload.customerName != null ? String(payload.customerName).trim() : ''
+    if (cn) {
+      try {
+        const cf = (lf.custom_fields ?? {}) as Record<string, unknown>
+        const cad = (cf.cadastro ?? {}) as Record<string, unknown>
+        await userClient.from('leads').update({ custom_fields: { ...cf, cadastro: { ...cad, nomeCompleto: cn } } }).eq('id', lf.id)
+        leadForCheckout.custom_fields = { ...cf, cadastro: { ...cad, nomeCompleto: cn } }
+      } catch { /* best-effort */ }
+    }
   } else {
     // Link avulso (fora do chat): resolve o polo ativo e usa um "lead" sintético.
     const { data: tid } = await userClient.rpc('current_tenant_id')
