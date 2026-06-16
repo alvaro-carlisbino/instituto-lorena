@@ -373,6 +373,8 @@ export async function blingCreateSaleOrder(
   args: {
     kit: string; amountCents: number; customerName?: string; phone?: string
     cpf?: string; email?: string; dataNascimento?: string; sexo?: string
+    /** Venda AVULSA (sem kit): descrição livre do item (ex.: "Tricopill + Shampoo"). */
+    description?: string
   },
 ): Promise<{ orderId: string | null; bottles: number }> {
   const token = await getValidBlingToken(admin, tenantId)
@@ -398,10 +400,16 @@ export async function blingCreateSaleOrder(
   const bottlesMap = (cfg.kit_bottles && typeof cfg.kit_bottles === 'object'
     ? (cfg.kit_bottles as Record<string, unknown>)
     : {}) as Record<string, unknown>
-  const bottles = Number(bottlesMap[args.kit] ?? DEFAULT_KIT_BOTTLES[args.kit] ?? 1) || 1
+  // Venda AVULSA (sem kit): 1 item genérico (descrição livre + valor cheio), usando o produto
+  // Tricopill padrão pra o pedido existir no Bling. Kit conhecido: usa frascos/label do kit.
+  const hasKit = !!String(args.kit ?? '').trim()
+  const bottles = hasKit ? (Number(bottlesMap[args.kit] ?? DEFAULT_KIT_BOTTLES[args.kit] ?? 1) || 1) : 1
 
   const totalReais = Math.round(args.amountCents) / 100
   const valorUnit = Math.round((totalReais / bottles) * 100) / 100
+  const itemDescricao = hasKit
+    ? (KIT_LABEL[args.kit] ?? `Tricopill ${args.kit}`)
+    : (args.description?.trim() || 'Venda avulsa Tricopill')
 
   // Data do pedido (YYYY-MM-DD, fuso de Maringá/Brasília). O Bling EXIGE `data` —
   // sem ela recusa com "A data para geração das parcelas é inválida".
@@ -416,7 +424,7 @@ export async function blingCreateSaleOrder(
     itens: [
       {
         produto: { id: Number(productId) || productId },
-        descricao: KIT_LABEL[args.kit] ?? `Tricopill ${args.kit}`,
+        descricao: itemDescricao,
         quantidade: bottles,
         valor: valorUnit,
       },

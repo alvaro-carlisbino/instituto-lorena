@@ -145,17 +145,21 @@ Deno.serve(async (req) => {
   let blingOrderId: string | null = null
   let blingNote = ''
   if (createBling) {
-    if (!kitKey) {
-      blingNote = 'Pedido no Bling não criado (venda avulsa sem kit — lance manualmente se precisar).'
-    } else {
-      try {
-        const cad = (lead.custom_fields?.cadastro ?? {}) as Record<string, string>
-        const out = await blingCreateSaleOrder(admin, tenantId, { kit: kitKey, amountCents: productCents, customerName, phone: lead.phone ? String(lead.phone) : undefined, cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo })
-        blingOrderId = out.orderId
-        blingNote = `Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`
-      } catch (e) {
-        blingNote = `Falha ao criar pedido no Bling: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`
-      }
+    try {
+      const cad = (lead.custom_fields?.cadastro ?? {}) as Record<string, string>
+      // Kit conhecido → pedido por kit (frascos). Venda AVULSA → pedido com 1 item descrito
+      // (ex.: "Tricopill + Shampoo") pelo valor — assim TODA venda confirmada entra no Bling.
+      const out = await blingCreateSaleOrder(admin, tenantId, {
+        kit: kitKey ?? '', amountCents: productCents, description: kitKey ? undefined : label,
+        customerName, phone: lead.phone ? String(lead.phone) : undefined,
+        cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo,
+      })
+      blingOrderId = out.orderId
+      blingNote = kitKey
+        ? `Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`
+        : `Pedido AVULSO criado no Bling (#${out.orderId ?? '?'}): ${label}. Confira os itens/estoque no Bling.`
+    } catch (e) {
+      blingNote = `Falha ao criar pedido no Bling: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`
     }
     try {
       await insertInteraction(admin, {

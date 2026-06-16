@@ -124,13 +124,25 @@ Deno.serve(async (req) => {
 
     // kit: payload > kit salvo > inferido pelo valor pago (cobre o caso do total com frete embutido).
     const kit = payload.kit != null ? String(payload.kit) : (pay.kit ?? inferRedeKit(Number(pay.amount_cents ?? 0)) ?? '')
-    if (!kit) return json({ ok: false, error: 'sem_kit', message: 'Não deu pra identificar o kit pelo valor — informe o kit.' }, 400)
+
+    // AVULSO (sem kit): puxa a descrição da última "Venda confirmada" (ex.: "Tricopill + Shampoo").
+    let description: string | undefined
+    if (!kit) {
+      const { data: conf } = await admin
+        .from('interactions').select('content').eq('lead_id', leadId)
+        .ilike('content', '%Venda confirmada%').order('happened_at', { ascending: false }).limit(1).maybeSingle()
+      const c = String((conf as { content?: string } | null)?.content ?? '')
+      const m = c.match(/Venda confirmada:\s*(.+?)\s*[—-]\s*R\$/i)
+      description = (payload.description != null ? String(payload.description) : (m?.[1] ?? '').trim()) || 'Venda avulsa Tricopill'
+    }
 
     const cad = ((lead.custom_fields?.cadastro as Record<string, string>) ?? {})
     try {
-      const productCents = REDE_KITS[kit]?.amountCents ?? PAGBANK_KITS[kit]?.amountCents ?? Number(pay.amount_cents ?? 0)
+      const productCents = kit
+        ? (REDE_KITS[kit]?.amountCents ?? PAGBANK_KITS[kit]?.amountCents ?? Number(pay.amount_cents ?? 0))
+        : Number(pay.amount_cents ?? 0)
       const out = await blingCreateSaleOrder(admin, 'tricopill', {
-        kit, amountCents: productCents,
+        kit, amountCents: productCents, description,
         customerName: String(cad.nomeCompleto || lead.patient_name || 'Cliente Tricopill').trim(),
         phone: lead.phone ? String(lead.phone) : undefined,
         cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo,
@@ -138,7 +150,11 @@ Deno.serve(async (req) => {
       if (rede) await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', (rede as { id: string }).id)
       await insertInteraction(admin, {
         leadId, patientName: String(cad.nomeCompleto || lead.patient_name || 'Cliente'), channel: 'system', direction: 'system',
-        author: 'Bling', content: `📦 Pedido relançado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`, tenantId: 'tricopill',
+        author: 'Bling',
+        content: kit
+          ? `📦 Pedido relançado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`
+          : `📦 Pedido AVULSO relançado no Bling (#${out.orderId ?? '?'}): ${description}. Confira itens/estoque no Bling.`,
+        tenantId: 'tricopill',
       })
       return json({ ok: true, orderId: out.orderId, bottles: out.bottles })
     } catch (e) {
