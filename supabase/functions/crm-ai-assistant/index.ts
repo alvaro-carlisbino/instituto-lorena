@@ -435,6 +435,14 @@ function extractReplyFromZai(parsed: unknown): string {
   const msg = p.choices?.[0]?.message
   const c = msg?.content
   if (typeof c === 'string' && c.trim()) return c.trim()
+  // FALLBACK: o glm-4.7 (modelo reasoning) às vezes devolve content="" e coloca a resposta
+  // REAL em reasoning_content (com o marcador <<<PACIENTE>>>). Sem isto o bot ficava mudo
+  // ("zai_empty_reply") mesmo tendo gerado a resposta. Extrai a parte do paciente do reasoning.
+  const r = msg?.reasoning_content
+  if (typeof r === 'string' && r.trim()) {
+    const recovered = stripInternalPatientReply(r)
+    if (recovered.trim()) return recovered.trim()
+  }
   return ''
 }
 
