@@ -5,6 +5,33 @@ import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, createPagBankPixOrder } from './pagbank.ts'
 import { createRedeIntent, resolveRedeKit } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
+import { melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+
+/**
+ * Resolve o frete em centavos para um op de fechamento (pix/cartão):
+ *  - Se a IA mandou `freight_service` ("PAC"/"SEDEX") + `to_cep`, RECOTA no servidor
+ *    (Melhor Envio) e usa o valor autoritativo — não confia no número copiado pela IA.
+ *  - Caso contrário, usa `freight_cents`/`freightCents` literal (compatível com o fluxo antigo).
+ * Devolve `undefined` quando não há frete (ex.: retirada na clínica).
+ */
+async function resolveFreightCents(op: Record<string, unknown>): Promise<number | undefined> {
+  const literalRaw = op.freight_cents ?? op.freightCents
+  const literal =
+    literalRaw != null && Number.isFinite(Number(literalRaw)) ? Math.max(0, Math.round(Number(literalRaw))) : undefined
+
+  const service = op.freight_service != null ? String(op.freight_service).trim() : ''
+  const toCep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
+  if (service && toCep.length === 8 && melhorEnvioConfigured()) {
+    try {
+      const q = await quoteFreteMelhorEnvio(toCep)
+      const chosen = q.ok ? pickFreteOption(q, service) : null
+      if (chosen) return chosen.priceCents
+    } catch {
+      // cai no literal abaixo
+    }
+  }
+  return literal
+}
 
 const CRM_OPS_MARKER = '<<<CRM_OPS>>>'
 
@@ -541,9 +568,7 @@ export async function executeCrmAiOpsFromModel(
           results.push({ type: 'pagbank_pix', ok: false, detail: 'lead_not_found' })
           continue
         }
-        const freightRaw = op.freight_cents ?? op.freightCents
-        const freightCents =
-          freightRaw != null && Number.isFinite(Number(freightRaw)) ? Math.max(0, Math.round(Number(freightRaw))) : undefined
+        const freightCents = await resolveFreightCents(op)
         try {
           const out = await createPagBankPixOrder(admin, {
             tenantId: String(lf.tenant_id ?? leadTenantId),
@@ -584,11 +609,10 @@ export async function executeCrmAiOpsFromModel(
           continue
         }
         const installments = Math.max(1, Math.min(12, Number(op.installments ?? 12) || 12))
-        // Frete (entrega à parte) somado ao link, em centavos — vem do PROMPT ADICIONAL
-        // conforme a cidade/CEP que a IA perguntou ao cliente.
-        const freightRaw = op.freight_cents ?? op.freightCents
-        const freightCents =
-          freightRaw != null && Number.isFinite(Number(freightRaw)) ? Math.max(0, Math.round(Number(freightRaw))) : undefined
+        // Frete (entrega à parte) somado ao link, em centavos. Cotação real: se a IA mandar
+        // freight_service ("PAC"/"SEDEX") + to_cep, o servidor recota (Melhor Envio); senão
+        // usa o freight_cents literal.
+        const freightCents = await resolveFreightCents(op)
         try {
           const out = await createRedeIntent(admin, {
             tenantId: leadTenantId,

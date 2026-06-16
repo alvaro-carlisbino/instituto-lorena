@@ -33,6 +33,7 @@ import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
 import { readPagBankConfig } from '../_shared/pagbank.ts'
+import { melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
 
@@ -702,7 +703,18 @@ Deno.serve(async (req) => {
         const cat = await buildBlingCatalog(dbClient, tenantId)
         // Só produtos com PREÇO DE VENDA (preco > 0) E sem estoque NEGATIVO.
         // estoque null = não controlado (mantém); 0 mantém; < 0 oculta (indisponível/oversold).
-        const sellable = cat.items.filter((i) => i.preco > 0 && (i.estoque === null || i.estoque >= 0))
+        let sellable = cat.items.filter((i) => i.preco > 0 && (i.estoque === null || i.estoque >= 0))
+        // O bot do Tricopill vende SOMENTE o Tricopill. A conta Bling é compartilhada com a
+        // clínica (Grandha, Alkymia, shampoos, óleos…), então o catálogo do bot é restrito aos
+        // itens "tricopill" — e tiramos a variante ERRADA "HDS TRICOPILL - 800 MG - 60 CAPSULAS"
+        // (R$ 36,70, blister de cápsulas), que NÃO é o frasco/kit que o bot vende
+        // ("Tricopill - Suplemento Capilar", R$ 199). Sem isso a IA cotava o preço errado.
+        if (tenantId === 'tricopill') {
+          sellable = sellable.filter((i) => {
+            const n = i.nome.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()
+            return n.includes('tricopill') && !n.includes('hds')
+          })
+        }
         if (sellable.length) {
           (snapshot as Record<string, unknown>).bling_catalog = sellable.map((i) => ({
             nome: i.nome,
@@ -748,7 +760,33 @@ Deno.serve(async (req) => {
         const cep = extractLatestCep(userTexts)
         if (cep) {
           const info = await resolveCepBrasil(cep)
-          if (info) (snapshot as Record<string, unknown>).cep_info = info
+          if (info) {
+            ;(snapshot as Record<string, unknown>).cep_info = info
+            // Frete REAL (Melhor Envio): cota PAC/SEDEX pelo CEP do cliente e injeta no
+            // snapshot pra IA apresentar valores reais — em vez de adivinhar por cidade.
+            // Best-effort: se a cotação falhar, a IA cai no fluxo de pedir CEP / humano.
+            if (melhorEnvioConfigured()) {
+              try {
+                const fq = await quoteFreteMelhorEnvio(info.cep)
+                if (fq.ok) {
+                  ;(snapshot as Record<string, unknown>).frete = {
+                    origem_cep: fq.fromCep,
+                    destino_cep: fq.toCep,
+                    destino: `${info.localidade}/${info.uf}`,
+                    opcoes: fq.options.map((o) => ({
+                      servico: o.service,
+                      transportadora: o.company,
+                      valor_reais: o.priceCents / 100,
+                      valor_centavos: o.priceCents,
+                      prazo_dias_uteis: o.deliveryDays,
+                    })),
+                  }
+                }
+              } catch {
+                // best-effort
+              }
+            }
+          }
         }
       } catch {
         // best-effort
@@ -795,11 +833,12 @@ Deno.serve(async (req) => {
           'AGENDAR (você pode agendar sozinha): quando o paciente CONFIRMAR um horário de `shosp.disponibilidade`, inclua na MESMA resposta <<<CRM_OPS>>>{"version":1,"ops":[{"type":"shosp_book","codigoPrestador":N,"codigoServico":N,"data":"AAAA-MM-DD","horario":"HH:MM","codigoHorario":N}]}',
           '- codigoPrestador/data/horario/codigoHorario vêm EXATAMENTE do item escolhido; codigoServico vem de `shosp.servicos_consulta` (médico + gênero certos).',
           'O servidor confirma o horário na MESMA mensagem — escreva como já agendado. Se faltar dado (missing_patient_data) peça ao paciente; se slot_taken ofereça outro. A tag <<<CRM_OPS>>> NUNCA aparece para o paciente.',
-          'Se NÃO houver `shosp.disponibilidade`, diga que a Dandara confirma o melhor horário.',
+          'Se NÃO houver `shosp.disponibilidade`, diga que a Dandara confirma o melhor horário e TERMINE a mensagem com [PRONTO_PARA_CONSULTOR] na última linha (avisa a Dandara no CRM; o paciente não vê).',
         ]
       : [
           'MEIO-TERMO — a MARCAÇÃO do horário é conduzida pela DANDARA (consultora humana), NÃO por você. Seu papel é AUXILIAR: identifique o tipo de atendimento e a preferência de período (manhã/tarde), tire dúvidas, e diga que a Dandara vai confirmar o melhor horário e passar os detalhes em seguida.',
           'NÃO fique oferecendo horários específicos, NÃO use ferramentas de agendamento, NÃO diga "já agendei" nem invente protocolo. (Sobre consultas JÁ marcadas, PODE responder usando `shosp.agendamentos`.)',
+          'HANDOFF OBRIGATÓRIO PARA A DANDARA: na MESMA mensagem em que você disser que a Dandara vai confirmar/continuar (isto é, assim que já tiver o tipo de atendimento E a preferência de período — ou se o paciente pedir um atendente humano, ou perguntar valores/detalhes clínicos), TERMINE a resposta com a tag [PRONTO_PARA_CONSULTOR] na ÚLTIMA linha. É ESSA tag — e SÓ ela — que avisa a Dandara no CRM e transfere oficialmente o atendimento para ela; sem a tag, a Dandara NÃO é notificada e o lead fica parado. O paciente NUNCA vê a tag (o sistema a remove automaticamente).',
         ]
 
     // Persona de VENDAS (ex.: Tricopill). Mantém os tokens/regras agnósticos que o
@@ -826,12 +865,13 @@ Deno.serve(async (req) => {
       'snapshot.bling_catalog é o catálogo REAL do Bling JÁ FILTRADO (só produtos COM preço de venda): cada item tem nome, código, **preco** (preço de VENDA em reais) e estoque. É a fonte da verdade de produtos, preços e disponibilidade. Se o estoque for 0 ou negativo (ou null = não controlado), não prometa pronta-entrega — diga que confirma o prazo. Não ofereça item que não esteja no catálogo.',
       'PREÇO: para os produtos do catálogo, você PODE e DEVE informar o "preco" (preço de venda) que está no bling_catalog. EXCEÇÃO IMPORTANTE — os KITS do Tricopill (1 mês, 3+1, 5 meses) seguem SEMPRE os valores e promoções do PROMPT ADICIONAL (ex.: Pix com 5% off), NUNCA o preço de linha do catálogo (que pode divergir). Se o cliente perguntar o valor de algo que NÃO está nem no bling_catalog nem no PROMPT ADICIONAL, NÃO invente — diga que confirma com a atendente. Cotar preço inventado é PROIBIDO; o frete é sempre cobrado à parte.',
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
-      'VALORES, PAGAMENTO E FRETE: apresente os valores, as formas de pagamento/parcelas e o FRETE EXATAMENTE como definido no PROMPT ADICIONAL — nunca invente preço, parcela ou desconto. Ao passar QUALQUER preço, informe SEMPRE que o frete é cobrado à parte (não está incluso no valor do produto) e pergunte a cidade/CEP do cliente para calcular — principalmente clientes de fora de Maringá.',
+      'VALORES, PAGAMENTO E FRETE: apresente os valores e as formas de pagamento/parcelas EXATAMENTE como no PROMPT ADICIONAL — nunca invente preço, parcela ou desconto. Ao passar QUALQUER preço, informe SEMPRE que o frete é cobrado à parte (não incluso no produto) e peça o CEP do cliente para COTAR o frete real.',
+      'FRETE REAL (snapshot.frete): quando existir snapshot.frete, são as opções de frete REAIS cotadas pelos Correios (via Melhor Envio) para o CEP do cliente. Apresente as opções de snapshot.frete.opcoes (ex.: PAC e SEDEX) com o valor (valor_reais) e o prazo (prazo_dias_uteis) EXATAMENTE como vierem — NUNCA invente outro valor — e pergunte qual o cliente prefere. Se o cliente NÃO mandou o CEP ainda, peça o CEP. Só passe para um atendente humano (com [PRONTO_PARA_CONSULTOR]) se, MESMO com o CEP, snapshot.frete não vier (cotação indisponível). Para RETIRADA na clínica (Maringá), não há frete.',
       'RETIRADA NA CLÍNICA (só Maringá): quando o cliente optar por RETIRAR o pedido na clínica (em vez de entrega), informe AUTOMATICAMENTE o endereço de retirada, sempre em TERCEIRA PESSOA (impessoal, NÃO "eu te entrego"). Modelo: "Perfeito! O pedido ficará disponível para retirada na clínica da Dra. Lorena. O endereço é: *Av. Nóbrega, 814 - Zona 04, Maringá - PR, 87014-180*. Na retirada não há cobrança de frete 💚". Esse endereço só vale para retirada em Maringá (a clínica fica em Maringá); para outras cidades é entrega com frete, não retirada.',
       'FECHAMENTO NO CARTÃO (você gera o link sozinha): quando o cliente decidir comprar no CARTÃO — já escolheu o kit, quer cartão e JÁ informou a cidade (para o frete) — gere o link você mesma. Na MESMA resposta, DEPOIS da mensagem ao cliente, acrescente exatamente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_link","kit":"3_meses","installments":12,"freight_cents":1500,"coupon":"CODIGO_SE_HOUVER"}]}. O servidor cria o link de cartão (em até 12x) e ANEXA sozinho na sua mensagem — então escreva de forma calorosa que o link está logo abaixo (ex.: "Prontinho! 💳 Seu link de pagamento no cartão tá aqui embaixo, é só preencher os dados 💚"). NUNCA escreva uma URL nem invente o link: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o link — CONTINUE atendendo para tirar dúvidas e ajudar a concluir o pagamento.',
       'KIT no op: passe "kit" com a chave do kit escolhido — "1_mes", "3_meses" ou "5_meses" — exatamente como descrito no PROMPT ADICIONAL. O servidor já aplica o PREÇO CHEIO de cartão desse kit; você NÃO calcula o valor do produto, só informa o frete.',
       'PARCELAS (REGRA FIXA por kit): **1 frasco (1_mes)** → NÃO parcela: ofereça só PIX ou cartão À VISTA (1x). **Kits de 3+ frascos (3_meses, 5_meses)** → cartão em ATÉ 3x sem juros: ofereça PIX, à vista, ou parcelado (o cliente escolhe 1x, 2x ou 3x). NUNCA ofereça mais de 3x, nem parcelamento para 1 frasco. O link de cartão já sai com o limite certo automático; o cliente escolhe o nº de parcelas (até o máximo) na própria página de pagamento — então é só dizer as opções disponíveis conforme o kit.',
-      'FRETE NO LINK: "freight_cents" é o frete em CENTAVOS (ex.: R$ 15,00 = 1500), conforme a cidade no PROMPT ADICIONAL. CIDADE — NUNCA adivinhe a cidade pelo número do CEP (você erra). Se existir snapshot.cep_info, a cidade REAL do cliente é cep_info.localidade/cep_info.uf — use SOMENTE essa, jamais outra. Se o cliente só mandou o CEP e NÃO existir cep_info, NÃO afirme nenhuma cidade — peça a cidade. Se a cidade for MARINGÁ, você JÁ sabe o frete (R$15 = 1500) — GERE o link na hora. Frete grátis/incluso = 0 ou omita.',
+      'FRETE NO LINK: "freight_cents" é o frete em CENTAVOS. Use o "valor_centavos" da opção de frete que o cliente ESCOLHEU em snapshot.frete.opcoes (cotação real) — NUNCA invente o valor. Alternativa robusta: em vez de freight_cents, passe "freight_service" com o nome do serviço escolhido ("PAC" ou "SEDEX") + "to_cep" com o CEP do cliente, que o servidor recota e aplica o frete certo sozinho. CIDADE — NUNCA adivinhe a cidade pelo CEP; se existir snapshot.cep_info, a cidade real é cep_info.localidade/cep_info.uf. Retirada na clínica (Maringá) ou frete grátis = 0 ou omita.',
       'CUPOM: se o cliente informar um cupom, passe em "coupon":"CODIGO" no op — o servidor valida e aplica o desconto sozinho (cupom inválido = valor cheio). NÃO confirme valor com desconto por conta própria; o link já sai com o preço certo.',
       ...(pixEnabled
         ? [
@@ -841,7 +881,7 @@ Deno.serve(async (req) => {
         : [
             'PIX → SEMPRE HUMANO (NÃO gere Pix): o pagamento por PIX está temporariamente INDISPONÍVEL no atendimento automático. Se o cliente quiser pagar no PIX, você NUNCA gera código/QR nem promete um Pix — diga com cordialidade que um atendente já vai te enviar o Pix certinho e termine a resposta com [PRONTO_PARA_CONSULTOR] na última linha. (Apenas o CARTÃO/Rede você gera sozinha; o Pix é só pelo atendente por enquanto.)',
           ]),
-      'EXCEÇÕES → HUMANO: passe pro humano com [PRONTO_PARA_CONSULTOR] APENAS se o cliente pedir um atendente humano, ou a cidade tiver frete que você REALMENTE não conhece pelo PROMPT ADICIONAL. NUNCA transfira só para "calcular o frete" de uma cidade cujo valor você já sabe (ex.: Maringá, R$15) — gere o link/Pix você mesma. (O sistema remove o marcador; o cliente não vê.)',
+      'EXCEÇÕES → HUMANO: passe pro humano com [PRONTO_PARA_CONSULTOR] APENAS se o cliente pedir um atendente humano, ou se a cotação de frete REALMENTE não vier mesmo com o CEP informado (snapshot.frete ausente). NUNCA transfira só para "calcular o frete" quando snapshot.frete já traz as opções — apresente os valores e gere o link/Pix você mesma. (O sistema remove o marcador; o cliente não vê.)',
       'CONTATOS — NUNCA passe números: você JAMAIS escreve, repete, confirma ou inventa número de telefone, e-mail ou contato de NINGUÉM (nem do cliente, nem de atendente, nem um número alternativo que o cliente tenha dado). Se o cliente mandar um número, apenas registre internamente — NUNCA repita de volta na mensagem. O ÚNICO contato da Tricopill é este próprio WhatsApp; não cite outro número.',
       'NOME do cliente: chame pelo PRIMEIRO nome de forma natural e ESPORÁDICA — NÃO repita o nome em toda mensagem (soa robótico/falso). Use só o nome que o PRÓPRIO cliente disser nesta conversa ou o nome do lead; NUNCA invente um nome nem use o nome de outra conversa.',
       'TRANSFERÊNCIA p/ humano: quando precisar passar para um atendente, diga UMA única vez, curto e caloroso (ex.: "Vou te passar pra nossa atendente, que finaliza pra você 💚"), e termine com [PRONTO_PARA_CONSULTOR]. NÃO fique repetindo "a atendente já vai chegar / já está ciente / já está a caminho" em várias mensagens seguidas.',
