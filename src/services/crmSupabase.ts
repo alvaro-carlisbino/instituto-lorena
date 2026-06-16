@@ -85,6 +85,7 @@ type DbLead = {
   conversation_status?: string | null
   lost_reason?: string | null
   last_interaction_at?: string | null
+  stage_entered_at?: string | null
   tenant_id?: string | null
 }
 type DbInteraction = {
@@ -235,6 +236,10 @@ const mapDbLeadToLead = (lead: DbLead, tagIds: string[], followup: DbFollowupSta
       lead.last_interaction_at != null && String(lead.last_interaction_at).length > 0
         ? String(lead.last_interaction_at)
         : lead.created_at,
+    stage_entered_at:
+      lead.stage_entered_at != null && String(lead.stage_entered_at).length > 0
+        ? String(lead.stage_entered_at)
+        : lead.created_at,
   }
   if (followup) {
     out.followup_current_step =
@@ -309,7 +314,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     client
       .from('leads')
       .select(
-        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at, tenant_id',
+        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at, stage_entered_at, tenant_id',
       )
       .is('deleted_at', null)
       .order('position', { ascending: true }),
@@ -673,7 +678,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
     client
       .from('leads')
       .select(
-        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at, tenant_id',
+        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at, stage_entered_at, tenant_id',
       )
       .is('deleted_at', null)
       .order('position', { ascending: true }),
@@ -895,6 +900,7 @@ export const seedDemoData = async (): Promise<void> => {
     conversation_status: lead.conversation_status ?? 'new',
     lost_reason: lead.lost_reason ?? null,
     last_interaction_at: lead.last_interaction_at ?? lead.createdAt,
+    stage_entered_at: lead.stage_entered_at ?? lead.createdAt,
   }))
 
   const interactionPayload = initialInteractions.map((interaction) => ({

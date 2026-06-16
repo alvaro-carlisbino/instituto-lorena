@@ -57,10 +57,14 @@ export function KanbanLeadCard({
   const temperature =
     tempRaw === 'cold' || tempRaw === 'warm' || tempRaw === 'hot' ? tempRaw : lead.temperature
 
-  // SLA Calculation
-  const elapsedMs = nowMs - new Date(lead.createdAt).getTime()
+  // SLA por etapa: conta o tempo PARADO na etapa atual (stage_entered_at), não a
+  // idade total do lead. Assim, ao entrar em contato ou agendar consulta (mudança
+  // de etapa), o contador reinicia e o selo some — só reaparece se o lead ficar
+  // parado naquela etapa além do prazo dela. SLA 0 ou em branco = sem prazo.
+  const stageAnchor = lead.stage_entered_at ?? lead.createdAt
+  const elapsedMs = nowMs - new Date(stageAnchor).getTime()
   const elapsedMinutes = Math.floor(elapsedMs / 60000)
-  const isSlaBreached = slaMinutes !== undefined && elapsedMinutes > slaMinutes
+  const isSlaBreached = slaMinutes !== undefined && slaMinutes > 0 && elapsedMinutes > slaMinutes
 
   const detailFields = kanbanFields.filter(
     (f) => f.fieldKey !== 'patient_name' && f.fieldKey !== 'temperature',

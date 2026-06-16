@@ -86,6 +86,8 @@ export type Lead = {
   lost_reason?: string | null
   /** ISO timestamp of last inbound/outbound touch (Supabase). */
   last_interaction_at?: string | null
+  /** ISO timestamp de quando o lead entrou na etapa atual (base do SLA por etapa). */
+  stage_entered_at?: string | null
   /** Follow-up automático D1/D3/D5 (Supabase). */
   followup_current_step?: number
   followup_status?: 'active' | 'completed' | 'interrupted'
@@ -303,13 +305,12 @@ export const pipelines: Pipeline[] = [
     id: 'pipeline-clinica',
     name: 'Pipeline Clínica',
     boardConfig: {
+      // SLA por etapa = tempo máximo PARADO naquela etapa antes de virar "atrasado".
+      // Só vale para etapas onde o lead ainda aguarda 1º atendimento. Depois de
+      // contatado/agendar consulta, já foi atendido → sem prazo.
       stageSlaMinutes: {
         novo: 15,
         triagem: 30,
-        contato: 60,
-        consulta: 120,
-        acompanhamento: 240,
-        fechado: 0,
       },
     },
     stages: [
