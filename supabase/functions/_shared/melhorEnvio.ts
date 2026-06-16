@@ -711,8 +711,17 @@ export async function autoShipToCart(
     }
     if (!to.address) return { ok: false, skipped: true, reason: 'sem_rua' }
 
+    // COTA ANTES e escolhe um serviço que REALMENTE atende o trecho. Antes assumia PAC fixo,
+    // mas há rotas que só têm SEDEX (ex.: Nova Esperança, Apucarana) → o carrinho dava
+    // "transportadora não atende". Agora: usa o serviço escolhido pelo cliente SE ele atende;
+    // senão cai no mais barato que atende.
+    const box = boxForKit(opts.kit) ?? undefined
+    const q = await quoteFreteMelhorEnvio(admin, tenantId, cep, { box, cityInfo })
+    if (!q.ok || q.options.length === 0) return { ok: false, skipped: true, reason: 'sem_servico_atende' }
     const serviceRaw = String(entrega.service ?? entrega.freight_service ?? '').trim().toUpperCase()
-    const serviceId = serviceRaw.includes('SEDEX') ? 2 : 1 // default PAC
+    const preferred = serviceRaw ? q.options.find((o) => o.service.toUpperCase().includes(serviceRaw)) : null
+    const chosen = preferred ?? q.options[0] // options já vêm ordenadas do mais barato
+    const serviceId = chosen.serviceId
 
     const res = await createMeShipment(admin, tenantId, {
       to,
