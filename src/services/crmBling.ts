@@ -88,6 +88,12 @@ export async function createBlingTestOrder(kit: string): Promise<{ orderId: stri
   return { orderId: p.orderId != null ? String(p.orderId) : null, bottles: Number(p.bottles ?? 0) }
 }
 
+/** Relança no Bling uma venda PAGA que não entrou (lead de outro canal, bug, etc.). */
+export async function retryBlingOrder(leadId: string, kit?: string): Promise<{ orderId: string | null; bottles: number }> {
+  const p = await invokeBling({ action: 'retry_bling', leadId, ...(kit ? { kit } : {}) })
+  return { orderId: p.orderId != null ? String(p.orderId) : null, bottles: Number(p.bottles ?? 0) }
+}
+
 /** Inicia o OAuth: pede a URL de autorização do Bling e redireciona o navegador. */
 export async function startBlingConnect(returnUrl: string): Promise<void> {
   if (!supabase) throw new Error('Sistema não configurado.')

@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { buildBlingCatalog, blingCreateSaleOrder } from '../_shared/bling.ts'
 import { PAGBANK_KITS } from '../_shared/pagbank.ts'
+import { insertInteraction } from '../_shared/crm.ts'
 
 // Ações autenticadas do Bling para o frontend.
 //  list_products      -> catálogo (nome, código, preço, estoque) do polo ativo
@@ -88,6 +89,55 @@ Deno.serve(async (req) => {
     const amountCents = PAGBANK_KITS[kit]?.amountCents ?? 18905
     try {
       const out = await blingCreateSaleOrder(admin, tenantId, { kit, amountCents, customerName: 'Pedido de teste' })
+      return json({ ok: true, orderId: out.orderId, bottles: out.bottles })
+    } catch (e) {
+      return json({ ok: false, error: 'bling_order_failed', message: e instanceof Error ? e.message : String(e) }, 502)
+    }
+  }
+
+  // retry_bling: cria/relança o pedido no Bling para uma venda JÁ PAGA que não entrou
+  // (ex.: lead veio pelo canal da clínica comprando Tricopill, ou bug do kit null).
+  // Kit Tricopill → SEMPRE no tenant 'tricopill' (onde vive a config do Bling).
+  if (action === 'retry_bling') {
+    const leadId = String(payload.leadId ?? '').trim()
+    if (!leadId) return json({ ok: false, error: 'missing_lead' }, 400)
+
+    const { data: leadRow } = await admin
+      .from('leads').select('id, patient_name, phone, custom_fields').eq('id', leadId).maybeSingle()
+    const lead = leadRow as { id: string; patient_name?: string; phone?: string; custom_fields?: Record<string, unknown> } | null
+    if (!lead) return json({ ok: false, error: 'lead_not_found' }, 404)
+
+    // Pagamento pago mais recente SEM pedido Bling (cartão tem a coluna bling_order_id; Pix não).
+    const { data: rede } = await admin
+      .from('rede_payments').select('id, kit, amount_cents, installments, bling_order_id')
+      .eq('lead_id', leadId).eq('status', 'paid').is('bling_order_id', null)
+      .order('paid_at', { ascending: false }).limit(1).maybeSingle()
+    const { data: pb } = await admin
+      .from('pagbank_checkouts').select('checkout_id, kit, amount_cents')
+      .eq('lead_id', leadId).eq('status', 'paid')
+      .order('paid_at', { ascending: false }).limit(1).maybeSingle()
+
+    const pay = (rede as { id: string; kit?: string; amount_cents?: number } | null)
+      ?? (pb ? { id: (pb as { checkout_id: string }).checkout_id, kit: (pb as { kit?: string }).kit, amount_cents: (pb as { amount_cents?: number }).amount_cents } : null)
+    if (!pay) return json({ ok: false, error: 'nenhuma_venda_paga_sem_bling' }, 404)
+
+    const kit = payload.kit != null ? String(payload.kit) : (pay.kit ?? '')
+    if (!kit) return json({ ok: false, error: 'sem_kit', message: 'Pagamento sem kit — informe o kit ou lance manual.' }, 400)
+
+    const cad = ((lead.custom_fields?.cadastro as Record<string, string>) ?? {})
+    try {
+      const productCents = PAGBANK_KITS[kit]?.amountCents ?? Number(pay.amount_cents ?? 0)
+      const out = await blingCreateSaleOrder(admin, 'tricopill', {
+        kit, amountCents: productCents,
+        customerName: String(cad.nomeCompleto || lead.patient_name || 'Cliente Tricopill').trim(),
+        phone: lead.phone ? String(lead.phone) : undefined,
+        cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo,
+      })
+      if (rede) await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', (rede as { id: string }).id)
+      await insertInteraction(admin, {
+        leadId, patientName: String(cad.nomeCompleto || lead.patient_name || 'Cliente'), channel: 'system', direction: 'system',
+        author: 'Bling', content: `📦 Pedido relançado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`, tenantId: 'tricopill',
+      })
       return json({ ok: true, orderId: out.orderId, bottles: out.bottles })
     } catch (e) {
       return json({ ok: false, error: 'bling_order_failed', message: e instanceof Error ? e.message : String(e) }, 502)

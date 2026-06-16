@@ -153,6 +153,22 @@ export function LeadChatThread({
   const [confirmSaleOpen, setConfirmSaleOpen] = useState(false)
   const [shipOpen, setShipOpen] = useState(false)
   const [pagbankLoading, setPagbankLoading] = useState(false)
+  const [retryingBling, setRetryingBling] = useState(false)
+
+  const handleRetryBling = async () => {
+    if (retryingBling) return
+    setRetryingBling(true)
+    try {
+      const { retryBlingOrder } = await import('@/services/crmBling')
+      const res = await retryBlingOrder(leadId)
+      toast.success(`Pedido lançado no Bling (#${res.orderId ?? '?'}, ${res.bottles} frascos).`)
+      void crm.refreshChatFromSupabase?.()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao reenviar pro Bling')
+    } finally {
+      setRetryingBling(false)
+    }
+  }
   const scrollRef = useRef<HTMLDivElement>(null)
   // Controle de auto-scroll: só descer pro fim se o usuário JÁ estava no fim.
   const isAtBottomRef = useRef(true)
@@ -1040,6 +1056,18 @@ export function LeadChatThread({
                     Agendar
                   </Button>
                 )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  title="Relançar no Bling uma venda paga que não entrou"
+                  className="h-8 rounded-lg px-2 text-[10px]"
+                  disabled={retryingBling}
+                  onClick={() => void handleRetryBling()}
+                >
+                  <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5 text-primary', retryingBling && 'animate-spin')} />
+                  {retryingBling ? 'Enviando…' : 'Reenviar Bling'}
+                </Button>
               </div>
               <Button
                 type="button"
