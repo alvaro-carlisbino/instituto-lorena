@@ -66,6 +66,12 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
   const [loading, setLoading] = useState(false)
   const [cepLoading, setCepLoading] = useState(false)
 
+  // Caixa (peso/dimensões) — vazio usa o padrão do polo. Importante para o preço bater.
+  const [weight, setWeight] = useState('')
+  const [boxL, setBoxL] = useState('')
+  const [boxW, setBoxW] = useState('')
+  const [boxH, setBoxH] = useState('')
+
   // Remetente / config
   const [config, setConfig] = useState<ShipConfig | null>(null)
   const [showSender, setShowSender] = useState(false)
@@ -163,6 +169,12 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
           stateAbbr: uf.trim().toUpperCase(),
         },
         products: [{ name: productName.trim() || 'Produto', quantity: Math.max(1, Number(productQty) || 1), unitaryValueCents: valueCents }],
+        box: {
+          weightKg: Number(weight.replace(',', '.')) || undefined,
+          lengthCm: Number(boxL) || undefined,
+          widthCm: Number(boxW) || undefined,
+          heightCm: Number(boxH) || undefined,
+        },
         insuranceCents: valueCents,
         finalize,
       })
@@ -302,8 +314,26 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
                 <Input id="sl-val" inputMode="decimal" value={productReais} onChange={(e) => setProductReais(e.target.value)} />
               </div>
             </div>
+            <div className="grid grid-cols-4 gap-2">
+              <div className="space-y-1">
+                <Label htmlFor="sl-wt" className="text-[0.7rem]">Peso (kg)</Label>
+                <Input id="sl-wt" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="0,3" className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="sl-l" className="text-[0.7rem]">Compr. (cm)</Label>
+                <Input id="sl-l" inputMode="numeric" value={boxL} onChange={(e) => setBoxL(e.target.value)} placeholder="20" className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="sl-w" className="text-[0.7rem]">Larg. (cm)</Label>
+                <Input id="sl-w" inputMode="numeric" value={boxW} onChange={(e) => setBoxW(e.target.value)} placeholder="20" className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="sl-h" className="text-[0.7rem]">Alt. (cm)</Label>
+                <Input id="sl-h" inputMode="numeric" value={boxH} onChange={(e) => setBoxH(e.target.value)} placeholder="10" className="h-8 text-xs" />
+              </div>
+            </div>
             <p className="text-[0.7rem] text-muted-foreground">
-              A caixa usa as dimensões padrão do polo. Ajuste no painel do Melhor Envio se precisar.
+              Vazio = caixa padrão do polo (0,3 kg · 20×20×10). Pra <b>4 frascos</b> use o peso real (≈ 0,6–1 kg) pra o preço bater.
             </p>
           </div>
 
