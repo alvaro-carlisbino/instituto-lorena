@@ -48,6 +48,7 @@ export function PaymentLinksPage() {
   const isSalesPolo = tenant.poloType === 'sales'
 
   const [leadId, setLeadId] = useState<string>(NO_LEAD)
+  const [customerName, setCustomerName] = useState('')
   const [kit, setKit] = useState<PagbankKit>('3_meses')
   const [amountReais, setAmountReais] = useState('')
   const [description, setDescription] = useState('')
@@ -95,9 +96,7 @@ export function PaymentLinksPage() {
   }, [loadRows])
 
   const selectedLeadId = leadId !== NO_LEAD ? leadId : undefined
-  // Nome do cliente vem do LEAD (server-side por leadId) ou já está cadastrado no Bling —
-  // não pedimos "nome completo" no link (campo removido a pedido do Álvaro 16/jun).
-  const selectedName: string | undefined = undefined
+  const selectedName = leadId === NO_LEAD && customerName.trim() ? customerName.trim() : undefined
 
   const applyFreight = (o: FreteOption) => {
     setFreightReais((o.priceCents / 100).toFixed(2).replace('.', ','))
@@ -204,6 +203,12 @@ export function PaymentLinksPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {leadField}
+            {leadId === NO_LEAD ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="pl-customer">Nome do cliente (opcional)</Label>
+                <Input id="pl-customer" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Ex.: Maria Silva" />
+              </div>
+            ) : null}
 
             <div className="space-y-1.5">
               <Label htmlFor="pl-freight">Frete (R$) — cobrado à parte</Label>
