@@ -128,6 +128,12 @@ export function blingConnectionStatus(cfg: Record<string, unknown> | null | unde
 }
 
 async function blingFetch(token: string, path: string, init?: RequestInit): Promise<Response> {
+  // Timeout OBRIGATÓRIO: sem isto, uma chamada lenta/travada ao Bling pendura o chamador
+  // indefinidamente. Como buildBlingCatalog roda a cada resposta do bot de vendas (e o
+  // catch dele NÃO protege contra hang, só contra erro), um Bling lento derrubava a IA do
+  // Tricopill inteira. Aborta em BLING_FETCH_TIMEOUT_MS (default 8s) → falha rápido → a IA
+  // responde mesmo sem catálogo.
+  const timeoutMs = Number(Deno.env.get('BLING_FETCH_TIMEOUT_MS') ?? '') || 8000
   return await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -136,6 +142,7 @@ async function blingFetch(token: string, path: string, init?: RequestInit): Prom
       Accept: 'application/json',
       ...(init?.headers ?? {}),
     },
+    signal: init?.signal ?? AbortSignal.timeout(timeoutMs),
   })
 }
 

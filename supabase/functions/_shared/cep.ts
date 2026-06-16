@@ -1,7 +1,7 @@
 // CEP → cidade/UF (ViaCEP) + regra de praça local. Compartilhado entre o bot
 // (crm-ai-assistant) e a cotação de frete (melhorEnvio / crm-frete-quote).
 
-export type CepInfo = { cep: string; localidade: string; uf: string; bairro: string }
+export type CepInfo = { cep: string; localidade: string; uf: string; bairro: string; logradouro: string }
 
 /** Acha o CEP mais recente (8 dígitos) num conjunto de textos do cliente. */
 export function extractLatestCep(texts: string[]): string {
@@ -22,13 +22,14 @@ export async function resolveCepBrasil(rawCep: string): Promise<CepInfo | null> 
   try {
     const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`)
     if (!res.ok) return null
-    const data = (await res.json()) as { localidade?: string; uf?: string; bairro?: string; erro?: boolean }
+    const data = (await res.json()) as { localidade?: string; uf?: string; bairro?: string; logradouro?: string; erro?: boolean }
     if (data.erro || !data.localidade) return null
     return {
       cep: `${digits.slice(0, 5)}-${digits.slice(5)}`,
       localidade: String(data.localidade),
       uf: String(data.uf ?? ''),
       bairro: String(data.bairro ?? ''),
+      logradouro: String(data.logradouro ?? ''),
     }
   } catch {
     return null

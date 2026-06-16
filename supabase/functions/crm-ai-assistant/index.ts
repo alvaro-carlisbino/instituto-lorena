@@ -670,7 +670,13 @@ Deno.serve(async (req) => {
     // cotar custo ao cliente. Preço de venda vem só do PROMPT ADICIONAL.
     if (isSalesBot && tenantId) {
       try {
-        const cat = await buildBlingCatalog(dbClient, tenantId)
+        // O catálogo é só ENRIQUECIMENTO (preços vêm do prompt). NUNCA pode bloquear a
+        // resposta: corta em 3,5s. Com cache vazio + Bling lento, isso evitava a IA "parar".
+        const cat = await Promise.race([
+          buildBlingCatalog(dbClient, tenantId),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
+        ])
+        if (!cat) throw new Error('catalog_timeout')
         // Só produtos com PREÇO DE VENDA (preco > 0) E COM ESTOQUE (> 0). A IA NÃO deve
         // falar/ofertar item esgotado: estoque 0 ou negativo (oversold) é OCULTADO.
         // estoque null = não controlado no Bling (mantém — não é "esgotado", só não é rastreado).
