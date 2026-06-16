@@ -264,6 +264,22 @@ Deno.serve(async (req) => {
               media_base64: dl.base64,
               metadata: { source: 'wapi', caption: med.caption || null },
             })
+            // Cutuca o realtime de `leads` p/ o chat exibir a mídia na hora (sem esperar o poll de 12s).
+            await admin.from('leads').update({ updated_at: new Date().toISOString() }).eq('id', leadIdForMedia)
+          } else {
+            // Não perde a mídia: enfileira p/ o worker (crm-wapi-media-retry) tentar de novo
+            // FORA da requisição — o áudio do W-API costuma estourar o timeout aqui na hora.
+            await admin.from('crm_media_retry_jobs').insert({
+              tenant_id: tenantId ?? null,
+              lead_id: leadIdForMedia,
+              interaction_id: inboundInteractionId,
+              whatsapp_instance_id: wInstanceId,
+              message_id: messageId,
+              media_type: med.mediaType,
+              media: med.media,
+              caption: med.caption || null,
+              last_error: `${dl.debug}`.slice(0, 300),
+            })
           }
         })())
       }
