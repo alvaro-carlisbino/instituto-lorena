@@ -42,6 +42,7 @@ import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
@@ -749,20 +750,20 @@ export function LeadsPage() {
             </table>
           </div>
           {!crm.isLoading && filteredLeads.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-24 text-center opacity-30">
-              <div className="mb-4 text-5xl">🔭</div>
-              <h3 className="text-sm font-black uppercase tracking-[0.3em]">Nenhum lead encontrado</h3>
-              <p className="text-xs font-bold text-muted-foreground mt-2 max-w-md">
-                {crm.leads.length === 0 &&
+            <EmptyState
+              title="Nenhum lead encontrado"
+              description={
+                crm.leads.length === 0 &&
                 pipelineFilter === 'all' &&
                 stageFilter === 'all' &&
                 ownerFilter === 'all' &&
                 sourceFilter === 'all' &&
                 !searchTerm.trim()
                   ? 'Ainda não há leads na base. Importe um CSV abaixo, conecte canais que criem leads ou, se for administrador, use Laboratório para dados de demonstração.'
-                  : 'Tente ajustar filtros ou o termo de busca.'}
-              </p>
-            </div>
+                  : 'Tente ajustar filtros ou o termo de busca.'
+              }
+              className="py-20"
+            />
           )}
         </CardContent>
       </Card>

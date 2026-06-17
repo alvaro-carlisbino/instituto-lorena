@@ -6,6 +6,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { CepInput } from '@/components/ui/masked-input'
 import { Label } from '@/components/ui/label'
@@ -409,9 +410,17 @@ export function PaymentLinksPage() {
             </CardHeader>
             <CardContent className="p-0">
               {rows.length === 0 ? (
-                <div className="py-10 text-center text-sm text-muted-foreground">
-                  {loadingRows ? 'Carregando…' : 'Nenhum link gerado ainda.'}
-                </div>
+                loadingRows ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground" role="status" aria-live="polite">
+                    Carregando…
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="Nenhum link gerado ainda"
+                    description="Os links de pagamento (cartão e Pix) que você gerar aparecem aqui."
+                    className="py-10"
+                  />
+                )
               ) : (
                 <div className="divide-y divide-border/40">
                   {rows.map((r) => (
