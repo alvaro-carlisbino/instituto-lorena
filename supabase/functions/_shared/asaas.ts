@@ -224,13 +224,26 @@ export async function chargeAsaasCard(
   const cfg = await readAsaasConfig(admin, intent.tenantId)
   if (!cfg) throw new Error('asaas_nao_configurado')
 
-  const cpf = digits(args.holderInfo?.cpf || intent.customerDoc)
-  const phone = digits(args.holderInfo?.phone || intent.phone)
+  // Holder info (CPF/CEP/número/e-mail) — o antifraude do Asaas exige no cartão. Prioriza o que
+  // veio do checkout; completa com o cadastro/entrega do lead capturado na conversa.
+  let leadCad: Record<string, string> = {}
+  let leadEnt: Record<string, string> = {}
+  if (intent.leadId) {
+    const { data: lead } = await admin.from('leads').select('custom_fields').eq('id', intent.leadId).maybeSingle()
+    const cf = ((lead as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>
+    leadCad = (cf.cadastro ?? {}) as Record<string, string>
+    leadEnt = (cf.entrega ?? {}) as Record<string, string>
+  }
+  const cpf = digits(args.holderInfo?.cpf || intent.customerDoc || leadCad.cpf)
+  const phone = digits(args.holderInfo?.phone || intent.phone || '')
+  const email = args.holderInfo?.email || leadCad.email || 'cliente@tricopill.com.br'
+  const postalCode = digits(args.holderInfo?.postalCode || leadEnt.cep)
+  const addressNumber = String(args.holderInfo?.addressNumber || leadEnt.numero || 'S/N').slice(0, 20)
   const customerId = await findOrCreateAsaasCustomer(cfg, {
     name: intent.customerName || args.card.holderName,
     cpfCnpj: cpf,
     phone,
-    email: args.holderInfo?.email,
+    email,
   })
   const installments = Math.max(1, Math.min(12, args.installments ?? intent.installments ?? 1))
   const value = intent.amountCents / 100
@@ -250,10 +263,10 @@ export async function chargeAsaasCard(
     },
     creditCardHolderInfo: {
       name: (intent.customerName || args.card.holderName).slice(0, 100),
-      email: args.holderInfo?.email || 'cliente@tricopill.com.br',
+      email,
       cpfCnpj: cpf || undefined,
-      postalCode: digits(args.holderInfo?.postalCode) || undefined,
-      addressNumber: (args.holderInfo?.addressNumber || 'S/N').slice(0, 20),
+      postalCode: postalCode || undefined,
+      addressNumber,
       phone: phone || undefined,
       mobilePhone: phone || undefined,
     },

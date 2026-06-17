@@ -2,8 +2,9 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 
 import { insertInteraction } from './crm.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
-import { createPagBankCheckout, createPagBankPixOrder } from './pagbank.ts'
-import { createRedeIntent, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit } from './rede.ts'
+import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
+import { resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit } from './rede.ts'
+import { createAsaasCardIntent, createAsaasPix } from './asaas.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 
@@ -667,22 +668,11 @@ export async function executeCrmAiOpsFromModel(
       }
 
       if (type === 'pagbank_pix' || type === 'pix' || type === 'pix_qr') {
-        // Pix DIRETO (copia-e-cola + QR), via PagBank Orders. Aceita kit OU amount_cents, frete e cupom.
-        const { data: leadFull } = await admin
-          .from('leads')
-          .select('id, patient_name, phone, custom_fields, tenant_id')
-          .eq('id', opts.allowedLeadId)
-          .maybeSingle()
-        const lf = leadFull as
-          | { id: string; patient_name?: string; phone?: string; custom_fields?: Record<string, unknown>; tenant_id?: string }
-          | null
-        if (!lf) {
-          results.push({ type: 'pagbank_pix', ok: false, detail: 'lead_not_found' })
-          continue
-        }
-        const freightCents = await resolveFreightCents(admin, String(lf.tenant_id ?? leadTenantId), op)
+        // Pix DIRETO (copia-e-cola + QR) via ASAAS. Aceita kit OU amount_cents, frete e cupom.
+        // (Preço Pix do kit = tabela PAGBANK_KITS, que já é o valor com 5% off.)
+        const freightCents = await resolveFreightCents(admin, leadTenantId, op)
         const snapPix = await persistEntrega(admin, opts.allowedLeadId, op)
-        // MESMA trava NF-e do cartão: não gera Pix sem cadastro completo (nome+CPF+CEP+número).
+        // MESMA trava NF-e do cartão: não gera Pix sem cadastro completo (nome+telefone+CPF+CEP+número).
         const readyPix = validateOrderReadiness(snapPix.cadastro, snapPix.entrega)
         if (!readyPix.ok) {
           results.push({
@@ -693,23 +683,40 @@ export async function executeCrmAiOpsFromModel(
           })
           continue
         }
+        const pixKey = op.kit != null ? normalizeKitKey(String(op.kit)) : null
+        const pixKit = pixKey ? PAGBANK_KITS[pixKey] : undefined
+        let pixAmount = 0
+        let pixDesc = ''
+        if (pixKit) {
+          pixAmount = pixKit.amountCents
+          pixDesc = pixKit.label
+        } else if (op.amount_cents != null) {
+          pixAmount = Math.round(Number(op.amount_cents))
+          pixDesc = op.description != null ? String(op.description).slice(0, 120) : 'Tricopill'
+        } else {
+          results.push({ type: 'pagbank_pix', ok: false, detail: 'missing_kit_or_amount' })
+          continue
+        }
         try {
-          const out = await createPagBankPixOrder(admin, {
-            tenantId: String(lf.tenant_id ?? leadTenantId),
-            lead: { id: lf.id, patient_name: lf.patient_name, phone: lf.phone, custom_fields: lf.custom_fields ?? null },
-            kit: op.kit != null ? String(op.kit) : undefined,
-            amountCents: op.amount_cents != null ? Number(op.amount_cents) : undefined,
-            description: op.description != null ? String(op.description) : undefined,
+          const out = await createAsaasPix(admin, {
+            tenantId: leadTenantId,
+            amountCents: pixAmount,
+            description: pixDesc,
+            leadId: opts.allowedLeadId,
             couponCode: op.coupon != null ? String(op.coupon) : undefined,
             freightCents,
-            supabaseUrl: Deno.env.get('SUPABASE_URL') ?? '',
+            kit: pixKey ?? undefined,
+            customer: {
+              name: String(snapPix.cadastro.nomeCompleto ?? '').trim() || undefined,
+              cpf: String(snapPix.cadastro.cpf ?? '').replace(/\D/g, '') || undefined,
+              phone: String(snapPix.cadastro.telefone ?? '').replace(/\D/g, '') || undefined,
+              email: String(snapPix.cadastro.email ?? '').trim() || undefined,
+            },
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           // detail = copia-e-cola (vai no texto); imageUrl = PNG do QR (enviado como imagem).
           results.push({ type: 'pagbank_pix', ok: true, detail: out.qrText, customerNote: note, imageUrl: out.qrImageUrl || undefined })
-          summaries.push(
-            `Pix gerado (${out.label}${out.env === 'sandbox' ? ', sandbox' : ''}${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`,
-          )
+          summaries.push(`Pix gerado (${pixDesc}${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`)
         } catch (e) {
           results.push({ type: 'pagbank_pix', ok: false, detail: (e instanceof Error ? e.message : String(e)).slice(0, 200) })
         }
@@ -759,7 +766,7 @@ export async function executeCrmAiOpsFromModel(
           continue
         }
         try {
-          const out = await createRedeIntent(admin, {
+          const out = await createAsaasCardIntent(admin, {
             tenantId: leadTenantId,
             amountCents,
             description,
@@ -769,10 +776,13 @@ export async function executeCrmAiOpsFromModel(
             couponCode: op.coupon != null ? String(op.coupon) : undefined,
             freightCents,
             kit: kitKey ?? undefined, // guarda o kit (ou inferido) p/ criar o pedido no Bling ao pagar
-            // Dados do cliente na cobrança (controle + conciliação): nome/telefone/CPF do cadastro.
-            customerName: String(snap.cadastro.nomeCompleto ?? '').trim() || undefined,
-            phone: String(snap.cadastro.telefone ?? '').replace(/\D/g, '') || undefined,
-            customerDoc: String(snap.cadastro.cpf ?? '').replace(/\D/g, '') || undefined,
+            // Dados do cliente na cobrança (controle + conciliação + holder do cartão no Asaas).
+            customer: {
+              name: String(snap.cadastro.nomeCompleto ?? '').trim() || undefined,
+              cpf: String(snap.cadastro.cpf ?? '').replace(/\D/g, '') || undefined,
+              phone: String(snap.cadastro.telefone ?? '').replace(/\D/g, '') || undefined,
+              email: String(snap.cadastro.email ?? '').trim() || undefined,
+            },
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: note, installments: effInstallments })

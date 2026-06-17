@@ -41,7 +41,12 @@ const str = (v: unknown) => (v != null && String(v).trim() ? String(v) : null)
 /** Lista cartão + Pix unificados, ordenados por criação (desc). RLS confina ao polo. */
 export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[]> {
   if (!supabase) return []
-  const [rede, pix] = await Promise.all([
+  const [asaas, rede, pix] = await Promise.all([
+    supabase
+      .from('asaas_payments')
+      .select('id, lead_id, method, amount_cents, description, kit, installments, status, return_code, customer_name, phone, customer_doc, asaas_payment_id, bling_order_id, created_at, paid_at')
+      .order('created_at', { ascending: false })
+      .limit(limit),
     supabase
       .from('rede_payments')
       .select('id, lead_id, amount_cents, description, kit, installments, status, tid, return_code, customer_name, phone, customer_doc, bling_order_id, created_at, paid_at')
@@ -55,6 +60,31 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
   ])
 
   const rows: UnifiedPayment[] = []
+
+  if (!asaas.error) {
+    for (const r of asaas.data ?? []) {
+      const rec = asRec(r)
+      const paidAt = rec.paid_at != null ? String(rec.paid_at) : null
+      rows.push({
+        id: String(rec.id ?? ''),
+        method: String(rec.method ?? 'card') === 'pix' ? 'pix' : 'card',
+        leadId: str(rec.lead_id),
+        customerName: str(rec.customer_name),
+        phone: str(rec.phone),
+        customerDoc: str(rec.customer_doc),
+        amountCents: Number(rec.amount_cents ?? 0),
+        description: str(rec.description),
+        kit: str(rec.kit),
+        installments: Number(rec.installments ?? 1),
+        status: statusOf(String(rec.status ?? 'pending'), paidAt),
+        tid: str(rec.asaas_payment_id),
+        returnCode: str(rec.return_code),
+        blingOrderId: str(rec.bling_order_id),
+        createdAt: String(rec.created_at ?? ''),
+        paidAt,
+      })
+    }
+  }
 
   if (!rede.error) {
     for (const r of rede.data ?? []) {

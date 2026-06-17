@@ -12,19 +12,17 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
-import {
-  generatePagbankLink,
-  PAGBANK_KIT_LABELS,
-  type PagbankKit,
-} from '@/services/crmPagbank'
-import { generateRedeLink } from '@/services/crmRede'
+import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
+import { generateAsaasCardLink, generateAsaasPix } from '@/services/crmAsaas'
 import { quoteFrete, type FreteOption } from '@/services/crmFrete'
 import { ClinicPaymentsPanel } from '@/components/payments/ClinicPaymentsPanel'
 
 const NO_LEAD = '__none__'
 
-// Preço CHEIO para cartão (Rede) — sem o desconto de 5% do Pix.
+// Preço CHEIO para cartão (Asaas) — sem o desconto de 5% do Pix.
 const REDE_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99900 }
+// Preço do Pix por kit (com 5% off) — mesma tabela do PAGBANK_KITS no backend.
+const PIX_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 56700, '5_meses': 94905 }
 // Regra de parcelas por kit: 1 frasco = só à vista (1x); 3+ frascos = até 3x.
 const KIT_MAX_INSTALLMENTS: Record<PagbankKit, number> = { '1_mes': 1, '3_meses': 3, '5_meses': 3 }
 
@@ -55,7 +53,7 @@ export function PaymentLinksPage() {
   const [maxInstallments, setMaxInstallments] = useState(isSalesPolo ? KIT_MAX_INSTALLMENTS['3_meses'] : 12)
   const [freightReais, setFreightReais] = useState('')
   const [generating, setGenerating] = useState(false)
-  const [lastLink, setLastLink] = useState<{ url: string; via: string } | null>(null)
+  const [lastLink, setLastLink] = useState<{ url: string; via: string; qrImage?: string; isPix?: boolean } | null>(null)
 
   // Cotação de frete por CEP (preenche o campo de frete acima).
   const [cep, setCep] = useState('')
@@ -113,9 +111,15 @@ export function PaymentLinksPage() {
     setGenerating(true)
     setLastLink(null)
     try {
-      const res = await generatePagbankLink({ leadId: selectedLeadId, kit, customerName: selectedName, freightCents })
-      setLastLink({ url: res.payLink, via: `Pix · ${formatBRL(res.amountCents)}` })
-      toast.success(`Link Pix gerado (${formatBRL(res.amountCents)}).`)
+      const res = await generateAsaasPix({
+        leadId: selectedLeadId,
+        amountCents: PIX_KIT_AMOUNTS[kit],
+        description: `Tricopill ${kit.replace('_', ' ')}`,
+        customerName: selectedName,
+        freightCents,
+      })
+      setLastLink({ url: res.qrText, via: `Pix · ${formatBRL(res.amountCents)}`, qrImage: res.qrImageUrl, isPix: true })
+      toast.success(`Pix gerado (${formatBRL(res.amountCents)}).`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao gerar link Pix')
     } finally {
@@ -131,11 +135,11 @@ export function PaymentLinksPage() {
     setGenerating(true)
     setLastLink(null)
     try {
-      const res = await generateRedeLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents, installments, customerName: selectedName })
+      const res = await generateAsaasCardLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents, installments, customerName: selectedName })
       setLastLink({ url: res.payLink, via: `Cartão · ${formatBRL(res.amountCents)}` })
       toast.success(`Link de cartão gerado (${formatBRL(res.amountCents)}).`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao gerar link de cartão (Rede)')
+      toast.error(e instanceof Error ? e.message : 'Falha ao gerar link de cartão (Asaas)')
     } finally {
       setGenerating(false)
     }
@@ -347,22 +351,29 @@ export function PaymentLinksPage() {
                   onClick={() => void handleCard(Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100), description.trim() || 'Pagamento', maxInstallments)}
                   disabled={generating}
                 >
-                  <CreditCard className="mr-1.5 size-4" /> {generating ? 'Gerando…' : 'Gerar link de cartão (Rede)'}
+                  <CreditCard className="mr-1.5 size-4" /> {generating ? 'Gerando…' : 'Gerar link de cartão (Asaas)'}
                 </Button>
               </>
             )}
 
             {lastLink ? (
               <div className="space-y-2 rounded-lg border border-border/60 bg-muted/30 p-3">
-                <p className="text-[0.7rem] font-bold uppercase tracking-widest text-muted-foreground">{lastLink.via}</p>
+                <p className="text-[0.7rem] font-bold uppercase tracking-widest text-muted-foreground">
+                  {lastLink.via}{lastLink.isPix ? ' — copia e cola' : ''}
+                </p>
+                {lastLink.qrImage ? (
+                  <img src={lastLink.qrImage} alt="QR Code Pix" className="mx-auto size-40 rounded-md bg-white p-1" />
+                ) : null}
                 <p className="break-all font-mono text-xs">{lastLink.url}</p>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => void copy(lastLink.url)}>
-                    <Copy className="mr-1.5 size-3.5" /> Copiar
+                    <Copy className="mr-1.5 size-3.5" /> Copiar {lastLink.isPix ? 'código Pix' : 'link'}
                   </Button>
-                  <Button size="sm" variant="outline" render={<a href={lastLink.url} target="_blank" rel="noreferrer" />}>
-                    <ExternalLink className="mr-1.5 size-3.5" /> Abrir
-                  </Button>
+                  {!lastLink.isPix ? (
+                    <Button size="sm" variant="outline" render={<a href={lastLink.url} target="_blank" rel="noreferrer" />}>
+                      <ExternalLink className="mr-1.5 size-3.5" /> Abrir
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             ) : null}

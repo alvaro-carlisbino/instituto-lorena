@@ -4,7 +4,7 @@ import { useParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { fetchRedeIntent, payRedeIntent, type RedeIntentView } from '@/services/crmRede'
+import { fetchAsaasIntent, payAsaasCard, type AsaasIntentView } from '@/services/crmAsaas'
 
 function brl(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -12,7 +12,7 @@ function brl(cents: number): string {
 
 export function CheckoutPage() {
   const { id = '' } = useParams()
-  const [intent, setIntent] = useState<RedeIntentView | null>(null)
+  const [intent, setIntent] = useState<AsaasIntentView | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -21,12 +21,15 @@ export function CheckoutPage() {
   const [month, setMonth] = useState('')
   const [year, setYear] = useState('')
   const [cvv, setCvv] = useState('')
+  const [cpf, setCpf] = useState('')
+  const [cep, setCep] = useState('')
+  const [addrNumber, setAddrNumber] = useState('')
   const [installments, setInstallments] = useState(1)
   const [paying, setPaying] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   useEffect(() => {
-    fetchRedeIntent(id)
+    fetchAsaasIntent(id)
       .then(setIntent)
       .catch((e) => setError(e instanceof Error ? e.message : 'Cobrança não encontrada'))
       .finally(() => setLoading(false))
@@ -36,7 +39,7 @@ export function CheckoutPage() {
     setPaying(true)
     setResult(null)
     try {
-      const out = await payRedeIntent(
+      const out = await payAsaasCard(
         id,
         {
           cardholderName: name.trim(),
@@ -44,6 +47,11 @@ export function CheckoutPage() {
           expirationMonth: Number(month),
           expirationYear: Number(year.length === 2 ? `20${year}` : year),
           securityCode: cvv.trim(),
+        },
+        {
+          cpf: cpf.replace(/\D/g, ''),
+          postalCode: cep.replace(/\D/g, ''),
+          addressNumber: addrNumber.trim(),
         },
         installments,
       )
@@ -103,6 +111,20 @@ export function CheckoutPage() {
               <Input id="cc-cvv" value={cvv} onChange={(e) => setCvv(e.target.value)} inputMode="numeric" placeholder="123" />
             </div>
           </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="cc-cpf">CPF do titular</Label>
+              <Input id="cc-cpf" value={cpf} onChange={(e) => setCpf(e.target.value)} inputMode="numeric" placeholder="Somente números" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cc-cep">CEP</Label>
+              <Input id="cc-cep" value={cep} onChange={(e) => setCep(e.target.value)} inputMode="numeric" placeholder="00000000" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cc-addrnum">Nº</Label>
+              <Input id="cc-addrnum" value={addrNumber} onChange={(e) => setAddrNumber(e.target.value)} inputMode="numeric" placeholder="123" />
+            </div>
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="cc-inst">Parcelas</Label>
             <select
@@ -126,7 +148,7 @@ export function CheckoutPage() {
           <Button className="w-full" onClick={() => void submit()} disabled={paying}>
             {paying ? 'Processando…' : `Pagar ${brl(intent.amountCents)}`}
           </Button>
-          <p className="text-center text-[0.7rem] text-muted-foreground">Pagamento processado pela Rede.</p>
+          <p className="text-center text-[0.7rem] text-muted-foreground">Pagamento processado pelo Asaas.</p>
         </div>
       )}
     </div>
