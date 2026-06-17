@@ -323,11 +323,23 @@ export async function createAsaasPix(
   const baseDesc = String(args.description ?? 'Pagamento').slice(0, 100)
   const description = freightCents > 0 ? `${baseDesc} + frete` : baseDesc
 
+  // Asaas EXIGE CPF/CNPJ na cobrança Pix. Se o caller não mandou (ex.: painel sem digitar),
+  // completa com o cadastro do lead (nome/CPF/telefone/e-mail) — espelha o chargeAsaasCard.
+  let leadCad: Record<string, string> = {}
+  if (args.leadId) {
+    const { data: lead } = await admin.from('leads').select('custom_fields, patient_name, phone').eq('id', args.leadId).maybeSingle()
+    const l = lead as { custom_fields?: Record<string, unknown>; patient_name?: string; phone?: string } | null
+    leadCad = ((l?.custom_fields?.cadastro ?? {}) as Record<string, string>)
+    if (!leadCad.nomeCompleto && l?.patient_name) leadCad.nomeCompleto = l.patient_name
+    if (!leadCad.telefone && l?.phone) leadCad.telefone = l.phone
+  }
+  const pixCpf = digits(args.customer?.cpf || leadCad.cpf)
+  if (!pixCpf) throw new Error('asaas_pix_fail: informe o CPF ou CNPJ do cliente (o Asaas exige na cobrança Pix).')
   const customerId = await findOrCreateAsaasCustomer(cfg, {
-    name: args.customer?.name,
-    cpfCnpj: args.customer?.cpf,
-    phone: args.customer?.phone,
-    email: args.customer?.email,
+    name: args.customer?.name || leadCad.nomeCompleto,
+    cpfCnpj: pixCpf,
+    phone: digits(args.customer?.phone || leadCad.telefone),
+    email: args.customer?.email || leadCad.email,
   })
   const id = shortId()
   const create = await asaasFetch(cfg, '/payments', {
@@ -360,9 +372,9 @@ export async function createAsaasPix(
     kit: args.kit || null,
     coupon_code: coupon.applied ? coupon.code : null,
     discount_cents: coupon.discountCents,
-    customer_name: args.customer?.name?.trim() || null,
-    phone: digits(args.customer?.phone) || null,
-    customer_doc: digits(args.customer?.cpf) || null,
+    customer_name: (args.customer?.name?.trim() || leadCad.nomeCompleto || null),
+    phone: digits(args.customer?.phone || leadCad.telefone) || null,
+    customer_doc: pixCpf || null,
     asaas_customer_id: customerId,
     asaas_payment_id: String(asaasId),
     pix_payload: qrText || null,

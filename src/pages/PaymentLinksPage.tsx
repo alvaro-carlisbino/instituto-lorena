@@ -46,6 +46,7 @@ export function PaymentLinksPage() {
 
   const [leadId, setLeadId] = useState<string>(NO_LEAD)
   const [customerName, setCustomerName] = useState('')
+  const [customerCpf, setCustomerCpf] = useState('')
   const [kit, setKit] = useState<PagbankKit>('3_meses')
   const [amountReais, setAmountReais] = useState('')
   const [description, setDescription] = useState('')
@@ -69,6 +70,8 @@ export function PaymentLinksPage() {
   // Nome digitado SEMPRE usado (mesmo com lead): vai pro contato do Bling/NF. Se vazio,
   // o servidor cai no nome do lead. Assim o operador garante o NOME COMPLETO certo no Bling.
   const selectedName = customerName.trim() || undefined
+  // Asaas EXIGE CPF/CNPJ na cobrança Pix (e ajuda a casar o cliente no Bling no cartão).
+  const selectedCpf = customerCpf.replace(/\D/g, '') || undefined
 
   const applyFreight = (o: FreteOption) => {
     setFreightReais((o.priceCents / 100).toFixed(2).replace('.', ','))
@@ -107,15 +110,26 @@ export function PaymentLinksPage() {
     }
   }
 
-  const handlePix = async () => {
+  const handlePix = async (amountCents: number, desc: string) => {
+    if (!Number.isFinite(amountCents) || amountCents < 500) {
+      toast.error('Informe um valor válido (mínimo R$ 5,00).')
+      return
+    }
+    // O Asaas recusa Pix sem CPF/CNPJ. Com lead, o servidor puxa o CPF do cadastro; sem lead
+    // (avulso), o operador PRECISA preencher o campo.
+    if (!selectedCpf && !selectedLeadId) {
+      toast.error('Informe o CPF/CNPJ do cliente para gerar o Pix (o Asaas exige).')
+      return
+    }
     setGenerating(true)
     setLastLink(null)
     try {
       const res = await generateAsaasPix({
         leadId: selectedLeadId,
-        amountCents: PIX_KIT_AMOUNTS[kit],
-        description: `Tricopill ${kit.replace('_', ' ')}`,
+        amountCents,
+        description: desc,
         customerName: selectedName,
+        cpf: selectedCpf,
         freightCents,
       })
       setLastLink({ url: res.qrText, via: `Pix · ${formatBRL(res.amountCents)}`, qrImage: res.qrImageUrl, isPix: true })
@@ -135,7 +149,7 @@ export function PaymentLinksPage() {
     setGenerating(true)
     setLastLink(null)
     try {
-      const res = await generateAsaasCardLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents, installments, customerName: selectedName })
+      const res = await generateAsaasCardLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents, installments, customerName: selectedName, cpf: selectedCpf })
       setLastLink({ url: res.payLink, via: `Cartão · ${formatBRL(res.amountCents)}` })
       toast.success(`Link de cartão gerado (${formatBRL(res.amountCents)}).`)
     } catch (e) {
@@ -184,6 +198,18 @@ export function PaymentLinksPage() {
               <Label htmlFor="pl-customer">Nome completo do cliente</Label>
               <Input id="pl-customer" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Ex.: Maria Silva Santos" />
               <p className="text-[0.7rem] text-muted-foreground">Vai pro pedido no Bling (e na nota fiscal). Se vazio, usa o nome do lead.</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="pl-cpf">CPF ou CNPJ do cliente</Label>
+              <Input
+                id="pl-cpf"
+                inputMode="numeric"
+                value={customerCpf}
+                onChange={(e) => setCustomerCpf(e.target.value)}
+                placeholder="Obrigatório no Pix. Só números."
+              />
+              <p className="text-[0.7rem] text-muted-foreground">O Asaas exige CPF/CNPJ pra gerar Pix. Com lead, puxa do cadastro se vazio.</p>
             </div>
 
             <div className="space-y-1.5">
@@ -275,7 +301,7 @@ export function PaymentLinksPage() {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button className="flex-1" onClick={() => void handlePix()} disabled={generating}>
+                  <Button className="flex-1" onClick={() => void handlePix(PIX_KIT_AMOUNTS[kit], `Tricopill ${kit.replace('_', ' ')}`)} disabled={generating}>
                     <QrCode className="mr-1.5 size-4" /> Pix
                   </Button>
                   <Button
@@ -298,20 +324,34 @@ export function PaymentLinksPage() {
                     <Label htmlFor="pl-desc">Descrição</Label>
                     <Input id="pl-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex.: Shampoo / outro produto" />
                   </div>
-                  <Button
-                    className="w-full"
-                    variant="outline"
-                    onClick={() =>
-                      void handleCard(
-                        Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100),
-                        description.trim() || 'Tricopill',
-                        maxInstallments,
-                      )
-                    }
-                    disabled={generating}
-                  >
-                    <CreditCard className="mr-1.5 size-4" /> Gerar link de cartão (valor avulso)
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      className="flex-1"
+                      onClick={() =>
+                        void handlePix(
+                          Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100),
+                          description.trim() || 'Tricopill',
+                        )
+                      }
+                      disabled={generating}
+                    >
+                      <QrCode className="mr-1.5 size-4" /> Pix (avulso)
+                    </Button>
+                    <Button
+                      className="flex-1"
+                      variant="outline"
+                      onClick={() =>
+                        void handleCard(
+                          Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100),
+                          description.trim() || 'Tricopill',
+                          maxInstallments,
+                        )
+                      }
+                      disabled={generating}
+                    >
+                      <CreditCard className="mr-1.5 size-4" /> Cartão (avulso)
+                    </Button>
+                  </div>
                 </div>
               </>
             ) : (
@@ -346,13 +386,23 @@ export function PaymentLinksPage() {
                   </Select>
                   <p className="text-[0.7rem] text-muted-foreground">O cliente escolhe de 1x até esse máximo na hora de pagar.</p>
                 </div>
-                <Button
-                  className="w-full"
-                  onClick={() => void handleCard(Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100), description.trim() || 'Pagamento', maxInstallments)}
-                  disabled={generating}
-                >
-                  <CreditCard className="mr-1.5 size-4" /> {generating ? 'Gerando…' : 'Gerar link de cartão (Asaas)'}
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    className="flex-1"
+                    onClick={() => void handlePix(Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100), description.trim() || 'Pagamento')}
+                    disabled={generating}
+                  >
+                    <QrCode className="mr-1.5 size-4" /> Pix
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    variant="outline"
+                    onClick={() => void handleCard(Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100), description.trim() || 'Pagamento', maxInstallments)}
+                    disabled={generating}
+                  >
+                    <CreditCard className="mr-1.5 size-4" /> {generating ? 'Gerando…' : 'Cartão'}
+                  </Button>
+                </div>
               </>
             )}
 

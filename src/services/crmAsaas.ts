@@ -53,6 +53,7 @@ export async function generateAsaasCardLink(args: {
   freightCents?: number
   couponCode?: string
   customerName?: string
+  cpf?: string
 }): Promise<{ payLink: string; amountCents: number }> {
   const p = await invoke('crm-asaas', {
     action: 'generate_card',
@@ -64,6 +65,7 @@ export async function generateAsaasCardLink(args: {
     ...(args.freightCents && args.freightCents > 0 ? { freightCents: args.freightCents } : {}),
     ...(args.couponCode?.trim() ? { couponCode: args.couponCode.trim() } : {}),
     ...(args.customerName?.trim() ? { customerName: args.customerName.trim() } : {}),
+    ...(args.cpf?.replace(/\D/g, '') ? { cpf: args.cpf.replace(/\D/g, '') } : {}),
   })
   if (p.ok !== true) {
     const m = String(p.message || p.error || '')
@@ -81,6 +83,7 @@ export async function generateAsaasPix(args: {
   freightCents?: number
   couponCode?: string
   customerName?: string
+  cpf?: string
 }): Promise<{ qrText: string; qrImageUrl: string; amountCents: number }> {
   const p = await invoke('crm-asaas', {
     action: 'generate_pix',
@@ -90,6 +93,7 @@ export async function generateAsaasPix(args: {
     ...(args.freightCents && args.freightCents > 0 ? { freightCents: args.freightCents } : {}),
     ...(args.couponCode?.trim() ? { couponCode: args.couponCode.trim() } : {}),
     ...(args.customerName?.trim() ? { customerName: args.customerName.trim() } : {}),
+    ...(args.cpf?.replace(/\D/g, '') ? { cpf: args.cpf.replace(/\D/g, '') } : {}),
   })
   if (p.ok !== true) {
     const m = String(p.message || p.error || '')
