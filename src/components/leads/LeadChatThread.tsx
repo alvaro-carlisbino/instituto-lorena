@@ -115,6 +115,78 @@ type Props = {
   } | null
 }
 
+// --- Mídia inline (áudio/vídeo) ---------------------------------------------
+// Converte o base64 inline (WhatsApp/W-API) num Blob URL em vez de data: URI.
+// Motivo: o Chrome NÃO toca <audio>/<video> Opus de nota de voz (PTT, sem
+// metadados de duração) a partir de data: URI — o player aparece mudo. Via Blob
+// URL ele trata como recurso real e resolve duração/seek. Imagens seguem em
+// data: URI (funcionam). Prefere a URL externa (ManyChat S3) quando existe.
+function base64ToBlobUrl(base64: string, mime: string): string | null {
+  try {
+    const clean = (mime || '').split(';')[0].trim() || 'application/octet-stream'
+    const bin = atob(base64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
+    return URL.createObjectURL(new Blob([bytes], { type: clean }))
+  } catch {
+    return null
+  }
+}
+
+function useBlobMediaSrc(
+  url: string | null | undefined,
+  base64: string | null | undefined,
+  fallbackMime: string,
+  mime: string | null | undefined,
+): string | null {
+  const resolved = useMemo(() => {
+    if (url && url.trim()) return { value: url, isBlob: false }
+    if (base64 && base64.trim()) return { value: base64ToBlobUrl(base64, mime || fallbackMime), isBlob: true }
+    return { value: null, isBlob: false }
+  }, [url, base64, mime, fallbackMime])
+  // Revoga o Blob URL ao trocar/desmontar pra não vazar memória.
+  useEffect(() => {
+    if (resolved.isBlob && resolved.value) {
+      const v = resolved.value
+      return () => URL.revokeObjectURL(v)
+    }
+  }, [resolved])
+  return resolved.value
+}
+
+type InlineMediaItem = { url?: string | null; base64?: string | null; mimeType?: string | null; caption?: string | null }
+
+function InlineAudio({ item }: { item: InlineMediaItem }) {
+  const src = useBlobMediaSrc(item.url, item.base64, 'audio/ogg', item.mimeType)
+  if (!src) return null
+  return (
+    <div className="flex flex-col gap-1">
+      <audio controls preload="metadata" src={src} className="h-8 w-full min-w-[200px]">
+        Seu navegador não suporta áudio.
+      </audio>
+      <div className="flex items-center gap-2 px-1">
+        <span className="text-[10px] opacity-60">Áudio recebido</span>
+        <a href={src} download="audio.ogg" className="text-[10px] underline opacity-60 hover:opacity-100">
+          baixar
+        </a>
+      </div>
+    </div>
+  )
+}
+
+function InlineVideo({ item }: { item: InlineMediaItem }) {
+  const src = useBlobMediaSrc(item.url, item.base64, 'video/mp4', item.mimeType)
+  if (!src) return null
+  return (
+    <div className="overflow-hidden rounded-lg border border-border/20">
+      <video controls preload="metadata" src={src} className="max-h-72 w-full">
+        Seu navegador não suporta vídeo.
+      </video>
+      {item.caption && <p className="mt-1 px-2 pb-1 text-xs opacity-80">{item.caption}</p>}
+    </div>
+  )
+}
+
 export function LeadChatThread({
   leadId,
   history,
@@ -489,30 +561,10 @@ export function LeadChatThread({
               )
             }
             if (item.type === 'audio') {
-              const src = resolveSrc(item, 'audio/ogg')
-              if (!src) return null
-              return (
-                <div key={item.id} className="flex flex-col gap-1">
-                  <audio controls className="h-8 w-full min-w-[200px]">
-                    <source src={src} type={item.mimeType || 'audio/ogg'} />
-                    Seu navegador não suporta áudio.
-                  </audio>
-                  <span className="text-[10px] opacity-60 px-1">Áudio recebido</span>
-                </div>
-              )
+              return <InlineAudio key={item.id} item={item} />
             }
             if (item.type === 'video') {
-              const src = resolveSrc(item, 'video/mp4')
-              if (!src) return null
-              return (
-                <div key={item.id} className="overflow-hidden rounded-lg border border-border/20">
-                  <video controls className="max-h-72 w-full" preload="metadata">
-                    <source src={src} type={item.mimeType || 'video/mp4'} />
-                    Seu navegador não suporta vídeo.
-                  </video>
-                  {item.caption && <p className="mt-1 px-2 pb-1 text-xs opacity-80">{item.caption}</p>}
-                </div>
-              )
+              return <InlineVideo key={item.id} item={item} />
             }
             if (item.type === 'document') {
               const src = resolveSrc(item, 'application/octet-stream')
