@@ -97,6 +97,51 @@ export async function fetchRedeIntent(id: string): Promise<RedeIntentView> {
   }
 }
 
+// === Gestão / relatório de recebimentos por cartão (Rede) — RLS por polo ===
+export type RedePaymentRow = {
+  id: string
+  leadId: string | null
+  amountCents: number
+  description: string | null
+  installments: number
+  status: string
+  tid: string | null
+  returnCode: string | null
+  customerName: string | null
+  phone: string | null
+  createdAt: string
+  paidAt: string | null
+}
+
+/** Lista os pagamentos por cartão (Rede) do polo ativo (RLS). Base da gestão/relatório. */
+export async function fetchRedePayments(limit = 200): Promise<RedePaymentRow[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('rede_payments')
+    .select('id, lead_id, amount_cents, description, installments, status, tid, return_code, customer_name, phone, created_at, paid_at')
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const rec = r as Record<string, unknown>
+    const paidAt = rec.paid_at != null ? String(rec.paid_at) : null
+    return {
+      id: String(rec.id ?? ''),
+      leadId: rec.lead_id != null ? String(rec.lead_id) : null,
+      amountCents: Number(rec.amount_cents ?? 0),
+      description: rec.description != null ? String(rec.description) : null,
+      installments: Number(rec.installments ?? 1),
+      status: paidAt ? 'paid' : String(rec.status ?? 'pending'),
+      tid: rec.tid != null ? String(rec.tid) : null,
+      returnCode: rec.return_code != null ? String(rec.return_code) : null,
+      customerName: rec.customer_name != null && String(rec.customer_name).trim() ? String(rec.customer_name) : null,
+      phone: rec.phone != null ? String(rec.phone) : null,
+      createdAt: String(rec.created_at ?? ''),
+      paidAt,
+    }
+  })
+}
+
 export type RedeCardInput = {
   cardholderName: string
   cardNumber: string

@@ -23,6 +23,7 @@ import {
 } from '@/services/crmPagbank'
 import { generateRedeLink } from '@/services/crmRede'
 import { quoteFrete, type FreteOption } from '@/services/crmFrete'
+import { ClinicPaymentsPanel } from '@/components/payments/ClinicPaymentsPanel'
 
 const NO_LEAD = '__none__'
 
@@ -461,11 +462,7 @@ export function PaymentLinksPage() {
             </CardContent>
           </Card>
         ) : (
-          <Card>
-            <CardContent className="flex h-full flex-col items-center justify-center py-12 text-center text-sm text-muted-foreground">
-              Gere um link de cartão (Rede) informando o valor. O Pix pelo PagBank é exclusivo do polo Tricopill.
-            </CardContent>
-          </Card>
+          <ClinicPaymentsPanel />
         )}
       </div>
     </AppLayout>
