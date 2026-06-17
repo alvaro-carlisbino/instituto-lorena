@@ -23,8 +23,8 @@ const NO_LEAD = '__none__'
 const CARD_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99900 }
 // Preço do Pix por kit (com 5% off) — mesma tabela do PAGBANK_KITS no backend.
 const PIX_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 56700, '5_meses': 94905 }
-// Regra de parcelas por kit: 1 frasco = só à vista (1x); 3+ frascos = até 3x.
-const KIT_MAX_INSTALLMENTS: Record<PagbankKit, number> = { '1_mes': 1, '3_meses': 3, '5_meses': 3 }
+// Parcelamento com juros (Asaas) até 12x em todos os kits.
+const KIT_MAX_INSTALLMENTS: Record<PagbankKit, number> = { '1_mes': 12, '3_meses': 12, '5_meses': 12 }
 
 function formatBRL(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })

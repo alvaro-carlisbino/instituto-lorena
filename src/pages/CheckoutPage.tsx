@@ -74,6 +74,11 @@ export function CheckoutPage() {
   if (error || !intent) return <div style={box}>Cobrança não encontrada ou expirada.</div>
 
   const paid = intent.status === 'paid' || result?.ok
+  // Plano de parcelas vindo do servidor (com juros). Fallback: à vista.
+  const plan = intent.installmentPlan.length
+    ? intent.installmentPlan
+    : [{ n: 1, totalCents: intent.amountCents, perCents: intent.amountCents }]
+  const selectedOpt = plan.find((o) => o.n === installments) ?? plan[0]
 
   return (
     <div style={box} className="text-foreground">
@@ -133,12 +138,19 @@ export function CheckoutPage() {
               onChange={(e) => setInstallments(Number(e.target.value))}
               className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
             >
-              {Array.from({ length: Math.max(1, Math.min(12, intent.installments || 12)) }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>
-                  {n === 1 ? `À vista — ${brl(intent.amountCents)}` : `${n}x de ${brl(Math.round(intent.amountCents / n))}`}
+              {plan.map((o) => (
+                <option key={o.n} value={o.n}>
+                  {o.n === 1
+                    ? `À vista — ${brl(o.totalCents)}`
+                    : `${o.n}x de ${brl(o.perCents)} — total ${brl(o.totalCents)}`}
                 </option>
               ))}
             </select>
+            {selectedOpt && selectedOpt.n > 1 ? (
+              <p className="text-[0.7rem] text-muted-foreground">
+                Parcelado com juros. À vista sai por {brl(intent.amountCents)}.
+              </p>
+            ) : null}
           </div>
 
           {result && !result.ok ? (
@@ -146,7 +158,7 @@ export function CheckoutPage() {
           ) : null}
 
           <Button className="w-full" onClick={() => void submit()} disabled={paying}>
-            {paying ? 'Processando…' : `Pagar ${brl(intent.amountCents)}`}
+            {paying ? 'Processando…' : `Pagar ${brl(selectedOpt.totalCents)}`}
           </Button>
           <p className="text-center text-[0.7rem] text-muted-foreground">Pagamento processado pelo Asaas.</p>
         </div>

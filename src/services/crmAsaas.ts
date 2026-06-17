@@ -104,16 +104,30 @@ export async function generateAsaasPix(args: {
 }
 
 // === Checkout público (cliente, sem login) ===
-export type AsaasIntentView = { amountCents: number; description: string; installments: number; status: string }
+export type AsaasInstallmentOption = { n: number; totalCents: number; perCents: number }
+export type AsaasIntentView = {
+  amountCents: number
+  description: string
+  installments: number
+  status: string
+  installmentPlan: AsaasInstallmentOption[]
+}
 
 export async function fetchAsaasIntent(id: string): Promise<AsaasIntentView> {
   const p = await invoke('crm-asaas-pay', { action: 'get_intent', id })
   if (p.ok !== true) throw new Error(String(p.error || 'Cobrança não encontrada'))
+  const rawPlan = Array.isArray(p.installmentPlan) ? (p.installmentPlan as Array<Record<string, unknown>>) : []
+  const installmentPlan: AsaasInstallmentOption[] = rawPlan.map((o) => ({
+    n: Number(o.n ?? 1),
+    totalCents: Number(o.totalCents ?? 0),
+    perCents: Number(o.perCents ?? 0),
+  }))
   return {
     amountCents: Number(p.amountCents ?? 0),
     description: String(p.description ?? ''),
     installments: Number(p.installments ?? 1),
     status: String(p.status ?? 'pending'),
+    installmentPlan,
   }
 }
 

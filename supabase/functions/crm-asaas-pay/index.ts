@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { chargeAsaasCard, getAsaasIntent } from '../_shared/asaas.ts'
+import { chargeAsaasCard, getAsaasIntent, installmentPlan, readAsaasConfig } from '../_shared/asaas.ts'
 
 // Checkout público (cliente) — sem login. Cartão via Asaas.
 //  get_intent -> { id } -> dados da cobrança (valor, descrição, status)
@@ -38,12 +38,17 @@ Deno.serve(async (req) => {
   if (action === 'get_intent') {
     const intent = await getAsaasIntent(admin, id)
     if (!intent) return json({ ok: false, error: 'nao_encontrada' }, 404)
+    // Plano de parcelas COM JUROS (cliente paga) p/ o checkout exibir os valores reais.
+    const cfg = await readAsaasConfig(admin, intent.tenantId)
+    const plan = cfg ? installmentPlan(intent.amountCents, cfg.installments) : [{ n: 1, totalCents: intent.amountCents, perCents: intent.amountCents }]
+    const maxN = Math.max(1, Math.min(plan.length, intent.installments || plan.length))
     return json({
       ok: true,
       amountCents: intent.amountCents,
       description: intent.description,
       installments: intent.installments,
       status: intent.status,
+      installmentPlan: plan.slice(0, maxN),
     })
   }
 

@@ -20,7 +20,8 @@ export const REDE_KITS: Record<string, { label: string; amountCents: number; qty
  * frascos, em até 3x sem juros. 1 frasco = só à vista (1x) ou Pix. Kits 3_meses (3+1=4
  * frascos) e 5_meses (5) parcelam até 3x. Aplicado no createRedeIntent (a IA não decide).
  */
-export const REDE_KIT_MAX_INSTALLMENTS: Record<string, number> = { '1_mes': 1, '3_meses': 3, '5_meses': 3 }
+// Asaas (gateway atual) parcela COM JUROS até 12x em qualquer kit. (Nome REDE_* mantido por compat.)
+export const REDE_KIT_MAX_INSTALLMENTS: Record<string, number> = { '1_mes': 12, '3_meses': 12, '5_meses': 12 }
 
 /**
  * Infere o kit a partir de um valor APROXIMADO (total pago, que pode incluir o frete).

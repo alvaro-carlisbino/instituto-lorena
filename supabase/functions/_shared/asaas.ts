@@ -17,7 +17,43 @@ import { autoShipToCart } from './melhorEnvio.ts'
  *  • Pix: cria a cobrança PIX no Asaas na hora, busca o QR (copia-e-cola + imagem) e manda inline.
  */
 
-export type AsaasConfig = { apiKey: string; baseUrl: string; env: 'sandbox' | 'prod'; webhookToken: string }
+/**
+ * Parcelamento COM JUROS (cliente paga) — fórmula Price (juros compostos por parcela).
+ * 1x sempre à vista (sem juros). De 2x até `max`, o cliente paga o valor financiado.
+ * Config por polo em tenant_integrations.asaas.installments:
+ *   { max?: 12, monthlyPct?: 1.45, fixedCents?: 29, freeUpTo?: 1 }
+ */
+export type InstallmentCfg = { max: number; monthlyPct: number; fixedCents: number; freeUpTo: number }
+export type AsaasConfig = {
+  apiKey: string
+  baseUrl: string
+  env: 'sandbox' | 'prod'
+  webhookToken: string
+  installments: InstallmentCfg
+}
+
+const DEFAULT_INSTALLMENTS: InstallmentCfg = { max: 12, monthlyPct: 1.45, fixedCents: 29, freeUpTo: 1 }
+
+/** Total cobrado do cliente p/ `n` parcelas (Price). n ≤ freeUpTo (e 1x) = sem juros. */
+export function installmentTotalCents(baseCents: number, n: number, ic: InstallmentCfg): number {
+  const parcels = Math.max(1, Math.round(n))
+  if (parcels <= 1 || parcels <= ic.freeUpTo) return baseCents
+  const i = ic.monthlyPct / 100
+  if (!(i > 0)) return baseCents
+  const coef = i / (1 - Math.pow(1 + i, -parcels)) // fator Price por parcela
+  return Math.round(baseCents * coef * parcels) + Math.max(0, ic.fixedCents)
+}
+
+/** Tabela 1..max p/ exibir no checkout: {n, total, valor da parcela}. */
+export function installmentPlan(baseCents: number, ic: InstallmentCfg): Array<{ n: number; totalCents: number; perCents: number }> {
+  const out: Array<{ n: number; totalCents: number; perCents: number }> = []
+  const max = Math.max(1, Math.min(21, Math.round(ic.max)))
+  for (let n = 1; n <= max; n++) {
+    const totalCents = installmentTotalCents(baseCents, n, ic)
+    out.push({ n, totalCents, perCents: Math.round(totalCents / n) })
+  }
+  return out
+}
 
 const ASAAS_BASE = {
   sandbox: 'https://sandbox.asaas.com/api/v3',
@@ -30,10 +66,34 @@ function shortId(): string {
 function digits(v: unknown): string {
   return String(v ?? '').replace(/\D/g, '')
 }
+/**
+ * Telefone BR p/ o Asaas: SEM o DDI 55. O WhatsApp/W-API manda 55+DDD+número (12 ou 13
+ * dígitos) e o Asaas trata o "55" como DDD, virando "(55) 4497-…". Aqui tiramos o 55 quando
+ * o que sobra é um telefone local válido (10 ou 11 dígitos), preservando DDDs reais (ex.: 55 = RS).
+ */
+function brPhone(v: unknown): string {
+  const d = digits(v)
+  if (d.startsWith('55') && (d.length === 12 || d.length === 13)) return d.slice(2)
+  return d
+}
 function todayBrasilia(): string {
   // YYYY-MM-DD no fuso de Brasília (vencimento da cobrança = hoje).
   const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' })
   return fmt.format(new Date())
+}
+
+function parseInstallmentCfg(raw: unknown): InstallmentCfg {
+  const o = (raw ?? {}) as Record<string, unknown>
+  const num = (v: unknown, fb: number) => {
+    const n = Number(String(v ?? '').toString().replace(',', '.'))
+    return Number.isFinite(n) && n >= 0 ? n : fb
+  }
+  return {
+    max: Math.max(1, Math.min(21, Math.round(num(o.max, DEFAULT_INSTALLMENTS.max)))),
+    monthlyPct: num(o.monthlyPct ?? o.monthly_pct, DEFAULT_INSTALLMENTS.monthlyPct),
+    fixedCents: Math.round(num(o.fixedCents ?? o.fixed_cents, DEFAULT_INSTALLMENTS.fixedCents)),
+    freeUpTo: Math.max(1, Math.round(num(o.freeUpTo ?? o.free_up_to, DEFAULT_INSTALLMENTS.freeUpTo))),
+  }
 }
 
 function parseAsaasConfig(cfg: Record<string, unknown>): AsaasConfig | null {
@@ -42,7 +102,8 @@ function parseAsaasConfig(cfg: Record<string, unknown>): AsaasConfig | null {
   const env: 'sandbox' | 'prod' = cfg.env === 'prod' || cfg.env === 'production' ? 'prod' : 'sandbox'
   const baseUrl = (String(cfg.base_url ?? '').trim() || ASAAS_BASE[env]).replace(/\/$/, '')
   const webhookToken = String(cfg.webhookToken ?? cfg.webhook_token ?? '').trim()
-  return { apiKey, baseUrl, env, webhookToken }
+  const installments = parseInstallmentCfg(cfg.installments)
+  return { apiKey, baseUrl, env, webhookToken, installments }
 }
 
 export async function readAsaasConfig(admin: SupabaseClient, tenantId: string): Promise<AsaasConfig | null> {
@@ -101,7 +162,7 @@ export async function findOrCreateAsaasCustomer(
     const list = (q.body as { data?: Array<{ id?: string }> }).data
     if (Array.isArray(list) && list[0]?.id) return String(list[0].id)
   }
-  const phone = digits(args.phone)
+  const phone = brPhone(args.phone)
   const create = await asaasFetch(cfg, '/customers', {
     method: 'POST',
     body: JSON.stringify({
@@ -145,7 +206,7 @@ export async function createAsaasCardIntent(
   const amountCents = coupon.finalCents + freightCents
   const baseDesc = String(args.description ?? 'Pagamento').slice(0, 100)
   const description = freightCents > 0 ? `${baseDesc} + frete` : baseDesc
-  const installments = Math.max(1, Math.min(12, args.installments ?? 1))
+  const installments = Math.max(1, Math.min(cfg.installments.max, args.installments ?? 1))
 
   const id = shortId()
   await admin.from('asaas_payments').insert({
@@ -160,7 +221,7 @@ export async function createAsaasCardIntent(
     coupon_code: coupon.applied ? coupon.code : null,
     discount_cents: coupon.discountCents,
     customer_name: args.customer?.name?.trim() || null,
-    phone: digits(args.customer?.phone) || null,
+    phone: brPhone(args.customer?.phone) || null,
     customer_doc: digits(args.customer?.cpf) || null,
     status: 'pending',
   })
@@ -235,7 +296,7 @@ export async function chargeAsaasCard(
     leadEnt = (cf.entrega ?? {}) as Record<string, string>
   }
   const cpf = digits(args.holderInfo?.cpf || intent.customerDoc || leadCad.cpf)
-  const phone = digits(args.holderInfo?.phone || intent.phone || '')
+  const phone = brPhone(args.holderInfo?.phone || intent.phone || '')
   const email = args.holderInfo?.email || leadCad.email || 'cliente@tricopill.com.br'
   const postalCode = digits(args.holderInfo?.postalCode || leadEnt.cep)
   const addressNumber = String(args.holderInfo?.addressNumber || leadEnt.numero || 'S/N').slice(0, 20)
@@ -245,8 +306,11 @@ export async function chargeAsaasCard(
     phone,
     email,
   })
-  const installments = Math.max(1, Math.min(12, args.installments ?? intent.installments ?? 1))
-  const value = intent.amountCents / 100
+  const ic = cfg.installments
+  const installments = Math.max(1, Math.min(ic.max, args.installments ?? intent.installments ?? 1))
+  // COM JUROS (cliente paga): de 2x até o teto, o valor cobrado é o financiado (Price).
+  const chargeCents = installmentTotalCents(intent.amountCents, installments, ic)
+  const value = chargeCents / 100
   const payload: Record<string, unknown> = {
     customer: customerId,
     billingType: 'CREDIT_CARD',
@@ -373,7 +437,7 @@ export async function createAsaasPix(
     coupon_code: coupon.applied ? coupon.code : null,
     discount_cents: coupon.discountCents,
     customer_name: (args.customer?.name?.trim() || leadCad.nomeCompleto || null),
-    phone: digits(args.customer?.phone || leadCad.telefone) || null,
+    phone: brPhone(args.customer?.phone || leadCad.telefone) || null,
     customer_doc: pixCpf || null,
     asaas_customer_id: customerId,
     asaas_payment_id: String(asaasId),
