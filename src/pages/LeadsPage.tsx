@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { MessageCircle, Search } from 'lucide-react'
 import { HelpDrawer } from '@/components/page/HelpDrawer'
 
@@ -37,7 +37,6 @@ const LEADS_HELP = [
 ]
 import { toast } from 'sonner'
 
-import { LeadDetailModal } from '@/components/leads/LeadDetailModal'
 import { PaymentBadge, PoloBadge } from '@/components/leads/PaymentBadge'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { Badge } from '@/components/ui/badge'
@@ -79,8 +78,8 @@ function temperatureBadgeClass(t: string): string {
 export function LeadsPage() {
   const crm = useCrm()
   const { availableTenants } = useTenant()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const [sheetOpen, setSheetOpen] = useState(false)
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [searchTerm, setSearchTerm] = useState('')
   const [pipelineFilter, setPipelineFilter] = useState<string>('all')
   const [stageFilter, setStageFilter] = useState<string>('all')
@@ -225,15 +224,9 @@ export function LeadsPage() {
 
   const openLead = useCallback(
     (id: string) => {
-      crmRef.current.setSelectedLeadId(id)
-      setSheetOpen(true)
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev)
-        next.set('leadId', id)
-        return next
-      })
+      navigate(`/leads/${id}`)
     },
-    [setSearchParams],
+    [navigate],
   )
   const toggleLeadSelection = (leadId: string) => {
     setSelectedLeadIds((prev) => (prev.includes(leadId) ? prev.filter((id) => id !== leadId) : [...prev, leadId]))
@@ -241,11 +234,9 @@ export function LeadsPage() {
 
   useEffect(() => {
     if (!leadIdParam) return
-    if (crmRef.current.leads.some((l) => l.id === leadIdParam)) {
-      crmRef.current.setSelectedLeadId(leadIdParam)
-      setSheetOpen(true)
-    }
-  }, [leadIdParam])
+    // Compatibilidade com links antigos /leads?leadId=… → redireciona para a tela dedicada.
+    navigate(`/leads/${leadIdParam}`, { replace: true })
+  }, [leadIdParam, navigate])
 
   useEffect(() => {
     if (pipelineFilter !== 'all' && !crm.pipelineCatalog.some((p) => p.id === pipelineFilter)) {
@@ -284,17 +275,6 @@ export function LeadsPage() {
       setBulkStageId('all')
     }
   }, [stagesForBulk, bulkStageId])
-
-  const handleSheetChange = (open: boolean) => {
-    setSheetOpen(open)
-    if (!open) {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev)
-        next.delete('leadId')
-        return next
-      })
-    }
-  }
 
   const runCsvImportFromFile = async (file: File) => {
     const name = file.name.toLowerCase()
@@ -844,12 +824,6 @@ export function LeadsPage() {
         </Card>
       </section>
 
-      {leadIdParam && (
-        <LeadDetailModal
-          open={sheetOpen}
-          onOpenChange={handleSheetChange}
-        />
-      )}
     </AppLayout>
   )
 }

@@ -1,6 +1,6 @@
 /**
  * Estilos coloridos para badges de canal (mensagem) e origem (lead) — usados em
- * LeadChatThread, KanbanLeadCard/ListView, ChatWorkspacePage, HistoryPage e LeadDetailModal.
+ * LeadChatThread, KanbanLeadCard/ListView, ChatWorkspacePage, HistoryPage e LeadDetailPage.
  *
  * As classes aqui devolvidas já trazem cor, ring suave e tipografia consistente; só falta
  * aplicar num <span> ou <Badge> existente. Para identificação rápida na UI usamos cores
