@@ -45,7 +45,6 @@ import { SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { AppSidebar } from '@/layouts/AppSidebar'
-import { TopNav } from '@/layouts/TopNav'
 
 function AppRoutes() {
   return (
@@ -142,9 +141,6 @@ function App() {
               <AppSidebar />
               <CommandPalette />
               <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                <div className="shrink-0 md:hidden">
-                  <TopNav />
-                </div>
                 <RouteTransition>
                   <AppRoutes />
                 </RouteTransition>
