@@ -1,5 +1,6 @@
 /**
- * crm-frete-quote — cotação de frete (Melhor Envio: Correios PAC/SEDEX) por CEP.
+ * crm-frete-quote — cotação de frete (Melhor Envio: TODAS as transportadoras da conta —
+ *   Correios, Jadlog, Loggi, etc., da mais barata p/ a mais cara) por CEP.
  *
  * Endpoint COMPARTILHADO: consumido pelo CRM (painel/bot) e pelo site oficial do Tricopill
  * (mesmo Supabase). Usa o token OAuth conectado em tenant_integrations.melhorenvio (via

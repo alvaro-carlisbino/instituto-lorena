@@ -795,7 +795,7 @@ Deno.serve(async (req) => {
                     origem_cep: first?.fromCep,
                     destino_cep: first?.toCep,
                     destino: `${info.localidade}/${info.uf}`,
-                    observacao: 'Frete varia conforme o kit (peso). Use a linha do kit que o cliente escolher.',
+                    observacao: 'Frete varia conforme o kit (peso). Use a linha do kit que o cliente escolher. As opções já vêm da MAIS BARATA p/ a mais cara, com a transportadora de cada uma — ofereça as alternativas mais econômicas (Jadlog/Loggi/etc.), não só Correios; destaque a mais barata e cite o prazo.',
                     por_kit: porKit,
                   }
                 }

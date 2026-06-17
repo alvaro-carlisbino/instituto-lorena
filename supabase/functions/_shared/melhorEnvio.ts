@@ -20,7 +20,8 @@ import { isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
  *   MELHOR_ENVIO_SCOPES          Escopos (default cobre cotação + futura geração de etiqueta)
  *   MELHOR_ENVIO_USER_AGENT      Identificação OBRIGATÓRIA pela ME: "App Nome (email@dominio)"
  *   MELHOR_ENVIO_FROM_CEP        CEP de origem (default 87014180 — Maringá)
- *   MELHOR_ENVIO_SERVICES        IDs de serviço (default "1,2" = Correios PAC e SEDEX)
+ *   MELHOR_ENVIO_SERVICES        IDs de serviço p/ RESTRINGIR a cotação (ex.: "1,2" = só Correios
+ *                                PAC/SEDEX). Default VAZIO = cota TODAS as transportadoras da conta.
  *   FRETE_BOX_WEIGHT_KG / _LENGTH_CM / _WIDTH_CM / _HEIGHT_CM   Caixa padrão (override no body)
  *   FRETE_INSURANCE_CENTS        Valor segurado opcional em centavos (default 0)
  */
@@ -307,7 +308,10 @@ export async function quoteFreteMelhorEnvio(
 ): Promise<FreteQuote> {
   const toCep = onlyDigits(rawToCep)
   const fromCep = onlyDigits(Deno.env.get('MELHOR_ENVIO_FROM_CEP') || '87014180')
-  const services = (opts?.servicesCsv ?? Deno.env.get('MELHOR_ENVIO_SERVICES') ?? '1,2').trim()
+  // VAZIO por padrão = Melhor Envio devolve TODAS as transportadoras habilitadas na conta
+  // (Correios PAC/SEDEX + Jadlog, Loggi, Azul, etc.), ordenadas do mais barato. Só restringe
+  // se `servicesCsv`/env vier preenchido (ex.: "1,2" p/ só Correios).
+  const services = (opts?.servicesCsv ?? Deno.env.get('MELHOR_ENVIO_SERVICES') ?? '').trim()
 
   const empty = (debug: string): FreteQuote => ({ ok: false, fromCep, toCep, options: [], debug })
 
@@ -346,7 +350,8 @@ export async function quoteFreteMelhorEnvio(
       height: box.heightCm && box.heightCm > 0 ? box.heightCm : envNum('FRETE_BOX_HEIGHT_CM', 10),
     },
     options: { insurance_value: insuranceReais, receipt: false, own_hand: false },
-    services,
+    // Só envia o filtro de serviços quando explicitamente definido; sem ele a ME cota tudo.
+    ...(services ? { services } : {}),
   }
 
   try {
