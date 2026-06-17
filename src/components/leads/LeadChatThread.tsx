@@ -156,6 +156,71 @@ function useBlobMediaSrc(
 
 type InlineMediaItem = { url?: string | null; base64?: string | null; mimeType?: string | null; caption?: string | null }
 
+// O áudio do WhatsApp é OGG/Opus — o Chrome toca inline, mas QuickTime (macOS) e
+// players nativos não abrem .ogg ("vem vazio"). Pra o botão "baixar" entregar um
+// arquivo que abre em QUALQUER lugar, decodificamos no navegador (Web Audio) e
+// reembalamos em WAV. Se a decodificação falhar, cai pro .ogg original.
+function encodeWav(audioBuffer: AudioBuffer): Blob {
+  const numCh = audioBuffer.numberOfChannels
+  const sampleRate = audioBuffer.sampleRate
+  const numFrames = audioBuffer.length
+  const blockAlign = numCh * 2
+  const dataSize = numFrames * blockAlign
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+  const writeStr = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i += 1) view.setUint8(off + i, s.charCodeAt(i))
+  }
+  writeStr(0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeStr(8, 'WAVE')
+  writeStr(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, numCh, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * blockAlign, true)
+  view.setUint16(32, blockAlign, true)
+  view.setUint16(34, 16, true)
+  writeStr(36, 'data')
+  view.setUint32(40, dataSize, true)
+  const channels: Float32Array[] = []
+  for (let c = 0; c < numCh; c += 1) channels.push(audioBuffer.getChannelData(c))
+  let off = 44
+  for (let i = 0; i < numFrames; i += 1) {
+    for (let c = 0; c < numCh; c += 1) {
+      const clamped = Math.max(-1, Math.min(1, channels[c]![i]!))
+      view.setInt16(off, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+      off += 2
+    }
+  }
+  return new Blob([view], { type: 'audio/wav' })
+}
+
+function triggerDownload(url: string, filename: string): void {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+}
+
+async function downloadAudioAsWav(srcUrl: string, baseName: string): Promise<void> {
+  try {
+    const ab = await (await fetch(srcUrl)).arrayBuffer()
+    const AC: typeof AudioContext =
+      window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    const ac = new AC()
+    const audioBuf = await ac.decodeAudioData(ab)
+    void ac.close()
+    const wavUrl = URL.createObjectURL(encodeWav(audioBuf))
+    triggerDownload(wavUrl, `${baseName}.wav`)
+    setTimeout(() => URL.revokeObjectURL(wavUrl), 10_000)
+  } catch {
+    // navegador não decodificou o Opus → baixa o .ogg original
+    triggerDownload(srcUrl, `${baseName}.ogg`)
+  }
+}
+
 function InlineAudio({ item }: { item: InlineMediaItem }) {
   const src = useBlobMediaSrc(item.url, item.base64, 'audio/ogg', item.mimeType)
   if (!src) return null
@@ -166,9 +231,13 @@ function InlineAudio({ item }: { item: InlineMediaItem }) {
       </audio>
       <div className="flex items-center gap-2 px-1">
         <span className="text-[10px] opacity-60">Áudio recebido</span>
-        <a href={src} download="audio.ogg" className="text-[10px] underline opacity-60 hover:opacity-100">
-          baixar
-        </a>
+        <button
+          type="button"
+          onClick={() => void downloadAudioAsWav(src, 'audio')}
+          className="text-[10px] underline opacity-60 hover:opacity-100"
+        >
+          baixar (.wav)
+        </button>
       </div>
     </div>
   )
