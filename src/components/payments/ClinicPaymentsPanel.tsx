@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { FileText, Paperclip, RefreshCw, Search, Trash2 } from 'lucide-react'
+import { Download, FileText, Paperclip, RefreshCw, Search, Trash2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,23 @@ import {
 
 function formatBRL(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+/** Escapa célula CSV (delimitador ';' para Excel pt-BR). */
+function csvCell(v: string): string {
+  const s = String(v ?? '')
+  return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+function statusLabel(r: RedePaymentRow): string {
+  if (isPaid(r)) return 'Pago'
+  if (isFailed(r)) return 'Falhou'
+  return 'Aguardando'
+}
+function dtBR(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
 const isPaid = (r: RedePaymentRow) => r.status === 'paid'
@@ -157,13 +174,55 @@ export function ClinicPaymentsPanel() {
     }
   }
 
+  const exportCsv = () => {
+    if (filtered.length === 0) {
+      toast.error('Nada para exportar com o filtro atual.')
+      return
+    }
+    const headers = [
+      'Gerado em', 'Pago em', 'Cliente', 'Descrição', 'Valor (R$)', 'Parcelas',
+      'Status', 'TID', 'Cód. retorno', 'Comprovante', 'Nº comprovantes',
+    ]
+    const lines = filtered.map((r) => {
+      const recs = receipts[r.id] ?? []
+      return [
+        dtBR(r.createdAt),
+        dtBR(r.paidAt),
+        r.customerName || leadName(r.leadId) || 'Cliente avulso',
+        r.description ?? '',
+        (r.amountCents / 100).toFixed(2).replace('.', ','),
+        String(r.installments),
+        statusLabel(r),
+        r.tid ?? '',
+        r.returnCode ?? '',
+        recs.length > 0 ? 'Sim' : 'Não',
+        String(recs.length),
+      ].map(csvCell).join(';')
+    })
+    const csv = '﻿' + [headers.join(';'), ...lines].join('\r\n')
+    const stamp = nowMs ? (() => { const d = new Date(nowMs); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` })() : 'export'
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `recebimentos-instituto-${stamp}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success(`${filtered.length} recebimento(s) exportado(s).`)
+  }
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-2">
         <CardTitle className="text-sm">Recebimentos (cartão)</CardTitle>
-        <Button size="sm" variant="ghost" onClick={() => void load()} disabled={loading}>
-          <RefreshCw className={`mr-1.5 size-3.5 ${loading ? 'animate-spin' : ''}`} /> Atualizar
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="outline" onClick={exportCsv} disabled={loading || filtered.length === 0}>
+            <Download className="mr-1.5 size-3.5" /> Exportar CSV
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => void load()} disabled={loading}>
+            <RefreshCw className={`mr-1.5 size-3.5 ${loading ? 'animate-spin' : ''}`} /> Atualizar
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* KPIs */}
