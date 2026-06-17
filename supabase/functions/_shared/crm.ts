@@ -542,6 +542,49 @@ export async function insertInteraction(
 }
 
 /**
+ * Comprovante AUTOMÁTICO do recebimento — grava a prova do gateway no momento do pagamento
+ * (cartão: TID/código de autorização/parcelas; Pix: id da transação/E2E do PagBank). Assim
+ * NENHUM recebimento fica sem comprovante, mesmo que a SDR nunca anexe um arquivo. Idempotente
+ * (índice único parcial payment_id+payment_method onde source='auto') e best-effort: nunca
+ * derruba o fluxo de pagamento. O upload manual (foto/recibo) continua possível em paralelo.
+ */
+export async function recordAutoReceipt(
+  admin: SupabaseClient,
+  input: {
+    tenantId: string
+    paymentId: string
+    paymentMethod: 'card' | 'pix'
+    amountCents: number
+    autoData: Record<string, unknown>
+    note?: string
+  },
+): Promise<void> {
+  try {
+    const { error } = await admin.from('payment_receipts').insert({
+      tenant_id: input.tenantId,
+      payment_id: input.paymentId,
+      payment_method: input.paymentMethod,
+      source: 'auto',
+      storage_path: null,
+      file_name: `comprovante-auto-${input.paymentMethod}-${input.paymentId}.json`,
+      mime_type: 'application/json',
+      note: input.note ?? null,
+      auto_data: {
+        ...input.autoData,
+        amount_cents: input.amountCents,
+        recorded_at: new Date().toISOString(),
+      },
+    })
+    // 23505 = unique_violation → comprovante automático já existe (retry/webhook duplicado). OK.
+    if (error && error.code !== '23505') {
+      console.warn('[recordAutoReceipt] insert failed:', error.message)
+    }
+  } catch (e) {
+    console.warn('[recordAutoReceipt] exception:', e instanceof Error ? e.message : String(e))
+  }
+}
+
+/**
  * Finds an existing Instagram lead (synthetic phone prefix 888001) by patient name.
  * Used for cross-channel merge when a WhatsApp message arrives from someone
  * already known via Instagram/ManyChat — no phone match is possible until now.

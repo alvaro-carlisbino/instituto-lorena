@@ -211,6 +211,9 @@ export async function createPagBankCheckout(
       status: 'created',
       coupon_code: coupon.applied ? coupon.code : null,
       discount_cents: coupon.discountCents,
+      customer_name: customerName || null,
+      phone: phoneDigits || null,
+      customer_doc: String(cad.cpf || '').replace(/\D/g, '') || null,
     })
   } catch {
     // ignore
@@ -403,6 +406,9 @@ export async function createPagBankPixOrder(
       status: 'created',
       coupon_code: coupon.applied ? coupon.code : null,
       discount_cents: coupon.discountCents,
+      customer_name: customerName || null,
+      phone: String(args.lead.phone ?? '').replace(/\D/g, '') || null,
+      customer_doc: taxId || null,
     })
   } catch {
     // ignore (auditoria best-effort)

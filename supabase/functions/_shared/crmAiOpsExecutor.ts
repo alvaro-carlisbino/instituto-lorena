@@ -71,8 +71,9 @@ async function persistEntrega(
   op: Record<string, unknown>,
 ): Promise<{ cadastro: CadastroSnapshot; entrega: EntregaSnapshot }> {
   try {
-    const { data } = await admin.from('leads').select('custom_fields').eq('id', leadId).maybeSingle()
+    const { data } = await admin.from('leads').select('custom_fields, phone').eq('id', leadId).maybeSingle()
     const cf = ((data as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>
+    const leadPhone = String((data as { phone?: string } | null)?.phone ?? '').replace(/\D/g, '')
     const prev = (cf.entrega ?? {}) as Record<string, unknown>
     const prevCad = (cf.cadastro ?? {}) as Record<string, unknown>
 
@@ -93,13 +94,20 @@ async function persistEntrega(
       delivery_mode: normalizeDeliveryMode(op.delivery_mode ?? op.to_delivery_mode) || prev.delivery_mode,
     }
 
-    // CADASTRO completo (NF-e): nome, CPF, e-mail, nascimento, sexo — merge quando vierem no op.
+    // CADASTRO completo (NF-e): nome, CPF, telefone, e-mail, nascimento, sexo — merge quando vierem no op.
     const cpf = String(op.to_cpf ?? op.cpf ?? '').replace(/\D/g, '')
     const sexoRaw = String(op.to_sex ?? op.to_sexo ?? '').trim().toUpperCase()
+    // TELEFONE: prioriza o que a IA capturou no op; senão herda o já gravado; senão AUTO do
+    // número do WhatsApp do lead (leads.phone). Assim o telefone quase sempre existe sem atrito,
+    // e a trava de prontidão só barra quando não há nenhum número estruturado.
+    const opPhone = String(op.to_phone ?? op.to_telefone ?? op.phone ?? op.telefone ?? '').replace(/\D/g, '')
+    const prevPhone = String(prevCad.telefone ?? '').replace(/\D/g, '')
+    const telefone = opPhone.length >= 10 ? opPhone : prevPhone.length >= 10 ? prevPhone : leadPhone.length >= 10 ? leadPhone : ''
     const cadastro: CadastroSnapshot = {
       ...prevCad,
       nomeCompleto: str(op.to_name ?? op.to_nome ?? op.customer_name) ?? prevCad.nomeCompleto,
       ...(cpf.length === 11 ? { cpf } : {}),
+      ...(telefone ? { telefone } : {}),
       email: str(op.to_email ?? op.email) ?? prevCad.email,
       dataNascimento: str(op.to_birthdate ?? op.to_nascimento) ?? prevCad.dataNascimento,
       ...(['M', 'F'].includes(sexoRaw) ? { sexo: sexoRaw } : {}),
@@ -115,7 +123,9 @@ async function persistEntrega(
 /**
  * Trava de prontidão antes de gerar QUALQUER link/Pix: como a NF-e é emitida automática no
  * fechamento, o pedido precisa de cadastro completo SEMPRE (inclusive retirada). Exige nome
- * completo + CPF(11) + CEP(8) + número. Devolve o que falta (em pt-BR) p/ a IA pedir.
+ * completo + telefone + CPF(11) + CEP(8) + número. O telefone é auto-preenchido do WhatsApp
+ * em persistEntrega, então só barra quando não há número nenhum (raro). Devolve o que falta
+ * (em pt-BR) p/ a IA pedir.
  */
 function validateOrderReadiness(
   cadastro: CadastroSnapshot,
@@ -123,10 +133,12 @@ function validateOrderReadiness(
 ): { ok: boolean; missing: string[] } {
   const missing: string[] = []
   const nome = String(cadastro.nomeCompleto ?? '').trim()
+  const telefone = String(cadastro.telefone ?? '').replace(/\D/g, '')
   const cpf = String(cadastro.cpf ?? '').replace(/\D/g, '')
   const cep = String(entrega.cep ?? '').replace(/\D/g, '')
   const numero = String(entrega.numero ?? '').trim()
   if (nome.split(/\s+/).filter(Boolean).length < 2) missing.push('nome completo')
+  if (telefone.length < 10) missing.push('telefone com DDD')
   if (cpf.length !== 11) missing.push('CPF')
   if (cep.length !== 8) missing.push('CEP')
   if (!numero) missing.push('número do endereço')
@@ -757,6 +769,10 @@ export async function executeCrmAiOpsFromModel(
             couponCode: op.coupon != null ? String(op.coupon) : undefined,
             freightCents,
             kit: kitKey ?? undefined, // guarda o kit (ou inferido) p/ criar o pedido no Bling ao pagar
+            // Dados do cliente na cobrança (controle + conciliação): nome/telefone/CPF do cadastro.
+            customerName: String(snap.cadastro.nomeCompleto ?? '').trim() || undefined,
+            phone: String(snap.cadastro.telefone ?? '').replace(/\D/g, '') || undefined,
+            customerDoc: String(snap.cadastro.cpf ?? '').replace(/\D/g, '') || undefined,
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: note, installments: effInstallments })

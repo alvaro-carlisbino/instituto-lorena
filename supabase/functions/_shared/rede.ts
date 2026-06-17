@@ -1,5 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { insertInteraction } from './crm.ts'
+import { insertInteraction, recordAutoReceipt } from './crm.ts'
 import { normalizeKitKey } from './pagbank.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
 import { blingCreateSaleOrder } from './bling.ts'
@@ -186,6 +186,10 @@ export async function createRedeIntent(
     freightCents?: number
     kit?: string
     customerName?: string
+    /** Telefone do cliente (dígitos) — gravado na cobrança p/ controle e conciliação. */
+    phone?: string
+    /** CPF do cliente (dígitos) — gravado p/ casar com a NF-e/Bling na conciliação. */
+    customerDoc?: string
   },
 ): Promise<{ id: string; url: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null; freightCents: number }> {
   const cfg = await readRedeConfig(admin, args.tenantId)
@@ -221,6 +225,8 @@ export async function createRedeIntent(
     discount_cents: coupon.discountCents,
     kit: args.kit || null,
     customer_name: args.customerName?.trim() || null,
+    phone: args.phone?.replace(/\D/g, '') || null,
+    customer_doc: args.customerDoc?.replace(/\D/g, '') || null,
   })
   const base = args.appBaseUrl.replace(/\/$/, '')
   return {
@@ -320,6 +326,23 @@ export async function payRedeIntent(
   // Pagamento aprovado: conta o uso do cupom (só agora, não na geração do link).
   if (approved) {
     await incrementCouponUse(admin, intent.tenantId, intent.couponCode)
+    // Comprovante AUTOMÁTICO da maquininha (e.Rede): TID + código de retorno + parcelas.
+    // Garante prova de recebimento sem depender de a SDR anexar foto.
+    await recordAutoReceipt(admin, {
+      tenantId: intent.tenantId,
+      paymentId: intent.id,
+      paymentMethod: 'card',
+      amountCents: intent.amountCents,
+      note: 'Comprovante automático e.Rede (autorização da maquininha).',
+      autoData: {
+        gateway: 'rede',
+        tid,
+        return_code: returnCode,
+        installments: Math.max(1, Math.min(12, args.installments ?? intent.installments ?? 1)),
+        cardholder_name: args.card.cardholderName?.slice(0, 50) ?? null,
+        paid_at: new Date().toISOString(),
+      },
+    })
   }
 
   if (approved && intent.leadId) {

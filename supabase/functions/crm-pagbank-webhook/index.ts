@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { insertInteraction } from '../_shared/crm.ts'
+import { insertInteraction, recordAutoReceipt } from '../_shared/crm.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { parsePagBankNotification } from '../_shared/pagbank.ts'
 import { incrementCouponUse } from '../_shared/coupons.ts'
@@ -68,14 +68,20 @@ Deno.serve(async (req) => {
   //    têm lead_id sintético "manual-..."). Casa por reference_id ou checkout id.
   let markedPaid = false
   let paidLeadId = ''
+  let paidCheckoutId = ''
+  let paidTenantId = ''
+  let paidAmountCents = 0
   // Transição real not-paid -> paid (via `.neq('status','paid')`): só aqui contamos
   // o cupom, pra não somar duas vezes em notificações repetidas (PAID, AVAILABLE...).
   const redeemCoupon = async (data: Record<string, unknown> | null) => {
     if (!data) return
     markedPaid = true
     paidLeadId = String((data as { lead_id?: string }).lead_id ?? '')
+    paidCheckoutId = String((data as { checkout_id?: string }).checkout_id ?? '')
+    paidTenantId = String((data as { tenant_id?: string }).tenant_id ?? '')
+    paidAmountCents = Number((data as { amount_cents?: number }).amount_cents ?? 0)
     const code = (data as { coupon_code?: string }).coupon_code
-    const tenant = String((data as { tenant_id?: string }).tenant_id ?? '')
+    const tenant = paidTenantId
     if (code) await incrementCouponUse(admin, tenant, code)
   }
   if (referenceId) {
@@ -84,7 +90,7 @@ Deno.serve(async (req) => {
       .update({ status: 'paid', paid_at: nowIso })
       .eq('reference_id', referenceId)
       .neq('status', 'paid')
-      .select('lead_id, tenant_id, coupon_code')
+      .select('lead_id, tenant_id, coupon_code, checkout_id, amount_cents')
       .maybeSingle()
     await redeemCoupon(data as Record<string, unknown> | null)
   }
@@ -95,7 +101,7 @@ Deno.serve(async (req) => {
         .update({ status: 'paid', paid_at: nowIso })
         .eq('checkout_id', id)
         .neq('status', 'paid')
-        .select('lead_id, tenant_id, coupon_code')
+        .select('lead_id, tenant_id, coupon_code, checkout_id, amount_cents')
         .maybeSingle()
       if (data) {
         await redeemCoupon(data as Record<string, unknown>)
@@ -112,6 +118,25 @@ Deno.serve(async (req) => {
       .eq('reference_id', referenceId)
       .maybeSingle()
     if (data) paidLeadId = String((data as { lead_id?: string }).lead_id ?? '')
+  }
+
+  // Comprovante AUTOMÁTICO do Pix (PagBank) — grava a prova da transação na 1ª confirmação,
+  // INCLUSIVE para links avulsos (sem lead real). Idempotente. Nunca perdemos o recebimento.
+  if (markedPaid && paidCheckoutId && paidTenantId) {
+    await recordAutoReceipt(admin, {
+      tenantId: paidTenantId,
+      paymentId: paidCheckoutId,
+      paymentMethod: 'pix',
+      amountCents: paidAmountCents,
+      note: 'Comprovante automático PagBank (Pix confirmado).',
+      autoData: {
+        gateway: 'pagbank',
+        reference_id: referenceId ?? null,
+        transaction_ids: ids,
+        status: status ?? null,
+        paid_at: nowIso,
+      },
+    })
   }
 
   // 2) Lead REAL (ignora ids sintéticos "manual-" dos links avulsos).
