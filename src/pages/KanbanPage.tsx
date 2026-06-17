@@ -5,7 +5,6 @@ import { Bot, History, LayoutDashboard, LayoutGrid, List, MoreHorizontal, Refres
 
 import { KanbanListView } from '@/components/kanban/KanbanListView'
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
-import { LeadDetailModal } from '@/components/leads/LeadDetailModal'
 import { KanbanToolbar, type ConversationFilterOption, type SortOption } from '@/components/kanban/KanbanToolbar'
 import { buttonVariants } from '@/components/ui/button'
 import {
@@ -60,7 +59,6 @@ export function KanbanPage() {
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [tagFilter, setTagFilter] = useState<string>('all')
   const [dragOverStageId, setDragOverStageId] = useState<string | null>(null)
-  const [detailOpen, setDetailOpen] = useState(false)
   const [viewMode, setViewMode] = useState<'board' | 'list'>(() => {
     if (typeof sessionStorage === 'undefined') return 'board'
     return sessionStorage.getItem('crm-kanban-view-mode') === 'list' ? 'list' : 'board'
@@ -312,7 +310,7 @@ export function KanbanPage() {
           selectedLeadId={crm.selectedLeadId}
           onSelectLead={(id) => {
             crm.setSelectedLeadId(id)
-            setDetailOpen(true)
+            navigate(`/leads/${id}`)
           }}
           getOwnerName={crm.getOwnerName}
           tagPillsForLead={tagPillsForLead}
@@ -362,7 +360,7 @@ export function KanbanPage() {
                       payment={crm.paymentByLeadId[lead.id] ?? null}
                       onSelect={() => {
                         crm.setSelectedLeadId(lead.id)
-                        setDetailOpen(true)
+                        navigate(`/leads/${lead.id}`)
                       }}
                       onMovePrev={() => crm.moveLead(lead.id, 'prev')}
                       onMoveNext={() => {
@@ -404,8 +402,6 @@ export function KanbanPage() {
           })}
         </div>
       )}
-      <LeadDetailModal open={detailOpen} onOpenChange={setDetailOpen} />
-      
       {pendingMove && (
         <LeadLossReasonDialog
           open={lossDialogOpen}
