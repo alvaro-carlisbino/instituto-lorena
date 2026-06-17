@@ -1,20 +1,24 @@
 import { useEffect, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Package, TriangleAlert, Truck, Settings } from 'lucide-react'
+import { Package, TriangleAlert, Truck, Settings, CheckCircle2 } from 'lucide-react'
 
+import { EmptyState } from '@/components/ui/empty-state'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog'
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useCrm } from '@/context/CrmContext'
+import { AppLayout } from '@/layouts/AppLayout'
 import { cn } from '@/lib/utils'
 import {
   createShipment,
@@ -26,16 +30,6 @@ import {
   type ShipConfig,
 } from '@/services/crmFrete'
 
-type Props = {
-  isOpen: boolean
-  onClose: () => void
-  leadId: string
-  /** Pré-preenche o destinatário (nome/telefone do lead). */
-  defaultName?: string
-  defaultPhone?: string
-  onDone?: () => void
-}
-
 // Prefill de produto por kit (valores Pix oficiais Tricopill).
 const KIT_PRESETS: Record<string, { name: string; qty: number; reais: string }> = {
   '1_mes': { name: 'Tricopill — 1 frasco', qty: 1, reais: '199,00' },
@@ -46,10 +40,25 @@ const KIT_PRESETS: Record<string, { name: string; qty: number; reais: string }> 
 const reaisToCents = (v: string) => Math.round(Number(String(v).replace(/\./g, '').replace(',', '.')) * 100)
 const onlyDigits = (v: string) => v.replace(/\D/g, '')
 
-export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultPhone, onDone }: Props) {
+export function LeadShipPage() {
+  const crm = useCrm()
+  const navigate = useNavigate()
+  const { leadId } = useParams<{ leadId: string }>()
+
+  // A tela seleciona o lead no contexto; selectedLead deriva de selectedLeadId.
+  useEffect(() => {
+    if (leadId) crm.setSelectedLeadId(leadId)
+  }, [leadId, crm.setSelectedLeadId])
+
+  const lead = crm.selectedLead ?? crm.leads.find((l) => l.id === leadId) ?? null
+  const ready = !!lead && lead.id === leadId
+
+  const defaultName = lead?.patientName
+  const defaultPhone = lead?.phone
+
   // Destinatário
-  const [name, setName] = useState(defaultName ?? '')
-  const [phone, setPhone] = useState(defaultPhone ?? '')
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
   const [document, setDocument] = useState('')
   const [cep, setCep] = useState('')
   const [address, setAddress] = useState('')
@@ -66,6 +75,8 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
   const [finalize, setFinalize] = useState(false)
   const [loading, setLoading] = useState(false)
   const [cepLoading, setCepLoading] = useState(false)
+  const [pageError, setPageError] = useState<string | null>(null)
+  const [pageSuccess, setPageSuccess] = useState<string | null>(null)
 
   // Cotação real: só os serviços que ATENDEM aquele CEP (evita "transportadora não atende").
   const [quoteOptions, setQuoteOptions] = useState<FreteOption[]>([])
@@ -84,8 +95,13 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
   const [sender, setSender] = useState<MeAddress>({})
   const [savingSender, setSavingSender] = useState(false)
 
+  // Pré-preenche destinatário com nome/telefone do lead assim que disponível.
   useEffect(() => {
-    if (!isOpen) return
+    if (defaultName != null) setName((prev) => (prev ? prev : defaultName))
+    if (defaultPhone != null) setPhone((prev) => (prev ? prev : defaultPhone))
+  }, [defaultName, defaultPhone])
+
+  useEffect(() => {
     getShipConfig()
       .then((c) => {
         setConfig(c)
@@ -93,7 +109,9 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
         if (c.senderMissing.length) setShowSender(true)
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao ler configuração do Melhor Envio'))
-  }, [isOpen])
+  }, [])
+
+  const goBack = () => navigate(`/leads/${leadId}`)
 
   const applyKit = (kit: string) => {
     const preset = KIT_PRESETS[kit]
@@ -179,26 +197,43 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
   }
 
   const handleCreate = async () => {
-    if (!name.trim()) return toast.error('Informe o nome do destinatário.')
-    if (onlyDigits(cep).length !== 8) return toast.error('CEP do destinatário inválido.')
+    setPageError(null)
+    setPageSuccess(null)
+    if (!name.trim()) {
+      setPageError('Informe o nome do destinatário.')
+      return toast.error('Informe o nome do destinatário.')
+    }
+    if (onlyDigits(cep).length !== 8) {
+      setPageError('CEP do destinatário inválido.')
+      return toast.error('CEP do destinatário inválido.')
+    }
     if (!address.trim() || !number.trim() || !district.trim() || !city.trim() || !uf.trim()) {
+      setPageError('Endereço do destinatário incompleto.')
       return toast.error('Endereço do destinatário incompleto.')
     }
     const valueCents = reaisToCents(productReais)
-    if (!Number.isFinite(valueCents) || valueCents < 100) return toast.error('Valor do produto inválido.')
-    if (!serviceId || !selectedOption) return toast.error('Cote o frete e escolha um serviço primeiro.')
+    if (!Number.isFinite(valueCents) || valueCents < 100) {
+      setPageError('Valor do produto inválido.')
+      return toast.error('Valor do produto inválido.')
+    }
+    if (!serviceId || !selectedOption) {
+      setPageError('Cote o frete e escolha um serviço primeiro.')
+      return toast.error('Cote o frete e escolha um serviço primeiro.')
+    }
     if (selectedOption.internal) {
+      setPageError('Maringá é entrega interna (local) — não gera etiqueta dos Correios.')
       return toast.error('Maringá é entrega interna (local) — não gera etiqueta dos Correios.')
     }
     if (config && config.senderMissing.length) {
       setShowSender(true)
+      setPageError(`Remetente incompleto: ${config.senderMissing.join(', ')}`)
       return toast.error(`Remetente incompleto: ${config.senderMissing.join(', ')}`)
     }
 
     setLoading(true)
     try {
       const res = await createShipment({
-        leadId,
+        leadId: leadId!,
         serviceId: Number(serviceId),
         to: {
           name: name.trim(),
@@ -223,50 +258,103 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
         finalize,
       })
       if (res.finalized) {
-        toast.success(`Etiqueta gerada!${res.tracking ? ` Rastreio: ${res.tracking}` : ''}`)
+        const msg = `Etiqueta gerada!${res.tracking ? ` Rastreio: ${res.tracking}` : ''}`
+        toast.success(msg)
+        setPageSuccess(msg)
         if (res.printUrl) window.open(res.printUrl, '_blank', 'noopener')
       } else {
-        toast.success(`Adicionado ao carrinho do Melhor Envio (#${res.cartId}). Finalize a compra no painel.`)
+        const msg = `Adicionado ao carrinho do Melhor Envio (#${res.cartId}). Finalize a compra no painel.`
+        toast.success(msg)
+        setPageSuccess(msg)
       }
-      onDone?.()
-      onClose()
+      void crm.refreshChatFromSupabase?.()
+      navigate(`/leads/${leadId}`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao gerar envio')
+      const msg = e instanceof Error ? e.message : 'Falha ao gerar envio'
+      setPageError(msg)
+      toast.error(msg)
     } finally {
       setLoading(false)
     }
   }
 
+  // Carregando / lead não encontrado.
+  if (!ready || !lead) {
+    return (
+      <AppLayout title="Gerar envio">
+        <div className="space-y-4">
+          <Link
+            to="/leads"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            ‹ Todos os leads
+          </Link>
+          <EmptyState
+            title="Carregando lead…"
+            description="Se o lead não aparecer, ele pode ter sido removido ou não está acessível com seu perfil."
+          />
+        </div>
+      </AppLayout>
+    )
+  }
+
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[480px]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+    <AppLayout title="Gerar envio">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink render={<Link to="/leads" />}>Leads</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbLink render={<Link to={`/leads/${leadId}`} />}>{lead.patientName}</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>Envio</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+
+      <section className="rounded-md border border-border bg-card p-3 sm:p-4">
+        <div className="space-y-1">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
             <Truck className="size-5 text-primary" /> Gerar envio (Melhor Envio)
-          </DialogTitle>
-          <DialogDescription>
+          </h2>
+          <p className="text-sm text-muted-foreground">
             Cria o envio na conta Melhor Envio. Por padrão só adiciona ao carrinho — ligue a opção abaixo para já comprar e gerar a etiqueta.
-          </DialogDescription>
-        </DialogHeader>
+          </p>
+        </div>
 
         {config && !config.connected ? (
-          <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <TriangleAlert className="size-4 shrink-0" /> Conta Melhor Envio não conectada neste polo.
           </div>
         ) : null}
         {config?.sandbox ? (
-          <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-[0.7rem] text-sky-800">
+          <div className="mt-2 rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-[0.7rem] text-sky-800">
             Ambiente <b>sandbox</b> — etiquetas de teste, não gera cobrança real.
           </div>
         ) : null}
 
-        <div className="space-y-4 py-1">
+        {pageError ? (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive">
+            <TriangleAlert className="size-4 shrink-0" /> {pageError}
+          </div>
+        ) : null}
+        {pageSuccess ? (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+            <CheckCircle2 className="size-4 shrink-0" /> {pageSuccess}
+          </div>
+        ) : null}
+
+        <div className="mt-4 space-y-4">
           {/* Destinatário */}
           <div className="space-y-2">
             <p className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
               <Package className="size-3.5" /> Destinatário
             </p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:max-w-2xl">
               <div className="col-span-2 space-y-1">
                 <Label htmlFor="sl-name">Nome completo</Label>
                 <Input id="sl-name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -319,7 +407,7 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
           {/* Pedido + serviço */}
           <div className="space-y-2">
             <p className="text-xs font-semibold text-muted-foreground">Pedido e frete</p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:max-w-2xl">
               <div className="space-y-1">
                 <Label htmlFor="sl-kit">Kit (prefill)</Label>
                 <Select value="" onValueChange={(v) => applyKit(String(v ?? ''))}>
@@ -346,7 +434,7 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
                 <Input id="sl-qty" inputMode="numeric" value={productQty} onChange={(e) => setProductQty(e.target.value)} />
               </div>
             </div>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-4 gap-2 sm:max-w-2xl">
               <div className="space-y-1">
                 <Label htmlFor="sl-wt" className="text-[0.7rem]">Peso (kg)</Label>
                 <Input id="sl-wt" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} onBlur={() => void doQuote()} placeholder="0,3" className="h-8 text-xs" />
@@ -364,12 +452,12 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
                 <Input id="sl-h" inputMode="numeric" value={boxH} onChange={(e) => setBoxH(e.target.value)} placeholder="10" className="h-8 text-xs" />
               </div>
             </div>
-            <p className="text-[0.7rem] text-muted-foreground">
+            <p className="text-[0.7rem] text-muted-foreground sm:max-w-2xl">
               Vazio = caixa padrão do polo (0,3 kg · 20×20×10). Pra <b>4 frascos</b> use o peso real (≈ 0,6–1 kg) pra o preço bater.
             </p>
 
             {/* Serviço — cotado de verdade; só aparece o que ATENDE o CEP/caixa */}
-            <div className="space-y-1.5 rounded-lg border border-border/40 px-3 py-2.5">
+            <div className="space-y-1.5 rounded-lg border border-border/40 px-3 py-2.5 sm:max-w-2xl">
               <div className="flex items-center justify-between">
                 <Label htmlFor="sl-service" className="text-xs font-semibold">Serviço (frete real)</Label>
                 <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-[0.7rem]" disabled={quoting || onlyDigits(cep).length !== 8} onClick={() => void doQuote()}>
@@ -410,7 +498,7 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
           </div>
 
           {/* Finalizar */}
-          <div className="flex items-center justify-between rounded-lg border border-border/40 px-3 py-2">
+          <div className="flex items-center justify-between rounded-lg border border-border/40 px-3 py-2 sm:max-w-2xl">
             <div>
               <p className="text-sm font-medium">Comprar e gerar etiqueta agora</p>
               <p className="text-[0.7rem] text-muted-foreground">
@@ -423,7 +511,7 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
           </div>
 
           {/* Remetente */}
-          <div className="rounded-lg border border-border/40">
+          <div className="rounded-lg border border-border/40 sm:max-w-2xl">
             <button
               type="button"
               onClick={() => setShowSender((s) => !s)}
@@ -459,18 +547,18 @@ export function ShipLabelDialog({ isOpen, onClose, leadId, defaultName, defaultP
               </div>
             ) : null}
           </div>
-        </div>
 
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
-            Cancelar
-          </Button>
-          <Button type="button" onClick={() => void handleCreate()} disabled={loading}>
-            {loading ? 'Enviando…' : finalize ? 'Comprar e gerar etiqueta' : 'Adicionar ao carrinho'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={goBack} disabled={loading}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => void handleCreate()} disabled={loading}>
+              {loading ? 'Enviando…' : finalize ? 'Comprar e gerar etiqueta' : 'Adicionar ao carrinho'}
+            </Button>
+          </div>
+        </div>
+      </section>
+    </AppLayout>
   )
 }
 

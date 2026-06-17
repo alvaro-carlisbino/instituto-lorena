@@ -27,6 +27,8 @@ import { DataViewsPage } from './pages/DataViewsPage'
 import { AssistantPage } from './pages/AssistantPage'
 import { LeadsPage } from './pages/LeadsPage'
 import { LeadDetailPage } from './pages/LeadDetailPage'
+import { LeadShipPage } from './pages/LeadShipPage'
+import { LeadSalePage } from './pages/LeadSalePage'
 import { TasksPage } from './pages/TasksPage'
 import { ChatWorkspacePage } from './pages/ChatWorkspacePage'
 import { TricopilPage } from './pages/TricopilPage'
@@ -57,6 +59,8 @@ function AppRoutes() {
       <Route path="/kanban" element={<KanbanPage />} />
       <Route path="/leads" element={<LeadsPage />} />
       <Route path="/leads/:leadId" element={<LeadDetailPage />} />
+      <Route path="/leads/:leadId/envio" element={<LeadShipPage />} />
+      <Route path="/leads/:leadId/venda" element={<LeadSalePage />} />
       <Route path="/tarefas" element={<TasksPage />} />
       <Route path="/agenda" element={<AgendaPage />} />
       <Route path="/chat" element={<ChatWorkspacePage />} />

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import {
@@ -39,8 +40,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ScheduleAppointmentDialog } from '@/components/leads/ScheduleAppointmentDialog'
-import { ConfirmSaleDialog } from '@/components/leads/ConfirmSaleDialog'
-import { ShipLabelDialog } from '@/components/leads/ShipLabelDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { generatePagbankLink, PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
@@ -125,6 +124,7 @@ export function LeadChatThread({
   aiConversationBase,
 }: Props) {
   const crm = useCrm()
+  const navigate = useNavigate()
   const { tenant } = useTenant()
   const isSalesPolo = tenant.poloType === 'sales'
 
@@ -150,8 +150,6 @@ export function LeadChatThread({
   const isActiveLead = crm.selectedLeadId === leadId
   const [filter, setFilter] = useState<ChatFilter>(whatsappOnly ? 'whatsapp' : 'all')
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
-  const [confirmSaleOpen, setConfirmSaleOpen] = useState(false)
-  const [shipOpen, setShipOpen] = useState(false)
   const [pagbankLoading, setPagbankLoading] = useState(false)
   const [retryingBling, setRetryingBling] = useState(false)
 
@@ -1027,7 +1025,7 @@ export function LeadChatThread({
                     size="sm"
                     title="Confirmar venda fechada (marca pago + Bling)"
                     className="h-8 rounded-lg px-2 text-[10px]"
-                    onClick={() => setConfirmSaleOpen(true)}
+                    onClick={() => navigate(`/leads/${leadId}/venda`)}
                   >
                     <CheckCircle2 className="mr-1.5 h-3.5 w-3.5 text-emerald-600" />
                     Confirmar venda
@@ -1038,7 +1036,7 @@ export function LeadChatThread({
                     size="sm"
                     title="Gerar envio no Melhor Envio (carrinho ou etiqueta)"
                     className="h-8 rounded-lg px-2 text-[10px]"
-                    onClick={() => setShipOpen(true)}
+                    onClick={() => navigate(`/leads/${leadId}/envio`)}
                   >
                     <Truck className="mr-1.5 h-3.5 w-3.5 text-primary" />
                     Gerar envio
@@ -1142,23 +1140,6 @@ export function LeadChatThread({
         isOpen={isScheduleOpen}
         onClose={() => setIsScheduleOpen(false)}
         leadId={leadId}
-      />
-
-      <ConfirmSaleDialog
-        isOpen={confirmSaleOpen}
-        onClose={() => setConfirmSaleOpen(false)}
-        leadId={leadId}
-        onConfirmed={() => void crm.syncFromSupabase?.()}
-      />
-
-      <ShipLabelDialog
-        key={`ship-${leadId}-${shipOpen}`}
-        isOpen={shipOpen}
-        onClose={() => setShipOpen(false)}
-        leadId={leadId}
-        defaultName={crm.leads.find((l) => l.id === leadId)?.patientName}
-        defaultPhone={crm.leads.find((l) => l.id === leadId)?.phone}
-        onDone={() => void crm.refreshChatFromSupabase?.()}
       />
     </div>
   )
