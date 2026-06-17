@@ -3,13 +3,13 @@ import { toast } from 'sonner'
 import { Calendar, Clock } from 'lucide-react'
 
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog'
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -111,17 +111,17 @@ export function ScheduleAppointmentDialog({ isOpen, onClose, leadId }: Props) {
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[425px] rounded-xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+    <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2">
             <Calendar className="w-5 h-5 text-primary" /> Agendar Consulta
-          </DialogTitle>
-          <DialogDescription>
+          </SheetTitle>
+          <SheetDescription>
             Encontraremos o primeiro horário livre para este paciente.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
+          </SheetDescription>
+        </SheetHeader>
+        <div className="grid gap-4 px-4 py-4">
           <div className="grid grid-cols-4 items-center gap-4">
             <Label className="text-right">Sala Preferida</Label>
             <Select value={roomId} onValueChange={(v) => v && setRoomId(v)}>
@@ -160,14 +160,14 @@ export function ScheduleAppointmentDialog({ isOpen, onClose, leadId }: Props) {
             />
           </div>
         </div>
-        <DialogFooter>
+        <SheetFooter>
           <Button variant="outline" onClick={onClose} className="rounded-lg">Cancelar</Button>
           <Button type="submit" onClick={() => void handleSchedule()} disabled={isLoading || !online} className="rounded-lg gap-2">
             <Clock className="w-4 h-4" />
             {isLoading ? 'Agendando...' : 'Confirmar Agendamento'}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   )
 }

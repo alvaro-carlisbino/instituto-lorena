@@ -30,13 +30,13 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -468,22 +468,22 @@ export function BoardsPage() {
         onConfirm={handleConfirmDelete}
       />
 
-      {/* Automation Dialog */}
-      <Dialog
+      {/* Automation Sheet */}
+      <Sheet
         open={automationTarget !== null}
         onOpenChange={(open) => !open && setAutomationTarget(null)}
       >
-        <DialogContent className="max-h-[min(92dvh,calc(100dvh-2rem))] overflow-y-auto sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
+        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>
               ⚡ Automação: {automationTarget?.name}
-            </DialogTitle>
-            <DialogDescription>
+            </SheetTitle>
+            <SheetDescription>
               Configure uma mensagem automática de WhatsApp enviada quando um
               lead entrar nesta etapa.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-5 py-2">
+            </SheetDescription>
+          </SheetHeader>
+          <div className="space-y-5 px-4 py-2">
             <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/10 p-3">
               <Switch
                 id="auto-enabled"
@@ -540,14 +540,14 @@ export function BoardsPage() {
               </div>
             </div>
           </div>
-          <DialogFooter>
+          <SheetFooter>
             <Button variant="outline" onClick={() => setAutomationTarget(null)}>
               Cancelar
             </Button>
             <Button onClick={handleSaveAutomation}>Salvar automação</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </AppLayout>
   )
 }

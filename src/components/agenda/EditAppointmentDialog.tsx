@@ -3,13 +3,13 @@ import { toast } from 'sonner'
 import { Calendar, Trash2 } from 'lucide-react'
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
@@ -127,19 +127,19 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
   }
 
   return (
-    <Dialog open={appointment !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[440px] rounded-xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+    <Sheet open={appointment !== null} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2">
             <Calendar className="h-5 w-5 text-primary" />
             Editar agendamento
-          </DialogTitle>
-          <DialogDescription>
+          </SheetTitle>
+          <SheetDescription>
             Início e fim em horário de Brasília (Maringá). A duração recalcula o término automaticamente.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
         {appointment ? (
-          <div className="grid gap-4 py-2">
+          <div className="grid gap-4 px-4 py-2">
             <div className="space-y-1.5">
               <Label htmlFor="edit-appt-lead">Paciente (lead)</Label>
               <Select value={leadId} onValueChange={(v) => v && setLeadId(v)}>
@@ -242,7 +242,7 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
             </p>
           </div>
         ) : null}
-        <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
+        <SheetFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
           <Button
             type="button"
             variant="outline"
@@ -261,8 +261,8 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
               Guardar
             </Button>
           </div>
-        </DialogFooter>
-      </DialogContent>
+        </SheetFooter>
+      </SheetContent>
 
       <ConfirmDialog
         open={showDeleteConfirm}
@@ -273,6 +273,6 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
         cancelLabel="Cancelar"
         onConfirm={handleDelete}
       />
-    </Dialog>
+    </Sheet>
   )
 }
