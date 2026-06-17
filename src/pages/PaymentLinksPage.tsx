@@ -1,24 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import { toast } from 'sonner'
-import { Copy, CreditCard, RefreshCw, ExternalLink, QrCode, Truck } from 'lucide-react'
+import { Copy, CreditCard, ExternalLink, QrCode, Truck } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { CepInput } from '@/components/ui/masked-input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import {
-  fetchPagbankCheckouts,
   generatePagbankLink,
   PAGBANK_KIT_LABELS,
-  type PagbankCheckoutRow,
   type PagbankKit,
 } from '@/services/crmPagbank'
 import { generateRedeLink } from '@/services/crmRede'
@@ -71,33 +67,6 @@ export function PaymentLinksPage() {
     ? Math.round(Number(freightReais.replace(/\./g, '').replace(',', '.')) * 100)
     : undefined
 
-  const [rows, setRows] = useState<PagbankCheckoutRow[]>([])
-  const [loadingRows, setLoadingRows] = useState(false)
-
-  const leadName = useMemo(() => {
-    const map = new Map(crm.leads.map((l) => [l.id, l.patientName]))
-    return (id: string | null) => (id ? map.get(id) ?? id : '—')
-  }, [crm.leads])
-
-  const loadRows = useMemo(
-    () => async () => {
-      if (!isSalesPolo) return
-      setLoadingRows(true)
-      try {
-        setRows(await fetchPagbankCheckouts(50))
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Falha ao carregar links')
-      } finally {
-        setLoadingRows(false)
-      }
-    },
-    [isSalesPolo],
-  )
-
-  useEffect(() => {
-    void loadRows()
-  }, [loadRows])
-
   const selectedLeadId = leadId !== NO_LEAD ? leadId : undefined
   // Nome digitado SEMPRE usado (mesmo com lead): vai pro contato do Bling/NF. Se vazio,
   // o servidor cai no nome do lead. Assim o operador garante o NOME COMPLETO certo no Bling.
@@ -147,7 +116,6 @@ export function PaymentLinksPage() {
       const res = await generatePagbankLink({ leadId: selectedLeadId, kit, customerName: selectedName, freightCents })
       setLastLink({ url: res.payLink, via: `Pix · ${formatBRL(res.amountCents)}` })
       toast.success(`Link Pix gerado (${formatBRL(res.amountCents)}).`)
-      await loadRows()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao gerar link Pix')
     } finally {
@@ -401,69 +369,7 @@ export function PaymentLinksPage() {
           </CardContent>
         </Card>
 
-        {isSalesPolo ? (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-sm">Links Pix gerados</CardTitle>
-              <Button size="sm" variant="ghost" onClick={() => void loadRows()} disabled={loadingRows}>
-                <RefreshCw className={`mr-1.5 size-3.5 ${loadingRows ? 'animate-spin' : ''}`} /> Atualizar
-              </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              {rows.length === 0 ? (
-                loadingRows ? (
-                  <div className="py-10 text-center text-sm text-muted-foreground" role="status" aria-live="polite">
-                    Carregando…
-                  </div>
-                ) : (
-                  <EmptyState
-                    title="Nenhum link gerado ainda"
-                    description="Os links de pagamento (cartão e Pix) que você gerar aparecem aqui."
-                    className="py-10"
-                  />
-                )
-              ) : (
-                <div className="divide-y divide-border/40">
-                  {rows.map((r) => (
-                    <div key={r.checkoutId} className="flex items-center gap-3 px-4 py-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-sm font-semibold">{r.customerName || leadName(r.leadId)}</span>
-                          <Badge variant="outline" className="shrink-0 text-[10px]">
-                            {r.method === 'card' ? 'Cartão' : 'Pix'}
-                          </Badge>
-                          <Badge
-                            variant={r.status === 'paid' ? 'default' : 'secondary'}
-                            className={r.status === 'paid' ? 'bg-emerald-500/15 text-emerald-600' : ''}
-                          >
-                            {r.status === 'paid' ? 'Pago' : 'Aguardando'}
-                          </Badge>
-                        </div>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {formatBRL(r.amountCents)}
-                          {r.kit ? ` · ${r.kit.replace('_', ' ')}` : ''}
-                          {r.status === 'paid' && r.paidAt
-                            ? ` · pago ${new Date(r.paidAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
-                            : r.createdAt
-                              ? ` · gerado ${new Date(r.createdAt).toLocaleDateString('pt-BR')}`
-                              : ''}
-                        </p>
-                      </div>
-                      <Button size="sm" variant="outline" onClick={() => void copy(r.payLink)}>
-                        <Copy className="size-3.5" />
-                      </Button>
-                      <Button size="sm" variant="outline" render={<a href={r.payLink} target="_blank" rel="noreferrer" />}>
-                        <ExternalLink className="size-3.5" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ) : (
-          <ClinicPaymentsPanel />
-        )}
+        <ClinicPaymentsPanel />
       </div>
     </AppLayout>
   )
