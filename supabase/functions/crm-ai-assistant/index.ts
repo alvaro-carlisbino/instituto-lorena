@@ -1117,6 +1117,28 @@ Deno.serve(async (req) => {
       reply = normalizeWhatsappPatientFormatting(reply)
     }
 
+    // Op ENTREGÁVEL (link de cartão / Pix / checkout) executou com sucesso, mas o modelo não
+    // deixou texto visível ao paciente (z.ai devolveu só CoT/`<thinking>`, ou a sanitização
+    // zerou a prosa). Sem isto, a cobrança/charge é criada e o "Link gerado" é logado, mas
+    // NENHUMA mensagem sai — e o caller ainda faz retry, podendo gerar cobranças DUPLICADAS.
+    // Sintetiza um lead-in mínimo para que o bloco de anexação de link abaixo monte a mensagem
+    // real (com a URL/Pix) e o reply deixe de ser vazio (corta o retry e o ok:false).
+    if (!reply.trim() && isInternal && context.leadId) {
+      const hasDeliverable = actionChunks.some(
+        (c) =>
+          c.ok &&
+          ((c.type === 'rede_link' && typeof c.detail === 'string' && c.detail.startsWith('http')) ||
+            (c.type === 'pagbank_checkout' && typeof c.detail === 'string' && c.detail.startsWith('http')) ||
+            (c.type === 'pagbank_pix' && typeof c.detail === 'string' && c.detail.length > 20) ||
+            // Agendamentos também têm efeito colateral: empty reply → retry → DUPLA reserva.
+            (c.type === 'shosp_book' && typeof c.detail === 'string' && c.detail.length >= 8) ||
+            ((c.type === 'book_appointment' || c.type === 'schedule_appointment') &&
+              typeof c.detail === 'string' &&
+              c.detail.length >= 12)),
+      )
+      if (hasDeliverable) reply = 'Prontinho! 💚'
+    }
+
     // Z.ai (GLM) por vezes devolve só monólogo CoT em inglês ou só blocos `<thinking>` /
     // function_call. Depois da sanitização não sobra texto visível ao paciente. Em vez de
     // responder ok:true com reply:"" (silenciado pelo caller como fallback), devolve ok:false
