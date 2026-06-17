@@ -18,6 +18,7 @@ import { AlertTriangle, MessageSquare, RefreshCw } from 'lucide-react'
 import { AppLayout } from '@/layouts/AppLayout'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { buttonVariants } from '@/components/ui/button'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { fetchTricopillBi, formatBRL, kitLabel, type TricopillBi } from '@/services/tricopillBi'
 
@@ -335,22 +336,22 @@ export function TricopilDashboardPage() {
           {(funnel?.por_source ?? []).length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Sem dados no período.</p>
           ) : (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  <th className="pb-2">Origem</th>
-                  <th className="pb-2 text-right">Leads</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="w-full text-xs">
+              <TableHeader>
+                <TableRow className="text-left text-muted-foreground">
+                  <TableHead className="pb-2">Origem</TableHead>
+                  <TableHead className="pb-2 text-right">Leads</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {(funnel?.por_source ?? []).map((s) => (
-                  <tr key={s.source} className="border-t border-border/20">
-                    <td className="py-1.5">{SOURCE_LABELS[s.source] ?? s.source}</td>
-                    <td className="py-1.5 text-right font-semibold tabular-nums">{s.count}</td>
-                  </tr>
+                  <TableRow key={s.source} className="border-t border-border/20">
+                    <TableCell className="py-1.5">{SOURCE_LABELS[s.source] ?? s.source}</TableCell>
+                    <TableCell className="py-1.5 text-right font-semibold tabular-nums">{s.count}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </div>
       </section>
@@ -434,24 +435,24 @@ export function TricopilDashboardPage() {
           {(checkout?.por_kit ?? []).length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Sem vendas confirmadas no período.</p>
           ) : (
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  <th className="pb-2">Kit</th>
-                  <th className="pb-2 text-right">Qtd</th>
-                  <th className="pb-2 text-right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="w-full text-xs">
+              <TableHeader>
+                <TableRow className="text-left text-muted-foreground">
+                  <TableHead className="pb-2">Kit</TableHead>
+                  <TableHead className="pb-2 text-right">Qtd</TableHead>
+                  <TableHead className="pb-2 text-right">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {(checkout?.por_kit ?? []).map((k) => (
-                  <tr key={k.kit} className="border-t border-border/20">
-                    <td className="py-1.5">{kitLabel(k.kit)}</td>
-                    <td className="py-1.5 text-right tabular-nums">{k.count}</td>
-                    <td className="py-1.5 text-right font-semibold tabular-nums">{formatBRL(k.total_cents)}</td>
-                  </tr>
+                  <TableRow key={k.kit} className="border-t border-border/20">
+                    <TableCell className="py-1.5">{kitLabel(k.kit)}</TableCell>
+                    <TableCell className="py-1.5 text-right tabular-nums">{k.count}</TableCell>
+                    <TableCell className="py-1.5 text-right font-semibold tabular-nums">{formatBRL(k.total_cents)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </div>
       </section>
@@ -460,24 +461,24 @@ export function TricopilDashboardPage() {
         <section className="mt-8">
           <SectionTitle>Cupons</SectionTitle>
           <div className="rounded-3xl border border-border/30 bg-card/40 p-6">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  <th className="pb-2">Cupom</th>
-                  <th className="pb-2 text-right">Usos</th>
-                  <th className="pb-2 text-right">Receita gerada</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="w-full text-xs">
+              <TableHeader>
+                <TableRow className="text-left text-muted-foreground">
+                  <TableHead className="pb-2">Cupom</TableHead>
+                  <TableHead className="pb-2 text-right">Usos</TableHead>
+                  <TableHead className="pb-2 text-right">Receita gerada</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {(checkout?.por_cupom ?? []).map((c) => (
-                  <tr key={c.code} className="border-t border-border/20">
-                    <td className="py-1.5 font-mono font-semibold uppercase">{c.code}</td>
-                    <td className="py-1.5 text-right tabular-nums">{c.count}</td>
-                    <td className="py-1.5 text-right font-semibold tabular-nums">{formatBRL(c.total_cents)}</td>
-                  </tr>
+                  <TableRow key={c.code} className="border-t border-border/20">
+                    <TableCell className="py-1.5 font-mono font-semibold uppercase">{c.code}</TableCell>
+                    <TableCell className="py-1.5 text-right tabular-nums">{c.count}</TableCell>
+                    <TableCell className="py-1.5 text-right font-semibold tabular-nums">{formatBRL(c.total_cents)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </section>
       ) : null}

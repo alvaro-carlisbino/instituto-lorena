@@ -47,6 +47,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { sourceLabel } from '@/hooks/useCrmState'
@@ -660,29 +661,29 @@ export function LeadsPage() {
           </ul>
 
           <div className="hidden w-full overflow-x-auto md:block">
-            <table className="w-full border-collapse text-left">
-              <thead>
-                <tr className="border-b border-border/20 bg-muted/10 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/50">
-                  <th className="w-16 px-8 py-5">
+            <Table className="w-full border-collapse text-left">
+              <TableHeader>
+                <TableRow className="border-b border-border/20 bg-muted/10 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/50">
+                  <TableHead className="w-16 px-8 py-5">
                     <div className="flex items-center justify-center">
                       <div className="size-4 rounded border-border/40 border" />
                     </div>
-                  </th>
+                  </TableHead>
                   {visibleColumns.map((col) => (
-                    <th key={col} className="px-4 py-5 font-black">
+                    <TableHead key={col} className="px-4 py-5 font-black">
                       {columnLabel(col, crm.workflowFields)}
-                    </th>
+                    </TableHead>
                   ))}
-                  <th className="px-8 py-5 text-right">Interação</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/5">
+                  <TableHead className="px-8 py-5 text-right">Interação</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="divide-y divide-border/5">
                 {filteredLeads.map((lead) => {
                   const pipe = crm.pipelineCatalog.find((p) => p.id === lead.pipelineId)
                   const stage = pipe?.stages.find((s) => s.id === lead.stageId)
                   const selected = selectedLeadIds.includes(lead.id)
                   return (
-                    <tr
+                    <TableRow
                       key={lead.id}
                       className={cn(
                         'group transition-all duration-200 cursor-pointer',
@@ -690,7 +691,7 @@ export function LeadsPage() {
                       )}
                       onClick={() => openLead(lead.id)}
                     >
-                      <td className="px-8 py-5" onClick={(e) => e.stopPropagation()}>
+                      <TableCell className="px-8 py-5" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center">
                           <input
                             type="checkbox"
@@ -699,9 +700,9 @@ export function LeadsPage() {
                             className="size-5 rounded-lg border-border/40 checked:bg-primary"
                           />
                         </div>
-                      </td>
+                      </TableCell>
                       {visibleColumns.map((col) => (
-                        <td key={col} className="px-4 py-5 max-w-[20rem]">
+                        <TableCell key={col} className="px-4 py-5 max-w-[20rem]">
                           {col === 'patient_name' && (
                             <div className="flex flex-col gap-1">
                               <span className="text-[14px] font-bold text-foreground/90 group-hover:text-primary transition-colors">{lead.patientName}</span>
@@ -733,21 +734,21 @@ export function LeadsPage() {
                           ].includes(col) && (
                             <span className="text-xs font-medium text-muted-foreground/60">{String(getLeadFieldValue(lead, col) ?? '—')}</span>
                           )}
-                        </td>
+                        </TableCell>
                       ))}
-                      <td className="px-8 py-5 text-right" onClick={(e) => e.stopPropagation()}>
+                      <TableCell className="px-8 py-5 text-right" onClick={(e) => e.stopPropagation()}>
                         <Link
                           to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
                           className="inline-flex size-10 items-center justify-center rounded-2xl bg-primary/[0.08] text-primary transition-all hover:bg-primary/20 active:scale-90"
                         >
                           <MessageCircle className="size-4" />
                         </Link>
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   )
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
           {!crm.isLoading && filteredLeads.length === 0 && (
             <EmptyState

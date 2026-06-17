@@ -9,6 +9,7 @@ import {
   YAxis,
 } from 'recharts'
 
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { fetchAnalyticsV2, type AnalyticsV2 } from '@/services/analytics'
 
 const SOURCE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -155,26 +156,26 @@ export function AnalyticsV2Panel() {
             <p className="py-8 text-center text-xs text-muted-foreground">Sem dados no período.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-left text-muted-foreground">
-                    <th className="pb-2">Origem</th>
-                    <th className="pb-2 text-right">Leads</th>
-                    <th className="pb-2 text-right">Agendados</th>
-                    <th className="pb-2 text-right">Conv. %</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table className="w-full text-xs">
+                <TableHeader>
+                  <TableRow className="text-left text-muted-foreground">
+                    <TableHead className="pb-2">Origem</TableHead>
+                    <TableHead className="pb-2 text-right">Leads</TableHead>
+                    <TableHead className="pb-2 text-right">Agendados</TableHead>
+                    <TableHead className="pb-2 text-right">Conv. %</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {sourceBars.map((s) => (
-                    <tr key={s.name} className="border-t border-border/20">
-                      <td className="py-1.5">{s.name}</td>
-                      <td className="py-1.5 text-right">{s.total}</td>
-                      <td className="py-1.5 text-right">{s.agendados}</td>
-                      <td className="py-1.5 text-right font-semibold">{s.conversao.toFixed(1)}%</td>
-                    </tr>
+                    <TableRow key={s.name} className="border-t border-border/20">
+                      <TableCell className="py-1.5">{s.name}</TableCell>
+                      <TableCell className="py-1.5 text-right">{s.total}</TableCell>
+                      <TableCell className="py-1.5 text-right">{s.agendados}</TableCell>
+                      <TableCell className="py-1.5 text-right font-semibold">{s.conversao.toFixed(1)}%</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
         </div>
@@ -208,28 +209,28 @@ export function AnalyticsV2Panel() {
           <p className="py-6 text-center text-xs text-muted-foreground">Sem dados no período.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  <th className="pb-2">Atendente</th>
-                  <th className="pb-2 text-right">Leads</th>
-                  <th className="pb-2 text-right">Agendados</th>
-                  <th className="pb-2 text-right">Perdidos</th>
-                  <th className="pb-2 text-right">Conv. %</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table className="w-full text-xs">
+              <TableHeader>
+                <TableRow className="text-left text-muted-foreground">
+                  <TableHead className="pb-2">Atendente</TableHead>
+                  <TableHead className="pb-2 text-right">Leads</TableHead>
+                  <TableHead className="pb-2 text-right">Agendados</TableHead>
+                  <TableHead className="pb-2 text-right">Perdidos</TableHead>
+                  <TableHead className="pb-2 text-right">Conv. %</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {(data?.by_sdr ?? []).map((s) => (
-                  <tr key={s.owner_id ?? s.owner_name} className="border-t border-border/20">
-                    <td className="py-1.5">{s.owner_name}</td>
-                    <td className="py-1.5 text-right">{s.total}</td>
-                    <td className="py-1.5 text-right">{s.agendados}</td>
-                    <td className="py-1.5 text-right text-destructive">{s.perdidos}</td>
-                    <td className="py-1.5 text-right font-semibold">{(s.conversao_pct ?? 0).toFixed(1)}%</td>
-                  </tr>
+                  <TableRow key={s.owner_id ?? s.owner_name} className="border-t border-border/20">
+                    <TableCell className="py-1.5">{s.owner_name}</TableCell>
+                    <TableCell className="py-1.5 text-right">{s.total}</TableCell>
+                    <TableCell className="py-1.5 text-right">{s.agendados}</TableCell>
+                    <TableCell className="py-1.5 text-right text-destructive">{s.perdidos}</TableCell>
+                    <TableCell className="py-1.5 text-right font-semibold">{(s.conversao_pct ?? 0).toFixed(1)}%</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         )}
       </div>

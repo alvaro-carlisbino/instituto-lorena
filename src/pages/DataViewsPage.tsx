@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { columnLabel } from '@/lib/leadColumnLabels'
@@ -98,28 +99,28 @@ export function DataViewsPage() {
           </CardHeader>
           <CardContent className="min-w-0 overflow-x-auto">
             {activeView ? (
-              <table className="w-full min-w-[28rem] border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left">
+              <Table className="w-full min-w-[28rem] border-collapse text-sm">
+                <TableHeader>
+                  <TableRow className="border-b border-border text-left">
                     {activeColumns.map((col) => (
-                      <th key={col} className="p-2 font-medium">
+                      <TableHead key={col} className="p-2 font-medium">
                         {columnLabel(col, crm.workflowFields)}
-                      </th>
+                      </TableHead>
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {crm.leads.slice(0, 12).map((lead) => (
-                    <tr key={lead.id} className="border-b border-border/80">
+                    <TableRow key={lead.id} className="border-b border-border/80">
                       {activeColumns.map((col) => (
-                        <td key={col} className="p-2 text-muted-foreground">
+                        <TableCell key={col} className="p-2 text-muted-foreground">
                           {String(getLeadFieldValue(lead, col) ?? '')}
-                        </td>
+                        </TableCell>
                       ))}
-                    </tr>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             ) : (
               <p className="text-sm text-muted-foreground">Crie uma visão para ver a tabela.</p>
             )}

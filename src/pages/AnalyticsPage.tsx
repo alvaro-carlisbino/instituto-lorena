@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { AnalyticsV2Panel } from '@/components/analytics/AnalyticsV2Panel'
 import { ShospAgendaMetricsPanel } from '@/components/analytics/ShospAgendaMetricsPanel'
 import { AppLayout } from '@/layouts/AppLayout'
@@ -220,26 +221,26 @@ export function AnalyticsPage() {
                   {data.by_sdr.length === 0 ? (
                     <p className="text-xs text-muted-foreground">Nenhum dado.</p>
                   ) : (
-                    <table className="w-full text-xs">
-                      <thead className="text-left text-muted-foreground">
-                        <tr>
-                          <th className="pb-1 font-semibold">SDR</th>
-                          <th className="pb-1 text-right font-semibold">Leads</th>
-                          <th className="pb-1 text-right font-semibold">Perdidos</th>
-                          <th className="pb-1 text-right font-semibold">Conv.</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/40">
+                    <Table className="w-full text-xs">
+                      <TableHeader className="text-left text-muted-foreground">
+                        <TableRow>
+                          <TableHead className="pb-1 font-semibold">SDR</TableHead>
+                          <TableHead className="pb-1 text-right font-semibold">Leads</TableHead>
+                          <TableHead className="pb-1 text-right font-semibold">Perdidos</TableHead>
+                          <TableHead className="pb-1 text-right font-semibold">Conv.</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody className="divide-y divide-border/40">
                         {data.by_sdr.map((s) => (
-                          <tr key={s.sdr_id}>
-                            <td className="py-1 truncate">{s.sdr_name}</td>
-                            <td className="py-1 text-right tabular-nums">{s.total_leads}</td>
-                            <td className="py-1 text-right tabular-nums">{s.lost_leads}</td>
-                            <td className="py-1 text-right tabular-nums">{s.conversion_pct}%</td>
-                          </tr>
+                          <TableRow key={s.sdr_id}>
+                            <TableCell className="py-1 truncate">{s.sdr_name}</TableCell>
+                            <TableCell className="py-1 text-right tabular-nums">{s.total_leads}</TableCell>
+                            <TableCell className="py-1 text-right tabular-nums">{s.lost_leads}</TableCell>
+                            <TableCell className="py-1 text-right tabular-nums">{s.conversion_pct}%</TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </TableBody>
+                    </Table>
                   )}
                 </CardContent>
               </Card>
