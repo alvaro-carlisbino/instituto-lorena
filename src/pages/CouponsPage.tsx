@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   type Coupon,
@@ -48,6 +49,7 @@ export function CouponsPage() {
   const [saving, setSaving] = useState(false)
   const [rows, setRows] = useState<Coupon[]>([])
   const [loading, setLoading] = useState(false)
+  const [couponToDelete, setCouponToDelete] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -112,7 +114,6 @@ export function CouponsPage() {
   }
 
   const remove = async (code: string) => {
-    if (!window.confirm(`Excluir o cupom ${code}?`)) return
     try {
       await deleteCoupon(code)
       setRows((prev) => prev.filter((r) => r.code !== code))
@@ -252,7 +253,7 @@ export function CouponsPage() {
                     <Button size="sm" variant="outline" onClick={() => void toggleActive(c)}>
                       {c.active ? 'Desativar' : 'Ativar'}
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => void remove(c.code)}>
+                    <Button size="sm" variant="outline" onClick={() => setCouponToDelete(c.code)}>
                       <Trash2 className="size-3.5" />
                     </Button>
                   </div>
@@ -262,6 +263,23 @@ export function CouponsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={couponToDelete !== null}
+        onOpenChange={(open) => { if (!open) setCouponToDelete(null) }}
+        title="Excluir cupom?"
+        description={
+          couponToDelete
+            ? `O cupom ${couponToDelete} será excluído de forma permanente e deixará de ser aplicado. Esta ação não pode ser desfeita.`
+            : ''
+        }
+        confirmLabel="Excluir"
+        cancelLabel="Cancelar"
+        onConfirm={() => {
+          if (couponToDelete) void remove(couponToDelete)
+          setCouponToDelete(null)
+        }}
+      />
     </AppLayout>
   )
 }

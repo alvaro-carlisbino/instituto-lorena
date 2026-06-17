@@ -5,6 +5,7 @@ import { History, MessageSquarePlus, Trash2 } from 'lucide-react'
 import { CrmAssistantChat } from '@/components/assistant/CrmAssistantChat'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -43,6 +44,7 @@ export function AssistantPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [threads, setThreads] = useState<AssistantThreadRow[]>([])
+  const [threadToDelete, setThreadToDelete] = useState<string | null>(null)
 
   const leadIdParam = searchParams.get('leadId')?.trim() || undefined
   const weekStartIso = searchParams.get('week')?.trim() || undefined
@@ -88,10 +90,13 @@ export function AssistantPage() {
     setThreadId(undefined)
   }
 
-  const deleteThread = async (e: React.MouseEvent, id: string) => {
+  const requestDeleteThread = (e: React.MouseEvent, id: string) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!confirm('Excluir esta conversa? Esta ação não pode ser desfeita.')) return
+    setThreadToDelete(id)
+  }
+
+  const deleteThread = async (id: string) => {
     const ok = await deleteAssistantThread(id)
     if (!ok) return
     if (threadIdParam === id) setThreadId(undefined)
@@ -193,7 +198,7 @@ export function AssistantPage() {
                               size="icon"
                               className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
                               aria-label="Eliminar conversa"
-                              onClick={(e) => void deleteThread(e, t.id)}
+                              onClick={(e) => requestDeleteThread(e, t.id)}
                             >
                               <Trash2 className="size-3.5" />
                             </Button>
@@ -218,6 +223,19 @@ export function AssistantPage() {
           />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={threadToDelete !== null}
+        onOpenChange={(open) => { if (!open) setThreadToDelete(null) }}
+        title="Excluir esta conversa?"
+        description="A conversa e seu histórico serão removidos de forma permanente. Esta ação não pode ser desfeita."
+        confirmLabel="Excluir"
+        cancelLabel="Cancelar"
+        onConfirm={() => {
+          if (threadToDelete) void deleteThread(threadToDelete)
+          setThreadToDelete(null)
+        }}
+      />
     </AppLayout>
   )
 }

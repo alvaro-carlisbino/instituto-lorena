@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useCrm } from '@/context/CrmContext'
 import { getDataProviderMode } from '@/services/dataMode'
 import { isSupabaseConfigured } from '@/lib/supabaseClient'
@@ -30,6 +31,8 @@ export function LeadTaskPanel({ leadId, className }: Props) {
     .sort((a, b) => a.sortOrder - b.sortOrder)
   const [newTitle, setNewTitle] = useState('')
   const [attByTask, setAttByTask] = useState<Record<string, LeadTaskAttachmentRow[]>>({})
+  const [taskToDelete, setTaskToDelete] = useState<string | null>(null)
+  const [attachmentToDelete, setAttachmentToDelete] = useState<LeadTaskAttachmentRow | null>(null)
 
   const taskIdKey = tasks.map((t) => t.id).join(',')
   useEffect(() => {
@@ -83,6 +86,18 @@ export function LeadTaskPanel({ leadId, className }: Props) {
       window.open(url, '_blank', 'noopener,noreferrer')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao abrir ficheiro')
+    }
+  }
+
+  const removeAttachment = async (a: LeadTaskAttachmentRow) => {
+    try {
+      await deleteTaskAttachmentRow(a.id, a.storagePath)
+      setAttByTask((p) => ({
+        ...p,
+        [a.leadTaskId]: (p[a.leadTaskId] ?? []).filter((x) => x.id !== a.id),
+      }))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha')
     }
   }
 
@@ -144,9 +159,7 @@ export function LeadTaskPanel({ leadId, className }: Props) {
                   variant="ghost"
                   size="icon"
                   className="h-8 w-8 text-destructive"
-                  onClick={() => {
-                    if (window.confirm('Eliminar tarefa?')) crm.removeLeadTask(task.id)
-                  }}
+                  onClick={() => setTaskToDelete(task.id)}
                   title="Remover tarefa"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -190,18 +203,7 @@ export function LeadTaskPanel({ leadId, className }: Props) {
                         variant="ghost"
                         size="sm"
                         className="h-6 px-1 text-xs text-destructive"
-                        onClick={async () => {
-                          if (!window.confirm('Remover anexo?')) return
-                          try {
-                            await deleteTaskAttachmentRow(a.id, a.storagePath)
-                            setAttByTask((p) => ({
-                              ...p,
-                              [task.id]: (p[task.id] ?? []).filter((x) => x.id !== a.id),
-                            }))
-                          } catch (err) {
-                            toast.error(err instanceof Error ? err.message : 'Falha')
-                          }
-                        }}
+                        onClick={() => setAttachmentToDelete(a)}
                       >
                         Remover
                       </Button>
@@ -213,6 +215,32 @@ export function LeadTaskPanel({ leadId, className }: Props) {
           </li>
         ))}
       </ul>
+
+      <ConfirmDialog
+        open={taskToDelete !== null}
+        onOpenChange={(open) => { if (!open) setTaskToDelete(null) }}
+        title="Eliminar tarefa?"
+        description="A tarefa será removida da sequência. Esta ação não pode ser desfeita."
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        onConfirm={() => {
+          if (taskToDelete) crm.removeLeadTask(taskToDelete)
+          setTaskToDelete(null)
+        }}
+      />
+
+      <ConfirmDialog
+        open={attachmentToDelete !== null}
+        onOpenChange={(open) => { if (!open) setAttachmentToDelete(null) }}
+        title="Remover anexo?"
+        description="O ficheiro anexado será apagado de forma permanente. Esta ação não pode ser desfeita."
+        confirmLabel="Remover"
+        cancelLabel="Cancelar"
+        onConfirm={() => {
+          if (attachmentToDelete) void removeAttachment(attachmentToDelete)
+          setAttachmentToDelete(null)
+        }}
+      />
     </section>
   )
 }

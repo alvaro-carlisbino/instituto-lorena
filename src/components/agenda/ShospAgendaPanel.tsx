@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useCrm } from '@/context/CrmContext'
 import {
   cancelShospAppointment,
@@ -42,6 +43,7 @@ export function ShospAgendaPanel() {
   const [nascimento, setNascimento] = useState('')
   const [sexo, setSexo] = useState('M')
   const [saving, setSaving] = useState(false)
+  const [slotToCancel, setSlotToCancel] = useState<ShospSlot | null>(null)
 
   useEffect(() => {
     fetchShospPrestadores()
@@ -135,9 +137,13 @@ export function ShospAgendaPanel() {
     }
   }
 
-  const cancelSlot = async (slot: ShospSlot) => {
+  const cancelSlot = (slot: ShospSlot) => {
     if (!slot.codigoAgendamento) return
-    if (!window.confirm(`Cancelar agendamento de ${slot.paciente ?? 'paciente'} às ${slot.horario}?`)) return
+    setSlotToCancel(slot)
+  }
+
+  const confirmCancelSlot = async (slot: ShospSlot) => {
+    if (!slot.codigoAgendamento) return
     const r = await cancelShospAppointment(slot.codigoAgendamento)
     if (r.ok) {
       toast.success('Agendamento cancelado na Shosp.')
@@ -254,6 +260,23 @@ export function ShospAgendaPanel() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={slotToCancel !== null}
+        onOpenChange={(open) => { if (!open) setSlotToCancel(null) }}
+        title="Cancelar este agendamento?"
+        description={
+          slotToCancel
+            ? `O agendamento de ${slotToCancel.paciente ?? 'paciente'} às ${slotToCancel.horario} será cancelado na Shosp. Esta ação não pode ser desfeita.`
+            : ''
+        }
+        confirmLabel="Cancelar agendamento"
+        cancelLabel="Voltar"
+        onConfirm={() => {
+          if (slotToCancel) void confirmCancelSlot(slotToCancel)
+          setSlotToCancel(null)
+        }}
+      />
     </section>
   )
 }

@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useTenant } from '@/context/TenantContext'
 import {
   fetchBlingStatus,
@@ -39,6 +40,7 @@ export function IntegrationsPage() {
   const [autoOrder, setAutoOrder] = useState(false)
   const [savingCfg, setSavingCfg] = useState(false)
   const [testingOrder, setTestingOrder] = useState(false)
+  const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
 
   // === Rede (ambos os polos) ===
   const [rede, setRede] = useState<RedeConfigStatus>({ configured: false, env: 'sandbox' })
@@ -232,7 +234,7 @@ export function IntegrationsPage() {
                       Conectado em {new Date(bling.connectedAt).toLocaleString('pt-BR')}
                     </p>
                   ) : null}
-                  <Button variant="outline" size="sm" onClick={() => void handleDisconnect()}>
+                  <Button variant="outline" size="sm" onClick={() => setShowDisconnectConfirm(true)}>
                     <Unplug className="mr-1.5 size-4" /> Desconectar
                   </Button>
                 </div>
@@ -390,6 +392,16 @@ export function IntegrationsPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <ConfirmDialog
+        open={showDisconnectConfirm}
+        onOpenChange={setShowDisconnectConfirm}
+        title="Desconectar o Bling?"
+        description="A criação automática de pedidos de venda e a emissão de NF-e param até você reconectar o Bling. Tem certeza?"
+        confirmLabel="Desconectar"
+        cancelLabel="Cancelar"
+        onConfirm={() => void handleDisconnect()}
+      />
     </AppLayout>
   )
 }

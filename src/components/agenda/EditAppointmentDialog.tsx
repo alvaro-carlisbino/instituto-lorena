@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -70,6 +71,7 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
   const [notes, setNotes] = useState('')
   const [attendanceStatus, setAttendanceStatus] = useState<Appointment['attendanceStatus']>('expected')
   const [status, setStatus] = useState<Appointment['status']>('confirmed')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   useEffect(() => {
     if (!appointment) return
@@ -115,7 +117,6 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
 
   const handleDelete = () => {
     if (!appointment) return
-    if (!window.confirm('Remover esta marcação da agenda?')) return
     try {
       crm.removeAppointmentRow(appointment.id)
       toast.success('Marcação removida.')
@@ -246,7 +247,7 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
             type="button"
             variant="outline"
             className="rounded-xl text-destructive border-destructive/40 hover:bg-destructive/10"
-            onClick={() => void handleDelete()}
+            onClick={() => setShowDeleteConfirm(true)}
             disabled={!appointment}
           >
             <Trash2 className="mr-2 h-4 w-4" />
@@ -262,6 +263,16 @@ export function EditAppointmentDialog({ appointment, onClose }: Props) {
           </div>
         </DialogFooter>
       </DialogContent>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title="Remover esta marcação?"
+        description="O agendamento será removido da agenda de forma permanente. Esta ação não pode ser desfeita."
+        confirmLabel="Remover"
+        cancelLabel="Cancelar"
+        onConfirm={handleDelete}
+      />
     </Dialog>
   )
 }

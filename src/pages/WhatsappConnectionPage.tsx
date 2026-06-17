@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -100,6 +101,7 @@ export function WhatsappConnectionPage() {
   const [linkPhone, setLinkPhone] = useState('')
   const [savingInstance, setSavingInstance] = useState(false)
   const [removingInstance, setRemovingInstance] = useState(false)
+  const [instanceToRemove, setInstanceToRemove] = useState<string | null>(null)
   const [linkOpen, setLinkOpen] = useState(false)
   const [configuringWebhook, setConfiguringWebhook] = useState(false)
   const [loadingAction, setLoadingAction] = useState<ConnectionAction | null>(null)
@@ -394,13 +396,6 @@ export function WhatsappConnectionPage() {
 
   const handleRemoveInstance = async (id: string) => {
     const target = instances.find((i) => i.id === id)
-    const confirmManychat =
-      target?.channelProvider === 'manychat'
-        ? 'Apagar esta linha ManyChat do CRM? Os fluxos no ManyChat continuam — atualize o External Request se deixar de usar esta chave.'
-        : 'Apagar este telefone? O WhatsApp desta linha deixa de receber mensagens no CRM, e a sessão no servidor (se ainda existir) será removida.'
-    if (!window.confirm(confirmManychat)) {
-      return
-    }
     setRemovingInstance(true)
     try {
       if (target?.channelProvider !== 'manychat') {
@@ -534,7 +529,7 @@ export function WhatsappConnectionPage() {
                 variant="outline"
                 className="shrink-0 border-destructive/50 text-destructive hover:bg-destructive/10"
                 disabled={removingInstance}
-                onClick={() => void handleRemoveInstance(selectedInstance.id)}
+                onClick={() => setInstanceToRemove(selectedInstance.id)}
               >
                 {removingInstance ? 'Apagando…' : 'Apagar este telefone'}
               </Button>
@@ -1083,6 +1078,23 @@ export function WhatsappConnectionPage() {
         </Card>
       </div>
       )}
+
+      <ConfirmDialog
+        open={instanceToRemove !== null}
+        onOpenChange={(open) => { if (!open) setInstanceToRemove(null) }}
+        title="Apagar este telefone?"
+        description={
+          instances.find((i) => i.id === instanceToRemove)?.channelProvider === 'manychat'
+            ? 'Apagar esta linha ManyChat do CRM? Os fluxos no ManyChat continuam — atualize o External Request se deixar de usar esta chave. Esta ação não pode ser desfeita.'
+            : 'Apagar este telefone? O WhatsApp desta linha deixa de receber mensagens no CRM, e a sessão no servidor (se ainda existir) será removida. Esta ação não pode ser desfeita.'
+        }
+        confirmLabel="Apagar"
+        cancelLabel="Cancelar"
+        onConfirm={() => {
+          if (instanceToRemove) void handleRemoveInstance(instanceToRemove)
+          setInstanceToRemove(null)
+        }}
+      />
     </AppLayout>
   )
 }
