@@ -10,6 +10,7 @@ import {
 } from 'recharts'
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { useTenant } from '@/context/TenantContext'
 import { fetchAnalyticsV2, type AnalyticsV2 } from '@/services/analytics'
 
 const SOURCE_OPTIONS: Array<{ value: string; label: string }> = [
@@ -42,6 +43,7 @@ function StatCard({ label, value, tone }: { label: string; value: number | strin
 }
 
 export function AnalyticsV2Panel() {
+  const { tenant } = useTenant()
   const [end, setEnd] = useState<string>(isoDate(new Date()))
   const [start, setStart] = useState<string>(isoDate(new Date(Date.now() - 30 * 86400000)))
   const [source, setSource] = useState<string>('')
@@ -57,6 +59,7 @@ export function AnalyticsV2Panel() {
       start: new Date(`${start}T00:00:00`),
       end: new Date(`${end}T23:59:59`),
       source: source || null,
+      tenant: tenant.id,
     })
       .then((res) => {
         if (!cancelled) setData(res)
@@ -70,7 +73,7 @@ export function AnalyticsV2Panel() {
     return () => {
       cancelled = true
     }
-  }, [start, end, source])
+  }, [start, end, source, tenant.id])
 
   const applyQuick = (days: number) => {
     setEnd(isoDate(new Date()))

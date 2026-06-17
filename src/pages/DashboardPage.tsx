@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { KanbanSquare, LayoutListIcon, MoreHorizontal, RefreshCw, SlidersHorizontal, UsersIcon } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, LabelList } from 'recharts'
@@ -18,10 +18,9 @@ import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
-import { isSameLocalDayInTimezone } from '@/lib/sameLocalDayInTimezone'
 import { labelForIdName } from '@/lib/selectDisplay'
-import { fetchHandoffEventCountForTodayInTimezone } from '@/services/leadWaLineEvents'
 import { PendingHumanHandoffPanel } from '@/components/dashboard/PendingHumanHandoffPanel'
+import { DashboardKpiSection } from '@/components/dashboard/DashboardKpiSection'
 import { cn } from '@/lib/utils'
 
 const CHART_COLORS = [
@@ -37,17 +36,6 @@ export function DashboardPage() {
   const crm = useCrm()
   const navigate = useNavigate()
   const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
-
-  const getDashboardValue = (metricKey: string) => {
-    if (metricKey === 'leads-active') return crm.leads.length
-    if (metricKey === 'leads-hot') return crm.totalHotLeads
-    if (metricKey === 'qualified-ai') return crm.totalQualified
-    if (metricKey === 'channels-active') return crm.channels.filter((channel) => channel.enabled).length
-    const metric = crm.metrics.find((item) => item.id === metricKey)
-    return metric?.value ?? 0
-  }
-
-  const dashboardCards = crm.dashboardWidgets.filter((widget) => widget.enabled).sort((a, b) => a.position - b.position)
 
   const pipelineSelectLabel = useMemo(
     () =>
@@ -75,26 +63,6 @@ export function DashboardPage() {
     })),
     [crm.workloadBySdr],
   )
-
-  const orgTz = crm.orgSettings.timezone || 'America/Sao_Paulo'
-  const leadsNewToday = useMemo(
-    () => crm.leads.filter((l) => isSameLocalDayInTimezone(l.createdAt, orgTz)),
-    [crm.leads, orgTz],
-  )
-  const newWhatsappToday = useMemo(
-    () => leadsNewToday.filter((l) => l.source === 'whatsapp' || l.source === 'meta_whatsapp'),
-    [leadsNewToday],
-  )
-  const [handoffsToday, setHandoffsToday] = useState(0)
-
-  useEffect(() => {
-    if (crm.isLoading) return
-    if (crm.dataMode !== 'supabase') {
-      setHandoffsToday(0)
-      return
-    }
-    void fetchHandoffEventCountForTodayInTimezone(orgTz).then(setHandoffsToday)
-  }, [crm.isLoading, crm.dataMode, orgTz, crm.leads.length])
 
   useEffect(() => {
     const list = crm.pipelineCatalog
@@ -158,80 +126,7 @@ export function DashboardPage() {
         <PendingHumanHandoffPanel />
       </section>
 
-      {dashboardCards.length === 0 ? (
-        <EmptyState
-          icon={LayoutListIcon}
-          title="Pronto para Decolar"
-          description="Seus indicadores de performance aparecerão aqui assim que os primeiros leads forem processados."
-          className="border-0 shadow-none mb-10 py-20"
-        />
-      ) : (
-        <>
-          <section className="mb-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {dashboardCards.map((card) => (
-            <Card key={card.id} className="relative overflow-hidden border border-border/40 bg-card/60 backdrop-blur-sm transition-all duration-300 hover:bg-card hover:shadow-xl hover:-translate-y-1 rounded-3xl p-2">
-              <div className="absolute top-0 right-0 p-6 opacity-[0.03]">
-                <UsersIcon className="size-20" />
-              </div>
-              <CardHeader className="p-6">
-                <CardDescription className="text-[11px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 mb-2">
-                  {card.title}
-                </CardDescription>
-                <div className="flex items-baseline gap-1">
-                  <CardTitle className="text-5xl font-black tracking-tighter text-foreground tabular-nums">
-                    {getDashboardValue(card.metricKey)}
-                  </CardTitle>
-                </div>
-              </CardHeader>
-            </Card>
-          ))}
-          </section>
-        </>
-      )}
-
-      {crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers ? (
-        <div className="mb-10">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="h-px flex-1 bg-border/40" />
-            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/40">Resumo Diário</h3>
-            <div className="h-px flex-1 bg-border/40" />
-          </div>
-          
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="group rounded-3xl border border-border/40 bg-card/40 p-6 transition-all hover:bg-card/80">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Entradas Hoje</p>
-              <h4 className="text-3xl font-black text-foreground tabular-nums">{leadsNewToday.length}</h4>
-              <div className="mt-3 h-1 w-full rounded-full bg-primary/10 overflow-hidden">
-                <div className="h-full bg-primary transition-all duration-1000" style={{ width: `${Math.min(100, (leadsNewToday.length / 20) * 100)}%` }} />
-              </div>
-            </div>
-
-            <div className="group rounded-3xl border border-border/40 bg-card/40 p-6 transition-all hover:bg-card/80">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Via WhatsApp</p>
-              <h4 className="text-3xl font-black text-foreground tabular-nums">{newWhatsappToday.length}</h4>
-              <div className="mt-3 h-1 w-full rounded-full bg-emerald-500/10 overflow-hidden">
-                <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${Math.min(100, (newWhatsappToday.length / 20) * 100)}%` }} />
-              </div>
-            </div>
-
-            <div className="group rounded-3xl border border-border/40 bg-card/40 p-6 transition-all hover:bg-card/80">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Handoffs IA</p>
-              <h4 className="text-3xl font-black text-foreground tabular-nums">{handoffsToday}</h4>
-              <div className="mt-3 h-1 w-full rounded-full bg-amber-500/10 overflow-hidden">
-                <div className="h-full bg-amber-500 transition-all duration-1000" style={{ width: `${Math.min(100, (handoffsToday / 10) * 100)}%` }} />
-              </div>
-            </div>
-
-            <Link
-              to="/admin-whatsapp"
-              className="group flex flex-col items-center justify-center rounded-3xl border border-primary/20 bg-primary/[0.03] p-6 transition-all hover:bg-primary/[0.08] hover:shadow-lg hover:shadow-primary/5 active:scale-[0.98]"
-            >
-              <RefreshCw className="size-6 text-primary mb-2 group-hover:rotate-180 transition-transform duration-500" />
-              <span className="text-[11px] font-black uppercase tracking-widest text-primary">Gerenciar Canais</span>
-            </Link>
-          </section>
-        </div>
-      ) : null}
+      <DashboardKpiSection />
 
       <section className="grid gap-8 lg:grid-cols-12">
         <Card className="rounded-[2rem] border-border/30 bg-card/40 shadow-sm lg:col-span-8 overflow-hidden">
