@@ -1,32 +1,41 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { CircleCheck } from 'lucide-react'
+import { CircleCheck, TriangleAlert, CheckCircle2 } from 'lucide-react'
 
+import { EmptyState } from '@/components/ui/empty-state'
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog'
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useCrm } from '@/context/CrmContext'
+import { AppLayout } from '@/layouts/AppLayout'
 import { cn } from '@/lib/utils'
 import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
 import { confirmSale } from '@/services/crmConfirmSale'
 
-type Props = {
-  isOpen: boolean
-  onClose: () => void
-  leadId: string
-  onConfirmed?: () => void
-}
+export function LeadSalePage() {
+  const crm = useCrm()
+  const navigate = useNavigate()
+  const { leadId } = useParams<{ leadId: string }>()
 
-export function ConfirmSaleDialog({ isOpen, onClose, leadId, onConfirmed }: Props) {
+  // A tela seleciona o lead no contexto; selectedLead deriva de selectedLeadId.
+  useEffect(() => {
+    if (leadId) crm.setSelectedLeadId(leadId)
+  }, [leadId, crm.setSelectedLeadId])
+
+  const lead = crm.selectedLead ?? crm.leads.find((l) => l.id === leadId) ?? null
+  const ready = !!lead && lead.id === leadId
+
   const [mode, setMode] = useState<'kit' | 'custom'>('kit')
   const [kit, setKit] = useState<PagbankKit>('3_meses')
   const [amountReais, setAmountReais] = useState('')
@@ -37,11 +46,18 @@ export function ConfirmSaleDialog({ isOpen, onClose, leadId, onConfirmed }: Prop
   const [freight, setFreight] = useState('')
   const [createBling, setCreateBling] = useState(true)
   const [loading, setLoading] = useState(false)
+  const [pageError, setPageError] = useState<string | null>(null)
+  const [pageSuccess, setPageSuccess] = useState<string | null>(null)
+
+  const goBack = () => navigate(`/leads/${leadId}`)
 
   const handleConfirm = async () => {
+    setPageError(null)
+    setPageSuccess(null)
     if (mode === 'custom') {
       const cents = Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100)
       if (!Number.isFinite(cents) || cents < 100) {
+        setPageError('Informe um valor válido.')
         toast.error('Informe um valor válido.')
         return
       }
@@ -49,7 +65,7 @@ export function ConfirmSaleDialog({ isOpen, onClose, leadId, onConfirmed }: Prop
     setLoading(true)
     try {
       const res = await confirmSale({
-        leadId,
+        leadId: leadId!,
         mode,
         kit: mode === 'kit' ? kit : undefined,
         amountCents:
@@ -62,29 +78,80 @@ export function ConfirmSaleDialog({ isOpen, onClose, leadId, onConfirmed }: Prop
         createBlingOrder: createBling,
       })
       const valor = (res.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-      toast.success(`Venda confirmada: ${valor} (${res.method}).${res.blingNote ? ' ' + res.blingNote : ''}`)
-      onConfirmed?.()
-      onClose()
+      const msg = `Venda confirmada: ${valor} (${res.method}).${res.blingNote ? ' ' + res.blingNote : ''}`
+      toast.success(msg)
+      setPageSuccess(msg)
+      void crm.syncFromSupabase?.()
+      navigate(`/leads/${leadId}`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao confirmar venda')
+      const msg = e instanceof Error ? e.message : 'Falha ao confirmar venda'
+      setPageError(msg)
+      toast.error(msg)
     } finally {
       setLoading(false)
     }
   }
 
-  return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-[440px]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <CircleCheck className="size-5 text-emerald-600" /> Confirmar venda
-          </DialogTitle>
-          <DialogDescription>
-            Marca o lead como pago, registra a venda no faturamento e cria o pedido no Bling.
-          </DialogDescription>
-        </DialogHeader>
+  // Carregando / lead não encontrado.
+  if (!ready || !lead) {
+    return (
+      <AppLayout title="Confirmar venda">
+        <div className="space-y-4">
+          <Link
+            to="/leads"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            ‹ Todos os leads
+          </Link>
+          <EmptyState
+            title="Carregando lead…"
+            description="Se o lead não aparecer, ele pode ter sido removido ou não está acessível com seu perfil."
+          />
+        </div>
+      </AppLayout>
+    )
+  }
 
-        <div className="space-y-4 py-1">
+  return (
+    <AppLayout title="Confirmar venda">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink render={<Link to="/leads" />}>Leads</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbLink render={<Link to={`/leads/${leadId}`} />}>{lead.patientName}</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>Venda</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+
+      <section className="rounded-md border border-border bg-card p-3 sm:p-4">
+        <div className="space-y-1">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+            <CircleCheck className="size-5 text-emerald-600" /> Confirmar venda
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Marca o lead como pago, registra a venda no faturamento e cria o pedido no Bling.
+          </p>
+        </div>
+
+        {pageError ? (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive">
+            <TriangleAlert className="size-4 shrink-0" /> {pageError}
+          </div>
+        ) : null}
+        {pageSuccess ? (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+            <CheckCircle2 className="size-4 shrink-0" /> {pageSuccess}
+          </div>
+        ) : null}
+
+        <div className="mt-4 space-y-4 sm:max-w-md">
           <div className="flex gap-2">
             {(['kit', 'custom'] as const).map((m) => (
               <button
@@ -220,17 +287,17 @@ export function ConfirmSaleDialog({ isOpen, onClose, leadId, onConfirmed }: Prop
             </div>
             <Switch checked={createBling} onCheckedChange={setCreateBling} />
           </div>
-        </div>
 
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
-            Cancelar
-          </Button>
-          <Button type="button" onClick={() => void handleConfirm()} disabled={loading}>
-            {loading ? 'Confirmando…' : 'Confirmar venda'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={goBack} disabled={loading}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => void handleConfirm()} disabled={loading}>
+              {loading ? 'Confirmando…' : 'Confirmar venda'}
+            </Button>
+          </div>
+        </div>
+      </section>
+    </AppLayout>
   )
 }
