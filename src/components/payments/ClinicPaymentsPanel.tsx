@@ -201,9 +201,11 @@ export function PaymentsPanel() {
     if (rec.source === 'auto') {
       const d = rec.autoData ?? {}
       const proof =
-        d.gateway === 'rede'
-          ? `e.Rede · TID ${d.tid ?? '—'} · cód ${d.return_code ?? '—'} · ${d.installments ?? 1}x`
-          : `PagBank · ref ${d.reference_id ?? '—'} · tx ${(Array.isArray(d.transaction_ids) ? d.transaction_ids[0] : d.transaction_ids) ?? '—'}`
+        d.gateway === 'asaas'
+          ? `Asaas · cobrança ${d.asaas_payment_id ?? '—'} · ${d.return_code ?? 'confirmado'} · ${d.installments ?? 1}x`
+          : d.gateway === 'rede'
+            ? `e.Rede · TID ${d.tid ?? '—'} · cód ${d.return_code ?? '—'} · ${d.installments ?? 1}x`
+            : `PagBank · ref ${d.reference_id ?? '—'} · tx ${(Array.isArray(d.transaction_ids) ? d.transaction_ids[0] : d.transaction_ids) ?? '—'}`
       toast.info(`Comprovante automático: ${proof}`)
       return
     }
@@ -426,7 +428,7 @@ export function PaymentsPanel() {
           ) : (
             <EmptyState
               title="Nenhum recebimento no filtro"
-              description="Pagamentos por cartão (Rede) e Pix (PagBank) aparecem aqui, com comprovante automático e conciliação."
+              description="Pagamentos por cartão e Pix (Asaas) aparecem aqui, com comprovante automático e conciliação."
               className="py-10"
             />
           )

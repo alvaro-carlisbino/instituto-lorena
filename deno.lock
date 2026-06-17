@@ -29,7 +29,6 @@
         "npm:globals@^17.4.0",
         "npm:lucide-react@^1.8.0",
         "npm:next-themes@~0.4.6",
-        "npm:phosphor-react@^1.4.1",
         "npm:react-dom@^19.2.4",
         "npm:react-markdown@^10.1.0",
         "npm:react-router-dom@^7.14.1",

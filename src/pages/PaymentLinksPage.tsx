@@ -20,7 +20,7 @@ import { ClinicPaymentsPanel } from '@/components/payments/ClinicPaymentsPanel'
 const NO_LEAD = '__none__'
 
 // Preço CHEIO para cartão (Asaas) — sem o desconto de 5% do Pix.
-const REDE_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99900 }
+const CARD_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99900 }
 // Preço do Pix por kit (com 5% off) — mesma tabela do PAGBANK_KITS no backend.
 const PIX_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 56700, '5_meses': 94905 }
 // Regra de parcelas por kit: 1 frasco = só à vista (1x); 3+ frascos = até 3x.
@@ -168,7 +168,7 @@ export function PaymentLinksPage() {
     <AppLayout title="Links de pagamento">
       <PageHeader
         title="Links de pagamento"
-        description={isSalesPolo ? 'Pix (PagBank) e cartão (Rede) para o Tricopill' : 'Link de pagamento por cartão (Rede)'}
+        description={isSalesPolo ? 'Pix e cartão (Asaas) para o Tricopill' : 'Link de pagamento por cartão (Asaas)'}
       />
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,400px)_1fr]">
@@ -253,7 +253,7 @@ export function PaymentLinksPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-[0.7rem] text-muted-foreground">
-                    Pix com 5% off (PagBank). Cartão no valor cheio ({formatBRL(REDE_KIT_AMOUNTS[kit])}, Rede).
+                    Pix com 5% off. Cartão no valor cheio ({formatBRL(CARD_KIT_AMOUNTS[kit])}). Tudo via Asaas.
                   </p>
                 </div>
 
@@ -276,15 +276,15 @@ export function PaymentLinksPage() {
 
                 <div className="flex gap-2">
                   <Button className="flex-1" onClick={() => void handlePix()} disabled={generating}>
-                    <QrCode className="mr-1.5 size-4" /> Pix (PagBank)
+                    <QrCode className="mr-1.5 size-4" /> Pix
                   </Button>
                   <Button
                     className="flex-1"
                     variant="outline"
-                    onClick={() => void handleCard(REDE_KIT_AMOUNTS[kit], `Tricopill ${kit.replace('_', ' ')}`, maxInstallments)}
+                    onClick={() => void handleCard(CARD_KIT_AMOUNTS[kit], `Tricopill ${kit.replace('_', ' ')}`, maxInstallments)}
                     disabled={generating}
                   >
-                    <CreditCard className="mr-1.5 size-4" /> Cartão (Rede)
+                    <CreditCard className="mr-1.5 size-4" /> Cartão
                   </Button>
                 </div>
 

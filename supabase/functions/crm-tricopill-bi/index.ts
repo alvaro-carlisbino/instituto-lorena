@@ -143,9 +143,10 @@ Deno.serve(async (req) => {
   }
 
   // ---------------------------------------------------------------------------
-  // 2) Checkout (PagBank/PIX + e.Rede/Cartão) — pagamentos confirmados no período
+  // 2) Checkout (Asaas = gateway vivo; PagBank/e.Rede = histórico) — confirmados no período.
+  //    Asaas tem `method` ('pix'|'card'): pix entra no balde PIX, card no balde Cartão.
   // ---------------------------------------------------------------------------
-  const [pagbankRes, redeRes] = await Promise.all([
+  const [pagbankRes, redeRes, asaasRes] = await Promise.all([
     admin
       .from('pagbank_checkouts')
       .select('amount_cents, kit, status, created_at, paid_at, coupon_code, discount_cents')
@@ -154,26 +155,27 @@ Deno.serve(async (req) => {
       .from('rede_payments')
       .select('amount_cents, installments, status, created_at, paid_at, kit, coupon_code, discount_cents')
       .eq('tenant_id', tenantId),
+    admin
+      .from('asaas_payments')
+      .select('amount_cents, method, installments, status, created_at, paid_at, kit, coupon_code, discount_cents')
+      .eq('tenant_id', tenantId),
   ])
-  const pagbank = (pagbankRes.data ?? []) as Array<{
+  type CheckoutRow = {
     amount_cents: number | null
-    kit: string | null
-    status: string | null
-    created_at: string | null
-    paid_at: string | null
-    coupon_code: string | null
-    discount_cents: number | null
-  }>
-  const rede = (redeRes.data ?? []) as Array<{
-    amount_cents: number | null
-    installments: number | null
+    installments?: number | null
     status: string | null
     created_at: string | null
     paid_at: string | null
     kit: string | null
     coupon_code: string | null
     discount_cents: number | null
-  }>
+  }
+  const pagbank = (pagbankRes.data ?? []) as CheckoutRow[]
+  const rede = (redeRes.data ?? []) as CheckoutRow[]
+  const asaas = (asaasRes.data ?? []) as Array<CheckoutRow & { method: string | null }>
+  // Asaas vivo somado ao histórico: pix (PagBank + Asaas pix), cartão (e.Rede + Asaas card).
+  const pixSource: CheckoutRow[] = [...pagbank, ...asaas.filter((r) => String(r.method ?? '') !== 'card')]
+  const cardSource: CheckoutRow[] = [...rede, ...asaas.filter((r) => String(r.method ?? '') === 'card')]
 
   const startMs = Date.parse(startIso)
   const endMs = Date.parse(endIso)
@@ -211,7 +213,7 @@ Deno.serve(async (req) => {
   let pixCents = 0
   let pixGerados = 0
   const pixDayRows: Array<{ day: string; cents: number }> = []
-  for (const r of pagbank) {
+  for (const r of pixSource) {
     if (inRange(r.created_at)) pixGerados += 1
     if (isPaid(r.status, r.paid_at) && inRange(r.paid_at ?? r.created_at)) {
       const cents = r.amount_cents ?? 0
@@ -229,7 +231,7 @@ Deno.serve(async (req) => {
   let cardGerados = 0
   let parcelasSoma = 0
   const cardDayRows: Array<{ day: string; cents: number }> = []
-  for (const r of rede) {
+  for (const r of cardSource) {
     if (inRange(r.created_at)) cardGerados += 1
     if (isPaid(r.status, r.paid_at) && inRange(r.paid_at ?? r.created_at)) {
       const cents = r.amount_cents ?? 0
