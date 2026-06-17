@@ -25,7 +25,7 @@ import {
   type BlingStatus,
   type BlingCatalogItem,
 } from '@/services/crmBling'
-import { getRedeConfig, setRedeConfig, testRedeTx, type RedeConfigStatus } from '@/services/crmRede'
+import { getAsaasConfig, setAsaasConfig, testAsaas, type AsaasConfigStatus } from '@/services/crmAsaas'
 
 export function IntegrationsPage() {
   const { tenant } = useTenant()
@@ -43,14 +43,14 @@ export function IntegrationsPage() {
   const [testingOrder, setTestingOrder] = useState(false)
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false)
 
-  // === Rede (ambos os polos) ===
-  const [rede, setRede] = useState<RedeConfigStatus>({ configured: false, env: 'sandbox' })
-  const [redePv, setRedePv] = useState('')
-  const [redeToken, setRedeToken] = useState('')
-  const [redeEnv, setRedeEnv] = useState('sandbox')
-  const [savingRede, setSavingRede] = useState(false)
-  const [testingRede, setTestingRede] = useState(false)
-  const [redeTestMsg, setRedeTestMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  // === Asaas — gateway único cartão + Pix (ambos os polos) ===
+  const [asaas, setAsaas] = useState<AsaasConfigStatus>({ configured: false, env: 'prod' })
+  const [asaasKey, setAsaasKey] = useState('')
+  const [asaasWebhookToken, setAsaasWebhookToken] = useState('')
+  const [asaasEnv, setAsaasEnv] = useState('prod')
+  const [savingAsaas, setSavingAsaas] = useState(false)
+  const [testingAsaas, setTestingAsaas] = useState(false)
+  const [asaasTestMsg, setAsaasTestMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   const loadCatalog = async (refresh = false) => {
     setCatalogLoading(true)
@@ -110,39 +110,44 @@ export function IntegrationsPage() {
     }
   }
 
-  const saveRede = async () => {
-    setSavingRede(true)
+  const saveAsaas = async () => {
+    setSavingAsaas(true)
     try {
-      await setRedeConfig({ pv: redePv.trim(), token: redeToken.trim(), env: redeEnv })
-      toast.success('Rede salva.')
-      const cfg = await getRedeConfig()
-      setRede(cfg)
-      setRedeEnv(cfg.env)
+      await setAsaasConfig({
+        ...(asaasKey.trim() ? { apiKey: asaasKey.trim() } : {}),
+        env: asaasEnv,
+        ...(asaasWebhookToken.trim() ? { webhookToken: asaasWebhookToken.trim() } : {}),
+      })
+      toast.success('Asaas salvo.')
+      setAsaasKey('')
+      const cfg = await getAsaasConfig()
+      setAsaas(cfg)
+      setAsaasEnv(cfg.env)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao salvar Rede')
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar Asaas')
     } finally {
-      setSavingRede(false)
+      setSavingAsaas(false)
     }
   }
 
-  const testRede = async () => {
-    setTestingRede(true)
-    setRedeTestMsg(null)
+  const testAsaasConn = async () => {
+    setTestingAsaas(true)
+    setAsaasTestMsg(null)
     try {
-      const r = await testRedeTx()
+      const r = await testAsaas()
       if (r.ok) {
-        setRedeTestMsg({ ok: true, text: 'Autorização de teste aprovada (returnCode 00). Credenciais válidas.' })
-        toast.success('Transação de teste aprovada! Credenciais OK.')
+        setAsaasTestMsg({ ok: true, text: r.message || 'Credencial válida.' })
+        toast.success('Conexão com o Asaas OK!')
       } else {
-        setRedeTestMsg({ ok: false, text: `returnCode ${r.returnCode}: ${r.message}` })
-        toast.error(`Teste recusado (returnCode ${r.returnCode}).`)
+        setAsaasTestMsg({ ok: false, text: r.message || 'Credencial inválida.' })
+        toast.error('Falha na conexão com o Asaas.')
       }
     } catch (e) {
       const m = e instanceof Error ? e.message : 'Falha no teste'
-      setRedeTestMsg({ ok: false, text: m })
+      setAsaasTestMsg({ ok: false, text: m })
       toast.error(m)
     } finally {
-      setTestingRede(false)
+      setTestingAsaas(false)
     }
   }
 
@@ -161,11 +166,11 @@ export function IntegrationsPage() {
   }, [])
 
   useEffect(() => {
-    // Rede em qualquer polo
-    getRedeConfig()
+    // Asaas em qualquer polo
+    getAsaasConfig()
       .then((cfg) => {
-        setRede(cfg)
-        setRedeEnv(cfg.env)
+        setAsaas(cfg)
+        setAsaasEnv(cfg.env)
       })
       .catch(() => {})
     if (!isSalesPolo) return
@@ -249,62 +254,76 @@ export function IntegrationsPage() {
           </Card>
         ) : null}
 
-        {/* Rede / Itaú (cartão) — ambos os polos */}
+        {/* Asaas — gateway único cartão + Pix (ambos os polos) */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-2 text-sm">
               <span className="flex items-center gap-2">
-                <CreditCard className="size-4 text-primary" /> Rede / Itaú (cartão)
+                <CreditCard className="size-4 text-primary" /> Asaas (cartão + Pix)
               </span>
               <Badge
-                variant={rede.configured ? 'default' : 'secondary'}
-                className={rede.configured ? 'bg-emerald-500/15 text-emerald-600' : ''}
+                variant={asaas.configured ? 'default' : 'secondary'}
+                className={asaas.configured ? 'bg-emerald-500/15 text-emerald-600' : ''}
               >
-                {rede.configured ? 'Configurada' : 'Pendente'}
+                {asaas.configured ? `Configurado · ${asaas.env === 'prod' ? 'Produção' : 'Sandbox'}` : 'Pendente'}
               </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Cartão de crédito via e.Rede (página de checkout própria).{' '}
-              {isSalesPolo ? 'No Tricopill o Pix continua pelo PagBank.' : ''}
+              Gateway único de pagamento: cartão de crédito (checkout próprio em <code>/pagar</code>) e Pix
+              (copia-e-cola + QR). O frete é sempre somado à cobrança.
             </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="asaas-key">API Key</Label>
+              <Input
+                id="asaas-key"
+                type="password"
+                value={asaasKey}
+                onChange={(e) => setAsaasKey(e.target.value)}
+                placeholder={asaas.configured ? '•••••• (preencha só para trocar)' : '$aact_prod_…'}
+                className="font-mono text-xs"
+                autoComplete="off"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">
-                <Label htmlFor="rede-pv">PV (clientId)</Label>
-                <Input id="rede-pv" value={redePv} onChange={(e) => setRedePv(e.target.value)} placeholder="ex.: 41710257" className="font-mono text-xs" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="rede-env">Ambiente</Label>
-                <Select value={redeEnv} onValueChange={(v) => setRedeEnv(v ?? 'sandbox')}>
-                  <SelectTrigger id="rede-env">
+                <Label htmlFor="asaas-env">Ambiente</Label>
+                <Select value={asaasEnv} onValueChange={(v) => setAsaasEnv(v ?? 'prod')}>
+                  <SelectTrigger id="asaas-env">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="sandbox">Sandbox</SelectItem>
                     <SelectItem value="prod">Produção</SelectItem>
+                    <SelectItem value="sandbox">Sandbox</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="rede-token">Token (clientSecret)</Label>
-              <Input id="rede-token" type="password" value={redeToken} onChange={(e) => setRedeToken(e.target.value)} placeholder="token (sensível)" className="font-mono text-xs" autoComplete="off" />
+              <div className="space-y-1.5">
+                <Label htmlFor="asaas-wht">Token do webhook (opcional)</Label>
+                <Input
+                  id="asaas-wht"
+                  type="password"
+                  value={asaasWebhookToken}
+                  onChange={(e) => setAsaasWebhookToken(e.target.value)}
+                  placeholder="asaas-access-token"
+                  className="font-mono text-xs"
+                  autoComplete="off"
+                />
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" onClick={() => void saveRede()} disabled={savingRede}>
-                {savingRede ? 'Salvando…' : 'Salvar Rede'}
+              <Button size="sm" onClick={() => void saveAsaas()} disabled={savingAsaas}>
+                {savingAsaas ? 'Salvando…' : 'Salvar Asaas'}
               </Button>
-              {redeEnv === 'sandbox' && (
-                <Button size="sm" variant="outline" onClick={() => void testRede()} disabled={testingRede || savingRede}>
-                  {testingRede ? 'Testando…' : 'Testar transação (sandbox)'}
-                </Button>
-              )}
+              <Button size="sm" variant="outline" onClick={() => void testAsaasConn()} disabled={testingAsaas || savingAsaas || !asaas.configured}>
+                {testingAsaas ? 'Testando…' : 'Testar conexão'}
+              </Button>
             </div>
-            {redeTestMsg && (
-              <p className={`text-xs ${redeTestMsg.ok ? 'text-emerald-600' : 'text-destructive'}`}>
-                {redeTestMsg.ok ? '✓ ' : '✗ '}
-                {redeTestMsg.text}
+            {asaasTestMsg && (
+              <p className={`text-xs ${asaasTestMsg.ok ? 'text-emerald-600' : 'text-destructive'}`}>
+                {asaasTestMsg.ok ? '✓ ' : '✗ '}
+                {asaasTestMsg.text}
               </p>
             )}
           </CardContent>
