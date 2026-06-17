@@ -4,13 +4,13 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useTenant } from '@/context/TenantContext'
@@ -92,14 +92,14 @@ export function TenantsAdminPage() {
             </p>
           </div>
           <Button onClick={() => setCreateOpen(true)}>Nova clínica</Button>
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <Sheet open={createOpen} onOpenChange={setCreateOpen}>
             <CreateTenantDialog
               onCreated={async () => {
                 setCreateOpen(false)
                 await reload()
               }}
             />
-          </Dialog>
+          </Sheet>
         </div>
 
         <Card>
@@ -143,7 +143,7 @@ export function TenantsAdminPage() {
         </Card>
       </div>
 
-      <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
+      <Sheet open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
         {editing ? (
           <EditTenantDialog
             tenant={editing}
@@ -153,7 +153,7 @@ export function TenantsAdminPage() {
             }}
           />
         ) : null}
-      </Dialog>
+      </Sheet>
     </AppLayout>
   )
 }
@@ -195,14 +195,14 @@ function CreateTenantDialog({ onCreated }: { onCreated: () => Promise<void> }) {
   }
 
   return (
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>Nova clínica</DialogTitle>
-        <DialogDescription>
+    <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-xl">
+      <SheetHeader>
+        <SheetTitle>Nova clínica</SheetTitle>
+        <SheetDescription>
           Cria um tenant isolado. Marcando "Clonar template", copia pipelines, etapas, campos,
           salas e configs da clínica modelo como ponto de partida.
-        </DialogDescription>
-      </DialogHeader>
+        </SheetDescription>
+      </SheetHeader>
       <div className="grid gap-3">
         <div className="grid gap-1">
           <Label htmlFor="t-id">Slug (URL-safe)</Label>
@@ -244,12 +244,12 @@ function CreateTenantDialog({ onCreated }: { onCreated: () => Promise<void> }) {
           Clonar template da clínica modelo (pipelines, salas, etiquetas, configs de IA)
         </label>
       </div>
-      <DialogFooter>
+      <SheetFooter>
         <Button onClick={handleSubmit} disabled={saving}>
           {saving ? 'A criar…' : 'Criar clínica'}
         </Button>
-      </DialogFooter>
-    </DialogContent>
+      </SheetFooter>
+    </SheetContent>
   )
 }
 
@@ -300,13 +300,13 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
   }
 
   return (
-    <DialogContent className="max-h-[85vh] overflow-y-auto">
-      <DialogHeader>
-        <DialogTitle>{tenant.name}</DialogTitle>
-        <DialogDescription>
+    <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-xl">
+      <SheetHeader>
+        <SheetTitle>{tenant.name}</SheetTitle>
+        <SheetDescription>
           Slug: <code className="rounded bg-muted/60 px-1">{tenant.id}</code>
-        </DialogDescription>
-      </DialogHeader>
+        </SheetDescription>
+      </SheetHeader>
 
       <section className="grid gap-3 border-b border-border/40 pb-4">
         <h3 className="text-xs font-black uppercase tracking-widest text-muted-foreground">
@@ -484,11 +484,11 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
         </ul>
       </div>
 
-      <DialogFooter>
+      <SheetFooter>
         <Button onClick={handleSave} disabled={saving}>
           {saving ? 'A salvar…' : 'Salvar alterações'}
         </Button>
-      </DialogFooter>
-    </DialogContent>
+      </SheetFooter>
+    </SheetContent>
   )
 }
