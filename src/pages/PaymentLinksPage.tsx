@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { CepInput } from '@/components/ui/masked-input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -227,16 +228,14 @@ export function PaymentLinksPage() {
                 <Truck className="size-3.5 text-primary" /> Cotar frete por CEP
               </Label>
               <div className="flex gap-2">
-                <Input
+                <CepInput
                   id="pl-cep"
-                  inputMode="numeric"
                   value={cep}
-                  onChange={(e) => setCep(e.target.value)}
+                  onValueChange={(raw) => setCep(raw)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') void handleQuote()
                   }}
                   placeholder="CEP do cliente"
-                  maxLength={9}
                 />
                 <Button type="button" variant="outline" onClick={() => void handleQuote()} disabled={quoting}>
                   {quoting ? 'Cotando…' : 'Cotar'}

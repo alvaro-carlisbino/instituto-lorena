@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { CepInput, CpfInput, PhoneInput } from '@/components/ui/masked-input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -361,18 +362,18 @@ export function LeadShipPage() {
               </div>
               <div className="space-y-1">
                 <Label htmlFor="sl-phone">Telefone</Label>
-                <Input id="sl-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="DDD + número" />
+                <PhoneInput id="sl-phone" value={phone} onValueChange={(raw) => setPhone(raw)} placeholder="(DDD) número" />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="sl-doc">CPF (opcional)</Label>
-                <Input id="sl-doc" value={document} onChange={(e) => setDocument(e.target.value)} />
+                <CpfInput id="sl-doc" value={document} onValueChange={(raw) => setDocument(raw)} placeholder="000.000.000-00" />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="sl-cep">CEP</Label>
-                <Input
+                <CepInput
                   id="sl-cep"
                   value={cep}
-                  onChange={(e) => setCep(e.target.value)}
+                  onValueChange={(raw) => setCep(raw)}
                   onBlur={() => void lookupCep()}
                   placeholder={cepLoading ? 'Buscando…' : '00000-000'}
                 />
