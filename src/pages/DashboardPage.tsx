@@ -308,10 +308,12 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent className="p-8 flex-1 flex flex-col">
             {crm.workloadBySdr.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center py-20 text-center opacity-20">
-                <UsersIcon className="size-10 mb-4" />
-                <p className="text-[11px] font-black uppercase tracking-widest">Sem dados de equipe</p>
-              </div>
+              <EmptyState
+                icon={UsersIcon}
+                title="Sem dados de equipe"
+                description="A produtividade por SDR aparece quando houver leads atribuídos."
+                className="flex-1 py-16"
+              />
             ) : (
               <div className="h-[300px] w-full min-h-[240px] min-w-0">
                 <ResponsiveContainer width="100%" height="100%" minHeight={240} minWidth={0}>

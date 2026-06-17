@@ -6,6 +6,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -324,9 +325,17 @@ export function IntegrationsPage() {
           </CardHeader>
           <CardContent className="p-0">
             {catalog.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                {catalogLoading ? 'Carregando…' : 'Nenhum produto encontrado no Bling.'}
-              </div>
+              catalogLoading ? (
+                <div className="py-8 text-center text-sm text-muted-foreground" role="status" aria-live="polite">
+                  Carregando…
+                </div>
+              ) : (
+                <EmptyState
+                  title="Nenhum produto no Bling"
+                  description="Conecte o Bling e atualize o catálogo para ver os produtos aqui."
+                  className="py-8"
+                />
+              )
             ) : (
               <div className="max-h-96 divide-y divide-border/40 overflow-y-auto">
                 {catalog.map((p) => (
