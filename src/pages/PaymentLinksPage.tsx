@@ -73,6 +73,31 @@ export function PaymentLinksPage() {
   // Asaas EXIGE CPF/CNPJ na cobrança Pix (e ajuda a casar o cliente no Bling no cartão).
   const selectedCpf = customerCpf.replace(/\D/g, '') || undefined
 
+  // Nome completo do lead (cadastro que a IA coletou) com fallback no nome curto da ficha.
+  const leadFullName = (l: { patientName: string; customFields?: Record<string, unknown> | null }): string => {
+    const cad = ((l.customFields ?? {}) as Record<string, unknown>).cadastro as Record<string, string> | undefined
+    return (cad?.nomeCompleto || l.patientName || '').trim()
+  }
+
+  // Ao escolher o lead, puxa nome completo + CPF + CEP do cadastro/entrega que a IA já salvou.
+  const applyLead = (id: string) => {
+    setLeadId(id)
+    if (id === NO_LEAD) return
+    const l = crm.leads.find((x) => x.id === id)
+    if (!l) return
+    const cf = (l.customFields ?? {}) as Record<string, unknown>
+    const cad = (cf.cadastro ?? {}) as Record<string, string>
+    const ent = (cf.entrega ?? {}) as Record<string, string>
+    const nome = leadFullName(l)
+    if (nome) setCustomerName(nome)
+    const cpf = String(cad.cpf ?? '').replace(/\D/g, '')
+    if (cpf) setCustomerCpf(cpf)
+    const cepDigits = String(ent.cep ?? cad.cep ?? '').replace(/\D/g, '')
+    if (cepDigits.length === 8) setCep(cepDigits)
+    const prefilled = [nome ? 'nome' : '', cpf ? 'CPF' : '', cepDigits.length === 8 ? 'CEP' : ''].filter(Boolean)
+    if (prefilled.length) toast.success(`Dados do lead preenchidos (${prefilled.join(', ')}).`)
+  }
+
   const applyFreight = (o: FreteOption) => {
     setFreightReais((o.priceCents / 100).toFixed(2).replace('.', ','))
     toast.success(`Frete ${o.service} aplicado: ${formatBRL(o.priceCents)}`)
@@ -162,7 +187,7 @@ export function PaymentLinksPage() {
   const leadField = (
     <div className="space-y-1.5">
       <Label htmlFor="pl-lead">Lead (opcional)</Label>
-      <Select value={leadId} onValueChange={(v) => setLeadId(v ?? NO_LEAD)}>
+      <Select value={leadId} onValueChange={(v) => applyLead(v ?? NO_LEAD)}>
         <SelectTrigger id="pl-lead">
           <SelectValue placeholder="Sem lead (avulso)" />
         </SelectTrigger>
@@ -170,7 +195,7 @@ export function PaymentLinksPage() {
           <SelectItem value={NO_LEAD}>Sem lead (avulso)</SelectItem>
           {crm.leads.map((l) => (
             <SelectItem key={l.id} value={l.id}>
-              {l.patientName}
+              {leadFullName(l) || l.patientName}
             </SelectItem>
           ))}
         </SelectContent>
