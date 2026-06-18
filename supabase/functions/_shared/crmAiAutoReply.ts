@@ -328,6 +328,50 @@ function scheduleWhatsappInboundBurstFlush(
   })())
 }
 
+// Lease da trava por-lead: > maior duração realista de UMA resposta (z.ai ~30-120s + retries,
+// limitado pelo wall-clock da Edge). Se o detentor morrer, a trava expira e o burst-flush retoma.
+const AI_REPLY_LOCK_LEASE_MS = 150_000
+
+/**
+ * Trava ATÔMICA por lead para a resposta da IA. Dois flushes concorrentes do mesmo lead (comum
+ * quando o z.ai está lento e o cliente manda 2 msgs) geravam resposta/cobrança dupla (caso
+ * Debora 18/jun: 2 Pix). Quem pega a trava responde; o outro desiste (o em curso já lê o
+ * histórico completo). Retorna true se adquiriu.
+ */
+async function acquireAiReplyLock(admin: SupabaseClient, leadId: string): Promise<boolean> {
+  const now = nowIso()
+  const until = new Date(Date.now() + AI_REPLY_LOCK_LEASE_MS).toISOString()
+  try {
+    const { data: locked, error: updErr } = await admin
+      .from('crm_conversation_states')
+      .update({ ai_reply_lock_until: until, updated_at: now })
+      .eq('lead_id', leadId)
+      .or(`ai_reply_lock_until.is.null,ai_reply_lock_until.lt.${now}`)
+      .select('lead_id')
+    if (updErr) throw updErr
+    if (locked && locked.length > 0) return true
+    // 0 linhas: ou o lead ainda não tem linha de estado, ou a trava está ativa (outra resposta).
+    const { data: exists } = await admin
+      .from('crm_conversation_states').select('lead_id').eq('lead_id', leadId).maybeSingle()
+    if (exists) return false // trava ativa → desiste
+    const { error: insErr } = await admin
+      .from('crm_conversation_states')
+      .insert({ lead_id: leadId, ai_reply_lock_until: until, updated_at: now })
+    return !insErr // corrida no insert (outro criou primeiro) → desiste
+  } catch (e) {
+    // FAIL-OPEN: qualquer erro na trava NÃO pode bloquear todas as respostas. Pior caso volta a
+    // ser a dup rara (já mitigada pela idempotência de cobrança em asaas.ts).
+    console.error('acquireAiReplyLock (fail-open):', e instanceof Error ? e.message : String(e))
+    return true
+  }
+}
+
+/** Libera a trava por-lead (não regrava outras colunas; upserts de conclusão preservam o resto). */
+async function releaseAiReplyLock(admin: SupabaseClient, leadId: string): Promise<void> {
+  await admin.from('crm_conversation_states')
+    .update({ ai_reply_lock_until: null }).eq('lead_id', leadId)
+}
+
 /** Saudação contextual ("Bom dia" / "Boa tarde" / "Boa noite") no fuso de São Paulo. */
 export function brasilGreetingNow(now: Date = new Date()): string {
   const hour = Number(
@@ -809,6 +853,14 @@ export async function runWhatsappAiAutoReply(
   }
   // --- End Triage Logic ---
 
+  // TRAVA POR-LEAD: serializa a geração+envio da resposta da IA (a triagem acima fica de fora).
+  // Quem não adquire desiste — o flush em curso já responde com o histórico completo. Evita
+  // resposta/cobrança dupla quando 2 flushes do mesmo lead correm em paralelo (z.ai lento).
+  // Liberada no finally que fecha a função.
+  if (!(await acquireAiReplyLock(admin, options.leadId))) {
+    return { replied: false }
+  }
+  try {
   let aiReplyRaw = ''
   let pixQrUrl = ''
   try {
@@ -1005,6 +1057,9 @@ export async function runWhatsappAiAutoReply(
       })
       return { replied: false }
     }
+  }
+  } finally {
+    await releaseAiReplyLock(admin, options.leadId)
   }
 }
 
