@@ -37,6 +37,12 @@ export type AsaasConfig = {
 // Override por polo em tenant_integrations.asaas.installments.
 const DEFAULT_INSTALLMENTS: InstallmentCfg = { max: 3, monthlyPct: 1.49, fixedCents: 0, freeUpTo: 3 }
 
+// Idempotência anti-cobrança-dupla: quando o cliente manda 2 mensagens seguidas e o z.ai está
+// lento, dois flushes do MESMO lead rodam concorrentes e geram 2 cobranças iguais (caso Debora,
+// 18/jun: 2 Pix R$594 com 23s). Antes de criar Pix/cartão, reaproveitamos uma cobrança PENDENTE
+// do mesmo lead+método+valor(+parcelas) criada nesta janela.
+const DEDUP_WINDOW_MS = 10 * 60 * 1000
+
 /** Total cobrado do cliente p/ `n` parcelas (Price). n ≤ freeUpTo (e 1x) = sem juros. */
 export function installmentTotalCents(baseCents: number, n: number, ic: InstallmentCfg): number {
   const parcels = Math.max(1, Math.round(n))
@@ -217,6 +223,30 @@ export async function createAsaasCardIntent(
   // escolhe de 1x até o máximo no checkout). Default 1 fazia o link sair "sem parcelamento".
   const installments = Math.max(1, Math.min(cfg.installments.max, args.installments ?? cfg.installments.max))
 
+  // Idempotência: reaproveita um link de cartão PENDENTE do mesmo lead+valor+parcelas recente.
+  if (args.leadId) {
+    const { data: dup } = await admin
+      .from('asaas_payments')
+      .select('id, discount_cents, coupon_code')
+      .eq('lead_id', args.leadId).eq('method', 'card').eq('status', 'pending')
+      .eq('amount_cents', amountCents).eq('installments', installments)
+      .gte('created_at', new Date(Date.now() - DEDUP_WINDOW_MS).toISOString())
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    const dupRow = dup as { id?: string; discount_cents?: number; coupon_code?: string | null } | null
+    if (dupRow?.id) {
+      const base = args.appBaseUrl.replace(/\/$/, '')
+      return {
+        id: dupRow.id,
+        url: `${base}/pagar/${dupRow.id}`,
+        amountCents,
+        baseCents,
+        discountCents: dupRow.discount_cents ?? coupon.discountCents,
+        couponCode: dupRow.coupon_code ?? (coupon.applied ? coupon.code : null),
+        freightCents,
+      }
+    }
+  }
+
   const id = shortId()
   await admin.from('asaas_payments').insert({
     id,
@@ -395,6 +425,34 @@ export async function createAsaasPix(
   const amountCents = coupon.finalCents + freightCents
   const baseDesc = String(args.description ?? 'Pagamento').slice(0, 100)
   const description = freightCents > 0 ? `${baseDesc} + frete` : baseDesc
+
+  // Idempotência: reaproveita uma cobrança Pix PENDENTE do mesmo lead+valor recente (re-busca o
+  // QR no Asaas). Evita 2ª cobrança quando o bot dispara 2x. Não precisa de CPF (a cobrança já existe).
+  if (args.leadId) {
+    const { data: dup } = await admin
+      .from('asaas_payments')
+      .select('id, asaas_payment_id, pix_payload, discount_cents, coupon_code')
+      .eq('lead_id', args.leadId).eq('method', 'pix').eq('status', 'pending')
+      .eq('amount_cents', amountCents)
+      .gte('created_at', new Date(Date.now() - DEDUP_WINDOW_MS).toISOString())
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    const dupRow = dup as { id?: string; asaas_payment_id?: string; pix_payload?: string | null; discount_cents?: number; coupon_code?: string | null } | null
+    if (dupRow?.id && dupRow.asaas_payment_id) {
+      const qr = await asaasFetch(cfg, `/payments/${dupRow.asaas_payment_id}/pixQrCode`)
+      const qrText = String(dupRow.pix_payload || (qr.body as { payload?: string }).payload || '')
+      const encoded = String((qr.body as { encodedImage?: string }).encodedImage ?? '')
+      return {
+        id: dupRow.id,
+        asaasPaymentId: String(dupRow.asaas_payment_id),
+        qrText,
+        qrImageUrl: encoded ? `data:image/png;base64,${encoded}` : '',
+        amountCents,
+        baseCents,
+        discountCents: dupRow.discount_cents ?? coupon.discountCents,
+        couponCode: dupRow.coupon_code ?? (coupon.applied ? coupon.code : null),
+      }
+    }
+  }
 
   // Asaas EXIGE CPF/CNPJ na cobrança Pix. Se o caller não mandou (ex.: painel sem digitar),
   // completa com o cadastro do lead (nome/CPF/telefone/e-mail) — espelha o chargeAsaasCard.
