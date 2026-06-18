@@ -39,14 +39,22 @@ Deno.serve(async (req) => {
 
   const authHeader = req.headers.get('Authorization')
   if (!authHeader) return json({ error: 'unauthorized' }, 401)
-  const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
-    global: { headers: { Authorization: authHeader } },
-  })
-  const {
-    data: { user },
-    error: userErr,
-  } = await userClient.auth.getUser()
-  if (userErr || !user) return json({ error: 'unauthorized' }, 401)
+  // Chamadas server-to-server (cron de follow-up via admin.functions.invoke) chegam com a
+  // própria service_role key no Authorization. auth.getUser() NÃO devolve usuário p/ um token
+  // de service_role → dava 401 e os follow-ups de WhatsApp nunca saíam (sent:0). A plataforma
+  // já validou o JWT (verify_jwt=true); aqui só liberamos o caminho de máquina confiável e
+  // mantemos a exigência de usuário real para os envios vindos do painel.
+  const bearer = authHeader.replace(/^Bearer\s+/i, '').trim()
+  const isServiceRole = bearer.length > 0 && bearer === serviceRole
+  let user: { email?: string | null } | null = null
+  if (!isServiceRole) {
+    const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+      global: { headers: { Authorization: authHeader } },
+    })
+    const { data: authData, error: userErr } = await userClient.auth.getUser()
+    if (userErr || !authData.user) return json({ error: 'unauthorized' }, 401)
+    user = authData.user
+  }
 
   let body: {
     leadId?: string
@@ -137,7 +145,7 @@ Deno.serve(async (req) => {
         patientName: row.patient_name,
         channel: 'system',
         direction: 'system',
-        author: user.email || 'Operador',
+        author: user?.email || 'Operador',
         content: `Override humano após opt-out (${new Date(row.opted_out_at).toISOString()}). Operador assumiu risco de ban.`,
         tenantId: row.tenant_id,
       })
@@ -278,7 +286,7 @@ Deno.serve(async (req) => {
             patientName: row.patient_name,
             channel: pushChannel === 'whatsapp' ? 'whatsapp' : 'meta',
             direction: 'out',
-            author: user.email || 'Consultor',
+            author: user?.email || 'Consultor',
             content: text || mediaUrls.map((m) => m.url).join('\n'),
             happenedAt: nowIso(),
           })
@@ -362,7 +370,7 @@ Deno.serve(async (req) => {
         patientName: row.patient_name,
         channel: pushChannel === 'whatsapp' ? 'whatsapp' : 'meta',
         direction: 'out',
-        author: user.email || 'Consultor',
+        author: user?.email || 'Consultor',
         content: replyText,
         happenedAt: nowIso(),
       })
@@ -509,7 +517,7 @@ Deno.serve(async (req) => {
       patientName: String(lead.patient_name ?? 'Lead'),
       channel: 'whatsapp',
       direction: 'out',
-      author: user.email ?? 'Operador',
+      author: user?.email ?? 'Operador',
       content: outboundContent,
       externalMessageId,
     })
