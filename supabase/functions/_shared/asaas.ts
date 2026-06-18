@@ -87,7 +87,11 @@ function todayBrasilia(): string {
 function parseInstallmentCfg(raw: unknown): InstallmentCfg {
   const o = (raw ?? {}) as Record<string, unknown>
   const num = (v: unknown, fb: number) => {
-    const n = Number(String(v ?? '').toString().replace(',', '.'))
+    // Chave AUSENTE/vazia → usa o fallback (DEFAULT_INSTALLMENTS). Antes `v ?? ''` virava ''
+    // → Number('')=0 → retornava 0 (não o fallback), e max/freeUpTo desabavam p/ 1 — era a
+    // causa do link "sem parcelamento" mesmo com a config null no banco.
+    if (v === undefined || v === null || v === '') return fb
+    const n = Number(String(v).replace(',', '.'))
     return Number.isFinite(n) && n >= 0 ? n : fb
   }
   return {
