@@ -32,9 +32,10 @@ export type AsaasConfig = {
   installments: InstallmentCfg
 }
 
-// Regra da casa: até 3x SEM juros; de 4x a 12x com 1,49% ao mês (Price), sem taxa fixa.
-// Override por polo em tenant_integrations.asaas.installments (hoje null nos 2 → usa este default).
-const DEFAULT_INSTALLMENTS: InstallmentCfg = { max: 12, monthlyPct: 1.49, fixedCents: 0, freeUpTo: 3 }
+// Regra da casa: parcelamento travado em até 3x, todas SEM juros (4x+ bloqueado).
+// monthlyPct fica só como fallback caso um polo eleve `max` via override no banco.
+// Override por polo em tenant_integrations.asaas.installments.
+const DEFAULT_INSTALLMENTS: InstallmentCfg = { max: 3, monthlyPct: 1.49, fixedCents: 0, freeUpTo: 3 }
 
 /** Total cobrado do cliente p/ `n` parcelas (Price). n ≤ freeUpTo (e 1x) = sem juros. */
 export function installmentTotalCents(baseCents: number, n: number, ic: InstallmentCfg): number {
