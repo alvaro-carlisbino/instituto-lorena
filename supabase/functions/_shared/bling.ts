@@ -400,6 +400,8 @@ export async function blingCreateSaleOrder(
     cpf?: string; email?: string; dataNascimento?: string; sexo?: string
     /** Venda AVULSA (sem kit): descrição livre do item (ex.: "Tricopill + Shampoo"). */
     description?: string
+    /** Força a quantidade de frascos (ex.: envio de assinatura = 1 ou 3). Ignora o mapa de kit. */
+    bottlesOverride?: number
     /** Endereço de entrega capturado p/ completar o contato (NF-e) + modalidade da venda. */
     entrega?: {
       cep?: string; numero?: string; complemento?: string
@@ -454,7 +456,8 @@ export async function blingCreateSaleOrder(
   // Venda AVULSA (sem kit): 1 item genérico (descrição livre + valor cheio), usando o produto
   // Tricopill padrão pra o pedido existir no Bling. Kit conhecido: usa frascos/label do kit.
   const hasKit = !!String(args.kit ?? '').trim()
-  const bottles = hasKit ? (Number(bottlesMap[args.kit] ?? DEFAULT_KIT_BOTTLES[args.kit] ?? 1) || 1) : 1
+  const overrideBottles = Number(args.bottlesOverride) > 0 ? Math.floor(Number(args.bottlesOverride)) : 0
+  const bottles = overrideBottles || (hasKit ? (Number(bottlesMap[args.kit] ?? DEFAULT_KIT_BOTTLES[args.kit] ?? 1) || 1) : 1)
 
   const totalReais = Math.round(args.amountCents) / 100
   const valorUnit = Math.round((totalReais / bottles) * 100) / 100

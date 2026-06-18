@@ -457,7 +457,7 @@ export async function createAsaasPix(
   }
 }
 
-export type AsaasWebhookEvent = { event: string; asaasPaymentId: string | null; externalRef: string | null; paid: boolean }
+export type AsaasWebhookEvent = { event: string; asaasPaymentId: string | null; externalRef: string | null; subscriptionId: string | null; paid: boolean }
 
 /** Normaliza o corpo do webhook do Asaas. Eventos de pagamento: PAYMENT_CONFIRMED/RECEIVED. */
 export function parseAsaasWebhook(payload: Record<string, unknown>): AsaasWebhookEvent {
@@ -465,6 +465,8 @@ export function parseAsaasWebhook(payload: Record<string, unknown>): AsaasWebhoo
   const payment = (payload.payment ?? {}) as Record<string, unknown>
   const asaasPaymentId = payment.id ? String(payment.id) : null
   const externalRef = payment.externalReference ? String(payment.externalReference) : null
+  // Pagamento gerado por uma ASSINATURA carrega o id da assinatura (sub_*).
+  const subscriptionId = payment.subscription ? String(payment.subscription) : null
   const status = String(payment.status ?? '').toUpperCase()
   const paid =
     event === 'PAYMENT_CONFIRMED' ||
@@ -472,7 +474,109 @@ export function parseAsaasWebhook(payload: Record<string, unknown>): AsaasWebhoo
     status === 'CONFIRMED' ||
     status === 'RECEIVED' ||
     status === 'RECEIVED_IN_CASH'
-  return { event, asaasPaymentId, externalRef, paid }
+  return { event, asaasPaymentId, externalRef, subscriptionId, paid }
+}
+
+/**
+ * Downstream de um CICLO de ASSINATURA pago (idempotente — chamado 1x por pagamento do ciclo).
+ * Incrementa paid_cycles, grava comprovante, e — se for ciclo de ENVIO conforme a cadência —
+ * cria o pedido no Bling (qtd exata de frascos) e monta o envio no Melhor Envio.
+ *  • mensal     -> envia todo ciclo (1 frasco).
+ *  • trimestral -> envia nos ciclos 1, 4, 7… (3 frascos).
+ * `localSubId` = asaas_subscriptions.id; `asaasPaymentId` = id do pagamento do ciclo (Asaas).
+ */
+export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubId: string, asaasPaymentId: string | null): Promise<void> {
+  const { data } = await admin.from('asaas_subscriptions').select('*').eq('id', localSubId).maybeSingle()
+  if (!data) return
+  const s = data as Record<string, unknown>
+  const tenantId = String(s.tenant_id ?? 'tricopill')
+  const cadence = String(s.cadence ?? 'mensal')
+  const unitsPerShipment = Number(s.units_per_shipment ?? 1) || 1
+  const unitPriceCents = Number(s.unit_price_cents ?? 15000) || 15000
+  const monthlyValueCents = Number(s.monthly_value_cents ?? 0)
+  const leadId = s.lead_id != null ? String(s.lead_id) : ''
+  const entrega = (s.entrega ?? {}) as Record<string, unknown>
+  const cycle = (Number(s.paid_cycles ?? 0) || 0) + 1
+
+  // Marca o ciclo como pago + reativa a assinatura se estava em atraso.
+  await admin.from('asaas_subscriptions').update({ paid_cycles: cycle, status: 'active', updated_at: new Date().toISOString() }).eq('id', localSubId)
+
+  // Comprovante automático do ciclo (idempotente pelo payment_id).
+  await recordAutoReceipt(admin, {
+    tenantId,
+    paymentId: asaasPaymentId || `${localSubId}:cycle:${cycle}`,
+    paymentMethod: 'card',
+    amountCents: monthlyValueCents,
+    note: `Assinatura Tricopill — ciclo ${cycle} (${cadence}).`,
+    autoData: { gateway: 'asaas', subscription_local_id: localSubId, asaas_subscription_id: s.asaas_subscription_id ?? null, cycle, cadence },
+  })
+
+  // Lead sintético a partir da assinatura (garante endereço p/ Bling + Melhor Envio mesmo sem lead real).
+  const synthLead = {
+    id: leadId || `sub-${localSubId}`,
+    patient_name: s.customer_name != null ? String(s.customer_name) : 'Assinante Tricopill',
+    phone: s.phone != null ? String(s.phone) : null,
+    custom_fields: {
+      cadastro: { nomeCompleto: s.customer_name ?? 'Assinante Tricopill', cpf: s.customer_doc ?? undefined, email: s.email ?? undefined },
+      entrega: { ...entrega, delivery_mode: 'envio_externo' },
+    },
+  }
+
+  if (leadId) {
+    await insertInteraction(admin, {
+      leadId, patientName: String(synthLead.patient_name), channel: 'system', direction: 'system', author: 'Asaas',
+      content: `🔁 Assinatura — ciclo ${cycle} pago (${(monthlyValueCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}).`,
+      tenantId,
+    }).catch(() => {})
+  }
+
+  // Decide se ESTE ciclo envia produto.
+  const ships = cadence === 'trimestral' ? ((cycle - 1) % 3 === 0) : true
+  if (!ships) return
+
+  const shipUnits = unitsPerShipment
+  const shipValueCents = shipUnits * unitPriceCents
+  const blingTenant = 'tricopill'
+  try {
+    const out = await blingCreateSaleOrder(admin, blingTenant, {
+      kit: '',
+      bottlesOverride: shipUnits,
+      amountCents: shipValueCents,
+      description: `Assinatura Tricopill (${shipUnits} ${shipUnits === 1 ? 'frasco' : 'frascos'}) — ciclo ${cycle}`,
+      customerName: s.customer_name != null ? String(s.customer_name) : undefined,
+      phone: s.phone != null ? String(s.phone) : undefined,
+      cpf: s.customer_doc != null ? String(s.customer_doc) : undefined,
+      email: s.email != null ? String(s.email) : undefined,
+      entrega: { ...entrega, delivery_mode: 'envio_externo' } as Record<string, string>,
+    })
+    if (leadId) {
+      await insertInteraction(admin, {
+        leadId, patientName: String(synthLead.patient_name), channel: 'system', direction: 'system', author: 'Bling',
+        content: `📦 Assinatura: pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos) — ciclo ${cycle}.`,
+        tenantId: blingTenant,
+      }).catch(() => {})
+    }
+  } catch (e) {
+    if (leadId) {
+      await insertInteraction(admin, {
+        leadId, patientName: String(synthLead.patient_name), channel: 'system', direction: 'system', author: 'Bling',
+        content: `⚠️ Assinatura: não criou o pedido no Bling automaticamente (ciclo ${cycle}): ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`,
+        tenantId: blingTenant,
+      }).catch(() => {})
+    }
+  }
+
+  // Envio automático no Melhor Envio (best-effort).
+  try {
+    await autoShipToCart(admin, blingTenant, {
+      lead: synthLead,
+      kit: null,
+      productName: `Tricopill assinatura (${shipUnits}x)`,
+      productValueCents: shipValueCents,
+    })
+  } catch { /* best-effort */ }
+
+  await admin.from('asaas_subscriptions').update({ last_shipped_cycle: cycle, updated_at: new Date().toISOString() }).eq('id', localSubId)
 }
 
 /**
