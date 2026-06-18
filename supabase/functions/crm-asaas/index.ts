@@ -86,7 +86,9 @@ Deno.serve(async (req) => {
         amountCents: Math.round(Number(payload.amountCents ?? 0)),
         description: String(payload.description ?? 'Pagamento'),
         leadId: payload.leadId != null ? String(payload.leadId) : undefined,
-        installments: payload.installments != null ? Number(payload.installments) : 1,
+        // Sem escolha explícita no painel → undefined: o link nasce com o parcelamento
+        // máximo da config (antes ia 1 e o checkout travava "sem parcelamento").
+        installments: payload.installments != null ? Number(payload.installments) : undefined,
         appBaseUrl,
         couponCode: payload.couponCode != null ? String(payload.couponCode) : undefined,
         freightCents: payload.freightCents != null ? Number(payload.freightCents) : undefined,

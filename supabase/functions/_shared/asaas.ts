@@ -32,7 +32,9 @@ export type AsaasConfig = {
   installments: InstallmentCfg
 }
 
-const DEFAULT_INSTALLMENTS: InstallmentCfg = { max: 12, monthlyPct: 1.45, fixedCents: 29, freeUpTo: 1 }
+// Regra da casa: até 3x SEM juros; de 4x a 12x com 1,49% ao mês (Price), sem taxa fixa.
+// Override por polo em tenant_integrations.asaas.installments (hoje null nos 2 → usa este default).
+const DEFAULT_INSTALLMENTS: InstallmentCfg = { max: 12, monthlyPct: 1.49, fixedCents: 0, freeUpTo: 3 }
 
 /** Total cobrado do cliente p/ `n` parcelas (Price). n ≤ freeUpTo (e 1x) = sem juros. */
 export function installmentTotalCents(baseCents: number, n: number, ic: InstallmentCfg): number {
@@ -206,7 +208,9 @@ export async function createAsaasCardIntent(
   const amountCents = coupon.finalCents + freightCents
   const baseDesc = String(args.description ?? 'Pagamento').slice(0, 100)
   const description = freightCents > 0 ? `${baseDesc} + frete` : baseDesc
-  const installments = Math.max(1, Math.min(cfg.installments.max, args.installments ?? 1))
+  // Sem `installments` explícito, o link nasce permitindo o MÁXIMO da config (o cliente
+  // escolhe de 1x até o máximo no checkout). Default 1 fazia o link sair "sem parcelamento".
+  const installments = Math.max(1, Math.min(cfg.installments.max, args.installments ?? cfg.installments.max))
 
   const id = shortId()
   await admin.from('asaas_payments').insert({
