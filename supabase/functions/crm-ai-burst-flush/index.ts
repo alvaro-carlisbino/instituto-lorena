@@ -27,6 +27,55 @@ function json(body: Record<string, unknown>, status = 200): Response {
 // Só age em bursts parados há mais que isto (deixa o flush rápido do waitUntil, debounce ~3s, agir antes).
 const STALE_SECS = 45
 
+// PASSO 2 (rede profunda): conversa presa SEM buffer (o waitUntil/z.ai morreu DEPOIS de zerar o
+// buffer no claim → Passo 1 fica cego). Detectada pelo histórico. Margem alta p/ não competir com
+// o caminho normal nem com o Passo 1 (z.ai lento chega a ~55s).
+const STUCK_SECS = 180
+
+type Admin = ReturnType<typeof createClient>
+type FlushLead = {
+  id: string; patient_name?: string; phone?: string; whatsapp_instance_id?: string | null
+  deleted_at?: string | null; conversation_status?: string | null; tenant_id?: string
+}
+
+/** Monta provider W-API + prompt do polo e dispara a resposta da IA (burstFlush). Throw em falha. */
+async function deliverAiReply(
+  admin: Admin,
+  lead: FlushLead,
+  args: { text: string; inboundHappenedAt: string; ownerMode: string; aiJobSource: string },
+): Promise<void> {
+  const instRow = await loadWapiInstanceByRowId(admin, String(lead.whatsapp_instance_id))
+  if (!instRow) throw new Error('instance_not_found')
+  const provider = createWapiProviderForRow(instRow)
+  const isSalesBot = String((instRow as { bot_kind?: string }).bot_kind ?? '').toLowerCase() === 'sales'
+  const tenantId = String(lead.tenant_id ?? '').trim()
+
+  const { data: state } = await admin
+    .from('crm_conversation_states').select('prompt_override').eq('lead_id', lead.id).maybeSingle()
+  const { data: config } = tenantId
+    ? await admin.from('crm_ai_configs').select('system_prompt').eq('id', 'default').eq('tenant_id', tenantId).maybeSingle()
+    : { data: null }
+  const statePrompt = String(
+    (state as { prompt_override?: string } | null)?.prompt_override ??
+    (config as { system_prompt?: string } | null)?.system_prompt ?? '',
+  ).trim()
+
+  await runWhatsappAiAutoReply(admin, {
+    leadId: lead.id,
+    patientName: String(lead.patient_name ?? 'Cliente'),
+    fromPhone: String(lead.phone ?? ''),
+    aiInboundUserText: args.text,
+    inboundHappenedAt: args.inboundHappenedAt,
+    ownerMode: args.ownerMode,
+    aiEnabled: true,
+    statePrompt,
+    aiJobSource: args.aiJobSource,
+    sendProvider: provider,
+    keepAiOn: isSalesBot,
+    burstFlush: true,
+  })
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -88,43 +137,120 @@ Deno.serve(async (req) => {
     if (!text) { skipped++; continue } // já flushado por outro caminho
 
     try {
-      const instRow = await loadWapiInstanceByRowId(admin, String(lead.whatsapp_instance_id))
-      if (!instRow) { results.push({ leadId, status: 'instance_not_found' }); continue }
-      const provider = createWapiProviderForRow(instRow)
-      const isSalesBot = String((instRow as { bot_kind?: string }).bot_kind ?? '').toLowerCase() === 'sales'
-      const tenantId = String(lead.tenant_id ?? '').trim()
-
-      const { data: state } = await admin
-        .from('crm_conversation_states').select('prompt_override').eq('lead_id', leadId).maybeSingle()
-      const { data: config } = tenantId
-        ? await admin.from('crm_ai_configs').select('system_prompt').eq('id', 'default').eq('tenant_id', tenantId).maybeSingle()
-        : { data: null }
-      const statePrompt = String(
-        (state as { prompt_override?: string } | null)?.prompt_override ??
-        (config as { system_prompt?: string } | null)?.system_prompt ?? '',
-      ).trim()
-
-      await runWhatsappAiAutoReply(admin, {
-        leadId,
-        patientName: String(lead.patient_name ?? 'Cliente'),
-        fromPhone: String(lead.phone ?? ''),
-        aiInboundUserText: text,
+      await deliverAiReply(admin, lead, {
+        text,
         inboundHappenedAt: String((row as { last_inbound_at?: string }).last_inbound_at ?? nowIso()),
         ownerMode: String((row as { owner_mode?: string }).owner_mode ?? 'auto'),
-        aiEnabled: true,
-        statePrompt,
         aiJobSource: 'burst-flush-cron',
-        sendProvider: provider,
-        keepAiOn: isSalesBot,
-        burstFlush: true,
       })
       flushed++
       results.push({ leadId, status: 'flushed' })
     } catch (e) {
-      console.error(`[burst-flush] lead=${leadId}:`, e instanceof Error ? e.message : String(e))
-      results.push({ leadId, status: 'error' })
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error(`[burst-flush] lead=${leadId}:`, msg)
+      results.push({ leadId, status: msg === 'instance_not_found' ? 'instance_not_found' : 'error' })
     }
   }
 
-  return json({ ok: true, candidates: rows?.length ?? 0, flushed, skipped, results, at: nowIso() })
+  // ── PASSO 2 — REDE DE SEGURANÇA PROFUNDA ────────────────────────────────────────────────
+  // Conversa presa SEM buffer: o waitUntil/z.ai morreu DEPOIS do claim (que zera o buffer) →
+  // o Passo 1 não vê nada. Aqui detectamos pelo histórico: última interação WhatsApp é do
+  // cliente (sem resposta depois) e parada há > STUCK_SECS. Reconstruímos o texto do cliente
+  // desde a última resposta e disparamos a IA. Idempotência por external_message_id do inbound
+  // (claim em webhook_jobs) p/ não duplicar com a reply normal que possa chegar atrasada.
+  const stuckCutoff = new Date(Date.now() - STUCK_SECS * 1000).toISOString()
+  let recovered = 0
+  const stuckResults: Array<{ leadId: string; status: string }> = []
+  const { data: stuckRows } = await admin
+    .from('crm_conversation_states')
+    .select(`
+      lead_id, owner_mode, last_inbound_at, last_ai_reply_at, last_human_reply_at,
+      leads!inner ( id, patient_name, phone, whatsapp_instance_id, deleted_at, conversation_status, tenant_id )
+    `)
+    .neq('owner_mode', 'human')
+    .eq('ai_enabled', true)
+    .not('last_inbound_at', 'is', null)
+    .lt('last_inbound_at', stuckCutoff)
+    .is('leads.deleted_at', null)
+    // Mais recente primeiro: uma conversa presa AGORA tem last_inbound recente → vai pro topo
+    // (PostgREST não compara coluna-a-coluna, então o filtro inbound>reply é feito em código).
+    .order('last_inbound_at', { ascending: false })
+    .limit(100)
+
+  for (const row of stuckRows ?? []) {
+    const leadsRaw = (row as unknown as { leads: unknown }).leads
+    const lead = (Array.isArray(leadsRaw) ? leadsRaw[0] : leadsRaw) as FlushLead | null
+    const leadId = String((row as { lead_id: string }).lead_id)
+    if (!lead) continue
+    if (lead.conversation_status === 'lost' || lead.conversation_status === 'closed') continue
+
+    const phoneDigits = String(lead.phone ?? '').replace(/\D/g, '')
+    const isRealWhatsapp = phoneDigits.length >= 10 && !phoneDigits.startsWith('888001')
+    if (!isRealWhatsapp || !lead.whatsapp_instance_id) continue
+
+    const lastInboundAt = String((row as { last_inbound_at?: string }).last_inbound_at ?? '')
+    const inboundMs = lastInboundAt ? Date.parse(lastInboundAt) : 0
+    const lastReplyMs = Math.max(
+      Date.parse(String((row as { last_ai_reply_at?: string }).last_ai_reply_at ?? '')) || 0,
+      Date.parse(String((row as { last_human_reply_at?: string }).last_human_reply_at ?? '')) || 0,
+    )
+    // Só conversas onde o inbound é mais novo que QUALQUER resposta (presa de verdade).
+    if (lastReplyMs && inboundMs && inboundMs <= lastReplyMs) continue
+
+    // Confirma pelo histórico e reconstrói o texto do cliente (inbounds consecutivos no topo).
+    const { data: inter } = await admin
+      .from('interactions')
+      .select('direction, content, happened_at, external_message_id')
+      .eq('lead_id', leadId).eq('channel', 'whatsapp')
+      .order('happened_at', { ascending: false }).limit(12)
+    const list = (inter ?? []) as Array<{ direction: string; content: string; happened_at: string; external_message_id?: string }>
+    if (list.length === 0 || list[0].direction !== 'in') continue // já respondido (último é out) ou sem inbound
+
+    const inbound: typeof list = []
+    for (const it of list) { if (it.direction !== 'in') break; inbound.push(it) }
+    inbound.reverse() // cronológico
+    const text = inbound.map((i) => String(i.content ?? '').trim()).filter(Boolean).join('\n').trim().slice(0, 4000)
+    if (!text) continue
+    const last = inbound[inbound.length - 1]
+    const msgKey = String(last.external_message_id ?? last.happened_at)
+
+    // CLAIM idempotente: insere ANTES de enviar (não duplica). Em falha, apaga p/ permitir retry.
+    const claimNote = `stuck_claim:${leadId}:${msgKey}`.slice(0, 500)
+    const { data: already } = await admin
+      .from('webhook_jobs').select('id').eq('note', claimNote).limit(1).maybeSingle()
+    if (already) { stuckResults.push({ leadId, status: 'already_claimed' }); continue }
+    const { data: claimRow } = await admin
+      .from('webhook_jobs').insert({ source: 'burst-flush-stuck', status: 'done', note: claimNote })
+      .select('id').maybeSingle()
+
+    try {
+      await deliverAiReply(admin, lead, {
+        text,
+        inboundHappenedAt: lastInboundAt || nowIso(),
+        ownerMode: String((row as { owner_mode?: string }).owner_mode ?? 'auto'),
+        aiJobSource: 'burst-flush-stuck',
+      })
+      recovered++
+      stuckResults.push({ leadId, status: 'recovered' })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error(`[burst-flush:stuck] lead=${leadId}:`, msg)
+      // Apaga o claim p/ permitir nova tentativa numa próxima rodada do cron.
+      const claimId = (claimRow as { id?: string | number } | null)?.id
+      if (claimId !== undefined) await admin.from('webhook_jobs').delete().eq('id', claimId)
+      stuckResults.push({ leadId, status: 'error' })
+    }
+  }
+
+  return json({
+    ok: true,
+    candidates: rows?.length ?? 0,
+    flushed,
+    skipped,
+    recovered,
+    stuckCandidates: stuckRows?.length ?? 0,
+    results,
+    stuckResults,
+    at: nowIso(),
+  })
 })
