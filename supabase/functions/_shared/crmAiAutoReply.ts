@@ -514,6 +514,11 @@ export async function invokeCrmAiAssistantForLead(
         aiObj.error,
         aiObj.message ?? aiObj.detail ?? '',
       )
+      // 'zai_unavailable': o assistant JÁ retentou o z.ai internamente com backoff 429-aware.
+      // Re-invocar aqui só re-roda o snapshot e bate de novo no z.ai na MESMA janela de
+      // rate-limit — amplifica o estouro (foi o que pinou 1 lead em ~10 chamadas/5min).
+      // Para nesse erro; deixa o burst-flush retentar mais tarde, com a janela já limpa.
+      if (aiObj.error === 'zai_unavailable') break
       if (attempt < attempts - 1) await sleepMs(700 * (attempt + 1))
       continue
     }

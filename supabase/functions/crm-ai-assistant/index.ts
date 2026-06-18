@@ -994,77 +994,100 @@ Deno.serve(async (req) => {
     // sem erro, sem breadcrumb) — o que derrubou clínica + tricopill juntos. Aborta em
     // ZAI_TIMEOUT_MS (default 60s — responder lento >> falhar e perder venda no fechamento).
     const zaiTimeoutMs = Number(Deno.env.get('ZAI_TIMEOUT_MS') ?? '') || 60000
-    const zaiRes = await fetch(zaiChatUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept-Language': 'en-US,en',
-        Authorization: `Bearer ${zaiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: temperatureForModel(model),
-        max_tokens: 2048,
-      }),
-      signal: AbortSignal.timeout(zaiTimeoutMs),
-    })
 
-    const zaiText = await zaiRes.text()
-    if (!zaiRes.ok) {
-      const bodyText = trunc(zaiText, 1200)
-      const looksLikeGenericFail =
-        /Operation failed|"code"\s*:\s*"500"/i.test(zaiText) || (zaiRes.status === 500 && bodyText.length < 500)
-      const hint =
-        useCodingMerge && looksLikeGenericFail
-          ? 'O endpoint …/coding/paas/v4 (GLM Coding Plan) na documentação Z.ai destina-se a integrações listadas (IDEs, agentes de código). Um assistente CRM no Supabase pode não ser suportado e devolver 500 genérico. Para uso geral na app, use https://api.z.ai/api/paas/v4 com saldo pay-as-you-go (ajuste o secret ZAI_API_BASE).'
-          : undefined
+    // RETRY 429-AWARE (z.ai-only). O z.ai pay-as-you-go limita REQUISIÇÕES SIMULTÂNEAS por
+    // conta (não é o saldo que acaba): quando vários leads escrevem juntos, estouramos esse
+    // teto e o z.ai devolve 429 code 1302. Esse 429 limpa em ~1-2s (assim que requests em voo
+    // terminam), então RETENTAR AQUI DENTRO com backoff absorve o pico em vez de cuspir
+    // "Peço desculpa". Antes o retry vivia só no caller (700/1400ms) e batia junto com a cron
+    // burst-flush → várias chamadas na MESMA janela mantinham a conta presa no limite.
+    // Retry-After do header é respeitado quando vem; senão backoff exponencial 1.2s/2.4s/4.8s.
+    const zaiMaxAttempts = Math.max(1, Math.min(5, Number(Deno.env.get('ZAI_MAX_ATTEMPTS') ?? '') || 3))
+    let reply = ''
+    let zaiFailReason = ''
+    let retryable = false
+    for (let attempt = 0; attempt < zaiMaxAttempts; attempt++) {
+      let retryAfterMs = 0
+      retryable = false
       try {
-        await dbClient.from('webhook_jobs').insert({
-          source: 'crm-ai-assistant',
-          status: 'done',
-          note: `crm-ai-debug:zai_upstream:status=${zaiRes.status}:lead=${context.leadId ?? '?'}:${bodyText.replace(/[\r\n]+/g, ' ')}`.slice(0, 480),
+        const zaiRes = await fetch(zaiChatUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept-Language': 'en-US,en',
+            Authorization: `Bearer ${zaiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: temperatureForModel(model),
+            max_tokens: 2048,
+          }),
+          signal: AbortSignal.timeout(zaiTimeoutMs),
         })
-      } catch { /* ignore */ }
-      return jsonResponse({
-        ok: false,
-        error: 'zai_upstream',
-        message: bodyText,
-        ...(hint ? { hint } : {}),
-        status: zaiRes.status,
-      })
+
+        const zaiText = await zaiRes.text()
+        if (zaiRes.ok) {
+          zaiFailReason = ''
+          try {
+            reply = extractReplyFromZai(JSON.parse(zaiText))
+          } catch {
+            zaiFailReason = 'invalid_json'
+          }
+          if (reply) break
+          if (!zaiFailReason) {
+            zaiFailReason = 'empty_reply'
+            console.warn('crm-ai-assistant zai_empty_reply', {
+              model,
+              leadId: context.leadId ?? null,
+              raw_excerpt: trunc(zaiText, 600),
+            })
+            try {
+              await dbClient.from('webhook_jobs').insert({
+                source: 'crm-ai-assistant',
+                status: 'done',
+                note: `crm-ai-debug:zai_empty_reply:lead=${context.leadId ?? 'unknown'}:model=${model}:raw=${trunc(zaiText, 400).replace(/[\r\n]+/g, ' ')}`.slice(0, 500),
+              })
+            } catch { /* ignore */ }
+          }
+          // empty/invalid_json: vale uma nova tentativa (o glm às vezes devolve vazio pontual).
+          retryable = true
+        } else {
+          zaiFailReason = `status=${zaiRes.status}`
+          // 429 (rate-limit) e 5xx são transitórios → retentar. 4xx (exceto 429) não.
+          retryable = zaiRes.status === 429 || zaiRes.status >= 500
+          if (zaiRes.status === 429) {
+            const ra = Number(zaiRes.headers.get('retry-after') ?? '')
+            retryAfterMs = Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 8000) : 0
+          }
+          try {
+            await dbClient.from('webhook_jobs').insert({
+              source: 'crm-ai-assistant',
+              status: 'done',
+              note: `crm-ai-debug:zai_upstream:status=${zaiRes.status}:attempt=${attempt + 1}/${zaiMaxAttempts}:lead=${context.leadId ?? '?'}:${trunc(zaiText, 800).replace(/[\r\n]+/g, ' ')}`.slice(0, 480),
+            })
+          } catch { /* ignore */ }
+        }
+      } catch (e) {
+        // timeout (AbortSignal) ou erro de rede — transitório, vale retentar.
+        zaiFailReason = `exception:${e instanceof Error ? e.message : String(e)}`
+        retryable = true
+      }
+
+      if (!retryable || attempt >= zaiMaxAttempts - 1) break
+      // Backoff antes da próxima tentativa: respeita Retry-After; senão 1.2s/2.4s/4.8s + jitter.
+      const base = retryAfterMs || 1200 * Math.pow(2, attempt)
+      await new Promise((r) => setTimeout(r, base + Math.floor(Math.random() * 400)))
     }
 
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(zaiText)
-    } catch {
-      return jsonResponse({
-        ok: false,
-        error: 'zai_invalid_json',
-        message: trunc(zaiText, 800),
-      })
-    }
-
-    let reply = extractReplyFromZai(parsed)
     if (!reply) {
-      const debugNote = `crm-ai-debug:zai_empty_reply:lead=${context.leadId ?? 'unknown'}:model=${model}:raw=${trunc(zaiText, 400).replace(/[\r\n]+/g, ' ')}`
-      console.warn('crm-ai-assistant zai_empty_reply', {
-        model,
-        leadId: context.leadId ?? null,
-        raw_excerpt: trunc(zaiText, 600),
-      })
-      try {
-        await dbClient.from('webhook_jobs').insert({
-          source: 'crm-ai-assistant',
-          status: 'done',
-          note: debugNote.slice(0, 500),
-        })
-      } catch { /* ignore */ }
+      // z.ai esgotou as tentativas. Devolve ok:false para o caller decidir (o breadcrumb acima
+      // já registou a causa). Só aqui, no limite, o paciente pode ver o fallback "Peço desculpa".
       return jsonResponse({
         ok: false,
-        error: 'zai_empty_reply',
-        message: trunc(zaiText, 800),
+        error: 'zai_unavailable',
+        message: zaiFailReason || 'sem resposta do modelo',
+        retryable,
       })
     }
     const rawZaiReply = reply
