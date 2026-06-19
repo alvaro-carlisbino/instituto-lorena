@@ -22,6 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn } from '@/lib/utils'
 import { fetchTricopillBi, fetchTricopillPaidOrders, formatBRL, kitLabel, type TricopillBi, type TricopillOrderLite } from '@/services/tricopillBi'
 import { classifyDelivery, type DeliveryKind } from '@/lib/deliveryType'
+import { TricopillMarginCard } from '@/components/payments/TricopillMarginCard'
 
 const CHART_COLORS = [
   'oklch(0.638 0.065 44)',
@@ -532,6 +533,11 @@ export function TricopilDashboardPage() {
           </div>
         </section>
       ) : null}
+
+      <section className="mt-8">
+        <SectionTitle>Custos &amp; Margem</SectionTitle>
+        <TricopillMarginCard porKit={checkout?.por_kit ?? []} revenueCents={checkout?.total_cents ?? 0} />
+      </section>
 
       <section className="mt-8">
         <SectionTitle>Entregas (pedidos pagos)</SectionTitle>
