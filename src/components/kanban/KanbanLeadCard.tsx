@@ -3,6 +3,7 @@ import type { LeadPaymentSummary } from '@/services/crmLeadPayments'
 
 import { Button } from '@/components/ui/button'
 import { PaymentBadge, PoloBadge } from '@/components/leads/PaymentBadge'
+import { DeliveryBadge } from '@/components/leads/DeliveryBadge'
 import { useNowMs } from '@/hooks/useNowMs'
 import { getSourceStyle } from '@/lib/channelStyles'
 import { cn } from '@/lib/utils'
@@ -180,6 +181,7 @@ export function KanbanLeadCard({
         </span>
         <PoloBadge name={poloName} />
         <PaymentBadge payment={payment} />
+        <DeliveryBadge lead={lead} />
         {tagPills.map((t) => (
           <span
             key={t.id}

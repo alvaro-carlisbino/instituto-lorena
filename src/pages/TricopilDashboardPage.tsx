@@ -20,7 +20,8 @@ import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { buttonVariants } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import { fetchTricopillBi, formatBRL, kitLabel, type TricopillBi } from '@/services/tricopillBi'
+import { fetchTricopillBi, fetchTricopillPaidOrders, formatBRL, kitLabel, type TricopillBi, type TricopillOrderLite } from '@/services/tricopillBi'
+import { classifyDelivery, type DeliveryKind } from '@/lib/deliveryType'
 
 const CHART_COLORS = [
   'oklch(0.638 0.065 44)',
@@ -88,6 +89,7 @@ export function TricopilDashboardPage() {
   const [end, setEnd] = useState<string>(isoDate(new Date()))
   const [start, setStart] = useState<string>(isoDate(new Date(Date.now() - 30 * 86400000)))
   const [data, setData] = useState<TricopillBi | null>(null)
+  const [orders, setOrders] = useState<TricopillOrderLite[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -110,6 +112,39 @@ export function TricopilDashboardPage() {
       cancelled = true
     }
   }, [start, end, reloadKey])
+
+  // Pedidos pagos + custom_fields p/ classificar o TIPO DE ENTREGA (o BI agregado não traz).
+  useEffect(() => {
+    let cancelled = false
+    fetchTricopillPaidOrders({ start: new Date(`${start}T00:00:00`), end: new Date(`${end}T23:59:59`) })
+      .then((res) => {
+        if (!cancelled) setOrders(res)
+      })
+      .catch(() => {
+        if (!cancelled) setOrders([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [start, end, reloadKey])
+
+  // Quebra por tipo de entrega (🛵 motoboy / 🏠 retirada / 📦 correios / não informado).
+  const deliveryBreakdown = useMemo(() => {
+    const counts: Record<DeliveryKind, number> = { motoboy: 0, retirada: 0, correios: 0, desconhecido: 0 }
+    let inferred = 0
+    for (const o of orders) {
+      const c = classifyDelivery(o)
+      counts[c.kind] += 1
+      if (c.inferred) inferred += 1
+    }
+    const rows: Array<{ kind: DeliveryKind; emoji: string; label: string; count: number }> = [
+      { kind: 'motoboy', emoji: '🛵', label: 'Motoboy (Maringá e região)', count: counts.motoboy },
+      { kind: 'retirada', emoji: '🏠', label: 'Retirada na clínica', count: counts.retirada },
+      { kind: 'correios', emoji: '📦', label: 'Envio Correios', count: counts.correios },
+      { kind: 'desconhecido', emoji: '—', label: 'Não informado', count: counts.desconhecido },
+    ]
+    return { rows, total: orders.length, inferred }
+  }, [orders])
 
   const applyQuick = (days: number) => {
     setEnd(isoDate(new Date()))
@@ -482,6 +517,42 @@ export function TricopilDashboardPage() {
           </div>
         </section>
       ) : null}
+
+      <section className="mt-8">
+        <SectionTitle>Entregas (pedidos pagos)</SectionTitle>
+        <div className="rounded-3xl border border-border/30 bg-card/40 p-6">
+          {deliveryBreakdown.total === 0 ? (
+            <p className="py-8 text-center text-xs text-muted-foreground">Sem pedidos pagos no período.</p>
+          ) : (
+            <>
+              <Table className="w-full text-xs">
+                <TableHeader>
+                  <TableRow className="text-left text-muted-foreground">
+                    <TableHead className="pb-2">Tipo de entrega</TableHead>
+                    <TableHead className="pb-2 text-right">Pedidos</TableHead>
+                    <TableHead className="pb-2 text-right">%</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {deliveryBreakdown.rows.map((r) => (
+                    <TableRow key={r.kind} className="border-t border-border/20">
+                      <TableCell className="py-1.5">{r.emoji} {r.label}</TableCell>
+                      <TableCell className="py-1.5 text-right tabular-nums">{r.count}</TableCell>
+                      <TableCell className="py-1.5 text-right tabular-nums text-muted-foreground">
+                        {deliveryBreakdown.total > 0 ? Math.round((r.count / deliveryBreakdown.total) * 100) : 0}%
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <p className="mt-3 text-[11px] text-muted-foreground">
+                Total: {deliveryBreakdown.total} pedido(s). "Não informado" = vendas sem tipo de entrega registrado
+                (em geral antigas/manuais). {deliveryBreakdown.inferred > 0 ? `${deliveryBreakdown.inferred} classificado(s) por inferência de CEP.` : ''}
+              </p>
+            </>
+          )}
+        </div>
+      </section>
 
       {bling?.connected && bling.error ? (
         <p className="mt-6 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700">

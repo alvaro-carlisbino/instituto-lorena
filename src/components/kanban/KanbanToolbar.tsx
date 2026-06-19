@@ -5,6 +5,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/in
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { labelForIdName } from '@/lib/selectDisplay'
+import { DELIVERY_FILTER_OPTIONS, type DeliveryKind } from '@/lib/deliveryType'
 import { cn } from '@/lib/utils'
 
 type Temperature = 'all' | 'hot' | 'warm' | 'cold'
@@ -43,6 +44,8 @@ type Props = {
   onSortOrderChange: (order: SortOption) => void
   conversationFilter: ConversationFilterOption
   onConversationFilterChange: (value: ConversationFilterOption) => void
+  deliveryFilter: 'all' | DeliveryKind
+  onDeliveryFilterChange: (value: 'all' | DeliveryKind) => void
 }
 
 export function KanbanToolbar({
@@ -68,6 +71,8 @@ export function KanbanToolbar({
   onSortOrderChange,
   conversationFilter,
   onConversationFilterChange,
+  deliveryFilter,
+  onDeliveryFilterChange,
 }: Props) {
   const showPolo = !!poloOptions && poloOptions.length >= 2 && !!onPoloChange
   const poloLabel = labelForIdName(
@@ -94,6 +99,11 @@ export function KanbanToolbar({
     { value: 'all', label: 'Todas as etiquetas' },
     'Etiqueta',
   )
+
+  const deliveryLabel =
+    deliveryFilter === 'all'
+      ? 'Entrega'
+      : DELIVERY_FILTER_OPTIONS.find((o) => o.value === deliveryFilter)?.label ?? 'Entrega'
 
   const conversationLabel =
     conversationFilter === 'all'
@@ -259,6 +269,28 @@ export function KanbanToolbar({
                 <SelectItem value="human_active" className="text-xs uppercase font-bold tracking-tight">
                   Atendimento humano
                 </SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={deliveryFilter}
+              onValueChange={(v) => v && onDeliveryFilterChange(v as 'all' | DeliveryKind)}
+            >
+              <LabeledSelectTrigger
+                className="min-w-[160px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
+                size="default"
+              >
+                {deliveryLabel}
+              </LabeledSelectTrigger>
+              <SelectContent className="rounded-xl">
+                <SelectItem value="all" className="text-xs uppercase font-bold tracking-tight">
+                  Todas (entrega)
+                </SelectItem>
+                {DELIVERY_FILTER_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value} className="text-xs uppercase font-bold tracking-tight">
+                    {o.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>

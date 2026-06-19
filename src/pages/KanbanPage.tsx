@@ -19,6 +19,7 @@ import { useTenant } from '@/context/TenantContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
 import { getLeadFieldValue } from '@/lib/leadFields'
+import { classifyDelivery, type DeliveryKind } from '@/lib/deliveryType'
 import { cn } from '@/lib/utils'
 import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
 import { LeadLossReasonDialog } from '@/components/kanban/LeadLossReasonDialog'
@@ -65,6 +66,7 @@ export function KanbanPage() {
   })
   const [sortOrder, setSortOrder] = useState<SortOption>('position')
   const [conversationFilter, setConversationFilter] = useState<ConversationFilterOption>('all')
+  const [deliveryFilter, setDeliveryFilter] = useState<'all' | DeliveryKind>('all')
 
   // Estados para captura de motivo de perda
   const [lossDialogOpen, setLossDialogOpen] = useState(false)
@@ -156,7 +158,9 @@ export function KanbanPage() {
       const effConv = lead.conversation_status ?? 'new'
       const matchesConversation =
         conversationFilter === 'all' || effConv === conversationFilter
-      return matchesText && matchesTemperature && matchesOwner && matchesTag && matchesConversation
+      const matchesDelivery =
+        deliveryFilter === 'all' || classifyDelivery(lead).kind === deliveryFilter
+      return matchesText && matchesTemperature && matchesOwner && matchesTag && matchesConversation && matchesDelivery
     })
 
     // Aplicar ordenação
@@ -179,6 +183,7 @@ export function KanbanPage() {
     tagFilter,
     sortOrder,
     conversationFilter,
+    deliveryFilter,
   ])
 
   const tagPillsForLead = (leadId: string) => {
@@ -300,6 +305,8 @@ export function KanbanPage() {
         onSortOrderChange={setSortOrder}
         conversationFilter={conversationFilter}
         onConversationFilterChange={setConversationFilter}
+        deliveryFilter={deliveryFilter}
+        onDeliveryFilterChange={setDeliveryFilter}
       />
 
       {viewMode === 'list' ? (

@@ -60,6 +60,31 @@ export async function fetchTricopillBi(params: { start: Date; end: Date }): Prom
   }
 }
 
+/**
+ * Pedidos (leads em etapa "pago") do Tricopill no intervalo, com o custom_fields necessário
+ * pra classificar o TIPO DE ENTREGA no front (classifyDelivery). Consulta direta (RLS do
+ * usuário) — o BI agregado não traz delivery_mode, então buscamos aqui à parte.
+ */
+export type TricopillOrderLite = { id: string; patientName: string; customFields: Record<string, unknown> }
+
+export async function fetchTricopillPaidOrders(params: { start: Date; end: Date }): Promise<TricopillOrderLite[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase
+    .from('leads')
+    .select('id, patient_name, custom_fields, stage_id, created_at')
+    .eq('tenant_id', 'tricopill')
+    .or('stage_id.ilike.%pago%,stage_id.ilike.%vd-pago%')
+    .gte('created_at', params.start.toISOString())
+    .lte('created_at', params.end.toISOString())
+    .limit(2000)
+  if (error || !Array.isArray(data)) return []
+  return (data as Array<Record<string, unknown>>).map((r) => ({
+    id: String(r.id),
+    patientName: String(r.patient_name ?? 'Cliente'),
+    customFields: (r.custom_fields ?? {}) as Record<string, unknown>,
+  }))
+}
+
 /** Formata centavos como BRL. */
 export function formatBRL(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
