@@ -26,13 +26,19 @@ const toCents = (reais: string) => {
 export function TricopillMarginCard({
   porKit,
   revenueCents,
+  startIso,
+  endIso,
 }: {
   porKit: Array<{ kit: string; count: number; total_cents: number }>
   revenueCents: number
+  /** Intervalo (yyyy-mm-dd) p/ somar o frete arrecadado (margem líquida). */
+  startIso: string
+  endIso: string
 }) {
   const [costCents, setCostCents] = useState<Record<string, number>>({})
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [businessRules, setBusinessRules] = useState<Record<string, unknown>>({})
+  const [freightCollected, setFreightCollected] = useState(0)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -67,6 +73,26 @@ export function TricopillMarginCard({
     }
   }, [])
 
+  // Frete arrecadado no período (pago) — pra descontar da margem (margem líquida).
+  useEffect(() => {
+    if (!supabase) return
+    let cancelled = false
+    void supabase
+      .from('asaas_payments')
+      .select('freight_cents')
+      .not('paid_at', 'is', null)
+      .gte('paid_at', `${startIso}T00:00:00`)
+      .lte('paid_at', `${endIso}T23:59:59`)
+      .then(({ data }) => {
+        if (cancelled) return
+        const sum = (data ?? []).reduce((s, r) => s + Number((r as { freight_cents?: number }).freight_cents ?? 0), 0)
+        setFreightCollected(sum)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [startIso, endIso])
+
   const soldByKit = useMemo(() => {
     const m: Record<string, number> = {}
     for (const r of porKit) m[r.kit] = (m[r.kit] ?? 0) + r.count
@@ -88,8 +114,12 @@ export function TricopillMarginCard({
     }
     const lucro = revenueWithCost - cost
     const pct = revenueWithCost > 0 ? Math.round((lucro / revenueWithCost) * 100) : 0
-    return { cost, lucro, pct, revenueWithCost, kitsSemCusto }
-  }, [porKit, costCents])
+    // Líquida: tira o frete arrecadado (não é lucro — cobre o custo do envio).
+    const lucroLiq = lucro - freightCollected
+    const baseLiq = Math.max(0, revenueWithCost - freightCollected)
+    const pctLiq = baseLiq > 0 ? Math.round((lucroLiq / baseLiq) * 100) : 0
+    return { cost, lucro, pct, revenueWithCost, kitsSemCusto, lucroLiq, pctLiq }
+  }, [porKit, costCents, freightCollected])
 
   const save = async () => {
     if (!supabase) return
@@ -156,6 +186,14 @@ export function TricopillMarginCard({
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Margem %</p>
           <p className="mt-0.5 text-lg font-black tabular-nums text-foreground">{margin.pct}%</p>
         </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-muted/40 px-3 py-2">
+        <span className="text-[11px] font-semibold text-foreground/80">
+          Margem líquida <span className="font-normal text-muted-foreground">(− frete {brl(freightCollected)})</span>
+        </span>
+        <span className="text-sm font-black tabular-nums text-emerald-700 dark:text-emerald-400">
+          {brl(margin.lucroLiq)} <span className="text-muted-foreground">· {margin.pctLiq}%</span>
+        </span>
       </div>
       {margin.kitsSemCusto > 0 ? (
         <p className="mt-2 text-[11px] text-amber-600">

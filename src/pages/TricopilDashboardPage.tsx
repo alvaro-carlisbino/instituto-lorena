@@ -538,7 +538,7 @@ export function TricopilDashboardPage() {
       <section className="mt-8">
         <SectionTitle>Custos, Margem &amp; CAC</SectionTitle>
         <div className="grid gap-4 lg:grid-cols-2">
-          <TricopillMarginCard porKit={checkout?.por_kit ?? []} revenueCents={checkout?.total_cents ?? 0} />
+          <TricopillMarginCard porKit={checkout?.por_kit ?? []} revenueCents={checkout?.total_cents ?? 0} startIso={start} endIso={end} />
           <TricopillCacCard paidCount={checkout?.total_pagos ?? 0} revenueCents={checkout?.total_cents ?? 0} />
         </div>
       </section>
