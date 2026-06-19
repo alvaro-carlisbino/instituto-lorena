@@ -314,14 +314,29 @@ export function TricopilDashboardPage() {
 
         {/* Estoque (Bling) */}
         <div className="rounded-3xl border border-border/30 bg-card/40 p-6 lg:col-span-4">
-          <p className="mb-4 text-sm font-bold text-foreground/90">Estoque (Bling)</p>
+          {(() => {
+            const rupturas = (bling?.estoque ?? []).filter((p) => p.estoque != null && p.estoque <= 5).length
+            return (
+              <p className="mb-4 flex items-center justify-between gap-2 text-sm font-bold text-foreground/90">
+                <span>Estoque (Bling)</span>
+                {rupturas > 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-bold text-destructive">
+                    <AlertTriangle className="size-3" /> {rupturas} em ruptura
+                  </span>
+                ) : null}
+              </p>
+            )
+          })()}
           {!bling?.connected ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Bling não conectado.</p>
           ) : (bling.estoque ?? []).length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Sem produtos no catálogo.</p>
           ) : (
             <ul className="flex flex-col gap-2">
-              {bling.estoque.slice(0, 8).map((p) => {
+              {[...bling.estoque]
+                .sort((a, b) => (a.estoque ?? 9999) - (b.estoque ?? 9999))
+                .slice(0, 12)
+                .map((p) => {
                 const low = p.estoque != null && p.estoque <= 5
                 return (
                   <li key={p.codigo || p.nome} className="flex items-center justify-between gap-2 text-xs">
