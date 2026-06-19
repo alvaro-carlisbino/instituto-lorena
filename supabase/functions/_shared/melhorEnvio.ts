@@ -92,6 +92,25 @@ export function boxForKit(kitRaw: unknown): FreteBox | null {
 export const KIT_KEYS = Object.keys(KIT_BOXES)
 
 /**
+ * Valor declarado (seguro) por kit, em centavos — DEVE bater com o que a etiqueta real declara
+ * (autoShipToCart usa o valor do produto). Os Correios cobram o seguro/valor declarado como % do
+ * valor, então a cotação e a cobrança PRECISAM incluir o mesmo seguro; senão a etiqueta sai
+ * SEMPRE mais cara que o cotado (~R$5/pedido). Usa o maior preço por kit (cartão) p/ nunca
+ * cobrar a MENOS que o seguro real. Kit desconhecido → null (cai no seguro padrão/0).
+ */
+const KIT_DECLARED_VALUE_CENTS: Record<string, number> = {
+  '1_mes': 19900,
+  '3_meses': 59700,
+  '5_meses': 99900,
+}
+
+/** Valor declarado (seguro) p/ um kit. null quando o kit é desconhecido. */
+export function declaredValueCentsForKit(kitRaw: unknown): number | null {
+  const key = normalizeKitKeyLocal(kitRaw)
+  return key ? KIT_DECLARED_VALUE_CENTS[key] : null
+}
+
+/**
  * Margem de segurança no frete COBRADO do cliente (política "nunca cobrar menos que o custo").
  * Aplica `FRETE_MARKUP_PCT` (default 10%) e arredonda PRA CIMA até `FRETE_ROUND_CENTS`
  * (default 100 = próximo R$1). Ex.: custo R$37,49 → ×1,10 = 41,24 → arredonda → R$42,00.

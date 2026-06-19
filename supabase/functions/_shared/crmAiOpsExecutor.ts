@@ -6,7 +6,7 @@ import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.
 import { resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit } from './rede.ts'
 import { createAsaasCardIntent, createAsaasPix } from './asaas.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
-import { applyFreightMarkup, boxForKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 
 /** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
 const DELIVERY_MODES = ['retirada_clinica', 'entrega_local_maringa', 'envio_externo'] as const
@@ -45,7 +45,18 @@ async function resolveFreightCents(
     try {
       // A caixa ESCALA com o kit (peso real): sem isto o frete de 4 frascos saía como o de 1.
       const box = boxForKit(op.kit)
-      const q = await quoteFreteMelhorEnvio(admin, tenantId, toCep, box ? { box } : undefined)
+      // SEGURO/valor declarado: a etiqueta real (autoShipToCart) é comprada declarando o valor do
+      // produto, e os Correios cobram isso como %. A cotação que COBRA o cliente tem que incluir o
+      // MESMO seguro — senão a etiqueta sai sempre mais cara que o cobrado. Usa o valor do kit
+      // (ou amount_cents avulso); kit desconhecido cai no seguro padrão.
+      const insuranceCents =
+        declaredValueCentsForKit(op.kit) ??
+        (op.amount_cents != null && Number.isFinite(Number(op.amount_cents)) ? Math.max(0, Math.round(Number(op.amount_cents))) : undefined) ??
+        undefined
+      const q = await quoteFreteMelhorEnvio(admin, tenantId, toCep, {
+        ...(box ? { box } : {}),
+        ...(insuranceCents != null ? { insuranceCents } : {}),
+      })
       // Se o serviço pedido não casar (ex.: CEP de praça local só devolve "Entrega interna",
       // ou a rota só tem SEDEX), NÃO cobra R$0: cai na opção mais barata que a cotação trouxe.
       // Política "nunca cobrar menos que o custo": aplica margem (markup + arredonda pra cima).

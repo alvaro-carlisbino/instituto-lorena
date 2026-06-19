@@ -33,7 +33,7 @@ import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
 import { readPagBankConfig } from '../_shared/pagbank.ts'
-import { applyFreightMarkup, boxForKit, melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
+import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
 import { extractLatestCep, resolveCepBrasil } from '../_shared/cep.ts'
 
 const MIN_INTERNAL_SECRET_LEN = 16
@@ -766,6 +766,9 @@ Deno.serve(async (req) => {
                   KITS.map((k) =>
                     quoteFreteMelhorEnvio(dbClient, tenantId, info.cep, {
                       box: boxForKit(k.key) ?? undefined,
+                      // SEGURO igual ao da etiqueta real (valor declarado do kit): o que a IA
+                      // MOSTRA tem que bater com o que será COBRADO e COMPRADO no Melhor Envio.
+                      insuranceCents: declaredValueCentsForKit(k.key) ?? undefined,
                       cityInfo,
                     }).catch(() => null),
                   ),
