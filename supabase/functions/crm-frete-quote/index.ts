@@ -15,7 +15,7 @@
  * Conectar a conta: edge crm-frete-oauth. Caixa padrão/segredos: ver _shared/melhorEnvio.ts.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
+import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -52,16 +52,26 @@ Deno.serve(async (req) => {
   if (toCep.length !== 8) return json({ ok: false, error: 'invalid_to_cep', hint: 'envie toCep com 8 dígitos' }, 400)
 
   const tenantId = String(body.tenantId ?? 'tricopill').trim() || 'tricopill'
+  // KIT (opcional): quando informado, a cotação espelha o que o BOT cobra — caixa do kit +
+  // seguro/valor declarado do kit. Sem kit (ex.: site oficial), tudo cru como antes.
+  const kitRaw = body.kit != null ? String(body.kit) : ''
+  const kitBox = kitRaw ? boxForKit(kitRaw) : null
   const insuranceCents =
     body.insuranceCents != null && Number.isFinite(Number(body.insuranceCents))
       ? Math.max(0, Math.round(Number(body.insuranceCents)))
-      : undefined
+      : kitRaw
+        ? declaredValueCentsForKit(kitRaw) ?? undefined
+        : undefined
+  // CHARGED: aplica a margem (markup) no preço devolvido — o VALOR QUE O CLIENTE PAGA, igual ao
+  // link/Pix. Default: liga quando veio kit (painel de cobrança). O site oficial não manda kit
+  // nem charged → continua recebendo o custo cru.
+  const charged = body.charged != null ? body.charged === true : Boolean(kitRaw)
   const servicesCsv = body.services != null ? String(body.services) : undefined
   const box = {
-    weightKg: num(body.weight),
-    lengthCm: num(body.length),
-    widthCm: num(body.width),
-    heightCm: num(body.height),
+    weightKg: num(body.weight) ?? kitBox?.weightKg,
+    lengthCm: num(body.length) ?? kitBox?.lengthCm,
+    widthCm: num(body.width) ?? kitBox?.widthCm,
+    heightCm: num(body.height) ?? kitBox?.heightCm,
   }
 
   let q = await quoteFreteMelhorEnvio(admin, tenantId, toCep, { insuranceCents, servicesCsv, box })
@@ -77,15 +87,23 @@ Deno.serve(async (req) => {
     tenant_id: tenantId,
     from_cep: q.fromCep,
     to_cep: q.toCep,
-    options: q.options.map((o) => ({
-      service: o.service,
-      service_id: o.serviceId,
-      company: o.company,
-      price_reais: o.priceCents / 100,
-      price_cents: o.priceCents,
-      delivery_days: o.deliveryDays,
-      internal: o.internal ?? false,
-    })),
+    charged,
+    options: q.options.map((o) => {
+      // Preço FINAL devolvido = com markup quando charged (o que o cliente paga); o cru fica
+      // em *_raw p/ referência. Entrega interna (Maringá) não recebe markup.
+      const finalCents = charged ? applyFreightMarkup(o.priceCents, { internal: o.internal }) : o.priceCents
+      return {
+        service: o.service,
+        service_id: o.serviceId,
+        company: o.company,
+        price_reais: finalCents / 100,
+        price_cents: finalCents,
+        price_cents_raw: o.priceCents,
+        price_reais_raw: o.priceCents / 100,
+        delivery_days: o.deliveryDays,
+        internal: o.internal ?? false,
+      }
+    }),
     debug: q.debug,
   }, 200)
 })

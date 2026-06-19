@@ -27,6 +27,9 @@ export type FreteQuoteResult = {
 export async function quoteFrete(args: {
   toCep: string
   tenantId?: string
+  /** Kit do pedido — quando informado, a cotação volta com o VALOR COBRADO (caixa do kit +
+   * seguro + margem), igual ao link/Pix. Sem kit = custo cru. */
+  kit?: string
   weight?: number
   length?: number
   width?: number
@@ -35,6 +38,7 @@ export async function quoteFrete(args: {
   if (!supabase) throw new Error('Sistema não configurado.')
   const body: Record<string, unknown> = { toCep: args.toCep.replace(/\D/g, '') }
   if (args.tenantId) body.tenantId = args.tenantId
+  if (args.kit) body.kit = args.kit
   if (args.weight) body.weight = args.weight
   if (args.length) body.length = args.length
   if (args.width) body.width = args.width

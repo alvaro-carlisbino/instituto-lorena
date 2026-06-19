@@ -113,13 +113,15 @@ export function PaymentLinksPage() {
     setQuoteOptions([])
     setQuoteMsg(null)
     try {
-      const r = await quoteFrete({ toCep: digits, tenantId: tenant.id })
+      // Passa o kit → a cotação volta com o VALOR COBRADO (seguro do kit + margem), igual ao
+      // link/Pix. Antes vinha o custo cru e nunca batia com o que o cliente pagava / com o ME.
+      const r = await quoteFrete({ toCep: digits, tenantId: tenant.id, kit })
       if (r.ok && r.options.length) {
         setQuoteOptions(r.options)
         setQuoteMsg(
           r.options.some((o) => o.internal)
             ? 'Maringá: entrega interna. Clique para aplicar.'
-            : 'Clique numa opção para aplicar no frete.',
+            : 'Valor já com seguro + margem (o que o cliente paga). Clique para aplicar.',
         )
       } else {
         setQuoteMsg(
