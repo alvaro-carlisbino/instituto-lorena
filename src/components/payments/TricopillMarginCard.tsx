@@ -141,7 +141,7 @@ export function TricopillMarginCard({
   }
 
   return (
-    <div className="rounded-3xl border border-border/30 bg-card/40 p-6">
+    <div className="rounded-3xl border border-border/40 bg-card/50 p-6 transition-all hover:bg-card/80">
       <p className="mb-1 text-sm font-bold text-foreground/90">Custos &amp; Margem</p>
       <p className="mb-4 text-[11px] text-muted-foreground">
         Informe o custo de cada kit pra ver a margem. A margem só conta os kits com custo cadastrado.
@@ -175,16 +175,16 @@ export function TricopillMarginCard({
 
       <div className="mt-4 grid grid-cols-3 gap-3 border-t border-border/20 pt-4">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Custo (período)</p>
-          <p className="mt-0.5 text-lg font-black tabular-nums text-rose-600">{brl(margin.cost)}</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Custo (período)</p>
+          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-rose-600">{brl(margin.cost)}</p>
         </div>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Margem bruta</p>
-          <p className="mt-0.5 text-lg font-black tabular-nums text-emerald-600">{brl(margin.lucro)}</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Margem bruta</p>
+          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-emerald-600">{brl(margin.lucro)}</p>
         </div>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Margem %</p>
-          <p className="mt-0.5 text-lg font-black tabular-nums text-foreground">{margin.pct}%</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Margem %</p>
+          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-foreground">{margin.pct}%</p>
         </div>
       </div>
       <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-muted/40 px-3 py-2">

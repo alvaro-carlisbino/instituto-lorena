@@ -26,7 +26,7 @@ export function TricopillCacCard({ paidCount, revenueCents }: { paidCount: numbe
   }, [spend, paidCount, revenueCents])
 
   return (
-    <div className="rounded-3xl border border-border/30 bg-card/40 p-6">
+    <div className="rounded-3xl border border-border/40 bg-card/50 p-6 transition-all hover:bg-card/80">
       <p className="mb-1 text-sm font-bold text-foreground/90">CAC &amp; ROAS</p>
       <p className="mb-4 text-[11px] text-muted-foreground">
         Digite quanto investiu em anúncios <b>neste período</b> pra ver o custo por venda e o retorno.
@@ -42,18 +42,18 @@ export function TricopillCacCard({ paidCount, revenueCents }: { paidCount: numbe
 
       <div className="mt-4 grid grid-cols-3 gap-3 border-t border-border/20 pt-4">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">CAC</p>
-          <p className="mt-0.5 text-lg font-black tabular-nums text-foreground">{spend > 0 ? brl(cac) : '—'}</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">CAC</p>
+          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-foreground">{spend > 0 ? brl(cac) : '—'}</p>
           <p className="text-[10px] text-muted-foreground">{paidCount} venda(s) paga(s)</p>
         </div>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">ROAS</p>
-          <p className="mt-0.5 text-lg font-black tabular-nums text-emerald-600">{spend > 0 ? `${roas.toFixed(1)}x` : '—'}</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">ROAS</p>
+          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-emerald-600">{spend > 0 ? `${roas.toFixed(1)}x` : '—'}</p>
           <p className="text-[10px] text-muted-foreground">receita ÷ investimento</p>
         </div>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Receita paga</p>
-          <p className="mt-0.5 text-lg font-black tabular-nums text-foreground">{brl(revenueCents)}</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Receita paga</p>
+          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-foreground">{brl(revenueCents)}</p>
         </div>
       </div>
     </div>
