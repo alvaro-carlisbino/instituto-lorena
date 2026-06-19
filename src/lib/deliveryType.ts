@@ -43,6 +43,34 @@ function isMaringaRegionCep(cepDigits: string): boolean {
   return cepDigits.startsWith('870') || cepDigits.startsWith('871') || cepDigits.startsWith('86990')
 }
 
+/**
+ * Status logístico do pedido (Fase 2) — gravado em custom_fields.entrega.status. Canônico e
+ * único pros 3 tipos de entrega (os rótulos se adaptam ao tipo na UI quando útil):
+ *   a_preparar → pronto (separado/etiqueta) → enviado (postado/saiu) → entregue. (+ cancelado)
+ */
+export type ShipStatus = 'a_preparar' | 'pronto' | 'enviado' | 'entregue' | 'cancelado'
+
+export const SHIP_STATUS_OPTIONS: Array<{ value: ShipStatus; label: string }> = [
+  { value: 'a_preparar', label: 'A preparar' },
+  { value: 'pronto', label: 'Pronto / separado' },
+  { value: 'enviado', label: 'Enviado / saiu' },
+  { value: 'entregue', label: 'Entregue' },
+  { value: 'cancelado', label: 'Cancelado' },
+]
+
+const SHIP_STATUS_SET = new Set<ShipStatus>(['a_preparar', 'pronto', 'enviado', 'entregue', 'cancelado'])
+
+export function shipStatusLabel(s: ShipStatus): string {
+  return SHIP_STATUS_OPTIONS.find((o) => o.value === s)?.label ?? s
+}
+
+/** Lê o status logístico do lead (default 'a_preparar'). */
+export function getShipStatus(lead: Pick<Lead, 'customFields'> | null | undefined): ShipStatus {
+  const ent = ((lead?.customFields ?? {}) as Record<string, unknown>).entrega as Record<string, unknown> | undefined
+  const raw = String(ent?.status ?? '').trim() as ShipStatus
+  return SHIP_STATUS_SET.has(raw) ? raw : 'a_preparar'
+}
+
 export function classifyDelivery(lead: Pick<Lead, 'customFields'>): DeliveryClassification {
   const cf = (lead.customFields ?? {}) as Record<string, unknown>
   const ent = (cf.entrega ?? {}) as Record<string, unknown>

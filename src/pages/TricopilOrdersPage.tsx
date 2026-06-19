@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ExternalLink, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
@@ -10,8 +11,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useCrm } from '@/context/CrmContext'
 import { fetchUnifiedPayments, type PaymentStatus, type UnifiedPayment } from '@/services/crmPaymentsUnified'
+import { setShipStatus } from '@/services/crmOrders'
 import { kitLabel } from '@/services/tricopillBi'
-import { classifyDelivery, DELIVERY_FILTER_OPTIONS, type DeliveryKind } from '@/lib/deliveryType'
+import {
+  classifyDelivery,
+  DELIVERY_FILTER_OPTIONS,
+  getShipStatus,
+  SHIP_STATUS_OPTIONS,
+  type DeliveryKind,
+  type ShipStatus,
+} from '@/lib/deliveryType'
 import { cn } from '@/lib/utils'
 
 function brl(cents: number): string {
@@ -51,6 +60,10 @@ export function TricopilOrdersPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | PaymentStatus>('all')
   const [methodFilter, setMethodFilter] = useState<'all' | 'pix' | 'card'>('all')
   const [deliveryFilter, setDeliveryFilter] = useState<'all' | DeliveryKind>('all')
+  const [shipFilter, setShipFilter] = useState<'all' | ShipStatus>('all')
+  // Override otimista do status logístico por lead (evita reler tudo após salvar).
+  const [shipOverride, setShipOverride] = useState<Record<string, ShipStatus>>({})
+  const [savingShip, setSavingShip] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -84,12 +97,34 @@ export function TricopilOrdersPage() {
     return classifyDelivery(lead).kind
   }
 
+  const shipOf = (p: UnifiedPayment): ShipStatus => {
+    if (!p.leadId) return 'a_preparar'
+    return shipOverride[p.leadId] ?? getShipStatus(leadById.get(p.leadId))
+  }
+
+  const changeShip = async (p: UnifiedPayment, next: ShipStatus) => {
+    if (!p.leadId) return
+    const lead = leadById.get(p.leadId)
+    const prev = shipOf(p)
+    setShipOverride((m) => ({ ...m, [p.leadId as string]: next }))
+    setSavingShip(p.leadId)
+    try {
+      await setShipStatus(p.leadId, lead?.customFields ?? null, next)
+    } catch (e) {
+      setShipOverride((m) => ({ ...m, [p.leadId as string]: prev }))
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar o status de envio.')
+    } finally {
+      setSavingShip(null)
+    }
+  }
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rows.filter((p) => {
       if (statusFilter !== 'all' && p.status !== statusFilter) return false
       if (methodFilter !== 'all' && p.method !== methodFilter) return false
       if (deliveryFilter !== 'all' && deliveryOf(p) !== deliveryFilter) return false
+      if (shipFilter !== 'all' && shipOf(p) !== shipFilter) return false
       if (q) {
         const hay = [p.customerName, p.phone, p.customerDoc, p.description, p.kit].filter(Boolean).join(' ').toLowerCase()
         if (!hay.includes(q)) return false
@@ -97,7 +132,7 @@ export function TricopilOrdersPage() {
       return true
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, statusFilter, methodFilter, deliveryFilter, leadById])
+  }, [rows, search, statusFilter, methodFilter, deliveryFilter, shipFilter, leadById, shipOverride])
 
   const kpis = useMemo(() => {
     const paid = filtered.filter((p) => p.status === 'paid')
@@ -160,6 +195,15 @@ export function TricopilOrdersPage() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={shipFilter} onValueChange={(v) => setShipFilter(v as 'all' | ShipStatus)}>
+          <SelectTrigger className="sm:w-[170px]"><SelectValue placeholder="Status envio" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos (envio)</SelectItem>
+            {SHIP_STATUS_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </section>
 
       {error ? (
@@ -175,6 +219,7 @@ export function TricopilOrdersPage() {
               <TableHead className="px-3 py-2 text-right">Valor</TableHead>
               <TableHead className="px-3 py-2">Pagamento</TableHead>
               <TableHead className="px-3 py-2">Entrega</TableHead>
+              <TableHead className="px-3 py-2">Status envio</TableHead>
               <TableHead className="px-3 py-2">Bling</TableHead>
               <TableHead className="px-3 py-2">Data</TableHead>
               <TableHead className="px-3 py-2"></TableHead>
@@ -182,9 +227,9 @@ export function TricopilOrdersPage() {
           </TableHeader>
           <TableBody>
             {loading && rows.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="px-3 py-8 text-center text-muted-foreground">Carregando…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} className="px-3 py-8 text-center text-muted-foreground">Carregando…</TableCell></TableRow>
             ) : filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="px-3 py-8 text-center text-muted-foreground">Nenhum pedido com esses filtros.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} className="px-3 py-8 text-center text-muted-foreground">Nenhum pedido com esses filtros.</TableCell></TableRow>
             ) : (
               filtered.map((p) => {
                 const lead = p.leadId ? leadById.get(p.leadId) : undefined
@@ -210,6 +255,22 @@ export function TricopilOrdersPage() {
                       {p.paidAt ? <div className="mt-0.5 text-[10px] text-muted-foreground">{shortDateTime(p.paidAt)}</div> : null}
                     </TableCell>
                     <TableCell className="px-3 py-2"><span className={cn(PILL, dm.cls)}>{dm.label}</span></TableCell>
+                    <TableCell className="px-3 py-2">
+                      {p.leadId ? (
+                        <select
+                          value={shipOf(p)}
+                          onChange={(e) => void changeShip(p, e.target.value as ShipStatus)}
+                          disabled={savingShip === p.leadId}
+                          className="h-7 max-w-[130px] rounded-md border border-border/50 bg-background px-1.5 text-[11px]"
+                        >
+                          {SHIP_STATUS_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="px-3 py-2">
                       {p.blingOrderId ? (
                         <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">#{p.blingOrderId}</span>
