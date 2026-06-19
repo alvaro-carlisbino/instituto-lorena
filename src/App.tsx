@@ -34,6 +34,7 @@ import { ChatWorkspacePage } from './pages/ChatWorkspacePage'
 import { TricopilPage } from './pages/TricopilPage'
 import { TricopilDashboardPage } from './pages/TricopilDashboardPage'
 import { TricopilOrdersPage } from './pages/TricopilOrdersPage'
+import { TricopilFinancePage } from './pages/TricopilFinancePage'
 import { PaymentLinksPage } from './pages/PaymentLinksPage'
 import { SalesReportPage } from './pages/SalesReportPage'
 import { CouponsPage } from './pages/CouponsPage'
@@ -68,6 +69,7 @@ function AppRoutes() {
       <Route path="/tricopill" element={<TricopilPage />} />
       <Route path="/tricopill-bi" element={<TricopilDashboardPage />} />
       <Route path="/tricopill-pedidos" element={<TricopilOrdersPage />} />
+      <Route path="/tricopill-financeiro" element={<TricopilFinancePage />} />
       <Route path="/links-pagamento" element={<PaymentLinksPage />} />
       <Route path="/relatorio-vendas" element={<SalesReportPage />} />
       <Route path="/cupons" element={<CouponsPage />} />
