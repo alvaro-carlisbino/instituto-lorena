@@ -444,3 +444,13 @@ verify_jwt = false
 # POST authorize_url valida a sessão por conta própria (getUser).
 [functions.crm-frete-oauth]
 verify_jwt = false
+
+# Webhook do Asaas: chamado pelo Asaas com header `asaas-access-token` (sem JWT do
+# Supabase). PRECISA verify_jwt=false, senão o gateway devolve 401 e as confirmações
+# de pagamento falham. (Sem isto fixado, um `deploy` sem --no-verify-jwt religa a trava.)
+[functions.crm-asaas-webhook]
+verify_jwt = false
+
+# Checkout de cartão Asaas (/pagar): página pública do cliente, sem login.
+[functions.crm-asaas-pay]
+verify_jwt = false
