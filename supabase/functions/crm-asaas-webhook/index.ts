@@ -27,6 +27,27 @@ Deno.serve(async (req) => {
     return json({ ok: true, skipped: 'invalid_json' }, 200)
   }
 
+  // ===== Gatilho MANUAL (operação): finaliza o downstream (Bling + comprovante + Melhor Envio +
+  // mover p/ Pago) de uma cobrança JÁ paga que não passou pelo webhook — ex.: Pix pago fora do
+  // gateway e reconciliado à mão. Guardado pelo webhookToken do polo. NÃO depende de evento Asaas.
+  // Body: { manual_finalize: true, local_id: "<asaas_payments.id>" }
+  if (payload.manual_finalize === true && typeof payload.local_id === 'string') {
+    const localId = payload.local_id
+    const { data: row } = await admin.from('asaas_payments').select('tenant_id').eq('id', localId).maybeSingle()
+    if (!row) return json({ ok: false, error: 'payment_not_found' }, 200)
+    const tenantId = String((row as { tenant_id?: string }).tenant_id ?? '')
+    const cfg = await readAsaasConfig(admin, tenantId)
+    const expected = cfg?.webhookToken ?? ''
+    const got = req.headers.get('asaas-access-token') ?? ''
+    if (!expected || got !== expected) return json({ ok: false, error: 'invalid_webhook_token' }, 401)
+    try {
+      await finalizeAsaasPaid(admin, localId)
+    } catch (e) {
+      return json({ ok: false, error: 'finalize_failed', detail: (e instanceof Error ? e.message : String(e)).slice(0, 300) }, 200)
+    }
+    return json({ ok: true, manual_finalized: localId }, 200)
+  }
+
   const { event, asaasPaymentId, externalRef, subscriptionId, paid } = parseAsaasWebhook(payload)
 
   // Dedup. Assinatura: por PAGAMENTO (sem o evento) — assim CONFIRMED e RECEIVED do MESMO ciclo
