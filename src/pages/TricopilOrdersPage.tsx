@@ -138,7 +138,11 @@ export function TricopilOrdersPage() {
     const paid = filtered.filter((p) => p.status === 'paid')
     const pending = filtered.filter((p) => p.status === 'pending')
     const revenue = paid.reduce((s, p) => s + p.amountCents, 0)
-    return { total: filtered.length, paid: paid.length, pending: pending.length, revenue }
+    // Frete médio: só pedidos com frete informado e > 0 (exclui retirada/Maringá grátis e
+    // pedidos antigos sem o dado). Asaas é o único que grava freight_cents.
+    const comFrete = filtered.filter((p) => p.freightCents != null && p.freightCents > 0)
+    const freteMedio = comFrete.length > 0 ? Math.round(comFrete.reduce((s, p) => s + (p.freightCents ?? 0), 0) / comFrete.length) : 0
+    return { total: filtered.length, paid: paid.length, pending: pending.length, revenue, freteMedio, comFreteCount: comFrete.length }
   }, [filtered])
 
   return (
@@ -154,11 +158,16 @@ export function TricopilOrdersPage() {
       />
 
       {/* KPIs */}
-      <section className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <KpiCard label="Pedidos (filtro)" value={String(kpis.total)} />
         <KpiCard label="Pagos" value={String(kpis.paid)} tone="text-emerald-600" />
         <KpiCard label="Aguardando" value={String(kpis.pending)} tone="text-amber-600" />
         <KpiCard label="Receita paga" value={brl(kpis.revenue)} tone="text-foreground" />
+        <KpiCard
+          label="Frete médio"
+          value={kpis.comFreteCount > 0 ? brl(kpis.freteMedio) : '—'}
+          tone="text-foreground"
+        />
       </section>
 
       {/* Filtros */}

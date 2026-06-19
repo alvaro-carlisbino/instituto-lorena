@@ -262,6 +262,7 @@ export async function createAsaasCardIntent(
     customer_name: args.customer?.name?.trim() || null,
     phone: brPhone(args.customer?.phone) || null,
     customer_doc: digits(args.customer?.cpf) || null,
+    freight_cents: freightCents,
     status: 'pending',
   })
   const base = args.appBaseUrl.replace(/\/$/, '')
@@ -509,6 +510,7 @@ export async function createAsaasPix(
     asaas_customer_id: customerId,
     asaas_payment_id: String(asaasId),
     pix_payload: qrText || null,
+    freight_cents: freightCents,
     status: 'pending',
   })
 
