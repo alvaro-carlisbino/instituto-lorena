@@ -24,6 +24,7 @@ import {
   Building2,
   PackageOpen,
   Pill,
+  Store,
   Wallet,
   CreditCard,
   Receipt,
@@ -163,6 +164,7 @@ export function AppSidebar() {
                 <NavItem to="/tricopill-pedidos" label="Pedidos" icon={PackageOpen} />
                 <NavItem to="/tricopill-financeiro" label="Financeiro" icon={Wallet} />
                 <NavItem to="/tricopill-bi" label="BI Tricopill" icon={ChartColumn} />
+                <NavItem to="/tricopill-loja" label="Loja (site)" icon={Store} />
                 <NavItem to="/relatorio-vendas" label="Relatório de vendas" icon={Receipt} />
                 <NavItem to="/cupons" label="Cupons" icon={Ticket} />
               </SidebarMenu>
