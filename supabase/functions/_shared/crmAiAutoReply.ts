@@ -1150,6 +1150,17 @@ export async function runManychatAiAutoReply(
   }
   // --- End Triage Logic ---
 
+  // TRAVA POR-LEAD (mesma proteção do caminho WhatsApp em runWhatsappAiAutoReply): serializa
+  // a geração+envio da resposta da IA. Sem ela, 2 mensagens seguidas do paciente enquanto o
+  // z.ai ainda gera (~50-60s) disparavam 2 gerações independentes — resposta DUPLICADA e/ou
+  // atropelada (caso Jamile 18/jun: parágrafo da Unimed enviado 2x). Quem não adquire a trava
+  // desiste; a geração em curso já responde com o histórico do lead. Liberada no finally.
+  // OBS.: o merge de mensagens em rajada (inbound_burst_debounce_ms) exige entrega assíncrona
+  // via push ManyChat — pendente de configurar push p/ este tenant; aqui só a trava.
+  if (!(await acquireAiReplyLock(admin, options.leadId))) {
+    return { replied: false }
+  }
+  try {
   let aiReplyRaw = ''
   try {
     const invokeOpts =
@@ -1264,5 +1275,8 @@ export async function runManychatAiAutoReply(
       })
       return { replied: false, handoffSuggested: false }
     }
+  }
+  } finally {
+    await releaseAiReplyLock(admin, options.leadId)
   }
 }
