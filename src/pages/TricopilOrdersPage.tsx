@@ -281,11 +281,16 @@ export function TricopilOrdersPage() {
                       )}
                     </TableCell>
                     <TableCell className="px-3 py-2">
-                      {p.blingOrderId ? (
-                        <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">#{p.blingOrderId}</span>
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground">— sem pedido</span>
-                      )}
+                      <div className="flex flex-col gap-0.5">
+                        {p.blingOrderId ? (
+                          <span className="w-fit rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">Bling #{p.blingOrderId}</span>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">— sem pedido</span>
+                        )}
+                        {p.meOrderId ? (
+                          <span className="w-fit rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700" title={`Melhor Envio: ${p.meOrderId}`}>📦 Envio no ME</span>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell className="px-3 py-2 whitespace-nowrap text-muted-foreground">{shortDateTime(p.createdAt)}</TableCell>
                     <TableCell className="px-3 py-2">

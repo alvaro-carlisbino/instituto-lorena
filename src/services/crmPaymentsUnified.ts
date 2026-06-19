@@ -27,6 +27,8 @@ export type UnifiedPayment = {
   paidAt: string | null
   /** Frete em centavos embutido no total (só Asaas grava; null = não informado). */
   freightCents: number | null
+  /** ID do pedido no Melhor Envio (base p/ rastreio; só Asaas). */
+  meOrderId: string | null
 }
 
 const PAID_STATUSES = new Set(['paid', 'pago', 'approved', 'available', 'completed'])
@@ -46,7 +48,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
   const [asaas, rede, pix] = await Promise.all([
     supabase
       .from('asaas_payments')
-      .select('id, lead_id, method, amount_cents, description, kit, installments, status, return_code, customer_name, phone, customer_doc, asaas_payment_id, bling_order_id, created_at, paid_at, freight_cents')
+      .select('id, lead_id, method, amount_cents, description, kit, installments, status, return_code, customer_name, phone, customer_doc, asaas_payment_id, bling_order_id, created_at, paid_at, freight_cents, me_order_id')
       .order('created_at', { ascending: false })
       .limit(limit),
     supabase
@@ -85,6 +87,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         createdAt: String(rec.created_at ?? ''),
         paidAt,
         freightCents: rec.freight_cents != null ? Number(rec.freight_cents) : null,
+        meOrderId: str(rec.me_order_id),
       })
     }
   }
@@ -111,6 +114,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         createdAt: String(rec.created_at ?? ''),
         paidAt,
         freightCents: null,
+        meOrderId: null,
       })
     }
   }
@@ -137,6 +141,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         createdAt: String(rec.created_at ?? ''),
         paidAt,
         freightCents: null,
+        meOrderId: null,
       })
     }
   }

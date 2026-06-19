@@ -788,6 +788,10 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
       ].filter(Boolean).join(' - ')
       let content = ''
       let author = 'Melhor Envio'
+      // Persiste o id do pedido ME no pagamento (base p/ rastreio automático futuro).
+      if (ship.ok && ship.cartId) {
+        await admin.from('asaas_payments').update({ me_order_id: ship.cartId }).eq('id', localId).then(() => {}, () => {})
+      }
       if (ship.ok) content = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
       else if (ship.reason === 'entrega_local_maringa') { author = 'Logística'; content = `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}.` }
       else if (ship.reason === 'retirada_clinica') { author = 'Logística'; content = `🏥 RETIRADA NA CLÍNICA — cliente vai buscar.` }
