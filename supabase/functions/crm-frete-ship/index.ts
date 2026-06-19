@@ -19,12 +19,20 @@ import {
   createMeShipment,
   getMeSender,
   meConnectionStatus,
+  meOrderStatus,
   melhorEnvioSandbox,
   meSenderMissing,
   setMeSender,
   type MeAddress,
   type MeProduct,
 } from '../_shared/melhorEnvio.ts'
+
+// Status do Melhor Envio → status logístico do CRM (custom_fields.entrega.status).
+const ME_STATUS_MAP: Record<string, string> = {
+  pending: 'pronto', released: 'pronto', generated: 'pronto',
+  posted: 'enviado', delivered: 'entregue',
+  canceled: 'cancelado', cancelled: 'cancelado',
+}
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -163,6 +171,40 @@ Deno.serve(async (req) => {
       ok: true, finalized: res.finalized, cartId: res.cartId, tracking: res.tracking,
       protocol: res.protocol, printUrl: res.printUrl, stage: res.stage,
     })
+  }
+
+  // ── refresh_tracking: lê o status/rastreio no Melhor Envio e atualiza o status logístico ──
+  if (action === 'refresh_tracking') {
+    const leadId = String(p.leadId ?? '').trim()
+    if (!leadId) return json({ error: 'missing_lead' }, 400)
+    // Pega o pedido ME mais recente desse lead.
+    const { data: pay } = await admin
+      .from('asaas_payments')
+      .select('me_order_id')
+      .eq('lead_id', leadId)
+      .not('me_order_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const orderId = (pay as { me_order_id?: string } | null)?.me_order_id
+    if (!orderId) return json({ ok: false, error: 'sem_envio_me' }, 200)
+
+    const st = await meOrderStatus(admin, tenantId, orderId)
+    if (!st.ok) return json({ ok: false, error: st.error ?? 'falha', me_order_id: orderId }, 200)
+
+    const mapped = st.status ? ME_STATUS_MAP[st.status.toLowerCase()] : undefined
+    // Atualiza custom_fields.entrega (status + rastreio), preservando o resto.
+    const { data: lead } = await admin.from('leads').select('custom_fields').eq('id', leadId).maybeSingle()
+    const cf = { ...(((lead as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>) }
+    const ent = { ...((cf.entrega ?? {}) as Record<string, unknown>) }
+    if (mapped) ent.status = mapped
+    if (st.tracking) ent.tracking = st.tracking
+    ent.me_status_raw = st.status
+    ent.tracking_updated_at = new Date().toISOString()
+    cf.entrega = ent
+    await admin.from('leads').update({ custom_fields: cf }).eq('id', leadId)
+
+    return json({ ok: true, me_status: st.status, mapped: mapped ?? null, tracking: st.tracking })
   }
 
   return json({ error: 'unknown_action' }, 400)

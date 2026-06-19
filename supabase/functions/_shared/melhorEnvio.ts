@@ -686,6 +686,37 @@ export async function createMeShipment(
   return { ok: true, cartId, finalized: true, tracking, protocol, printUrl, stage: printUrl ? 'print' : 'generate' }
 }
 
+/**
+ * Lê o status + rastreio de um pedido no Melhor Envio (GET /me/orders/{id}). Usado pelo rastreio
+ * "ler do painel": o operador compra a etiqueta no painel ME e o sistema puxa o status depois.
+ * Enquanto o envio estiver só no CARRINHO (não comprado), a ME pode devolver 404/sem tracking —
+ * tratado como "ainda sem rastreio".
+ */
+export async function meOrderStatus(
+  admin: SupabaseClient,
+  tenantId: string,
+  orderId: string,
+): Promise<{ ok: boolean; status: string | null; tracking: string | null; error?: string }> {
+  if (!melhorEnvioConfigured()) return { ok: false, status: null, tracking: null, error: 'client_not_configured' }
+  const token = await getValidMeToken(admin, tenantId)
+  if (!token) return { ok: false, status: null, tracking: null, error: 'not_connected' }
+  try {
+    const res = await fetch(`${melhorEnvioBaseUrl()}/api/v2/me/orders/${encodeURIComponent(orderId)}`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}`, 'User-Agent': meUserAgent() },
+      signal: AbortSignal.timeout(15000),
+    })
+    const text = await res.text()
+    if (!res.ok) return { ok: false, status: null, tracking: null, error: `http_${res.status}: ${text.slice(0, 120)}` }
+    const data = (text ? JSON.parse(text) : {}) as Record<string, unknown>
+    const status = data.status != null ? String(data.status) : null
+    const tracking =
+      data.tracking != null ? String(data.tracking) : data.self_tracking != null ? String(data.self_tracking) : null
+    return { ok: true, status, tracking }
+  } catch (e) {
+    return { ok: false, status: null, tracking: null, error: (e instanceof Error ? e.message : String(e)).slice(0, 140) }
+  }
+}
+
 export type AutoShipResult = {
   ok: boolean
   skipped?: boolean

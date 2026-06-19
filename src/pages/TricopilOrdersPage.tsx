@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ExternalLink, RefreshCw } from 'lucide-react'
+import { ExternalLink, RefreshCw, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useCrm } from '@/context/CrmContext'
 import { fetchUnifiedPayments, type PaymentStatus, type UnifiedPayment } from '@/services/crmPaymentsUnified'
 import { setShipStatus } from '@/services/crmOrders'
+import { refreshTracking } from '@/services/crmFrete'
 import { kitLabel } from '@/services/tricopillBi'
 import {
   classifyDelivery,
@@ -64,6 +65,8 @@ export function TricopilOrdersPage() {
   // Override otimista do status logístico por lead (evita reler tudo após salvar).
   const [shipOverride, setShipOverride] = useState<Record<string, ShipStatus>>({})
   const [savingShip, setSavingShip] = useState<string | null>(null)
+  const [trackingByLead, setTrackingByLead] = useState<Record<string, string>>({})
+  const [refreshingTrack, setRefreshingTrack] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -100,6 +103,34 @@ export function TricopilOrdersPage() {
   const shipOf = (p: UnifiedPayment): ShipStatus => {
     if (!p.leadId) return 'a_preparar'
     return shipOverride[p.leadId] ?? getShipStatus(leadById.get(p.leadId))
+  }
+
+  // Rastreio já salvo no lead (custom_fields.entrega.tracking), preenchido pelo refresh.
+  const persistedTracking = (p: UnifiedPayment): string => {
+    if (!p.leadId) return ''
+    const ent = ((leadById.get(p.leadId)?.customFields ?? {}) as Record<string, unknown>).entrega as
+      | Record<string, unknown>
+      | undefined
+    return ent?.tracking ? String(ent.tracking) : ''
+  }
+
+  const doRefreshTracking = async (p: UnifiedPayment) => {
+    if (!p.leadId) return
+    setRefreshingTrack(p.leadId)
+    try {
+      const r = await refreshTracking(p.leadId)
+      if (!r.ok) {
+        toast.message(r.error === 'sem_envio_me' ? 'Sem envio no Melhor Envio pra este pedido.' : 'Ainda sem rastreio no Melhor Envio (compre a etiqueta no painel).')
+        return
+      }
+      if (r.mapped) setShipOverride((m) => ({ ...m, [p.leadId as string]: r.mapped as ShipStatus }))
+      if (r.tracking) setTrackingByLead((m) => ({ ...m, [p.leadId as string]: r.tracking as string }))
+      toast.success(r.tracking ? `Rastreio: ${r.tracking}${r.meStatus ? ` (${r.meStatus})` : ''}` : `Status no ME: ${r.meStatus ?? 'sem rastreio ainda'}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao atualizar rastreio.')
+    } finally {
+      setRefreshingTrack(null)
+    }
   }
 
   const changeShip = async (p: UnifiedPayment, next: ShipStatus) => {
@@ -288,7 +319,23 @@ export function TricopilOrdersPage() {
                           <span className="text-[10px] text-muted-foreground">— sem pedido</span>
                         )}
                         {p.meOrderId ? (
-                          <span className="w-fit rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700" title={`Melhor Envio: ${p.meOrderId}`}>📦 Envio no ME</span>
+                          <div className="flex flex-col gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => void doRefreshTracking(p)}
+                              disabled={refreshingTrack === p.leadId}
+                              className="inline-flex w-fit items-center gap-1 rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 hover:bg-sky-500/20 disabled:opacity-60"
+                              title={`Melhor Envio: ${p.meOrderId}. Clique para puxar o rastreio.`}
+                            >
+                              <Truck className={cn('size-3', refreshingTrack === p.leadId && 'animate-pulse')} />
+                              {refreshingTrack === p.leadId ? 'Buscando…' : 'Atualizar rastreio'}
+                            </button>
+                            {((p.leadId && trackingByLead[p.leadId]) || persistedTracking(p)) ? (
+                              <span className="text-[10px] tabular-nums text-muted-foreground">
+                                🔎 {(p.leadId && trackingByLead[p.leadId]) || persistedTracking(p)}
+                              </span>
+                            ) : null}
+                          </div>
                         ) : null}
                       </div>
                     </TableCell>

@@ -171,3 +171,23 @@ export async function createShipment(args: {
     stage: String(p.stage ?? ''),
   }
 }
+
+export type RefreshTrackingResult = {
+  ok: boolean
+  meStatus: string | null
+  mapped: string | null
+  tracking: string | null
+  error: string | null
+}
+
+/** Lê o status/rastreio do pedido no Melhor Envio e atualiza o status logístico do lead. */
+export async function refreshTracking(leadId: string): Promise<RefreshTrackingResult> {
+  const p = await shipInvoke({ action: 'refresh_tracking', leadId })
+  return {
+    ok: p.ok === true,
+    meStatus: (p.me_status as string | null) ?? null,
+    mapped: (p.mapped as string | null) ?? null,
+    tracking: (p.tracking as string | null) ?? null,
+    error: p.ok === true ? null : String(p.error ?? 'falha'),
+  }
+}
