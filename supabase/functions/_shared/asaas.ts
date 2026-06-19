@@ -753,9 +753,12 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
               ? ` · NF-e ${out.nfe.numero ? '#' + out.nfe.numero + ' ' : ''}transmitida ✅`
               : out.nfe.nfeId ? ` · NF-e gerada (rascunho${out.nfe.error ? ': ' + out.nfe.error : ''})` : ` · NF-e não emitida${out.nfe.error ? ': ' + out.nfe.error : ''}`)
           : ''
+        const fbNote = out.contatoFallback
+          ? ` · ⚠️ saiu no contato GENÉRICO (não foi possível registrar ${String(cad.nomeCompleto || p.customer_name || l.patient_name || 'o cliente').trim()} no Bling) — corrigir o cadastro/contato do pedido manualmente`
+          : ''
         await insertInteraction(admin, {
           leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author: 'Bling',
-          content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).${nfeNote}`, tenantId: blingTenant,
+          content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).${nfeNote}${fbNote}`, tenantId: blingTenant,
         })
       }
     } catch (e) {

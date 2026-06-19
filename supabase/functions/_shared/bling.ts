@@ -147,6 +147,31 @@ async function blingFetch(token: string, path: string, init?: RequestInit): Prom
   })
 }
 
+/**
+ * Como blingFetch, mas com RETRY em 429 (limite Bling = 3 req/s) e 5xx transitório. Usar SÓ
+ * em escrita CRÍTICA (criar contato / pedido), onde uma falha transitória NÃO pode degradar
+ * para o contato genérico (caso Alisson 19/jun: contato bateu no rate-limit no meio da rajada
+ * pedido+NF-e+Melhor Envio e o pedido saiu no "Cliente Loja Tricopill (site)"). Respeita
+ * Retry-After; senão backoff 700ms → 1400ms → 2800ms. NÃO usar em leitura quente (catálogo).
+ */
+async function blingFetchWithRetry(
+  token: string,
+  path: string,
+  init?: RequestInit,
+  attempts = 4,
+): Promise<Response> {
+  let res = await blingFetch(token, path, init)
+  for (let i = 1; i < attempts && (res.status === 429 || res.status >= 500); i++) {
+    const raSec = Number(res.headers.get('retry-after') ?? '')
+    const wait = Number.isFinite(raSec) && raSec > 0
+      ? Math.min(raSec * 1000, 5000)
+      : 700 * 2 ** (i - 1)
+    await new Promise((r) => setTimeout(r, wait))
+    res = await blingFetch(token, path, init)
+  }
+  return res
+}
+
 /** Lista produtos (catálogo + saldo de estoque quando disponível). */
 export async function blingListProducts(
   token: string,
@@ -318,7 +343,7 @@ async function blingFindOrCreateContato(
   // 1) Procura por CPF (mais único) e depois por telefone — NUNCA só por nome (xarás).
   for (const term of [cpf.length === 11 ? cpf : '', tail8 ? phoneDigits.slice(-11) : ''].filter(Boolean)) {
     try {
-      const res = await blingFetch(token, `/contatos?pesquisa=${encodeURIComponent(term)}&limite=20`)
+      const res = await blingFetchWithRetry(token, `/contatos?pesquisa=${encodeURIComponent(term)}&limite=20`)
       if (res.ok) {
         const data = (JSON.parse((await res.text()) || '{}')?.data ?? []) as Array<Record<string, unknown>>
         const match = data.find((c) => {
@@ -372,17 +397,25 @@ async function blingFindOrCreateContato(
   const bodies = [full, withEndereco, withDoc, base]
     .map((b) => JSON.stringify(b))
     .filter((s) => (seen.has(s) ? false : (seen.add(s), true)))
+  let lastErr = ''
   for (const body of bodies) {
     try {
-      const res = await blingFetch(token, '/contatos', { method: 'POST', body })
+      const res = await blingFetchWithRetry(token, '/contatos', { method: 'POST', body })
       if (res.ok) {
         const id = (JSON.parse((await res.text()) || '{}')?.data as { id?: number | string } | undefined)?.id
         if (id != null) return String(id)
+        lastErr = 'resposta sem id'
+      } else {
+        lastErr = `${res.status}: ${(await res.text().catch(() => '')).slice(0, 160)}`
       }
-    } catch {
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : String(e)
       // tenta o próximo (menos campos)
     }
   }
+  // Não cria silenciosamente: se chegou aqui, o caller cai no contato GENÉRICO — registra
+  // pra investigar (rate-limit, validação, token) em vez de a venda sair sem nome.
+  console.warn('[bling] blingFindOrCreateContato falhou; usando contato genérico', { nome, lastErr })
   return null
 }
 
@@ -412,6 +445,8 @@ export async function blingCreateSaleOrder(
 ): Promise<{
   orderId: string | null
   bottles: number
+  /** true: o contato REAL não pôde ser criado/achado e o pedido saiu no contato GENÉRICO. */
+  contatoFallback: boolean
   nfe?: { nfeId: string | null; numero?: string; situacao?: string; transmitted: boolean; error?: string }
 }> {
   const token = await getValidBlingToken(admin, tenantId)
@@ -439,12 +474,14 @@ export async function blingCreateSaleOrder(
       uf: (args.entrega?.uf || info?.uf || '').toUpperCase() || undefined,
     }
   }
+  let contatoFallback = false
   if (args.customerName) {
     const realId = await blingFindOrCreateContato(token, {
       nome: args.customerName, phone: args.phone, cpf: args.cpf, email: args.email,
       dataNascimento: args.dataNascimento, sexo: args.sexo, endereco,
     })
     if (realId) contatoId = realId
+    else contatoFallback = true
   }
 
   const productId = cfg.kit_product_id != null && String(cfg.kit_product_id).trim()
@@ -520,7 +557,7 @@ export async function blingCreateSaleOrder(
       transmit: cfg.auto_nfe_transmit === true,
     }).catch((e) => ({ nfeId: null, transmitted: false, error: e instanceof Error ? e.message : String(e) }))
   }
-  return { orderId, bottles, nfe }
+  return { orderId, bottles, contatoFallback, nfe }
 }
 
 /**
@@ -626,7 +663,7 @@ export async function blingListSaleOrders(
 
 /** Cria um pedido de venda no Bling. Retorna o id do pedido criado. */
 export async function blingCreateOrder(token: string, payload: Record<string, unknown>): Promise<string | null> {
-  const res = await blingFetch(token, `/pedidos/vendas`, { method: 'POST', body: JSON.stringify(payload) })
+  const res = await blingFetchWithRetry(token, `/pedidos/vendas`, { method: 'POST', body: JSON.stringify(payload) })
   const text = await res.text()
   if (!res.ok) throw new Error(`bling_pedido_${res.status}: ${text.slice(0, 300)}`)
   let parsed: { data?: { id?: number | string } } = {}
