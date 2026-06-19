@@ -22,6 +22,7 @@ export function CheckoutPage() {
   const [year, setYear] = useState('')
   const [cvv, setCvv] = useState('')
   const [cpf, setCpf] = useState('')
+  const [phone, setPhone] = useState('')
   const [cep, setCep] = useState('')
   const [addrNumber, setAddrNumber] = useState('')
   const [installments, setInstallments] = useState(1)
@@ -50,6 +51,7 @@ export function CheckoutPage() {
         },
         {
           cpf: cpf.replace(/\D/g, ''),
+          phone: phone.replace(/\D/g, ''),
           postalCode: cep.replace(/\D/g, ''),
           addressNumber: addrNumber.trim(),
         },
@@ -115,6 +117,10 @@ export function CheckoutPage() {
               <Label htmlFor="cc-cvv">CVV</Label>
               <Input id="cc-cvv" value={cvv} onChange={(e) => setCvv(e.target.value)} inputMode="numeric" placeholder="123" />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="cc-phone">Celular do titular (com DDD)</Label>
+            <Input id="cc-phone" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="numeric" placeholder="(44) 99999-9999" />
           </div>
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1.5">
