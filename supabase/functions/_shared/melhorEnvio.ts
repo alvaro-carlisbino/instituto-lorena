@@ -313,6 +313,20 @@ export function meConnectionStatus(cfg: Record<string, unknown> | null | undefin
 
 // ─── Cotação ────────────────────────────────────────────────────────────────
 
+/**
+ * Piso de peso (kg) p/ COTAR e COMPRAR frete: nunca abaixo disso, mesmo que a caixa do kit
+ * seja mais leve. Regra do negócio (Álvaro 20/jun): "o peso padrão é 0,7kg" — evita sub-cotar
+ * e perder dinheiro no envio (ex.: 1 frasco antes cotava 0,3kg). Kits mais pesados (3+1=0,75;
+ * 5=0,95) seguem com o peso real, que já é maior que o piso.
+ */
+const FRETE_MIN_WEIGHT_KG = 0.7
+
+/** Peso (kg) p/ a cotação/etiqueta: maior entre a caixa do kit, o default e o piso de 0,7kg. */
+function resolveWeightKg(box: FreteBox): number {
+  const fromBox = box.weightKg && box.weightKg > 0 ? box.weightKg : envNum('FRETE_BOX_WEIGHT_KG', 0.7)
+  return Math.max(FRETE_MIN_WEIGHT_KG, fromBox)
+}
+
 export async function quoteFreteMelhorEnvio(
   admin: SupabaseClient,
   tenantId: string,
@@ -363,7 +377,7 @@ export async function quoteFreteMelhorEnvio(
     from: { postal_code: fromCep },
     to: { postal_code: toCep },
     package: {
-      weight: box.weightKg && box.weightKg > 0 ? box.weightKg : envNum('FRETE_BOX_WEIGHT_KG', 0.3),
+      weight: resolveWeightKg(box),
       length: box.lengthCm && box.lengthCm > 0 ? box.lengthCm : envNum('FRETE_BOX_LENGTH_CM', 20),
       width: box.widthCm && box.widthCm > 0 ? box.widthCm : envNum('FRETE_BOX_WIDTH_CM', 20),
       height: box.heightCm && box.heightCm > 0 ? box.heightCm : envNum('FRETE_BOX_HEIGHT_CM', 10),
@@ -633,7 +647,7 @@ export async function createMeShipment(
         height: box.heightCm && box.heightCm > 0 ? box.heightCm : envNum('FRETE_BOX_HEIGHT_CM', 10),
         width: box.widthCm && box.widthCm > 0 ? box.widthCm : envNum('FRETE_BOX_WIDTH_CM', 20),
         length: box.lengthCm && box.lengthCm > 0 ? box.lengthCm : envNum('FRETE_BOX_LENGTH_CM', 20),
-        weight: box.weightKg && box.weightKg > 0 ? box.weightKg : envNum('FRETE_BOX_WEIGHT_KG', 0.3),
+        weight: resolveWeightKg(box),
       },
     ],
     options: {
