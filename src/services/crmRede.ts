@@ -70,6 +70,47 @@ export async function generateRedeLink(args: {
   return { payLink: String(p.payLink ?? ''), amountCents: Number(p.amountCents ?? 0) }
 }
 
+/** Gera um PIX (e.Rede) e devolve o copia-e-cola + imagem do QR. */
+export async function generateRedePix(args: {
+  amountCents: number
+  description: string
+  leadId?: string
+  freightCents?: number
+  couponCode?: string
+  customerName?: string
+  cpf?: string
+}): Promise<{ id: string; qrText: string; qrImage: string | null; amountCents: number }> {
+  const p = await invoke('crm-rede-link', {
+    action: 'generate_pix',
+    amountCents: args.amountCents,
+    description: args.description,
+    ...(args.leadId ? { leadId: args.leadId } : {}),
+    ...(args.freightCents && args.freightCents > 0 ? { freightCents: args.freightCents } : {}),
+    ...(args.couponCode?.trim() ? { couponCode: args.couponCode.trim() } : {}),
+    ...(args.customerName?.trim() ? { customerName: args.customerName.trim() } : {}),
+    ...(args.cpf?.trim() ? { cpf: args.cpf.trim() } : {}),
+  })
+  if (p.ok !== true) {
+    const m = String(p.message || p.error || '')
+    if (m.includes('rede_nao_configurado')) throw new Error('Rede não configurada neste polo. Preencha PV e Token (e.Rede) em Integrações.')
+    if (m.includes('rede_valor')) throw new Error('Informe um valor válido (mínimo R$ 1,00).')
+    throw new Error(m || 'Falha ao gerar Pix')
+  }
+  return {
+    id: String(p.id ?? ''),
+    qrText: String(p.qrText ?? ''),
+    qrImage: p.qrImage != null ? String(p.qrImage) : null,
+    amountCents: Number(p.amountCents ?? 0),
+  }
+}
+
+/** Consulta o status de um PIX (e.Rede) e finaliza no servidor se já foi pago. */
+export async function checkRedePix(id: string): Promise<{ status: string; paid: boolean; rawStatus: string }> {
+  const p = await invoke('crm-rede-link', { action: 'check_pix', id })
+  if (p.ok !== true) throw new Error(String(p.message || p.error || 'Falha ao verificar o Pix'))
+  return { status: String(p.status ?? 'pending'), paid: p.paid === true, rawStatus: String(p.rawStatus ?? '') }
+}
+
 /** Dispara uma autorização de teste (sandbox) para validar PV/token salvos. */
 export async function testRedeTx(): Promise<{ ok: boolean; returnCode: string; message: string }> {
   try {

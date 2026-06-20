@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Copy, CreditCard, ExternalLink, QrCode, Truck } from 'lucide-react'
+import { Copy, CreditCard, ExternalLink, QrCode, RefreshCw, Truck } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
@@ -13,13 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
-import { generateAsaasCardLink, generateAsaasPix } from '@/services/crmAsaas'
+import { checkRedePix, generateRedeLink, generateRedePix } from '@/services/crmRede'
 import { quoteFrete, type FreteOption } from '@/services/crmFrete'
 import { ClinicPaymentsPanel } from '@/components/payments/ClinicPaymentsPanel'
 
 const NO_LEAD = '__none__'
 
-// Preço CHEIO para cartão (Asaas) — sem o desconto de 5% do Pix.
+// Preço CHEIO para cartão (e.Rede) — sem o desconto de 5% do Pix.
 const CARD_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99900 }
 // Preço do Pix por kit (com 5% off) — mesma tabela do PAGBANK_KITS no backend.
 const PIX_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 56700, '5_meses': 94905 }
@@ -54,7 +54,8 @@ export function PaymentLinksPage() {
   const [maxInstallments, setMaxInstallments] = useState(isSalesPolo ? KIT_MAX_INSTALLMENTS['3_meses'] : 12)
   const [freightReais, setFreightReais] = useState('')
   const [generating, setGenerating] = useState(false)
-  const [lastLink, setLastLink] = useState<{ url: string; via: string; qrImage?: string; isPix?: boolean } | null>(null)
+  const [lastLink, setLastLink] = useState<{ url: string; via: string; qrImage?: string; isPix?: boolean; id?: string } | null>(null)
+  const [checkingPix, setCheckingPix] = useState(false)
 
   // Cotação de frete por CEP (preenche o campo de frete acima).
   const [cep, setCep] = useState('')
@@ -138,20 +139,14 @@ export function PaymentLinksPage() {
   }
 
   const handlePix = async (amountCents: number, desc: string) => {
-    if (!Number.isFinite(amountCents) || amountCents < 500) {
-      toast.error('Informe um valor válido (mínimo R$ 5,00).')
-      return
-    }
-    // O Asaas recusa Pix sem CPF/CNPJ. Com lead, o servidor puxa o CPF do cadastro; sem lead
-    // (avulso), o operador PRECISA preencher o campo.
-    if (!selectedCpf && !selectedLeadId) {
-      toast.error('Informe o CPF/CNPJ do cliente para gerar o Pix (o Asaas exige).')
+    if (!Number.isFinite(amountCents) || amountCents < 100) {
+      toast.error('Informe um valor válido (mínimo R$ 1,00).')
       return
     }
     setGenerating(true)
     setLastLink(null)
     try {
-      const res = await generateAsaasPix({
+      const res = await generateRedePix({
         leadId: selectedLeadId,
         amountCents,
         description: desc,
@@ -159,12 +154,26 @@ export function PaymentLinksPage() {
         cpf: selectedCpf,
         freightCents,
       })
-      setLastLink({ url: res.qrText, via: `Pix · ${formatBRL(res.amountCents)}`, qrImage: res.qrImageUrl, isPix: true })
+      setLastLink({ url: res.qrText, via: `Pix · ${formatBRL(res.amountCents)}`, qrImage: res.qrImage ?? undefined, isPix: true, id: res.id })
       toast.success(`Pix gerado (${formatBRL(res.amountCents)}).`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao gerar link Pix')
+      toast.error(e instanceof Error ? e.message : 'Falha ao gerar Pix')
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const handleCheckPix = async () => {
+    if (!lastLink?.id) return
+    setCheckingPix(true)
+    try {
+      const r = await checkRedePix(lastLink.id)
+      if (r.paid) toast.success('Pagamento confirmado! ✅')
+      else toast.info(`Ainda não consta pago${r.rawStatus ? ` (status: ${r.rawStatus})` : ''}.`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao verificar o Pix')
+    } finally {
+      setCheckingPix(false)
     }
   }
 
@@ -176,11 +185,11 @@ export function PaymentLinksPage() {
     setGenerating(true)
     setLastLink(null)
     try {
-      const res = await generateAsaasCardLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents, installments, customerName: selectedName, cpf: selectedCpf })
+      const res = await generateRedeLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents, installments, customerName: selectedName })
       setLastLink({ url: res.payLink, via: `Cartão · ${formatBRL(res.amountCents)}` })
       toast.success(`Link de cartão gerado (${formatBRL(res.amountCents)}).`)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao gerar link de cartão (Asaas)')
+      toast.error(e instanceof Error ? e.message : 'Falha ao gerar link de cartão (Rede)')
     } finally {
       setGenerating(false)
     }
@@ -209,7 +218,7 @@ export function PaymentLinksPage() {
     <AppLayout title="Links de pagamento">
       <PageHeader
         title="Links de pagamento"
-        description={isSalesPolo ? 'Pix e cartão (Asaas) para o Tricopill' : 'Link de pagamento por cartão (Asaas)'}
+        description={isSalesPolo ? 'Pix e cartão (e.Rede) para o Tricopill' : 'Link de pagamento por cartão (e.Rede)'}
       />
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,400px)_1fr]">
@@ -234,9 +243,9 @@ export function PaymentLinksPage() {
                 inputMode="numeric"
                 value={customerCpf}
                 onChange={(e) => setCustomerCpf(e.target.value)}
-                placeholder="Obrigatório no Pix. Só números."
+                placeholder="Opcional. Só números."
               />
-              <p className="text-[0.7rem] text-muted-foreground">O Asaas exige CPF/CNPJ pra gerar Pix. Com lead, puxa do cadastro se vazio.</p>
+              <p className="text-[0.7rem] text-muted-foreground">Opcional no Pix; vai pro pedido/nota no Bling. Com lead, puxa do cadastro se vazio.</p>
             </div>
 
             <div className="space-y-1.5">
@@ -306,7 +315,7 @@ export function PaymentLinksPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-[0.7rem] text-muted-foreground">
-                    Pix com 5% off. Cartão no valor cheio ({formatBRL(CARD_KIT_AMOUNTS[kit])}). Tudo via Asaas.
+                    Pix com 5% off. Cartão no valor cheio ({formatBRL(CARD_KIT_AMOUNTS[kit])}). Tudo via e.Rede.
                   </p>
                 </div>
 
@@ -449,6 +458,12 @@ export function PaymentLinksPage() {
                   {!lastLink.isPix ? (
                     <Button size="sm" variant="outline" render={<a href={lastLink.url} target="_blank" rel="noreferrer" />}>
                       <ExternalLink className="mr-1.5 size-3.5" /> Abrir
+                    </Button>
+                  ) : null}
+                  {lastLink.isPix && lastLink.id ? (
+                    <Button size="sm" variant="outline" onClick={() => void handleCheckPix()} disabled={checkingPix}>
+                      <RefreshCw className={`mr-1.5 size-3.5 ${checkingPix ? 'animate-spin' : ''}`} />
+                      {checkingPix ? 'Verificando…' : 'Verificar pagamento'}
                     </Button>
                   ) : null}
                 </div>
