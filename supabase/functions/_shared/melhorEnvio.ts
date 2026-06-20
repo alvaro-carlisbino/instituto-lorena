@@ -633,8 +633,23 @@ export async function createMeShipment(
 
   const box = input.box ?? {}
   const insuranceReais = Math.max(0, (input.insuranceCents ?? 0) / 100)
+
+  // Agência de POSTAGEM (ponto onde a etiqueta é despachada — ex.: PEGAKI/Frete Fácil).
+  // Configurável por polo em tenant_integrations.melhorenvio.agency (ID numérico da agência no
+  // Melhor Envio). Sem isso, o ME usa a agência padrão da conta. NÃO tem relação com o token/login.
+  let agencyId: number | null = null
+  try {
+    const { data: meRow } = await admin.from('tenant_integrations').select('melhorenvio').eq('tenant_id', tenantId).maybeSingle()
+    const meCfg = ((meRow as { melhorenvio?: Record<string, unknown> } | null)?.melhorenvio ?? {}) as Record<string, unknown>
+    const a = Number(meCfg.agency)
+    if (Number.isFinite(a) && a > 0) agencyId = a
+  } catch {
+    // best-effort: sem config → agência padrão da conta
+  }
+
   const cartBody = {
     service: input.serviceId,
+    ...(agencyId ? { agency: agencyId } : {}),
     from: meAddressToApi(from),
     to: meAddressToApi(input.to),
     products: input.products.map((p) => ({
