@@ -70,10 +70,13 @@ const REDE_ENDPOINTS = {
   sandbox: {
     token: 'https://rl7-sandbox-api.useredecloud.com.br/oauth2/token',
     tx: 'https://sandbox-erede.useredecloud.com.br/v2/transactions',
+    // PIX e.Rede roda na v1 + Basic auth (≠ cartão, que é v2 + Bearer/OAuth).
+    pix: 'https://sandbox-erede.useredecloud.com.br/v1/transactions',
   },
   prod: {
     token: 'https://api.userede.com.br/redelabs/oauth2/token',
     tx: 'https://api.userede.com.br/erede/v2/transactions',
+    pix: 'https://api.userede.com.br/erede/v1/transactions',
   },
 } as const
 
@@ -83,6 +86,8 @@ export type RedeConfig = {
   env: 'sandbox' | 'prod'
   tokenUrl: string
   txUrl: string
+  /** Endpoint v1 usado pelo PIX (Basic auth). */
+  pixUrl: string
 }
 
 /**
@@ -103,7 +108,8 @@ function parseRedeConfig(cfg: Record<string, unknown>): RedeConfig | null {
   const ep = REDE_ENDPOINTS[env]
   const tokenUrl = (typeof cfg.token_url === 'string' && cfg.token_url.trim() ? cfg.token_url.trim() : ep.token).replace(/\/$/, '')
   const txUrl = (typeof cfg.tx_url === 'string' && cfg.tx_url.trim() ? cfg.tx_url.trim() : ep.tx).replace(/\/$/, '')
-  return { clientId, clientSecret, env, tokenUrl, txUrl }
+  const pixUrl = (typeof cfg.pix_url === 'string' && cfg.pix_url.trim() ? cfg.pix_url.trim() : ep.pix).replace(/\/$/, '')
+  return { clientId, clientSecret, env, tokenUrl, txUrl, pixUrl }
 }
 
 /** Lê e monta a config e.Rede de UM polo específico (sem fallback). */
@@ -167,6 +173,7 @@ export type RedeIntent = {
   couponCode: string | null
   kit: string | null
   blingOrderId: string | null
+  method: 'card' | 'pix'
 }
 
 function shortId(): string {
@@ -241,10 +248,123 @@ export async function createRedeIntent(
   }
 }
 
+/**
+ * Cria uma cobrança PIX na e.Rede e devolve o copia-e-cola + imagem do QR.
+ * ATENÇÃO: o PIX da e.Rede roda na API **v1 + Basic auth** (base64(PV:token)), DIFERENTE do
+ * cartão (v2 + Bearer/OAuth). Contrato confirmado em produção 17/06 (returnCode 00). NÃO
+ * finaliza venda — só gera o QR; a confirmação do pagamento é assíncrona (webhook/consulta).
+ */
+export async function createRedePix(
+  admin: SupabaseClient,
+  args: {
+    tenantId: string
+    amountCents: number
+    description: string
+    leadId?: string
+    appBaseUrl?: string
+    couponCode?: string
+    freightCents?: number
+    kit?: string
+    customerName?: string
+    phone?: string
+    customerDoc?: string
+    /** Validade do QR em horas (≤ 15 dias). Default 24h. */
+    expiresInHours?: number
+  },
+): Promise<{
+  id: string; qrText: string; qrImage: string | null; tid: string | null
+  amountCents: number; baseCents: number; discountCents: number; couponCode: string | null; freightCents: number
+}> {
+  const cfg = await readRedeConfig(admin, args.tenantId)
+  if (!cfg) throw new Error('rede_nao_configurado')
+  const baseCents = Math.round(args.amountCents)
+  if (!Number.isFinite(baseCents) || baseCents < 100) throw new Error('rede_valor_invalido')
+
+  // Cupom (best-effort): inválido → valor cheio.
+  const coupon = await quoteCoupon(admin, args.tenantId, args.couponCode, baseCents)
+  const productCents = coupon.finalCents
+  const freightCents = Math.max(0, Math.round(Number(args.freightCents ?? 0)))
+  const amountCents = productCents + freightCents
+  const baseDesc = String(args.description ?? 'Pagamento').slice(0, 100)
+  const description = freightCents > 0 ? `${baseDesc} + frete` : baseDesc
+
+  const id = shortId() // 16 hex → reference ≤ 16 alfanuméricos (limite da e.Rede)
+
+  // Expiração do QR (e.Rede exige ≤ 15 dias). Sem timezone, formato YYYY-MM-DDThh:mm:ss.
+  const hours = Math.min(24 * 15, Math.max(1, Math.round(args.expiresInHours ?? 24)))
+  const exp = new Date(Date.now() + hours * 3_600_000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const dateTimeExpiration =
+    `${exp.getFullYear()}-${pad(exp.getMonth() + 1)}-${pad(exp.getDate())}T${pad(exp.getHours())}:${pad(exp.getMinutes())}:${pad(exp.getSeconds())}`
+
+  // PIX = v1 + Basic auth (mesmas credenciais do cartão: clientId=PV, clientSecret=token).
+  const basic = btoa(`${cfg.clientId}:${cfg.clientSecret}`)
+  const res = await fetch(cfg.pixUrl, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind: 'pix',
+      reference: id,
+      amount: String(amountCents), // centavos como STRING (contrato e.Rede v1 Pix)
+      qrCode: { dateTimeExpiration },
+    }),
+  })
+  const text = await res.text()
+  let parsed: Record<string, unknown> = {}
+  try {
+    parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+  } catch {
+    parsed = {}
+  }
+  const returnCode = String(parsed.returnCode ?? `http_${res.status}`)
+  const qr = (parsed.qrCodeResponse ?? {}) as Record<string, unknown>
+  const qrText = typeof qr.qrCodeData === 'string' ? qr.qrCodeData : ''
+  const qrImageRaw = typeof qr.qrCodeImage === 'string' ? qr.qrCodeImage : ''
+  const tid = typeof parsed.tid === 'string' ? parsed.tid : null
+  // e.Rede: returnCode "00" = QR gerado. Sem copia-e-cola = falha mesmo com 200.
+  if (returnCode !== '00' || !qrText) {
+    const detail = String(parsed.returnMessage ?? parsed.message ?? text.slice(0, 160))
+    throw new Error(`rede_pix_falhou:${returnCode}:${detail}`)
+  }
+  // A imagem vem base64 PNG (geralmente sem prefixo) — normaliza p/ data URI exibível.
+  const qrImage = qrImageRaw ? (qrImageRaw.startsWith('data:') ? qrImageRaw : `data:image/png;base64,${qrImageRaw}`) : null
+
+  await admin.from('rede_payments').insert({
+    id,
+    tenant_id: args.tenantId,
+    lead_id: args.leadId || null,
+    amount_cents: amountCents,
+    description: description.slice(0, 120),
+    installments: 1,
+    method: 'pix',
+    status: 'pending',
+    tid,
+    pix_payload: qrText,
+    coupon_code: coupon.applied ? coupon.code : null,
+    discount_cents: coupon.discountCents,
+    kit: args.kit || null,
+    customer_name: args.customerName?.trim() || null,
+    phone: args.phone?.replace(/\D/g, '') || null,
+    customer_doc: args.customerDoc?.replace(/\D/g, '') || null,
+  })
+
+  return {
+    id,
+    qrText,
+    qrImage,
+    tid,
+    amountCents,
+    baseCents,
+    discountCents: coupon.discountCents,
+    couponCode: coupon.applied ? coupon.code : null,
+    freightCents,
+  }
+}
+
 export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<RedeIntent | null> {
   const { data } = await admin
     .from('rede_payments')
-    .select('id, tenant_id, lead_id, amount_cents, description, installments, status, coupon_code, kit, bling_order_id')
+    .select('id, tenant_id, lead_id, amount_cents, description, installments, status, coupon_code, kit, bling_order_id, method')
     .eq('id', id)
     .maybeSingle()
   if (!data) return null
@@ -260,6 +380,7 @@ export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<
     couponCode: r.coupon_code != null ? String(r.coupon_code) : null,
     kit: r.kit != null ? String(r.kit) : null,
     blingOrderId: r.bling_order_id != null ? String(r.bling_order_id) : null,
+    method: r.method === 'pix' ? 'pix' : 'card',
   }
 }
 
@@ -272,6 +393,194 @@ export type RedeCard = {
 }
 
 export type RedePayResult = { status: 'paid' | 'failed'; returnCode: string; message: string; tid: string | null }
+
+/**
+ * Downstream COMPARTILHADO de um pagamento Rede aprovado (cartão OU Pix): conta o cupom,
+ * grava o comprovante automático, move o lead p/ "Pago", cria o pedido no Bling e lança o
+ * envio no Melhor Envio. Extraído do payRedeIntent p/ o webhook de Pix reusar o MESMO caminho.
+ * Tudo best-effort: nunca derruba a confirmação do pagamento.
+ */
+export async function finalizeRedePaid(
+  admin: SupabaseClient,
+  intent: RedeIntent,
+  opts: {
+    method: 'card' | 'pix'
+    tid: string | null
+    returnCode: string
+    installments?: number
+    /** Nome do titular do cartão (cartão) — usado como fallback do nome no Bling. */
+    cardholderName?: string
+  },
+): Promise<void> {
+  const isPix = opts.method === 'pix'
+  // Conta o uso do cupom só agora (no pago), não na geração do link.
+  await incrementCouponUse(admin, intent.tenantId, intent.couponCode)
+
+  // Comprovante AUTOMÁTICO (e.Rede): TID + código de retorno. Prova de recebimento sem
+  // depender de a SDR anexar foto.
+  await recordAutoReceipt(admin, {
+    tenantId: intent.tenantId,
+    paymentId: intent.id,
+    paymentMethod: opts.method,
+    amountCents: intent.amountCents,
+    note: isPix
+      ? 'Comprovante automático e.Rede Pix (confirmação do QR).'
+      : 'Comprovante automático e.Rede (autorização da maquininha).',
+    autoData: {
+      gateway: 'rede',
+      method: opts.method,
+      tid: opts.tid,
+      return_code: opts.returnCode,
+      ...(isPix ? {} : { installments: opts.installments ?? intent.installments, cardholder_name: opts.cardholderName ?? null }),
+      paid_at: new Date().toISOString(),
+    },
+  })
+
+  if (!intent.leadId) return
+  try {
+    const { data: lead } = await admin
+      .from('leads')
+      .select('id, patient_name, pipeline_id, tenant_id, phone, custom_fields')
+      .eq('id', intent.leadId)
+      .maybeSingle()
+    const l = lead as {
+      id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string; phone?: string
+      custom_fields?: { cadastro?: Record<string, string> }
+    } | null
+    if (!l) return
+
+    // Procura a etapa "Pago" do PRÓPRIO pipeline do lead — nunca chuta uma etapa fixa
+    // (senão um lead do Instituto cairia na etapa de "Pago" do Tricopill).
+    let pagoStageId: string | null = null
+    if (l.pipeline_id) {
+      const { data: stage } = await admin
+        .from('pipeline_stages')
+        .select('id')
+        .eq('pipeline_id', l.pipeline_id)
+        .ilike('name', 'pago%')
+        .maybeSingle()
+      if (stage?.id) pagoStageId = String(stage.id)
+    }
+    // Só move de etapa se achou a "Pago" no pipeline certo; senão mantém a etapa atual.
+    const leadUpdate: Record<string, unknown> = { temperature: 'hot', updated_at: new Date().toISOString() }
+    if (pagoStageId) leadUpdate.stage_id = pagoStageId
+    await admin.from('leads').update(leadUpdate).eq('id', l.id)
+    const valorBrl = (intent.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    await insertInteraction(admin, {
+      leadId: l.id,
+      patientName: String(l.patient_name ?? 'Cliente'),
+      channel: 'system',
+      direction: 'system',
+      author: isPix ? 'Rede Pix' : 'Rede',
+      content: isPix
+        ? `✅ Pagamento via Pix confirmado (Rede). ${valorBrl}.`
+        : `💳 Pagamento no cartão confirmado (Rede). ${valorBrl}.`,
+      tenantId: String(l.tenant_id ?? intent.tenantId),
+    })
+
+    // Pedido automático no Bling (best-effort): só se auto_order_enabled, o pagamento
+    // tem kit, e ainda não há pedido (idempotente). Espelha o caminho do Pix/PagBank.
+    // KIT = produto Tricopill → Bling/ME vivem no tenant 'tricopill', NÃO no tenant do
+    // lead. Sem isto, um lead que veio pelo canal da CLÍNICA comprando Tricopill tentava
+    // criar o pedido no Bling da clínica (inexistente) e não ia pro Bling (bug Fabricio).
+    const blingTenant = intent.kit ? 'tricopill' : String(l.tenant_id ?? intent.tenantId)
+    if (intent.kit && !intent.blingOrderId) {
+      try {
+        const { data: blingRow } = await admin
+          .from('tenant_integrations')
+          .select('bling')
+          .eq('tenant_id', blingTenant)
+          .maybeSingle()
+        const blingCfg = ((blingRow as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+        if (blingCfg.auto_order_enabled === true) {
+          // Nome/CPF/e-mail: prioriza o cadastro capturado na conversa, depois o titular
+          // do cartão (pagador real), por fim o pushName do WhatsApp.
+          const cad = (l.custom_fields?.cadastro ?? {}) as Record<string, string>
+          const out = await blingCreateSaleOrder(admin, blingTenant, {
+            kit: intent.kit,
+            amountCents: intent.amountCents,
+            customerName: String(cad.nomeCompleto || opts.cardholderName || l.patient_name || 'Cliente Tricopill').trim(),
+            phone: l.phone ? String(l.phone) : undefined,
+            cpf: cad.cpf,
+            email: cad.email,
+            dataNascimento: cad.dataNascimento,
+            sexo: cad.sexo,
+            entrega: ((l.custom_fields as Record<string, unknown> | undefined)?.entrega as {
+              cep?: string; numero?: string; complemento?: string
+              bairro?: string; logradouro?: string; cidade?: string; uf?: string; delivery_mode?: string
+            }) ?? undefined,
+          })
+          await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
+          const nfeNote = out.nfe
+            ? (out.nfe.transmitted
+                ? ` · NF-e ${out.nfe.numero ? '#' + out.nfe.numero + ' ' : ''}transmitida ✅`
+                : out.nfe.nfeId
+                  ? ` · NF-e gerada (rascunho${out.nfe.error ? ': ' + out.nfe.error : ''}) — transmita no Bling`
+                  : ` · NF-e não emitida${out.nfe.error ? ': ' + out.nfe.error : ''}`)
+            : ''
+          await insertInteraction(admin, {
+            leadId: l.id,
+            patientName: String(l.patient_name ?? 'Cliente'),
+            channel: 'system',
+            direction: 'system',
+            author: 'Bling',
+            content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).${nfeNote}`,
+            tenantId: blingTenant,
+          })
+        }
+      } catch (e) {
+        await insertInteraction(admin, {
+          leadId: l.id,
+          patientName: String(l.patient_name ?? 'Cliente'),
+          channel: 'system',
+          direction: 'system',
+          author: 'Bling',
+          content: `⚠️ Não foi possível criar o pedido no Bling automaticamente: ${(e instanceof Error ? e.message : String(e)).slice(0, 180)}`,
+          tenantId: blingTenant,
+        })
+      }
+    }
+
+    // Envio automático no Melhor Envio (CARRINHO; best-effort, nunca quebra o pagamento).
+    try {
+      const ship = await autoShipToCart(admin, blingTenant, {
+        lead: { id: l.id, patient_name: l.patient_name, phone: l.phone, custom_fields: l.custom_fields },
+        kit: intent.kit ?? null,
+        productName: intent.kit ? `Tricopill (${intent.kit})` : 'Tricopill',
+        productValueCents: intent.amountCents,
+      })
+      if (ship.ok || ship.skipped || ship.reason) {
+        const ent = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>
+        const ster = (v: unknown) => String(v ?? '').trim()
+        const endLinha = [
+          [ster(ent.logradouro), ster(ent.numero)].filter(Boolean).join(', '),
+          ster(ent.complemento), ster(ent.bairro), [ster(ent.cidade), ster(ent.uf)].filter(Boolean).join('/'),
+        ].filter(Boolean).join(' - ')
+        let content: string
+        let author = 'Melhor Envio'
+        if (ship.ok) {
+          content = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
+        } else if (ship.reason === 'entrega_local_maringa') {
+          author = 'Logística'
+          content = `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`
+        } else if (ship.reason === 'retirada_clinica') {
+          author = 'Logística'
+          content = `🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)`
+        } else {
+          content = `📦 Envio NÃO gerado automaticamente (${ship.reason}). Gere pelo botão se for envio externo.`
+        }
+        await insertInteraction(admin, {
+          leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author,
+          content, tenantId: blingTenant,
+        })
+      }
+    } catch {
+      // best-effort: envio nunca derruba o pagamento
+    }
+  } catch {
+    // best-effort
+  }
+}
 
 /** Autoriza+captura a cobrança na e.Rede com os dados do cartão. */
 export async function payRedeIntent(
@@ -324,169 +633,15 @@ export async function payRedeIntent(
     .update({ status: approved ? 'paid' : 'failed', tid, return_code: returnCode, paid_at: approved ? new Date().toISOString() : null })
     .eq('id', intent.id)
 
-  // Pagamento aprovado: conta o uso do cupom (só agora, não na geração do link).
+  // Pagamento aprovado: roda o downstream COMPARTILHADO (cupom, comprovante, lead, Bling, envio).
   if (approved) {
-    await incrementCouponUse(admin, intent.tenantId, intent.couponCode)
-    // Comprovante AUTOMÁTICO da maquininha (e.Rede): TID + código de retorno + parcelas.
-    // Garante prova de recebimento sem depender de a SDR anexar foto.
-    await recordAutoReceipt(admin, {
-      tenantId: intent.tenantId,
-      paymentId: intent.id,
-      paymentMethod: 'card',
-      amountCents: intent.amountCents,
-      note: 'Comprovante automático e.Rede (autorização da maquininha).',
-      autoData: {
-        gateway: 'rede',
-        tid,
-        return_code: returnCode,
-        installments: Math.max(1, Math.min(12, args.installments ?? intent.installments ?? 1)),
-        cardholder_name: args.card.cardholderName?.slice(0, 50) ?? null,
-        paid_at: new Date().toISOString(),
-      },
+    await finalizeRedePaid(admin, intent, {
+      method: 'card',
+      tid,
+      returnCode,
+      installments: Math.max(1, Math.min(12, args.installments ?? intent.installments ?? 1)),
+      cardholderName: args.card.cardholderName?.slice(0, 50) ?? undefined,
     })
-  }
-
-  if (approved && intent.leadId) {
-    try {
-      const { data: lead } = await admin
-        .from('leads')
-        .select('id, patient_name, pipeline_id, tenant_id, phone, custom_fields')
-        .eq('id', intent.leadId)
-        .maybeSingle()
-      const l = lead as {
-        id: string; patient_name?: string; pipeline_id?: string; tenant_id?: string; phone?: string
-        custom_fields?: { cadastro?: Record<string, string> }
-      } | null
-      if (l) {
-        // Procura a etapa "Pago" do PRÓPRIO pipeline do lead — nunca chuta uma etapa fixa
-        // (senão um lead do Instituto cairia na etapa de "Pago" do Tricopill).
-        let pagoStageId: string | null = null
-        if (l.pipeline_id) {
-          const { data: stage } = await admin
-            .from('pipeline_stages')
-            .select('id')
-            .eq('pipeline_id', l.pipeline_id)
-            .ilike('name', 'pago%')
-            .maybeSingle()
-          if (stage?.id) pagoStageId = String(stage.id)
-        }
-        // Só move de etapa se achou a "Pago" no pipeline certo; senão mantém a etapa atual.
-        const leadUpdate: Record<string, unknown> = { temperature: 'hot', updated_at: new Date().toISOString() }
-        if (pagoStageId) leadUpdate.stage_id = pagoStageId
-        await admin.from('leads').update(leadUpdate).eq('id', l.id)
-        await insertInteraction(admin, {
-          leadId: l.id,
-          patientName: String(l.patient_name ?? 'Cliente'),
-          channel: 'system',
-          direction: 'system',
-          author: 'Rede',
-          content: `💳 Pagamento no cartão confirmado (Rede). ${(intent.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`,
-          tenantId: String(l.tenant_id ?? intent.tenantId),
-        })
-
-        // Pedido automático no Bling (best-effort): só se auto_order_enabled, o pagamento
-        // tem kit, e ainda não há pedido (idempotente). Espelha o caminho do Pix/PagBank.
-        // KIT = produto Tricopill → Bling/ME vivem no tenant 'tricopill', NÃO no tenant do
-        // lead. Sem isto, um lead que veio pelo canal da CLÍNICA comprando Tricopill tentava
-        // criar o pedido no Bling da clínica (inexistente) e não ia pro Bling (bug Fabricio).
-        const blingTenant = intent.kit ? 'tricopill' : String(l.tenant_id ?? intent.tenantId)
-        if (intent.kit && !intent.blingOrderId) {
-          try {
-            const { data: blingRow } = await admin
-              .from('tenant_integrations')
-              .select('bling')
-              .eq('tenant_id', blingTenant)
-              .maybeSingle()
-            const blingCfg = ((blingRow as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
-            if (blingCfg.auto_order_enabled === true) {
-              // Nome/CPF/e-mail: prioriza o cadastro capturado na conversa, depois o titular
-              // do cartão (pagador real), por fim o pushName do WhatsApp.
-              const cad = (l.custom_fields?.cadastro ?? {}) as Record<string, string>
-              const out = await blingCreateSaleOrder(admin, blingTenant, {
-                kit: intent.kit,
-                amountCents: intent.amountCents,
-                customerName: String(cad.nomeCompleto || args.card.cardholderName || l.patient_name || 'Cliente Tricopill').trim(),
-                phone: l.phone ? String(l.phone) : undefined,
-                cpf: cad.cpf,
-                email: cad.email,
-                dataNascimento: cad.dataNascimento,
-                sexo: cad.sexo,
-                entrega: ((l.custom_fields as Record<string, unknown> | undefined)?.entrega as {
-                  cep?: string; numero?: string; complemento?: string
-                  bairro?: string; logradouro?: string; cidade?: string; uf?: string; delivery_mode?: string
-                }) ?? undefined,
-              })
-              await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
-              const nfeNote = out.nfe
-                ? (out.nfe.transmitted
-                    ? ` · NF-e ${out.nfe.numero ? '#' + out.nfe.numero + ' ' : ''}transmitida ✅`
-                    : out.nfe.nfeId
-                      ? ` · NF-e gerada (rascunho${out.nfe.error ? ': ' + out.nfe.error : ''}) — transmita no Bling`
-                      : ` · NF-e não emitida${out.nfe.error ? ': ' + out.nfe.error : ''}`)
-                : ''
-              await insertInteraction(admin, {
-                leadId: l.id,
-                patientName: String(l.patient_name ?? 'Cliente'),
-                channel: 'system',
-                direction: 'system',
-                author: 'Bling',
-                content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).${nfeNote}`,
-                tenantId: blingTenant,
-              })
-            }
-          } catch (e) {
-            await insertInteraction(admin, {
-              leadId: l.id,
-              patientName: String(l.patient_name ?? 'Cliente'),
-              channel: 'system',
-              direction: 'system',
-              author: 'Bling',
-              content: `⚠️ Não foi possível criar o pedido no Bling automaticamente: ${(e instanceof Error ? e.message : String(e)).slice(0, 180)}`,
-              tenantId: blingTenant,
-            })
-          }
-        }
-
-        // Envio automático no Melhor Envio (CARRINHO; best-effort, nunca quebra o pagamento).
-        try {
-          const ship = await autoShipToCart(admin, blingTenant, {
-            lead: { id: l.id, patient_name: l.patient_name, phone: l.phone, custom_fields: l.custom_fields },
-            kit: intent.kit ?? null,
-            productName: intent.kit ? `Tricopill (${intent.kit})` : 'Tricopill',
-            productValueCents: intent.amountCents,
-          })
-          if (ship.ok || ship.skipped || ship.reason) {
-            const ent = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>
-            const ster = (v: unknown) => String(v ?? '').trim()
-            const endLinha = [
-              [ster(ent.logradouro), ster(ent.numero)].filter(Boolean).join(', '),
-              ster(ent.complemento), ster(ent.bairro), [ster(ent.cidade), ster(ent.uf)].filter(Boolean).join('/'),
-            ].filter(Boolean).join(' - ')
-            let content: string
-            let author = 'Melhor Envio'
-            if (ship.ok) {
-              content = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
-            } else if (ship.reason === 'entrega_local_maringa') {
-              author = 'Logística'
-              content = `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`
-            } else if (ship.reason === 'retirada_clinica') {
-              author = 'Logística'
-              content = `🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)`
-            } else {
-              content = `📦 Envio NÃO gerado automaticamente (${ship.reason}). Gere pelo botão se for envio externo.`
-            }
-            await insertInteraction(admin, {
-              leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author,
-              content, tenantId: blingTenant,
-            })
-          }
-        } catch {
-          // best-effort: envio nunca derruba o pagamento
-        }
-      }
-    } catch {
-      // best-effort
-    }
   }
 
   return { status: approved ? 'paid' : 'failed', returnCode, message, tid }
