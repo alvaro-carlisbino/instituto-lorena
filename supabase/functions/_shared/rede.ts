@@ -647,6 +647,78 @@ export async function payRedeIntent(
   return { status: approved ? 'paid' : 'failed', returnCode, message, tid }
 }
 
+// Status do PIX na CONSULTA e.Rede (qrCodeResponse.status). "Pending" = aguardando.
+// ⚠️ Os valores de PAGO ainda serão confirmados no teste real (R$1) — quando souber a string
+// exata, garantir que está aqui. Conservador: status desconhecido NÃO finaliza (fica pending).
+const REDE_PIX_PAID_STATUSES = new Set([
+  'paid', 'confirmed', 'approved', 'completed', 'concluded', 'settled',
+  'pago', 'aprovado', 'aprovada', 'concluida', 'concluído', 'confirmado', 'liquidado',
+])
+const REDE_PIX_FAILED_STATUSES = new Set([
+  'expired', 'canceled', 'cancelled', 'failed', 'denied', 'rejected',
+  'expirado', 'cancelado', 'negado', 'recusado', 'falha',
+])
+
+export type RedePixStatus = {
+  id: string
+  status: 'pending' | 'paid' | 'failed'
+  rawStatus: string
+  paid: boolean
+  finalized: boolean
+}
+
+/**
+ * Consulta o status de uma cobrança PIX na e.Rede (GET v1 + Basic, por reference) e, se PAGA,
+ * roda o downstream (finalizeRedePaid) UMA vez (idempotente via update condicional). Usada
+ * tanto pelo botão "Verificar" do painel quanto pelo poller. Nunca finaliza status ambíguo.
+ */
+export async function checkRedePixStatus(admin: SupabaseClient, id: string): Promise<RedePixStatus> {
+  const intent = await getRedeIntent(admin, id)
+  if (!intent) throw new Error('cobranca_nao_encontrada')
+  if (intent.status === 'paid') return { id, status: 'paid', rawStatus: 'paid', paid: true, finalized: false }
+
+  const cfg = await readRedeConfig(admin, intent.tenantId)
+  if (!cfg) throw new Error('rede_nao_configurado')
+  const basic = btoa(`${cfg.clientId}:${cfg.clientSecret}`)
+  const res = await fetch(`${cfg.pixUrl}?reference=${encodeURIComponent(id)}`, {
+    method: 'GET',
+    headers: { Authorization: `Basic ${basic}` },
+  })
+  const text = await res.text()
+  let parsed: Record<string, unknown> = {}
+  try {
+    parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
+  } catch {
+    parsed = {}
+  }
+  const qr = (parsed.qrCodeResponse ?? {}) as Record<string, unknown>
+  const rawStatus = String(qr.status ?? '').trim()
+  const low = rawStatus.toLowerCase()
+  const tid = typeof qr.tid === 'string' ? qr.tid : null
+
+  if (REDE_PIX_PAID_STATUSES.has(low)) {
+    // Idempotência: só finaliza quem AINDA está pending (update condicional + checagem de linhas).
+    const { data: upd } = await admin
+      .from('rede_payments')
+      .update({ status: 'paid', paid_at: new Date().toISOString(), ...(tid ? { tid } : {}) })
+      .eq('id', id)
+      .eq('status', 'pending')
+      .select('id')
+    const firstTime = Array.isArray(upd) && upd.length > 0
+    if (firstTime) {
+      await finalizeRedePaid(admin, { ...intent, status: 'paid' }, { method: 'pix', tid, returnCode: '00' })
+    }
+    return { id, status: 'paid', rawStatus, paid: true, finalized: firstTime }
+  }
+
+  if (REDE_PIX_FAILED_STATUSES.has(low)) {
+    await admin.from('rede_payments').update({ status: 'failed' }).eq('id', id).eq('status', 'pending')
+    return { id, status: 'failed', rawStatus, paid: false, finalized: false }
+  }
+
+  return { id, status: 'pending', rawStatus, paid: false, finalized: false }
+}
+
 /**
  * Teste de credenciais/conectividade e.Rede: faz uma AUTORIZAÇÃO (capture:false)
  * de R$20,00 com o cartão oficial de teste e descarta. Serve para validar PV/token

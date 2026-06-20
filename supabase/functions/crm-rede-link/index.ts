@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { createRedeIntent, readRedeConfig, testRedeTransaction } from '../_shared/rede.ts'
+import { checkRedePixStatus, createRedeIntent, createRedePix, readRedeConfig, testRedeTransaction } from '../_shared/rede.ts'
 
 // e.Rede (cartão) — ações autenticadas do CRM.
 //  get_config    -> { configured, env }
@@ -93,6 +93,46 @@ Deno.serve(async (req) => {
       const msg = e instanceof Error ? e.message : String(e)
       const status = msg.startsWith('rede_nao_configurado') || msg.startsWith('rede_valor') ? 400 : 502
       return json({ ok: false, error: 'rede_link_failed', message: msg }, status)
+    }
+  }
+
+  if (action === 'generate_pix') {
+    const amountCents = Math.round(Number(payload.amountCents ?? 0))
+    const description = String(payload.description ?? 'Pagamento')
+    const leadId = payload.leadId != null ? String(payload.leadId) : undefined
+    const freightCents = payload.freightCents != null ? Number(payload.freightCents) : undefined
+    const couponCode = payload.couponCode != null ? String(payload.couponCode) : undefined
+    const customerName = payload.customerName != null ? String(payload.customerName).trim() : ''
+    const customerDoc = payload.cpf != null ? String(payload.cpf) : (payload.customerDoc != null ? String(payload.customerDoc) : undefined)
+    // Mesmo enriquecimento do link de cartão: nome completo digitado → cadastro do lead.
+    if (leadId && customerName) {
+      try {
+        const { data: lr } = await admin.from('leads').select('custom_fields').eq('id', leadId).maybeSingle()
+        const cf = ((lr as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>
+        const cad = (cf.cadastro ?? {}) as Record<string, unknown>
+        await admin.from('leads').update({ patient_name: customerName, custom_fields: { ...cf, cadastro: { ...cad, nomeCompleto: customerName } } }).eq('id', leadId)
+      } catch { /* best-effort */ }
+    }
+    try {
+      const out = await createRedePix(admin, { tenantId, amountCents, description, leadId, freightCents, couponCode, customerName: customerName || undefined, customerDoc })
+      return json({ ok: true, id: out.id, qrText: out.qrText, qrImage: out.qrImage, amountCents: out.amountCents })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      const status = msg.startsWith('rede_nao_configurado') || msg.startsWith('rede_valor') ? 400 : 502
+      return json({ ok: false, error: 'rede_pix_failed', message: msg }, status)
+    }
+  }
+
+  if (action === 'check_pix') {
+    const id = String(payload.id ?? '').trim()
+    if (!id) return json({ ok: false, error: 'missing_id' }, 400)
+    try {
+      const out = await checkRedePixStatus(admin, id)
+      return json({ ok: true, ...out })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      const status = msg.startsWith('cobranca_nao_encontrada') ? 404 : msg.startsWith('rede_nao_configurado') ? 400 : 502
+      return json({ ok: false, error: 'rede_check_failed', message: msg }, status)
     }
   }
 
