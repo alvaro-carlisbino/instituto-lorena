@@ -730,7 +730,10 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
 
   // KIT = produto Tricopill → Bling/ME vivem no tenant 'tricopill'.
   const blingTenant = kit ? 'tricopill' : String(l.tenant_id ?? tenantId)
-  if (kit) {
+  // Cria pedido no Bling para KITS Tricopill E para vendas avulsas/carrinho do tenant 'tricopill'.
+  // (Antes só criava quando havia `kit`; compras pelo carrinho salvam kit=null e nunca iam pro Bling.)
+  const shouldCreateBlingOrder = !!kit || blingTenant === 'tricopill'
+  if (shouldCreateBlingOrder) {
     try {
       const { data: blingRow } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', blingTenant).maybeSingle()
       const blingCfg = ((blingRow as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
@@ -739,6 +742,8 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
         const out = await blingCreateSaleOrder(admin, blingTenant, {
           kit,
           amountCents,
+          // Venda avulsa/carrinho (sem kit): descrição livre p/ o pedido sair como 1 item pelo valor cheio.
+          description: kit ? undefined : String(p.description ?? l.patient_name ?? 'Pedido Tricopill').trim(),
           customerName: String(cad.nomeCompleto || p.customer_name || l.patient_name || 'Cliente Tricopill').trim(),
           phone: l.phone ? String(l.phone) : (p.phone != null ? String(p.phone) : undefined),
           cpf: cad.cpf || (p.customer_doc != null ? String(p.customer_doc) : undefined),
