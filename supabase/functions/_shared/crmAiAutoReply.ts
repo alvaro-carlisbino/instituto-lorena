@@ -580,10 +580,10 @@ export async function invokeCrmAiAssistantForLead(
     reply = reply.replace(/<(thinking|thought|reasoning)>[\s\S]*?<\/\1>/gi, '').trim()
     reply = reply.replace(/```(?:thinking|thought|reasoning)[\s\S]*?```/gi, '').trim()
 
-    // QR do Pix (op pagbank_pix) para enviar como IMAGEM, propagado via crm_actions.
+    // QR do Pix (op rede_pix; `pagbank_pix` é alias legado) para enviar como IMAGEM, via crm_actions.
     const acts = Array.isArray(aiObj.crm_actions) ? (aiObj.crm_actions as Array<Record<string, unknown>>) : []
     const pixAct = acts.find(
-      (a) => a && typeof a === 'object' && String(a.type ?? '') === 'pagbank_pix' && a.ok === true && typeof a.imageUrl === 'string' && a.imageUrl,
+      (a) => a && typeof a === 'object' && (String(a.type ?? '') === 'rede_pix' || String(a.type ?? '') === 'pagbank_pix') && a.ok === true && typeof a.imageUrl === 'string' && a.imageUrl,
     )
     const pixQrUrl = pixAct ? String(pixAct.imageUrl) : ''
 
