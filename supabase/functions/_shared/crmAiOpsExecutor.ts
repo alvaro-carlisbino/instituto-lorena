@@ -677,8 +677,9 @@ export async function executeCrmAiOpsFromModel(
         continue
       }
 
-      if (type === 'pagbank_pix' || type === 'pix' || type === 'pix_qr') {
-        // Pix DIRETO (copia-e-cola + QR) via ASAAS. Aceita kit OU amount_cents, frete e cupom.
+      if (type === 'rede_pix' || type === 'pagbank_pix' || type === 'pix' || type === 'pix_qr') {
+        // Pix DIRETO (copia-e-cola + QR) via e.Rede (createRedePix). Aceita kit OU amount_cents,
+        // frete e cupom. (`pagbank_pix`/`pix*` são aliases legados — o motor é 100% e.Rede.)
         // (Preço Pix do kit = tabela PAGBANK_KITS, que já é o valor com 5% off.)
         const freightCents = await resolveFreightCents(admin, leadTenantId, op)
         const snapPix = await persistEntrega(admin, opts.allowedLeadId, op)
@@ -686,7 +687,7 @@ export async function executeCrmAiOpsFromModel(
         const readyPix = validateOrderReadiness(snapPix.cadastro, snapPix.entrega)
         if (!readyPix.ok) {
           results.push({
-            type: 'pagbank_pix',
+            type: 'rede_pix',
             ok: false,
             detail: `cadastro_incompleto: ${readyPix.missing.join(', ')}`,
             customerNote: `Pra finalizar e já emitir sua nota fiscal, só preciso de: ${readyPix.missing.join(', ')}. Pode me mandar? 💚`,
@@ -704,7 +705,7 @@ export async function executeCrmAiOpsFromModel(
           pixAmount = Math.round(Number(op.amount_cents))
           pixDesc = op.description != null ? String(op.description).slice(0, 120) : 'Tricopill'
         } else {
-          results.push({ type: 'pagbank_pix', ok: false, detail: 'missing_kit_or_amount' })
+          results.push({ type: 'rede_pix', ok: false, detail: 'missing_kit_or_amount' })
           continue
         }
         try {
@@ -723,10 +724,10 @@ export async function executeCrmAiOpsFromModel(
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           // detail = copia-e-cola (vai no texto). A e.Rede devolve o QR como base64 (data URI),
           // que o WhatsApp não envia como imagem — então mandamos só o copia-e-cola (suficiente).
-          results.push({ type: 'pagbank_pix', ok: true, detail: out.qrText, customerNote: note })
+          results.push({ type: 'rede_pix', ok: true, detail: out.qrText, customerNote: note })
           summaries.push(`Pix gerado via Rede (${pixDesc}${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`)
         } catch (e) {
-          results.push({ type: 'pagbank_pix', ok: false, detail: (e instanceof Error ? e.message : String(e)).slice(0, 200) })
+          results.push({ type: 'rede_pix', ok: false, detail: (e instanceof Error ? e.message : String(e)).slice(0, 200) })
         }
         continue
       }

@@ -901,8 +901,8 @@ Deno.serve(async (req) => {
       'CUPOM: se o cliente informar um cupom, passe em "coupon":"CODIGO" no op — o servidor valida e aplica o desconto sozinho (cupom inválido = valor cheio). NÃO confirme valor com desconto por conta própria; o link já sai com o preço certo.',
       ...(pixEnabled
         ? [
-            'FECHAMENTO NO PIX (você gera o Pix sozinha — copia-e-cola + QR): quando o cliente decidir comprar no PIX (escolheu o kit, a modalidade de entrega E você JÁ coletou o cadastro completo: nome completo + CPF + CEP + número), gere o Pix. ⚠️ Se faltar algum desses dados, NÃO diga que o Pix está abaixo: peça primeiro (o servidor bloqueia sem cadastro completo). Na MESMA resposta, DEPOIS da mensagem, acrescente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"pagbank_pix","kit":"3_meses","delivery_mode":"envio_externo","freight_service":"SEDEX","to_cep":"00000000","to_number":"123","to_name":"Nome Completo","to_cpf":"00000000000","coupon":"CODIGO_SE_HOUVER"}]}. O servidor gera o Pix e ANEXA o copia-e-cola no texto + envia o QR Code como imagem — então escreva um lead-in caloroso dizendo que está GERANDO o Pix agora; NUNCA afirme que "já te mandei o Pix / já está aqui embaixo" antes da hora (o servidor só anexa o Pix SE a geração der certo; se você já disse que mandou e falha, o cliente paga por fora ou fica perdido). Ex.: "Perfeito! 💸 Já estou gerando seu Pix aqui, só um instante 💚". NUNCA escreva/invente um código Pix você mesma: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o Pix — CONTINUE atendendo.',
-            'OBSERVAÇÃO PIX: o "kit"/"delivery_mode"/"freight_service"/"to_cep"/"to_number"/"to_name"/"to_cpf"/"coupon" do op pagbank_pix seguem as MESMAS regras do cartão — o frete vem do delivery_mode (retirada=0, entrega local=R$15, envio=cotação por freight_service+to_cep), o cadastro completo é obrigatório, e o cupom é validado pelo servidor. O Pix do PagBank já aplica o desconto de 5% próprio dos kits.',
+            'FECHAMENTO NO PIX (você gera o Pix sozinha — copia-e-cola + QR): quando o cliente decidir comprar no PIX (escolheu o kit, a modalidade de entrega E você JÁ coletou o cadastro completo: nome completo + CPF + CEP + número), gere o Pix. ⚠️ Se faltar algum desses dados, NÃO diga que o Pix está abaixo: peça primeiro (o servidor bloqueia sem cadastro completo). Na MESMA resposta, DEPOIS da mensagem, acrescente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_pix","kit":"3_meses","delivery_mode":"envio_externo","freight_service":"SEDEX","to_cep":"00000000","to_number":"123","to_name":"Nome Completo","to_cpf":"00000000000","coupon":"CODIGO_SE_HOUVER"}]}. O servidor gera o Pix e ANEXA o copia-e-cola no texto + envia o QR Code como imagem — então escreva um lead-in caloroso dizendo que está GERANDO o Pix agora; NUNCA afirme que "já te mandei o Pix / já está aqui embaixo" antes da hora (o servidor só anexa o Pix SE a geração der certo; se você já disse que mandou e falha, o cliente paga por fora ou fica perdido). Ex.: "Perfeito! 💸 Já estou gerando seu Pix aqui, só um instante 💚". NUNCA escreva/invente um código Pix você mesma: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o Pix — CONTINUE atendendo.',
+            'OBSERVAÇÃO PIX: o "kit"/"delivery_mode"/"freight_service"/"to_cep"/"to_number"/"to_name"/"to_cpf"/"coupon" do op rede_pix seguem as MESMAS regras do cartão — o frete vem do delivery_mode (retirada=0, entrega local=R$15, envio=cotação por freight_service+to_cep), o cadastro completo é obrigatório, e o cupom é validado pelo servidor. O Pix da e.Rede já aplica o desconto de 5% próprio dos kits.',
           ]
         : [
             'PIX → SEMPRE HUMANO (NÃO gere Pix): o pagamento por PIX está temporariamente INDISPONÍVEL no atendimento automático. Se o cliente quiser pagar no PIX, você NUNCA gera código/QR nem promete um Pix — diga com cordialidade que um atendente já vai te enviar o Pix certinho e termine a resposta com [PRONTO_PARA_CONSULTOR] na última linha. (Apenas o CARTÃO/Rede você gera sozinha; o Pix é só pelo atendente por enquanto.)',
@@ -1161,7 +1161,7 @@ Deno.serve(async (req) => {
           c.ok &&
           ((c.type === 'rede_link' && typeof c.detail === 'string' && c.detail.startsWith('http')) ||
             (c.type === 'pagbank_checkout' && typeof c.detail === 'string' && c.detail.startsWith('http')) ||
-            (c.type === 'pagbank_pix' && typeof c.detail === 'string' && c.detail.length > 20) ||
+            (c.type === 'rede_pix' && typeof c.detail === 'string' && c.detail.length > 20) ||
             // Agendamentos também têm efeito colateral: empty reply → retry → DUPLA reserva.
             (c.type === 'shosp_book' && typeof c.detail === 'string' && c.detail.length >= 8) ||
             ((c.type === 'book_appointment' || c.type === 'schedule_appointment') &&
@@ -1221,14 +1221,14 @@ Deno.serve(async (req) => {
       )
       if (redeLink?.detail && !reply.includes(redeLink.detail)) {
         const note = redeLink.customerNote ? `\n${redeLink.customerNote}` : ''
-        // Parcelamento (Asaas, com juros a partir de 2x): 1x = sem texto; >1 = "em até Nx".
+        // Parcelamento (e.Rede, com juros a partir de 2x): 1x = sem texto; >1 = "em até Nx".
         const inst = Number(redeLink.installments) || 0
         const parcela = inst > 1 ? ` (em até ${inst}x)` : ''
         reply = `${reply.trim()}\n\n💳 Pague no cartão${parcela} por aqui:\n${redeLink.detail}${note}`
       }
-      // pagbank_pix: Pix DIRETO — copia-e-cola no texto (o QR vai como imagem à parte, via auto-reply).
+      // rede_pix: Pix DIRETO (e.Rede) — copia-e-cola no texto (o QR vai como imagem à parte, via auto-reply).
       const pixQr = actionChunks.find(
-        (c) => c.type === 'pagbank_pix' && c.ok && typeof c.detail === 'string' && c.detail.length > 20,
+        (c) => c.type === 'rede_pix' && c.ok && typeof c.detail === 'string' && c.detail.length > 20,
       )
       if (pixQr?.detail && !reply.includes(pixQr.detail)) {
         const note = pixQr.customerNote ? `\n${pixQr.customerNote}` : ''
@@ -1243,7 +1243,7 @@ Deno.serve(async (req) => {
       //     o caller NOTIFICAR/transferir p/ um atendente de verdade (antes a promessa de "chamar
       //     atendente" era só texto e ninguém era avisado).
       const payFailed = actionChunks.find(
-        (c) => (c.type === 'pagbank_pix' || c.type === 'rede_link' || c.type === 'pagbank_checkout') && !c.ok,
+        (c) => (c.type === 'rede_pix' || c.type === 'rede_link' || c.type === 'pagbank_checkout') && !c.ok,
       )
       const paySucceeded = Boolean(pixQr) || Boolean(redeLink) || Boolean(pagbankLink)
       if (payFailed && !paySucceeded) {
