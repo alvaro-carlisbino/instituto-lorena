@@ -32,7 +32,7 @@ import {
 import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
-import { readPagBankConfig } from '../_shared/pagbank.ts'
+import { readRedeConfig } from '../_shared/rede.ts'
 import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
 import { extractLatestCep, resolveCepBrasil } from '../_shared/cep.ts'
 
@@ -714,13 +714,15 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Pix só é oferecido pelo bot quando o PagBank está em PRODUÇÃO. Em sandbox o código
-    // não é pagável, então a IA NÃO gera Pix (faz handoff). Casado com a trava em pagbank.ts.
+    // Pix é gerado 100% na e.Rede (createRedePix). Só é oferecido pelo bot quando a e.Rede
+    // está configurada para o polo E em PRODUÇÃO — em sandbox o código não é pagável, então a
+    // IA NÃO gera Pix (faz handoff). Se a e.Rede cair/sumir, volta ao handoff em vez de gerar
+    // um Pix quebrado. (Antes isto olhava o PagBank, que saiu do fluxo na migração p/ e.Rede.)
     let pixEnabled = false
     if (isSalesBot && tenantId) {
       try {
-        const pbCfg = await readPagBankConfig(dbClient, tenantId)
-        pixEnabled = pbCfg?.env === 'prod'
+        const redeCfg = await readRedeConfig(dbClient, tenantId)
+        pixEnabled = redeCfg?.env === 'prod'
       } catch {
         pixEnabled = false
       }
