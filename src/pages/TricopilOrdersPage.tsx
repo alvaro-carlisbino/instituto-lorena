@@ -52,6 +52,16 @@ const DELIVERY_META: Record<DeliveryKind, { label: string; cls: string }> = {
   desconhecido: { label: '— Não inform.', cls: 'bg-muted text-muted-foreground ring-border/40' },
 }
 
+// Origem do pedido. Não há campo de origem nos pagamentos, então é derivado do lead
+// vinculado (best-effort): bot de vendas no WhatsApp (lead com instância W-API ou source
+// whatsapp/meta) × loja no site (checkout sem lead do CRM) × lançamento manual.
+type OrderOrigin = 'whatsapp' | 'site' | 'manual'
+const ORIGIN_META: Record<OrderOrigin, { label: string; cls: string }> = {
+  whatsapp: { label: '🟢 WhatsApp', cls: 'bg-green-500/10 text-green-700 ring-green-500/25 dark:text-green-300' },
+  site: { label: '🛒 Site', cls: 'bg-indigo-500/10 text-indigo-700 ring-indigo-500/25 dark:text-indigo-300' },
+  manual: { label: '✍️ Manual', cls: 'bg-muted text-muted-foreground ring-border/40' },
+}
+
 const STATUS_SEG: Array<{ v: 'all' | PaymentStatus; l: string }> = [
   { v: 'all', l: 'Todos' },
   { v: 'paid', l: 'Pagos' },
@@ -98,6 +108,15 @@ export function TricopilOrdersPage() {
   const deliveryOf = (p: UnifiedPayment): DeliveryKind => {
     const lead = p.leadId ? leadById.get(p.leadId) : undefined
     return lead ? classifyDelivery(lead).kind : 'desconhecido'
+  }
+
+  const originOf = (p: UnifiedPayment): OrderOrigin => {
+    const lead = p.leadId ? leadById.get(p.leadId) : undefined
+    if (!lead) return 'site' // checkout da loja: cliente não vira lead do WhatsApp
+    if (lead.whatsappInstanceId) return 'whatsapp' // veio do bot de vendas (W-API)
+    const src = String(lead.source ?? '').toLowerCase()
+    if (src.includes('whatsapp') || src.startsWith('meta')) return 'whatsapp'
+    return 'manual' // lead criado à mão / sem origem clara
   }
 
   const shipOf = (p: UnifiedPayment): ShipStatus => {
@@ -305,12 +324,14 @@ export function TricopilOrdersPage() {
                 const name = p.customerName || lead?.patientName || 'Cliente'
                 const dm = DELIVERY_META[deliveryOf(p)]
                 const sm = STATUS_META[p.status]
+                const om = ORIGIN_META[originOf(p)]
                 const track = (p.leadId && trackingByLead[p.leadId]) || persistedTracking(p)
                 return (
                   <TableRow key={`${p.method}:${p.id}`}>
                     <TableCell>
                       <div className="font-semibold text-foreground/90">{name}</div>
                       {p.phone ? <div className="text-xs text-muted-foreground">{p.phone}</div> : null}
+                      <div className="mt-1"><span className={cn(PILL, om.cls)}>{om.label}</span></div>
                     </TableCell>
                     <TableCell className="text-xs">{p.kit ? kitLabel(p.kit) : (p.description ?? '—')}</TableCell>
                     <TableCell className="text-right">
