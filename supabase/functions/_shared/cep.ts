@@ -49,7 +49,8 @@ export function isMaringa(info: { localidade?: string; uf?: string } | null | un
 
 /**
  * Cidades atendidas pela ENTREGA INTERNA da equipe (mesma praça de Maringá): Maringá e
- * as vizinhas Sarandi, Paiçandu e Marialva (PR). Entrega própria (R$ 15 fixo), não Correios.
+ * as vizinhas Sarandi, Paiçandu e Marialva (PR). Entrega própria (Maringá R$ 15 /
+ * região R$ 20 — ver localDeliveryCents), não Correios.
  * Fora dessas → envio externo (Melhor Envio). Compara sem acento.
  */
 const LOCAL_DELIVERY_CITIES = new Set(['maringa', 'sarandi', 'paicandu', 'marialva'])
@@ -58,4 +59,13 @@ export function isLocalDeliveryCity(info: { localidade?: string; uf?: string } |
   if (!info) return false
   const city = stripAccents(String(info.localidade ?? '').trim().toLowerCase())
   return LOCAL_DELIVERY_CITIES.has(city) && String(info.uf ?? '').toUpperCase() === 'PR'
+}
+
+/**
+ * Cidades da REGI\u00c3O (vizinhas atendidas pela equipe, mas FORA de Maring\u00e1): Sarandi,
+ * Pai\u00e7andu e Marialva. A entrega \u00e9 interna (pr\u00f3pria), mas a TAXA \u00e9 maior que a de
+ * Maring\u00e1 (R$ 20 vs R$ 15). Maring\u00e1 em si N\u00c3O entra aqui.
+ */
+export function isMaringaRegion(info: { localidade?: string; uf?: string } | null | undefined): boolean {
+  return isLocalDeliveryCity(info) && !isMaringa(info)
 }

@@ -6,6 +6,7 @@ import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.
 import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+import { resolveCepBrasil } from './cep.ts'
 
 /** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
 const DELIVERY_MODES = ['retirada_clinica', 'entrega_local_maringa', 'envio_externo'] as const
@@ -32,11 +33,17 @@ async function resolveFreightCents(
 
   // MODALIDADE define o frete antes de qualquer cotação:
   //  - retirada_clinica   → sem frete (cliente busca na clínica)
-  //  - entrega_local_maringa → R$ 15 fixo (equipe entrega em Maringá + vizinhas)
+  //  - entrega_local_maringa → entrega da equipe: R$ 15 em Maringá, R$ 20 na região
+  //    (Sarandi/Paiçandu/Marialva). A praça é resolvida pelo CEP (ViaCEP); sem CEP
+  //    válido cai na taxa de Maringá (default de localDeliveryCents).
   //  - envio_externo / ausente → cota o Melhor Envio (abaixo)
   const deliveryMode = normalizeDeliveryMode(op.delivery_mode ?? op.to_delivery_mode)
   if (deliveryMode === 'retirada_clinica') return undefined
-  if (deliveryMode === 'entrega_local_maringa') return localDeliveryCents()
+  if (deliveryMode === 'entrega_local_maringa') {
+    const cepDigits = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
+    const cityInfo = cepDigits.length === 8 ? await resolveCepBrasil(cepDigits) : null
+    return localDeliveryCents(cityInfo)
+  }
 
   const service = op.freight_service != null ? String(op.freight_service).trim() : ''
   const toCep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
+import { isLocalDeliveryCity, isMaringaRegion, resolveCepBrasil } from './cep.ts'
 
 /**
  * Melhor Envio — agregador que cota Correios (PAC/SEDEX) e transportadoras SEM exigir
@@ -136,11 +136,19 @@ function envNum(key: string, fallback: number): number {
 }
 
 /**
- * Valor da entrega interna da equipe (Maringá + Sarandi/Paiçandu/Marialva) em centavos
- * (default R$ 15,00; aceita 0 = grátis via FRETE_MARINGA_CENTS). Exportado p/ o executor
- * de ops cobrar o frete certo no fechamento (modo entrega_local_maringa).
+ * Valor da entrega interna da equipe em centavos, por praça:
+ *  - Maringá:                         R$ 15,00 (override FRETE_MARINGA_CENTS)
+ *  - Região (Sarandi/Paiçandu/Marialva): R$ 20,00 (override FRETE_REGIAO_CENTS)
+ * Ambos aceitam 0 = grátis. Sem `cityInfo` (cidade desconhecida) assume Maringá (R$ 15)
+ * por compatibilidade. Exportado p/ o executor de ops cobrar o frete certo no fechamento
+ * (modo entrega_local_maringa).
  */
-export function localDeliveryCents(): number {
+export function localDeliveryCents(cityInfo?: { localidade?: string; uf?: string } | null): number {
+  if (isMaringaRegion(cityInfo)) {
+    const raw = (Deno.env.get('FRETE_REGIAO_CENTS') ?? '').trim()
+    const n = Number(raw)
+    return raw !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n) : 2000
+  }
   const raw = (Deno.env.get('FRETE_MARINGA_CENTS') ?? '').trim()
   const n = Number(raw)
   return raw !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n) : 1500
@@ -351,8 +359,8 @@ export async function quoteFreteMelhorEnvio(
   if (toCep.length !== 8) return empty('invalid_to_cep')
   if (fromCep.length !== 8) return empty('invalid_from_cep')
 
-  // Praça local (Maringá + Sarandi/Paiçandu/Marialva): entrega INTERNA da equipe (não cota
-  // Correios). Vale mesmo sem ME conectado. R$ 15 fixo (localDeliveryCents).
+  // Praça local: entrega INTERNA da equipe (não cota Correios). Vale mesmo sem ME conectado.
+  // Taxa por praça: Maringá R$ 15, região (Sarandi/Paiçandu/Marialva) R$ 20 (localDeliveryCents).
   const cityInfo = opts?.cityInfo ?? (await resolveCepBrasil(toCep))
   if (isLocalDeliveryCity(cityInfo)) {
     return {
@@ -360,7 +368,7 @@ export async function quoteFreteMelhorEnvio(
       fromCep,
       toCep,
       options: [
-        { service: 'Entrega interna', serviceId: 0, company: 'Maringá e região (local)', priceCents: localDeliveryCents(), deliveryDays: null, internal: true },
+        { service: 'Entrega interna', serviceId: 0, company: 'Maringá e região (local)', priceCents: localDeliveryCents(cityInfo), deliveryDays: null, internal: true },
       ],
       debug: 'entrega_interna_local',
     }
