@@ -4,7 +4,7 @@ import { useParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { fetchAsaasIntent, payAsaasCard, type AsaasIntentView } from '@/services/crmAsaas'
+import { fetchRedeIntent, payRedeIntent, type RedeIntentView } from '@/services/crmRede'
 
 function brl(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -12,7 +12,7 @@ function brl(cents: number): string {
 
 export function CheckoutPage() {
   const { id = '' } = useParams()
-  const [intent, setIntent] = useState<AsaasIntentView | null>(null)
+  const [intent, setIntent] = useState<RedeIntentView | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -21,16 +21,12 @@ export function CheckoutPage() {
   const [month, setMonth] = useState('')
   const [year, setYear] = useState('')
   const [cvv, setCvv] = useState('')
-  const [cpf, setCpf] = useState('')
-  const [phone, setPhone] = useState('')
-  const [cep, setCep] = useState('')
-  const [addrNumber, setAddrNumber] = useState('')
   const [installments, setInstallments] = useState(1)
   const [paying, setPaying] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   useEffect(() => {
-    fetchAsaasIntent(id)
+    fetchRedeIntent(id)
       .then(setIntent)
       .catch((e) => setError(e instanceof Error ? e.message : 'Cobrança não encontrada'))
       .finally(() => setLoading(false))
@@ -40,7 +36,7 @@ export function CheckoutPage() {
     setPaying(true)
     setResult(null)
     try {
-      const out = await payAsaasCard(
+      const out = await payRedeIntent(
         id,
         {
           cardholderName: name.trim(),
@@ -48,12 +44,6 @@ export function CheckoutPage() {
           expirationMonth: Number(month),
           expirationYear: Number(year.length === 2 ? `20${year}` : year),
           securityCode: cvv.trim(),
-        },
-        {
-          cpf: cpf.replace(/\D/g, ''),
-          phone: phone.replace(/\D/g, ''),
-          postalCode: cep.replace(/\D/g, ''),
-          addressNumber: addrNumber.trim(),
         },
         installments,
       )
@@ -76,10 +66,13 @@ export function CheckoutPage() {
   if (error || !intent) return <div style={box}>Cobrança não encontrada ou expirada.</div>
 
   const paid = intent.status === 'paid' || result?.ok
-  // Plano de parcelas vindo do servidor (com juros). Fallback: à vista.
-  const plan = intent.installmentPlan.length
-    ? intent.installmentPlan
-    : [{ n: 1, totalCents: intent.amountCents, perCents: intent.amountCents }]
+  // Cartão e.Rede = parcelado SEM JUROS até o limite do kit (intent.installments). O total
+  // não muda com o número de parcelas; cada parcela é o valor / n.
+  const maxInst = Math.max(1, intent.installments || 1)
+  const plan = Array.from({ length: maxInst }, (_, i) => {
+    const n = i + 1
+    return { n, totalCents: intent.amountCents, perCents: Math.round(intent.amountCents / n) }
+  })
   const selectedOpt = plan.find((o) => o.n === installments) ?? plan[0]
 
   return (
@@ -118,55 +111,32 @@ export function CheckoutPage() {
               <Input id="cc-cvv" value={cvv} onChange={(e) => setCvv(e.target.value)} inputMode="numeric" placeholder="123" />
             </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="cc-phone">Celular do titular (com DDD)</Label>
-            <Input id="cc-phone" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="numeric" placeholder="(44) 99999-9999" />
-          </div>
-          <div className="grid grid-cols-3 gap-2">
+          {maxInst > 1 ? (
             <div className="space-y-1.5">
-              <Label htmlFor="cc-cpf">CPF do titular</Label>
-              <Input id="cc-cpf" value={cpf} onChange={(e) => setCpf(e.target.value)} inputMode="numeric" placeholder="Somente números" />
+              <Label htmlFor="cc-inst">Parcelas</Label>
+              <select
+                id="cc-inst"
+                value={installments}
+                onChange={(e) => setInstallments(Number(e.target.value))}
+                className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+              >
+                {plan.map((o) => (
+                  <option key={o.n} value={o.n}>
+                    {o.n === 1 ? `À vista — ${brl(o.totalCents)}` : `${o.n}x de ${brl(o.perCents)} sem juros — total ${brl(o.totalCents)}`}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="cc-cep">CEP</Label>
-              <Input id="cc-cep" value={cep} onChange={(e) => setCep(e.target.value)} inputMode="numeric" placeholder="00000000" />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="cc-addrnum">Nº</Label>
-              <Input id="cc-addrnum" value={addrNumber} onChange={(e) => setAddrNumber(e.target.value)} inputMode="numeric" placeholder="123" />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="cc-inst">Parcelas</Label>
-            <select
-              id="cc-inst"
-              value={installments}
-              onChange={(e) => setInstallments(Number(e.target.value))}
-              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
-            >
-              {plan.map((o) => (
-                <option key={o.n} value={o.n}>
-                  {o.n === 1
-                    ? `À vista — ${brl(o.totalCents)}`
-                    : `${o.n}x de ${brl(o.perCents)} — total ${brl(o.totalCents)}`}
-                </option>
-              ))}
-            </select>
-            {selectedOpt && selectedOpt.n > 1 ? (
-              <p className="text-[0.7rem] text-muted-foreground">
-                Parcelado com juros. À vista sai por {brl(intent.amountCents)}.
-              </p>
-            ) : null}
-          </div>
+          ) : null}
 
           {result && !result.ok ? (
             <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-700">{result.message}</div>
           ) : null}
 
           <Button className="w-full" onClick={() => void submit()} disabled={paying}>
-            {paying ? 'Processando…' : `Pagar ${brl(selectedOpt.totalCents)}`}
+            {paying ? 'Processando…' : `Pagar ${selectedOpt.n === 1 ? brl(selectedOpt.totalCents) : `${selectedOpt.n}x de ${brl(selectedOpt.perCents)}`}`}
           </Button>
-          <p className="text-center text-[0.7rem] text-muted-foreground">Pagamento processado pelo Asaas.</p>
+          <p className="text-center text-[0.7rem] text-muted-foreground">Pagamento processado pela Rede.</p>
         </div>
       )}
     </div>
