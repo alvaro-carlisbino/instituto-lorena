@@ -154,6 +154,22 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Quando o consultor humano responde, o lead deixa de "aguardar consultor" no Painel
+  // de Atendimento Pendente (waiting_human → human_active). Escopo mínimo e seguro: só
+  // transiciona quem está EXATAMENTE em waiting_human — não toca em 'new', leads de venda
+  // (Tricopill) nem em estados finais. Best-effort: nunca derruba o envio.
+  if (user?.email) {
+    try {
+      await admin
+        .from('leads')
+        .update({ conversation_status: 'human_active', last_interaction_at: nowIso() })
+        .eq('id', row.id)
+        .eq('conversation_status', 'waiting_human')
+    } catch (e) {
+      console.warn('[crm-send-message] clear waiting_human failed:', e instanceof Error ? e.message : String(e))
+    }
+  }
+
   const effectiveTo = to || String(row.phone ?? '').trim()
   const customFieldsChannel = String(
     (row.custom_fields as Record<string, unknown> | null)?.channel ?? '',

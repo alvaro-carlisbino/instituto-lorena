@@ -180,6 +180,16 @@ function contentForInboundWithMedia(text: string, media: ExtractedMedia[]): stri
   return labels.join(' • ')
 }
 
+// Detecta a transferência da Sofia para a consultora humana (Dandara) a partir do TEXTO
+// da resposta espelhada. Usado como rede quando o marcador [PRONTO_PARA_CONSULTOR] não
+// chega ao CRM (a clínica roda a Sofia no ManyChat, com a IA do CRM desligada). Exige o
+// nome "Dandara" + um verbo de encaminhamento, pra não disparar em menções soltas.
+function looksLikeDandaraHandoff(text: string): boolean {
+  const t = (text || '').toLowerCase()
+  if (!t.includes('dandara')) return false
+  return /encaminh|consultora|vou te passar|vou te chamar|vai te explicar|vai confirmar|seguir com o agendamento|passar (pra|para) (a )?dandara|chamar agora/.test(t)
+}
+
 /**
  * Grava os anexos extraídos do payload ManyChat em `crm_media_items`, linkando à
  * interaction recém-criada. A URL do S3 do ManyChat vai em `storage_path` (estável,
@@ -847,6 +857,39 @@ Deno.serve(async (req) => {
         content: outboundText || rawOutbound,
         happenedAt: nowIso(),
       })
+
+      // Painel "Atendimento Pendente": a Sofia roda no ManyChat (IA do CRM off), então é
+      // AQUI, no espelho do outbound, que o handoff para a Dandara entra no CRM. Detecta
+      // pelo marcador [PRONTO_PARA_CONSULTOR] (handoffSuggested) e, como rede, pelo texto
+      // de apresentação da Dandara. Marca o lead como `waiting_human` pra acender o painel
+      // e só notifica a equipe quando há transição real (evita spam a cada mensagem).
+      try {
+        const isAiAuthor = author === 'Assistente IA' || /assistente|sofia/i.test(author)
+        const isHandoff = handoffSuggested || (isAiAuthor && looksLikeDandaraHandoff(outboundText || rawOutbound))
+        if (isHandoff) {
+          const { data: updated } = await admin
+            .from('leads')
+            .update({ conversation_status: 'waiting_human', last_interaction_at: nowIso() })
+            .eq('id', leadId)
+            .not('conversation_status', 'in', '(waiting_human,human_active,lost,closed,archived)')
+            .select('id')
+          if (updated && updated.length > 0) {
+            await notifyAgents(admin, {
+              leadId,
+              kind: 'handoff',
+              title: 'Triagem finalizada — assumir',
+              body: `${userName} foi encaminhado(a) para a Dandara e aguarda atendimento.`,
+              includeOwner: true,
+              tenantId,
+              dedupeKey: 'handoff_waiting',
+              dedupeWindowMinutes: 30,
+            })
+          }
+        }
+      } catch (e) {
+        console.warn('[manychat-webhook] record_outbound handoff status update failed:', e instanceof Error ? e.message : String(e))
+      }
+
       return json({
         ok: true,
         leadId,
