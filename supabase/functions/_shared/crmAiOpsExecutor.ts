@@ -5,7 +5,7 @@ import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
 import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
-import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { resolveCepBrasil } from './cep.ts'
 
 /** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
@@ -39,6 +39,9 @@ async function resolveFreightCents(
   //  - envio_externo / ausente → cota o Melhor Envio (abaixo)
   const deliveryMode = normalizeDeliveryMode(op.delivery_mode ?? op.to_delivery_mode)
   if (deliveryMode === 'retirada_clinica') return undefined
+  // FRETE GRÁTIS por kit (alavanca de ticket — default kit 5 meses): zera o frete em qualquer
+  // modalidade de envio. Vale antes da cotação/taxa local.
+  if (isFreeShippingKit(op.kit)) return 0
   if (deliveryMode === 'entrega_local_maringa') {
     const cepDigits = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
     const cityInfo = cepDigits.length === 8 ? await resolveCepBrasil(cepDigits) : null

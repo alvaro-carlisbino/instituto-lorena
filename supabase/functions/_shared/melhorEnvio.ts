@@ -154,6 +154,22 @@ export function localDeliveryCents(cityInfo?: { localidade?: string; uf?: string
   return raw !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n) : 1500
 }
 
+/**
+ * Kits com FRETE GRÁTIS (alavanca de ticket — incentiva subir pro kit maior). Default: só
+ * o kit de 5 meses. Override por env `FRETE_GRATIS_KITS` = csv de chaves canônicas
+ * (ex.: "5_meses,3_meses"; "none" desliga). O frete grátis vale em QUALQUER modalidade
+ * (entrega local ou Correios) — o servidor zera tanto no que COBRA (resolveFreightCents)
+ * quanto no que MOSTRA (snapshot.frete.por_kit).
+ */
+export function isFreeShippingKit(kitRaw: unknown): boolean {
+  const key = normalizeKitKeyLocal(kitRaw)
+  if (!key) return false
+  const raw = (Deno.env.get('FRETE_GRATIS_KITS') ?? '').trim().toLowerCase()
+  if (raw === 'none') return false
+  const set = raw ? new Set(raw.split(',').map((s) => s.trim()).filter(Boolean)) : new Set(['5_meses'])
+  return set.has(key)
+}
+
 // ─── OAuth2: configuração do app ────────────────────────────────────────────
 
 export function melhorEnvioSandbox(): boolean {
