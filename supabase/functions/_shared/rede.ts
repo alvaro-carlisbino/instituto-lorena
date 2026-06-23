@@ -685,18 +685,32 @@ export async function checkRedePixStatus(admin: SupabaseClient, id: string): Pro
     headers: { Authorization: `Basic ${basic}` },
   })
   const text = await res.text()
+  // Erro de gateway/credencial (401/403/5xx) NÃO pode virar "pending" silencioso — senão um
+  // PIX pago fica preso pra sempre sem ninguém perceber. Surge como exceção (poller registra).
+  if (res.status === 401 || res.status === 403 || res.status >= 500) {
+    throw new Error(`rede_pix_consulta_falhou:${res.status}:${(text || '').slice(0, 140)}`)
+  }
   let parsed: Record<string, unknown> = {}
   try {
     parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {}
   } catch {
     parsed = {}
   }
+  // A e.Rede devolve formatos DIFERENTES conforme o estágio do PIX:
+  //  - pendente: { qrCodeResponse: { status: "Pending", ... } }
+  //  - PAGO:     { authorization: { status: "Approved", returnCode: "00", tid, ... } }  (sem qrCodeResponse)
+  // Ler só qrCodeResponse fazia o PIX pago (que não tem esse campo) cair em "pending" pra sempre.
   const qr = (parsed.qrCodeResponse ?? {}) as Record<string, unknown>
-  const rawStatus = String(qr.status ?? '').trim()
+  const auth = (parsed.authorization ?? {}) as Record<string, unknown>
+  const authApproved =
+    String(auth.returnCode ?? '') === '00' ||
+    REDE_PIX_PAID_STATUSES.has(String(auth.status ?? '').trim().toLowerCase())
+  const rawStatus = String((auth.status ?? qr.status) ?? '').trim()
   const low = rawStatus.toLowerCase()
-  const tid = typeof qr.tid === 'string' ? qr.tid : null
+  const tid =
+    (typeof auth.tid === 'string' && auth.tid) ? auth.tid : (typeof qr.tid === 'string' ? qr.tid : null)
 
-  if (REDE_PIX_PAID_STATUSES.has(low)) {
+  if (authApproved || REDE_PIX_PAID_STATUSES.has(low)) {
     // Idempotência: só finaliza quem AINDA está pending (update condicional + checagem de linhas).
     const { data: upd } = await admin
       .from('rede_payments')
