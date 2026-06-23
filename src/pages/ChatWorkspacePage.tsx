@@ -1,6 +1,6 @@
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useRef, useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Search, UserRound } from 'lucide-react'
@@ -163,13 +163,19 @@ export function ChatWorkspacePage({
     [crm.interactions, activeLead],
   )
 
+  // Aplica o leadId da URL apenas uma vez por valor distinto. Antes este efeito
+  // dependia de `crm` (objeto novo a cada render), entao rodava em TODO render e
+  // forcava a selecao de volta para o lead da URL — travando a troca de lead.
+  const leadIdParam = searchParams.get('leadId')
+  const appliedLeadIdRef = useRef<string | null>(null)
   useEffect(() => {
-    const leadId = searchParams.get('leadId')
-    if (!leadId) return
-    if (crm.leads.some((lead) => lead.id === leadId)) {
-      crm.setSelectedLeadId(leadId)
+    if (!leadIdParam) return
+    if (appliedLeadIdRef.current === leadIdParam) return
+    if (crm.leads.some((lead) => lead.id === leadIdParam)) {
+      appliedLeadIdRef.current = leadIdParam
+      crm.setSelectedLeadId(leadIdParam)
     }
-  }, [crm, searchParams])
+  }, [leadIdParam, crm.leads, crm.setSelectedLeadId])
 
   useEffect(() => {
     if (ownerFilter !== 'all' && !crm.users.some((u) => u.id === ownerFilter)) {
