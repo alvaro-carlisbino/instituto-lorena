@@ -184,14 +184,27 @@ function pickupAdviceNote(entrega: EntregaSnapshot): string {
 const PIX_QR_IMAGE_BASE = (Deno.env.get('PIX_QR_IMAGE_BASE') ?? 'https://api.qrserver.com/v1/create-qr-code/').trim()
 
 /**
- * URL de imagem PNG do QR Code Pix a partir do copia-e-cola (EMV). A e.Rede frequentemente NÃO
- * devolve a imagem do QR (só o copia-e-cola), e a W-API envia imagem por URL — então geramos a
- * imagem aqui a partir do próprio payload. Best-effort: se o gerador cair, o copia-e-cola (que
- * vai no texto da mensagem) continua resolvendo o pagamento.
+ * Gera a imagem do QR Code Pix a partir do copia-e-cola (EMV) e devolve um DATA URI base64
+ * (data:image/png;base64,...). A e.Rede raramente devolve a imagem do QR, e a W-API só aceita
+ * imagem como base64 OU URL terminada em .png/.jpg — a URL do gerador (com query string) é
+ * REJEITADA ("A URL da imagem deve ser nos formatos .png/.jpeg/.jpg"). Por isso baixamos o PNG
+ * e mandamos em base64. Best-effort: devolve '' se o gerador falhar (o copia-e-cola no texto da
+ * mensagem já resolve o pagamento). O PNG do QR é ~1KB, então o base64 trafega tranquilo no JSON.
  */
-function pixQrImageUrl(emv: string): string {
-  const sep = PIX_QR_IMAGE_BASE.includes('?') ? '&' : '?'
-  return `${PIX_QR_IMAGE_BASE}${sep}size=400x400&margin=12&data=${encodeURIComponent(emv)}`
+async function pixQrImageDataUri(emv: string): Promise<string> {
+  try {
+    const sep = PIX_QR_IMAGE_BASE.includes('?') ? '&' : '?'
+    const url = `${PIX_QR_IMAGE_BASE}${sep}size=400x400&margin=12&format=png&data=${encodeURIComponent(emv)}`
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) })
+    if (!res.ok) return ''
+    const buf = new Uint8Array(await res.arrayBuffer())
+    if (buf.length === 0) return ''
+    let bin = ''
+    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]!)
+    return `data:image/png;base64,${btoa(bin)}`
+  } catch {
+    return ''
+  }
 }
 
 const CRM_OPS_MARKER = '<<<CRM_OPS>>>'
@@ -761,14 +774,16 @@ export async function executeCrmAiOpsFromModel(
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           const pixNote = [note, pickupAdviceNote(snapPix.entrega)].filter(Boolean).join('\n\n')
-          // detail = copia-e-cola (vai no texto). imageUrl = QR como IMAGEM: a W-API envia imagem
-          // por URL e a e.Rede frequentemente não devolve a imagem, então geramos do copia-e-cola.
+          // detail = copia-e-cola (vai no texto). imageUrl = QR como IMAGEM (data URI base64): a
+          // e.Rede raramente devolve a imagem e a W-API rejeita URL sem extensão .png, então
+          // geramos o PNG do copia-e-cola e mandamos em base64.
+          const pixImg = out.qrText ? await pixQrImageDataUri(out.qrText) : ''
           results.push({
             type: 'rede_pix',
             ok: true,
             detail: out.qrText,
             customerNote: pixNote || undefined,
-            ...(out.qrText ? { imageUrl: pixQrImageUrl(out.qrText) } : {}),
+            ...(pixImg ? { imageUrl: pixImg } : {}),
           })
           summaries.push(`Pix gerado via Rede (${pixDesc}${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`)
           // VENDA QUENTE: o cliente recebeu o Pix — avisa o consultor pra acompanhar o fechamento.
