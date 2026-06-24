@@ -410,17 +410,37 @@ export class WapiProvider implements WhatsappProvider {
         safeString(getByPath(parsed, 'data.url'))
       if (mediaUrl && mediaUrl.startsWith('http')) {
         const mediaTimeout = Number(Deno.env.get('WAPI_MEDIA_TIMEOUT_MS') ?? '') || 90000
-        // Alguns CDNs da W-API exigem o Bearer pra servir o fileLink (sem ele a conexão pendura).
-        const isWapiHost = /w-api\.app|wapi/i.test(mediaUrl)
-        let r: Response
+        // O fileLink vem SEMPRE da resposta autenticada do /message/download-media, logo é um
+        // recurso do W-API → mandamos o Bearer SEMPRE. Sem ele o servidor não responde e a
+        // conexão pendura até o timeout. Desde ~22/jun o W-API passou a devolver o link num nó
+        // por IP cru (ex.: http://76.13.231.97:8080/...); a regex `wapi` antiga não casava, o
+        // token não ia e TODO áudio/imagem/doc estourava `filelink_timeout`.
+        // Fallback: o mesmo path no domínio oficial https://api.w-api.app (o que a doc documenta
+        // como destino do fileLink) — cobre o caso do nó por IP cru estar inalcançável do Edge.
+        const candidates: string[] = [mediaUrl]
         try {
-          r = await fetch(mediaUrl, {
-            signal: AbortSignal.timeout(mediaTimeout),
-            ...(isWapiHost ? { headers: { Authorization: `Bearer ${this.token}` } } : {}),
-          })
-        } catch (e) {
+          const u = new URL(mediaUrl)
+          if (u.hostname !== 'api.w-api.app') candidates.push(`https://api.w-api.app${u.pathname}${u.search}`)
+        } catch {
+          /* mediaUrl malformado — segue só com o original */
+        }
+        let r: Response | null = null
+        let lastErr = ''
+        for (const target of candidates) {
+          try {
+            r = await fetch(target, {
+              signal: AbortSignal.timeout(mediaTimeout),
+              headers: { Authorization: `Bearer ${this.token}` },
+            })
+            break
+          } catch (e) {
+            lastErr = e instanceof Error ? e.message : String(e)
+            r = null
+          }
+        }
+        if (!r) {
           const host = (() => { try { return new URL(mediaUrl).host } catch { return '?' } })()
-          return { ok: false, debug: `filelink_timeout:${host}:${(e instanceof Error ? e.message : String(e)).slice(0, 60)}` }
+          return { ok: false, debug: `filelink_timeout:${host}:${lastErr.slice(0, 60)}` }
         }
         if (!r.ok) return { ok: false, debug: `media_url_http_${r.status}` }
         const buf = await r.arrayBuffer()
