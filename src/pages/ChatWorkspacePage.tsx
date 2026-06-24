@@ -3,7 +3,7 @@ import { ptBR } from 'date-fns/locale'
 import { useMemo, useRef, useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Search, UserRound } from 'lucide-react'
+import { Mail, Search, UserRound } from 'lucide-react'
 
 import { ConversationModeSwitch } from '@/components/leads/ConversationModeSwitch'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
@@ -30,11 +30,20 @@ import {
 } from '@/services/conversationControl'
 import { isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
 import { fetchWhatsappChannelInstances, type BotKind } from '@/services/whatsappChannelInstances'
+import { useUnreadConversations } from '@/hooks/useUnreadConversations'
 
 const MODE_SUMMARY: Record<ConversationOwnerMode, string> = {
   human: 'Humano',
   ai: 'IA',
   auto: 'Misto',
+}
+
+/** Iniciais para o avatar do contato na lista (1ª + última palavra). */
+function initials(name: string): string {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase()
+  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase()
 }
 
 /**
@@ -55,6 +64,8 @@ export function ChatWorkspacePage({
   const [leadMode, setLeadMode] = useState<ConversationOwnerMode>('auto')
   const [modeLoading, setModeLoading] = useState(false)
   const [leadSheetOpen, setLeadSheetOpen] = useState(false)
+  const [unreadOnly, setUnreadOnly] = useState(false)
+  const { isUnread, unreadCount, markSeen, markUnread } = useUnreadConversations(crm.interactions)
   // Ids das linhas de WhatsApp do tipo `restrictToBotKind` (ex.: vendas/Tricopill).
   // null = ainda carregando; Set vazio = nenhuma linha desse tipo configurada.
   const [restrictInstanceIds, setRestrictInstanceIds] = useState<Set<string> | null>(null)
@@ -130,6 +141,7 @@ export function ChatWorkspacePage({
         if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) return false
       }
       if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) return false
+      if (unreadOnly && !isUnread(lead.id)) return false
       if (!text) return true
       return [lead.patientName, lead.phone, lead.summary].join(' ').toLowerCase().includes(text)
     })
@@ -154,7 +166,7 @@ export function ChatWorkspacePage({
       const bh = crm.interactions.find((i) => i.leadId === b.id)?.happenedAt ?? b.createdAt
       return new Date(bh).getTime() - new Date(ah).getTime()
     })
-  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds])
+  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread])
 
   const activeLead = crm.selectedLead ?? conversations[0] ?? null
   const waComposeBlocked = activeLead ? isLeadWhatsappComposeBlocked(activeLead) : false
@@ -211,6 +223,14 @@ export function ChatWorkspacePage({
     if (!aiConversationBase) return null
     return { ...aiConversationBase, ownerMode: leadMode }
   }, [aiConversationBase, leadMode])
+
+  // Conversa ABERTA pelo atendente (selectedLeadId explícito) conta como lida — e re-marca
+  // quando chega mensagem nova com ela aberta. Usamos selectedLeadId em vez de activeLead de
+  // propósito: a 1ª conversa da lista aparece por fallback mas NÃO deve "auto-ler" sozinha,
+  // senão o "marcar como não lida" seria revertido na hora.
+  useEffect(() => {
+    if (crm.selectedLeadId) markSeen(crm.selectedLeadId)
+  }, [crm.selectedLeadId, activeHistory, markSeen])
 
   useEffect(() => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured || !supabase) return
@@ -287,6 +307,29 @@ export function ChatWorkspacePage({
                   <SelectItem value="long_wait" className="text-xs">Longa espera</SelectItem>
                 </SelectContent>
               </Select>
+              <Button
+                type="button"
+                variant={unreadOnly ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setUnreadOnly((v) => !v)}
+                className="h-8 w-full justify-between rounded-lg px-2.5 text-[11px]"
+                title="Mostrar só conversas com mensagem nova não lida"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Mail className="size-3.5" />
+                  {unreadOnly ? 'Só não lidas' : 'Não lidas'}
+                </span>
+                {unreadCount > 0 ? (
+                  <span
+                    className={cn(
+                      'inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums',
+                      unreadOnly ? 'bg-primary-foreground text-primary' : 'bg-primary text-primary-foreground',
+                    )}
+                  >
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                ) : null}
+              </Button>
             </div>
           </CardHeader>
           <CardContent className="min-h-0 flex-1 overflow-y-auto p-0 scrollbar-thin scrollbar-thumb-border/40">
@@ -302,27 +345,50 @@ export function ChatWorkspacePage({
                   const waitingLabel = waitingMinutes >= 60
                     ? `${Math.floor(waitingMinutes / 60)}h${waitingMinutes % 60 ? ` ${waitingMinutes % 60}m` : ''}`
                     : `${waitingMinutes}m`
+                  const unread = isUnread(lead.id)
+                  const isActive = crm.selectedLeadId === lead.id
                   return (
                   <button
                     key={lead.id}
-                    onClick={() => crm.setSelectedLeadId(lead.id)}
+                    onClick={() => { markSeen(lead.id); crm.setSelectedLeadId(lead.id) }}
                     className={cn(
-                      'flex w-full flex-col gap-1 p-3 text-left transition-all duration-200 hover:bg-muted/30 sm:px-4',
-                      crm.selectedLeadId === lead.id ? 'bg-primary/5 shadow-[inset_3px_0_0_0_hsl(var(--primary))]' : 'transparent',
+                      'flex w-full gap-3 p-3 text-left transition-all duration-200 hover:bg-muted/30 sm:px-4',
+                      isActive
+                        ? 'bg-primary/5 shadow-[inset_3px_0_0_0_hsl(var(--primary))]'
+                        : unread ? 'bg-primary/[0.03]' : 'transparent',
                     )}
                   >
+                    <span
+                      className={cn(
+                        'relative mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full text-[11px] font-bold tracking-tight',
+                        unread ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
+                      )}
+                      aria-hidden
+                    >
+                      {initials(lead.patientName)}
+                      {unread ? (
+                        <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-primary ring-2 ring-card" />
+                      ) : null}
+                    </span>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <div className="flex w-full items-center justify-between gap-2">
                       <span className={cn(
-                        "truncate text-sm font-medium tracking-tight",
-                        crm.selectedLeadId === lead.id ? "text-primary" : "text-foreground"
+                        "truncate text-sm tracking-tight",
+                        unread ? "font-bold text-foreground" : isActive ? "font-medium text-primary" : "font-medium text-foreground"
                       )}>
                         {lead.patientName}
                       </span>
-                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">
+                      <span className={cn(
+                        "shrink-0 text-[10px] tabular-nums",
+                        unread ? "font-semibold text-primary" : "text-muted-foreground/60"
+                      )}>
                         {lead.createdAt ? format(new Date(lead.createdAt), 'HH:mm', { locale: ptBR }) : ''}
                       </span>
                     </div>
-                    <p className="line-clamp-1 w-full text-xs text-muted-foreground/70 leading-normal">
+                    <p className={cn(
+                      "line-clamp-1 w-full text-xs leading-normal",
+                      unread ? "font-medium text-foreground/80" : "text-muted-foreground/70"
+                    )}>
                       {lead.summary || 'Sem resumo disponível'}
                     </p>
                     <div className="mt-1 flex items-center gap-2">
@@ -353,6 +419,7 @@ export function ChatWorkspacePage({
                           ⏱ {waitingLabel}
                         </span>
                       ) : null}
+                    </div>
                     </div>
                   </button>
                   )
@@ -387,6 +454,20 @@ export function ChatWorkspacePage({
                   </div>
                   
                   <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="rounded-xl gap-1.5 text-xs"
+                      onClick={() => {
+                        markUnread(activeLead.id)
+                        crm.setSelectedLeadId('')
+                        toast.success('Conversa marcada como não lida')
+                      }}
+                      title="Marcar esta conversa como não lida (volta a aparecer em destaque na lista)"
+                    >
+                      <Mail className="size-3.5" />
+                      <span className="hidden sm:inline">Não lida</span>
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
