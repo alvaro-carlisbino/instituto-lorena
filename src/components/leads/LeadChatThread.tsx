@@ -137,6 +137,25 @@ function base64ToBlobUrl(base64: string, mime: string): string | null {
   }
 }
 
+/**
+ * Abre uma mídia (documento/imagem) numa nova aba. O Chrome BLOQUEIA navegação top-level para
+ * data: URIs — então PDF/foto da W-API (que vêm em base64, sem storage_path) "não abrem nada"
+ * ao clicar. Convertendo o base64 num Blob URL o navegador trata como recurso real e abre.
+ * URL externa (ManyChat S3) abre direto. Revoga o Blob depois pra não vazar memória.
+ */
+function openMedia(item: { url?: string; base64?: string; mimeType?: string | null }, fallbackMime: string): void {
+  if (item.url && item.url.trim()) {
+    window.open(item.url, '_blank', 'noopener')
+    return
+  }
+  if (item.base64 && item.base64.trim()) {
+    const blobUrl = base64ToBlobUrl(item.base64, item.mimeType || fallbackMime)
+    if (!blobUrl) return
+    window.open(blobUrl, '_blank', 'noopener')
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
+  }
+}
+
 function useBlobMediaSrc(
   url: string | null | undefined,
   base64: string | null | undefined,
@@ -634,7 +653,7 @@ export function LeadChatThread({
                     src={src}
                     alt={item.caption || 'Foto'}
                     className="max-h-64 w-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                    onClick={() => window.open(src, '_blank')}
+                    onClick={() => openMedia(item, 'image/jpeg')}
                   />
                   {item.caption && <p className="mt-1 px-2 pb-1 text-xs opacity-80">{item.caption}</p>}
                 </div>
@@ -650,13 +669,11 @@ export function LeadChatThread({
               const src = resolveSrc(item, 'application/octet-stream')
               if (!src) return null
               return (
-                <a
+                <button
                   key={item.id}
-                  href={src}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  download={item.caption || undefined}
-                  className="flex items-center gap-3 rounded-lg bg-black/5 p-2 transition-colors hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10 no-underline"
+                  type="button"
+                  onClick={() => openMedia(item, 'application/octet-stream')}
+                  className="flex w-full items-center gap-3 rounded-lg bg-black/5 p-2 text-left transition-colors hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10"
                 >
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/20 text-blue-500">
                     <FileIcon className="h-5 w-5" />
@@ -665,7 +682,7 @@ export function LeadChatThread({
                     <span className="truncate text-sm font-semibold">{item.caption || 'Documento'}</span>
                     <span className="text-[10px] uppercase opacity-60">Clique para abrir</span>
                   </div>
-                </a>
+                </button>
               )
             }
             return null
