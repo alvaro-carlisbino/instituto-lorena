@@ -833,16 +833,14 @@ export async function autoShipToCart(
     }
     if (!to.address) return { ok: false, skipped: true, reason: 'sem_rua' }
 
-    // COTA ANTES e escolhe um serviço que REALMENTE atende o trecho. Antes assumia PAC fixo,
-    // mas há rotas que só têm SEDEX (ex.: Nova Esperança, Apucarana) → o carrinho dava
-    // "transportadora não atende". Agora: usa o serviço escolhido pelo cliente SE ele atende;
-    // senão cai no mais barato que atende.
+    // COTA ANTES e escolhe a transportadora MAIS BARATA que REALMENTE atende o trecho — qualquer
+    // empresa (Correios, Jadlog, Loggi…), não Correios fixo. Isso bate com o que foi COBRADO do
+    // cliente (resolveFreightCents também usa a mais barata), então a etiqueta nunca sai mais cara
+    // que o cobrado. options[0] já vem ordenado do mais barato pelo Melhor Envio.
     const box = boxForKit(opts.kit) ?? undefined
     const q = await quoteFreteMelhorEnvio(admin, tenantId, cep, { box, cityInfo })
     if (!q.ok || q.options.length === 0) return { ok: false, skipped: true, reason: 'sem_servico_atende' }
-    const serviceRaw = String(entrega.service ?? entrega.freight_service ?? '').trim().toUpperCase()
-    const preferred = serviceRaw ? q.options.find((o) => o.service.toUpperCase().includes(serviceRaw)) : null
-    const chosen = preferred ?? q.options[0] // options já vêm ordenadas do mais barato
+    const chosen = q.options[0]
     const serviceId = chosen.serviceId
 
     const res = await createMeShipment(admin, tenantId, {

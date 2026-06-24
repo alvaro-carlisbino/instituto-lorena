@@ -576,6 +576,7 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
     paymentId: asaasPaymentId || `${localSubId}:cycle:${cycle}`,
     paymentMethod: 'card',
     amountCents: monthlyValueCents,
+    customerName: s.customer_name != null ? String(s.customer_name) : undefined,
     note: `Assinatura Tricopill — ciclo ${cycle} (${cadence}).`,
     autoData: { gateway: 'asaas', subscription_local_id: localSubId, asaas_subscription_id: s.asaas_subscription_id ?? null, cycle, cadence },
   })
@@ -677,6 +678,7 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
     paymentId: localId,
     paymentMethod: method as 'card' | 'pix',
     amountCents,
+    customerName: p.customer_name != null ? String(p.customer_name) : undefined,
     note: `Comprovante automático Asaas (${method === 'pix' ? 'Pix' : 'cartão'}).`,
     autoData: {
       gateway: 'asaas',

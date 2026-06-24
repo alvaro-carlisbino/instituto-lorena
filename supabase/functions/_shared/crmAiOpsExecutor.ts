@@ -1,11 +1,12 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
 import { insertInteraction } from './crm.ts'
+import { notifyAgents } from './notifyAgents.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
 import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
-import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { resolveCepBrasil } from './cep.ts'
 
 /** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
@@ -48,9 +49,10 @@ async function resolveFreightCents(
     return localDeliveryCents(cityInfo)
   }
 
-  const service = op.freight_service != null ? String(op.freight_service).trim() : ''
   const toCep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
-  if (service && toCep.length === 8 && melhorEnvioConfigured()) {
+  // Cota sempre que há CEP válido (não depende mais da IA citar "PAC"/"SEDEX"): o valor
+  // autoritativo é o do Melhor Envio, não o serviço que a IA escolheu.
+  if (toCep.length === 8 && melhorEnvioConfigured()) {
     try {
       // A caixa ESCALA com o kit (peso real): sem isto o frete de 4 frascos saía como o de 1.
       const box = boxForKit(op.kit)
@@ -66,10 +68,11 @@ async function resolveFreightCents(
         ...(box ? { box } : {}),
         ...(insuranceCents != null ? { insuranceCents } : {}),
       })
-      // Se o serviço pedido não casar (ex.: CEP de praça local só devolve "Entrega interna",
-      // ou a rota só tem SEDEX), NÃO cobra R$0: cai na opção mais barata que a cotação trouxe.
-      // Política "nunca cobrar menos que o custo": aplica margem (markup + arredonda pra cima).
-      const chosen = q.ok ? (pickFreteOption(q, service) ?? q.options[0] ?? null) : null
+      // COBRA SEMPRE a transportadora MAIS BARATA cotada (qualquer empresa: Correios, Jadlog,
+      // Loggi…), não o serviço que a IA citou — assim o valor bate com o real e fica idêntico
+      // ao que a etiqueta (autoShipToCart) vai pagar, que também pega a mais barata. options[0]
+      // já vem ordenado do mais barato pelo Melhor Envio. Aplica margem (markup + arredonda).
+      const chosen = q.ok ? (q.options[0] ?? null) : null
       if (chosen) return applyFreightMarkup(chosen.priceCents, { internal: chosen.internal })
     } catch {
       // cai no literal abaixo
@@ -164,6 +167,31 @@ function validateOrderReadiness(
   if (cep.length !== 8) missing.push('CEP')
   if (!numero) missing.push('número do endereço')
   return { ok: missing.length === 0, missing }
+}
+
+/**
+ * Aviso ao cliente quando a entrega é RETIRADA na clínica: informa o prazo de liberação
+ * (1 dia útil após a confirmação do pagamento). Anexado à mensagem do Pix/cartão para o
+ * cliente saber que NÃO é envio pelos Correios e quando o pedido fica disponível.
+ */
+function pickupAdviceNote(entrega: EntregaSnapshot): string {
+  const mode = normalizeDeliveryMode((entrega as Record<string, unknown>).delivery_mode)
+  if (mode !== 'retirada_clinica') return ''
+  return '📍 Como você vai *retirar na clínica*, assim que o pagamento for confirmado seu pedido fica disponível para retirada em até *1 dia útil*. Te aviso por aqui quando estiver pronto! 💚'
+}
+
+/** Host do gerador de imagem do QR Code Pix (override por env). O payload Pix (EMV) é público. */
+const PIX_QR_IMAGE_BASE = (Deno.env.get('PIX_QR_IMAGE_BASE') ?? 'https://api.qrserver.com/v1/create-qr-code/').trim()
+
+/**
+ * URL de imagem PNG do QR Code Pix a partir do copia-e-cola (EMV). A e.Rede frequentemente NÃO
+ * devolve a imagem do QR (só o copia-e-cola), e a W-API envia imagem por URL — então geramos a
+ * imagem aqui a partir do próprio payload. Best-effort: se o gerador cair, o copia-e-cola (que
+ * vai no texto da mensagem) continua resolvendo o pagamento.
+ */
+function pixQrImageUrl(emv: string): string {
+  const sep = PIX_QR_IMAGE_BASE.includes('?') ? '&' : '?'
+  return `${PIX_QR_IMAGE_BASE}${sep}size=400x400&margin=12&data=${encodeURIComponent(emv)}`
 }
 
 const CRM_OPS_MARKER = '<<<CRM_OPS>>>'
@@ -732,10 +760,30 @@ export async function executeCrmAiOpsFromModel(
             phone: String(snapPix.cadastro.telefone ?? '').replace(/\D/g, '') || undefined,
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
-          // detail = copia-e-cola (vai no texto). A e.Rede devolve o QR como base64 (data URI),
-          // que o WhatsApp não envia como imagem — então mandamos só o copia-e-cola (suficiente).
-          results.push({ type: 'rede_pix', ok: true, detail: out.qrText, customerNote: note })
+          const pixNote = [note, pickupAdviceNote(snapPix.entrega)].filter(Boolean).join('\n\n')
+          // detail = copia-e-cola (vai no texto). imageUrl = QR como IMAGEM: a W-API envia imagem
+          // por URL e a e.Rede frequentemente não devolve a imagem, então geramos do copia-e-cola.
+          results.push({
+            type: 'rede_pix',
+            ok: true,
+            detail: out.qrText,
+            customerNote: pixNote || undefined,
+            ...(out.qrText ? { imageUrl: pixQrImageUrl(out.qrText) } : {}),
+          })
           summaries.push(`Pix gerado via Rede (${pixDesc}${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`)
+          // VENDA QUENTE: o cliente recebeu o Pix — avisa o consultor pra acompanhar o fechamento.
+          // É só um FYI (sininho), NÃO desliga a IA nem marca "aguardando consultor" (o cliente
+          // ainda paga sozinho). Dedupe por lead p/ não repetir a cada Pix dentro de 6h.
+          await notifyAgents(admin, {
+            leadId: opts.allowedLeadId,
+            kind: 'urgent',
+            title: 'Venda quente — acompanhe',
+            body: `${String(snapPix.cadastro.nomeCompleto ?? 'Cliente').trim()} recebeu o Pix (${pixDesc}). Pronto pra fechar!`,
+            includeOwner: true,
+            tenantId: leadTenantId,
+            dedupeKey: 'venda_quente',
+            dedupeWindowMinutes: 360,
+          })
         } catch (e) {
           results.push({ type: 'rede_pix', ok: false, detail: (e instanceof Error ? e.message : String(e)).slice(0, 200) })
         }
@@ -801,7 +849,8 @@ export async function executeCrmAiOpsFromModel(
             phone: String(snap.cadastro.telefone ?? '').replace(/\D/g, '') || undefined,
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
-          results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: note, installments: effInstallments })
+          const linkNote = [note, pickupAdviceNote(snap.entrega)].filter(Boolean).join('\n\n')
+          results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: linkNote || undefined, installments: effInstallments })
           summaries.push(
             `Link cartão e.Rede gerado (${description}, até ${effInstallments}x${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`,
           )

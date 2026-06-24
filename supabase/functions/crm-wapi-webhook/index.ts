@@ -6,7 +6,8 @@ import {
   runWhatsappAiAutoReply,
   upsertConversationStateInboundOnly,
 } from '../_shared/crmAiAutoReply.ts'
-import { insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
+import { customerSaysPaid, escalateLeadToHuman, insertInteraction, upsertLeadByPhone, wantsHumanAgent } from '../_shared/crm.ts'
+import { checkPendingRedePixForLead } from '../_shared/rede.ts'
 import { captureCadastroForLead } from '../_shared/cadastroExtract.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
@@ -386,6 +387,18 @@ Deno.serve(async (req) => {
     // mensagem de texto do cliente dispara a IA normalmente.
     const mediaOnly = isMediaOnlyMarker(normalized.text)
 
+    // Cliente avisou que pagou (ou "segue o comprovante"): confere o PIX e.Rede do lead NA HORA,
+    // sem esperar o poller (cron). Se a e.Rede confirmar, finalizeRedePaid já roda (pedido/baixa/
+    // comprovante) e o status fica atualizado ANTES de a IA responder — então a IA confirma o
+    // pagamento em vez de pedir de novo. No-op se o lead não tem PIX e.Rede pendente.
+    if (!mediaOnly && customerSaysPaid(normalized.text)) {
+      try {
+        await checkPendingRedePixForLead(admin, lead.leadId)
+      } catch (e) {
+        console.warn('[wapi-webhook] check pix on paid signal:', e instanceof Error ? e.message : String(e))
+      }
+    }
+
     let routing: string
     if (mediaOnly) {
       await admin
@@ -393,6 +406,19 @@ Deno.serve(async (req) => {
         .update({ updated_at: new Date().toISOString(), last_interaction_at: new Date().toISOString() })
         .eq('id', lead.leadId)
       routing = 'media_only_no_reply'
+    } else if (wantsHumanAgent(normalized.text)) {
+      // GATILHO "consultor precisa assumir": o cliente PEDIU uma pessoa. Vale p/ qualquer bot
+      // (inclusive o de vendas, que normalmente nunca escala): desliga a IA, acende o painel
+      // "Atendimento Pendente" e notifica. NÃO roda a IA (não responde automático por cima).
+      await escalateLeadToHuman(admin, {
+        leadId: lead.leadId,
+        tenantId,
+        title: 'Cliente pediu atendimento humano',
+        body: `${normalized.fromName} pediu para falar com uma pessoa.`,
+        dedupeKey: 'wants_human',
+        dedupeWindowMinutes: 30,
+      })
+      routing = 'human_requested'
     } else if (gate.canAutoReply) {
       const { replied, burstPending, handoffSuggested } = await runWhatsappAiAutoReply(admin, {
         leadId: lead.leadId,
@@ -408,7 +434,10 @@ Deno.serve(async (req) => {
         keepAiOn: isSalesBot,
       })
 
-      if (handoffSuggested && !isSalesBot) {
+      if (handoffSuggested) {
+        // Vale também p/ o bot de VENDAS agora (antes era `&& !isSalesBot`): quando a IA trava
+        // (2 fallbacks seguidos) ou finaliza a triagem, escala p/ humano — acende o painel e
+        // notifica. disableAiOnHandoff desliga a IA e move o stage (no clinic).
         await admin.from('leads').update({
           updated_at: new Date().toISOString(),
           last_interaction_at: new Date().toISOString(),
@@ -418,8 +447,10 @@ Deno.serve(async (req) => {
         await notifyAgents(admin, {
           leadId: lead.leadId,
           kind: 'handoff',
-          title: 'Triagem Finalizada',
-          body: `A IA terminou a triagem de ${normalized.fromName}. Pronto para assumir!`,
+          title: isSalesBot ? 'Venda precisa de um consultor' : 'Triagem finalizada',
+          body: isSalesBot
+            ? `A IA travou no atendimento de ${normalized.fromName}. Pronto para assumir!`
+            : `A IA terminou a triagem de ${normalized.fromName}. Pronto para assumir!`,
           includeOwner: true,
           tenantId,
         })

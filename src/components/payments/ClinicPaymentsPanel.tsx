@@ -197,20 +197,28 @@ export function PaymentsPanel() {
       setUploadingFor(null)
     }
   }
-  const viewReceipt = async (rec: PaymentReceiptRow) => {
+  const viewReceipt = async (rec: PaymentReceiptRow, customerName: string) => {
+    // O nome do cliente sempre acompanha o comprovante: preferimos o nome gravado no próprio
+    // comprovante (auto_data.customer_name) e caímos no nome da linha de pagamento (retroativo
+    // p/ comprovantes antigos que ainda não carimbavam o nome).
     if (rec.source === 'auto') {
       const d = rec.autoData ?? {}
+      const who = (typeof d.customer_name === 'string' && d.customer_name) || customerName
       const proof =
         d.gateway === 'asaas'
           ? `Asaas · cobrança ${d.asaas_payment_id ?? '—'} · ${d.return_code ?? 'confirmado'} · ${d.installments ?? 1}x`
           : d.gateway === 'rede'
             ? `e.Rede · TID ${d.tid ?? '—'} · cód ${d.return_code ?? '—'} · ${d.installments ?? 1}x`
             : `PagBank · ref ${d.reference_id ?? '—'} · tx ${(Array.isArray(d.transaction_ids) ? d.transaction_ids[0] : d.transaction_ids) ?? '—'}`
-      toast.info(`Comprovante automático: ${proof}`)
+      toast.info(`Comprovante de ${who}`, { description: proof })
       return
     }
-    if (!rec.storagePath) return
+    if (!rec.storagePath) {
+      toast.info(`Comprovante de ${customerName}`)
+      return
+    }
     try {
+      toast.info(`Comprovante de ${customerName}`)
       const url = await getReceiptSignedUrl(rec.storagePath)
       window.open(url, '_blank', 'noopener')
     } catch (e) {
@@ -463,7 +471,7 @@ export function PaymentsPanel() {
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         {recs.map((rec) => (
                           <span key={rec.id} className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] ${rec.source === 'auto' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-muted/60'}`}>
-                            <button type="button" onClick={() => void viewReceipt(rec)} className="inline-flex items-center gap-1 hover:underline">
+                            <button type="button" onClick={() => void viewReceipt(rec, name)} className="inline-flex items-center gap-1 hover:underline">
                               {rec.source === 'auto' ? <BadgeCheck className="size-3" /> : <FileText className="size-3" />}
                               {rec.source === 'auto' ? 'Auto (gateway)' : (rec.fileName ? rec.fileName.slice(0, 22) : 'comprovante')}
                             </button>

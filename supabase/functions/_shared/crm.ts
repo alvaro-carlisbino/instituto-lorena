@@ -3,6 +3,7 @@ import {
   attributionForCustomFields,
   type LeadAttribution,
 } from './attribution.ts'
+import { notifyAgents } from './notifyAgents.ts'
 
 export type LeadSource = 'meta_facebook' | 'meta_instagram' | 'meta_whatsapp' | 'whatsapp' | 'manual'
 export type LeadTemperature = 'cold' | 'warm' | 'hot'
@@ -556,6 +557,8 @@ export async function recordAutoReceipt(
     paymentMethod: 'card' | 'pix'
     amountCents: number
     autoData: Record<string, unknown>
+    /** Nome de quem pagou — carimbado no comprovante p/ não ficar anônimo na conciliação. */
+    customerName?: string
     note?: string
   },
 ): Promise<void> {
@@ -571,6 +574,7 @@ export async function recordAutoReceipt(
       note: input.note ?? null,
       auto_data: {
         ...input.autoData,
+        customer_name: input.customerName?.trim() || null,
         amount_cents: input.amountCents,
         recorded_at: new Date().toISOString(),
       },
@@ -582,6 +586,86 @@ export async function recordAutoReceipt(
   } catch (e) {
     console.warn('[recordAutoReceipt] exception:', e instanceof Error ? e.message : String(e))
   }
+}
+
+/**
+ * Escala um lead para ATENDIMENTO HUMANO ("consultor precisa assumir"):
+ *  1) marca `conversation_status='waiting_human'` (acende o painel "Atendimento Pendente"),
+ *     sem rebaixar quem já está em atendimento humano/perdido/fechado;
+ *  2) opcionalmente DESLIGA a IA (owner_mode=human, ai_enabled=false) p/ o humano assumir;
+ *  3) notifica os agentes (sininho + som + toast via app_inbox_notifications).
+ * Best-effort: nunca lança — usada em webhooks/fechamento, não pode derrubar o fluxo.
+ * É o caminho ÚNICO de handoff p/ o bot de vendas (Tricopill), que antes nunca escalava.
+ */
+export async function escalateLeadToHuman(
+  admin: SupabaseClient,
+  input: {
+    leadId: string
+    tenantId?: string
+    title: string
+    body: string
+    /** false = só notifica/acende painel sem desligar a IA (ex.: avisar venda quente). Default: desliga. */
+    turnOffAi?: boolean
+    /** Anti-spam: não repete a mesma notificação para o lead dentro da janela. */
+    dedupeKey?: string
+    dedupeWindowMinutes?: number
+  },
+): Promise<void> {
+  try {
+    const nowIso = new Date().toISOString()
+    await admin
+      .from('leads')
+      .update({ conversation_status: 'waiting_human', last_interaction_at: nowIso, updated_at: nowIso })
+      .eq('id', input.leadId)
+      .not('conversation_status', 'in', '(human_active,lost,closed,archived)')
+    if (input.turnOffAi !== false) {
+      await admin.from('crm_conversation_states').upsert({
+        lead_id: input.leadId,
+        ai_enabled: false,
+        owner_mode: 'human',
+        updated_at: nowIso,
+      })
+    }
+    await notifyAgents(admin, {
+      leadId: input.leadId,
+      kind: 'handoff',
+      title: input.title,
+      body: input.body,
+      includeOwner: true,
+      ...(input.tenantId ? { tenantId: input.tenantId } : {}),
+      ...(input.dedupeKey ? { dedupeKey: input.dedupeKey, dedupeWindowMinutes: input.dedupeWindowMinutes ?? 60 } : {}),
+    })
+  } catch (e) {
+    console.warn('[escalateLeadToHuman]', e instanceof Error ? e.message : String(e))
+  }
+}
+
+/**
+ * Detecta quando o cliente PEDE explicitamente falar com uma pessoa (atendente/consultor/humano).
+ * Sinal objetivo p/ chamar o consultor no bot de vendas. Conservador p/ evitar falso positivo
+ * (que desligaria a IA à toa): exige menção clara a atendente humano, não só a palavra "pessoa".
+ */
+const HUMAN_REQUEST_RE =
+  /atendimento humano|^\s*atendente\b|tem algu[eé]m a[íi]|(quero|queria|gostaria|preciso|posso|chama[r]?|me\s+(transfere|passa|encaminha|chama|atende)|falar|conversar)\b[^.!?\n]{0,24}\b(atendente|humano|consultor[ae]?|vendedor[ae]?|uma pessoa|pessoa\s+(de verdade|real)|algu[eé]m|gente)\b/i
+
+export function wantsHumanAgent(text: string): boolean {
+  const t = (text ?? '').toLowerCase().trim()
+  if (!t) return false
+  return HUMAN_REQUEST_RE.test(t)
+}
+
+/**
+ * Detecta quando o cliente AVISA que pagou (ou que está mandando o comprovante). Dispara a
+ * verificação imediata do PIX e.Rede do lead — confirma em segundos em vez de esperar o poller.
+ * Conservador, mas cobre as formas comuns ("paguei", "fiz o pix", "segue o comprovante").
+ */
+const SAYS_PAID_RE =
+  /\b(paguei|pagei|paguey|j[áa]\s*paguei|fiz o (pix|pagamento|pagamentinho)|efetuei|realizei o pagamento|fiz a transfer[êe]ncia|transferi|comprovante|comprei|finalizei a compra|conclu[íi] a compra)\b|pagamento (feito|realizado|efetuado|conclu[íi]do)|paguei o pix/i
+
+export function customerSaysPaid(text: string): boolean {
+  const t = (text ?? '').toLowerCase().trim()
+  if (!t) return false
+  return SAYS_PAID_RE.test(t)
 }
 
 /**

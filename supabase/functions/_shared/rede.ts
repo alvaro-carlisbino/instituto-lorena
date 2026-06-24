@@ -174,6 +174,7 @@ export type RedeIntent = {
   kit: string | null
   blingOrderId: string | null
   method: 'card' | 'pix'
+  customerName: string | null
 }
 
 function shortId(): string {
@@ -364,7 +365,7 @@ export async function createRedePix(
 export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<RedeIntent | null> {
   const { data } = await admin
     .from('rede_payments')
-    .select('id, tenant_id, lead_id, amount_cents, description, installments, status, coupon_code, kit, bling_order_id, method')
+    .select('id, tenant_id, lead_id, amount_cents, description, installments, status, coupon_code, kit, bling_order_id, method, customer_name')
     .eq('id', id)
     .maybeSingle()
   if (!data) return null
@@ -381,6 +382,7 @@ export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<
     kit: r.kit != null ? String(r.kit) : null,
     blingOrderId: r.bling_order_id != null ? String(r.bling_order_id) : null,
     method: r.method === 'pix' ? 'pix' : 'card',
+    customerName: r.customer_name != null ? String(r.customer_name) : null,
   }
 }
 
@@ -423,6 +425,7 @@ export async function finalizeRedePaid(
     paymentId: intent.id,
     paymentMethod: opts.method,
     amountCents: intent.amountCents,
+    customerName: intent.customerName ?? opts.cardholderName,
     note: isPix
       ? 'Comprovante automático e.Rede Pix (confirmação do QR).'
       : 'Comprovante automático e.Rede (autorização da maquininha).',
@@ -731,6 +734,38 @@ export async function checkRedePixStatus(admin: SupabaseClient, id: string): Pro
   }
 
   return { id, status: 'pending', rawStatus, paid: false, finalized: false }
+}
+
+/**
+ * Confere NA HORA os PIX e.Rede pendentes de UM lead (consulta a e.Rede e finaliza os pagos).
+ * Usado quando o cliente avisa "paguei"/manda comprovante: confirma em segundos em vez de
+ * esperar o poller (cron) de 1-2 min. Idempotente (checkRedePixStatus só finaliza pending) e
+ * best-effort (erro em um PIX não derruba os outros nem o webhook). Retorna se algum confirmou.
+ */
+export async function checkPendingRedePixForLead(
+  admin: SupabaseClient,
+  leadId: string,
+): Promise<{ confirmed: boolean; checked: number }> {
+  if (!leadId) return { confirmed: false, checked: 0 }
+  const { data } = await admin
+    .from('rede_payments')
+    .select('id')
+    .eq('lead_id', leadId)
+    .eq('method', 'pix')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+    .limit(10)
+  const ids = (data ?? []).map((r) => String((r as { id: unknown }).id))
+  let confirmed = false
+  for (const id of ids) {
+    try {
+      const out = await checkRedePixStatus(admin, id)
+      if (out.status === 'paid') confirmed = true
+    } catch {
+      /* a e.Rede falhou nesta consulta — o poller tenta de novo no próximo ciclo */
+    }
+  }
+  return { confirmed, checked: ids.length }
 }
 
 /**

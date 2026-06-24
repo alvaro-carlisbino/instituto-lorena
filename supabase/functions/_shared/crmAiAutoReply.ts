@@ -903,10 +903,11 @@ export async function runWhatsappAiAutoReply(
   }
 
   if (!aiReply) {
-    // Falha consecutiva no WhatsApp também: 2º fallback seguido → handover defensivo.
-    // EXCETO bot de vendas (keepAiOn): nunca desliga — manda o fallback e segue atendendo.
+    // Falha consecutiva no WhatsApp também: 2º fallback seguido → handover defensivo (desliga a
+    // IA, manda mensagem útil e sinaliza handoff). Agora vale TAMBÉM p/ o bot de vendas: quando
+    // a IA trava de verdade (2x seguidas), o consultor é chamado em vez de a IA seguir patinando.
     const prevAlsoFallback = await wasLastAiReplyFallback(admin, options.leadId)
-    if (prevAlsoFallback && !options.keepAiOn) {
+    if (prevAlsoFallback) {
       try {
         const handoverText = normalizeWhatsappPatientFormatting(AI_FAILURE_HANDOVER_TEXT)
         const envTyping = (Deno.env.get('WHATSAPP_AI_TYPING_DELAY_MS') ?? '').trim()
