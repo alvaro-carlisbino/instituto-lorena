@@ -1,5 +1,3 @@
-import { format } from 'date-fns'
-import { ptBR } from 'date-fns/locale'
 import { useMemo, useRef, useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -28,7 +26,8 @@ import {
   setConversationMode,
   type ConversationOwnerMode,
 } from '@/services/conversationControl'
-import { isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
+import { getLeadPhoneDisplay, isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
+import { formatConversationHeaderStamp, formatConversationStamp } from '@/lib/chatDates'
 import { fetchWhatsappChannelInstances, type BotKind } from '@/services/whatsappChannelInstances'
 import { useUnreadConversations } from '@/hooks/useUnreadConversations'
 
@@ -382,7 +381,7 @@ export function ChatWorkspacePage({
                         "shrink-0 text-[10px] tabular-nums",
                         unread ? "font-semibold text-primary" : "text-muted-foreground/60"
                       )}>
-                        {lead.createdAt ? format(new Date(lead.createdAt), 'HH:mm', { locale: ptBR }) : ''}
+                        {formatConversationStamp(lead.last_interaction_at ?? lead.createdAt)}
                       </span>
                     </div>
                     <p className={cn(
@@ -446,10 +445,29 @@ export function ChatWorkspacePage({
                         </Badge>
                       )}
                     </div>
-                    <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground/80">
-                      <span className="font-mono">{activeLead.phone ? activeLead.phone : 'Sem telefone'}</span>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground/80">
+                      {(() => {
+                        const ph = getLeadPhoneDisplay(activeLead)
+                        return (
+                          <span
+                            className={ph.isReal ? 'font-mono' : 'italic text-muted-foreground/55'}
+                            title={ph.isReal ? undefined : 'Telefone real ainda não recebido do ManyChat'}
+                          >
+                            {ph.label}
+                          </span>
+                        )
+                      })()}
                       <span className="text-muted-foreground/30">•</span>
                       <span className="capitalize">{activeLead.source.replace('meta_', '')}</span>
+                      {(() => {
+                        const stamp = formatConversationHeaderStamp(activeLead.last_interaction_at ?? activeLead.createdAt)
+                        return stamp ? (
+                          <>
+                            <span className="text-muted-foreground/30">•</span>
+                            <span title="Data da última mensagem">{stamp}</span>
+                          </>
+                        ) : null
+                      })()}
                     </div>
                   </div>
                   

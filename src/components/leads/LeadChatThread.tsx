@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { Fragment, useEffect, useMemo, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { format } from 'date-fns'
+import { format, isSameDay } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { formatDaySeparator } from '@/lib/chatDates'
 import {
   CalendarPlus,
   Video as VideoIcon,
@@ -808,13 +809,20 @@ export function LeadChatThread({
               const out = first.direction === 'out'
               
               return (
-                <li
-                  key={`group-${gIdx}`}
-                  className={cn(
-                    'flex w-full flex-col gap-1',
-                    out ? 'items-end' : 'items-start',
-                  )}
-                >
+                <Fragment key={`group-${gIdx}`}>
+                  {(gIdx === 0 || !isSameDay(new Date(first.happenedAt), new Date(groupedItems[gIdx - 1][0].happenedAt))) ? (
+                    <li className="flex items-center justify-center py-1">
+                      <span className="rounded-full bg-muted/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/80 dark:bg-white/5">
+                        {formatDaySeparator(first.happenedAt)}
+                      </span>
+                    </li>
+                  ) : null}
+                  <li
+                    className={cn(
+                      'flex w-full flex-col gap-1',
+                      out ? 'items-end' : 'items-start',
+                    )}
+                  >
                   <div className="flex w-full max-w-[min(92%,28rem)] flex-col gap-1.5 sm:max-w-[min(85%,32rem)] lg:max-w-[75%]">
                     {group.map((msg, mIdx) => (
                       <div
@@ -891,7 +899,8 @@ export function LeadChatThread({
                       {getChannelShortLabel(first.channel)}
                     </span>
                   </div>
-                </li>
+                  </li>
+                </Fragment>
               )
             })
           )}

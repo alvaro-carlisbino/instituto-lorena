@@ -14,6 +14,22 @@ export function isManychatSyntheticPhone(phone: string): boolean {
 }
 
 /**
+ * Telefone para EXIBIÇÃO no chat/ficha. Quando o número é sintético do ManyChat
+ * (`888001…`) ou tem menos de 10 dígitos, não mostramos o id disfarçado de telefone —
+ * devolvemos um rótulo honesto de que ainda não há número real. `isReal` permite
+ * estilizar (mutado/itálico) o caso sem número.
+ */
+export function getLeadPhoneDisplay(lead: Pick<Lead, 'phone' | 'source'>): { label: string; isReal: boolean } {
+  const phone = String(lead.phone ?? '').trim()
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length >= 10 && !isManychatSyntheticPhone(phone)) {
+    return { label: phone, isReal: true }
+  }
+  const via = isLeadSourceInstagram(lead.source) ? 'Instagram' : 'ManyChat'
+  return { label: `Sem nº real · ${via}`, isReal: false }
+}
+
+/**
  * Sem compositor / envio `crm-send-message`: lead Instagram sem número utilizável **ou** ainda com telefone sintético.
  * Com ≥10 dígitos e **não** prefixo `888001…`, o CRM permite WhatsApp manual (ex.: após merge com WA real).
  */
