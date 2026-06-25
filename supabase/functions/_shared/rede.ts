@@ -175,6 +175,7 @@ export type RedeIntent = {
   blingOrderId: string | null
   method: 'card' | 'pix'
   customerName: string | null
+  customerDoc?: string | null
 }
 
 function shortId(): string {
@@ -365,7 +366,7 @@ export async function createRedePix(
 export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<RedeIntent | null> {
   const { data } = await admin
     .from('rede_payments')
-    .select('id, tenant_id, lead_id, amount_cents, description, installments, status, coupon_code, kit, bling_order_id, method, customer_name')
+    .select('id, tenant_id, lead_id, amount_cents, description, installments, status, coupon_code, kit, bling_order_id, method, customer_name, customer_doc')
     .eq('id', id)
     .maybeSingle()
   if (!data) return null
@@ -383,6 +384,7 @@ export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<
     blingOrderId: r.bling_order_id != null ? String(r.bling_order_id) : null,
     method: r.method === 'pix' ? 'pix' : 'card',
     customerName: r.customer_name != null ? String(r.customer_name) : null,
+    customerDoc: r.customer_doc != null ? String(r.customer_doc) : null,
   }
 }
 
@@ -452,6 +454,21 @@ export async function finalizeRedePaid(
     } | null
     if (!l) return
 
+    // O checkout do site não grava CPF/nome no cadastro do lead, mas eles vêm no pagamento
+    // (customer_doc/customer_name). Sem isso o Bling cai no contato GENÉRICO e o Melhor Envio
+    // vai sem documento. Completa o cadastro do lead a partir do pagamento (merge, best-effort).
+    try {
+      const cadAtual = ((l.custom_fields as { cadastro?: Record<string, string> } | undefined)?.cadastro ?? {}) as Record<string, string>
+      const cadNovo: Record<string, string> = { ...cadAtual }
+      if (!cadNovo.cpf && intent.customerDoc) cadNovo.cpf = String(intent.customerDoc)
+      if (!cadNovo.nomeCompleto && (intent.customerName || opts.cardholderName)) cadNovo.nomeCompleto = String(intent.customerName || opts.cardholderName)
+      if (JSON.stringify(cadNovo) !== JSON.stringify(cadAtual)) {
+        const cf = { ...((l.custom_fields as Record<string, unknown>) ?? {}), cadastro: cadNovo }
+        await admin.from('leads').update({ custom_fields: cf }).eq('id', l.id)
+        ;(l as { custom_fields?: Record<string, unknown> }).custom_fields = cf
+      }
+    } catch { /* nunca derruba o pagamento por causa do enriquecimento do cadastro */ }
+
     // Procura a etapa "Pago" do PRÓPRIO pipeline do lead — nunca chuta uma etapa fixa
     // (senão um lead do Instituto cairia na etapa de "Pago" do Tricopill).
     let pagoStageId: string | null = null
@@ -487,7 +504,11 @@ export async function finalizeRedePaid(
     // lead. Sem isto, um lead que veio pelo canal da CLÍNICA comprando Tricopill tentava
     // criar o pedido no Bling da clínica (inexistente) e não ia pro Bling (bug Fabricio).
     const blingTenant = intent.kit ? 'tricopill' : String(l.tenant_id ?? intent.tenantId)
-    if (intent.kit && !intent.blingOrderId) {
+    // Cria pedido no Bling para KITS Tricopill E para vendas avulsas/carrinho do tenant 'tricopill'.
+    // (Antes só criava quando havia `kit`; o carrinho do site salva kit=null e nunca ia pro Bling —
+    //  o gateway do site é a e.Rede e o Pix é finalizado por aqui via cron. Espelha finalizeAsaasPaid.)
+    const shouldCreateBlingOrder = !!intent.kit || blingTenant === 'tricopill'
+    if (shouldCreateBlingOrder && !intent.blingOrderId) {
       try {
         const { data: blingRow } = await admin
           .from('tenant_integrations')
@@ -500,11 +521,13 @@ export async function finalizeRedePaid(
           // do cartão (pagador real), por fim o pushName do WhatsApp.
           const cad = (l.custom_fields?.cadastro ?? {}) as Record<string, string>
           const out = await blingCreateSaleOrder(admin, blingTenant, {
-            kit: intent.kit,
+            kit: intent.kit ?? '',
             amountCents: intent.amountCents,
-            customerName: String(cad.nomeCompleto || opts.cardholderName || l.patient_name || 'Cliente Tricopill').trim(),
+            // Venda avulsa/carrinho (sem kit): descrição livre p/ sair como 1 item pelo valor cheio.
+            description: intent.kit ? undefined : String(intent.description ?? l.patient_name ?? 'Pedido Tricopill').trim(),
+            customerName: String(cad.nomeCompleto || opts.cardholderName || intent.customerName || l.patient_name || 'Cliente Tricopill').trim(),
             phone: l.phone ? String(l.phone) : undefined,
-            cpf: cad.cpf,
+            cpf: cad.cpf || intent.customerDoc || undefined,
             email: cad.email,
             dataNascimento: cad.dataNascimento,
             sexo: cad.sexo,
