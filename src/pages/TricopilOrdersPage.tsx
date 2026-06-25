@@ -116,6 +116,10 @@ export function TricopilOrdersPage() {
     if (lead.whatsappInstanceId) return 'whatsapp' // veio do bot de vendas (W-API)
     const src = String(lead.source ?? '').toLowerCase()
     if (src.includes('whatsapp') || src.startsWith('meta')) return 'whatsapp'
+    // O checkout do site grava custom_fields.origin='site' no lead — sinal CONFIÁVEL de venda
+    // do site, mesmo quando o lead foi deduplicado por telefone e ficou com source 'manual'.
+    if (String((lead.customFields as Record<string, unknown> | undefined)?.origin ?? '') === 'site') return 'site'
+    if (String(p.leadId ?? '').startsWith('site-')) return 'site'
     return 'manual' // lead criado à mão / sem origem clara
   }
 
