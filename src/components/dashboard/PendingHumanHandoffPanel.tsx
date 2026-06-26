@@ -1,10 +1,11 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertOctagon, MessageSquare } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { useCrm } from '@/context/CrmContext'
 import { useNowMs } from '@/hooks/useNowMs'
+import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
 
 function formatWaitingFor(iso: string | null | undefined, now: number): string {
@@ -19,17 +20,64 @@ function formatWaitingFor(iso: string | null | undefined, now: number): string {
   const rem = mins % 60
   if (hours < 24) return rem ? `há ${hours}h ${rem}m` : `há ${hours}h`
   const days = Math.floor(hours / 24)
-  return `há ${days}d`
+  const remH = hours % 24
+  return remH ? `há ${days}d ${remH}h` : `há ${days}d`
 }
 
 const MAX_VISIBLE = 5
+/** Handoffs mais antigos que isto viram "lead frio" (vão p/ follow-up, não p/ este card). */
+const WINDOW_HOURS = 48
+const POLL_MS = 30_000
+
+type WaitingItem = { id: string; name: string; since: string | null }
+
+type PendingHandoffRow = {
+  lead_id: string
+  patient_name: string | null
+  waiting_since: string | null
+  last_message: string | null
+  channel: string | null
+}
 
 export function PendingHumanHandoffPanel() {
   const crm = useCrm()
   const navigate = useNavigate()
   const nowMs = useNowMs(60_000)
 
-  const waiting = useMemo(() => {
+  // Fonte da verdade real: RPC que deriva das interactions (independe da escrita de
+  // conversation_status, que historicamente nunca acendia para a clínica). Em modo
+  // mock (sem Supabase) cai no filtro client-side de crm.leads.
+  const usingRpc = isSupabaseConfigured && !!supabase
+  const [rpcRows, setRpcRows] = useState<PendingHandoffRow[] | null>(null)
+
+  useEffect(() => {
+    if (!usingRpc || !supabase) return
+    const sb = supabase
+    let cancelled = false
+    const fetchRows = async () => {
+      const { data, error } = await sb.rpc('crm_pending_human_handoff', {
+        p_window_hours: WINDOW_HOURS,
+      })
+      if (cancelled || error) return // em erro, preserva a última lista boa
+      setRpcRows((data as PendingHandoffRow[]) ?? [])
+    }
+    void fetchRows()
+    const id = window.setInterval(fetchRows, POLL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [usingRpc])
+
+  const waiting = useMemo<WaitingItem[] | null>(() => {
+    if (usingRpc) {
+      if (rpcRows === null) return null // ainda carregando — evita piscar verde→vermelho
+      return rpcRows.map((r) => ({
+        id: r.lead_id,
+        name: r.patient_name || 'Lead sem nome',
+        since: r.waiting_since,
+      }))
+    }
     return crm.leads
       .filter((l) => l.conversation_status === 'waiting_human')
       .sort((a, b) => {
@@ -37,7 +85,11 @@ export function PendingHumanHandoffPanel() {
         const tb = b.last_interaction_at ? new Date(b.last_interaction_at).getTime() : 0
         return ta - tb
       })
-  }, [crm.leads])
+      .map((l) => ({ id: l.id, name: l.patientName || 'Lead sem nome', since: l.last_interaction_at ?? null }))
+  }, [usingRpc, rpcRows, crm.leads])
+
+  // Primeira carga do RPC ainda em andamento: não renderiza nada (sem flash do estado vazio).
+  if (waiting === null) return null
 
   const count = waiting.length
   const top = waiting.slice(0, MAX_VISIBLE)
@@ -94,11 +146,9 @@ export function PendingHumanHandoffPanel() {
               className="flex items-center justify-between gap-3 rounded-xl border border-red-500/10 bg-background/60 px-3 py-2"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-foreground/90">
-                  {lead.patientName || 'Lead sem nome'}
-                </p>
+                <p className="truncate text-sm font-bold text-foreground/90">{lead.name}</p>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-red-700/70">
-                  Aguardando {formatWaitingFor(lead.last_interaction_at, nowMs)}
+                  Aguardando {formatWaitingFor(lead.since, nowMs)}
                 </p>
               </div>
               <Button

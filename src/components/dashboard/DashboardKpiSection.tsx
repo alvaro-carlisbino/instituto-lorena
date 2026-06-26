@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownRight, ArrowUpRight, BotIcon, CalendarCheck2, TrendingUp, UsersIcon } from 'lucide-react'
 
 import { useCrm } from '@/context/CrmContext'
+import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { sourceLabel } from '@/mocks/crmMock'
 import {
   fetchLeadIdsWithAppointment,
@@ -196,12 +197,34 @@ export function DashboardKpiSection() {
   const conversao = pct(vinculados, novosCurr.length)
   const conversaoPrev = pct(vinculadosPrev, novosPrevCount)
 
+  // Aguardando consultor: derivado das interactions via RPC (mesma fonte do card de
+  // Atendimento Pendente). conversation_status='waiting_human' nunca acende p/ a clínica,
+  // então contar por ele dava 0 falso. Em modo mock cai no filtro de crm.leads.
+  const [pendingHandoff, setPendingHandoff] = useState<number | null>(null)
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return
+    const sb = supabase
+    let cancelled = false
+    const fetchCount = async () => {
+      const { data, error } = await sb.rpc('crm_pending_human_handoff', { p_window_hours: 48 })
+      if (cancelled || error) return
+      setPendingHandoff(Array.isArray(data) ? data.length : 0)
+    }
+    void fetchCount()
+    const id = window.setInterval(fetchCount, 30_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [])
+
   // Saúde da IA — snapshot ao vivo.
   const aiHealth = useMemo(() => {
-    const waiting = crm.leads.filter((l) => l.conversation_status === 'waiting_human').length
+    const fallbackWaiting = crm.leads.filter((l) => l.conversation_status === 'waiting_human').length
+    const waiting = isSupabaseConfigured && pendingHandoff !== null ? pendingHandoff : fallbackWaiting
     const inAi = crm.leads.filter((l) => l.conversation_status === 'ai_triaging').length
     return { waiting, inAi }
-  }, [crm.leads])
+  }, [crm.leads, pendingHandoff])
 
   // Novos leads por origem.
   const origemRows = useMemo(() => {
