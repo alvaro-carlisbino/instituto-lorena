@@ -30,6 +30,7 @@ import {
   type MeAddress,
   type ShipConfig,
 } from '@/services/crmFrete'
+import { saveLeadCadastro } from '@/services/crmOrders'
 
 // Prefill de produto por kit (valores Pix oficiais Tricopill).
 const KIT_PRESETS: Record<string, { name: string; qty: number; reais: string }> = {
@@ -40,6 +41,39 @@ const KIT_PRESETS: Record<string, { name: string; qty: number; reais: string }> 
 
 const reaisToCents = (v: string) => Math.round(Number(String(v).replace(/\./g, '').replace(',', '.')) * 100)
 const onlyDigits = (v: string) => v.replace(/\D/g, '')
+
+// Data de nascimento: máscara DD/MM/AAAA + validação (data real, idade 16–110).
+const fmtBirth = (v: string) => {
+  const d = onlyDigits(v).slice(0, 8)
+  if (d.length <= 2) return d
+  if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`
+  return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`
+}
+const isValidBirth = (raw: string) => {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((raw || '').trim())
+  if (!m) return false
+  const dd = +m[1], mm = +m[2], yyyy = +m[3]
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return false
+  const dt = new Date(yyyy, mm - 1, dd)
+  if (dt.getFullYear() !== yyyy || dt.getMonth() !== mm - 1 || dt.getDate() !== dd) return false
+  const age = (Date.now() - dt.getTime()) / (365.25 * 24 * 3600 * 1000)
+  return age >= 16 && age <= 110
+}
+// CPF: validação dos dígitos verificadores (obrigatório p/ NF-e + envio).
+const isValidCpf = (raw: string) => {
+  const c = onlyDigits(raw)
+  if (c.length !== 11 || /^(\d)\1{10}$/.test(c)) return false
+  let s = 0
+  for (let i = 0; i < 9; i++) s += parseInt(c[i], 10) * (10 - i)
+  let d = (s * 10) % 11
+  if (d === 10) d = 0
+  if (d !== parseInt(c[9], 10)) return false
+  s = 0
+  for (let i = 0; i < 10; i++) s += parseInt(c[i], 10) * (11 - i)
+  d = (s * 10) % 11
+  if (d === 10) d = 0
+  return d === parseInt(c[10], 10)
+}
 
 export function LeadShipPage() {
   const crm = useCrm()
@@ -68,6 +102,7 @@ export function LeadShipPage() {
   const [district, setDistrict] = useState('')
   const [city, setCity] = useState('')
   const [uf, setUf] = useState('')
+  const [birth, setBirth] = useState('')
 
   // Pedido / frete
   const [productName, setProductName] = useState(KIT_PRESETS['3_meses'].name)
@@ -101,6 +136,14 @@ export function LeadShipPage() {
     if (defaultName != null) setName((prev) => (prev ? prev : defaultName))
     if (defaultPhone != null) setPhone((prev) => (prev ? prev : defaultPhone))
   }, [defaultName, defaultPhone])
+
+  // Pré-preenche CPF e data de nascimento com o cadastro já salvo do lead (se houver).
+  useEffect(() => {
+    const cad = ((lead?.customFields ?? {}) as Record<string, unknown>).cadastro as Record<string, unknown> | undefined
+    if (!cad) return
+    if (typeof cad.cpf === 'string' && cad.cpf) setDocument((prev) => (prev ? prev : String(cad.cpf)))
+    if (typeof cad.dataNascimento === 'string' && cad.dataNascimento) setBirth((prev) => (prev ? prev : fmtBirth(String(cad.dataNascimento))))
+  }, [lead?.id])
 
   useEffect(() => {
     getShipConfig()
@@ -212,6 +255,14 @@ export function LeadShipPage() {
       setPageError('Endereço do destinatário incompleto.')
       return toast.error('Endereço do destinatário incompleto.')
     }
+    if (!isValidCpf(document)) {
+      setPageError('Informe um CPF válido (obrigatório para a nota fiscal).')
+      return toast.error('Informe um CPF válido (obrigatório para a nota fiscal).')
+    }
+    if (!isValidBirth(birth)) {
+      setPageError('Informe a data de nascimento (DD/MM/AAAA).')
+      return toast.error('Informe a data de nascimento (DD/MM/AAAA).')
+    }
     const valueCents = reaisToCents(productReais)
     if (!Number.isFinite(valueCents) || valueCents < 100) {
       setPageError('Valor do produto inválido.')
@@ -233,6 +284,17 @@ export function LeadShipPage() {
 
     setLoading(true)
     try {
+      // Registra o cadastro obrigatório da venda (nome, CPF, nascimento) no lead — best-effort,
+      // não bloqueia o envio se falhar.
+      try {
+        await saveLeadCadastro(leadId!, lead?.customFields, {
+          nomeCompleto: name.trim(),
+          cpf: onlyDigits(document),
+          dataNascimento: birth.trim(),
+        })
+      } catch (e) {
+        toast.warning(e instanceof Error ? e.message : 'Não foi possível salvar o cadastro do cliente.')
+      }
       const res = await createShipment({
         leadId: leadId!,
         serviceId: Number(serviceId),
@@ -365,8 +427,19 @@ export function LeadShipPage() {
                 <PhoneInput id="sl-phone" value={phone} onValueChange={(raw) => setPhone(raw)} placeholder="(DDD) número" />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="sl-doc">CPF (opcional)</Label>
+                <Label htmlFor="sl-doc">CPF</Label>
                 <CpfInput id="sl-doc" value={document} onValueChange={(raw) => setDocument(raw)} placeholder="000.000.000-00" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="sl-birth">Data de nascimento</Label>
+                <Input
+                  id="sl-birth"
+                  value={birth}
+                  onChange={(e) => setBirth(fmtBirth(e.target.value))}
+                  inputMode="numeric"
+                  maxLength={10}
+                  placeholder="DD/MM/AAAA"
+                />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="sl-cep">CEP</Label>
