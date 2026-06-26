@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownRight, ArrowUpRight, BotIcon, CalendarCheck2, TrendingUp, UsersIcon } from 'lucide-react'
 
 import { useCrm } from '@/context/CrmContext'
+import { useTenant } from '@/context/TenantContext'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { sourceLabel } from '@/mocks/crmMock'
 import {
@@ -127,6 +128,7 @@ function KpiCard({
 
 export function DashboardKpiSection() {
   const crm = useCrm()
+  const { tenant } = useTenant()
   const [range, setRange] = useState<RangeKey>('7d')
   const [appts, setAppts] = useState<ShospApptRow[]>([])
   const [linkedLeadIds, setLinkedLeadIds] = useState<Set<string>>(new Set())
@@ -216,15 +218,19 @@ export function DashboardKpiSection() {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [])
+    // tenant.id: re-conta ao trocar de workspace.
+  }, [tenant.id])
 
-  // Saúde da IA — snapshot ao vivo.
+  // Saúde da IA — snapshot ao vivo, ISOLADO ao polo ativo. crm.leads traz os dois
+  // polos por RLS (p/ quem é multi-polo), então filtramos por tenant pra não somar
+  // a triagem do Tricopill na visão da Clínica (era o "52 em triagem" cruzado).
   const aiHealth = useMemo(() => {
-    const fallbackWaiting = crm.leads.filter((l) => l.conversation_status === 'waiting_human').length
+    const ofPolo = crm.leads.filter((l) => !l.tenantId || l.tenantId === tenant.id)
+    const fallbackWaiting = ofPolo.filter((l) => l.conversation_status === 'waiting_human').length
     const waiting = isSupabaseConfigured && pendingHandoff !== null ? pendingHandoff : fallbackWaiting
-    const inAi = crm.leads.filter((l) => l.conversation_status === 'ai_triaging').length
+    const inAi = ofPolo.filter((l) => l.conversation_status === 'ai_triaging').length
     return { waiting, inAi }
-  }, [crm.leads, pendingHandoff])
+  }, [crm.leads, pendingHandoff, tenant.id])
 
   // Novos leads por origem.
   const origemRows = useMemo(() => {

@@ -4,6 +4,7 @@ import { AlertOctagon, MessageSquare } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { useCrm } from '@/context/CrmContext'
+import { useTenant } from '@/context/TenantContext'
 import { useNowMs } from '@/hooks/useNowMs'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
@@ -41,6 +42,7 @@ type PendingHandoffRow = {
 
 export function PendingHumanHandoffPanel() {
   const crm = useCrm()
+  const { tenant } = useTenant()
   const navigate = useNavigate()
   const nowMs = useNowMs(60_000)
 
@@ -67,7 +69,8 @@ export function PendingHumanHandoffPanel() {
       cancelled = true
       window.clearInterval(id)
     }
-  }, [usingRpc])
+    // tenant.id: ao trocar de workspace, re-busca os handoffs do polo novo.
+  }, [usingRpc, tenant.id])
 
   const waiting = useMemo<WaitingItem[] | null>(() => {
     if (usingRpc) {

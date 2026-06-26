@@ -33,7 +33,7 @@ import {
 } from 'lucide-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
-import { PoloSwitcher } from '@/components/PoloSwitcher'
+import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher'
 import { Badge } from '@/components/ui/badge'
 import { BRAND_FAVICON_URL } from '@/config/brandAssets'
 import { APP_ENV_BADGE, APP_NAME, APP_TAGLINE } from '@/config/branding'
@@ -131,8 +131,8 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="px-3 gap-0">
-        <div className="px-1 pb-2 group-data-[collapsible=icon]:hidden">
-          <PoloSwitcher />
+        <div className="px-1 pb-3 group-data-[collapsible=icon]:hidden">
+          <WorkspaceSwitcher />
         </div>
         <SidebarGroup>
           <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
