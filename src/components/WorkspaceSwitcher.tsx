@@ -8,10 +8,11 @@ import { useTenant } from '@/context/TenantContext'
 import { setActiveTenant, type PoloOption } from '@/services/tenant'
 import { cn } from '@/lib/utils'
 
-/** Rótulo curto e ícone por tipo de polo (clínica vs vendas/Tricopill). */
+/** Rótulo CURTO e ícone por tipo de polo (nome de marca completo é longo demais
+ *  p/ um toggle compacto). Clínica vs Tricopill (vendas). */
 function poloMeta(polo: PoloOption): { label: string; Icon: typeof Building2 } {
-  if (polo.poloType === 'sales') return { label: polo.brand.app_name || 'Tricopill', Icon: Pill }
-  return { label: polo.brand.app_name || 'Clínica', Icon: Building2 }
+  if (polo.poloType === 'sales') return { label: 'Tricopill', Icon: Pill }
+  return { label: 'Clínica', Icon: Building2 }
 }
 
 /**
@@ -53,7 +54,7 @@ export function WorkspaceSwitcher() {
     <div
       role="tablist"
       aria-label="Trocar workspace"
-      className="flex items-center gap-1 rounded-2xl border border-sidebar-border/60 bg-sidebar-accent/20 p-1"
+      className="flex w-full items-center gap-1 rounded-xl border border-sidebar-border/50 bg-sidebar-accent/20 p-1"
     >
       {availableTenants.map((polo) => {
         const isActive = polo.id === tenant.id
@@ -69,17 +70,17 @@ export function WorkspaceSwitcher() {
             onClick={() => void handleSwitch(polo.id)}
             title={polo.brand.app_name || polo.name}
             className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2.5 py-2 text-[11px] font-black uppercase tracking-wide transition-all',
+              'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-bold tracking-wide transition-all',
               isActive
-                ? 'bg-sidebar text-sidebar-foreground shadow-sm ring-1 ring-sidebar-border/70'
-                : 'text-sidebar-foreground/45 hover:text-sidebar-foreground/80',
+                ? 'bg-sidebar text-sidebar-foreground shadow-sm ring-1 ring-sidebar-border/60'
+                : 'text-sidebar-foreground/45 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground/75',
               busy && 'cursor-wait',
             )}
           >
             {isLoadingThis ? (
               <Loader2 className="size-3.5 shrink-0 animate-spin" />
             ) : (
-              <Icon className="size-3.5 shrink-0" />
+              <Icon className={cn('size-3.5 shrink-0', isActive ? 'opacity-100' : 'opacity-70')} />
             )}
             <span className="truncate">{label}</span>
           </button>
