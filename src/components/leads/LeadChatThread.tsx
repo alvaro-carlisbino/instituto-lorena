@@ -406,13 +406,17 @@ export function LeadChatThread({
     return isAiReplyLikelyPending({ history, gate: aiGate })
   }, [history, aiGate, aiUiTick])
 
-  const showForceAiButton =
+  const aiForceBaseReady =
     Boolean(aiConversationBase) &&
     isSupabaseConfigured &&
     canCompose &&
     isActiveLead &&
-    aiConversationBase!.aiEnabled &&
-    aiConversationBase!.ownerMode !== 'human'
+    aiConversationBase!.aiEnabled
+
+  // Conversa em modo Humano: mostramos o botão mesmo assim, mas ele apenas
+  // orienta a trocar para Misto — antes ele sumia e o clique morria sem aviso.
+  const forceAiHumanBlocked = aiForceBaseReady && aiConversationBase!.ownerMode === 'human'
+  const showForceAiButton = aiForceBaseReady && aiConversationBase!.ownerMode !== 'human'
 
   const handleForceAiReply = async () => {
     if (!showForceAiButton || forceAiLoading) return
@@ -768,15 +772,27 @@ export function LeadChatThread({
         >
           Tudo
         </Button>
-        {showForceAiButton ? (
+        {showForceAiButton || forceAiHumanBlocked ? (
           <Button
             type="button"
             size="sm"
-            variant="secondary"
+            variant={forceAiHumanBlocked ? 'outline' : 'secondary'}
             className="ml-auto h-7 gap-1 rounded-lg px-2 text-[10px] sm:h-8 sm:px-2.5 sm:text-xs"
             disabled={forceAiLoading}
-            title="Gera e envia outra resposta com base na última mensagem do paciente (ignora limites de ritmo da IA)."
-            onClick={() => void handleForceAiReply()}
+            title={
+              forceAiHumanBlocked
+                ? 'Conversa em modo Humano — mude o atendimento para Misto para a IA responder.'
+                : 'Gera e envia outra resposta com base na última mensagem do paciente (ignora limites de ritmo da IA).'
+            }
+            onClick={() => {
+              if (forceAiHumanBlocked) {
+                toast.message('Conversa em modo Humano.', {
+                  description: 'Mude o atendimento para Misto (ou IA) para a IA dar continuidade.',
+                })
+                return
+              }
+              void handleForceAiReply()
+            }}
           >
             <RefreshCw className={cn('h-3 w-3 shrink-0', forceAiLoading && 'animate-spin')} aria-hidden />
             <span className="hidden sm:inline">Pedir IA de novo</span>
