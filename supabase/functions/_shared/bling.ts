@@ -303,7 +303,16 @@ export async function buildBlingCatalog(
 
 // Mapa padrão kit -> frascos a abater (3 meses leva o 4º grátis).
 const DEFAULT_KIT_BOTTLES: Record<string, number> = { '1_mes': 1, '3_meses': 4, '5_meses': 5 }
-const DEFAULT_KIT_PRODUCT_ID = '16322942669' // "Tricopill - Suplemento Capilar" (frasco base)
+const DEFAULT_KIT_PRODUCT_ID = '16322942669' // "Tricopill - Suplemento Capilar" = frasco INDIVIDUAL (SKU 00001)
+
+// Produto PRÓPRIO de cada kit no Bling (o pedido sai como "Tricopill 3 Meses" etc., NÃO como o
+// individual 00001). O estoque do kit deve abater o frasco base pela COMPOSIÇÃO do Bling
+// (kit = composto de N× 16322942669). Override por tenant em bling.kit_product_ids.
+const DEFAULT_KIT_PRODUCT_IDS: Record<string, string> = {
+  '1_mes': '16577835905',
+  '3_meses': '16580995608',
+  '5_meses': '16577835908',
+}
 
 const KIT_LABEL: Record<string, string> = {
   '1_mes': 'Tricopill 1 mês (1 frasco)',
@@ -484,20 +493,38 @@ export async function blingCreateSaleOrder(
     else contatoFallback = true
   }
 
-  const productId = cfg.kit_product_id != null && String(cfg.kit_product_id).trim()
+  const individualProductId = cfg.kit_product_id != null && String(cfg.kit_product_id).trim()
     ? String(cfg.kit_product_id).trim()
     : DEFAULT_KIT_PRODUCT_ID
   const bottlesMap = (cfg.kit_bottles && typeof cfg.kit_bottles === 'object'
     ? (cfg.kit_bottles as Record<string, unknown>)
     : {}) as Record<string, unknown>
-  // Venda AVULSA (sem kit): 1 item genérico (descrição livre + valor cheio), usando o produto
-  // Tricopill padrão pra o pedido existir no Bling. Kit conhecido: usa frascos/label do kit.
+  const kitProductIds = (cfg.kit_product_ids && typeof cfg.kit_product_ids === 'object'
+    ? (cfg.kit_product_ids as Record<string, unknown>)
+    : {}) as Record<string, unknown>
   const hasKit = !!String(args.kit ?? '').trim()
   const overrideBottles = Number(args.bottlesOverride) > 0 ? Math.floor(Number(args.bottlesOverride)) : 0
-  const bottles = overrideBottles || (hasKit ? (Number(bottlesMap[args.kit] ?? DEFAULT_KIT_BOTTLES[args.kit] ?? 1) || 1) : 1)
+  // Produto do kit (ex.: "Tricopill 3 Meses"). Se existir, o pedido sai NESSE produto (1 un.),
+  // e o estoque abate o frasco base pela COMPOSIÇÃO do Bling — NÃO no individual 00001.
+  const kitProductId = hasKit && !overrideBottles
+    ? String(kitProductIds[args.kit] ?? DEFAULT_KIT_PRODUCT_IDS[args.kit] ?? '').trim()
+    : ''
 
   const totalReais = Math.round(args.amountCents) / 100
-  const valorUnit = Math.round((totalReais / bottles) * 100) / 100
+  let productId: string
+  let bottles: number // quantidade da linha do pedido
+  let valorUnit: number
+  if (kitProductId) {
+    // KIT com produto próprio: 1 unidade do produto do kit, valor cheio.
+    productId = kitProductId
+    bottles = 1
+    valorUnit = Math.round(totalReais * 100) / 100
+  } else {
+    // Avulso / assinatura (bottlesOverride) / kit sem produto: frasco INDIVIDUAL (00001) × frascos.
+    productId = individualProductId
+    bottles = overrideBottles || (hasKit ? (Number(bottlesMap[args.kit] ?? DEFAULT_KIT_BOTTLES[args.kit] ?? 1) || 1) : 1)
+    valorUnit = Math.round((totalReais / bottles) * 100) / 100
+  }
   const itemDescricao = hasKit
     ? (KIT_LABEL[args.kit] ?? `Tricopill ${args.kit}`)
     : (args.description?.trim() || 'Venda avulsa Tricopill')

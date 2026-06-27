@@ -31,23 +31,31 @@ function llmConfig(): { apiKey: string; url: string; model: string } | null {
  */
 
 
+export type EnderecoFields = {
+  cep?: string; logradouro?: string; numero?: string
+  bairro?: string; cidade?: string; uf?: string; complemento?: string
+}
+
 export type CadastroFields = {
   nomeCompleto?: string
   dataNascimento?: string // DD/MM/AAAA
   sexo?: string // M | F
   email?: string
   cpf?: string
+  /** Endereço de ENTREGA capturado da conversa (gravado em custom_fields.entrega). */
+  endereco?: EnderecoFields
 }
 
 const EMAIL_RX = /[\w.+-]+@[\w-]+\.[\w.-]+/
 const DATE_RX = /\b\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\b/
 const CPF_RX = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/
+const CEP_RX = /\b\d{5}-?\d{3}\b/
 
-/** Gate barato: só chama o LLM quando há sinal de dado de cadastro. */
+/** Gate barato: só chama o LLM quando há sinal de dado de cadastro OU de endereço. */
 export function textHasCadastroHints(text: string): boolean {
   if (!text) return false
-  if (EMAIL_RX.test(text) || CPF_RX.test(text) || DATE_RX.test(text)) return true
-  return /nasc|nascimento|meu nome|me chamo|cpf|e-?mail/i.test(text)
+  if (EMAIL_RX.test(text) || CPF_RX.test(text) || DATE_RX.test(text) || CEP_RX.test(text)) return true
+  return /nasc|nascimento|meu nome|me chamo|cpf|e-?mail|endere[çc]o|\brua\b|\bavenida\b|\bav\.?\b|bairro|n[uú]mero|\bcep\b|\bn[º°]\b/i.test(text)
 }
 
 function extractJsonObject(text: string): Record<string, unknown> | null {
@@ -76,7 +84,7 @@ export async function extractCadastro(conversationText: string): Promise<Cadastr
           {
             role: 'system',
             content:
-              'Extraia dados de cadastro do PACIENTE a partir da mensagem. Responda APENAS um objeto JSON (sem texto fora dele, sem markdown) com as chaves que encontrar: nomeCompleto, dataNascimento (formato DD/MM/AAAA), sexo (M ou F), email, cpf. Omita chaves sem valor claro. NÃO invente. dataNascimento só se for claramente a data de nascimento do paciente (nunca data de consulta/agendamento). Se não houver nada, responda {}.',
+              'Extraia dados de cadastro e ENDEREÇO DE ENTREGA do cliente a partir da mensagem. Responda APENAS um objeto JSON (sem texto fora dele, sem markdown) com as chaves que encontrar: nomeCompleto, dataNascimento (formato DD/MM/AAAA), sexo (M ou F), email, cpf, e endereco (um objeto com cep, logradouro, numero, bairro, cidade, uf [sigla de 2 letras], complemento). Omita chaves sem valor claro. NÃO invente. dataNascimento só se for claramente a data de nascimento (nunca data de consulta/agendamento). Preencha endereco SÓ quando o cliente estiver informando o endereço de entrega dele. Se não houver nada, responda {}.',
           },
           { role: 'user', content: conversationText.slice(0, 4000) },
         ],
@@ -105,6 +113,19 @@ export async function extractCadastro(conversationText: string): Promise<Cadastr
     if (sx === 'M' || sx === 'F') out.sexo = sx
     if (typeof parsed.email === 'string' && EMAIL_RX.test(parsed.email)) out.email = parsed.email.trim()
     if (typeof parsed.cpf === 'string' && CPF_RX.test(parsed.cpf)) out.cpf = parsed.cpf.trim()
+    if (parsed.endereco && typeof parsed.endereco === 'object') {
+      const e = parsed.endereco as Record<string, unknown>
+      const end: EnderecoFields = {}
+      const cep = String(e.cep ?? '').replace(/\D/g, '')
+      if (cep.length === 8) end.cep = cep
+      for (const k of ['logradouro', 'numero', 'bairro', 'cidade', 'complemento'] as const) {
+        const v = String(e[k] ?? '').trim()
+        if (v) end[k] = v.slice(0, 120)
+      }
+      const uf = String(e.uf ?? '').trim().toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2)
+      if (uf.length === 2) end.uf = uf
+      if (Object.keys(end).length) out.endereco = end
+    }
     return out
   } catch {
     return {}
@@ -124,15 +145,28 @@ export async function captureCadastroForLead(
     const { data: lead } = await admin.from('leads').select('custom_fields').eq('id', leadId).maybeSingle()
     const cf = ((lead as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>
     const cadastro = { ...((cf.cadastro as Record<string, unknown>) ?? {}) }
+    const entrega = { ...((cf.entrega as Record<string, unknown>) ?? {}) }
     let changed = false
     for (const [k, v] of Object.entries(fields)) {
+      if (k === 'endereco') continue // endereço vai para custom_fields.entrega, não cadastro
       if (v && !cadastro[k]) {
         cadastro[k] = v
         changed = true
       }
     }
+    // Endereço de entrega: preenche só o que falta em custom_fields.entrega (não sobrescreve
+    // delivery_mode/service já gravados). Assim, quando o cliente manda o endereço pra IA, o
+    // pedido já pago ganha o endereço — o aviso "registre o endereço" some sozinho.
+    if (fields.endereco) {
+      for (const [k, v] of Object.entries(fields.endereco)) {
+        if (v && !entrega[k]) {
+          entrega[k] = v
+          changed = true
+        }
+      }
+    }
     if (!changed) return null
-    await admin.from('leads').update({ custom_fields: { ...cf, cadastro } }).eq('id', leadId)
+    await admin.from('leads').update({ custom_fields: { ...cf, cadastro, entrega } }).eq('id', leadId)
     return fields
   } catch {
     return null
