@@ -173,27 +173,60 @@ function shospDadosArray(data: unknown): Record<string, unknown>[] {
   return []
 }
 
-/** Busca pacientes na Shosp por nome (para vincular manualmente um lead a um paciente). */
+function mapShospCandidate(c: Record<string, unknown>): ShospPatientCandidate | null {
+  const prontuario = String(c.prontuario ?? c.codigo ?? '').trim()
+  if (!prontuario) return null
+  const payload = (c.payload && typeof c.payload === 'object' ? c.payload : {}) as Record<string, unknown>
+  return {
+    prontuario,
+    nome: String(c.nome ?? payload.nome ?? ''),
+    celular: c.celular != null ? String(c.celular) : undefined,
+    telefone: c.telefone != null ? String(c.telefone) : undefined,
+    cpf: c.cpf != null ? String(c.cpf) : undefined,
+    dataNascimento:
+      c.dataNascimento != null
+        ? String(c.dataNascimento)
+        : c.nascimento != null
+          ? String(c.nascimento)
+          : payload.nascimento != null
+            ? String(payload.nascimento)
+            : undefined,
+  }
+}
+
+/**
+ * Busca pacientes para vincular um lead. Primeiro no ESPELHO local (`shosp_patients`), que é
+ * tolerante: casa por CPF ou por CADA palavra do nome (ordem/parcial não importam) — resolve o
+ * caso em que a busca por nome exato na Shosp não achava ninguém (ex.: Wagner Quiuli Diniz). Se o
+ * espelho não trouxer nada (paciente recém-cadastrado, ainda não sincronizado), cai na Shosp ao vivo.
+ */
 export async function searchShospPatients(params: { nome: string; cpf?: string }): Promise<ShospPatientCandidate[]> {
   if (!supabase) return []
-  const { data, error } = await supabase.functions.invoke('crm-shosp', {
-    body: { mode: 'find_patient', nome: params.nome, cpf: params.cpf },
-  })
+  const raw = String(params.nome ?? '').trim()
+  const digits = String(params.cpf ?? raw).replace(/\D/g, '')
+
+  // 1) Espelho local (confiável e tolerante a nome parcial/fora de ordem)
+  let q = supabase.from('shosp_patients').select('prontuario, nome, cpf, celular, telefone, payload').limit(25)
+  if (digits.length >= 6) {
+    q = q.ilike('cpf', `%${digits}%`)
+  } else {
+    const tokens = raw.split(/\s+/).filter((t) => t.length >= 2).slice(0, 6)
+    for (const t of tokens) q = q.ilike('nome', `%${t}%`)
+  }
+  const { data, error } = await q
   if (error) throw new Error(error.message)
-  const res = data as { ok?: boolean; data?: unknown }
+  const fromMirror = ((data ?? []) as Record<string, unknown>[])
+    .map(mapShospCandidate)
+    .filter((x): x is ShospPatientCandidate => x !== null)
+  if (fromMirror.length) return fromMirror
+
+  // 2) Fallback: Shosp ao vivo (nome como cadastrado lá). Erro aqui não derruba a busca.
+  const { data: live, error: liveErr } = await supabase.functions.invoke('crm-shosp', {
+    body: { mode: 'find_patient', nome: raw, cpf: params.cpf },
+  })
+  if (liveErr) return []
+  const res = live as { ok?: boolean; data?: unknown }
   return shospDadosArray(res?.data)
-    .map((c): ShospPatientCandidate | null => {
-      const prontuario = String(c.prontuario ?? c.codigo ?? '').trim()
-      if (!prontuario) return null
-      return {
-        prontuario,
-        nome: String(c.nome ?? ''),
-        celular: c.celular != null ? String(c.celular) : undefined,
-        telefone: c.telefone != null ? String(c.telefone) : undefined,
-        cpf: c.cpf != null ? String(c.cpf) : undefined,
-        dataNascimento:
-          c.dataNascimento != null ? String(c.dataNascimento) : c.nascimento != null ? String(c.nascimento) : undefined,
-      }
-    })
+    .map(mapShospCandidate)
     .filter((x): x is ShospPatientCandidate => x !== null)
 }
