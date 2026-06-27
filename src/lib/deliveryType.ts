@@ -92,3 +92,20 @@ export function classifyDelivery(lead: Pick<Lead, 'customFields'>): DeliveryClas
   if (isMaringaRegionCep(cep)) return make('motoboy', true)
   return make('desconhecido')
 }
+
+/**
+ * Pedido de VENDA (passou por checkout/compra) que ficou SEM endereço suficiente para enviar.
+ * Usado para acender o aviso "REGISTRE O ENDEREÇO" na tela do cliente. Regra:
+ *  - só vale para quem comprou (tem `custom_fields.entrega`, gravado no checkout/bot);
+ *  - retirada na clínica não precisa de endereço de envio;
+ *  - caso contrário, precisa de CEP (8 dígitos) E número — sem isso não dá pra despachar.
+ */
+export function needsShippingAddress(lead: Pick<Lead, 'customFields'>): boolean {
+  const cf = (lead.customFields ?? {}) as Record<string, unknown>
+  const ent = cf.entrega as Record<string, unknown> | undefined
+  if (!ent || typeof ent !== 'object') return false
+  if (String(ent.delivery_mode ?? '').trim() === 'retirada_clinica') return false
+  const cep = String(ent.cep ?? '').replace(/\D/g, '')
+  const numero = String(ent.numero ?? '').trim()
+  return cep.length !== 8 || numero.length === 0
+}

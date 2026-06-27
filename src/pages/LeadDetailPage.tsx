@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Trash2 } from 'lucide-react'
+import { AlertTriangle, Trash2 } from 'lucide-react'
 
 import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
 import { LeadAnalyticsActions } from '@/components/leads/LeadAnalyticsActions'
@@ -34,6 +34,7 @@ import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
 import { businessHoursFromAiConfig } from '@/lib/aiTypingIndicator'
 import { getSourceStyle } from '@/lib/channelStyles'
+import { needsShippingAddress } from '@/lib/deliveryType'
 import { isLeadWhatsappComposeBlocked, workflowFieldsForContext } from '@/lib/leadFields'
 import { labelForIdName } from '@/lib/selectDisplay'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
@@ -303,6 +304,22 @@ export function LeadDetailPage() {
           </div>
         </div>
       </section>
+
+      {needsShippingAddress(lead) ? (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-md border-2 border-destructive bg-destructive/10 px-4 py-3 text-destructive"
+        >
+          <AlertTriangle className="mt-0.5 size-6 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-base font-extrabold uppercase tracking-wide">Registre o endereço de entrega</p>
+            <p className="mt-0.5 text-sm font-medium">
+              Este cliente comprou, mas NÃO temos endereço completo (CEP + número) para enviar.
+              Peça o endereço ao cliente e cadastre antes de despachar o pedido.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <Tabs defaultValue="visao">
         <TabsList>
