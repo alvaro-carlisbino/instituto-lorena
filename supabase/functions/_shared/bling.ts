@@ -440,6 +440,8 @@ export async function blingCreateSaleOrder(
   args: {
     kit: string; amountCents: number; customerName?: string; phone?: string
     cpf?: string; email?: string; dataNascimento?: string; sexo?: string
+    /** Frete (centavos) cobrado à parte → vai em transporte.frete; o valor do produto = amount − frete. */
+    freightCents?: number
     /** Venda AVULSA (sem kit): descrição livre do item (ex.: "Tricopill + Shampoo"). */
     description?: string
     /** Força a quantidade de frascos (ex.: envio de assinatura = 1 ou 3). Ignora o mapa de kit. */
@@ -510,20 +512,22 @@ export async function blingCreateSaleOrder(
     ? String(kitProductIds[args.kit] ?? DEFAULT_KIT_PRODUCT_IDS[args.kit] ?? '').trim()
     : ''
 
-  const totalReais = Math.round(args.amountCents) / 100
+  // Frete cobrado à parte: vai em transporte.frete; o VALOR DO PRODUTO = total − frete.
+  const freightCents = Math.max(0, Math.round(Number(args.freightCents) || 0))
+  const produtoReais = Math.max(0, Math.round(args.amountCents) - freightCents) / 100
   let productId: string
   let bottles: number // quantidade da linha do pedido
   let valorUnit: number
   if (kitProductId) {
-    // KIT com produto próprio: 1 unidade do produto do kit, valor cheio.
+    // KIT com produto próprio: 1 unidade do produto do kit (estoque abate o base pela composição).
     productId = kitProductId
     bottles = 1
-    valorUnit = Math.round(totalReais * 100) / 100
+    valorUnit = Math.round(produtoReais * 100) / 100
   } else {
     // Avulso / assinatura (bottlesOverride) / kit sem produto: frasco INDIVIDUAL (00001) × frascos.
     productId = individualProductId
     bottles = overrideBottles || (hasKit ? (Number(bottlesMap[args.kit] ?? DEFAULT_KIT_BOTTLES[args.kit] ?? 1) || 1) : 1)
-    valorUnit = Math.round((totalReais / bottles) * 100) / 100
+    valorUnit = Math.round((produtoReais / bottles) * 100) / 100
   }
   const itemDescricao = hasKit
     ? (KIT_LABEL[args.kit] ?? `Tricopill ${args.kit}`)
@@ -558,6 +562,7 @@ export async function blingCreateSaleOrder(
     contato: { id: Number(contatoId) || contatoId },
     data: dataPedido,
     ...(obs ? { observacoes: obs } : {}),
+    ...(freightCents > 0 ? { transporte: { frete: Math.round(freightCents) / 100, fretePorConta: 1 } } : {}),
     itens: [
       {
         produto: { id: Number(productId) || productId },

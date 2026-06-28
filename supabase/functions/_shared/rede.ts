@@ -176,6 +176,7 @@ export type RedeIntent = {
   method: 'card' | 'pix'
   customerName: string | null
   customerDoc?: string | null
+  freightCents?: number
 }
 
 function shortId(): string {
@@ -228,6 +229,7 @@ export async function createRedeIntent(
     tenant_id: args.tenantId,
     lead_id: args.leadId || null,
     amount_cents: amountCents,
+    freight_cents: freightCents,
     description: description.slice(0, 120),
     installments,
     status: 'pending',
@@ -336,6 +338,7 @@ export async function createRedePix(
     tenant_id: args.tenantId,
     lead_id: args.leadId || null,
     amount_cents: amountCents,
+    freight_cents: freightCents,
     description: description.slice(0, 120),
     installments: 1,
     method: 'pix',
@@ -366,7 +369,7 @@ export async function createRedePix(
 export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<RedeIntent | null> {
   const { data } = await admin
     .from('rede_payments')
-    .select('id, tenant_id, lead_id, amount_cents, description, installments, status, coupon_code, kit, bling_order_id, method, customer_name, customer_doc')
+    .select('id, tenant_id, lead_id, amount_cents, freight_cents, description, installments, status, coupon_code, kit, bling_order_id, method, customer_name, customer_doc')
     .eq('id', id)
     .maybeSingle()
   if (!data) return null
@@ -385,6 +388,7 @@ export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<
     method: r.method === 'pix' ? 'pix' : 'card',
     customerName: r.customer_name != null ? String(r.customer_name) : null,
     customerDoc: r.customer_doc != null ? String(r.customer_doc) : null,
+    freightCents: Math.max(0, Math.round(Number(r.freight_cents ?? 0))),
   }
 }
 
@@ -523,6 +527,7 @@ export async function finalizeRedePaid(
           const out = await blingCreateSaleOrder(admin, blingTenant, {
             kit: intent.kit ?? '',
             amountCents: intent.amountCents,
+            freightCents: intent.freightCents ?? 0,
             // Venda avulsa/carrinho (sem kit): descrição livre p/ sair como 1 item pelo valor cheio.
             description: intent.kit ? undefined : String(intent.description ?? l.patient_name ?? 'Pedido Tricopill').trim(),
             customerName: String(cad.nomeCompleto || opts.cardholderName || intent.customerName || l.patient_name || 'Cliente Tricopill').trim(),
