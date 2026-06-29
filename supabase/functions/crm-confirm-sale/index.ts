@@ -70,6 +70,16 @@ Deno.serve(async (req) => {
     custom_fields?: Record<string, unknown>; tenant_id?: string; pipeline_id?: string
   }
 
+  // CARRINHO: produtos cadastrados no Bling (id + nome + qty + preço). Cada um vira uma linha.
+  const cartItems = Array.isArray(p.items)
+    ? (p.items as Array<Record<string, unknown>>).map((it) => ({
+        id: String(it.id ?? '').trim(),
+        nome: String(it.nome ?? 'Produto').slice(0, 120),
+        qty: Math.max(1, Math.round(Number(it.qty ?? 1)) || 1),
+        precoCents: Math.max(0, Math.round(Number(it.precoCents ?? 0))),
+      })).filter((it) => it.id && it.precoCents > 0)
+    : []
+
   // Resolve valor + kit. Kit usa preço Pix (PAGBANK_KITS, 5% off) ou cartão (REDE_KITS, cheio).
   let baseCents = 0
   let kitKey: string | null = null
@@ -82,6 +92,10 @@ Deno.serve(async (req) => {
     baseCents = kit.amountCents
     label = kit.label
     kitKey = key
+  } else if (cartItems.length) {
+    baseCents = cartItems.reduce((s, it) => s + it.qty * it.precoCents, 0)
+    const nomes = cartItems.map((i) => (i.qty > 1 ? `${i.qty}× ${i.nome}` : i.nome)).join(', ')
+    label = (cartItems.length === 1 ? nomes : `Carrinho: ${nomes}`).slice(0, 120)
   } else {
     baseCents = Math.round(Number(p.amountCents ?? 0))
     label = String(p.description ?? 'Venda avulsa').slice(0, 120) || 'Venda avulsa'
@@ -98,6 +112,19 @@ Deno.serve(async (req) => {
   const customerName = String(
     (lead.custom_fields?.cadastro as Record<string, string> | undefined)?.nomeCompleto || lead.patient_name || 'Cliente Tricopill',
   ).slice(0, 60)
+
+  // TRAVA ANTI-DUPLICIDADE: mesma venda (lead + valor) confirmada nos últimos 2 min não
+  // gera segundo registro/pedido (evita o duplo-clique que criou 2 pedidos no Bling).
+  {
+    const since = new Date(Date.now() - 120_000).toISOString()
+    const dupQ = isCard
+      ? admin.from('rede_payments').select('id').eq('tenant_id', tenantId).eq('lead_id', leadId).eq('amount_cents', totalCents).eq('status', 'paid').gte('paid_at', since)
+      : admin.from('pagbank_checkouts').select('checkout_id').eq('tenant_id', tenantId).eq('lead_id', leadId).eq('amount_cents', totalCents).eq('status', 'paid').gte('paid_at', since)
+    const { data: dup } = await dupQ.limit(1)
+    if (dup && dup.length) {
+      return json({ ok: true, duplicate: true, leadId, amountCents: totalCents, message: 'Venda idêntica já registrada há instantes — não dupliquei.' })
+    }
+  }
 
   // 1) Registra o pagamento PAGO (entra no BI: pagbank_checkouts / rede_payments).
   try {
@@ -150,7 +177,10 @@ Deno.serve(async (req) => {
       // Kit conhecido → pedido por kit (frascos). Venda AVULSA → pedido com 1 item descrito
       // (ex.: "Tricopill + Shampoo") pelo valor — assim TODA venda confirmada entra no Bling.
       const out = await blingCreateSaleOrder(admin, tenantId, {
-        kit: kitKey ?? '', amountCents: productCents, description: kitKey ? undefined : label,
+        kit: kitKey ?? '', amountCents: productCents,
+        // Carrinho → 1 linha por produto cadastrado no Bling; kit → produto do kit; senão avulso.
+        items: cartItems.length ? cartItems : undefined,
+        description: kitKey || cartItems.length ? undefined : label,
         customerName, phone: lead.phone ? String(lead.phone) : undefined,
         cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo,
         entrega: (lead.custom_fields?.entrega as {
@@ -161,6 +191,8 @@ Deno.serve(async (req) => {
       blingOrderId = out.orderId
       blingNote = kitKey
         ? `Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`
+        : cartItems.length
+        ? `Pedido criado no Bling (#${out.orderId ?? '?'}) com ${cartItems.length} produto(s) do catálogo.`
         : `Pedido AVULSO criado no Bling (#${out.orderId ?? '?'}): ${label}. Confira os itens/estoque no Bling.`
     } catch (e) {
       blingNote = `Falha ao criar pedido no Bling: ${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`

@@ -19,17 +19,29 @@ async function invoke(fn: string, body: Record<string, unknown>): Promise<Record
   return (data ?? {}) as Record<string, unknown>
 }
 
+export type CartItem = { id: string; nome: string; qty: number; precoCents: number }
+export type CatalogProduct = { id: string; nome: string; precoCents: number; imagem: string | null; estoque: number }
+
 export type ConfirmSaleInput = {
   leadId: string
-  mode: 'kit' | 'custom'
+  mode: 'kit' | 'custom' | 'cart'
   kit?: string
   amountCents?: number
   description?: string
+  items?: CartItem[]
   paymentMethod: 'pix' | 'card' | 'other'
   installments?: number
   couponCode?: string
   freightCents?: number
   createBlingOrder?: boolean
+}
+
+/** Catálogo de produtos cadastrados no Bling (para montar o carrinho da venda manual). */
+export async function fetchBlingCatalog(): Promise<CatalogProduct[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.functions.invoke('crm-bling-catalog', { body: {} })
+  if (error) throw new Error(error.message)
+  return ((data as { produtos?: CatalogProduct[] } | null)?.produtos ?? [])
 }
 
 export type ConfirmSaleResult = {
@@ -48,6 +60,7 @@ export async function confirmSale(input: ConfirmSaleInput): Promise<ConfirmSaleR
     createBlingOrder: input.createBlingOrder !== false,
   }
   if (input.mode === 'kit') body.kit = input.kit
+  else if (input.mode === 'cart') body.items = input.items ?? []
   else {
     body.amountCents = input.amountCents
     body.description = input.description

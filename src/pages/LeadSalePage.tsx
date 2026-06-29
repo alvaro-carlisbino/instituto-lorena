@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { CircleCheck, TriangleAlert, CheckCircle2 } from 'lucide-react'
+import { CircleCheck, TriangleAlert, CheckCircle2, Plus, Minus, Trash2, Search } from 'lucide-react'
 
 import { EmptyState } from '@/components/ui/empty-state'
 import {
@@ -21,7 +21,9 @@ import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { cn } from '@/lib/utils'
 import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
-import { confirmSale } from '@/services/crmConfirmSale'
+import { confirmSale, fetchBlingCatalog, type CartItem, type CatalogProduct } from '@/services/crmConfirmSale'
+
+const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export function LeadSalePage() {
   const crm = useCrm()
@@ -36,10 +38,15 @@ export function LeadSalePage() {
   const lead = crm.selectedLead ?? crm.leads.find((l) => l.id === leadId) ?? null
   const ready = !!lead && lead.id === leadId
 
-  const [mode, setMode] = useState<'kit' | 'custom'>('kit')
+  const [mode, setMode] = useState<'kit' | 'cart' | 'custom'>('kit')
   const [kit, setKit] = useState<PagbankKit>('3_meses')
   const [amountReais, setAmountReais] = useState('')
   const [description, setDescription] = useState('')
+  const [catalog, setCatalog] = useState<CatalogProduct[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [cart, setCart] = useState<CartItem[]>([])
   const [method, setMethod] = useState<'pix' | 'card' | 'other'>('pix')
   const [installments, setInstallments] = useState('1')
   const [coupon, setCoupon] = useState('')
@@ -50,6 +57,33 @@ export function LeadSalePage() {
   const [pageSuccess, setPageSuccess] = useState<string | null>(null)
 
   const goBack = () => navigate(`/leads/${leadId}`)
+
+  // Carrega o catálogo do Bling sob demanda (só quando abre o modo Carrinho).
+  useEffect(() => {
+    if (mode !== 'cart' || catalog.length || catalogLoading) return
+    setCatalogLoading(true)
+    setCatalogError(null)
+    fetchBlingCatalog()
+      .then(setCatalog)
+      .catch((e) => setCatalogError(e instanceof Error ? e.message : 'Falha ao carregar o catálogo do Bling.'))
+      .finally(() => setCatalogLoading(false))
+  }, [mode, catalog.length, catalogLoading])
+
+  const addToCart = (p: CatalogProduct) =>
+    setCart((c) => {
+      const i = c.findIndex((x) => x.id === p.id)
+      if (i >= 0) {
+        const n = [...c]
+        n[i] = { ...n[i], qty: n[i].qty + 1 }
+        return n
+      }
+      return [...c, { id: p.id, nome: p.nome, qty: 1, precoCents: p.precoCents }]
+    })
+  const setQty = (id: string, qty: number) => setCart((c) => c.map((x) => (x.id === id ? { ...x, qty: Math.max(1, qty) } : x)))
+  const removeFromCart = (id: string) => setCart((c) => c.filter((x) => x.id !== id))
+  const cartTotalCents = cart.reduce((s, x) => s + x.qty * x.precoCents, 0)
+  const q = search.trim().toLowerCase()
+  const filteredCatalog = (q ? catalog.filter((p) => p.nome.toLowerCase().includes(q)) : catalog).slice(0, 12)
 
   const handleConfirm = async () => {
     setPageError(null)
@@ -62,6 +96,11 @@ export function LeadSalePage() {
         return
       }
     }
+    if (mode === 'cart' && cart.length === 0) {
+      setPageError('Adicione ao menos um produto do Bling ao carrinho.')
+      toast.error('Adicione ao menos um produto ao carrinho.')
+      return
+    }
     setLoading(true)
     try {
       const res = await confirmSale({
@@ -71,6 +110,7 @@ export function LeadSalePage() {
         amountCents:
           mode === 'custom' ? Math.round(Number(amountReais.replace(/\./g, '').replace(',', '.')) * 100) : undefined,
         description: mode === 'custom' ? description.trim() || 'Venda avulsa' : undefined,
+        items: mode === 'cart' ? cart : undefined,
         paymentMethod: method,
         installments: method === 'card' ? Math.max(1, Math.min(12, Number(installments) || 1)) : undefined,
         couponCode: coupon.trim() || undefined,
@@ -153,7 +193,7 @@ export function LeadSalePage() {
 
         <div className="mt-4 space-y-4 sm:max-w-md">
           <div className="flex gap-2">
-            {(['kit', 'custom'] as const).map((m) => (
+            {(['kit', 'cart', 'custom'] as const).map((m) => (
               <button
                 key={m}
                 type="button"
@@ -163,7 +203,7 @@ export function LeadSalePage() {
                   mode === m ? 'border-primary bg-primary/10 text-primary' : 'border-border/50 text-muted-foreground',
                 )}
               >
-                {m === 'kit' ? 'Kit' : 'Valor avulso'}
+                {m === 'kit' ? 'Kit' : m === 'cart' ? 'Carrinho' : 'Valor avulso'}
               </button>
             ))}
           </div>
@@ -186,6 +226,72 @@ export function LeadSalePage() {
               <p className="text-[0.7rem] text-muted-foreground">
                 No cartão usa o valor cheio; no Pix, com 5% de desconto.
               </p>
+            </div>
+          ) : mode === 'cart' ? (
+            <div className="space-y-3">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input className="pl-8" placeholder="Buscar produto do Bling…" value={search} onChange={(e) => setSearch(e.target.value)} />
+              </div>
+              {catalogError ? (
+                <p className="text-xs text-destructive">{catalogError}</p>
+              ) : catalogLoading ? (
+                <p className="text-xs text-muted-foreground">Carregando catálogo do Bling…</p>
+              ) : (
+                <div className="max-h-52 space-y-1 overflow-y-auto rounded-lg border border-border/40 p-1">
+                  {filteredCatalog.length === 0 ? (
+                    <p className="px-2 py-3 text-center text-xs text-muted-foreground">Nenhum produto encontrado.</p>
+                  ) : (
+                    filteredCatalog.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => addToCart(p)}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted/50"
+                      >
+                        {p.imagem ? (
+                          <img src={p.imagem} alt="" className="size-7 rounded object-cover" />
+                        ) : (
+                          <div className="size-7 rounded bg-muted" />
+                        )}
+                        <span className="flex-1 truncate">{p.nome}</span>
+                        <span className="shrink-0 text-muted-foreground">{brl(p.precoCents)}</span>
+                        <Plus className="size-3.5 shrink-0 text-primary" />
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+              {cart.length > 0 ? (
+                <div className="space-y-1.5 rounded-lg border border-border/40 p-2">
+                  {cart.map((it) => (
+                    <div key={it.id} className="flex items-center gap-2 text-xs">
+                      <span className="flex-1 truncate">{it.nome}</span>
+                      <div className="flex items-center gap-1">
+                        <button type="button" onClick={() => setQty(it.id, it.qty - 1)} className="rounded border border-border/50 p-0.5">
+                          <Minus className="size-3" />
+                        </button>
+                        <span className="w-5 text-center tabular-nums">{it.qty}</span>
+                        <button type="button" onClick={() => setQty(it.id, it.qty + 1)} className="rounded border border-border/50 p-0.5">
+                          <Plus className="size-3" />
+                        </button>
+                      </div>
+                      <span className="w-16 shrink-0 text-right tabular-nums">{brl(it.qty * it.precoCents)}</span>
+                      <button type="button" onClick={() => removeFromCart(it.id)} className="text-muted-foreground hover:text-destructive">
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between border-t border-border/40 pt-1.5 text-xs font-semibold">
+                    <span>Total (produtos)</span>
+                    <span className="tabular-nums">{brl(cartTotalCents)}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[0.7rem] text-muted-foreground">
+                  Busque e clique nos produtos para montar o carrinho. Cada item vai pro Bling com seu produto cadastrado.
+                </p>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
