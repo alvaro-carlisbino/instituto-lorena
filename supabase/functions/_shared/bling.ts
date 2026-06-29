@@ -442,6 +442,8 @@ export async function blingCreateSaleOrder(
     cpf?: string; email?: string; dataNascimento?: string; sexo?: string
     /** Frete (centavos) cobrado à parte → vai em transporte.frete; o valor do produto = amount − frete. */
     freightCents?: number
+    /** Carrinho multi-itens (loja): cada item vira uma linha com seu produto cadastrado no Bling. */
+    items?: Array<{ id?: unknown; nome?: unknown; qty?: unknown; precoCents?: unknown; kit?: unknown }>
     /** Venda AVULSA (sem kit): descrição livre do item (ex.: "Tricopill + Shampoo"). */
     description?: string
     /** Força a quantidade de frascos (ex.: envio de assinatura = 1 ou 3). Ignora o mapa de kit. */
@@ -534,6 +536,21 @@ export async function blingCreateSaleOrder(
     // Sem kit: produto INDIVIDUAL cadastrado (00001) com o nome real — nunca "venda avulsa".
     : (args.description?.trim() || 'Tricopill - Suplemento Capilar')
 
+  // Itens do pedido: CARRINHO multi-itens (loja) → cada produto cadastrado no Bling vira 1 linha
+  // (kit → produto do kit; bump/avulso → individual 00001; catálogo → id do próprio item). Senão,
+  // 1 item (kit ou individual). Nunca "venda avulsa" / produto fora do catálogo.
+  const cartItens = (Array.isArray(args.items) ? args.items : []).map((it) => {
+    const kitKey = typeof it.kit === 'string' ? it.kit : (String(it.id ?? '').startsWith('kit:') ? String(it.id).slice(4) : '')
+    let prodId: string
+    if (kitKey === 'bump_frasco') prodId = individualProductId
+    else if (kitKey) prodId = String(kitProductIds[kitKey] ?? DEFAULT_KIT_PRODUCT_IDS[kitKey] ?? individualProductId).trim()
+    else prodId = String(Number(it.id) || it.id || '')
+    return { produto: { id: Number(prodId) || prodId }, descricao: String(it.nome ?? 'Produto').slice(0, 120), quantidade: Number(it.qty) || 1, valor: Math.round(Number(it.precoCents) || 0) / 100 }
+  }).filter((x) => x.produto.id)
+  const itens = cartItens.length
+    ? cartItens
+    : [{ produto: { id: Number(productId) || productId }, descricao: itemDescricao, quantidade: bottles, valor: valorUnit }]
+
   // Data do pedido (YYYY-MM-DD, fuso de Maringá/Brasília). O Bling EXIGE `data` —
   // sem ela recusa com "A data para geração das parcelas é inválida".
   const dataPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
@@ -564,14 +581,7 @@ export async function blingCreateSaleOrder(
     data: dataPedido,
     ...(obs ? { observacoes: obs } : {}),
     ...(freightCents > 0 ? { transporte: { frete: Math.round(freightCents) / 100, fretePorConta: 1 } } : {}),
-    itens: [
-      {
-        produto: { id: Number(productId) || productId },
-        descricao: itemDescricao,
-        quantidade: bottles,
-        valor: valorUnit,
-      },
-    ],
+    itens,
   }
   const orderId = await blingCreateOrder(token, payload)
 

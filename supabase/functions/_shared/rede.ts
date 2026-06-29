@@ -179,6 +179,7 @@ export type RedeIntent = {
   customerName: string | null
   customerDoc?: string | null
   freightCents?: number
+  items?: Array<Record<string, unknown>> | null
 }
 
 function shortId(): string {
@@ -371,7 +372,7 @@ export async function createRedePix(
 export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<RedeIntent | null> {
   const { data } = await admin
     .from('rede_payments')
-    .select('id, tenant_id, lead_id, amount_cents, freight_cents, description, installments, status, coupon_code, kit, bling_order_id, method, customer_name, customer_doc')
+    .select('id, tenant_id, lead_id, amount_cents, freight_cents, description, installments, status, coupon_code, kit, bling_order_id, method, customer_name, customer_doc, items')
     .eq('id', id)
     .maybeSingle()
   if (!data) return null
@@ -391,6 +392,7 @@ export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<
     customerName: r.customer_name != null ? String(r.customer_name) : null,
     customerDoc: r.customer_doc != null ? String(r.customer_doc) : null,
     freightCents: Math.max(0, Math.round(Number(r.freight_cents ?? 0))),
+    items: Array.isArray(r.items) ? (r.items as Array<Record<string, unknown>>) : null,
   }
 }
 
@@ -579,7 +581,9 @@ export async function finalizeRedePaid(
             kit: intent.kit ?? '',
             amountCents: intent.amountCents,
             freightCents: intent.freightCents ?? 0,
-            // Venda avulsa/carrinho (sem kit): descrição livre p/ sair como 1 item pelo valor cheio.
+            // Carrinho da loja: manda CADA item com seu produto cadastrado no Bling (não colapsa
+            // num item só). Sem itens, cai no kit/individual.
+            items: intent.items && intent.items.length ? intent.items : undefined,
             description: intent.kit ? undefined : String(intent.description ?? l.patient_name ?? 'Pedido Tricopill').trim(),
             customerName: String(cad.nomeCompleto || opts.cardholderName || intent.customerName || l.patient_name || 'Cliente Tricopill').trim(),
             phone: l.phone ? String(l.phone) : undefined,
