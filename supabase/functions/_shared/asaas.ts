@@ -605,13 +605,16 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
   if (!ships) return
 
   const shipUnits = unitsPerShipment
-  const shipValueCents = shipUnits * unitPriceCents
+  const shipFreightCents = Math.max(0, Math.round(Number(s.freight_cents) || 0))
+  const shipProductCents = shipUnits * unitPriceCents
+  const shipValueCents = shipProductCents + shipFreightCents // total (produto + frete); blingCreateSaleOrder põe o frete em transporte.frete
   const blingTenant = 'tricopill'
   try {
     const out = await blingCreateSaleOrder(admin, blingTenant, {
       kit: '',
       bottlesOverride: shipUnits,
       amountCents: shipValueCents,
+      freightCents: shipFreightCents,
       description: `Assinatura Tricopill (${shipUnits} ${shipUnits === 1 ? 'frasco' : 'frascos'}) — ciclo ${cycle}`,
       customerName: s.customer_name != null ? String(s.customer_name) : undefined,
       phone: s.phone != null ? String(s.phone) : undefined,
