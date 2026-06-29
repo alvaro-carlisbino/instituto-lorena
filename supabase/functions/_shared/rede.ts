@@ -402,6 +402,55 @@ export type RedeCard = {
 
 export type RedePayResult = { status: 'paid' | 'failed'; returnCode: string; message: string; tid: string | null }
 
+// Envia um texto pelo WhatsApp (w-api) usando a linha ATIVA do tenant. Best-effort (false em falha).
+async function sendWapiText(admin: SupabaseClient, tenantId: string, phone: string, text: string): Promise<boolean> {
+  const to = String(phone || '').replace(/\D/g, '')
+  if (to.length < 10) return false
+  try {
+    const { data } = await admin.from('whatsapp_channel_instances')
+      .select('wapi_instance_id, wapi_token, wapi_base_url')
+      .eq('tenant_id', tenantId).eq('channel_provider', 'wapi').eq('active', true).limit(1).maybeSingle()
+    const row = data as { wapi_instance_id?: string; wapi_token?: string; wapi_base_url?: string | null } | null
+    const instanceId = row?.wapi_instance_id ? String(row.wapi_instance_id).trim() : ''
+    const token = row?.wapi_token ? String(row.wapi_token).trim() : ''
+    if (!instanceId || !token) return false
+    const baseUrl = ((row?.wapi_base_url ? String(row.wapi_base_url) : '').trim() || 'https://api.w-api.app/v1').replace(/\/$/, '')
+    const res = await fetch(`${baseUrl}/message/send-text?instanceId=${encodeURIComponent(instanceId)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ phone: to, message: text }),
+    })
+    return res.ok
+  } catch { return false }
+}
+
+// Mensagem de confirmação ao cliente: confere nome/CPF/endereço e PEDE o que faltar.
+function buildConfirmMsg(a: { nome?: string; cad: Record<string, unknown>; ent: Record<string, unknown>; cpfPayment?: string; pedidoDesc: string; valorBRL: string }): string {
+  const cad = a.cad || {}; const ent = a.ent || {}
+  const nomeCompleto = String(cad.nomeCompleto ?? a.nome ?? '').trim()
+  const first = nomeCompleto.split(/\s+/).filter(Boolean)[0] || 'tudo bem'
+  const cpf = String(cad.cpf ?? a.cpfPayment ?? '').replace(/\D/g, '')
+  const isPickup = String(ent.delivery_mode ?? '').trim() === 'retirada_clinica'
+  const cep = String(ent.cep ?? '').replace(/\D/g, '')
+  const numero = String(ent.numero ?? '').trim()
+  const rua = String(ent.logradouro ?? '').trim(), bairro = String(ent.bairro ?? '').trim()
+  const cidade = String(ent.cidade ?? '').trim(), uf = String(ent.uf ?? '').trim(), compl = String(ent.complemento ?? '').trim()
+  const hasNome = nomeCompleto.split(/\s+/).filter(Boolean).length >= 2
+  const hasCpf = cpf.length === 11
+  const hasEnd = isPickup || (cep.length === 8 && numero.length > 0)
+  const header = `Olá ${first}! ✅ Recebemos seu pagamento.\n\nPedido: ${a.pedidoDesc}\nValor: ${a.valorBRL}`
+  const faltam: string[] = []
+  if (!hasNome) faltam.push('seu *nome completo*')
+  if (!hasCpf) faltam.push('seu *CPF*')
+  if (!hasEnd) faltam.push('seu *endereço completo* (CEP, rua, número, bairro e cidade)')
+  if (faltam.length) {
+    return `${header}\n\nPra preparar seu envio e emitir a nota fiscal, preciso confirmar: ${faltam.join(', ')}. Pode me mandar aqui, por favor? 💚`
+  }
+  const endLinha = isPickup
+    ? 'Retirada na clínica (Maringá)'
+    : `${rua}, ${numero}${compl ? ' - ' + compl : ''} - ${bairro} - ${cidade}/${uf} - CEP ${cep}`
+  const cpfFmt = cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+  return `${header}\n\n*Confira seus dados de entrega:*\n👤 ${nomeCompleto}\n📄 CPF ${cpfFmt}\n📍 ${endLinha}\n\nEstá tudo certo? Se algo estiver errado, é só me responder aqui. 💚`
+}
+
 /**
  * Downstream COMPARTILHADO de um pagamento Rede aprovado (cartão OU Pix): conta o cupom,
  * grava o comprovante automático, move o lead p/ "Pago", cria o pedido no Bling e lança o
@@ -608,6 +657,20 @@ export async function finalizeRedePaid(
     } catch {
       // best-effort: envio nunca derruba o pagamento
     }
+
+    // Confirmação no WhatsApp ao cliente: confere nome/CPF/endereço e pede o que faltar.
+    // Best-effort — nunca derruba o pagamento. (PIX/bot não mandavam nada antes.)
+    try {
+      const cadMsg = ((l.custom_fields as Record<string, unknown> | undefined)?.cadastro ?? {}) as Record<string, unknown>
+      const entMsg = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>
+      const valorBRL = (intent.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+      const pedidoDesc = String(intent.description || 'Tricopill').slice(0, 80)
+      const msg = buildConfirmMsg({
+        nome: intent.customerName ?? opts.cardholderName ?? undefined,
+        cad: cadMsg, ent: entMsg, cpfPayment: intent.customerDoc ?? undefined, pedidoDesc, valorBRL,
+      })
+      await sendWapiText(admin, String(l.tenant_id ?? intent.tenantId), String(l.phone ?? ''), msg)
+    } catch { /* best-effort */ }
   } catch {
     // best-effort
   }
