@@ -3,6 +3,8 @@ import { insertInteraction, recordAutoReceipt } from './crm.ts'
 import { normalizeKitKey } from './pagbank.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
 import { blingCreateSaleOrder } from './bling.ts'
+import { sendEmail } from './resend.ts'
+import { internalSaleEmail, orderConfirmEmail, TEAM_EMAIL } from './emails.ts'
 import { autoShipToCart } from './melhorEnvio.ts'
 
 /**
@@ -670,6 +672,17 @@ export async function finalizeRedePaid(
         cad: cadMsg, ent: entMsg, cpfPayment: intent.customerDoc ?? undefined, pedidoDesc, valorBRL,
       })
       await sendWapiText(admin, String(l.tenant_id ?? intent.tenantId), String(l.phone ?? ''), msg)
+      // E-mails (Resend): confirmação ao cliente (se houver e-mail) + aviso interno de venda. Best-effort.
+      try {
+        const nomeEmail = intent.customerName ?? opts.cardholderName ?? undefined
+        const email = String((cadMsg as Record<string, unknown>).email ?? '').trim()
+        if (email) {
+          const c = orderConfirmEmail({ nome: nomeEmail, cad: cadMsg, ent: entMsg, cpfPayment: intent.customerDoc ?? undefined, pedidoDesc, valorBRL })
+          await sendEmail({ to: email, subject: c.subject, html: c.html })
+        }
+        const ie = internalSaleEmail({ nome: nomeEmail, cad: cadMsg, ent: entMsg, cpfPayment: intent.customerDoc ?? undefined, pedidoDesc, valorBRL, phone: String(l.phone ?? ''), metodo: isPix ? 'PIX' : 'Cartão' })
+        await sendEmail({ to: TEAM_EMAIL, subject: ie.subject, html: ie.html })
+      } catch { /* best-effort: e-mail nunca derruba o pagamento */ }
     } catch { /* best-effort */ }
   } catch {
     // best-effort

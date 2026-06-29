@@ -14,6 +14,8 @@
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
+import { sendEmail } from '../_shared/resend.ts'
+import { trackingEmail } from '../_shared/emails.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import {
   createMeShipment,
@@ -167,6 +169,17 @@ Deno.serve(async (req) => {
       } catch { /* ignore */ }
     }
 
+    // E-mail de rastreio ao cliente quando a etiqueta foi GERADA pelo sistema (best-effort).
+    if (res.finalized && res.tracking) {
+      try {
+        const custEmail = String(to.email ?? '').trim()
+        if (custEmail) {
+          const t = trackingEmail({ nome: to.name, tracking: res.tracking })
+          await sendEmail({ to: custEmail, subject: t.subject, html: t.html })
+        }
+      } catch { /* ignore */ }
+    }
+
     return json({
       ok: true, finalized: res.finalized, cartId: res.cartId, tracking: res.tracking,
       protocol: res.protocol, printUrl: res.printUrl, stage: res.stage,
@@ -197,12 +210,25 @@ Deno.serve(async (req) => {
     const { data: lead } = await admin.from('leads').select('custom_fields').eq('id', leadId).maybeSingle()
     const cf = { ...(((lead as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>) }
     const ent = { ...((cf.entrega ?? {}) as Record<string, unknown>) }
+    const prevTracking = String(ent.tracking ?? '').trim()
     if (mapped) ent.status = mapped
     if (st.tracking) ent.tracking = st.tracking
     ent.me_status_raw = st.status
     ent.tracking_updated_at = new Date().toISOString()
     cf.entrega = ent
     await admin.from('leads').update({ custom_fields: cf }).eq('id', leadId)
+
+    // Rastreio NOVO (apareceu agora) → e-mail ao cliente (best-effort).
+    if (st.tracking && st.tracking !== prevTracking) {
+      try {
+        const cad = (cf.cadastro ?? {}) as Record<string, unknown>
+        const email = String(cad.email ?? '').trim()
+        if (email) {
+          const t = trackingEmail({ nome: String(cad.nomeCompleto ?? ''), tracking: st.tracking })
+          await sendEmail({ to: email, subject: t.subject, html: t.html })
+        }
+      } catch { /* ignore */ }
+    }
 
     return json({ ok: true, me_status: st.status, mapped: mapped ?? null, tracking: st.tracking })
   }
