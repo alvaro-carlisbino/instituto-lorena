@@ -20,6 +20,18 @@ export type TricopillSubscription = {
   createdAt: string
 }
 
+export type SubscriptionAction = 'cancel' | 'pause' | 'resume' | 'resend_tracking'
+
+/** Ação no painel de assinaturas (cancelar/pausar/reativar/reenviar rastreio). */
+export async function subscriptionAction(subId: string, action: SubscriptionAction): Promise<{ ok: boolean; message?: string }> {
+  if (!supabase) return { ok: false, message: 'Sistema não configurado.' }
+  const { data, error } = await supabase.functions.invoke('crm-subscription-admin', { body: { action, subId } })
+  if (error) return { ok: false, message: error.message }
+  const r = data as { ok?: boolean; error?: string; message?: string; tracking?: string }
+  if (!r?.ok) return { ok: false, message: r?.message || r?.error || 'Falha na ação.' }
+  return { ok: true, message: r.tracking ? `Rastreio reenviado (${r.tracking}).` : undefined }
+}
+
 /** Assinaturas (clube) do Tricopill — fonte: asaas_subscriptions. */
 export async function fetchTricopillSubscriptions(): Promise<TricopillSubscription[]> {
   if (!supabase) return []

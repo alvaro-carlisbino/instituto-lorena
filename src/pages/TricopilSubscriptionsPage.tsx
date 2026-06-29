@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
-import { fetchTricopillSubscriptions, type TricopillSubscription } from '@/services/tricopillSubscriptions'
+import { fetchTricopillSubscriptions, subscriptionAction, type SubscriptionAction, type TricopillSubscription } from '@/services/tricopillSubscriptions'
 
 const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -27,6 +28,18 @@ export function TricopilSubscriptionsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  async function doAction(s: TricopillSubscription, action: SubscriptionAction) {
+    if (action === 'cancel' && !window.confirm(`Cancelar a assinatura de ${s.customerName || 'cliente'}? Isso interrompe as cobranças no Asaas.`)) return
+    const key = `${s.id}:${action}`
+    setBusy(key)
+    try {
+      const r = await subscriptionAction(s.id, action)
+      if (r.ok) { toast.success(r.message || 'Feito ✅'); setReload((k) => k + 1) }
+      else toast.error(r.message || 'Falha na ação.')
+    } finally { setBusy(null) }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -87,6 +100,7 @@ export function TricopilSubscriptionsPage() {
                 <th className="px-3 py-2 font-medium">Último envio</th>
                 <th className="px-3 py-2 font-medium">Entrega</th>
                 <th className="px-3 py-2 font-medium">Asaas</th>
+                <th className="px-3 py-2 font-medium">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -119,6 +133,19 @@ export function TricopilSubscriptionsPage() {
                       {s.asaasSubscriptionId ? (
                         <a className="text-xs text-sky-700 underline" href={`https://www.asaas.com/subscriptions/show/${s.asaasSubscriptionId}`} target="_blank" rel="noreferrer">abrir</a>
                       ) : '—'}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={!!busy && busy.startsWith(s.id)} onClick={() => void doAction(s, 'resend_tracking')}>Rastreio</Button>
+                        {s.status === 'active' ? (
+                          <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={!!busy && busy.startsWith(s.id)} onClick={() => void doAction(s, 'pause')}>Pausar</Button>
+                        ) : s.status === 'paused' ? (
+                          <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={!!busy && busy.startsWith(s.id)} onClick={() => void doAction(s, 'resume')}>Reativar</Button>
+                        ) : null}
+                        {s.status !== 'canceled' && s.status !== 'cancelled' ? (
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive" disabled={!!busy && busy.startsWith(s.id)} onClick={() => void doAction(s, 'cancel')}>Cancelar</Button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 )

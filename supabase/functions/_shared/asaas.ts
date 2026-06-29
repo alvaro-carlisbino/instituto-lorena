@@ -170,6 +170,22 @@ function asaasError(r: AsaasResponse): string {
   return desc || r.text.slice(0, 200) || `http_${r.status}`
 }
 
+/** Cancela (deleta) uma assinatura no Asaas. */
+export async function cancelAsaasSubscription(admin: SupabaseClient, tenantId: string, asaasSubId: string): Promise<{ ok: boolean; error?: string }> {
+  const cfg = await readAsaasConfig(admin, tenantId)
+  if (!cfg) return { ok: false, error: 'asaas_nao_configurado' }
+  const r = await asaasFetch(cfg, `/subscriptions/${encodeURIComponent(asaasSubId)}`, { method: 'DELETE' })
+  return r.ok ? { ok: true } : { ok: false, error: asaasError(r) }
+}
+
+/** Pausa (INACTIVE) ou reativa (ACTIVE) uma assinatura no Asaas. */
+export async function setAsaasSubscriptionStatus(admin: SupabaseClient, tenantId: string, asaasSubId: string, status: 'ACTIVE' | 'INACTIVE'): Promise<{ ok: boolean; error?: string }> {
+  const cfg = await readAsaasConfig(admin, tenantId)
+  if (!cfg) return { ok: false, error: 'asaas_nao_configurado' }
+  const r = await asaasFetch(cfg, `/subscriptions/${encodeURIComponent(asaasSubId)}`, { method: 'PUT', body: JSON.stringify({ status }) })
+  return r.ok ? { ok: true } : { ok: false, error: asaasError(r) }
+}
+
 /** Testa a credencial (GET /myAccount). Usado no botão "Testar conexão". */
 export async function asaasPing(cfg: AsaasConfig): Promise<{ ok: boolean; detail: string }> {
   const r = await asaasFetch(cfg, '/myAccount')
