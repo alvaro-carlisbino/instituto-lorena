@@ -675,7 +675,8 @@ export async function finalizeRedePaid(
       // E-mails (Resend): confirmação ao cliente (se houver e-mail) + aviso interno de venda. Best-effort.
       try {
         const nomeEmail = intent.customerName ?? opts.cardholderName ?? undefined
-        const email = String((cadMsg as Record<string, unknown>).email ?? '').trim()
+        const cfTop = (l.custom_fields ?? {}) as Record<string, unknown>
+        const email = String(cfTop.email ?? (cadMsg as Record<string, unknown>).email ?? '').trim()
         if (email) {
           const c = orderConfirmEmail({ nome: nomeEmail, cad: cadMsg, ent: entMsg, cpfPayment: intent.customerDoc ?? undefined, pedidoDesc, valorBRL })
           await sendEmail({ to: email, subject: c.subject, html: c.html })
