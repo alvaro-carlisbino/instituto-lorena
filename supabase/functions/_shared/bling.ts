@@ -531,7 +531,8 @@ export async function blingCreateSaleOrder(
   }
   const itemDescricao = hasKit
     ? (KIT_LABEL[args.kit] ?? `Tricopill ${args.kit}`)
-    : (args.description?.trim() || 'Venda avulsa Tricopill')
+    // Sem kit: produto INDIVIDUAL cadastrado (00001) com o nome real — nunca "venda avulsa".
+    : (args.description?.trim() || 'Tricopill - Suplemento Capilar')
 
   // Data do pedido (YYYY-MM-DD, fuso de Maringá/Brasília). O Bling EXIGE `data` —
   // sem ela recusa com "A data para geração das parcelas é inválida".

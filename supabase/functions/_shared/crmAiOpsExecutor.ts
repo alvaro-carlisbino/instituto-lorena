@@ -752,11 +752,9 @@ export async function executeCrmAiOpsFromModel(
         if (pixKit) {
           pixAmount = pixKit.amountCents
           pixDesc = pixKit.label
-        } else if (op.amount_cents != null) {
-          pixAmount = Math.round(Number(op.amount_cents))
-          pixDesc = op.description != null ? String(op.description).slice(0, 120) : 'Tricopill'
         } else {
-          results.push({ type: 'rede_pix', ok: false, detail: 'missing_kit_or_amount' })
+          // SÓ vendemos KIT cadastrado — sem venda avulsa por valor livre.
+          results.push({ type: 'rede_pix', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o Pix só para os kits do Tricopill (1 mês, 3+1 ou 5 meses). Qual deles você quer? 💚' })
           continue
         }
         try {
@@ -814,11 +812,9 @@ export async function executeCrmAiOpsFromModel(
         if (resolved) {
           amountCents = resolved.amountCents
           description = resolved.label
-        } else if (op.amount_cents != null) {
-          amountCents = Math.round(Number(op.amount_cents))
-          description = op.description != null ? String(op.description).slice(0, 120) : 'Tricopill'
         } else {
-          results.push({ type: 'rede_link', ok: false, detail: 'missing_kit_or_amount' })
+          // SÓ vendemos KIT cadastrado — sem venda avulsa por valor livre.
+          results.push({ type: 'rede_link', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o link de pagamento só para os kits do Tricopill (1 mês, 3+1 ou 5 meses). Qual deles você quer? 💚' })
           continue
         }
         // KIT: prioriza o que a IA mandou; se ela mandou amount_cents (sem kit), INFERE o kit
