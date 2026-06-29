@@ -3,6 +3,22 @@ import { insertInteraction, recordAutoReceipt } from './crm.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
 import { blingCreateSaleOrder } from './bling.ts'
 import { autoShipToCart } from './melhorEnvio.ts'
+import { sendEmail } from './resend.ts'
+
+// Envia texto pelo WhatsApp (w-api) usando a linha ativa do tenant. Best-effort.
+async function subSendWapi(admin: SupabaseClient, tenantId: string, phone: string, text: string): Promise<boolean> {
+  const to = String(phone || '').replace(/\D/g, ''); if (to.length < 10) return false
+  const full = to.startsWith('55') ? to : '55' + to
+  try {
+    const { data } = await admin.from('whatsapp_channel_instances').select('wapi_instance_id, wapi_token, wapi_base_url').eq('tenant_id', tenantId).eq('channel_provider', 'wapi').eq('active', true).limit(1).maybeSingle()
+    const row = data as { wapi_instance_id?: string; wapi_token?: string; wapi_base_url?: string | null } | null
+    const inst = row?.wapi_instance_id ? String(row.wapi_instance_id).trim() : ''; const tok = row?.wapi_token ? String(row.wapi_token).trim() : ''
+    if (!inst || !tok) return false
+    const base = ((row?.wapi_base_url ? String(row.wapi_base_url) : '').trim() || 'https://api.w-api.app/v1').replace(/\/$/, '')
+    const res = await fetch(`${base}/message/send-text?instanceId=${encodeURIComponent(inst)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok }, body: JSON.stringify({ phone: full, message: text }) })
+    return res.ok
+  } catch { return false }
+}
 
 /**
  * Asaas — gateway único (cartão + Pix). Config por polo em tenant_integrations.asaas:
@@ -602,6 +618,23 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
 
   // Decide se ESTE ciclo envia produto.
   const ships = cadence === 'trimestral' ? ((cycle - 1) % 3 === 0) : true
+
+  // Confirmação ao cliente (WhatsApp + e-mail) — renovação paga + status do envio. Best-effort.
+  try {
+    const nome = String(s.customer_name ?? '').trim().split(/\s+/).filter(Boolean)[0] || 'tudo bem'
+    const valorBRL = (monthlyValueCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    const un = Number(s.units_per_shipment ?? 1) || 1
+    const envioTxt = ships
+      ? `📦 Seu novo envio (${un} frasco${un > 1 ? 's' : ''}) já está sendo preparado — você recebe o código de rastreio em breve.`
+      : 'Seu próximo envio é no próximo ciclo. 💚'
+    await subSendWapi(admin, tenantId, String(s.phone ?? ''), `Olá ${nome}! ✅ Renovação da sua *assinatura Tricopill* confirmada (${valorBRL}).\n\n${envioTxt}\n\nObrigado por fazer parte do clube! Qualquer dúvida, é só responder. 💚`)
+    const email = String(s.email ?? '').trim()
+    if (email) {
+      const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1e1e1e;line-height:1.5"><h2 style="color:#14362E">Assinatura renovada ✅</h2><p>Olá ${nome}!</p><p>Recebemos a renovação da sua assinatura Tricopill — <b>${valorBRL}</b>.</p><p>${ships ? `Seu novo envio (${un} frasco${un > 1 ? 's' : ''}) está sendo preparado; o código de rastreio chega em breve.` : 'Seu próximo envio é no próximo ciclo.'}</p><p>Obrigado por fazer parte do clube! 💚</p></div>`
+      await sendEmail({ to: email, subject: 'Assinatura Tricopill renovada', html })
+    }
+  } catch { /* best-effort: notificação nunca derruba o ciclo */ }
+
   if (!ships) return
 
   const shipUnits = unitsPerShipment

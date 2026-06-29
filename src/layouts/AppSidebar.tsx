@@ -30,6 +30,7 @@ import {
   Receipt,
   Ticket,
   Unplug,
+  Repeat,
 } from 'lucide-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
@@ -163,6 +164,7 @@ export function AppSidebar() {
                 <NavItem to="/tricopill" label="Tricopill" icon={Pill} />
                 <NavItem to="/tricopill-pedidos" label="Pedidos" icon={PackageOpen} />
                 <NavItem to="/tricopill-financeiro" label="Financeiro" icon={Wallet} />
+                <NavItem to="/tricopill-assinaturas" label="Assinaturas" icon={Repeat} />
                 <NavItem to="/tricopill-bi" label="BI Tricopill" icon={ChartColumn} />
                 <NavItem to="/tricopill-loja" label="Loja (site)" icon={Store} />
                 <NavItem to="/relatorio-vendas" label="Relatório de vendas" icon={Receipt} />
