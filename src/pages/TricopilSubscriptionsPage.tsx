@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
-import { fetchTricopillSubscriptions, subscriptionAction, type SubscriptionAction, type TricopillSubscription } from '@/services/tricopillSubscriptions'
+import { fetchTricopillSubscriptions, subscriptionAction, subscriptionHistory, type AsaasCharge, type SubscriptionAction, type TricopillSubscription } from '@/services/tricopillSubscriptions'
+
+const brlNum = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const CHARGE_STATUS: Record<string, string> = { RECEIVED: 'Pago', CONFIRMED: 'Pago', PENDING: 'Pendente', OVERDUE: 'Vencido', REFUNDED: 'Estornado', CANCELED: 'Cancelado' }
+const STATUS_FILTERS = [
+  { v: 'all', label: 'Todas' }, { v: 'active', label: 'Ativas' }, { v: 'paused', label: 'Pausadas' }, { v: 'canceled', label: 'Canceladas' },
+] as const
 
 const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -29,6 +35,21 @@ export function TricopilSubscriptionsPage() {
   const [error, setError] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [history, setHistory] = useState<Record<string, AsaasCharge[]>>({})
+  const [historyLoading, setHistoryLoading] = useState<string | null>(null)
+
+  async function toggleHistory(s: TricopillSubscription) {
+    if (expanded === s.id) { setExpanded(null); return }
+    setExpanded(s.id)
+    if (!history[s.id]) {
+      setHistoryLoading(s.id)
+      try { const h = await subscriptionHistory(s.id); setHistory((prev) => ({ ...prev, [s.id]: h })) }
+      catch (e) { toast.error(e instanceof Error ? e.message : 'Falha ao carregar cobranças.') }
+      finally { setHistoryLoading(null) }
+    }
+  }
 
   async function doAction(s: TricopillSubscription, action: SubscriptionAction) {
     if (action === 'cancel' && !window.confirm(`Cancelar a assinatura de ${s.customerName || 'cliente'}? Isso interrompe as cobranças no Asaas.`)) return
@@ -57,6 +78,11 @@ export function TricopilSubscriptionsPage() {
     return { total: rows.length, active: active.length, mrr }
   }, [rows])
 
+  const filtered = useMemo(
+    () => (statusFilter === 'all' ? rows : rows.filter((r) => (statusFilter === 'canceled' ? r.status === 'canceled' || r.status === 'cancelled' : r.status === statusFilter))),
+    [rows, statusFilter],
+  )
+
   return (
     <AppLayout title="Assinaturas Tricopill">
       <PageHeader title="Assinaturas (Clube)" description="Assinantes do Tricopill — plano, status, ciclos pagos e envios. Cobrança, Bling, Melhor Envio e rastreio são automáticos." />
@@ -76,9 +102,16 @@ export function TricopilSubscriptionsPage() {
         </div>
       </div>
 
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{loading ? 'Carregando…' : `${rows.length} assinatura(s)`}</p>
-        <Button variant="outline" size="sm" onClick={() => setReload((k) => k + 1)} disabled={loading}>Atualizar</Button>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1">
+          {STATUS_FILTERS.map((f) => (
+            <Button key={f.v} variant={statusFilter === f.v ? 'default' : 'outline'} size="sm" className="h-7 px-2.5 text-xs" onClick={() => setStatusFilter(f.v)}>{f.label}</Button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-muted-foreground">{loading ? 'Carregando…' : `${filtered.length} assinatura(s)`}</p>
+          <Button variant="outline" size="sm" onClick={() => setReload((k) => k + 1)} disabled={loading}>Atualizar</Button>
+        </div>
       </div>
 
       {error ? <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive">{error}</p> : null}
@@ -104,11 +137,13 @@ export function TricopilSubscriptionsPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((s) => {
+              {filtered.map((s) => {
                 const ent = s.entrega ?? {}
                 const cidade = [String(ent.cidade ?? ''), String(ent.uf ?? '')].filter(Boolean).join('/')
+                const charges = history[s.id]
                 return (
-                  <tr key={s.id} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
+                  <Fragment key={s.id}>
+                  <tr className="border-b border-border/50 hover:bg-muted/20">
                     <td className="px-3 py-2">
                       <p className="font-medium text-foreground">{s.customerName || '—'}</p>
                       <p className="text-xs text-muted-foreground">{s.phone || ''}{s.email ? ` · ${s.email}` : ''}</p>
@@ -136,6 +171,7 @@ export function TricopilSubscriptionsPage() {
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex flex-wrap gap-1">
+                        <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => void toggleHistory(s)}>{expanded === s.id ? 'Fechar' : 'Cobranças'}</Button>
                         <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={!!busy && busy.startsWith(s.id)} onClick={() => void doAction(s, 'resend_tracking')}>Rastreio</Button>
                         {s.status === 'active' ? (
                           <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={!!busy && busy.startsWith(s.id)} onClick={() => void doAction(s, 'pause')}>Pausar</Button>
@@ -148,6 +184,31 @@ export function TricopilSubscriptionsPage() {
                       </div>
                     </td>
                   </tr>
+                  {expanded === s.id ? (
+                    <tr className="border-b border-border/50 bg-muted/10">
+                      <td colSpan={9} className="px-3 py-3">
+                        {historyLoading === s.id ? (
+                          <p className="text-xs text-muted-foreground">Carregando cobranças…</p>
+                        ) : !charges || charges.length === 0 ? (
+                          <p className="text-xs text-muted-foreground">Sem cobranças no Asaas.</p>
+                        ) : (
+                          <div className="space-y-1">
+                            <p className="text-xs font-semibold text-foreground">Cobranças (Asaas)</p>
+                            {charges.map((c) => (
+                              <div key={c.id} className="flex flex-wrap items-center gap-2 text-xs">
+                                <span className="font-medium">{brlNum(c.value)}</span>
+                                <span className={c.status === 'RECEIVED' || c.status === 'CONFIRMED' ? 'font-medium text-emerald-700' : 'text-muted-foreground'}>{CHARGE_STATUS[c.status] ?? c.status}</span>
+                                <span className="text-muted-foreground">venc {c.dueDate}{c.paymentDate ? ` · pago ${c.paymentDate}` : ''}</span>
+                                {c.receiptUrl ? <a className="text-sky-700 underline" href={c.receiptUrl} target="_blank" rel="noreferrer">recibo</a>
+                                  : c.invoiceUrl ? <a className="text-sky-700 underline" href={c.invoiceUrl} target="_blank" rel="noreferrer">fatura</a> : null}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ) : null}
+                  </Fragment>
                 )
               })}
             </tbody>

@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { cancelAsaasSubscription, setAsaasSubscriptionStatus } from '../_shared/asaas.ts'
+import { cancelAsaasSubscription, listAsaasSubscriptionPayments, setAsaasSubscriptionStatus } from '../_shared/asaas.ts'
 import { getValidMeToken, melhorEnvioBaseUrl, meUserAgent } from '../_shared/melhorEnvio.ts'
 import { sendEmail } from '../_shared/resend.ts'
 import { trackingEmail } from '../_shared/emails.ts'
@@ -91,6 +91,10 @@ Deno.serve(async (req) => {
     const email = String(s.email ?? '').trim()
     if (email) { const t = trackingEmail({ nome, tracking }); await sendEmail({ to: email, subject: t.subject, html: t.html }) }
     return json({ ok: true, tracking, whatsapp: sent, email: !!email })
+  }
+  if (action === 'history') {
+    const payments = asaasSubId ? await listAsaasSubscriptionPayments(admin, tenantId, asaasSubId) : []
+    return json({ ok: true, payments })
   }
   return json({ error: 'unknown_action' }, 400)
 })

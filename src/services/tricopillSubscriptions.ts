@@ -32,6 +32,16 @@ export async function subscriptionAction(subId: string, action: SubscriptionActi
   return { ok: true, message: r.tracking ? `Rastreio reenviado (${r.tracking}).` : undefined }
 }
 
+export type AsaasCharge = { id: string; value: number; status: string; billingType: string; dueDate: string; paymentDate: string | null; invoiceUrl: string | null; receiptUrl: string | null }
+
+/** Histórico de cobranças (ciclos) de uma assinatura, puxado do Asaas. */
+export async function subscriptionHistory(subId: string): Promise<AsaasCharge[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.functions.invoke('crm-subscription-admin', { body: { action: 'history', subId } })
+  if (error) throw new Error(error.message)
+  return ((data as { payments?: AsaasCharge[] } | null)?.payments ?? [])
+}
+
 /** Assinaturas (clube) do Tricopill — fonte: asaas_subscriptions. */
 export async function fetchTricopillSubscriptions(): Promise<TricopillSubscription[]> {
   if (!supabase) return []

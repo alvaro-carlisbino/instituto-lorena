@@ -186,6 +186,27 @@ export async function setAsaasSubscriptionStatus(admin: SupabaseClient, tenantId
   return r.ok ? { ok: true } : { ok: false, error: asaasError(r) }
 }
 
+export type AsaasChargeRow = { id: string; value: number; status: string; billingType: string; dueDate: string; paymentDate: string | null; invoiceUrl: string | null; receiptUrl: string | null }
+
+/** Lista as cobranças (ciclos) de uma assinatura no Asaas. */
+export async function listAsaasSubscriptionPayments(admin: SupabaseClient, tenantId: string, asaasSubId: string): Promise<AsaasChargeRow[]> {
+  const cfg = await readAsaasConfig(admin, tenantId)
+  if (!cfg) return []
+  const r = await asaasFetch(cfg, `/payments?subscription=${encodeURIComponent(asaasSubId)}&limit=50`)
+  if (!r.ok) return []
+  const data = (r.body?.data ?? []) as Array<Record<string, unknown>>
+  return data.map((p) => ({
+    id: String(p.id ?? ''),
+    value: Number(p.value ?? 0),
+    status: String(p.status ?? ''),
+    billingType: String(p.billingType ?? ''),
+    dueDate: String(p.dueDate ?? ''),
+    paymentDate: p.paymentDate ? String(p.paymentDate) : p.confirmedDate ? String(p.confirmedDate) : null,
+    invoiceUrl: p.invoiceUrl ? String(p.invoiceUrl) : null,
+    receiptUrl: p.transactionReceiptUrl ? String(p.transactionReceiptUrl) : null,
+  }))
+}
+
 /** Testa a credencial (GET /myAccount). Usado no botão "Testar conexão". */
 export async function asaasPing(cfg: AsaasConfig): Promise<{ ok: boolean; detail: string }> {
   const r = await asaasFetch(cfg, '/myAccount')
