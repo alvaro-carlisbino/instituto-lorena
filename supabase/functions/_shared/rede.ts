@@ -14,7 +14,7 @@ import { autoShipToCart } from './melhorEnvio.ts'
 export const REDE_KITS: Record<string, { label: string; amountCents: number; qty: number }> = {
   '1_mes': { label: 'Tricopill — 1 frasco (1 mês)', amountCents: 19900, qty: 1 },
   '3_meses': { label: 'Tricopill — 3 frascos (3 meses) + 1 grátis', amountCents: 59700, qty: 3 },
-  '5_meses': { label: 'Tricopill — 5 frascos (5 meses)', amountCents: 99900, qty: 5 },
+  '5_meses': { label: 'Tricopill — 5 frascos (5 meses)', amountCents: 69700, qty: 5 },
 }
 
 /**
