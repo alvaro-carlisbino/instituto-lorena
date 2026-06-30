@@ -70,7 +70,7 @@ function StatCard({
   tone?: string
 }) {
   return (
-    <div className="rounded-3xl border border-border/40 bg-card/50 p-6 transition-all hover:bg-card/80">
+    <div className="rounded-xl border border-border bg-card p-6 transition-all hover:bg-card/80">
       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">{label}</p>
       <p className={cn('mt-2 text-3xl font-black tabular-nums tracking-tight', tone)}>{value}</p>
       {hint ? <p className="mt-1 text-[11px] text-muted-foreground/70">{hint}</p> : null}
@@ -162,7 +162,7 @@ export function LojaTricopillPage() {
         <div className="flex items-center gap-2">
           <Link
             to="/tricopill-bi"
-            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-xl border-border/40')}
+            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-lg')}
           >
             <MessageSquare className="size-4 mr-2" />
             BI Vendas
@@ -170,7 +170,7 @@ export function LojaTricopillPage() {
           <button
             type="button"
             onClick={() => setReloadKey((x) => x + 1)}
-            className={cn(buttonVariants({ size: 'sm' }), 'rounded-xl')}
+            className={cn(buttonVariants({ size: 'sm' }), 'rounded-lg')}
           >
             <RefreshCw className={cn('size-4 mr-2', loading && 'animate-spin')} />
             Atualizar
@@ -180,7 +180,7 @@ export function LojaTricopillPage() {
     >
       <SubTabs tabs={ANALISE_TABS} />
       {/* Filtro de período */}
-      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-border/30 bg-muted/10 p-3">
+      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-3">
         <span className="text-xs text-muted-foreground">Período</span>
         <div className="flex gap-1">
           {PERIODS.map((p) => (
@@ -207,7 +207,7 @@ export function LojaTricopillPage() {
       ) : null}
 
       {!hasAnyData ? (
-        <div className="rounded-3xl border border-border/30 bg-card/40 py-8">
+        <div className="rounded-xl border border-border bg-card py-8">
           <EmptyState
             icon={ShoppingBag}
             title="Sem dados da loja ainda"
@@ -232,7 +232,7 @@ export function LojaTricopillPage() {
 
           {/* 2 — Funil de conversão */}
           <SectionTitle>Funil de conversão</SectionTitle>
-          <section className="mb-8 rounded-3xl border border-border/30 bg-card/40 p-6">
+          <section className="mb-8 rounded-xl border border-border bg-card p-6">
             {(data?.funnel.viewItem ?? 0) === 0 ? (
               <p className="py-8 text-center text-xs text-muted-foreground">Sem visualizações de produto no período.</p>
             ) : (
@@ -269,7 +269,7 @@ export function LojaTricopillPage() {
           {/* 3 + 4 — Produtos & Páginas */}
           <section className="mb-8 grid gap-4 lg:grid-cols-12">
             {/* Produtos mais acessados (view agregada — acumulado) */}
-            <div className="rounded-3xl border border-border/30 bg-card/40 p-6 lg:col-span-7">
+            <div className="rounded-xl border border-border bg-card p-6 lg:col-span-7">
               <div className="mb-4 flex items-center justify-between gap-2">
                 <p className="text-sm font-bold text-foreground/90">Produtos mais acessados</p>
                 <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50">acumulado</span>
@@ -323,7 +323,7 @@ export function LojaTricopillPage() {
             </div>
 
             {/* Páginas mais acessadas */}
-            <div className="rounded-3xl border border-border/30 bg-card/40 p-6 lg:col-span-5">
+            <div className="rounded-xl border border-border bg-card p-6 lg:col-span-5">
               <p className="mb-4 text-sm font-bold text-foreground/90">Páginas mais acessadas</p>
               {(data?.pages ?? []).length === 0 ? (
                 <p className="py-8 text-center text-xs text-muted-foreground">Sem páginas no período.</p>
@@ -354,7 +354,7 @@ export function LojaTricopillPage() {
 
           {/* 5 — Linha do tempo */}
           <SectionTitle>Linha do tempo</SectionTitle>
-          <section className="mb-8 rounded-3xl border border-border/30 bg-card/40 p-6">
+          <section className="mb-8 rounded-xl border border-border bg-card p-6">
             <p className="mb-4 text-sm font-bold text-foreground/90">Eventos por dia</p>
             {timeline.length === 0 ? (
               <p className="py-16 text-center text-xs text-muted-foreground">Sem eventos no período.</p>

@@ -76,7 +76,7 @@ function StatCard({
   tone?: string
 }) {
   return (
-    <div className="rounded-3xl border border-border/40 bg-card/50 p-6 transition-all hover:bg-card/80">
+    <div className="rounded-xl border border-border bg-card p-6 transition-all hover:bg-card/80">
       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">{label}</p>
       <p className={cn('mt-2 text-3xl font-black tabular-nums tracking-tight', tone)}>{value}</p>
       {hint ? <p className="mt-1 text-[11px] text-muted-foreground/70">{hint}</p> : null}
@@ -199,7 +199,7 @@ export function TricopilDashboardPage() {
         <div className="flex items-center gap-2">
           <Link
             to="/tricopill"
-            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-xl border-border/40')}
+            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-lg')}
           >
             <MessageSquare className="size-4 mr-2" />
             Conversas
@@ -207,7 +207,7 @@ export function TricopilDashboardPage() {
           <button
             type="button"
             onClick={() => setReloadKey((k) => k + 1)}
-            className={cn(buttonVariants({ size: 'sm' }), 'rounded-xl')}
+            className={cn(buttonVariants({ size: 'sm' }), 'rounded-lg')}
           >
             <RefreshCw className={cn('size-4 mr-2', loading && 'animate-spin')} />
             Atualizar
@@ -217,7 +217,7 @@ export function TricopilDashboardPage() {
     >
       <SubTabs tabs={ANALISE_TABS} />
       {/* Filtros de período */}
-      <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-border/30 bg-muted/10 p-3">
+      <div className="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3">
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-muted-foreground">De</span>
           <input
@@ -292,7 +292,7 @@ export function TricopilDashboardPage() {
       <SectionTitle>Vendas & Faturamento</SectionTitle>
 
       <section className="mb-8 grid gap-4 lg:grid-cols-12">
-        <div className="rounded-3xl border border-border/30 bg-card/40 p-6 lg:col-span-8">
+        <div className="rounded-xl border border-border bg-card p-6 lg:col-span-8">
           <p className="mb-4 text-sm font-bold text-foreground/90">Faturamento por dia — Bling x Checkout</p>
           {dailySeries.length === 0 ? (
             <p className="py-16 text-center text-xs text-muted-foreground">Sem faturamento no período.</p>
@@ -322,7 +322,7 @@ export function TricopilDashboardPage() {
         </div>
 
         {/* Estoque (Bling) */}
-        <div className="rounded-3xl border border-border/30 bg-card/40 p-6 lg:col-span-4">
+        <div className="rounded-xl border border-border bg-card p-6 lg:col-span-4">
           {(() => {
             const rupturas = (bling?.estoque ?? []).filter((p) => p.estoque != null && p.estoque <= 5).length
             return (
@@ -371,7 +371,7 @@ export function TricopilDashboardPage() {
       <SectionTitle>Funil comercial</SectionTitle>
 
       <section className="mb-8 grid gap-4 lg:grid-cols-12">
-        <div className="rounded-3xl border border-border/30 bg-card/40 p-6 lg:col-span-7">
+        <div className="rounded-xl border border-border bg-card p-6 lg:col-span-7">
           <p className="mb-4 text-sm font-bold text-foreground/90">Leads por etapa</p>
           {stageBars.length === 0 ? (
             <p className="py-16 text-center text-xs text-muted-foreground">Sem leads no período.</p>
@@ -390,7 +390,7 @@ export function TricopilDashboardPage() {
           )}
         </div>
 
-        <div className="rounded-3xl border border-border/30 bg-card/40 p-6 lg:col-span-5">
+        <div className="rounded-xl border border-border bg-card p-6 lg:col-span-5">
           <p className="mb-4 text-sm font-bold text-foreground/90">Leads por origem</p>
           {(funnel?.por_source ?? []).length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Sem dados no período.</p>
@@ -416,7 +416,7 @@ export function TricopilDashboardPage() {
       </section>
 
       {/* Conversão por etapa (funil) */}
-      <section className="mb-8 rounded-3xl border border-border/30 bg-card/40 p-6">
+      <section className="mb-8 rounded-xl border border-border bg-card p-6">
         <p className="mb-4 text-sm font-bold text-foreground/90">Conversão por etapa</p>
         {(funnel?.etapas ?? []).length === 0 ? (
           <p className="py-8 text-center text-xs text-muted-foreground">Sem leads no período.</p>
@@ -489,7 +489,7 @@ export function TricopilDashboardPage() {
           />
         </div>
 
-        <div className="rounded-3xl border border-border/30 bg-card/40 p-6 lg:col-span-5">
+        <div className="rounded-xl border border-border bg-card p-6 lg:col-span-5">
           <p className="mb-4 text-sm font-bold text-foreground/90">Kits vendidos (PIX + cartão)</p>
           {(checkout?.por_kit ?? []).length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Sem vendas confirmadas no período.</p>
@@ -519,7 +519,7 @@ export function TricopilDashboardPage() {
       {(checkout?.por_cupom ?? []).length > 0 ? (
         <section className="mt-8">
           <SectionTitle>Cupons</SectionTitle>
-          <div className="rounded-3xl border border-border/30 bg-card/40 p-6">
+          <div className="rounded-xl border border-border bg-card p-6">
             <Table className="w-full text-xs">
               <TableHeader>
                 <TableRow className="text-left text-muted-foreground">
@@ -552,7 +552,7 @@ export function TricopilDashboardPage() {
 
       <section className="mt-8">
         <SectionTitle>Entregas (pedidos pagos)</SectionTitle>
-        <div className="rounded-3xl border border-border/30 bg-card/40 p-6">
+        <div className="rounded-xl border border-border bg-card p-6">
           {deliveryBreakdown.total === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Sem pedidos pagos no período.</p>
           ) : (
