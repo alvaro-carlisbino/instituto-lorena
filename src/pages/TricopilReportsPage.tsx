@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Download, RefreshCw, FileSpreadsheet, Package, Repeat, Receipt } from 'lucide-react'
+import { Download, RefreshCw, FileSpreadsheet, Package, Repeat, Receipt, TrendingUp, TrendingDown } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { PageHeader } from '@/components/page/PageHeader'
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   fetchMonthlyReport,
+  fetchMonthlyTrend,
   fetchShipmentsReport,
   salesCsv,
   closeCsv,
@@ -17,6 +18,7 @@ import {
   shipmentsCsv,
   downloadCsv,
   type MonthlyReport,
+  type MonthPoint,
   type Shipment,
 } from '@/services/tricopillReports'
 
@@ -28,8 +30,26 @@ function currentMonth(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
+const monthLabel = (ym: string) => {
+  const [y, m] = ym.split('-')
+  return `${['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'][Number(m) - 1] ?? m}/${y.slice(2)}`
+}
 
-function Kpi({ label, value, hint }: { label: string; value: string; hint?: string }) {
+/** Badge de variação % vs. valor anterior (▲ verde / ▼ vermelho). null se não há base. */
+function DeltaBadge({ cur, prev }: { cur: number; prev: number | undefined }) {
+  if (prev == null || prev === 0) return null
+  const pct = Math.round(((cur - prev) / prev) * 100)
+  if (pct === 0) return <span className="text-[0.7rem] text-muted-foreground">0% vs. mês ant.</span>
+  const up = pct > 0
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[0.7rem] font-medium ${up ? 'text-emerald-600' : 'text-rose-600'}`}>
+      {up ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
+      {up ? '+' : ''}{pct}% vs. mês ant.
+    </span>
+  )
+}
+
+function Kpi({ label, value, hint, delta }: { label: string; value: string; hint?: string; delta?: React.ReactNode }) {
   return (
     <Card>
       <CardHeader className="pb-1">
@@ -37,9 +57,34 @@ function Kpi({ label, value, hint }: { label: string; value: string; hint?: stri
       </CardHeader>
       <CardContent>
         <p className="text-lg font-semibold tabular-nums">{value}</p>
+        {delta ? <div>{delta}</div> : null}
         {hint ? <p className="text-[0.7rem] text-muted-foreground">{hint}</p> : null}
       </CardContent>
     </Card>
+  )
+}
+
+/** Mini gráfico de barras da evolução mensal (receita), dependency-free. */
+function TrendChart({ points, month }: { points: MonthPoint[]; month: string }) {
+  if (points.length === 0) return null
+  const max = Math.max(1, ...points.map((p) => p.totalCents))
+  return (
+    <div className="rounded-md border border-border bg-card p-3">
+      <p className="mb-3 text-xs font-semibold text-muted-foreground">Evolução da receita (últimos {points.length} meses)</p>
+      <div className="flex items-end gap-2" style={{ height: 120 }}>
+        {points.map((p) => {
+          const h = Math.round((p.totalCents / max) * 100)
+          const isCur = p.month === month
+          return (
+            <div key={p.month} className="flex flex-1 flex-col items-center justify-end gap-1" title={`${monthLabel(p.month)}: ${brl(p.totalCents)} (${p.count} vendas)`}>
+              <span className="text-[0.6rem] tabular-nums text-muted-foreground">{p.totalCents ? (p.totalCents / 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : ''}</span>
+              <div className={`w-full rounded-t ${isCur ? 'bg-emerald-500' : 'bg-emerald-500/30'}`} style={{ height: `${Math.max(2, h)}%` }} />
+              <span className={`text-[0.65rem] ${isCur ? 'font-semibold text-foreground' : 'text-muted-foreground'}`}>{monthLabel(p.month)}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -58,17 +103,20 @@ export function TricopilReportsPage() {
   const [month, setMonth] = useState(currentMonth())
   const [report, setReport] = useState<MonthlyReport | null>(null)
   const [shipments, setShipments] = useState<Shipment[]>([])
+  const [trend, setTrend] = useState<MonthPoint[]>([])
   const [loading, setLoading] = useState(false)
 
   const load = useCallback(async (m: string) => {
     setLoading(true)
     try {
-      const [rep, ship] = await Promise.all([
+      const [rep, ship, tr] = await Promise.all([
         fetchMonthlyReport(m),
         fetchShipmentsReport(m).catch(() => [] as Shipment[]),
+        fetchMonthlyTrend(m, 6).catch(() => [] as MonthPoint[]),
       ])
       setReport(rep)
       setShipments(ship)
+      setTrend(tr)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar os relatórios.')
     } finally {
@@ -82,6 +130,8 @@ export function TricopilReportsPage() {
   }, [month, load])
 
   const c = report?.close
+  const prevPoint = trend.length >= 2 && trend[trend.length - 1]?.month === month ? trend[trend.length - 2] : undefined
+  const prevTicket = prevPoint && prevPoint.count ? Math.round(prevPoint.totalCents / prevPoint.count) : undefined
   const exportClose = () => c && downloadCsv(`fechamento-${month}.csv`, closeCsv(c))
   const exportSales = () => report && downloadCsv(`vendas-${month}.csv`, salesCsv(report.sales))
   const exportShip = () => downloadCsv(`envios-${month}.csv`, shipmentsCsv(shipments))
@@ -116,11 +166,12 @@ export function TricopilReportsPage() {
       {/* ---- Fechamento ---- */}
       <SectionHeader icon={<Receipt className="size-4 text-emerald-600" />} title="Fechamento" onExport={exportClose} />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="Receita total" value={brl(c?.totalCents ?? 0)} hint={`${c?.count ?? 0} venda(s)`} />
-        <Kpi label="Ticket médio" value={brl(c?.ticketCents ?? 0)} />
+        <Kpi label="Receita total" value={brl(c?.totalCents ?? 0)} hint={`${c?.count ?? 0} venda(s)`} delta={<DeltaBadge cur={c?.totalCents ?? 0} prev={prevPoint?.totalCents} />} />
+        <Kpi label="Ticket médio" value={brl(c?.ticketCents ?? 0)} delta={<DeltaBadge cur={c?.ticketCents ?? 0} prev={prevTicket} />} />
         <Kpi label="Produtos" value={brl(c?.productCents ?? 0)} hint={`Frete: ${brl(c?.freightCents ?? 0)}`} />
         <Kpi label="Cartão · Pix" value={`${brl(c?.cardCents ?? 0)} · ${brl(c?.pixCents ?? 0)}`} hint={`${c?.cardCount ?? 0} cartão · ${c?.pixCount ?? 0} Pix · descontos ${brl(c?.discountCents ?? 0)}`} />
       </div>
+      {trend.length > 1 ? <div className="mt-3"><TrendChart points={trend} month={month} /></div> : null}
       {c && c.byProduct.length > 0 ? (
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           <div className="rounded-md border border-border bg-card p-3">

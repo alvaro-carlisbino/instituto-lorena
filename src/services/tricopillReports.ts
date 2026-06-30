@@ -68,6 +68,31 @@ async function fetchSubsSummary(): Promise<SubsSummary> {
   }
 }
 
+export type MonthPoint = { month: string; totalCents: number; count: number }
+
+/** Lista os N meses (YYYY-MM) terminando em endMonth, do mais antigo ao mais novo. */
+function monthsBack(endMonth: string, n: number): string[] {
+  const [y, m] = endMonth.split('-').map(Number)
+  const out: string[] = []
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(y, (m ?? 1) - 1 - i, 1)
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+  return out
+}
+
+/** Evolução mês a mês (receita + nº de vendas) para o gráfico e o comparativo. */
+export async function fetchMonthlyTrend(endMonth: string, n = 6): Promise<MonthPoint[]> {
+  const months = monthsBack(endMonth, n)
+  return Promise.all(
+    months.map(async (m) => {
+      const { startIso, endIso } = monthBoundsIso(m)
+      const { totals } = await fetchSalesRowsInRange(startIso, endIso)
+      return { month: m, totalCents: totals.totalCents, count: totals.count }
+    }),
+  )
+}
+
 export async function fetchMonthlyReport(month: string): Promise<MonthlyReport> {
   const { startIso, endIso } = monthBoundsIso(month)
   const [{ rows, totals }, subs] = await Promise.all([fetchSalesRowsInRange(startIso, endIso), fetchSubsSummary()])
