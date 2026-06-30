@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Copy, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronRight } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
+import { SubTabs } from '@/components/page/SubTabs'
 import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -76,7 +77,8 @@ export function SalesReportPage() {
 
   return (
     <AppLayout title="Relatório de vendas">
-      <PageHeader title="Relatório de vendas" description="Vendas pagas do dia (cartão, Pix e venda manual) para o financeiro." />
+      <PageHeader title="Relatórios" description="Vendas pagas do dia (cartão, Pix e venda manual) para o financeiro." />
+      <SubTabs tabs={[{ to: '/relatorio-vendas', label: 'Por dia' }, { to: '/tricopill-relatorios', label: 'Por mês' }]} />
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <div className="space-y-1.5">

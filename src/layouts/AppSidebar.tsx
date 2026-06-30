@@ -24,14 +24,15 @@ import {
   Building2,
   PackageOpen,
   Pill,
-  Store,
   Wallet,
   CreditCard,
-  Receipt,
   Ticket,
   Unplug,
   Repeat,
   FileSpreadsheet,
+  Gauge,
+  Stethoscope,
+  Layers,
 } from 'lucide-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
@@ -138,17 +139,17 @@ export function AppSidebar() {
         </div>
         <SidebarGroup>
           <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-            Trabalho
+            Principal
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
               <NavItem to="/dashboard" label="Painel" icon={TrendingUp} />
-              <NavItem to="/kanban" label="Quadro de leads" icon={LayoutGrid} />
+              <NavItem to="/kanban" label="Funil de leads" icon={LayoutGrid} />
               {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={List} /> : null}
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={MessagesSquare} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
-              {showLeadsHub ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
               {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={SquareCheck} /> : null}
+              {showLeadsHub && isClinicPolo ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
               <NavItem to="/historico" label="Histórico" icon={History} />
               <NavItem to="/assistente" label="Assistente IA" icon={Bot} />
             </SidebarMenu>
@@ -162,15 +163,25 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                <NavItem to="/tricopill" label="Tricopill" icon={Pill} />
+                <NavItem to="/tricopill" label="Visão Tricopill" icon={Pill} />
                 <NavItem to="/tricopill-pedidos" label="Pedidos" icon={PackageOpen} />
-                <NavItem to="/tricopill-financeiro" label="Financeiro" icon={Wallet} />
                 <NavItem to="/tricopill-assinaturas" label="Assinaturas" icon={Repeat} />
-                <NavItem to="/tricopill-bi" label="BI Tricopill" icon={ChartColumn} />
-                <NavItem to="/tricopill-loja" label="Loja (site)" icon={Store} />
-                <NavItem to="/relatorio-vendas" label="Relatório de vendas" icon={Receipt} />
-                <NavItem to="/tricopill-relatorios" label="Relatórios mensais" icon={FileSpreadsheet} />
                 <NavItem to="/cupons" label="Cupons" icon={Ticket} />
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
+
+        {showLeadsHub && isSalesPolo ? (
+          <SidebarGroup>
+            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+              Financeiro
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                <NavItem to="/tricopill-financeiro" label="Recebimentos" icon={Wallet} />
+                <NavItem to="/tricopill-relatorios" label="Relatórios" icon={FileSpreadsheet} />
+                <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -178,15 +189,15 @@ export function AppSidebar() {
 
         <SidebarGroup>
           <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-            Dados e canais
+            Análise
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
+              {isSalesPolo ? <NavItem to="/tricopill-bi" label="BI de vendas" icon={ChartColumn} /> : null}
+              <NavItem to="/metricas" label="Métricas" icon={Gauge} />
+              {isClinicPolo ? <NavItem to="/prontuario" label="Prontuário" icon={Stethoscope} /> : null}
+              <NavItem to="/planos" label="Planos" icon={Layers} />
               <NavItem to="/canais" label="Canais" icon={Radio} />
-              <NavItem to="/metricas" label="Métricas" icon={ChartColumn} />
-              <NavItem to="/analytics" label="Analytics" icon={ChartColumn} />
-              {isClinicPolo ? <NavItem to="/prontuario" label="Prontuário" icon={ChartColumn} /> : null}
-              <NavItem to="/planos" label="Planos" icon={ChartColumn} />
               {showBoards ? <NavItem to="/boards" label="Funis" icon={Boxes} /> : null}
               {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table2} /> : null}
             </SidebarMenu>

@@ -13,7 +13,13 @@ import {
 import { ArrowDown, ArrowUp, MessageSquare, RefreshCw, ShoppingBag } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
+import { SubTabs } from '@/components/page/SubTabs'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
+
+const ANALISE_TABS = [
+  { to: '/tricopill-bi', label: 'BI de vendas' },
+  { to: '/tricopill-loja', label: 'Loja (site)' },
+]
 import { EmptyState } from '@/components/ui/empty-state'
 import { buttonVariants } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -172,6 +178,7 @@ export function LojaTricopillPage() {
         </div>
       }
     >
+      <SubTabs tabs={ANALISE_TABS} />
       {/* Filtro de período */}
       <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-border/30 bg-muted/10 p-3">
         <span className="text-xs text-muted-foreground">Período</span>

@@ -11,7 +11,13 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import { SubTabs } from '@/components/page/SubTabs'
 import { cn } from '@/lib/utils'
+
+const DADOS_TABS = [
+  { to: '/metricas', label: 'Métricas' },
+  { to: '/analytics', label: 'Analytics' },
+]
 
 const UNIT_OPTIONS = [
   { value: 'count', label: 'Contagem' },
@@ -50,6 +56,7 @@ export function MetricsPage() {
 
   return (
     <AppLayout title="Métricas">
+      <SubTabs tabs={DADOS_TABS} />
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={() => { crm.addMetric(); toast.success('Métrica criada.') }}>
           Nova métrica

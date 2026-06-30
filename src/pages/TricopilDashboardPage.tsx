@@ -16,7 +16,13 @@ import {
 import { AlertTriangle, MessageSquare, RefreshCw } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
+import { SubTabs } from '@/components/page/SubTabs'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
+
+const ANALISE_TABS = [
+  { to: '/tricopill-bi', label: 'BI de vendas' },
+  { to: '/tricopill-loja', label: 'Loja (site)' },
+]
 import { buttonVariants } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
@@ -209,6 +215,7 @@ export function TricopilDashboardPage() {
         </div>
       }
     >
+      <SubTabs tabs={ANALISE_TABS} />
       {/* Filtros de período */}
       <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-border/30 bg-muted/10 p-3">
         <label className="flex flex-col gap-1 text-xs">
