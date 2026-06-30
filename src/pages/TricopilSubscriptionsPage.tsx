@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { Button } from '@/components/ui/button'
+import { StatCard } from '@/components/page/StatCard'
 import { fetchTricopillSubscriptions, subscriptionAction, subscriptionHistory, type AsaasCharge, type SubscriptionAction, type TricopillSubscription } from '@/services/tricopillSubscriptions'
 
 const brlNum = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -85,18 +86,9 @@ export function TricopilSubscriptionsPage() {
   return (
     <AppLayout title="Assinaturas (Clube)" subtitle="Assinantes do Tricopill — plano, status, ciclos pagos e envios. Cobrança, Bling, Melhor Envio e rastreio são automáticos.">
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div className="rounded-md border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">Assinaturas ativas</p>
-          <p className="text-2xl font-bold text-foreground">{stats.active}</p>
-        </div>
-        <div className="rounded-md border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">Receita recorrente (MRR)</p>
-          <p className="text-2xl font-bold text-emerald-700">{brl(stats.mrr)}</p>
-        </div>
-        <div className="rounded-md border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">Total cadastradas</p>
-          <p className="text-2xl font-bold text-foreground">{stats.total}</p>
-        </div>
+        <StatCard label="Assinaturas ativas" value={stats.active} />
+        <StatCard label="Receita recorrente (MRR)" value={brl(stats.mrr)} valueClassName="text-emerald-700" />
+        <StatCard label="Total cadastradas" value={stats.total} />
       </div>
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

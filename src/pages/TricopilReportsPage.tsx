@@ -4,8 +4,8 @@ import { Download, RefreshCw, FileSpreadsheet, Package, Repeat, Receipt, Trendin
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
+import { StatCard } from '@/components/page/StatCard'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -46,21 +46,6 @@ function DeltaBadge({ cur, prev }: { cur: number; prev: number | undefined }) {
       {up ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
       {up ? '+' : ''}{pct}% vs. mês ant.
     </span>
-  )
-}
-
-function Kpi({ label, value, hint, delta }: { label: string; value: string; hint?: string; delta?: React.ReactNode }) {
-  return (
-    <Card>
-      <CardHeader className="pb-1">
-        <CardTitle className="text-xs text-muted-foreground">{label}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <p className="text-lg font-semibold tabular-nums">{value}</p>
-        {delta ? <div>{delta}</div> : null}
-        {hint ? <p className="text-[0.7rem] text-muted-foreground">{hint}</p> : null}
-      </CardContent>
-    </Card>
   )
 }
 
@@ -166,10 +151,10 @@ export function TricopilReportsPage() {
       {/* ---- Fechamento ---- */}
       <SectionHeader icon={<Receipt className="size-4 text-emerald-600" />} title="Fechamento" onExport={exportClose} />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="Receita total" value={brl(c?.totalCents ?? 0)} hint={`${c?.count ?? 0} venda(s)`} delta={<DeltaBadge cur={c?.totalCents ?? 0} prev={prevPoint?.totalCents} />} />
-        <Kpi label="Ticket médio" value={brl(c?.ticketCents ?? 0)} delta={<DeltaBadge cur={c?.ticketCents ?? 0} prev={prevTicket} />} />
-        <Kpi label="Produtos" value={brl(c?.productCents ?? 0)} hint={`Frete: ${brl(c?.freightCents ?? 0)}`} />
-        <Kpi label="Cartão · Pix" value={`${brl(c?.cardCents ?? 0)} · ${brl(c?.pixCents ?? 0)}`} hint={`${c?.cardCount ?? 0} cartão · ${c?.pixCount ?? 0} Pix · descontos ${brl(c?.discountCents ?? 0)}`} />
+        <StatCard label="Receita total" value={brl(c?.totalCents ?? 0)} hint={`${c?.count ?? 0} venda(s)`} delta={<DeltaBadge cur={c?.totalCents ?? 0} prev={prevPoint?.totalCents} />} />
+        <StatCard label="Ticket médio" value={brl(c?.ticketCents ?? 0)} delta={<DeltaBadge cur={c?.ticketCents ?? 0} prev={prevTicket} />} />
+        <StatCard label="Produtos" value={brl(c?.productCents ?? 0)} hint={`Frete: ${brl(c?.freightCents ?? 0)}`} />
+        <StatCard label="Cartão · Pix" valueClassName="text-base" value={`${brl(c?.cardCents ?? 0)} · ${brl(c?.pixCents ?? 0)}`} hint={`${c?.cardCount ?? 0} cartão · ${c?.pixCount ?? 0} Pix · descontos ${brl(c?.discountCents ?? 0)}`} />
       </div>
       {trend.length > 1 ? <div className="mt-3"><TrendChart points={trend} month={month} /></div> : null}
       {c && c.byProduct.length > 0 ? (
@@ -278,10 +263,10 @@ export function TricopilReportsPage() {
       {/* ---- Assinaturas ---- */}
       <SectionHeader icon={<Repeat className="size-4 text-violet-600" />} title="Assinaturas (clube)" onExport={exportSubs} />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="MRR" value={brl(report?.subs.mrrCents ?? 0)} hint="receita recorrente/mês" />
-        <Kpi label="Ativas" value={String(report?.subs.active ?? 0)} />
-        <Kpi label="Pausadas" value={String(report?.subs.paused ?? 0)} />
-        <Kpi label="Canceladas" value={String(report?.subs.canceled ?? 0)} />
+        <StatCard label="MRR" value={brl(report?.subs.mrrCents ?? 0)} hint="receita recorrente/mês" />
+        <StatCard label="Ativas" value={String(report?.subs.active ?? 0)} />
+        <StatCard label="Pausadas" value={String(report?.subs.paused ?? 0)} />
+        <StatCard label="Canceladas" value={String(report?.subs.canceled ?? 0)} />
       </div>
       {report && report.subs.rows.length > 0 ? (
         <div className="mt-3 overflow-x-auto rounded-md border border-border">

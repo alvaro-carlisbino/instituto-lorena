@@ -5,7 +5,8 @@ import { Copy, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronRight }
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { StatCard } from '@/components/page/StatCard'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -97,22 +98,10 @@ export function SalesReportPage() {
 
       {/* Totais */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground">Total do dia</CardTitle></CardHeader>
-          <CardContent className="text-2xl font-bold">{t ? brl(t.totalCents) : '—'}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground">Vendas</CardTitle></CardHeader>
-          <CardContent className="text-2xl font-bold">{t?.count ?? 0}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground">Cartão</CardTitle></CardHeader>
-          <CardContent className="text-lg font-semibold">{t ? brl(t.cardCents) : '—'} <span className="text-xs text-muted-foreground">({t?.cardCount ?? 0})</span></CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-1"><CardTitle className="text-xs text-muted-foreground">Pix</CardTitle></CardHeader>
-          <CardContent className="text-lg font-semibold">{t ? brl(t.pixCents) : '—'} <span className="text-xs text-muted-foreground">({t?.pixCount ?? 0})</span></CardContent>
-        </Card>
+        <StatCard label="Total do dia" value={t ? brl(t.totalCents) : '—'} />
+        <StatCard label="Vendas" value={t?.count ?? 0} />
+        <StatCard label="Cartão" valueClassName="text-lg" value={t ? brl(t.cardCents) : '—'} hint={`${t?.cardCount ?? 0} venda(s)`} />
+        <StatCard label="Pix" valueClassName="text-lg" value={t ? brl(t.pixCents) : '—'} hint={`${t?.pixCount ?? 0} venda(s)`} />
       </div>
 
       {/* Tabela */}
