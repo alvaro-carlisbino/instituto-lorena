@@ -371,9 +371,16 @@ async function blingFindOrCreateContato(
   // 2) Cria com DEGRADAÇÃO graduada: tenta o cadastro completo; se a API recusar a
   // estrutura (ex.: dadosAdicionais), tenta sem ela mas com CPF/e-mail; por fim o mínimo.
   // Assim, no pior caso ainda cria o contato no nome certo.
-  const tel = phoneDigits ? phoneDigits.slice(-11) : ''
+  // Telefone NACIONAL: tira o DDI 55 (senão "554484031689" → slice(-11) virava "54484031689",
+  // DDD inválido, o Bling recusa e a criação do contato falha → pedido cai no genérico).
+  // Celular só quando for mobile de 11 dígitos (senão o Bling reprova o campo celular).
+  let tel = phoneDigits
+  if (tel.length >= 12 && tel.startsWith('55')) tel = tel.slice(2)
   const base: Record<string, unknown> = { nome, tipo: 'F', situacao: 'A' }
-  if (tel) { base.telefone = tel; base.celular = tel }
+  if (tel.length >= 10) {
+    base.telefone = tel
+    if (tel.length === 11) base.celular = tel
+  }
   const withDoc: Record<string, unknown> = { ...base }
   if (cpf.length === 11) withDoc.numeroDocumento = cpf
   if (email) withDoc.email = email
@@ -401,9 +408,15 @@ async function blingFindOrCreateContato(
   if (sexo) dados.sexo = sexo
   const full: Record<string, unknown> = Object.keys(dados).length ? { ...withEndereco, dadosAdicionais: dados } : { ...withEndereco }
 
+  // Último recurso SEM telefone (nome + CPF): se o telefone for o problema, ainda cria o
+  // contato no nome/CPF certo em vez de cair no genérico.
+  const minimal: Record<string, unknown> = { nome, tipo: 'F', situacao: 'A' }
+  if (cpf.length === 11) minimal.numeroDocumento = cpf
+  if (email) minimal.email = email
+
   const seen = new Set<string>()
-  // Degradação: completo (c/ endereço) → c/ doc → mínimo. Garante o contato no nome certo.
-  const bodies = [full, withEndereco, withDoc, base]
+  // Degradação: completo (c/ endereço) → c/ doc → c/ telefone → mínimo (nome+CPF, sem fone).
+  const bodies = [full, withEndereco, withDoc, base, minimal]
     .map((b) => JSON.stringify(b))
     .filter((s) => (seen.has(s) ? false : (seen.add(s), true)))
   let lastErr = ''

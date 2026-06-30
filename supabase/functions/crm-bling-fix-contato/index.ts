@@ -31,13 +31,15 @@ async function findOrCreateContato(token: string, a: { nome: string; cpf?: strin
   for (const term of [cpf.length === 11 ? cpf : '', tail8 ? phone.slice(-11) : ''].filter(Boolean)) {
     try { const r = await bfetch(token, `/contatos?pesquisa=${encodeURIComponent(term)}&limite=20`); if (r.ok) { const d = (JSON.parse((await r.text()) || '{}')?.data ?? []) as Array<Record<string, unknown>>; const hit = d.find((c) => { const doc = digits(c.numeroDocumento); const t = digits(c.telefone), cel = digits(c.celular); return (cpf.length === 11 && doc === cpf) || (!!tail8 && (t.endsWith(tail8) || cel.endsWith(tail8))) }); if (hit?.id != null) return String(hit.id) } } catch { /* segue */ }
   }
-  const tel = phone ? phone.slice(-11) : ''
-  const base: Record<string, unknown> = { nome, tipo: 'F', situacao: 'A' }; if (tel) { base.telefone = tel; base.celular = tel }
+  let tel = phone
+  if (tel.length >= 12 && tel.startsWith('55')) tel = tel.slice(2) // tira DDI 55 (senão Bling recusa o fone)
+  const base: Record<string, unknown> = { nome, tipo: 'F', situacao: 'A' }; if (tel.length >= 10) { base.telefone = tel; if (tel.length === 11) base.celular = tel }
   const withDoc: Record<string, unknown> = { ...base }; if (cpf.length === 11) withDoc.numeroDocumento = cpf; if (a.email) withDoc.email = String(a.email).slice(0, 120)
   const e = a.ent || {}; const cep = digits(e.cep); const withEnd: Record<string, unknown> = { ...withDoc }
   if (cep.length === 8 && e.logradouro) { const v = (!e.cidade || !e.uf) ? await viacep(cep) : {}; withEnd.endereco = { geral: { endereco: String(e.logradouro).slice(0, 90), numero: String(e.numero ?? 'S/N').slice(0, 20), complemento: String(e.complemento ?? '').slice(0, 60), bairro: String(e.bairro ?? (v as Record<string, unknown>).bairro ?? '').slice(0, 60), cep, municipio: String(e.cidade ?? (v as Record<string, unknown>).localidade ?? '').slice(0, 60), uf: String(e.uf ?? (v as Record<string, unknown>).uf ?? '').toUpperCase().slice(0, 2) } } }
   const nasc = ddmmaaaaToYmd(a.nasc ?? ''); const full: Record<string, unknown> = nasc ? { ...withEnd, dadosAdicionais: { dataNascimento: nasc } } : { ...withEnd }
-  const seen = new Set<string>(); const bodies = [full, withEnd, withDoc, base].map((b) => JSON.stringify(b)).filter((s) => (seen.has(s) ? false : (seen.add(s), true)))
+  const minimal: Record<string, unknown> = { nome, tipo: 'F', situacao: 'A' }; if (cpf.length === 11) minimal.numeroDocumento = cpf // fallback sem telefone
+  const seen = new Set<string>(); const bodies = [full, withEnd, withDoc, base, minimal].map((b) => JSON.stringify(b)).filter((s) => (seen.has(s) ? false : (seen.add(s), true)))
   for (const body of bodies) { try { const r = await bfetch(token, '/contatos', { method: 'POST', body }); if (r.ok) { const id = (JSON.parse((await r.text()) || '{}')?.data as { id?: unknown })?.id; if (id != null) return String(id) } } catch { /* tenta próximo */ } }
   return null
 }
