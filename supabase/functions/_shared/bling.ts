@@ -349,6 +349,22 @@ async function blingFindOrCreateContato(
   const nascimento = ddmmaaaaToYmd(args.dataNascimento ?? '')
   const sexo = ['M', 'F'].includes(String(args.sexo ?? '').trim().toUpperCase()) ? String(args.sexo).trim().toUpperCase() : ''
 
+  // Endereço (geral) p/ NF-e — já resolvido pelo caller (entrega + ViaCEP). Usado tanto para
+  // ATUALIZAR um contato já existente quanto para criar um novo: a NF-e EXIGE rua + bairro.
+  const e = args.endereco ?? {}
+  const cepDigits = String(e.cep ?? '').replace(/\D/g, '')
+  const enderecoGeral = cepDigits.length === 8 && e.rua && e.municipio && e.uf
+    ? {
+        endereco: String(e.rua).slice(0, 90),
+        numero: String(e.numero ?? 'S/N').slice(0, 20),
+        complemento: String(e.complemento ?? '').slice(0, 60),
+        bairro: String(e.bairro ?? '').slice(0, 60),
+        cep: cepDigits,
+        municipio: String(e.municipio).slice(0, 60),
+        uf: String(e.uf).toUpperCase().slice(0, 2),
+      }
+    : null
+
   // 1) Procura por CPF (mais único) e depois por telefone — NUNCA só por nome (xarás).
   for (const term of [cpf.length === 11 ? cpf : '', tail8 ? phoneDigits.slice(-11) : ''].filter(Boolean)) {
     try {
@@ -361,7 +377,29 @@ async function blingFindOrCreateContato(
           const cel = String(c.celular ?? '').replace(/\D/g, '')
           return (cpf.length === 11 && doc === cpf) || (!!tail8 && (t.endsWith(tail8) || cel.endsWith(tail8)))
         })
-        if (match?.id != null) return String(match.id)
+        if (match?.id != null) {
+          const id = String(match.id)
+          // Contato JÁ existe: garante endereço+bairro (NF-e exige). Bling não tem PATCH em
+          // contatos → GET + PUT preservando os campos; só mexe se faltar rua/bairro. Best-effort.
+          if (enderecoGeral) {
+            try {
+              const curRes = await blingFetchWithRetry(token, `/contatos/${id}`)
+              const cur = (JSON.parse((await curRes.text()) || '{}')?.data ?? null) as Record<string, unknown> | null
+              const g = ((cur?.endereco as { geral?: Record<string, unknown> } | undefined)?.geral) ?? {}
+              if (cur && (!String(g.endereco ?? '').trim() || !String(g.bairro ?? '').trim())) {
+                await blingFetchWithRetry(token, `/contatos/${id}`, {
+                  method: 'PUT',
+                  body: JSON.stringify({
+                    nome: cur.nome, tipo: cur.tipo ?? 'F', situacao: cur.situacao ?? 'A',
+                    numeroDocumento: cur.numeroDocumento, telefone: cur.telefone, celular: cur.celular, email: cur.email,
+                    endereco: { geral: enderecoGeral },
+                  }),
+                })
+              }
+            } catch { /* não quebra a venda */ }
+          }
+          return id
+        }
       }
     } catch {
       // segue
@@ -385,23 +423,9 @@ async function blingFindOrCreateContato(
   if (cpf.length === 11) withDoc.numeroDocumento = cpf
   if (email) withDoc.email = email
 
-  // Endereço (geral) p/ NF-e. Só inclui se tiver CEP — senão o Bling reclama de campos vazios.
-  const e = args.endereco ?? {}
-  const cepDigits = String(e.cep ?? '').replace(/\D/g, '')
+  // Endereço (geral) p/ NF-e — computado acima (enderecoGeral, com rua+bairro do ViaCEP).
   const withEndereco: Record<string, unknown> = { ...withDoc }
-  if (cepDigits.length === 8 && e.rua && e.municipio && e.uf) {
-    withEndereco.endereco = {
-      geral: {
-        endereco: String(e.rua).slice(0, 90),
-        numero: String(e.numero ?? 'S/N').slice(0, 20),
-        complemento: String(e.complemento ?? '').slice(0, 60),
-        bairro: String(e.bairro ?? '').slice(0, 60),
-        cep: cepDigits,
-        municipio: String(e.municipio).slice(0, 60),
-        uf: String(e.uf).toUpperCase().slice(0, 2),
-      },
-    }
-  }
+  if (enderecoGeral) withEndereco.endereco = { geral: enderecoGeral }
 
   const dados: Record<string, unknown> = {}
   if (nascimento) dados.dataNascimento = nascimento
