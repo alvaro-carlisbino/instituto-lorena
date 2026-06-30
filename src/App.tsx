@@ -39,6 +39,7 @@ import { TricopilFinancePage } from './pages/TricopilFinancePage'
 import { TricopilSubscriptionsPage } from './pages/TricopilSubscriptionsPage'
 import { PaymentLinksPage } from './pages/PaymentLinksPage'
 import { SalesReportPage } from './pages/SalesReportPage'
+import { TricopilReportsPage } from './pages/TricopilReportsPage'
 import { CouponsPage } from './pages/CouponsPage'
 import { IntegrationsPage } from './pages/IntegrationsPage'
 import { CheckoutPage } from './pages/CheckoutPage'
@@ -76,6 +77,7 @@ function AppRoutes() {
       <Route path="/tricopill-assinaturas" element={<TricopilSubscriptionsPage />} />
       <Route path="/links-pagamento" element={<PaymentLinksPage />} />
       <Route path="/relatorio-vendas" element={<SalesReportPage />} />
+      <Route path="/tricopill-relatorios" element={<TricopilReportsPage />} />
       <Route path="/cupons" element={<CouponsPage />} />
       <Route path="/integracoes" element={<IntegrationsPage />} />
       <Route path="/assistente" element={<AssistantPage />} />

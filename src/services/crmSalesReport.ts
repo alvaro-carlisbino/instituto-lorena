@@ -17,8 +17,10 @@ export type SaleRow = {
   method: 'card' | 'pix'
   customerName: string
   product: string
+  kit: string
   installments: number | null
   amountCents: number
+  freightCents: number
   discountCents: number
   couponCode: string | null
   blingOrderId: string | null
@@ -76,6 +78,7 @@ type RawSale = {
   kit: string
   description: string
   amountCents: number
+  freightCents: number
   installments: number | null
   discountCents: number
   couponCode: string | null
@@ -95,21 +98,32 @@ function score(r: RawSale): number {
   return s
 }
 
+/** Limites UTC do MÊS local (YYYY-MM). */
+export function monthBoundsIso(monthYm: string): { startIso: string; endIso: string } {
+  const [y, m] = monthYm.split('-').map(Number)
+  const start = new Date(y, (m ?? 1) - 1, 1, 0, 0, 0, 0)
+  const end = new Date(y, m ?? 1, 1, 0, 0, 0, 0)
+  return { startIso: start.toISOString(), endIso: end.toISOString() }
+}
+
+const emptyTotals = (): SalesReport['totals'] => ({ count: 0, totalCents: 0, cardCents: 0, pixCents: 0, discountCents: 0, cardCount: 0, pixCount: 0 })
+
+/** Relatório de vendas pagas de UM DIA. */
 export async function fetchSalesReport(dateYmd: string): Promise<SalesReport> {
-  const empty: SalesReport = {
-    date: dateYmd,
-    rows: [],
-    totals: { count: 0, totalCents: 0, cardCents: 0, pixCents: 0, discountCents: 0, cardCount: 0, pixCount: 0 },
-  }
-  if (!supabase) return empty
-
   const { startIso, endIso } = dayBoundsIso(dateYmd)
+  const { rows, totals } = await fetchSalesRowsInRange(startIso, endIso)
+  return { date: dateYmd, rows, totals }
+}
 
-  // Janela por paid_at: pega só as PAGAS no dia (paid_at não-nulo já exclui links pendentes).
+/** Núcleo: busca + deduplica as vendas PAGAS na janela [startIso, endIso). Reusado por dia e mês. */
+export async function fetchSalesRowsInRange(startIso: string, endIso: string): Promise<{ rows: SaleRow[]; totals: SalesReport['totals'] }> {
+  if (!supabase) return { rows: [], totals: emptyTotals() }
+
+  // Janela por paid_at: pega só as PAGAS no período (paid_at não-nulo já exclui links pendentes).
   const [redeRes, pagRes] = await Promise.all([
     supabase
       .from('rede_payments')
-      .select('id, lead_id, customer_name, kit, amount_cents, discount_cents, coupon_code, installments, status, paid_at, description, bling_order_id, phone')
+      .select('id, lead_id, customer_name, kit, amount_cents, freight_cents, discount_cents, coupon_code, installments, status, paid_at, description, bling_order_id, phone')
       .gte('paid_at', startIso)
       .lt('paid_at', endIso),
     supabase
@@ -134,6 +148,7 @@ export async function fetchSalesReport(dateYmd: string): Promise<SalesReport> {
       kit: r.kit != null ? String(r.kit) : '',
       description: r.description != null ? String(r.description) : '',
       amountCents: Number(r.amount_cents) || 0,
+      freightCents: Number(r.freight_cents) || 0,
       installments: r.installments != null ? Number(r.installments) : null,
       discountCents: Number(r.discount_cents) || 0,
       couponCode: r.coupon_code != null ? String(r.coupon_code) : null,
@@ -152,6 +167,7 @@ export async function fetchSalesReport(dateYmd: string): Promise<SalesReport> {
       kit: r.kit != null ? String(r.kit) : '',
       description: '',
       amountCents: Number(r.amount_cents) || 0,
+      freightCents: 0,
       installments: null,
       discountCents: Number(r.discount_cents) || 0,
       couponCode: r.coupon_code != null ? String(r.coupon_code) : null,
@@ -231,8 +247,10 @@ export async function fetchSalesReport(dateYmd: string): Promise<SalesReport> {
       method: r.src === 'rede' ? 'card' : 'pix',
       customerName: info?.name || r.customerName || 'Cliente',
       product: productOf(r),
+      kit: r.kit || '',
       installments: r.installments,
       amountCents: r.amountCents,
+      freightCents: r.freightCents,
       discountCents: r.discountCents,
       couponCode: r.couponCode,
       blingOrderId: r.blingOrderId,
@@ -263,7 +281,7 @@ export async function fetchSalesReport(dateYmd: string): Promise<SalesReport> {
     { count: 0, totalCents: 0, cardCents: 0, pixCents: 0, discountCents: 0, cardCount: 0, pixCount: 0 },
   )
 
-  return { date: dateYmd, rows, totals }
+  return { rows, totals }
 }
 
 const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
