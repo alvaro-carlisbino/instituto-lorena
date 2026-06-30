@@ -1,5 +1,4 @@
 import { AppLayout } from '@/layouts/AppLayout'
-import { PageHeader } from '@/components/page/PageHeader'
 import { PaymentsPanel } from '@/components/payments/ClinicPaymentsPanel'
 
 /**
@@ -10,11 +9,10 @@ import { PaymentsPanel } from '@/components/payments/ClinicPaymentsPanel'
  */
 export function TricopilFinancePage() {
   return (
-    <AppLayout title="Financeiro Tricopill">
-      <PageHeader
-        title="Financeiro"
-        description="Recebimentos, conciliação com o extrato bancário e comprovantes — tudo num lugar."
-      />
+    <AppLayout
+      title="Financeiro"
+      subtitle="Recebimentos, conciliação com o extrato bancário e comprovantes — tudo num lugar."
+    >
       <PaymentsPanel />
     </AppLayout>
   )

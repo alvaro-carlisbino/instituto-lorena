@@ -3,7 +3,6 @@ import { toast } from 'sonner'
 import { Unplug, Plug, Package, CreditCard } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -208,9 +207,7 @@ export function IntegrationsPage() {
   }
 
   return (
-    <AppLayout title="Integrações">
-      <PageHeader title="Integrações" description="Conecte ERP e meios de pagamento" />
-
+    <AppLayout title="Integrações" subtitle="Conecte ERP e meios de pagamento">
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         {/* Bling — só polo de vendas */}
         {isSalesPolo ? (

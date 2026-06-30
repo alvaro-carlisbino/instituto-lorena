@@ -4,7 +4,6 @@ import { Copy, Download, RefreshCw, FileSpreadsheet, ChevronDown, ChevronRight }
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
-import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -76,8 +75,7 @@ export function SalesReportPage() {
   const t = report?.totals
 
   return (
-    <AppLayout title="Relatório de vendas">
-      <PageHeader title="Relatórios" description="Vendas pagas do dia (cartão, Pix e venda manual) para o financeiro." />
+    <AppLayout title="Relatórios" subtitle="Vendas pagas do dia (cartão, Pix e venda manual) para o financeiro.">
       <SubTabs tabs={[{ to: '/relatorio-vendas', label: 'Por dia' }, { to: '/tricopill-relatorios', label: 'Por mês' }]} />
 
       <div className="mt-4 flex flex-wrap items-end gap-3">

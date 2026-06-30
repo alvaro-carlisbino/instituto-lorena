@@ -3,7 +3,6 @@ import { toast } from 'sonner'
 import { Download, RefreshCw, FileSpreadsheet, Package, Repeat, Receipt, TrendingUp, TrendingDown } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { PageHeader } from '@/components/page/PageHeader'
 import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -147,8 +146,7 @@ export function TricopilReportsPage() {
   }
 
   return (
-    <AppLayout title="Relatórios Tricopill">
-      <PageHeader title="Relatórios" description="Fechamento mensal: vendas, receita, envios e assinaturas — com exportação para o financeiro." />
+    <AppLayout title="Relatórios" subtitle="Fechamento mensal: vendas, receita, envios e assinaturas — com exportação para o financeiro.">
       <SubTabs tabs={[{ to: '/relatorio-vendas', label: 'Por dia' }, { to: '/tricopill-relatorios', label: 'Por mês' }]} />
 
       <div className="mt-4 flex flex-wrap items-end gap-3">

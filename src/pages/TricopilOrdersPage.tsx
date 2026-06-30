@@ -4,7 +4,6 @@ import { ExternalLink, RefreshCw, Search, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
@@ -200,17 +199,15 @@ export function TricopilOrdersPage() {
   }
 
   return (
-    <AppLayout title="Pedidos Tricopill">
-      <PageHeader
-        title="Pedidos"
-        description="Pagamento, entrega, Bling e rastreio — tudo num lugar"
-        actions={
-          <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
-            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Atualizar
-          </Button>
-        }
-      />
-
+    <AppLayout
+      title="Pedidos"
+      subtitle="Pagamento, entrega, Bling e rastreio — tudo num lugar"
+      actions={
+        <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
+          <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Atualizar
+        </Button>
+      }
+    >
       {/* KPIs */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <KpiCard label="Pedidos" value={String(kpis.total)} hint="no filtro atual" />

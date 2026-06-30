@@ -3,7 +3,6 @@ import { toast } from 'sonner'
 import { Copy, CreditCard, ExternalLink, QrCode, RefreshCw, Truck } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -215,12 +214,10 @@ export function PaymentLinksPage() {
   )
 
   return (
-    <AppLayout title="Links de pagamento">
-      <PageHeader
-        title="Links de pagamento"
-        description={isSalesPolo ? 'Pix e cartão (e.Rede) para o Tricopill' : 'Link de pagamento por cartão (e.Rede)'}
-      />
-
+    <AppLayout
+      title="Links de pagamento"
+      subtitle={isSalesPolo ? 'Pix e cartão (e.Rede) para o Tricopill' : 'Link de pagamento por cartão (e.Rede)'}
+    >
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,400px)_1fr]">
         <Card>
           <CardHeader>

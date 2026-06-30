@@ -3,7 +3,6 @@ import { toast } from 'sonner'
 import { RefreshCw, Tag, Trash2, Plus } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -124,12 +123,10 @@ export function CouponsPage() {
   }
 
   return (
-    <AppLayout title="Cupons">
-      <PageHeader
-        title="Cupons de desconto"
-        description="Códigos que a IA de vendas e os links de pagamento aplicam (Pix e cartão)."
-      />
-
+    <AppLayout
+      title="Cupons de desconto"
+      subtitle="Códigos que a IA de vendas e os links de pagamento aplicam (Pix e cartão)."
+    >
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,380px)_1fr]">
         <Card>
           <CardHeader>

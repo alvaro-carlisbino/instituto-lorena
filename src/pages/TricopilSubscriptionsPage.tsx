@@ -2,7 +2,6 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { PageHeader } from '@/components/page/PageHeader'
 import { Button } from '@/components/ui/button'
 import { fetchTricopillSubscriptions, subscriptionAction, subscriptionHistory, type AsaasCharge, type SubscriptionAction, type TricopillSubscription } from '@/services/tricopillSubscriptions'
 
@@ -84,9 +83,7 @@ export function TricopilSubscriptionsPage() {
   )
 
   return (
-    <AppLayout title="Assinaturas Tricopill">
-      <PageHeader title="Assinaturas (Clube)" description="Assinantes do Tricopill — plano, status, ciclos pagos e envios. Cobrança, Bling, Melhor Envio e rastreio são automáticos." />
-
+    <AppLayout title="Assinaturas (Clube)" subtitle="Assinantes do Tricopill — plano, status, ciclos pagos e envios. Cobrança, Bling, Melhor Envio e rastreio são automáticos.">
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <div className="rounded-md border border-border bg-card p-3">
           <p className="text-xs text-muted-foreground">Assinaturas ativas</p>
