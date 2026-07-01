@@ -386,7 +386,13 @@ async function blingFindOrCreateContato(
               const curRes = await blingFetchWithRetry(token, `/contatos/${id}`)
               const cur = (JSON.parse((await curRes.text()) || '{}')?.data ?? null) as Record<string, unknown> | null
               const g = ((cur?.endereco as { geral?: Record<string, unknown> } | undefined)?.geral) ?? {}
-              if (cur && (!String(g.endereco ?? '').trim() || !String(g.bairro ?? '').trim())) {
+              const gCep = String(g.cep ?? '').replace(/\D/g, '')
+              // NF-e exige rua + bairro + CEP + município. Atualiza se QUALQUER um faltar —
+              // não só rua/bairro: contato antigo com rua+bairro mas SEM CEP / com cidade
+              // errada fazia a NF-e rejeitar por CEP×cidade (caso Selma/Cidade Gaúcha, 30/jun/2026).
+              const faltaNfe = !String(g.endereco ?? '').trim() || !String(g.bairro ?? '').trim()
+                || gCep.length !== 8 || !String(g.municipio ?? '').trim()
+              if (cur && faltaNfe) {
                 await blingFetchWithRetry(token, `/contatos/${id}`, {
                   method: 'PUT',
                   body: JSON.stringify({
