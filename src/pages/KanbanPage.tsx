@@ -86,13 +86,41 @@ export function KanbanPage() {
     }
   }, [viewMode])
 
+  // Funil padrão robusto: lembra a última escolha (localStorage) e, na dúvida, abre no
+  // funil com MAIS leads (o principal) — não no primeiro por nome, que caía num funil
+  // vazio (ex.: "PROCESSO CIRÚRGICO") e escondia as colunas de Follow-up do Pipeline Clínica.
+  const defaultPipelineId = useMemo(() => {
+    const list = crm.pipelineCatalog
+    if (list.length === 0) return null
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('crm-kanban-pipeline') : null
+    if (saved && list.some((p) => p.id === saved)) return saved
+    const counts = new Map<string, number>()
+    for (const l of crm.leads) {
+      if (l.pipelineId) counts.set(l.pipelineId, (counts.get(l.pipelineId) ?? 0) + 1)
+    }
+    let best = list[0]!.id
+    let bestN = -1
+    for (const p of list) {
+      const n = counts.get(p.id) ?? 0
+      if (n > bestN) { bestN = n; best = p.id }
+    }
+    return best
+  }, [crm.pipelineCatalog, crm.leads])
+
   useEffect(() => {
     const list = crm.pipelineCatalog
     if (list.length === 0) return
     if (!list.some((p) => p.id === crm.selectedPipelineId)) {
-      void crm.setSelectedPipelineId(list[0]!.id)
+      void crm.setSelectedPipelineId(defaultPipelineId ?? list[0]!.id)
     }
-  }, [crm.pipelineCatalog, crm.selectedPipelineId, crm.setSelectedPipelineId])
+  }, [crm.pipelineCatalog, crm.selectedPipelineId, crm.setSelectedPipelineId, defaultPipelineId])
+
+  // Lembra o funil escolhido pra não voltar ao errado no próximo acesso.
+  useEffect(() => {
+    if (crm.selectedPipelineId && crm.pipelineCatalog.some((p) => p.id === crm.selectedPipelineId)) {
+      try { localStorage.setItem('crm-kanban-pipeline', crm.selectedPipelineId) } catch { /* ignore */ }
+    }
+  }, [crm.selectedPipelineId, crm.pipelineCatalog])
 
   // Ao filtrar por Polo, se o funil selecionado não pertencer ao polo, pula para o
   // primeiro funil do polo (assim o quadro mostra só leads daquele polo).
