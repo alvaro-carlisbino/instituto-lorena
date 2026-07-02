@@ -498,7 +498,37 @@ export async function finalizeRedePaid(
     },
   })
 
-  if (!intent.leadId) return
+  // LINK AVULSO (sem lead): ainda assim cria o pedido no Bling — pagamento pago sem pedido
+  // é venda perdida no fechamento (casos 16/jun + Victor 02/07, links do painel não têm lead).
+  // Sem lead não há cadastro/entrega: o contato sai com nome/CPF do próprio pagamento e a
+  // equipe completa depois p/ NF-e. Best-effort: nunca derruba a confirmação do pagamento.
+  if (!intent.leadId) {
+    if (!intent.blingOrderId && intent.tenantId === 'tricopill') {
+      try {
+        const { data: blingRow } = await admin
+          .from('tenant_integrations')
+          .select('bling')
+          .eq('tenant_id', 'tricopill')
+          .maybeSingle()
+        const blingCfg = ((blingRow as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+        if (blingCfg.auto_order_enabled === true) {
+          const out = await blingCreateSaleOrder(admin, 'tricopill', {
+            kit: intent.kit ?? '',
+            amountCents: intent.amountCents,
+            freightCents: intent.freightCents ?? 0,
+            items: intent.items && intent.items.length ? intent.items : undefined,
+            description: intent.kit ? undefined : String(intent.description ?? 'Pedido Tricopill').trim(),
+            customerName: String(intent.customerName || opts.cardholderName || 'Cliente Tricopill').trim(),
+            cpf: intent.customerDoc || undefined,
+          })
+          await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
+        }
+      } catch (e) {
+        console.warn('[rede] pedido Bling (link sem lead) falhou:', e instanceof Error ? e.message : String(e))
+      }
+    }
+    return
+  }
   try {
     const { data: lead } = await admin
       .from('leads')
