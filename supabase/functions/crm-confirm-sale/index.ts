@@ -6,6 +6,7 @@ import { REDE_KITS, resolveRedeKit } from '../_shared/rede.ts'
 import { formatBRLCents, incrementCouponUse, quoteCoupon } from '../_shared/coupons.ts'
 import { blingCreateSaleOrder } from '../_shared/bling.ts'
 import { autoShipToCart } from '../_shared/melhorEnvio.ts'
+import { sendSaleReceiptToGroup } from '../_shared/saleReceipt.ts'
 
 // Confirmação MANUAL de venda pela atendente (quando o cliente paga via link/Pix
 // e a venda fecha fora do webhook automático — ex.: ambiente sandbox).
@@ -127,16 +128,17 @@ Deno.serve(async (req) => {
   }
 
   // 1) Registra o pagamento PAGO (entra no BI: pagbank_checkouts / rede_payments).
+  const manualPayId = shortId()
   try {
     if (isCard) {
       await admin.from('rede_payments').insert({
-        id: shortId(), tenant_id: tenantId, lead_id: leadId, amount_cents: totalCents,
+        id: manualPayId, tenant_id: tenantId, lead_id: leadId, amount_cents: totalCents,
         description: freightCents > 0 ? `${label} + frete` : label, installments, status: 'paid', paid_at: new Date().toISOString(),
         coupon_code: coupon.applied ? coupon.code : null, discount_cents: coupon.discountCents,
       })
     } else {
       await admin.from('pagbank_checkouts').insert({
-        checkout_id: shortId(), tenant_id: tenantId, lead_id: leadId, reference_id: `lead:${leadId}`,
+        checkout_id: manualPayId, tenant_id: tenantId, lead_id: leadId, reference_id: `lead:${leadId}`,
         amount_cents: totalCents, kit: kitKey, pay_link: 'manual', status: 'paid',
         paid_at: new Date().toISOString(), coupon_code: coupon.applied ? coupon.code : null,
         discount_cents: coupon.discountCents,
@@ -234,6 +236,32 @@ Deno.serve(async (req) => {
       leadId, patientName: customerName, channel: 'system', direction: 'system', author: 'Melhor Envio', content: shipNote, tenantId,
     })
   } catch { /* nunca derruba a venda */ }
+
+  // 4c) Comprovante da venda no grupo do financeiro (best-effort).
+  {
+    const cad = (lead.custom_fields?.cadastro ?? {}) as Record<string, string>
+    await sendSaleReceiptToGroup(admin, {
+      tenantId,
+      paymentId: manualPayId,
+      gateway: 'Confirmação manual (painel)',
+      method: isCard ? 'card' : method === 'other' ? 'other' : 'pix',
+      installments: isCard ? installments : undefined,
+      amountCents: totalCents,
+      freightCents,
+      discountCents: coupon.discountCents,
+      couponCode: coupon.applied ? coupon.code : null,
+      produto: label,
+      blingOrderId,
+      buyer: {
+        name: customerName,
+        cpf: cad.cpf,
+        phone: lead.phone,
+        email: cad.email,
+        entrega: (lead.custom_fields?.entrega as Record<string, unknown>) ?? null,
+      },
+      origem: `Confirmação manual por ${user.email || 'atendente'}`,
+    })
+  }
 
   // 5) Notifica o time.
   try {

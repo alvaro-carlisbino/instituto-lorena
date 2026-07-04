@@ -4,6 +4,7 @@ import { incrementCouponUse, quoteCoupon } from './coupons.ts'
 import { blingCreateSaleOrder } from './bling.ts'
 import { autoShipToCart } from './melhorEnvio.ts'
 import { sendEmail } from './resend.ts'
+import { sendSaleReceiptToGroup } from './saleReceipt.ts'
 
 // Envia texto pelo WhatsApp (w-api) usando a linha ativa do tenant. Best-effort.
 async function subSendWapi(admin: SupabaseClient, tenantId: string, phone: string, text: string): Promise<boolean> {
@@ -634,6 +635,25 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
     autoData: { gateway: 'asaas', subscription_local_id: localSubId, asaas_subscription_id: s.asaas_subscription_id ?? null, cycle, cadence },
   })
 
+  // Comprovante do ciclo no grupo do financeiro (best-effort).
+  await sendSaleReceiptToGroup(admin, {
+    tenantId: 'tricopill',
+    paymentId: asaasPaymentId || `${localSubId}:cycle:${cycle}`,
+    gateway: 'Asaas',
+    method: 'card',
+    amountCents: monthlyValueCents,
+    produto: `Assinatura Tricopill (${unitsPerShipment} frasco${unitsPerShipment > 1 ? 's' : ''}/envio, ${cadence})`,
+    transactionId: asaasPaymentId,
+    buyer: {
+      name: s.customer_name != null ? String(s.customer_name) : null,
+      cpf: s.customer_doc != null ? String(s.customer_doc) : null,
+      phone: s.phone != null ? String(s.phone) : null,
+      email: s.email != null ? String(s.email) : null,
+      entrega: { ...entrega, delivery_mode: 'envio_externo' },
+    },
+    origem: `Assinatura — ciclo ${cycle} (${cadence})`,
+  })
+
   // Lead sintético a partir da assinatura (garante endereço p/ Bling + Melhor Envio mesmo sem lead real).
   const synthLead = {
     id: leadId || `sub-${localSubId}`,
@@ -762,7 +782,32 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
     },
   })
 
-  if (!leadId) return
+  if (!leadId) {
+    // Comprovante no grupo do financeiro só na TRANSIÇÃO p/ pago (webhook repetido não duplica).
+    if (!wasPaid) {
+      await sendSaleReceiptToGroup(admin, {
+        tenantId: kit ? 'tricopill' : tenantId,
+        paymentId: localId,
+        gateway: 'Asaas',
+        method: method as 'card' | 'pix',
+        installments: method === 'card' ? Number(p.installments ?? 1) : undefined,
+        amountCents,
+        freightCents: Math.max(0, Math.round(Number(p.freight_cents ?? 0))),
+        discountCents: Math.max(0, Math.round(Number(p.discount_cents ?? 0))),
+        couponCode: p.coupon_code != null ? String(p.coupon_code) : null,
+        produto: p.description != null ? String(p.description) : (kit ? `Tricopill (${kit})` : null),
+        blingOrderId: p.bling_order_id != null ? String(p.bling_order_id) : null,
+        transactionId: p.asaas_payment_id != null ? String(p.asaas_payment_id) : null,
+        buyer: {
+          name: p.customer_name != null ? String(p.customer_name) : null,
+          cpf: p.customer_doc != null ? String(p.customer_doc) : null,
+          phone: p.phone != null ? String(p.phone) : null,
+        },
+        origem: 'Cobrança avulsa (sem lead)',
+      })
+    }
+    return
+  }
   const { data: lead } = await admin
     .from('leads')
     .select('id, patient_name, pipeline_id, tenant_id, phone, custom_fields')
@@ -808,6 +853,7 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
   // Cria pedido no Bling para KITS Tricopill E para vendas avulsas/carrinho do tenant 'tricopill'.
   // (Antes só criava quando havia `kit`; compras pelo carrinho salvam kit=null e nunca iam pro Bling.)
   const shouldCreateBlingOrder = !!kit || blingTenant === 'tricopill'
+  let receiptBlingId = p.bling_order_id != null ? String(p.bling_order_id) : null
   if (shouldCreateBlingOrder) {
     try {
       const { data: blingRow } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', blingTenant).maybeSingle()
@@ -830,6 +876,7 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
           }) ?? undefined,
         })
         await admin.from('asaas_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', localId)
+        receiptBlingId = out.orderId ?? null
         const nfeNote = out.nfe
           ? (out.nfe.transmitted
               ? ` · NF-e ${out.nfe.numero ? '#' + out.nfe.numero + ' ' : ''}transmitida ✅`
@@ -849,6 +896,33 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
         content: `⚠️ Não foi possível criar o pedido no Bling automaticamente: ${(e instanceof Error ? e.message : String(e)).slice(0, 180)}`, tenantId: blingTenant,
       })
     }
+  }
+
+  // Comprovante da venda no grupo do financeiro (best-effort, só na transição p/ pago).
+  {
+    const cadR = (l.custom_fields?.cadastro ?? {}) as Record<string, string>
+    const entR = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>
+    await sendSaleReceiptToGroup(admin, {
+      tenantId: blingTenant,
+      paymentId: localId,
+      gateway: 'Asaas',
+      method: method as 'card' | 'pix',
+      installments: method === 'card' ? Number(p.installments ?? 1) : undefined,
+      amountCents,
+      freightCents: Math.max(0, Math.round(Number(p.freight_cents ?? 0))),
+      discountCents: Math.max(0, Math.round(Number(p.discount_cents ?? 0))),
+      couponCode: p.coupon_code != null ? String(p.coupon_code) : null,
+      produto: p.description != null ? String(p.description) : (kit ? `Tricopill (${kit})` : null),
+      blingOrderId: receiptBlingId,
+      transactionId: p.asaas_payment_id != null ? String(p.asaas_payment_id) : null,
+      buyer: {
+        name: cadR.nomeCompleto || (p.customer_name != null ? String(p.customer_name) : null) || l.patient_name,
+        cpf: cadR.cpf || (p.customer_doc != null ? String(p.customer_doc) : null),
+        phone: l.phone || (p.phone != null ? String(p.phone) : null),
+        email: cadR.email,
+        entrega: entR,
+      },
+    })
   }
 
   // Envio automático no Melhor Envio (carrinho; best-effort).

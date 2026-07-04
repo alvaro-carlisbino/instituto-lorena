@@ -18,6 +18,7 @@ import {
 } from '../_shared/whatsapp/wapiConfig.ts'
 import { extractInboundMedia, isMediaOnlyMarker, WapiProvider } from '../_shared/whatsapp/wapi.ts'
 import { enrichMediaRowsFromBase64 } from '../_shared/manychatMediaEnrich.ts'
+import { registerSalesReceiptGroup, sendWapiGroupText } from '../_shared/saleReceipt.ts'
 
 // Webhook próprio da W-API. Roda em paralelo ao crm-whatsapp-webhook (Evolution/Official).
 // Cada linha em whatsapp_channel_instances com channel_provider='wapi' tem token e
@@ -105,6 +106,33 @@ Deno.serve(async (req) => {
   const sigOk = provider.validateWebhookSignature(rawBody, req.headers)
   if (!(await Promise.resolve(sigOk))) {
     return json({ error: 'unauthorized' }, 401)
+  }
+
+  // REGISTRO DO GRUPO DE COMPROVANTES: mensagens de grupo são descartadas pelo normalizeInbound,
+  // mas "#comprovantes" mandado num grupo (com esta linha dentro) registra o grupo como destino
+  // dos comprovantes de venda do tenant — sem precisar caçar o JID na mão.
+  {
+    const chatObj = (payload.chat ?? {}) as Record<string, unknown>
+    const groupJid = String(chatObj.id ?? '').trim()
+    if (groupJid.toLowerCase().includes('@g.us')) {
+      const mc = (payload.msgContent ?? payload.msgcontent ?? {}) as Record<string, unknown>
+      const ext = (mc.extendedTextMessage ?? {}) as Record<string, unknown>
+      const groupText = String(mc.conversation ?? ext.text ?? '').trim().toLowerCase()
+      if (/^#comprovantes?$/.test(groupText)) {
+        const gTenant = instanceRow.tenant_id ? String(instanceRow.tenant_id) : ''
+        if (gTenant) {
+          try {
+            await registerSalesReceiptGroup(admin, gTenant, groupJid)
+            await sendWapiGroupText(admin, gTenant, groupJid,
+              '✅ Grupo registrado! A partir de agora, todo pagamento confirmado gera um comprovante de venda aqui (data, hora, valor, pagamento e dados do comprador).')
+            console.log(`[wapi-webhook] grupo de comprovantes registrado: tenant=${gTenant} jid=${groupJid}`)
+          } catch (e) {
+            console.warn('[wapi-webhook] falha ao registrar grupo de comprovantes:', e instanceof Error ? e.message : String(e))
+          }
+        }
+        return json({ ok: true, receipts_group_registered: groupJid }, 200)
+      }
+    }
   }
 
   const normalized = provider.normalizeInbound(payload, req.headers)

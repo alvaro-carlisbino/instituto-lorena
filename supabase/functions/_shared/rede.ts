@@ -6,6 +6,7 @@ import { blingCreateSaleOrder } from './bling.ts'
 import { sendEmail } from './resend.ts'
 import { internalSaleEmail, orderConfirmEmail, TEAM_EMAIL } from './emails.ts'
 import { autoShipToCart } from './melhorEnvio.ts'
+import { sendSaleReceiptToGroup } from './saleReceipt.ts'
 
 /**
  * Kits do Tricopill no CARTÃO (e.Rede) — preço CHEIO, sem o desconto de 5% do Pix.
@@ -178,6 +179,8 @@ export type RedeIntent = {
   method: 'card' | 'pix'
   customerName: string | null
   customerDoc?: string | null
+  phone?: string | null
+  discountCents?: number
   freightCents?: number
   items?: Array<Record<string, unknown>> | null
 }
@@ -372,7 +375,7 @@ export async function createRedePix(
 export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<RedeIntent | null> {
   const { data } = await admin
     .from('rede_payments')
-    .select('id, tenant_id, lead_id, amount_cents, freight_cents, description, installments, status, coupon_code, kit, bling_order_id, method, customer_name, customer_doc, items')
+    .select('id, tenant_id, lead_id, amount_cents, freight_cents, description, installments, status, coupon_code, discount_cents, kit, bling_order_id, method, customer_name, customer_doc, phone, items')
     .eq('id', id)
     .maybeSingle()
   if (!data) return null
@@ -391,6 +394,8 @@ export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<
     method: r.method === 'pix' ? 'pix' : 'card',
     customerName: r.customer_name != null ? String(r.customer_name) : null,
     customerDoc: r.customer_doc != null ? String(r.customer_doc) : null,
+    phone: r.phone != null ? String(r.phone) : null,
+    discountCents: Math.max(0, Math.round(Number(r.discount_cents ?? 0))),
     freightCents: Math.max(0, Math.round(Number(r.freight_cents ?? 0))),
     items: Array.isArray(r.items) ? (r.items as Array<Record<string, unknown>>) : null,
   }
@@ -503,6 +508,7 @@ export async function finalizeRedePaid(
   // Sem lead não há cadastro/entrega: o contato sai com nome/CPF do próprio pagamento e a
   // equipe completa depois p/ NF-e. Best-effort: nunca derruba a confirmação do pagamento.
   if (!intent.leadId) {
+    let receiptBlingId = intent.blingOrderId
     if (!intent.blingOrderId && intent.tenantId === 'tricopill') {
       try {
         const { data: blingRow } = await admin
@@ -522,11 +528,33 @@ export async function finalizeRedePaid(
             cpf: intent.customerDoc || undefined,
           })
           await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
+          receiptBlingId = out.orderId ?? null
         }
       } catch (e) {
         console.warn('[rede] pedido Bling (link sem lead) falhou:', e instanceof Error ? e.message : String(e))
       }
     }
+    // Comprovante da venda no grupo do financeiro (best-effort).
+    await sendSaleReceiptToGroup(admin, {
+      tenantId: intent.kit ? 'tricopill' : intent.tenantId,
+      paymentId: intent.id,
+      gateway: 'e.Rede',
+      method: opts.method,
+      installments: isPix ? undefined : (opts.installments ?? intent.installments),
+      amountCents: intent.amountCents,
+      freightCents: intent.freightCents,
+      discountCents: intent.discountCents,
+      couponCode: intent.couponCode,
+      produto: intent.kit ? (REDE_KITS[intent.kit]?.label ?? intent.description) : intent.description,
+      blingOrderId: receiptBlingId,
+      transactionId: opts.tid,
+      buyer: {
+        name: intent.customerName ?? opts.cardholderName,
+        cpf: intent.customerDoc,
+        phone: intent.phone,
+      },
+      origem: 'Link de pagamento (sem lead)',
+    })
     return
   }
   try {
@@ -595,6 +623,7 @@ export async function finalizeRedePaid(
     // (Antes só criava quando havia `kit`; o carrinho do site salva kit=null e nunca ia pro Bling —
     //  o gateway do site é a e.Rede e o Pix é finalizado por aqui via cron. Espelha finalizeAsaasPaid.)
     const shouldCreateBlingOrder = !!intent.kit || blingTenant === 'tricopill'
+    let receiptBlingId = intent.blingOrderId
     if (shouldCreateBlingOrder && !intent.blingOrderId) {
       try {
         const { data: blingRow } = await admin
@@ -627,6 +656,7 @@ export async function finalizeRedePaid(
             }) ?? undefined,
           })
           await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
+          receiptBlingId = out.orderId ?? null
           const nfeNote = out.nfe
             ? (out.nfe.transmitted
                 ? ` · NF-e ${out.nfe.numero ? '#' + out.nfe.numero + ' ' : ''}transmitida ✅`
@@ -655,6 +685,33 @@ export async function finalizeRedePaid(
           tenantId: blingTenant,
         })
       }
+    }
+
+    // Comprovante da venda no grupo do financeiro (best-effort, nunca quebra o pagamento).
+    {
+      const cadR = ((l.custom_fields as Record<string, unknown> | undefined)?.cadastro ?? {}) as Record<string, string>
+      const entR = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>
+      await sendSaleReceiptToGroup(admin, {
+        tenantId: blingTenant,
+        paymentId: intent.id,
+        gateway: 'e.Rede',
+        method: opts.method,
+        installments: isPix ? undefined : (opts.installments ?? intent.installments),
+        amountCents: intent.amountCents,
+        freightCents: intent.freightCents,
+        discountCents: intent.discountCents,
+        couponCode: intent.couponCode,
+        produto: intent.kit ? (REDE_KITS[intent.kit]?.label ?? intent.description) : intent.description,
+        blingOrderId: receiptBlingId,
+        transactionId: opts.tid,
+        buyer: {
+          name: cadR.nomeCompleto || intent.customerName || opts.cardholderName || l.patient_name,
+          cpf: cadR.cpf || intent.customerDoc,
+          phone: l.phone || intent.phone,
+          email: cadR.email,
+          entrega: entR,
+        },
+      })
     }
 
     // Envio automático no Melhor Envio (CARRINHO; best-effort, nunca quebra o pagamento).
