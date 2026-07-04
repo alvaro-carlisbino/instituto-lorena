@@ -644,10 +644,30 @@ export async function blingCreateSaleOrder(
   let nfe: { nfeId: string | null; numero?: string; situacao?: string; transmitted: boolean; error?: string } | undefined
   const cpfOk = String(args.cpf ?? '').replace(/\D/g, '').length === 11
   if (orderId && cfg.auto_nfe_enabled === true && cfg.natureza_operacao_id && cpfOk) {
+    // A NF-e sai pelos ITENS (a API /nfe não herda o desconto do pedido): com desconto
+    // (Pix 5% do site, cupom), prorrateia nos valores unitários pra nota fechar no valor
+    // REALMENTE RECEBIDO — nota acima do recebido é passivo fiscal. O último item absorve
+    // o resíduo do arredondamento.
+    let nfeItens = payload.itens as Array<{ produto: { id: number | string }; descricao: string; quantidade: number; valor: number }>
+    if (descontoReais > 0.05 && itensTotalReais > 0) {
+      const fator = produtoReais / itensTotalReais
+      let acumulado = 0
+      nfeItens = nfeItens.map((x, i) => {
+        const qty = Number(x.quantidade) || 1
+        const ultimo = i === nfeItens.length - 1
+        // Último item: resíduo arredondado PARA BAIXO — a nota pode fechar 1-2 centavos
+        // abaixo do recebido (ok), nunca acima (passivo fiscal).
+        const valor = ultimo
+          ? Math.floor(((produtoReais - acumulado) / qty) * 100) / 100
+          : Math.round((Number(x.valor) || 0) * fator * 100) / 100
+        if (!ultimo) acumulado += valor * qty
+        return { ...x, valor }
+      })
+    }
     nfe = await blingEmitNfe(token, {
       naturezaOperacaoId: String(cfg.natureza_operacao_id),
       contatoId,
-      itens: payload.itens,
+      itens: nfeItens,
       observacoes: obs,
       transmit: cfg.auto_nfe_transmit === true,
     }).catch((e) => ({ nfeId: null, transmitted: false, error: e instanceof Error ? e.message : String(e) }))
