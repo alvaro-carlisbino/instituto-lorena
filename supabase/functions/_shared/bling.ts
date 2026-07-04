@@ -594,6 +594,14 @@ export async function blingCreateSaleOrder(
     ? cartItens
     : [{ produto: { id: Number(productId) || productId }, descricao: itemDescricao, quantidade: bottles, valor: valorUnit }]
 
+  // Desconto do pedido: itens do CARRINHO vêm com preço CHEIO de tabela, mas o valor PAGO
+  // (produtoReais) pode ser menor (Pix 5% off do site, cupom). Sem registrar a diferença como
+  // desconto, o pedido no Bling sai MAIOR que o recebido e trava a conferência do financeiro
+  // (caso Thiago 03/07: pedido R$999,00 vs Pix pago R$949,05). Pago MAIOR que os itens (juros
+  // de cartão embutidos no total) não vira desconto negativo.
+  const itensTotalReais = itens.reduce((s, x) => s + (Number(x.valor) || 0) * (Number(x.quantidade) || 1), 0)
+  const descontoReais = Math.round((itensTotalReais - produtoReais) * 100) / 100
+
   // Data do pedido (YYYY-MM-DD, fuso de Maringá/Brasília). O Bling EXIGE `data` —
   // sem ela recusa com "A data para geração das parcelas é inválida".
   const dataPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
@@ -624,6 +632,7 @@ export async function blingCreateSaleOrder(
     data: dataPedido,
     ...(obs ? { observacoes: obs } : {}),
     ...(freightCents > 0 ? { transporte: { frete: Math.round(freightCents) / 100, fretePorConta: 1 } } : {}),
+    ...(descontoReais > 0.05 ? { desconto: { valor: descontoReais, unidade: 'REAL' } } : {}),
     itens,
   }
   const orderId = await blingCreateOrder(token, payload)
