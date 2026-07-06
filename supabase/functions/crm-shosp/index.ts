@@ -185,8 +185,15 @@ Deno.serve(async (req) => {
   // --- Fase 4: leitura de disponibilidade + escrita (agendar/cancelar/paciente) ---
   if (mode === 'find_patient') {
     const nome = String(body.nome ?? '').trim()
-    if (!nome) return json({ error: 'nome_required' }, 400)
-    const res = await shospSearchPaciente({ nome, cpf: body.cpf as string | undefined, email: body.email as string | undefined })
+    const cpf = String(body.cpf ?? '').replace(/\D/g, '')
+    // Aceita busca por nome OU por cpf sozinho. Mandar os dois juntos faz a Shosp
+    // fazer E (AND) — quem chama decide (o front busca separado pra não zerar).
+    if (!nome && cpf.length < 11) return json({ error: 'nome_or_cpf_required' }, 400)
+    const res = await shospSearchPaciente({
+      nome: nome || undefined,
+      cpf: cpf.length === 11 ? cpf : undefined,
+      email: body.email as string | undefined,
+    })
     return json({ ok: res.ok, status: res.status, data: res.data })
   }
 

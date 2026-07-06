@@ -232,11 +232,14 @@ export async function searchShospPatients(params: { nome: string; cpf?: string }
   }
   if (fromMirror.length) return fromMirror
 
-  // 2) Fallback: Shosp ao vivo. Primeiro o termo completo; se vazio, só as 2 primeiras
-  //    palavras (a busca da Shosp é mais estreita que a do espelho).
-  const liveSearch = async (nome: string): Promise<ShospPatientCandidate[]> => {
+  // 2) Fallback: Shosp ao vivo. IMPORTANTE: a Shosp faz E (AND) entre nome e cpf, então
+  //    mandar os dois juntos procura "alguém com ESTE nome E ESTE cpf" e zera quando o
+  //    nome digitado não é o dono do cpf do lead. Busca por NOME vai só com o nome; o
+  //    cpf entra como busca SEPARADA (via `cpf`, deixando o nome de fora) e o rank()
+  //    destaca depois quem casa cpf/telefone/nascimento com o lead.
+  const liveSearch = async (query: { nome?: string; cpf?: string }): Promise<ShospPatientCandidate[]> => {
     const { data: live, error: liveErr } = await supabase!.functions.invoke('crm-shosp', {
-      body: { mode: 'find_patient', nome, cpf: params.cpf },
+      body: { mode: 'find_patient', ...query },
     })
     if (liveErr) return []
     const res = live as { ok?: boolean; data?: unknown }
@@ -244,8 +247,27 @@ export async function searchShospPatients(params: { nome: string; cpf?: string }
       .map(mapShospCandidate)
       .filter((x): x is ShospPatientCandidate => x !== null)
   }
-  const full = await liveSearch(raw)
-  if (full.length) return full
-  const short = raw.split(/\s+/).slice(0, 2).join(' ')
-  return short && short !== raw ? await liveSearch(short) : []
+
+  const merged: ShospPatientCandidate[] = []
+  const seen = new Set<string>()
+  const add = (list: ShospPatientCandidate[]) => {
+    for (const c of list) {
+      if (!seen.has(c.prontuario)) {
+        seen.add(c.prontuario)
+        merged.push(c)
+      }
+    }
+  }
+
+  // Por CPF do lead (match forte, sem nome) — vem primeiro.
+  if (digits.length === 11) add(await liveSearch({ cpf: digits }))
+  // Por NOME (sem cpf) — traz homônimos; se nada, tenta as 2 primeiras palavras.
+  if (raw.length >= 3) {
+    add(await liveSearch({ nome: raw }))
+    if (!merged.length) {
+      const short = raw.split(/\s+/).slice(0, 2).join(' ')
+      if (short && short !== raw) add(await liveSearch({ nome: short }))
+    }
+  }
+  return merged
 }
