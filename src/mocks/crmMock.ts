@@ -320,6 +320,8 @@ export const pipelines: Pipeline[] = [
       { id: 'consulta', name: 'Consulta agendada' },
       { id: 'acompanhamento', name: 'Acompanhamento' },
       { id: 'fechado', name: 'Encerrado' },
+      { id: 'cancelou-cirurgia', name: 'Cancelou cirurgia' },
+      { id: 'cancelou-protocolo', name: 'Cancelou protocolo' },
     ],
   },
   {

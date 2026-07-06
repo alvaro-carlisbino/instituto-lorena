@@ -165,7 +165,7 @@ export function KanbanLeadCard({
           className="m-0 text-[10px] font-semibold leading-snug text-destructive/90 line-clamp-2"
           title={lead.lost_reason}
         >
-          Perda: {lead.lost_reason}
+          Motivo: {lead.lost_reason}
         </p>
       ) : null}
 

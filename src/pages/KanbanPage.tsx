@@ -68,12 +68,13 @@ export function KanbanPage() {
   const [conversationFilter, setConversationFilter] = useState<ConversationFilterOption>('all')
   const [deliveryFilter, setDeliveryFilter] = useState<'all' | DeliveryKind>('all')
 
-  // Estados para captura de motivo de perda
+  // Estados para captura de motivo de perda/cancelamento
   const [lossDialogOpen, setLossDialogOpen] = useState(false)
   const [pendingMove, setPendingMove] = useState<{
     leadId: string
     targetStageId: string
     patientName: string
+    stageName: string
   } | null>(null)
 
   if (crm.pipelineCatalog.length === 0) crm.ensureStandardKanbanSetup()
@@ -232,15 +233,19 @@ export function KanbanPage() {
     )
   }
 
-  const isClosingStage = (stageId: string) => {
-    const pipeline = crm.selectedPipeline
-    const lastStage = pipeline.stages[pipeline.stages.length - 1]
-    return stageId === lastStage?.id
+  // Etapa "fim de linha" pelo nome/id (Encerrado, Perdido, Cancelou cirurgia/protocolo…).
+  // Etapas de sucesso no fim do funil (ex.: "Alta / concluído") não pedem motivo.
+  const CLOSING_STAGE_RE = /cancelad|cancelou|encerrad|perdid|fechado/i
+  const closingStageFor = (stageId: string) => {
+    const stage = crm.selectedPipeline.stages.find((s) => s.id === stageId)
+    if (!stage) return null
+    return CLOSING_STAGE_RE.test(stage.name) || CLOSING_STAGE_RE.test(stage.id) ? stage : null
   }
 
   const handleLeadMove = (leadId: string, stageId: string, patientName: string) => {
-    if (isClosingStage(stageId)) {
-      setPendingMove({ leadId, targetStageId: stageId, patientName })
+    const closingStage = closingStageFor(stageId)
+    if (closingStage) {
+      setPendingMove({ leadId, targetStageId: stageId, patientName, stageName: closingStage.name })
       setLossDialogOpen(true)
     } else {
       crm.reorderLeadCard(leadId, { stageId, index: 0 })
@@ -442,6 +447,7 @@ export function KanbanPage() {
           open={lossDialogOpen}
           onOpenChange={setLossDialogOpen}
           patientName={pendingMove.patientName}
+          stageName={pendingMove.stageName}
           onConfirm={(reason) => {
             crm.closeLead(pendingMove.leadId, reason, pendingMove.targetStageId)
             setLossDialogOpen(false)

@@ -26,7 +26,7 @@ export function isWorkloadExcludedStageId(stageId: string): boolean {
   if (stageId === 'fechado' || stageId === 'tc-concluido' || stageId === 'cx-alta') {
     return true
   }
-  if (stageId.includes('fechado') || stageId.includes('encerrado')) {
+  if (stageId.includes('fechado') || stageId.includes('encerrado') || stageId.includes('cancel')) {
     return true
   }
   return false

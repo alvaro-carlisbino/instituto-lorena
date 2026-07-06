@@ -560,13 +560,20 @@ export const useCrmState = () => {
       void persistLead(updated)
     }
 
+    const targetStage = pipelineCatalog
+      .find((p) => p.id === targetLead.pipelineId)
+      ?.stages.find((s) => s.id === targetStageId)
+    const isCancellation = targetStage ? /cancel/i.test(targetStage.name) : false
+
     addInteraction({
       leadId: targetLead.id,
       patientName: targetLead.patientName,
       channel: 'system',
       direction: 'system',
-      author: 'Quadro (Encerramento)',
-      content: `Lead encerrado. Motivo: ${reason}`,
+      author: isCancellation ? 'Quadro (Cancelamento)' : 'Quadro (Encerramento)',
+      content: isCancellation
+        ? `${targetStage!.name}. Motivo: ${reason}`
+        : `Lead encerrado. Motivo: ${reason}`,
       happenedAt: new Date().toISOString(),
     })
   }
