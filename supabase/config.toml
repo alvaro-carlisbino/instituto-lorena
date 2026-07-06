@@ -454,3 +454,8 @@ verify_jwt = false
 # Checkout de cartão Asaas (/pagar): página pública do cliente, sem login.
 [functions.crm-asaas-pay]
 verify_jwt = false
+
+# Webhook de Lead Ads da Meta (formulários): a Meta chama com GET (handshake) e POST
+# assinado via X-Hub-Signature-256 (validado no handler) — nunca com JWT do Supabase.
+[functions.crm-meta-leadform-webhook]
+verify_jwt = false
