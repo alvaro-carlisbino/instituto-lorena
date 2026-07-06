@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { Session } from '@supabase/supabase-js'
 import {
@@ -219,6 +219,8 @@ export const useCrmState = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [syncNotice, setSyncNotice] = useState<string>('')
   const [session, setSession] = useState<Session | null>(null)
+  // true enquanto há sessão ativa — detecta o login novo na mesma aba p/ re-sincronizar.
+  const hadSessionRef = useRef(false)
   const [authEmail, setAuthEmail] = useState<string>('')
   const [authPassword, setAuthPassword] = useState<string>('')
   const [authNotice, setAuthNotice] = useState<string>('')
@@ -1978,6 +1980,7 @@ export const useCrmState = () => {
     void getCurrentSession().then(async (currentSession) => {
       setSession(currentSession)
       if (!currentSession) return
+      hadSessionRef.current = true
       try {
         await ensureAppProfile(currentSession)
         await syncForcedAdminRole(currentSession, parseForceAdminEmails())
@@ -1989,7 +1992,16 @@ export const useCrmState = () => {
 
     const subscription = onAuthStateChanged((updatedSession) => {
       setSession(updatedSession)
-      if (!updatedSession) return
+      if (!updatedSession) {
+        hadSessionRef.current = false
+        return
+      }
+      // Login novo na MESMA aba: o sync do mount rodou sem sessão (e falhou), então
+      // sem este re-sync o painel fica preso no catálogo mock até apertar "Atualizar".
+      if (!hadSessionRef.current) {
+        hadSessionRef.current = true
+        void syncFromSupabase()
+      }
       void (async () => {
         try {
           await ensureAppProfile(updatedSession)
