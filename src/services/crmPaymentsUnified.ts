@@ -53,7 +53,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
       .limit(limit),
     supabase
       .from('rede_payments')
-      .select('id, lead_id, amount_cents, description, kit, installments, status, tid, return_code, customer_name, phone, customer_doc, bling_order_id, created_at, paid_at')
+      .select('id, lead_id, method, amount_cents, description, kit, installments, status, tid, return_code, customer_name, phone, customer_doc, bling_order_id, created_at, paid_at')
       .order('created_at', { ascending: false })
       .limit(limit),
     supabase
@@ -98,7 +98,9 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
       const paidAt = rec.paid_at != null ? String(rec.paid_at) : null
       rows.push({
         id: String(rec.id ?? ''),
-        method: 'card',
+        // e.Rede processa cartão E Pix — respeitar a coluna method (antes era 'card' fixo,
+        // e todo Pix da Rede aparecia como Cartão no painel).
+        method: String(rec.method ?? 'card') === 'pix' ? 'pix' : 'card',
         leadId: str(rec.lead_id),
         customerName: str(rec.customer_name),
         phone: str(rec.phone),

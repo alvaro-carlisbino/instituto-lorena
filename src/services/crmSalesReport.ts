@@ -73,6 +73,8 @@ function dayBoundsIso(dateYmd: string): { startIso: string; endIso: string } {
 type RawSale = {
   id: string
   src: 'rede' | 'pagbank'
+  /** Método real do pagamento (e.Rede faz cartão E Pix; PagBank é Pix). */
+  method: 'card' | 'pix'
   leadId: string
   customerName: string
   kit: string
@@ -123,7 +125,7 @@ export async function fetchSalesRowsInRange(startIso: string, endIso: string): P
   const [redeRes, pagRes] = await Promise.all([
     supabase
       .from('rede_payments')
-      .select('id, lead_id, customer_name, kit, amount_cents, freight_cents, discount_cents, coupon_code, installments, status, paid_at, description, bling_order_id, phone')
+      .select('id, lead_id, method, customer_name, kit, amount_cents, freight_cents, discount_cents, coupon_code, installments, status, paid_at, description, bling_order_id, phone')
       .gte('paid_at', startIso)
       .lt('paid_at', endIso),
     supabase
@@ -143,6 +145,7 @@ export async function fetchSalesRowsInRange(startIso: string, endIso: string): P
     raw.push({
       id: String(r.id ?? ''),
       src: 'rede',
+      method: String(r.method ?? 'card') === 'pix' ? 'pix' : 'card',
       leadId: r.lead_id != null ? String(r.lead_id) : '',
       customerName: String(r.customer_name ?? '').trim(),
       kit: r.kit != null ? String(r.kit) : '',
@@ -162,6 +165,7 @@ export async function fetchSalesRowsInRange(startIso: string, endIso: string): P
     raw.push({
       id: String(r.checkout_id ?? ''),
       src: 'pagbank',
+      method: 'pix',
       leadId: r.lead_id != null ? String(r.lead_id) : '',
       customerName: '',
       kit: r.kit != null ? String(r.kit) : '',
@@ -244,7 +248,7 @@ export async function fetchSalesRowsInRange(startIso: string, endIso: string): P
     const info = leadInfo[r.leadId]
     return {
       paidAt: r.paidAt,
-      method: r.src === 'rede' ? 'card' : 'pix',
+      method: r.method,
       customerName: info?.name || r.customerName || 'Cliente',
       product: productOf(r),
       kit: r.kit || '',

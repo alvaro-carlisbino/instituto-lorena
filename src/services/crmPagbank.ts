@@ -78,7 +78,7 @@ export async function fetchPagbankCheckouts(limit = 50): Promise<PagbankCheckout
       .limit(limit),
     supabase
       .from('rede_payments')
-      .select('id, lead_id, amount_cents, kit, status, created_at, paid_at, customer_name')
+      .select('id, lead_id, method, amount_cents, kit, status, created_at, paid_at, customer_name')
       .order('created_at', { ascending: false })
       .limit(limit),
   ])
@@ -120,7 +120,7 @@ export async function fetchPagbankCheckouts(limit = 50): Promise<PagbankCheckout
         createdAt: String(rec.created_at ?? ''),
         paidAt,
         customerName: rec.customer_name != null && String(rec.customer_name).trim() ? String(rec.customer_name) : null,
-        method: 'card',
+        method: String(rec.method ?? 'card') === 'pix' ? 'pix' : 'card',
       })
     }
   }
