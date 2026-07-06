@@ -33,6 +33,11 @@ import {
   Gauge,
   Stethoscope,
   Layers,
+  ClipboardList,
+  CalendarClock,
+  Warehouse,
+  PackageCheck,
+  ClipboardCheck,
 } from 'lucide-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
@@ -182,6 +187,23 @@ export function AppSidebar() {
                 <NavItem to="/tricopill-financeiro" label="Recebimentos" icon={Wallet} />
                 <NavItem to="/tricopill-relatorios" label="Relatórios" icon={FileSpreadsheet} />
                 <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} />
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
+
+        {showBoards ? (
+          <SidebarGroup>
+            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+              Estoque e compras
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                <NavItem to="/estoque" label="Estoque" icon={Warehouse} />
+                <NavItem to="/compras" label="Ordens de compra" icon={ClipboardList} />
+                <NavItem to="/contas-a-pagar" label="Contas a pagar" icon={CalendarClock} />
+                <NavItem to="/inventario" label="Inventário" icon={ClipboardCheck} />
+                {isClinicPolo ? <NavItem to="/kits" label="Kits cirúrgicos" icon={PackageCheck} /> : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

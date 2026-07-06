@@ -47,6 +47,11 @@ import { AdminOperationsPage } from './pages/AdminOperationsPage'
 import { TenantsAdminPage } from './pages/TenantsAdminPage'
 import { WhatsappConnectionPage } from './pages/WhatsappConnectionPage'
 import { AgendaPage } from './pages/AgendaPage'
+import { EstoquePage } from './pages/EstoquePage'
+import { ComprasPage } from './pages/ComprasPage'
+import { ContasPagarPage } from './pages/ContasPagarPage'
+import { KitsPage } from './pages/KitsPage'
+import { InventarioPage } from './pages/InventarioPage'
 import { CommandPalette } from './components/CommandPalette'
 import { RouteTransition } from './components/RouteTransition'
 import { SidebarProvider } from '@/components/ui/sidebar'
@@ -68,6 +73,11 @@ function AppRoutes() {
       <Route path="/leads/:leadId/venda" element={<LeadSalePage />} />
       <Route path="/tarefas" element={<TasksPage />} />
       <Route path="/agenda" element={<AgendaPage />} />
+      <Route path="/estoque" element={<EstoquePage />} />
+      <Route path="/compras" element={<ComprasPage />} />
+      <Route path="/contas-a-pagar" element={<ContasPagarPage />} />
+      <Route path="/kits" element={<KitsPage />} />
+      <Route path="/inventario" element={<InventarioPage />} />
       <Route path="/chat" element={<ChatWorkspacePage />} />
       <Route path="/tricopill" element={<TricopilPage />} />
       <Route path="/tricopill-bi" element={<TricopilDashboardPage />} />
