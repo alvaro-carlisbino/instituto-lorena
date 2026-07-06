@@ -167,6 +167,23 @@ Deno.serve(async (req) => {
           body: note.slice(0, 180), includeOwner: false, tenantId,
         })
       } catch { /* ignore */ }
+      // Endereço usado na etiqueta é o mais confiável (operador acabou de despachar pra ele):
+      // grava em custom_fields.entrega pro cadastro do lead nunca ficar sem rua.
+      try {
+        const { data: lead } = await admin.from('leads').select('custom_fields').eq('id', leadId).maybeSingle()
+        const cf = { ...(((lead as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>) }
+        const ent = { ...((cf.entrega ?? {}) as Record<string, unknown>) }
+        const cepDigits = String(to.postalCode ?? '').replace(/\D/g, '')
+        if (cepDigits.length === 8) ent.cep = cepDigits
+        if (to.address) ent.logradouro = to.address
+        if (to.number) ent.numero = to.number
+        if (to.complement) ent.complemento = to.complement
+        if (to.district) ent.bairro = to.district
+        if (to.city) ent.cidade = to.city
+        if (to.stateAbbr) ent.uf = String(to.stateAbbr).toUpperCase()
+        cf.entrega = ent
+        await admin.from('leads').update({ custom_fields: cf }).eq('id', leadId)
+      } catch { /* ignore */ }
     }
 
     // E-mail de rastreio ao cliente quando a etiqueta foi GERADA pelo sistema (best-effort).
