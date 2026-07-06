@@ -199,6 +199,9 @@ Deno.serve(async (req) => {
           score: 70,
           attribution,
           tenantId,
+          // Lead de formulário entra na fila de contato ATIVO (etapa "📞 Ligar — Formulário",
+          // SLA 15min no board_config) — só na criação; lead existente não muda de etapa.
+          ...(tenantId === 'instituto-lorena' ? { pipelineId: 'pipeline-clinica', stageId: 'ligar-formulario' } : {}),
           customFields: { lead_form: { leadgen_id: leadgenId, form_id: String(lead.form_id ?? ''), ...(email ? { email } : {}), respostas: answers } },
         })
         const resumo = Object.entries(answers).map(([k, v]) => `• ${k}: ${v}`).join('\n')

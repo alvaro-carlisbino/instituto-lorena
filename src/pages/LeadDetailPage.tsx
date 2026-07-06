@@ -35,7 +35,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { businessHoursFromAiConfig } from '@/lib/aiTypingIndicator'
 import { getSourceStyle } from '@/lib/channelStyles'
 import { needsShippingAddress } from '@/lib/deliveryType'
-import { isLeadWhatsappComposeBlocked, workflowFieldsForContext } from '@/lib/leadFields'
+import { getLeadPhoneDisplay, isLeadWhatsappComposeBlocked, workflowFieldsForContext } from '@/lib/leadFields'
 import { labelForIdName } from '@/lib/selectDisplay'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
@@ -350,7 +350,21 @@ export function LeadDetailPage() {
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label className="text-xs">Telefone principal</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-xs">Telefone principal</Label>
+                    {getLeadPhoneDisplay(lead).isReal ? (
+                      <a
+                        href={`https://wa.me/${String(lead.phone).replace(/\D/g, '')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-500/25 hover:bg-emerald-500/20 dark:text-emerald-300"
+                        title="Abrir conversa no WhatsApp com este número (lead de formulário não chega conversando — chame ativamente)"
+                      >
+                        💬 Chamar no WhatsApp
+                      </a>
+                    ) : null}
+                  </div>
                   <Input
                     value={lead.phone}
                     onChange={(e) => crm.persistLeadPatch({ ...lead, phone: e.target.value })}
