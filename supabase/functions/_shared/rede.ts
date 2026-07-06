@@ -449,7 +449,15 @@ function buildConfirmMsg(a: { nome?: string; cad: Record<string, unknown>; ent: 
   const faltam: string[] = []
   if (!hasNome) faltam.push('seu *nome completo*')
   if (!hasCpf) faltam.push('seu *CPF*')
-  if (!hasEnd) faltam.push('seu *endereço completo* (CEP, rua, número, bairro e cidade)')
+  // Pede SÓ o que falta de verdade: com CEP ok (rua/bairro/cidade o sistema resolve
+  // sozinho pelo ViaCEP), falta só o número — pedir "endereço completo" de novo é atrito.
+  if (!hasEnd) {
+    faltam.push(
+      cep.length === 8
+        ? 'o *número* do seu endereço (e complemento, se tiver)'
+        : 'seu *endereço completo* (CEP, rua, número, bairro e cidade)',
+    )
+  }
   if (faltam.length) {
     return `${header}\n\nPra preparar seu envio e emitir a nota fiscal, preciso confirmar: ${faltam.join(', ')}. Pode me mandar aqui, por favor? 💚`
   }
