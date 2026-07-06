@@ -541,7 +541,13 @@ export function LeadDetailPage() {
             })()}
 
             {crm.currentPermission.canRouteLeads && crm.dataMode === 'supabase' ? (
-              <ShospLinkSection leadId={lead.id} leadName={lead.patientName} />
+              <ShospLinkSection
+                leadId={lead.id}
+                leadName={lead.patientName}
+                leadPhone={lead.phone}
+                leadCpf={String((lead.customFields?.cadastro as Record<string, unknown> | undefined)?.cpf ?? '') || undefined}
+                leadNascimento={String((lead.customFields?.cadastro as Record<string, unknown> | undefined)?.dataNascimento ?? '') || undefined}
+              />
             ) : null}
 
             {crm.currentPermission.canRouteLeads && otherPipelines.length > 0 ? (

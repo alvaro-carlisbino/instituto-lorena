@@ -205,28 +205,47 @@ export async function searchShospPatients(params: { nome: string; cpf?: string }
   const raw = String(params.nome ?? '').trim()
   const digits = String(params.cpf ?? raw).replace(/\D/g, '')
 
-  // 1) Espelho local (confiável e tolerante a nome parcial/fora de ordem)
-  let q = supabase.from('shosp_patients').select('prontuario, nome, cpf, celular, telefone, payload').limit(25)
+  // 1) Espelho local. Nome via RPC search_shosp_patients (unaccent: "joao" acha "João",
+  //    tokens em qualquer ordem/parcial); CPF direto na coluna.
+  const fromMirror: ShospPatientCandidate[] = []
   if (digits.length >= 6) {
-    q = q.ilike('cpf', `%${digits}%`)
-  } else {
-    const tokens = raw.split(/\s+/).filter((t) => t.length >= 2).slice(0, 6)
-    for (const t of tokens) q = q.ilike('nome', `%${t}%`)
+    const { data, error } = await supabase
+      .from('shosp_patients')
+      .select('prontuario, nome, cpf, celular, telefone, payload')
+      .ilike('cpf', `%${digits}%`)
+      .limit(25)
+    if (error) throw new Error(error.message)
+    fromMirror.push(
+      ...((data ?? []) as Record<string, unknown>[])
+        .map(mapShospCandidate)
+        .filter((x): x is ShospPatientCandidate => x !== null),
+    )
   }
-  const { data, error } = await q
-  if (error) throw new Error(error.message)
-  const fromMirror = ((data ?? []) as Record<string, unknown>[])
-    .map(mapShospCandidate)
-    .filter((x): x is ShospPatientCandidate => x !== null)
+  if (!fromMirror.length && raw.length >= 3) {
+    const { data, error } = await supabase.rpc('search_shosp_patients', { q: raw })
+    if (error) throw new Error(error.message)
+    fromMirror.push(
+      ...((data ?? []) as Record<string, unknown>[])
+        .map(mapShospCandidate)
+        .filter((x): x is ShospPatientCandidate => x !== null),
+    )
+  }
   if (fromMirror.length) return fromMirror
 
-  // 2) Fallback: Shosp ao vivo (nome como cadastrado lá). Erro aqui não derruba a busca.
-  const { data: live, error: liveErr } = await supabase.functions.invoke('crm-shosp', {
-    body: { mode: 'find_patient', nome: raw, cpf: params.cpf },
-  })
-  if (liveErr) return []
-  const res = live as { ok?: boolean; data?: unknown }
-  return shospDadosArray(res?.data)
-    .map(mapShospCandidate)
-    .filter((x): x is ShospPatientCandidate => x !== null)
+  // 2) Fallback: Shosp ao vivo. Primeiro o termo completo; se vazio, só as 2 primeiras
+  //    palavras (a busca da Shosp é mais estreita que a do espelho).
+  const liveSearch = async (nome: string): Promise<ShospPatientCandidate[]> => {
+    const { data: live, error: liveErr } = await supabase!.functions.invoke('crm-shosp', {
+      body: { mode: 'find_patient', nome, cpf: params.cpf },
+    })
+    if (liveErr) return []
+    const res = live as { ok?: boolean; data?: unknown }
+    return shospDadosArray(res?.data)
+      .map(mapShospCandidate)
+      .filter((x): x is ShospPatientCandidate => x !== null)
+  }
+  const full = await liveSearch(raw)
+  if (full.length) return full
+  const short = raw.split(/\s+/).slice(0, 2).join(' ')
+  return short && short !== raw ? await liveSearch(short) : []
 }

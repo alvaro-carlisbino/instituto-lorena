@@ -32,6 +32,15 @@ function cleanName(s: unknown): string {
     .replace(/\s+/g, ' ')
     .trim()
 }
+/** Data → chave comparável AAAA-MM-DD. Aceita DD/MM/AAAA (cadastro) e AAAA-MM-DD (Shosp). */
+function dateKey(s: unknown): string {
+  const v = String(s ?? '').trim()
+  let m = v.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/)
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
+  m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+  return ''
+}
 
 /** Extrai a lista de `dados`, lidando com array OU objeto-por-código. */
 function dadosArray(data: unknown): Record<string, unknown>[] {
@@ -171,6 +180,66 @@ export async function matchLeadsToPatients(admin: SupabaseClient, limit = 15): P
       continue
     }
     const hit = candidates.find((c) => digits(c.cpf) === cpfDigits)
+    if (!hit) continue
+    const prontuario = String(hit.prontuario ?? hit.codigo ?? '').trim()
+    if (!prontuario) continue
+
+    await admin.from('shosp_patients').upsert(
+      {
+        prontuario,
+        nome: hit.nome != null ? String(hit.nome) : null,
+        cpf: hit.cpf != null ? String(hit.cpf) : null,
+        celular: hit.celular != null ? String(hit.celular) : null,
+        telefone: hit.telefone != null ? String(hit.telefone) : null,
+        email: hit.email != null ? String(hit.email) : null,
+        lead_id: lead.id,
+        payload: hit,
+        synced_at: nowIso(),
+      },
+      { onConflict: 'prontuario' },
+    )
+    await admin.from('leads').update({ shosp_prontuario: prontuario }).eq('id', lead.id)
+    matched++
+  }
+
+  // Pass 3: leads com DATA DE NASCIMENTO no cadastro (o CPF nem sempre é ditado, e o
+  // telefone sintético não casa). Nome (busca) + nascimento igual identifica com
+  // segurança; se o candidato tiver CPF cadastrado E o lead também, os dois ainda
+  // precisam bater — nunca vincula contra evidência.
+  const { data: nascLeads } = await admin
+    .from('leads')
+    .select('id, patient_name, custom_fields')
+    .is('deleted_at', null)
+    .is('shosp_prontuario', null)
+    .not('custom_fields->cadastro->>dataNascimento', 'is', null)
+    .order('last_interaction_at', { ascending: false, nullsFirst: false })
+    .limit(limit)
+
+  for (const lead of (nascLeads ?? []) as Array<{
+    id: string
+    patient_name: string
+    custom_fields: Record<string, unknown> | null
+  }>) {
+    checked++
+    const cadastro = (lead.custom_fields?.cadastro ?? {}) as Record<string, unknown>
+    const nascKey = dateKey(cadastro.dataNascimento)
+    if (!nascKey) continue
+    const leadCpf = digits(cadastro.cpf)
+    const baseName = cleanName(cadastro.nomeCompleto ?? lead.patient_name)
+    if (baseName.length < 3) continue
+    const searchName = baseName.split(' ').slice(0, 2).join(' ')
+
+    let candidates: Record<string, unknown>[] = []
+    try {
+      candidates = dadosArray((await shospSearchPaciente({ nome: searchName })).data)
+    } catch {
+      continue
+    }
+    const hit = candidates.find((c) => {
+      if (dateKey(c.dataNascimento ?? c.nascimento) !== nascKey) return false
+      const candCpf = digits(c.cpf)
+      return !(leadCpf.length === 11 && candCpf.length === 11 && candCpf !== leadCpf)
+    })
     if (!hit) continue
     const prontuario = String(hit.prontuario ?? hit.codigo ?? '').trim()
     if (!prontuario) continue
