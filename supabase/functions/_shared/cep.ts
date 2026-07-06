@@ -37,6 +37,28 @@ export async function resolveCepBrasil(rawCep: string): Promise<CepInfo | null> 
 }
 
 /**
+ * Completa rua/bairro/cidade/UF de um endereço a partir do CEP (ViaCEP), preenchendo
+ * SÓ o que falta — nunca sobrescreve o que o cliente informou. Cliente manda "CEP +
+ * número" e o resto vem daqui; sem isso o endereço ficava salvo só com o número
+ * (caso Marcia 06/jul). CEP "geral" (sem logradouro no ViaCEP) segue sem rua — quem
+ * chama decide se pede a rua ao cliente.
+ */
+export async function enrichEnderecoViaCep<T extends Record<string, unknown>>(end: T): Promise<T> {
+  const digits = String(end.cep ?? '').replace(/\D/g, '')
+  if (digits.length !== 8) return end
+  const has = (k: string) => Boolean(String(end[k] ?? '').trim())
+  if (has('logradouro') && has('bairro') && has('cidade') && has('uf')) return end
+  const info = await resolveCepBrasil(digits)
+  if (!info) return end
+  const out: Record<string, unknown> = { ...end }
+  if (!has('logradouro') && info.logradouro) out.logradouro = info.logradouro
+  if (!has('bairro') && info.bairro) out.bairro = info.bairro
+  if (!has('cidade') && info.localidade) out.cidade = info.localidade
+  if (!has('uf') && info.uf) out.uf = info.uf
+  return out as T
+}
+
+/**
  * Maringá-PR = praça local: a entrega é INTERNA (própria/motoboy), não vai pelos
  * Correios. Detecta pela cidade (ViaCEP), não pelo número do CEP. Aceita a forma
  * com e sem acento (ViaCEP devolve "Maringá").

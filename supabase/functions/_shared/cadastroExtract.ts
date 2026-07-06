@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { enrichEnderecoViaCep } from './cep.ts'
 
 // LLM = mesma config do resto do CRM: Z.ai (GLM) por env, com fallback OpenAI.
 function normalizeApiRoot(raw: string): string {
@@ -163,6 +164,16 @@ export async function captureCadastroForLead(
           entrega[k] = v
           changed = true
         }
+      }
+    }
+    // Rua/bairro/cidade/UF que o cliente não ditou vêm do ViaCEP pelo CEP — sem isso o
+    // endereço fica gravado só com CEP + número.
+    if (entrega.cep) {
+      const antes = JSON.stringify(entrega)
+      const cheio = await enrichEnderecoViaCep(entrega)
+      if (JSON.stringify(cheio) !== antes) {
+        Object.assign(entrega, cheio)
+        changed = true
       }
     }
     if (!changed) return null

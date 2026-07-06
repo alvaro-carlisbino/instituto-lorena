@@ -824,7 +824,7 @@ export async function autoShipToCart(
       phone: opts.lead.phone ? String(opts.lead.phone) : undefined,
       document: cad.cpf || undefined,
       postalCode: cep,
-      address: cityInfo.logradouro || String(entrega.address ?? entrega.rua ?? '').trim(),
+      address: cityInfo.logradouro || String(entrega.logradouro ?? entrega.address ?? entrega.rua ?? '').trim(),
       number: numero,
       complement: String(entrega.complemento ?? entrega.complement ?? '').trim() || undefined,
       district: cityInfo.bairro || String(entrega.bairro ?? '').trim(),

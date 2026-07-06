@@ -7,7 +7,7 @@ import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.
 import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
-import { resolveCepBrasil } from './cep.ts'
+import { enrichEnderecoViaCep, resolveCepBrasil } from './cep.ts'
 
 /** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
 const DELIVERY_MODES = ['retirada_clinica', 'entrega_local_maringa', 'envio_externo'] as const
@@ -104,19 +104,28 @@ async function persistEntrega(
     const cep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
     const str = (v: unknown) => (v == null ? undefined : String(v).trim() || undefined)
 
+    // CEP novo ≠ CEP já gravado → rua/bairro/cidade/UF antigos pertencem ao endereço velho;
+    // não podem ser herdados (viram endereço "Frankenstein").
+    const prevCep = String(prev.cep ?? '').replace(/\D/g, '')
+    const cepMudou = cep.length === 8 && prevCep.length === 8 && cep !== prevCep
+    const base = cepMudou ? { ...prev, logradouro: undefined, bairro: undefined, cidade: undefined, uf: undefined } : prev
+
     // ENTREGA: só sobrescreve campos que vieram no op (merge — nunca apaga o já capturado).
-    const entrega: EntregaSnapshot = {
-      ...prev,
+    let entrega: EntregaSnapshot = {
+      ...base,
       ...(cep.length === 8 ? { cep } : {}),
-      numero: str(op.to_number) ?? prev.numero,
-      complemento: str(op.to_complement) ?? prev.complemento,
-      bairro: str(op.to_neighborhood ?? op.to_bairro) ?? prev.bairro,
-      logradouro: str(op.to_street ?? op.to_logradouro ?? op.to_address) ?? prev.logradouro,
-      cidade: str(op.to_city ?? op.to_cidade) ?? prev.cidade,
-      uf: (str(op.to_uf ?? op.to_state) ?? (prev.uf as string | undefined))?.toUpperCase(),
-      service: str(op.freight_service) ?? prev.service,
-      delivery_mode: normalizeDeliveryMode(op.delivery_mode ?? op.to_delivery_mode) || prev.delivery_mode,
+      numero: str(op.to_number) ?? base.numero,
+      complemento: str(op.to_complement) ?? base.complemento,
+      bairro: str(op.to_neighborhood ?? op.to_bairro) ?? base.bairro,
+      logradouro: str(op.to_street ?? op.to_logradouro ?? op.to_address) ?? base.logradouro,
+      cidade: str(op.to_city ?? op.to_cidade) ?? base.cidade,
+      uf: (str(op.to_uf ?? op.to_state) ?? (base.uf as string | undefined))?.toUpperCase(),
+      service: str(op.freight_service) ?? base.service,
+      delivery_mode: normalizeDeliveryMode(op.delivery_mode ?? op.to_delivery_mode) || base.delivery_mode,
     }
+    // Cliente manda só "CEP + número" — rua/bairro/cidade/UF vêm do ViaCEP (senão o
+    // endereço fica salvo só com o número).
+    entrega = await enrichEnderecoViaCep(entrega)
 
     // CADASTRO completo (NF-e): nome, CPF, telefone, e-mail, nascimento, sexo — merge quando vierem no op.
     const cpf = String(op.to_cpf ?? op.cpf ?? '').replace(/\D/g, '')
@@ -161,11 +170,15 @@ function validateOrderReadiness(
   const cpf = String(cadastro.cpf ?? '').replace(/\D/g, '')
   const cep = String(entrega.cep ?? '').replace(/\D/g, '')
   const numero = String(entrega.numero ?? '').trim()
+  const logradouro = String(entrega.logradouro ?? '').trim()
   if (nome.split(/\s+/).filter(Boolean).length < 2) missing.push('nome completo')
   if (telefone.length < 10) missing.push('telefone com DDD')
   if (cpf.length !== 11) missing.push('CPF')
   if (cep.length !== 8) missing.push('CEP')
   if (!numero) missing.push('número do endereço')
+  // Rua: o ViaCEP preenche sozinho em persistEntrega; só chega vazio quando o CEP é
+  // "geral" (cidade inteira/rural) — aí a IA precisa pedir a rua ao cliente.
+  if (!logradouro) missing.push('nome da rua (o CEP não identifica a rua sozinho)')
   return { ok: missing.length === 0, missing }
 }
 
