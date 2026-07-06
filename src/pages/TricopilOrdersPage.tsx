@@ -18,6 +18,7 @@ import {
   classifyDelivery,
   DELIVERY_FILTER_OPTIONS,
   getShipStatus,
+  needsShippingAddress,
   shipStatusLabel,
   SHIP_STATUS_OPTIONS,
   type DeliveryKind,
@@ -343,7 +344,25 @@ export function TricopilOrdersPage() {
                       <span className={cn(PILL, sm.cls)}>{sm.label}</span>
                       {p.paidAt ? <div className="mt-1 text-[10px] text-muted-foreground">{shortDateTime(p.paidAt)}</div> : null}
                     </TableCell>
-                    <TableCell><span className={cn(PILL, dm.cls)}>{dm.label}</span></TableCell>
+                    <TableCell>
+                      <span className={cn(PILL, dm.cls)}>{dm.label}</span>
+                      {lead && needsShippingAddress(lead) ? (
+                        <div className="mt-1">
+                          <a
+                            href={p.phone ? `https://wa.me/${String(p.phone).replace(/\D/g, '')}?text=${encodeURIComponent('Oi! Pra despachar seu Tricopill só falta o número do seu endereço 😊 Pode me mandar? ')}` : undefined}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={cn(
+                              'inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-300',
+                              p.phone ? 'hover:bg-amber-500/25' : 'pointer-events-none',
+                            )}
+                            title="Endereço incompleto pro envio (falta CEP ou número). Clique pra pedir no WhatsApp."
+                          >
+                            ⚠️ Falta nº — pedir
+                          </a>
+                        </div>
+                      ) : null}
+                    </TableCell>
                     <TableCell>
                       {p.leadId ? (
                         <select

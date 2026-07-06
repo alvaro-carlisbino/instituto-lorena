@@ -87,9 +87,12 @@ export function classifyDelivery(lead: Pick<Lead, 'customFields'>): DeliveryClas
   if (mode === 'entrega_local_maringa') return make('motoboy')
   if (mode === 'envio_externo') return make('correios')
 
-  // Sem modo explícito: infere pelo CEP (Maringá → motoboy). Fora isso, não informado.
+  // Sem modo explícito: infere pelo CEP. Maringá/região → motoboy; QUALQUER outro CEP
+  // válido → envio externo (Correios/Melhor Envio) — é a mesma regra do backend
+  // (fora da praça local = externo). "Não informado" fica só pra quem não tem nem CEP.
   const cep = String(ent.cep ?? cad.cep ?? '').replace(/\D/g, '')
   if (isMaringaRegionCep(cep)) return make('motoboy', true)
+  if (cep.length === 8) return make('correios', true)
   return make('desconhecido')
 }
 
