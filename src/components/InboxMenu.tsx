@@ -216,6 +216,8 @@ export function InboxMenu() {
           items.map((i) => {
             const isUrgent = URGENT_KINDS.has(i.kind)
             const leadId = typeof i.metadata?.leadId === 'string' ? i.metadata.leadId : null
+            // Notificações sem lead (ex.: alertas de estoque) podem levar a uma rota interna.
+            const route = !leadId && typeof i.metadata?.route === 'string' ? i.metadata.route : null
             return (
               <DropdownMenuItem
                 key={i.id}
@@ -243,6 +245,20 @@ export function InboxMenu() {
                       }}
                     >
                       Atender
+                    </Button>
+                  ) : null}
+                  {route ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 text-xs"
+                      onClick={() => {
+                        setOpen(false)
+                        navigate(route)
+                        if (!i.readAt) void markInboxItemRead(i.id).then(load)
+                      }}
+                    >
+                      Ver
                     </Button>
                   ) : null}
                   {!i.readAt ? (
