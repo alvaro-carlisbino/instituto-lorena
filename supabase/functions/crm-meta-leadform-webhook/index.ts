@@ -43,6 +43,19 @@ function normalizeBrPhone(raw: string): string {
 
 type FieldData = { name?: string; values?: unknown[] }
 
+/** Auditoria: registra TODA entrega da Meta em meta_leadgen_events (best-effort, nunca quebra). */
+async function logEvent(
+  admin: ReturnType<typeof createClient>,
+  ev: { leadgenId: string; pageId?: string; formId?: string; status: string; leadId?: string; detail?: string },
+): Promise<void> {
+  try {
+    await admin.from('meta_leadgen_events').insert({
+      leadgen_id: ev.leadgenId, page_id: ev.pageId ?? null, form_id: ev.formId ?? null,
+      status: ev.status, lead_id: ev.leadId ?? null, detail: (ev.detail ?? '').slice(0, 500) || null,
+    })
+  } catch { /* auditoria nunca derruba o webhook */ }
+}
+
 function pickField(fields: FieldData[], ...keys: string[]): string {
   for (const k of keys) {
     const f = fields.find((x) => String(x.name ?? '').toLowerCase().includes(k))
@@ -106,10 +119,12 @@ Deno.serve(async (req) => {
       const value = (change.value ?? {}) as Record<string, unknown>
       const leadgenId = String(value.leadgen_id ?? '').trim()
       const pageId = String(value.page_id ?? entry.id ?? '').trim()
+      const formIdRaw = String(value.form_id ?? '').trim()
       if (!leadgenId) continue
 
       if (!pageToken) {
         console.error(`[meta-leadform] lead ${leadgenId} recebido mas META_PAGE_TOKEN ausente — não dá pra buscar os dados`)
+        await logEvent(admin, { leadgenId, pageId, formId: formIdRaw, status: 'sem_page_token' })
         results.push({ leadgenId, ok: false, reason: 'sem_page_token' })
         continue
       }
@@ -123,12 +138,14 @@ Deno.serve(async (req) => {
         const data = (await res.json()) as Record<string, unknown>
         if (!res.ok) {
           console.error(`[meta-leadform] Graph ${leadgenId} falhou: ${JSON.stringify(data).slice(0, 300)}`)
+          await logEvent(admin, { leadgenId, pageId, formId: formIdRaw, status: 'graph_error', detail: JSON.stringify(data).slice(0, 400) })
           results.push({ leadgenId, ok: false, reason: 'graph_error' })
           continue
         }
         lead = data
       } catch (e) {
         console.error(`[meta-leadform] Graph ${leadgenId} exception: ${e instanceof Error ? e.message : e}`)
+        await logEvent(admin, { leadgenId, pageId, formId: formIdRaw, status: 'graph_exception', detail: e instanceof Error ? e.message : String(e) })
         results.push({ leadgenId, ok: false, reason: 'graph_exception' })
         continue
       }
@@ -141,6 +158,7 @@ Deno.serve(async (req) => {
 
       if (phone.length < 10) {
         console.error(`[meta-leadform] lead ${leadgenId} sem telefone utilizável ("${phoneRaw}") — não criado. Campos: ${JSON.stringify(fields).slice(0, 300)}`)
+        await logEvent(admin, { leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw), status: 'skipped_sem_telefone', detail: `nome="${nome}" phoneRaw="${phoneRaw}"` })
         results.push({ leadgenId, ok: false, reason: 'sem_telefone' })
         continue
       }
@@ -188,9 +206,11 @@ Deno.serve(async (req) => {
           content: `📋 Formulário recebido${campaignName ? ` (campanha: ${campaignName}` : ''}${adName ? ` · anúncio: ${adName}` : ''}${campaignName ? ')' : ''}\n${resumo}`.slice(0, 1500),
           tenantId,
         }).catch(() => {})
+        await logEvent(admin, { leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw), status: `lead_${up.status}`, leadId: up.leadId, detail: `${nome} | campanha=${campaignName || '-'}` })
         results.push({ leadgenId, ok: true, leadId: up.leadId, status: up.status })
       } catch (e) {
         console.error(`[meta-leadform] upsert ${leadgenId} falhou: ${e instanceof Error ? e.message : e}`)
+        await logEvent(admin, { leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw), status: 'upsert_failed', detail: e instanceof Error ? e.message : String(e) })
         results.push({ leadgenId, ok: false, reason: 'upsert_failed' })
       }
     }
