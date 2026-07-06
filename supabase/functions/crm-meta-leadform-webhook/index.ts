@@ -1,5 +1,6 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
+import { notifyAgents } from '../_shared/notifyAgents.ts'
 import type { LeadAttribution } from '../_shared/attribution.ts'
 
 // Frente B da atribuição Meta: LEAD ADS (formulário dentro do Facebook/Instagram).
@@ -45,7 +46,7 @@ type FieldData = { name?: string; values?: unknown[] }
 
 /** Auditoria: registra TODA entrega da Meta em meta_leadgen_events (best-effort, nunca quebra). */
 async function logEvent(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseClient,
   ev: { leadgenId: string; pageId?: string; formId?: string; status: string; leadId?: string; detail?: string },
 ): Promise<void> {
   try {
@@ -207,6 +208,17 @@ Deno.serve(async (req) => {
           tenantId,
         }).catch(() => {})
         await logEvent(admin, { leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw), status: `lead_${up.status}`, leadId: up.leadId, detail: `${nome} | campanha=${campaignName || '-'}` })
+        // Lead de formulário NÃO chega conversando — o time precisa chamar ATIVAMENTE.
+        // Notificação in-app na hora, com o WhatsApp pronto pra ação.
+        await notifyAgents(admin, {
+          leadId: up.leadId,
+          kind: 'info',
+          title: '📋 Lead de formulário Meta — chamar AGORA',
+          body: `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio — quanto antes o contato, maior a conversão.`,
+          includeOwner: true,
+          tenantId,
+          metadata: { dedupeKey: `leadform-${leadgenId}` },
+        }).catch(() => {})
         results.push({ leadgenId, ok: true, leadId: up.leadId, status: up.status })
       } catch (e) {
         console.error(`[meta-leadform] upsert ${leadgenId} falhou: ${e instanceof Error ? e.message : e}`)
