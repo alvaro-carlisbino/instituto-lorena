@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDownRight, ArrowUpRight, BotIcon, CalendarCheck2, TrendingUp, UsersIcon } from 'lucide-react'
+import { ArrowDownRight, ArrowUpRight, BotIcon, CalendarCheck2, CalendarX2, Link2, TrendingUp, UsersIcon } from 'lucide-react'
 
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
@@ -7,6 +7,7 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { sourceLabel } from '@/mocks/crmMock'
 import {
   fetchLeadIdsWithAppointment,
+  fetchLeadIdsWithShospLink,
   fetchShospAppointmentsBetween,
   type ShospApptRow,
 } from '@/services/analytics'
@@ -132,23 +133,37 @@ export function DashboardKpiSection() {
   const [range, setRange] = useState<RangeKey>('7d')
   const [appts, setAppts] = useState<ShospApptRow[]>([])
   const [linkedLeadIds, setLinkedLeadIds] = useState<Set<string>>(new Set())
+  const [shospLinkedIds, setShospLinkedIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Agenda Shosp é dado da CLÍNICA: no polo de vendas (Tricopill) nem busca nem
+  // mostra os cards de consulta (a RLS também bloqueia p/ quem é só do polo vendas).
+  const isSalesPolo = tenant.poloType === 'sales'
 
   const win = useMemo(() => windowFor(range), [range])
 
   useEffect(() => {
+    if (isSalesPolo) {
+      setAppts([])
+      setLinkedLeadIds(new Set())
+      setLoading(false)
+      setError(null)
+      return
+    }
     let cancelled = false
     setLoading(true)
     setError(null)
     Promise.all([
       fetchShospAppointmentsBetween(ymd(win.prevStart), ymd(win.end)),
       fetchLeadIdsWithAppointment(),
+      fetchLeadIdsWithShospLink(),
     ])
-      .then(([rows, linked]) => {
+      .then(([rows, linked, shospLinked]) => {
         if (cancelled) return
         setAppts(rows)
         setLinkedLeadIds(linked)
+        setShospLinkedIds(shospLinked)
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Falha ao carregar a agenda.')
@@ -159,30 +174,36 @@ export function DashboardKpiSection() {
     return () => {
       cancelled = true
     }
-  }, [win])
+  }, [win, isSalesPolo])
 
   // Consultas (agenda real da clínica) — atual vs período anterior.
   const apptCurr = useMemo(() => bucketAppts(appts, ymd(win.start), ymd(win.end)), [appts, win])
+  const apptPrev = useMemo(() => bucketAppts(appts, ymd(win.prevStart), ymd(win.prevEnd)), [appts, win])
 
-  // Leads (já escopados por polo via RLS) criados na janela.
+  // Leads criados na janela — filtrados pelo polo ATIVO (crm.leads traz os dois
+  // polos via RLS p/ quem é multi-polo; mesmo isolamento já usado na Saúde da IA).
   const startMs = win.start.getTime()
   const endMs = win.end.getTime()
   const prevStartMs = win.prevStart.getTime()
   const prevEndMs = win.prevEnd.getTime()
 
+  const poloLeads = useMemo(
+    () => crm.leads.filter((l) => !l.tenantId || l.tenantId === tenant.id),
+    [crm.leads, tenant.id],
+  )
   const novosCurr = useMemo(
-    () => crm.leads.filter((l) => {
+    () => poloLeads.filter((l) => {
       const t = new Date(l.createdAt).getTime()
       return t >= startMs && t <= endMs
     }),
-    [crm.leads, startMs, endMs],
+    [poloLeads, startMs, endMs],
   )
   const novosPrev = useMemo(
-    () => crm.leads.filter((l) => {
+    () => poloLeads.filter((l) => {
       const t = new Date(l.createdAt).getTime()
       return t >= prevStartMs && t <= prevEndMs
     }),
-    [crm.leads, prevStartMs, prevEndMs],
+    [poloLeads, prevStartMs, prevEndMs],
   )
   const novosPrevCount = novosPrev.length
 
@@ -198,6 +219,29 @@ export function DashboardKpiSection() {
   )
   const conversao = pct(vinculados, novosCurr.length)
   const conversaoPrev = pct(vinculadosPrev, novosPrevCount)
+
+  // Faltas + desmarques: taxa sobre o total de compromissos do período (quanto MENOR, melhor).
+  const perdaRate = (b: ApptBucket) => {
+    const total = b.agendadas + b.faltas + b.desmarcadas
+    return total > 0 ? Math.round(((b.faltas + b.desmarcadas) / total) * 1000) / 10 : 0
+  }
+  const perdaCurr = perdaRate(apptCurr)
+  const perdaTrendRaw = trendPP(perdaCurr, perdaRate(apptPrev))
+  // Para perda, cair é BOM — inverte a cor da tendência.
+  const perdaTrend: Trend = { ...perdaTrendRaw, good: perdaTrendRaw.dir === 'down' ? true : perdaTrendRaw.dir === 'up' ? false : true }
+
+  // Cobertura do vínculo Shosp: % dos novos leads com prontuário. É o "quanto dá pra
+  // confiar" da conversão acima — cobertura baixa = conversão subestimada.
+  const comVinculo = useMemo(
+    () => novosCurr.filter((l) => shospLinkedIds.has(l.id)).length,
+    [novosCurr, shospLinkedIds],
+  )
+  const comVinculoPrev = useMemo(
+    () => novosPrev.filter((l) => shospLinkedIds.has(l.id)).length,
+    [novosPrev, shospLinkedIds],
+  )
+  const cobertura = pct(comVinculo, novosCurr.length)
+  const coberturaPrev = pct(comVinculoPrev, novosPrevCount)
 
   // Aguardando consultor: derivado das interactions via RPC (mesma fonte do card de
   // Atendimento Pendente). conversation_status='waiting_human' nunca acende p/ a clínica,
@@ -244,6 +288,36 @@ export function DashboardKpiSection() {
   const maxOrigem = Math.max(1, ...origemRows.map((r) => r.total))
   const topSource = origemRows[0] ?? null
 
+  // Mídia paga: leads do período POR CAMPANHA (atribuição first-touch gravada no lead) +
+  // quantos viraram consulta. Formulário Meta / CTWA / Site com UTM; sem atribuição = orgânico.
+  const midia = useMemo(() => {
+    type Row = { label: string; total: number; consultas: number }
+    const byCampaign = new Map<string, Row>()
+    let atribuidos = 0
+    for (const l of novosCurr) {
+      const cf = (l.customFields ?? {}) as Record<string, unknown>
+      const att = (cf.attribution ?? {}) as Record<string, unknown>
+      const channel = String(att.channel ?? '')
+      const first = (att.first ?? {}) as Record<string, unknown>
+      const isSiteAds = String(cf.origin ?? '') === 'site' && Boolean(first.utm_source || first.fbclid || att.utm_source || att.fbclid)
+      let canal = ''
+      if (channel === 'lead_ads') canal = '📋 Formulário'
+      else if (channel.startsWith('ctwa')) canal = '🎯 CTWA'
+      else if (isSiteAds) canal = '🌐 Site'
+      if (!canal) continue
+      atribuidos++
+      const campanha = String(att.campaign ?? first.utm_campaign ?? '').trim()
+      const key = campanha ? `${canal} · ${campanha}` : `${canal} · (sem nome de campanha)`
+      const row = byCampaign.get(key) ?? { label: key, total: 0, consultas: 0 }
+      row.total++
+      if (linkedLeadIds.has(l.id)) row.consultas++
+      byCampaign.set(key, row)
+    }
+    const rows = [...byCampaign.values()].sort((a, b) => b.total - a.total).slice(0, 6)
+    return { rows, atribuidos, organicos: novosCurr.length - atribuidos }
+  }, [novosCurr, linkedLeadIds])
+  const maxMidia = Math.max(1, ...midia.rows.map((r) => r.total))
+
   return (
     <section className="mb-10">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -271,26 +345,30 @@ export function DashboardKpiSection() {
         <p className="mb-3 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          label="Consultas agendadas"
-          value={apptCurr.agendadas}
-          sub={
-            apptCurr.faltas + apptCurr.desmarcadas > 0
-              ? `${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} desmarcadas`
-              : 'agenda da clínica (Shosp)'
-          }
-          icon={CalendarCheck2}
-          loading={loading}
-        />
-        <KpiCard
-          label="Conversão lead → consulta"
-          value={`${conversao}%`}
-          sub={`${vinculados} de ${novosCurr.length} novos leads vincularam consulta`}
-          trend={trendPP(conversao, conversaoPrev)}
-          icon={TrendingUp}
-          loading={loading}
-        />
+      <div className={cn('grid gap-4 sm:grid-cols-2', isSalesPolo ? null : 'xl:grid-cols-4')}>
+        {!isSalesPolo ? (
+          <KpiCard
+            label="Consultas agendadas"
+            value={apptCurr.agendadas}
+            sub={
+              apptCurr.faltas + apptCurr.desmarcadas > 0
+                ? `${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} desmarcadas`
+                : 'agenda da clínica (Shosp)'
+            }
+            icon={CalendarCheck2}
+            loading={loading}
+          />
+        ) : null}
+        {!isSalesPolo ? (
+          <KpiCard
+            label="Conversão lead → consulta"
+            value={`${conversao}%`}
+            sub={`${vinculados} de ${novosCurr.length} novos leads vincularam consulta`}
+            trend={trendPP(conversao, conversaoPrev)}
+            icon={TrendingUp}
+            loading={loading}
+          />
+        ) : null}
         <KpiCard
           label="Novos leads"
           value={novosCurr.length}
@@ -310,6 +388,28 @@ export function DashboardKpiSection() {
           icon={BotIcon}
           accent={aiHealth.waiting === 0 ? 'text-emerald-600' : 'text-amber-600'}
         />
+        {!isSalesPolo ? (
+          <KpiCard
+            label="Faltas + desmarques"
+            value={`${perdaCurr}%`}
+            sub={`${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} desmarcadas no período`}
+            trend={perdaTrend}
+            icon={CalendarX2}
+            accent={perdaCurr > 15 ? 'text-rose-500' : undefined}
+            loading={loading}
+          />
+        ) : null}
+        {!isSalesPolo ? (
+          <KpiCard
+            label="Cobertura do funil real"
+            value={`${cobertura}%`}
+            sub={`${comVinculo} de ${novosCurr.length} novos leads com prontuário Shosp — a conversão acima só enxerga estes`}
+            trend={trendPP(cobertura, coberturaPrev)}
+            icon={Link2}
+            accent={cobertura < 30 ? 'text-amber-600' : 'text-emerald-600'}
+            loading={loading}
+          />
+        ) : null}
       </div>
 
       <div className="mt-4 rounded-3xl border border-border/40 bg-card/40 p-6">
@@ -331,6 +431,45 @@ export function DashboardKpiSection() {
                 </div>
                 <span className="w-16 text-right text-[11px] tabular-nums text-muted-foreground/70">
                   <span className="font-bold text-foreground/80">{r.total}</span> leads
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-3xl border border-border/40 bg-card/40 p-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/50">
+            Mídia paga — leads por campanha
+          </p>
+          <p className="text-[11px] font-semibold text-muted-foreground/70">
+            {midia.atribuidos} com anúncio identificado · {midia.organicos} orgânicos/sem atribuição
+          </p>
+        </div>
+        {midia.rows.length === 0 ? (
+          <p className="py-4 text-center text-xs text-muted-foreground/60">
+            Nenhum lead do período veio com anúncio identificado. Formulários Meta já marcam sozinhos;
+            CTWA depende do gatilho no ManyChat e o site depende de UTM nos anúncios.
+          </p>
+        ) : (
+          <div className="grid gap-3">
+            {midia.rows.map((r) => (
+              <div key={r.label} className="grid grid-cols-[minmax(10rem,14rem)_1fr_auto] items-center gap-3">
+                <span className="truncate text-xs font-semibold text-foreground/80" title={r.label}>
+                  {r.label}
+                </span>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-blue-500/70 transition-all duration-500"
+                    style={{ width: `${(r.total / maxMidia) * 100}%` }}
+                  />
+                </div>
+                <span className="w-32 text-right text-[11px] tabular-nums text-muted-foreground/70">
+                  <span className="font-bold text-foreground/80">{r.total}</span> lead{r.total === 1 ? '' : 's'}
+                  {r.consultas > 0 ? (
+                    <span className="text-emerald-600"> · {r.consultas} consulta{r.consultas === 1 ? '' : 's'}</span>
+                  ) : null}
                 </span>
               </div>
             ))}

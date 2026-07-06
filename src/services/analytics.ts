@@ -168,6 +168,21 @@ export async function fetchLeadIdsWithAppointment(): Promise<Set<string>> {
   return set
 }
 
+/** IDs de leads vinculados a paciente Shosp (prontuário preenchido). Base da métrica de
+ *  COBERTURA do funil real: a conversão lead→consulta só enxerga leads vinculados, então
+ *  cobertura baixa = conversão subestimada (gargalo de vínculo, não de venda). */
+export async function fetchLeadIdsWithShospLink(): Promise<Set<string>> {
+  if (!supabase) return new Set()
+  const { data, error } = await supabase
+    .from('leads')
+    .select('id')
+    .not('shosp_prontuario', 'is', null)
+    .is('deleted_at', null)
+    .limit(10000)
+  if (error) throw new Error(error.message)
+  return new Set(((data as Array<{ id: string }>) ?? []).map((r) => r.id))
+}
+
 /** Marca um lead como perdido, com motivo. */
 export async function setLeadLostReason(leadId: string, reason: string): Promise<void> {
   if (!supabase) throw new Error('Sistema não configurado.')
