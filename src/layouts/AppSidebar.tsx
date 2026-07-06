@@ -38,6 +38,11 @@ import {
   Warehouse,
   PackageCheck,
   ClipboardCheck,
+  ListChecks,
+  FileBarChart2,
+  Fingerprint,
+  ClipboardPen,
+  AlarmClock,
 } from 'lucide-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
@@ -153,6 +158,7 @@ export function AppSidebar() {
               {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={List} /> : null}
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={MessagesSquare} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
+              {showLeadsHub && isClinicPolo ? <NavItem to="/protocolos" label="Protocolos" icon={ListChecks} /> : null}
               {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={SquareCheck} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
               <NavItem to="/historico" label="Histórico" icon={History} />
@@ -204,6 +210,22 @@ export function AppSidebar() {
                 <NavItem to="/contas-a-pagar" label="Contas a pagar" icon={CalendarClock} />
                 <NavItem to="/inventario" label="Inventário" icon={ClipboardCheck} />
                 {isClinicPolo ? <NavItem to="/kits" label="Kits cirúrgicos" icon={PackageCheck} /> : null}
+                <NavItem to="/estoque-relatorios" label="Relatórios" icon={FileBarChart2} />
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
+
+        {isClinicPolo ? (
+          <SidebarGroup>
+            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+              Equipe (RH)
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                <NavItem to="/ponto" label="Meu ponto" icon={Fingerprint} />
+                <NavItem to="/rh-formularios" label="Formulários RH" icon={ClipboardPen} />
+                {showAdmin ? <NavItem to="/ponto-gestao" label="Gestão de ponto" icon={AlarmClock} /> : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

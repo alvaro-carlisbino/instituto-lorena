@@ -84,10 +84,27 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
         name: nfeItem.description,
         unit: nfeItem.unit,
         source: 'nfe',
+        barcode: nfeItem.ean,
       })
       itemsCreated += 1
     } else {
-      controlled = byId.get(stockItemId)?.controlled ?? false
+      const current = byId.get(stockItemId)
+      controlled = current?.controlled ?? false
+      // NF-e traz o GTIN: aproveita pra carimbar o barcode do item que ainda não tem
+      // (upsert exige o registro completo — só {id, barcode} zeraria os demais campos).
+      if (current && !current.barcode && nfeItem.ean) {
+        await upsertStockItem({
+          id: current.id,
+          name: current.name,
+          sku: current.sku,
+          barcode: nfeItem.ean,
+          category: current.category,
+          unit: current.unit,
+          minQty: current.minQty,
+          controlled: current.controlled,
+          note: current.note,
+        })
+      }
     }
 
     let batchId: string | null = null
@@ -109,6 +126,7 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
       refType: 'purchase_invoice',
       refId: invoice.id,
       batchId,
+      unitCostCents: nfeItem.unitCostCents,
     })
     itemsStocked += 1
 

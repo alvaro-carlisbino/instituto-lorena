@@ -17,6 +17,7 @@ import { useCrm } from '@/context/CrmContext'
 import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 import {
   type ControlledLogRow,
+  type KitCost,
   type KitTemplate,
   type StockKit,
   cancelKit,
@@ -25,12 +26,17 @@ import {
   createKitTemplate,
   deactivateKitTemplate,
   listControlledLog,
+  listItemLastCosts,
+  listKitCosts,
   listKitTemplates,
   listKits,
 } from '@/services/estoqueKits'
 
 type DraftRow = { itemId: string; qty: string }
 const EMPTY_ROW: DraftRow = { itemId: '', qty: '' }
+
+const formatBRL = (cents: number): string =>
+  (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export function KitsPage() {
   const { tenant } = useTenant()
@@ -39,6 +45,8 @@ export function KitsPage() {
   const [templates, setTemplates] = useState<KitTemplate[]>([])
   const [kits, setKits] = useState<StockKit[]>([])
   const [controlledLog, setControlledLog] = useState<ControlledLogRow[]>([])
+  const [kitCosts, setKitCosts] = useState<Map<string, KitCost>>(new Map())
+  const [lastCosts, setLastCosts] = useState<Map<string, number>>(new Map())
   const [loading, setLoading] = useState(false)
 
   // form de modelo
@@ -78,16 +86,20 @@ export function KitsPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [it, tpls, ks, log] = await Promise.all([
+      const [it, tpls, ks, log, costs, last] = await Promise.all([
         listStockItems(),
         listKitTemplates(),
         listKits(),
         listControlledLog(),
+        listKitCosts(),
+        listItemLastCosts(),
       ])
       setItems(it)
       setTemplates(tpls)
       setKits(ks)
       setControlledLog(log)
+      setKitCosts(costs)
+      setLastCosts(last)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar kits')
     } finally {
@@ -346,6 +358,17 @@ export function KitsPage() {
               ) : (
                 kits.map((kit) => {
                   const hasControlled = kit.items.some((i) => controlledIds.has(i.itemId))
+                  // Custo em materiais: real (movimentos valorados) p/ consumido;
+                  // estimado pelo último custo de compra p/ kit ainda montado.
+                  const realCost = kit.status === 'consumido' ? kitCosts.get(kit.id) : undefined
+                  const estimate = kit.items.reduce(
+                    (acc, i) => {
+                      const c = lastCosts.get(i.itemId)
+                      if (c == null || c <= 0) return { cents: acc.cents, missing: acc.missing + 1 }
+                      return { cents: acc.cents + Math.round(i.qty * c), missing: acc.missing }
+                    },
+                    { cents: 0, missing: 0 },
+                  )
                   return (
                     <div key={kit.id} className="rounded-lg border border-border p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -393,6 +416,19 @@ export function KitsPage() {
                           </li>
                         ))}
                       </ul>
+                      {realCost ? (
+                        <div className="mt-1.5 text-xs font-medium">
+                          Materiais: <span className="font-semibold">{formatBRL(realCost.totalCostCents)}</span>
+                          {!realCost.fullyCosted ? (
+                            <span className="ml-1 text-muted-foreground">(parcial — há item sem custo)</span>
+                          ) : null}
+                        </div>
+                      ) : kit.status === 'montado' && estimate.cents > 0 ? (
+                        <div className="mt-1.5 text-xs font-medium text-muted-foreground">
+                          Materiais: ≈ {formatBRL(estimate.cents)}
+                          {estimate.missing > 0 ? ` (${estimate.missing} ${estimate.missing === 1 ? 'item' : 'itens'} sem custo)` : ''}
+                        </div>
+                      ) : null}
                       {kit.status === 'montado' ? (
                         <div className="mt-2.5 flex gap-1.5">
                           <Button size="sm" onClick={() => void consume(kit)}>

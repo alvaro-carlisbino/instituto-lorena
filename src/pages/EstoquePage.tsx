@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Boxes, Plus, ArrowDownToLine, ArrowUpFromLine, History, ShieldAlert } from 'lucide-react'
+import { Boxes, Plus, ArrowDownToLine, ArrowUpFromLine, History, ScanBarcode, ShieldAlert } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
@@ -40,10 +40,108 @@ export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: st
     { to: '/contas-a-pagar', label: 'Contas a pagar' },
     { to: '/inventario', label: 'Inventário' },
     ...(isSalesPolo ? [] : [{ to: '/kits', label: 'Kits cirúrgicos' }]),
+    { to: '/estoque-relatorios', label: 'Relatórios' },
   ]
 }
 
-const EMPTY_ITEM = { name: '', sku: '', category: '', unit: 'un', minQty: '', controlled: false }
+const EMPTY_ITEM = { name: '', sku: '', barcode: '', category: '', unit: 'un', minQty: '', controlled: false }
+
+// --------------------------------------------------- leitura de código de barras
+// Leitor USB age como teclado (digita o código + Enter no campo "Bipar").
+// Pela câmera usamos a BarcodeDetector API (Chrome/Android); sem suporte, o
+// botão explica e o campo continua funcionando.
+
+type BarcodeDetectorLike = {
+  detect: (source: CanvasImageSource) => Promise<Array<{ rawValue: string }>>
+}
+
+function getBarcodeDetector(): BarcodeDetectorLike | null {
+  const w = window as unknown as {
+    BarcodeDetector?: new (opts?: { formats?: string[] }) => BarcodeDetectorLike
+  }
+  if (!w.BarcodeDetector) return null
+  try {
+    return new w.BarcodeDetector({
+      formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf'],
+    })
+  } catch {
+    return null
+  }
+}
+
+function BarcodeCameraDialog({
+  open,
+  onOpenChange,
+  onScan,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onScan: (code: string) => void
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setError(null)
+    const detector = getBarcodeDetector()
+    if (!detector) {
+      setError('Este navegador não lê código pela câmera. Use o leitor USB no campo "Bipar código".')
+      return
+    }
+    let stream: MediaStream | null = null
+    let timer: number | null = null
+    let done = false
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: 'environment' } })
+      .then((s) => {
+        stream = s
+        if (videoRef.current) {
+          videoRef.current.srcObject = s
+          void videoRef.current.play()
+        }
+        timer = window.setInterval(() => {
+          const video = videoRef.current
+          if (done || !video || video.readyState < 2) return
+          detector
+            .detect(video)
+            .then((codes) => {
+              const code = codes[0]?.rawValue?.trim()
+              if (code && !done) {
+                done = true
+                onScan(code)
+              }
+            })
+            .catch(() => {
+              /* frame ruim — tenta o próximo */
+            })
+        }, 300)
+      })
+      .catch(() => setError('Não foi possível acessar a câmera.'))
+    return () => {
+      done = true
+      if (timer) window.clearInterval(timer)
+      stream?.getTracks().forEach((t) => t.stop())
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Ler código de barras</DialogTitle>
+          <DialogDescription>Aponte a câmera para o código do produto.</DialogDescription>
+        </DialogHeader>
+        {error ? (
+          <p className="py-4 text-sm text-muted-foreground">{error}</p>
+        ) : (
+          <video ref={videoRef} className="aspect-video w-full rounded-md bg-black" muted playsInline />
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 export function EstoquePage() {
   const { tenant } = useTenant()
@@ -83,7 +181,12 @@ export function EstoquePage() {
   const [moveKind, setMoveKind] = useState<'entrada' | 'saida' | 'ajuste'>('entrada')
   const [moveQty, setMoveQty] = useState('')
   const [moveReason, setMoveReason] = useState('')
+  const [moveCost, setMoveCost] = useState('')
   const [moving, setMoving] = useState(false)
+
+  // bipar código de barras (leitor USB digita + Enter; câmera via BarcodeDetector)
+  const [scanCode, setScanCode] = useState('')
+  const [cameraOpen, setCameraOpen] = useState(false)
 
   // dialog de histórico
   const [historyItem, setHistoryItem] = useState<StockItem | null>(null)
@@ -116,9 +219,26 @@ export function EstoquePage() {
       (i) =>
         i.name.toLowerCase().includes(q) ||
         (i.category ?? '').toLowerCase().includes(q) ||
-        (i.sku ?? '').toLowerCase().includes(q),
+        (i.sku ?? '').toLowerCase().includes(q) ||
+        (i.barcode ?? '').includes(q),
     )
   }, [items, filter])
+
+  // Código bipado: acha o item (barcode, depois SKU) e abre o movimento; código
+  // desconhecido pré-preenche o cadastro de novo item.
+  const handleScanned = (raw: string) => {
+    const code = raw.trim()
+    if (!code) return
+    setCameraOpen(false)
+    setScanCode('')
+    const found = items.find((i) => i.barcode === code) ?? items.find((i) => (i.sku ?? '') === code)
+    if (found) {
+      openMove(found, 'entrada')
+    } else {
+      setForm((f) => ({ ...f, barcode: code }))
+      toast.info(`Código ${code} não cadastrado — já deixei preenchido no formulário de novo item.`)
+    }
+  }
 
   const belowMin = items.filter((i) => i.minQty > 0 && i.qty < i.minQty)
 
@@ -146,6 +266,7 @@ export function EstoquePage() {
       await upsertStockItem({
         name: form.name,
         sku: form.sku || null,
+        barcode: form.barcode || null,
         category: form.category || null,
         unit: form.unit,
         minQty: form.minQty.trim() ? Number(form.minQty.replace(',', '.')) : 0,
@@ -166,6 +287,7 @@ export function EstoquePage() {
     setMoveKind(kind)
     setMoveQty('')
     setMoveReason('')
+    setMoveCost('')
   }
 
   const handleMove = async () => {
@@ -175,9 +297,14 @@ export function EstoquePage() {
       toast.error('Informe uma quantidade válida.')
       return
     }
+    const costNumber = Number(moveCost.replace(/\./g, '').replace(',', '.'))
+    const unitCostCents =
+      moveKind === 'entrada' && Number.isFinite(costNumber) && costNumber > 0
+        ? Math.round(costNumber * 100)
+        : null
     setMoving(true)
     try {
-      await registerMovement({ itemId: moveItem.id, kind: moveKind, qty, reason: moveReason })
+      await registerMovement({ itemId: moveItem.id, kind: moveKind, qty, reason: moveReason, unitCostCents })
       toast.success(`${moveKind === 'saida' ? 'Saída' : 'Entrada'} registrada em ${moveItem.name}.`)
       setMoveItem(null)
       await load()
@@ -321,6 +448,18 @@ export function EstoquePage() {
                 />
               </div>
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="st-barcode" className="flex items-center gap-1.5">
+                <ScanBarcode className="size-3.5" /> Código de barras (EAN)
+              </Label>
+              <Input
+                id="st-barcode"
+                value={form.barcode}
+                onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))}
+                placeholder="Bipe com o leitor ou digite — a NF-e preenche sozinha"
+                inputMode="numeric"
+              />
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">
                 <Label>Unidade</Label>
@@ -366,16 +505,42 @@ export function EstoquePage() {
         </Card>
 
         <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Boxes className="size-4 text-primary" /> Itens ({items.length})
             </CardTitle>
-            <Input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Buscar item…"
-              className="h-8 max-w-[220px]"
-            />
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex items-center gap-1">
+                <Input
+                  value={scanCode}
+                  onChange={(e) => setScanCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      handleScanned(scanCode)
+                    }
+                  }}
+                  placeholder="Bipar código…"
+                  className="h-8 w-[150px]"
+                  inputMode="numeric"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 px-2"
+                  onClick={() => setCameraOpen(true)}
+                  title="Ler pela câmera"
+                >
+                  <ScanBarcode className="size-4" />
+                </Button>
+              </div>
+              <Input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Buscar item…"
+                className="h-8 w-[160px]"
+              />
+            </div>
           </CardHeader>
           <CardContent>
             {filtered.length === 0 ? (
@@ -405,7 +570,11 @@ export function EstoquePage() {
                               {item.name}
                               {item.controlled ? <ShieldAlert className="size-3.5 text-amber-500" /> : null}
                             </div>
-                            {item.sku ? <div className="text-xs text-muted-foreground">{item.sku}</div> : null}
+                            {item.sku || item.barcode ? (
+                              <div className="text-xs text-muted-foreground">
+                                {[item.sku, item.barcode].filter(Boolean).join(' · ')}
+                              </div>
+                            ) : null}
                           </TableCell>
                           <TableCell className="text-muted-foreground">{item.category ?? '—'}</TableCell>
                           <TableCell className="text-right">
@@ -469,6 +638,18 @@ export function EstoquePage() {
                 placeholder="Ex.: 10"
               />
             </div>
+            {moveKind === 'entrada' ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="mv-cost">Custo unitário (R$)</Label>
+                <Input
+                  id="mv-cost"
+                  value={moveCost}
+                  onChange={(e) => setMoveCost(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="Opcional — alimenta o custo por cirurgia"
+                />
+              </div>
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="mv-reason">Motivo</Label>
               <Input
@@ -486,6 +667,8 @@ export function EstoquePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BarcodeCameraDialog open={cameraOpen} onOpenChange={setCameraOpen} onScan={handleScanned} />
 
       <Dialog open={historyItem != null} onOpenChange={(open) => (!open ? setHistoryItem(null) : null)}>
         <DialogContent className="sm:max-w-lg">

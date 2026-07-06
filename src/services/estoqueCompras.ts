@@ -67,6 +67,7 @@ export type StockItem = {
   id: string
   name: string
   sku: string | null
+  barcode: string | null
   category: string | null
   unit: string
   minQty: number
@@ -83,7 +84,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
   const client = assertClient()
   let itemsQuery = client
     .from('stock_items')
-    .select('id, name, sku, category, unit, min_qty, source, controlled, note, active')
+    .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active')
     .order('name')
   if (!includeInactive) itemsQuery = itemsQuery.eq('active', true)
   const [items, balances] = await Promise.all([
@@ -101,6 +102,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
       id: String(r.id),
       name: String(r.name),
       sku: r.sku != null ? String(r.sku) : null,
+      barcode: r.barcode != null ? String(r.barcode) : null,
       category: r.category != null ? String(r.category) : null,
       unit: String(r.unit ?? 'un'),
       minQty: Number(r.min_qty ?? 0),
@@ -118,6 +120,7 @@ export async function upsertStockItem(payload: {
   id?: string
   name: string
   sku?: string | null
+  barcode?: string | null
   category?: string | null
   unit?: string
   minQty?: number
@@ -130,6 +133,7 @@ export async function upsertStockItem(payload: {
   const row: Record<string, unknown> = {
     name: payload.name.trim(),
     sku: payload.sku?.trim() || null,
+    barcode: payload.barcode?.trim() || null,
     category: payload.category?.trim() || null,
     unit: (payload.unit ?? 'un').trim() || 'un',
     min_qty: payload.minQty ?? 0,
@@ -179,6 +183,35 @@ export async function listMovements(itemId: string, limit = 50): Promise<StockMo
   }))
 }
 
+export type StockMovementRow = StockMovement & {
+  refType: string | null
+  unitCostCents: number | null
+}
+
+/** Movimentos de TODOS os itens no período (base dos relatórios). Datas em yyyy-mm-dd. */
+export async function listMovementsInRange(fromDay: string, toDay: string): Promise<StockMovementRow[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('stock_movements')
+    .select('id, item_id, kind, qty_delta, reason, note, ref_type, unit_cost_cents, created_at')
+    .gte('created_at', `${fromDay}T00:00:00`)
+    .lte('created_at', `${toDay}T23:59:59.999`)
+    .order('created_at', { ascending: false })
+    .limit(5000)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => ({
+    id: String(r.id),
+    itemId: String(r.item_id),
+    kind: (r.kind === 'saida' || r.kind === 'ajuste' ? r.kind : 'entrada') as StockMovement['kind'],
+    qtyDelta: Number(r.qty_delta ?? 0),
+    reason: r.reason != null ? String(r.reason) : null,
+    note: r.note != null ? String(r.note) : null,
+    refType: r.ref_type != null ? String(r.ref_type) : null,
+    unitCostCents: r.unit_cost_cents != null ? Number(r.unit_cost_cents) : null,
+    createdAt: String(r.created_at ?? ''),
+  }))
+}
+
 export async function registerMovement(payload: {
   itemId: string
   kind: 'entrada' | 'saida' | 'ajuste'
@@ -188,6 +221,8 @@ export async function registerMovement(payload: {
   refType?: string
   refId?: string
   batchId?: string | null
+  /** Custo unitário em centavos no momento do movimento (base do gasto por paciente). */
+  unitCostCents?: number | null
 }): Promise<string> {
   const client = assertClient()
   const qty = Math.abs(payload.qty)
@@ -204,6 +239,10 @@ export async function registerMovement(payload: {
       ref_type: payload.refType ?? null,
       ref_id: payload.refId ?? null,
       batch_id: payload.batchId ?? null,
+      unit_cost_cents:
+        payload.unitCostCents != null && payload.unitCostCents > 0
+          ? Math.round(payload.unitCostCents)
+          : null,
     })
     .select('id')
     .single()
@@ -355,6 +394,7 @@ export async function receivePurchaseOrder(po: PurchaseOrder): Promise<{ stocked
       note: `Recebimento da ${po.code}`,
       refType: 'purchase_order',
       refId: po.id,
+      unitCostCents: item.unitCostCents,
     })
     stocked += 1
   }

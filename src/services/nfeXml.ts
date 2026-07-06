@@ -11,6 +11,8 @@ export type NfeItem = {
   totalCents: number
   lotCode: string | null
   expiresOn: string | null
+  /** GTIN/EAN do produto (cEAN) — 'SEM GTIN' vira null. */
+  ean: string | null
 }
 
 export type NfeInstallment = {
@@ -66,6 +68,7 @@ export function parseNfeXml(xml: string): NfeParsed {
     if (!prod) continue
     const rastro = prod.getElementsByTagName('rastro')[0]
     const qty = Number(text(prod, 'qCom') ?? '0')
+    const rawEan = text(prod, 'cEAN')
     items.push({
       description: text(prod, 'xProd') ?? `Item ${i + 1}`,
       qty: Number.isFinite(qty) ? qty : 0,
@@ -74,6 +77,7 @@ export function parseNfeXml(xml: string): NfeParsed {
       totalCents: toCents(text(prod, 'vProd')),
       lotCode: rastro ? text(rastro, 'nLote') : null,
       expiresOn: rastro ? toDay(text(rastro, 'dVal')) : null,
+      ean: rawEan && /^\d{8,14}$/.test(rawEan) ? rawEan : null,
     })
   }
 

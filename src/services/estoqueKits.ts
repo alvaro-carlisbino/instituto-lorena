@@ -132,6 +132,52 @@ export async function deactivateKitTemplate(id: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+// ------------------------------------------------------------------- custos
+
+/** Último custo de compra conhecido por item (entradas valoradas + linhas de OC). */
+export async function listItemLastCosts(): Promise<Map<string, number>> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('stock_item_last_costs')
+    .select('item_id, unit_cost_cents')
+  if (error) throw new Error(error.message)
+  const map = new Map<string, number>()
+  for (const r of data ?? []) map.set(String(r.item_id), Number(r.unit_cost_cents ?? 0))
+  return map
+}
+
+/** Custo real por lote (custo da entrada valorada do lote). */
+export async function listBatchCosts(): Promise<Map<string, number>> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('stock_batch_costs')
+    .select('batch_id, unit_cost_cents')
+  if (error) throw new Error(error.message)
+  const map = new Map<string, number>()
+  for (const r of data ?? []) map.set(String(r.batch_id), Number(r.unit_cost_cents ?? 0))
+  return map
+}
+
+export type KitCost = { kitId: string; totalCostCents: number; fullyCosted: boolean }
+
+/** Custo em materiais dos kits consumidos. fullyCosted=false ⇒ total parcial (item sem custo). */
+export async function listKitCosts(leadId?: string): Promise<Map<string, KitCost>> {
+  const client = assertClient()
+  let query = client.from('stock_kit_costs').select('kit_id, lead_id, total_cost_cents, fully_costed')
+  if (leadId) query = query.eq('lead_id', leadId)
+  const { data, error } = await query
+  if (error) throw new Error(error.message)
+  const map = new Map<string, KitCost>()
+  for (const r of data ?? []) {
+    map.set(String(r.kit_id), {
+      kitId: String(r.kit_id),
+      totalCostCents: Number(r.total_cost_cents ?? 0),
+      fullyCosted: Boolean(r.fully_costed),
+    })
+  }
+  return map
+}
+
 // -------------------------------------------------------------- kits montados
 
 export type KitStatus = 'montado' | 'consumido' | 'cancelado'
@@ -151,14 +197,15 @@ export type StockKit = {
   items: StockKitItem[]
 }
 
-export async function listKits(): Promise<StockKit[]> {
+export async function listKits(leadId?: string): Promise<StockKit[]> {
   const client = assertClient()
+  let kitsQuery = client
+    .from('stock_kits')
+    .select('id, name, template_id, lead_id, patient_name, procedure_label, scheduled_for, status, note, created_at, consumed_at')
+    .order('created_at', { ascending: false })
+  kitsQuery = leadId ? kitsQuery.eq('lead_id', leadId) : kitsQuery.limit(100)
   const [kits, items] = await Promise.all([
-    client
-      .from('stock_kits')
-      .select('id, name, template_id, lead_id, patient_name, procedure_label, scheduled_for, status, note, created_at, consumed_at')
-      .order('created_at', { ascending: false })
-      .limit(100),
+    kitsQuery,
     client.from('stock_kit_items').select('id, kit_id, item_id, qty'),
   ])
   if (kits.error) throw new Error(kits.error.message)
@@ -256,12 +303,19 @@ export async function consumeKit(
   controlledItemIds: Set<string>,
 ): Promise<{ movements: number; controlled: number }> {
   const client = assertClient()
+  // Valoração da saída: custo real do lote; sem lote (ou lote sem custo),
+  // último custo de compra do item. null = fica sem custo (total vira "parcial").
+  const [batchCosts, lastCosts] = await Promise.all([listBatchCosts(), listItemLastCosts()])
   let movements = 0
   let controlled = 0
   for (const item of kit.items) {
     const batches = await listBatchBalances(item.itemId)
     const allocation = allocateFefo(batches, item.qty)
     for (const slice of allocation) {
+      const unitCostCents =
+        (slice.batchId ? batchCosts.get(slice.batchId) : undefined) ??
+        lastCosts.get(item.itemId) ??
+        null
       const movementId = await registerMovement({
         itemId: item.itemId,
         kind: 'saida',
@@ -271,6 +325,7 @@ export async function consumeKit(
         refType: 'stock_kit',
         refId: kit.id,
         batchId: slice.batchId,
+        unitCostCents,
       })
       movements += 1
       if (controlledItemIds.has(item.itemId)) {

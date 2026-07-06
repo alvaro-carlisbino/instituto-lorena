@@ -6,6 +6,8 @@ import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
 import { LeadAnalyticsActions } from '@/components/leads/LeadAnalyticsActions'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { LeadTaskPanel } from '@/components/leads/LeadTaskPanel'
+import { LeadProtocolsSection } from '@/components/leads/LeadProtocolsSection'
+import { LeadStockCostsSection } from '@/components/leads/LeadStockCostsSection'
 import { ShospLinkSection } from '@/components/leads/ShospLinkSection'
 import { EmptyState } from '@/components/ui/empty-state'
 import {
@@ -548,6 +550,13 @@ export function LeadDetailPage() {
                 leadCpf={String((lead.customFields?.cadastro as Record<string, unknown> | undefined)?.cpf ?? '') || undefined}
                 leadNascimento={String((lead.customFields?.cadastro as Record<string, unknown> | undefined)?.dataNascimento ?? '') || undefined}
               />
+            ) : null}
+
+            {crm.dataMode === 'supabase' ? (
+              <>
+                <LeadProtocolsSection leadId={lead.id} leadName={lead.patientName} />
+                <LeadStockCostsSection leadId={lead.id} />
+              </>
             ) : null}
 
             {crm.currentPermission.canRouteLeads && otherPipelines.length > 0 ? (

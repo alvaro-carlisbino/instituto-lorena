@@ -52,6 +52,11 @@ import { ComprasPage } from './pages/ComprasPage'
 import { ContasPagarPage } from './pages/ContasPagarPage'
 import { KitsPage } from './pages/KitsPage'
 import { InventarioPage } from './pages/InventarioPage'
+import { EstoqueRelatoriosPage } from './pages/EstoqueRelatoriosPage'
+import { ProtocolosPage } from './pages/ProtocolosPage'
+import { PontoPage } from './pages/PontoPage'
+import { PontoGestaoPage } from './pages/PontoGestaoPage'
+import { FormulariosRhPage } from './pages/FormulariosRhPage'
 import { CommandPalette } from './components/CommandPalette'
 import { RouteTransition } from './components/RouteTransition'
 import { SidebarProvider } from '@/components/ui/sidebar'
@@ -78,6 +83,11 @@ function AppRoutes() {
       <Route path="/contas-a-pagar" element={<ContasPagarPage />} />
       <Route path="/kits" element={<KitsPage />} />
       <Route path="/inventario" element={<InventarioPage />} />
+      <Route path="/estoque-relatorios" element={<EstoqueRelatoriosPage />} />
+      <Route path="/protocolos" element={<ProtocolosPage />} />
+      <Route path="/ponto" element={<PontoPage />} />
+      <Route path="/ponto-gestao" element={<PontoGestaoPage />} />
+      <Route path="/rh-formularios" element={<FormulariosRhPage />} />
       <Route path="/chat" element={<ChatWorkspacePage />} />
       <Route path="/tricopill" element={<TricopilPage />} />
       <Route path="/tricopill-bi" element={<TricopilDashboardPage />} />
