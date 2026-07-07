@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { WorkspaceLeadSidebar } from '@/components/leads/WorkspaceLeadSidebar'
 import { useCrm } from '@/context/CrmContext'
+import { useTenant } from '@/context/TenantContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { getSourceStyle } from '@/lib/channelStyles'
 import { cn } from '@/lib/utils'
@@ -55,6 +56,7 @@ export function ChatWorkspacePage({
   restrictToBotKind,
 }: { title?: string; restrictToBotKind?: BotKind } = {}) {
   const crm = useCrm()
+  const { tenant } = useTenant()
   const { dataMode } = crm
   const [searchParams] = useSearchParams()
   const [search, setSearch] = useState('')
@@ -135,6 +137,10 @@ export function ChatWorkspacePage({
   const conversations = useMemo(() => {
     const text = search.trim().toLowerCase()
     const filtered = crm.leads.filter((lead) => {
+      // Escopa ao workspace ATIVO (Clínica × Tricopill). Sem isso, o RLS traz os
+      // leads dos 2 polos p/ quem é multi-polo e a Dandara via clínica + Tricopill
+      // misturados mesmo com o polo trocado no switcher.
+      if (lead.tenantId && lead.tenantId !== tenant.id) return false
       if (restrictToBotKind) {
         if (!restrictInstanceIds) return false
         if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) return false
@@ -165,7 +171,7 @@ export function ChatWorkspacePage({
       const bh = crm.interactions.find((i) => i.leadId === b.id)?.happenedAt ?? b.createdAt
       return new Date(bh).getTime() - new Date(ah).getTime()
     })
-  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread])
+  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread, tenant.id])
 
   const activeLead = crm.selectedLead ?? conversations[0] ?? null
   const waComposeBlocked = activeLead ? isLeadWhatsappComposeBlocked(activeLead) : false
