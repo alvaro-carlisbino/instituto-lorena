@@ -1,7 +1,6 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
-import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
-import { getWapiProviderForLead } from '../_shared/whatsapp/wapiConfig.ts'
+import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
 import {
   pushManychatInstagramDmAfterReply,
@@ -183,41 +182,19 @@ Deno.serve(async (req) => {
     if (!phoneDigits || phoneDigits.length < 10) {
       return json({ error: 'no_channel', message: 'Lead sem WhatsApp e sem subscriber ManyChat' }, 400)
     }
-    // WhatsApp direto: roteia por channel_provider da linha do lead — W-API tem
-    // token+instanceId próprios por linha (Aline / Ingrid), enquanto Evolution/Official
-    // seguem caindo no fallback de env quando o lead não tem instância explícita.
-    let instanceChannelProvider = ''
-    if (lead.whatsapp_instance_id) {
-      const { data: instRow } = await admin
-        .from('whatsapp_channel_instances')
-        .select('channel_provider')
-        .eq('id', lead.whatsapp_instance_id)
-        .maybeSingle()
-      instanceChannelProvider = String(
-        (instRow as { channel_provider?: string } | null)?.channel_provider ?? '',
-      ).toLowerCase()
+    // WhatsApp direto: roteia por channel_provider da linha do lead (resolvedor único).
+    // Lead sem `whatsapp_instance_id` usa a instância padrão ATIVA do próprio tenant —
+    // nunca o default global 'evolution' (que mandava o Tricopill pela linha errada).
+    let provider: WhatsappProvider
+    try {
+      ;({ provider } = await resolveOutboundProviderForLead(admin, {
+        id: lead.id,
+        whatsapp_instance_id: lead.whatsapp_instance_id,
+        tenant_id: lead.tenant_id,
+      }))
+    } catch (e) {
+      return json({ error: 'no_provider', message: e instanceof Error ? e.message : String(e) }, 500)
     }
-
-    let provider: WhatsappProvider | null = null
-    if (instanceChannelProvider === 'wapi') {
-      try {
-        provider = await getWapiProviderForLead(admin, lead.whatsapp_instance_id)
-      } catch (e) {
-        return json({ error: 'no_provider', message: e instanceof Error ? e.message : String(e) }, 500)
-      }
-    } else {
-      try {
-        provider = await getOfficialProviderForLead(admin, lead.id)
-      } catch { /* tenta evolution */ }
-      if (!provider) {
-        try {
-          provider = await getEvolutionProviderForLead(admin, lead.id)
-        } catch (e) {
-          return json({ error: 'no_provider', message: e instanceof Error ? e.message : String(e) }, 500)
-        }
-      }
-    }
-    if (!provider) return json({ error: 'no_provider' }, 500)
     const sent = await provider.sendMessage({ to: phoneDigits, text: npsText, leadId: lead.id })
     dispatchChannel = 'whatsapp'
     sentVia = `whatsapp_${sent.provider}`

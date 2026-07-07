@@ -2,8 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { coercePgBoolean } from '../_shared/coercePgBoolean.ts'
 import { disableAiOnHandoff, runManychatAiAutoReply, runWhatsappAiAutoReply } from '../_shared/crmAiAutoReply.ts'
 import { pushManychatInstagramDmAfterReply, readManychatPushConfigFromEnv } from '../_shared/manychatPublicApi.ts'
-import { getEvolutionProviderForLead, getOfficialProviderForLead } from '../_shared/whatsapp/evolutionConfig.ts'
-import { getWapiProviderForLead } from '../_shared/whatsapp/wapiConfig.ts'
+import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
 
 const cors = {
@@ -279,32 +278,16 @@ Deno.serve(async (req) => {
           message: 'Lead sem telefone para enviar WhatsApp.',
         })
       }
-      // Roteamento por linha: igual ao crm-send-message — channel_provider da
-      // instância vinculada ao lead sobrescreve a env WHATSAPP_PROVIDER. Permite
-      // forçar reply via W-API (Aline/Ingrid) sem mexer no Evolution.
-      let instanceChannelProvider = ''
-      if (row.whatsapp_instance_id) {
-        const { data: instRow } = await admin
-          .from('whatsapp_channel_instances')
-          .select('channel_provider')
-          .eq('id', row.whatsapp_instance_id)
-          .maybeSingle()
-        instanceChannelProvider = String(
-          (instRow as { channel_provider?: string } | null)?.channel_provider ?? '',
-        ).toLowerCase()
-      }
-      const waProvider =
-        instanceChannelProvider ||
-        (Deno.env.get('WHATSAPP_PROVIDER') ?? 'evolution').trim().toLowerCase()
+      // Roteamento por linha (resolvedor único compartilhado): channel_provider da
+      // instância vinculada ao lead manda; lead sem linha usa a instância padrão do
+      // tenant, nunca o default global 'evolution'. Ver resolveProvider.ts.
       let sendProvider: WhatsappProvider
       try {
-        if (waProvider === 'wapi') {
-          sendProvider = await getWapiProviderForLead(admin, row.whatsapp_instance_id)
-        } else if (waProvider === 'official') {
-          sendProvider = await getOfficialProviderForLead(admin, row.whatsapp_instance_id)
-        } else {
-          sendProvider = await getEvolutionProviderForLead(admin, row.whatsapp_instance_id)
-        }
+        ;({ provider: sendProvider } = await resolveOutboundProviderForLead(admin, {
+          id: row.id,
+          whatsapp_instance_id: row.whatsapp_instance_id,
+          tenant_id: tenantId,
+        }))
       } catch (e) {
         return json({
           ok: true,
