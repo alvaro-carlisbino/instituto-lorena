@@ -49,6 +49,24 @@ function normalizePhone(value: string): string {
   return digitsOnly(value)
 }
 
+// Variantes de telefone BR p/ dedup de lead: com/sem código do país (+55) e com/sem
+// o 9º dígito do celular. O site grava "44999161834" (sem 55); o WhatsApp manda
+// "554499161834" (com 55, sem o 9). Sem isso, o inbound não acha o lead do pedido e
+// DUPLICA o contato (caso Eder 07/jul). Mantém o DDD fixo → risco de colisão desprezível.
+function brPhoneVariants(raw: string): string[] {
+  let d = digitsOnly(raw)
+  if (d.length >= 12 && d.startsWith('55')) d = d.slice(2)
+  if (d.length < 10) return d ? [d] : []
+  const ddd = d.slice(0, 2)
+  const num = d.slice(2)
+  const cores = new Set<string>([ddd + num])
+  if (num.length === 9 && num[0] === '9') cores.add(ddd + num.slice(1))        // remove o 9º dígito
+  else if (num.length === 8 && /^[6-9]/.test(num)) cores.add(ddd + '9' + num)  // adiciona o 9º dígito
+  const out = new Set<string>()
+  for (const c of cores) { out.add(c); out.add('55' + c) }
+  return [...out].filter((v) => v.length >= 10)
+}
+
 function temperatureForSource(source: LeadSource, override: string | undefined): LeadTemperature {
   if (override && ['cold', 'warm', 'hot'].includes(override)) return override as LeadTemperature
   if (source === 'meta_facebook' || source === 'meta_instagram') return 'hot'
@@ -57,6 +75,21 @@ function temperatureForSource(source: LeadSource, override: string | undefined):
 }
 
 export async function findLeadByPhone(admin: SupabaseClient, phone: string): Promise<string | null> {
+  // 1) Casa por variantes (±55, ±9º dígito) — pega o lead do pedido do site mesmo com
+  //    formato diferente do WhatsApp. Prefere o mais antigo (o original) e ignora escondidos.
+  const variants = brPhoneVariants(phone)
+  if (variants.length) {
+    const { data } = await admin
+      .from('leads')
+      .select('id')
+      .in('phone', variants)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    if (data?.id) return String(data.id)
+  }
+  // 2) Fallback (compat): RPC + eq exato.
   const { data: fromRpc, error: findError } = await admin.rpc('find_lead_id_by_phone_digits', { p_digits: phone })
   if (!findError && fromRpc) return String(fromRpc)
   const { data, error } = await admin.from('leads').select('id').eq('phone', phone).maybeSingle()
@@ -84,19 +117,28 @@ async function findLeadIdByPhoneAndInstance(
   phone: string,
   instanceId: string | null,
 ): Promise<string | null> {
+  const phones = brPhoneVariants(phone)
+  const inList = phones.length ? phones : [digitsOnly(phone)]
   if (instanceId) {
     const { data: byBoth } = await admin
       .from('leads')
       .select('id')
-      .eq('phone', phone)
+      .in('phone', inList)
       .eq('whatsapp_instance_id', instanceId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+      .limit(1)
       .maybeSingle()
     if (byBoth?.id) return String(byBoth.id)
+    // Lead do site: criado sem linha (whatsapp_instance_id null) — casa pela variante do fone.
     const { data: byPhoneNull } = await admin
       .from('leads')
       .select('id')
-      .eq('phone', phone)
+      .in('phone', inList)
       .is('whatsapp_instance_id', null)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+      .limit(1)
       .maybeSingle()
     if (byPhoneNull?.id) return String(byPhoneNull.id)
     return null
