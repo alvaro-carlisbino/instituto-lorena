@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { isLocalDeliveryCity, isMaringaRegion, resolveCepBrasil } from './cep.ts'
+import { insertInteraction } from './crm.ts'
 
 /**
  * Melhor Envio — agregador que cota Correios (PAC/SEDEX) e transportadoras SEM exigir
@@ -857,4 +858,100 @@ export async function autoShipToCart(
   } catch (e) {
     return { ok: false, reason: 'exception', error: e instanceof Error ? e.message : String(e) }
   }
+}
+
+// Motivos de skip do autoShipToCart que o cliente RESOLVE ao completar o endereço depois
+// do pagamento (número/CEP/rua). Só estes disparam o religamento — 'me_nao_configurado',
+// 'sem_servico_atende' ou 'shipment_failed' não se resolvem com o endereço.
+const RESHIPPABLE_REASONS = new Set(['sem_numero', 'sem_cep', 'sem_rua', 'cep_nao_resolvido'])
+
+/**
+ * Religa o envio automático quando o endereço é COMPLETADO depois do pagamento.
+ *
+ * Caso Kellen (07/07): checkout do site entrou sem o número da casa, o PIX confirmou, o
+ * autoShipToCart pulou com `sem_numero` e, quando ela mandou "Av. Dona Lídia, 900" pelo
+ * WhatsApp 1min depois, o envio NÃO era retentado — ficava parado até alguém notar.
+ *
+ * Idempotência pela timeline (não há tabela de envios): só age se a ÚLTIMA interação de
+ * 'Melhor Envio' do lead for um skip retentável. Assim que um envio entra no carrinho (ou
+ * é local/retirada), a última interação deixa de ser skip e o religamento não repete.
+ * Best-effort: nunca lança (o chamador é o webhook de inbound).
+ */
+export async function maybeReshipAfterAddressComplete(admin: SupabaseClient, leadId: string): Promise<void> {
+  try {
+    if (!leadId) return
+
+    // 1. Última interação de envio: só religa se foi um skip retentável (endereço incompleto).
+    const { data: lastShip } = await admin
+      .from('interactions')
+      .select('content, author')
+      .eq('lead_id', leadId)
+      .in('author', ['Melhor Envio', 'Logística'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const lastContent = String((lastShip as { content?: string } | null)?.content ?? '')
+    if (!lastContent) return // nunca tentou enviar por aqui — não inventa envio
+    const m = lastContent.match(/NÃO gerado automaticamente \(([a-z_]+)\)/)
+    if (!m || !RESHIPPABLE_REASONS.has(m[1])) return // já tem envio, é local/retirada, ou skip não-retentável
+
+    // 2. Endereço agora completo? (envio externo exige cep+numero; local/retirada não vão pro ME)
+    const { data: leadRow } = await admin
+      .from('leads')
+      .select('id, patient_name, phone, tenant_id, custom_fields')
+      .eq('id', leadId)
+      .maybeSingle()
+    const l = leadRow as {
+      id: string; patient_name?: string; phone?: string; tenant_id?: string
+      custom_fields?: Record<string, unknown>
+    } | null
+    if (!l) return
+    const entrega = ((l.custom_fields?.entrega ?? {}) as Record<string, unknown>)
+    const mode = String(entrega.delivery_mode ?? '').trim()
+    if (mode === 'retirada_clinica' || mode === 'entrega_local_maringa') return
+    const cep = onlyDigitsStr(entrega.cep ?? entrega.postalCode)
+    const numero = String(entrega.numero ?? entrega.number ?? '').trim()
+    if (cep.length !== 8 || !numero) return // ainda incompleto — espera a próxima mensagem
+
+    // 3. Pedido PAGO do lead (kit/valor p/ a etiqueta). Kits/vendas Tricopill vivem no tenant
+    //    'tricopill'. Rede (site) OU Asaas — o mais recente pago.
+    const { data: rede } = await admin
+      .from('rede_payments')
+      .select('kit, amount_cents, freight_cents, created_at')
+      .eq('lead_id', leadId).eq('status', 'paid')
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    const { data: asaas } = await admin
+      .from('asaas_payments')
+      .select('kit, amount_cents, freight_cents, created_at')
+      .eq('lead_id', leadId).eq('status', 'paid')
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    const paid = [rede, asaas]
+      .filter(Boolean)
+      .sort((a, b) => String((b as { created_at?: string }).created_at ?? '').localeCompare(String((a as { created_at?: string }).created_at ?? '')))[0] as
+        { kit?: string | null; amount_cents?: number; freight_cents?: number } | undefined
+    if (!paid) return // sem pagamento pago — não gera envio
+
+    // 4. Religa o envio (mesmo caminho do fechamento). Valor do produto = pago − frete.
+    const blingTenant = paid.kit ? 'tricopill' : String(l.tenant_id ?? 'tricopill')
+    const productValueCents = Math.max(0, Math.round(Number(paid.amount_cents) || 0) - Math.max(0, Math.round(Number(paid.freight_cents) || 0)))
+    const ship = await autoShipToCart(admin, blingTenant, {
+      lead: { id: l.id, patient_name: l.patient_name, phone: l.phone, custom_fields: l.custom_fields },
+      kit: paid.kit ?? null,
+      productName: paid.kit ? `Tricopill (${paid.kit})` : 'Tricopill',
+      productValueCents,
+    })
+
+    // 5. Timeline: só registra sucesso ou uma nova falha REAL (não repete o mesmo skip de
+    //    endereço, que aqui já não deveria acontecer). Sem isso a idempotência não fecha.
+    let content: string | null = null
+    if (ship.ok) content = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}) — gerado após o endereço ser completado. Finalize a compra no painel.`
+    else if (ship.reason && !RESHIPPABLE_REASONS.has(ship.reason) && ship.reason !== 'entrega_local_maringa' && ship.reason !== 'retirada_clinica') {
+      content = `📦 Envio ainda não gerado (${ship.reason}) mesmo com o endereço completo. Gere pelo botão.`
+    }
+    if (content) {
+      await insertInteraction(admin, {
+        leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author: 'Melhor Envio', content, tenantId: blingTenant,
+      })
+    }
+  } catch { /* nunca derruba o inbound por causa do religamento de envio */ }
 }

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { enrichEnderecoViaCep } from './cep.ts'
+import { maybeReshipAfterAddressComplete } from './melhorEnvio.ts'
 
 // LLM = mesma config do resto do CRM: Z.ai (GLM) por env, com fallback OpenAI.
 function normalizeApiRoot(raw: string): string {
@@ -178,6 +179,10 @@ export async function captureCadastroForLead(
     }
     if (!changed) return null
     await admin.from('leads').update({ custom_fields: { ...cf, cadastro, entrega } }).eq('id', leadId)
+    // Endereço completado DEPOIS do pagamento (caso Kellen: o checkout do site entra sem o
+    // número da casa, o cliente manda pelo WhatsApp minutos depois) → religa o envio que o
+    // fechamento pulou por `sem_numero`/`sem_cep`. Totalmente guardado e best-effort lá dentro.
+    await maybeReshipAfterAddressComplete(admin, leadId)
     return fields
   } catch {
     return null

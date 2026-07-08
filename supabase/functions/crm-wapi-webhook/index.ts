@@ -334,6 +334,8 @@ Deno.serve(async (req) => {
     }
 
     // Captura passiva de dados de cadastro p/ agendar na Shosp sem digitação.
+    // (o próprio captureCadastroForLead religa o envio se o endereço foi completado
+    //  depois de um pagamento — caso Kellen.)
     try {
       await captureCadastroForLead(admin, lead.leadId, normalized.text)
     } catch {
