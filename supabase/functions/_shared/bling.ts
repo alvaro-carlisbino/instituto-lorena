@@ -776,6 +776,22 @@ export async function blingListSaleOrders(
   return out
 }
 
+/**
+ * Número VISÍVEL do pedido (o que aparece na tela do Bling). A criação só devolve o
+ * id interno da API (26275181279), que não acha nada na busca do Bling — o financeiro
+ * procura pelo `numero` (3306). Best-effort: null se o GET falhar.
+ */
+export async function blingGetOrderNumero(token: string, orderId: string): Promise<string | null> {
+  try {
+    const res = await blingFetch(token, `/pedidos/vendas/${orderId}`)
+    if (!res.ok) return null
+    const parsed = JSON.parse((await res.text()) || '{}') as { data?: { numero?: number | string } }
+    return parsed.data?.numero != null ? String(parsed.data.numero) : null
+  } catch {
+    return null
+  }
+}
+
 /** Cria um pedido de venda no Bling. Retorna o id do pedido criado. */
 export async function blingCreateOrder(token: string, payload: Record<string, unknown>): Promise<string | null> {
   const res = await blingFetchWithRetry(token, `/pedidos/vendas`, { method: 'POST', body: JSON.stringify(payload) })

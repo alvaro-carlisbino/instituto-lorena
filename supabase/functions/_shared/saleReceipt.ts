@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { blingGetOrderNumero, getValidBlingToken } from './bling.ts'
 
 /**
  * Comprovante de venda no GRUPO do WhatsApp (lançamento + conferência do financeiro).
@@ -26,6 +27,8 @@ export type SaleReceiptInput = {
   /** Produto vendido (label do kit ou descrição da cobrança). */
   produto?: string | null
   blingOrderId?: string | null
+  /** Número VISÍVEL do pedido no Bling (ex.: 3306) — resolvido automaticamente a partir do id interno. */
+  blingOrderNumero?: string | null
   /** Id da transação no gateway (TID e.Rede / payment id Asaas). */
   transactionId?: string | null
   paidAtIso?: string
@@ -115,7 +118,10 @@ export function buildSaleReceiptText(d: SaleReceiptInput): string {
 
   const pedido: string[] = []
   if (d.produto?.trim()) pedido.push(`• Produto: ${d.produto.trim().slice(0, 120)}`)
-  if (d.blingOrderId) pedido.push(`• Pedido Bling: #${d.blingOrderId}`)
+  // Número visível (3306) é o que a busca do Bling encontra; o id interno da API
+  // (26275181279) não acha nada e confundiu o financeiro (caso Kellen 07/07).
+  if (d.blingOrderNumero) pedido.push(`• Pedido Bling: nº ${d.blingOrderNumero}`)
+  else if (d.blingOrderId) pedido.push(`• Pedido Bling: id ${d.blingOrderId} (interno — na tela do Bling, busque pelo nome do cliente)`)
   if (d.origem?.trim()) pedido.push(`• Origem: ${d.origem.trim()}`)
   pedido.push(`• Ref: ${d.paymentId}`)
 
@@ -210,6 +216,14 @@ export async function sendSaleReceiptToGroup(admin: SupabaseClient, d: SaleRecei
     const cfg = await readNotifCfg(admin, d.tenantId)
     const jid = String(cfg.sales_receipt_group_jid ?? '').trim()
     if (!jid || cfg.sales_receipt_enabled === false) return
+    // Resolve o número VISÍVEL do pedido (o que a busca do Bling acha) a partir do id
+    // interno da API. Best-effort: sem token ou com falha, a mensagem sai com o id.
+    if (d.blingOrderId && !d.blingOrderNumero) {
+      try {
+        const token = await getValidBlingToken(admin, d.tenantId)
+        if (token) d = { ...d, blingOrderNumero: await blingGetOrderNumero(token, d.blingOrderId) }
+      } catch { /* segue com o id interno */ }
+    }
     const ok = await sendWapiGroupText(admin, d.tenantId, jid, buildSaleReceiptText(d))
     if (!ok) console.warn(`[saleReceipt] comprovante NÃO entregue ao grupo (tenant=${d.tenantId}, payment=${d.paymentId})`)
   } catch (e) {
