@@ -68,7 +68,10 @@ export function FrenteLojaPage() {
     setSearched(false)
     setSearchError(null)
     try {
-      const res = await searchShospPatients({ nome: q, cpf: termDigits.length >= 6 ? termDigits : undefined })
+      // CPF puro → só busca por CPF (1 chamada ao Shosp). Nome → só por nome. Evita queimar o
+      // limite da API do Shosp com buscas redundantes (CPF sendo procurado também como nome).
+      const isCpf = termDigits.length === 11 && /^[\d.\s-]+$/.test(q)
+      const res = await searchShospPatients(isCpf ? { nome: '', cpf: termDigits } : { nome: q })
       setShosp(res)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Falha na busca Shosp.'
