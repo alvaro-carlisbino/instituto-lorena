@@ -44,7 +44,7 @@ import { ScheduleAppointmentDialog } from '@/components/leads/ScheduleAppointmen
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
-import { generateAsaasCardLink } from '@/services/crmAsaas'
+import { generateRedeLink } from '@/services/crmRede'
 import {
   isWaInstagramMergeNotice,
   tryConsumeWaInstagramMergeToast,
@@ -57,8 +57,9 @@ import type { Interaction } from '@/mocks/crmMock'
 import { forceAiReply, type ConversationOwnerMode } from '@/services/conversationControl'
 
 /** Emojis frequentes para inserir no rascunho (UTF-8). */
-// Valor cheio do cartão por kit Tricopill (mesma tabela do PaymentLinksPage). Gera link Asaas /pagar.
-const ASAAS_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 69700 }
+// Valor cheio do cartão por kit Tricopill (mesma tabela do PaymentLinksPage). Cartão+Pix = e.Rede
+// (Asaas é SÓ assinatura); o link /pagar deixa o cliente escolher Pix (5% off) ou cartão até 3x.
+const REDE_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 69700 }
 
 const CHAT_QUICK_EMOJIS = [
   '😀',
@@ -293,13 +294,13 @@ export function LeadChatThread({
   const { tenant } = useTenant()
   const isSalesPolo = tenant.poloType === 'sales'
 
-  const handleGenerateAsaas = async (kit: PagbankKit) => {
+  const handleGenerateRede = async (kit: PagbankKit) => {
     if (pagbankLoading) return
     setPagbankLoading(true)
     try {
-      const amountCents = ASAAS_KIT_AMOUNTS[kit]
+      const amountCents = REDE_KIT_AMOUNTS[kit]
       const maxInstallments = kit === '1_mes' ? 1 : 3
-      const res = await generateAsaasCardLink({
+      const res = await generateRedeLink({
         amountCents,
         description: `Tricopill ${kit.replace('_', ' ')}`,
         leadId,
@@ -307,10 +308,10 @@ export function LeadChatThread({
       })
       crm.setDraftMessage((prev) => {
         const base = prev.trim()
-        const linkLine = `💳 Aqui está seu link de pagamento no cartão:\n${res.payLink}`
+        const linkLine = `💳 Aqui está seu link de pagamento (Pix ou cartão):\n${res.payLink}`
         return base ? `${base}\n\n${linkLine}` : linkLine
       })
-      toast.success('Link de cartão (Asaas) gerado — revise e envie.')
+      toast.success('Link de pagamento (Rede) gerado — revise e envie.')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao gerar link de pagamento')
     } finally {
@@ -1176,18 +1177,18 @@ export function LeadChatThread({
                     <DropdownMenuTrigger
                       type="button"
                       disabled={pagbankLoading}
-                      title="Gerar link de pagamento no cartão (Asaas)"
+                      title="Gerar link de pagamento (Pix ou cartão) — Rede"
                       className={cn(
                         buttonVariants({ variant: 'ghost', size: 'sm' }),
                         'h-8 rounded-lg px-2 text-[10px]',
                       )}
                     >
                       <CreditCard className="mr-1.5 h-3.5 w-3.5 text-primary" />
-                      {pagbankLoading ? 'Gerando…' : 'Link cartão'}
+                      {pagbankLoading ? 'Gerando…' : 'Link pagamento'}
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start">
                       {(Object.keys(PAGBANK_KIT_LABELS) as PagbankKit[]).map((kit) => (
-                        <DropdownMenuItem key={kit} onClick={() => void handleGenerateAsaas(kit)}>
+                        <DropdownMenuItem key={kit} onClick={() => void handleGenerateRede(kit)}>
                           {PAGBANK_KIT_LABELS[kit]}
                         </DropdownMenuItem>
                       ))}
