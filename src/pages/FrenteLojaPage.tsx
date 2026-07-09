@@ -35,6 +35,7 @@ export function FrenteLojaPage() {
   const [searching, setSearching] = useState(false)
   const [shosp, setShosp] = useState<ShospPatientCandidate[]>([])
   const [searched, setSearched] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
 
   const [showNew, setShowNew] = useState(false)
   const [newPhone, setNewPhone] = useState('')
@@ -65,12 +66,15 @@ export function FrenteLojaPage() {
     }
     setSearching(true)
     setSearched(false)
+    setSearchError(null)
     try {
       const res = await searchShospPatients({ nome: q, cpf: termDigits.length >= 6 ? termDigits : undefined })
       setShosp(res)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha na busca Shosp.')
+      const msg = e instanceof Error ? e.message : 'Falha na busca Shosp.'
+      toast.error(msg)
       setShosp([])
+      setSearchError(msg)
     } finally {
       setSearching(false)
       setSearched(true)
@@ -199,7 +203,11 @@ export function FrenteLojaPage() {
               <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Pacientes Shosp
               </p>
-              {shosp.length ? (
+              {searchError ? (
+                <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-sm text-amber-700 dark:text-amber-300">
+                  {searchError} Você ainda pode cadastrar o cliente na hora abaixo.
+                </p>
+              ) : shosp.length ? (
                 <ul className="grid gap-1.5">
                   {shosp.map((c) => (
                     <li

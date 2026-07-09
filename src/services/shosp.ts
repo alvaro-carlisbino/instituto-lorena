@@ -237,12 +237,22 @@ export async function searchShospPatients(params: { nome: string; cpf?: string }
   //    nome digitado não é o dono do cpf do lead. Busca por NOME vai só com o nome; o
   //    cpf entra como busca SEPARADA (via `cpf`, deixando o nome de fora) e o rank()
   //    destaca depois quem casa cpf/telefone/nascimento com o lead.
+  // Se o Shosp responder erro (ex.: 429 "Limit Exceeded") e nada for encontrado, sinalizamos
+  // pra NÃO mostrar "nenhum paciente" (que engana) e sim um aviso de indisponibilidade.
+  let shospError: 'limite' | 'indisponivel' | null = null
   const liveSearch = async (query: { nome?: string; cpf?: string }): Promise<ShospPatientCandidate[]> => {
     const { data: live, error: liveErr } = await supabase!.functions.invoke('crm-shosp', {
       body: { mode: 'find_patient', ...query },
     })
-    if (liveErr) return []
-    const res = live as { ok?: boolean; data?: unknown }
+    if (liveErr) {
+      shospError = shospError ?? 'indisponivel'
+      return []
+    }
+    const res = live as { ok?: boolean; status?: number; data?: unknown }
+    if (res?.ok === false) {
+      shospError = res.status === 429 ? 'limite' : 'indisponivel'
+      return []
+    }
     return shospDadosArray(res?.data)
       .map(mapShospCandidate)
       .filter((x): x is ShospPatientCandidate => x !== null)
@@ -268,6 +278,13 @@ export async function searchShospPatients(params: { nome: string; cpf?: string }
       const short = raw.split(/\s+/).slice(0, 2).join(' ')
       if (short && short !== raw) add(await liveSearch({ nome: short }))
     }
+  }
+  if (!merged.length && shospError) {
+    throw new Error(
+      shospError === 'limite'
+        ? 'O Shosp atingiu o limite de consultas agora. Aguarde alguns instantes e tente de novo.'
+        : 'O Shosp está indisponível no momento. Tente de novo em instantes.',
+    )
   }
   return merged
 }
