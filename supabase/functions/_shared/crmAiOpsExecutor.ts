@@ -4,7 +4,7 @@ import { insertInteraction } from './crm.ts'
 import { notifyAgents } from './notifyAgents.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
-import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit } from './rede.ts'
+import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit, SHAMPOO_ADDON } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, resolveCepBrasil } from './cep.ts'
@@ -760,16 +760,28 @@ export async function executeCrmAiOpsFromModel(
         }
         const pixKey = op.kit != null ? normalizeKitKey(String(op.kit)) : null
         const pixKit = pixKey ? PAGBANK_KITS[pixKey] : undefined
+        // Upsell: Shampoo Ozonizado como item extra (junto do kit OU sozinho).
+        const pixShampooQty = Math.max(0, Math.floor(Number(op.shampoo) || 0))
         let pixAmount = 0
         let pixDesc = ''
+        const pixItems: Array<Record<string, unknown>> = []
         if (pixKit) {
-          pixAmount = pixKit.amountCents
+          pixAmount += pixKit.amountCents
           pixDesc = pixKit.label
-        } else {
-          // SÓ vendemos KIT cadastrado — sem venda avulsa por valor livre.
-          results.push({ type: 'rede_pix', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o Pix só para os kits do Tricopill (1 mês, 3+1 ou 5 meses). Qual deles você quer? 💚' })
+          pixItems.push({ kit: pixKey, nome: pixKit.label, qty: 1, precoCents: pixKit.amountCents })
+        }
+        if (pixShampooQty > 0) {
+          pixAmount += pixShampooQty * SHAMPOO_ADDON.amountCents
+          pixDesc = pixDesc ? `${pixDesc} + ${pixShampooQty}× Shampoo Ozonizado` : `${pixShampooQty}× Shampoo Ozonizado`
+          pixItems.push({ id: SHAMPOO_ADDON.blingProductId, nome: SHAMPOO_ADDON.nome, qty: pixShampooQty, precoCents: SHAMPOO_ADDON.amountCents })
+        }
+        if (pixItems.length === 0) {
+          // Sem kit e sem shampoo: nada a vender.
+          results.push({ type: 'rede_pix', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o Pix pros kits do Tricopill (1 mês, 3+1 ou 5 meses) e pro Shampoo Ozonizado. O que você quer? 💚' })
           continue
         }
+        // Só manda "items" quando há shampoo (carrinho misto/avulso); kit puro segue o caminho testado.
+        const pixUseItems = pixShampooQty > 0
         try {
           const out = await createRedePix(admin, {
             tenantId: leadTenantId,
@@ -779,6 +791,7 @@ export async function executeCrmAiOpsFromModel(
             couponCode: op.coupon != null ? String(op.coupon) : undefined,
             freightCents,
             kit: pixKey ?? undefined,
+            items: pixUseItems ? pixItems : undefined,
             customerName: String(snapPix.cadastro.nomeCompleto ?? '').trim() || undefined,
             customerDoc: String(snapPix.cadastro.cpf ?? '').replace(/\D/g, '') || undefined,
             phone: String(snapPix.cadastro.telefone ?? '').replace(/\D/g, '') || undefined,
@@ -820,16 +833,27 @@ export async function executeCrmAiOpsFromModel(
         // Cartão (e.Rede), parcelado até 12x. Aceita kit OU amount_cents+description, e cupom.
         const kitRaw = op.kit != null ? String(op.kit) : ''
         const resolved = kitRaw ? resolveRedeKit(kitRaw) : null
+        // Upsell: Shampoo Ozonizado como item extra (junto do kit OU sozinho).
+        const cardShampooQty = Math.max(0, Math.floor(Number(op.shampoo) || 0))
         let amountCents = 0
         let description = ''
+        const cardItems: Array<Record<string, unknown>> = []
         if (resolved) {
-          amountCents = resolved.amountCents
+          amountCents += resolved.amountCents
           description = resolved.label
-        } else {
-          // SÓ vendemos KIT cadastrado — sem venda avulsa por valor livre.
-          results.push({ type: 'rede_link', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o link de pagamento só para os kits do Tricopill (1 mês, 3+1 ou 5 meses). Qual deles você quer? 💚' })
+          cardItems.push({ kit: resolved.key, nome: resolved.label, qty: 1, precoCents: resolved.amountCents })
+        }
+        if (cardShampooQty > 0) {
+          amountCents += cardShampooQty * SHAMPOO_ADDON.amountCents
+          description = description ? `${description} + ${cardShampooQty}× Shampoo Ozonizado` : `${cardShampooQty}× Shampoo Ozonizado`
+          cardItems.push({ id: SHAMPOO_ADDON.blingProductId, nome: SHAMPOO_ADDON.nome, qty: cardShampooQty, precoCents: SHAMPOO_ADDON.amountCents })
+        }
+        if (cardItems.length === 0) {
+          // Sem kit e sem shampoo: nada a vender.
+          results.push({ type: 'rede_link', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o link pros kits do Tricopill (1 mês, 3+1 ou 5 meses) e pro Shampoo Ozonizado. O que você quer? 💚' })
           continue
         }
+        const cardUseItems = cardShampooQty > 0
         // KIT: prioriza o que a IA mandou; se ela mandou amount_cents (sem kit), INFERE o kit
         // pelo valor do produto (match exato com REDE_KITS). Sem isso o kit ficava null no
         // rede_payments e a venda no cartão NÃO ia pro Bling automaticamente.
@@ -867,6 +891,7 @@ export async function executeCrmAiOpsFromModel(
             couponCode: op.coupon != null ? String(op.coupon) : undefined,
             freightCents,
             kit: kitKey ?? undefined, // guarda o kit (ou inferido) p/ criar o pedido no Bling ao pagar
+            items: cardUseItems ? cardItems : undefined,
             // Dados do cliente na cobrança (controle + conciliação + titular do cartão na e.Rede).
             customerName: String(snap.cadastro.nomeCompleto ?? '').trim() || undefined,
             customerDoc: String(snap.cadastro.cpf ?? '').replace(/\D/g, '') || undefined,

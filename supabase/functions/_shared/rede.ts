@@ -19,6 +19,17 @@ export const REDE_KITS: Record<string, { label: string; amountCents: number; qty
 }
 
 /**
+ * Único produto EXTRA (além dos kits) que o bot pode vender — upsell do Shampoo Ozonizado.
+ * Vai como item próprio no pedido do Bling (id real → baixa o estoque do shampoo). Preço =
+ * catálogo Bling (R$119,90). Se mudar o preço, alinhe aqui + Bling + catalog_cache.
+ */
+export const SHAMPOO_ADDON = {
+  blingProductId: '16675535462',
+  nome: 'Shampoo Ozonizado Multifuncional - Ozoncare 200ml',
+  amountCents: 11990,
+}
+
+/**
  * Parcelamento MÁXIMO no cartão por kit (regra Ingrid 15/jun): só parcela ACIMA de 3
  * frascos, em até 3x sem juros. 1 frasco = só à vista (1x) ou Pix. Kits 3_meses (3+1=4
  * frascos) e 5_meses (5) parcelam até 3x. Aplicado no createRedeIntent (a IA não decide).
@@ -207,6 +218,8 @@ export async function createRedeIntent(
     phone?: string
     /** CPF do cliente (dígitos) — gravado p/ casar com a NF-e/Bling na conciliação. */
     customerDoc?: string
+    /** Itens do pedido (carrinho): kit + extras. Se vier, o pedido no Bling sai por estes itens. */
+    items?: Array<Record<string, unknown>> | null
   },
 ): Promise<{ id: string; url: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null; freightCents: number }> {
   const cfg = await readRedeConfig(admin, args.tenantId)
@@ -242,6 +255,7 @@ export async function createRedeIntent(
     coupon_code: coupon.applied ? coupon.code : null,
     discount_cents: coupon.discountCents,
     kit: args.kit || null,
+    items: Array.isArray(args.items) && args.items.length ? args.items : null,
     customer_name: args.customerName?.trim() || null,
     phone: args.phone?.replace(/\D/g, '') || null,
     customer_doc: args.customerDoc?.replace(/\D/g, '') || null,
@@ -280,6 +294,8 @@ export async function createRedePix(
     customerDoc?: string
     /** Validade do QR em horas (≤ 15 dias). Default 24h. */
     expiresInHours?: number
+    /** Itens do pedido (carrinho): kit + extras. Se vier, o pedido no Bling sai por estes itens. */
+    items?: Array<Record<string, unknown>> | null
   },
 ): Promise<{
   id: string; qrText: string; qrImage: string | null; tid: string | null
@@ -354,6 +370,7 @@ export async function createRedePix(
     coupon_code: coupon.applied ? coupon.code : null,
     discount_cents: coupon.discountCents,
     kit: args.kit || null,
+    items: Array.isArray(args.items) && args.items.length ? args.items : null,
     customer_name: args.customerName?.trim() || null,
     phone: args.phone?.replace(/\D/g, '') || null,
     customer_doc: args.customerDoc?.replace(/\D/g, '') || null,
