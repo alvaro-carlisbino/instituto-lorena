@@ -88,7 +88,9 @@ export function LeadSalePage() {
   const q = search.trim().toLowerCase()
   const filteredCatalog = (q ? catalog.filter((p) => p.nome.toLowerCase().includes(q)) : catalog).slice(0, 12)
   // Order bump: o Shampoo Ozonizado, oferecido sempre que ainda não está no carrinho.
+  // Só aparece com estoque > 0 (evita vender no negativo enquanto a entrada não é lançada).
   const bumpProduct = catalog.find((p) => p.id === CROSS_SELL_PRODUCT_ID)
+  const bumpAvailable = !!bumpProduct && (bumpProduct.estoque ?? 0) > 0
   const bumpInCart = cart.some((x) => x.id === CROSS_SELL_PRODUCT_ID)
 
   const handleConfirm = async () => {
@@ -268,7 +270,7 @@ export function LeadSalePage() {
                   )}
                 </div>
               )}
-              {bumpProduct && !bumpInCart ? (
+              {bumpProduct && bumpAvailable && !bumpInCart ? (
                 <button
                   type="button"
                   onClick={() => addToCart(bumpProduct)}
