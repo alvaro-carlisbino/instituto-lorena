@@ -25,6 +25,9 @@ import { confirmSale, fetchBlingCatalog, type CartItem, type CatalogProduct } fr
 
 const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
+// Cross-sell fixo de marketing: sempre oferecer o Shampoo Ozonizado junto (order bump 1-clique).
+const CROSS_SELL_PRODUCT_ID = '16675535462' // Shampoo Ozonizado Multifuncional - Ozoncare 200ml
+
 export function LeadSalePage() {
   const crm = useCrm()
   const navigate = useNavigate()
@@ -84,6 +87,9 @@ export function LeadSalePage() {
   const cartTotalCents = cart.reduce((s, x) => s + x.qty * x.precoCents, 0)
   const q = search.trim().toLowerCase()
   const filteredCatalog = (q ? catalog.filter((p) => p.nome.toLowerCase().includes(q)) : catalog).slice(0, 12)
+  // Order bump: o Shampoo Ozonizado, oferecido sempre que ainda não está no carrinho.
+  const bumpProduct = catalog.find((p) => p.id === CROSS_SELL_PRODUCT_ID)
+  const bumpInCart = cart.some((x) => x.id === CROSS_SELL_PRODUCT_ID)
 
   const handleConfirm = async () => {
     setPageError(null)
@@ -262,6 +268,21 @@ export function LeadSalePage() {
                   )}
                 </div>
               )}
+              {bumpProduct && !bumpInCart ? (
+                <button
+                  type="button"
+                  onClick={() => addToCart(bumpProduct)}
+                  className="flex w-full items-center gap-2 rounded-lg border border-dashed border-primary/50 bg-primary/5 px-3 py-2 text-left text-xs transition-colors hover:bg-primary/10"
+                >
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                    <Plus className="size-3.5" />
+                  </span>
+                  <span className="flex-1">
+                    <strong className="block">Adicione o Shampoo Ozonizado — {brl(bumpProduct.precoCents)}</strong>
+                    <span className="text-muted-foreground">Leve o cuidado capilar completo junto com o tratamento.</span>
+                  </span>
+                </button>
+              ) : null}
               {cart.length > 0 ? (
                 <div className="space-y-1.5 rounded-lg border border-border/40 p-2">
                   {cart.map((it) => (
