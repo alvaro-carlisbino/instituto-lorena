@@ -94,6 +94,13 @@ export async function retryBlingOrder(leadId: string, kit?: string): Promise<{ o
   return { orderId: p.orderId != null ? String(p.orderId) : null, bottles: Number(p.bottles ?? 0) }
 }
 
+/** Cria/atualiza o contato do cliente no Bling a partir do cadastro/endereço do lead
+ *  e, se houver pedido vinculado, corrige o contato dele. */
+export async function syncLeadContato(leadId: string): Promise<{ contatoId: string | null; orderUpdated: boolean }> {
+  const p = await invokeBling({ action: 'sync_contato', leadId })
+  return { contatoId: p.contatoId != null ? String(p.contatoId) : null, orderUpdated: p.orderUpdated === true }
+}
+
 /** Inicia o OAuth: pede a URL de autorização do Bling e redireciona o navegador. */
 export async function startBlingConnect(returnUrl: string): Promise<void> {
   if (!supabase) throw new Error('Sistema não configurado.')

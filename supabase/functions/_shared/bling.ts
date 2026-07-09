@@ -332,7 +332,7 @@ function ddmmaaaaToYmd(s: string): string {
   return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`
 }
 
-async function blingFindOrCreateContato(
+export async function blingFindOrCreateContato(
   token: string,
   args: {
     nome: string; phone?: string; cpf?: string; email?: string; dataNascimento?: string; sexo?: string

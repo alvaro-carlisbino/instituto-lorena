@@ -24,6 +24,7 @@ import {
   Building2,
   PackageOpen,
   Pill,
+  Store,
   Wallet,
   CreditCard,
   Ticket,
@@ -175,6 +176,7 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 <NavItem to="/tricopill" label="Visão Tricopill" icon={Pill} />
+                <NavItem to="/frente-loja" label="Frente de Loja" icon={Store} />
                 <NavItem to="/tricopill-pedidos" label="Pedidos" icon={PackageOpen} />
                 <NavItem to="/tricopill-assinaturas" label="Assinaturas" icon={Repeat} />
                 <NavItem to="/cupons" label="Cupons" icon={Ticket} />

@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { buildBlingCatalog, blingCreateSaleOrder } from '../_shared/bling.ts'
+import { buildBlingCatalog, blingCreateSaleOrder, blingFindOrCreateContato, getValidBlingToken } from '../_shared/bling.ts'
+import { resolveCepBrasil } from '../_shared/cep.ts'
 import { PAGBANK_KITS } from '../_shared/pagbank.ts'
 import { REDE_KITS, inferRedeKit } from '../_shared/rede.ts'
 import { insertInteraction } from '../_shared/crm.ts'
@@ -164,6 +165,94 @@ Deno.serve(async (req) => {
     } catch (e) {
       return json({ ok: false, error: 'bling_order_failed', message: e instanceof Error ? e.message : String(e) }, 502)
     }
+  }
+
+  // sync_contato: cria/atualiza o contato REAL do cliente no Bling a partir do cadastro/
+  // endereço do lead e, se já houver pedido vinculado, corrige o contato desse pedido.
+  // Usado pelo botão "Atualizar no Bling" da ficha (conserta cadastro incompleto).
+  if (action === 'sync_contato') {
+    const leadId = String(payload.leadId ?? '').trim()
+    if (!leadId) return json({ ok: false, error: 'missing_lead' }, 400)
+
+    const { data: leadRow } = await admin
+      .from('leads').select('id, patient_name, phone, custom_fields').eq('id', leadId).maybeSingle()
+    const lead = leadRow as { id: string; patient_name?: string; phone?: string; custom_fields?: Record<string, unknown> } | null
+    if (!lead) return json({ ok: false, error: 'lead_not_found' }, 404)
+
+    const cf = (lead.custom_fields ?? {}) as Record<string, unknown>
+    const cad = (cf.cadastro ?? {}) as Record<string, string>
+    const ent = (cf.entrega ?? {}) as Record<string, string>
+    const nome = String(cad.nomeCompleto || lead.patient_name || '').trim()
+    if (!nome) return json({ ok: false, error: 'sem_nome' }, 400)
+
+    // Kit Tricopill → config do Bling vive no tenant 'tricopill'.
+    const token = await getValidBlingToken(admin, 'tricopill')
+    if (!token) return json({ ok: false, error: 'bling_indisponivel' }, 502)
+
+    // Endereço completo via ViaCEP (mesma fonte do fechamento de venda).
+    const cep = String(ent.cep ?? '').replace(/\D/g, '')
+    let endereco: Record<string, string | undefined> | undefined
+    if (cep.length === 8) {
+      const info = (!ent.cidade || !ent.uf || !ent.logradouro) ? await resolveCepBrasil(cep).catch(() => null) : null
+      endereco = {
+        rua: ent.logradouro || info?.logradouro,
+        numero: ent.numero,
+        complemento: ent.complemento,
+        bairro: ent.bairro || info?.bairro,
+        cep,
+        municipio: ent.cidade || info?.localidade,
+        uf: (ent.uf || info?.uf || '').toUpperCase() || undefined,
+      }
+    }
+
+    let contatoId: string | null = null
+    try {
+      contatoId = await blingFindOrCreateContato(token, {
+        nome, phone: lead.phone ? String(lead.phone) : undefined,
+        cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo,
+        endereco,
+      })
+    } catch (e) {
+      return json({ ok: false, error: 'contato_falhou', message: e instanceof Error ? e.message : String(e) }, 502)
+    }
+    if (!contatoId) return json({ ok: false, error: 'contato_nao_criado' }, 502)
+
+    // Se houver pedido de cartão vinculado (rede_payments.bling_order_id), troca o contato dele.
+    let orderUpdated = false
+    const { data: rede } = await admin
+      .from('rede_payments').select('bling_order_id')
+      .eq('lead_id', leadId).not('bling_order_id', 'is', null)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    const orderId = String((rede as { bling_order_id?: string } | null)?.bling_order_id ?? '').trim()
+    if (orderId) {
+      try {
+        const bh = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Accept: 'application/json' }
+        const gr = await fetch(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, { headers: bh })
+        if (gr.ok) {
+          const o = (JSON.parse((await gr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+          const itens = (Array.isArray(o.itens) ? o.itens : []).map((i: Record<string, unknown>) => ({
+            produto: { id: ((i.produto ?? {}) as Record<string, unknown>).id }, descricao: i.descricao, quantidade: i.quantidade, valor: i.valor,
+          }))
+          const putPayload: Record<string, unknown> = { contato: { id: Number(contatoId) || contatoId }, data: o.data, itens }
+          if (o.observacoes) putPayload.observacoes = o.observacoes
+          const tr = (o.transporte ?? {}) as Record<string, unknown>
+          if (Number(tr.frete) > 0) putPayload.transporte = { frete: tr.frete, fretePorConta: tr.fretePorConta ?? 1 }
+          const pr = await fetch(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, { method: 'PUT', headers: bh, body: JSON.stringify(putPayload) })
+          orderUpdated = pr.ok
+        }
+      } catch {
+        // best-effort: o contato já foi criado/atualizado, o pedido pode ser corrigido depois
+      }
+    }
+
+    await insertInteraction(admin, {
+      leadId, patientName: nome, channel: 'system', direction: 'system', author: 'Bling',
+      content: orderUpdated
+        ? `🔄 Cadastro sincronizado no Bling (contato #${contatoId}) e pedido #${orderId} atualizado.`
+        : `🔄 Cadastro sincronizado no Bling (contato #${contatoId}).`,
+      tenantId: 'tricopill',
+    })
+    return json({ ok: true, contatoId, orderUpdated })
   }
 
   return json({ error: 'unknown_action' }, 400)

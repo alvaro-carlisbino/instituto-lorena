@@ -6,6 +6,7 @@ import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
 import { LeadAnalyticsActions } from '@/components/leads/LeadAnalyticsActions'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { LeadTaskPanel } from '@/components/leads/LeadTaskPanel'
+import { LeadCadastroCard } from '@/components/leads/LeadCadastroCard'
 import { LeadProtocolsSection } from '@/components/leads/LeadProtocolsSection'
 import { LeadStockCostsSection } from '@/components/leads/LeadStockCostsSection'
 import { ShospLinkSection } from '@/components/leads/ShospLinkSection'
@@ -495,52 +496,12 @@ export function LeadDetailPage() {
               )
             })()}
 
-            {(() => {
-              const cf = (lead.customFields ?? {}) as Record<string, unknown>
-              const cad = (cf.cadastro ?? {}) as Record<string, unknown>
-              const ent = (cf.entrega ?? {}) as Record<string, unknown>
-              const str = (v: unknown) => (v == null ? '' : String(v).trim())
-              const nomeCompleto = str(cad.nomeCompleto)
-              const cpf = str(cad.cpf)
-              const cep = str(ent.cep)
-              const numero = str(ent.numero)
-              const complemento = str(ent.complemento)
-              const logradouro = str(ent.logradouro)
-              const bairro = str(ent.bairro)
-              const cidade = str(ent.cidade ?? ent.municipio)
-              const uf = str(ent.uf)
-              const enderecoLinha = [logradouro, numero].filter(Boolean).join(', ')
-              const cidadeLinha = [bairro, [cidade, uf].filter(Boolean).join('/')]
-                .filter(Boolean)
-                .join(' · ')
-              const hasAny = nomeCompleto || cpf || cep || numero || logradouro || cidade
-              if (!hasAny) return null
-              const Row = ({ label, value }: { label: string; value: string }) =>
-                value ? (
-                  <div className="flex flex-col">
-                    <dt className="text-xs text-muted-foreground">{label}</dt>
-                    <dd className="break-words">{value}</dd>
-                  </div>
-                ) : null
-              return (
-                <section
-                  aria-labelledby="lead-cadastro-heading"
-                  className="rounded-md border border-border bg-muted/20 p-3"
-                >
-                  <h2 id="lead-cadastro-heading" className="mb-2 text-sm font-semibold">
-                    Cadastro de venda / entrega
-                  </h2>
-                  <dl className="grid gap-1.5 text-sm sm:grid-cols-2">
-                    <Row label="Nome completo" value={nomeCompleto} />
-                    <Row label="CPF" value={cpf} />
-                    <Row label="CEP" value={cep} />
-                    <Row label="Endereço" value={enderecoLinha} />
-                    <Row label="Complemento" value={complemento} />
-                    <Row label="Bairro / Cidade" value={cidadeLinha} />
-                  </dl>
-                </section>
-              )
-            })()}
+            <LeadCadastroCard
+              lead={lead}
+              onPatch={crm.persistLeadPatch}
+              canEdit={crm.currentPermission.canRouteLeads}
+              canSyncBling={crm.dataMode === 'supabase'}
+            />
 
             {crm.currentPermission.canRouteLeads && crm.dataMode === 'supabase' ? (
               <ShospLinkSection
