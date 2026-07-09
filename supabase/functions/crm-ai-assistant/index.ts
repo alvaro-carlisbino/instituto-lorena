@@ -700,15 +700,16 @@ Deno.serve(async (req) => {
         // falar/ofertar item esgotado: estoque 0 ou negativo (oversold) é OCULTADO.
         // estoque null = não controlado no Bling (mantém — não é "esgotado", só não é rastreado).
         let sellable = cat.items.filter((i) => i.preco > 0 && (i.estoque === null || i.estoque > 0))
-        // O bot do Tricopill vende SOMENTE o Tricopill. A conta Bling é compartilhada com a
-        // clínica (Grandha, Alkymia, shampoos, óleos…), então o catálogo do bot é restrito aos
-        // itens "tricopill" — e tiramos a variante ERRADA "HDS TRICOPILL - 800 MG - 60 CAPSULAS"
-        // (R$ 36,70, blister de cápsulas), que NÃO é o frasco/kit que o bot vende
-        // ("Tricopill - Suplemento Capilar", R$ 199). Sem isso a IA cotava o preço errado.
+        // O bot do Tricopill vende o Tricopill + a linha Ozoncare (mesma operação). A conta Bling
+        // é compartilhada com a clínica (Grandha, Alkymia, shampoos, óleos…), então o catálogo do
+        // bot é um WHITELIST por marca ("tricopill"/"ozoncare") — e tiramos a variante ERRADA
+        // "HDS TRICOPILL - 800 MG - 60 CAPSULAS" (R$ 36,70, blister), que NÃO é o frasco/kit que o
+        // bot vende ("Tricopill - Suplemento Capilar", R$ 199). Sem isso a IA cotava o preço errado.
+        // (Itens com estoque 0 já foram removidos acima — só entram os disponíveis.)
         if (tenantId === 'tricopill') {
           sellable = sellable.filter((i) => {
             const n = i.nome.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()
-            return n.includes('tricopill') && !n.includes('hds')
+            return (n.includes('tricopill') || n.includes('ozoncare')) && !n.includes('hds')
           })
         }
         if (sellable.length) {
