@@ -511,6 +511,14 @@ export async function finalizeRedePaid(
     },
   })
 
+  // Kit do pedido: quando o link foi gerado "solto" (só nome + valor, sem kit) o pedido no Bling
+  // saía como 1 frasco avulso com o valor CHEIO (ex.: R$697 → "Tricopill" qtd 1, caso Bianca 09/07).
+  // Deduz o kit pelo valor pago (menos frete) — mesmo mapa do botão manual (crm-bling) — pra sair
+  // com o produto/quantidade certos (R$697 → 5_meses = 5 frascos). Carrinho da loja (items) manda a
+  // quantidade por item, então não deduz. inferRedeKit devolve null p/ valor fora dos kits → avulso.
+  const orderKit = intent.kit
+    || ((intent.items && intent.items.length) ? '' : (inferRedeKit((intent.amountCents ?? 0) - (intent.freightCents ?? 0)) ?? ''))
+
   // LINK AVULSO (sem lead): ainda assim cria o pedido no Bling — pagamento pago sem pedido
   // é venda perdida no fechamento (casos 16/jun + Victor 02/07, links do painel não têm lead).
   // Sem lead não há cadastro/entrega: o contato sai com nome/CPF do próprio pagamento e a
@@ -527,11 +535,11 @@ export async function finalizeRedePaid(
         const blingCfg = ((blingRow as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
         if (blingCfg.auto_order_enabled === true) {
           const out = await blingCreateSaleOrder(admin, 'tricopill', {
-            kit: intent.kit ?? '',
+            kit: orderKit,
             amountCents: intent.amountCents,
             freightCents: intent.freightCents ?? 0,
             items: intent.items && intent.items.length ? intent.items : undefined,
-            description: intent.kit ? undefined : String(intent.description ?? 'Pedido Tricopill').trim(),
+            description: orderKit ? undefined : String(intent.description ?? 'Pedido Tricopill').trim(),
             customerName: String(intent.customerName || opts.cardholderName || 'Cliente Tricopill').trim(),
             cpf: intent.customerDoc || undefined,
           })
@@ -544,7 +552,7 @@ export async function finalizeRedePaid(
     }
     // Comprovante da venda no grupo do financeiro (best-effort).
     await sendSaleReceiptToGroup(admin, {
-      tenantId: intent.kit ? 'tricopill' : intent.tenantId,
+      tenantId: orderKit ? 'tricopill' : intent.tenantId,
       paymentId: intent.id,
       gateway: 'e.Rede',
       method: opts.method,
@@ -553,7 +561,7 @@ export async function finalizeRedePaid(
       freightCents: intent.freightCents,
       discountCents: intent.discountCents,
       couponCode: intent.couponCode,
-      produto: intent.kit ? (REDE_KITS[intent.kit]?.label ?? intent.description) : intent.description,
+      produto: orderKit ? (REDE_KITS[orderKit]?.label ?? intent.description) : intent.description,
       blingOrderId: receiptBlingId,
       transactionId: opts.tid,
       buyer: {
@@ -645,13 +653,13 @@ export async function finalizeRedePaid(
           // do cartão (pagador real), por fim o pushName do WhatsApp.
           const cad = (l.custom_fields?.cadastro ?? {}) as Record<string, string>
           const out = await blingCreateSaleOrder(admin, blingTenant, {
-            kit: intent.kit ?? '',
+            kit: orderKit,
             amountCents: intent.amountCents,
             freightCents: intent.freightCents ?? 0,
             // Carrinho da loja: manda CADA item com seu produto cadastrado no Bling (não colapsa
             // num item só). Sem itens, cai no kit/individual.
             items: intent.items && intent.items.length ? intent.items : undefined,
-            description: intent.kit ? undefined : String(intent.description ?? l.patient_name ?? 'Pedido Tricopill').trim(),
+            description: orderKit ? undefined : String(intent.description ?? l.patient_name ?? 'Pedido Tricopill').trim(),
             customerName: String(cad.nomeCompleto || opts.cardholderName || intent.customerName || l.patient_name || 'Cliente Tricopill').trim(),
             phone: l.phone ? String(l.phone) : undefined,
             cpf: cad.cpf || intent.customerDoc || undefined,
@@ -709,7 +717,7 @@ export async function finalizeRedePaid(
         freightCents: intent.freightCents,
         discountCents: intent.discountCents,
         couponCode: intent.couponCode,
-        produto: intent.kit ? (REDE_KITS[intent.kit]?.label ?? intent.description) : intent.description,
+        produto: orderKit ? (REDE_KITS[orderKit]?.label ?? intent.description) : intent.description,
         blingOrderId: receiptBlingId,
         transactionId: opts.tid,
         buyer: {
@@ -726,8 +734,8 @@ export async function finalizeRedePaid(
     try {
       const ship = await autoShipToCart(admin, blingTenant, {
         lead: { id: l.id, patient_name: l.patient_name, phone: l.phone, custom_fields: l.custom_fields },
-        kit: intent.kit ?? null,
-        productName: intent.kit ? `Tricopill (${intent.kit})` : 'Tricopill',
+        kit: orderKit || null,
+        productName: orderKit ? `Tricopill (${orderKit})` : 'Tricopill',
         productValueCents: intent.amountCents,
       })
       if (ship.ok || ship.skipped || ship.reason) {
