@@ -36,7 +36,7 @@ import { saveLeadCadastro } from '@/services/crmOrders'
 const KIT_PRESETS: Record<string, { name: string; qty: number; reais: string }> = {
   '1_mes': { name: 'Tricopill — 1 frasco', qty: 1, reais: '199,00' },
   '3_meses': { name: 'Tricopill — Kit 3+1 (4 frascos)', qty: 1, reais: '567,00' },
-  '5_meses': { name: 'Tricopill — 5 frascos', qty: 1, reais: '949,05' },
+  '5_meses': { name: 'Tricopill — 5 frascos', qty: 1, reais: '662,15' },
 }
 
 const reaisToCents = (v: string) => Math.round(Number(String(v).replace(/\./g, '').replace(',', '.')) * 100)

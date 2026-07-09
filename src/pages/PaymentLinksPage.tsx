@@ -19,9 +19,9 @@ import { ClinicPaymentsPanel } from '@/components/payments/ClinicPaymentsPanel'
 const NO_LEAD = '__none__'
 
 // Preço CHEIO para cartão (e.Rede) — sem o desconto de 5% do Pix.
-const CARD_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99900 }
+const CARD_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 69700 }
 // Preço do Pix por kit (com 5% off) — mesma tabela do PAGBANK_KITS no backend.
-const PIX_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 56700, '5_meses': 94905 }
+const PIX_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 56700, '5_meses': 66215 }
 // Parcelamento com juros (Asaas) até 12x em todos os kits.
 const KIT_MAX_INSTALLMENTS: Record<PagbankKit, number> = { '1_mes': 12, '3_meses': 12, '5_meses': 12 }
 

@@ -58,7 +58,7 @@ import { forceAiReply, type ConversationOwnerMode } from '@/services/conversatio
 
 /** Emojis frequentes para inserir no rascunho (UTF-8). */
 // Valor cheio do cartão por kit Tricopill (mesma tabela do PaymentLinksPage). Gera link Asaas /pagar.
-const ASAAS_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99900 }
+const ASAAS_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 69700 }
 
 const CHAT_QUICK_EMOJIS = [
   '😀',
