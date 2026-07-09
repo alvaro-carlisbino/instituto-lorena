@@ -44,7 +44,7 @@ export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: st
   ]
 }
 
-const EMPTY_ITEM = { name: '', sku: '', barcode: '', category: '', unit: 'un', minQty: '', controlled: false }
+const EMPTY_ITEM = { name: '', sku: '', barcode: '', category: '', unit: 'un', minQty: '', controlled: false, blingProductId: '' }
 
 // --------------------------------------------------- leitura de código de barras
 // Leitor USB age como teclado (digita o código + Enter no campo "Bipar").
@@ -173,6 +173,7 @@ export function EstoquePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSalesPolo])
   const [form, setForm] = useState({ ...EMPTY_ITEM })
+  const [editId, setEditId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [filter, setFilter] = useState('')
 
@@ -256,7 +257,7 @@ export function EstoquePage() {
       .sort((a, b) => (a.expiresOn ?? '').localeCompare(b.expiresOn ?? ''))
   }, [batches, items])
 
-  const handleCreate = async () => {
+  const handleSave = async () => {
     if (form.name.trim().length < 2) {
       toast.error('Informe o nome do item.')
       return
@@ -264,6 +265,7 @@ export function EstoquePage() {
     setSaving(true)
     try {
       await upsertStockItem({
+        ...(editId ? { id: editId } : {}),
         name: form.name,
         sku: form.sku || null,
         barcode: form.barcode || null,
@@ -271,15 +273,37 @@ export function EstoquePage() {
         unit: form.unit,
         minQty: form.minQty.trim() ? Number(form.minQty.replace(',', '.')) : 0,
         controlled: form.controlled,
+        blingProductId: form.blingProductId || null,
       })
-      toast.success(`Item "${form.name.trim()}" cadastrado.`)
+      toast.success(editId ? `Item "${form.name.trim()}" atualizado.` : `Item "${form.name.trim()}" cadastrado.`)
       setForm({ ...EMPTY_ITEM })
+      setEditId(null)
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao salvar item')
     } finally {
       setSaving(false)
     }
+  }
+
+  const openEdit = (item: StockItem) => {
+    setEditId(item.id)
+    setForm({
+      name: item.name,
+      sku: item.sku ?? '',
+      barcode: item.barcode ?? '',
+      category: item.category ?? '',
+      unit: item.unit,
+      minQty: item.minQty ? String(item.minQty) : '',
+      controlled: item.controlled,
+      blingProductId: item.blingProductId ?? '',
+    })
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const cancelEdit = () => {
+    setEditId(null)
+    setForm({ ...EMPTY_ITEM })
   }
 
   const openMove = (item: StockItem, kind: 'entrada' | 'saida') => {
@@ -415,7 +439,7 @@ export function EstoquePage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <Plus className="size-4 text-primary" /> Novo item
+              <Plus className="size-4 text-primary" /> {editId ? 'Editar item' : 'Novo item'}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -498,9 +522,42 @@ export function EstoquePage() {
                 <ShieldAlert className="size-3.5 text-amber-500" /> Substância controlada
               </span>
             </label>
-            <Button className="w-full" onClick={handleCreate} disabled={saving}>
-              {saving ? 'Salvando…' : 'Cadastrar item'}
-            </Button>
+            {isSalesPolo ? (
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1.5">
+                  <Boxes className="size-3.5" /> Produto no Bling (vínculo)
+                </Label>
+                <Select
+                  value={form.blingProductId || '__none__'}
+                  onValueChange={(v) => setForm((f) => ({ ...f, blingProductId: v === '__none__' ? '' : (v ?? '') }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sem vínculo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— sem vínculo —</SelectItem>
+                    {blingItems.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.nome}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Vinculado, a entrada por NF-e/compra também dá entrada no Bling (saldo que vende).
+                </p>
+              </div>
+            ) : null}
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={handleSave} disabled={saving}>
+                {saving ? 'Salvando…' : editId ? 'Salvar alterações' : 'Cadastrar item'}
+              </Button>
+              {editId ? (
+                <Button variant="outline" onClick={cancelEdit} disabled={saving}>
+                  Cancelar
+                </Button>
+              ) : null}
+            </div>
           </CardContent>
         </Card>
 
@@ -592,6 +649,9 @@ export function EstoquePage() {
                               </Button>
                               <Button size="sm" variant="ghost" onClick={() => void openHistory(item)}>
                                 <History className="size-3.5" />
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => openEdit(item)}>
+                                Editar
                               </Button>
                             </div>
                           </TableCell>

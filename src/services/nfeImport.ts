@@ -9,6 +9,9 @@ import {
   upsertSupplier,
 } from '@/services/estoqueCompras'
 import { ensureBatch, logControlledEntry } from '@/services/estoqueKits'
+import { fetchBlingCatalog, pushBlingStockEntry } from '@/services/crmBling'
+
+const onlyDigits = (v: string | null | undefined) => String(v ?? '').replace(/\D/g, '')
 
 // Orquestra o import da NF-e já parseada: vive num módulo separado pra não criar
 // ciclo entre estoqueCompras (fase 1) e estoqueKits (fase 2/lotes).
@@ -46,6 +49,8 @@ export type NfeImportResult = {
   itemsCreated: number
   batches: number
   payables: number
+  /** entradas espelhadas no Bling (produtos que vendem no site/bot/PDV) */
+  blingPushed: number
 }
 
 export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<NfeImportResult> {
@@ -68,9 +73,21 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
   // 3) Itens → estoque (cria ou reusa, dá entrada, cria lote e loga controlado)
   const currentStock = await listStockItems(true)
   const byId = new Map(currentStock.map((s) => [s.id, s] as const))
+  // Catálogo do Bling (best-effort) p/ casar item da nota por EAN e espelhar a entrada.
+  const blingByEan = new Map<string, string>()
+  try {
+    const cat = await fetchBlingCatalog(false)
+    for (const p of cat.items) {
+      const ean = onlyDigits(p.gtin)
+      if (ean.length >= 8) blingByEan.set(ean, p.id)
+    }
+  } catch {
+    // sem catálogo do Bling: segue só com o estoque interno
+  }
   let itemsStocked = 0
   let itemsCreated = 0
   let batches = 0
+  let blingPushed = 0
 
   for (const itemPlan of plan.itemsPlan) {
     if (itemPlan.action === 'ignorar') continue
@@ -130,6 +147,25 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
     })
     itemsStocked += 1
 
+    // Espelha a entrada no Bling se o item estiver vinculado (por bling_product_id ou EAN).
+    const linkedBlingId =
+      (stockItemId ? byId.get(stockItemId)?.blingProductId : null) ||
+      (nfeItem.ean ? blingByEan.get(onlyDigits(nfeItem.ean)) : null) ||
+      null
+    if (linkedBlingId) {
+      try {
+        await pushBlingStockEntry({
+          blingProductId: linkedBlingId,
+          qty: nfeItem.qty,
+          unitCostCents: nfeItem.unitCostCents,
+          note: `Entrada NF ${nfe.number} (import CRM)`,
+        })
+        blingPushed += 1
+      } catch {
+        // best-effort: a entrada interna já foi feita; o Bling pode ser reconciliado depois
+      }
+    }
+
     if (controlled) {
       await logControlledEntry({
         itemId: stockItemId,
@@ -163,5 +199,6 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
     itemsCreated,
     batches,
     payables,
+    blingPushed,
   }
 }

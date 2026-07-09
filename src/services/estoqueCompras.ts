@@ -75,6 +75,8 @@ export type StockItem = {
   controlled: boolean
   note: string | null
   active: boolean
+  /** ID do produto no Bling — quando vinculado, a entrada de estoque é espelhada no Bling. */
+  blingProductId: string | null
   /** saldo atual (da view stock_balances) */
   qty: number
   lastMovementAt: string | null
@@ -84,7 +86,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
   const client = assertClient()
   let itemsQuery = client
     .from('stock_items')
-    .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active')
+    .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active, bling_product_id')
     .order('name')
   if (!includeInactive) itemsQuery = itemsQuery.eq('active', true)
   const [items, balances] = await Promise.all([
@@ -110,6 +112,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
       controlled: Boolean(r.controlled),
       note: r.note != null ? String(r.note) : null,
       active: Boolean(r.active),
+      blingProductId: r.bling_product_id != null ? String(r.bling_product_id) : null,
       qty: Number(bal?.qty ?? 0),
       lastMovementAt: bal?.last_movement_at ? String(bal.last_movement_at) : null,
     }
@@ -128,6 +131,7 @@ export async function upsertStockItem(payload: {
   source?: string
   note?: string | null
   active?: boolean
+  blingProductId?: string | null
 }): Promise<string> {
   const client = assertClient()
   const row: Record<string, unknown> = {
@@ -143,6 +147,7 @@ export async function upsertStockItem(payload: {
     updated_at: new Date().toISOString(),
   }
   if (payload.source) row.source = payload.source
+  if (payload.blingProductId !== undefined) row.bling_product_id = payload.blingProductId?.trim() || null
   const query = payload.id
     ? client.from('stock_items').update(row).eq('id', payload.id)
     : client.from('stock_items').insert(row)

@@ -255,5 +255,47 @@ Deno.serve(async (req) => {
     return json({ ok: true, contatoId, orderUpdated })
   }
 
+  // stock_entry: espelha no Bling uma ENTRADA de estoque (compra/NF-e importada no CRM).
+  // O saldo que vende (site/bot/PDV) vive no Bling, então a entrada da nota é empurrada pra cá.
+  if (action === 'stock_entry') {
+    const blingProductId = String(payload.blingProductId ?? '').trim()
+    const qty = Number(payload.qty ?? 0)
+    const unitCostCents = Number(payload.unitCostCents ?? 0)
+    const note = String(payload.note ?? 'Entrada por NF-e (CRM)').slice(0, 200)
+    if (!blingProductId || !(qty > 0)) return json({ ok: false, error: 'dados_invalidos' }, 400)
+
+    const token = await getValidBlingToken(admin, 'tricopill')
+    if (!token) return json({ ok: false, error: 'bling_indisponivel' }, 502)
+    const bh = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Accept: 'application/json' }
+
+    try {
+      // Depósito padrão (o Bling exige depósito na movimentação de estoque).
+      let depositoId = ''
+      const dr = await fetch('https://api.bling.com.br/Api/v3/depositos', { headers: bh })
+      if (dr.ok) {
+        const deps = (JSON.parse((await dr.text()) || '{}')?.data ?? []) as Array<Record<string, unknown>>
+        depositoId = String((deps.find((d) => d.padrao === true) ?? deps[0] ?? {}).id ?? '')
+      }
+      if (!depositoId) return json({ ok: false, error: 'deposito_nao_encontrado' }, 502)
+
+      const custoReais = unitCostCents > 0 ? Math.round(unitCostCents) / 100 : undefined
+      const body: Record<string, unknown> = {
+        produto: { id: Number(blingProductId) || blingProductId },
+        deposito: { id: Number(depositoId) || depositoId },
+        operacao: 'E',
+        quantidade: qty,
+        observacoes: note,
+        ...(custoReais != null ? { preco: custoReais, custo: custoReais } : {}),
+      }
+      const er = await fetch('https://api.bling.com.br/Api/v3/estoques', { method: 'POST', headers: bh, body: JSON.stringify(body) })
+      const txt = await er.text()
+      if (!er.ok) return json({ ok: false, error: 'bling_estoque_falhou', status: er.status, message: txt.slice(0, 300) }, 502)
+      const movId = (JSON.parse(txt || '{}')?.data as { id?: unknown })?.id ?? null
+      return json({ ok: true, movementId: movId != null ? String(movId) : null, depositoId })
+    } catch (e) {
+      return json({ ok: false, error: 'bling_estoque_erro', message: e instanceof Error ? e.message : String(e) }, 502)
+    }
+  }
+
   return json({ error: 'unknown_action' }, 400)
 })

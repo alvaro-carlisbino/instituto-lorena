@@ -35,6 +35,25 @@ export type BlingCatalogItem = {
   codigo: string
   preco: number
   estoque: number | null
+  /** EAN/GTIN — usado p/ casar item da NF-e ao produto do Bling. */
+  gtin?: string
+}
+
+/** Espelha no Bling uma entrada de estoque (compra/NF-e) para um produto vinculado. */
+export async function pushBlingStockEntry(args: {
+  blingProductId: string
+  qty: number
+  unitCostCents?: number
+  note?: string
+}): Promise<{ movementId: string | null }> {
+  const p = await invokeBling({
+    action: 'stock_entry',
+    blingProductId: args.blingProductId,
+    qty: args.qty,
+    ...(args.unitCostCents ? { unitCostCents: args.unitCostCents } : {}),
+    ...(args.note ? { note: args.note } : {}),
+  })
+  return { movementId: p.movementId != null ? String(p.movementId) : null }
 }
 
 /** Lista o catálogo do Bling do polo ativo (com opção de forçar atualização). */

@@ -151,7 +151,8 @@ export function ContasPagarPage() {
         `NF ${result.invoiceNumber} importada — ${result.itemsStocked} ${result.itemsStocked === 1 ? 'entrada' : 'entradas'} no estoque` +
           (result.itemsCreated > 0 ? ` (${result.itemsCreated} ${result.itemsCreated === 1 ? 'item novo' : 'itens novos'})` : '') +
           (result.batches > 0 ? `, ${result.batches} ${result.batches === 1 ? 'lote' : 'lotes'}` : '') +
-          (result.payables > 0 ? `, ${result.payables} ${result.payables === 1 ? 'parcela' : 'parcelas'}` : '') + '.',
+          (result.payables > 0 ? `, ${result.payables} ${result.payables === 1 ? 'parcela' : 'parcelas'}` : '') +
+          (result.blingPushed > 0 ? `, ${result.blingPushed} ${result.blingPushed === 1 ? 'entrada' : 'entradas'} espelhada${result.blingPushed === 1 ? '' : 's'} no Bling` : '') + '.',
       )
       setNfe(null)
       setNfePlan([])

@@ -199,6 +199,8 @@ export type BlingCatalogItem = {
   estoque: number | null
   /** URL da foto do produto (preservada no cache p/ a loja pública do site Tricopill). */
   imagem?: string
+  /** EAN/GTIN do produto — usado p/ casar item da NF-e ao produto do Bling na importação. */
+  gtin?: string
 }
 
 function num(v: unknown): number {
@@ -276,6 +278,9 @@ export async function buildBlingCatalog(
     const priorImg = new Map(
       cache.map((c) => [c.id, typeof c.imagem === 'string' ? c.imagem : '']).filter(([, v]) => v),
     )
+    const priorGtin = new Map(
+      cache.map((c) => [c.id, typeof c.gtin === 'string' ? c.gtin : '']).filter(([, v]) => v),
+    )
     const items: BlingCatalogItem[] = raw.map((p) => {
       const id = String(p.id ?? '')
       const est = (p.estoque ?? {}) as Record<string, unknown>
@@ -288,6 +293,7 @@ export async function buildBlingCatalog(
         preco: num(p.preco),
         estoque,
         imagem: pickBlingImg(p) || priorImg.get(id) || '',
+        gtin: String(p.gtin ?? '') || priorGtin.get(id) || '',
       }
     })
     const nowIso = new Date().toISOString()
