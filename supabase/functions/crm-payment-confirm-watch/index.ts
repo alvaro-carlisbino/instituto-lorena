@@ -62,6 +62,32 @@ async function hasConfirmedPayment(
   return ((rede ?? []).length + (asaas ?? []).length) > 0
 }
 
+// Rede de segurança do FUNIL: venda paga cujo lead ficou preso numa etapa inicial do
+// funil de vendas Tricopill vai pra "Pago". O finalize às vezes não move e o checkout do
+// SITE (finalizeApproved) NUNCA move — então a venda não aparecia como fechada. Só promove
+// (Novo/Qualificado/Link enviado → Pago); nunca mexe em Pós-venda/Perdido. Best-effort.
+async function promotePaidTricopillToPago(admin: SupabaseClient): Promise<number> {
+  const sinceIso = new Date(Date.now() - 15 * 86_400_000).toISOString()
+  const ids = new Set<string>()
+  const [{ data: rede }, { data: asaas }] = await Promise.all([
+    admin.from('rede_payments').select('lead_id').eq('tenant_id', 'tricopill').eq('status', 'paid').gte('paid_at', sinceIso).not('lead_id', 'is', null),
+    admin.from('asaas_payments').select('lead_id').eq('tenant_id', 'tricopill').in('status', ['paid', 'confirmed', 'received', 'approved']).gte('paid_at', sinceIso).not('lead_id', 'is', null),
+  ])
+  for (const r of [...((rede ?? []) as Array<{ lead_id?: unknown }>), ...((asaas ?? []) as Array<{ lead_id?: unknown }>)]) {
+    const id = String(r.lead_id ?? '')
+    if (id) ids.add(id)
+  }
+  if (!ids.size) return 0
+  const { data, error } = await admin.from('leads')
+    .update({ stage_id: 'tricopill__vd-pago', stage_entered_at: new Date().toISOString() })
+    .eq('pipeline_id', 'tricopill__pipeline-vendas')
+    .in('stage_id', ['tricopill__vd-novo', 'tricopill__vd-conversando', 'tricopill__vd-proposta'])
+    .in('id', [...ids])
+    .select('id')
+  if (error) return 0
+  return (data ?? []).length
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
 
@@ -74,6 +100,9 @@ Deno.serve(async (req) => {
   // que ficou sem comprovante (envio inline falhou no W-API). Dedupe por receipt_group_sent_at,
   // então nunca duplica. Best-effort — nunca derruba o resto do vigia.
   const receipts = await resendMissingSaleReceipts(admin).catch(() => ({ checked: 0, resent: 0 }))
+
+  // Rede de segurança do funil: venda paga presa em etapa inicial → "Pago".
+  const promovidosPago = await promotePaidTricopillToPago(admin).catch(() => 0)
 
   // Janela: mensagens de 12h atrás até 4 min atrás. O atraso de 4 min dá tempo do gateway
   // (poller PIX / webhook) confirmar sozinho antes de incomodarmos a equipe. 12h cobre
@@ -94,7 +123,7 @@ Deno.serve(async (req) => {
   if (claimsErr) return json({ ok: false, error: claimsErr.message }, 500)
 
   const leadIds = [...new Set((claims ?? []).map((r) => String((r as { lead_id: unknown }).lead_id)).filter(Boolean))]
-  if (leadIds.length === 0) return json({ ok: true, candidates: 0, alerted: 0, receipts })
+  if (leadIds.length === 0) return json({ ok: true, candidates: 0, alerted: 0, receipts, promovidosPago })
 
   // Só leads dos tenants observados.
   const { data: leadsData } = await admin
@@ -126,5 +155,5 @@ Deno.serve(async (req) => {
     if (n > 0) alerted += 1
   }
 
-  return json({ ok: true, candidates: leads.length, alerted, skipped: skipped.length, receipts })
+  return json({ ok: true, candidates: leads.length, alerted, skipped: skipped.length, receipts, promovidosPago })
 })
