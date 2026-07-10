@@ -435,10 +435,14 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       }))
     : pipelines
 
+  // Pool de donos para roteamento/atribuição de leads. O ideal é usar quem tem role 'sdr',
+  // mas clínicas que operam só com admin/gestor não têm nenhum SDR — nesse caso o pool caía no
+  // `sdrTeam` estático (ids demo tipo 'sdr-1'), e qualquer criação de lead quebrava com 409
+  // (owner_id → app_users FK violation). Então: SDRs se existirem, senão os usuários reais ativos.
+  const sdrRoleUsers = userRows.filter((user) => user.role === 'sdr')
+  const routingPool = sdrRoleUsers.length ? sdrRoleUsers : userRows.filter((user) => user.active)
   const builtSdrUsers: Sdr[] = userRows.length
-    ? userRows
-        .filter((user) => user.role === 'sdr')
-        .map((user) => ({ id: user.id, name: user.name, active: user.active }))
+    ? routingPool.map((user) => ({ id: user.id, name: user.name, active: user.active }))
     : sdrTeam
 
   const builtLeads: Lead[] = leadRows.length
