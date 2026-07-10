@@ -307,8 +307,8 @@ export async function buildBlingCatalog(
   }
 }
 
-// Mapa padrão kit -> frascos a abater (3 meses leva o 4º grátis).
-const DEFAULT_KIT_BOTTLES: Record<string, number> = { '1_mes': 1, '3_meses': 4, '5_meses': 5 }
+// Mapa padrão kit -> frascos a abater (compra 3→4º grátis; compra 5→6º grátis).
+const DEFAULT_KIT_BOTTLES: Record<string, number> = { '1_mes': 1, '3_meses': 4, '5_meses': 6 }
 const DEFAULT_KIT_PRODUCT_ID = '16322942669' // "Tricopill - Suplemento Capilar" = frasco INDIVIDUAL (SKU 00001)
 
 // Produto PRÓPRIO de cada kit no Bling (o pedido sai como "Tricopill 3 Meses" etc., NÃO como o
@@ -322,8 +322,8 @@ const DEFAULT_KIT_PRODUCT_IDS: Record<string, string> = {
 
 const KIT_LABEL: Record<string, string> = {
   '1_mes': 'Tricopill 1 mês (1 frasco)',
-  '3_meses': 'Tricopill 3 meses (3+1 frascos)',
-  '5_meses': 'Tricopill 5 meses (5 frascos)',
+  '3_meses': 'Tricopill 3 meses (3+1 = 4 frascos)',
+  '5_meses': 'Tricopill 5 meses (5+1 = 6 frascos)',
 }
 
 /**

@@ -16,9 +16,10 @@ const SANDBOX_BASE = 'https://sandbox.api.pagseguro.com'
 /** Kits do Tricopill no PIX (unit_amount em CENTAVOS). Valores oficiais: 1 frasco
  * R$199 (preço único), promo 3+1 = 4 frascos R$567 no Pix. */
 export const PAGBANK_KITS: Record<string, { label: string; amountCents: number; qty: number }> = {
+  // PIX = cartão −5%. Cartão: 3m=59700, 5m=99500 → PIX: 3m=56715, 5m=94525.
   '1_mes': { label: 'Tricopill — 1 frasco (1 mês)', amountCents: 19900, qty: 1 },
-  '3_meses': { label: 'Tricopill — 3 frascos + 1 grátis (4 frascos)', amountCents: 56700, qty: 3 },
-  '5_meses': { label: 'Tricopill — 5 frascos (5 meses)', amountCents: 66215, qty: 5 },
+  '3_meses': { label: 'Tricopill — compra 3 + 1 grátis (4 frascos)', amountCents: 56715, qty: 4 },
+  '5_meses': { label: 'Tricopill — compra 5 + 1 grátis (6 frascos)', amountCents: 94525, qty: 6 },
 }
 
 /** Normaliza variações que a IA possa mandar ('3 meses', '3meses', 'kit3') para a chave canônica. */

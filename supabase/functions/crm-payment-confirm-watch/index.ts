@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
+import { resendMissingSaleReceipts } from '../_shared/saleReceipt.ts'
 
 // Rede de segurança de confirmação de pagamento.
 //
@@ -69,6 +70,11 @@ Deno.serve(async (req) => {
   if (!supabaseUrl || !serviceRole) return json({ error: 'server_misconfigured' }, 500)
   const admin = createClient(supabaseUrl, serviceRole) as unknown as SupabaseClient
 
+  // "SEMPRE ENVIAR": rede de segurança do COMPROVANTE no grupo. Reenvia toda venda paga
+  // que ficou sem comprovante (envio inline falhou no W-API). Dedupe por receipt_group_sent_at,
+  // então nunca duplica. Best-effort — nunca derruba o resto do vigia.
+  const receipts = await resendMissingSaleReceipts(admin).catch(() => ({ checked: 0, resent: 0 }))
+
   // Janela: mensagens de 12h atrás até 4 min atrás. O atraso de 4 min dá tempo do gateway
   // (poller PIX / webhook) confirmar sozinho antes de incomodarmos a equipe. 12h cobre
   // claims feitos no fim do dia que só seriam vistos na manhã seguinte. O dedupe (6h)
@@ -88,7 +94,7 @@ Deno.serve(async (req) => {
   if (claimsErr) return json({ ok: false, error: claimsErr.message }, 500)
 
   const leadIds = [...new Set((claims ?? []).map((r) => String((r as { lead_id: unknown }).lead_id)).filter(Boolean))]
-  if (leadIds.length === 0) return json({ ok: true, candidates: 0, alerted: 0 })
+  if (leadIds.length === 0) return json({ ok: true, candidates: 0, alerted: 0, receipts })
 
   // Só leads dos tenants observados.
   const { data: leadsData } = await admin
@@ -120,5 +126,5 @@ Deno.serve(async (req) => {
     if (n > 0) alerted += 1
   }
 
-  return json({ ok: true, candidates: leads.length, alerted, skipped: skipped.length })
+  return json({ ok: true, candidates: leads.length, alerted, skipped: skipped.length, receipts })
 })

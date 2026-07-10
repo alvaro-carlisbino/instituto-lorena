@@ -10,6 +10,8 @@ import { customerSaysPaid, escalateLeadToHuman, insertInteraction, upsertLeadByP
 import { checkPendingRedePixForLead } from '../_shared/rede.ts'
 import { captureCadastroForLead } from '../_shared/cadastroExtract.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
+import { sendWapiDirectText } from '../_shared/saleReceipt.ts'
+import { handleOwnerMessage, isOwnerPhone } from '../_shared/ownerAssistant.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { applyOptOutToLead, isOptOutMessage } from '../_shared/optOutDetect.ts'
 import {
@@ -168,6 +170,22 @@ Deno.serve(async (req) => {
   if (jobInsertError) return json({ error: jobInsertError.message }, 400)
 
   try {
+    // ── IA PESSOAL DO DONO (read-only) ──
+    // Se quem escreveu é o número do dono (config sales_receipt_owner_phones), responde
+    // a central de gestão (vendas/financeiro/rastreio/pedido/estoque) e NÃO entra no funil
+    // de vendas — o bot nunca tenta vender pro dono. Só na linha de vendas (Tricopill).
+    // BLINDADO: qualquer erro aqui NUNCA afeta o cliente — cai no fluxo normal.
+    try {
+      if (normalized.direction === 'in' && isSalesBot && await isOwnerPhone(admin, tenantId, normalized.fromPhone)) {
+        const reply = await handleOwnerMessage(admin, tenantId, normalized.fromPhone, normalized.text)
+        await sendWapiDirectText(admin, tenantId ?? 'tricopill', normalized.fromPhone, reply)
+        await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', jobRow.id)
+        return json({ ok: true, owner_assistant: true }, 200)
+      }
+    } catch (e) {
+      console.warn('[owner-assistant] falhou, seguindo fluxo normal:', e instanceof Error ? e.message : String(e))
+    }
+
     // Outbound (mensagem enviada do dispositivo / painel da W-API):
     // só registra eco e atualiza last_human_reply_at — não dispara IA.
     if (normalized.direction !== 'in') {

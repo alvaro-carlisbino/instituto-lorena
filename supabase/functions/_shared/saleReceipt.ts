@@ -169,27 +169,65 @@ export async function sendWapiGroupText(admin: SupabaseClient, tenantId: string,
   if (!creds) return false
   const url = `${creds.baseUrl}/message/send-text?instanceId=${encodeURIComponent(creds.instanceId)}`
   const candidates = jid.includes('@') ? [jid, jid.split('@')[0]] : [jid, `${jid}@g.us`]
-  for (const phone of candidates) {
+  // Retry com backoff: o W-API dá timeout/erro transiente e, sem retry, a venda sumia
+  // calada do grupo (caso João Guerreiro 09/07). 3 rodadas × 2 formatos de JID.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 600 * attempt)) // 0, 600, 1200ms
+    for (const phone of candidates) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + creds.token },
+          body: JSON.stringify({ phone, message: text }),
+        })
+        const body = await res.text()
+        let parsed: Record<string, unknown> = {}
+        try { parsed = body ? JSON.parse(body) : {} } catch { /* corpo não-JSON */ }
+        const apiError = parsed.error === true || Boolean(parsed.errorMessage) || String(parsed.status ?? '').toLowerCase() === 'error'
+        if (res.ok && !apiError) return true
+        console.warn(`[saleReceipt] envio ao grupo falhou (tentativa ${attempt + 1}, phone=${phone}):`, body.slice(0, 180))
+      } catch (e) {
+        console.warn('[saleReceipt] envio ao grupo (exception):', e instanceof Error ? e.message : String(e))
+      }
+    }
+  }
+  return false
+}
+
+type NotifCfg = {
+  sales_receipt_group_jid?: string
+  sales_receipt_enabled?: boolean
+  /** Números (dígitos, DDI 55…) que recebem uma CÓPIA 1:1 de cada venda (dono/gestor). */
+  sales_receipt_owner_phones?: string[]
+}
+
+/** Envia texto 1:1 (DM) via W-API. `phone` = só dígitos (DDI+DDD+número). Retry 3×. */
+export async function sendWapiDirectText(admin: SupabaseClient, tenantId: string, phone: string, text: string): Promise<boolean> {
+  const digits = String(phone ?? '').replace(/\D/g, '')
+  if (digits.length < 12 || !text.trim()) return false
+  const creds = await loadWapiCreds(admin, tenantId)
+  if (!creds) return false
+  const url = `${creds.baseUrl}/message/send-text?instanceId=${encodeURIComponent(creds.instanceId)}`
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 600 * attempt))
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + creds.token },
-        body: JSON.stringify({ phone, message: text }),
+        body: JSON.stringify({ phone: digits, message: text }),
       })
       const body = await res.text()
       let parsed: Record<string, unknown> = {}
       try { parsed = body ? JSON.parse(body) : {} } catch { /* corpo não-JSON */ }
       const apiError = parsed.error === true || Boolean(parsed.errorMessage) || String(parsed.status ?? '').toLowerCase() === 'error'
       if (res.ok && !apiError) return true
-      console.warn(`[saleReceipt] envio ao grupo falhou (phone=${phone}):`, body.slice(0, 180))
+      console.warn(`[saleReceipt] DM dono falhou (tentativa ${attempt + 1}):`, body.slice(0, 160))
     } catch (e) {
-      console.warn('[saleReceipt] envio ao grupo (exception):', e instanceof Error ? e.message : String(e))
+      console.warn('[saleReceipt] DM dono (exception):', e instanceof Error ? e.message : String(e))
     }
   }
   return false
 }
-
-type NotifCfg = { sales_receipt_group_jid?: string; sales_receipt_enabled?: boolean }
 
 async function readNotifCfg(admin: SupabaseClient, tenantId: string): Promise<NotifCfg> {
   const { data } = await admin.from('tenant_integrations').select('notifications').eq('tenant_id', tenantId).maybeSingle()
@@ -211,11 +249,11 @@ export async function registerSalesReceiptGroup(admin: SupabaseClient, tenantId:
  * Ponto ÚNICO chamado pelos downstreams de pagamento. Sem grupo configurado (ou
  * desligado), sai silenciosamente — nunca lança.
  */
-export async function sendSaleReceiptToGroup(admin: SupabaseClient, d: SaleReceiptInput): Promise<void> {
+export async function sendSaleReceiptToGroup(admin: SupabaseClient, d: SaleReceiptInput): Promise<boolean> {
   try {
     const cfg = await readNotifCfg(admin, d.tenantId)
     const jid = String(cfg.sales_receipt_group_jid ?? '').trim()
-    if (!jid || cfg.sales_receipt_enabled === false) return
+    if (!jid || cfg.sales_receipt_enabled === false) return false
     // Resolve o número VISÍVEL do pedido (o que a busca do Bling acha) a partir do id
     // interno da API. Best-effort: sem token ou com falha, a mensagem sai com o id.
     if (d.blingOrderId && !d.blingOrderNumero) {
@@ -225,8 +263,124 @@ export async function sendSaleReceiptToGroup(admin: SupabaseClient, d: SaleRecei
       } catch { /* segue com o id interno */ }
     }
     const ok = await sendWapiGroupText(admin, d.tenantId, jid, buildSaleReceiptText(d))
-    if (!ok) console.warn(`[saleReceipt] comprovante NÃO entregue ao grupo (tenant=${d.tenantId}, payment=${d.paymentId})`)
+    if (ok) {
+      // Marca a venda como "comprovante enviado" pra o vigia (crm-payment-confirm-watch)
+      // não reenviar. Faz nas DUAS tabelas por id — só a que casar é atualizada.
+      await markReceiptSent(admin, d.paymentId, 'receipt_group_sent_at')
+    } else {
+      console.warn(`[saleReceipt] comprovante NÃO entregue ao grupo (tenant=${d.tenantId}, payment=${d.paymentId})`)
+    }
+    return ok
   } catch (e) {
     console.warn('[saleReceipt] exception:', e instanceof Error ? e.message : String(e))
+    return false
   }
+}
+
+/** Carimba a marca (receipt_group_sent_at | receipt_owner_sent_at) na venda pelo id. */
+async function markReceiptSent(admin: SupabaseClient, paymentId: string, column: 'receipt_group_sent_at' | 'receipt_owner_sent_at'): Promise<void> {
+  const nowIso = new Date().toISOString()
+  await Promise.all([
+    admin.from('rede_payments').update({ [column]: nowIso }).eq('id', paymentId).is(column, null),
+    admin.from('asaas_payments').update({ [column]: nowIso }).eq('id', paymentId).is(column, null),
+  ].map((p) => p.then(() => {}, () => {})))
+}
+
+/** Entrega a CÓPIA 1:1 da venda pros números do dono (config sales_receipt_owner_phones). */
+async function deliverOwnerCopy(admin: SupabaseClient, d: SaleReceiptInput): Promise<boolean> {
+  const cfg = await readNotifCfg(admin, d.tenantId)
+  const phones = Array.isArray(cfg.sales_receipt_owner_phones) ? cfg.sales_receipt_owner_phones.filter(Boolean) : []
+  if (phones.length === 0) return true // nada configurado = nada a entregar (não fica reprocessando)
+  if (d.blingOrderId && !d.blingOrderNumero) {
+    try {
+      const token = await getValidBlingToken(admin, d.tenantId)
+      if (token) d = { ...d, blingOrderNumero: await blingGetOrderNumero(token, d.blingOrderId) }
+    } catch { /* segue com o id interno */ }
+  }
+  const text = buildSaleReceiptText(d)
+  let anyOk = false
+  for (const p of phones) {
+    if (await sendWapiDirectText(admin, d.tenantId, p, text)) anyOk = true
+  }
+  return anyOk
+}
+
+type RedeRow = {
+  id: string; tenant_id: string; method?: string; amount_cents: number; installments?: number
+  kit?: string | null; description?: string | null; coupon_code?: string | null; discount_cents?: number | null
+  bling_order_id?: string | null; tid?: string | null; customer_name?: string | null
+  phone?: string | null; customer_doc?: string | null; freight_cents?: number | null; paid_at?: string | null
+}
+type AsaasRow = RedeRow & { asaas_payment_id?: string | null }
+
+function methodOf(m?: string | null): 'pix' | 'card' | 'other' {
+  const v = String(m ?? '').toLowerCase()
+  return v === 'pix' ? 'pix' : v === 'card' || v === 'credit_card' || v === 'cartao' ? 'card' : 'other'
+}
+
+function rowToReceipt(row: RedeRow, gateway: string, transactionId?: string | null): SaleReceiptInput {
+  return {
+    tenantId: row.tenant_id,
+    paymentId: row.id,
+    gateway,
+    method: methodOf(row.method),
+    installments: row.installments ?? undefined,
+    amountCents: row.amount_cents,
+    freightCents: row.freight_cents ?? undefined,
+    discountCents: row.discount_cents ?? undefined,
+    couponCode: row.coupon_code ?? undefined,
+    produto: (row.description && row.description.trim()) || (row.kit ? `Tricopill (${row.kit})` : 'Tricopill'),
+    blingOrderId: row.bling_order_id ?? undefined,
+    transactionId: transactionId ?? row.tid ?? undefined,
+    buyer: { name: row.customer_name, cpf: row.customer_doc, phone: row.phone },
+    origem: 'Rede de segurança (reenvio automático)',
+  }
+}
+
+/**
+ * VIGIA "sempre enviar": reenvia o comprovante de toda venda PAGA que ficou sem ele
+ * (receipt_group_sent_at IS NULL). Dedupe pela própria marca — nunca duplica. Chamado
+ * pelo cron do crm-payment-confirm-watch. Só age em vendas recentes (janela) e dá uma
+ * folga (minAge) pro envio inline confirmar sozinho antes de o vigia entrar.
+ */
+export async function resendMissingSaleReceipts(
+  admin: SupabaseClient,
+  opts?: { maxAgeHours?: number; minAgeMinutes?: number; limit?: number },
+): Promise<{ checked: number; groupSent: number; ownerSent: number }> {
+  const maxAgeHours = opts?.maxAgeHours ?? 24
+  const minAgeMinutes = opts?.minAgeMinutes ?? 5
+  const limit = opts?.limit ?? 30
+  const sinceIso = new Date(Date.now() - maxAgeHours * 3_600_000).toISOString()
+  const untilIso = new Date(Date.now() - minAgeMinutes * 60_000).toISOString()
+  const missing = 'receipt_group_sent_at.is.null,receipt_owner_sent_at.is.null'
+
+  let checked = 0, groupSent = 0, ownerSent = 0
+  const handle = async (row: RedeRow & { receipt_group_sent_at?: string | null; receipt_owner_sent_at?: string | null }, gateway: string, txId?: string | null) => {
+    checked++
+    const d = rowToReceipt(row, gateway, txId)
+    // Comprovante do GRUPO (financeiro) — só se ainda não foi.
+    if (row.receipt_group_sent_at == null && await sendSaleReceiptToGroup(admin, d)) groupSent++
+    // CÓPIA do DONO (Álvaro) — marca própria, independente do grupo.
+    if (row.receipt_owner_sent_at == null && await deliverOwnerCopy(admin, d)) {
+      await markReceiptSent(admin, row.id, 'receipt_owner_sent_at')
+      ownerSent++
+    }
+  }
+
+  try {
+    const redeCols = 'id, tenant_id, method, amount_cents, installments, kit, description, coupon_code, discount_cents, bling_order_id, tid, customer_name, phone, customer_doc, freight_cents, paid_at, receipt_group_sent_at, receipt_owner_sent_at'
+    const { data: rede } = await admin.from('rede_payments').select(redeCols)
+      .eq('status', 'paid').or(missing)
+      .gte('paid_at', sinceIso).lte('paid_at', untilIso).limit(limit)
+    for (const row of (rede ?? []) as RedeRow[]) await handle(row, 'e.Rede')
+
+    const asaasCols = redeCols.replace(' tid,', ' asaas_payment_id,')
+    const { data: asaas } = await admin.from('asaas_payments').select(asaasCols)
+      .in('status', ['paid', 'confirmed', 'received', 'approved']).or(missing)
+      .gte('paid_at', sinceIso).lte('paid_at', untilIso).limit(limit)
+    for (const row of (asaas ?? []) as AsaasRow[]) await handle(row, 'Asaas', row.asaas_payment_id)
+  } catch (e) {
+    console.warn('[saleReceipt] resendMissing exception:', e instanceof Error ? e.message : String(e))
+  }
+  return { checked, groupSent, ownerSent }
 }
