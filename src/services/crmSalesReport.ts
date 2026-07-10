@@ -53,7 +53,7 @@ const isPaid = (status: unknown, paidAt: unknown) =>
 const KIT_LABEL: Record<string, string> = {
   '1_mes': '1 frasco',
   '3_meses': 'Kit 3+1 (4 frascos)',
-  '5_meses': '5 frascos',
+  '5_meses': '6 frascos',
 }
 
 const digits = (v: unknown) => String(v ?? '').replace(/\D/g, '')

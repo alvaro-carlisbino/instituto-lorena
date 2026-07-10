@@ -4,8 +4,8 @@ export type PagbankKit = '1_mes' | '3_meses' | '5_meses'
 
 export const PAGBANK_KIT_LABELS: Record<PagbankKit, string> = {
   '1_mes': '1 frasco — R$ 199,00',
-  '3_meses': '3+1 frascos (4) — Pix R$ 567,00 / cartão R$ 597,00',
-  '5_meses': '5 frascos — Pix R$ 662,15 / cartão R$ 697,00',
+  '3_meses': '3+1 frascos (4) — Pix R$ 567,15 / cartão R$ 597,00',
+  '5_meses': '5+1 frascos (6) — Pix R$ 945,25 / cartão R$ 995,00',
 }
 
 export type PagbankLinkResult = { ok: true; payLink: string; label: string; amountCents: number }

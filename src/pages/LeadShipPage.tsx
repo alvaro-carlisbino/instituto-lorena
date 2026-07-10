@@ -35,8 +35,8 @@ import { saveLeadCadastro } from '@/services/crmOrders'
 // Prefill de produto por kit (valores Pix oficiais Tricopill).
 const KIT_PRESETS: Record<string, { name: string; qty: number; reais: string }> = {
   '1_mes': { name: 'Tricopill — 1 frasco', qty: 1, reais: '199,00' },
-  '3_meses': { name: 'Tricopill — Kit 3+1 (4 frascos)', qty: 1, reais: '567,00' },
-  '5_meses': { name: 'Tricopill — 5 frascos', qty: 1, reais: '662,15' },
+  '3_meses': { name: 'Tricopill — Kit 3+1 (4 frascos)', qty: 1, reais: '567,15' },
+  '5_meses': { name: 'Tricopill — Kit 5+1 (6 frascos)', qty: 1, reais: '945,25' },
 }
 
 const reaisToCents = (v: string) => Math.round(Number(String(v).replace(/\./g, '').replace(',', '.')) * 100)
@@ -491,7 +491,7 @@ export function LeadShipPage() {
                   <SelectContent>
                     <SelectItem value="1_mes">1 frasco</SelectItem>
                     <SelectItem value="3_meses">Kit 3+1 (4 frascos)</SelectItem>
-                    <SelectItem value="5_meses">5 frascos</SelectItem>
+                    <SelectItem value="5_meses">Kit 5+1 (6 frascos)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

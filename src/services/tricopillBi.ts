@@ -93,7 +93,7 @@ export function formatBRL(cents: number): string {
 const KIT_LABELS: Record<string, string> = {
   '1_mes': '1 mês (1 frasco)',
   '3_meses': '3 meses (3+1)',
-  '5_meses': '5 meses (5 frascos)',
+  '5_meses': '5 meses (6 frascos)',
   avulso: 'Avulso',
 }
 export function kitLabel(kit: string): string {
