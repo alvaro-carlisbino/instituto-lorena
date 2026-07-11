@@ -163,7 +163,7 @@ export function CommandPalette() {
           {showBoards ? (
             <Command.Item
               className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
-              onSelect={() => go('/boards')}
+              onSelect={() => go('/config-funis')}
             >
               <LayoutGrid className="size-4 shrink-0 opacity-70" />
               Funis

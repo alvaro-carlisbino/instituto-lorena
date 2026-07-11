@@ -281,7 +281,7 @@ export function KanbanPage() {
                 Todos os leads
               </DropdownMenuItem>
               {crm.currentPermission.canEditBoards ? (
-                <DropdownMenuItem onClick={() => navigate('/boards')}>
+                <DropdownMenuItem onClick={() => navigate('/config-funis')}>
                   <LayoutGrid className="size-4" />
                   Funis e etapas
                 </DropdownMenuItem>

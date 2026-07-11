@@ -202,13 +202,13 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                <NavItem to="/tricopill-bi" label="Visão de vendas" icon={ChartColumn} />
+                <NavItem to="/bi-vendas" label="Visão de vendas" icon={ChartColumn} />
                 <NavItem to="/tricopill" label="Chat de vendas" icon={MessagesSquare} />
-                <NavItem to="/tricopill-pedidos" label="Pedidos" icon={PackageOpen} />
-                <NavItem to="/tricopill-assinaturas" label="Assinaturas" icon={Repeat} />
+                <NavItem to="/pedidos" label="Pedidos" icon={PackageOpen} />
+                <NavItem to="/assinaturas" label="Assinaturas" icon={Repeat} />
                 <NavItem to="/frente-loja" label="Frente de loja" icon={Store} />
-                <NavItem to="/tricopill-reengajamento" label="Reengajamento" icon={Send} />
-                <NavItem to="/tricopill-loja" label="Analytics do site" icon={LineChart} />
+                <NavItem to="/reengajamento" label="Reengajamento" icon={Send} />
+                <NavItem to="/loja-analytics" label="Analytics do site" icon={LineChart} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -222,7 +222,7 @@ export function AppSidebar() {
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {isSalesPolo ? <NavItem to="/tricopill-financeiro" label="Recebimentos" icon={Wallet} /> : null}
+                {isSalesPolo ? <NavItem to="/recebimentos" label="Recebimentos" icon={Wallet} /> : null}
                 <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} />
                 {isSalesPolo ? <NavItem to="/cupons" label="Cupons" icon={Ticket} /> : null}
                 {showBoards ? <NavItem to="/contas-a-pagar" label="Contas a pagar" icon={CalendarClock} /> : null}
@@ -288,7 +288,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
               <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
-              {showBoards ? <NavItem to="/boards" label="Configurar funis" icon={Boxes} /> : null}
+              {showBoards ? <NavItem to="/config-funis" label="Configurar funis" icon={Boxes} /> : null}
               {showDashboardConfig ? <NavItem to="/canais" label="Canais" icon={Radio} /> : null}
               {showAdmin ? <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowLeftRight} /> : null}
               {showAdmin ? <NavItem to="/integracoes" label="Integrações" icon={Unplug} /> : null}

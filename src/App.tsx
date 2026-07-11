@@ -94,7 +94,8 @@ function AppRoutes() {
       <Routes>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/dashboard-config" element={<DashboardConfigPage />} />
-        <Route path="/boards" element={<BoardsPage />} />
+        <Route path="/config-funis" element={<BoardsPage />} />
+        <Route path="/boards" element={<Navigate to="/config-funis" replace />} />
         <Route path="/visoes" element={<DataViewsPage />} />
         <Route path="/kanban" element={<KanbanPage />} />
         <Route path="/leads" element={<LeadsPage />} />
@@ -116,12 +117,20 @@ function AppRoutes() {
         <Route path="/rh-formularios" element={<FormulariosRhPage />} />
         <Route path="/chat" element={<ChatWorkspacePage />} />
         <Route path="/tricopill" element={<TricopilPage />} />
-        <Route path="/tricopill-bi" element={<TricopilDashboardPage />} />
-        <Route path="/tricopill-loja" element={<LojaTricopillPage />} />
-        <Route path="/tricopill-reengajamento" element={<TricopillReengagePage />} />
-        <Route path="/tricopill-pedidos" element={<TricopilOrdersPage />} />
-        <Route path="/tricopill-financeiro" element={<TricopilFinancePage />} />
-        <Route path="/tricopill-assinaturas" element={<TricopilSubscriptionsPage />} />
+        {/* Rotas novas (sem prefixo tricopill-); as antigas viram redirect pra não
+            quebrar bookmarks, deep-links do chat e fluxos do ManyChat. */}
+        <Route path="/bi-vendas" element={<TricopilDashboardPage />} />
+        <Route path="/tricopill-bi" element={<Navigate to="/bi-vendas" replace />} />
+        <Route path="/loja-analytics" element={<LojaTricopillPage />} />
+        <Route path="/tricopill-loja" element={<Navigate to="/loja-analytics" replace />} />
+        <Route path="/reengajamento" element={<TricopillReengagePage />} />
+        <Route path="/tricopill-reengajamento" element={<Navigate to="/reengajamento" replace />} />
+        <Route path="/pedidos" element={<TricopilOrdersPage />} />
+        <Route path="/tricopill-pedidos" element={<Navigate to="/pedidos" replace />} />
+        <Route path="/recebimentos" element={<TricopilFinancePage />} />
+        <Route path="/tricopill-financeiro" element={<Navigate to="/recebimentos" replace />} />
+        <Route path="/assinaturas" element={<TricopilSubscriptionsPage />} />
+        <Route path="/tricopill-assinaturas" element={<Navigate to="/assinaturas" replace />} />
         <Route path="/links-pagamento" element={<PaymentLinksPage />} />
         <Route path="/relatorio-vendas" element={<SalesReportPage />} />
         <Route path="/tricopill-relatorios" element={<TricopilReportsPage />} />

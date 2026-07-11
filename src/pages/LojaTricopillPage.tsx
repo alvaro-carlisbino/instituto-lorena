@@ -17,9 +17,9 @@ import { SubTabs } from '@/components/page/SubTabs'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 
 const ANALISE_TABS = [
-  { to: '/tricopill-bi', label: 'BI de vendas' },
-  { to: '/tricopill-loja', label: 'Loja (site)' },
-  { to: '/tricopill-reengajamento', label: 'Reengajamento' },
+  { to: '/bi-vendas', label: 'BI de vendas' },
+  { to: '/loja-analytics', label: 'Loja (site)' },
+  { to: '/reengajamento', label: 'Reengajamento' },
 ]
 import { EmptyState } from '@/components/ui/empty-state'
 import { buttonVariants } from '@/components/ui/button'
@@ -162,7 +162,7 @@ export function LojaTricopillPage() {
       actions={
         <div className="flex items-center gap-2">
           <Link
-            to="/tricopill-bi"
+            to="/bi-vendas"
             className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-lg')}
           >
             <MessageSquare className="size-4 mr-2" />

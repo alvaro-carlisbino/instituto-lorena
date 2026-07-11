@@ -16,9 +16,9 @@ import {
 } from '@/services/tricopillReengage'
 
 const ANALISE_TABS = [
-  { to: '/tricopill-bi', label: 'BI de vendas' },
-  { to: '/tricopill-loja', label: 'Loja (site)' },
-  { to: '/tricopill-reengajamento', label: 'Reengajamento' },
+  { to: '/bi-vendas', label: 'BI de vendas' },
+  { to: '/loja-analytics', label: 'Loja (site)' },
+  { to: '/reengajamento', label: 'Reengajamento' },
 ]
 
 const firstName = (s: string | null) => {
