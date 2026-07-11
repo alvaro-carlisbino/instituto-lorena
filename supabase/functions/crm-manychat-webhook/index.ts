@@ -736,7 +736,10 @@ Deno.serve(async (req) => {
   // e chama esta ação com { action:'feedback', subscriber_id, score, comment }. Grava em
   // survey_responses (reusa o painel de NPS) e avisa o time em nota baixa (detrator).
   if (action === 'feedback' || action === 'avaliacao' || action === 'nps_feedback') {
-    const scoreRaw = Number(body.score ?? body.nota ?? body.rating)
+    // score pode chegar como string (ManyChat manda o merge field entre aspas). Vazio = sem nota
+    // (Number('') seria 0 = falso detrator).
+    const scoreStr = String(body.score ?? body.nota ?? body.rating ?? '').trim()
+    const scoreRaw = scoreStr === '' ? NaN : Number(scoreStr)
     const score = Number.isFinite(scoreRaw) ? Math.max(0, Math.min(10, Math.round(scoreRaw))) : null
     const comment = String(body.comment ?? body.comentario ?? body.feedback ?? body.text ?? '').trim().slice(0, 1000) || null
     if (score === null && !comment) return json({ error: 'missing_feedback', message: 'Envie score (0-10) e/ou comment.' }, 400)
