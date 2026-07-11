@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Plus, Stethoscope, Search, User } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
+import { SubTabs } from '@/components/page/SubTabs'
+import { pacienteTabs } from '@/lib/patientFileTabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -80,7 +82,7 @@ export function ClinicalNotesPage() {
 
   return (
     <AppLayout
-      title="Notas Clínicas"
+      title="Ficha do paciente"
       subtitle="Observações dos médicos e da recepção, para dar continuidade ao atendimento"
       actions={
         canWrite ? (
@@ -88,6 +90,7 @@ export function ClinicalNotesPage() {
         ) : null
       }
     >
+      <SubTabs tabs={pacienteTabs()} />
       {canWrite ? (
           <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) resetDialog() }}>
             <DialogContent>

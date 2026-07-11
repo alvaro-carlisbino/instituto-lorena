@@ -10,6 +10,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AppLayout } from '@/layouts/AppLayout'
+import { SubTabs } from '@/components/page/SubTabs'
+import { pacienteTabs } from '@/lib/patientFileTabs'
 import {
   createMedicalRecord,
   fetchPatientConsents,
@@ -85,7 +87,8 @@ export function MedicalRecordsPage() {
   }
 
   return (
-    <AppLayout title="Prontuário">
+    <AppLayout title="Ficha do paciente" subtitle="Prontuário clínico do paciente (registro append-only)">
+      <SubTabs tabs={pacienteTabs()} />
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-2">
           <Input

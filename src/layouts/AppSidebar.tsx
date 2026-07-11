@@ -34,8 +34,6 @@ import {
   FileSpreadsheet,
   Gauge,
   Target,
-  Stethoscope,
-  NotebookPen,
   ClipboardList,
   CalendarClock,
   Warehouse,
@@ -190,8 +188,6 @@ export function AppSidebar() {
               <SidebarMenu className="gap-0.5">
                 <NavItem to="/agenda" label="Agenda" icon={Calendar} />
                 <NavItem to="/perfil" label="Ficha do paciente" icon={UserSearch} />
-                <NavItem to="/notas-clinicas" label="Notas clínicas" icon={NotebookPen} />
-                <NavItem to="/prontuario" label="Prontuário" icon={Stethoscope} />
                 <NavItem to="/protocolos" label="Protocolos" icon={ListChecks} />
               </SidebarMenu>
             </SidebarGroupContent>

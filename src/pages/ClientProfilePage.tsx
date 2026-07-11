@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Search, User, MapPin, Route, Star, Stethoscope, CreditCard } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
+import { SubTabs } from '@/components/page/SubTabs'
+import { pacienteTabs } from '@/lib/patientFileTabs'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -59,7 +61,8 @@ export function ClientProfilePage() {
   const paidTotal = profile?.payments.filter((p) => isPaid(p.status)).reduce((s, p) => s + p.amountCents, 0) ?? 0
 
   return (
-    <AppLayout title="Perfil do Cliente" subtitle="Visão consolidada: origem, jornada, feedback, notas e financeiro">
+    <AppLayout title="Ficha do paciente" subtitle="Visão consolidada: origem, jornada, feedback, notas e financeiro">
+      <SubTabs tabs={pacienteTabs()} />
       {/* busca */}
       <div className="mb-6 max-w-lg">
         <div className="relative">
