@@ -30,7 +30,7 @@ import {
 import { enrichManychatMediaRows } from '../_shared/manychatMediaEnrich.ts'
 import { captureCadastroForLead } from '../_shared/cadastroExtract.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
-import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
+import { captureNpsInboundResponse, thankYouFor } from '../_shared/npsCapture.ts'
 import { resolveTenantFromManychatBody } from '../_shared/tenantResolve.ts'
 import { applyOptOutToLead, isOptOutMessage } from '../_shared/optOutDetect.ts'
 import { attributionFromManychatBody, type LeadAttribution } from '../_shared/attribution.ts'
@@ -728,6 +728,52 @@ Deno.serve(async (req) => {
     } catch (e) {
       return json({ error: 'merge_failed', message: e instanceof Error ? e.message : String(e) }, 400)
     }
+  }
+
+  // ── FEEDBACK / AVALIAÇÃO (nota por botão + comentário) ──
+  // Quando o field 14768395=true, o ManyChat manda os botões de nota + pede o comentário,
+  // e chama esta ação com { action:'feedback', subscriber_id, score, comment }. Grava em
+  // survey_responses (reusa o painel de NPS) e avisa o time em nota baixa (detrator).
+  if (action === 'feedback' || action === 'avaliacao' || action === 'nps_feedback') {
+    const scoreRaw = Number(body.score ?? body.nota ?? body.rating)
+    const score = Number.isFinite(scoreRaw) ? Math.max(0, Math.min(10, Math.round(scoreRaw))) : null
+    const comment = String(body.comment ?? body.comentario ?? body.feedback ?? body.text ?? '').trim().slice(0, 1000) || null
+    if (score === null && !comment) return json({ error: 'missing_feedback', message: 'Envie score (0-10) e/ou comment.' }, 400)
+    const fbLeadId = await findLeadIdByManychatSubscriberId(admin, subscriberId)
+    if (!fbLeadId) return json({ ok: false, action: 'feedback', reason: 'lead_nao_encontrado' })
+    const rand = Math.random().toString(36).slice(2, 8)
+    const dispatchId = `disp-fb-${Date.now()}-${rand}`
+    const respId = `resp-fb-${Date.now()}-${rand}`
+    const nowIso = new Date().toISOString()
+    try {
+      await admin.from('survey_dispatches').insert({
+        id: dispatchId, template_id: 'feedback-atendimento', lead_id: fbLeadId,
+        channel: 'manychat', sent_at: nowIso, tenant_id: tenantId,
+      })
+      await admin.from('survey_responses').insert({
+        id: respId, dispatch_id: dispatchId, score, comment, responded_at: nowIso, tenant_id: tenantId,
+      })
+    } catch (e) {
+      return json({ error: 'feedback_insert_failed', message: e instanceof Error ? e.message : String(e) }, 500)
+    }
+    const nomeCliente = String(body.user_name ?? body.name ?? '').trim()
+    await insertInteraction(admin, {
+      leadId: fbLeadId, patientName: nomeCliente || 'Cliente', channel: 'system', direction: 'in', author: 'Feedback',
+      content: `⭐ Avaliação recebida${score !== null ? `: nota ${score}` : ''}${comment ? `\n💬 "${comment}"` : ''}`,
+      tenantId,
+    }).catch(() => {})
+    if (score !== null && score <= 6) {
+      await notifyAgents(admin, {
+        leadId: fbLeadId, kind: 'urgent', title: '⚠️ Avaliação baixa — recuperar cliente',
+        body: `${nomeCliente || 'Cliente'} deu nota ${score}${comment ? `: "${comment.slice(0, 120)}"` : ''}. Vale um contato pra entender e reverter.`,
+        includeOwner: true, tenantId, metadata: { dedupeKey: `feedback-low-${fbLeadId}` },
+      }).catch(() => {})
+    }
+    const firstName = nomeCliente.split(/\s+/)[0] || ''
+    return json({
+      ok: true, action: 'feedback', leadId: fbLeadId, score, comment: comment ?? null,
+      thankYou: score !== null ? thankYouFor(score, firstName) : 'Obrigada pelo seu retorno! 🙏',
+    })
   }
 
   const text = String(body.text ?? body.message ?? '').trim()

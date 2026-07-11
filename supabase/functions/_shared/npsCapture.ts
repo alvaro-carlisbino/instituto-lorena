@@ -26,7 +26,7 @@ export type NpsCaptureResult =
       thankYouText: string
     }
 
-function thankYouFor(score: number, firstName: string): string {
+export function thankYouFor(score: number, firstName: string): string {
   const who = firstName ? `, ${firstName}` : ''
   if (score >= 9) {
     return `Que bom${who}! ⭐ Muito obrigada pela nota *${score}*. Fico feliz em saber que correspondemos à sua expectativa. Se quiser compartilhar mais sobre o que mais gostou, ficaremos muito gratos!`
