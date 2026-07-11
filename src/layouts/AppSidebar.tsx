@@ -159,6 +159,7 @@ export function AppSidebar() {
               <NavItem to="/dashboard" label="Painel" icon={TrendingUp} />
               <NavItem to="/kanban" label="Funil de leads" icon={LayoutGrid} />
               {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={List} /> : null}
+              {showLeadsHub ? <NavItem to="/perfil" label="Perfil do Cliente" icon={Users} /> : null}
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={MessagesSquare} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/protocolos" label="Protocolos" icon={ListChecks} /> : null}
