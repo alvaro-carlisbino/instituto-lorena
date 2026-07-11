@@ -46,7 +46,10 @@ const MIN_GAP_MS = 20 * 3600_000 // 20h entre toques do mesmo lead
 const REACT_MAX_STEPS = 24    // ~2+ anos de toques; trava de segurança, não é o "fim"
 const RECOMPRA_MAX_STEPS = 12
 
-const firstName = (s: unknown) => String(s ?? '').trim().split(/\s+/)[0] || 'tudo bem'
+const firstName = (s: unknown) => {
+  const first = String(s ?? '').trim().split(/\s+/)[0] || ''
+  return first.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '') || 'tudo bem' // tira emoji/símbolo das pontas
+}
 
 // ── Cadência Trilha A: dias a partir do 1º toque (anchor = 1º contato) ──────────
 function reactDueDay(step: number): number {

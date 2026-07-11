@@ -30,6 +30,7 @@ import {
   Ticket,
   Unplug,
   Repeat,
+  Send,
   FileSpreadsheet,
   Gauge,
   Stethoscope,
@@ -240,6 +241,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
               {isSalesPolo ? <NavItem to="/tricopill-bi" label="BI de vendas" icon={ChartColumn} /> : null}
+              {isSalesPolo ? <NavItem to="/tricopill-reengajamento" label="Reengajamento" icon={Send} /> : null}
               <NavItem to="/metricas" label="Métricas" icon={Gauge} />
               {isClinicPolo ? <NavItem to="/prontuario" label="Prontuário" icon={Stethoscope} /> : null}
               <NavItem to="/planos" label="Planos" icon={Layers} />
