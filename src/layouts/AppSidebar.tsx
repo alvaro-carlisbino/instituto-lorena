@@ -162,6 +162,7 @@ export function AppSidebar() {
               {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={MessagesSquare} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/protocolos" label="Protocolos" icon={ListChecks} /> : null}
+              {showLeadsHub && isClinicPolo ? <NavItem to="/notas-clinicas" label="Notas Clínicas" icon={Stethoscope} /> : null}
               {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={SquareCheck} /> : null}
               {showLeadsHub ? <NavItem to="/feedback" label="Feedback & Engajamento" icon={Star} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}

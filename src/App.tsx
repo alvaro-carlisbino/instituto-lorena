@@ -11,6 +11,7 @@ import { ChannelsPage } from './pages/ChannelsPage'
 import { MetricsPage } from './pages/MetricsPage'
 import { AnalyticsPage } from './pages/AnalyticsPage'
 import { FeedbackDashboardPage } from './pages/FeedbackDashboardPage'
+import { ClinicalNotesPage } from './pages/ClinicalNotesPage'
 import { MedicalRecordsPage } from './pages/MedicalRecordsPage'
 import { BillingPage } from './pages/BillingPage'
 import { PwaInstallBanner } from './components/PwaInstallBanner'
@@ -111,6 +112,7 @@ function AppRoutes() {
       <Route path="/metricas" element={<MetricsPage />} />
       <Route path="/analytics" element={<AnalyticsPage />} />
       <Route path="/feedback" element={<FeedbackDashboardPage />} />
+      <Route path="/notas-clinicas" element={<ClinicalNotesPage />} />
       <Route path="/prontuario" element={<MedicalRecordsPage />} />
       <Route path="/planos" element={<BillingPage />} />
       <Route path="/usuarios" element={<UsersPage />} />
