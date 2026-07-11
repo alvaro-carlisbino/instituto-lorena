@@ -18,6 +18,7 @@ import {
   Tv,
   Users,
   SquareCheck,
+  Star,
   MessagesSquare,
   ArrowLeftRight,
   Calendar,
@@ -162,6 +163,7 @@ export function AppSidebar() {
               {showLeadsHub && isClinicPolo ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/protocolos" label="Protocolos" icon={ListChecks} /> : null}
               {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={SquareCheck} /> : null}
+              {showLeadsHub ? <NavItem to="/feedback" label="Feedback & Engajamento" icon={Star} /> : null}
               {showLeadsHub && isClinicPolo ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
               <NavItem to="/historico" label="Histórico" icon={History} />
               <NavItem to="/assistente" label="Assistente IA" icon={Bot} />
