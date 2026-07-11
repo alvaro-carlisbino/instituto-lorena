@@ -18,18 +18,18 @@ export type DeliveryClassification = {
 }
 
 const LABELS: Record<DeliveryKind, { label: string; emoji: string }> = {
-  retirada: { label: 'Retirada', emoji: '🏠' },
-  motoboy: { label: 'Motoboy Maringá', emoji: '🛵' },
-  correios: { label: 'Correios', emoji: '📦' },
+  retirada: { label: 'Retirada', emoji: '' },
+  motoboy: { label: 'Motoboy Maringá', emoji: '' },
+  correios: { label: 'Correios', emoji: '' },
   desconhecido: { label: 'Não informado', emoji: '—' },
 }
 
 /** Rótulos das opções de filtro (ordem de exibição). */
 export const DELIVERY_FILTER_OPTIONS: Array<{ value: DeliveryKind; label: string }> = [
-  { value: 'motoboy', label: '🛵 Motoboy Maringá' },
-  { value: 'retirada', label: '🏠 Retirada na clínica' },
-  { value: 'correios', label: '📦 Envio Correios' },
-  { value: 'desconhecido', label: '— Não informado' },
+  { value: 'motoboy', label: 'Motoboy Maringá' },
+  { value: 'retirada', label: 'Retirada na clínica' },
+  { value: 'correios', label: 'Envio Correios' },
+  { value: 'desconhecido', label: 'Não informado' },
 ]
 
 /**

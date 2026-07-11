@@ -5,7 +5,7 @@ import { HelpDrawer } from '@/components/page/HelpDrawer'
 
 const LEADS_HELP = [
   {
-    icon: '👥',
+    icon: '',
     title: 'Gestão de Pacientes',
     content: (
       <p>
@@ -15,7 +15,7 @@ const LEADS_HELP = [
     ),
   },
   {
-    icon: '📦',
+    icon: '',
     title: 'Ações em Lote',
     content: (
       <p>
@@ -25,7 +25,7 @@ const LEADS_HELP = [
     ),
   },
   {
-    icon: '📥',
+    icon: '',
     title: 'Importação',
     content: (
       <p>
@@ -777,7 +777,7 @@ export function LeadsPage() {
           <CardContent className="p-8 flex flex-col gap-6">
             <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="sr-only" onChange={onCsvInputChange} />
             <div className="flex flex-col items-center justify-center border-2 border-dashed border-border/40 rounded-[2rem] p-8 transition-all hover:bg-muted/20">
-              <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-4 text-xl">📄</div>
+              <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-4 text-xl">CSV</div>
               <Button type="button" variant="link" className="font-bold text-primary" onClick={() => csvInputRef.current?.click()}>
                 Selecionar Ficheiro CSV
               </Button>
@@ -804,7 +804,7 @@ export function LeadsPage() {
           <CardContent className="p-8 flex flex-col gap-6">
             <input ref={jsonInputRef} type="file" accept=".json,application/json" className="sr-only" onChange={onJsonInputChange} />
             <div className="flex flex-col items-center justify-center border-2 border-dashed border-border/40 rounded-[2rem] p-8 transition-all hover:bg-muted/20">
-              <div className="size-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 mb-4 text-xl">💬</div>
+              <div className="size-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 mb-4 text-xl">JSON</div>
               <Button type="button" variant="link" className="font-bold text-amber-600" onClick={() => jsonInputRef.current?.click()}>
                 Selecionar Ficheiro JSON
               </Button>

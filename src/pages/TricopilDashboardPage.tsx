@@ -147,10 +147,10 @@ export function TricopilDashboardPage() {
       if (c.inferred) inferred += 1
     }
     const rows: Array<{ kind: DeliveryKind; emoji: string; label: string; count: number }> = [
-      { kind: 'motoboy', emoji: '🛵', label: 'Motoboy (Maringá e região)', count: counts.motoboy },
-      { kind: 'retirada', emoji: '🏠', label: 'Retirada na clínica', count: counts.retirada },
-      { kind: 'correios', emoji: '📦', label: 'Envio Correios', count: counts.correios },
-      { kind: 'desconhecido', emoji: '—', label: 'Não informado', count: counts.desconhecido },
+      { kind: 'motoboy', emoji: '', label: 'Motoboy (Maringá e região)', count: counts.motoboy },
+      { kind: 'retirada', emoji: '', label: 'Retirada na clínica', count: counts.retirada },
+      { kind: 'correios', emoji: '', label: 'Envio Correios', count: counts.correios },
+      { kind: 'desconhecido', emoji: '', label: 'Não informado', count: counts.desconhecido },
     ]
     return { rows, total: orders.length, inferred }
   }, [orders])
@@ -195,7 +195,7 @@ export function TricopilDashboardPage() {
 
   return (
     <AppLayout
-      title="BI Tricopill — Vendas & Faturamento"
+      title="BI Tricopill · Vendas & Faturamento"
       actions={
         <div className="flex items-center gap-2">
           <Link
@@ -294,7 +294,7 @@ export function TricopilDashboardPage() {
 
       <section className="mb-8 grid gap-4 lg:grid-cols-12">
         <div className="rounded-xl border border-border bg-card p-6 lg:col-span-8">
-          <p className="mb-4 text-sm font-bold text-foreground/90">Faturamento por dia — Bling x Checkout</p>
+          <p className="mb-4 text-sm font-bold text-foreground/90">Faturamento por dia: Bling x Checkout</p>
           {dailySeries.length === 0 ? (
             <p className="py-16 text-center text-xs text-muted-foreground">Sem faturamento no período.</p>
           ) : (
@@ -569,7 +569,7 @@ export function TricopilDashboardPage() {
                 <TableBody>
                   {deliveryBreakdown.rows.map((r) => (
                     <TableRow key={r.kind} className="border-t border-border/20">
-                      <TableCell className="py-1.5">{r.emoji} {r.label}</TableCell>
+                      <TableCell className="py-1.5">{r.label}</TableCell>
                       <TableCell className="py-1.5 text-right tabular-nums">{r.count}</TableCell>
                       <TableCell className="py-1.5 text-right tabular-nums text-muted-foreground">
                         {deliveryBreakdown.total > 0 ? Math.round((r.count / deliveryBreakdown.total) * 100) : 0}%

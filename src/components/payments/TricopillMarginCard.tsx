@@ -197,7 +197,7 @@ export function TricopillMarginCard({
       </div>
       {margin.kitsSemCusto > 0 ? (
         <p className="mt-2 text-[11px] text-amber-600">
-          ⚠️ {margin.kitsSemCusto} kit(s) vendido(s) sem custo cadastrado ficam de fora da margem.
+          {margin.kitsSemCusto} kit(s) vendido(s) sem custo cadastrado ficam de fora da margem.
         </p>
       ) : null}
       <p className="mt-1 text-[10px] text-muted-foreground">Receita considerada (kits com custo): {brl(margin.revenueWithCost)} · receita total paga: {brl(revenueCents)}</p>

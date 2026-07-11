@@ -57,7 +57,7 @@ export function TricopilSubscriptionsPage() {
     setBusy(key)
     try {
       const r = await subscriptionAction(s.id, action)
-      if (r.ok) { toast.success(r.message || 'Feito ✅'); setReload((k) => k + 1) }
+      if (r.ok) { toast.success(r.message || 'Feito.'); setReload((k) => k + 1) }
       else toast.error(r.message || 'Falha na ação.')
     } finally { setBusy(null) }
   }
@@ -84,7 +84,7 @@ export function TricopilSubscriptionsPage() {
   )
 
   return (
-    <AppLayout title="Assinaturas (Clube)" subtitle="Assinantes do Tricopill — plano, status, ciclos pagos e envios. Cobrança, Bling, Melhor Envio e rastreio são automáticos.">
+    <AppLayout title="Assinaturas (Clube)" subtitle="Assinantes do Tricopill: plano, status, ciclos pagos e envios. Cobrança, Bling, Melhor Envio e rastreio são automáticos.">
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatCard label="Assinaturas ativas" value={stats.active} />
         <StatCard label="Receita recorrente (MRR)" value={brl(stats.mrr)} valueClassName="text-emerald-700" />

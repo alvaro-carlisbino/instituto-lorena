@@ -228,7 +228,6 @@ export function InboxMenu() {
                 onSelect={(e) => e.preventDefault()}
               >
                 <span className={cn('text-xs font-medium', isUrgent && !i.readAt && 'text-red-600')}>
-                  {isUrgent && !i.readAt ? '🚨 ' : ''}
                   {i.title}
                 </span>
                 <span className="text-xs text-muted-foreground">{i.body}</span>

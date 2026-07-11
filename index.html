@@ -9,6 +9,10 @@
     <meta property="og:title" content="Instituto Lorena CRM" />
     <meta property="og:description" content="CRM comercial interno — kanban de vendas, gestão de leads e funil de captação." />
     <meta property="og:type" content="website" />
+    <!-- Abre a conexão TLS com o Supabase em paralelo ao download do JS: o primeiro
+         fetch de dados (auth + snapshot) sai sem pagar o handshake (~100-300ms). -->
+    <link rel="preconnect" href="https://fgyfpmnvlkmyxtucbxbu.supabase.co" crossorigin />
+    <link rel="dns-prefetch" href="https://fgyfpmnvlkmyxtucbxbu.supabase.co" />
     <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/favicon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />

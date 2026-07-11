@@ -234,12 +234,12 @@ export function KanbanToolbar({
                 className="min-w-[140px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
                 size="default"
               >
-                {sortOrder === 'idle_time' ? '⏳ Mais tempo sem resposta' : sortOrder === 'score' ? '⭐ Melhor Score' : '📋 Ordem Padrão'}
+                {sortOrder === 'idle_time' ? 'Mais tempo sem resposta' : sortOrder === 'score' ? 'Melhor Score' : 'Ordem Padrão'}
               </LabeledSelectTrigger>
               <SelectContent className="rounded-xl">
-                <SelectItem value="position" className="text-xs uppercase font-bold tracking-tight">📋 Ordem Padrão</SelectItem>
-                <SelectItem value="idle_time" className="text-xs uppercase font-bold tracking-tight">⏳ Mais tempo sem resposta</SelectItem>
-                <SelectItem value="score" className="text-xs uppercase font-bold tracking-tight">⭐ Melhor Score</SelectItem>
+                <SelectItem value="position" className="text-xs uppercase font-bold tracking-tight">Ordem Padrão</SelectItem>
+                <SelectItem value="idle_time" className="text-xs uppercase font-bold tracking-tight">Mais tempo sem resposta</SelectItem>
+                <SelectItem value="score" className="text-xs uppercase font-bold tracking-tight">Melhor Score</SelectItem>
               </SelectContent>
             </Select>
 

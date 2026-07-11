@@ -127,7 +127,7 @@ export function PaymentLinksPage() {
         setQuoteMsg(
           r.debug === 'not_connected'
             ? 'Melhor Envio não conectado.'
-            : 'Não foi possível cotar — confira o CEP.',
+            : 'Não foi possível cotar. Confira o CEP.',
         )
       }
     } catch (e) {
@@ -167,7 +167,7 @@ export function PaymentLinksPage() {
     setCheckingPix(true)
     try {
       const r = await checkRedePix(lastLink.id)
-      if (r.paid) toast.success('Pagamento confirmado! ✅')
+      if (r.paid) toast.success('Pagamento confirmado!')
       else toast.info(`Ainda não consta pago${r.rawStatus ? ` (status: ${r.rawStatus})` : ''}.`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao verificar o Pix')
@@ -246,7 +246,7 @@ export function PaymentLinksPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="pl-freight">Frete (R$) — cobrado à parte</Label>
+              <Label htmlFor="pl-freight">Frete (R$) · cobrado à parte</Label>
               <Input
                 id="pl-freight"
                 inputMode="decimal"
@@ -279,7 +279,6 @@ export function PaymentLinksPage() {
                 <div className="flex flex-wrap gap-2 pt-0.5">
                   {quoteOptions.map((o) => (
                     <Button key={o.service} type="button" size="sm" variant="secondary" onClick={() => applyFreight(o)}>
-                      {o.internal ? '🏠 ' : ''}
                       {o.service} · {formatBRL(o.priceCents)}
                       {o.deliveryDays ? ` · ${o.deliveryDays}d` : ''}
                     </Button>
@@ -442,7 +441,7 @@ export function PaymentLinksPage() {
             {lastLink ? (
               <div className="space-y-2 rounded-lg border border-border/60 bg-muted/30 p-3">
                 <p className="text-[0.7rem] font-bold uppercase tracking-widest text-muted-foreground">
-                  {lastLink.via}{lastLink.isPix ? ' — copia e cola' : ''}
+                  {lastLink.via}{lastLink.isPix ? ' · copia e cola' : ''}
                 </p>
                 {lastLink.qrImage ? (
                   <img src={lastLink.qrImage} alt="QR Code Pix" className="mx-auto size-40 rounded-md bg-white p-1" />

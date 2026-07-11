@@ -37,7 +37,7 @@ export function PaymentBadge({
       title={`${paid ? 'Pago' : 'Aguardando pagamento'} · ${methodLabel(payment.method)} · ${brl(payment.amountCents)}`}
     >
       <span className={cn('h-1.5 w-1.5 rounded-full', paid ? 'bg-emerald-500' : 'bg-amber-500')} aria-hidden />
-      {paid ? '✓ Pago' : '⏳ Aguardando'}
+      {paid ? 'Pago' : 'Aguardando'}
       {payment.amountCents > 0 ? ` · ${brl(payment.amountCents)}` : ''}
       {` · ${methodLabel(payment.method)}`}
     </span>

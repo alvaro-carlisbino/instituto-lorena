@@ -59,7 +59,7 @@ export function ClientProfilePage() {
   const paidTotal = profile?.payments.filter((p) => isPaid(p.status)).reduce((s, p) => s + p.amountCents, 0) ?? 0
 
   return (
-    <AppLayout title="Perfil do Cliente" subtitle="Visão consolidada — origem, jornada, feedback, notas e financeiro">
+    <AppLayout title="Perfil do Cliente" subtitle="Visão consolidada: origem, jornada, feedback, notas e financeiro">
       {/* busca */}
       <div className="mb-6 max-w-lg">
         <div className="relative">

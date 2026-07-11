@@ -421,7 +421,7 @@ export function ChatWorkspacePage({
                           )}
                           title={`Última mensagem do paciente sem resposta há ${waitingLabel}`}
                         >
-                          ⏱ {waitingLabel}
+                          {waitingLabel}
                         </span>
                       ) : null}
                     </div>
@@ -533,7 +533,7 @@ export function ChatWorkspacePage({
           ) : (
             <div className="flex h-full flex-col items-center justify-center p-12 text-center">
               <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-primary/5 shadow-inner">
-                <span className="text-3xl grayscale-[0.5] opacity-50">📬</span>
+                <Mail className="size-8 text-muted-foreground/50" aria-hidden />
               </div>
               <h3 className="text-lg font-semibold tracking-tight">Sua Central de Mensagens</h3>
               <p className="mt-2 max-w-sm text-sm text-muted-foreground/80">

@@ -34,9 +34,9 @@ import { saveLeadCadastro } from '@/services/crmOrders'
 
 // Prefill de produto por kit (valores Pix oficiais Tricopill).
 const KIT_PRESETS: Record<string, { name: string; qty: number; reais: string }> = {
-  '1_mes': { name: 'Tricopill — 1 frasco', qty: 1, reais: '199,00' },
-  '3_meses': { name: 'Tricopill — Kit 3+1 (4 frascos)', qty: 1, reais: '567,15' },
-  '5_meses': { name: 'Tricopill — Kit 5+1 (6 frascos)', qty: 1, reais: '945,25' },
+  '1_mes': { name: 'Tricopill 1 frasco', qty: 1, reais: '199,00' },
+  '3_meses': { name: 'Tricopill Kit 3+1 (4 frascos)', qty: 1, reais: '567,15' },
+  '5_meses': { name: 'Tricopill Kit 5+1 (6 frascos)', qty: 1, reais: '945,25' },
 }
 
 const reaisToCents = (v: string) => Math.round(Number(String(v).replace(/\./g, '').replace(',', '.')) * 100)
@@ -273,8 +273,8 @@ export function LeadShipPage() {
       return toast.error('Cote o frete e escolha um serviço primeiro.')
     }
     if (selectedOption.internal) {
-      setPageError('Maringá é entrega interna (local) — não gera etiqueta dos Correios.')
-      return toast.error('Maringá é entrega interna (local) — não gera etiqueta dos Correios.')
+      setPageError('Maringá é entrega interna (local), não gera etiqueta dos Correios.')
+      return toast.error('Maringá é entrega interna (local), não gera etiqueta dos Correios.')
     }
     if (config && config.senderMissing.length) {
       setShowSender(true)
@@ -385,7 +385,7 @@ export function LeadShipPage() {
             <Truck className="size-5 text-primary" /> Gerar envio (Melhor Envio)
           </h2>
           <p className="text-sm text-muted-foreground">
-            Cria o envio na conta Melhor Envio. Por padrão só adiciona ao carrinho — ligue a opção abaixo para já comprar e gerar a etiqueta.
+            Cria o envio na conta Melhor Envio. Por padrão só adiciona ao carrinho. Ligue a opção abaixo para já comprar e gerar a etiqueta.
           </p>
         </div>
 
@@ -396,7 +396,7 @@ export function LeadShipPage() {
         ) : null}
         {config?.sandbox ? (
           <div className="mt-2 rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-[0.7rem] text-sky-800">
-            Ambiente <b>sandbox</b> — etiquetas de teste, não gera cobrança real.
+            Ambiente <b>sandbox</b>: etiquetas de teste, não gera cobrança real.
           </div>
         ) : null}
 
@@ -547,7 +547,7 @@ export function LeadShipPage() {
                     <SelectContent>
                       {quoteOptions.map((o) => (
                         <SelectItem key={o.serviceId} value={String(o.serviceId)}>
-                          {o.service} — R$ {o.priceReais.toFixed(2)}
+                          {o.service} · R$ {o.priceReais.toFixed(2)}
                           {o.deliveryDays != null ? ` · ${o.deliveryDays}d` : ''} ({o.company})
                         </SelectItem>
                       ))}
@@ -555,7 +555,7 @@ export function LeadShipPage() {
                   </Select>
                   {selectedOption ? (
                     selectedOption.internal ? (
-                      <p className="text-[0.7rem] text-amber-700">Entrega interna (Maringá) — não gera etiqueta dos Correios.</p>
+                      <p className="text-[0.7rem] text-amber-700">Entrega interna (Maringá), não gera etiqueta dos Correios.</p>
                     ) : (
                       <p className="text-[0.7rem] text-muted-foreground">
                         Custo real da etiqueta: <b>R$ {selectedOption.priceReais.toFixed(2)}</b>. (O que você cobra do cliente é à parte.)
@@ -577,7 +577,7 @@ export function LeadShipPage() {
               <p className="text-sm font-medium">Comprar e gerar etiqueta agora</p>
               <p className="text-[0.7rem] text-muted-foreground">
                 {finalize
-                  ? '⚠️ Debita o saldo da carteira Melhor Envio e emite a etiqueta.'
+                  ? 'Debita o saldo da carteira Melhor Envio e emite a etiqueta.'
                   : 'Desligado: só adiciona ao carrinho para você pagar no painel.'}
               </p>
             </div>

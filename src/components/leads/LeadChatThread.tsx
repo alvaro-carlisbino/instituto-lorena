@@ -311,7 +311,7 @@ export function LeadChatThread({
         const linkLine = `💳 Aqui está seu link de pagamento (Pix ou cartão):\n${res.payLink}`
         return base ? `${base}\n\n${linkLine}` : linkLine
       })
-      toast.success('Link de pagamento (Rede) gerado — revise e envie.')
+      toast.success('Link de pagamento (Rede) gerado. Revise e envie.')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao gerar link de pagamento')
     } finally {
@@ -441,7 +441,7 @@ export function LeadChatThread({
             description: 'MANYCHAT_PUSH_SKIP_SEND_FLOW=true',
           })
         } else if ((r.channel === 'meta' || r.channel === 'whatsapp') && mc?.attempted && mc.ok === false && mc.set_field_ok && mc.send_flow_ok === false) {
-          toast.message('ManyChat: campo ENVIAR-DM atualizado, mas sendFlow falhou — o cliente pode não receber DM.', {
+          toast.message('ManyChat: campo ENVIAR-DM atualizado, mas sendFlow falhou. O cliente pode não receber DM.', {
             description: String(mc.error ?? 'Veja MANYCHAT_DM_FLOW_NS, MANYCHAT_SEND_FLOW_MESSAGE_TAG (ex.: HUMAN_AGENT) e logs da Edge Function.'),
           })
         } else if ((r.channel === 'meta' || r.channel === 'whatsapp') && mc?.attempted && mc.ok === false) {
@@ -782,7 +782,7 @@ export function LeadChatThread({
             disabled={forceAiLoading}
             title={
               forceAiHumanBlocked
-                ? 'Conversa em modo Humano — mude o atendimento para Misto para a IA responder.'
+                ? 'Conversa em modo Humano. Mude o atendimento para Misto para a IA responder.'
                 : 'Gera e envia outra resposta com base na última mensagem do paciente (ignora limites de ritmo da IA).'
             }
             onClick={() => {
@@ -816,7 +816,7 @@ export function LeadChatThread({
           {groupedItems.length === 0 ? (
             <li className="flex flex-col items-center justify-center py-12 text-center">
               <div className="mb-3 h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center opacity-40">
-                <span className="text-xl">📥</span>
+                <span className="text-xl"></span>
               </div>
               <p className="text-xs text-muted-foreground font-medium">Nenhuma mensagem encontrada</p>
             </li>
@@ -1081,7 +1081,7 @@ export function LeadChatThread({
                     className="sr-only"
                     onChange={(e) => void handleAttachFiles(e.target.files)}
                   />
-                  📎 {crm.draftAttachments.length > 0 ? `${crm.draftAttachments.length} arquivos` : 'Anexar'}
+                  {crm.draftAttachments.length > 0 ? `${crm.draftAttachments.length} arquivos` : 'Anexar'}
                 </label>
                 <input
                   ref={stickerInputRef}
@@ -1177,7 +1177,7 @@ export function LeadChatThread({
                     <DropdownMenuTrigger
                       type="button"
                       disabled={pagbankLoading}
-                      title="Gerar link de pagamento (Pix ou cartão) — Rede"
+                      title="Gerar link de pagamento (Pix ou cartão) · Rede"
                       className={cn(
                         buttonVariants({ variant: 'ghost', size: 'sm' }),
                         'h-8 rounded-lg px-2 text-[10px]',

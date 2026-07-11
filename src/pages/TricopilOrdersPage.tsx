@@ -40,16 +40,16 @@ function shortDateTime(iso: string): string {
 const PILL = 'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1'
 
 const STATUS_META: Record<PaymentStatus, { label: string; cls: string }> = {
-  paid: { label: '✓ Pago', cls: 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300' },
-  pending: { label: '⏳ Aguardando', cls: 'bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300' },
-  failed: { label: '✕ Falhou', cls: 'bg-rose-500/10 text-rose-700 ring-rose-500/25 dark:text-rose-300' },
+  paid: { label: 'Pago', cls: 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300' },
+  pending: { label: 'Aguardando', cls: 'bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300' },
+  failed: { label: 'Falhou', cls: 'bg-rose-500/10 text-rose-700 ring-rose-500/25 dark:text-rose-300' },
 }
 
 const DELIVERY_META: Record<DeliveryKind, { label: string; cls: string }> = {
-  motoboy: { label: '🛵 Motoboy', cls: 'bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:text-sky-300' },
-  retirada: { label: '🏠 Retirada', cls: 'bg-violet-500/10 text-violet-700 ring-violet-500/25 dark:text-violet-300' },
-  correios: { label: '📦 Correios', cls: 'bg-orange-500/10 text-orange-700 ring-orange-500/25 dark:text-orange-300' },
-  desconhecido: { label: '— Não inform.', cls: 'bg-muted text-muted-foreground ring-border/40' },
+  motoboy: { label: 'Motoboy', cls: 'bg-sky-500/10 text-sky-700 ring-sky-500/25 dark:text-sky-300' },
+  retirada: { label: 'Retirada', cls: 'bg-violet-500/10 text-violet-700 ring-violet-500/25 dark:text-violet-300' },
+  correios: { label: 'Correios', cls: 'bg-orange-500/10 text-orange-700 ring-orange-500/25 dark:text-orange-300' },
+  desconhecido: { label: 'Não inform.', cls: 'bg-muted text-muted-foreground ring-border/40' },
 }
 
 // Origem do pedido. Não há campo de origem nos pagamentos, então é derivado do lead
@@ -57,9 +57,9 @@ const DELIVERY_META: Record<DeliveryKind, { label: string; cls: string }> = {
 // whatsapp/meta) × loja no site (checkout sem lead do CRM) × lançamento manual.
 type OrderOrigin = 'whatsapp' | 'site' | 'manual'
 const ORIGIN_META: Record<OrderOrigin, { label: string; cls: string }> = {
-  whatsapp: { label: '🟢 WhatsApp', cls: 'bg-green-500/10 text-green-700 ring-green-500/25 dark:text-green-300' },
-  site: { label: '🛒 Site', cls: 'bg-indigo-500/10 text-indigo-700 ring-indigo-500/25 dark:text-indigo-300' },
-  manual: { label: '✍️ Manual', cls: 'bg-muted text-muted-foreground ring-border/40' },
+  whatsapp: { label: 'WhatsApp', cls: 'bg-green-500/10 text-green-700 ring-green-500/25 dark:text-green-300' },
+  site: { label: 'Site', cls: 'bg-indigo-500/10 text-indigo-700 ring-indigo-500/25 dark:text-indigo-300' },
+  manual: { label: 'Manual', cls: 'bg-muted text-muted-foreground ring-border/40' },
 }
 
 const STATUS_SEG: Array<{ v: 'all' | PaymentStatus; l: string }> = [
@@ -202,7 +202,7 @@ export function TricopilOrdersPage() {
   return (
     <AppLayout
       title="Pedidos"
-      subtitle="Pagamento, entrega, Bling e rastreio — tudo num lugar"
+      subtitle="Pagamento, entrega, Bling e rastreio: tudo num lugar"
       actions={
         <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
           <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Atualizar
@@ -358,7 +358,7 @@ export function TricopilOrdersPage() {
                             )}
                             title="Endereço incompleto pro envio (falta CEP ou número). Clique pra pedir no WhatsApp."
                           >
-                            ⚠️ Falta nº — pedir
+                            Falta nº · pedir
                           </a>
                         </div>
                       ) : null}

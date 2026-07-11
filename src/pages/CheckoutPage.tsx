@@ -48,7 +48,7 @@ export function CheckoutPage() {
         installments,
       )
       if (out.status === 'paid') {
-        setResult({ ok: true, message: 'Pagamento aprovado! Obrigado 💚' })
+        setResult({ ok: true, message: 'Pagamento aprovado! Obrigado.' })
         setIntent((p) => (p ? { ...p, status: 'paid' } : p))
       } else {
         setResult({ ok: false, message: out.message || 'Pagamento não aprovado. Confira os dados do cartão.' })
@@ -85,7 +85,7 @@ export function CheckoutPage() {
 
       {paid ? (
         <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-emerald-700">
-          ✅ {result?.message ?? 'Pagamento já confirmado.'}
+          {result?.message ?? 'Pagamento já confirmado.'}
         </div>
       ) : (
         <div className="space-y-3">
@@ -122,7 +122,7 @@ export function CheckoutPage() {
               >
                 {plan.map((o) => (
                   <option key={o.n} value={o.n}>
-                    {o.n === 1 ? `À vista — ${brl(o.totalCents)}` : `${o.n}x de ${brl(o.perCents)} sem juros — total ${brl(o.totalCents)}`}
+                    {o.n === 1 ? `À vista · ${brl(o.totalCents)}` : `${o.n}x de ${brl(o.perCents)} sem juros · total ${brl(o.totalCents)}`}
                   </option>
                 ))}
               </select>

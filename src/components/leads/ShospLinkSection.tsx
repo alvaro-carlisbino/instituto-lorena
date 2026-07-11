@@ -160,7 +160,7 @@ export function ShospLinkSection({ leadId, leadName, leadPhone, leadCpf, leadNas
       {prontuario ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-0.5 text-sm font-medium text-emerald-600">
-            <Link2 className="size-4" /> Vinculado — prontuário {prontuario}
+            <Link2 className="size-4" /> Vinculado · prontuário {prontuario}
           </span>
           <Button variant="ghost" size="sm" disabled={linking} onClick={() => void handleUnlink()}>
             <Link2Off className="size-4 mr-1.5" /> Desvincular

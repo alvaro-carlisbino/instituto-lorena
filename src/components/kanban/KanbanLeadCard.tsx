@@ -130,7 +130,7 @@ export function KanbanLeadCard({
         {lead.conversation_status === 'ai_triaging' && (
           <div className="flex items-center gap-1 rounded-md bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-600 ring-1 ring-blue-500/20">
             <span className="size-1.5 rounded-full bg-blue-500 animate-pulse" />
-            🤖 Triagem IA
+            Triagem IA
           </div>
         )}
         {lead.conversation_status === 'waiting_human' && (
@@ -139,13 +139,13 @@ export function KanbanLeadCard({
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
             </span>
-            🚨 Aguardando SDR
+            Aguardando SDR
           </div>
         )}
         {lead.conversation_status === 'human_active' && (
           <div className="flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-600 ring-1 ring-emerald-500/20">
             <span className="size-1.5 rounded-full bg-emerald-500" />
-            👤 Atendimento Humano
+            Atendimento Humano
           </div>
         )}
         {lead.followup_status === 'active' && lead.followup_current_step != null ? (

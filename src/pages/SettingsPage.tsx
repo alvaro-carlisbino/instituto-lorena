@@ -47,17 +47,17 @@ import { getAiConfig, saveAiConfig, type ConversationOwnerMode } from '@/service
 import { AutoSchedulingToggle } from '@/components/settings/AutoSchedulingToggle'
 
 const FIELD_TYPE_OPTIONS = [
-  { value: 'text', label: '📝 Texto livre' },
-  { value: 'select', label: '📋 Lista de opções' },
-  { value: 'number', label: '🔢 Número' },
-  { value: 'date', label: '📅 Data' },
-  { value: 'boolean', label: '✅ Sim / Não' },
+  { value: 'text', label: 'Texto livre' },
+  { value: 'select', label: 'Lista de opções' },
+  { value: 'number', label: 'Número' },
+  { value: 'date', label: 'Data' },
+  { value: 'boolean', label: 'Sim / Não' },
 ] as const
 
 const ROLE_OPTIONS = [
-  { value: 'admin', label: '👑 Administrador' },
-  { value: 'gestor', label: '📊 Gestor comercial' },
-  { value: 'sdr', label: '💬 Atendente' },
+  { value: 'admin', label: 'Administrador' },
+  { value: 'gestor', label: 'Gestor comercial' },
+  { value: 'sdr', label: 'Atendente' },
 ] as const
 
 const CHANNEL_OPTIONS = [
@@ -75,22 +75,22 @@ const VISIBILITY_CONTEXTS: { value: FieldVisibilityContext; label: string; descr
 
 const PERMISSION_LABELS: Record<string, { label: string; description: string; emoji: string }> = {
   canRouteLeads: {
-    emoji: '🎯',
+    emoji: '',
     label: 'Gerenciar leads',
     description: 'Ver, mover e editar fichas de leads. Encaminhar entre funis.',
   },
   canEditBoards: {
-    emoji: '🗂️',
+    emoji: '',
     label: 'Configurar funis e etapas',
     description: 'Criar e editar funis, etapas e automações de mensagem.',
   },
   canViewTvPanel: {
-    emoji: '📺',
+    emoji: '',
     label: 'Ver painel de TV',
     description: 'Acesso à tela de painel para exibição em monitor.',
   },
   canManageUsers: {
-    emoji: '👥',
+    emoji: '',
     label: 'Administrar usuários',
     description: 'Convidar usuários, alterar papéis e configurações gerais.',
   },
@@ -100,7 +100,7 @@ type DeleteTarget = { type: 'field' | 'profile' | 'rule'; id: string; name?: str
 
 const SETTINGS_HELP = [
   {
-    icon: '🤖',
+    icon: '',
     title: 'Atendimento com IA',
     content: (
       <p>
@@ -110,17 +110,17 @@ const SETTINGS_HELP = [
     ),
   },
   {
-    icon: '📝',
+    icon: '',
     title: 'Campos personalizados',
     content: (
       <p>
-        Crie campos extras para guardar informações específicas de cada lead — como
+        Crie campos extras para guardar informações específicas de cada lead, como
         convênio, procedimento desejado ou data de retorno. Arraste para reordenar.
       </p>
     ),
   },
   {
-    icon: '🔐',
+    icon: '',
     title: 'Permissões por papel',
     content: (
       <p>
@@ -130,11 +130,11 @@ const SETTINGS_HELP = [
     ),
   },
   {
-    icon: '🔔',
+    icon: '',
     title: 'Notificações',
     content: (
       <p>
-        Crie regras para avisar a equipe sobre eventos — ex.: quando um lead fica parado
+        Crie regras para avisar a equipe sobre eventos. Ex.: quando um lead fica parado
         mais de 2 horas ou quando uma etapa é concluída.
       </p>
     ),
@@ -666,7 +666,7 @@ export function SettingsPage() {
                             />
                             <div className="min-w-0">
                               <p className="text-sm font-medium leading-tight">
-                                {meta.emoji} {meta.label}
+                                {meta.label}
                               </p>
                               <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
                                 {meta.description}

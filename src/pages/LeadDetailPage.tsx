@@ -362,9 +362,9 @@ export function LeadDetailPage() {
                         rel="noreferrer"
                         onClick={(e) => e.stopPropagation()}
                         className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-500/25 hover:bg-emerald-500/20 dark:text-emerald-300"
-                        title="Abrir conversa no WhatsApp com este número (lead de formulário não chega conversando — chame ativamente)"
+                        title="Abrir conversa no WhatsApp com este número (lead de formulário não chega conversando, chame ativamente)"
                       >
-                        💬 Chamar no WhatsApp
+                        Chamar no WhatsApp
                       </a>
                     ) : null}
                   </div>
@@ -713,7 +713,7 @@ export function LeadDetailPage() {
                   })
                   return (
                     <li key={e.id} className="rounded border border-border/50 bg-card/30 px-2 py-1.5">
-                      <span className="text-muted-foreground">{t}</span> — de «{from}» → «{to}»
+                      <span className="text-muted-foreground">{t}</span> · de «{from}» → «{to}»
                     </li>
                   )
                 })}

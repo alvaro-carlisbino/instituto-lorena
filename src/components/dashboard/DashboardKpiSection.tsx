@@ -301,9 +301,9 @@ export function DashboardKpiSection() {
       const first = (att.first ?? {}) as Record<string, unknown>
       const isSiteAds = String(cf.origin ?? '') === 'site' && Boolean(first.utm_source || first.fbclid || att.utm_source || att.fbclid)
       let canal = ''
-      if (channel === 'lead_ads') canal = '📋 Formulário'
-      else if (channel.startsWith('ctwa')) canal = '🎯 CTWA'
-      else if (isSiteAds) canal = '🌐 Site'
+      if (channel === 'lead_ads') canal = 'Formulário'
+      else if (channel.startsWith('ctwa')) canal = 'CTWA'
+      else if (isSiteAds) canal = 'Site'
       if (!canal) continue
       atribuidos++
       const campanha = String(att.campaign ?? first.utm_campaign ?? '').trim()
@@ -403,7 +403,7 @@ export function DashboardKpiSection() {
           <KpiCard
             label="Cobertura do funil real"
             value={`${cobertura}%`}
-            sub={`${comVinculo} de ${novosCurr.length} novos leads com prontuário Shosp — a conversão acima só enxerga estes`}
+            sub={`${comVinculo} de ${novosCurr.length} novos leads com prontuário Shosp. A conversão acima só enxerga estes`}
             trend={trendPP(cobertura, coberturaPrev)}
             icon={Link2}
             accent={cobertura < 30 ? 'text-amber-600' : 'text-emerald-600'}
@@ -441,7 +441,7 @@ export function DashboardKpiSection() {
       <div className="mt-4 rounded-3xl border border-border/40 bg-card/40 p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <p className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground/50">
-            Mídia paga — leads por campanha
+            Mídia paga · leads por campanha
           </p>
           <p className="text-[11px] font-semibold text-muted-foreground/70">
             {midia.atribuidos} com anúncio identificado · {midia.organicos} orgânicos/sem atribuição

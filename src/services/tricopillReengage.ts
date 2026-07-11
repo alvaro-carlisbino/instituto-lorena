@@ -58,6 +58,6 @@ export const TRACK_LABEL: Record<string, string> = {
 export const STATUS_LABEL: Record<string, string> = {
   active: 'Ativo',
   stopped: 'Parou (opt-out)',
-  converted: 'Convertido ✅',
+  converted: 'Convertido',
   paused: 'Pausado',
 }

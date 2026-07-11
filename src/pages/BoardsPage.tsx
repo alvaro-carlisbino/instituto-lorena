@@ -48,17 +48,17 @@ import type { Pipeline, Stage } from '@/mocks/crmMock'
 
 const BOARDS_HELP = [
   {
-    icon: '🔀',
+    icon: '',
     title: 'O que é um funil?',
     content: (
       <p>
-        Um funil representa uma jornada do lead — por exemplo, "Consulta Inicial" ou "Cirurgia".
+        Um funil representa uma jornada do lead, por exemplo "Consulta Inicial" ou "Cirurgia".
         Cada funil tem etapas que mostram em que fase o paciente está.
       </p>
     ),
   },
   {
-    icon: '📋',
+    icon: '',
     title: 'O que é uma etapa?',
     content: (
       <p>
@@ -68,7 +68,7 @@ const BOARDS_HELP = [
     ),
   },
   {
-    icon: '⚡',
+    icon: '',
     title: 'Automações de mensagem',
     content: (
       <p>
@@ -78,7 +78,7 @@ const BOARDS_HELP = [
     ),
   },
   {
-    icon: '⏱️',
+    icon: '',
     title: 'Prazo (SLA)',
     content: (
       <p>
@@ -476,7 +476,7 @@ export function BoardsPage() {
         <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
           <SheetHeader>
             <SheetTitle>
-              ⚡ Automação: {automationTarget?.name}
+              Automação: {automationTarget?.name}
             </SheetTitle>
             <SheetDescription>
               Configure uma mensagem automática de WhatsApp enviada quando um
@@ -507,7 +507,7 @@ export function BoardsPage() {
                     template: e.target.value,
                   })
                 }
-                placeholder="Ex: Olá {{nome}}, sua consulta está confirmada! 😊"
+                placeholder="Ex: Olá {{nome}}, sua consulta está confirmada!"
                 className="min-h-[min(7.5rem,28dvh)] sm:min-h-[120px]"
                 disabled={!draftAutomation.enabled}
               />

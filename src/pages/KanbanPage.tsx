@@ -421,7 +421,6 @@ export function KanbanPage() {
 
                   {stageLeads.length === 0 && !crm.isLoading && (
                     <div className="flex flex-col items-center justify-center py-12 text-center opacity-40">
-                      <div className="mb-2 text-2xl">📥</div>
                       <p className="text-[10px] font-bold uppercase tracking-widest">Sem leads aqui</p>
                     </div>
                   )}

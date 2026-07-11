@@ -94,7 +94,6 @@ export function KanbanListView({
 
             {stageLeads.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center opacity-30">
-                <div className="mb-2 text-3xl">📥</div>
                 <p className="text-[11px] font-black uppercase tracking-[0.2em]">Vazio por aqui</p>
               </div>
             ) : (

@@ -321,7 +321,10 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     client
       .from('interactions')
       .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
-      .order('happened_at', { ascending: false }),
+      .order('happened_at', { ascending: false })
+      // Boot carrega só a janela recente (o PostgREST cortava em 1000 silenciosamente).
+      // Histórico completo por lead chega via loadLeadInteractionsFromSupabase ao abrir.
+      .limit(1500),
     client
       .from('channel_configs')
       .select('id, name, enabled, sla_minutes, auto_reply, priority, driver, field_mapping, credentials_ref')
@@ -347,7 +350,10 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       .select('id, timezone, date_format, week_starts_on, appointment_completed_routing')
       .eq('id', 'default')
       .maybeSingle(),
-    client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, storage_path, metadata'),
+    // SEM media_base64 no boot: eram ~9MB de base64 baixados no login. Metadados bastam
+    // pra listar (tipo/URL/caption); o base64 chega por lead ao abrir a conversa
+    // (loadLeadInteractionsFromSupabase) e, pra mídia nova, pela janela de 48h do refresh.
+    client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, storage_path, metadata'),
   ])
 
   if (pipelinesRes.error) throw pipelinesRes.error
@@ -461,7 +467,9 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
         id: String(row.id),
         type: row.media_type as any,
         mimeType: row.mime_type,
-        base64: row.media_base64,
+        // Boot não traz base64 (9MB); quem tem storage_path renderiza pela URL e o
+        // base64 chega ao abrir a conversa (loadLeadInteractionsFromSupabase).
+        base64: undefined,
         url: (row as { storage_path?: string | null }).storage_path ?? undefined,
         caption: (row.metadata as any)?.caption,
       })
@@ -692,7 +700,15 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
       .order('happened_at', { ascending: false })
       .limit(3200),
     client.from('lead_tag_assignments').select('lead_id, tag_id'),
-    client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, media_base64, storage_path, metadata'),
+    // Base64 SÓ das mídias recentes (48h): este refresh roda o tempo todo e baixava os
+    // ~9MB de TODAS as mídias a cada ciclo. Mídia antiga chega por lead ao abrir a
+    // conversa (loadLeadInteractionsFromSupabase); o merge preserva o que já está rico.
+    client
+      .from('crm_media_items')
+      .select('id, interaction_id, media_type, mime_type, media_base64, storage_path, metadata')
+      .gte('created_at', new Date(Date.now() - 48 * 3_600_000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(120),
     client.from('crm_lead_followup_state').select('lead_id, current_step, status'),
   ])
   if (leadsRes.error) throw leadsRes.error

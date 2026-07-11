@@ -109,7 +109,7 @@ export function MedicalRecordsPage() {
           <Card>
             <CardContent className="pt-6 text-sm text-muted-foreground">
               Informe o ID do paciente para abrir o prontuário. Cada registro fica imutável
-              (append-only) — correções são feitas com registro do tipo "Errata".
+              (append-only): correções são feitas com registro do tipo "Errata".
             </CardContent>
           </Card>
         ) : null}
@@ -195,7 +195,7 @@ export function MedicalRecordsPage() {
                       <div className="mt-1 text-[11px] text-muted-foreground">
                         Por <span className="font-medium text-foreground">{r.author_name}</span>
                         {r.author_crm ? ` · ${r.author_crm}` : ''}
-                        {r.signed_at ? ' · ✓ assinado' : ' · assinatura pendente'}
+                        {r.signed_at ? ' · assinado' : ' · assinatura pendente'}
                       </div>
                       <p className="mt-2 whitespace-pre-wrap text-sm">{r.content}</p>
                     </li>

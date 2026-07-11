@@ -4,30 +4,8 @@
 @import "@fontsource-variable/plus-jakarta-sans";
 @import "@fontsource-variable/geist";
 
-@font-face {
-  font-family: 'Bould';
-  font-weight: 100;
-  font-style: normal;
-  font-display: swap;
-  src: url('../assets/Type de Apoio/Bould Thin.otf') format('opentype');
-}
-
-@font-face {
-  font-family: 'Bould';
-  font-weight: 200;
-  font-style: normal;
-  font-display: swap;
-  src: url('../assets/Type de Apoio/Bould ExtraLight.otf') format('opentype');
-}
-
-@font-face {
-  font-family: 'Bould';
-  font-weight: 300;
-  font-style: normal;
-  font-display: swap;
-  src: url('../assets/Type de Apoio/Bould Light.otf') format('opentype');
-}
-
+/* Bould = só títulos (--font-heading), que usam pesos 500-900. Os pesos 100-300 e os
+   itálicos (10 arquivos .otf, ~555KB) nunca eram usados e desciam pra todo visitante. */
 @font-face {
   font-family: 'Bould';
   font-weight: 400;
@@ -58,62 +36,6 @@
   font-style: normal;
   font-display: swap;
   src: url('../assets/Type de Apoio/Bould Bold.otf') format('opentype');
-}
-
-@font-face {
-  font-family: 'Bould';
-  font-weight: 100;
-  font-style: italic;
-  font-display: swap;
-  src: url('../assets/Type de Apoio/Bould Thin Italic.otf') format('opentype');
-}
-
-@font-face {
-  font-family: 'Bould';
-  font-weight: 200;
-  font-style: italic;
-  font-display: swap;
-  src: url('../assets/Type de Apoio/Bould ExtraLight Italic.otf') format('opentype');
-}
-
-@font-face {
-  font-family: 'Bould';
-  font-weight: 300;
-  font-style: italic;
-  font-display: swap;
-  src: url('../assets/Type de Apoio/Bould Light Italic.otf') format('opentype');
-}
-
-@font-face {
-  font-family: 'Bould';
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-  src: url('../assets/Type de Apoio/Bould Regular Italic.otf') format('opentype');
-}
-
-@font-face {
-  font-family: 'Bould';
-  font-weight: 500;
-  font-style: italic;
-  font-display: swap;
-  src: url('../assets/Type de Apoio/Bould Medium Italic.otf') format('opentype');
-}
-
-@font-face {
-  font-family: 'Bould';
-  font-weight: 600;
-  font-style: italic;
-  font-display: swap;
-  src: url('../assets/Type de Apoio/Bould SemiBold Italic.otf') format('opentype');
-}
-
-@font-face {
-  font-family: 'Bould';
-  font-weight: 700;
-  font-style: italic;
-  font-display: swap;
-  src: url('../assets/Type de Apoio/Bould Bold Italic.otf') format('opentype');
 }
 
 @custom-variant dark (&:is(.dark *));

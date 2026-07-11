@@ -81,7 +81,7 @@ export function ClinicalNotesPage() {
   return (
     <AppLayout
       title="Notas Clínicas"
-      subtitle="Observações dos médicos e da recepção — continuidade do atendimento"
+      subtitle="Observações dos médicos e da recepção, para dar continuidade ao atendimento"
       actions={
         canWrite ? (
           <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-3.5 w-3.5" /> Nova nota</Button>

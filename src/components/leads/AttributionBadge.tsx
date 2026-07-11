@@ -17,15 +17,12 @@ export function AttributionBadge({ lead, className }: { lead: Pick<Lead, 'custom
   const campaign = String(att.campaign ?? '').trim()
   const headline = String(att.headline ?? '').trim()
 
-  let emoji = ''
   let label = ''
   let style = ''
   if (channel === 'lead_ads') {
-    emoji = '📋'
     label = 'Form Meta'
     style = 'bg-blue-500/10 text-blue-700 ring-1 ring-blue-500/25 dark:text-blue-300'
   } else if (channel.startsWith('ctwa')) {
-    emoji = '🎯'
     label = 'CTWA'
     style = 'bg-fuchsia-500/10 text-fuchsia-700 ring-1 ring-fuchsia-500/25 dark:text-fuchsia-300'
   } else {
@@ -34,7 +31,6 @@ export function AttributionBadge({ lead, className }: { lead: Pick<Lead, 'custom
     const utmSource = String(first.utm_source ?? att.utm_source ?? '').toLowerCase()
     const hasAdClick = Boolean(first.fbclid ?? att.fbclid)
     if (String(cf.origin ?? '') === 'site' && (utmSource || hasAdClick)) {
-      emoji = '🌐'
       label = utmSource ? `Site·${utmSource}` : 'Site·Ads'
       style = 'bg-teal-500/10 text-teal-700 ring-1 ring-teal-500/25 dark:text-teal-300'
     }
@@ -46,7 +42,7 @@ export function AttributionBadge({ lead, className }: { lead: Pick<Lead, 'custom
     .join(' · ')
   return (
     <span className={cn(PILL, style, className)} title={tooltip}>
-      {emoji} {label}
+      {label}
     </span>
   )
 }

@@ -21,9 +21,9 @@ export function DeliveryBadge({ lead, className }: { lead: Pick<Lead, 'customFie
   return (
     <span
       className={cn(PILL, STYLE[c.kind], className)}
-      title={`Entrega: ${c.label}${c.inferred ? ' (inferido pelo CEP — confirmar)' : ''}`}
+      title={`Entrega: ${c.label}${c.inferred ? ' (inferido pelo CEP, confirmar)' : ''}`}
     >
-      {c.emoji} {c.label}
+      {c.label}
       {c.inferred ? '?' : ''}
     </span>
   )

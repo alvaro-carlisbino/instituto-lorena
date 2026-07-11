@@ -270,7 +270,15 @@ export const useCrmState = () => {
     if (!openLeadHistory || openLeadHistory.items.length === 0) return interactions
     const byId = new Map<string, Interaction>()
     for (const i of openLeadHistory.items) byId.set(i.id, i)
-    for (const i of interactions) byId.set(i.id, i)
+    for (const i of interactions) {
+      // O global vence por id (mais fresco), MAS o fetch global não traz base64 de mídia
+      // antiga (só a janela de 48h) — preserva a mídia rica que o histórico do lead já
+      // carregou, senão a foto/áudio some do chat aberto no próximo refresh.
+      const prev = byId.get(i.id)
+      const prevRicher =
+        prev?.media?.length && (!i.media?.length || (i.media.every((m) => !m.base64) && prev.media.some((m) => m.base64)))
+      byId.set(i.id, prevRicher ? { ...i, media: prev.media } : i)
+    }
     return Array.from(byId.values())
   }, [interactions, openLeadHistory])
 
@@ -280,12 +288,13 @@ export const useCrmState = () => {
   )
 
   const workloadBySdr = useMemo(() => {
-    return sdrMembers.map((sdr) => ({
-      ...sdr,
-      total: leads.filter(
-        (lead) => lead.ownerId === sdr.id && !isWorkloadExcludedStageId(lead.stageId),
-      ).length,
-    }))
+    // Uma passada nos leads (Map) em vez de leads.filter() por SDR — O(n+m) e não O(n×m).
+    const countByOwner = new Map<string, number>()
+    for (const lead of leads) {
+      if (isWorkloadExcludedStageId(lead.stageId)) continue
+      countByOwner.set(lead.ownerId, (countByOwner.get(lead.ownerId) ?? 0) + 1)
+    }
+    return sdrMembers.map((sdr) => ({ ...sdr, total: countByOwner.get(sdr.id) ?? 0 }))
   }, [leads, sdrMembers])
 
   const totalHotLeads = leads.filter((lead) => lead.temperature === 'hot').length
@@ -445,7 +454,7 @@ export const useCrmState = () => {
                 channel: 'system',
                 direction: 'system',
                 author: 'NPS',
-                content: `Falha ao enviar pesquisa NPS: ${result.error}${result.detail ? ` — ${result.detail}` : ''}`,
+                content: `Falha ao enviar pesquisa NPS: ${result.error}${result.detail ? ` · ${result.detail}` : ''}`,
                 happenedAt: new Date().toISOString(),
               })
             }
@@ -785,7 +794,7 @@ export const useCrmState = () => {
       channel: 'whatsapp',
       direction: 'out',
       author: getOwnerName(selectedLead.ownerId),
-      content: '🎭 Figurinha enviada',
+      content: 'Figurinha enviada',
       happenedAt: new Date().toISOString(),
     })
     toast.success('Figurinha enviada (modo mock).')
@@ -813,7 +822,7 @@ export const useCrmState = () => {
       if (result.provider.startsWith('manychat_')) {
         toast.success('Automação disparada via ManyChat.', {
           description:
-            'Entrega depende da janela 24h da Meta. Confirme pela resposta do paciente — o ManyChat não confirma delivery.',
+            'Entrega depende da janela 24h da Meta. Confirme pela resposta do paciente: o ManyChat não confirma delivery.',
         })
       } else {
         toast.success('Mensagem automática enviada.')
@@ -911,7 +920,9 @@ export const useCrmState = () => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, scheduleSliceRefresh)
       .subscribe()
 
-    const pollMs = 12000
+    // O realtime (postgres_changes acima) é o mecanismo primário de atualização; o poll
+    // é só uma rede de segurança. A 12s ele duplicava o tráfego do realtime o dia todo.
+    const pollMs = 45000
     const pollId = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
       void refreshChatFromSupabase()
@@ -1004,7 +1015,9 @@ export const useCrmState = () => {
       setLeadTagDefinitions(snapshot.leadTagDefinitions ?? initialLeadTagDefinitions)
       setRooms(snapshot.rooms ?? initialRooms)
       setAppointments(snapshot.appointments ?? initialAppointments)
-      await refreshWebhookJobs()
+      // Fila de webhooks não é crítica pro boot (só o painel admin usa): fire-and-forget
+      // tira 200-400ms do caminho até a primeira tela.
+      void refreshWebhookJobs()
       setSyncNotice('Sistema atualizado com os dados mais recentes.')
     } catch (error: unknown) {
       console.error('Falha de sistema:', error)
@@ -1691,7 +1704,7 @@ export const useCrmState = () => {
               channel: 'system',
               direction: 'system',
               author: 'NPS',
-              content: `Falha ao enviar pesquisa NPS: ${result.error}${result.detail ? ` — ${result.detail}` : ''}`,
+              content: `Falha ao enviar pesquisa NPS: ${result.error}${result.detail ? ` · ${result.detail}` : ''}`,
               happenedAt: new Date().toISOString(),
             })
           }
