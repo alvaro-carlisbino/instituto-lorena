@@ -406,6 +406,20 @@ Deno.serve(async (req) => {
       } catch (e) {
         console.warn('[wapi-webhook] nps thankyou send failed:', e instanceof Error ? e.message : String(e))
       }
+      // Nota baixa (detrator ≤6) → alerta in-app + DM no WhatsApp do dono (paridade com a clínica).
+      if (typeof npsResult.score === 'number' && npsResult.score <= 6) {
+        await notifyAgents(admin, {
+          leadId: lead.leadId, kind: 'urgent', title: '⚠️ Avaliação baixa — recuperar cliente',
+          body: `${normalized.fromName || 'Cliente'} deu nota ${npsResult.score}. Vale um contato pra entender e reverter.`,
+          includeOwner: true, tenantId, metadata: { dedupeKey: `feedback-low-${lead.leadId}` },
+        }).catch(() => {})
+        try {
+          const { data: ti } = await admin.from('tenant_integrations').select('notifications').eq('tenant_id', 'tricopill').maybeSingle()
+          const phones = (((ti as { notifications?: { sales_receipt_owner_phones?: string[] } } | null)?.notifications?.sales_receipt_owner_phones) ?? []).filter(Boolean)
+          const dm = `⚠️ *Avaliação baixa*\n${normalized.fromName || 'Cliente'} deu nota *${npsResult.score}*. Vale um contato pra reverter.`
+          for (const p of phones) await sendWapiDirectText(admin, 'tricopill', p, dm)
+        } catch { /* best-effort */ }
+      }
       await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', String(jobRow.id))
       return json({
         ok: true,

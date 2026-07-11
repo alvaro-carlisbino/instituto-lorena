@@ -13,7 +13,9 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
  * (ex.: triagem da Sofia 1–5) quando o lead é reaberto por follow-up dias depois.
  */
 
-const SCORE_REGEX = /^\s*(10|[0-9])\s*$/
+// Nota no INÍCIO (0-10) e, opcionalmente, um comentário logo depois na mesma mensagem.
+// Ex.: "10", "10 atendimento ótimo", "8 - poderia ser mais rápido".
+const SCORE_REGEX = /^\s*(10|[0-9])(?:[\s.,:;)\-–—]+(.*))?$/s
 const NPS_CAPTURE_WINDOW_MS = 72 * 60 * 60 * 1000
 
 export type NpsCaptureResult =
@@ -52,6 +54,7 @@ export async function captureNpsInboundResponse(
   if (!m) return { captured: false }
   const score = Number.parseInt(m[1], 10)
   if (!Number.isFinite(score) || score < 0 || score > 10) return { captured: false }
+  const comment = String(m[2] ?? '').trim().slice(0, 1000) || null
 
   // Procura dispatch pendente (sem resposta) dentro da janela de captura.
   const since = new Date(Date.now() - NPS_CAPTURE_WINDOW_MS).toISOString()
@@ -85,7 +88,7 @@ export async function captureNpsInboundResponse(
     id: responseId,
     dispatch_id: pending.id,
     score,
-    comment: null,
+    comment,
     responded_at: new Date().toISOString(),
   }
   if (opts.tenantId) insertRow.tenant_id = opts.tenantId

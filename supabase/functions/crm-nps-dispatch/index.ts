@@ -24,6 +24,7 @@ const NPS_TEMPLATE_ID_BY_PIPELINE: Record<string, string> = {
   'pipeline-clinica': 'nps-clinica',
   'pipeline-tratamento-capilar': 'nps-capilar',
   'pipeline-processo-cirurgico': 'nps-cirurgico',
+  'tricopill__pipeline-vendas': 'nps-tricopill',
 }
 
 type LeadRow = {
@@ -56,10 +57,12 @@ async function pickTemplate(admin: SupabaseClient, lead: LeadRow, requestedId: s
       .maybeSingle()
     if (data) return data
   }
+  // Fallback ESCOPADO por tenant — um lead do Tricopill nunca pega template da clínica.
   const { data } = await admin
     .from('survey_templates')
     .select('id, name, nps_question, enabled')
     .eq('enabled', true)
+    .eq('tenant_id', lead.tenant_id)
     .limit(1)
     .maybeSingle()
   return data
