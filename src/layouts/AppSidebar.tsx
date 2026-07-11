@@ -14,17 +14,15 @@ import {
   List,
   SlidersHorizontal,
   LayoutGrid,
-  Table2,
   Tv,
   Users,
+  UserSearch,
   SquareCheck,
   Star,
   MessagesSquare,
   ArrowLeftRight,
   Calendar,
-  Building2,
   PackageOpen,
-  Pill,
   Store,
   Wallet,
   CreditCard,
@@ -32,10 +30,12 @@ import {
   Unplug,
   Repeat,
   Send,
+  LineChart,
   FileSpreadsheet,
   Gauge,
+  Target,
   Stethoscope,
-  Layers,
+  NotebookPen,
   ClipboardList,
   CalendarClock,
   Warehouse,
@@ -97,7 +97,7 @@ function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon
 
 export function AppSidebar() {
   const crm = useCrm()
-  const { tenant, isSuperAdmin } = useTenant()
+  const { tenant } = useTenant()
 
   // No mobile, o primitivo Sidebar renderiza um drawer (Sheet) sozinho — NÃO retornar null
   // aqui, senão o celular fica sem navegação (o hamburger no header abre este drawer).
@@ -150,61 +150,93 @@ export function AppSidebar() {
         <div className="px-1 pb-3 group-data-[collapsible=icon]:hidden">
           <WorkspaceSwitcher />
         </div>
+
+        {/* Início — porta de entrada */}
         <SidebarGroup>
           <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-            Principal
+            Início
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
               <NavItem to="/dashboard" label="Painel" icon={TrendingUp} />
-              <NavItem to="/kanban" label="Funil de leads" icon={LayoutGrid} />
-              {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={List} /> : null}
-              {showLeadsHub ? <NavItem to="/perfil" label="Perfil do Cliente" icon={Users} /> : null}
-              {showLeadsHub ? <NavItem to="/chat" label="Chat comercial" icon={MessagesSquare} /> : null}
-              {showLeadsHub && isClinicPolo ? <NavItem to="/agenda" label="Agenda" icon={Calendar} /> : null}
-              {showLeadsHub && isClinicPolo ? <NavItem to="/protocolos" label="Protocolos" icon={ListChecks} /> : null}
-              {showLeadsHub && isClinicPolo ? <NavItem to="/notas-clinicas" label="Notas Clínicas" icon={Stethoscope} /> : null}
-              {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas e NPS" icon={SquareCheck} /> : null}
-              {showLeadsHub ? <NavItem to="/feedback" label="Feedback & Engajamento" icon={Star} /> : null}
-              {showLeadsHub && isClinicPolo ? <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} /> : null}
-              <NavItem to="/historico" label="Histórico" icon={History} />
               <NavItem to="/assistente" label="Assistente IA" icon={Bot} />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {showLeadsHub && isSalesPolo ? (
+        {/* Leads — operação comercial (comum aos dois polos) */}
+        <SidebarGroup>
+          <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+            Leads
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu className="gap-0.5">
+              <NavItem to="/kanban" label="Funil de leads" icon={LayoutGrid} />
+              {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={List} /> : null}
+              {showLeadsHub && isClinicPolo ? <NavItem to="/chat" label="Chat comercial" icon={MessagesSquare} /> : null}
+              <NavItem to="/historico" label="Histórico" icon={History} />
+              {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas" icon={SquareCheck} /> : null}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Clínica — telas por-paciente (só polo clínica) */}
+        {isClinicPolo && showLeadsHub ? (
+          <SidebarGroup>
+            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+              Clínica
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                <NavItem to="/agenda" label="Agenda" icon={Calendar} />
+                <NavItem to="/perfil" label="Ficha do paciente" icon={UserSearch} />
+                <NavItem to="/notas-clinicas" label="Notas clínicas" icon={NotebookPen} />
+                <NavItem to="/prontuario" label="Prontuário" icon={Stethoscope} />
+                <NavItem to="/protocolos" label="Protocolos" icon={ListChecks} />
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ) : null}
+
+        {/* Vendas — operação do e-commerce (só polo vendas) */}
+        {isSalesPolo && showLeadsHub ? (
           <SidebarGroup>
             <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
               Vendas
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                <NavItem to="/tricopill" label="Visão Tricopill" icon={Pill} />
-                <NavItem to="/frente-loja" label="Frente de Loja" icon={Store} />
+                <NavItem to="/tricopill-bi" label="Visão de vendas" icon={ChartColumn} />
+                <NavItem to="/tricopill" label="Chat de vendas" icon={MessagesSquare} />
                 <NavItem to="/tricopill-pedidos" label="Pedidos" icon={PackageOpen} />
                 <NavItem to="/tricopill-assinaturas" label="Assinaturas" icon={Repeat} />
-                <NavItem to="/cupons" label="Cupons" icon={Ticket} />
+                <NavItem to="/frente-loja" label="Frente de loja" icon={Store} />
+                <NavItem to="/tricopill-reengajamento" label="Reengajamento" icon={Send} />
+                <NavItem to="/tricopill-loja" label="Analytics do site" icon={LineChart} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         ) : null}
 
-        {showLeadsHub && isSalesPolo ? (
+        {/* Financeiro — a "casa do dinheiro", agora existe nos DOIS polos */}
+        {showLeadsHub ? (
           <SidebarGroup>
             <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
               Financeiro
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                <NavItem to="/tricopill-financeiro" label="Recebimentos" icon={Wallet} />
-                <NavItem to="/tricopill-relatorios" label="Relatórios" icon={FileSpreadsheet} />
+                {isSalesPolo ? <NavItem to="/tricopill-financeiro" label="Recebimentos" icon={Wallet} /> : null}
                 <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} />
+                {isSalesPolo ? <NavItem to="/cupons" label="Cupons" icon={Ticket} /> : null}
+                {showBoards ? <NavItem to="/contas-a-pagar" label="Contas a pagar" icon={CalendarClock} /> : null}
+                {isSalesPolo ? <NavItem to="/tricopill-relatorios" label="Relatórios de vendas" icon={FileSpreadsheet} /> : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         ) : null}
 
+        {/* Estoque e compras */}
         {showBoards ? (
           <SidebarGroup>
             <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
@@ -214,15 +246,29 @@ export function AppSidebar() {
               <SidebarMenu className="gap-0.5">
                 <NavItem to="/estoque" label="Estoque" icon={Warehouse} />
                 <NavItem to="/compras" label="Ordens de compra" icon={ClipboardList} />
-                <NavItem to="/contas-a-pagar" label="Contas a pagar" icon={CalendarClock} />
                 <NavItem to="/inventario" label="Inventário" icon={ClipboardCheck} />
                 {isClinicPolo ? <NavItem to="/kits" label="Kits cirúrgicos" icon={PackageCheck} /> : null}
-                <NavItem to="/estoque-relatorios" label="Relatórios" icon={FileBarChart2} />
+                <NavItem to="/estoque-relatorios" label="Relatórios de estoque" icon={FileBarChart2} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         ) : null}
 
+        {/* Relatórios — números de verdade (comum aos dois polos) */}
+        <SidebarGroup>
+          <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+            Relatórios
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu className="gap-0.5">
+              {isClinicPolo ? <NavItem to="/analytics" label="Análise do funil" icon={Gauge} /> : null}
+              {showLeadsHub ? <NavItem to="/feedback" label="Feedback e NPS" icon={Star} /> : null}
+              <NavItem to="/metricas" label="Metas" icon={Target} />
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Equipe (RH) — só polo clínica */}
         {isClinicPolo ? (
           <SidebarGroup>
             <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
@@ -238,40 +284,35 @@ export function AppSidebar() {
           </SidebarGroup>
         ) : null}
 
+        {/* Configuração — setup + integrações (Configurações sempre disponível) */}
         <SidebarGroup>
           <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-            Análise
+            Configuração
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
-              {isSalesPolo ? <NavItem to="/tricopill-bi" label="BI de vendas" icon={ChartColumn} /> : null}
-              {isSalesPolo ? <NavItem to="/tricopill-reengajamento" label="Reengajamento" icon={Send} /> : null}
-              <NavItem to="/metricas" label="Métricas" icon={Gauge} />
-              {isClinicPolo ? <NavItem to="/prontuario" label="Prontuário" icon={Stethoscope} /> : null}
-              <NavItem to="/planos" label="Planos" icon={Layers} />
-              <NavItem to="/canais" label="Canais" icon={Radio} />
-              {showBoards ? <NavItem to="/boards" label="Funis" icon={Boxes} /> : null}
-              {showBoards ? <NavItem to="/visoes" label="Visões" icon={Table2} /> : null}
+              <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
+              {showBoards ? <NavItem to="/boards" label="Configurar funis" icon={Boxes} /> : null}
+              {showDashboardConfig ? <NavItem to="/canais" label="Canais" icon={Radio} /> : null}
+              {showAdmin ? <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowLeftRight} /> : null}
+              {showAdmin ? <NavItem to="/integracoes" label="Integrações" icon={Unplug} /> : null}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {(showDashboardConfig || showAdmin) && (
+        {showTv ? (
           <SidebarGroup>
             <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-              Configuração
+              TV
             </SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {showDashboardConfig ? (
-                  <NavItem to="/dashboard-config" label="Painel (widgets)" icon={SlidersHorizontal} />
-                ) : null}
-                {showAdmin ? <NavItem to="/integracoes" label="Integrações" icon={Unplug} /> : null}
-                <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
+                <NavItem to="/tv" label="Tela TV" icon={Monitor} />
+                <NavItem to="/tv-config" label="Config. TV" icon={Tv} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-        )}
+        ) : null}
 
         {showAdmin ? (
           <SidebarGroup>
@@ -281,38 +322,9 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 <NavItem to="/usuarios" label="Usuários" icon={Users} />
-                <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowLeftRight} />
                 <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
-                <NavItem to="/admin-operacao" label="Operação Admin" icon={Settings} />
-                <NavItem to="/admin-lab" label="Ferramentas" icon={FlaskConical} />
-                {isSuperAdmin ? <NavItem to="/admin-clinicas" label="Clínicas" icon={Building2} /> : null}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ) : null}
-
-        {showTv ? (
-          <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-              TV
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                <NavItem to="/tv-config" label="Config. TV" icon={Tv} />
-                <NavItem to="/tv" label="Tela TV" icon={Monitor} />
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ) : null}
-
-        {!showDashboardConfig && !showAdmin ? (
-          <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/40">
-              Geral
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
+                <NavItem to="/admin-operacao" label="Operação Admin" icon={SlidersHorizontal} />
+                <NavItem to="/admin-lab" label="Ferramentas de dev" icon={FlaskConical} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
