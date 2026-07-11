@@ -1,13 +1,20 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw, Star, MessageSquare, ThumbsUp, ThumbsDown, Smile } from 'lucide-react'
 
+import { toast } from 'sonner'
+
 import { AppLayout } from '@/layouts/AppLayout'
 import { StatCard } from '@/components/page/StatCard'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { useTenant } from '@/context/TenantContext'
+import { useCrm } from '@/context/CrmContext'
 import { fetchFeedbackAnalytics, type FeedbackAnalytics } from '@/services/feedbackAnalytics'
 import { cn } from '@/lib/utils'
 import {
@@ -36,10 +43,30 @@ function scoreBadge(score: number | null) {
 
 export function FeedbackDashboardPage() {
   const { tenant } = useTenant()
+  const crm = useCrm()
+  const canWrite = crm.currentPermission?.canRouteLeads ?? false
   const [days, setDays] = useState(30)
   const [data, setData] = useState<FeedbackAnalytics | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Registro manual de resposta de pesquisa (migrado da antiga tela "Tarefas e NPS":
+  // Feedback e NPS agora é a fonte única de NPS).
+  const [npsScore, setNpsScore] = useState('9')
+  const [npsComment, setNpsComment] = useState('')
+  const [npsDispatchId, setNpsDispatchId] = useState('')
+
+  const recordNps = () => {
+    const id = npsDispatchId.trim()
+    if (!id) {
+      toast.error('Informe o código da pesquisa enviada.')
+      return
+    }
+    const score = Math.min(10, Math.max(0, Math.round(Number(npsScore))))
+    crm.recordSurveyResponse(id, score, npsComment.trim() || null)
+    toast.success('Resposta NPS registrada.')
+    setNpsComment('')
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -60,7 +87,7 @@ export function FeedbackDashboardPage() {
 
   return (
     <AppLayout
-      title="Feedback & Engajamento"
+      title="Feedback e NPS"
       subtitle={`Avaliações dos clientes · ${tenant.name ?? tenant.id}`}
       actions={
         <div className="flex items-center gap-1.5">
@@ -93,7 +120,7 @@ export function FeedbackDashboardPage() {
           description="Quando os clientes responderem a pesquisa (nota + comentário), os números aparecem aqui."
         />
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-8 mb-8">
           {/* KPIs */}
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <StatCard label="Respostas" value={data.total} icon={<Star className="h-3.5 w-3.5" />} hint={`${data.comComentario} com comentário`} />
@@ -177,6 +204,64 @@ export function FeedbackDashboardPage() {
           </section>
         </div>
       )}
+
+      {/* Registro manual de resposta de pesquisa (migrado de Tarefas) */}
+      {canWrite ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Registrar resposta manualmente</CardTitle>
+          </CardHeader>
+          <CardContent className="grid max-w-md gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="dispatch-id">Código da pesquisa</Label>
+              <Input id="dispatch-id" value={npsDispatchId} onChange={(e) => setNpsDispatchId(e.target.value)} placeholder="disp-…" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Nota</Label>
+              <Select value={npsScore} onValueChange={(v) => v && setNpsScore(v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 11 }, (_, i) => (
+                    <SelectItem key={i} value={String(i)}>
+                      {i}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="nps-comment">Comentário (opcional)</Label>
+              <Input id="nps-comment" value={npsComment} onChange={(e) => setNpsComment(e.target.value)} />
+            </div>
+            <Button type="button" onClick={recordNps}>
+              Salvar resposta
+            </Button>
+            {crm.surveyDispatches.length > 0 ? (
+              <div className="mt-4 border-t border-border pt-4">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">Pesquisas recentes (copie o código)</p>
+                <ul className="m-0 max-h-40 list-none space-y-1 overflow-y-auto p-0 font-mono text-[11px]">
+                  {crm.surveyDispatches.slice(0, 12).map((d) => {
+                    const tpl = crm.surveyTemplates.find((t) => t.id === d.templateId)
+                    return (
+                      <li key={d.id} className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                        <div className="min-w-0">
+                          <button type="button" className="block w-full truncate text-left font-mono text-[10px] underline" onClick={() => setNpsDispatchId(d.id)}>
+                            {d.id}
+                          </button>
+                          {tpl ? <span className="text-[10px] text-muted-foreground">{tpl.name}</span> : null}
+                        </div>
+                        <span className="shrink-0 text-[10px] text-muted-foreground">{d.leadId}</span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
     </AppLayout>
   )
 }

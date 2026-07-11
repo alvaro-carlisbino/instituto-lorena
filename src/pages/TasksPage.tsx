@@ -1,11 +1,7 @@
 import { useMemo, useState } from 'react'
-import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import type { LeadTask } from '@/mocks/crmMock'
@@ -13,9 +9,6 @@ import type { LeadTask } from '@/mocks/crmMock'
 export function TasksPage() {
   const crm = useCrm()
   const [filter, setFilter] = useState<'mine' | 'all' | 'open' | 'done'>('open')
-  const [npsScore, setNpsScore] = useState('9')
-  const [npsComment, setNpsComment] = useState('')
-  const [npsDispatchId, setNpsDispatchId] = useState('')
 
   const tasks = useMemo(() => {
     let list = [...crm.leadTasks]
@@ -30,18 +23,6 @@ export function TasksPage() {
       return da - db
     })
   }, [crm.leadTasks, crm.myAppUserId, filter])
-
-  const recordNps = () => {
-    const id = npsDispatchId.trim()
-    if (!id) {
-      toast.error('Informe o código da pesquisa enviada.')
-      return
-    }
-    const score = Math.min(10, Math.max(0, Math.round(Number(npsScore))))
-    crm.recordSurveyResponse(id, score, npsComment.trim() || null)
-    toast.success('Resposta NPS registrada.')
-    setNpsComment('')
-  }
 
   const toggleDone = (t: LeadTask) => {
     const next = t.status === 'done' ? 'open' : 'done'
@@ -59,7 +40,7 @@ export function TasksPage() {
   }
 
   return (
-    <AppLayout title="Tarefas e NPS">
+    <AppLayout title="Tarefas">
       <div className="mb-4 flex flex-wrap gap-2">
         <Button type="button" size="sm" variant={filter === 'open' ? 'default' : 'outline'} onClick={() => setFilter('open')}>
           Abertas
@@ -107,60 +88,6 @@ export function TasksPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">NPS</CardTitle>
-        </CardHeader>
-        <CardContent className="grid max-w-md gap-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor="dispatch-id">Código da pesquisa</Label>
-            <Input id="dispatch-id" value={npsDispatchId} onChange={(e) => setNpsDispatchId(e.target.value)} placeholder="disp-…" />
-          </div>
-          <div className="grid gap-1.5">
-            <Label>Nota</Label>
-            <Select value={npsScore} onValueChange={(v) => v && setNpsScore(v)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Array.from({ length: 11 }, (_, i) => (
-                  <SelectItem key={i} value={String(i)}>
-                    {i}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="nps-comment">Comentário (opcional)</Label>
-            <Input id="nps-comment" value={npsComment} onChange={(e) => setNpsComment(e.target.value)} />
-          </div>
-          <Button type="button" onClick={recordNps}>
-            Salvar resposta
-          </Button>
-          {crm.surveyDispatches.length > 0 ? (
-            <div className="mt-4 border-t border-border pt-4">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Pesquisas recentes (copie o código)</p>
-              <ul className="m-0 max-h-40 list-none space-y-1 overflow-y-auto p-0 font-mono text-[11px]">
-                {crm.surveyDispatches.slice(0, 12).map((d) => {
-                  const tpl = crm.surveyTemplates.find((t) => t.id === d.templateId)
-                  return (
-                    <li key={d.id} className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                      <div className="min-w-0">
-                        <button type="button" className="block w-full truncate text-left font-mono text-[10px] underline" onClick={() => setNpsDispatchId(d.id)}>
-                          {d.id}
-                        </button>
-                        {tpl ? <span className="text-[10px] text-muted-foreground">{tpl.name}</span> : null}
-                      </div>
-                      <span className="shrink-0 text-[10px] text-muted-foreground">{d.leadId}</span>
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
     </AppLayout>
   )
 }

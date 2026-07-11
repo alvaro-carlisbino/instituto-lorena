@@ -131,7 +131,7 @@ export function TricopilReportsPage() {
   }
 
   return (
-    <AppLayout title="Relatórios" subtitle="Fechamento mensal: vendas, receita, envios e assinaturas — com exportação para o financeiro.">
+    <AppLayout title="Relatórios de vendas" subtitle="Fechamento mensal: vendas, receita, envios e assinaturas, com exportação para o financeiro.">
       <SubTabs tabs={[{ to: '/relatorio-vendas', label: 'Por dia' }, { to: '/tricopill-relatorios', label: 'Por mês' }]} />
 
       <div className="mt-4 flex flex-wrap items-end gap-3">

@@ -76,7 +76,7 @@ export function SalesReportPage() {
   const t = report?.totals
 
   return (
-    <AppLayout title="Relatórios" subtitle="Vendas pagas do dia (cartão, Pix e venda manual) para o financeiro.">
+    <AppLayout title="Relatórios de vendas" subtitle="Vendas pagas do dia (cartão, Pix e venda manual) para o financeiro.">
       <SubTabs tabs={[{ to: '/relatorio-vendas', label: 'Por dia' }, { to: '/tricopill-relatorios', label: 'Por mês' }]} />
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
