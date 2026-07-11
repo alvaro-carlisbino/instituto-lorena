@@ -294,6 +294,26 @@ export function LeadChatThread({
   const { tenant } = useTenant()
   const isSalesPolo = tenant.poloType === 'sales'
 
+  // Rascunho do compositor = estado LOCAL (antes vivia no context global e cada tecla
+  // re-renderizava o app inteiro). Só este componente re-renderiza ao digitar.
+  const [draftMessage, setDraftMessage] = useState<string>('')
+  const [draftAttachments, setDraftAttachments] = useState<
+    Array<{ name: string; mimeType: string; base64: string }>
+  >([])
+
+  const handleSend = async () => {
+    if (!draftMessage.trim()) return
+    const text = draftMessage
+    const atts = draftAttachments
+    setDraftMessage('')
+    setDraftAttachments([])
+    const res = await crm.sendMessage(text, atts)
+    if (res?.restore) {
+      setDraftMessage(text)
+      setDraftAttachments(atts)
+    }
+  }
+
   const handleGenerateRede = async (kit: PagbankKit) => {
     if (pagbankLoading) return
     setPagbankLoading(true)
@@ -306,7 +326,7 @@ export function LeadChatThread({
         leadId,
         installments: maxInstallments,
       })
-      crm.setDraftMessage((prev) => {
+      setDraftMessage((prev) => {
         const base = prev.trim()
         const linkLine = `💳 Aqui está seu link de pagamento (Pix ou cartão):\n${res.payLink}`
         return base ? `${base}\n\n${linkLine}` : linkLine
@@ -549,21 +569,21 @@ export function LeadChatThread({
         base64,
       })
     }
-    crm.setDraftAttachments([...(crm.draftAttachments ?? []), ...next])
+    setDraftAttachments([...(draftAttachments ?? []), ...next])
   }
 
   const insertEmojiIntoDraft = (emoji: string) => {
     if (showAiResponding) return
     const el = draftTextareaRef.current
     if (!el) {
-      crm.setDraftMessage((prev) => prev + emoji)
+      setDraftMessage((prev) => prev + emoji)
       return
     }
-    const start = el.selectionStart ?? crm.draftMessage.length
+    const start = el.selectionStart ?? draftMessage.length
     const end = el.selectionEnd ?? start
-    const before = crm.draftMessage.slice(0, start)
-    const after = crm.draftMessage.slice(end)
-    crm.setDraftMessage(before + emoji + after)
+    const before = draftMessage.slice(0, start)
+    const after = draftMessage.slice(end)
+    setDraftMessage(before + emoji + after)
     window.requestAnimationFrame(() => {
       el.focus()
       const pos = start + emoji.length
@@ -970,11 +990,11 @@ export function LeadChatThread({
               id={`lead-chat-draft-${leadId}`}
               ref={draftTextareaRef}
               rows={1}
-              value={crm.draftMessage}
+              value={draftMessage}
               readOnly={showAiResponding}
               onChange={(e) => {
                 const val = e.target.value
-                crm.setDraftMessage(val)
+                setDraftMessage(val)
                 
                 // Detecta atalho de mensagens rápidas
                 const lastSlashIdx = val.lastIndexOf('/')
@@ -992,7 +1012,7 @@ export function LeadChatThread({
                 }
 
                 if (val.endsWith('/agendar ')) {
-                  crm.setDraftMessage(val.replace('/agendar ', ''))
+                  setDraftMessage(val.replace('/agendar ', ''))
                   setIsScheduleOpen(true)
                 }
               }}
@@ -1008,9 +1028,9 @@ export function LeadChatThread({
                     e.preventDefault()
                     const msg = filteredQuick[selectedQuickIdx]
                     if (msg) {
-                      const lastSlashIdx = crm.draftMessage.lastIndexOf('/')
-                      const before = crm.draftMessage.slice(0, lastSlashIdx)
-                      crm.setDraftMessage(before + msg.content)
+                      const lastSlashIdx = draftMessage.lastIndexOf('/')
+                      const before = draftMessage.slice(0, lastSlashIdx)
+                      setDraftMessage(before + msg.content)
                     }
                     setShowQuickMenu(false)
                   } else if (e.key === 'Escape') {
@@ -1029,8 +1049,8 @@ export function LeadChatThread({
                 ) {
                   e.preventDefault()
                   if (showAiResponding) return
-                  if (!crm.draftMessage.trim() && crm.draftAttachments.length === 0) return
-                  void crm.sendMessage()
+                  if (!draftMessage.trim() && draftAttachments.length === 0) return
+                  void handleSend()
                 }
               }}
               placeholder={
@@ -1057,9 +1077,9 @@ export function LeadChatThread({
                         idx === selectedQuickIdx ? "bg-primary text-primary-foreground" : "hover:bg-muted"
                       )}
                       onClick={() => {
-                        const lastSlashIdx = crm.draftMessage.lastIndexOf('/')
-                        const before = crm.draftMessage.slice(0, lastSlashIdx)
-                        crm.setDraftMessage(before + m.content)
+                        const lastSlashIdx = draftMessage.lastIndexOf('/')
+                        const before = draftMessage.slice(0, lastSlashIdx)
+                        setDraftMessage(before + m.content)
                         setShowQuickMenu(false)
                         draftTextareaRef.current?.focus()
                       }}
@@ -1081,7 +1101,7 @@ export function LeadChatThread({
                     className="sr-only"
                     onChange={(e) => void handleAttachFiles(e.target.files)}
                   />
-                  {crm.draftAttachments.length > 0 ? `${crm.draftAttachments.length} arquivos` : 'Anexar'}
+                  {draftAttachments.length > 0 ? `${draftAttachments.length} arquivos` : 'Anexar'}
                 </label>
                 <input
                   ref={stickerInputRef}
@@ -1159,9 +1179,9 @@ export function LeadChatThread({
                           key={m.id}
                           className="flex cursor-pointer flex-col items-start gap-0.5 whitespace-normal px-3 py-2"
                           onSelect={() => {
-                            const current = crm.draftMessage
+                            const current = draftMessage
                             const next = current ? `${current}${current.endsWith(' ') ? '' : ' '}${m.content}` : m.content
-                            crm.setDraftMessage(next)
+                            setDraftMessage(next)
                           }}
                         >
                           <span className="text-xs font-bold text-primary">/{m.title}</span>
@@ -1247,9 +1267,9 @@ export function LeadChatThread({
                 size="sm"
                 className="h-8 rounded-xl px-5"
                 disabled={
-                  showAiResponding || (!crm.draftMessage.trim() && crm.draftAttachments.length === 0)
+                  showAiResponding || (!draftMessage.trim() && draftAttachments.length === 0)
                 }
-                onClick={() => void crm.sendMessage()}
+                onClick={() => void handleSend()}
               >
                 Enviar
               </Button>
@@ -1315,6 +1335,7 @@ export function LeadChatThread({
         isOpen={isScheduleOpen}
         onClose={() => setIsScheduleOpen(false)}
         leadId={leadId}
+        onScheduledMessage={setDraftMessage}
       />
     </div>
   )

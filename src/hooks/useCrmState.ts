@@ -191,8 +191,8 @@ export const useCrmState = () => {
   // do fetch global). Mantido à parte para sobreviver ao refresh do slice a cada 12s.
   const [openLeadHistory, setOpenLeadHistory] = useState<{ leadId: string; items: Interaction[] } | null>(null)
   const [selectedLeadId, setSelectedLeadId] = useState<string>(initialLeads[0].id)
-  const [draftMessage, setDraftMessage] = useState<string>('')
-  const [draftAttachments, setDraftAttachments] = useState<Array<{ name: string; mimeType: string; base64: string }>>([])
+  // O rascunho do compositor foi movido para estado LOCAL do LeadChatThread: digitar
+  // não re-renderiza mais o app inteiro (sidebar, kanban, paleta) a cada tecla.
   const [routingCursor, setRoutingCursor] = useState<number>(0)
   const [captureNotice, setCaptureNotice] = useState<string>('')
   const [queueJobs, setQueueJobs] = useState<QueueJob[]>(queueSeed)
@@ -666,20 +666,24 @@ export const useCrmState = () => {
     })
   }
 
-  const sendMessage = async () => {
-    if (!selectedLead || !draftMessage.trim()) return
+  // Recebe o texto/anexos do compositor (estado local do chat) em vez de ler estado
+  // global. Retorna { restore } quando o operador cancelou o envio a um opt-out, para
+  // o compositor devolver o rascunho.
+  const sendMessage = async (
+    text: string,
+    attachments: Array<{ name: string; mimeType: string; base64: string }> = [],
+  ): Promise<{ ok: boolean; restore?: boolean }> => {
+    if (!selectedLead || !text.trim()) return { ok: false }
 
     if (isLeadWhatsappComposeBlocked(selectedLead)) {
       toast.error(
         'Lead do Instagram ainda com telefone sintético: responda no Instagram ou ManyChat. Quando o número for o WhatsApp real, o envio pelo CRM fica disponível.',
       )
-      return
+      return { ok: false }
     }
 
-    const outbound = draftMessage.trim()
-    setDraftMessage('')
-    const attachments = [...draftAttachments]
-    setDraftAttachments([])
+    const outbound = text.trim()
+    const atts = [...attachments]
     const senderName = getOwnerName(selectedLead.ownerId)
 
     if (dataMode === 'supabase' && isSupabaseConfigured) {
@@ -687,7 +691,7 @@ export const useCrmState = () => {
         leadId: selectedLead.id,
         to: selectedLead.phone,
         text: outbound,
-        attachments,
+        attachments: atts,
       })
 
       if (!result.ok && result.kind === 'lead_opted_out') {
@@ -698,26 +702,24 @@ export const useCrmState = () => {
             'Confirma o envio?',
         )
         if (!confirmed) {
-          setDraftMessage(outbound)
-          setDraftAttachments(attachments)
-          return
+          return { ok: false, restore: true }
         }
         result = await sendWhatsappMessage({
           leadId: selectedLead.id,
           to: selectedLead.phone,
           text: outbound,
-          attachments,
+          attachments: atts,
           manualOverride: true,
         })
       }
 
       if (!result.ok) {
         notifySendError(result, 'manual')
-        return
+        return { ok: false }
       }
 
       await refreshChatFromSupabase()
-      return
+      return { ok: true }
     }
 
     addInteraction({
@@ -729,17 +731,18 @@ export const useCrmState = () => {
       content: outbound,
       happenedAt: new Date().toISOString(),
     })
-    if (attachments.length > 0) {
+    if (atts.length > 0) {
       addInteraction({
         leadId: selectedLead.id,
         patientName: selectedLead.patientName,
         channel: 'system',
         direction: 'system',
         author: 'Anexos',
-        content: `${attachments.length} arquivo(s)/áudio(s) adicionados à conversa.`,
+        content: `${atts.length} arquivo(s)/áudio(s) adicionados à conversa.`,
         happenedAt: new Date().toISOString(),
       })
     }
+    return { ok: true }
   }
 
   const sendStickerMessage = async (stickerWebpBase64: string) => {
@@ -2383,10 +2386,6 @@ export const useCrmState = () => {
     saveAppointmentRow,
     removeAppointmentRow,
     myAppUserId,
-    draftMessage,
-    draftAttachments,
-    setDraftMessage,
-    setDraftAttachments,
     triageByLead,
     isLoading,
     syncNotice,

@@ -30,9 +30,11 @@ type Props = {
   isOpen: boolean
   onClose: () => void
   leadId: string
+  /** Pré-preenche o rascunho do compositor (que agora é estado local do chat). */
+  onScheduledMessage?: (message: string) => void
 }
 
-export function ScheduleAppointmentDialog({ isOpen, onClose, leadId }: Props) {
+export function ScheduleAppointmentDialog({ isOpen, onClose, leadId, onScheduledMessage }: Props) {
   const crm = useCrm()
   const dataMode = getDataProviderMode()
   const online = dataMode === 'supabase' && isSupabaseConfigured
@@ -99,7 +101,7 @@ export function ScheduleAppointmentDialog({ isOpen, onClose, leadId }: Props) {
       if (lead) {
         const dateStr = new Date(slot.slotStart).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
         const autoMessage = `Sua consulta foi agendada para ${dateStr}. Nos vemos lá!`
-        crm.setDraftMessage(autoMessage)
+        onScheduledMessage?.(autoMessage)
       }
       
       onClose()
