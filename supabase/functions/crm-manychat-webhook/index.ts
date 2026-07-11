@@ -31,6 +31,7 @@ import { enrichManychatMediaRows } from '../_shared/manychatMediaEnrich.ts'
 import { captureCadastroForLead } from '../_shared/cadastroExtract.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { captureNpsInboundResponse, thankYouFor } from '../_shared/npsCapture.ts'
+import { sendWapiDirectText } from '../_shared/saleReceipt.ts'
 import { resolveTenantFromManychatBody } from '../_shared/tenantResolve.ts'
 import { applyOptOutToLead, isOptOutMessage } from '../_shared/optOutDetect.ts'
 import { attributionFromManychatBody, type LeadAttribution } from '../_shared/attribution.ts'
@@ -768,6 +769,13 @@ Deno.serve(async (req) => {
         body: `${nomeCliente || 'Cliente'} deu nota ${score}${comment ? `: "${comment.slice(0, 120)}"` : ''}. Vale um contato pra entender e reverter.`,
         includeOwner: true, tenantId, metadata: { dedupeKey: `feedback-low-${fbLeadId}` },
       }).catch(() => {})
+      // Aviso no WhatsApp do dono (linha W-API que alcança o número dele) — só nota baixa.
+      try {
+        const { data: ti } = await admin.from('tenant_integrations').select('notifications').eq('tenant_id', 'tricopill').maybeSingle()
+        const phones = (((ti as { notifications?: { sales_receipt_owner_phones?: string[] } } | null)?.notifications?.sales_receipt_owner_phones) ?? []).filter(Boolean)
+        const dm = `⚠️ *Feedback baixo — clínica*\n${nomeCliente || 'Cliente'} avaliou o atendimento com nota *${score}*.${comment ? `\n💬 "${comment.slice(0, 200)}"` : ''}\n\nVale um contato pra entender e reverter.`
+        for (const p of phones) await sendWapiDirectText(admin, 'tricopill', p, dm)
+      } catch { /* best-effort */ }
     }
     const firstName = nomeCliente.split(/\s+/)[0] || ''
     return json({
