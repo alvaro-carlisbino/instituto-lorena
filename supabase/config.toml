@@ -427,6 +427,11 @@ verify_jwt = false
 [functions.crm-followup-scheduler]
 verify_jwt = false
 
+# Reengajamento (reativação + recompra): chamado 1x/dia via pg_cron. verify_jwt=false
+# porque o cron não manda JWT de usuário; a função aceita x-cron-secret opcional.
+[functions.crm-reengage-scheduler]
+verify_jwt = false
+
 # Webhook de pagamento PagBank: chamado pelo PagBank sem JWT (mapeia pelo reference_id).
 [functions.crm-pagbank-webhook]
 verify_jwt = false
