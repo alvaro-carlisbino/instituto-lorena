@@ -19,6 +19,7 @@ import {
   pushManychatInstagramDmAfterReply,
   pushManychatWhatsappDmAfterReply,
   readManychatPushConfigForTenantChannel,
+  sendManychatText,
 } from '../_shared/manychatPublicApi.ts'
 import { resolveWhatsappLineInstanceId, sanitizeCrmInstanceKey } from '../_shared/manychatInstanceResolve.ts'
 import {
@@ -781,9 +782,17 @@ Deno.serve(async (req) => {
       } catch { /* best-effort */ }
     }
     const firstName = nomeCliente.split(/\s+/)[0] || ''
+    const thankYouText = score !== null
+      ? thankYouFor(score, firstName)
+      : `Obrigada pelo seu retorno${firstName ? `, ${firstName}` : ''}! 🙏 A sua opinião é muito importante pra gente.`
+    // Manda o "obrigado" direto pela API do ManyChat (não depende do fluxo mapear a resposta).
+    try {
+      const { data: tiMc } = await admin.from('tenant_integrations').select('manychat').eq('tenant_id', tenantId ?? 'instituto-lorena').maybeSingle()
+      const mcKey = String(((tiMc as { manychat?: { api_key?: string } } | null)?.manychat?.api_key) ?? '').trim()
+      if (mcKey) await sendManychatText(mcKey, subscriberId, thankYouText).catch(() => {})
+    } catch { /* best-effort — o fluxo do ManyChat também pode mandar o thankYou da resposta */ }
     return json({
-      ok: true, action: 'feedback', leadId: fbLeadId, score, comment: comment ?? null,
-      thankYou: score !== null ? thankYouFor(score, firstName) : 'Obrigada pelo seu retorno! 🙏',
+      ok: true, action: 'feedback', leadId: fbLeadId, score, comment: comment ?? null, thankYou: thankYouText,
     })
   }
 

@@ -312,6 +312,19 @@ async function sendManychatContentCore(input: {
   return { ok: false, error: describeManychatFailure(input.errorLabel, res), status: String(res.json.status ?? '') }
 }
 
+/** Envia UMA mensagem de TEXTO ao subscriber via /fb/sending/sendContent (janela 24h aberta). */
+export async function sendManychatText(
+  apiKey: string,
+  subscriberId: string,
+  text: string,
+  messageTag?: string,
+): Promise<ManychatSendContentResult> {
+  if (!apiKey?.trim() || !subscriberId?.trim() || !text?.trim()) return { ok: false, error: 'missing_params' }
+  return sendManychatContentCore({
+    apiKey, subscriberId, blocks: [{ type: 'text', text }], messageTag, errorLabel: 'manychat_text',
+  })
+}
+
 /**
  * Envia mídia (imagem/áudio/vídeo/arquivo) + texto opcional como blocos nativos do ManyChat.
  * Usa /fb/sending/sendContent — exige plano Pro. Se falhar, o caller pode cair no
