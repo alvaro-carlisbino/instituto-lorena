@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { resendMissingSaleReceipts } from '../_shared/saleReceipt.ts'
+import { sendManychatFlow } from '../_shared/manychatPublicApi.ts'
 
 // Rede de segurança de confirmação de pagamento.
 //
@@ -88,6 +89,39 @@ async function promotePaidTricopillToPago(admin: SupabaseClient): Promise<number
   return (data ?? []).length
 }
 
+// Pesquisa de satisfação da CLÍNICA: quando o lead entra em "Consulta agendada" (o 1º
+// atendimento da Dandara/IA acabou), dispara o fluxo do ManyChat (sendFlow) pra colher a
+// nota. Dedup por custom_fields.feedback_sent_at → uma pesquisa por lead. Best-effort.
+async function dispatchClinicFeedbackOnStage(admin: SupabaseClient): Promise<number> {
+  const { data: ti } = await admin.from('tenant_integrations').select('manychat').eq('tenant_id', 'instituto-lorena').maybeSingle()
+  const mc = ((ti as { manychat?: Record<string, unknown> } | null)?.manychat) ?? {}
+  const apiKey = String(mc.api_key ?? '').trim()
+  const flowNs = String(mc.feedback_flow_ns ?? '').trim()
+  if (!apiKey || !flowNs) return 0
+
+  const { data: leads } = await admin.from('leads')
+    .select('id, custom_fields')
+    .eq('tenant_id', 'instituto-lorena')
+    .eq('pipeline_id', 'pipeline-clinica')
+    .eq('stage_id', 'consulta')
+    .order('stage_entered_at', { ascending: false })
+    .limit(50)
+
+  let sent = 0
+  for (const l of (leads ?? []) as Array<{ id: string; custom_fields: Record<string, unknown> | null }>) {
+    const cf = (l.custom_fields ?? {}) as Record<string, unknown>
+    if (cf.feedback_sent_at) continue // já pedimos avaliação a esse lead
+    const sid = String(cf.manychat_subscriber_id ?? '').trim()
+    if (!sid) continue
+    const r = await sendManychatFlow(apiKey, sid, flowNs)
+    if (r.ok) {
+      await admin.from('leads').update({ custom_fields: { ...cf, feedback_sent_at: new Date().toISOString() } }).eq('id', l.id).then(() => {}, () => {})
+      sent++
+    }
+  }
+  return sent
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
 
@@ -103,6 +137,9 @@ Deno.serve(async (req) => {
 
   // Rede de segurança do funil: venda paga presa em etapa inicial → "Pago".
   const promovidosPago = await promotePaidTricopillToPago(admin).catch(() => 0)
+
+  // Pesquisa de satisfação da clínica: lead entrou em "Consulta agendada" → dispara o fluxo.
+  const feedbackClinica = await dispatchClinicFeedbackOnStage(admin).catch(() => 0)
 
   // Janela: mensagens de 12h atrás até 4 min atrás. O atraso de 4 min dá tempo do gateway
   // (poller PIX / webhook) confirmar sozinho antes de incomodarmos a equipe. 12h cobre
@@ -123,7 +160,7 @@ Deno.serve(async (req) => {
   if (claimsErr) return json({ ok: false, error: claimsErr.message }, 500)
 
   const leadIds = [...new Set((claims ?? []).map((r) => String((r as { lead_id: unknown }).lead_id)).filter(Boolean))]
-  if (leadIds.length === 0) return json({ ok: true, candidates: 0, alerted: 0, receipts, promovidosPago })
+  if (leadIds.length === 0) return json({ ok: true, candidates: 0, alerted: 0, receipts, promovidosPago, feedbackClinica })
 
   // Só leads dos tenants observados.
   const { data: leadsData } = await admin
@@ -155,5 +192,5 @@ Deno.serve(async (req) => {
     if (n > 0) alerted += 1
   }
 
-  return json({ ok: true, candidates: leads.length, alerted, skipped: skipped.length, receipts, promovidosPago })
+  return json({ ok: true, candidates: leads.length, alerted, skipped: skipped.length, receipts, promovidosPago, feedbackClinica })
 })

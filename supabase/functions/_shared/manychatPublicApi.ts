@@ -312,6 +312,22 @@ async function sendManychatContentCore(input: {
   return { ok: false, error: describeManychatFailure(input.errorLabel, res), status: String(res.json.status ?? '') }
 }
 
+/** Dispara um FLOW do ManyChat pro subscriber (ex.: pesquisa de satisfação). */
+export async function sendManychatFlow(
+  apiKey: string,
+  subscriberId: string,
+  flowNs: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!apiKey?.trim() || !subscriberId?.trim() || !flowNs?.trim()) return { ok: false, error: 'missing_params' }
+  const res = await manychatPost(
+    '/fb/sending/sendFlow',
+    { subscriber_id: normalizeSubscriberId(subscriberId), flow_ns: flowNs.trim() },
+    apiKey,
+  )
+  if (res.ok && manychatSuccess(res.json)) return { ok: true }
+  return { ok: false, error: describeManychatFailure('manychat_send_flow', res) }
+}
+
 /** Envia UMA mensagem de TEXTO ao subscriber via /fb/sending/sendContent (janela 24h aberta). */
 export async function sendManychatText(
   apiKey: string,
