@@ -113,6 +113,20 @@ const isSyntheticPhone = (phone: unknown): boolean => {
   return d.length < 10 || d.startsWith('888001')
 }
 
+// Barra contato interno/parceiro/lixo — não pode receber oferta de venda.
+// (a própria clínica, recepção, marketing, comercial, spa, e nomes só de emoji)
+const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+const BLOCK_TERMS = [
+  'recepc', 'marketing', 'comercial', 'contato whatsapp', 'spa capilar',
+  'instituto lorena', 'lorena visentainer', 'alvaro carlisbino', 'financeiro',
+  'atendimento', 'guegrorioda',
+]
+const isBlockedContact = (name: unknown): boolean => {
+  const n = norm(String(name ?? '')).trim()
+  if ((n.match(/[a-z]/g) || []).length < 3) return true // emoji/símbolos, sem nome real
+  return BLOCK_TERMS.some((t) => n.includes(t))
+}
+
 type LeadRow = {
   lead_id: string
   patient_name: string | null
@@ -192,6 +206,7 @@ Deno.serve(async (req) => {
   let capped = 0
   for (const l of leads) {
     if (isSyntheticPhone(l.phone)) { results.push({ lead: l.lead_id, skip: 'phone_sintetico' }); continue }
+    if (isBlockedContact(l.patient_name)) { results.push({ lead: l.lead_id, skip: 'contato_interno' }); continue }
     // Atingiu o teto de envios reais nesta execução: para de mandar, mas registra o backlog.
     if (ENABLED && sent >= DAILY_CAP) { capped++; continue }
     const nome = firstName(l.patient_name)
