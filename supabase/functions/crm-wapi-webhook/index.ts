@@ -282,8 +282,17 @@ Deno.serve(async (req) => {
     // Roda em BACKGROUND (não atrasa a resposta do webhook) com timeout generoso + RETRY:
     // o fileLink do W-API EXPIRA, então um timeout na 1ª tentativa perdia a mídia pra sempre
     // (era o caso dos áudios "sumindo" — só ficava o placeholder "🎤 Áudio").
+    // Extraída uma vez: usada no download (abaixo) e na decisão de segurar a IA
+    // até o OCR/transcrição terminar (deferForMediaMs no dispatch mais adiante).
+    let inboundMedia: ReturnType<typeof extractInboundMedia> = null
     try {
-      const med = extractInboundMedia(normalized.raw as Record<string, unknown>)
+      inboundMedia = extractInboundMedia(normalized.raw as Record<string, unknown>)
+    } catch {
+      inboundMedia = null
+    }
+
+    try {
+      const med = inboundMedia
       if (med && provider instanceof WapiProvider) {
         const wapiProvider = provider
         const messageId = normalized.externalMessageId
@@ -461,13 +470,41 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Foto/áudio na mensagem: segura a IA por 15s pra dar tempo do OCR/transcrição
+    // (que roda em background) chegar ao contexto. Evita a IA chutar o produto da
+    // foto — caso real: shampoo de R$179 cobrado como o de R$119.
+    const mediaKind = String(inboundMedia?.mediaType ?? '').toLowerCase()
+    const deferForMediaMs = mediaKind === 'image' || mediaKind === 'audio' ? 15000 : 0
+
     let routing: string
     if (mediaOnly) {
       await admin
         .from('leads')
         .update({ updated_at: new Date().toISOString(), last_interaction_at: new Date().toISOString() })
         .eq('id', lead.leadId)
-      routing = 'media_only_no_reply'
+      if (isSalesBot && mediaKind === 'image' && gate.canAutoReply) {
+        // Bot de VENDAS: foto sem legenda não fica mais no vácuo — espera o OCR e
+        // responde (identifica o produto pela imagem, ou pergunta o nome por escrito;
+        // a regra de confirmar produto+valor antes de cobrar está no system prompt).
+        await runWhatsappAiAutoReply(admin, {
+          leadId: lead.leadId,
+          patientName: normalized.fromName,
+          fromPhone: normalized.fromPhone,
+          aiInboundUserText:
+            '[Cliente enviou uma foto sem legenda. Use o texto extraído da imagem no contexto para identificar o assunto; se não der para ter certeza do produto, pergunte o nome por escrito.]',
+          inboundHappenedAt: normalized.happenedAt,
+          ownerMode: gate.ownerMode,
+          aiEnabled: gate.aiEnabled,
+          statePrompt,
+          aiJobSource: 'wapi-webhook',
+          sendProvider: provider,
+          keepAiOn: isSalesBot,
+          deferForMediaMs,
+        })
+        routing = 'media_only_sales_deferred_reply'
+      } else {
+        routing = 'media_only_no_reply'
+      }
     } else if (wantsHumanAgent(normalized.text)) {
       // GATILHO "consultor precisa assumir": o cliente PEDIU uma pessoa. Vale p/ qualquer bot
       // (inclusive o de vendas, que normalmente nunca escala): desliga a IA, acende o painel
@@ -494,6 +531,7 @@ Deno.serve(async (req) => {
         aiJobSource: 'wapi-webhook',
         sendProvider: provider,
         keepAiOn: isSalesBot,
+        deferForMediaMs,
       })
 
       if (handoffSuggested) {

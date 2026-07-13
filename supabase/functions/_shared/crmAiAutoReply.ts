@@ -728,6 +728,13 @@ export async function runWhatsappAiAutoReply(
     whatsappInstanceId?: string | null
     /** True (bot de vendas): NUNCA desliga a IA no handover de falha — mantém atendendo. */
     keepAiOn?: boolean
+    /**
+     * Mensagem veio com mídia (foto/áudio): segura a resposta por N ms pra dar tempo
+     * do OCR/transcrição (background) gravar em crm_media_items ANTES de a IA rodar.
+     * Sem isso a IA respondia no escuro e chutava o produto da foto (caso shampoo
+     * R$179 cobrado como R$119).
+     */
+    deferForMediaMs?: number
   },
 ): Promise<{ replied: boolean; replyText?: string; burstPending?: boolean; handoffSuggested?: boolean }> {
   // crm_ai_configs tem PK (tenant_id, id): escopar por tenant do lead.
@@ -754,10 +761,13 @@ export async function runWhatsappAiAutoReply(
     .maybeSingle()
   const hasPendingBurst = String(existingBurst?.ai_inbound_burst_text ?? '').trim().length > 0
 
+  const mediaDeferMs = Math.max(0, Math.floor(options.deferForMediaMs ?? 0))
+  const effectiveDebounceMs = Math.max(burstMs, mediaDeferMs)
+
   if (
     !options.burstFlush &&
-    burstMs > 0 &&
-    (hasPendingBurst || shouldDeferReplyForBurstMerge(options.aiInboundUserText))
+    effectiveDebounceMs > 0 &&
+    (hasPendingBurst || mediaDeferMs > 0 || shouldDeferReplyForBurstMerge(options.aiInboundUserText))
   ) {
     await appendInboundBurstBuffer(
       admin,
@@ -765,7 +775,7 @@ export async function runWhatsappAiAutoReply(
       options.aiInboundUserText,
       options.inboundHappenedAt,
     )
-    scheduleWhatsappInboundBurstFlush(admin, burstMs, {
+    scheduleWhatsappInboundBurstFlush(admin, effectiveDebounceMs, {
       leadId: options.leadId,
       patientName: options.patientName,
       fromPhone: options.fromPhone,
