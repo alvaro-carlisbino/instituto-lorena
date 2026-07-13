@@ -145,7 +145,7 @@ async function processLeadgen(
     return { leadgenId, ok: false, reason: 'sem_page_token' }
   }
 
-  // Busca o formulário preenchido (traz campanha/anúncio por nome junto).
+  // Busca o formulário preenchido (traz campanha/anúncio por id junto).
   const primary = await graphGetLead(leadgenId, pageToken)
   let lead: Record<string, unknown> | null = primary.ok ? primary.data : null
   if (!lead) {
@@ -159,6 +159,21 @@ async function processLeadgen(
     }
   }
 
+  return await processLeadData(admin, lead, { leadgenId, pageId, formId: formIdRaw }, tenantMap)
+}
+
+/**
+ * Miolo compartilhado: recebe o objeto do lead JÁ lido da Graph e cria/atualiza
+ * no CRM com atribuição. Usado pelo webhook/recuperação (via processLeadgen) e
+ * pela VARREDURA (sweep_forms), que lê os leads em lote pelo edge do formulário.
+ */
+async function processLeadData(
+  admin: SupabaseClient,
+  lead: Record<string, unknown>,
+  input: { leadgenId: string; pageId: string; formId: string },
+  tenantMap: Record<string, string>,
+): Promise<ProcessResult> {
+  const { leadgenId, pageId, formId: formIdRaw } = input
   const fields = Array.isArray(lead.field_data) ? (lead.field_data as FieldData[]) : []
   const nome = pickField(fields, 'full_name', 'nome') || 'Lead Meta (formulário)'
   const phoneRaw = pickField(fields, 'phone', 'telefone', 'whatsapp', 'celular')
@@ -279,6 +294,97 @@ async function runRecovery(admin: SupabaseClient, pageToken: string, tenantMap: 
   })
 }
 
+/**
+ * VARREDURA de segurança (cron): a Meta às vezes NEM entrega o webhook (caso real
+ * de 12/jul — lead na planilha do gestor de tráfego sem nenhum evento aqui). Esta
+ * ação lê os leads recentes direto do edge /{form_id}/leads de cada formulário já
+ * visto e processa qualquer leadgen_id que ainda não virou lead. Idempotente: quem
+ * já tem evento lead_, skipped ou ignored é pulado, e o upsert dedupa por telefone.
+ */
+async function runSweep(
+  admin: SupabaseClient,
+  pageToken: string,
+  tenantMap: Record<string, string>,
+  opts: { days: number; pagesPerForm: number },
+): Promise<Response> {
+  if (!pageToken) return json({ error: 'sem_page_token' }, 500)
+
+  // Formulários vistos nos últimos 30 dias (page_id junto pro tenant map).
+  const since = new Date(Date.now() - 30 * 864e5).toISOString()
+  const { data: formRows, error: formErr } = await admin
+    .from('meta_leadgen_events')
+    .select('form_id, page_id')
+    .gte('created_at', since)
+    .not('form_id', 'is', null)
+  if (formErr) return json({ error: 'query_failed', message: formErr.message }, 500)
+  const forms = new Map<string, string>()
+  for (const r of (formRows ?? []) as Array<Record<string, unknown>>) {
+    const f = String(r.form_id ?? '')
+    // 444444444444 é o leadgen de teste da Meta — não é um formulário real
+    if (f && f !== '444444444444') forms.set(f, String(r.page_id ?? ''))
+  }
+
+  // Já resolvidos: viraram lead, foram pulados de propósito ou ignorados.
+  const { data: doneRows, error: doneErr } = await admin
+    .from('meta_leadgen_events')
+    .select('leadgen_id')
+    .or('status.like.lead_%,status.like.skipped%,status.like.ignored%')
+  if (doneErr) return json({ error: 'query_failed', message: doneErr.message }, 500)
+  const done = new Set((doneRows ?? []).map((r) => String((r as Record<string, unknown>).leadgen_id)))
+
+  const cutoffMs = Date.now() - opts.days * 864e5
+  const results: ProcessResult[] = []
+  let scanned = 0
+
+  for (const [formId, pageId] of forms) {
+    let url: string =
+      `${GRAPH}/${formId}/leads?fields=${LEAD_FIELDS}&limit=100&access_token=${encodeURIComponent(pageToken)}`
+    for (let page = 0; page < opts.pagesPerForm && url; page++) {
+      let data: Record<string, unknown>
+      try {
+        const res = await fetch(url)
+        data = (await res.json()) as Record<string, unknown>
+        if (!res.ok) {
+          console.error(`[meta-leadform] sweep form ${formId} falhou: ${JSON.stringify(data).slice(0, 300)}`)
+          break
+        }
+      } catch (e) {
+        console.error(`[meta-leadform] sweep form ${formId} fetch: ${e instanceof Error ? e.message : e}`)
+        break
+      }
+      const arr = Array.isArray(data.data) ? (data.data as Array<Record<string, unknown>>) : []
+      let reachedCutoff = false
+      for (const lead of arr) {
+        scanned += 1
+        const id = String(lead.id ?? '').trim()
+        const createdMs = Date.parse(String(lead.created_time ?? ''))
+        // o edge devolve do mais novo pro mais velho — passou do corte, o resto é antigo
+        if (Number.isFinite(createdMs) && createdMs < cutoffMs) {
+          reachedCutoff = true
+          break
+        }
+        if (!id || done.has(id)) continue
+        results.push(await processLeadData(admin, lead, { leadgenId: id, pageId, formId }, tenantMap))
+        done.add(id)
+      }
+      if (reachedCutoff) break
+      url = String((data.paging as Record<string, unknown> | undefined)?.next ?? '')
+    }
+  }
+
+  const created = results.filter((r) => r.ok).length
+  if (created > 0) console.warn(`[meta-leadform] sweep achou ${created} lead(s) que o webhook NÃO entregou`)
+  return json({
+    ok: true,
+    action: 'sweep_forms',
+    formularios: forms.size,
+    examinados: scanned,
+    novos: created,
+    falhas: results.filter((r) => !r.ok).length,
+    detalhe: results,
+  })
+}
+
 Deno.serve(async (req) => {
   const url = new URL(req.url)
 
@@ -311,7 +417,7 @@ Deno.serve(async (req) => {
   // Protegidas por token guardado no banco; não são chamadas pela Meta.
   try {
     const maybe = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {}
-    if (maybe && (maybe.action === 'recover_failed' || maybe.action === 'debug_graph')) {
+    if (maybe && (maybe.action === 'recover_failed' || maybe.action === 'debug_graph' || maybe.action === 'sweep_forms')) {
       const provided = String(maybe.token ?? '')
       const { data: tok } = await admin
         .from('app_edge_tokens').select('token').eq('name', 'meta_leadform_recover_token').maybeSingle()
@@ -341,6 +447,11 @@ Deno.serve(async (req) => {
             : {}),
           ...(leadgenId ? { leadgen: await g(`${leadgenId}?fields=${LEAD_FIELDS}`) } : {}),
         })
+      }
+      if (maybe.action === 'sweep_forms') {
+        const days = Number.isFinite(Number(maybe.days)) && Number(maybe.days) > 0 ? Math.min(30, Math.floor(Number(maybe.days))) : 3
+        const pages = Number.isFinite(Number(maybe.pages)) && Number(maybe.pages) > 0 ? Math.min(10, Math.floor(Number(maybe.pages))) : 3
+        return await runSweep(admin, pageToken, tenantMap, { days, pagesPerForm: pages })
       }
       const limit = Number.isFinite(Number(maybe.limit)) && Number(maybe.limit) > 0 ? Math.min(200, Math.floor(Number(maybe.limit))) : 50
       return await runRecovery(admin, pageToken, tenantMap, limit)
