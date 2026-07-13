@@ -15,8 +15,12 @@ import type { LeadAttribution } from '../_shared/attribution.ts'
 //  - META_PAGE_TENANT_MAP       opcional, JSON {"<page_id>":"tricopill"}; default instituto-lorena
 
 const GRAPH = 'https://graph.facebook.com/v21.0'
+// SEM ad_name/adset_name/campaign_name: esses campos exigem permissão de ads que o
+// system user (só leads_retrieval) NÃO tem, e a Graph derruba a chamada INTEIRA com
+// GraphMethodException #100 "Unsupported request" — foi isso que perdeu ~97% dos
+// formulários de 10-13/jul. Os IDs vêm normalmente; nome de campanha fica pelo id.
 const LEAD_FIELDS =
-  'field_data,created_time,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,is_organic'
+  'field_data,created_time,ad_id,adset_id,campaign_id,form_id,is_organic'
 
 function text(body: string, status = 200): Response {
   return new Response(body, { status, headers: { 'Content-Type': 'text/plain' } })
@@ -303,20 +307,45 @@ Deno.serve(async (req) => {
     tenantMap = JSON.parse(Deno.env.get('META_PAGE_TENANT_MAP') ?? '{}') as Record<string, string>
   } catch { /* mapa opcional */ }
 
-  // ── Ação de RECUPERAÇÃO (antes da validação de assinatura da Meta) ──
-  // Protegida por token guardado no banco; não é chamada pela Meta.
+  // ── Ações administrativas (antes da validação de assinatura da Meta) ──
+  // Protegidas por token guardado no banco; não são chamadas pela Meta.
   try {
     const maybe = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : {}
-    if (maybe && maybe.action === 'recover_failed') {
+    if (maybe && (maybe.action === 'recover_failed' || maybe.action === 'debug_graph')) {
       const provided = String(maybe.token ?? '')
       const { data: tok } = await admin
         .from('app_edge_tokens').select('token').eq('name', 'meta_leadform_recover_token').maybeSingle()
       const expected = String((tok as Record<string, unknown> | null)?.token ?? '')
       if (!expected || provided !== expected) return json({ error: 'unauthorized' }, 401)
+      if (maybe.action === 'debug_graph') {
+        // Diagnóstico do META_PAGE_TOKEN direto na Graph: quem é o token, permissões,
+        // validade e se consegue ler o formulário/lead informado. Não altera nada.
+        const g = async (path: string) => {
+          try {
+            const sep = path.includes('?') ? '&' : '?'
+            const res = await fetch(`${GRAPH}/${path}${sep}access_token=${encodeURIComponent(pageToken)}`)
+            return { status: res.status, body: await res.json() }
+          } catch (e) {
+            return { status: 0, body: { fetch_error: e instanceof Error ? e.message : String(e) } }
+          }
+        }
+        const formId = String(maybe.form_id ?? '')
+        const leadgenId = String(maybe.leadgen_id ?? '')
+        return json({
+          me: await g('me?fields=id,name'),
+          permissions: await g('me/permissions'),
+          token_debug: await g(`debug_token?input_token=${encodeURIComponent(pageToken)}`),
+          ...(formId ? { form: await g(`${formId}?fields=id,name,status,leads_count`) } : {}),
+          ...(formId
+            ? { form_leads: await g(`${formId}/leads?limit=1&fields=${String(maybe.fields ?? 'id,created_time')}`) }
+            : {}),
+          ...(leadgenId ? { leadgen: await g(`${leadgenId}?fields=${LEAD_FIELDS}`) } : {}),
+        })
+      }
       const limit = Number.isFinite(Number(maybe.limit)) && Number(maybe.limit) > 0 ? Math.min(200, Math.floor(Number(maybe.limit))) : 50
       return await runRecovery(admin, pageToken, tenantMap, limit)
     }
-  } catch { /* não é JSON de recover — segue fluxo normal da Meta */ }
+  } catch { /* não é JSON de ação admin — segue fluxo normal da Meta */ }
 
   // Assinatura: valida quando o App Secret estiver configurado (setup em fases).
   const appSecret = (Deno.env.get('META_APP_SECRET') ?? '').trim()
