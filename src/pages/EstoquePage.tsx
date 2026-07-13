@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Boxes, Plus, ArrowDownToLine, ArrowUpFromLine, History, ScanBarcode, ShieldAlert } from 'lucide-react'
 
@@ -30,12 +30,14 @@ import {
 } from '@/services/estoqueCompras'
 import { type BlingCatalogItem, fetchBlingCatalog } from '@/services/crmBling'
 import { type StockBatch, listBatchBalances } from '@/services/estoqueKits'
+import { BarcodeCameraDialog } from '@/components/estoque/BarcodeCameraDialog'
 import { useTenant } from '@/context/TenantContext'
 
 /** Abas do módulo. Kits cirúrgicos é só da clínica (o polo de vendas não tem procedimento). */
 export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: string }> {
   return [
     { to: '/estoque', label: 'Estoque' },
+    { to: '/bipagem', label: 'Bipagem' },
     { to: '/compras', label: 'Ordens de compra' },
     { to: '/contas-a-pagar', label: 'Contas a pagar' },
     { to: '/inventario', label: 'Inventário' },
@@ -45,103 +47,6 @@ export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: st
 }
 
 const EMPTY_ITEM = { name: '', sku: '', barcode: '', category: '', unit: 'un', minQty: '', controlled: false, blingProductId: '' }
-
-// --------------------------------------------------- leitura de código de barras
-// Leitor USB age como teclado (digita o código + Enter no campo "Bipar").
-// Pela câmera usamos a BarcodeDetector API (Chrome/Android); sem suporte, o
-// botão explica e o campo continua funcionando.
-
-type BarcodeDetectorLike = {
-  detect: (source: CanvasImageSource) => Promise<Array<{ rawValue: string }>>
-}
-
-function getBarcodeDetector(): BarcodeDetectorLike | null {
-  const w = window as unknown as {
-    BarcodeDetector?: new (opts?: { formats?: string[] }) => BarcodeDetectorLike
-  }
-  if (!w.BarcodeDetector) return null
-  try {
-    return new w.BarcodeDetector({
-      formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf'],
-    })
-  } catch {
-    return null
-  }
-}
-
-function BarcodeCameraDialog({
-  open,
-  onOpenChange,
-  onScan,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onScan: (code: string) => void
-}) {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setError(null)
-    const detector = getBarcodeDetector()
-    if (!detector) {
-      setError('Este navegador não lê código pela câmera. Use o leitor USB no campo "Bipar código".')
-      return
-    }
-    let stream: MediaStream | null = null
-    let timer: number | null = null
-    let done = false
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: 'environment' } })
-      .then((s) => {
-        stream = s
-        if (videoRef.current) {
-          videoRef.current.srcObject = s
-          void videoRef.current.play()
-        }
-        timer = window.setInterval(() => {
-          const video = videoRef.current
-          if (done || !video || video.readyState < 2) return
-          detector
-            .detect(video)
-            .then((codes) => {
-              const code = codes[0]?.rawValue?.trim()
-              if (code && !done) {
-                done = true
-                onScan(code)
-              }
-            })
-            .catch(() => {
-              /* frame ruim — tenta o próximo */
-            })
-        }, 300)
-      })
-      .catch(() => setError('Não foi possível acessar a câmera.'))
-    return () => {
-      done = true
-      if (timer) window.clearInterval(timer)
-      stream?.getTracks().forEach((t) => t.stop())
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Ler código de barras</DialogTitle>
-          <DialogDescription>Aponte a câmera para o código do produto.</DialogDescription>
-        </DialogHeader>
-        {error ? (
-          <p className="py-4 text-sm text-muted-foreground">{error}</p>
-        ) : (
-          <video ref={videoRef} className="aspect-video w-full rounded-md bg-black" muted playsInline />
-        )}
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 export function EstoquePage() {
   const { tenant } = useTenant()

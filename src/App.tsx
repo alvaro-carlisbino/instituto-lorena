@@ -69,6 +69,7 @@ const TenantsAdminPage = lazyPage(() => import('./pages/TenantsAdminPage'), 'Ten
 const WhatsappConnectionPage = lazyPage(() => import('./pages/WhatsappConnectionPage'), 'WhatsappConnectionPage')
 const AgendaPage = lazyPage(() => import('./pages/AgendaPage'), 'AgendaPage')
 const EstoquePage = lazyPage(() => import('./pages/EstoquePage'), 'EstoquePage')
+const BipagemPage = lazyPage(() => import('./pages/BipagemPage'), 'BipagemPage')
 const ComprasPage = lazyPage(() => import('./pages/ComprasPage'), 'ComprasPage')
 const ContasPagarPage = lazyPage(() => import('./pages/ContasPagarPage'), 'ContasPagarPage')
 const KitsPage = lazyPage(() => import('./pages/KitsPage'), 'KitsPage')
@@ -106,6 +107,7 @@ function AppRoutes() {
         <Route path="/tarefas" element={<TasksPage />} />
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/estoque" element={<EstoquePage />} />
+        <Route path="/bipagem" element={<BipagemPage />} />
         <Route path="/compras" element={<ComprasPage />} />
         <Route path="/contas-a-pagar" element={<ContasPagarPage />} />
         <Route path="/kits" element={<KitsPage />} />

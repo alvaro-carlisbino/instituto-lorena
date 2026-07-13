@@ -37,6 +37,7 @@ import {
   ClipboardList,
   CalendarClock,
   Warehouse,
+  ScanBarcode,
   PackageCheck,
   ClipboardCheck,
   ListChecks,
@@ -241,6 +242,7 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 <NavItem to="/estoque" label="Estoque" icon={Warehouse} />
+                <NavItem to="/bipagem" label="Bipagem" icon={ScanBarcode} />
                 <NavItem to="/compras" label="Ordens de compra" icon={ClipboardList} />
                 <NavItem to="/inventario" label="Inventário" icon={ClipboardCheck} />
                 {isClinicPolo ? <NavItem to="/kits" label="Kits cirúrgicos" icon={PackageCheck} /> : null}

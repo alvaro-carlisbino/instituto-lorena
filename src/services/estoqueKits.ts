@@ -407,3 +407,25 @@ export async function logControlledEntry(payload: {
   })
   if (error) throw new Error(error.message)
 }
+
+/** Saída de controlado fora de kit (ex.: bipagem) — mesmo livro do consumeKit. */
+export async function logControlledExit(payload: {
+  itemId: string
+  batchId?: string | null
+  movementId?: string | null
+  qty: number
+  patientName?: string | null
+  note?: string | null
+}): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.from('controlled_substance_log').insert({
+    item_id: payload.itemId,
+    batch_id: payload.batchId ?? null,
+    movement_id: payload.movementId ?? null,
+    action: 'saida',
+    qty: payload.qty,
+    patient_name: payload.patientName?.trim() || null,
+    note: payload.note?.trim() || null,
+  })
+  if (error) throw new Error(error.message)
+}
