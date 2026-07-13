@@ -102,7 +102,7 @@ export const KIT_KEYS = Object.keys(KIT_BOXES)
 const KIT_DECLARED_VALUE_CENTS: Record<string, number> = {
   '1_mes': 19900,
   '3_meses': 59700,
-  '5_meses': 69700,
+  '5_meses': 99500, // acompanha o preço do kit 5 (R$995); estava 69700 do preço antigo
 }
 
 /** Valor declarado (seguro) p/ um kit. null quando o kit é desconhecido. */
