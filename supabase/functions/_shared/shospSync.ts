@@ -99,7 +99,129 @@ export async function syncShospReferences(admin: SupabaseClient): Promise<{ upse
   return { upserted: error ? 0 : deduped.length, error }
 }
 
-export async function matchLeadsToPatients(admin: SupabaseClient, limit = 15): Promise<{ matched: number; checked: number }> {
+export async function matchLeadsToPatients(
+  admin: SupabaseClient,
+  limit = 15,
+  agendaLimit = 20,
+): Promise<{ matched: number; checked: number }> {
+  // A API da Shosp tem rate limit (429 "Limit Exceeded"): busca espaçada, um retry
+  // com pausa e, se persistir, encerra a RODADA inteira (o cron de 15min continua).
+  // null = estourou o limite (pare o passe); [] = busca ok sem resultado (siga).
+  let shospRateLimited = false
+  const searchPaciente = async (nome: string): Promise<Record<string, unknown>[] | null> => {
+    if (shospRateLimited) return null
+    await new Promise((r) => setTimeout(r, 900))
+    const call = async () => {
+      try {
+        return await shospSearchPaciente({ nome })
+      } catch {
+        return { ok: false, status: 0, data: null }
+      }
+    }
+    let res = await call()
+    if (res.status === 429) {
+      await new Promise((r) => setTimeout(r, 6000))
+      res = await call()
+    }
+    if (res.status === 429) {
+      shospRateLimited = true
+      return null
+    }
+    return dadosArray(res.data)
+  }
+
+  let matched = 0
+  let checked = 0
+
+  // Pass 4 PRIMEIRO (agenda → lead, direção inversa): parte de quem JÁ AGENDOU.
+  // Os passes 1-3 buscam pelo nome do LEAD (apelido de WhatsApp — quase nunca acha)
+  // e reprocessam sempre os mesmos recentes. Aqui a fonte é a agenda espelhada, que
+  // tem prontuário + NOME REAL (payload.paciente): busca o cadastro por esse nome
+  // (veio da própria Shosp, a busca acha), espelha em shosp_patients e casa o
+  // telefone com um lead sem vínculo. Roda primeiro porque é o passe de maior
+  // rendimento e o rate limit da Shosp pode derrubar o resto da rodada.
+  const { data: apptRows } = await admin
+    .from('shosp_appointments')
+    .select('prontuario, payload')
+    .gte('data', ymdOffset(-45))
+    .not('prontuario', 'is', null)
+    .order('data', { ascending: false })
+    .limit(2000)
+  const { data: mirroredRows } = await admin.from('shosp_patients').select('prontuario')
+  const mirrored = new Set(
+    ((mirroredRows ?? []) as Array<{ prontuario: unknown }>).map((r) => String(r.prontuario)),
+  )
+  const pending: Array<{ prontuario: string; nome: string }> = []
+  const seenPront = new Set<string>()
+  for (const r of (apptRows ?? []) as Array<{ prontuario: unknown; payload: Record<string, unknown> | null }>) {
+    const pront = String(r.prontuario ?? '').trim()
+    if (!pront || mirrored.has(pront) || seenPront.has(pront)) continue
+    seenPront.add(pront)
+    const nome = cleanName(r.payload?.paciente)
+    if (nome.length < 3) continue
+    pending.push({ prontuario: pront, nome })
+    if (pending.length >= agendaLimit) break
+  }
+
+  if (pending.length > 0) {
+    // Índice de telefone dos leads da clínica sem vínculo (uma leitura só).
+    const { data: freeLeads } = await admin
+      .from('leads')
+      .select('id, phone')
+      .eq('tenant_id', 'instituto-lorena')
+      .is('deleted_at', null)
+      .is('shosp_prontuario', null)
+      .not('phone', 'like', '888001%')
+      .limit(5000)
+    const leadsByLast8 = new Map<string, string[]>()
+    for (const l of (freeLeads ?? []) as Array<{ id: string; phone: string }>) {
+      const k = last8(l.phone)
+      if (!k) continue
+      const arr = leadsByLast8.get(k) ?? []
+      arr.push(l.id)
+      leadsByLast8.set(k, arr)
+    }
+
+    for (const p of pending) {
+      checked++
+      const candidates = await searchPaciente(p.nome.split(' ').slice(0, 2).join(' '))
+      if (candidates === null) break
+      const hit = candidates.find((c) => String(c.prontuario ?? c.codigo ?? '').trim() === p.prontuario)
+      if (!hit) continue
+
+      const phoneKeys = [...new Set([last8(hit.celular), last8(hit.telefone)].filter(Boolean))]
+      const leadIds = [...new Set(phoneKeys.flatMap((k) => leadsByLast8.get(k) ?? []))]
+      const leadId = leadIds.length === 1 ? leadIds[0] : null // ambíguo = não vincula
+
+      // Espelha SEMPRE que achar o cadastro (mesmo sem lead): não re-busca na
+      // próxima rodada e o telefone fica disponível pra matches futuros.
+      await admin.from('shosp_patients').upsert(
+        {
+          prontuario: p.prontuario,
+          nome: hit.nome != null ? String(hit.nome) : null,
+          cpf: hit.cpf != null ? String(hit.cpf) : null,
+          celular: hit.celular != null ? String(hit.celular) : null,
+          telefone: hit.telefone != null ? String(hit.telefone) : null,
+          email: hit.email != null ? String(hit.email) : null,
+          lead_id: leadId,
+          payload: hit,
+          synced_at: nowIso(),
+        },
+        { onConflict: 'prontuario' },
+      )
+      if (leadId) {
+        await admin.from('leads').update({ shosp_prontuario: p.prontuario }).eq('id', leadId)
+        await admin
+          .from('shosp_appointments')
+          .update({ lead_id: leadId })
+          .eq('prontuario', p.prontuario)
+          .is('lead_id', null)
+        for (const k of phoneKeys) leadsByLast8.delete(k)
+        matched++
+      }
+    }
+  }
+
   const { data: leads } = await admin
     .from('leads')
     .select('id, patient_name, phone')
@@ -109,8 +231,6 @@ export async function matchLeadsToPatients(admin: SupabaseClient, limit = 15): P
     .order('last_interaction_at', { ascending: false, nullsFirst: false })
     .limit(limit)
 
-  let matched = 0
-  let checked = 0
   for (const lead of (leads ?? []) as Array<{ id: string; patient_name: string; phone: string }>) {
     checked++
     const phone8 = last8(lead.phone)
@@ -119,12 +239,8 @@ export async function matchLeadsToPatients(admin: SupabaseClient, limit = 15): P
     if (name.length < 3) continue
     const searchName = name.split(' ').slice(0, 2).join(' ')
 
-    let candidates: Record<string, unknown>[] = []
-    try {
-      candidates = dadosArray((await shospSearchPaciente({ nome: searchName })).data)
-    } catch {
-      continue
-    }
+    const candidates = await searchPaciente(searchName)
+    if (candidates === null) break
     const hit = candidates.find((c) => last8(c.celular) === phone8 || last8(c.telefone) === phone8)
     if (!hit) continue
     const prontuario = String(hit.prontuario ?? hit.codigo ?? '').trim()
@@ -173,12 +289,8 @@ export async function matchLeadsToPatients(admin: SupabaseClient, limit = 15): P
     if (baseName.length < 3) continue
     const searchName = baseName.split(' ').slice(0, 2).join(' ')
 
-    let candidates: Record<string, unknown>[] = []
-    try {
-      candidates = dadosArray((await shospSearchPaciente({ nome: searchName })).data)
-    } catch {
-      continue
-    }
+    const candidates = await searchPaciente(searchName)
+    if (candidates === null) break
     const hit = candidates.find((c) => digits(c.cpf) === cpfDigits)
     if (!hit) continue
     const prontuario = String(hit.prontuario ?? hit.codigo ?? '').trim()
@@ -229,12 +341,8 @@ export async function matchLeadsToPatients(admin: SupabaseClient, limit = 15): P
     if (baseName.length < 3) continue
     const searchName = baseName.split(' ').slice(0, 2).join(' ')
 
-    let candidates: Record<string, unknown>[] = []
-    try {
-      candidates = dadosArray((await shospSearchPaciente({ nome: searchName })).data)
-    } catch {
-      continue
-    }
+    const candidates = await searchPaciente(searchName)
+    if (candidates === null) break
     const hit = candidates.find((c) => {
       if (dateKey(c.dataNascimento ?? c.nascimento) !== nascKey) return false
       const candCpf = digits(c.cpf)
@@ -456,12 +564,12 @@ export async function syncFullAgenda(
 
 export async function runShospSync(
   admin: SupabaseClient,
-  opts: { matchLimit?: number; apptLimit?: number; diasTotal?: number; steps?: string[] } = {},
+  opts: { matchLimit?: number; apptLimit?: number; diasTotal?: number; steps?: string[]; agendaLimit?: number } = {},
 ): Promise<Record<string, unknown>> {
   const steps = opts.steps ?? ['references', 'match', 'appointments']
   const result: Record<string, unknown> = {}
   if (steps.includes('references')) result.references = await syncShospReferences(admin)
-  if (steps.includes('match')) result.match = await matchLeadsToPatients(admin, opts.matchLimit ?? 15)
+  if (steps.includes('match')) result.match = await matchLeadsToPatients(admin, opts.matchLimit ?? 15, opts.agendaLimit ?? 20)
   if (steps.includes('appointments')) result.appointments = await syncAppointments(admin, opts.apptLimit ?? 25)
   if (steps.includes('full_agenda')) result.full_agenda = await syncFullAgenda(admin, { diasTotal: opts.diasTotal })
   return result

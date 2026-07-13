@@ -174,6 +174,7 @@ Deno.serve(async (req) => {
         matchLimit: body.matchLimit as number | undefined,
         apptLimit: body.apptLimit as number | undefined,
         diasTotal: body.diasTotal as number | undefined,
+        agendaLimit: body.agendaLimit as number | undefined,
         steps: Array.isArray(body.steps) ? (body.steps as string[]) : undefined,
       })
       return json({ ok: true, mode: 'sync', syncedAt: new Date().toISOString(), result })

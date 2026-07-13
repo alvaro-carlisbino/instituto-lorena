@@ -193,17 +193,25 @@ export async function resolveDefaultRouting(admin: SupabaseClient): Promise<{
     })
   }
 
+  // takes_leads: só quem realmente ATENDE entra no rodízio (financeiro/Gerencia
+  // ficam de fora — 42% dos leads caíam com contas que ninguém opera).
   const { data: sdrRows } = await admin
     .from('app_users')
     .select('id')
     .eq('role', 'sdr')
     .eq('active', true)
+    .eq('takes_leads', true)
     .order('name', { ascending: true })
     .limit(20)
 
   let ownerCandidates = (sdrRows ?? []).map((r) => String(r.id))
   if (ownerCandidates.length === 0) {
-    const { data: activeUsers } = await admin.from('app_users').select('id').eq('active', true).limit(20)
+    const { data: activeUsers } = await admin
+      .from('app_users')
+      .select('id')
+      .eq('active', true)
+      .eq('takes_leads', true)
+      .limit(20)
     ownerCandidates = (activeUsers ?? []).map((r) => String(r.id))
   }
   if (ownerCandidates.length === 0) {
