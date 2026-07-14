@@ -874,6 +874,7 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
           entrega: ((l.custom_fields as Record<string, unknown> | undefined)?.entrega as {
             cep?: string; numero?: string; complemento?: string; bairro?: string; logradouro?: string; cidade?: string; uf?: string; delivery_mode?: string
           }) ?? undefined,
+          saleDateISO: (p.paid_at != null ? String(p.paid_at) : (p.created_at != null ? String(p.created_at) : undefined)),
         })
         await admin.from('asaas_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', localId)
         receiptBlingId = out.orderId ?? null

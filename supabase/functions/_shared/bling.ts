@@ -495,6 +495,13 @@ export async function blingCreateSaleOrder(
     items?: Array<{ id?: unknown; nome?: unknown; qty?: unknown; precoCents?: unknown; kit?: unknown }>
     /** Venda AVULSA (sem kit): descrição livre do item (ex.: "Tricopill + Shampoo"). */
     description?: string
+    /**
+     * Data/hora REAL da venda (ISO, ex.: paid_at do pagamento). O pedido no Bling herda ESTA
+     * data (no fuso de Brasília), não a de criação do pedido. Sem isto, um pedido criado depois
+     * (ex.: religado quando o endereço completa no dia seguinte) saía com a data errada
+     * (caso João Guerreiro: venda 09/07, pedido criado 10/07 → Bling marcava 10/07).
+     */
+    saleDateISO?: string
     /** Força a quantidade de frascos (ex.: envio de assinatura = 1 ou 3). Ignora o mapa de kit. */
     bottlesOverride?: number
     /** Endereço de entrega capturado p/ completar o contato (NF-e) + modalidade da venda. */
@@ -600,17 +607,46 @@ export async function blingCreateSaleOrder(
     ? cartItens
     : [{ produto: { id: Number(productId) || productId }, descricao: itemDescricao, quantidade: bottles, valor: valorUnit }]
 
+  // ACRÉSCIMO (pago MAIOR que os itens): juros do parcelado no cartão. O total cobrado do
+  // cliente (produtoReais) fica ACIMA do preço de tabela dos itens. Antes a diferença era
+  // simplesmente descartada e o pedido saía menor que o recebido (caso João Guerreiro 09/07:
+  // pedido R$697,00 vs cartão R$707,55), quebrando a NF-e (a nota precisa do valor EXATO da
+  // venda). Correção: rateia o acréscimo nos itens (proporcional; o último absorve o resíduo do
+  // arredondamento) para que a soma feche EXATAMENTE no valor cobrado — assim o pedido E a NF-e
+  // saem no valor certo. Simétrico ao desconto do Pix logo abaixo.
+  {
+    const itensTotalAntes = itens.reduce((s, x) => s + (Number(x.valor) || 0) * (Number(x.quantidade) || 1), 0)
+    if (itensTotalAntes > 0 && produtoReais - itensTotalAntes > 0.05) {
+      const fator = produtoReais / itensTotalAntes
+      let acc = 0
+      itens.forEach((it, idx) => {
+        const q = Number(it.quantidade) || 1
+        if (idx < itens.length - 1) {
+          it.valor = Math.round((Number(it.valor) || 0) * fator * 100) / 100
+          acc += it.valor * q
+        } else {
+          // Último item fecha a conta: valor unitário = (total − já acumulado) / quantidade.
+          it.valor = Math.round(((produtoReais - acc) / q) * 100) / 100
+        }
+      })
+    }
+  }
+
   // Desconto do pedido: itens do CARRINHO vêm com preço CHEIO de tabela, mas o valor PAGO
   // (produtoReais) pode ser menor (Pix 5% off do site, cupom). Sem registrar a diferença como
   // desconto, o pedido no Bling sai MAIOR que o recebido e trava a conferência do financeiro
   // (caso Thiago 03/07: pedido R$999,00 vs Pix pago R$949,05). Pago MAIOR que os itens (juros
-  // de cartão embutidos no total) não vira desconto negativo.
+  // de cartão) já foi rateado nos itens acima, então aqui descontoReais fica ~0.
   const itensTotalReais = itens.reduce((s, x) => s + (Number(x.valor) || 0) * (Number(x.quantidade) || 1), 0)
   const descontoReais = Math.round((itensTotalReais - produtoReais) * 100) / 100
 
   // Data do pedido (YYYY-MM-DD, fuso de Maringá/Brasília). O Bling EXIGE `data` —
-  // sem ela recusa com "A data para geração das parcelas é inválida".
-  const dataPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
+  // sem ela recusa com "A data para geração das parcelas é inválida". Usa a data REAL da venda
+  // (saleDateISO, ex.: paid_at) quando informada; senão, o momento atual. Assim um pedido criado
+  // depois da venda (religamento por endereço, retry, cron) ainda sai com a data da venda.
+  const saleDate = args.saleDateISO ? new Date(args.saleDateISO) : null
+  const dataBase = saleDate && !isNaN(saleDate.getTime()) ? saleDate : new Date()
+  const dataPedido = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(dataBase)
   // Observações: nome do cliente + MODALIDADE de entrega (a equipe de logística lê aqui no
   // Bling). Na entrega local da equipe, inclui o endereço operacional (rua, nº, compl., bairro).
   const modeLabels: Record<string, string> = {

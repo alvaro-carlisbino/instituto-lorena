@@ -194,6 +194,9 @@ export type RedeIntent = {
   discountCents?: number
   freightCents?: number
   items?: Array<Record<string, unknown>> | null
+  /** Momento do pagamento (ISO) → data da venda no pedido do Bling. Fallback: createdAt. */
+  paidAt?: string | null
+  createdAt?: string | null
 }
 
 function shortId(): string {
@@ -392,7 +395,7 @@ export async function createRedePix(
 export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<RedeIntent | null> {
   const { data } = await admin
     .from('rede_payments')
-    .select('id, tenant_id, lead_id, amount_cents, freight_cents, description, installments, status, coupon_code, discount_cents, kit, bling_order_id, method, customer_name, customer_doc, phone, items')
+    .select('id, tenant_id, lead_id, amount_cents, freight_cents, description, installments, status, coupon_code, discount_cents, kit, bling_order_id, method, customer_name, customer_doc, phone, items, paid_at, created_at')
     .eq('id', id)
     .maybeSingle()
   if (!data) return null
@@ -415,6 +418,8 @@ export async function getRedeIntent(admin: SupabaseClient, id: string): Promise<
     discountCents: Math.max(0, Math.round(Number(r.discount_cents ?? 0))),
     freightCents: Math.max(0, Math.round(Number(r.freight_cents ?? 0))),
     items: Array.isArray(r.items) ? (r.items as Array<Record<string, unknown>>) : null,
+    paidAt: r.paid_at != null ? String(r.paid_at) : null,
+    createdAt: r.created_at != null ? String(r.created_at) : null,
   }
 }
 
@@ -559,6 +564,7 @@ export async function finalizeRedePaid(
             description: orderKit ? undefined : String(intent.description ?? 'Pedido Tricopill').trim(),
             customerName: String(intent.customerName || opts.cardholderName || 'Cliente Tricopill').trim(),
             cpf: intent.customerDoc || undefined,
+            saleDateISO: intent.paidAt || intent.createdAt || undefined,
           })
           await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
           receiptBlingId = out.orderId ?? null
@@ -687,6 +693,7 @@ export async function finalizeRedePaid(
               cep?: string; numero?: string; complemento?: string
               bairro?: string; logradouro?: string; cidade?: string; uf?: string; delivery_mode?: string
             }) ?? undefined,
+            saleDateISO: intent.paidAt || intent.createdAt || undefined,
           })
           await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
           receiptBlingId = out.orderId ?? null
