@@ -931,17 +931,20 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
     ].filter(Boolean).join(' - ')
     const mode = String(entrega.delivery_mode ?? '').trim()
     if (mode === 'retirada_clinica' || mode === 'entrega_local_maringa') {
-      // Force (fluxo sem NENHUM evento de ME, ex.: cartão do site): registra a nota
-      // operacional UMA vez — a equipe precisa saber que é entrega interna/retirada.
-      if (force && !lastContent) {
-        await insertInteraction(admin, {
-          leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system',
-          author: 'Logística',
-          content: mode === 'retirada_clinica'
-            ? '🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)'
-            : `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`,
-          tenantId: String(l.tenant_id ?? 'tricopill'),
-        })
+      // Force (fluxo sem etiqueta, ex.: cartão do site ou pedido que passou a ter endereço):
+      // registra a nota operacional pra equipe saber que é entrega interna/retirada. Loga só
+      // se DIFERE do último evento — assim substitui um skip velho ("sem CEP capturado") sem
+      // repetir a mesma nota a cada execução.
+      if (force) {
+        const note = mode === 'retirada_clinica'
+          ? '🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)'
+          : `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`
+        if (note !== lastContent) {
+          await insertInteraction(admin, {
+            leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system',
+            author: 'Logística', content: note, tenantId: String(l.tenant_id ?? 'tricopill'),
+          })
+        }
       }
       return
     }
@@ -1027,8 +1030,10 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
         ? `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
         : `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}) — gerado após o endereço ser completado. Finalize a compra no painel.`
     } else if (ship.reason === 'entrega_local_maringa' || ship.reason === 'retirada_clinica') {
-      // Rede de segurança do autoShipToCart (cidade da praça local sem delivery_mode).
-      if (force && !lastContent) {
+      // Rede de segurança do autoShipToCart (cidade da praça local inferida pelo CEP, sem
+      // delivery_mode explícito). Sob force, loga a nota — o guard final (content !== lastContent)
+      // substitui um skip velho sem repetir a mesma nota.
+      if (force) {
         author = 'Logística'
         content = ship.reason === 'retirada_clinica'
           ? '🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)'
