@@ -1034,6 +1034,7 @@ Deno.serve(async (req) => {
     const zaiMaxAttempts = Math.max(1, Math.min(5, Number(Deno.env.get('ZAI_MAX_ATTEMPTS') ?? '') || 3))
     let reply = ''
     let zaiFailReason = ''
+    let zaiErrorCode = '' // código de erro do z.ai (1302=concorrência, 1113=sem saldo) p/ o caller decidir
     let retryable = false
     for (let attempt = 0; attempt < zaiMaxAttempts; attempt++) {
       let retryAfterMs = 0
@@ -1066,6 +1067,7 @@ Deno.serve(async (req) => {
           if (reply) break
           if (!zaiFailReason) {
             zaiFailReason = 'empty_reply'
+            zaiErrorCode = zaiErrorCode || 'empty'
             console.warn('crm-ai-assistant zai_empty_reply', {
               model,
               leadId: context.leadId ?? null,
@@ -1085,6 +1087,15 @@ Deno.serve(async (req) => {
           zaiFailReason = `status=${zaiRes.status}`
           // 429 (rate-limit) e 5xx são transitórios → retentar. 4xx (exceto 429) não.
           retryable = zaiRes.status === 429 || zaiRes.status >= 500
+          // Código de erro do z.ai no corpo: 1302 = limite de requisições simultâneas (limpa
+          // sozinho em segundos), 1113 = SEM SALDO (não limpa com retry — precisa recarregar).
+          try {
+            const parsedErr = JSON.parse(zaiText) as { error?: { code?: unknown } }
+            const c = parsedErr?.error?.code
+            if (c != null && String(c).trim()) zaiErrorCode = String(c).trim()
+          } catch { /* corpo não-JSON (ex.: HTML do 502) */ }
+          if (!zaiErrorCode && zaiRes.status >= 500) zaiErrorCode = '5xx'
+          if (zaiErrorCode === '1113') retryable = false // sem saldo: parar de retentar (inútil) e sinalizar
           if (zaiRes.status === 429) {
             const ra = Number(zaiRes.headers.get('retry-after') ?? '')
             retryAfterMs = Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 8000) : 0
@@ -1100,6 +1111,7 @@ Deno.serve(async (req) => {
       } catch (e) {
         // timeout (AbortSignal) ou erro de rede — transitório, vale retentar.
         zaiFailReason = `exception:${e instanceof Error ? e.message : String(e)}`
+        zaiErrorCode = zaiErrorCode || 'timeout'
         retryable = true
       }
 
@@ -1117,6 +1129,7 @@ Deno.serve(async (req) => {
         error: 'zai_unavailable',
         message: zaiFailReason || 'sem resposta do modelo',
         retryable,
+        code: zaiErrorCode || undefined,
       })
     }
     const rawZaiReply = reply

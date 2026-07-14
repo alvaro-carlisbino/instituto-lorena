@@ -1,6 +1,7 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
 import { insertInteraction } from './crm.ts'
+import { alertOwnerAiOutOfBalance } from './saleReceipt.ts'
 import type { WhatsappProvider } from './whatsapp/types.ts'
 
 /** Mesma convenção do fluxo n8n ManyChat (triagem → consultor humano). */
@@ -520,7 +521,11 @@ export async function invokeCrmAiAssistantForLead(
   aiInboundUserText: string,
   promptOverride: string,
   opts?: { maxAttempts?: number; whatsappInstanceId?: string | null },
-): Promise<{ reply: string; pixQrUrl?: string }> {
+): Promise<{ reply: string; pixQrUrl?: string; failKind?: 'transient' | 'balance' | 'other' }> {
+  // Classifica a falha do z.ai p/ o caller decidir: 'transient' (1302 concorrência / 5xx /
+  // timeout → o cron retenta sozinho, sem mandar desculpa), 'balance' (1113 sem saldo → alerta
+  // o dono), 'other' (vazio persistente / erro não-retentável → mantém o fallback de sempre).
+  let failKind: 'transient' | 'balance' | 'other' | undefined
   const aiMessages = [{ role: 'user', content: aiInboundUserText }]
   const aiCtx: Record<string, unknown> = { leadId, focus: 'lead' }
   const wid = opts?.whatsappInstanceId != null ? String(opts.whatsappInstanceId).trim() : ''
@@ -562,7 +567,15 @@ export async function invokeCrmAiAssistantForLead(
       // Re-invocar aqui só re-roda o snapshot e bate de novo no z.ai na MESMA janela de
       // rate-limit — amplifica o estouro (foi o que pinou 1 lead em ~10 chamadas/5min).
       // Para nesse erro; deixa o burst-flush retentar mais tarde, com a janela já limpa.
-      if (aiObj.error === 'zai_unavailable') break
+      if (aiObj.error === 'zai_unavailable') {
+        const code = String(aiObj.code ?? '')
+        const retry = aiObj.retryable === true
+        failKind = code === '1113' ? 'balance'
+          : code === 'empty' ? 'other' // vazio persistente: mantém fallback/handover (não é capacidade)
+          : retry ? 'transient'
+          : 'other'
+        break
+      }
       if (attempt < attempts - 1) await sleepMs(700 * (attempt + 1))
       continue
     }
@@ -591,7 +604,7 @@ export async function invokeCrmAiAssistantForLead(
     if (attempt < attempts - 1) await sleepMs(500 * (attempt + 1))
   }
 
-  return { reply: '' }
+  return { reply: '', failKind }
 }
 
 /**
@@ -873,6 +886,7 @@ export async function runWhatsappAiAutoReply(
   try {
   let aiReplyRaw = ''
   let pixQrUrl = ''
+  let aiFailKind: 'transient' | 'balance' | 'other' | undefined
   try {
     let resolvedWaInst = options.whatsappInstanceId != null ? String(options.whatsappInstanceId).trim() : ''
     if (!resolvedWaInst) {
@@ -893,6 +907,7 @@ export async function runWhatsappAiAutoReply(
     )
     aiReplyRaw = invokeRes.reply
     pixQrUrl = invokeRes.pixQrUrl ?? ''
+    aiFailKind = invokeRes.failKind
   } catch (e) {
     console.error('runWhatsappAiAutoReply invoke:', e)
   }
@@ -913,6 +928,29 @@ export async function runWhatsappAiAutoReply(
   }
 
   if (!aiReply) {
+    // FALHA DO Z.AI POR CAPACIDADE/SALDO (não por conteúdo): NÃO manda a desculpa "não consegui
+    // responder" — ela viraria a última interação e faria a rede de segurança do cron (que só
+    // retenta quando a última msg é do cliente) desistir da conversa. Em vez disso, deixa a
+    // conversa "presa" (só regrava o inbound) para o cron (a cada 2 min) retentar quando o z.ai
+    // desafogar. 'balance' (sem saldo) também alerta o dono, pois não limpa sozinho.
+    if (aiFailKind === 'transient' || aiFailKind === 'balance') {
+      if (aiFailKind === 'balance') {
+        const { data: lr } = await admin.from('leads').select('tenant_id').eq('id', options.leadId).maybeSingle()
+        const tId = String((lr as { tenant_id?: string } | null)?.tenant_id ?? '').trim()
+        if (tId) await alertOwnerAiOutOfBalance(admin, tId).catch(() => {})
+      }
+      await upsertConversationStateInboundOnly(admin, {
+        leadId: options.leadId,
+        ownerMode: options.ownerMode,
+        aiEnabled: options.aiEnabled,
+        inboundHappenedAt: options.inboundHappenedAt,
+      })
+      console.warn('runWhatsappAiAutoReply: z.ai indisponível — sem desculpa, cron retenta', {
+        leadId: options.leadId,
+        failKind: aiFailKind,
+      })
+      return { replied: false }
+    }
     // Falha consecutiva no WhatsApp também: 2º fallback seguido → handover defensivo (desliga a
     // IA, manda mensagem útil e sinaliza handoff). Agora vale TAMBÉM p/ o bot de vendas: quando
     // a IA trava de verdade (2x seguidas), o consultor é chamado em vez de a IA seguir patinando.

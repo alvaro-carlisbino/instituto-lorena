@@ -235,6 +235,34 @@ async function readNotifCfg(admin: SupabaseClient, tenantId: string): Promise<No
 }
 
 /**
+ * Alerta os donos no WhatsApp quando o modelo de IA (z.ai) está SEM SALDO (erro 1113) — o
+ * ÚNICO modo de falha que o retry automático NÃO cura sozinho (precisa recarregar a conta).
+ * Reusa os contatos do comprovante de venda (owner_phones + grupo). Dedupe: no máximo 1 alerta
+ * a cada 30 min por tenant (via webhook_jobs). Best-effort — nunca derruba o fluxo do bot.
+ */
+export async function alertOwnerAiOutOfBalance(admin: SupabaseClient, tenantId: string): Promise<void> {
+  const tid = String(tenantId ?? '').trim()
+  if (!tid) return
+  try {
+    const bucket = Math.floor(Date.now() / (30 * 60 * 1000))
+    const key = `zai_balance_alert:${tid}:${bucket}`
+    const { data: seen } = await admin.from('webhook_jobs').select('id').eq('note', key).limit(1).maybeSingle()
+    if (seen) return
+    await admin.from('webhook_jobs').insert({ source: 'crm-ai-balance-alert', status: 'done', note: key })
+    const cfg = await readNotifCfg(admin, tid)
+    const text =
+      '🚨 Bot fora do ar: a conta do modelo de IA (z.ai) está SEM SALDO (erro 1113). ' +
+      'Os clientes estão sem resposta automática. Recarregue a conta para o bot voltar a responder.'
+    const phones = Array.isArray(cfg.sales_receipt_owner_phones) ? cfg.sales_receipt_owner_phones.filter(Boolean) : []
+    for (const ph of phones) {
+      try { await sendWapiDirectText(admin, tid, String(ph), text) } catch { /* best-effort */ }
+    }
+    const jid = String(cfg.sales_receipt_group_jid ?? '').trim()
+    if (jid) { try { await sendWapiGroupText(admin, tid, jid, text) } catch { /* best-effort */ } }
+  } catch { /* alerta nunca derruba o bot */ }
+}
+
+/**
  * Grava o grupo que recebe os comprovantes do tenant (chamado pelo crm-wapi-webhook
  * quando alguém manda "#comprovantes" no grupo).
  */

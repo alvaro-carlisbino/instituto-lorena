@@ -43,7 +43,7 @@ async function deliverAiReply(
   admin: Admin,
   lead: FlushLead,
   args: { text: string; inboundHappenedAt: string; ownerMode: string; aiJobSource: string },
-): Promise<void> {
+): Promise<{ replied: boolean }> {
   const instRow = await loadWapiInstanceByRowId(admin, String(lead.whatsapp_instance_id))
   if (!instRow) throw new Error('instance_not_found')
   const provider = createWapiProviderForRow(instRow)
@@ -60,7 +60,7 @@ async function deliverAiReply(
     (config as { system_prompt?: string } | null)?.system_prompt ?? '',
   ).trim()
 
-  await runWhatsappAiAutoReply(admin, {
+  const res = await runWhatsappAiAutoReply(admin, {
     leadId: lead.id,
     patientName: String(lead.patient_name ?? 'Cliente'),
     fromPhone: String(lead.phone ?? ''),
@@ -74,6 +74,7 @@ async function deliverAiReply(
     keepAiOn: isSalesBot,
     burstFlush: true,
   })
+  return { replied: (res as { replied?: boolean } | undefined)?.replied !== false }
 }
 
 Deno.serve(async (req) => {
@@ -224,14 +225,22 @@ Deno.serve(async (req) => {
       .select('id').maybeSingle()
 
     try {
-      await deliverAiReply(admin, lead, {
+      const res = await deliverAiReply(admin, lead, {
         text,
         inboundHappenedAt: lastInboundAt || nowIso(),
         ownerMode: String((row as { owner_mode?: string }).owner_mode ?? 'auto'),
         aiJobSource: 'burst-flush-stuck',
       })
-      recovered++
-      stuckResults.push({ leadId, status: 'recovered' })
+      if (!res.replied) {
+        // z.ai indisponível (rate-limit/sem saldo): NÃO respondeu e NÃO mandou desculpa. Libera o
+        // claim p/ o cron retentar na próxima rodada (a cada 2 min), até o z.ai voltar.
+        const claimId = (claimRow as { id?: string | number } | null)?.id
+        if (claimId !== undefined) await admin.from('webhook_jobs').delete().eq('id', claimId)
+        stuckResults.push({ leadId, status: 'retry_later' })
+      } else {
+        recovered++
+        stuckResults.push({ leadId, status: 'recovered' })
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       console.error(`[burst-flush:stuck] lead=${leadId}:`, msg)
