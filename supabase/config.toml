@@ -464,3 +464,8 @@ verify_jwt = false
 # assinado via X-Hub-Signature-256 (validado no handler) — nunca com JWT do Supabase.
 [functions.crm-meta-leadform-webhook]
 verify_jwt = false
+
+# Religa o envio de pagos órfãos (endereço completado no painel). Chamada interna/manual
+# guardada por header x-reship-secret == RESHIP_SECRET no handler (sem JWT de usuário).
+[functions.crm-reship]
+verify_jwt = false
