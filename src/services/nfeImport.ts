@@ -23,7 +23,20 @@ export type NfeItemPlan = {
   /** 'novo' cria stock_item; id existente dá entrada nele; 'ignorar' pula (item que não é estoque) */
   action: 'novo' | 'existente' | 'ignorar'
   matchedItemId: string | null
+  /** Como a sugestão casou com o estoque (pra mostrar na tela). null = não casou / manual. */
+  matchedBy: 'ean' | 'sku' | 'nome' | null
 }
+
+const onlyDigitsStr = (v: string | null | undefined) => String(v ?? '').replace(/\D/g, '')
+/** Normaliza nome pra comparar: minúsculo, sem acento, espaços colapsados. */
+const normalizeName = (v: string | null | undefined) =>
+  String(v ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+const normalizeCode = (v: string | null | undefined) => String(v ?? '').trim().toLowerCase()
 
 export type NfeImportPlan = {
   createSupplier: boolean
@@ -32,14 +45,35 @@ export type NfeImportPlan = {
   itemsPlan: NfeItemPlan[]
 }
 
-/** Sugere o casamento de cada item da NF com o estoque existente (por nome exato, senão “novo”). */
+/**
+ * Sugere o casamento de cada item da NF com o estoque existente. O fornecedor quase nunca
+ * usa o mesmo nome/código que a gente, então casa em cascata pela chave mais confiável:
+ *   1) EAN/GTIN (cEAN da nota × barcode do item) — chave global, não muda de fornecedor;
+ *   2) SKU (cProd da nota × sku do item) — código próprio, quando o fornecedor repete o nosso;
+ *   3) nome normalizado (sem acento/maiúscula/espaço duplo) — última tentativa.
+ * Sem casar → 'novo'. O usuário revê e pode conectar manualmente na tela.
+ */
 export function suggestItemPlan(nfe: NfeParsed, stock: StockItem[]): NfeItemPlan[] {
-  const byName = new Map(stock.map((s) => [s.name.trim().toLowerCase(), s.id] as const))
+  const byEan = new Map<string, string>()
+  const bySku = new Map<string, string>()
+  const byName = new Map<string, string>()
+  for (const s of stock) {
+    const ean = onlyDigitsStr(s.barcode)
+    if (ean.length >= 8 && !byEan.has(ean)) byEan.set(ean, s.id)
+    const sku = normalizeCode(s.sku)
+    if (sku && !bySku.has(sku)) bySku.set(sku, s.id)
+    const name = normalizeName(s.name)
+    if (name && !byName.has(name)) byName.set(name, s.id)
+  }
   return nfe.items.map((item, index) => {
-    const match = byName.get(item.description.trim().toLowerCase())
-    return match
-      ? { index, action: 'existente' as const, matchedItemId: match }
-      : { index, action: 'novo' as const, matchedItemId: null }
+    const ean = onlyDigitsStr(item.ean)
+    const eanHit = ean.length >= 8 ? byEan.get(ean) : undefined
+    if (eanHit) return { index, action: 'existente' as const, matchedItemId: eanHit, matchedBy: 'ean' as const }
+    const skuHit = item.supplierCode ? bySku.get(normalizeCode(item.supplierCode)) : undefined
+    if (skuHit) return { index, action: 'existente' as const, matchedItemId: skuHit, matchedBy: 'sku' as const }
+    const nameHit = byName.get(normalizeName(item.description))
+    if (nameHit) return { index, action: 'existente' as const, matchedItemId: nameHit, matchedBy: 'nome' as const }
+    return { index, action: 'novo' as const, matchedItemId: null, matchedBy: null }
   })
 }
 

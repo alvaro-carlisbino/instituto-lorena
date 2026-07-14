@@ -66,7 +66,7 @@ export function ChatWorkspacePage({
   const [modeLoading, setModeLoading] = useState(false)
   const [leadSheetOpen, setLeadSheetOpen] = useState(false)
   const [unreadOnly, setUnreadOnly] = useState(false)
-  const { isUnread, unreadCount, markSeen, markUnread } = useUnreadConversations(crm.interactions)
+  const { isUnread, markSeen, markUnread } = useUnreadConversations(crm.interactions)
   // Ids das linhas de WhatsApp do tipo `restrictToBotKind` (ex.: vendas/Tricopill).
   // null = ainda carregando; Set vazio = nenhuma linha desse tipo configurada.
   const [restrictInstanceIds, setRestrictInstanceIds] = useState<Set<string> | null>(null)
@@ -172,6 +172,26 @@ export function ChatWorkspacePage({
       return new Date(bh).getTime() - new Date(ah).getTime()
     })
   }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread, tenant.id])
+
+  // Contador do selo "Não lidas" com o MESMO escopo da lista (workspace/tenant + linha
+  // de bot + responsável) — só sem o filtro de texto e o próprio toggle. O `unreadCount`
+  // do hook conta sobre TODAS as interactions (os 2 polos, todas as linhas), então mostrava
+  // um número que não batia com a lista: o selo tinha "3" mas clicar em "Não lidas" trazia
+  // lista vazia porque as não lidas eram de outro polo/linha (ou forçadas em localStorage
+  // de leads que nem estão carregados aqui).
+  const scopedUnreadCount = useMemo(() => {
+    let n = 0
+    for (const lead of crm.leads) {
+      if (lead.tenantId && lead.tenantId !== tenant.id) continue
+      if (restrictToBotKind) {
+        if (!restrictInstanceIds) continue
+        if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) continue
+      }
+      if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) continue
+      if (isUnread(lead.id)) n += 1
+    }
+    return n
+  }, [crm.leads, tenant.id, restrictToBotKind, restrictInstanceIds, ownerFilter, isUnread])
 
   const activeLead = crm.selectedLead ?? conversations[0] ?? null
   const waComposeBlocked = activeLead ? isLeadWhatsappComposeBlocked(activeLead) : false
@@ -324,14 +344,14 @@ export function ChatWorkspacePage({
                   <Mail className="size-3.5" />
                   {unreadOnly ? 'Só não lidas' : 'Não lidas'}
                 </span>
-                {unreadCount > 0 ? (
+                {scopedUnreadCount > 0 ? (
                   <span
                     className={cn(
                       'inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums',
                       unreadOnly ? 'bg-primary-foreground text-primary' : 'bg-primary text-primary-foreground',
                     )}
                   >
-                    {unreadCount > 99 ? '99+' : unreadCount}
+                    {scopedUnreadCount > 99 ? '99+' : scopedUnreadCount}
                   </span>
                 ) : null}
               </Button>

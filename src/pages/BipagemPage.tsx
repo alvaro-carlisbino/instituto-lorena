@@ -348,9 +348,24 @@ export function BipagemPage() {
                     }
                   }}
                   onBlur={() => {
-                    // devolve o foco pro campo (o leitor digita onde o cursor estiver),
-                    // menos quando um dialog está aberto
-                    if (!dialogOpen) window.setTimeout(() => scanRef.current?.focus(), 120)
+                    // O leitor USB digita onde o cursor estiver, então este campo segura o
+                    // foco. MAS só devolve o foco quando ninguém está usando outro campo —
+                    // senão clicar em Motivo/Paciente/Qtd/Lote perde o foco na hora (o campo
+                    // "desseleciona"). Passados os 120ms, se o foco já está num input/botão/
+                    // select da tela, respeita: o operador está digitando lá.
+                    if (dialogOpen) return
+                    window.setTimeout(() => {
+                      const active = document.activeElement as HTMLElement | null
+                      if (
+                        active &&
+                        active !== document.body &&
+                        active !== scanRef.current &&
+                        active.closest('input, textarea, select, button, [role="combobox"], [contenteditable="true"]')
+                      ) {
+                        return
+                      }
+                      scanRef.current?.focus()
+                    }, 120)
                   }}
                   placeholder="Bipe com o leitor…"
                   inputMode="numeric"

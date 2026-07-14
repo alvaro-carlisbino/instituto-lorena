@@ -652,6 +652,18 @@ export function ContasPagarPage() {
                 <div className="space-y-1.5">
                   {nfe.items.map((item, index) => {
                     const plan = nfePlan[index]
+                    const matchedItem =
+                      plan?.action === 'existente' && plan.matchedItemId
+                        ? stockItems.find((s) => s.id === plan.matchedItemId) ?? null
+                        : null
+                    const matchLabel =
+                      plan?.matchedBy === 'ean'
+                        ? 'casou por código de barras'
+                        : plan?.matchedBy === 'sku'
+                          ? 'casou por SKU'
+                          : plan?.matchedBy === 'nome'
+                            ? 'casou por nome'
+                            : null
                     return (
                       <div key={index} className="rounded-md border border-border p-2.5 text-sm">
                         <div className="flex items-start justify-between gap-2">
@@ -659,9 +671,18 @@ export function ContasPagarPage() {
                             <div className="font-medium">{item.description}</div>
                             <div className="text-xs text-muted-foreground">
                               {item.qty} {item.unit} · {formatBRL(item.unitCostCents)}/un
+                              {item.ean ? ` · EAN ${item.ean}` : ''}
+                              {item.supplierCode ? ` · cód. ${item.supplierCode}` : ''}
                               {item.lotCode ? ` · lote ${item.lotCode}` : ''}
                               {item.expiresOn ? ` · val. ${formatDay(item.expiresOn)}` : ''}
                             </div>
+                            {matchedItem ? (
+                              <div className="mt-0.5 text-xs text-emerald-600">
+                                ↳ dá entrada em: {matchedItem.name}
+                                {matchedItem.sku ? ` (SKU ${matchedItem.sku})` : ''}
+                                {matchLabel ? ` · ${matchLabel}` : ' · manual'}
+                              </div>
+                            ) : null}
                           </div>
                           <Select
                             value={plan?.action === 'existente' ? (plan.matchedItemId ?? 'novo') : (plan?.action ?? 'novo')}
@@ -670,16 +691,16 @@ export function ContasPagarPage() {
                                 prev.map((p, j) =>
                                   j === index
                                     ? v === 'novo'
-                                      ? { index, action: 'novo', matchedItemId: null }
+                                      ? { index, action: 'novo', matchedItemId: null, matchedBy: null }
                                       : v === 'ignorar'
-                                        ? { index, action: 'ignorar', matchedItemId: null }
-                                        : { index, action: 'existente', matchedItemId: v }
+                                        ? { index, action: 'ignorar', matchedItemId: null, matchedBy: null }
+                                        : { index, action: 'existente', matchedItemId: v, matchedBy: null }
                                     : p,
                                 ),
                               )
                             }
                           >
-                            <SelectTrigger className="h-8 w-[160px] shrink-0">
+                            <SelectTrigger className="h-8 w-[180px] shrink-0">
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -688,6 +709,7 @@ export function ContasPagarPage() {
                               {stockItems.map((s) => (
                                 <SelectItem key={s.id} value={s.id}>
                                   ↳ {s.name}
+                                  {s.sku ? ` · SKU ${s.sku}` : s.barcode ? ` · ${s.barcode}` : ''}
                                 </SelectItem>
                               ))}
                             </SelectContent>
