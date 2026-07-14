@@ -7,6 +7,7 @@ import { sendEmail } from './resend.ts'
 import { internalSaleEmail, orderConfirmEmail, TEAM_EMAIL } from './emails.ts'
 import { autoShipToCart } from './melhorEnvio.ts'
 import { sendSaleReceiptToGroup } from './saleReceipt.ts'
+import { dispatchPurchaseConversions } from './conversions.ts'
 
 /**
  * Kits do Tricopill no CARTÃO (e.Rede) — preço CHEIO, sem o desconto de 5% do Pix.
@@ -816,6 +817,18 @@ export async function finalizeRedePaid(
         await sendEmail({ to: TEAM_EMAIL, subject: ie.subject, html: ie.html })
       } catch { /* best-effort: e-mail nunca derruba o pagamento */ }
     } catch { /* best-effort */ }
+
+    // Conversão de COMPRA server-side (funil interno + GA4 + Meta). Captura 100%, PIX incluso.
+    await dispatchPurchaseConversions(admin, {
+      leadId: l.id,
+      valueCents: intent.amountCents,
+      orderId: intent.id,
+      method: opts.method,
+      gateway: 'rede',
+      productName: orderKit ? `Tricopill (${orderKit})` : String(intent.description ?? 'Tricopill'),
+      phone: l.phone,
+      cpf: intent.customerDoc,
+    })
   } catch {
     // best-effort
   }

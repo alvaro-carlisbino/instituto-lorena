@@ -5,6 +5,7 @@ import { blingCreateSaleOrder } from './bling.ts'
 import { autoShipToCart } from './melhorEnvio.ts'
 import { sendEmail } from './resend.ts'
 import { sendSaleReceiptToGroup } from './saleReceipt.ts'
+import { dispatchPurchaseConversions } from './conversions.ts'
 
 // Envia texto pelo WhatsApp (w-api) usando a linha ativa do tenant. Best-effort.
 async function subSendWapi(admin: SupabaseClient, tenantId: string, phone: string, text: string): Promise<boolean> {
@@ -846,6 +847,18 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
     author: 'Asaas',
     content: `💳 Pagamento ${method === 'pix' ? 'Pix' : 'no cartão'} confirmado (Asaas). ${(amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`,
     tenantId: String(l.tenant_id ?? tenantId),
+  })
+
+  // Conversão de COMPRA server-side (funil interno + GA4 + Meta). Captura 100%, PIX incluso.
+  await dispatchPurchaseConversions(admin, {
+    leadId: l.id,
+    valueCents: amountCents,
+    orderId: localId,
+    method,
+    gateway: 'asaas',
+    productName: kit ? `Tricopill (${kit})` : String(p.description ?? 'Tricopill'),
+    phone: l.phone ?? (p.phone != null ? String(p.phone) : null),
+    cpf: p.customer_doc != null ? String(p.customer_doc) : null,
   })
 
   // KIT = produto Tricopill → Bling/ME vivem no tenant 'tricopill'.
