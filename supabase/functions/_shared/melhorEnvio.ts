@@ -1,6 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { isLocalDeliveryCity, isMaringaRegion, resolveCepBrasil } from './cep.ts'
-import { insertInteraction } from './crm.ts'
+import { brPhoneVariants, insertInteraction } from './crm.ts'
 
 /**
  * Melhor Envio — agregador que cota Correios (PAC/SEDEX) e transportadoras SEM exigir
@@ -878,10 +878,24 @@ const RESHIPPABLE_REASONS = new Set(['sem_numero', 'sem_cep', 'sem_rua', 'cep_na
  * Best-effort: nunca lança (o chamador é o webhook de inbound).
  */
 export async function maybeReshipAfterAddressComplete(admin: SupabaseClient, leadId: string): Promise<void> {
+  await reshipLead(admin, leadId, { force: false })
+}
+
+/**
+ * Núcleo do religamento. `force: true` (crm-reship manual / fechamento do cartão do site,
+ * que não deixa NENHUM evento de ME na timeline) dispensa a exigência de um skip retentável
+ * como último evento — mas NUNCA dispensa as provas de envio existente: rastreio no próprio
+ * lead, sucesso de carrinho como último evento, ou rastreio RECENTE num lead irmão de mesmo
+ * telefone (caso Thiago 14/07: skip ficou no lead do site e o envio real saiu no lead
+ * duplicado do WhatsApp — o reship recriou a etiqueta).
+ */
+export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { force?: boolean } = {}): Promise<void> {
   try {
     if (!leadId) return
+    const force = opts.force === true
 
-    // 1. Última interação de envio: só religa se foi um skip retentável (endereço incompleto).
+    // 1. Última interação de envio: sucesso de carrinho nunca repete; sem force, exige
+    //    um skip retentável (endereço incompleto).
     const { data: lastShip } = await admin
       .from('interactions')
       .select('content, author')
@@ -891,9 +905,12 @@ export async function maybeReshipAfterAddressComplete(admin: SupabaseClient, lea
       .limit(1)
       .maybeSingle()
     const lastContent = String((lastShip as { content?: string } | null)?.content ?? '')
-    if (!lastContent) return // nunca tentou enviar por aqui — não inventa envio
-    const m = lastContent.match(/NÃO gerado automaticamente \(([a-z_]+)\)/)
-    if (!m || !RESHIPPABLE_REASONS.has(m[1])) return // já tem envio, é local/retirada, ou skip não-retentável
+    if (/carrinho do Melhor Envio|adicionado ao carrinho/i.test(lastContent)) return // envio já gerado
+    if (!force) {
+      if (!lastContent) return // nunca tentou enviar por aqui — não inventa envio
+      const m = lastContent.match(/NÃO gerado automaticamente \(([a-z_]+)\)/)
+      if (!m || !RESHIPPABLE_REASONS.has(m[1])) return // já tem envio, é local/retirada, ou skip não-retentável
+    }
 
     // 2. Endereço agora completo? (envio externo exige cep+numero; local/retirada não vão pro ME)
     const { data: leadRow } = await admin
@@ -907,11 +924,70 @@ export async function maybeReshipAfterAddressComplete(admin: SupabaseClient, lea
     } | null
     if (!l) return
     const entrega = ((l.custom_fields?.entrega ?? {}) as Record<string, unknown>)
+    const ster = (v: unknown) => String(v ?? '').trim()
+    const endLinha = [
+      [ster(entrega.logradouro), ster(entrega.numero)].filter(Boolean).join(', '),
+      ster(entrega.complemento), ster(entrega.bairro), [ster(entrega.cidade), ster(entrega.uf)].filter(Boolean).join('/'),
+    ].filter(Boolean).join(' - ')
     const mode = String(entrega.delivery_mode ?? '').trim()
-    if (mode === 'retirada_clinica' || mode === 'entrega_local_maringa') return
+    if (mode === 'retirada_clinica' || mode === 'entrega_local_maringa') {
+      // Force (fluxo sem NENHUM evento de ME, ex.: cartão do site): registra a nota
+      // operacional UMA vez — a equipe precisa saber que é entrega interna/retirada.
+      if (force && !lastContent) {
+        await insertInteraction(admin, {
+          leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system',
+          author: 'Logística',
+          content: mode === 'retirada_clinica'
+            ? '🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)'
+            : `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`,
+          tenantId: String(l.tenant_id ?? 'tricopill'),
+        })
+      }
+      return
+    }
+    // Prova de envio existente no PRÓPRIO lead: rastreio/status gravados pelo poller.
+    if (String(entrega.tracking ?? '').trim()) return
+    if (['enviado', 'postado', 'entregue'].includes(String(entrega.status ?? '').trim())) return
     const cep = onlyDigitsStr(entrega.cep ?? entrega.postalCode)
     const numero = String(entrega.numero ?? entrega.number ?? '').trim()
-    if (cep.length !== 8 || !numero) return // ainda incompleto — espera a próxima mensagem
+    // Sem force: espera a próxima mensagem completar o endereço. Com force, segue até o
+    // autoShipToCart pra REGISTRAR o skip padrão (sem_cep/sem_numero) — é esse evento que
+    // permite o religamento automático quando o cliente mandar o endereço depois.
+    if (!force && (cep.length !== 8 || !numero)) return
+
+    // 2.5. Lead irmão (mesmo telefone ±55/±9º dígito) com rastreio RECENTE = mesmo pedido já
+    //      enviado por outro cadastro (dup site×WhatsApp). Janela de 14 dias pra não bloquear
+    //      recompra legítima meses depois. Registra o motivo pra virar o "último evento" e
+    //      encerrar novas tentativas.
+    if (l.phone) {
+      const variants = brPhoneVariants(String(l.phone))
+      if (variants.length) {
+        const { data: sibs } = await admin
+          .from('leads')
+          .select('id, patient_name, custom_fields')
+          .in('phone', variants)
+          .neq('id', l.id)
+          .limit(10)
+        for (const sRow of (sibs ?? []) as Array<{ id: string; patient_name?: string; custom_fields?: Record<string, unknown> }>) {
+          const sEnt = ((sRow.custom_fields?.entrega ?? {}) as Record<string, unknown>)
+          const sTracking = String(sEnt.tracking ?? '').trim()
+          if (!sTracking) continue
+          const upd = Date.parse(String(sEnt.tracking_updated_at ?? ''))
+          const recent = Number.isFinite(upd) && Date.now() - upd < 14 * 24 * 60 * 60 * 1000
+          if (!recent) continue
+          await insertInteraction(admin, {
+            leadId: l.id,
+            patientName: String(l.patient_name ?? 'Cliente'),
+            channel: 'system',
+            direction: 'system',
+            author: 'Melhor Envio',
+            content: `📦 Envio NÃO recriado: rastreio ${sTracking} já existe no lead ${String(sRow.patient_name ?? sRow.id)} (mesmo telefone). Se for outro pedido, gere pelo botão.`,
+            tenantId: String(l.tenant_id ?? 'tricopill'),
+          })
+          return
+        }
+      }
+    }
 
     // 3. Pedido PAGO do lead (kit/valor p/ a etiqueta). Kits/vendas Tricopill vivem no tenant
     //    'tricopill'. Rede (site) OU Asaas — o mais recente pago.
@@ -941,16 +1017,31 @@ export async function maybeReshipAfterAddressComplete(admin: SupabaseClient, lea
       productValueCents,
     })
 
-    // 5. Timeline: só registra sucesso ou uma nova falha REAL (não repete o mesmo skip de
-    //    endereço, que aqui já não deveria acontecer). Sem isso a idempotência não fecha.
+    // 5. Timeline: registra sucesso ou falha nova (nunca repete o mesmo evento — é o
+    //    "último evento" que fecha a idempotência). No force, os skips retentáveis também
+    //    são registrados no formato padrão pra habilitar o religamento automático depois.
     let content: string | null = null
-    if (ship.ok) content = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}) — gerado após o endereço ser completado. Finalize a compra no painel.`
-    else if (ship.reason && !RESHIPPABLE_REASONS.has(ship.reason) && ship.reason !== 'entrega_local_maringa' && ship.reason !== 'retirada_clinica') {
+    let author = 'Melhor Envio'
+    if (ship.ok) {
+      content = force
+        ? `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
+        : `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}) — gerado após o endereço ser completado. Finalize a compra no painel.`
+    } else if (ship.reason === 'entrega_local_maringa' || ship.reason === 'retirada_clinica') {
+      // Rede de segurança do autoShipToCart (cidade da praça local sem delivery_mode).
+      if (force && !lastContent) {
+        author = 'Logística'
+        content = ship.reason === 'retirada_clinica'
+          ? '🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)'
+          : `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`
+      }
+    } else if (ship.reason && !RESHIPPABLE_REASONS.has(ship.reason)) {
       content = `📦 Envio ainda não gerado (${ship.reason}) mesmo com o endereço completo. Gere pelo botão.`
+    } else if (force && ship.reason) {
+      content = `📦 Envio NÃO gerado automaticamente (${ship.reason}). Gere pelo botão se for envio externo.`
     }
-    if (content) {
+    if (content && content !== lastContent) {
       await insertInteraction(admin, {
-        leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author: 'Melhor Envio', content, tenantId: blingTenant,
+        leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author, content, tenantId: blingTenant,
       })
     }
   } catch { /* nunca derruba o inbound por causa do religamento de envio */ }

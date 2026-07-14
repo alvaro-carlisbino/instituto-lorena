@@ -11,12 +11,15 @@
  * Auth: chamada interna/manual — header `x-reship-secret` == env RESHIP_SECRET.
  * (verify_jwt=false no config.toml; a trava é o secret no handler.)
  *
- * Body: { "leadIds": ["lead-...", ...] }
+ * Body: { "leadIds": ["lead-...", ...], "force"?: boolean }
+ * `force: true` dispensa a exigência de skip retentável na timeline — pra leads pagos SEM
+ * nenhum evento de ME (cartão do site, caso Roberta 14/07). As provas de envio existente
+ * (rastreio no lead, carrinho já gerado, rastreio recente em lead irmão) continuam valendo.
  * Resposta: { ok, results: [{ leadId, lastShip }] } com o último evento de envio
  * de cada lead após a tentativa (pra confirmar se foi pro carrinho ou o motivo).
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { maybeReshipAfterAddressComplete } from '../_shared/melhorEnvio.ts'
+import { reshipLead } from '../_shared/melhorEnvio.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -50,12 +53,13 @@ Deno.serve(async (req) => {
     ? (p.leadIds as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean)
     : []
   if (!leadIds.length) return json({ error: 'missing_leadIds' }, 400)
+  const force = p.force === true
 
   const admin = createClient(supabaseUrl, serviceRole)
   const results: Array<{ leadId: string; lastShip: string | null }> = []
   for (const leadId of leadIds) {
     try {
-      await maybeReshipAfterAddressComplete(admin, leadId)
+      await reshipLead(admin, leadId, { force })
     } catch (e) {
       results.push({ leadId, lastShip: `erro: ${e instanceof Error ? e.message : String(e)}` })
       continue

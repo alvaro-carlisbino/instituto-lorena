@@ -53,7 +53,7 @@ function normalizePhone(value: string): string {
 // o 9º dígito do celular. O site grava "44999161834" (sem 55); o WhatsApp manda
 // "554499161834" (com 55, sem o 9). Sem isso, o inbound não acha o lead do pedido e
 // DUPLICA o contato (caso Eder 07/jul). Mantém o DDD fixo → risco de colisão desprezível.
-function brPhoneVariants(raw: string): string[] {
+export function brPhoneVariants(raw: string): string[] {
   let d = digitsOnly(raw)
   if (d.length >= 12 && d.startsWith('55')) d = d.slice(2)
   if (d.length < 10) return d ? [d] : []
