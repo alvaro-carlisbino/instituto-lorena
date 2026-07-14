@@ -57,13 +57,16 @@ type PurchaseInput = {
   cpf?: string | null
 }
 
-function pickAttr(cf: Record<string, unknown>): { gclid?: string; fbclid?: string } {
+function pickAttr(cf: Record<string, unknown>): { gclid?: string; fbclid?: string; gaClientId?: string; gaSessionId?: string } {
   const attr = (cf.attribution ?? {}) as Record<string, unknown>
   const first = (attr.first ?? {}) as Record<string, unknown>
   const last = (attr.last ?? {}) as Record<string, unknown>
+  const ga = (attr.ga ?? {}) as Record<string, unknown>
   const gclid = String(first.gclid ?? last.gclid ?? attr.gclid ?? '').trim() || undefined
   const fbclid = String(first.fbclid ?? last.fbclid ?? attr.fbclid ?? '').trim() || undefined
-  return { gclid, fbclid }
+  const gaClientId = String(ga.client_id ?? '').trim() || undefined
+  const gaSessionId = String(ga.session_id ?? '').trim() || undefined
+  return { gclid, fbclid, gaClientId, gaSessionId }
 }
 
 /** fbc a partir do fbclid (Meta aceita este formato quando não há cookie _fbc). */
@@ -103,7 +106,7 @@ export async function dispatchPurchaseConversions(admin: SupabaseClient, input: 
     if (origin !== 'site') return
     const cad = (cf.cadastro ?? {}) as Record<string, unknown>
     const ent = (cf.entrega ?? {}) as Record<string, unknown>
-    const { gclid, fbclid } = pickAttr(cf)
+    const { gclid, fbclid, gaClientId, gaSessionId } = pickAttr(cf)
 
     const email = String(input.email ?? cf.email ?? cad.email ?? '').trim().toLowerCase()
     const phone = phoneE164BR(input.phone ?? lead.phone ?? cad.telefone ?? ent.telefone)
@@ -144,14 +147,17 @@ export async function dispatchPurchaseConversions(admin: SupabaseClient, input: 
       const userData: Record<string, unknown> = {}
       if (email) userData.sha256_email_address = await sha256Hex(email)
       if (phone) userData.sha256_phone_number = await sha256Hex(phone)
+      // client_id do GA4 capturado no checkout (costura o PIX à sessão do clique). Sem ele,
+      // cai no id de sessão do funil ou num sintético (conta, mas atribui a "direct").
       const body = {
-        client_id: sessionId,
+        client_id: gaClientId ?? sessionId,
         events: [{
           name: 'purchase',
           params: {
             currency: 'BRL',
             value: valueReais,
             transaction_id: input.orderId,
+            ...(gaSessionId ? { session_id: gaSessionId } : {}),
             items: [{ item_name: input.productName ?? 'Tricopill', quantity: 1, price: valueReais }],
             ...(gclid ? { gclid } : {}),
           },
