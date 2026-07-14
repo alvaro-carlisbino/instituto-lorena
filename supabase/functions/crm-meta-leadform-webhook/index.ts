@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
+import { createManychatWhatsappSubscriber, sendManychatFlow } from '../_shared/manychatPublicApi.ts'
 import type { LeadAttribution } from '../_shared/attribution.ts'
 
 // Frente B da atribuição Meta: LEAD ADS (formulário dentro do Facebook/Instagram).
@@ -127,6 +128,109 @@ async function graphFindLeadViaForm(
 
 type ProcessResult = { leadgenId: string; ok: boolean; leadId?: string; status?: string; reason?: string }
 
+// ── Primeiro contato automático (Sofia) ────────────────────────────────────
+// Lead de formulário NÃO chega conversando; sem isto o time precisa chamar na mão.
+// Quando habilitado, criamos o contato no ManyChat pelo telefone e disparamos um
+// flow que começa com um WhatsApp Message Template aprovado (única forma de
+// iniciar conversa fora da janela de 24h). O manychat_subscriber_id fica salvo no
+// lead, então a resposta da pessoa cai no inbound normal e a Sofia segue sozinha.
+//
+// Config por tenant em tenant_integrations.manychat.leadform_first_touch:
+//   { "enabled": true, "flow_ns": "content...", "max_age_hours": 48 }
+// api_key vem de tenant_integrations.manychat.api_key ou do secret MANYCHAT_API_KEY.
+// Sem enabled+flow_ns+api_key = no-op silencioso. Nunca propaga erro (o envio é
+// best-effort; a criação do lead não pode falhar por causa dele).
+
+type FirstTouchInput = {
+  tenantId: string
+  leadId: string
+  phone: string
+  nome: string
+  /** created_time do formulário na Meta (ISO) — trava anti-backfill. */
+  formCreatedTime: string
+  leadgenId: string
+  pageId: string
+  formId: string
+}
+
+async function maybeSendLeadformFirstTouch(admin: SupabaseClient, input: FirstTouchInput): Promise<boolean> {
+  try {
+    const { data } = await admin
+      .from('tenant_integrations')
+      .select('manychat')
+      .eq('tenant_id', input.tenantId)
+      .maybeSingle()
+    const mc = ((data as { manychat?: unknown } | null)?.manychat ?? {}) as Record<string, unknown>
+    const cfg = (mc.leadform_first_touch ?? {}) as { enabled?: boolean; flow_ns?: string; max_age_hours?: number }
+    if (cfg.enabled !== true) return false
+    const flowNs = String(cfg.flow_ns ?? '').trim()
+    const apiKey = String(mc.api_key ?? Deno.env.get('MANYCHAT_API_KEY') ?? '').trim()
+    if (!flowNs || !apiKey) return false
+
+    // Só formulário fresco: varredura/recuperação reprocessa formulário antigo, e
+    // ninguém quer a "primeira mensagem" chegando dias depois do preenchimento.
+    const maxAgeH = Number(cfg.max_age_hours) > 0 ? Number(cfg.max_age_hours) : 48
+    const createdMs = Date.parse(input.formCreatedTime)
+    if (Number.isFinite(createdMs) && Date.now() - createdMs > maxAgeH * 3_600_000) {
+      await logEvent(admin, {
+        leadgenId: input.leadgenId, pageId: input.pageId, formId: input.formId,
+        status: 'first_touch_skipped_old', leadId: input.leadId,
+      })
+      return false
+    }
+
+    const sub = await createManychatWhatsappSubscriber({
+      apiKey,
+      phone: input.phone,
+      firstName: input.nome.split(/\s+/)[0],
+      consentPhrase: 'Formulário Meta Lead Ads enviado pelo próprio contato',
+    })
+    if (!sub.ok) {
+      await logEvent(admin, {
+        leadgenId: input.leadgenId, pageId: input.pageId, formId: input.formId,
+        status: 'first_touch_failed', leadId: input.leadId, detail: sub.error,
+      })
+      return false
+    }
+
+    const flow = await sendManychatFlow(apiKey, sub.subscriberId, flowNs)
+    if (!flow.ok) {
+      await logEvent(admin, {
+        leadgenId: input.leadgenId, pageId: input.pageId, formId: input.formId,
+        status: 'first_touch_failed', leadId: input.leadId, detail: flow.error ?? 'send_flow_failed',
+      })
+      return false
+    }
+
+    // Amarra o subscriber no lead: a resposta da pessoa resolve pra ESTE lead
+    // (telefone real) em vez de criar um novo com telefone sintético.
+    try {
+      const { data: cur } = await admin.from('leads').select('custom_fields').eq('id', input.leadId).maybeSingle()
+      const cf = { ...(((cur as { custom_fields?: unknown } | null)?.custom_fields as Record<string, unknown>) ?? {}) }
+      if (!cf.manychat_subscriber_id) cf.manychat_subscriber_id = sub.subscriberId
+      const lf = cf.lead_form && typeof cf.lead_form === 'object' ? { ...(cf.lead_form as Record<string, unknown>) } : {}
+      lf.first_touch = { at: new Date().toISOString(), flow_ns: flowNs, subscriber_id: sub.subscriberId }
+      cf.lead_form = lf
+      await admin.from('leads').update({ custom_fields: cf }).eq('id', input.leadId)
+    } catch { /* carimbo é best-effort; o envio já aconteceu */ }
+
+    await insertInteraction(admin, {
+      leadId: input.leadId, patientName: input.nome, channel: 'whatsapp', direction: 'out',
+      author: 'Sofia (IA)',
+      content: '📤 Primeiro contato automático da Sofia enviado (template WhatsApp do formulário Meta).',
+      tenantId: input.tenantId,
+    }).catch(() => {})
+    await logEvent(admin, {
+      leadgenId: input.leadgenId, pageId: input.pageId, formId: input.formId,
+      status: 'first_touch_sent', leadId: input.leadId, detail: `subscriber=${sub.subscriberId}`,
+    })
+    return true
+  } catch (e) {
+    console.error(`[meta-leadform] first_touch ${input.leadgenId}: ${e instanceof Error ? e.message : e}`)
+    return false
+  }
+}
+
 /**
  * Processa UM leadgen (usado tanto pelo webhook ao vivo quanto pela recuperação):
  * busca na Graph (retry + fallback), valida telefone, cria/atualiza o lead com atribuição.
@@ -233,12 +337,24 @@ async function processLeadData(
       tenantId,
     }).catch(() => {})
     await logEvent(admin, { leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw), status: `lead_${up.status}`, leadId: up.leadId, detail: `${nome} | campanha=${campaignName || '-'}` })
-    // Lead de formulário NÃO chega conversando — o time precisa chamar ATIVAMENTE.
+    // Primeiro contato automático da Sofia (só lead NOVO; existente pode já estar em conversa).
+    const firstTouchSent = up.status === 'created'
+      ? await maybeSendLeadformFirstTouch(admin, {
+          tenantId, leadId: up.leadId, phone, nome,
+          formCreatedTime: String(lead.created_time ?? ''),
+          leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw),
+        })
+      : false
+    // Sem primeiro contato automático, o time precisa chamar ATIVAMENTE.
     await notifyAgents(admin, {
       leadId: up.leadId,
       kind: 'info',
-      title: '📋 Lead de formulário Meta — chamar AGORA',
-      body: `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio — quanto antes o contato, maior a conversão.`,
+      title: firstTouchSent
+        ? '📋 Lead de formulário Meta — Sofia iniciou o contato'
+        : '📋 Lead de formulário Meta — chamar AGORA',
+      body: firstTouchSent
+        ? `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio; a Sofia já mandou a primeira mensagem — acompanhe a resposta.`
+        : `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio — quanto antes o contato, maior a conversão.`,
       includeOwner: true,
       tenantId,
       metadata: { dedupeKey: `leadform-${leadgenId}` },

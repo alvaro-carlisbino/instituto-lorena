@@ -44,6 +44,23 @@ async function manychatPost(
   return { ok: res.ok, status: res.status, json, raw: raw.slice(0, 1500) }
 }
 
+async function manychatGet(
+  path: string,
+  apiKey: string,
+): Promise<{ ok: boolean; status: number; json: Record<string, unknown>; raw: string }> {
+  const res = await fetch(`${MANYCHAT_API_ROOT}${path}`, {
+    headers: { Authorization: `Bearer ${apiKey.trim()}` },
+  })
+  const raw = await res.text()
+  let json: Record<string, unknown> = {}
+  try {
+    json = JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    /* ignore */
+  }
+  return { ok: res.ok, status: res.status, json, raw: raw.slice(0, 1500) }
+}
+
 function normalizeSubscriberId(subscriberId: string): string | number {
   const s = subscriberId.trim()
   const n = Number(s)
@@ -326,6 +343,58 @@ export async function sendManychatFlow(
   )
   if (res.ok && manychatSuccess(res.json)) return { ok: true }
   return { ok: false, error: describeManychatFailure('manychat_send_flow', res) }
+}
+
+function extractSubscriberIdFromResponse(json: Record<string, unknown>): string {
+  const data = json.data
+  const row = Array.isArray(data) ? data[0] : data
+  const id = (row as Record<string, unknown> | null | undefined)?.id
+  if (typeof id === 'number' && Number.isFinite(id)) return String(Math.trunc(id))
+  if (typeof id === 'string') return id.trim()
+  return ''
+}
+
+/**
+ * Cria (ou reaproveita) um contato de WHATSAPP no ManyChat a partir do telefone —
+ * é o que permite INICIAR conversa com quem nunca mandou mensagem (ex.: lead de
+ * formulário Meta). Exige plano com importação de contatos; fora da janela de 24h
+ * o envio só chega se o flow disparado em seguida começar com um WhatsApp Message
+ * Template aprovado.
+ */
+export async function createManychatWhatsappSubscriber(input: {
+  apiKey: string
+  /** dígitos com DDI, ex.: 5544999998888 */
+  phone: string
+  firstName?: string
+  consentPhrase?: string
+}): Promise<{ ok: true; subscriberId: string } | { ok: false; error: string }> {
+  const digits = String(input.phone ?? '').replace(/\D/g, '')
+  if (!input.apiKey?.trim() || digits.length < 10) return { ok: false, error: 'missing_params' }
+  const e164 = `+${digits}`
+
+  const body: Record<string, unknown> = { whatsapp_phone: e164, phone: e164 }
+  const firstName = (input.firstName ?? '').trim()
+  if (firstName) body.first_name = firstName.slice(0, 80)
+  const consent = (input.consentPhrase ?? '').trim()
+  if (consent) body.consent_phrase = consent.slice(0, 200)
+
+  const created = await manychatPost('/fb/subscriber/createSubscriber', body, input.apiKey)
+  const createdId = extractSubscriberIdFromResponse(created.json)
+  if (created.ok && manychatSuccess(created.json) && createdId) {
+    return { ok: true, subscriberId: createdId }
+  }
+
+  // Telefone já cadastrado (ou plano bloqueou a criação): tenta achar o contato existente.
+  const found = await manychatGet(
+    `/fb/subscriber/findBySystemField?phone=${encodeURIComponent(e164)}`,
+    input.apiKey,
+  )
+  const foundId = extractSubscriberIdFromResponse(found.json)
+  if (found.ok && manychatSuccess(found.json) && foundId) {
+    return { ok: true, subscriberId: foundId }
+  }
+
+  return { ok: false, error: describeManychatFailure('manychat_create_subscriber', created) }
 }
 
 /** Envia UMA mensagem de TEXTO ao subscriber via /fb/sending/sendContent (janela 24h aberta). */
