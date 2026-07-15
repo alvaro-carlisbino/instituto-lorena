@@ -28,9 +28,7 @@ import { cn } from '@/lib/utils'
 import { formatBRL } from '@/services/tricopillBi'
 import {
   fetchLojaAnalytics,
-  fetchProductStats,
   type LojaAnalytics,
-  type ProductStat,
 } from '@/services/lojaTricopillAnalytics'
 
 const CHART_COLORS = [
@@ -49,7 +47,7 @@ const PERIODS: Array<{ key: PeriodKey; label: string; days: number | null }> = [
   { key: 'all', label: 'Tudo', days: null },
 ]
 
-type SortKey = 'views' | 'addToCart' | 'purchases' | 'revenueCents'
+type SortKey = 'views' | 'addToCart' | 'addToCartRate' | 'sessions'
 
 function shortDay(iso: string): string {
   const [, m, d] = iso.split('-')
@@ -91,7 +89,6 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 export function LojaTricopillPage() {
   const [period, setPeriod] = useState<PeriodKey>('30d')
   const [data, setData] = useState<LojaAnalytics | null>(null)
-  const [products, setProducts] = useState<ProductStat[]>([])
   const [sortKey, setSortKey] = useState<SortKey>('views')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -106,11 +103,10 @@ export function LojaTricopillPage() {
     const end = days == null ? null : new Date()
     const start = days == null ? null : new Date(Date.now() - days * 86400000)
 
-    Promise.all([fetchLojaAnalytics({ start, end }), fetchProductStats()])
-      .then(([analytics, prods]) => {
+    fetchLojaAnalytics({ start, end })
+      .then((analytics) => {
         if (cancelled) return
         setData(analytics)
-        setProducts(prods)
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Falha ao carregar a loja.')
@@ -124,8 +120,8 @@ export function LojaTricopillPage() {
   }, [period, reloadKey])
 
   const sortedProducts = useMemo(() => {
-    return [...products].sort((a, b) => b[sortKey] - a[sortKey])
-  }, [products, sortKey])
+    return [...(data?.products ?? [])].sort((a, b) => b[sortKey] - a[sortKey])
+  }, [data, sortKey])
 
   const funnelRows = useMemo(() => {
     const f = data?.funnel
@@ -154,7 +150,7 @@ export function LojaTricopillPage() {
 
   const k = data?.kpis
   const sub = data?.subscription
-  const hasAnyData = (data?.totalEvents ?? 0) > 0 || products.length > 0
+  const hasAnyData = (data?.totalEvents ?? 0) > 0
 
   return (
     <AppLayout
@@ -259,12 +255,17 @@ export function LojaTricopillPage() {
                 ))}
               </ul>
             )}
-            <p className="mt-3 text-[10px] text-muted-foreground/60">
-              Conversão geral viu produto → compra:{' '}
-              <strong className="text-foreground/70">
-                {pct(data?.funnel.purchase ?? 0, data?.funnel.viewItem ?? 0)}%
-              </strong>
-            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-[10px] text-muted-foreground/60">
+              <span>
+                Conversão geral viu produto → compra:{' '}
+                <strong className="text-foreground/70">{pct(data?.funnel.purchase ?? 0, data?.funnel.viewItem ?? 0)}%</strong>
+              </span>
+              <span>
+                Abandono no carrinho:{' '}
+                <strong className="text-amber-600">{pct((data?.funnel.addToCart ?? 0) - (data?.funnel.purchase ?? 0), data?.funnel.addToCart ?? 0)}%</strong>
+                {' '}({Math.max(0, (data?.funnel.addToCart ?? 0) - (data?.funnel.purchase ?? 0))} de {data?.funnel.addToCart ?? 0} sem comprar)
+              </span>
+            </div>
           </section>
 
           {/* 3 + 4 — Produtos & Páginas */}
@@ -272,11 +273,13 @@ export function LojaTricopillPage() {
             {/* Produtos mais acessados (view agregada — acumulado) */}
             <div className="rounded-xl border border-border bg-card p-6 lg:col-span-7">
               <div className="mb-4 flex items-center justify-between gap-2">
-                <p className="text-sm font-bold text-foreground/90">Produtos mais acessados</p>
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50">acumulado</span>
+                <p className="text-sm font-bold text-foreground/90">Produtos mais vistos</p>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50">
+                  {PERIODS.find((p) => p.key === period)?.label ?? 'no período'}
+                </span>
               </div>
               {sortedProducts.length === 0 ? (
-                <p className="py-8 text-center text-xs text-muted-foreground">Sem produtos registrados ainda.</p>
+                <p className="py-8 text-center text-xs text-muted-foreground">Sem produtos vistos no período.</p>
               ) : (
                 <Table className="w-full text-xs">
                   <TableHeader>
@@ -285,8 +288,8 @@ export function LojaTricopillPage() {
                       {([
                         ['views', 'Views'],
                         ['addToCart', 'Carrinho'],
-                        ['purchases', 'Compras'],
-                        ['revenueCents', 'Receita'],
+                        ['addToCartRate', 'Taxa'],
+                        ['sessions', 'Sessões'],
                       ] as Array<[SortKey, string]>).map(([key, label]) => (
                         <TableHead key={key} className="pb-2 text-right">
                           <button
@@ -312,10 +315,8 @@ export function LojaTricopillPage() {
                         </TableCell>
                         <TableCell className="py-1.5 text-right tabular-nums">{p.views}</TableCell>
                         <TableCell className="py-1.5 text-right tabular-nums">{p.addToCart}</TableCell>
-                        <TableCell className="py-1.5 text-right tabular-nums">{p.purchases}</TableCell>
-                        <TableCell className="py-1.5 text-right font-semibold tabular-nums">
-                          {formatBRL(p.revenueCents)}
-                        </TableCell>
+                        <TableCell className="py-1.5 text-right tabular-nums text-muted-foreground">{p.addToCartRate}%</TableCell>
+                        <TableCell className="py-1.5 text-right font-semibold tabular-nums">{p.sessions}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

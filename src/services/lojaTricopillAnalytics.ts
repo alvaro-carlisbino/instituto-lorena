@@ -37,6 +37,7 @@ export type LojaAnalytics = {
     purchase: number
   }
   pages: Array<{ path: string; sessions: number; views: number }>
+  products: PeriodProductStat[]
   timeline: Array<{ day: string; view_item: number; add_to_cart: number; purchase: number }>
   subscription: {
     viewSubscription: number
@@ -58,6 +59,17 @@ export type ProductStat = {
   revenueCents: number
   sessions: number
   lastEventAt: string | null
+}
+
+// Ranking de produtos DENTRO do período selecionado (views + add_to_cart carregam produto;
+// purchase não carrega product_id, então compra por produto não entra aqui — fica no BI/pedidos).
+export type PeriodProductStat = {
+  productId: string
+  productName: string
+  views: number
+  addToCart: number
+  sessions: number
+  addToCartRate: number // % de quem viu e adicionou ao carrinho
 }
 
 type RawEvent = {
@@ -135,6 +147,16 @@ function aggregate(rows: RawEvent[]): LojaAnalytics {
   let purchaseRevenueCents = 0
 
   const pageMap = new Map<string, { views: number; sessions: Set<string> }>()
+  const prodMap = new Map<string, { productId: string; productName: string; views: number; addToCart: number; sessions: Set<string> }>()
+  const bumpProduct = (r: RawEvent, key: 'views' | 'addToCart') => {
+    const id = r.product_id || r.product_name
+    if (!id) return
+    const entry = prodMap.get(id) ?? { productId: r.product_id ?? '', productName: r.product_name ?? r.product_id ?? '—', views: 0, addToCart: 0, sessions: new Set<string>() }
+    entry[key] += 1
+    if (r.product_name) entry.productName = r.product_name
+    if (r.session_id) entry.sessions.add(r.session_id)
+    prodMap.set(id, entry)
+  }
   const dayMap = new Map<string, { view_item: number; add_to_cart: number; purchase: number }>()
   const bumpDay = (day: string, key: 'view_item' | 'add_to_cart' | 'purchase') => {
     if (!day) return
@@ -153,10 +175,12 @@ function aggregate(rows: RawEvent[]): LojaAnalytics {
       case 'view_item':
         viewItem += 1
         bumpDay(day, 'view_item')
+        bumpProduct(r, 'views')
         break
       case 'add_to_cart':
         addToCart += 1
         bumpDay(day, 'add_to_cart')
+        bumpProduct(r, 'addToCart')
         break
       case 'begin_checkout':
         beginCheckout += 1
@@ -194,6 +218,17 @@ function aggregate(rows: RawEvent[]): LojaAnalytics {
     .map(([path, v]) => ({ path, views: v.views, sessions: v.sessions.size }))
     .sort((a, b) => b.sessions - a.sessions || b.views - a.views)
 
+  const products: PeriodProductStat[] = [...prodMap.values()]
+    .map((v) => ({
+      productId: v.productId,
+      productName: v.productName,
+      views: v.views,
+      addToCart: v.addToCart,
+      sessions: v.sessions.size,
+      addToCartRate: v.views > 0 ? Math.round((v.addToCart / v.views) * 100) : 0,
+    }))
+    .sort((a, b) => b.views - a.views || b.addToCart - a.addToCart)
+
   const timeline = [...dayMap.entries()]
     .map(([day, v]) => ({ day, ...v }))
     .sort((a, b) => a.day.localeCompare(b.day))
@@ -203,6 +238,7 @@ function aggregate(rows: RawEvent[]): LojaAnalytics {
     kpis: { sessions: sessions.size, viewItem, addToCart, purchases: purchase, revenueCents },
     funnel: { viewItem, addToCart, beginCheckout, purchase },
     pages,
+    products,
     timeline,
     subscription: {
       viewSubscription,
