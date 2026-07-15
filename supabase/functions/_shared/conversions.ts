@@ -75,6 +75,85 @@ function fbcFromFbclid(fbclid: string | undefined, tsMs: number): string | undef
   return `fb.1.${tsMs}.${fbclid}`
 }
 
+// ---- Google Ads API (offline click conversion via gclid) -----------------
+// Sobe a venda direto pro Google Ads pela API — 100% server-side, imune a
+// bloqueador/consentimento/tag do site. Atribui ao clique do anúncio pelo gclid.
+// Tudo por env (secret): liga sem mexer no código. Requer developer token com
+// acesso BÁSICO aprovado (token novo só funciona em conta de teste até aprovar).
+function gAdsDateTime(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}+00:00`
+}
+
+async function googleAdsAccessToken(): Promise<string | null> {
+  const clientId = (Deno.env.get('GOOGLE_ADS_CLIENT_ID') ?? '').trim()
+  const clientSecret = (Deno.env.get('GOOGLE_ADS_CLIENT_SECRET') ?? '').trim()
+  const refreshToken = (Deno.env.get('GOOGLE_ADS_REFRESH_TOKEN') ?? '').trim()
+  if (!clientId || !clientSecret || !refreshToken) return null
+  try {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' }),
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return null
+    const j = (await res.json()) as { access_token?: string }
+    return typeof j.access_token === 'string' ? j.access_token : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Sobe UMA conversão de clique pro Google Ads (uploadClickConversions). Reusa no disparo
+ * ao vivo e no backfill. Nunca lança — devolve {ok,error} pra o backfill reportar o motivo
+ * (ex.: "developer token não aprovado", "gclid não encontrado na conta").
+ */
+export async function uploadGoogleAdsConversion(args: {
+  gclid: string; valueReais: number; orderId: string; when?: Date
+}): Promise<{ ok: boolean; error?: string }> {
+  const devToken = (Deno.env.get('GOOGLE_ADS_DEVELOPER_TOKEN') ?? '').trim()
+  const customerId = onlyDigits(Deno.env.get('GOOGLE_ADS_CUSTOMER_ID'))
+  const loginCustomerId = onlyDigits(Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID'))
+  const actionId = onlyDigits(Deno.env.get('GOOGLE_ADS_CONVERSION_ACTION_ID'))
+  const apiVersion = (Deno.env.get('GOOGLE_ADS_API_VERSION') ?? 'v18').trim()
+  if (!devToken || !customerId || !actionId) return { ok: false, error: 'nao_configurado' }
+  if (!args.gclid) return { ok: false, error: 'sem_gclid' }
+  const accessToken = await googleAdsAccessToken()
+  if (!accessToken) return { ok: false, error: 'sem_access_token (confira client_id/secret/refresh_token)' }
+  const conversion = {
+    gclid: args.gclid,
+    conversionAction: `customers/${customerId}/conversionActions/${actionId}`,
+    conversionDateTime: gAdsDateTime(args.when ?? new Date()),
+    conversionValue: Math.max(0, args.valueReais),
+    currencyCode: 'BRL',
+    orderId: args.orderId,
+  }
+  try {
+    const res = await fetch(`https://googleads.googleapis.com/${apiVersion}/customers/${customerId}:uploadClickConversions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'developer-token': devToken,
+        ...(loginCustomerId ? { 'login-customer-id': loginCustomerId } : {}),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ conversions: [conversion], partialFailure: true }),
+      signal: AbortSignal.timeout(12000),
+    })
+    const text = await res.text()
+    if (!res.ok) return { ok: false, error: `http_${res.status}: ${text.slice(0, 400)}` }
+    try {
+      const j = JSON.parse(text) as { partialFailureError?: unknown; results?: unknown[] }
+      if (j.partialFailureError) return { ok: false, error: JSON.stringify(j.partialFailureError).slice(0, 400) }
+    } catch { /* corpo vazio em sucesso é ok */ }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 /**
  * Único ponto de entrada. Chame no fluxo de pagamento CONFIRMADO. Nunca lança.
  */
@@ -200,6 +279,15 @@ export async function dispatchPurchaseConversions(admin: SupabaseClient, input: 
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(8000),
         })
       } catch { /* best-effort */ }
+    }
+
+    // 4) Google Ads API — sobe a compra direto pro Google Ads pelo gclid (server-side).
+    //    Só faz sentido com gclid (é o que amarra ao clique do anúncio). Best-effort.
+    if (gclid) {
+      const r = await uploadGoogleAdsConversion({ gclid, valueReais, orderId: input.orderId })
+      if (!r.ok && r.error && r.error !== 'nao_configurado') {
+        console.warn('[gads] upload falhou:', r.error)
+      }
     }
   } catch { /* conversões nunca derrubam o pagamento */ }
 }

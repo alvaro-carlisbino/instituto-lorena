@@ -469,3 +469,8 @@ verify_jwt = false
 # guardada por header x-reship-secret == RESHIP_SECRET no handler (sem JWT de usuário).
 [functions.crm-reship]
 verify_jwt = false
+
+# Backfill/diagnóstico de conversões pro Google Ads (uploadClickConversions). Chamada
+# interna/manual guardada por x-reship-secret == RESHIP_SECRET no handler (sem JWT).
+[functions.crm-gads-backfill]
+verify_jwt = false
