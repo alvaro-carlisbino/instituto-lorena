@@ -1,6 +1,7 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
 import { insertInteraction } from './crm.ts'
+import { matchesInternalTerm } from './internalContacts.ts'
 import { alertOwnerAiOutOfBalance } from './saleReceipt.ts'
 import type { WhatsappProvider } from './whatsapp/types.ts'
 
@@ -446,11 +447,16 @@ export async function evaluateCrmAiAutoReplyGate(
     .maybeSingle()
   const { data: leadRowGate } = await admin
     .from('leads')
-    .select('opted_out_at, tenant_id')
+    .select('opted_out_at, tenant_id, patient_name')
     .eq('id', leadId)
     .maybeSingle()
   const leadOptedOut = Boolean(
     (leadRowGate as { opted_out_at?: string | null } | null)?.opted_out_at,
+  )
+  // Contato INTERNO (clínica/financeiro/sócios, ex.: Kauan do Instituto Lorena fazendo
+  // conciliação de caixa): o bot de vendas não responde. Mesma lista do reengajamento.
+  const internalContact = matchesInternalTerm(
+    (leadRowGate as { patient_name?: string | null } | null)?.patient_name,
   )
   // crm_ai_configs tem PK (tenant_id, id): escopar por tenant do lead, senão com >1 tenant
   // o .maybeSingle() falha e a config (default_owner_mode, enabled) vem nula.
@@ -473,6 +479,7 @@ export async function evaluateCrmAiAutoReplyGate(
 
   const skipReasons: string[] = []
   if (leadOptedOut) skipReasons.push('lead_opted_out')
+  if (internalContact) skipReasons.push('contato_interno')
   if (!aiEnabled) skipReasons.push('ai_disabled')
   if (!options.directionIsInbound) skipReasons.push('not_inbound')
   if (!shouldAiByMode) {
@@ -488,12 +495,16 @@ export async function evaluateCrmAiAutoReplyGate(
 
   const canAutoReply =
     !leadOptedOut &&
+    !internalContact &&
     aiEnabled &&
     shouldAiByMode &&
     options.directionIsInbound &&
     (minSecondsBetween === 0 || elapsedSinceAi >= minSecondsBetween)
 
   const hintParts: string[] = []
+  if (skipReasons.includes('contato_interno')) {
+    hintParts.push('Contato interno (clínica/financeiro/sócios): o bot de vendas não responde.')
+  }
   if (skipReasons.includes('ai_disabled')) {
     hintParts.push('IA desligada em crm_ai_configs ou neste lead (crm_conversation_states.ai_enabled).')
   }
