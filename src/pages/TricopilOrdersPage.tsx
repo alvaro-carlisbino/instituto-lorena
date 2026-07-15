@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, FileText, PackageCheck, Plus, RefreshCw, Search, Truck, X } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, FileText, PackageCheck, Plus, RefreshCw, Search, Truck, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
@@ -14,8 +14,11 @@ import {
   fetchReconciliations,
   fetchUnifiedPayments,
   markReconciled,
+  matchStatementToPayments,
+  parseBankStatementCsv,
   reconKey,
   unmarkReconciled,
+  type BankMatchResult,
   type PaymentStatus,
   type ReconciliationRow,
   type UnifiedPayment,
@@ -45,6 +48,27 @@ function shortDateTime(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
   return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+// Número em reais pro CSV (vírgula decimal, sem símbolo) — abre certo no Excel BR.
+function reaisCsv(cents: number): string {
+  return (Number(cents) / 100).toFixed(2).replace('.', ',')
+}
+function csvCell(v: unknown): string {
+  const s = String(v ?? '')
+  return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+function downloadCsv(filename: string, rows: string[][]): void {
+  const body = rows.map((r) => r.map(csvCell).join(';')).join('\r\n')
+  const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
 const PILL = 'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1'
@@ -118,6 +142,8 @@ export function TricopilOrdersPage() {
   const [savingRecon, setSavingRecon] = useState<string | null>(null)
   const [reconInput, setReconInput] = useState<Record<string, string>>({})
   const [relaunching, setRelaunching] = useState<string | null>(null)
+  const [importResult, setImportResult] = useState<BankMatchResult | null>(null)
+  const [applyingImport, setApplyingImport] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -328,6 +354,67 @@ export function TricopilOrdersPage() {
     setSearch(''); setStatusFilter('all'); setMethodFilter('all'); setDeliveryFilter('all'); setShipFilter('all')
   }
 
+  // Exporta os pedidos do filtro atual pra CSV (abre no Excel/Sheets). Só dado que já está na tela.
+  const exportCsv = () => {
+    const header = [
+      'Data', 'Cliente', 'Telefone', 'CPF/CNPJ', 'Origem', 'Kit', 'Itens', 'Valor', 'Método', 'Parcelas',
+      'Pagamento', 'Pago em', 'Entrega', 'Status envio', 'Bling', 'Frete', 'NF-e', 'NF-e nº', 'Rastreio',
+    ]
+    const body = filtered.map((p) => {
+      const lead = p.leadId ? leadById.get(p.leadId) : undefined
+      const name = p.customerName || lead?.patientName || 'Cliente'
+      const itens = (p.items ?? []).map((i) => `${i.qty > 1 ? `${i.qty}x ` : ''}${i.nome}`).join(' | ')
+      const nm = nfeMeta(p.nfeStatus, p.nfeNumero)
+      return [
+        shortDateTime(p.createdAt), name, p.phone ?? '', p.customerDoc ?? '', ORIGIN_META[originOf(p)].label,
+        p.kit ? kitLabel(p.kit) : (p.description ?? ''), itens, reaisCsv(p.amountCents),
+        p.method === 'pix' ? 'Pix' : 'Cartão', String(p.installments || 1), STATUS_META[p.status].label,
+        p.paidAt ? shortDateTime(p.paidAt) : '', DELIVERY_META[deliveryOf(p)].label, shipStatusLabel(shipOf(p)),
+        p.blingOrderId ? `#${p.blingOrderId}` : '', p.freightCents != null ? reaisCsv(p.freightCents) : '',
+        p.method === 'card' ? nm.label : 'Pix (sem NF)', p.nfeNumero ?? '', persistedTracking(p),
+      ]
+    })
+    const stamp = new Date().toISOString().slice(0, 10)
+    downloadCsv(`pedidos-tricopill-${stamp}.csv`, [header, ...body])
+    toast.success(`${filtered.length} pedido${filtered.length === 1 ? '' : 's'} exportado${filtered.length === 1 ? '' : 's'}.`)
+  }
+
+  // Importa o extrato (CSV do banco/gateway) e casa por valor + data com os pagamentos pagos.
+  const onImportStatement = async (file: File) => {
+    try {
+      const text = await file.text()
+      const lines = parseBankStatementCsv(text)
+      if (lines.length === 0) { toast.error('Não achei lançamentos nesse arquivo. Confira se é o CSV do extrato.'); return }
+      setImportResult(matchStatementToPayments(lines, rows))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao ler o extrato.')
+    }
+  }
+
+  // Concilia em lote os pagamentos que bateram com o extrato (grava o valor da linha do banco).
+  const applyImportMatches = async () => {
+    if (!importResult || importResult.matched.length === 0) return
+    setApplyingImport(true)
+    let ok = 0
+    try {
+      for (const { payment, line } of importResult.matched) {
+        try {
+          await markReconciled({ paymentId: payment.id, method: payment.method, bankAmountCents: line.amountCents, bankRef: line.ref || null, matchedSource: 'csv_import' })
+          setRecons((prev) => {
+            const next = new Map(prev)
+            next.set(reconKey(payment.method, payment.id), { paymentId: payment.id, method: payment.method, bankRef: line.ref || null, bankAmountCents: line.amountCents, matchedSource: 'csv_import', note: null, reconciledAt: new Date().toISOString() })
+            return next
+          })
+          ok += 1
+        } catch { /* segue pros próximos */ }
+      }
+      toast.success(`${ok} pagamento${ok === 1 ? '' : 's'} conciliado${ok === 1 ? '' : 's'} pelo extrato.`)
+      setImportResult(null)
+    } finally {
+      setApplyingImport(false)
+    }
+  }
+
   return (
     <AppLayout
       title="Pedidos"
@@ -337,6 +424,18 @@ export function TricopilOrdersPage() {
           <Link to="/frente-loja" className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-xl')}>
             <Plus className="size-3.5" /> Novo pedido
           </Link>
+          <label className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'cursor-pointer rounded-xl')} title="Casa o extrato do banco/gateway com os pagamentos pagos (por valor e data)">
+            <Upload className="size-3.5" /> Importar extrato
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void onImportStatement(f); e.currentTarget.value = '' }}
+            />
+          </label>
+          <Button variant="outline" size="sm" className="rounded-xl" onClick={exportCsv} disabled={filtered.length === 0}>
+            <Download className="size-3.5" /> Exportar CSV
+          </Button>
           <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
             <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Atualizar
           </Button>
@@ -432,6 +531,35 @@ export function TricopilOrdersPage() {
       </section>
 
       {error ? <p className="rounded-xl bg-rose-500/10 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
+
+      {importResult ? (
+        <section className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border/60">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm">
+              <span className="font-bold text-foreground/90">Extrato lido:</span>{' '}
+              <span className="tabular-nums">{importResult.parsedCount} lançamento{importResult.parsedCount === 1 ? '' : 's'}</span>,{' '}
+              <span className="font-semibold text-emerald-600">{importResult.matched.length} bateu com pagamento</span>
+              {importResult.unmatchedLines.length > 0 ? <span className="text-muted-foreground">, {importResult.unmatchedLines.length} sem correspondência</span> : null}.
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" className="rounded-lg" disabled={applyingImport || importResult.matched.length === 0} onClick={() => void applyImportMatches()}>
+                <CheckCircle2 className={cn('size-3.5', applyingImport && 'animate-pulse')} />
+                {applyingImport ? 'Conciliando…' : `Conciliar ${importResult.matched.length} casado${importResult.matched.length === 1 ? '' : 's'}`}
+              </Button>
+              <button type="button" onClick={() => setImportResult(null)} className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Fechar">
+                <X className="size-4" />
+              </button>
+            </div>
+          </div>
+          {importResult.unmatchedLines.length > 0 ? (
+            <p className="mt-2 text-[11px] text-muted-foreground/70">
+              Sem correspondência (valor não bateu com nenhum pagamento pago, ou já conciliado):{' '}
+              {importResult.unmatchedLines.slice(0, 8).map((l) => brl(l.amountCents)).join(', ')}
+              {importResult.unmatchedLines.length > 8 ? ` e mais ${importResult.unmatchedLines.length - 8}` : ''}.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       {/* Tabela */}
       <div className="overflow-hidden rounded-2xl bg-card shadow-sm ring-1 ring-border/60">
