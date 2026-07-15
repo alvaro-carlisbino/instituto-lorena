@@ -1,16 +1,26 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ExternalLink, RefreshCw, Search, Truck, X } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, FileText, PackageCheck, Plus, RefreshCw, Search, Truck, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useCrm } from '@/context/CrmContext'
-import { fetchUnifiedPayments, type PaymentStatus, type UnifiedPayment } from '@/services/crmPaymentsUnified'
+import {
+  fetchReconciliations,
+  fetchUnifiedPayments,
+  markReconciled,
+  reconKey,
+  unmarkReconciled,
+  type PaymentStatus,
+  type ReconciliationRow,
+  type UnifiedPayment,
+} from '@/services/crmPaymentsUnified'
+import { nfeEmit, retryBlingOrder } from '@/services/crmBling'
 import { setShipStatus } from '@/services/crmOrders'
 import { refreshTracking } from '@/services/crmFrete'
 import { kitLabel } from '@/services/tricopillBi'
@@ -62,6 +72,20 @@ const ORIGIN_META: Record<OrderOrigin, { label: string; cls: string }> = {
   manual: { label: 'Manual', cls: 'bg-muted text-muted-foreground ring-border/40' },
 }
 
+// NF-e: só o cartão (rede_payments) carrega estado de nota. Traduz o status cru do Bling
+// num selo curto. `emitida`/`autorizada` = ok; `rejeitada`/`erro` = falha; resto = pendente.
+function nfeMeta(status: string | null, numero: string | null): { label: string; cls: string; done: boolean; failed: boolean } {
+  const s = (status ?? '').toLowerCase()
+  if (s.includes('autoriz') || s.includes('emit') || s === 'ok' || numero) {
+    return { label: numero ? `NF ${numero}` : 'Emitida', cls: 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300', done: true, failed: false }
+  }
+  if (s.includes('rejeit') || s.includes('erro') || s.includes('deneg') || s.includes('fail')) {
+    return { label: 'Rejeitada', cls: 'bg-rose-500/10 text-rose-700 ring-rose-500/25 dark:text-rose-300', done: false, failed: true }
+  }
+  if (s) return { label: 'Processando', cls: 'bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300', done: false, failed: false }
+  return { label: 'Sem nota', cls: 'bg-muted text-muted-foreground ring-border/40', done: false, failed: false }
+}
+
 const STATUS_SEG: Array<{ v: 'all' | PaymentStatus; l: string }> = [
   { v: 'all', l: 'Todos' },
   { v: 'paid', l: 'Pagos' },
@@ -87,17 +111,35 @@ export function TricopilOrdersPage() {
   const [savingShip, setSavingShip] = useState<string | null>(null)
   const [trackingByLead, setTrackingByLead] = useState<Record<string, string>>({})
   const [refreshingTrack, setRefreshingTrack] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [recons, setRecons] = useState<Map<string, ReconciliationRow>>(new Map())
+  const [emittingNfe, setEmittingNfe] = useState<string | null>(null)
+  const [nfeMsg, setNfeMsg] = useState<Record<string, string>>({})
+  const [savingRecon, setSavingRecon] = useState<string | null>(null)
+  const [reconInput, setReconInput] = useState<Record<string, string>>({})
+  const [relaunching, setRelaunching] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchUnifiedPayments(1000)
-      .then((res) => { if (!cancelled) setRows(res) })
+    Promise.all([fetchUnifiedPayments(1000), fetchReconciliations().catch(() => new Map<string, ReconciliationRow>())])
+      .then(([res, rec]) => { if (!cancelled) { setRows(res); setRecons(rec) } })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Falha ao carregar pedidos.') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [reloadKey])
+
+  const rowKey = (p: UnifiedPayment) => `${p.method}:${p.id}`
+  const toggleExpand = (p: UnifiedPayment) => {
+    const k = rowKey(p)
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return next
+    })
+  }
 
   const leadById = useMemo(() => {
     const m = new Map<string, (typeof crm.leads)[number]>()
@@ -169,6 +211,93 @@ export function TricopilOrdersPage() {
     }
   }
 
+  // Emite a NF-e desta venda (só cartão/rede tem nota). Atualiza a linha em memória com o
+  // resultado, sem refazer o fetch inteiro.
+  const doEmitNfe = async (p: UnifiedPayment) => {
+    if (p.method !== 'card') return
+    setEmittingNfe(p.id)
+    setNfeMsg((m) => ({ ...m, [p.id]: '' }))
+    try {
+      const r = await nfeEmit(p.id)
+      if (r.ok || r.alreadyEmitted) {
+        setRows((prev) => prev.map((x) => (x.id === p.id && x.method === p.method
+          ? { ...x, nfeStatus: r.status ?? 'autorizada', nfeNumero: r.numero ?? x.nfeNumero }
+          : x)))
+        toast.success(r.alreadyEmitted ? 'NF-e já estava emitida.' : `NF-e emitida${r.numero ? ` (nº ${r.numero})` : ''}.`)
+      } else {
+        const msg = r.message ?? 'Falha ao emitir NF-e.'
+        setNfeMsg((m) => ({ ...m, [p.id]: msg }))
+        toast.error(msg)
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Falha ao emitir NF-e.'
+      setNfeMsg((m) => ({ ...m, [p.id]: msg }))
+      toast.error(msg)
+    } finally {
+      setEmittingNfe(null)
+    }
+  }
+
+  // Conciliação cobrado × recebido: grava o valor líquido que caiu no banco. A diferença pro
+  // valor cobrado é a taxa do gateway (mostrada na linha).
+  const doReconcile = async (p: UnifiedPayment) => {
+    const k = reconKey(p.method, p.id)
+    const raw = (reconInput[k] ?? '').trim().replace(/\./g, '').replace(',', '.')
+    const reais = Number(raw)
+    if (!raw || !Number.isFinite(reais) || reais <= 0) { toast.error('Informe o valor recebido (líquido).'); return }
+    const cents = Math.round(reais * 100)
+    setSavingRecon(k)
+    try {
+      await markReconciled({ paymentId: p.id, method: p.method, bankAmountCents: cents, matchedSource: 'manual' })
+      setRecons((prev) => {
+        const next = new Map(prev)
+        next.set(k, { paymentId: p.id, method: p.method, bankRef: null, bankAmountCents: cents, matchedSource: 'manual', note: null, reconciledAt: new Date().toISOString() })
+        return next
+      })
+      setReconInput((m) => ({ ...m, [k]: '' }))
+      toast.success('Conciliado.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao conciliar.')
+    } finally {
+      setSavingRecon(null)
+    }
+  }
+
+  const doUnreconcile = async (p: UnifiedPayment) => {
+    const k = reconKey(p.method, p.id)
+    setSavingRecon(k)
+    try {
+      await unmarkReconciled(p.id, p.method)
+      setRecons((prev) => { const next = new Map(prev); next.delete(k); return next })
+      toast.success('Conciliação desfeita.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao desfazer.')
+    } finally {
+      setSavingRecon(null)
+    }
+  }
+
+  const markDelivered = (p: UnifiedPayment) => changeShip(p, 'entregue')
+
+  // Relança no Bling uma venda paga que não gerou pedido (lead de outro canal, bug, etc.).
+  const doRelaunchBling = async (p: UnifiedPayment) => {
+    if (!p.leadId) { toast.error('Pedido sem lead vinculado — abra o cadastro e vincule antes.'); return }
+    setRelaunching(p.id)
+    try {
+      const r = await retryBlingOrder(p.leadId, p.kit ?? undefined)
+      if (r.orderId) {
+        setRows((prev) => prev.map((x) => (x.id === p.id && x.method === p.method ? { ...x, blingOrderId: r.orderId } : x)))
+        toast.success(`Pedido criado no Bling (#${r.orderId}).`)
+      } else {
+        toast.error('Bling não retornou o pedido. Confira no painel do Bling.')
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao relançar no Bling.')
+    } finally {
+      setRelaunching(null)
+    }
+  }
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rows.filter((p) => {
@@ -204,9 +333,14 @@ export function TricopilOrdersPage() {
       title="Pedidos"
       subtitle="Pagamento, entrega, Bling e rastreio: tudo num lugar"
       actions={
-        <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
-          <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Atualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          <Link to="/frente-loja" className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-xl')}>
+            <Plus className="size-3.5" /> Novo pedido
+          </Link>
+          <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
+            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Atualizar
+          </Button>
+        </div>
       }
     >
       {/* KPIs */}
@@ -304,6 +438,7 @@ export function TricopilOrdersPage() {
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
+              <TableHead className="w-8" />
               <TableHead>Cliente</TableHead>
               <TableHead>Kit</TableHead>
               <TableHead className="text-right">Valor</TableHead>
@@ -311,15 +446,16 @@ export function TricopilOrdersPage() {
               <TableHead>Entrega</TableHead>
               <TableHead>Status envio</TableHead>
               <TableHead>Bling / Envio</TableHead>
+              <TableHead>NF-e</TableHead>
               <TableHead>Data</TableHead>
               <TableHead className="text-right">Ação</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && rows.length === 0 ? (
-              <TableRow><TableCell colSpan={9} className="py-12 text-center text-sm text-muted-foreground">Carregando…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={11} className="py-12 text-center text-sm text-muted-foreground">Carregando…</TableCell></TableRow>
             ) : filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={9} className="py-12 text-center text-sm text-muted-foreground">Nenhum pedido com esses filtros.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={11} className="py-12 text-center text-sm text-muted-foreground">Nenhum pedido com esses filtros.</TableCell></TableRow>
             ) : (
               filtered.map((p) => {
                 const lead = p.leadId ? leadById.get(p.leadId) : undefined
@@ -328,14 +464,37 @@ export function TricopilOrdersPage() {
                 const sm = STATUS_META[p.status]
                 const om = ORIGIN_META[originOf(p)]
                 const track = (p.leadId && trackingByLead[p.leadId]) || persistedTracking(p)
+                const k = rowKey(p)
+                const isOpen = expanded.has(k)
+                const nm = nfeMeta(p.nfeStatus, p.nfeNumero)
+                const rk = reconKey(p.method, p.id)
+                const recon = recons.get(rk)
+                const feeCents = recon?.bankAmountCents != null ? p.amountCents - recon.bankAmountCents : null
                 return (
-                  <TableRow key={`${p.method}:${p.id}`}>
+                  <Fragment key={k}>
+                  <TableRow className={cn(isOpen && 'border-b-0 bg-muted/20')}>
+                    <TableCell className="pr-0">
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(p)}
+                        className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        title={isOpen ? 'Recolher' : 'Ver itens, NF-e, conciliação e ações'}
+                        aria-label={isOpen ? 'Recolher' : 'Expandir'}
+                      >
+                        {isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                      </button>
+                    </TableCell>
                     <TableCell>
                       <div className="font-semibold text-foreground/90">{name}</div>
                       {p.phone ? <div className="text-xs text-muted-foreground">{p.phone}</div> : null}
                       <div className="mt-1"><span className={cn(PILL, om.cls)}>{om.label}</span></div>
                     </TableCell>
-                    <TableCell className="text-xs">{p.kit ? kitLabel(p.kit) : (p.description ?? '—')}</TableCell>
+                    <TableCell className="text-xs">
+                      <div>{p.kit ? kitLabel(p.kit) : (p.description ?? '—')}</div>
+                      {p.items && p.items.length > 1 ? (
+                        <div className="mt-0.5 text-[10px] font-semibold text-muted-foreground">+{p.items.length - 1} item{p.items.length - 1 === 1 ? '' : 's'}</div>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="text-right">
                       <div className="font-bold tabular-nums">{brl(p.amountCents)}</div>
                       <div className="text-xs text-muted-foreground">{p.method === 'pix' ? 'Pix' : 'Cartão'}{p.installments > 1 ? ` · ${p.installments}x` : ''}</div>
@@ -396,6 +555,16 @@ export function TricopilOrdersPage() {
                         ) : null}
                       </div>
                     </TableCell>
+                    <TableCell>
+                      {p.method === 'card' ? (
+                        <span className={cn(PILL, nm.cls)} title={p.nfeStatus ?? undefined}>
+                          {nm.done ? <CheckCircle2 className="size-3" /> : <FileText className="size-3" />}
+                          {nm.label}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">Pix (sem NF)</span>
+                      )}
+                    </TableCell>
                     <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{shortDateTime(p.createdAt)}</TableCell>
                     <TableCell className="text-right">
                       {p.leadId ? (
@@ -405,6 +574,128 @@ export function TricopilOrdersPage() {
                       ) : null}
                     </TableCell>
                   </TableRow>
+                  {isOpen ? (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={11} className="bg-muted/20 p-0">
+                        <div className="grid gap-4 px-6 py-4 md:grid-cols-3">
+                          {/* Itens / SKU */}
+                          <div className="rounded-xl bg-background/60 p-3 ring-1 ring-border/50">
+                            <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Itens do pedido</div>
+                            {p.items && p.items.length > 0 ? (
+                              <ul className="space-y-1.5">
+                                {p.items.map((it, i) => (
+                                  <li key={i} className="flex items-start justify-between gap-2 text-xs">
+                                    <div className="min-w-0">
+                                      <div className="font-medium text-foreground/90">{it.qty > 1 ? `${it.qty}× ` : ''}{it.nome}</div>
+                                      {it.sku ? <div className="font-mono text-[10px] text-muted-foreground">SKU {it.sku}</div> : null}
+                                    </div>
+                                    {it.precoCents != null ? <div className="shrink-0 tabular-nums text-muted-foreground">{brl(it.precoCents)}</div> : null}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <div className="text-xs text-muted-foreground">
+                                {p.kit ? kitLabel(p.kit) : (p.description ?? 'Sem detalhamento de itens neste pedido.')}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* NF-e */}
+                          <div className="rounded-xl bg-background/60 p-3 ring-1 ring-border/50">
+                            <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Nota fiscal</div>
+                            {p.method !== 'card' ? (
+                              <p className="text-xs text-muted-foreground">Venda no Pix não emite NF-e por aqui.</p>
+                            ) : (
+                              <div className="space-y-2">
+                                <span className={cn(PILL, nm.cls)} title={p.nfeStatus ?? undefined}>
+                                  {nm.done ? <CheckCircle2 className="size-3" /> : <FileText className="size-3" />}{nm.label}
+                                </span>
+                                {!nm.done ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="w-full rounded-lg"
+                                    disabled={emittingNfe === p.id || p.status !== 'paid'}
+                                    onClick={() => void doEmitNfe(p)}
+                                    title={p.status !== 'paid' ? 'Só emite NF-e de venda paga.' : 'Emite a NF-e no Bling.'}
+                                  >
+                                    <FileText className={cn('size-3.5', emittingNfe === p.id && 'animate-pulse')} />
+                                    {emittingNfe === p.id ? 'Emitindo…' : nm.failed ? 'Tentar de novo' : 'Emitir NF-e'}
+                                  </Button>
+                                ) : null}
+                                {nfeMsg[p.id] ? <p className="text-[11px] text-rose-600">{nfeMsg[p.id]}</p> : null}
+                                {!p.blingOrderId ? <p className="text-[11px] text-amber-600">Sem pedido no Bling ainda — relance o pedido antes de emitir.</p> : null}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Conciliação cobrado × recebido */}
+                          <div className="rounded-xl bg-background/60 p-3 ring-1 ring-border/50">
+                            <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Conciliação</div>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">Cobrado</span>
+                              <span className="font-semibold tabular-nums">{brl(p.amountCents)}</span>
+                            </div>
+                            {recon?.bankAmountCents != null ? (
+                              <div className="mt-1 space-y-1">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-muted-foreground">Recebido</span>
+                                  <span className="font-semibold tabular-nums text-emerald-600">{brl(recon.bankAmountCents)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="text-muted-foreground">Taxa/diferença</span>
+                                  <span className={cn('font-semibold tabular-nums', (feeCents ?? 0) > 0 ? 'text-rose-600' : 'text-muted-foreground')}>{feeCents != null ? brl(feeCents) : '—'}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => void doUnreconcile(p)}
+                                  disabled={savingRecon === rk}
+                                  className="mt-1 text-[11px] font-semibold text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+                                >
+                                  Desfazer conciliação
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="mt-2 flex items-center gap-1.5">
+                                <input
+                                  value={reconInput[rk] ?? ''}
+                                  onChange={(e) => setReconInput((m) => ({ ...m, [rk]: e.target.value }))}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') void doReconcile(p) }}
+                                  placeholder="Recebido (R$)"
+                                  inputMode="decimal"
+                                  className="h-7 w-full rounded-lg border border-border/50 bg-background px-2 text-xs outline-none focus-visible:border-ring"
+                                />
+                                <Button size="sm" className="h-7 shrink-0 rounded-lg px-2.5" disabled={savingRecon === rk} onClick={() => void doReconcile(p)}>
+                                  {savingRecon === rk ? '…' : 'Conciliar'}
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Ações */}
+                          <div className="md:col-span-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button size="sm" variant="outline" className="rounded-lg" disabled={!p.leadId || savingShip === p.leadId || shipOf(p) === 'entregue'} onClick={() => void markDelivered(p)}>
+                                <PackageCheck className="size-3.5" /> Marcar entregue
+                              </Button>
+                              {!p.blingOrderId ? (
+                                <Button size="sm" variant="outline" className="rounded-lg" disabled={relaunching === p.id || !p.leadId} onClick={() => void doRelaunchBling(p)}>
+                                  <RefreshCw className={cn('size-3.5', relaunching === p.id && 'animate-spin')} /> {relaunching === p.id ? 'Relançando…' : 'Criar pedido no Bling'}
+                                </Button>
+                              ) : null}
+                              {p.leadId ? (
+                                <Link to={`/leads/${p.leadId}`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-lg')}>
+                                  <ExternalLink className="size-3.5" /> Abrir cadastro
+                                </Link>
+                              ) : null}
+                              {p.tid ? <span className="ml-auto font-mono text-[10px] text-muted-foreground">TID {p.tid}</span> : null}
+                            </div>
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                  </Fragment>
                 )
               })
             )}

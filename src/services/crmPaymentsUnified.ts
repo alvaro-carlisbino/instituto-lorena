@@ -7,6 +7,30 @@ import { supabase } from '@/lib/supabaseClient'
 export type PaymentMethod = 'card' | 'pix'
 export type PaymentStatus = 'paid' | 'pending' | 'failed'
 
+/** Item do pedido (o que foi comprado). Vem do JSON `items` do pagamento (só Rede grava). */
+export type OrderItem = { nome: string; qty: number; kit: string | null; sku: string | null; precoCents: number | null }
+
+function parseItems(raw: unknown): OrderItem[] | null {
+  if (!Array.isArray(raw)) return null
+  const items = raw
+    .map((i) => {
+      const r = (i ?? {}) as Record<string, unknown>
+      const rawId = r.id != null ? String(r.id) : null
+      // O `id` guardado é `kit:3_meses` (kit) ou o id do produto no Bling (avulso). Pro SKU
+      // exibido, tiro o prefixo `kit:` — vira o código do kit; produto avulso fica com o id.
+      const sku = rawId ? rawId.replace(/^kit:/, '') : (r.kit != null ? String(r.kit) : null)
+      const preco = r.precoCents ?? r.preco_cents ?? r.valorCents
+      return {
+        nome: String(r.nome ?? r.descricao ?? r.name ?? '').trim() || 'Item',
+        qty: Number(r.qty ?? r.quantidade ?? r.quantity ?? 1) || 1,
+        kit: r.kit != null ? String(r.kit) : null,
+        sku,
+        precoCents: preco != null && Number.isFinite(Number(preco)) ? Number(preco) : null,
+      }
+    })
+  return items.length ? items : null
+}
+
 export type UnifiedPayment = {
   /** rede_payments.id (cartão) OU pagbank_checkouts.checkout_id (Pix). */
   id: string
@@ -29,6 +53,11 @@ export type UnifiedPayment = {
   freightCents: number | null
   /** ID do pedido no Melhor Envio (base p/ rastreio; só Asaas). */
   meOrderId: string | null
+  /** Itens do pedido (o que foi comprado). Só Rede grava; null nos demais. */
+  items: OrderItem[] | null
+  /** NF-e: emitida | rascunho | erro | null (sem nota). Só Rede. */
+  nfeStatus: string | null
+  nfeNumero: string | null
 }
 
 const PAID_STATUSES = new Set(['paid', 'pago', 'approved', 'available', 'completed'])
@@ -53,7 +82,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
       .limit(limit),
     supabase
       .from('rede_payments')
-      .select('id, lead_id, method, amount_cents, description, kit, installments, status, tid, return_code, customer_name, phone, customer_doc, bling_order_id, created_at, paid_at')
+      .select('id, lead_id, method, amount_cents, description, kit, installments, status, tid, return_code, customer_name, phone, customer_doc, bling_order_id, created_at, paid_at, items, nfe_status, nfe_numero')
       .order('created_at', { ascending: false })
       .limit(limit),
     supabase
@@ -88,6 +117,9 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         paidAt,
         freightCents: rec.freight_cents != null ? Number(rec.freight_cents) : null,
         meOrderId: str(rec.me_order_id),
+        items: null,
+        nfeStatus: null,
+        nfeNumero: null,
       })
     }
   }
@@ -117,6 +149,9 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         paidAt,
         freightCents: null,
         meOrderId: null,
+        items: parseItems(rec.items),
+        nfeStatus: str(rec.nfe_status),
+        nfeNumero: str(rec.nfe_numero),
       })
     }
   }
@@ -144,6 +179,9 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         paidAt,
         freightCents: null,
         meOrderId: null,
+        items: null,
+        nfeStatus: null,
+        nfeNumero: null,
       })
     }
   }
