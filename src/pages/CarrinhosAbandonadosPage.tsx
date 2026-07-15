@@ -82,7 +82,7 @@ export function CarrinhosAbandonadosPage() {
   }, [days, reloadKey])
 
   const carts = data?.carts ?? []
-  const active = useMemo(() => carts.filter((c) => !c.alreadyCustomer), [carts])
+  const active = useMemo(() => carts.filter((c) => !c.alreadyCustomer && !c.recovered), [carts])
 
   const exportCsv = () => {
     const header = ['Cliente', 'Telefone', 'Email', 'Itens', 'Valor', 'Origem', 'Google Ads', 'Última atividade', 'Já cliente']
@@ -113,7 +113,7 @@ export function CarrinhosAbandonadosPage() {
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Recuperáveis" value={String(active.length)} tone="text-amber-600" hint="com contato e sem compra" />
         <KpiCard label="Valor em jogo" value={brl(data?.recoverableValueCents ?? 0)} hint="soma dos carrinhos" />
-        <KpiCard label="Já viraram cliente" value={String(carts.length - active.length)} tone="text-emerald-600" hint="compraram por outro caminho" />
+        <KpiCard label="Recuperados" value={String(data?.recoveredCount ?? 0)} tone="text-emerald-600" hint="site → venda (inclui WhatsApp)" />
         <KpiCard label="Anônimos" value={String(data?.anonymousCount ?? 0)} hint="carrinho sem contato" />
       </section>
 
@@ -160,12 +160,13 @@ export function CarrinhosAbandonadosPage() {
                 const link = waLink(c)
                 const done = contacted.has(c.sessionId)
                 return (
-                  <TableRow key={c.sessionId} className={cn(c.alreadyCustomer && 'opacity-55')}>
+                  <TableRow key={c.sessionId} className={cn((c.alreadyCustomer || c.recovered) && 'opacity-55')}>
                     <TableCell>
                       <div className="font-semibold text-foreground/90">{c.name ?? 'Sem nome'}</div>
                       {c.phone ? <div className="text-xs text-muted-foreground">{c.phone}</div> : null}
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {c.alreadyCustomer ? <span className={cn(PILL, 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25')}>Já comprou</span> : null}
+                        {c.recovered ? <span className={cn(PILL, 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25')}>Recuperado ✓</span> : null}
+                        {c.alreadyCustomer ? <span className={cn(PILL, 'bg-muted text-muted-foreground ring-border/40')}>Cliente antigo</span> : null}
                         {done ? <span className={cn(PILL, 'bg-sky-500/10 text-sky-700 ring-sky-500/25')}>Contatado</span> : null}
                       </div>
                     </TableCell>
