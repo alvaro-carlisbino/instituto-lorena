@@ -72,6 +72,7 @@ const EstoquePage = lazyPage(() => import('./pages/EstoquePage'), 'EstoquePage')
 const BipagemPage = lazyPage(() => import('./pages/BipagemPage'), 'BipagemPage')
 const ComprasPage = lazyPage(() => import('./pages/ComprasPage'), 'ComprasPage')
 const ContasPagarPage = lazyPage(() => import('./pages/ContasPagarPage'), 'ContasPagarPage')
+const NfePage = lazyPage(() => import('./pages/NfePage'), 'NfePage')
 const KitsPage = lazyPage(() => import('./pages/KitsPage'), 'KitsPage')
 const InventarioPage = lazyPage(() => import('./pages/InventarioPage'), 'InventarioPage')
 const EstoqueRelatoriosPage = lazyPage(() => import('./pages/EstoqueRelatoriosPage'), 'EstoqueRelatoriosPage')
@@ -110,6 +111,7 @@ function AppRoutes() {
         <Route path="/bipagem" element={<BipagemPage />} />
         <Route path="/compras" element={<ComprasPage />} />
         <Route path="/contas-a-pagar" element={<ContasPagarPage />} />
+        <Route path="/nfe" element={<NfePage />} />
         <Route path="/kits" element={<KitsPage />} />
         <Route path="/inventario" element={<InventarioPage />} />
         <Route path="/estoque-relatorios" element={<EstoqueRelatoriosPage />} />

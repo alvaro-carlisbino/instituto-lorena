@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { buildBlingCatalog, blingCreateSaleOrder, blingFindOrCreateContato, getValidBlingToken } from '../_shared/bling.ts'
+import { buildBlingCatalog, blingCreateSaleOrder, blingEmitNfe, blingFindOrCreateContato, getValidBlingToken } from '../_shared/bling.ts'
 import { resolveCepBrasil } from '../_shared/cep.ts'
 import { PAGBANK_KITS } from '../_shared/pagbank.ts'
 import { REDE_KITS, inferRedeKit } from '../_shared/rede.ts'
@@ -69,6 +69,8 @@ Deno.serve(async (req) => {
       ok: true,
       default_contato_id: cfg.default_contato_id != null ? String(cfg.default_contato_id) : '',
       auto_order_enabled: cfg.auto_order_enabled === true,
+      natureza_operacao_id: cfg.natureza_operacao_id != null ? String(cfg.natureza_operacao_id) : '',
+      auto_nfe_transmit: cfg.auto_nfe_transmit === true,
     })
   }
 
@@ -81,6 +83,12 @@ Deno.serve(async (req) => {
     }
     if (payload.auto_order_enabled !== undefined) {
       next.auto_order_enabled = payload.auto_order_enabled === true
+    }
+    if (payload.natureza_operacao_id !== undefined) {
+      next.natureza_operacao_id = String(payload.natureza_operacao_id ?? '').trim()
+    }
+    if (payload.auto_nfe_transmit !== undefined) {
+      next.auto_nfe_transmit = payload.auto_nfe_transmit === true
     }
     await admin.from('tenant_integrations').upsert({ tenant_id: tenantId, bling: next })
     return json({ ok: true })
@@ -294,6 +302,135 @@ Deno.serve(async (req) => {
       return json({ ok: true, movementId: movId != null ? String(movId) : null, depositoId })
     } catch (e) {
       return json({ ok: false, error: 'bling_estoque_erro', message: e instanceof Error ? e.message : String(e) }, 502)
+    }
+  }
+
+  // nfe_list: vendas PAGAS com pedido no Bling num intervalo de datas (pós-conciliação),
+  // com o estado atual da NF-e. NF-e/Bling é do polo Tricopill. Base pra tela de emissão em lote.
+  if (action === 'nfe_list') {
+    const from = String(payload.from ?? '').trim() // 'YYYY-MM-DD'
+    const to = String(payload.to ?? '').trim()
+    const startIso = /^\d{4}-\d{2}-\d{2}$/.test(from) ? `${from}T00:00:00-03:00` : ''
+    const endIso = /^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to}T23:59:59-03:00` : ''
+    let q = admin
+      .from('rede_payments')
+      .select('id, lead_id, amount_cents, method, paid_at, bling_order_id, customer_name, customer_doc, nfe_id, nfe_numero, nfe_status, nfe_error')
+      .eq('tenant_id', 'tricopill')
+      .eq('status', 'paid')
+      .not('bling_order_id', 'is', null)
+      .order('paid_at', { ascending: true })
+    if (startIso) q = q.gte('paid_at', startIso)
+    if (endIso) q = q.lte('paid_at', endIso)
+    const { data: rows } = await q
+    const list = (rows ?? []) as Array<Record<string, unknown>>
+    // Completa nome/CPF pelo cadastro do lead quando o pagamento não tem.
+    const leadIds = [...new Set(list.map((r) => String(r.lead_id ?? '')).filter(Boolean))]
+    const leadMap = new Map<string, { nome?: string; cpf?: string }>()
+    if (leadIds.length) {
+      const { data: leads } = await admin.from('leads').select('id, patient_name, custom_fields').in('id', leadIds)
+      for (const l of (leads ?? []) as Array<Record<string, unknown>>) {
+        const cad = (((l.custom_fields ?? {}) as Record<string, unknown>).cadastro ?? {}) as Record<string, unknown>
+        leadMap.set(String(l.id), {
+          nome: String(cad.nomeCompleto ?? l.patient_name ?? '').trim() || undefined,
+          cpf: String(cad.cpf ?? '').replace(/\D/g, '') || undefined,
+        })
+      }
+    }
+    const items = list.map((r) => {
+      const lead = leadMap.get(String(r.lead_id ?? '')) ?? {}
+      const cpf = String(r.customer_doc ?? '').replace(/\D/g, '') || lead.cpf || ''
+      return {
+        paymentId: String(r.id),
+        leadId: String(r.lead_id ?? ''),
+        name: String(r.customer_name ?? '').trim() || lead.nome || 'Cliente',
+        cpf,
+        valueCents: Number(r.amount_cents ?? 0),
+        method: String(r.method ?? ''),
+        paidAt: r.paid_at ?? null,
+        blingOrderId: String(r.bling_order_id ?? ''),
+        nfeStatus: r.nfe_status != null ? String(r.nfe_status) : null,
+        nfeNumero: r.nfe_numero != null ? String(r.nfe_numero) : null,
+        nfeError: r.nfe_error != null ? String(r.nfe_error) : null,
+      }
+    })
+    return json({ ok: true, items })
+  }
+
+  // nfe_emit: emite a NF-e de UMA venda paga (a tela chama uma por vez, em lote). Puxa itens
+  // e contato do pedido do Bling e chama blingEmitNfe. Requer natureza_operacao_id configurada,
+  // CPF do comprador (nota PF) e o PRODUTO com ficha fiscal (NCM/CFOP) — senão o SEFAZ rejeita.
+  if (action === 'nfe_emit') {
+    const paymentId = String(payload.paymentId ?? '').trim()
+    if (!paymentId) return json({ ok: false, error: 'missing_payment' }, 400)
+
+    const { data: payRow } = await admin
+      .from('rede_payments')
+      .select('id, lead_id, bling_order_id, customer_doc, customer_name, nfe_numero')
+      .eq('tenant_id', 'tricopill').eq('id', paymentId).maybeSingle()
+    const pay = payRow as {
+      id: string; lead_id?: string; bling_order_id?: string; customer_doc?: string; customer_name?: string; nfe_numero?: string
+    } | null
+    if (!pay) return json({ ok: false, error: 'venda_nao_encontrada' }, 404)
+    if (pay.nfe_numero) return json({ ok: true, alreadyEmitted: true, numero: pay.nfe_numero })
+    const orderId = String(pay.bling_order_id ?? '').trim()
+    if (!orderId) return json({ ok: false, error: 'sem_pedido_bling' }, 400)
+
+    // natureza de operação (config fiscal — o contador informa o ID no Bling)
+    const { data: intRow } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', 'tricopill').maybeSingle()
+    const bcfg = ((intRow as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+    const naturezaOperacaoId = String(bcfg.natureza_operacao_id ?? '').trim()
+    if (!naturezaOperacaoId) {
+      return json({ ok: false, error: 'natureza_nao_configurada', message: 'Configure a natureza de operação da NF-e antes de emitir.' }, 400)
+    }
+    const transmit = payload.transmit !== undefined ? payload.transmit === true : bcfg.auto_nfe_transmit === true
+
+    // CPF do comprador (nota PF exige) — do pagamento ou do cadastro do lead.
+    let cpf = String(pay.customer_doc ?? '').replace(/\D/g, '')
+    if (cpf.length !== 11 && pay.lead_id) {
+      const { data: l } = await admin.from('leads').select('custom_fields').eq('id', pay.lead_id).maybeSingle()
+      const cad = ((((l as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}).cadastro ?? {}) as Record<string, unknown>)
+      cpf = String(cad.cpf ?? '').replace(/\D/g, '')
+    }
+    if (cpf.length !== 11) {
+      const msg = 'Sem CPF do cliente — a nota de pessoa física exige CPF. Complete o cadastro.'
+      await admin.from('rede_payments').update({ nfe_status: 'erro', nfe_error: msg }).eq('id', paymentId)
+      return json({ ok: false, error: 'sem_cpf', message: msg })
+    }
+
+    const token = await getValidBlingToken(admin, 'tricopill')
+    if (!token) return json({ ok: false, error: 'bling_indisponivel' }, 502)
+
+    // Itens + contato vêm do pedido já criado no Bling (mesmo caminho do sync_contato).
+    let contatoId = ''
+    let itens: Array<Record<string, unknown>> = []
+    try {
+      const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json' }
+      const gr = await fetch(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, { headers: bh })
+      if (!gr.ok) return json({ ok: false, error: 'pedido_bling_nao_lido', status: gr.status }, 502)
+      const o = (JSON.parse((await gr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+      contatoId = String(((o.contato ?? {}) as Record<string, unknown>).id ?? '')
+      itens = (Array.isArray(o.itens) ? o.itens : []).map((i: Record<string, unknown>) => ({
+        produto: { id: ((i.produto ?? {}) as Record<string, unknown>).id },
+        descricao: i.descricao, quantidade: i.quantidade, valor: i.valor,
+      }))
+    } catch (e) {
+      return json({ ok: false, error: 'pedido_bling_erro', message: e instanceof Error ? e.message : String(e) }, 502)
+    }
+    if (!contatoId || itens.length === 0) return json({ ok: false, error: 'pedido_sem_itens_ou_contato' }, 400)
+
+    try {
+      const out = await blingEmitNfe(token, { naturezaOperacaoId, contatoId, itens, transmit })
+      const status = out.error ? 'erro' : (out.transmitted ? 'emitida' : 'rascunho')
+      await admin.from('rede_payments').update({
+        nfe_id: out.nfeId, nfe_numero: out.numero ?? null, nfe_status: status,
+        nfe_error: out.error ?? null, nfe_emitted_at: new Date().toISOString(),
+      }).eq('id', paymentId)
+      if (out.error) return json({ ok: false, error: 'nfe_falhou', message: out.error })
+      return json({ ok: true, nfeId: out.nfeId, numero: out.numero ?? null, status, transmitted: out.transmitted })
+    } catch (e) {
+      const msg = (e instanceof Error ? e.message : String(e)).slice(0, 400)
+      await admin.from('rede_payments').update({ nfe_status: 'erro', nfe_error: msg }).eq('id', paymentId)
+      return json({ ok: false, error: 'nfe_falhou', message: msg })
     }
   }
 

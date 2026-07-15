@@ -40,6 +40,7 @@ export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: st
     { to: '/bipagem', label: 'Bipagem' },
     { to: '/compras', label: 'Ordens de compra' },
     { to: '/contas-a-pagar', label: 'Contas a pagar' },
+    ...(isSalesPolo ? [{ to: '/nfe', label: 'Emissão de NF-e' }] : []),
     { to: '/inventario', label: 'Inventário' },
     ...(isSalesPolo ? [] : [{ to: '/kits', label: 'Kits cirúrgicos' }]),
     { to: '/estoque-relatorios', label: 'Relatórios' },

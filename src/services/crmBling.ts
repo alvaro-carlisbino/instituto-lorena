@@ -85,21 +85,83 @@ async function invokeBling(body: Record<string, unknown>): Promise<Record<string
   return p
 }
 
-export type BlingOrderConfig = { defaultContatoId: string; autoOrderEnabled: boolean }
+export type BlingOrderConfig = {
+  defaultContatoId: string
+  autoOrderEnabled: boolean
+  naturezaOperacaoId: string
+  autoNfeTransmit: boolean
+}
 
 export async function getBlingOrderConfig(): Promise<BlingOrderConfig> {
   const p = await invokeBling({ action: 'get_order_config' })
   return {
     defaultContatoId: String(p.default_contato_id ?? ''),
     autoOrderEnabled: p.auto_order_enabled === true,
+    naturezaOperacaoId: String(p.natureza_operacao_id ?? ''),
+    autoNfeTransmit: p.auto_nfe_transmit === true,
   }
 }
 
-export async function setBlingOrderConfig(patch: { defaultContatoId?: string; autoOrderEnabled?: boolean }): Promise<void> {
+export async function setBlingOrderConfig(patch: {
+  defaultContatoId?: string; autoOrderEnabled?: boolean; naturezaOperacaoId?: string; autoNfeTransmit?: boolean
+}): Promise<void> {
   const body: Record<string, unknown> = { action: 'set_order_config' }
   if (patch.defaultContatoId !== undefined) body.default_contato_id = patch.defaultContatoId
   if (patch.autoOrderEnabled !== undefined) body.auto_order_enabled = patch.autoOrderEnabled
+  if (patch.naturezaOperacaoId !== undefined) body.natureza_operacao_id = patch.naturezaOperacaoId
+  if (patch.autoNfeTransmit !== undefined) body.auto_nfe_transmit = patch.autoNfeTransmit
   await invokeBling(body)
+}
+
+// ---- NF-e em lote --------------------------------------------------------
+export type NfeRow = {
+  paymentId: string
+  leadId: string
+  name: string
+  cpf: string
+  valueCents: number
+  method: string
+  paidAt: string | null
+  blingOrderId: string
+  nfeStatus: string | null
+  nfeNumero: string | null
+  nfeError: string | null
+}
+
+/** Vendas pagas com pedido no Bling num intervalo (pós-conciliação) + estado da NF-e. */
+export async function nfeList(from: string, to: string): Promise<NfeRow[]> {
+  const p = await invokeBling({ action: 'nfe_list', from, to })
+  return Array.isArray(p.items) ? (p.items as NfeRow[]) : []
+}
+
+export type NfeEmitResult = {
+  ok: boolean
+  numero?: string | null
+  status?: string
+  alreadyEmitted?: boolean
+  message?: string
+}
+
+/** Emite a NF-e de UMA venda (a tela chama em lote, uma por vez). Não lança em erro de
+ *  negócio (SEFAZ/CPF/natureza) — devolve ok:false + message pra mostrar por linha. */
+export async function nfeEmit(paymentId: string, transmit?: boolean): Promise<NfeEmitResult> {
+  if (!supabase) return { ok: false, message: 'Sistema não configurado.' }
+  const body: Record<string, unknown> = { action: 'nfe_emit', paymentId }
+  if (transmit !== undefined) body.transmit = transmit
+  const { data, error } = await supabase.functions.invoke('crm-bling', { body })
+  if (error) {
+    const ctx = (error as { context?: { body?: unknown } }).context
+    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
+    return { ok: false, message: String(msg || 'Falha ao emitir NF-e') }
+  }
+  const p = (data ?? {}) as Record<string, unknown>
+  return {
+    ok: p.ok === true,
+    numero: p.numero != null ? String(p.numero) : null,
+    status: p.status != null ? String(p.status) : undefined,
+    alreadyEmitted: p.alreadyEmitted === true,
+    message: p.message != null ? String(p.message) : (p.error != null ? String(p.error) : undefined),
+  }
 }
 
 export async function createBlingTestOrder(kit: string): Promise<{ orderId: string | null; bottles: number }> {
