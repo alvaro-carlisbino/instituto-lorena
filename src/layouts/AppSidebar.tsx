@@ -45,6 +45,7 @@ import {
   Fingerprint,
   ClipboardPen,
   AlarmClock,
+  ShoppingCart,
 } from 'lucide-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
@@ -206,6 +207,7 @@ export function AppSidebar() {
                 <NavItem to="/bi-vendas" label="Visão de vendas" icon={ChartColumn} />
                 <NavItem to="/tricopill" label="Chat de vendas" icon={MessagesSquare} />
                 <NavItem to="/pedidos" label="Pedidos" icon={PackageOpen} />
+                <NavItem to="/carrinhos-abandonados" label="Carrinhos abandonados" icon={ShoppingCart} />
                 <NavItem to="/assinaturas" label="Assinaturas" icon={Repeat} />
                 <NavItem to="/frente-loja" label="Frente de loja" icon={Store} />
                 <NavItem to="/reengajamento" label="Reengajamento" icon={Send} />

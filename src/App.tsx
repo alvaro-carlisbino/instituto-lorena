@@ -56,6 +56,7 @@ const TricopilDashboardPage = lazyPage(() => import('./pages/TricopilDashboardPa
 const LojaTricopillPage = lazyPage(() => import('./pages/LojaTricopillPage'), 'LojaTricopillPage')
 const TricopillReengagePage = lazyPage(() => import('./pages/TricopillReengagePage'), 'TricopillReengagePage')
 const TricopilOrdersPage = lazyPage(() => import('./pages/TricopilOrdersPage'), 'TricopilOrdersPage')
+const CarrinhosAbandonadosPage = lazyPage(() => import('./pages/CarrinhosAbandonadosPage'), 'CarrinhosAbandonadosPage')
 const TricopilFinancePage = lazyPage(() => import('./pages/TricopilFinancePage'), 'TricopilFinancePage')
 const TricopilSubscriptionsPage = lazyPage(() => import('./pages/TricopilSubscriptionsPage'), 'TricopilSubscriptionsPage')
 const PaymentLinksPage = lazyPage(() => import('./pages/PaymentLinksPage'), 'PaymentLinksPage')
@@ -130,6 +131,7 @@ function AppRoutes() {
         <Route path="/reengajamento" element={<TricopillReengagePage />} />
         <Route path="/tricopill-reengajamento" element={<Navigate to="/reengajamento" replace />} />
         <Route path="/pedidos" element={<TricopilOrdersPage />} />
+        <Route path="/carrinhos-abandonados" element={<CarrinhosAbandonadosPage />} />
         <Route path="/tricopill-pedidos" element={<Navigate to="/pedidos" replace />} />
         <Route path="/recebimentos" element={<TricopilFinancePage />} />
         <Route path="/tricopill-financeiro" element={<Navigate to="/recebimentos" replace />} />
