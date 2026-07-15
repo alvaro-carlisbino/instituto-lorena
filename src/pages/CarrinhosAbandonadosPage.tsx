@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageCircle, RefreshCw, ShoppingCart } from 'lucide-react'
+import { Download, MessageCircle, RefreshCw, ShoppingCart } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,23 @@ function relTime(iso: string): string {
 }
 
 const PILL = 'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1'
+
+function csvCell(v: unknown): string {
+  const s = String(v ?? '')
+  return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+function downloadCsv(filename: string, rows: string[][]): void {
+  const body = rows.map((r) => r.map(csvCell).join(';')).join('\r\n')
+  const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
 
 // Mensagem de recuperação (sem travessão, tom humano). Cita o primeiro item do carrinho.
 function recoveryMessage(c: AbandonedCart): string {
@@ -67,14 +84,30 @@ export function CarrinhosAbandonadosPage() {
   const carts = data?.carts ?? []
   const active = useMemo(() => carts.filter((c) => !c.alreadyCustomer), [carts])
 
+  const exportCsv = () => {
+    const header = ['Cliente', 'Telefone', 'Email', 'Itens', 'Valor', 'Origem', 'Google Ads', 'Última atividade', 'Já cliente']
+    const body = carts.map((c) => [
+      c.name ?? '', c.phone ?? '', c.email ?? '',
+      c.items.map((i) => `${i.qty > 1 ? `${i.qty}x ` : ''}${i.nome}`).join(' | '),
+      (c.valueCents / 100).toFixed(2).replace('.', ','),
+      c.source ?? '', c.gclid ? 'sim' : '', c.lastSeen.slice(0, 16).replace('T', ' '), c.alreadyCustomer ? 'sim' : '',
+    ])
+    downloadCsv(`carrinhos-abandonados-${new Date().toISOString().slice(0, 10)}.csv`, [header, ...body])
+  }
+
   return (
     <AppLayout
       title="Carrinhos abandonados"
       subtitle="Quem colocou no carrinho, deixou o contato e não finalizou. Recupere no WhatsApp."
       actions={
-        <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
-          <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Atualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="rounded-xl" onClick={exportCsv} disabled={carts.length === 0}>
+            <Download className="size-3.5" /> Exportar CSV
+          </Button>
+          <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
+            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Atualizar
+          </Button>
+        </div>
       }
     >
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">

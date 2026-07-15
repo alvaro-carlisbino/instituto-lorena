@@ -131,6 +131,8 @@ export function TricopilOrdersPage() {
   const [methodFilter, setMethodFilter] = useState<'all' | 'pix' | 'card'>('all')
   const [deliveryFilter, setDeliveryFilter] = useState<'all' | DeliveryKind>('all')
   const [shipFilter, setShipFilter] = useState<'all' | ShipStatus>('all')
+  const [originFilter, setOriginFilter] = useState<'all' | OrderOrigin>('all')
+  const [nfeFilter, setNfeFilter] = useState<'all' | 'com' | 'sem' | 'rejeitada'>('all')
   const [shipOverride, setShipOverride] = useState<Record<string, ShipStatus>>({})
   const [savingShip, setSavingShip] = useState<string | null>(null)
   const [trackingByLead, setTrackingByLead] = useState<Record<string, string>>({})
@@ -331,6 +333,14 @@ export function TricopilOrdersPage() {
       if (methodFilter !== 'all' && p.method !== methodFilter) return false
       if (deliveryFilter !== 'all' && deliveryOf(p) !== deliveryFilter) return false
       if (shipFilter !== 'all' && shipOf(p) !== shipFilter) return false
+      if (originFilter !== 'all' && originOf(p) !== originFilter) return false
+      if (nfeFilter !== 'all') {
+        const nm = nfeMeta(p.nfeStatus, p.nfeNumero)
+        if (nfeFilter === 'com' && !nm.done) return false
+        if (nfeFilter === 'rejeitada' && !nm.failed) return false
+        // "Sem NF-e" = venda no cartão paga que ainda não tem nota (o que falta emitir).
+        if (nfeFilter === 'sem' && !(p.method === 'card' && p.status === 'paid' && !nm.done)) return false
+      }
       if (q) {
         const hay = [p.customerName, p.phone, p.customerDoc, p.description, p.kit].filter(Boolean).join(' ').toLowerCase()
         if (!hay.includes(q)) return false
@@ -338,7 +348,7 @@ export function TricopilOrdersPage() {
       return true
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, statusFilter, methodFilter, deliveryFilter, shipFilter, leadById, shipOverride])
+  }, [rows, search, statusFilter, methodFilter, deliveryFilter, shipFilter, originFilter, nfeFilter, leadById, shipOverride])
 
   const kpis = useMemo(() => {
     const paid = filtered.filter((p) => p.status === 'paid')
@@ -346,12 +356,13 @@ export function TricopilOrdersPage() {
     const revenue = paid.reduce((s, p) => s + p.amountCents, 0)
     const comFrete = filtered.filter((p) => p.freightCents != null && p.freightCents > 0)
     const freteMedio = comFrete.length > 0 ? Math.round(comFrete.reduce((s, p) => s + (p.freightCents ?? 0), 0) / comFrete.length) : 0
-    return { total: filtered.length, paid: paid.length, pending: pending.length, revenue, freteMedio, comFreteCount: comFrete.length }
-  }, [filtered])
+    const reconciled = paid.filter((p) => recons.has(reconKey(p.method, p.id))).length
+    return { total: filtered.length, paid: paid.length, pending: pending.length, revenue, freteMedio, comFreteCount: comFrete.length, reconciled }
+  }, [filtered, recons])
 
-  const hasActiveFilters = search.trim() !== '' || statusFilter !== 'all' || methodFilter !== 'all' || deliveryFilter !== 'all' || shipFilter !== 'all'
+  const hasActiveFilters = search.trim() !== '' || statusFilter !== 'all' || methodFilter !== 'all' || deliveryFilter !== 'all' || shipFilter !== 'all' || originFilter !== 'all' || nfeFilter !== 'all'
   const clearFilters = () => {
-    setSearch(''); setStatusFilter('all'); setMethodFilter('all'); setDeliveryFilter('all'); setShipFilter('all')
+    setSearch(''); setStatusFilter('all'); setMethodFilter('all'); setDeliveryFilter('all'); setShipFilter('all'); setOriginFilter('all'); setNfeFilter('all')
   }
 
   // Exporta os pedidos do filtro atual pra CSV (abre no Excel/Sheets). Só dado que já está na tela.
@@ -443,11 +454,12 @@ export function TricopilOrdersPage() {
       }
     >
       {/* KPIs */}
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <KpiCard label="Pedidos" value={String(kpis.total)} hint="no filtro atual" />
         <KpiCard label="Pagos" value={String(kpis.paid)} tone="text-emerald-600" />
         <KpiCard label="Aguardando" value={String(kpis.pending)} tone="text-amber-600" />
         <KpiCard label="Receita paga" value={brl(kpis.revenue)} />
+        <KpiCard label="Conciliados" value={kpis.paid > 0 ? `${kpis.reconciled}/${kpis.paid}` : '—'} tone={kpis.paid > 0 && kpis.reconciled === kpis.paid ? 'text-emerald-600' : undefined} hint={kpis.paid > 0 ? `${Math.round((kpis.reconciled / kpis.paid) * 100)}% batidos` : 'sem pagos'} />
         <KpiCard label="Frete médio" value={kpis.comFreteCount > 0 ? brl(kpis.freteMedio) : '—'} hint={kpis.comFreteCount > 0 ? `${kpis.comFreteCount} c/ frete` : 'sem dado ainda'} />
       </section>
 
@@ -525,6 +537,30 @@ export function TricopilOrdersPage() {
               {SHIP_STATUS_OPTIONS.map((o) => (
                 <SelectItem key={o.value} value={o.value} className="text-xs font-bold uppercase tracking-tight">{o.label}</SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={originFilter} onValueChange={(v) => setOriginFilter(v as 'all' | OrderOrigin)}>
+            <LabeledSelectTrigger className={filterSelectCls} size="default">
+              {originFilter === 'all' ? 'Origem' : ORIGIN_META[originFilter].label}
+            </LabeledSelectTrigger>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="all" className="text-xs font-bold uppercase tracking-tight">Todas as origens</SelectItem>
+              <SelectItem value="whatsapp" className="text-xs font-bold uppercase tracking-tight">WhatsApp</SelectItem>
+              <SelectItem value="site" className="text-xs font-bold uppercase tracking-tight">Site</SelectItem>
+              <SelectItem value="manual" className="text-xs font-bold uppercase tracking-tight">Manual</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={nfeFilter} onValueChange={(v) => setNfeFilter(v as 'all' | 'com' | 'sem' | 'rejeitada')}>
+            <LabeledSelectTrigger className={filterSelectCls} size="default">
+              {nfeFilter === 'all' ? 'NF-e' : nfeFilter === 'com' ? 'Com NF-e' : nfeFilter === 'sem' ? 'Sem NF-e' : 'Rejeitada'}
+            </LabeledSelectTrigger>
+            <SelectContent className="rounded-xl">
+              <SelectItem value="all" className="text-xs font-bold uppercase tracking-tight">NF-e (todas)</SelectItem>
+              <SelectItem value="com" className="text-xs font-bold uppercase tracking-tight">Com NF-e</SelectItem>
+              <SelectItem value="sem" className="text-xs font-bold uppercase tracking-tight">Sem NF-e (falta emitir)</SelectItem>
+              <SelectItem value="rejeitada" className="text-xs font-bold uppercase tracking-tight">Rejeitada</SelectItem>
             </SelectContent>
           </Select>
         </div>
