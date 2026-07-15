@@ -29,6 +29,7 @@ export type LojaAnalytics = {
     addToCart: number
     purchases: number
     revenueCents: number
+    whatsappClicks: number
   }
   funnel: {
     viewItem: number
@@ -143,6 +144,7 @@ function aggregate(rows: RawEvent[]): LojaAnalytics {
   let viewSubscription = 0
   let subscribe = 0
   let reorder = 0
+  let whatsappClicks = 0
   let subscribeRevenueCents = 0
   let purchaseRevenueCents = 0
 
@@ -209,6 +211,9 @@ function aggregate(rows: RawEvent[]): LojaAnalytics {
       case 'reorder':
         reorder += 1
         break
+      case 'whatsapp_click':
+        whatsappClicks += 1
+        break
       default:
         break
     }
@@ -235,7 +240,7 @@ function aggregate(rows: RawEvent[]): LojaAnalytics {
 
   return {
     totalEvents: rows.length,
-    kpis: { sessions: sessions.size, viewItem, addToCart, purchases: purchase, revenueCents },
+    kpis: { sessions: sessions.size, viewItem, addToCart, purchases: purchase, revenueCents, whatsappClicks },
     funnel: { viewItem, addToCart, beginCheckout, purchase },
     pages,
     products,

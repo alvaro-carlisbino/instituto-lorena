@@ -214,10 +214,11 @@ export function LojaTricopillPage() {
       ) : (
         <>
           {/* 1 — KPIs */}
-          <section className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <section className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
             <StatCard label="Sessões" value={k?.sessions ?? 0} hint="visitantes únicos no período" />
             <StatCard label="Viu produto" value={k?.viewItem ?? 0} hint="eventos view_item" tone="text-primary" />
             <StatCard label="Add. carrinho" value={k?.addToCart ?? 0} hint="eventos add_to_cart" tone="text-amber-600" />
+            <StatCard label="Foi p/ WhatsApp" value={k?.whatsappClicks ?? 0} hint="cliques no botão do zap" tone="text-green-600" />
             <StatCard label="Compras" value={k?.purchases ?? 0} hint="eventos purchase" tone="text-emerald-600" />
             <StatCard
               label="Receita"
