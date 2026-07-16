@@ -7,6 +7,7 @@ import {
   upsertConversationStateInboundOnly,
 } from '../_shared/crmAiAutoReply.ts'
 import { customerSaysPaid, escalateLeadToHuman, insertInteraction, upsertLeadByPhone, wantsHumanAgent } from '../_shared/crm.ts'
+import { linkSiteAttributionToLead } from '../_shared/siteAttributionBridge.ts'
 import { checkPendingRedePixForLead } from '../_shared/rede.ts'
 import { captureCadastroForLead } from '../_shared/cadastroExtract.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
@@ -264,6 +265,11 @@ Deno.serve(async (req) => {
     if (isOptOutMessage(normalized.text)) {
       await applyOptOutToLead(admin, lead.leadId, 'whatsapp_inbound_opt_out')
     }
+
+    // Ponte site → zap: a 1ª mensagem vinda do CTA do site traz "(ref: SITE-<sid>)".
+    // Copia a atribuição da sessão (gclid do Ads, utms) pro lead — sem isso a venda que
+    // fecha na conversa nasce órfã e o Google nunca recebe a conversão de volta.
+    void linkSiteAttributionToLead(admin, lead.leadId, normalized.text)
 
     const inboundInteractionId = await insertInteraction(admin, {
       leadId: lead.leadId,
