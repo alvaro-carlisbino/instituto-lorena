@@ -100,24 +100,53 @@ async function dispatchClinicFeedbackOnStage(admin: SupabaseClient): Promise<num
   const flowNs = String(mc.feedback_flow_ns ?? '').trim()
   if (!apiKey || !flowNs) return 0
 
+  // RITMO: no máximo 25 pedidos de avaliação POR HORA. O backlog (600+) sai ao longo de
+  // ~1 dia em vez de metralhar todo mundo numa noite (caso 16/jul: 24 de uma vez assustou).
+  const hourAgo = new Date(Date.now() - 3_600_000).toISOString()
+  const { count: sentLastHour } = await admin.from('leads')
+    .select('id', { count: 'exact', head: true })
+    .eq('tenant_id', 'instituto-lorena')
+    .gte('custom_fields->>feedback_sent_at', hourAgo)
+  if ((sentLastHour ?? 0) >= 25) return 0
+
+  const batch = Math.max(0, 25 - (sentLastHour ?? 0))
   const { data: leads } = await admin.from('leads')
     .select('id, custom_fields')
     .eq('tenant_id', 'instituto-lorena')
     .eq('pipeline_id', 'pipeline-clinica')
     .in('stage_id', ['consulta', 'fechado']) // agendou OU fechou → pede avaliação (Álvaro, 16/jul)
+    // Filtro NO SQL, não em JS: antes o limit pegava sempre os mesmos 25 já marcados e a
+    // fila travava no primeiro lote (bug 16/jul: parou em 24 pra sempre).
+    .is('custom_fields->feedback_sent_at', null)
     .order('stage_entered_at', { ascending: false })
-    .limit(25) // 25 por rodada (cron 2min): espalha o backlog em vez de metralhar o ManyChat
+    .limit(batch)
 
   let sent = 0
   for (const l of (leads ?? []) as Array<{ id: string; custom_fields: Record<string, unknown> | null }>) {
     const cf = (l.custom_fields ?? {}) as Record<string, unknown>
-    if (cf.feedback_sent_at) continue // já pedimos avaliação a esse lead
     const sid = String(cf.manychat_subscriber_id ?? '').trim()
-    if (!sid) continue
+    if (!sid) {
+      // Sem subscriber não tem como enviar: carimba (data ISO, senão a conta por hora quebra)
+      // + motivo, pra sair da fila de vez.
+      await admin.from('leads').update({ custom_fields: { ...cf, feedback_sent_at: new Date().toISOString(), feedback_skipped: 'sem_manychat' } }).eq('id', l.id).then(() => {}, () => {})
+      continue
+    }
+    // CLAIM ATÔMICO antes de enviar: só envia quem conseguiu gravar a marca. Duas execuções
+    // simultâneas (cron + disparo manual) não duplicam mais — caso Ezequiel, que recebeu 2x
+    // porque as duas leram a fila antes de qualquer marca ser gravada.
+    const { data: claimed } = await admin.from('leads')
+      .update({ custom_fields: { ...cf, feedback_sent_at: new Date().toISOString() } })
+      .eq('id', l.id)
+      .is('custom_fields->feedback_sent_at', null)
+      .select('id')
+    if (!claimed || claimed.length === 0) continue // outra execução já pegou este lead
+
     const r = await sendManychatFlow(apiKey, sid, flowNs)
     if (r.ok) {
-      await admin.from('leads').update({ custom_fields: { ...cf, feedback_sent_at: new Date().toISOString() } }).eq('id', l.id).then(() => {}, () => {})
       sent++
+    } else {
+      // Envio falhou: solta a marca pra tentar de novo na próxima rodada.
+      await admin.from('leads').update({ custom_fields: cf }).eq('id', l.id).then(() => {}, () => {})
     }
   }
   return sent
