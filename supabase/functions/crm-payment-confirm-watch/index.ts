@@ -104,9 +104,9 @@ async function dispatchClinicFeedbackOnStage(admin: SupabaseClient): Promise<num
     .select('id, custom_fields')
     .eq('tenant_id', 'instituto-lorena')
     .eq('pipeline_id', 'pipeline-clinica')
-    .eq('stage_id', 'consulta')
+    .in('stage_id', ['consulta', 'fechado']) // agendou OU fechou → pede avaliação (Álvaro, 16/jul)
     .order('stage_entered_at', { ascending: false })
-    .limit(50)
+    .limit(25) // 25 por rodada (cron 2min): espalha o backlog em vez de metralhar o ManyChat
 
   let sent = 0
   for (const l of (leads ?? []) as Array<{ id: string; custom_fields: Record<string, unknown> | null }>) {
