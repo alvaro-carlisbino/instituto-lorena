@@ -187,6 +187,10 @@ Deno.serve(async (req) => {
 
   // Envia via crm-send-message (resolve provider/opt-out/telefone sozinho).
   async function deliver(leadId: string, text: string, source: string): Promise<{ ok: boolean; optOut: boolean; note: string }> {
+    // ANTI-BAN (pedido do Álvaro, 16/jul): espaço aleatório de 4 a 9s entre envios. Rajada
+    // de mensagens idênticas em sequência de segundos é a assinatura clássica de spam que
+    // derruba número em API não-oficial. 15 envios × ~6s ≈ 90s, dentro do limite da function.
+    await new Promise((r) => setTimeout(r, 4000 + Math.floor(Math.random() * 5000)))
     try {
       const res = await fetch(`${url}/functions/v1/crm-send-message`, {
         method: 'POST',
