@@ -36,3 +36,6 @@ supabase/.temp/
 .claude/
 .vercel
 .env*
+
+# snapshot do site antigo (WordPress) — material de referência, não versionar
+/tricopill-site-snapshot-*/
