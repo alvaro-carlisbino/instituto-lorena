@@ -146,7 +146,8 @@ Deno.serve(async (req) => {
         whatsapp_instance_id,
         deleted_at,
         conversation_status,
-        tenant_id
+        tenant_id,
+        stage_id
       )
     `)
     .eq('ai_enabled', true)
@@ -181,6 +182,16 @@ Deno.serve(async (req) => {
 
     // Ignora leads perdidos/fechados
     if (lead.conversation_status === 'lost' || lead.conversation_status === 'closed') {
+      skipped++
+      continue
+    }
+
+    // Quem JÁ CONVERTEU não recebe follow-up de venda (pedido do Álvaro, 16/jul):
+    // clínica com consulta agendada/fechado, ou venda paga no Tricopill. Pra esses o
+    // contato certo é o fluxo de FEEDBACK (pós-consulta) ou a recompra (pós-frasco),
+    // nunca "e aí, vamos fechar?" — soa robô e queima a relação.
+    const CONVERTED_STAGES = new Set(['fechado', 'consulta', 'tricopill__vd-pago'])
+    if (CONVERTED_STAGES.has(String((lead as { stage_id?: string }).stage_id ?? ''))) {
       skipped++
       continue
     }
