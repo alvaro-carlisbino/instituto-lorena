@@ -33,17 +33,31 @@ import { type StockBatch, listBatchBalances } from '@/services/estoqueKits'
 import { BarcodeCameraDialog } from '@/components/estoque/BarcodeCameraDialog'
 import { useTenant } from '@/context/TenantContext'
 
-/** Abas do módulo. Kits cirúrgicos é só da clínica (o polo de vendas não tem procedimento). */
+/** Abas do módulo de ESTOQUE: só o que é mercadoria física (o que entra, o que sai, o que tem).
+ *  Dinheiro (contas a pagar, NF-e) mora em financeiroTabs — antes vivia aqui e confundia:
+ *  a mesma fileira misturava "bipar caixa" com "pagar boleto".
+ *  Kits cirúrgicos é só da clínica (o polo de vendas não tem procedimento). */
 export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: string }> {
   return [
     { to: '/estoque', label: 'Estoque' },
     { to: '/bipagem', label: 'Bipagem' },
     { to: '/compras', label: 'Ordens de compra' },
-    { to: '/contas-a-pagar', label: 'Contas a pagar' },
-    ...(isSalesPolo ? [{ to: '/nfe', label: 'Emissão de NF-e' }] : []),
     { to: '/inventario', label: 'Inventário' },
     ...(isSalesPolo ? [] : [{ to: '/kits', label: 'Kits cirúrgicos' }]),
     { to: '/estoque-relatorios', label: 'Relatórios' },
+  ]
+}
+
+/** Abas do módulo FINANCEIRO: a casa do dinheiro. Espelha o grupo "Financeiro" da sidebar,
+ *  na mesma ordem do fluxo real: o que entra → como cobra → o que sai → nota → números. */
+export function financeiroTabs(isSalesPolo: boolean): Array<{ to: string; label: string }> {
+  return [
+    ...(isSalesPolo ? [{ to: '/recebimentos', label: 'Recebimentos' }] : []),
+    { to: '/links-pagamento', label: 'Links de pagamento' },
+    ...(isSalesPolo ? [{ to: '/cupons', label: 'Cupons' }] : []),
+    { to: '/contas-a-pagar', label: 'Contas a pagar' },
+    ...(isSalesPolo ? [{ to: '/nfe', label: 'Emissão de NF-e' }] : []),
+    ...(isSalesPolo ? [{ to: '/tricopill-relatorios', label: 'Relatórios' }] : []),
   ]
 }
 

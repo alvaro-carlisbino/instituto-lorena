@@ -19,7 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { estoqueTabs } from '@/pages/EstoquePage'
+import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import {
   type Payable,
@@ -277,7 +277,7 @@ export function ContasPagarPage() {
       title="Contas a pagar"
       subtitle="Notas fiscais de compra, boletos e a agenda de vencimentos com projeção por mês."
     >
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
+      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[

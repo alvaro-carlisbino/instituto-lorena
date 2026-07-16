@@ -4,7 +4,7 @@ import { FileText, RefreshCw, ShieldAlert, CheckCircle2, XCircle, Loader2, Setti
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
-import { estoqueTabs } from '@/pages/EstoquePage'
+import { financeiroTabs } from '@/pages/EstoquePage'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -187,7 +187,7 @@ export function NfePage() {
       title="Emissão de NF-e"
       subtitle="Depois da conciliação, marque as vendas pagas e emita as notas no Bling de uma vez."
     >
-      <SubTabs tabs={estoqueTabs(isSalesPolo)} />
+      <SubTabs tabs={financeiroTabs(isSalesPolo)} />
 
       {/* Pré-requisito fiscal */}
       {naturezaMissing ? (

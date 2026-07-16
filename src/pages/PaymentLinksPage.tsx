@@ -11,6 +11,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
+import { SubTabs } from '@/components/page/SubTabs'
+import { financeiroTabs } from '@/pages/EstoquePage'
 import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
 import { checkRedePix, generateRedeLink, generateRedePix } from '@/services/crmRede'
 import { quoteFrete, type FreteOption } from '@/services/crmFrete'
@@ -218,6 +220,7 @@ export function PaymentLinksPage() {
       title="Links de pagamento"
       subtitle={isSalesPolo ? 'Pix e cartão (e.Rede) para o Tricopill' : 'Link de pagamento por cartão (e.Rede)'}
     >
+      <SubTabs tabs={financeiroTabs(isSalesPolo)} />
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,400px)_1fr]">
         <Card>
           <CardHeader>

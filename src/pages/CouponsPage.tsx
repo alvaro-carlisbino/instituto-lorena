@@ -3,6 +3,9 @@ import { toast } from 'sonner'
 import { RefreshCw, Tag, Trash2, Plus } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
+import { SubTabs } from '@/components/page/SubTabs'
+import { financeiroTabs } from '@/pages/EstoquePage'
+import { useTenant } from '@/context/TenantContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -44,6 +47,7 @@ const EMPTY: {
 } = { code: '', kind: 'percent', value: '', maxUses: '', validUntil: '', minAmount: '', note: '' }
 
 export function CouponsPage() {
+  const { tenant } = useTenant()
   const [form, setForm] = useState({ ...EMPTY })
   const [saving, setSaving] = useState(false)
   const [rows, setRows] = useState<Coupon[]>([])
@@ -127,6 +131,7 @@ export function CouponsPage() {
       title="Cupons de desconto"
       subtitle="Códigos que a IA de vendas e os links de pagamento aplicam (Pix e cartão)."
     >
+      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,380px)_1fr]">
         <Card>
           <CardHeader>

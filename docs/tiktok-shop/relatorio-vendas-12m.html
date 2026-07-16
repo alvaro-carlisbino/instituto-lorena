@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tricopill — Relatório de Vendas (12 meses)</title>
+<style>
+  :root{
+    --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --bg:#f1f5f9;
+    --brand:#0e7490; --brand-soft:#ecfeff; --ok:#059669; --star:#f59e0b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);padding:32px 24px}
+  .wrap{max-width:1080px;margin:0 auto}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:28px;margin-bottom:20px}
+
+  /* header */
+  .head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+  .brand h1{font-size:26px;letter-spacing:-.02em}
+  .brand h1 span{color:var(--brand)}
+  .brand .dom{color:var(--muted);font-size:14px;margin-top:2px}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .badge{font-size:12px;font-weight:600;padding:6px 12px;border-radius:999px;background:var(--brand-soft);color:var(--brand);border:1px solid #a5f3fc}
+  .badge.gray{background:#f8fafc;color:var(--muted);border-color:var(--line)}
+  .sub{margin-top:18px;padding-top:18px;border-top:1px solid var(--line);display:flex;gap:32px;flex-wrap:wrap;font-size:14px}
+  .sub b{display:block;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+
+  /* KPIs */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .kpi{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px}
+  .kpi .lb{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .kpi .v{font-size:26px;font-weight:700;margin-top:6px;letter-spacing:-.02em}
+  .kpi .v small{font-size:14px;color:var(--muted);font-weight:600}
+  .kpi.hl{background:var(--brand);border-color:var(--brand)}
+  .kpi.hl .lb{color:#a5f3fc}
+  .kpi.hl .v{color:#fff}
+  .kpi.hl .v small{color:#cffafe}
+
+  h2{font-size:16px;margin-bottom:16px}
+  h2 small{color:var(--muted);font-weight:500;font-size:13px;margin-left:8px}
+
+  /* chart */
+  .chart{display:flex;align-items:flex-end;gap:10px;height:220px;padding-top:8px}
+  .bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
+  .bar .val{font-size:10.5px;color:var(--muted);margin-bottom:5px;white-space:nowrap}
+  .bar .col{width:100%;background:linear-gradient(180deg,#22d3ee,#0e7490);border-radius:6px 6px 0 0;min-height:6px}
+  .bar .lab{font-size:11px;color:var(--muted);margin-top:7px;white-space:nowrap}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:left;padding:10px 12px;border-bottom:2px solid var(--line)}
+  td{padding:10px 12px;border-bottom:1px solid var(--line)}
+  th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
+  tr.total td{font-weight:700;border-top:2px solid var(--ink);border-bottom:none;background:#f8fafc}
+
+  /* ratings */
+  .rat{display:grid;grid-template-columns:220px 1fr;gap:32px}
+  .rat-score{text-align:center;padding:12px 0}
+  .rat-score .n{font-size:52px;font-weight:800;letter-spacing:-.03em}
+  .rat-score .stars{color:var(--star);font-size:22px;letter-spacing:2px;margin:4px 0}
+  .rat-score .c{color:var(--muted);font-size:13px}
+  .dist{display:flex;flex-direction:column;gap:8px;justify-content:center}
+  .drow{display:flex;align-items:center;gap:10px;font-size:13px}
+  .drow .s{width:34px;color:var(--muted)}
+  .drow .track{flex:1;height:9px;background:#f1f5f9;border-radius:99px;overflow:hidden}
+  .drow .fill{height:100%;background:var(--star);border-radius:99px}
+  .drow .q{width:26px;text-align:right;color:var(--muted)}
+  .reviews{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}
+  .rev{border:1px solid var(--line);border-radius:12px;padding:16px;font-size:13px}
+  .rev .st{color:var(--star);letter-spacing:1px;margin-bottom:6px}
+  .rev p{color:#334155;line-height:1.45}
+  .rev .who{margin-top:10px;color:var(--muted);font-size:12px}
+
+  .foot{color:var(--muted);font-size:12px;line-height:1.6;text-align:center;padding:8px 0 24px}
+
+  @media (max-width:760px){
+    .kpis{grid-template-columns:repeat(2,1fr)}
+    .rat{grid-template-columns:1fr}
+    .reviews{grid-template-columns:1fr}
+    .bar .val{display:none}
+  }
+  @media print{
+    body{background:#fff;padding:0}
+    .card,.kpi{border-color:#cbd5e1;break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card">
+    <div class="head">
+      <div class="brand">
+        <h1>Trico<span>pill</span> — Loja Oficial</h1>
+        <div class="dom">tricopill.com.br &nbsp;·&nbsp; Categoria: Saúde — Suplementos Alimentares (capilar)</div>
+      </div>
+      <div class="badges">
+        <span class="badge">Relatório de Vendas Online</span>
+        <span class="badge gray">Fonte: ERP Bling — pedidos de venda</span>
+      </div>
+    </div>
+    <div class="sub">
+      <div><b>Período do relatório</b>01/07/2025 a 30/06/2026 (12 meses)</div>
+      <div><b>Moeda</b>BRL — Real brasileiro (R$)</div>
+      <div><b>Emitido em</b>03/07/2026</div>
+      <div><b>Critério</b>Pedidos de venda faturados/atendidos (exclui cancelados)</div>
+    </div>
+  </div>
+
+  <div class="kpis" style="margin-bottom:20px">
+    <div class="kpi hl">
+      <div class="lb">GMV / Receita — 12 meses</div>
+      <div class="v">R$ 878.038,21 <small>BRL</small></div>
+    </div>
+    <div class="kpi">
+      <div class="lb">Pedidos no período</div>
+      <div class="v">2.154</div>
+    </div>
+    <div class="kpi">
+      <div class="lb">Ticket médio</div>
+      <div class="v">R$ 407,63</div>
+    </div>
+    <div class="kpi">
+      <div class="lb">Avaliação da loja</div>
+      <div class="v">4,63 <small>★ · 16 avaliações</small></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Receita mensal (GMV em R$)<small>julho/2025 — junho/2026</small></h2>
+    <div class="chart" id="chart"></div>
+  </div>
+
+  <div class="card">
+    <h2>Histórico mensal de vendas</h2>
+    <table>
+      <thead><tr><th>Mês</th><th class="num">Pedidos</th><th class="num">GMV / Receita (BRL)</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Avaliações da loja<small>publicadas em tricopill.com.br</small></h2>
+    <div class="rat">
+      <div class="rat-score">
+        <div class="n">4,63</div>
+        <div class="stars">★★★★★</div>
+        <div class="c">16 avaliações publicadas</div>
+      </div>
+      <div class="dist">
+        <div class="drow"><span class="s">5 ★</span><div class="track"><div class="fill" style="width:69%"></div></div><span class="q">11</span></div>
+        <div class="drow"><span class="s">4 ★</span><div class="track"><div class="fill" style="width:25%"></div></div><span class="q">4</span></div>
+        <div class="drow"><span class="s">3 ★</span><div class="track"><div class="fill" style="width:6%"></div></div><span class="q">1</span></div>
+        <div class="drow"><span class="s">2 ★</span><div class="track"><div class="fill" style="width:0%"></div></div><span class="q">0</span></div>
+        <div class="drow"><span class="s">1 ★</span><div class="track"><div class="fill" style="width:0%"></div></div><span class="q">0</span></div>
+      </div>
+    </div>
+    <div class="reviews">
+      <div class="rev"><div class="st">★★★★★</div><p>“Comprei pela praticidade e gostei bastante. Cápsulas pequenas, fáceis de tomar no dia a dia.”</p><div class="who">Mariana S. · 20/04/2026</div></div>
+      <div class="rev"><div class="st">★★★★☆</div><p>“Bom custo-benefício. Estou seguindo a rotina certinho.”</p><div class="who">Rafael M. · 06/04/2026</div></div>
+      <div class="rev"><div class="st">★★★★☆</div><p>“Senti o couro cabeludo mais equilibrado com o uso.”</p><div class="who">Fernanda G. · 04/04/2026</div></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    Tricopill — Loja Oficial · tricopill.com.br · Relatório consolidado a partir dos pedidos de venda do ERP Bling (jul/2025 a jun/2026).<br>
+    Valores em reais brasileiros (BRL). Pedidos cancelados não são contabilizados.
+  </div>
+</div>
+
+<script>
+  const MONTHS = [
+    ['jul/25', 137,  54865.22],
+    ['ago/25', 291, 110491.24],
+    ['set/25', 142,  52011.20],
+    ['out/25', 233,  97627.15],
+    ['nov/25', 146,  65494.35],
+    ['dez/25', 103,  50150.55],
+    ['jan/26', 171,  79529.46],
+    ['fev/26', 161,  68151.06],
+    ['mar/26', 184,  74115.14],
+    ['abr/26', 226,  82619.13],
+    ['mai/26', 169,  65469.05],
+    ['jun/26', 191,  77514.66],
+  ];
+  const brl = v => v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  const max = Math.max(...MONTHS.map(m=>m[2]));
+
+  document.getElementById('chart').innerHTML = MONTHS.map(([lab,,v]) =>
+    `<div class="bar"><div class="val">${Math.round(v/1000)}k</div><div class="col" style="height:${(v/max*100).toFixed(1)}%"></div><div class="lab">${lab}</div></div>`
+  ).join('');
+
+  const tot = MONTHS.reduce((a,m)=>[a[0]+m[1],a[1]+m[2]],[0,0]);
+  document.getElementById('tbody').innerHTML = MONTHS.map(([lab,n,v]) =>
+    `<tr><td>${lab.replace('/', '/20')}</td><td class="num">${n}</td><td class="num">${brl(v)}</td></tr>`
+  ).join('') + `<tr class="total"><td>Total — 12 meses</td><td class="num">${tot[0].toLocaleString('pt-BR')}</td><td class="num">${brl(tot[1])}</td></tr>`;
+</script>
+</body>
+</html>
