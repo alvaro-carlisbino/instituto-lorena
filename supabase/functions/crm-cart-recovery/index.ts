@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { sendCartRecoveryEmail } from '../_shared/tricopillEmails.ts'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Carrinho abandonado — recupera links de pagamento (rede_payments) que ficaram
@@ -141,13 +142,35 @@ Deno.serve(async (req) => {
       note = e instanceof Error ? e.message : String(e)
     }
 
-    if (sent) {
+    // E-MAIL em paralelo (Resend): backup do WhatsApp, custo zero e sem risco de ban.
+    // O e-mail vem do cadastro do lead (o checkout do site sempre pede). Best-effort:
+    // não muda o avanço de step (o dedupe continua sendo o do WhatsApp).
+    let emailSent = false
+    try {
+      const { data: l } = await admin.from('leads').select('custom_fields').eq('id', r.lead_id).maybeSingle()
+      const cf = ((l as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>
+      const cad = (cf.cadastro ?? {}) as Record<string, unknown>
+      const email = String(cf.email ?? cad.email ?? '').trim()
+      if (email.includes('@')) {
+        const out = await sendCartRecoveryEmail({
+          to: email,
+          firstName: nome,
+          payLink: link,
+          step: (target === 1 ? 1 : 2) as 1 | 2,
+          couponCode: target === 2 && COUPON ? COUPON : undefined,
+          couponPct: COUPON_PCT ? Number(COUPON_PCT) : undefined,
+        })
+        emailSent = out.ok
+      }
+    } catch { /* e-mail nunca derruba a recuperação */ }
+
+    if (sent || emailSent) {
       await admin
         .from('rede_payments')
         .update({ recovery_step: target, recovery_sent_at: new Date().toISOString() })
         .eq('id', r.id)
     }
-    results.push({ id: r.id, lead: r.lead_id, tenant: r.tenant_id, target, sent, note: note.slice(0, 120) })
+    results.push({ id: r.id, lead: r.lead_id, tenant: r.tenant_id, target, sent, emailSent, note: note.slice(0, 120) })
   }
 
   return json({ ok: true, enabled: ENABLED, candidates: candidates.length, processed: results.length, results })

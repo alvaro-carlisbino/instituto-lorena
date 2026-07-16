@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supa
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { resendMissingSaleReceipts } from '../_shared/saleReceipt.ts'
 import { sendManychatFlow } from '../_shared/manychatPublicApi.ts'
+import { sendPostPurchaseEmail } from '../_shared/tricopillEmails.ts'
 
 // Rede de segurança de confirmação de pagamento.
 //
@@ -122,6 +123,42 @@ async function dispatchClinicFeedbackOnStage(admin: SupabaseClient): Promise<num
   return sent
 }
 
+// E-mail pós-compra: toda venda paga do Tricopill nas últimas 48h que ainda não recebeu.
+// Confirma o pedido, convida pro Clube (grupo) e planta o cupom da próxima compra.
+// E-mail sai do cadastro do lead (custom_fields.email ou cadastro.email). Sem e-mail = pula.
+async function sendPostPurchaseEmails(admin: SupabaseClient): Promise<number> {
+  const since = new Date(Date.now() - 48 * 3_600_000).toISOString()
+  const { data: rows } = await admin
+    .from('rede_payments')
+    .select('id, lead_id, customer_name, amount_cents, description, paid_at')
+    .eq('tenant_id', 'tricopill')
+    .eq('status', 'paid')
+    .is('post_purchase_email_at', null)
+    .gte('paid_at', since)
+    .not('lead_id', 'is', null)
+    .limit(20)
+  let sent = 0
+  for (const r of (rows ?? []) as Array<{ id: string; lead_id: string; customer_name?: string; amount_cents?: number; description?: string }>) {
+    const { data: l } = await admin.from('leads').select('custom_fields, patient_name').eq('id', r.lead_id).maybeSingle()
+    const cf = ((l as { custom_fields?: Record<string, unknown> } | null)?.custom_fields ?? {}) as Record<string, unknown>
+    const cad = (cf.cadastro ?? {}) as Record<string, unknown>
+    const email = String(cf.email ?? cad.email ?? '').trim()
+    if (!email || !email.includes('@')) {
+      // Sem e-mail não tem o que mandar; carimba pra não re-verificar esse pedido a cada 2min.
+      await admin.from('rede_payments').update({ post_purchase_email_at: new Date().toISOString() }).eq('id', r.id)
+      continue
+    }
+    const firstName = String(r.customer_name ?? (l as { patient_name?: string } | null)?.patient_name ?? 'tudo bem').trim().split(/\s+/)[0] || 'tudo bem'
+    const amountFmt = 'R$ ' + ((Number(r.amount_cents) || 0) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+    const out = await sendPostPurchaseEmail({ to: email, firstName, amountFmt, description: r.description ?? null })
+    if (out.ok) {
+      await admin.from('rede_payments').update({ post_purchase_email_at: new Date().toISOString() }).eq('id', r.id)
+      sent++
+    }
+  }
+  return sent
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
 
@@ -140,6 +177,11 @@ Deno.serve(async (req) => {
 
   // Pesquisa de satisfação da clínica: lead entrou em "Consulta agendada" → dispara o fluxo.
   const feedbackClinica = await dispatchClinicFeedbackOnStage(admin).catch(() => 0)
+
+  // E-mail pós-compra (Resend): confirmação + convite pro Clube + cupom da próxima.
+  // Dedupe por post_purchase_email_at; e-mail vem do cadastro do lead (o checkout do site
+  // sempre captura). Venda de bot sem e-mail é pulada em silêncio. Best-effort.
+  const emailsPosCompra = await sendPostPurchaseEmails(admin).catch(() => 0)
 
   // Janela: mensagens de 12h atrás até 4 min atrás. O atraso de 4 min dá tempo do gateway
   // (poller PIX / webhook) confirmar sozinho antes de incomodarmos a equipe. 12h cobre
@@ -160,7 +202,7 @@ Deno.serve(async (req) => {
   if (claimsErr) return json({ ok: false, error: claimsErr.message }, 500)
 
   const leadIds = [...new Set((claims ?? []).map((r) => String((r as { lead_id: unknown }).lead_id)).filter(Boolean))]
-  if (leadIds.length === 0) return json({ ok: true, candidates: 0, alerted: 0, receipts, promovidosPago, feedbackClinica })
+  if (leadIds.length === 0) return json({ ok: true, candidates: 0, alerted: 0, receipts, promovidosPago, feedbackClinica, emailsPosCompra })
 
   // Só leads dos tenants observados.
   const { data: leadsData } = await admin
@@ -192,5 +234,5 @@ Deno.serve(async (req) => {
     if (n > 0) alerted += 1
   }
 
-  return json({ ok: true, candidates: leads.length, alerted, skipped: skipped.length, receipts, promovidosPago, feedbackClinica })
+  return json({ ok: true, candidates: leads.length, alerted, skipped: skipped.length, receipts, promovidosPago, feedbackClinica, emailsPosCompra })
 })
