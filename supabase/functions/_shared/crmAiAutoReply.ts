@@ -465,8 +465,39 @@ export async function evaluateCrmAiAutoReplyGate(
     ? await admin.from('crm_ai_configs').select('*').eq('id', 'default').eq('tenant_id', gateTenantId).maybeSingle()
     : { data: null }
 
-  const ownerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
+  const rawOwnerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
   const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
+
+  // HANDOFF EXPIRA (16/jul). A conversa vira 'human' sempre que a equipe manda mensagem
+  // manual (crm-send-message) — correto, a IA não pode atropelar a atendente no meio do
+  // papo. O problema era não ter volta: atendente respondeu uma vez em maio e a IA ficava
+  // muda pra aquele cliente PARA SEMPRE. Achamos 682 conversas assim na clínica.
+  //
+  // Agora o 'human' vale enquanto a conversa está quente. Passados N dias sem NENHUM humano
+  // falar, o atendimento acabou e a IA reassume — o cliente que volta semanas depois é
+  // atendido na hora em vez de esperar alguém notar.
+  //
+  // Só expira o handoff da EQUIPE (owner_mode=human COM ai_enabled=true). Escalonamento de
+  // verdade (escalateLeadToHuman) desliga ai_enabled e continua respeitado pra sempre —
+  // é a regra crítica do fluxo [[feedback_handoff_desliga_ia]] e não é tocada aqui.
+  const handoffDays = Math.max(0, Number(config?.handoff_expires_days ?? 7))
+  let ownerMode = rawOwnerMode
+  let handoffExpired = false
+  if (rawOwnerMode === 'human' && aiEnabled && handoffDays > 0) {
+    const lastHumanAt = state?.last_human_reply_at ? new Date(String(state.last_human_reply_at)).getTime() : 0
+    const daysSinceHuman = lastHumanAt ? (Date.now() - lastHumanAt) / 86400000 : Number.POSITIVE_INFINITY
+    if (daysSinceHuman >= handoffDays) {
+      ownerMode = 'auto'
+      handoffExpired = true
+      // Persiste, senão o painel seguiria mostrando "Humano" e a IA responderia — a tela
+      // mentiria pra equipe sobre quem está atendendo.
+      await admin.from('crm_conversation_states')
+        .update({ owner_mode: 'auto', updated_at: new Date().toISOString() })
+        .eq('lead_id', leadId)
+        .then(() => {}, () => {})
+      console.log(`[autoReply] handoff expirado (${Math.round(daysSinceHuman)}d sem humano) → IA reassume lead ${leadId}`)
+    }
+  }
   /** 0 = sem espera mínima (várias mensagens seguidas do mesmo cliente podem gerar resposta a cada uma). */
   const minSecondsBetween = Math.max(0, Number(config?.min_seconds_between_ai_replies ?? 0))
   const latestAiReplyAt = state?.last_ai_reply_at ? new Date(String(state.last_ai_reply_at)).getTime() : 0
