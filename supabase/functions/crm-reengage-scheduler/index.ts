@@ -74,12 +74,24 @@ function recompraDueDay(step: number, supplyDays: number): number {
   return supplyDays + 10 + (step - 2) * 30            // winback mensal
 }
 
+// Convite pro Clube (grupo de ofertas). Vai nos steps 2 e 4 da reativação: quem não respondeu
+// 2 vezes provavelmente não quer conversar AGORA, mas entra num grupo pra ficar sabendo de
+// oferta. É um pedido menor que "compra?" — converte o silêncio em audiência em vez de perder
+// o lead. E dentro do grupo ele recebe promoção todo dia, sem custo e sem risco de ban.
+const CLUBE_LINK = 'https://chat.whatsapp.com/GlRBbbwhjELGZ4u93VGviT';
+
 const REACT_MSGS = [
+  // step 0 (na hora): abordagem direta, ainda tentando a venda 1:1
   'Oi {nome}, tudo bem? 💚 Fiquei de te ajudar com o Tricopill e acho que ficou no ar. Quer que eu tire alguma dúvida ou já te mando as opções?',
-  '{nome}, só não quero te deixar sem resposta 😊 Sobre o Tricopill, qualquer coisa (preço, frete, como funciona) é só me chamar que eu explico rapidinho.',
+  // step 1 (dia 3): não respondeu uma vez → oferece o grupo. Pedido menor que "compra?":
+  // converte o silêncio em audiência, e no grupo ele recebe oferta todo dia (custo zero).
+  `{nome}, se agora não for a hora, tudo bem 😊 Mas entra no *Clube Tricopill*: é um grupo só de ofertas, e quem está lá ganha *10% em qualquer pedido* (cupom CLUBE10) além das promoções relâmpago.\n\n${CLUBE_LINK}`,
+  // step 2 (dia 10): volta pra dor/venda
   'Oi {nome}! Muita gente começa o Tricopill justamente quando percebe a queda aumentando. Se quiser, te mostro o kit ideal pro seu caso 💚',
-  '{nome}, o resultado no cabelo depende de constância, e quanto antes começar, antes aparece. Quer que eu monte uma opção que caiba no seu bolso? 🌿',
-  'Oi {nome}! 💚 Ainda dá tempo de cuidar do seu cabelo. Se rolar interesse no Tricopill, é só responder que eu te ajudo.',
+  // step 3 (dia 24): reforça o grupo pra quem ainda não entrou
+  `{nome}, ainda dá tempo de cuidar do seu cabelo 🌿 E se preferir só acompanhar as ofertas por enquanto, o grupo do Clube é aqui (10% pra quem está dentro):\n\n${CLUBE_LINK}`,
+  // step 4 (dia 45): último toque mais direto
+  'Oi {nome}! 💚 Se rolar interesse no Tricopill, é só responder que eu monto uma opção que caiba no seu bolso.',
 ]
 // step >= 5 alterna estas (toque leve de manutenção)
 const REACT_MSGS_LOOP = [
