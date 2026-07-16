@@ -233,6 +233,17 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
   }))
 }
 
+/**
+ * Monta o kit do paciente E JÁ BAIXA o material do estoque (decisão da operação, 16/jul):
+ * quem monta a bandeja é quem tira o material da prateleira, então é nesse instante que o
+ * estoque some de verdade. Um momento, uma pessoa — é o que a equipe sustenta no dia a dia.
+ *
+ * Baixa por FEFO (vence primeiro sai primeiro) e registra controlados no livro, igual à
+ * conferência fazia antes. Depois disso:
+ *   • "consumido" = a enfermeira confirma que usou (NÃO mexe no estoque de novo)
+ *   • "cancelado" = cirurgia caiu → cancelKit ESTORNA tudo pro estoque
+ * Sobra de bandeja volta por ajuste manual, que é o caso raro.
+ */
 export async function createKit(payload: {
   templateId?: string | null
   name: string
@@ -241,7 +252,9 @@ export async function createKit(payload: {
   procedureLabel?: string
   scheduledFor?: string | null
   items: Array<{ itemId: string; qty: number }>
-}): Promise<void> {
+  /** ids dos itens controlados — vão pro livro na baixa (Portaria 344). */
+  controlledItemIds?: Set<string>
+}): Promise<{ kitId: string; movements: number; controlled: number }> {
   const client = assertClient()
   const items = payload.items.filter((i) => i.itemId && i.qty > 0)
   if (items.length === 0) throw new Error('O kit precisa de ao menos um item.')
@@ -266,6 +279,15 @@ export async function createKit(payload: {
     await client.from('stock_kits').delete().eq('id', kitId)
     throw new Error(itemsErr.message)
   }
+
+  // Baixa o material. Se falhar no meio, o kit fica registrado e a tela avisa — não apagamos
+  // o kit, senão perderíamos o rastro das baixas que já saíram.
+  const out = await deductKitStock(
+    { id: kitId, name: payload.name.trim() || 'Kit', patientName: payload.patientName?.trim() || null, procedureLabel: payload.procedureLabel?.trim() || null, items },
+    payload.controlledItemIds ?? new Set<string>(),
+    'kit montado',
+  )
+  return { kitId, ...out }
 }
 
 /** Aloca a quantidade nos lotes por FEFO (vence primeiro sai primeiro; sem lote por último). */
@@ -295,12 +317,13 @@ export function allocateFefo(
 }
 
 /**
- * Consome o kit: baixa cada item por FEFO e registra itens controlados no livro.
- * É a "conferência ativa" da enfermeira — nada disso acontece automático.
+ * Baixa o material de um kit: FEFO por item + livro de controlados. Usada na MONTAGEM
+ * (createKit) — é o único ponto que tira material do estoque.
  */
-export async function consumeKit(
-  kit: StockKit,
+async function deductKitStock(
+  kit: { id: string; name: string; patientName: string | null; procedureLabel: string | null; items: Array<{ itemId: string; qty: number }> },
   controlledItemIds: Set<string>,
+  reason: string,
 ): Promise<{ movements: number; controlled: number }> {
   const client = assertClient()
   // Valoração da saída: custo real do lote; sem lote (ou lote sem custo),
@@ -320,7 +343,7 @@ export async function consumeKit(
         itemId: item.itemId,
         kind: 'saida',
         qty: slice.qty,
-        reason: 'kit consumido',
+        reason,
         note: `${kit.name}${kit.patientName ? ` — ${kit.patientName}` : ''}`,
         refType: 'stock_kit',
         refId: kit.id,
@@ -343,18 +366,57 @@ export async function consumeKit(
       }
     }
   }
+  return { movements, controlled }
+}
+
+/**
+ * Conferência da enfermeira: confirma que o kit foi usado no paciente. NÃO mexe no estoque —
+ * o material já saiu na montagem (createKit). É o carimbo de "cirurgia aconteceu", que fecha
+ * o custo do procedimento e serve de trilha pra auditoria.
+ */
+export async function consumeKit(kit: StockKit): Promise<void> {
+  const client = assertClient()
   const { error } = await client
     .from('stock_kits')
     .update({ status: 'consumido', consumed_at: new Date().toISOString() })
     .eq('id', kit.id)
   if (error) throw new Error(error.message)
-  return { movements, controlled }
 }
 
-export async function cancelKit(id: string): Promise<void> {
+/**
+ * Cancela o kit e ESTORNA o material pro estoque (entrada de volta), porque a baixa
+ * aconteceu lá na montagem. Sem isso, cirurgia cancelada sumiria com o material pra sempre.
+ * Idempotente na prática: a tela só oferece cancelar kit 'montado'.
+ */
+export async function cancelKit(kit: StockKit): Promise<{ restored: number }> {
   const client = assertClient()
-  const { error } = await client.from('stock_kits').update({ status: 'cancelado' }).eq('id', id)
+  const lastCosts = await listItemLastCosts()
+  let restored = 0
+  // Devolve exatamente o que saiu, lote a lote (o movimento de saída guarda o batch_id).
+  // A coluna é qty_delta e vem NEGATIVA na saída — registerMovement quer qty positivo.
+  const { data: movs } = await client
+    .from('stock_movements')
+    .select('item_id, qty_delta, batch_id, unit_cost_cents')
+    .eq('ref_type', 'stock_kit')
+    .eq('ref_id', kit.id)
+    .eq('kind', 'saida')
+  for (const m of ((movs ?? []) as Array<{ item_id: string; qty_delta: number; batch_id: string | null; unit_cost_cents: number | null }>)) {
+    await registerMovement({
+      itemId: String(m.item_id),
+      kind: 'entrada',
+      qty: Math.abs(Number(m.qty_delta)),
+      reason: 'kit cancelado (estorno)',
+      note: `${kit.name}${kit.patientName ? ` — ${kit.patientName}` : ''}`,
+      refType: 'stock_kit',
+      refId: kit.id,
+      batchId: m.batch_id,
+      unitCostCents: m.unit_cost_cents ?? lastCosts.get(String(m.item_id)) ?? null,
+    })
+    restored += 1
+  }
+  const { error } = await client.from('stock_kits').update({ status: 'cancelado' }).eq('id', kit.id)
   if (error) throw new Error(error.message)
+  return { restored }
 }
 
 // --------------------------------------------------- livro de controlados

@@ -143,7 +143,7 @@ export function KitsPage() {
     try {
       // Se vinculou um lead e não digitou paciente, usa o nome do lead.
       const patientName = kitPatient.trim() || (kitLeadId ? leadNameById.get(kitLeadId) ?? '' : '')
-      await createKit({
+      const { movements, controlled } = await createKit({
         templateId: tpl.id,
         name: tpl.name,
         leadId: kitLeadId || null,
@@ -151,8 +151,13 @@ export function KitsPage() {
         procedureLabel: kitProcedure,
         scheduledFor: kitDate || null,
         items: tpl.items.map((i) => ({ itemId: i.itemId, qty: i.qty })),
+        controlledItemIds: controlledIds,
       })
-      toast.success(`Kit "${tpl.name}" montado${patientName ? ` para ${patientName}` : ''}.`)
+      toast.success(
+        `Kit "${tpl.name}" montado${patientName ? ` para ${patientName}` : ''} — ` +
+          `${movements} ${movements === 1 ? 'baixa' : 'baixas'} no estoque (FEFO)` +
+          (controlled > 0 ? `, ${controlled} no livro de controlados` : '') + '.',
+      )
       setKitTemplateId('')
       setKitLeadId('')
       setKitPatient('')
@@ -166,22 +171,27 @@ export function KitsPage() {
     }
   }
 
+  // Conferência: confirma que o kit foi usado. O material JÁ saiu na montagem — aqui é só o
+  // carimbo de "cirurgia aconteceu" (fecha o custo do procedimento).
   const consume = async (kit: StockKit) => {
     try {
-      const { movements, controlled } = await consumeKit(kit, controlledIds)
-      toast.success(
-        `Kit consumido — ${movements} ${movements === 1 ? 'baixa' : 'baixas'} no estoque (FEFO)` +
-          (controlled > 0 ? `, ${controlled} no livro de controlados` : '') + '.',
-      )
+      await consumeKit(kit)
+      toast.success(`Kit confirmado como usado${kit.patientName ? ` em ${kit.patientName}` : ''}.`)
       await load()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao consumir kit')
+      toast.error(e instanceof Error ? e.message : 'Falha ao confirmar kit')
     }
   }
 
-  const handleCancel = async (id: string) => {
+  // Cancelar DEVOLVE o material pro estoque (a baixa foi na montagem).
+  const handleCancel = async (kit: StockKit) => {
     try {
-      await cancelKit(id)
+      const { restored } = await cancelKit(kit)
+      toast.success(
+        restored > 0
+          ? `Kit cancelado — ${restored} ${restored === 1 ? 'item devolvido' : 'itens devolvidos'} ao estoque.`
+          : 'Kit cancelado.',
+      )
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao cancelar')
@@ -191,7 +201,7 @@ export function KitsPage() {
   return (
     <AppLayout
       title="Kits cirúrgicos"
-      subtitle="Modelos de kit, montagem por paciente e baixa por conferência (FEFO + livro de controlados)."
+      subtitle="Monte o kit do paciente e o material já baixa do estoque (FEFO + livro de controlados). Cancelar devolve."
     >
       <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
@@ -432,10 +442,10 @@ export function KitsPage() {
                       {kit.status === 'montado' ? (
                         <div className="mt-2.5 flex gap-1.5">
                           <Button size="sm" onClick={() => void consume(kit)}>
-                            <PackageCheck className="size-3.5" /> Consumir (baixa FEFO)
+                            <PackageCheck className="size-3.5" /> Confirmar uso
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => void handleCancel(kit.id)}>
-                            <Ban className="size-3.5" /> Cancelar
+                          <Button size="sm" variant="ghost" onClick={() => void handleCancel(kit)} title="Devolve o material ao estoque">
+                            <Ban className="size-3.5" /> Cancelar (devolve ao estoque)
                           </Button>
                         </div>
                       ) : null}
