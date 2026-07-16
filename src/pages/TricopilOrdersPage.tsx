@@ -360,6 +360,54 @@ export function TricopilOrdersPage() {
     return { total: filtered.length, paid: paid.length, pending: pending.length, revenue, freteMedio, comFreteCount: comFrete.length, reconciled }
   }, [filtered, recons])
 
+  // Conciliou → emite: vendas CONCILIADAS do filtro atual que ainda não têm NF-e nem rascunho.
+  // Mesma regra do doEmitNfe (só cartão/Rede tem nota). Alvo do botão "Emitir NF-e em lote".
+  const nfeCandidates = useMemo(() => filtered.filter((p) =>
+    p.status === 'paid' && p.method === 'card' && !!p.blingOrderId && !p.nfeNumero &&
+    p.nfeStatus !== 'emitida' && p.nfeStatus !== 'rascunho' && recons.has(reconKey(p.method, p.id))
+  ), [filtered, recons])
+
+  const [emittingBatch, setEmittingBatch] = useState(false)
+  const [batchReport, setBatchReport] = useState<{ ok: number; rascunhos: number; erros: Array<{ name: string; msg: string }> } | null>(null)
+
+  // Emite a NF-e de TODAS as conciliadas sem nota, uma a uma (rate-limit do Bling), e
+  // reporta por venda. É o "pumba" do financeiro: conciliou o extrato, um clique, notas fora.
+  const emitAllReconciled = async () => {
+    const targets = nfeCandidates
+    if (targets.length === 0 || emittingBatch) return
+    setEmittingBatch(true)
+    setBatchReport(null)
+    let ok = 0
+    let rascunhos = 0
+    const erros: Array<{ name: string; msg: string }> = []
+    try {
+      for (const p of targets) {
+        const name = p.customerName || (p.leadId ? leadById.get(p.leadId)?.patientName : '') || 'Cliente'
+        try {
+          const r = await nfeEmit(p.id)
+          if (r.ok || r.alreadyEmitted) {
+            if (r.status === 'rascunho') rascunhos += 1
+            else ok += 1
+            setRows((prev) => prev.map((x) => (x.id === p.id && x.method === p.method
+              ? { ...x, nfeStatus: r.status ?? 'emitida', nfeNumero: r.numero ?? x.nfeNumero }
+              : x)))
+          } else {
+            erros.push({ name, msg: r.message ?? 'Falha ao emitir.' })
+          }
+        } catch (e) {
+          erros.push({ name, msg: e instanceof Error ? e.message : 'Falha ao emitir.' })
+        }
+        await new Promise((r) => setTimeout(r, 350))
+      }
+      setBatchReport({ ok, rascunhos, erros })
+      const done = ok + rascunhos
+      if (erros.length === 0) toast.success(`NF-e: ${done} emitida${done === 1 ? '' : 's'}${rascunhos > 0 ? ` (${rascunhos} em rascunho)` : ''}.`)
+      else toast.warning(`NF-e: ${done} ok, ${erros.length} com erro. Detalhe no aviso acima da lista.`)
+    } finally {
+      setEmittingBatch(false)
+    }
+  }
+
   const hasActiveFilters = search.trim() !== '' || statusFilter !== 'all' || methodFilter !== 'all' || deliveryFilter !== 'all' || shipFilter !== 'all' || originFilter !== 'all' || nfeFilter !== 'all'
   const clearFilters = () => {
     setSearch(''); setStatusFilter('all'); setMethodFilter('all'); setDeliveryFilter('all'); setShipFilter('all'); setOriginFilter('all'); setNfeFilter('all')
@@ -419,7 +467,7 @@ export function TricopilOrdersPage() {
           ok += 1
         } catch { /* segue pros próximos */ }
       }
-      toast.success(`${ok} pagamento${ok === 1 ? '' : 's'} conciliado${ok === 1 ? '' : 's'} pelo extrato.`)
+      toast.success(`${ok} pagamento${ok === 1 ? '' : 's'} conciliado${ok === 1 ? '' : 's'} pelo extrato. Se houver venda sem NF-e, o botão de emissão em lote aparece acima da lista.`)
       setImportResult(null)
     } finally {
       setApplyingImport(false)
@@ -462,6 +510,34 @@ export function TricopilOrdersPage() {
         <KpiCard label="Conciliados" value={kpis.paid > 0 ? `${kpis.reconciled}/${kpis.paid}` : '—'} tone={kpis.paid > 0 && kpis.reconciled === kpis.paid ? 'text-emerald-600' : undefined} hint={kpis.paid > 0 ? `${Math.round((kpis.reconciled / kpis.paid) * 100)}% batidos` : 'sem pagos'} />
         <KpiCard label="Frete médio" value={kpis.comFreteCount > 0 ? brl(kpis.freteMedio) : '—'} hint={kpis.comFreteCount > 0 ? `${kpis.comFreteCount} c/ frete` : 'sem dado ainda'} />
       </section>
+
+      {/* Conciliou → emite: NF-e em lote das conciliadas sem nota (aparece só quando tem alvo). */}
+      {(nfeCandidates.length > 0 || (batchReport && batchReport.erros.length > 0)) && (
+        <section className="rounded-2xl border border-border/30 bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm">
+              <FileText className="size-4 text-muted-foreground" />
+              {nfeCandidates.length > 0 ? (
+                <span><strong>{nfeCandidates.length}</strong> venda{nfeCandidates.length === 1 ? ' conciliada está' : 's conciliadas estão'} sem NF-e.</span>
+              ) : (
+                <span>Emissão concluída. Vendas com erro seguem listadas abaixo.</span>
+              )}
+            </div>
+            {nfeCandidates.length > 0 && (
+              <Button size="sm" className="rounded-xl" onClick={() => void emitAllReconciled()} disabled={emittingBatch}>
+                <FileText className="size-3.5" /> {emittingBatch ? 'Emitindo…' : `Emitir NF-e de ${nfeCandidates.length} venda${nfeCandidates.length === 1 ? '' : 's'}`}
+              </Button>
+            )}
+          </div>
+          {batchReport && batchReport.erros.length > 0 && (
+            <ul className="mt-3 space-y-1 text-xs text-red-600">
+              {batchReport.erros.map((e, i) => (
+                <li key={i}><strong>{e.name}</strong>: {e.msg}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {/* Toolbar de filtros */}
       <section className="flex flex-col gap-3 border-b border-border/20 pb-5">
