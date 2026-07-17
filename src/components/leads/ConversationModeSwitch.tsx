@@ -65,7 +65,7 @@ export function ConversationModeSwitch({
           </div>
         ) : null}
         <div
-          className="flex w-full flex-col gap-2 min-[420px]:flex-row min-[420px]:gap-1.5 min-[420px]:rounded-2xl min-[420px]:border min-[420px]:border-border/80 min-[420px]:bg-muted/20 min-[420px]:p-1.5"
+          className="flex w-full flex-col gap-2 min-[360px]:flex-row min-[360px]:gap-1.5 min-[360px]:rounded-2xl min-[360px]:border min-[360px]:border-border/80 min-[360px]:bg-muted/20 min-[360px]:p-1.5"
           role="radiogroup"
           aria-label="Modo de atendimento: humano, assistente, ou misto"
         >
@@ -84,7 +84,7 @@ export function ConversationModeSwitch({
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2',
                   'disabled:cursor-not-allowed',
                   active
-                    ? 'border-primary bg-primary text-primary-foreground shadow-md ring-1 ring-primary/25 min-[420px]:shadow-sm'
+                    ? 'border-primary bg-primary text-primary-foreground shadow-md ring-1 ring-primary/25 min-[360px]:shadow-sm'
                     : 'border-border/60 bg-card text-foreground shadow-sm hover:border-primary/45 hover:bg-muted/50',
                 )}
                 role="radio"

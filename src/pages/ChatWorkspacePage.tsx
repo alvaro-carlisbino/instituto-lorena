@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Mail, Search, UserRound } from 'lucide-react'
+import { ChevronLeft, Mail, Search, UserRound } from 'lucide-react'
 
 import { ConversationModeSwitch } from '@/components/leads/ConversationModeSwitch'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
@@ -194,11 +194,30 @@ export function ChatWorkspacePage({
   }, [crm.leads, tenant.id, restrictToBotKind, restrictInstanceIds, ownerFilter, isUnread])
 
   const activeLead = crm.selectedLead ?? conversations[0] ?? null
+  // No celular o chat é master-detail: mostra a LISTA ou a CONVERSA, nunca as duas empilhadas
+  // (antes a lista comia 38dvh fixos no topo e a conversa ficava espremida embaixo). A partir
+  // de md volta a ser lado-a-lado. `hasSelection` = atendente abriu uma conversa de propósito.
+  const hasSelection = Boolean(crm.selectedLeadId)
   const waComposeBlocked = activeLead ? isLeadWhatsappComposeBlocked(activeLead) : false
   const activeHistory = useMemo(
     () => (activeLead ? crm.interactions.filter((i) => i.leadId === activeLead.id) : []),
     [crm.interactions, activeLead],
   )
+
+  // Troca do modo de atendimento (Humano/IA/Misto) — usado no cabeçalho (desktop) e na
+  // faixa do topo da conversa (mobile). Antes vivia inline só no bloco `hidden lg:block`,
+  // o que deixava o celular SEM jeito de desligar a IA.
+  const handleModeChange = (next: ConversationOwnerMode) => {
+    if (!activeLead) return
+    setModeLoading(true)
+    void setConversationMode(activeLead.id, next)
+      .then((state) => {
+        setLeadMode(state.owner_mode as ConversationOwnerMode)
+        toast.success(`Modo alterado para ${MODE_SUMMARY[next]}`)
+      })
+      .catch(() => toast.error('Falha ao alterar modo'))
+      .finally(() => setModeLoading(false))
+  }
 
   // Aplica o leadId da URL apenas uma vez por valor distinto. Antes este efeito
   // dependia de `crm` (objeto novo a cada render), entao rodava em TODO render e
@@ -288,8 +307,11 @@ export function ChatWorkspacePage({
   return (
     <AppLayout title={title} fullHeight={true} mainClassName="min-h-0 p-2 sm:p-3 md:p-4 bg-muted/30 dark:bg-transparent">
       <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2 overflow-hidden sm:gap-3 md:flex-row md:gap-4">
-        {/* Left Column: Lead List */}
-        <Card className="flex max-h-[38dvh] w-full shrink-0 flex-col gap-0 overflow-hidden rounded-2xl border border-border/40 bg-card/70 py-0 shadow-xl backdrop-blur-md min-[480px]:max-h-[42dvh] md:h-full md:max-h-none md:min-h-0 md:w-[min(300px,34vw)] md:max-w-[340px] md:min-w-[260px]">
+        {/* Left Column: Lead List — no mobile ocupa a tela inteira e some ao abrir uma conversa */}
+        <Card className={cn(
+          "flex min-h-0 w-full flex-1 flex-col gap-0 overflow-hidden rounded-2xl border border-border/40 bg-card/70 py-0 shadow-xl backdrop-blur-md md:h-full md:min-h-0 md:flex-none md:w-[min(300px,34vw)] md:max-w-[340px] md:min-w-[260px]",
+          hasSelection && "hidden md:flex",
+        )}>
           <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-4">
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="text-sm font-semibold">Mensagens</CardTitle>
@@ -455,12 +477,26 @@ export function ChatWorkspacePage({
         </Card>
 
         {/* Middle Column: Chat Area */}
-        <Card className="flex min-h-0 min-w-0 flex-1 flex-col gap-0 overflow-hidden rounded-2xl border border-border/40 bg-card py-0 shadow-xl md:flex-[3]">
+        <Card className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col gap-0 overflow-hidden rounded-2xl border border-border/40 bg-card py-0 shadow-xl md:flex-[3]",
+          !hasSelection && "hidden md:flex",
+        )}>
           {activeLead ? (
             <>
               <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-3 sm:px-5 sm:py-4">
                 <div className="flex flex-wrap items-start justify-between gap-2 sm:items-center sm:gap-4">
-                  <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-1 items-start gap-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="-ml-1 mt-0.5 size-8 shrink-0 rounded-xl md:hidden"
+                      onClick={() => crm.setSelectedLeadId('')}
+                      title="Voltar para a lista de conversas"
+                      aria-label="Voltar para a lista de conversas"
+                    >
+                      <ChevronLeft className="size-5" />
+                    </Button>
+                    <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <CardTitle className="truncate text-base font-bold tracking-tight sm:text-lg">
                         {activeLead.patientName}
@@ -495,8 +531,9 @@ export function ChatWorkspacePage({
                         ) : null
                       })()}
                     </div>
+                    </div>
                   </div>
-                  
+
                   <div className="flex items-center gap-2">
                     <Button
                       variant="outline"
@@ -525,21 +562,23 @@ export function ChatWorkspacePage({
                       <ConversationModeSwitch
                         value={leadMode}
                         loading={modeLoading}
-                        onChange={(next) => {
-                          setModeLoading(true)
-                          void setConversationMode(activeLead.id, next)
-                            .then((state) => {
-                              setLeadMode(state.owner_mode as ConversationOwnerMode)
-                              toast.success(`Modo alterado para ${MODE_SUMMARY[next]}`)
-                            })
-                            .catch(() => toast.error('Falha ao alterar modo'))
-                            .finally(() => setModeLoading(false))
-                        }}
+                        onChange={handleModeChange}
                       />
                     </div>
                   </div>
                 </div>
               </CardHeader>
+              {/* Toggle da IA no MOBILE/TABLET: no desktop ele fica no cabeçalho (hidden lg:block).
+                  Aqui aparece como faixa própria (lg:hidden) — antes o atendente não tinha como
+                  desligar a IA pelo celular. */}
+              <div className="shrink-0 border-b border-border/20 bg-muted/5 px-3 py-2.5 lg:hidden">
+                <ConversationModeSwitch
+                  value={leadMode}
+                  loading={modeLoading}
+                  onChange={handleModeChange}
+                  showFooterHint={false}
+                />
+              </div>
               <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/10 p-2 sm:p-4 dark:bg-background/20">
                 <LeadChatThread
                   leadId={activeLead.id}
@@ -592,4 +631,3 @@ export function ChatWorkspacePage({
     </AppLayout>
   )
 }
-

@@ -36,12 +36,12 @@ export function TopControls() {
   }, [])
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+    <div className="flex w-full min-w-0 flex-row flex-wrap items-center gap-2">
       <div className="flex shrink-0 items-center gap-2">
         <SidebarTrigger className="-ml-1" />
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+      <div className="flex min-w-0 flex-1 flex-row flex-wrap items-center justify-end gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger
             className={cn(
@@ -78,20 +78,20 @@ export function TopControls() {
           onClick={() => void crm.syncFromSupabase()}
         >
           <RefreshCw className={`size-3.5 ${crm.isLoading ? 'animate-spin' : ''}`} />
-          {crm.isLoading ? 'Atualizando…' : 'Atualizar'}
+          <span className="hidden min-[400px]:inline">{crm.isLoading ? 'Atualizando…' : 'Atualizar'}</span>
         </Button>
 
         {(crm.currentPermission.canManageUsers || import.meta.env.DEV) && (
-          <div className="relative w-full sm:w-auto md:max-w-md" ref={toolsRef}>
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="w-full justify-between gap-2 rounded-xl border border-transparent bg-background/60 md:w-auto"
+          <div className="relative w-auto md:max-w-md" ref={toolsRef}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-auto justify-between gap-2 rounded-xl border border-transparent bg-background/60"
               onClick={() => setIsToolsOpen(!isToolsOpen)}
             >
               <span className="inline-flex items-center gap-1.5">
                 <Wrench className="size-3.5" />
-                Ferramentas
+                <span className="hidden min-[400px]:inline">Ferramentas</span>
               </span>
               <ChevronDown className={`size-3.5 opacity-60 transition-transform ${isToolsOpen ? 'rotate-180' : ''}`} />
             </Button>
