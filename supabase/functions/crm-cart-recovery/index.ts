@@ -60,7 +60,12 @@ Deno.serve(async (req) => {
   const admin = createClient(url, serviceRole)
 
   const now = Date.now()
-  const since = new Date(now - 72 * 3600 * 1000).toISOString() // não mexe em links muito antigos
+  // 7 dias, não 72h: com 72h a recuperação passava fome. O site produz ~1 carrinho/dia, então
+  // quando ela ligou (16/07) só UMA pessoa estava dentro da janela — a Sylmara, que comprou
+  // R$618. Os outros 11 carrinhos já tinham 4-34 dias e nunca seriam tocados. O link e.Rede
+  // continua válido, e a 7 dias a mensagem ainda faz sentido; passou disso, quem fala é o
+  // reengajamento (que já pega 9 desses 11).
+  const since = new Date(now - 7 * 24 * 3600 * 1000).toISOString()
   const until = new Date(now - 2 * 3600 * 1000).toISOString() // dá 2h de "respiro" antes do 1º nudge
 
   const { data: rowsRaw, error } = await admin
