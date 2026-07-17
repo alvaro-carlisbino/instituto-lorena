@@ -723,6 +723,39 @@ export async function blingCreateSaleOrder(
  * operação informada. `transmit=false` deixa a nota em rascunho pro operador conferir e
  * transmitir num clique. Requer `natureza_operacao_id` configurado no tenant.
  */
+/**
+ * Rateia o desconto do pedido (Pix 5%, cupom) NOS ITENS da NF-e.
+ *
+ * Por que não manda `desconto` no corpo da nota: o Bling ACEITA o campo (200, sem erro) e
+ * simplesmente IGNORA — a nota sai com o preço de tabela. Descoberto no caso Thiago (03/07):
+ * venda de R$949,05 virava nota de R$999. Já o `valor` do item ele respeita, então o
+ * desconto entra por ali. Mesma tática do rateio de juros em blingCreateSaleOrder.
+ *
+ * O último item absorve o resíduo de centavos, garantindo total == valor cobrado.
+ */
+function descontarItens(
+  itens: Array<Record<string, unknown>>,
+  descontoReais: number,
+): Array<Record<string, unknown>> {
+  if (!descontoReais || descontoReais <= 0 || itens.length === 0) return itens
+  const bruto = itens.reduce(
+    (s, i) => s + (Number(i.valor) || 0) * (Number(i.quantidade) || 1),
+    0,
+  )
+  if (bruto <= 0 || descontoReais >= bruto) return itens
+  const fator = (bruto - descontoReais) / bruto
+  let acumulado = 0
+  return itens.map((i, idx) => {
+    const qtd = Number(i.quantidade) || 1
+    const ultimo = idx === itens.length - 1
+    const subtotal = ultimo
+      ? Number((bruto - descontoReais - acumulado).toFixed(2))
+      : Number(((Number(i.valor) || 0) * qtd * fator).toFixed(2))
+    acumulado += subtotal
+    return { ...i, valor: Number((subtotal / qtd).toFixed(2)) }
+  })
+}
+
 export async function blingEmitNfe(
   token: string,
   args: {
@@ -731,14 +764,29 @@ export async function blingEmitNfe(
     itens: Array<Record<string, unknown>>
     observacoes?: string
     transmit?: boolean
+    /** Data da venda (ISO). A NF-e sai com a data real, não com a de hoje. */
+    dataOperacaoISO?: string
+    /** Desconto do pedido em REAIS (ex.: os 5% do Pix). Sem isto a nota sai com o preço
+     *  de tabela e NÃO bate com o valor cobrado — erro fiscal. */
+    descontoReais?: number
   },
 ): Promise<{ nfeId: string | null; numero?: string; situacao?: string; transmitted: boolean; error?: string }> {
+  // dataOperacao é OBRIGATÓRIA no Bling e a gente nunca mandava: toda emissão morria em
+  // "Data de operação inválida" antes mesmo de chegar no SEFAZ. Formato aceito: YYYY-MM-DD
+  // HH:mm:ss no fuso de Brasília.
+  const dt = args.dataOperacaoISO ? new Date(args.dataOperacaoISO) : new Date()
+  const spDate = new Date(dt.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const dataOperacao = `${spDate.getFullYear()}-${pad(spDate.getMonth() + 1)}-${pad(spDate.getDate())} ` +
+    `${pad(spDate.getHours())}:${pad(spDate.getMinutes())}:${pad(spDate.getSeconds())}`
+
   const payload: Record<string, unknown> = {
     tipo: 1, // 1 = saída
     finalidade: 1, // 1 = NF-e normal
+    dataOperacao,
     naturezaOperacao: { id: Number(args.naturezaOperacaoId) || args.naturezaOperacaoId },
     contato: { id: Number(args.contatoId) || args.contatoId },
-    itens: args.itens,
+    itens: descontarItens(args.itens, args.descontoReais ?? 0),
     ...(args.observacoes ? { observacoes: args.observacoes } : {}),
   }
   const res = await blingFetch(token, '/nfe', { method: 'POST', body: JSON.stringify(payload) })

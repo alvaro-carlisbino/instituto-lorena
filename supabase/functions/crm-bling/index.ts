@@ -365,10 +365,10 @@ Deno.serve(async (req) => {
 
     const { data: payRow } = await admin
       .from('rede_payments')
-      .select('id, lead_id, bling_order_id, customer_doc, customer_name, nfe_numero')
+      .select('id, lead_id, bling_order_id, customer_doc, customer_name, nfe_numero, paid_at')
       .eq('tenant_id', 'tricopill').eq('id', paymentId).maybeSingle()
     const pay = payRow as {
-      id: string; lead_id?: string; bling_order_id?: string; customer_doc?: string; customer_name?: string; nfe_numero?: string
+      id: string; lead_id?: string; bling_order_id?: string; customer_doc?: string; customer_name?: string; nfe_numero?: string; paid_at?: string
     } | null
     if (!pay) return json({ ok: false, error: 'venda_nao_encontrada' }, 404)
     if (pay.nfe_numero) return json({ ok: true, alreadyEmitted: true, numero: pay.nfe_numero })
@@ -402,6 +402,7 @@ Deno.serve(async (req) => {
 
     // Itens + contato vêm do pedido já criado no Bling (mesmo caminho do sync_contato).
     let contatoId = ''
+    let descontoReais = 0
     let itens: Array<Record<string, unknown>> = []
     try {
       const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json' }
@@ -409,17 +410,61 @@ Deno.serve(async (req) => {
       if (!gr.ok) return json({ ok: false, error: 'pedido_bling_nao_lido', status: gr.status }, 502)
       const o = (JSON.parse((await gr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
       contatoId = String(((o.contato ?? {}) as Record<string, unknown>).id ?? '')
-      itens = (Array.isArray(o.itens) ? o.itens : []).map((i: Record<string, unknown>) => ({
-        produto: { id: ((i.produto ?? {}) as Record<string, unknown>).id },
-        descricao: i.descricao, quantidade: i.quantidade, valor: i.valor,
-      }))
+      // Desconto do pedido (Pix 5%, cupom): tem que ir pra nota, senão ela fecha no preço
+      // de tabela e não bate com o cobrado.
+      descontoReais = Number(((o.desconto ?? {}) as Record<string, unknown>).valor ?? 0) || 0
+      // A NF-e exige o CODIGO de cada produto (o pedido não devolve, só o cadastro do
+      // produto tem) — sem ele o Bling recusa com "Codigo do produto X deve ser informado".
+      // Busca produto a produto; são poucos itens por pedido.
+      const brutos = (Array.isArray(o.itens) ? o.itens : []) as Array<Record<string, unknown>>
+      itens = []
+      for (const i of brutos) {
+        const prodId = ((i.produto ?? {}) as Record<string, unknown>).id
+        let codigo = String(i.codigo ?? '').trim()
+        if (!codigo && prodId) {
+          const pr = await fetch(`https://api.bling.com.br/Api/v3/produtos/${prodId}`, { headers: bh })
+          if (pr.ok) {
+            const pd = (JSON.parse((await pr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+            codigo = String(pd.codigo ?? '').trim()
+          }
+        }
+        itens.push({
+          codigo: codigo || String(prodId ?? ''),
+          produto: { id: prodId },
+          descricao: i.descricao,
+          quantidade: i.quantidade,
+          valor: i.valor,
+        })
+      }
     } catch (e) {
       return json({ ok: false, error: 'pedido_bling_erro', message: e instanceof Error ? e.message : String(e) }, 502)
     }
     if (!contatoId || itens.length === 0) return json({ ok: false, error: 'pedido_sem_itens_ou_contato' }, 400)
 
+    // O contato PRECISA ter CPF gravado no Bling: a NF-e recusa com "O número do documento
+    // do contato não foi informado". Aqui a gente já tem o CPF validado acima, então garante
+    // que ele está no cadastro antes de emitir (Bling não tem PATCH: GET + PUT inteiro).
     try {
-      const out = await blingEmitNfe(token, { naturezaOperacaoId, contatoId, itens, transmit })
+      const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' }
+      const cr = await fetch(`https://api.bling.com.br/Api/v3/contatos/${contatoId}`, { headers: bh })
+      if (cr.ok) {
+        const cd = (JSON.parse((await cr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+        if (!String(cd.numeroDocumento ?? '').replace(/\D/g, '')) {
+          cd.numeroDocumento = cpf
+          cd.tipo = cd.tipo ?? 'F'
+          await fetch(`https://api.bling.com.br/Api/v3/contatos/${contatoId}`, {
+            method: 'PUT', headers: bh, body: JSON.stringify(cd),
+          })
+        }
+      }
+    } catch { /* best-effort: se falhar, o erro do Bling abaixo explica */ }
+
+    try {
+      const out = await blingEmitNfe(token, {
+        naturezaOperacaoId, contatoId, itens, transmit,
+        dataOperacaoISO: pay.paid_at || undefined,
+        descontoReais,
+      })
       const status = out.error ? 'erro' : (out.transmitted ? 'emitida' : 'rascunho')
       await admin.from('rede_payments').update({
         nfe_id: out.nfeId, nfe_numero: out.numero ?? null, nfe_status: status,
