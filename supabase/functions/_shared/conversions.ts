@@ -117,7 +117,12 @@ export async function uploadGoogleAdsConversion(args: {
   const customerId = onlyDigits(Deno.env.get('GOOGLE_ADS_CUSTOMER_ID'))
   const loginCustomerId = onlyDigits(Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID'))
   const actionId = onlyDigits(Deno.env.get('GOOGLE_ADS_CONVERSION_ACTION_ID'))
-  const apiVersion = (Deno.env.get('GOOGLE_ADS_API_VERSION') ?? 'v18').trim()
+  // Google aposenta versão da API ~a cada 4 meses (a antiga passa a devolver 404 HTML, não
+  // erro JSON). v18 morreu e deixava o upload em http_404. Sondar as vivas sem secret:
+  //   for v in v20 v21 v22 v23 v24; do curl -so/dev/null -w "$v %{http_code}\n" \
+  //     https://googleads.googleapis.com/$v/customers:listAccessibleCustomers; done  (401=viva, 404=morta)
+  // Quando a v22 cair, bump aqui ou via secret GOOGLE_ADS_API_VERSION.
+  const apiVersion = (Deno.env.get('GOOGLE_ADS_API_VERSION') ?? 'v22').trim()
   if (!devToken || !customerId || !actionId) return { ok: false, error: 'nao_configurado' }
   if (!args.gclid) return { ok: false, error: 'sem_gclid' }
   const accessToken = await googleAdsAccessToken()
