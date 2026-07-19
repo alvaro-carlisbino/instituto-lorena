@@ -152,7 +152,7 @@ export function AssistantPage() {
             <Card className="border-border shadow-sm">
               <CardHeader className="space-y-2 pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                  <History className="size-4 text-muted-foreground" />
+                  <History className="size-4 text-muted-foreground" aria-hidden />
                   Histórico
                 </CardTitle>
                 <Button
@@ -162,7 +162,7 @@ export function AssistantPage() {
                   className="w-full justify-start gap-2 rounded-none text-xs font-bold uppercase tracking-widest"
                   onClick={startNewConversation}
                 >
-                  <MessageSquarePlus className="size-4 shrink-0" />
+                  <MessageSquarePlus className="size-4 shrink-0" aria-hidden />
                   Nova conversa
                 </Button>
               </CardHeader>
@@ -177,12 +177,14 @@ export function AssistantPage() {
                         const label = t.title?.trim() || 'Sem título'
                         return (
                           <li key={t.id} className="flex gap-1">
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              aria-current={active ? 'true' : undefined}
                               className={cn(
-                                'min-w-0 flex-1 rounded-md border px-2 py-2 text-left text-xs transition-colors',
+                                'block h-auto min-w-0 flex-1 whitespace-normal rounded-md border px-2 py-2 text-left text-xs font-normal',
                                 active
-                                  ? 'border-primary bg-primary/10 text-foreground'
+                                  ? 'border-primary bg-primary/10 text-foreground hover:bg-primary/10'
                                   : 'border-transparent bg-muted/40 hover:bg-muted/70',
                               )}
                               onClick={() => setThreadId(t.id)}
@@ -191,7 +193,7 @@ export function AssistantPage() {
                               <span className="mt-0.5 block text-[10px] text-muted-foreground">
                                 {formatThreadWhen(t.updated_at)}
                               </span>
-                            </button>
+                            </Button>
                             <Button
                               type="button"
                               variant="ghost"
@@ -200,7 +202,7 @@ export function AssistantPage() {
                               aria-label="Eliminar conversa"
                               onClick={(e) => requestDeleteThread(e, t.id)}
                             >
-                              <Trash2 className="size-3.5" />
+                              <Trash2 className="size-3.5" aria-hidden />
                             </Button>
                           </li>
                         )

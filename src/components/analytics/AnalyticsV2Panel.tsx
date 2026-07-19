@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -9,6 +9,16 @@ import {
   YAxis,
 } from 'recharts'
 
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useTenant } from '@/context/TenantContext'
 import { fetchAnalyticsV2, type AnalyticsV2 } from '@/services/analytics'
@@ -44,6 +54,7 @@ function StatCard({ label, value, tone }: { label: string; value: number | strin
 
 export function AnalyticsV2Panel() {
   const { tenant } = useTenant()
+  const fid = useId()
   const [end, setEnd] = useState<string>(isoDate(new Date()))
   const [start, setStart] = useState<string>(isoDate(new Date(Date.now() - 30 * 86400000)))
   const [source, setSource] = useState<string>('')
@@ -105,7 +116,7 @@ export function AnalyticsV2Panel() {
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">Painel de Performance — Funil Real</h2>
+        <h2 className="text-lg font-semibold">Painel de Performance · Funil Real</h2>
         <p className="text-xs text-muted-foreground">
           Conversão, perdas e gargalos cruzando o CRM com a agenda da Shosp (agendado → comparecido → no-show).
         </p>
@@ -113,33 +124,42 @@ export function AnalyticsV2Panel() {
 
       {/* Filtros */}
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border/30 bg-muted/10 p-3">
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">De</span>
-          <input type="date" value={start} max={end} onChange={(e) => setStart(e.target.value)} className="rounded-md border border-border/40 bg-background px-2 py-1 text-sm" />
-        </label>
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Até</span>
-          <input type="date" value={end} min={start} onChange={(e) => setEnd(e.target.value)} className="rounded-md border border-border/40 bg-background px-2 py-1 text-sm" />
-        </label>
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Origem</span>
-          <select value={source} onChange={(e) => setSource(e.target.value)} className="rounded-md border border-border/40 bg-background px-2 py-1 text-sm">
-            {SOURCE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </label>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`${fid}-start`} className="text-xs text-muted-foreground">De</Label>
+          <Input id={`${fid}-start`} type="date" value={start} max={end} onChange={(e) => setStart(e.target.value)} className="w-40" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`${fid}-end`} className="text-xs text-muted-foreground">Até</Label>
+          <Input id={`${fid}-end`} type="date" value={end} min={start} onChange={(e) => setEnd(e.target.value)} className="w-40" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={`${fid}-source`} className="text-xs text-muted-foreground">Origem</Label>
+          <Select
+            value={source || 'all'}
+            onValueChange={(v) => v && setSource(v === 'all' ? '' : v)}
+            items={SOURCE_OPTIONS.map((o) => ({ value: o.value || 'all', label: o.label }))}
+          >
+            <SelectTrigger id={`${fid}-source`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SOURCE_OPTIONS.map((o) => (
+                <SelectItem key={o.value || 'all'} value={o.value || 'all'}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <div className="flex gap-1">
           {QUICK_RANGES.map((q) => (
-            <button key={q.days} type="button" onClick={() => applyQuick(q.days)} className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-muted/40">
+            <Button key={q.days} type="button" variant="outline" size="xs" onClick={() => applyQuick(q.days)}>
               {q.label}
-            </button>
+            </Button>
           ))}
         </div>
-        {loading && <span className="text-xs text-muted-foreground">Carregando…</span>}
+        {loading && <span role="status" className="text-xs text-muted-foreground">Carregando…</span>}
       </div>
 
-      {error && <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
 
       {/* Resumo */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -185,7 +205,7 @@ export function AnalyticsV2Panel() {
 
         {/* Gargalos: tempo médio por etapa */}
         <div className="rounded-xl border border-border/30 bg-card p-4">
-          <h3 className="mb-3 text-sm font-semibold">Gargalos — dias médios na etapa</h3>
+          <h3 className="mb-3 text-sm font-semibold">Gargalos · dias médios na etapa</h3>
           {gargalos.length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Sem dados no período.</p>
           ) : (

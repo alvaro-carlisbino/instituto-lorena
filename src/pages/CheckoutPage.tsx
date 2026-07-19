@@ -84,7 +84,7 @@ export function CheckoutPage() {
       </div>
 
       {paid ? (
-        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-emerald-700">
+        <div role="status" className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-emerald-700">
           {result?.message ?? 'Pagamento já confirmado.'}
         </div>
       ) : (
@@ -130,7 +130,7 @@ export function CheckoutPage() {
           ) : null}
 
           {result && !result.ok ? (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-700">{result.message}</div>
+            <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-700">{result.message}</div>
           ) : null}
 
           <Button className="w-full" onClick={() => void submit()} disabled={paying}>

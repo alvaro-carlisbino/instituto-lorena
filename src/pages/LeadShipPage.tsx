@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Package, TriangleAlert, Truck, Settings, CheckCircle2 } from 'lucide-react'
@@ -382,7 +382,7 @@ export function LeadShipPage() {
       <section className="rounded-md border border-border bg-card p-3 sm:p-4">
         <div className="space-y-1">
           <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
-            <Truck className="size-5 text-primary" /> Gerar envio (Melhor Envio)
+            <Truck className="size-5 text-primary" aria-hidden /> Gerar envio (Melhor Envio)
           </h2>
           <p className="text-sm text-muted-foreground">
             Cria o envio na conta Melhor Envio. Por padrão só adiciona ao carrinho. Ligue a opção abaixo para já comprar e gerar a etiqueta.
@@ -391,7 +391,7 @@ export function LeadShipPage() {
 
         {config && !config.connected ? (
           <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            <TriangleAlert className="size-4 shrink-0" /> Conta Melhor Envio não conectada neste polo.
+            <TriangleAlert className="size-4 shrink-0" aria-hidden /> Conta Melhor Envio não conectada neste polo.
           </div>
         ) : null}
         {config?.sandbox ? (
@@ -401,13 +401,13 @@ export function LeadShipPage() {
         ) : null}
 
         {pageError ? (
-          <div className="mt-3 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive">
-            <TriangleAlert className="size-4 shrink-0" /> {pageError}
+          <div role="alert" className="mt-3 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive">
+            <TriangleAlert className="size-4 shrink-0" aria-hidden /> {pageError}
           </div>
         ) : null}
         {pageSuccess ? (
-          <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-            <CheckCircle2 className="size-4 shrink-0" /> {pageSuccess}
+          <div role="status" className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
+            <CheckCircle2 className="size-4 shrink-0" aria-hidden /> {pageSuccess}
           </div>
         ) : null}
 
@@ -415,7 +415,7 @@ export function LeadShipPage() {
           {/* Destinatário */}
           <div className="space-y-2">
             <p className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-              <Package className="size-3.5" /> Destinatário
+              <Package className="size-3.5" aria-hidden /> Destinatário
             </p>
             <div className="grid grid-cols-2 gap-2 sm:max-w-2xl">
               <div className="col-span-2 space-y-1">
@@ -581,18 +581,20 @@ export function LeadShipPage() {
                   : 'Desligado: só adiciona ao carrinho para você pagar no painel.'}
               </p>
             </div>
-            <Switch checked={finalize} onCheckedChange={setFinalize} />
+            <Switch checked={finalize} onCheckedChange={setFinalize} aria-label="Comprar e gerar etiqueta agora" />
           </div>
 
           {/* Remetente */}
           <div className="rounded-lg border border-border/40 sm:max-w-2xl">
-            <button
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setShowSender((s) => !s)}
-              className="flex w-full items-center justify-between px-3 py-2 text-left"
+              aria-expanded={showSender}
+              className="h-auto w-full justify-between rounded-lg px-3 py-2 text-left font-normal hover:bg-muted/40"
             >
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-                <Settings className="size-3.5" /> Remetente
+                <Settings className="size-3.5" aria-hidden /> Remetente
                 {config?.senderMissing.length ? (
                   <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[0.65rem] font-medium text-amber-700">
                     incompleto
@@ -600,7 +602,7 @@ export function LeadShipPage() {
                 ) : null}
               </span>
               <span className="text-[0.7rem] text-muted-foreground">{showSender ? 'ocultar' : 'editar'}</span>
-            </button>
+            </Button>
             {showSender ? (
               <div className="space-y-2 border-t border-border/40 px-3 py-3">
                 <div className="grid grid-cols-2 gap-2">
@@ -649,10 +651,12 @@ function SenderField({
   setSender: (fn: (prev: MeAddress) => MeAddress) => void
   className?: string
 }) {
+  const id = useId()
   return (
     <div className={cn('space-y-1', className)}>
-      <Label className="text-[0.7rem]">{label}</Label>
+      <Label htmlFor={id} className="text-[0.7rem]">{label}</Label>
       <Input
+        id={id}
         value={(sender[k] as string | undefined) ?? ''}
         onChange={(e) => setSender((prev) => ({ ...prev, [k]: e.target.value }))}
         className="h-8 text-xs"

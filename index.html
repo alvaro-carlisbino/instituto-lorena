@@ -21,6 +21,12 @@
     <meta name="apple-mobile-web-app-title" content="CRM" />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Instituto Lorena CRM · INTERNO</title>
+    <!-- Tema escuro antes do primeiro paint (evita flash claro); a UI vive em TopControls/useTheme. -->
+    <script>
+      try {
+        if (localStorage.getItem('crm-theme') === 'dark') document.documentElement.classList.add('dark')
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

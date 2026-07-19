@@ -69,7 +69,7 @@ export function PwaInstallBanner() {
 
   return (
     <div className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-w-md items-center gap-3 rounded-xl border border-border/60 bg-background/95 p-3 shadow-lg backdrop-blur-md sm:bottom-4 sm:inset-x-auto sm:right-4">
-      <Download className="size-5 shrink-0 text-primary" />
+      <Download className="size-5 shrink-0 text-primary" aria-hidden />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold">Instalar o CRM no celular</p>
         <p className="text-[11px] text-muted-foreground">
@@ -79,14 +79,15 @@ export function PwaInstallBanner() {
       <Button size="sm" onClick={handleInstall}>
         Instalar
       </Button>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon-sm"
         aria-label="Dispensar"
-        className="rounded-md p-1 text-muted-foreground hover:bg-muted"
+        className="shrink-0 text-muted-foreground"
         onClick={handleDismiss}
       >
-        <X className="size-4" />
-      </button>
+        <X className="size-4" aria-hidden />
+      </Button>
     </div>
   )
 }

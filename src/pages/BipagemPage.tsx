@@ -13,6 +13,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -203,7 +204,7 @@ export function BipagemPage() {
   const handleConfirm = async () => {
     if (lines.length === 0) return
     if (lines.some((l) => !Number.isFinite(l.qty) || l.qty <= 0)) {
-      toast.error('Tem linha com quantidade zerada — ajuste ou remova.')
+      toast.error('Tem linha com quantidade zerada, ajuste ou remova.')
       return
     }
     if (mode === 'saida' && hasControlled && !patient.trim()) {
@@ -298,7 +299,7 @@ export function BipagemPage() {
   return (
     <AppLayout
       title="Bipagem"
-      subtitle="Entrada e saída contínuas com o leitor de código de barras — bipe tudo, confira e confirme de uma vez."
+      subtitle="Entrada e saída contínuas com o leitor de código de barras: bipe tudo, confira e confirme de uma vez."
     >
       <SubTabs tabs={estoqueTabs(isSalesPolo)} />
 
@@ -371,8 +372,15 @@ export function BipagemPage() {
                   inputMode="numeric"
                   className="h-11 text-base"
                 />
-                <Button variant="outline" className="h-11 px-3" onClick={() => setCameraOpen(true)} title="Ler pela câmera">
-                  <Camera className="size-4" />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="size-11"
+                  onClick={() => setCameraOpen(true)}
+                  title="Ler pela câmera"
+                  aria-label="Ler pela câmera"
+                >
+                  <Camera className="size-4" aria-hidden />
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
@@ -400,7 +408,7 @@ export function BipagemPage() {
                   id="bip-patient"
                   value={patient}
                   onChange={(e) => setPatient(e.target.value)}
-                  placeholder={hasControlled ? 'Obrigatório — tem item controlado na lista' : 'Opcional'}
+                  placeholder={hasControlled ? 'Obrigatório, tem item controlado na lista' : 'Opcional'}
                 />
               </div>
             ) : null}
@@ -438,7 +446,7 @@ export function BipagemPage() {
               ) : (
                 <ArrowUpFromLine className="size-4 text-red-500" />
               )}
-              {mode === 'entrada' ? 'Itens bipados — entrada' : 'Itens bipados — saída'} ({lines.length})
+              {mode === 'entrada' ? 'Itens bipados · entrada' : 'Itens bipados · saída'} ({lines.length})
             </CardTitle>
             {insufficient.length > 0 ? (
               <Badge variant="destructive">
@@ -451,7 +459,7 @@ export function BipagemPage() {
               <EmptyState
                 icon={ScanBarcode}
                 title={loading ? 'Carregando…' : 'Nada bipado ainda'}
-                description="Aponte o leitor pro código de barras do produto — cada bipe entra aqui na lista."
+                description="Aponte o leitor pro código de barras do produto, cada bipe entra aqui na lista."
               />
             ) : (
               <div className="overflow-x-auto">
@@ -468,7 +476,9 @@ export function BipagemPage() {
                           <TableHead className="w-[120px]">Custo un. (R$)</TableHead>
                         </>
                       ) : null}
-                      <TableHead className="w-[40px]" />
+                      <TableHead className="w-[40px]">
+                        <span className="sr-only">Remover</span>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -498,6 +508,7 @@ export function BipagemPage() {
                                 setLine(line.item.id, { qty: Number.isFinite(n) && n >= 0 ? n : 0 })
                               }}
                               inputMode="decimal"
+                              aria-label={`Quantidade de ${line.item.name}`}
                               className="h-8 text-right"
                             />
                           </TableCell>
@@ -508,6 +519,7 @@ export function BipagemPage() {
                                   value={line.lotCode}
                                   onChange={(e) => setLine(line.item.id, { lotCode: e.target.value })}
                                   placeholder="Opcional"
+                                  aria-label={`Lote de ${line.item.name}`}
                                   className="h-8"
                                 />
                               </TableCell>
@@ -516,6 +528,7 @@ export function BipagemPage() {
                                   type="date"
                                   value={line.expiresOn}
                                   onChange={(e) => setLine(line.item.id, { expiresOn: e.target.value })}
+                                  aria-label={`Validade de ${line.item.name}`}
                                   className="h-8"
                                   disabled={!line.lotCode.trim()}
                                 />
@@ -526,14 +539,20 @@ export function BipagemPage() {
                                   onChange={(e) => setLine(line.item.id, { unitCost: e.target.value })}
                                   placeholder="Opcional"
                                   inputMode="decimal"
+                                  aria-label={`Custo unitário de ${line.item.name}`}
                                   className="h-8"
                                 />
                               </TableCell>
                             </>
                           ) : null}
                           <TableCell>
-                            <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => removeLine(line.item.id)}>
-                              <Trash2 className="size-3.5" />
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => removeLine(line.item.id)}
+                              aria-label={`Remover ${line.item.name}`}
+                            >
+                              <Trash2 className="size-3.5" aria-hidden />
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -589,9 +608,9 @@ export function BipagemPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Unidade</Label>
+                <Label htmlFor="bip-new-unit">Unidade</Label>
                 <Select value={newForm.unit} onValueChange={(v) => setNewForm((f) => ({ ...f, unit: v ?? 'un' }))}>
-                  <SelectTrigger>
+                  <SelectTrigger id="bip-new-unit">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -604,17 +623,16 @@ export function BipagemPage() {
                 </Select>
               </div>
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="bip-new-controlled"
                 checked={newForm.controlled}
-                onChange={(e) => setNewForm((f) => ({ ...f, controlled: e.target.checked }))}
-                className="size-4 accent-amber-500"
+                onCheckedChange={(checked) => setNewForm((f) => ({ ...f, controlled: checked }))}
               />
-              <span className="flex items-center gap-1.5">
-                <ShieldAlert className="size-3.5 text-amber-500" /> Substância controlada
-              </span>
-            </label>
+              <Label htmlFor="bip-new-controlled" className="gap-1.5 font-normal">
+                <ShieldAlert className="size-3.5 text-amber-500" aria-hidden /> Substância controlada
+              </Label>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewBarcode(null)} disabled={savingNew}>

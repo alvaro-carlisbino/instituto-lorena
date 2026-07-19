@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BellIcon, Building2, Clock, FileTextIcon, GripVertical, Mail, MapPin, Phone, ShieldIcon, Trash2Icon } from 'lucide-react'
+import { BellIcon, Building2, ChevronRight, Clock, FileTextIcon, GripVertical, Mail, MapPin, Phone, ShieldIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   DndContext,
@@ -34,6 +34,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import {
@@ -252,10 +253,10 @@ export function SettingsPage() {
           <CardContent className="grid gap-5">
             <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-gradient-to-r from-primary/[0.04] to-transparent p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <div className="min-w-0 space-y-1 sm:pr-2">
-                <label className="flex cursor-pointer items-center gap-2 select-none">
+                <Label className="cursor-pointer select-none">
                   <Switch checked={aiEnabled} onCheckedChange={setAiEnabled} className="shrink-0" />
                   <span className="text-sm font-medium sm:text-base">Permitir respostas automáticas da IA</span>
-                </label>
+                </Label>
                 <p className="m-0 text-xs text-muted-foreground sm:text-sm">
                   Desligado: a assistente nunca gera, mesmo com modo <strong>IA</strong> ou <strong>Misto</strong> na ficha.
                 </p>
@@ -273,17 +274,17 @@ export function SettingsPage() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="ai-prompt">Prompt global da IA</Label>
-              <textarea
+              <Textarea
                 id="ai-prompt"
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
-                className="min-h-32 rounded-lg border border-input bg-background px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                className="min-h-32"
                 placeholder="Defina como a IA deve se comportar no atendimento..."
               />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="ai-rules">Regras de Negócio e Valores (JSON)</Label>
-              <textarea
+              <Textarea
                 id="ai-rules"
                 value={JSON.stringify(aiBusinessRules, null, 2)}
                 onChange={(e) => {
@@ -293,7 +294,7 @@ export function SettingsPage() {
                     // Ignora erro de parse enquanto digita
                   }
                 }}
-                className="min-h-48 font-mono text-xs rounded-lg border border-input bg-background px-3 py-2 focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                className="min-h-48 font-mono text-xs md:text-xs"
                 placeholder='{ "prices": { "consulta": "R$ 300" } }'
               />
               <p className="text-xs text-muted-foreground">
@@ -326,7 +327,7 @@ export function SettingsPage() {
                   onChange={(e) => setAiCooldownSeconds(Number(e.target.value) || 0)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Use 0 para responder a cada mensagem recebida (o atraso natural de “a digitar” no WhatsApp continua a aplicar-se).
+                  Use 0 para responder a cada mensagem recebida (o atraso natural de “digitando” no WhatsApp continua valendo).
                 </p>
               </div>
               <div className="grid gap-2">
@@ -386,44 +387,50 @@ export function SettingsPage() {
         <CardContent className="grid gap-6">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
-              <Label className="flex items-center gap-1.5">
-                <Building2 className="size-3 text-muted-foreground" />
+              <Label htmlFor="clinic-name" className="flex items-center gap-1.5">
+                <Building2 className="size-3 text-muted-foreground" aria-hidden />
                 Nome da Clínica
               </Label>
               <Input
+                id="clinic-name"
                 placeholder="Ex: Clínica São Lucas"
                 value={crm.orgSettings.clinicName || ''}
                 onChange={(e) => crm.updateOrgSettings({ clinicName: e.target.value })}
               />
             </div>
             <div className="grid gap-2">
-              <Label className="flex items-center gap-1.5">
-                <Phone className="size-3 text-muted-foreground" />
+              <Label htmlFor="clinic-phone" className="flex items-center gap-1.5">
+                <Phone className="size-3 text-muted-foreground" aria-hidden />
                 Telefone Principal
               </Label>
               <Input
+                id="clinic-phone"
+                type="tel"
                 placeholder="(11) 99999-9999"
                 value={crm.orgSettings.clinicPhone || ''}
                 onChange={(e) => crm.updateOrgSettings({ clinicPhone: e.target.value })}
               />
             </div>
             <div className="grid gap-2">
-              <Label className="flex items-center gap-1.5">
-                <Mail className="size-3 text-muted-foreground" />
+              <Label htmlFor="clinic-email" className="flex items-center gap-1.5">
+                <Mail className="size-3 text-muted-foreground" aria-hidden />
                 E-mail de Contato
               </Label>
               <Input
+                id="clinic-email"
+                type="email"
                 placeholder="contato@suaclinica.com.br"
                 value={crm.orgSettings.clinicEmail || ''}
                 onChange={(e) => crm.updateOrgSettings({ clinicEmail: e.target.value })}
               />
             </div>
             <div className="grid gap-2">
-              <Label className="flex items-center gap-1.5">
-                <MapPin className="size-3 text-muted-foreground" />
+              <Label htmlFor="clinic-address" className="flex items-center gap-1.5">
+                <MapPin className="size-3 text-muted-foreground" aria-hidden />
                 Endereço
               </Label>
               <Input
+                id="clinic-address"
                 placeholder="Rua Exemplo, 123"
                 value={crm.orgSettings.clinicAddress || ''}
                 onChange={(e) => crm.updateOrgSettings({ clinicAddress: e.target.value })}
@@ -446,8 +453,9 @@ export function SettingsPage() {
             <CardContent className="grid gap-6">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label>Abertura</Label>
+                  <Label htmlFor="wh-start">Abertura</Label>
                   <Input
+                    id="wh-start"
                     type="time"
                     value={wh.start || '08:00'}
                     onChange={(e) => crm.updateOrgSettings({
@@ -456,8 +464,9 @@ export function SettingsPage() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Fechamento</Label>
+                  <Label htmlFor="wh-end">Fechamento</Label>
                   <Input
+                    id="wh-end"
                     type="time"
                     value={wh.end || '18:00'}
                     onChange={(e) => crm.updateOrgSettings({
@@ -474,8 +483,10 @@ export function SettingsPage() {
                     return (
                       <Button
                         key={day}
+                        type="button"
                         size="sm"
                         variant={isSelected ? 'default' : 'outline'}
+                        aria-pressed={isSelected}
                         className={cn(
                           "w-12 h-9 rounded-xl transition-all",
                           isSelected ? "shadow-md shadow-primary/20" : "opacity-60 hover:opacity-100"
@@ -527,7 +538,7 @@ export function SettingsPage() {
               <ul className="m-0 list-none space-y-1 p-0 text-sm">
                 {crm.rooms.map((r) => (
                   <li key={r.id}>
-                    {r.name} {r.active ? '' : '(inactiva)'}
+                    {r.name} {r.active ? '' : '(inativa)'}
                   </li>
                 ))}
               </ul>
@@ -624,7 +635,7 @@ export function SettingsPage() {
                           crm.updatePermissionProfile(profile.id, { role: value as 'admin' | 'gestor' | 'sdr' })
                         }
                       >
-                        <SelectTrigger className="w-full sm:w-[220px] font-semibold h-9 border-border/40">
+                        <SelectTrigger aria-label="Papel do usuário" className="w-full sm:w-[220px] font-semibold h-9 border-border/40">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -634,11 +645,12 @@ export function SettingsPage() {
                         </SelectContent>
                       </Select>
                       <Button
-                        type="button" variant="ghost" size="sm"
+                        type="button" variant="ghost" size="icon-sm"
                         className="text-destructive/60 hover:text-destructive hover:bg-destructive/10"
                         onClick={() => setDeleteTarget({ type: 'profile', id: profile.id })}
+                        aria-label="Remover perfil"
                       >
-                        <Trash2Icon className="size-4" />
+                        <Trash2Icon className="size-4" aria-hidden />
                       </Button>
                     </div>
                     {/* Permission cards */}
@@ -662,6 +674,7 @@ export function SettingsPage() {
                               checked={value}
                               onCheckedChange={onChange}
                               onClick={(e) => e.stopPropagation()}
+                              aria-label={meta.label}
                               className="mt-0.5 shrink-0"
                             />
                             <div className="min-w-0">
@@ -712,6 +725,7 @@ export function SettingsPage() {
                       <Input
                         value={rule.name}
                         onChange={(event) => crm.updateNotificationRule(rule.id, { name: event.target.value })}
+                        aria-label="Nome da regra"
                       />
                       <div className="flex flex-wrap items-center gap-2">
                         <Select
@@ -722,7 +736,7 @@ export function SettingsPage() {
                             })
                           }
                         >
-                          <SelectTrigger className="w-full sm:w-[180px]">
+                          <SelectTrigger aria-label="Canal de aviso" className="w-full sm:w-[180px]">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -737,6 +751,7 @@ export function SettingsPage() {
                           value={rule.trigger}
                           onChange={(event) => crm.updateNotificationRule(rule.id, { trigger: event.target.value })}
                           placeholder="Quando avisar"
+                          aria-label="Quando avisar"
                           className="w-full sm:max-w-[12rem]"
                         />
                       </div>
@@ -744,10 +759,11 @@ export function SettingsPage() {
                     <div className="flex flex-wrap items-center gap-3">
                       <div className="flex items-center gap-2">
                         <Switch
+                          id={`rule-enabled-${rule.id}`}
                           checked={rule.enabled}
                           onCheckedChange={(checked) => crm.updateNotificationRule(rule.id, { enabled: checked })}
                         />
-                        <Label className="text-sm cursor-pointer">Ativo</Label>
+                        <Label htmlFor={`rule-enabled-${rule.id}`} className="text-sm cursor-pointer">Ativo</Label>
                       </div>
                       <Button type="button" variant="destructive" size="sm" onClick={() => setDeleteTarget({ type: 'rule', id: rule.id, name: rule.name })}>
                         <Trash2Icon className="size-4 mr-1" />
@@ -860,22 +876,26 @@ function SortableFieldRow({
       )}
     >
       <div className="flex items-start gap-4">
-        <button
+        <Button
           type="button"
-          className="mt-1 shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-primary transition-colors"
+          variant="ghost"
+          size="icon-sm"
+          className="mt-1 shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-primary"
           {...attributes}
           {...listeners}
+          aria-label="Arrastar para reordenar"
         >
-          <GripVertical className="size-5" />
-        </button>
+          <GripVertical className="size-5" aria-hidden />
+        </Button>
 
         <div className="flex-1 grid gap-5">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="grid gap-2 sm:col-span-2 lg:col-span-1">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor={`field-label-${field.id}`} className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Nome do campo
               </Label>
               <Input
+                id={`field-label-${field.id}`}
                 value={field.label}
                 onChange={(e) => crm.updateWorkflowField(field.id, { label: e.target.value })}
                 onBlur={(e) => {
@@ -889,7 +909,7 @@ function SortableFieldRow({
             </div>
 
             <div className="grid gap-2">
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              <Label htmlFor={`field-type-${field.id}`} className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Tipo de dado
               </Label>
               <Select
@@ -903,7 +923,7 @@ function SortableFieldRow({
                   crm.updateWorkflowField(field.id, updates)
                 }}
               >
-                <SelectTrigger className="h-9 border-border/60">
+                <SelectTrigger id={`field-type-${field.id}`} className="h-9 border-border/60">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -947,6 +967,7 @@ function SortableFieldRow({
                     checked={field.visibleIn.includes(ctx.value)}
                     onCheckedChange={(v) => toggleVis(ctx.value, v)}
                     onClick={(e) => e.stopPropagation()}
+                    aria-label={ctx.label}
                   />
                   <span className="text-xs font-medium">{ctx.label}</span>
                 </div>
@@ -961,6 +982,7 @@ function SortableFieldRow({
                   Opções da lista
                 </Label>
                 <Button
+                  type="button"
                   size="sm" variant="ghost"
                   className="h-7 text-xs text-primary hover:text-primary hover:bg-primary/10"
                   onClick={() => {
@@ -991,19 +1013,22 @@ function SortableFieldRow({
                         crm.updateWorkflowField(field.id, { options: toStoredOptions(pairs) })
                       }}
                       placeholder="Nome da opção"
+                      aria-label="Nome da opção"
                       className="h-8 text-xs border-border/40 bg-background"
                     />
                     <Button
+                      type="button"
                       size="icon" variant="ghost"
-                      className="size-8 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="size-8 text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                       onClick={() => {
                         const pairs = normalizeFieldSelectOptions(field.options)
                         if (pairs.length <= 1) return
                         pairs.splice(i, 1)
                         crm.updateWorkflowField(field.id, { options: toStoredOptions(pairs) })
                       }}
+                      aria-label="Remover opção"
                     >
-                      <Trash2Icon className="size-3" />
+                      <Trash2Icon className="size-3" aria-hidden />
                     </Button>
                   </div>
                 ))}
@@ -1014,12 +1039,13 @@ function SortableFieldRow({
           <div className="flex items-center justify-between gap-4 pt-2">
             <details className="group">
               <summary className="text-[10px] uppercase font-bold text-muted-foreground/60 cursor-pointer hover:text-muted-foreground transition-colors list-none flex items-center gap-1">
-                <span className="group-open:rotate-90 transition-transform">▶</span> Configurações avançadas
+                <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" aria-hidden /> Configurações avançadas
               </summary>
               <div className="mt-3 grid gap-4 sm:grid-cols-2">
                 <div className="grid gap-1.5">
-                  <Label className="text-[10px] text-muted-foreground uppercase">Chave técnica (API)</Label>
+                  <Label htmlFor={`field-key-${field.id}`} className="text-[10px] text-muted-foreground uppercase">Chave técnica (API)</Label>
                   <Input
+                    id={`field-key-${field.id}`}
                     value={field.fieldKey}
                     onChange={(e) => {
                       setWorkflowKeyManual(m => ({ ...m, [field.id]: true }))
@@ -1029,8 +1055,9 @@ function SortableFieldRow({
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label className="text-[10px] text-muted-foreground uppercase">Seção de agrupamento</Label>
+                  <Label htmlFor={`field-section-${field.id}`} className="text-[10px] text-muted-foreground uppercase">Seção de agrupamento</Label>
                   <Input
+                    id={`field-section-${field.id}`}
                     value={field.section}
                     onChange={(e) => crm.updateWorkflowField(field.id, { section: e.target.value })}
                     className="h-8 text-xs border-border/40"
@@ -1040,11 +1067,12 @@ function SortableFieldRow({
             </details>
 
             <Button
+              type="button"
               variant="ghost" size="sm"
               className="text-destructive/60 hover:text-destructive hover:bg-destructive/10 h-8"
               onClick={() => setDeleteTarget({ type: 'field', id: field.id, name: field.label })}
             >
-              <Trash2Icon className="size-4 mr-1.5" />
+              <Trash2Icon className="size-4 mr-1.5" aria-hidden />
               Remover campo
             </Button>
           </div>

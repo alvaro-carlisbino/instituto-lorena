@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { fetchShospAgendaMetrics, type ShospAgendaMetrics } from '@/services/analytics'
 
 const RANGES = [
@@ -51,27 +53,32 @@ export function ShospAgendaMetricsPanel() {
     <section className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-lg font-semibold">Agenda Shosp — clínica</h2>
+          <h2 className="text-lg font-semibold">Agenda Shosp · clínica</h2>
           <p className="text-xs text-muted-foreground">
             Agendamentos reais da Shosp (todos os médicos). Atenção: a Shosp registra agendamento/cancelamento, não comparecimento.
           </p>
         </div>
         <div className="flex gap-1">
           {RANGES.map((r) => (
-            <button
+            <Button
               key={r.days}
               type="button"
+              variant="outline"
+              size="xs"
+              aria-pressed={days === r.days}
               onClick={() => setDays(r.days)}
-              className={`rounded-md border px-2 py-1 text-xs ${days === r.days ? 'border-primary bg-primary/10 text-primary' : 'border-border/40 hover:bg-muted/40'}`}
+              className={cn(
+                days === r.days && 'border-primary bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
+              )}
             >
               {r.label}
-            </button>
+            </Button>
           ))}
-          {loading && <span className="ml-1 text-xs text-muted-foreground">Carregando…</span>}
+          {loading && <span role="status" className="ml-1 text-xs text-muted-foreground">Carregando…</span>}
         </div>
       </div>
 
-      {error && <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label={`Agendamentos (${days}d)`} value={data?.total ?? 0} tone="text-emerald-600" />

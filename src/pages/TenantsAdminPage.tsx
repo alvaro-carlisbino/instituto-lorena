@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Building2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Sheet,
   SheetContent,
@@ -63,7 +67,12 @@ export function TenantsAdminPage() {
     return (
       <AppLayout title="Clínicas">
         <Card>
-          <CardContent className="pt-6 text-sm text-muted-foreground">A carregar…</CardContent>
+          <CardContent className="grid gap-2 pt-6" aria-busy="true">
+            <span className="sr-only">Carregando…</span>
+            <Skeleton className="h-4 w-48" />
+            <Skeleton className="h-4 w-72 max-w-full" />
+            <Skeleton className="h-4 w-56" />
+          </CardContent>
         </Card>
       </AppLayout>
     )
@@ -84,13 +93,10 @@ export function TenantsAdminPage() {
   return (
     <AppLayout title="Clínicas (Multi-tenant)">
       <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold">Clínicas</h1>
-            <p className="text-xs text-muted-foreground">
-              Cada clínica é um tenant isolado: dados, branding e integrações próprias.
-            </p>
-          </div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="m-0 text-xs text-muted-foreground">
+            Cada clínica é um tenant isolado: dados, branding e integrações próprias.
+          </p>
           <Button onClick={() => setCreateOpen(true)}>Nova clínica</Button>
           <Sheet open={createOpen} onOpenChange={setCreateOpen}>
             <CreateTenantDialog
@@ -105,7 +111,7 @@ export function TenantsAdminPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-sm">
-              {loading ? 'A carregar…' : `${tenants.length} clínica(s)`}
+              {loading ? 'Carregando…' : `${tenants.length} clínica(s)`}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -118,11 +124,12 @@ export function TenantsAdminPage() {
                       <code className="rounded bg-muted/60 px-1 py-0.5">{t.id}</code>
                       {' · '}
                       {t.brand.app_name}
-                      {!t.active ? <span className="ml-2 text-amber-600">inativa</span> : null}
+                      {!t.active ? <span className="ml-2 text-warning">inativa</span> : null}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <span
+                      role="img"
                       className="size-4 rounded-full border border-border/40"
                       style={{ backgroundColor: t.brand.primary_color }}
                       aria-label="Cor primária"
@@ -134,8 +141,13 @@ export function TenantsAdminPage() {
                 </li>
               ))}
               {!loading && tenants.length === 0 ? (
-                <li className="py-6 text-center text-sm text-muted-foreground">
-                  Nenhuma clínica encontrada.
+                <li>
+                  <EmptyState
+                    icon={Building2}
+                    title="Nenhuma clínica encontrada"
+                    description='Clique em "Nova clínica" para criar a primeira.'
+                    className="py-6"
+                  />
                 </li>
               ) : null}
             </ul>
@@ -239,14 +251,14 @@ function CreateTenantDialog({ onCreated }: { onCreated: () => Promise<void> }) {
             <Input id="t-accent" type="color" value={accent} onChange={(e) => setAccent(e.target.value)} />
           </div>
         </div>
-        <label className="flex items-center gap-2 text-xs">
-          <input type="checkbox" checked={seed} onChange={(e) => setSeed(e.target.checked)} />
+        <Label className="cursor-pointer text-xs font-normal">
+          <Checkbox checked={seed} onCheckedChange={(checked) => setSeed(checked)} />
           Clonar template da clínica modelo (pipelines, salas, etiquetas, configs de IA)
-        </label>
+        </Label>
       </div>
       <SheetFooter>
         <Button onClick={handleSubmit} disabled={saving}>
-          {saving ? 'A criar…' : 'Criar clínica'}
+          {saving ? 'Criando…' : 'Criar clínica'}
         </Button>
       </SheetFooter>
     </SheetContent>
@@ -375,7 +387,12 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
           ManyChat
         </h3>
         {loadingIntegrations ? (
-          <p className="text-xs text-muted-foreground">A carregar…</p>
+          <div className="grid gap-2" aria-busy="true">
+            <span className="sr-only">Carregando…</span>
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+          </div>
         ) : (
           <>
             <div className="grid gap-1">
@@ -392,12 +409,14 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
             </h4>
             <div className="grid gap-2 pl-3">
               <Input
+                aria-label="flow_ns Instagram"
                 placeholder="flow_ns Instagram (content...)"
                 value={mc.instagram?.flow_ns ?? ''}
                 onChange={(e) => updateManychatChannel('instagram', { flow_ns: e.target.value || undefined })}
               />
               <Input
-                placeholder="message_tag (HUMAN_AGENT…) — opcional"
+                aria-label="message_tag Instagram (opcional)"
+                placeholder="message_tag (HUMAN_AGENT…), opcional"
                 value={mc.instagram?.message_tag ?? ''}
                 onChange={(e) => updateManychatChannel('instagram', { message_tag: e.target.value || undefined })}
               />
@@ -407,11 +426,13 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
             </h4>
             <div className="grid gap-2 pl-3">
               <Input
+                aria-label="flow_ns WhatsApp"
                 placeholder="flow_ns WhatsApp"
                 value={mc.whatsapp?.flow_ns ?? ''}
                 onChange={(e) => updateManychatChannel('whatsapp', { flow_ns: e.target.value || undefined })}
               />
               <Input
+                aria-label="message_tag WhatsApp"
                 placeholder="message_tag WhatsApp"
                 value={mc.whatsapp?.message_tag ?? ''}
                 onChange={(e) => updateManychatChannel('whatsapp', { message_tag: e.target.value || undefined })}
@@ -443,7 +464,8 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
             }
           />
           <Input
-            placeholder="Modelo (ex: glm-4.7) — opcional"
+            aria-label="Modelo Z.ai (opcional)"
+            placeholder="Modelo (ex: glm-4.7), opcional"
             value={integrations.llm?.zai?.model ?? ''}
             onChange={(e) =>
               setIntegrations((prev) => ({
@@ -486,7 +508,7 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
 
       <SheetFooter>
         <Button onClick={handleSave} disabled={saving}>
-          {saving ? 'A salvar…' : 'Salvar alterações'}
+          {saving ? 'Salvando…' : 'Salvar alterações'}
         </Button>
       </SheetFooter>
     </SheetContent>

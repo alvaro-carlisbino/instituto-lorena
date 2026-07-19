@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { setActiveTenant, type PoloOption } from '@/services/tenant'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 /** Rótulo CURTO e ícone por tipo de polo (nome de marca completo é longo demais
@@ -61,29 +62,30 @@ export function WorkspaceSwitcher() {
         const { label, Icon } = poloMeta(polo)
         const isLoadingThis = switchingTo === polo.id
         return (
-          <button
+          <Button
             key={polo.id}
             type="button"
+            variant="ghost"
             role="tab"
             aria-selected={isActive}
             disabled={busy}
             onClick={() => void handleSwitch(polo.id)}
             title={polo.brand.app_name || polo.name}
             className={cn(
-              'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-bold tracking-wide transition-all',
+              'h-auto min-w-0 flex-1 rounded-lg px-2 py-1.5 text-[11px] font-bold tracking-wide',
               isActive
-                ? 'bg-sidebar text-sidebar-foreground shadow-sm ring-1 ring-sidebar-border/60'
+                ? 'bg-sidebar text-sidebar-foreground shadow-sm ring-1 ring-sidebar-border/60 hover:bg-sidebar hover:text-sidebar-foreground'
                 : 'text-sidebar-foreground/45 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground/75',
               busy && 'cursor-wait',
             )}
           >
             {isLoadingThis ? (
-              <Loader2 className="size-3.5 shrink-0 animate-spin" />
+              <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
             ) : (
-              <Icon className={cn('size-3.5 shrink-0', isActive ? 'opacity-100' : 'opacity-70')} />
+              <Icon className={cn('size-3.5 shrink-0', isActive ? 'opacity-100' : 'opacity-70')} aria-hidden />
             )}
             <span className="truncate">{label}</span>
-          </button>
+          </Button>
         )
       })}
     </div>

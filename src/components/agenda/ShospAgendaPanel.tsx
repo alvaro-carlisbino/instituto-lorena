@@ -1,7 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
+import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import {
   cancelShospAppointment,
@@ -25,6 +35,7 @@ type BookingTarget = { data: string; horario: string; codigoHorario: number }
 
 export function ShospAgendaPanel() {
   const crm = useCrm()
+  const fid = useId()
   const [prestadores, setPrestadores] = useState<Array<{ codigo: string; nome: string }>>([])
   const [servicos, setServicos] = useState<Array<{ codigo: string; nome: string; valor: string | null }>>([])
   const [codigoPrestador, setCodigoPrestador] = useState<string>('')
@@ -157,23 +168,32 @@ export function ShospAgendaPanel() {
     <section className="rounded-xl border border-border/30 bg-card p-4">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold">Agenda Shosp — tempo real</h2>
+          <h2 className="text-base font-semibold">Agenda Shosp · tempo real</h2>
           <p className="text-xs text-muted-foreground">
-            Grade do prestador direto da Shosp. Clique num horário <span className="text-emerald-600">livre</span> para agendar, ou num{' '}
-            <span className="text-amber-700">ocupado</span> para cancelar.
+            Grade do prestador direto da Shosp. Clique num horário <span className="text-success">livre</span> para agendar, ou num{' '}
+            <span className="text-warning">ocupado</span> para cancelar.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <select value={codigoPrestador} onChange={(e) => setCodigoPrestador(e.target.value)} className="rounded-md border border-border/40 bg-background px-2 py-1 text-sm">
-            {prestadores.map((p) => (
-              <option key={p.codigo} value={p.codigo}>{p.nome}</option>
-            ))}
-          </select>
-          {loading && <span className="text-xs text-muted-foreground">Carregando…</span>}
+          <Select
+            value={codigoPrestador || null}
+            onValueChange={(v) => v && setCodigoPrestador(v)}
+            items={prestadores.map((p) => ({ value: p.codigo, label: p.nome }))}
+          >
+            <SelectTrigger aria-label="Prestador">
+              <SelectValue placeholder="Prestador" />
+            </SelectTrigger>
+            <SelectContent>
+              {prestadores.map((p) => (
+                <SelectItem key={p.codigo} value={p.codigo}>{p.nome}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {loading && <span role="status" className="text-xs text-muted-foreground">Carregando…</span>}
         </div>
       </div>
 
-      {error && <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
+      {error && <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
       {!error && days.length === 0 && !loading && (
         <p className="py-8 text-center text-xs text-muted-foreground">Sem dias retornados para este prestador.</p>
       )}
@@ -186,13 +206,15 @@ export function ShospAgendaPanel() {
               <p className="text-xs font-medium">{day.data.split('-').reverse().slice(0, 2).join('/')}</p>
             </div>
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
-              {day.slots.length === 0 && <li className="text-center text-[10px] text-muted-foreground">—</li>}
+              {day.slots.length === 0 && <li className="text-center text-[10px] text-muted-foreground">Sem horários</li>}
               {day.slots.map((slot, i) => {
                 const free = isFree(slot)
                 return (
                   <li key={`${day.data}-${slot.horario}-${i}`}>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="xs"
                       onClick={() =>
                         free
                           ? slot.codigoHorario && openBooking({ data: day.data, horario: slot.horario, codigoHorario: slot.codigoHorario })
@@ -200,14 +222,19 @@ export function ShospAgendaPanel() {
                       }
                       className={
                         free
-                          ? 'w-full rounded bg-emerald-500/10 px-1.5 py-0.5 text-left text-[11px] text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-400'
-                          : 'w-full rounded bg-amber-500/10 px-1.5 py-0.5 text-left text-[11px] text-amber-800 hover:bg-amber-500/20 dark:text-amber-300'
+                          ? 'h-auto w-full min-w-0 justify-start rounded bg-success/10 px-1.5 py-0.5 text-[11px] font-normal text-success hover:bg-success/20 hover:text-success'
+                          : 'h-auto w-full min-w-0 justify-start rounded bg-warning/10 px-1.5 py-0.5 text-[11px] font-normal text-warning hover:bg-warning/20 hover:text-warning'
                       }
-                      title={free ? 'Agendar' : `${slot.paciente ?? ''} — ${slot.status ?? ''} (clique p/ cancelar)`}
+                      title={free ? 'Agendar' : `${slot.paciente ?? ''} · ${slot.status ?? ''} (clique p/ cancelar)`}
+                      aria-label={
+                        free
+                          ? `${slot.horario} livre, agendar`
+                          : `${slot.horario} ${slot.paciente ?? 'ocupado'}, cancelar agendamento`
+                      }
                     >
-                      <span className="font-mono">{slot.horario}</span>{' '}
-                      {free ? <span className="opacity-70">livre</span> : <span>{(slot.paciente ?? 'ocupado').split(' ').slice(0, 2).join(' ')}</span>}
-                    </button>
+                      <span className="font-mono">{slot.horario}</span>
+                      {free ? <span className="opacity-70">livre</span> : <span className="min-w-0 truncate">{(slot.paciente ?? 'ocupado').split(' ').slice(0, 2).join(' ')}</span>}
+                    </Button>
                   </li>
                 )
               })}
@@ -218,44 +245,98 @@ export function ShospAgendaPanel() {
 
       {booking && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !saving && setBooking(null)}>
-          <div className="w-full max-w-md rounded-xl border border-border/40 bg-card p-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-sm font-semibold">Agendar — {booking.data.split('-').reverse().join('/')} às {booking.horario}</h3>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${fid}-booking-title`}
+            className="w-full max-w-md rounded-xl border border-border/40 bg-card p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id={`${fid}-booking-title`} className="text-sm font-semibold">Agendar · {booking.data.split('-').reverse().join('/')} às {booking.horario}</h3>
             <div className="mt-3 flex flex-col gap-2 text-sm">
-              <label className="flex flex-col gap-1 text-xs">
-                <span className="text-muted-foreground">Lead do CRM (opcional — prefill)</span>
-                <select value={leadId} onChange={(e) => setLeadId(e.target.value)} className="rounded-md border border-border/40 bg-background px-2 py-1">
-                  <option value="">— escolher lead —</option>
-                  {crm.leads.slice(0, 300).map((l) => (
-                    <option key={l.id} value={l.id}>{l.patientName} · {l.phone}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
-                <span className="text-muted-foreground">Serviço</span>
-                <select value={servicoCodigo} onChange={(e) => setServicoCodigo(e.target.value)} className="rounded-md border border-border/40 bg-background px-2 py-1">
-                  {servicos.map((s) => (
-                    <option key={s.codigo} value={s.codigo}>{s.nome}{s.valor ? ` (R$ ${s.valor})` : ''}</option>
-                  ))}
-                </select>
-              </label>
-              <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo" className="rounded-md border border-border/40 bg-background px-2 py-1" />
-              <div className="grid grid-cols-2 gap-2">
-                <input value={telefone} onChange={(e) => setTelefone(e.target.value)} placeholder="Telefone (DDD)" className="rounded-md border border-border/40 bg-background px-2 py-1" />
-                <input value={nascimento} onChange={(e) => setNascimento(e.target.value)} placeholder="Nascimento DD/MM/AAAA" className="rounded-md border border-border/40 bg-background px-2 py-1" />
+              <div className="flex flex-col gap-1">
+                <Label htmlFor={`${fid}-lead`} className="text-xs text-muted-foreground">Lead do CRM (opcional, preenche os dados)</Label>
+                <Select
+                  value={leadId || null}
+                  onValueChange={(v) => setLeadId(v ?? '')}
+                  items={[
+                    { value: null, label: 'Escolher lead' },
+                    ...crm.leads.slice(0, 300).map((l) => ({ value: l.id, label: `${l.patientName} · ${l.phone}` })),
+                  ]}
+                >
+                  <SelectTrigger id={`${fid}-lead`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={null}>Escolher lead</SelectItem>
+                    {crm.leads.slice(0, 300).map((l) => (
+                      <SelectItem key={l.id} value={l.id}>{l.patientName} · {l.phone}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor={`${fid}-servico`} className="text-xs text-muted-foreground">Serviço</Label>
+                <Select
+                  value={servicoCodigo || null}
+                  onValueChange={(v) => v && setServicoCodigo(v)}
+                  items={servicos.map((s) => ({ value: s.codigo, label: `${s.nome}${s.valor ? ` (R$ ${s.valor})` : ''}` }))}
+                >
+                  <SelectTrigger id={`${fid}-servico`} className="w-full">
+                    <SelectValue placeholder="Serviço" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {servicos.map((s) => (
+                      <SelectItem key={s.codigo} value={s.codigo}>{s.nome}{s.valor ? ` (R$ ${s.valor})` : ''}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor={`${fid}-nome`} className="text-xs text-muted-foreground">Nome completo</Label>
+                <Input id={`${fid}-nome`} value={nome} onChange={(e) => setNome(e.target.value)} autoComplete="name" />
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" className="rounded-md border border-border/40 bg-background px-2 py-1" />
-                <select value={sexo} onChange={(e) => setSexo(e.target.value)} className="rounded-md border border-border/40 bg-background px-2 py-1">
-                  <option value="M">Masculino</option>
-                  <option value="F">Feminino</option>
-                </select>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor={`${fid}-telefone`} className="text-xs text-muted-foreground">Telefone (com DDD)</Label>
+                  <Input id={`${fid}-telefone`} type="tel" value={telefone} onChange={(e) => setTelefone(e.target.value)} placeholder="44999999999" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor={`${fid}-nascimento`} className="text-xs text-muted-foreground">Nascimento</Label>
+                  <Input id={`${fid}-nascimento`} value={nascimento} onChange={(e) => setNascimento(e.target.value)} placeholder="DD/MM/AAAA" inputMode="numeric" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor={`${fid}-email`} className="text-xs text-muted-foreground">E-mail</Label>
+                  <Input id={`${fid}-email`} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nome@exemplo.com" />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor={`${fid}-sexo`} className="text-xs text-muted-foreground">Sexo</Label>
+                  <Select
+                    value={sexo}
+                    onValueChange={(v) => v && setSexo(v)}
+                    items={[
+                      { value: 'M', label: 'Masculino' },
+                      { value: 'F', label: 'Feminino' },
+                    ]}
+                  >
+                    <SelectTrigger id={`${fid}-sexo`} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="M">Masculino</SelectItem>
+                      <SelectItem value="F">Feminino</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" disabled={saving} onClick={() => setBooking(null)} className="rounded-md border border-border/40 px-3 py-1.5 text-sm hover:bg-muted/40">Cancelar</button>
-              <button type="button" disabled={saving} onClick={() => void submitBooking()} className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-60">
+              <Button type="button" variant="outline" disabled={saving} onClick={() => setBooking(null)}>Cancelar</Button>
+              <Button type="button" disabled={saving} onClick={() => void submitBooking()}>
                 {saving ? 'Agendando…' : 'Agendar na Shosp'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

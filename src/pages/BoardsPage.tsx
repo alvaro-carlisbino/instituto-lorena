@@ -137,30 +137,34 @@ function SortableStageRow({
     >
       <div className="flex min-w-0 flex-1 items-center gap-3">
         {/* Drag handle */}
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           {...attributes}
           {...listeners}
           className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground touch-none shrink-0"
           aria-label="Arrastar para reordenar"
         >
-          <GripVertical className="size-4" />
-        </button>
+          <GripVertical className="size-4" aria-hidden />
+        </Button>
 
         <Input
           value={stage.name}
           onChange={(e) =>
             crm.updateStage(pipeline.id, stage.id, { name: e.target.value })
           }
+          aria-label="Nome da etapa"
           className="max-w-sm border-t-0 border-r-0 border-l-0 border-b border-foreground/30 bg-transparent focus-visible:ring-0 focus-visible:border-primary px-0 font-semibold tracking-wide text-sm rounded-none"
         />
 
         {/* SLA badge */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <Clock className="size-3.5 text-muted-foreground/60" />
+          <Clock className="size-3.5 text-muted-foreground/60" aria-hidden />
           <Input
             type="number"
             min={1}
+            aria-label="Prazo da etapa em minutos"
             className="w-20 text-xs text-center border-border/50 h-7"
             placeholder="∞ min"
             value={boardConfig.stageSlaMinutes?.[stage.id] ?? ''}
@@ -206,7 +210,7 @@ function SortableStageRow({
           onClick={onDelete}
           aria-label="Remover etapa"
         >
-          <Trash2 className="size-3.5" />
+          <Trash2 className="size-3.5" aria-hidden />
         </Button>
       </div>
     </li>
@@ -358,10 +362,14 @@ export function BoardsPage() {
               >
                 <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/50 bg-muted/5 pb-4 rounded-t-xl">
                   <div className="flex-1 min-w-0">
-                    <Label className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground mb-1 block">
+                    <Label
+                      htmlFor={`pipeline-name-${pipeline.id}`}
+                      className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground mb-1 block"
+                    >
                       Nome do funil
                     </Label>
                     <Input
+                      id={`pipeline-name-${pipeline.id}`}
                       value={pipeline.name}
                       onChange={(e) =>
                         crm.updatePipeline(pipeline.id, { name: e.target.value })

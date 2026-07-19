@@ -6,6 +6,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -148,7 +149,7 @@ export function ContasPagarPage() {
         itemsPlan: nfePlan,
       })
       toast.success(
-        `NF ${result.invoiceNumber} importada — ${result.itemsStocked} ${result.itemsStocked === 1 ? 'entrada' : 'entradas'} no estoque` +
+        `NF ${result.invoiceNumber} importada: ${result.itemsStocked} ${result.itemsStocked === 1 ? 'entrada' : 'entradas'} no estoque` +
           (result.itemsCreated > 0 ? ` (${result.itemsCreated} ${result.itemsCreated === 1 ? 'item novo' : 'itens novos'})` : '') +
           (result.batches > 0 ? `, ${result.batches} ${result.batches === 1 ? 'lote' : 'lotes'}` : '') +
           (result.payables > 0 ? `, ${result.payables} ${result.payables === 1 ? 'parcela' : 'parcelas'}` : '') +
@@ -305,12 +306,13 @@ export function ContasPagarPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <p className="text-xs text-muted-foreground">
-                Suba o XML da nota: preenche fornecedor, itens (com lote/validade), dá entrada no estoque e cria as parcelas — tudo de uma vez, com confirmação.
+                Suba o XML da nota: preenche fornecedor, itens (com lote/validade), dá entrada no estoque e cria as parcelas, tudo de uma vez, com confirmação.
               </p>
               <Input
                 ref={nfeFileRef}
                 type="file"
                 accept=".xml,text/xml,application/xml"
+                aria-label="Arquivo XML da NF-e"
                 onChange={(e) => void handleNfeFile(e.target.files?.[0] ?? null)}
               />
             </CardContent>
@@ -345,9 +347,9 @@ export function ContasPagarPage() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
-                  <Label>Fornecedor</Label>
+                  <Label htmlFor="nf-supplier">Fornecedor</Label>
                   <Select value={nfForm.supplierId} onValueChange={(v) => setNfForm((f) => ({ ...f, supplierId: v ?? '' }))}>
-                    <SelectTrigger>
+                    <SelectTrigger id="nf-supplier">
                       <SelectValue placeholder="Opcional" />
                     </SelectTrigger>
                     <SelectContent>
@@ -404,9 +406,9 @@ export function ContasPagarPage() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
-                  <Label>Fornecedor</Label>
+                  <Label htmlFor="pg-supplier">Fornecedor</Label>
                   <Select value={payForm.supplierId} onValueChange={(v) => setPayForm((f) => ({ ...f, supplierId: v ?? '' }))}>
-                    <SelectTrigger>
+                    <SelectTrigger id="pg-supplier">
                       <SelectValue placeholder="Opcional" />
                     </SelectTrigger>
                     <SelectContent>
@@ -419,9 +421,9 @@ export function ContasPagarPage() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>NF vinculada</Label>
+                  <Label htmlFor="pg-invoice">NF vinculada</Label>
                   <Select value={payForm.invoiceId} onValueChange={(v) => setPayForm((f) => ({ ...f, invoiceId: v ?? '' }))}>
-                    <SelectTrigger>
+                    <SelectTrigger id="pg-invoice">
                       <SelectValue placeholder="Opcional" />
                     </SelectTrigger>
                     <SelectContent>
@@ -466,9 +468,9 @@ export function ContasPagarPage() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
-                  <Label>Forma</Label>
+                  <Label htmlFor="pg-method">Forma</Label>
                   <Select value={payForm.method} onValueChange={(v) => setPayForm((f) => ({ ...f, method: v ?? 'boleto' }))}>
-                    <SelectTrigger>
+                    <SelectTrigger id="pg-method">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -518,8 +520,13 @@ export function ContasPagarPage() {
                     <div className="flex shrink-0 items-center gap-2">
                       <span className="font-semibold">{formatBRL(inv.totalCents)}</span>
                       {inv.storagePath ? (
-                        <Button variant="ghost" size="sm" className="px-2" onClick={() => void openAttachment(inv.storagePath!)}>
-                          <Paperclip className="size-3.5" />
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => void openAttachment(inv.storagePath!)}
+                          aria-label={`Abrir anexo da NF ${inv.number}`}
+                        >
+                          <Paperclip className="size-3.5" aria-hidden />
                         </Button>
                       ) : null}
                     </div>
@@ -541,7 +548,7 @@ export function ContasPagarPage() {
               <EmptyState
                 icon={CalendarClock}
                 title={loading ? 'Carregando…' : 'Nada em aberto'}
-                description="Programe boletos e parcelas ao lado — a projeção por mês aparece aqui."
+                description="Programe boletos e parcelas ao lado, a projeção por mês aparece aqui."
               />
             ) : (
               agenda.map(([key, rows]) => {
@@ -632,18 +639,19 @@ export function ContasPagarPage() {
                 <p className="mb-1 font-semibold">Fornecedor</p>
                 {existingSupplierMatch ? (
                   <p className="text-muted-foreground">
-                    Já cadastrado: <span className="font-medium text-foreground">{existingSupplierMatch.name}</span> — a NF será vinculada a ele.
+                    Já cadastrado: <span className="font-medium text-foreground">{existingSupplierMatch.name}</span>, a NF será vinculada a ele.
                   </p>
                 ) : (
-                  <label className="flex items-center gap-2 text-muted-foreground">
-                    <input
-                      type="checkbox"
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="nfe-create-supplier"
                       checked={nfeCreateSupplier}
-                      onChange={(e) => setNfeCreateSupplier(e.target.checked)}
-                      className="size-4 accent-primary"
+                      onCheckedChange={(checked) => setNfeCreateSupplier(checked)}
                     />
-                    Cadastrar fornecedor “{nfe.supplierName ?? 'sem nome'}”{nfe.supplierCnpj ? ` (CNPJ ${nfe.supplierCnpj})` : ''}
-                  </label>
+                    <Label htmlFor="nfe-create-supplier" className="font-normal text-muted-foreground">
+                      Cadastrar fornecedor “{nfe.supplierName ?? 'sem nome'}”{nfe.supplierCnpj ? ` (CNPJ ${nfe.supplierCnpj})` : ''}
+                    </Label>
+                  </div>
                 )}
               </div>
 
@@ -700,7 +708,10 @@ export function ContasPagarPage() {
                               )
                             }
                           >
-                            <SelectTrigger className="h-8 w-[180px] shrink-0">
+                            <SelectTrigger
+                              className="h-8 w-[180px] shrink-0"
+                              aria-label={`Destino do item ${item.description}`}
+                            >
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -723,15 +734,16 @@ export function ContasPagarPage() {
 
               {nfe.installments.length > 0 ? (
                 <div>
-                  <label className="flex items-center gap-2 text-sm font-semibold">
-                    <input
-                      type="checkbox"
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="nfe-create-payables"
                       checked={nfeCreatePayables}
-                      onChange={(e) => setNfeCreatePayables(e.target.checked)}
-                      className="size-4 accent-primary"
+                      onCheckedChange={(checked) => setNfeCreatePayables(checked)}
                     />
-                    Criar {nfe.installments.length} {nfe.installments.length === 1 ? 'parcela' : 'parcelas'} em contas a pagar
-                  </label>
+                    <Label htmlFor="nfe-create-payables" className="font-semibold">
+                      Criar {nfe.installments.length} {nfe.installments.length === 1 ? 'parcela' : 'parcelas'} em contas a pagar
+                    </Label>
+                  </div>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {nfe.installments.map((inst) => (
                       <span key={inst.number} className="rounded-md bg-muted px-2 py-1 text-xs">
@@ -741,7 +753,7 @@ export function ContasPagarPage() {
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">A nota não traz duplicatas (parcelas) — só entra estoque e a NF.</p>
+                <p className="text-xs text-muted-foreground">A nota não traz duplicatas (parcelas), só entra estoque e a NF.</p>
               )}
             </div>
           ) : null}

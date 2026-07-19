@@ -7,6 +7,7 @@ import { SubTabs } from '@/components/page/SubTabs'
 import { financeiroTabs } from '@/pages/EstoquePage'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -224,10 +225,12 @@ export function NfePage() {
               className="w-[200px]"
             />
           </div>
-          <label className="flex items-center gap-2 pb-2 text-sm">
-            <input type="checkbox" checked={transmit} onChange={(e) => setTransmit(e.target.checked)} className="size-4 accent-primary" />
-            Transmitir ao SEFAZ na hora (senão fica em rascunho no Bling)
-          </label>
+          <div className="flex items-center gap-2 pb-2">
+            <Checkbox id="nfe-transmit" checked={transmit} onCheckedChange={(checked) => setTransmit(checked)} />
+            <Label htmlFor="nfe-transmit" className="font-normal">
+              Transmitir ao SEFAZ na hora (senão fica em rascunho no Bling)
+            </Label>
+          </div>
           <Button variant="outline" onClick={() => void saveConfig()} disabled={savingConfig}>
             {savingConfig ? 'Salvando...' : 'Salvar configuração'}
           </Button>
@@ -282,7 +285,7 @@ export function NfePage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[40px]">
-                      <input type="checkbox" checked={allSelected} onChange={toggleAll} className="size-4 accent-primary" aria-label="Selecionar todas" />
+                      <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Selecionar todas" />
                     </TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead>CPF</TableHead>
@@ -299,12 +302,10 @@ export function NfePage() {
                     return (
                       <TableRow key={r.paymentId} className={err ? 'bg-red-50/50' : done ? 'bg-emerald-50/40' : undefined}>
                         <TableCell>
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={selected.has(r.paymentId)}
-                            onChange={() => toggleOne(r.paymentId)}
+                            onCheckedChange={() => toggleOne(r.paymentId)}
                             disabled={done || r.emitting}
-                            className="size-4 accent-primary disabled:opacity-40"
                             aria-label={`Selecionar ${r.name}`}
                           />
                         </TableCell>

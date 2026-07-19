@@ -3,6 +3,8 @@ import { Download, MessageCircle, RefreshCw, ShoppingCart } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { fetchAbandonedCarts, type AbandonedCart, type AbandonedCartsResult } from '@/services/abandonedCarts'
 import { cn } from '@/lib/utils'
@@ -102,10 +104,10 @@ export function CarrinhosAbandonadosPage() {
       actions={
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="rounded-xl" onClick={exportCsv} disabled={carts.length === 0}>
-            <Download className="size-3.5" /> Exportar CSV
+            <Download className="size-3.5" aria-hidden /> Exportar CSV
           </Button>
           <Button variant="outline" size="sm" className="rounded-xl" onClick={() => setReloadKey((k) => k + 1)} disabled={loading}>
-            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Atualizar
+            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} aria-hidden /> Atualizar
           </Button>
         </div>
       }
@@ -118,19 +120,22 @@ export function CarrinhosAbandonadosPage() {
       </section>
 
       <section className="flex items-center gap-2 border-b border-border/20 pb-4">
-        <div className="inline-flex shrink-0 rounded-xl bg-muted/40 p-1">
+        <div className="inline-flex shrink-0 rounded-xl bg-muted/40 p-1" role="group" aria-label="Filtrar por período">
           {PERIODS.map((o) => (
-            <button
+            <Button
               key={o.v}
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setDays(o.v)}
+              aria-pressed={days === o.v}
               className={cn(
-                'h-7 rounded-lg px-3 text-[11px] font-bold uppercase tracking-wide transition-all duration-200',
-                days === o.v ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground',
+                'h-7 rounded-lg px-3 text-[11px] font-bold uppercase tracking-wide transition-all duration-200 hover:bg-transparent',
+                days === o.v ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50 hover:bg-background' : 'text-muted-foreground hover:text-foreground',
               )}
             >
               {o.l}
-            </button>
+            </Button>
           ))}
         </div>
         <span className="text-[11px] font-semibold text-muted-foreground">{active.length} para recuperar</span>
@@ -152,9 +157,21 @@ export function CarrinhosAbandonadosPage() {
           </TableHeader>
           <TableBody>
             {loading && !data ? (
-              <TableRow><TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">Carregando…</TableCell></TableRow>
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6} aria-busy="true">
+                  <div className="space-y-2 py-4">
+                    <Skeleton className="h-9 w-full" />
+                    <Skeleton className="h-9 w-full" />
+                    <Skeleton className="h-9 w-full" />
+                  </div>
+                </TableCell>
+              </TableRow>
             ) : carts.length === 0 ? (
-              <TableRow><TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">Nenhum carrinho abandonado no período. 🎉</TableCell></TableRow>
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={6}>
+                  <EmptyState icon={ShoppingCart} title="Nenhum carrinho abandonado no período" description="Todo mundo que começou um pedido chegou ao fim. Boa!" />
+                </TableCell>
+              </TableRow>
             ) : (
               carts.map((c) => {
                 const link = waLink(c)
@@ -194,7 +211,7 @@ export function CarrinhosAbandonadosPage() {
                           onClick={() => setContacted((s) => new Set(s).add(c.sessionId))}
                           className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-2.5 py-1.5 text-xs font-bold text-emerald-700 ring-1 ring-emerald-500/25 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
                         >
-                          <MessageCircle className="size-3.5" /> WhatsApp
+                          <MessageCircle className="size-3.5" aria-hidden /> WhatsApp
                         </a>
                       ) : <span className="text-xs text-muted-foreground">sem telefone</span>}
                     </TableCell>
@@ -207,7 +224,7 @@ export function CarrinhosAbandonadosPage() {
       </div>
 
       <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
-        <ShoppingCart className="size-3" />
+        <ShoppingCart className="size-3" aria-hidden />
         O contato é capturado quando o cliente digita nome e WhatsApp no checkout do site. Carrinhos com menos de 30 min de inatividade ficam de fora (podem estar comprando agora).
       </p>
     </AppLayout>

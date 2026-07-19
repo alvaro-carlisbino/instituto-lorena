@@ -1,11 +1,21 @@
-import { ChevronDown, LogOut, RefreshCw, Wrench } from 'lucide-react'
+import { ChevronDown, LogOut, Moon, RefreshCw, Sun, Wrench } from 'lucide-react'
 
 import { NoticeBanner } from '@/components/NoticeBanner'
 import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import { useCrm } from '@/context/CrmContext'
+import { useTheme } from '@/hooks/useTheme'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useId } from 'react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,12 +28,15 @@ import { SidebarTrigger } from '@/components/ui/sidebar'
 
 export function TopControls() {
   const crm = useCrm()
+  const { theme, toggleTheme } = useTheme()
   const email = crm.session?.user.email ?? 'Não conectado'
 
   const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
 
   const [isToolsOpen, setIsToolsOpen] = useState(false)
   const toolsRef = useRef<HTMLDivElement>(null)
+  const previewCheckboxId = useId()
+  const actingRoleSelectId = useId()
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -50,7 +63,7 @@ export function TopControls() {
             )}
           >
             <span className="truncate">{email}</span>
-            <ChevronDown className="size-3.5 shrink-0 opacity-60" />
+            <ChevronDown className="size-3.5 shrink-0 opacity-60" aria-hidden />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-56">
             <DropdownMenuLabel className="font-normal">
@@ -71,13 +84,25 @@ export function TopControls() {
         </DropdownMenu>
 
         <Button
+          variant="ghost"
+          size="icon-sm"
+          className="rounded-xl"
+          aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+          title={theme === 'dark' ? 'Tema claro' : 'Tema escuro'}
+          onClick={toggleTheme}
+        >
+          {theme === 'dark' ? <Sun className="size-4" aria-hidden /> : <Moon className="size-4" aria-hidden />}
+        </Button>
+
+        <Button
           variant="secondary"
           size="sm"
           className="rounded-xl"
           disabled={crm.isLoading || !canSync}
+          aria-label={crm.isLoading ? 'Atualizando' : 'Atualizar'}
           onClick={() => void crm.syncFromSupabase()}
         >
-          <RefreshCw className={`size-3.5 ${crm.isLoading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`size-3.5 ${crm.isLoading ? 'animate-spin' : ''}`} aria-hidden />
           <span className="hidden min-[400px]:inline">{crm.isLoading ? 'Atualizando…' : 'Atualizar'}</span>
         </Button>
 
@@ -87,13 +112,16 @@ export function TopControls() {
               variant="ghost"
               size="sm"
               className="w-auto justify-between gap-2 rounded-xl border border-transparent bg-background/60"
+              aria-expanded={isToolsOpen}
+              aria-haspopup="dialog"
+              aria-label="Ferramentas"
               onClick={() => setIsToolsOpen(!isToolsOpen)}
             >
               <span className="inline-flex items-center gap-1.5">
-                <Wrench className="size-3.5" />
+                <Wrench className="size-3.5" aria-hidden />
                 <span className="hidden min-[400px]:inline">Ferramentas</span>
               </span>
-              <ChevronDown className={`size-3.5 opacity-60 transition-transform ${isToolsOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`size-3.5 opacity-60 transition-transform ${isToolsOpen ? 'rotate-180' : ''}`} aria-hidden />
             </Button>
             
             {isToolsOpen && (
@@ -108,27 +136,41 @@ export function TopControls() {
                       {crm.dataMode === 'supabase' ? 'Tempo real' : 'Demonstração'}
                     </span>
                   </p>
-                  <label className="flex cursor-pointer items-center justify-between gap-3 text-xs sm:text-sm">
+                  <Label
+                    htmlFor={previewCheckboxId}
+                    className="flex cursor-pointer items-center justify-between gap-3 text-xs font-normal sm:text-sm"
+                  >
                     <span className="text-foreground/90">Simular perfil</span>
-                    <input
-                      type="checkbox"
-                      className="size-4 rounded border border-input"
+                    <Checkbox
+                      id={previewCheckboxId}
                       checked={crm.useRolePreview}
-                      onChange={(event) => crm.setUseRolePreview(event.target.checked)}
+                      onCheckedChange={(checked) => crm.setUseRolePreview(checked)}
                     />
-                  </label>
+                  </Label>
                   <div className="flex flex-col gap-2 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between">
-                    <span className="text-xs text-foreground/90 min-[400px]:text-sm">Ver como</span>
-                    <select
-                      className="h-9 w-full min-w-0 min-[400px]:h-8 min-[400px]:w-auto rounded-md border border-input bg-background px-2 text-xs font-medium text-foreground"
+                    <Label
+                      htmlFor={actingRoleSelectId}
+                      className="text-xs font-normal text-foreground/90 min-[400px]:text-sm"
+                    >
+                      Ver como
+                    </Label>
+                    <Select
                       value={crm.actingRole}
-                      onChange={(event) => crm.setActingRole(event.target.value as 'admin' | 'gestor' | 'sdr')}
+                      onValueChange={(value) => value && crm.setActingRole(value as 'admin' | 'gestor' | 'sdr')}
                       disabled={!crm.useRolePreview}
                     >
-                      <option value="admin">Administrador</option>
-                      <option value="gestor">Gestor</option>
-                      <option value="sdr">Atendente</option>
-                    </select>
+                      <SelectTrigger
+                        id={actingRoleSelectId}
+                        className="w-full min-[400px]:w-auto text-xs font-medium"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">Administrador</SelectItem>
+                        <SelectItem value="gestor">Gestor</SelectItem>
+                        <SelectItem value="sdr">Atendente</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <p className="flex flex-col gap-1 border-t border-dashed border-border/60 pt-2 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between text-xs sm:text-sm">
                     <span className="text-foreground/90">Perfil ativo</span>

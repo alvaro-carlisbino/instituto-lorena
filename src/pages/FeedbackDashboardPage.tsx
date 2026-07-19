@@ -93,19 +93,23 @@ export function FeedbackDashboardPage() {
         <div className="flex items-center gap-1.5">
           <div className="flex rounded-lg border border-border p-0.5">
             {RANGES.map((r) => (
-              <button
+              <Button
                 key={r.days}
+                type="button"
+                size="xs"
+                variant={days === r.days ? 'default' : 'ghost'}
+                aria-pressed={days === r.days}
                 onClick={() => setDays(r.days)}
                 className={cn(
-                  'rounded-md px-2.5 py-1 text-xs font-semibold transition-colors',
-                  days === r.days ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                  'rounded-md px-2.5 font-semibold',
+                  days !== r.days && 'text-muted-foreground hover:text-foreground',
                 )}
               >
                 {r.label}
-              </button>
+              </Button>
             ))}
           </div>
-          <Button variant="outline" size="sm" onClick={refresh}><RefreshCw className="h-3.5 w-3.5" /> Atualizar</Button>
+          <Button variant="outline" size="sm" onClick={refresh}><RefreshCw className="h-3.5 w-3.5" aria-hidden /> Atualizar</Button>
         </div>
       }
     >
@@ -123,12 +127,12 @@ export function FeedbackDashboardPage() {
         <div className="space-y-8 mb-8">
           {/* KPIs */}
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            <StatCard label="Respostas" value={data.total} icon={<Star className="h-3.5 w-3.5" />} hint={`${data.comComentario} com comentário`} />
+            <StatCard label="Respostas" value={data.total} icon={<Star className="h-3.5 w-3.5" aria-hidden />} hint={`${data.comComentario} com comentário`} />
             <StatCard label="NPS" value={data.nps ?? '—'} valueClassName={npsTone(data.nps)} hint="promotores − detratores" />
             <StatCard label="Nota média" value={data.media ?? '—'} hint="de 0 a 10" />
-            <StatCard label="Promotores" value={data.promotores} valueClassName="text-emerald-600" icon={<ThumbsUp className="h-3.5 w-3.5" />} hint="nota 9-10" />
-            <StatCard label="Neutros" value={data.neutros} valueClassName="text-amber-600" icon={<Smile className="h-3.5 w-3.5" />} hint="nota 7-8" />
-            <StatCard label="Detratores" value={data.detratores} valueClassName="text-red-600" icon={<ThumbsDown className="h-3.5 w-3.5" />} hint="nota 0-6" />
+            <StatCard label="Promotores" value={data.promotores} valueClassName="text-emerald-600" icon={<ThumbsUp className="h-3.5 w-3.5" aria-hidden />} hint="nota 9-10" />
+            <StatCard label="Neutros" value={data.neutros} valueClassName="text-amber-600" icon={<Smile className="h-3.5 w-3.5" aria-hidden />} hint="nota 7-8" />
+            <StatCard label="Detratores" value={data.detratores} valueClassName="text-red-600" icon={<ThumbsDown className="h-3.5 w-3.5" aria-hidden />} hint="nota 0-6" />
           </section>
 
           <section className="grid gap-4 lg:grid-cols-12">
@@ -247,9 +251,16 @@ export function FeedbackDashboardPage() {
                     return (
                       <li key={d.id} className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                         <div className="min-w-0">
-                          <button type="button" className="block w-full truncate text-left font-mono text-[10px] underline" onClick={() => setNpsDispatchId(d.id)}>
-                            {d.id}
-                          </button>
+                          <Button
+                            type="button"
+                            variant="link"
+                            size="xs"
+                            onClick={() => setNpsDispatchId(d.id)}
+                            aria-label={`Usar o código ${d.id}`}
+                            className="h-auto w-full min-w-0 justify-start p-0 font-mono text-[10px] font-normal underline"
+                          >
+                            <span className="truncate">{d.id}</span>
+                          </Button>
                           {tpl ? <span className="text-[10px] text-muted-foreground">{tpl.name}</span> : null}
                         </div>
                         <span className="shrink-0 text-[10px] text-muted-foreground">{d.leadId}</span>

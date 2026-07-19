@@ -22,7 +22,7 @@ const ANALISE_TABS = [
   { to: '/reengajamento', label: 'Reengajamento' },
 ]
 import { EmptyState } from '@/components/ui/empty-state'
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { formatBRL } from '@/services/tricopillBi'
@@ -154,7 +154,7 @@ export function LojaTricopillPage() {
 
   return (
     <AppLayout
-      title="Loja Tricopill — Analytics do site"
+      title="Loja Tricopill · Analytics do site"
       actions={
         <div className="flex items-center gap-2">
           <Link
@@ -164,14 +164,15 @@ export function LojaTricopillPage() {
             <MessageSquare className="size-4 mr-2" />
             BI Vendas
           </Link>
-          <button
+          <Button
             type="button"
+            size="sm"
             onClick={() => setReloadKey((x) => x + 1)}
-            className={cn(buttonVariants({ size: 'sm' }), 'rounded-lg')}
+            className="rounded-lg"
           >
-            <RefreshCw className={cn('size-4 mr-2', loading && 'animate-spin')} />
+            <RefreshCw className={cn('size-4 mr-2', loading && 'animate-spin')} aria-hidden />
             Atualizar
-          </button>
+          </Button>
         </div>
       }
     >
@@ -179,24 +180,27 @@ export function LojaTricopillPage() {
       {/* Filtro de período */}
       <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-3">
         <span className="text-xs text-muted-foreground">Período</span>
-        <div className="flex gap-1">
+        <div className="flex gap-1" role="group" aria-label="Filtrar por período">
           {PERIODS.map((p) => (
-            <button
+            <Button
               key={p.key}
               type="button"
+              variant="ghost"
+              size="xs"
               onClick={() => setPeriod(p.key)}
+              aria-pressed={period === p.key}
               className={cn(
-                'rounded-md border px-3 py-1 text-xs transition-colors',
+                'rounded-md border px-3 text-xs transition-colors',
                 period === p.key
-                  ? 'border-primary/40 bg-primary/10 font-semibold text-primary'
+                  ? 'border-primary/40 bg-primary/10 font-semibold text-primary hover:bg-primary/10 hover:text-primary'
                   : 'border-border/40 hover:bg-muted/40',
               )}
             >
               {p.label}
-            </button>
+            </Button>
           ))}
         </div>
-        {loading ? <span className="text-xs text-muted-foreground">Carregando…</span> : null}
+        {loading ? <span role="status" className="text-xs text-muted-foreground">Carregando…</span> : null}
       </div>
 
       {error ? (
@@ -292,18 +296,22 @@ export function LojaTricopillPage() {
                         ['addToCartRate', 'Taxa'],
                         ['sessions', 'Sessões'],
                       ] as Array<[SortKey, string]>).map(([key, label]) => (
-                        <TableHead key={key} className="pb-2 text-right">
-                          <button
+                        <TableHead key={key} className="pb-2 text-right" aria-sort={sortKey === key ? 'descending' : undefined}>
+                          <Button
                             type="button"
+                            variant="ghost"
+                            size="xs"
                             onClick={() => setSortKey(key)}
+                            aria-label={`Ordenar por ${label}`}
+                            aria-pressed={sortKey === key}
                             className={cn(
-                              'inline-flex items-center gap-1 hover:text-foreground',
+                              'h-auto gap-1 p-0 text-xs font-medium uppercase tracking-wide text-muted-foreground hover:bg-transparent hover:text-foreground',
                               sortKey === key && 'font-bold text-foreground',
                             )}
                           >
                             {label}
-                            {sortKey === key ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3 opacity-20" />}
-                          </button>
+                            {sortKey === key ? <ArrowDown className="size-3" aria-hidden /> : <ArrowUp className="size-3 opacity-20" aria-hidden />}
+                          </Button>
                         </TableHead>
                       ))}
                     </TableRow>

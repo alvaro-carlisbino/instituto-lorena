@@ -6,8 +6,10 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
 import { StatCard } from '@/components/page/StatCard'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   fetchMonthlyReport,
   fetchMonthlyTrend,
@@ -78,7 +80,7 @@ function SectionHeader({ icon, title, onExport }: { icon: React.ReactNode; title
     <div className="mb-2 mt-6 flex items-center justify-between">
       <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">{icon} {title}</h2>
       <Button type="button" variant="outline" size="sm" onClick={onExport}>
-        <Download className="mr-1.5 size-4" /> CSV
+        <Download className="mr-1.5 size-4" aria-hidden /> CSV
       </Button>
     </div>
   )
@@ -140,11 +142,11 @@ export function TricopilReportsPage() {
           <Input id="rep-month" type="month" value={month} max={currentMonth()} onChange={(e) => setMonth(e.target.value)} className="w-44" />
         </div>
         <Button type="button" variant="outline" size="sm" onClick={() => void load(month)} disabled={loading}>
-          <RefreshCw className={`mr-1.5 size-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
+          <RefreshCw className={`mr-1.5 size-4 ${loading ? 'animate-spin' : ''}`} aria-hidden /> Atualizar
         </Button>
         <div className="flex-1" />
         <Button type="button" size="sm" onClick={exportAll} disabled={!report}>
-          <FileSpreadsheet className="mr-1.5 size-4" /> Baixar tudo
+          <FileSpreadsheet className="mr-1.5 size-4" aria-hidden /> Baixar tudo
         </Button>
       </div>
 
@@ -161,32 +163,32 @@ export function TricopilReportsPage() {
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           <div className="rounded-md border border-border bg-card p-3">
             <p className="mb-2 text-xs font-semibold text-muted-foreground">Por produto</p>
-            <table className="w-full text-xs">
-              <tbody>
+            <Table className="text-xs">
+              <TableBody>
                 {c.byProduct.map((p) => (
-                  <tr key={p.product} className="border-b border-border/40 last:border-0">
-                    <td className="py-1">{p.product}</td>
-                    <td className="py-1 text-right tabular-nums text-muted-foreground">{p.count}×</td>
-                    <td className="py-1 text-right tabular-nums font-medium">{brl(p.cents)}</td>
-                  </tr>
+                  <TableRow key={p.product} className="border-border/40">
+                    <TableCell className="px-0 py-1">{p.product}</TableCell>
+                    <TableCell className="px-0 py-1 text-right tabular-nums text-muted-foreground">{p.count}×</TableCell>
+                    <TableCell className="px-0 py-1 text-right tabular-nums font-medium">{brl(p.cents)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
           {c.byCoupon.length > 0 ? (
             <div className="rounded-md border border-border bg-card p-3">
               <p className="mb-2 text-xs font-semibold text-muted-foreground">Cupons</p>
-              <table className="w-full text-xs">
-                <tbody>
+              <Table className="text-xs">
+                <TableBody>
                   {c.byCoupon.map((cp) => (
-                    <tr key={cp.code} className="border-b border-border/40 last:border-0">
-                      <td className="py-1 font-medium">{cp.code}</td>
-                      <td className="py-1 text-right tabular-nums text-muted-foreground">{cp.count}×</td>
-                      <td className="py-1 text-right tabular-nums text-rose-600">-{brl(cp.discountCents)}</td>
-                    </tr>
+                    <TableRow key={cp.code} className="border-border/40">
+                      <TableCell className="px-0 py-1 font-medium">{cp.code}</TableCell>
+                      <TableCell className="px-0 py-1 text-right tabular-nums text-muted-foreground">{cp.count}×</TableCell>
+                      <TableCell className="px-0 py-1 text-right tabular-nums text-rose-600">-{brl(cp.discountCents)}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           ) : null}
         </div>
@@ -194,70 +196,78 @@ export function TricopilReportsPage() {
 
       {/* ---- Vendas do mês ---- */}
       <SectionHeader icon={<Receipt className="size-4 text-sky-600" />} title={`Vendas do mês (${report?.sales.length ?? 0})`} onExport={exportSales} />
-      <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full text-left text-xs">
-          <thead className="border-b border-border bg-muted/30 text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Data</th>
-              <th className="px-3 py-2 font-medium">Cliente</th>
-              <th className="px-3 py-2 font-medium">Produto</th>
-              <th className="px-3 py-2 font-medium">Forma</th>
-              <th className="px-3 py-2 font-medium text-right">Frete</th>
-              <th className="px-3 py-2 font-medium text-right">Valor</th>
-              <th className="px-3 py-2 font-medium">Bling</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="rounded-md border border-border">
+        <Table className="text-left text-xs">
+          <TableHeader>
+            <TableRow className="bg-muted/30 hover:bg-muted/30">
+              <TableHead>Data</TableHead>
+              <TableHead>Cliente</TableHead>
+              <TableHead>Produto</TableHead>
+              <TableHead>Forma</TableHead>
+              <TableHead className="text-right">Frete</TableHead>
+              <TableHead className="text-right">Valor</TableHead>
+              <TableHead>Bling</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {(report?.sales ?? []).map((r, i) => (
-              <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
-                <td className="whitespace-nowrap px-3 py-2">{dt(r.paidAt)}</td>
-                <td className="px-3 py-2">{r.customerName}</td>
-                <td className="px-3 py-2">{r.product}</td>
-                <td className="px-3 py-2">{r.method === 'card' ? `Cartão${r.installments ? ` ${r.installments}x` : ''}` : 'Pix'}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{r.freightCents ? brl(r.freightCents) : '—'}</td>
-                <td className="px-3 py-2 text-right tabular-nums font-medium">{brl(r.amountCents)}</td>
-                <td className="px-3 py-2 text-muted-foreground">{r.blingOrderId ?? '—'}</td>
-              </tr>
+              <TableRow key={i} className="hover:bg-muted/20">
+                <TableCell className="whitespace-nowrap py-2">{dt(r.paidAt)}</TableCell>
+                <TableCell className="py-2">{r.customerName}</TableCell>
+                <TableCell className="py-2">{r.product}</TableCell>
+                <TableCell className="py-2">{r.method === 'card' ? `Cartão${r.installments ? ` ${r.installments}x` : ''}` : 'Pix'}</TableCell>
+                <TableCell className="py-2 text-right tabular-nums text-muted-foreground">{r.freightCents ? brl(r.freightCents) : '—'}</TableCell>
+                <TableCell className="py-2 text-right tabular-nums font-medium">{brl(r.amountCents)}</TableCell>
+                <TableCell className="py-2 text-muted-foreground">{r.blingOrderId ?? '—'}</TableCell>
+              </TableRow>
             ))}
             {!loading && (report?.sales.length ?? 0) === 0 ? (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">Sem vendas neste mês.</td></tr>
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={7}>
+                  <EmptyState className="py-6" icon={Receipt} title="Sem vendas neste mês" />
+                </TableCell>
+              </TableRow>
             ) : null}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       {/* ---- Envios ---- */}
       <SectionHeader icon={<Package className="size-4 text-amber-600" />} title={`Envios (${shipments.length})`} onExport={exportShip} />
-      <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full text-left text-xs">
-          <thead className="border-b border-border bg-muted/30 text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Cliente</th>
-              <th className="px-3 py-2 font-medium">Rastreio</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium">Serviço</th>
-              <th className="px-3 py-2 font-medium">Postado</th>
-              <th className="px-3 py-2 font-medium">Cidade</th>
-              <th className="px-3 py-2 font-medium text-right">Frete</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="rounded-md border border-border">
+        <Table className="text-left text-xs">
+          <TableHeader>
+            <TableRow className="bg-muted/30 hover:bg-muted/30">
+              <TableHead>Cliente</TableHead>
+              <TableHead>Rastreio</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Serviço</TableHead>
+              <TableHead>Postado</TableHead>
+              <TableHead>Cidade</TableHead>
+              <TableHead className="text-right">Frete</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {shipments.map((s, i) => (
-              <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
-                <td className="px-3 py-2">{s.cliente}</td>
-                <td className="px-3 py-2 font-mono">{s.tracking ?? '—'}</td>
-                <td className="px-3 py-2">{s.status}</td>
-                <td className="px-3 py-2 text-muted-foreground">{s.service}</td>
-                <td className="whitespace-nowrap px-3 py-2">{dt(s.postedAt)}</td>
-                <td className="px-3 py-2 text-muted-foreground">{s.cidade}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{s.priceCents ? brl(s.priceCents) : '—'}</td>
-              </tr>
+              <TableRow key={i} className="hover:bg-muted/20">
+                <TableCell className="py-2">{s.cliente}</TableCell>
+                <TableCell className="py-2 font-mono">{s.tracking ?? '—'}</TableCell>
+                <TableCell className="py-2">{s.status}</TableCell>
+                <TableCell className="py-2 text-muted-foreground">{s.service}</TableCell>
+                <TableCell className="whitespace-nowrap py-2">{dt(s.postedAt)}</TableCell>
+                <TableCell className="py-2 text-muted-foreground">{s.cidade}</TableCell>
+                <TableCell className="py-2 text-right tabular-nums">{s.priceCents ? brl(s.priceCents) : '—'}</TableCell>
+              </TableRow>
             ))}
             {!loading && shipments.length === 0 ? (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">Sem envios neste mês (ou Melhor Envio sem etiquetas no período).</td></tr>
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={7}>
+                  <EmptyState className="py-6" icon={Package} title="Sem envios neste mês" description="Ou o Melhor Envio está sem etiquetas no período." />
+                </TableCell>
+              </TableRow>
             ) : null}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       {/* ---- Assinaturas ---- */}
@@ -269,29 +279,29 @@ export function TricopilReportsPage() {
         <StatCard label="Canceladas" value={String(report?.subs.canceled ?? 0)} />
       </div>
       {report && report.subs.rows.length > 0 ? (
-        <div className="mt-3 overflow-x-auto rounded-md border border-border">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-border bg-muted/30 text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 font-medium">Cliente</th>
-                <th className="px-3 py-2 font-medium">Plano</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium text-right">Valor/mês</th>
-                <th className="px-3 py-2 font-medium text-right">Ciclos pagos</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="mt-3 rounded-md border border-border">
+          <Table className="text-left text-xs">
+            <TableHeader>
+              <TableRow className="bg-muted/30 hover:bg-muted/30">
+                <TableHead>Cliente</TableHead>
+                <TableHead>Plano</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Valor/mês</TableHead>
+                <TableHead className="text-right">Ciclos pagos</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {report.subs.rows.map((r, i) => (
-                <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
-                  <td className="px-3 py-2">{r.name}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{r.plan}</td>
-                  <td className="px-3 py-2">{STATUS_PT[r.status] ?? r.status}</td>
-                  <td className="px-3 py-2 text-right tabular-nums font-medium">{brl(r.monthlyCents)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{r.paidCycles}</td>
-                </tr>
+                <TableRow key={i} className="hover:bg-muted/20">
+                  <TableCell className="py-2">{r.name}</TableCell>
+                  <TableCell className="py-2 text-muted-foreground">{r.plan}</TableCell>
+                  <TableCell className="py-2">{STATUS_PT[r.status] ?? r.status}</TableCell>
+                  <TableCell className="py-2 text-right tabular-nums font-medium">{brl(r.monthlyCents)}</TableCell>
+                  <TableCell className="py-2 text-right tabular-nums">{r.paidCycles}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       ) : null}
 

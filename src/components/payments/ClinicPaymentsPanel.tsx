@@ -16,6 +16,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -92,6 +93,7 @@ export function PaymentsPanel() {
   const [onlyPending, setOnlyPending] = useState<'recon' | 'receipt' | null>(null)
   const [uploadingFor, setUploadingFor] = useState<string | null>(null)
   const [importReport, setImportReport] = useState<string | null>(null)
+  const [receiptToDelete, setReceiptToDelete] = useState<{ paymentId: string; rec: PaymentReceiptRow } | null>(null)
   const [nowMs, setNowMs] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bankInputRef = useRef<HTMLInputElement>(null)
@@ -225,15 +227,23 @@ export function PaymentsPanel() {
       toast.error(e instanceof Error ? e.message : 'Falha ao abrir comprovante')
     }
   }
-  const removeReceipt = async (paymentId: string, rec: PaymentReceiptRow) => {
+  const removeReceipt = (paymentId: string, rec: PaymentReceiptRow) => {
     if (rec.source === 'auto') {
       toast.info('O comprovante automático do gateway não pode ser removido (prova do recebimento).')
       return
     }
-    if (!window.confirm('Remover este comprovante?')) return
+    setReceiptToDelete({ paymentId, rec })
+  }
+  const confirmRemoveReceipt = async () => {
+    const target = receiptToDelete
+    if (!target) return
+    setReceiptToDelete(null)
     try {
-      await deletePaymentReceipt(rec.id, rec.storagePath)
-      setReceipts((prev) => ({ ...prev, [paymentId]: (prev[paymentId] ?? []).filter((x) => x.id !== rec.id) }))
+      await deletePaymentReceipt(target.rec.id, target.rec.storagePath)
+      setReceipts((prev) => ({
+        ...prev,
+        [target.paymentId]: (prev[target.paymentId] ?? []).filter((x) => x.id !== target.rec.id),
+      }))
       toast.success('Comprovante removido.')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao remover comprovante')
@@ -249,7 +259,7 @@ export function PaymentsPanel() {
         setRecon((prev) => { const n = new Map(prev); n.delete(key); return n })
         toast.success('Conciliação desfeita.')
       } else {
-        const ref = window.prompt('Referência no extrato (NSU/E2E/linha) — opcional:', '') ?? ''
+        const ref = window.prompt('Referência no extrato (NSU/E2E/linha), opcional:', '') ?? ''
         await markReconciled({ paymentId: p.id, method: p.method, bankRef: ref.trim() || null, matchedSource: 'manual' })
         setRecon((prev) => {
           const n = new Map(prev)
@@ -391,10 +401,16 @@ export function PaymentsPanel() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[180px] flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/60" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nome / telefone / CPF / descrição" className="pl-8" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Nome / telefone / CPF / descrição"
+              aria-label="Buscar recebimentos"
+              className="pl-8"
+            />
           </div>
           <Select value={method} onValueChange={(v) => setMethod(v as typeof method)}>
-            <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[120px]" aria-label="Filtrar por método"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos métodos</SelectItem>
               <SelectItem value="card">Cartão</SelectItem>
@@ -402,7 +418,7 @@ export function PaymentsPanel() {
             </SelectContent>
           </Select>
           <Select value={status} onValueChange={(v) => setStatus(v as typeof status)}>
-            <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[140px]" aria-label="Filtrar por status"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todos os status</SelectItem>
               <SelectItem value="paid">Pagos</SelectItem>
@@ -411,7 +427,7 @@ export function PaymentsPanel() {
             </SelectContent>
           </Select>
           <Select value={period} onValueChange={(v) => setPeriod(v as typeof period)}>
-            <SelectTrigger className="w-[110px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[110px]" aria-label="Filtrar por período"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="30">30 dias</SelectItem>
               <SelectItem value="90">90 dias</SelectItem>
@@ -471,14 +487,27 @@ export function PaymentsPanel() {
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         {recs.map((rec) => (
                           <span key={rec.id} className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] ${rec.source === 'auto' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-muted/60'}`}>
-                            <button type="button" onClick={() => void viewReceipt(rec, name)} className="inline-flex items-center gap-1 hover:underline">
-                              {rec.source === 'auto' ? <BadgeCheck className="size-3" /> : <FileText className="size-3" />}
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="xs"
+                              onClick={() => void viewReceipt(rec, name)}
+                              className="h-auto gap-1 p-0 text-[11px] font-normal text-current"
+                            >
+                              {rec.source === 'auto' ? <BadgeCheck className="size-3" aria-hidden /> : <FileText className="size-3" aria-hidden />}
                               {rec.source === 'auto' ? 'Auto (gateway)' : (rec.fileName ? rec.fileName.slice(0, 22) : 'comprovante')}
-                            </button>
+                            </Button>
                             {rec.source !== 'auto' ? (
-                              <button type="button" onClick={() => void removeReceipt(r.id, rec)} aria-label="Remover comprovante" className="text-muted-foreground/60 hover:text-rose-500">
-                                <Trash2 className="size-3" />
-                              </button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                onClick={() => removeReceipt(r.id, rec)}
+                                aria-label="Remover comprovante"
+                                className="size-4 text-muted-foreground/60 hover:bg-transparent hover:text-rose-500"
+                              >
+                                <Trash2 className="size-3" aria-hidden />
+                              </Button>
                             ) : null}
                           </span>
                         ))}
@@ -492,8 +521,14 @@ export function PaymentsPanel() {
                         {rc ? 'Conciliado' : 'Conciliar'}
                       </Button>
                     ) : null}
-                    <Button size="sm" variant={recs.length > 0 ? 'ghost' : 'outline'} onClick={() => onPickFile(r)} disabled={uploadingFor === r.id}>
-                      <Paperclip className="mr-1.5 size-3.5" />
+                    <Button
+                      size="sm"
+                      variant={recs.length > 0 ? 'ghost' : 'outline'}
+                      onClick={() => onPickFile(r)}
+                      disabled={uploadingFor === r.id}
+                      aria-label={recs.length > 0 && uploadingFor !== r.id ? 'Anexar outro comprovante' : undefined}
+                    >
+                      <Paperclip className="mr-1.5 size-3.5" aria-hidden />
                       {uploadingFor === r.id ? 'Enviando…' : recs.length > 0 ? '+' : 'Comprovante'}
                     </Button>
                   </div>
@@ -503,6 +538,16 @@ export function PaymentsPanel() {
           </div>
         )}
       </CardContent>
+
+      <ConfirmDialog
+        open={receiptToDelete != null}
+        onOpenChange={(open) => { if (!open) setReceiptToDelete(null) }}
+        title="Remover comprovante"
+        description="O comprovante anexado será removido deste pagamento."
+        confirmLabel="Remover"
+        variant="destructive"
+        onConfirm={() => void confirmRemoveReceipt()}
+      />
     </Card>
   )
 }

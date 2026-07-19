@@ -108,8 +108,8 @@ export function InventarioPage() {
       const { adjusted } = await finalizeCount(active, fresh)
       toast.success(
         adjusted === 0
-          ? 'Contagem finalizada — sem divergências.'
-          : `Contagem finalizada — ${adjusted} ${adjusted === 1 ? 'item ajustado' : 'itens ajustados'} no estoque.`,
+          ? 'Contagem finalizada, sem divergências.'
+          : `Contagem finalizada: ${adjusted} ${adjusted === 1 ? 'item ajustado' : 'itens ajustados'} no estoque.`,
       )
       setActiveId(null)
       await load()
@@ -132,7 +132,7 @@ export function InventarioPage() {
   return (
     <AppLayout
       title="Inventário"
-      subtitle="Contagem física do estoque — a divergência vira ajuste automático no saldo."
+      subtitle="Contagem física do estoque: a divergência vira ajuste automático no saldo."
     >
       <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
@@ -174,11 +174,13 @@ export function InventarioPage() {
                 <p className="py-3 text-center text-sm text-muted-foreground">Nenhuma contagem ainda.</p>
               ) : (
                 counts.map((c) => (
-                  <button
+                  <Button
                     key={c.id}
+                    type="button"
+                    variant="ghost"
                     onClick={() => setActiveId(c.id)}
-                    className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors ${
-                      c.id === activeId ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
+                    className={`h-auto w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm font-normal whitespace-normal ${
+                      c.id === activeId ? 'border-primary bg-primary/5 hover:bg-primary/10' : 'border-border hover:bg-muted/50'
                     }`}
                   >
                     <div>
@@ -199,7 +201,7 @@ export function InventarioPage() {
                     >
                       {c.status}
                     </Badge>
-                  </button>
+                  </Button>
                 ))
               )}
             </CardContent>
@@ -259,6 +261,7 @@ export function InventarioPage() {
                                 onChange={(e) => setDrafts((d) => ({ ...d, [ci.id]: e.target.value }))}
                                 onBlur={(e) => void saveCounted(ci.id, e.target.value)}
                                 inputMode="decimal"
+                                aria-label={`Quantidade contada de ${it?.name ?? ci.itemId}`}
                                 className="ml-auto h-8 w-20 text-right"
                                 placeholder="—"
                               />

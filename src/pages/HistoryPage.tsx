@@ -46,6 +46,7 @@ export function HistoryPage() {
 
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Input
+              type="search"
               className="w-full min-w-0 sm:max-w-xs"
               value={searchTerm}
               onChange={(event) => {
@@ -53,6 +54,7 @@ export function HistoryPage() {
                 setPage(1)
               }}
               placeholder="Buscar paciente"
+              aria-label="Buscar paciente"
             />
             <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
               <Button type="button" variant="outline" size="sm" onClick={() => setPage((previous) => Math.max(1, previous - 1))}>
@@ -78,18 +80,20 @@ export function HistoryPage() {
                 />
               ) : (
                 paginatedLeads.map((lead) => (
-                  <button
+                  <Button
                     key={lead.id}
                     type="button"
+                    variant="ghost"
+                    aria-pressed={crm.selectedLeadId === lead.id}
                     className={cn(
-                      'px-4 py-3 text-left text-sm transition bg-card hover:bg-muted/30 focus:outline-none',
+                      'h-auto w-full flex-col items-start gap-0 rounded-none bg-card px-4 py-3 text-left text-sm font-normal transition hover:bg-muted/30',
                       crm.selectedLeadId === lead.id && 'bg-muted/10 font-bold border-l-2 border-l-primary'
                     )}
                     onClick={() => crm.setSelectedLeadId(lead.id)}
                   >
-                    <span className="block truncate tracking-wide text-foreground uppercase">{lead.patientName}</span>
-                    <span className="block text-[10px] font-semibold tracking-widest text-muted-foreground uppercase mt-1">{sourceLabel[lead.source]}</span>
-                  </button>
+                    <span className="block w-full truncate tracking-wide text-foreground uppercase">{lead.patientName}</span>
+                    <span className="mt-1 block text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">{sourceLabel[lead.source]}</span>
+                  </Button>
                 ))
               )}
             </aside>

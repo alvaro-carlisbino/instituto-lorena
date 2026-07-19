@@ -9,6 +9,7 @@ import {
   Music as MusicIcon,
   File as FileIcon,
   Image as ImageIcon,
+  MessageCircle,
   RefreshCw,
   MoreVertical,
   Pencil,
@@ -23,6 +24,7 @@ import { toast } from 'sonner'
 
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Textarea } from '@/components/ui/textarea'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
@@ -256,13 +258,14 @@ function InlineAudio({ item }: { item: InlineMediaItem }) {
       </audio>
       <div className="flex items-center gap-2 px-1">
         <span className="text-[10px] opacity-60">Áudio recebido</span>
-        <button
+        <Button
           type="button"
+          variant="link"
           onClick={() => void downloadAudioAsWav(src, 'audio')}
-          className="text-[10px] underline opacity-60 hover:opacity-100"
+          className="h-auto p-0 text-[10px] font-normal text-current underline opacity-60 hover:opacity-100"
         >
           baixar (.wav)
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -602,7 +605,7 @@ export function LeadChatThread({
       return
     }
     if (file.size > 350 * 1024) {
-      toast.error('Ficheiro demasiado grande. Experimente uma figurinha até ~350 KB.')
+      toast.error('Arquivo muito grande. Use uma figurinha até ~350 KB.')
       return
     }
     try {
@@ -675,12 +678,19 @@ export function LeadChatThread({
               if (!src) return null
               return (
                 <div key={item.id} className="overflow-hidden rounded-lg border border-border/20">
-                  <img
-                    src={src}
-                    alt={item.caption || 'Foto'}
-                    className="max-h-64 w-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                  <Button
+                    type="button"
+                    variant="ghost"
                     onClick={() => openMedia(item, 'image/jpeg')}
-                  />
+                    aria-label={item.caption ? `Abrir imagem: ${item.caption}` : 'Abrir imagem em nova aba'}
+                    className="block h-auto w-full rounded-none border-0 p-0 hover:bg-transparent"
+                  >
+                    <img
+                      src={src}
+                      alt={item.caption || 'Foto'}
+                      className="max-h-64 w-full object-cover transition-opacity hover:opacity-90"
+                    />
+                  </Button>
                   {item.caption && <p className="mt-1 px-2 pb-1 text-xs opacity-80">{item.caption}</p>}
                 </div>
               )
@@ -695,20 +705,21 @@ export function LeadChatThread({
               const src = resolveSrc(item, 'application/octet-stream')
               if (!src) return null
               return (
-                <button
+                <Button
                   key={item.id}
                   type="button"
+                  variant="ghost"
                   onClick={() => openMedia(item, 'application/octet-stream')}
-                  className="flex w-full items-center gap-3 rounded-lg bg-black/5 p-2 text-left transition-colors hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10"
+                  className="h-auto w-full justify-start gap-3 whitespace-normal rounded-lg bg-black/5 p-2 text-left font-normal transition-colors hover:bg-black/10 hover:text-inherit dark:bg-white/5 dark:hover:bg-white/10"
                 >
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/20 text-blue-500">
-                    <FileIcon className="h-5 w-5" />
+                    <FileIcon className="h-5 w-5" aria-hidden />
                   </div>
                   <div className="flex flex-col overflow-hidden">
                     <span className="truncate text-sm font-semibold">{item.caption || 'Documento'}</span>
                     <span className="text-[10px] uppercase opacity-60">Clique para abrir</span>
                   </div>
-                </button>
+                </Button>
               )
             }
             return null
@@ -745,7 +756,7 @@ export function LeadChatThread({
       return (
         <div className="flex items-center gap-3 py-1">
           <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl", color)}>
-            <Icon className="h-5 w-5" />
+            <Icon className="h-5 w-5" aria-hidden />
           </div>
           <div className="flex flex-col">
             <span className="text-[11px] font-bold uppercase tracking-wider opacity-60">Mídia Recebida</span>
@@ -834,11 +845,8 @@ export function LeadChatThread({
       >
         <ul className="m-0 flex list-none flex-col gap-6 p-0">
           {groupedItems.length === 0 ? (
-            <li className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="mb-3 h-12 w-12 rounded-full bg-muted/50 flex items-center justify-center opacity-40">
-                <span className="text-xl"></span>
-              </div>
-              <p className="text-xs text-muted-foreground font-medium">Nenhuma mensagem encontrada</p>
+            <li>
+              <EmptyState icon={MessageCircle} title="Nenhuma mensagem encontrada" />
             </li>
           ) : (
             groupedItems.map((group, gIdx) => {
@@ -887,7 +895,7 @@ export function LeadChatThread({
                               )}
                               aria-label="Opções da mensagem"
                             >
-                              <MoreVertical className="h-4 w-4" />
+                              <MoreVertical className="h-4 w-4" aria-hidden />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align={out ? 'end' : 'start'} className="min-w-44">
                               {canEditOutboundText(msg) ? (
@@ -896,7 +904,7 @@ export function LeadChatThread({
                                     openEditDialog(msg)
                                   }}
                                 >
-                                  <Pencil className="size-4" />
+                                  <Pencil className="size-4" aria-hidden />
                                   Editar texto
                                 </DropdownMenuItem>
                               ) : null}
@@ -908,7 +916,7 @@ export function LeadChatThread({
                                   setDeleteMsgOpen(true)
                                 }}
                               >
-                                <Trash2 className="size-4" />
+                                <Trash2 className="size-4" aria-hidden />
                                 Apagar do CRM
                               </DropdownMenuItem>
                             </DropdownMenuContent>
@@ -978,7 +986,7 @@ export function LeadChatThread({
               className="mt-0.5 w-fit rounded-xl"
               onClick={() => setIsScheduleOpen(true)}
             >
-              <CalendarPlus className="mr-2 h-4 w-4" />
+              <CalendarPlus className="mr-2 h-4 w-4" aria-hidden />
               Agendar consulta
             </Button>
           </div>
@@ -1070,11 +1078,15 @@ export function LeadChatThread({
                 </div>
                 <div className="max-h-48 overflow-y-auto p-1">
                   {filteredQuick.map((m, idx) => (
-                    <button
+                    <Button
                       key={m.id}
+                      type="button"
+                      variant="ghost"
                       className={cn(
-                        "w-full flex flex-col items-start px-3 py-2 rounded-lg text-left transition-colors",
-                        idx === selectedQuickIdx ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+                        "h-auto w-full flex-col items-start gap-0 whitespace-normal rounded-lg px-3 py-2 text-left font-normal transition-colors",
+                        idx === selectedQuickIdx
+                          ? "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
+                          : "hover:bg-muted"
                       )}
                       onClick={() => {
                         const lastSlashIdx = draftMessage.lastIndexOf('/')
@@ -1086,14 +1098,14 @@ export function LeadChatThread({
                     >
                       <span className={cn("text-xs font-bold", idx === selectedQuickIdx ? "text-white" : "text-foreground")}>{m.title}</span>
                       <span className={cn("text-[10px] line-clamp-1", idx === selectedQuickIdx ? "text-white/80" : "text-muted-foreground")}>{m.content}</span>
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
             )}
             <div className="flex items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/50 transition-colors">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/50 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
                   <input
                     type="file"
                     multiple
@@ -1108,6 +1120,7 @@ export function LeadChatThread({
                   type="file"
                   accept=".webp,image/webp"
                   className="sr-only"
+                  aria-label="Escolher figurinha WebP"
                   onChange={(e) => void handleStickerFile(e.target.files)}
                 />
                 <Button
@@ -1119,7 +1132,7 @@ export function LeadChatThread({
                   title="Figurinha WebP (WhatsApp)"
                   onClick={() => stickerInputRef.current?.click()}
                 >
-                  <Sticker className="h-4 w-4" />
+                  <Sticker className="h-4 w-4" aria-hidden />
                   <span className="sr-only">Enviar figurinha WebP</span>
                 </Button>
                 <DropdownMenu>
@@ -1132,20 +1145,22 @@ export function LeadChatThread({
                       'h-8 rounded-lg px-2 text-[10px]',
                     )}
                   >
-                    <Smile className="h-4 w-4" />
+                    <Smile className="h-4 w-4" aria-hidden />
                     <span className="sr-only">Emojis</span>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="max-h-56 w-[min(100vw-2rem,15rem)] overflow-y-auto p-2">
                     <div className="grid grid-cols-8 gap-0.5">
                       {CHAT_QUICK_EMOJIS.map((em) => (
-                        <button
+                        <Button
                           key={em}
                           type="button"
-                          className="flex h-8 w-8 items-center justify-center rounded-md text-base leading-none hover:bg-muted"
+                          variant="ghost"
+                          size="icon"
+                          className="rounded-md text-base font-normal leading-none hover:bg-muted"
                           onClick={() => insertEmojiIntoDraft(em)}
                         >
                           {em}
-                        </button>
+                        </Button>
                       ))}
                     </div>
                   </DropdownMenuContent>
@@ -1203,7 +1218,7 @@ export function LeadChatThread({
                         'h-8 rounded-lg px-2 text-[10px]',
                       )}
                     >
-                      <CreditCard className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                      <CreditCard className="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden />
                       {pagbankLoading ? 'Gerando…' : 'Link pagamento'}
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start">
@@ -1222,7 +1237,7 @@ export function LeadChatThread({
                     className="h-8 rounded-lg px-2 text-[10px]"
                     onClick={() => navigate(`/leads/${leadId}/venda`)}
                   >
-                    <CheckCircle2 className="mr-1.5 h-3.5 w-3.5 text-emerald-600" />
+                    <CheckCircle2 className="mr-1.5 h-3.5 w-3.5 text-emerald-600" aria-hidden />
                     Confirmar venda
                   </Button>
                   <Button
@@ -1233,7 +1248,7 @@ export function LeadChatThread({
                     className="h-8 rounded-lg px-2 text-[10px]"
                     onClick={() => navigate(`/leads/${leadId}/envio`)}
                   >
-                    <Truck className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                    <Truck className="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden />
                     Gerar envio
                   </Button>
                   </>
@@ -1245,7 +1260,7 @@ export function LeadChatThread({
                     className="h-8 rounded-lg text-[10px]"
                     onClick={() => setIsScheduleOpen(true)}
                   >
-                    <CalendarPlus className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                    <CalendarPlus className="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden />
                     Agendar
                   </Button>
                 )}
@@ -1258,7 +1273,7 @@ export function LeadChatThread({
                   disabled={retryingBling}
                   onClick={() => void handleRetryBling()}
                 >
-                  <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5 text-primary', retryingBling && 'animate-spin')} />
+                  <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5 text-primary', retryingBling && 'animate-spin')} aria-hidden />
                   {retryingBling ? 'Enviando…' : 'Reenviar Bling'}
                 </Button>
               </div>
@@ -1307,7 +1322,7 @@ export function LeadChatThread({
               Cancelar
             </Button>
             <Button type="button" onClick={() => void saveEditedMessage()} disabled={editSaving || !editDraft.trim()}>
-              {editSaving ? 'A guardar…' : 'Guardar'}
+              {editSaving ? 'Salvando…' : 'Salvar'}
             </Button>
           </DialogFooter>
         </DialogContent>

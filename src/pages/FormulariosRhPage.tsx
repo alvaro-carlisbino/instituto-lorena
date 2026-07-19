@@ -15,7 +15,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 import { useCrm } from '@/context/CrmContext'
 import {
   type FormResponse,
@@ -115,17 +117,22 @@ export function FormulariosRhPage() {
   return (
     <AppLayout
       title="Formulários de RH"
-      subtitle="Perfil comportamental, personalidade e levantamento NR-1 (riscos psicossociais) — respostas por funcionário."
+      subtitle="Perfil comportamental, personalidade e levantamento NR-1 (riscos psicossociais) · respostas por funcionário."
     >
       <div className={`grid gap-4 ${isManager ? 'xl:grid-cols-2' : ''}`}>
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <ClipboardPen className="size-4 text-primary" /> Meus formulários
+              <ClipboardPen className="size-4 text-primary" aria-hidden /> Meus formulários
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-1.5">
-            {!loaded ? null : !me ? (
+            {!loaded ? (
+              <div className="space-y-1.5" aria-busy="true">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : !me ? (
               <EmptyState
                 icon={ClipboardPen}
                 title="Você ainda não está no RH"
@@ -163,14 +170,16 @@ export function FormulariosRhPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-sm">
-                <Eye className="size-4 text-primary" /> Respostas da equipe ({allResponses.length})
+                <Eye className="size-4 text-primary" aria-hidden /> Respostas da equipe ({allResponses.length})
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1.5">
               {allResponses.length === 0 ? (
-                <p className="py-4 text-center text-sm text-muted-foreground">
-                  Nenhuma resposta ainda — peça para a equipe responder na tela Formulários RH.
-                </p>
+                <EmptyState
+                  icon={Eye}
+                  title="Nenhuma resposta ainda"
+                  description="Peça para a equipe responder na tela Formulários RH."
+                />
               ) : (
                 allResponses.map((r) => (
                   <div key={r.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
@@ -182,7 +191,7 @@ export function FormulariosRhPage() {
                       </span>
                     </div>
                     <Button size="sm" variant="ghost" onClick={() => setViewing(r)}>
-                      <Eye className="size-3.5" /> Ver
+                      <Eye className="size-3.5" aria-hidden /> Ver
                     </Button>
                   </div>
                 ))
@@ -202,34 +211,36 @@ export function FormulariosRhPage() {
           <div className="space-y-4">
             {filling?.questions.map((q, idx) => (
               <div key={q.id} className="space-y-1.5">
-                <p className="text-sm font-medium">
+                <p id={`rh-q-${q.id}`} className="text-sm font-medium">
                   {idx + 1}. {q.text}
                 </p>
                 {q.type === 'likert' ? (
-                  <div className="flex gap-1.5">
+                  <div className="flex gap-1.5" role="group" aria-labelledby={`rh-q-${q.id}`}>
                     {LIKERT.map((n) => (
-                      <button
+                      <Button
                         key={n}
                         type="button"
+                        variant="outline"
+                        aria-pressed={answers[q.id] === n}
                         onClick={() => setAnswers((a) => ({ ...a, [q.id]: n }))}
-                        className={`size-9 rounded-md border text-sm font-medium transition-colors ${
-                          answers[q.id] === n
-                            ? 'border-primary bg-primary text-primary-foreground'
-                            : 'border-border hover:bg-muted/50'
-                        }`}
+                        className={cn(
+                          'size-9 rounded-md text-sm font-medium',
+                          answers[q.id] === n &&
+                            'border-primary bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground',
+                        )}
                       >
                         {n}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                 ) : q.type === 'choice' ? (
-                  <div className="space-y-1">
+                  <div className="space-y-1" role="radiogroup" aria-labelledby={`rh-q-${q.id}`}>
                     {(q.options ?? []).map((opt) => (
                       <label key={opt} className="flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/5">
                         <input
                           type="radio"
                           name={q.id}
-                          className="size-3.5 accent-primary"
+                          className="size-3.5 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                           checked={answers[q.id] === opt}
                           onChange={() => setAnswers((a) => ({ ...a, [q.id]: opt }))}
                         />
@@ -239,6 +250,7 @@ export function FormulariosRhPage() {
                   </div>
                 ) : (
                   <Textarea
+                    aria-labelledby={`rh-q-${q.id}`}
                     value={String(answers[q.id] ?? '')}
                     onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
                     rows={2}
@@ -250,7 +262,7 @@ export function FormulariosRhPage() {
           </div>
           <DialogFooter>
             <Button onClick={() => void submit()} disabled={sending}>
-              <Send className="size-4" /> {sending ? 'Enviando…' : 'Enviar respostas'}
+              <Send className="size-4" aria-hidden /> {sending ? 'Enviando…' : 'Enviar respostas'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -261,7 +273,7 @@ export function FormulariosRhPage() {
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {viewing ? templateById.get(viewing.templateId)?.name ?? 'Resposta' : ''} —{' '}
+              {viewing ? templateById.get(viewing.templateId)?.name ?? 'Resposta' : ''} ·{' '}
               {viewing ? employeeName.get(viewing.employeeId) ?? '?' : ''}
             </DialogTitle>
             <DialogDescription>
@@ -280,7 +292,7 @@ export function FormulariosRhPage() {
                         ? q.type === 'likert'
                           ? `${viewing.answers[q.id]} / 5`
                           : String(viewing.answers[q.id])
-                        : '—'}
+                        : 'Sem resposta'}
                     </p>
                   </div>
                 ))

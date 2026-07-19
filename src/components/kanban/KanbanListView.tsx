@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { temperaturePillClass } from '@/components/kanban/temperatureClass'
@@ -74,7 +75,7 @@ export function KanbanListView({
               className="flex flex-wrap items-center justify-between gap-4 border-b border-border/20 bg-muted/20 px-6 py-4 backdrop-blur-md"
             >
               <div className="flex items-center gap-3">
-                <div className="size-2.5 rounded-full bg-primary" />
+                <div className="size-2.5 rounded-full bg-primary" aria-hidden />
                 <h2 id={`list-stage-${stage.id}`} className="m-0 text-[14px] font-black uppercase tracking-[0.15em] text-foreground/80">
                   {stage.name}
                 </h2>
@@ -104,12 +105,15 @@ export function KanbanListView({
                     const selected = selectedLeadId === lead.id
                     return (
                       <li key={lead.id}>
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
                           onClick={() => onSelectLead(lead.id)}
                           className={cn(
-                            'w-full text-left p-5 transition-all duration-200',
-                            selected ? 'bg-primary/[0.03] ring-inset ring-1 ring-primary/20' : 'hover:bg-muted/30',
+                            'block h-auto w-full whitespace-normal rounded-none p-5 text-left font-normal duration-200',
+                            selected
+                              ? 'bg-primary/[0.03] ring-inset ring-1 ring-primary/20 hover:bg-primary/[0.03]'
+                              : 'hover:bg-muted/30',
                           )}
                         >
                           <div className="flex items-start justify-between gap-3">
@@ -131,7 +135,7 @@ export function KanbanListView({
                           ) : null}
                           <div className="mt-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
                             <span>{getOwnerName(lead.ownerId)}</span>
-                            <div className="size-1 rounded-full bg-border" />
+                            <div className="size-1 rounded-full bg-border" aria-hidden />
                             <span
                               className={cn(
                                 'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider',
@@ -156,7 +160,7 @@ export function KanbanListView({
                               ))}
                             </div>
                           ) : null}
-                        </button>
+                        </Button>
                       </li>
                     )
                   })}
@@ -243,7 +247,7 @@ export function KanbanListView({
                                     {t.name}
                                   </Badge>
                                 ))}
-                                {tagPillsForLead(lead.id).length === 0 ? <span className="text-[10px] font-bold text-muted-foreground/30 uppercase tracking-widest">—</span> : null}
+                                {tagPillsForLead(lead.id).length === 0 ? <span className="text-[10px] font-bold text-muted-foreground/30 uppercase tracking-widest">Sem etiquetas</span> : null}
                               </div>
                             </TableCell>
                           </TableRow>

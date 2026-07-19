@@ -86,7 +86,7 @@ export function ClinicalNotesPage() {
       subtitle="Observações dos médicos e da recepção, para dar continuidade ao atendimento"
       actions={
         canWrite ? (
-          <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-3.5 w-3.5" /> Nova nota</Button>
+          <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-3.5 w-3.5" aria-hidden /> Nova nota</Button>
         ) : null
       }
     >
@@ -99,26 +99,28 @@ export function ClinicalNotesPage() {
                 {/* paciente */}
                 {picked ? (
                   <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-3 py-2">
-                    <span className="flex items-center gap-2 text-sm font-medium"><User className="h-3.5 w-3.5" /> {picked.name}</span>
-                    <Button variant="ghost" size="sm" onClick={() => setPicked(null)}>trocar</Button>
+                    <span className="flex items-center gap-2 text-sm font-medium"><User className="h-3.5 w-3.5" aria-hidden /> {picked.name}</span>
+                    <Button variant="ghost" size="sm" onClick={() => setPicked(null)} aria-label="Trocar paciente">trocar</Button>
                   </div>
                 ) : (
                   <div>
                     <div className="relative">
-                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input className="pl-8" placeholder="Buscar paciente pelo nome…" value={term} onChange={(e) => setTerm(e.target.value)} />
+                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden />
+                      <Input type="search" className="pl-8" placeholder="Buscar paciente pelo nome…" aria-label="Buscar paciente pelo nome" value={term} onChange={(e) => setTerm(e.target.value)} />
                     </div>
                     {results.length > 0 && (
                       <div className="mt-1 max-h-44 overflow-auto rounded-lg border border-border">
                         {results.map((r) => (
-                          <button
+                          <Button
                             key={r.id}
+                            type="button"
+                            variant="ghost"
                             onClick={() => { setPicked({ id: r.id, name: r.name }); setTerm(''); setResults([]) }}
-                            className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/60"
+                            className="h-auto w-full justify-between rounded-none px-3 py-2 text-left font-normal hover:bg-muted/60"
                           >
-                            <span className="font-medium">{r.name}</span>
-                            <span className="text-xs text-muted-foreground">{r.phone}</span>
-                          </button>
+                            <span className="min-w-0 truncate font-medium">{r.name}</span>
+                            <span className="shrink-0 text-xs text-muted-foreground">{r.phone}</span>
+                          </Button>
                         ))}
                       </div>
                     )}
@@ -126,15 +128,15 @@ export function ClinicalNotesPage() {
                 )}
 
                 {/* categoria */}
-                <Select value={category} onValueChange={(v) => setCategory(v ?? 'observacao')}>
-                  <SelectTrigger><SelectValue placeholder="Categoria" /></SelectTrigger>
+                <Select value={category} onValueChange={(v) => setCategory(v ?? 'observacao')} items={NOTE_CATEGORIES}>
+                  <SelectTrigger aria-label="Categoria da nota"><SelectValue placeholder="Categoria" /></SelectTrigger>
                   <SelectContent>
                     {NOTE_CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
 
                 {/* texto */}
-                <Textarea rows={5} placeholder="Escreva a observação clínica…" value={text} onChange={(e) => setText(e.target.value)} />
+                <Textarea rows={5} placeholder="Escreva a observação clínica…" aria-label="Observação clínica" value={text} onChange={(e) => setText(e.target.value)} />
               </div>
               <DialogFooter>
                 <Button onClick={save} disabled={!picked || !text.trim() || saving}>
@@ -160,7 +162,7 @@ export function ClinicalNotesPage() {
             <div key={n.id} className="rounded-xl border border-border bg-card p-4">
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                  <User className="h-3.5 w-3.5 text-muted-foreground" /> {n.patientName}
+                  <User className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> {n.patientName}
                 </span>
                 <div className="flex items-center gap-2">
                   {catBadge(n.category)}

@@ -24,7 +24,9 @@ const ANALISE_TABS = [
   { to: '/loja-analytics', label: 'Loja (site)' },
   { to: '/reengajamento', label: 'Reengajamento' },
 ]
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { fetchTricopillBi, fetchTricopillPaidOrders, formatBRL, kitLabel, type TricopillBi, type TricopillOrderLite } from '@/services/tricopillBi'
@@ -205,53 +207,58 @@ export function TricopilDashboardPage() {
             <MessageSquare className="size-4 mr-2" />
             Conversas
           </Link>
-          <button
+          <Button
             type="button"
+            size="sm"
             onClick={() => setReloadKey((k) => k + 1)}
-            className={cn(buttonVariants({ size: 'sm' }), 'rounded-lg')}
+            className="rounded-lg"
           >
-            <RefreshCw className={cn('size-4 mr-2', loading && 'animate-spin')} />
+            <RefreshCw className={cn('size-4 mr-2', loading && 'animate-spin')} aria-hidden />
             Atualizar
-          </button>
+          </Button>
         </div>
       }
     >
       <SubTabs tabs={ANALISE_TABS} />
       {/* Filtros de período */}
       <div className="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-3">
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">De</span>
-          <input
+        <div className="flex flex-col gap-1 text-xs">
+          <Label htmlFor="bi-inicio" className="text-xs font-normal text-muted-foreground">De</Label>
+          <Input
+            id="bi-inicio"
             type="date"
             value={start}
             max={end}
             onChange={(e) => setStart(e.target.value)}
-            className="rounded-md border border-border/40 bg-background px-2 py-1 text-sm"
+            className="w-auto rounded-md border-border/40 bg-background px-2 py-1 text-sm"
           />
-        </label>
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="text-muted-foreground">Até</span>
-          <input
+        </div>
+        <div className="flex flex-col gap-1 text-xs">
+          <Label htmlFor="bi-fim" className="text-xs font-normal text-muted-foreground">Até</Label>
+          <Input
+            id="bi-fim"
             type="date"
             value={end}
             min={start}
             onChange={(e) => setEnd(e.target.value)}
-            className="rounded-md border border-border/40 bg-background px-2 py-1 text-sm"
+            className="w-auto rounded-md border-border/40 bg-background px-2 py-1 text-sm"
           />
-        </label>
-        <div className="flex gap-1">
+        </div>
+        <div className="flex gap-1" role="group" aria-label="Períodos rápidos">
           {QUICK_RANGES.map((q) => (
-            <button
+            <Button
               key={q.days}
               type="button"
+              variant="outline"
+              size="xs"
               onClick={() => applyQuick(q.days)}
-              className="rounded-md border border-border/40 px-2 py-1 text-xs hover:bg-muted/40"
+              className="rounded-md border-border/40 bg-transparent text-xs hover:bg-muted/40"
             >
               {q.label}
-            </button>
+            </Button>
           ))}
         </div>
-        {loading ? <span className="text-xs text-muted-foreground">Carregando…</span> : null}
+        {loading ? <span role="status" className="text-xs text-muted-foreground">Carregando…</span> : null}
       </div>
 
       {error ? (

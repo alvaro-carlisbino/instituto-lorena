@@ -38,14 +38,24 @@ const markdownComponents: Components = {
   blockquote: ({ children }) => (
     <blockquote className="mb-2 border-l-2 border-primary/40 pl-3 italic text-muted-foreground">{children}</blockquote>
   ),
+  // Tabela vem do markdown renderizado: mantém <table> semântica, mas com as mesmas
+  // classes do ui/table.tsx e container com overflow horizontal (não estoura no mobile).
   table: ({ children }) => (
-    <div className="mb-2 overflow-x-auto">
-      <table className="w-full border-collapse border border-border text-xs">{children}</table>
+    <div className="relative mb-2 w-full overflow-x-auto rounded-lg border border-border last:mb-0">
+      <table className="w-full caption-bottom text-xs">{children}</table>
     </div>
   ),
-  thead: ({ children }) => <thead className="bg-muted/60">{children}</thead>,
-  th: ({ children }) => <th className="border border-border px-2 py-1 text-left font-semibold">{children}</th>,
-  td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
+  thead: ({ children }) => <thead className="[&_tr]:border-b [&_tr]:border-border">{children}</thead>,
+  tbody: ({ children }) => <tbody className="[&_tr:last-child]:border-0">{children}</tbody>,
+  tr: ({ children }) => (
+    <tr className="border-b border-border/60 transition-colors hover:bg-muted/40">{children}</tr>
+  ),
+  th: ({ children }) => (
+    <th className="h-10 px-3 text-left align-middle text-xs font-medium tracking-wide text-muted-foreground uppercase whitespace-nowrap">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => <td className="px-3 py-2.5 align-middle">{children}</td>,
 }
 
 type Props = {

@@ -42,7 +42,7 @@ export function AppLayout({ title, subtitle, actions, children, mainClassName, f
     <SidebarInset className={cn(
       "flex w-full min-w-0 flex-1 min-h-0 flex-col overflow-hidden bg-transparent transition-all duration-300 ease-in-out",
     )}>
-      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_10%,oklch(0.95_0.03_50/.6),transparent_28%),radial-gradient(circle_at_88%_4%,oklch(0.93_0.03_250/.5),transparent_22%)]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_10%,oklch(0.95_0.03_50/.6),transparent_28%),radial-gradient(circle_at_88%_4%,oklch(0.93_0.03_250/.5),transparent_22%)] dark:bg-[radial-gradient(circle_at_12%_10%,oklch(0.27_0.03_50/.4),transparent_28%),radial-gradient(circle_at_88%_4%,oklch(0.25_0.03_250/.35),transparent_22%)]" />
       <header
         role="banner"
         className={cn(

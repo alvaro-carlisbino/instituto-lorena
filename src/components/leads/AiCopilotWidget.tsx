@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Bot, FileText, Sparkles, AlertCircle } from 'lucide-react'
+import { Bot, FileText, Sparkles, AlertCircle, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 import { invokeCrmAiAssistant } from '@/services/crmAiAssistant'
 import type { Lead, Interaction } from '@/mocks/crmMock'
 
@@ -86,7 +87,7 @@ ${historyText || '(Nenhum histórico recente)'}`
       <Card className="border border-primary/20 shadow-none bg-primary/5">
         <CardHeader className="pb-3 pt-4 px-4">
           <CardTitle className="text-xs flex items-center gap-2 font-semibold text-primary uppercase tracking-widest">
-            <Sparkles className="size-3.5" />
+            <Sparkles className="size-3.5" aria-hidden />
             Copilot I.A.
           </CardTitle>
           <CardDescription className="text-xs text-primary/70">
@@ -100,7 +101,7 @@ ${historyText || '(Nenhum histórico recente)'}`
             className="w-full text-xs font-bold gap-2"
             onClick={handleGenerateInsights}
           >
-            <Bot className="size-4" />
+            <Bot className="size-4" aria-hidden />
             Gerar Insights
           </Button>
         </CardContent>
@@ -113,29 +114,36 @@ ${historyText || '(Nenhum histórico recente)'}`
       <CardHeader className="pb-3 pt-4 px-4 bg-primary/5 border-b border-primary/10">
         <div className="flex items-center justify-between">
           <CardTitle className="text-xs flex items-center gap-2 font-semibold text-primary uppercase tracking-widest">
-            <Sparkles className="size-3.5" />
+            <Sparkles className="size-3.5" aria-hidden />
             Copilot I.A.
           </CardTitle>
           {loading ? (
-            <span className="text-[10px] font-medium text-muted-foreground animate-pulse">Pensando...</span>
+            <span role="status" className="text-[10px] font-medium text-muted-foreground animate-pulse">Pensando...</span>
           ) : (
-            <Button variant="ghost" size="icon" className="size-6 text-primary" onClick={handleGenerateInsights} title="Regerar Insights">
-              <RefreshCw className="size-3" />
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-primary"
+              onClick={handleGenerateInsights}
+              title="Regerar insights"
+              aria-label="Regerar insights"
+            >
+              <RefreshCw className="size-3" aria-hidden />
             </Button>
           )}
         </div>
       </CardHeader>
       <CardContent className="px-4 py-4 space-y-4">
         {loading ? (
-           <div className="space-y-2">
-             <div className="h-3 w-full bg-muted/60 animate-pulse rounded-full" />
-             <div className="h-3 w-4/5 bg-muted/60 animate-pulse rounded-full" />
+           <div className="space-y-2" aria-busy="true">
+             <Skeleton className="h-3 w-full rounded-full bg-muted/60" />
+             <Skeleton className="h-3 w-4/5 rounded-full bg-muted/60" />
            </div>
         ) : insights ? (
           <>
             <div className="space-y-1">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                <FileText className="size-3.5 text-muted-foreground" />
+                <FileText className="size-3.5 text-muted-foreground" aria-hidden />
                 Resumo da Conversa
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
@@ -145,19 +153,21 @@ ${historyText || '(Nenhum histórico recente)'}`
 
             <div className="space-y-2">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                <AlertCircle className="size-3.5 text-muted-foreground" />
+                <AlertCircle className="size-3.5 text-muted-foreground" aria-hidden />
                 Respostas Sugeridas
               </div>
               <div className="flex flex-col gap-1.5">
                 {insights.suggestedReplies.map((reply, idx) => (
-                  <button
+                  <Button
                     key={idx}
                     type="button"
+                    variant="ghost"
                     onClick={() => handleCopy(reply)}
-                    className="text-left text-[11px] leading-tight p-2 rounded-md bg-muted/30 hover:bg-primary/10 border border-border/50 hover:border-primary/30 transition-colors text-foreground"
+                    title="Copiar resposta sugerida"
+                    className="h-auto w-full items-start justify-start whitespace-normal rounded-md border border-border/50 bg-muted/30 p-2 text-left text-[11px] font-normal leading-tight text-foreground transition-colors hover:border-primary/30 hover:bg-primary/10 hover:text-foreground"
                   >
                     {reply}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
@@ -167,6 +177,3 @@ ${historyText || '(Nenhum histórico recente)'}`
     </Card>
   )
 }
-
-// Just to avoid missing RefreshCw import above, let's fix it.
-import { RefreshCw } from 'lucide-react'

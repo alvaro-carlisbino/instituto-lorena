@@ -243,7 +243,7 @@ export function CrmAssistantChat({
         <ScrollArea className="h-[min(20rem,min(52dvh,60svh))] rounded-md border border-border bg-muted/20 p-3 sm:h-[min(28rem,55vh)]">
           <ul className="m-0 list-none space-y-3 p-0">
             {loadingThread ? (
-              <li className="px-3 py-2 text-sm text-muted-foreground">A carregar conversa…</li>
+              <li className="px-3 py-2 text-sm text-muted-foreground">Carregando conversa…</li>
             ) : null}
             {messages.map((m, i) => (
               <li

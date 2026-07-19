@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, FileUp, Paperclip, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useCrm } from '@/context/CrmContext'
@@ -85,7 +86,7 @@ export function LeadTaskPanel({ leadId, className }: Props) {
       const url = await getAttachmentSignedUrl(a.storagePath)
       window.open(url, '_blank', 'noopener,noreferrer')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao abrir ficheiro')
+      toast.error(e instanceof Error ? e.message : 'Falha ao abrir arquivo')
     }
   }
 
@@ -107,7 +108,7 @@ export function LeadTaskPanel({ leadId, className }: Props) {
         Sequência e tarefas
       </h2>
       <p className="m-0 text-xs text-muted-foreground">
-        Ordene a sequência; anexe ficheiros por tarefa (sincroniza com a base de dados no modo online).
+        Ordene a sequência; anexe arquivos por tarefa (sincroniza com a banco de dados no modo online).
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -115,6 +116,7 @@ export function LeadTaskPanel({ leadId, className }: Props) {
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
           placeholder="Nova tarefa da sequência"
+          aria-label="Nova tarefa da sequência"
           className="min-w-[12rem] flex-1"
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -137,40 +139,39 @@ export function LeadTaskPanel({ leadId, className }: Props) {
           >
             <div className="flex flex-wrap items-start gap-2">
               <label className="mt-0.5 flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={task.status === 'done'}
-                  onChange={() =>
+                  onCheckedChange={() =>
                     crm.updateLeadTask(task.id, { status: task.status === 'done' ? 'open' : 'done' })
                   }
-                  className="rounded border-border"
                 />
                 <span className={task.status === 'done' ? 'line-through text-muted-foreground' : ''}>{task.title}</span>
               </label>
               <div className="flex items-center gap-0.5">
-                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => move(i, -1)} title="Mover acima" disabled={i === 0}>
-                  <ChevronUp className="h-4 w-4" />
+                <Button type="button" variant="ghost" size="icon" onClick={() => move(i, -1)} title="Mover acima" aria-label="Mover tarefa para cima" disabled={i === 0}>
+                  <ChevronUp className="h-4 w-4" aria-hidden />
                 </Button>
-                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => move(i, 1)} title="Mover abaixo" disabled={i === tasks.length - 1}>
-                  <ChevronDown className="h-4 w-4" />
+                <Button type="button" variant="ghost" size="icon" onClick={() => move(i, 1)} title="Mover abaixo" aria-label="Mover tarefa para baixo" disabled={i === tasks.length - 1}>
+                  <ChevronDown className="h-4 w-4" aria-hidden />
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 text-destructive"
+                  className="text-destructive"
                   onClick={() => setTaskToDelete(task.id)}
                   title="Remover tarefa"
+                  aria-label="Remover tarefa"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4" aria-hidden />
                 </Button>
               </div>
             </div>
             {supa ? (
               <div className="pl-6 text-xs text-muted-foreground">
-                <label className="inline-flex cursor-pointer items-center gap-1.5 text-primary hover:underline">
-                  <FileUp className="h-3.5 w-3.5" />
-                  <span>Anexar ficheiro</span>
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm text-primary hover:underline focus-within:ring-2 focus-within:ring-ring/50">
+                  <FileUp className="h-3.5 w-3.5" aria-hidden />
+                  <span>Anexar arquivo</span>
                   <input
                     type="file"
                     className="sr-only"
@@ -184,7 +185,7 @@ export function LeadTaskPanel({ leadId, className }: Props) {
                           ...p,
                           [task.id]: [...(p[task.id] ?? []), row],
                         }))
-                        toast.success('Ficheiro carregado')
+                        toast.success('Arquivo enviado')
                       } catch (err) {
                         toast.error(err instanceof Error ? err.message : 'Falha no envio')
                       }
@@ -195,7 +196,7 @@ export function LeadTaskPanel({ leadId, className }: Props) {
                   {(attByTask[task.id] ?? []).map((a) => (
                     <li key={a.id} className="list-none pl-0">
                       <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={() => void openFile(a)}>
-                        <Paperclip className="mr-1 inline h-3 w-3" />
+                        <Paperclip className="mr-1 inline h-3 w-3" aria-hidden />
                         {a.fileName || a.storagePath}
                       </Button>
                       <Button
@@ -233,7 +234,7 @@ export function LeadTaskPanel({ leadId, className }: Props) {
         open={attachmentToDelete !== null}
         onOpenChange={(open) => { if (!open) setAttachmentToDelete(null) }}
         title="Remover anexo?"
-        description="O ficheiro anexado será apagado de forma permanente. Esta ação não pode ser desfeita."
+        description="O arquivo anexado será apagado de forma permanente. Esta ação não pode ser desfeita."
         confirmLabel="Remover"
         cancelLabel="Cancelar"
         onConfirm={() => {

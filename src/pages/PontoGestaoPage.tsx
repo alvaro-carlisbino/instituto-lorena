@@ -17,6 +17,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -367,9 +368,9 @@ export function PontoGestaoPage() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label>Login do painel (bate o próprio ponto)</Label>
+                <Label htmlFor="emp-user">Login do painel (bate o próprio ponto)</Label>
                 <Select value={draft.userId || 'nenhum'} onValueChange={(v) => setDraft((d) => ({ ...d, userId: !v || v === 'nenhum' ? '' : v }))}>
-                  <SelectTrigger>
+                  <SelectTrigger id="emp-user">
                     <SelectValue placeholder="Vincular usuário" />
                   </SelectTrigger>
                   <SelectContent>
@@ -386,8 +387,11 @@ export function PontoGestaoPage() {
                 <Label>Quadro de horários (ex.: 07:00-11:00, 11:30-15:30)</Label>
                 {['1', '2', '3', '4', '5', '6', '0'].map((d) => (
                   <div key={d} className="flex items-center gap-2">
-                    <span className="w-16 shrink-0 text-xs text-muted-foreground">{WEEKDAY_LABELS[Number(d)]}</span>
+                    <Label htmlFor={`sched-${d}`} className="w-16 shrink-0 text-xs font-normal text-muted-foreground">
+                      {WEEKDAY_LABELS[Number(d)]}
+                    </Label>
                     <Input
+                      id={`sched-${d}`}
                       value={draft.scheduleText[d] ?? ''}
                       onChange={(e) => setDraft((dr) => ({ ...dr, scheduleText: { ...dr.scheduleText, [d]: e.target.value } }))}
                       placeholder="folga"
@@ -409,18 +413,19 @@ export function PontoGestaoPage() {
               {employees.length > 0 ? (
                 <div className="space-y-1.5 pt-1">
                   {employees.map((e) => (
-                    <button
+                    <Button
                       key={e.id}
                       type="button"
+                      variant="ghost"
                       onClick={() => editEmployee(e)}
-                      className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted/40"
+                      className="h-auto w-full items-center justify-between rounded-md border border-border px-3 py-2 text-left text-sm font-normal whitespace-normal hover:bg-muted/40"
                     >
                       <span>
                         <span className="font-medium">{e.name}</span>
                         {e.roleTitle ? <span className="text-xs text-muted-foreground"> · {e.roleTitle}</span> : null}
                       </span>
                       {!e.userId ? <Badge variant="secondary" className="bg-amber-500/15 text-amber-600">sem login</Badge> : null}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               ) : null}
@@ -489,15 +494,23 @@ export function PontoGestaoPage() {
                       <Input id="cfg-radius" value={settings.radiusM} onChange={(e) => setSettings((s) => (s ? { ...s, radiusM: Number(e.target.value) || 150 } : s))} inputMode="numeric" />
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-3 text-sm">
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" className="size-4 accent-primary" checked={settings.enforceFence} onChange={(e) => setSettings((s) => (s ? { ...s, enforceFence: e.target.checked } : s))} />
-                      Bloquear batida fora da cerca
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" className="size-4 accent-primary" checked={settings.requireSelfie} onChange={(e) => setSettings((s) => (s ? { ...s, requireSelfie: e.target.checked } : s))} />
-                      Exigir selfie
-                    </label>
+                  <div className="flex flex-wrap gap-3">
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="cfg-fence"
+                        checked={settings.enforceFence}
+                        onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, enforceFence: checked } : s))}
+                      />
+                      <Label htmlFor="cfg-fence" className="font-normal">Bloquear batida fora da cerca</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="cfg-selfie"
+                        checked={settings.requireSelfie}
+                        onCheckedChange={(checked) => setSettings((s) => (s ? { ...s, requireSelfie: checked } : s))}
+                      />
+                      <Label htmlFor="cfg-selfie" className="font-normal">Exigir selfie</Label>
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" onClick={useMyLocation}>
@@ -518,7 +531,7 @@ export function PontoGestaoPage() {
             </CardTitle>
             <div className="flex flex-wrap items-center gap-1.5">
               <Select value={selEmployeeId || undefined} onValueChange={(v) => v && setSelEmployeeId(v)}>
-                <SelectTrigger className="h-8 w-[190px]">
+                <SelectTrigger className="h-8 w-[190px]" aria-label="Funcionário">
                   <SelectValue placeholder="Funcionário" />
                 </SelectTrigger>
                 <SelectContent>
@@ -529,8 +542,8 @@ export function PontoGestaoPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-8 w-[140px]" />
-              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-8 w-[140px]" />
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Data inicial" className="h-8 w-[140px]" />
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Data final" className="h-8 w-[140px]" />
               <Button size="sm" variant="outline" onClick={exportEspelho} disabled={!timesheet}>
                 <FileDown className="size-3.5" /> CSV
               </Button>
@@ -566,7 +579,18 @@ export function PontoGestaoPage() {
                     </TableHeader>
                     <TableBody>
                       {timesheet.rows.map((r) => (
-                        <TableRow key={r.day} className="cursor-pointer" onClick={() => openDay(r.day)}>
+                        <TableRow
+                          key={r.day}
+                          tabIndex={0}
+                          className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          onClick={() => openDay(r.day)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              openDay(r.day)
+                            }
+                          }}
+                        >
                           <TableCell className="whitespace-nowrap text-xs">
                             {new Date(`${r.day}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}{' '}
                             <span className="text-muted-foreground">{r.weekdayLabel.slice(0, 3)}</span>
@@ -596,7 +620,7 @@ export function PontoGestaoPage() {
           <DialogHeader>
             <DialogTitle>
               {dayOpen ? new Date(`${dayOpen}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' }) : ''}{' '}
-              — {selEmployee?.name}
+              · {selEmployee?.name}
             </DialogTitle>
             <DialogDescription>Batidas do dia, ajuste manual e marcação (folga/feriado/atestado/abono).</DialogDescription>
           </DialogHeader>
@@ -617,12 +641,22 @@ export function PontoGestaoPage() {
                     </div>
                     <div className="flex gap-1">
                       {e.selfiePath ? (
-                        <Button size="sm" variant="ghost" className="px-2" onClick={() => void viewSelfie(e.selfiePath!)}>
-                          <Camera className="size-3.5" />
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          onClick={() => void viewSelfie(e.selfiePath!)}
+                          aria-label="Ver selfie da batida"
+                        >
+                          <Camera className="size-3.5" aria-hidden />
                         </Button>
                       ) : null}
-                      <Button size="sm" variant="ghost" className="px-2" onClick={() => void deletePunch(e.id).then(loadTimesheet)}>
-                        <Trash2 className="size-3.5" />
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={() => void deletePunch(e.id).then(loadTimesheet)}
+                        aria-label={`Excluir batida das ${new Date(e.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`}
+                      >
+                        <Trash2 className="size-3.5" aria-hidden />
                       </Button>
                     </div>
                   </div>
@@ -640,9 +674,9 @@ export function PontoGestaoPage() {
             </div>
             <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
               <div className="space-y-1.5">
-                <Label>Marcar dia</Label>
+                <Label htmlFor="mark-kind">Marcar dia</Label>
                 <Select value={markKind} onValueChange={(v) => setMarkKind((v ?? 'folga') as DayMarkKind)}>
-                  <SelectTrigger className="h-9 w-[140px]">
+                  <SelectTrigger id="mark-kind" className="h-9 w-[140px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

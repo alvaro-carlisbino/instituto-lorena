@@ -1,8 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import { Repeat } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { StatCard } from '@/components/page/StatCard'
 import { fetchTricopillSubscriptions, subscriptionAction, subscriptionHistory, type AsaasCharge, type SubscriptionAction, type TricopillSubscription } from '@/services/tricopillSubscriptions'
 
@@ -39,6 +44,8 @@ export function TricopilSubscriptionsPage() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [history, setHistory] = useState<Record<string, AsaasCharge[]>>({})
   const [historyLoading, setHistoryLoading] = useState<string | null>(null)
+  // Assinatura aguardando confirmação de cancelamento (via ConfirmDialog).
+  const [cancelTarget, setCancelTarget] = useState<TricopillSubscription | null>(null)
 
   async function toggleHistory(s: TricopillSubscription) {
     if (expanded === s.id) { setExpanded(null); return }
@@ -51,8 +58,8 @@ export function TricopilSubscriptionsPage() {
     }
   }
 
+  // O cancelamento passa antes pelo ConfirmDialog (setCancelTarget); as demais ações são diretas.
   async function doAction(s: TricopillSubscription, action: SubscriptionAction) {
-    if (action === 'cancel' && !window.confirm(`Cancelar a assinatura de ${s.customerName || 'cliente'}? Isso interrompe as cobranças no Asaas.`)) return
     const key = `${s.id}:${action}`
     setBusy(key)
     try {
@@ -105,60 +112,70 @@ export function TricopilSubscriptionsPage() {
 
       {error ? <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive">{error}</p> : null}
 
+      {loading && rows.length === 0 ? (
+        <div className="space-y-2" aria-busy="true">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
+      ) : null}
+
       {!loading && !error && rows.length === 0 ? (
-        <p className="rounded-md border border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">Nenhuma assinatura ainda.</p>
+        <div className="rounded-md border border-border bg-muted/20">
+          <EmptyState icon={Repeat} title="Nenhuma assinatura ainda" description="Quando um cliente entrar no clube, a assinatura aparece aqui." />
+        </div>
       ) : null}
 
       {rows.length > 0 ? (
-        <div className="overflow-x-auto rounded-md border border-border">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="px-3 py-2 font-medium">Cliente</th>
-                <th className="px-3 py-2 font-medium">Plano</th>
-                <th className="px-3 py-2 font-medium">Valor/mês</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Ciclos pagos</th>
-                <th className="px-3 py-2 font-medium">Último envio</th>
-                <th className="px-3 py-2 font-medium">Entrega</th>
-                <th className="px-3 py-2 font-medium">Asaas</th>
-                <th className="px-3 py-2 font-medium">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="rounded-md border border-border">
+          <Table className="text-sm">
+            <TableHeader>
+              <TableRow className="bg-muted/30 hover:bg-muted/30">
+                <TableHead>Cliente</TableHead>
+                <TableHead>Plano</TableHead>
+                <TableHead>Valor/mês</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Ciclos pagos</TableHead>
+                <TableHead>Último envio</TableHead>
+                <TableHead>Entrega</TableHead>
+                <TableHead>Asaas</TableHead>
+                <TableHead>Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {filtered.map((s) => {
                 const ent = s.entrega ?? {}
                 const cidade = [String(ent.cidade ?? ''), String(ent.uf ?? '')].filter(Boolean).join('/')
                 const charges = history[s.id]
                 return (
                   <Fragment key={s.id}>
-                  <tr className="border-b border-border/50 hover:bg-muted/20">
-                    <td className="px-3 py-2">
+                  <TableRow className="hover:bg-muted/20">
+                    <TableCell>
                       <p className="font-medium text-foreground">{s.customerName || '—'}</p>
                       <p className="text-xs text-muted-foreground">{s.phone || ''}{s.email ? ` · ${s.email}` : ''}</p>
-                    </td>
-                    <td className="px-3 py-2">
+                    </TableCell>
+                    <TableCell>
                       <p>{CADENCE_LABEL[s.cadence] ?? s.cadence}</p>
                       <p className="text-xs text-muted-foreground">{s.unitsPerShipment}× frasco{s.unitsPerShipment > 1 ? 's' : ''} · {brl(s.unitPriceCents)}/un</p>
-                    </td>
-                    <td className="px-3 py-2 font-medium">{brl(s.monthlyValueCents)}</td>
-                    <td className="px-3 py-2">
+                    </TableCell>
+                    <TableCell className="font-medium">{brl(s.monthlyValueCents)}</TableCell>
+                    <TableCell>
                       <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[s.status] ?? 'bg-muted text-muted-foreground'}`}>{s.status}</span>
-                    </td>
-                    <td className="px-3 py-2">
+                    </TableCell>
+                    <TableCell>
                       {s.paidCycles}{s.minCycles ? <span className="text-xs text-muted-foreground"> / mín. {s.minCycles}</span> : null}
-                    </td>
-                    <td className="px-3 py-2">
+                    </TableCell>
+                    <TableCell>
                       <p>ciclo {s.lastShippedCycle || '—'}</p>
                       {s.status === 'active' ? <p className="text-xs text-muted-foreground">próx.: ciclo {nextShipCycle(s)}</p> : null}
-                    </td>
-                    <td className="px-3 py-2 text-xs">{cidade || '—'}</td>
-                    <td className="px-3 py-2">
+                    </TableCell>
+                    <TableCell className="text-xs">{cidade || '—'}</TableCell>
+                    <TableCell>
                       {s.asaasSubscriptionId ? (
-                        <a className="text-xs text-sky-700 underline" href={`https://www.asaas.com/subscriptions/show/${s.asaasSubscriptionId}`} target="_blank" rel="noreferrer">abrir</a>
+                        <a className="text-xs text-sky-700 underline" href={`https://www.asaas.com/subscriptions/show/${s.asaasSubscriptionId}`} target="_blank" rel="noreferrer" aria-label={`Abrir assinatura de ${s.customerName || 'cliente'} no Asaas (nova aba)`}>abrir</a>
                       ) : '—'}
-                    </td>
-                    <td className="px-3 py-2">
+                    </TableCell>
+                    <TableCell>
                       <div className="flex flex-wrap gap-1">
                         <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => void toggleHistory(s)}>{expanded === s.id ? 'Fechar' : 'Cobranças'}</Button>
                         <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={!!busy && busy.startsWith(s.id)} onClick={() => void doAction(s, 'resend_tracking')}>Rastreio</Button>
@@ -168,14 +185,14 @@ export function TricopilSubscriptionsPage() {
                           <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={!!busy && busy.startsWith(s.id)} onClick={() => void doAction(s, 'resume')}>Reativar</Button>
                         ) : null}
                         {s.status !== 'canceled' && s.status !== 'cancelled' ? (
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive" disabled={!!busy && busy.startsWith(s.id)} onClick={() => void doAction(s, 'cancel')}>Cancelar</Button>
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive hover:text-destructive" disabled={!!busy && busy.startsWith(s.id)} onClick={() => setCancelTarget(s)}>Cancelar</Button>
                         ) : null}
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                   {expanded === s.id ? (
-                    <tr className="border-b border-border/50 bg-muted/10">
-                      <td colSpan={9} className="px-3 py-3">
+                    <TableRow className="bg-muted/10 hover:bg-muted/10">
+                      <TableCell colSpan={9} className="px-3 py-3">
                         {historyLoading === s.id ? (
                           <p className="text-xs text-muted-foreground">Carregando cobranças…</p>
                         ) : !charges || charges.length === 0 ? (
@@ -194,16 +211,32 @@ export function TricopilSubscriptionsPage() {
                             ))}
                           </div>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ) : null}
                   </Fragment>
                 )
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={cancelTarget != null}
+        onOpenChange={(open) => { if (!open) setCancelTarget(null) }}
+        title="Cancelar assinatura"
+        description={`Cancelar a assinatura de ${cancelTarget?.customerName || 'cliente'}? Isso interrompe as cobranças no Asaas.`}
+        confirmLabel="Cancelar assinatura"
+        cancelLabel="Voltar"
+        variant="destructive"
+        onConfirm={() => {
+          if (cancelTarget) {
+            void doAction(cancelTarget, 'cancel')
+            setCancelTarget(null)
+          }
+        }}
+      />
     </AppLayout>
   )
 }

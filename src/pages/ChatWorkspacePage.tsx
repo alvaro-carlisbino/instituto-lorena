@@ -8,6 +8,7 @@ import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
@@ -321,16 +322,18 @@ export function ChatWorkspacePage({
             </div>
             <div className="mt-3 space-y-2">
               <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground/70" />
-                <Input 
-                  value={search} 
-                  onChange={(e) => setSearch(e.target.value)} 
-                  className="h-9 rounded-lg border-border/60 bg-background/50 pl-8 text-xs focus:bg-background" 
-                  placeholder="Buscar contato..." 
+                <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground/70" aria-hidden />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-9 rounded-lg border-border/60 bg-background/50 pl-8 text-xs focus:bg-background"
+                  placeholder="Buscar contato..."
+                  aria-label="Buscar contato"
+                  type="search"
                 />
               </div>
               <Select value={ownerFilter} onValueChange={(value) => setOwnerFilter(value ?? 'all')}>
-                <LabeledSelectTrigger className="h-8 rounded-lg border-border/30 bg-background/30 text-[11px]" size="sm">
+                <LabeledSelectTrigger aria-label="Filtrar por responsável" className="h-8 rounded-lg border-border/30 bg-background/30 text-[11px]" size="sm">
                   {ownerSelectLabel}
                 </LabeledSelectTrigger>
                 <SelectContent>
@@ -346,7 +349,7 @@ export function ChatWorkspacePage({
                 value={sortMode}
                 onValueChange={(value) => setSortMode((value === 'long_wait' ? 'long_wait' : 'recent'))}
               >
-                <LabeledSelectTrigger className="h-8 rounded-lg border-border/30 bg-background/30 text-[11px]" size="sm">
+                <LabeledSelectTrigger aria-label="Ordenar conversas" className="h-8 rounded-lg border-border/30 bg-background/30 text-[11px]" size="sm">
                   {sortMode === 'long_wait' ? 'Longa espera' : 'Mais recentes'}
                 </LabeledSelectTrigger>
                 <SelectContent>
@@ -363,7 +366,7 @@ export function ChatWorkspacePage({
                 title="Mostrar só conversas com mensagem nova não lida"
               >
                 <span className="inline-flex items-center gap-1.5">
-                  <Mail className="size-3.5" />
+                  <Mail className="size-3.5" aria-hidden />
                   {unreadOnly ? 'Só não lidas' : 'Não lidas'}
                 </span>
                 {scopedUnreadCount > 0 ? (
@@ -381,9 +384,11 @@ export function ChatWorkspacePage({
           </CardHeader>
           <CardContent className="min-h-0 flex-1 overflow-y-auto p-0 scrollbar-thin scrollbar-thumb-border/40">
             {conversations.length === 0 ? (
-              <div className="flex h-full flex-col items-center justify-center p-6 text-center text-muted-foreground/60">
-                <p className="text-xs">Nenhuma conversa encontrada</p>
-              </div>
+              <EmptyState
+                icon={Search}
+                title="Nenhuma conversa encontrada"
+                className="h-full justify-center p-6 py-6"
+              />
             ) : (
               <div className="divide-y divide-border/5">
                 {conversations.map((lead) => {
@@ -395,11 +400,13 @@ export function ChatWorkspacePage({
                   const unread = isUnread(lead.id)
                   const isActive = crm.selectedLeadId === lead.id
                   return (
-                  <button
+                  <Button
                     key={lead.id}
+                    type="button"
+                    variant="ghost"
                     onClick={() => { markSeen(lead.id); crm.setSelectedLeadId(lead.id) }}
                     className={cn(
-                      'flex w-full gap-3 p-3 text-left transition-all duration-200 hover:bg-muted/30 sm:px-4',
+                      'flex h-auto w-full items-start justify-start gap-3 whitespace-normal rounded-none border-0 p-3 text-left font-normal transition-all duration-200 hover:bg-muted/30 hover:text-foreground sm:px-4',
                       isActive
                         ? 'bg-primary/5 shadow-[inset_3px_0_0_0_hsl(var(--primary))]'
                         : unread ? 'bg-primary/[0.03]' : 'transparent',
@@ -468,7 +475,7 @@ export function ChatWorkspacePage({
                       ) : null}
                     </div>
                     </div>
-                  </button>
+                  </Button>
                   )
                 })}
               </div>
@@ -494,7 +501,7 @@ export function ChatWorkspacePage({
                       title="Voltar para a lista de conversas"
                       aria-label="Voltar para a lista de conversas"
                     >
-                      <ChevronLeft className="size-5" />
+                      <ChevronLeft className="size-5" aria-hidden />
                     </Button>
                     <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -545,8 +552,9 @@ export function ChatWorkspacePage({
                         toast.success('Conversa marcada como não lida')
                       }}
                       title="Marcar esta conversa como não lida (volta a aparecer em destaque na lista)"
+                      aria-label="Marcar conversa como não lida"
                     >
-                      <Mail className="size-3.5" />
+                      <Mail className="size-3.5" aria-hidden />
                       <span className="hidden sm:inline">Não lida</span>
                     </Button>
                     <Button
@@ -555,7 +563,7 @@ export function ChatWorkspacePage({
                       className="lg:hidden rounded-xl gap-1.5 text-xs"
                       onClick={() => setLeadSheetOpen(true)}
                     >
-                      <UserRound className="size-3.5" />
+                      <UserRound className="size-3.5" aria-hidden />
                       Ficha
                     </Button>
                     <div className="hidden lg:block">

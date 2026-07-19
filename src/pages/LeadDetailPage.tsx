@@ -25,6 +25,7 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -255,7 +256,7 @@ export function LeadDetailPage() {
       <LeadAnalyticsActions leadId={lead.id} canManage={crm.currentPermission.canRouteLeads} />
       {crm.currentPermission.canRouteLeads ? (
         <Button variant="destructive" size="sm" onClick={() => setDeleteDialogOpen(true)}>
-          <Trash2 className="mr-1.5 size-4" />
+          <Trash2 className="mr-1.5 size-4" aria-hidden />
           Deletar
         </Button>
       ) : null}
@@ -313,7 +314,7 @@ export function LeadDetailPage() {
           role="alert"
           className="flex items-start gap-3 rounded-md border-2 border-destructive bg-destructive/10 px-4 py-3 text-destructive"
         >
-          <AlertTriangle className="mt-0.5 size-6 shrink-0" />
+          <AlertTriangle className="mt-0.5 size-6 shrink-0" aria-hidden />
           <div className="min-w-0">
             <p className="text-base font-extrabold uppercase tracking-wide">Registre o endereço de entrega</p>
             <p className="mt-0.5 text-sm font-medium">
@@ -346,15 +347,16 @@ export function LeadDetailPage() {
               </h2>
               <div className="grid gap-3 rounded-md border border-border bg-muted/20 p-3 sm:grid-cols-2">
                 <div className="grid gap-1.5">
-                  <Label className="text-xs">Nome</Label>
+                  <Label htmlFor="lead-profile-name" className="text-xs">Nome</Label>
                   <Input
+                    id="lead-profile-name"
                     value={lead.patientName}
                     onChange={(e) => crm.persistLeadPatch({ ...lead, patientName: e.target.value })}
                   />
                 </div>
                 <div className="grid gap-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="text-xs">Telefone principal</Label>
+                    <Label htmlFor="lead-profile-phone" className="text-xs">Telefone principal</Label>
                     {getLeadPhoneDisplay(lead).isReal ? (
                       <a
                         href={`https://wa.me/${String(lead.phone).replace(/\D/g, '')}`}
@@ -369,13 +371,15 @@ export function LeadDetailPage() {
                     ) : null}
                   </div>
                   <Input
+                    id="lead-profile-phone"
                     value={lead.phone}
                     onChange={(e) => crm.persistLeadPatch({ ...lead, phone: e.target.value })}
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label className="text-xs">E-mail</Label>
+                  <Label htmlFor="lead-profile-email" className="text-xs">E-mail</Label>
                   <Input
+                    id="lead-profile-email"
                     value={String(lead.customFields?.email ?? '')}
                     onChange={(e) =>
                       crm.persistLeadPatch({
@@ -386,8 +390,9 @@ export function LeadDetailPage() {
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label className="text-xs">Aniversário</Label>
+                  <Label htmlFor="lead-profile-birthday" className="text-xs">Aniversário</Label>
                   <Input
+                    id="lead-profile-birthday"
                     type="date"
                     value={String(lead.customFields?.birthday ?? '').slice(0, 10)}
                     onChange={(e) =>
@@ -399,8 +404,9 @@ export function LeadDetailPage() {
                   />
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
-                  <Label className="text-xs">Notas</Label>
+                  <Label htmlFor="lead-profile-notes" className="text-xs">Notas</Label>
                   <Textarea
+                    id="lead-profile-notes"
                     rows={2}
                     value={String(lead.customFields?.notes ?? '')}
                     onChange={(e) =>
@@ -412,8 +418,9 @@ export function LeadDetailPage() {
                   />
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
-                  <Label className="text-xs">Observações</Label>
+                  <Label htmlFor="lead-profile-observations" className="text-xs">Observações</Label>
                   <Textarea
+                    id="lead-profile-observations"
                     rows={2}
                     value={String(lead.customFields?.observations ?? '')}
                     onChange={(e) =>
@@ -537,14 +544,14 @@ export function LeadDetailPage() {
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div className="grid gap-1.5">
-                    <span className="text-xs text-muted-foreground">Funil de destino</span>
+                    <Label className="text-xs font-normal text-muted-foreground">Funil de destino</Label>
                     <Select
                       value={destPipelineId}
                       onValueChange={(v) => {
                         if (v) handleDestPipelineChange(v)
                       }}
                     >
-                      <LabeledSelectTrigger className="h-9 text-left text-xs" size="default">
+                      <LabeledSelectTrigger aria-label="Funil de destino" className="h-9 text-left text-xs" size="default">
                         {destPipelineLabel}
                       </LabeledSelectTrigger>
                       <SelectContent>
@@ -557,7 +564,7 @@ export function LeadDetailPage() {
                     </Select>
                   </div>
                   <div className="grid gap-1.5">
-                    <span className="text-xs text-muted-foreground">Etapa inicial</span>
+                    <Label className="text-xs font-normal text-muted-foreground">Etapa inicial</Label>
                     <Select
                       value={destStageId}
                       onValueChange={(v) => {
@@ -565,7 +572,7 @@ export function LeadDetailPage() {
                       }}
                       disabled={!destPipeline || destPipeline.stages.length === 0}
                     >
-                      <LabeledSelectTrigger className="h-9 text-left text-xs" size="default">
+                      <LabeledSelectTrigger aria-label="Etapa inicial" className="h-9 text-left text-xs" size="default">
                         {destStageLabel}
                       </LabeledSelectTrigger>
                       <SelectContent>
@@ -614,11 +621,9 @@ export function LeadDetailPage() {
                         className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-border/70 px-2 py-1 text-xs"
                         style={{ borderColor: on ? def.color : undefined, color: on ? def.color : undefined }}
                       >
-                        <input
-                          type="checkbox"
-                          className="rounded"
+                        <Checkbox
                           checked={on}
-                          onChange={() => {
+                          onCheckedChange={() => {
                             const set = new Set(lead.tagIds ?? [])
                             if (set.has(def.id)) {
                               set.delete(def.id)
@@ -705,7 +710,7 @@ export function LeadDetailPage() {
                 {waLineEvents.map((e) => {
                   const from = e.fromInstanceId
                     ? (waInstanceLabels[e.fromInstanceId] ?? e.fromInstanceId)
-                    : '—'
+                    : 'sem registro'
                   const to = waInstanceLabels[e.toInstanceId] ?? e.toInstanceId
                   const t = new Date(e.createdAt).toLocaleString('pt-PT', {
                     dateStyle: 'short',

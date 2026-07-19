@@ -4,6 +4,13 @@ import { ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import type { WorkflowField } from '@/mocks/crmMock'
 
@@ -203,25 +210,30 @@ export function ChannelFieldMappingEditor({ channelId, fieldMapping, workflowFie
             >
               <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] min-[480px]:items-end">
                 <div className="grid min-w-0 gap-1.5">
-                  <Label className="text-xs font-medium">Campo no cadastro</Label>
-                  <select
-                    className="h-10 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring/30"
+                  <Label htmlFor={`${channelId}-field-${index}`} className="text-xs font-medium">Campo no cadastro</Label>
+                  <Select
                     value={row.fieldKey}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      setRows((prev) => prev.map((r, i) => (i === index ? { ...r, fieldKey: v } : r)))
+                    onValueChange={(value) => {
+                      if (!value) return
+                      setRows((prev) => prev.map((r, i) => (i === index ? { ...r, fieldKey: value } : r)))
                     }}
                   >
-                    {fieldOptions.map((o) => (
-                      <option key={o.key} value={o.key}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id={`${channelId}-field-${index}`} className="h-10 w-full min-w-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {fieldOptions.map((o) => (
+                        <SelectItem key={o.key} value={o.key}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="grid min-w-0 gap-1.5">
-                  <Label className="text-xs font-medium">Nome do campo no aviso</Label>
+                  <Label htmlFor={`${channelId}-path-${index}`} className="text-xs font-medium">Nome do campo no aviso</Label>
                   <Input
+                    id={`${channelId}-path-${index}`}
                     value={row.path}
                     onChange={(e) => setRows((prev) => prev.map((r, i) => (i === index ? { ...r, path: e.target.value } : r)))}
                     placeholder={placeholder}

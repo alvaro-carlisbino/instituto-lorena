@@ -455,7 +455,7 @@ export function PaymentLinksPage() {
                     <Copy className="mr-1.5 size-3.5" /> Copiar {lastLink.isPix ? 'código Pix' : 'link'}
                   </Button>
                   {!lastLink.isPix ? (
-                    <Button size="sm" variant="outline" render={<a href={lastLink.url} target="_blank" rel="noreferrer" />}>
+                    <Button size="sm" variant="outline" nativeButton={false} render={<a href={lastLink.url} target="_blank" rel="noreferrer" />}>
                       <ExternalLink className="mr-1.5 size-3.5" /> Abrir
                     </Button>
                   ) : null}

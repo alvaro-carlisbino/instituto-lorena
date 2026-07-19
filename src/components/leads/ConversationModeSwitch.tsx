@@ -1,5 +1,6 @@
 import { Loader2, Scale, Sparkles, User } from 'lucide-react'
 
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { ConversationOwnerMode } from '@/services/conversationControl'
 
@@ -20,13 +21,13 @@ const MODES: ModeOption[] = [
   {
     id: 'ai',
     label: 'IA',
-    hint: 'A assistente pode responder sozinha, consoante limites e horários nas Configurações.',
+    hint: 'A assistente pode responder sozinha, conforme limites e horários nas Configurações.',
     icon: Sparkles,
   },
   {
     id: 'auto',
     label: 'Misto',
-    hint: 'Regras (horário, limites) decidem quando a IA responde ou quando fica a aguardar a equipe.',
+    hint: 'Regras (horário, limites) decidem quando a IA responde ou quando fica aguardando a equipe.',
     icon: Scale,
   },
 ]
@@ -61,7 +62,7 @@ export function ConversationModeSwitch({
             aria-busy
           >
             <Loader2 className="size-5 animate-spin text-primary" aria-hidden />
-            <span className="sr-only">A guardar…</span>
+            <span className="sr-only">Salvando…</span>
           </div>
         ) : null}
         <div
@@ -73,19 +74,18 @@ export function ConversationModeSwitch({
             const active = value === m.id
             const Icon = m.icon
             return (
-              <button
+              <Button
                 key={m.id}
                 type="button"
+                variant="ghost"
                 title={m.hint}
                 disabled={loading}
                 onClick={() => onChange(m.id)}
                 className={cn(
-                  'flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl border-2 px-3 py-2.5 text-sm font-semibold transition-all sm:min-h-0 sm:py-3',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2',
-                  'disabled:cursor-not-allowed',
+                  'h-auto min-h-12 flex-1 justify-center gap-2 rounded-2xl border-2 px-3 py-2.5 text-sm font-semibold transition-all sm:min-h-0 sm:py-3',
                   active
-                    ? 'border-primary bg-primary text-primary-foreground shadow-md ring-1 ring-primary/25 min-[360px]:shadow-sm'
-                    : 'border-border/60 bg-card text-foreground shadow-sm hover:border-primary/45 hover:bg-muted/50',
+                    ? 'border-primary bg-primary text-primary-foreground shadow-md ring-1 ring-primary/25 hover:bg-primary hover:text-primary-foreground min-[360px]:shadow-sm'
+                    : 'border-border/60 bg-card text-foreground shadow-sm hover:border-primary/45 hover:bg-muted/50 hover:text-foreground',
                 )}
                 role="radio"
                 aria-checked={active}
@@ -96,7 +96,7 @@ export function ConversationModeSwitch({
                   aria-hidden
                 />
                 {m.label}
-              </button>
+              </Button>
             )
           })}
         </div>

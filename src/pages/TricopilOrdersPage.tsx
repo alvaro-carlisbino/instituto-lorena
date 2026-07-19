@@ -5,9 +5,12 @@ import { toast } from 'sonner'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useCrm } from '@/context/CrmContext'
 import {
@@ -309,7 +312,7 @@ export function TricopilOrdersPage() {
 
   // Relança no Bling uma venda paga que não gerou pedido (lead de outro canal, bug, etc.).
   const doRelaunchBling = async (p: UnifiedPayment) => {
-    if (!p.leadId) { toast.error('Pedido sem lead vinculado — abra o cadastro e vincule antes.'); return }
+    if (!p.leadId) { toast.error('Pedido sem lead vinculado. Abra o cadastro e vincule antes.'); return }
     setRelaunching(p.id)
     try {
       const r = await retryBlingOrder(p.leadId, p.kit ?? undefined)
@@ -483,12 +486,13 @@ export function TricopilOrdersPage() {
           <Link to="/frente-loja" className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-xl')}>
             <Plus className="size-3.5" /> Novo pedido
           </Link>
-          <label className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'cursor-pointer rounded-xl')} title="Casa o extrato do banco/gateway com os pagamentos pagos (por valor e data)">
-            <Upload className="size-3.5" /> Importar extrato
+          <label className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'cursor-pointer rounded-xl focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 focus-within:ring-offset-2 focus-within:ring-offset-background')} title="Casa o extrato do banco/gateway com os pagamentos pagos (por valor e data)">
+            <Upload className="size-3.5" aria-hidden /> Importar extrato
             <input
               type="file"
               accept=".csv,text/csv"
-              className="hidden"
+              aria-label="Importar extrato (CSV do banco ou gateway)"
+              className="sr-only"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void onImportStatement(f); e.currentTarget.value = '' }}
             />
           </label>
@@ -549,6 +553,7 @@ export function TricopilOrdersPage() {
             <InputGroupInput
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              aria-label="Buscar pedidos por cliente, telefone ou CPF"
               placeholder="Buscar cliente, telefone, CPF…"
               className="rounded-r-xl border-border/40 bg-muted/10 text-xs font-medium placeholder:text-muted-foreground/50"
             />
@@ -556,28 +561,31 @@ export function TricopilOrdersPage() {
           <div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground sm:ml-auto">
             <span className="tabular-nums">{filtered.length} pedido{filtered.length === 1 ? '' : 's'}</span>
             {hasActiveFilters ? (
-              <button type="button" onClick={clearFilters} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-primary hover:bg-primary/10">
-                <X className="size-3" /> Limpar
-              </button>
+              <Button type="button" variant="ghost" size="xs" onClick={clearFilters} className="gap-1 rounded-lg px-2 text-[11px] font-semibold text-primary hover:bg-primary/10 hover:text-primary">
+                <X className="size-3" aria-hidden /> Limpar
+              </Button>
             ) : null}
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Pagamento = filtro principal, como segmented control */}
-          <div className="inline-flex shrink-0 rounded-xl bg-muted/40 p-1">
+          <div className="inline-flex shrink-0 rounded-xl bg-muted/40 p-1" role="group" aria-label="Filtrar por status de pagamento">
             {STATUS_SEG.map((o) => (
-              <button
+              <Button
                 key={o.v}
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => setStatusFilter(o.v)}
+                aria-pressed={statusFilter === o.v}
                 className={cn(
-                  'h-7 rounded-lg px-3 text-[11px] font-bold uppercase tracking-wide transition-all duration-200',
-                  statusFilter === o.v ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground',
+                  'h-7 rounded-lg px-3 text-[11px] font-bold uppercase tracking-wide transition-all duration-200 hover:bg-transparent',
+                  statusFilter === o.v ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50 hover:bg-background' : 'text-muted-foreground hover:text-foreground',
                 )}
               >
                 {o.l}
-              </button>
+              </Button>
             ))}
           </div>
 
@@ -658,9 +666,9 @@ export function TricopilOrdersPage() {
                 <CheckCircle2 className={cn('size-3.5', applyingImport && 'animate-pulse')} />
                 {applyingImport ? 'Conciliando…' : `Conciliar ${importResult.matched.length} casado${importResult.matched.length === 1 ? '' : 's'}`}
               </Button>
-              <button type="button" onClick={() => setImportResult(null)} className="grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Fechar">
-                <X className="size-4" />
-              </button>
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => setImportResult(null)} className="rounded-lg text-muted-foreground" aria-label="Fechar resultado do extrato">
+                <X className="size-4" aria-hidden />
+              </Button>
             </div>
           </div>
           {importResult.unmatchedLines.length > 0 ? (
@@ -693,9 +701,21 @@ export function TricopilOrdersPage() {
           </TableHeader>
           <TableBody>
             {loading && rows.length === 0 ? (
-              <TableRow><TableCell colSpan={11} className="py-12 text-center text-sm text-muted-foreground">Carregando…</TableCell></TableRow>
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={11} aria-busy="true">
+                  <div className="space-y-2 py-4">
+                    <Skeleton className="h-9 w-full" />
+                    <Skeleton className="h-9 w-full" />
+                    <Skeleton className="h-9 w-full" />
+                  </div>
+                </TableCell>
+              </TableRow>
             ) : filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={11} className="py-12 text-center text-sm text-muted-foreground">Nenhum pedido com esses filtros.</TableCell></TableRow>
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={11}>
+                  <EmptyState icon={Search} title="Nenhum pedido com esses filtros" description="Ajuste a busca ou limpe os filtros para ver mais pedidos." />
+                </TableCell>
+              </TableRow>
             ) : (
               filtered.map((p) => {
                 const lead = p.leadId ? leadById.get(p.leadId) : undefined
@@ -714,15 +734,18 @@ export function TricopilOrdersPage() {
                   <Fragment key={k}>
                   <TableRow className={cn(isOpen && 'border-b-0 bg-muted/20')}>
                     <TableCell className="pr-0">
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon-xs"
                         onClick={() => toggleExpand(p)}
-                        className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        className="rounded-md text-muted-foreground"
                         title={isOpen ? 'Recolher' : 'Ver itens, NF-e, conciliação e ações'}
-                        aria-label={isOpen ? 'Recolher' : 'Expandir'}
+                        aria-label={isOpen ? 'Recolher detalhes do pedido' : 'Expandir detalhes do pedido'}
+                        aria-expanded={isOpen}
                       >
-                        {isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                      </button>
+                        {isOpen ? <ChevronDown className="size-4" aria-hidden /> : <ChevronRight className="size-4" aria-hidden />}
+                      </Button>
                     </TableCell>
                     <TableCell>
                       <div className="font-semibold text-foreground/90">{name}</div>
@@ -764,14 +787,14 @@ export function TricopilOrdersPage() {
                     </TableCell>
                     <TableCell>
                       {p.leadId ? (
-                        <select
-                          value={shipOf(p)}
-                          onChange={(e) => void changeShip(p, e.target.value as ShipStatus)}
-                          disabled={savingShip === p.leadId}
-                          className="h-7 max-w-[140px] rounded-lg border border-border/50 bg-background px-2 text-xs font-medium outline-none transition-colors focus-visible:border-ring disabled:opacity-50"
-                        >
-                          {SHIP_STATUS_OPTIONS.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
-                        </select>
+                        <Select value={shipOf(p)} onValueChange={(v) => { if (v) void changeShip(p, v as ShipStatus) }} disabled={savingShip === p.leadId}>
+                          <LabeledSelectTrigger size="sm" aria-label="Status de envio" className="max-w-[140px] rounded-lg border-border/50 bg-background text-xs font-medium [&_[data-slot=select-value]]:text-xs">
+                            {shipStatusLabel(shipOf(p))}
+                          </LabeledSelectTrigger>
+                          <SelectContent>
+                            {SHIP_STATUS_OPTIONS.map((o) => (<SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>))}
+                          </SelectContent>
+                        </Select>
                       ) : <span className="text-xs text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
@@ -782,16 +805,18 @@ export function TricopilOrdersPage() {
                           <span className="text-[10px] text-muted-foreground">sem pedido</span>
                         )}
                         {p.meOrderId ? (
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
+                            size="xs"
                             onClick={() => void doRefreshTracking(p)}
                             disabled={refreshingTrack === p.leadId}
-                            className="inline-flex items-center gap-1 rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-bold text-sky-700 transition-colors hover:bg-sky-500/20 disabled:opacity-60"
+                            className="h-auto gap-1 rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-bold text-sky-700 hover:bg-sky-500/20 hover:text-sky-700 disabled:opacity-60"
                             title={`Melhor Envio: ${p.meOrderId}. Clique para puxar o rastreio.`}
                           >
-                            <Truck className={cn('size-3', refreshingTrack === p.leadId && 'animate-pulse')} />
+                            <Truck className={cn('size-3', refreshingTrack === p.leadId && 'animate-pulse')} aria-hidden />
                             {refreshingTrack === p.leadId ? 'Buscando…' : track ? track : 'Atualizar rastreio'}
-                          </button>
+                          </Button>
                         ) : null}
                       </div>
                     </TableCell>
@@ -864,7 +889,7 @@ export function TricopilOrdersPage() {
                                   </Button>
                                 ) : null}
                                 {nfeMsg[p.id] ? <p className="text-[11px] text-rose-600">{nfeMsg[p.id]}</p> : null}
-                                {!p.blingOrderId ? <p className="text-[11px] text-amber-600">Sem pedido no Bling ainda — relance o pedido antes de emitir.</p> : null}
+                                {!p.blingOrderId ? <p className="text-[11px] text-amber-600">Sem pedido no Bling ainda. Relance o pedido antes de emitir.</p> : null}
                               </div>
                             )}
                           </div>
@@ -886,24 +911,27 @@ export function TricopilOrdersPage() {
                                   <span className="text-muted-foreground">Taxa/diferença</span>
                                   <span className={cn('font-semibold tabular-nums', (feeCents ?? 0) > 0 ? 'text-rose-600' : 'text-muted-foreground')}>{feeCents != null ? brl(feeCents) : '—'}</span>
                                 </div>
-                                <button
+                                <Button
                                   type="button"
+                                  variant="link"
+                                  size="xs"
                                   onClick={() => void doUnreconcile(p)}
                                   disabled={savingRecon === rk}
-                                  className="mt-1 text-[11px] font-semibold text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+                                  className="mt-1 h-auto p-0 text-[11px] font-semibold text-muted-foreground underline-offset-2 hover:text-foreground"
                                 >
                                   Desfazer conciliação
-                                </button>
+                                </Button>
                               </div>
                             ) : (
                               <div className="mt-2 flex items-center gap-1.5">
-                                <input
+                                <Input
                                   value={reconInput[rk] ?? ''}
                                   onChange={(e) => setReconInput((m) => ({ ...m, [rk]: e.target.value }))}
                                   onKeyDown={(e) => { if (e.key === 'Enter') void doReconcile(p) }}
                                   placeholder="Recebido (R$)"
                                   inputMode="decimal"
-                                  className="h-7 w-full rounded-lg border border-border/50 bg-background px-2 text-xs outline-none focus-visible:border-ring"
+                                  aria-label="Valor recebido no banco (líquido, em reais)"
+                                  className="h-7 rounded-lg border-border/50 bg-background px-2 text-xs"
                                 />
                                 <Button size="sm" className="h-7 shrink-0 rounded-lg px-2.5" disabled={savingRecon === rk} onClick={() => void doReconcile(p)}>
                                   {savingRecon === rk ? '…' : 'Conciliar'}

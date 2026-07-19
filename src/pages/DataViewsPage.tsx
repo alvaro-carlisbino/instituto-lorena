@@ -1,9 +1,19 @@
 import { useMemo, useState } from 'react'
+import { Table2Icon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
@@ -11,6 +21,8 @@ import { columnLabel } from '@/lib/leadColumnLabels'
 import { getLeadFieldValue } from '@/lib/leadFields'
 
 const DEFAULT_COLUMNS = ['patient_name', 'phone', 'summary'] as const
+
+const SORT_NONE = '__none__'
 
 export function DataViewsPage() {
   const crm = useCrm()
@@ -72,16 +84,20 @@ export function DataViewsPage() {
                 key={view.id}
                 className={`flex flex-col gap-2 rounded-md border p-2 ${selectedViewId === view.id ? 'border-primary bg-primary/5' : 'border-border'}`}
               >
-                <button
+                <Button
                   type="button"
-                  className="text-left text-xs text-muted-foreground"
+                  variant="ghost"
+                  size="xs"
+                  className="w-fit justify-start px-1 text-xs font-normal text-muted-foreground"
+                  aria-pressed={selectedViewId === view.id}
                   onClick={() => setSelectedViewId(view.id)}
                 >
                   Selecionar
-                </button>
+                </Button>
                 <Input
                   value={view.name}
                   onChange={(e) => crm.updateDataView(view.id, { name: e.target.value })}
+                  aria-label="Nome da visão"
                   className="text-sm font-medium"
                 />
                 <Button type="button" variant="destructive" size="sm" onClick={() => crm.removeDataView(view.id)}>
@@ -89,7 +105,14 @@ export function DataViewsPage() {
                 </Button>
               </div>
             ))}
-            {crm.dataViews.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma visão ainda.</p> : null}
+            {crm.dataViews.length === 0 ? (
+              <EmptyState
+                icon={Table2Icon}
+                title="Nenhuma visão ainda"
+                description='Clique em "Nova visão" para criar a primeira.'
+                className="py-6"
+              />
+            ) : null}
           </CardContent>
         </Card>
 
@@ -122,7 +145,12 @@ export function DataViewsPage() {
                 </TableBody>
               </Table>
             ) : (
-              <p className="text-sm text-muted-foreground">Crie uma visão para ver a tabela.</p>
+              <EmptyState
+                icon={Table2Icon}
+                title="Nenhuma visão selecionada"
+                description="Crie uma visão para ver a tabela."
+                className="py-6"
+              />
             )}
             {activeView ? (
               <div className="mt-6 grid gap-4 border-t border-border/60 pt-4">
@@ -130,36 +158,39 @@ export function DataViewsPage() {
                   <Label className="text-sm font-medium">Colunas visíveis na tabela</Label>
                   <div className="flex flex-wrap gap-x-4 gap-y-2 rounded-lg border border-border/80 bg-muted/20 p-3">
                     {columnCatalog.map((key) => (
-                      <label key={key} className="flex cursor-pointer items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          className="size-4 rounded border-input"
+                      <Label key={key} className="cursor-pointer text-sm font-normal">
+                        <Checkbox
                           checked={activeColumns.includes(key)}
-                          onChange={(e) => toggleColumn(key, e.target.checked)}
+                          onCheckedChange={(checked) => toggleColumn(key, checked)}
                         />
                         <span>{columnLabel(key, crm.workflowFields)}</span>
-                      </label>
+                      </Label>
                     ))}
                   </div>
                 </div>
                 <div className="grid max-w-md gap-2">
-                  <Label>Ordenar por</Label>
-                  <select
-                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                    value={activeView.config.sortField ?? ''}
-                    onChange={(e) =>
+                  <Label htmlFor="dataview-sort">Ordenar por</Label>
+                  <Select
+                    value={activeView.config.sortField ?? SORT_NONE}
+                    onValueChange={(value) => {
+                      if (!value) return
                       crm.updateDataView(activeView.id, {
-                        config: { ...activeView.config, sortField: e.target.value || undefined },
+                        config: { ...activeView.config, sortField: value === SORT_NONE ? undefined : value },
                       })
-                    }
+                    }}
                   >
-                    <option value="">(sem ordenação extra)</option>
-                    {activeColumns.map((col) => (
-                      <option key={col} value={col}>
-                        {columnLabel(col, crm.workflowFields)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="dataview-sort" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SORT_NONE}>(sem ordenação extra)</SelectItem>
+                      {activeColumns.map((col) => (
+                        <SelectItem key={col} value={col}>
+                          {columnLabel(col, crm.workflowFields)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             ) : null}

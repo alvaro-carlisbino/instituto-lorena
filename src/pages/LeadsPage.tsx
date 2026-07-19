@@ -42,6 +42,7 @@ import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -281,14 +282,14 @@ export function LeadsPage() {
   const runCsvImportFromFile = async (file: File) => {
     const name = file.name.toLowerCase()
     if (!name.endsWith('.csv')) {
-      toast.error('Escolha um ficheiro com extensão .csv.')
+      toast.error('Escolha um arquivo com extensão .csv.')
       return
     }
     let text: string
     try {
       text = await file.text()
     } catch {
-      toast.error('Não foi possível ler o ficheiro.')
+      toast.error('Não foi possível ler o arquivo.')
       return
     }
     const grid = parseCsv(text.trim())
@@ -324,14 +325,14 @@ export function LeadsPage() {
   const runJsonImportFromFile = async (file: File) => {
     const name = file.name.toLowerCase()
     if (!name.endsWith('.json')) {
-      toast.error('Escolha um ficheiro com extensão .json.')
+      toast.error('Escolha um arquivo com extensão .json.')
       return
     }
     let text: string
     try {
       text = await file.text()
     } catch {
-      toast.error('Não foi possível ler o ficheiro.')
+      toast.error('Não foi possível ler o arquivo.')
       return
     }
     try {
@@ -408,7 +409,7 @@ export function LeadsPage() {
             Pesquisa Inteligente
           </Label>
           <div className="relative group">
-            <Search className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/40 group-focus-within:text-primary transition-colors" />
+            <Search className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/40 group-focus-within:text-primary transition-colors" aria-hidden />
             <Input
               id="leads-search"
               value={searchTerm}
@@ -423,7 +424,7 @@ export function LeadsPage() {
           <div className="flex flex-col gap-2 lg:col-span-2">
             <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-primary/70 ml-1">Polo</Label>
             <Select value={crm.tenantFilter} onValueChange={(v) => v && crm.setTenantFilter(v)}>
-              <LabeledSelectTrigger className="h-12 rounded-2xl border-primary/30 bg-primary/[0.06] text-xs font-bold uppercase" size="default">
+              <LabeledSelectTrigger aria-label="Filtrar por polo" className="h-12 rounded-2xl border-primary/30 bg-primary/[0.06] text-xs font-bold uppercase" size="default">
                 {poloSelectLabel}
               </LabeledSelectTrigger>
               <SelectContent className="rounded-xl">
@@ -441,7 +442,7 @@ export function LeadsPage() {
         <div className="flex flex-col gap-2">
           <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Funil</Label>
           <Select value={pipelineFilter} onValueChange={(v) => { if (v) { setPipelineFilter(v); setStageFilter('all') } }}>
-            <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
+            <LabeledSelectTrigger aria-label="Filtrar por funil" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
               {pipelineSelectLabel}
             </LabeledSelectTrigger>
             <SelectContent className="rounded-xl">
@@ -458,7 +459,7 @@ export function LeadsPage() {
         <div className="flex flex-col gap-2">
           <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Etapa</Label>
           <Select value={stageFilter} onValueChange={(v) => v && setStageFilter(v)} disabled={pipelineFilter === 'all'}>
-            <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
+            <LabeledSelectTrigger aria-label="Filtrar por etapa" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
               {stageSelectLabel}
             </LabeledSelectTrigger>
             <SelectContent className="rounded-xl">
@@ -475,7 +476,7 @@ export function LeadsPage() {
         <div className="flex flex-col gap-2">
           <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Responsável</Label>
           <Select value={ownerFilter} onValueChange={(v) => v && setOwnerFilter(v)}>
-            <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
+            <LabeledSelectTrigger aria-label="Filtrar por responsável" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
               {ownerSelectLabel}
             </LabeledSelectTrigger>
             <SelectContent className="rounded-xl">
@@ -492,7 +493,7 @@ export function LeadsPage() {
         <div className="flex flex-col gap-2">
           <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Origem</Label>
           <Select value={sourceFilter} onValueChange={(v) => v && setSourceFilter(v)}>
-            <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
+            <LabeledSelectTrigger aria-label="Filtrar por origem" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
               {sourceSelectLabel}
             </LabeledSelectTrigger>
             <SelectContent className="rounded-xl">
@@ -553,7 +554,7 @@ export function LeadsPage() {
           <div className="flex flex-col gap-2 flex-1">
             <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Novo Responsável</Label>
             <Select value={bulkOwnerId} onValueChange={(value) => setBulkOwnerId(value ?? 'all')}>
-              <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
+              <LabeledSelectTrigger aria-label="Novo responsável em lote" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
                 {bulkOwnerLabel}
               </LabeledSelectTrigger>
               <SelectContent className="rounded-xl">
@@ -569,7 +570,7 @@ export function LeadsPage() {
           <div className="flex flex-col gap-2 flex-1">
             <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Nova Etapa</Label>
             <Select value={bulkStageId} onValueChange={(value) => setBulkStageId(value ?? 'all')}>
-              <LabeledSelectTrigger className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
+              <LabeledSelectTrigger aria-label="Nova etapa em lote" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
                 {bulkStageLabel}
               </LabeledSelectTrigger>
               <SelectContent className="rounded-xl">
@@ -623,14 +624,19 @@ export function LeadsPage() {
                 <li key={lead.id} className="p-6 transition-all active:bg-muted/20">
                   <div className="flex gap-4">
                     <div className="pt-1">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selectedLeadIds.includes(lead.id)}
-                        onChange={() => toggleLeadSelection(lead.id)}
+                        onCheckedChange={() => toggleLeadSelection(lead.id)}
+                        aria-label={`Selecionar ${lead.patientName}`}
                         className="size-5 rounded-lg border-border/40"
                       />
                     </div>
-                    <div className="flex-1 min-w-0" onClick={() => openLead(lead.id)}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => openLead(lead.id)}
+                      className="block h-auto min-w-0 flex-1 whitespace-normal rounded-none border-0 p-0 text-left font-normal hover:bg-transparent hover:text-foreground"
+                    >
                       <h3 className="text-lg font-bold text-foreground/90 leading-tight">{lead.patientName}</h3>
                       <p className="text-[13px] font-bold text-muted-foreground/60 mt-0.5">{lead.phone}</p>
                       {lead.summary && <p className="mt-2 text-xs font-medium text-muted-foreground/80 line-clamp-2 leading-relaxed">{lead.summary}</p>}
@@ -647,13 +653,21 @@ export function LeadsPage() {
                           {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
                         </span>
                       </div>
-                    </div>
-                    <Link
-                      to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
-                      className="size-11 rounded-2xl bg-primary/[0.08] text-primary flex items-center justify-center transition-all hover:bg-primary/20 active:scale-90"
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      nativeButton={false}
+                      render={
+                        <Link
+                          to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
+                          aria-label={`Abrir conversa com ${lead.patientName}`}
+                        />
+                      }
+                      className="size-11 rounded-2xl bg-primary/[0.08] text-primary transition-all hover:bg-primary/20 hover:text-primary active:scale-90"
                     >
-                      <MessageCircle className="size-5" />
-                    </Link>
+                      <MessageCircle className="size-5" aria-hidden />
+                    </Button>
                   </div>
                 </li>
               )
@@ -666,7 +680,8 @@ export function LeadsPage() {
                 <TableRow className="border-b border-border/20 bg-muted/10 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/50">
                   <TableHead className="w-16 px-8 py-5">
                     <div className="flex items-center justify-center">
-                      <div className="size-4 rounded border-border/40 border" />
+                      <div className="size-4 rounded border-border/40 border" aria-hidden />
+                      <span className="sr-only">Seleção</span>
                     </div>
                   </TableHead>
                   {visibleColumns.map((col) => (
@@ -693,11 +708,11 @@ export function LeadsPage() {
                     >
                       <TableCell className="px-8 py-5" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center">
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={selected}
-                            onChange={() => toggleLeadSelection(lead.id)}
-                            className="size-5 rounded-lg border-border/40 checked:bg-primary"
+                            onCheckedChange={() => toggleLeadSelection(lead.id)}
+                            aria-label={`Selecionar ${lead.patientName}`}
+                            className="size-5 rounded-lg border-border/40"
                           />
                         </div>
                       </TableCell>
@@ -715,7 +730,7 @@ export function LeadsPage() {
                             </div>
                           )}
                           {col === 'phone' && <span className="text-[13px] font-bold tabular-nums text-muted-foreground/70">{lead.phone}</span>}
-                          {col === 'summary' && <span className="text-xs font-medium text-muted-foreground/60 line-clamp-1">{lead.summary || '—'}</span>}
+                          {col === 'summary' && <span className="text-xs font-medium text-muted-foreground/60 line-clamp-1">{lead.summary || '·'}</span>}
                           {col === 'pipeline_id' && <span className="text-[10px] font-black uppercase tracking-tight text-muted-foreground/80">{pipe?.name ?? lead.pipelineId}</span>}
                           {col === 'stage_id' && <span className="text-[10px] font-black uppercase tracking-tight text-muted-foreground/80">{stage?.name ?? lead.stageId}</span>}
                           {col === 'owner_id' && <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/60">{crm.getOwnerName(lead.ownerId)}</span>}
@@ -732,17 +747,25 @@ export function LeadsPage() {
                           {![
                             'patient_name', 'phone', 'summary', 'pipeline_id', 'stage_id', 'owner_id', 'source', 'temperature'
                           ].includes(col) && (
-                            <span className="text-xs font-medium text-muted-foreground/60">{String(getLeadFieldValue(lead, col) ?? '—')}</span>
+                            <span className="text-xs font-medium text-muted-foreground/60">{String(getLeadFieldValue(lead, col) ?? '·')}</span>
                           )}
                         </TableCell>
                       ))}
                       <TableCell className="px-8 py-5 text-right" onClick={(e) => e.stopPropagation()}>
-                        <Link
-                          to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
-                          className="inline-flex size-10 items-center justify-center rounded-2xl bg-primary/[0.08] text-primary transition-all hover:bg-primary/20 active:scale-90"
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          nativeButton={false}
+                          render={
+                            <Link
+                              to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
+                              aria-label={`Abrir conversa com ${lead.patientName}`}
+                            />
+                          }
+                          className="size-10 rounded-2xl bg-primary/[0.08] text-primary transition-all hover:bg-primary/20 hover:text-primary active:scale-90"
                         >
-                          <MessageCircle className="size-4" />
-                        </Link>
+                          <MessageCircle className="size-4" aria-hidden />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   )
@@ -775,14 +798,14 @@ export function LeadsPage() {
             <CardTitle className="text-base font-black uppercase tracking-widest text-foreground/80">Importação (CSV)</CardTitle>
           </CardHeader>
           <CardContent className="p-8 flex flex-col gap-6">
-            <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="sr-only" onChange={onCsvInputChange} />
+            <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="sr-only" aria-label="Selecionar arquivo CSV de leads" onChange={onCsvInputChange} />
             <div className="flex flex-col items-center justify-center border-2 border-dashed border-border/40 rounded-[2rem] p-8 transition-all hover:bg-muted/20">
               <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-4 text-xl">CSV</div>
               <Button type="button" variant="link" className="font-bold text-primary" onClick={() => csvInputRef.current?.click()}>
-                Selecionar Ficheiro CSV
+                Selecionar Arquivo CSV
               </Button>
               <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest text-center mt-2">
-                {csvFileLabel || "Nenhum ficheiro selecionado"}
+                {csvFileLabel || "Nenhum arquivo selecionado"}
                 {csvPreviewRows != null && ` · ${csvPreviewRows} leads`}
               </p>
             </div>
@@ -802,14 +825,14 @@ export function LeadsPage() {
             <CardTitle className="text-base font-black uppercase tracking-widest text-foreground/80">Histórico de Conversas (JSON)</CardTitle>
           </CardHeader>
           <CardContent className="p-8 flex flex-col gap-6">
-            <input ref={jsonInputRef} type="file" accept=".json,application/json" className="sr-only" onChange={onJsonInputChange} />
+            <input ref={jsonInputRef} type="file" accept=".json,application/json" className="sr-only" aria-label="Selecionar arquivo JSON de conversas" onChange={onJsonInputChange} />
             <div className="flex flex-col items-center justify-center border-2 border-dashed border-border/40 rounded-[2rem] p-8 transition-all hover:bg-muted/20">
               <div className="size-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 mb-4 text-xl">JSON</div>
               <Button type="button" variant="link" className="font-bold text-amber-600" onClick={() => jsonInputRef.current?.click()}>
-                Selecionar Ficheiro JSON
+                Selecionar Arquivo JSON
               </Button>
               <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest text-center mt-2">
-                {jsonFileLabel || "Nenhum ficheiro selecionado"}
+                {jsonFileLabel || "Nenhum arquivo selecionado"}
                 {jsonPreviewCount != null && ` · ${jsonPreviewCount} interações`}
               </p>
             </div>

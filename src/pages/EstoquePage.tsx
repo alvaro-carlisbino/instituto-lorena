@@ -6,6 +6,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -157,7 +158,7 @@ export function EstoquePage() {
       openMove(found, 'entrada')
     } else {
       setForm((f) => ({ ...f, barcode: code }))
-      toast.info(`Código ${code} não cadastrado — já deixei preenchido no formulário de novo item.`)
+      toast.info(`Código ${code} não cadastrado, já deixei preenchido no formulário de novo item.`)
     }
   }
 
@@ -272,7 +273,7 @@ export function EstoquePage() {
   return (
     <AppLayout
       title="Estoque"
-      subtitle="Itens e saldos do polo atual — entrada e baixa manuais por enquanto (Shosp/Bling em fase futura)."
+      subtitle="Itens e saldos do polo atual · entrada e baixa manuais por enquanto (Shosp/Bling em fase futura)."
     >
       <SubTabs tabs={estoqueTabs(isSalesPolo)} />
 
@@ -284,7 +285,7 @@ export function EstoquePage() {
                 <Boxes className="size-4 text-primary" /> Estoque no Bling ({blingItems.length})
               </CardTitle>
               <p className="mt-1 text-xs text-muted-foreground">
-                Fonte oficial do estoque de vendas — somente leitura.
+                Fonte oficial do estoque de vendas, somente leitura.
                 {blingFetchedAt
                   ? ` Atualizado ${new Date(blingFetchedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}.`
                   : ''}
@@ -400,15 +401,15 @@ export function EstoquePage() {
                 id="st-barcode"
                 value={form.barcode}
                 onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))}
-                placeholder="Bipe com o leitor ou digite — a NF-e preenche sozinha"
+                placeholder="Bipe com o leitor ou digite, a NF-e preenche sozinha"
                 inputMode="numeric"
               />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">
-                <Label>Unidade</Label>
+                <Label htmlFor="st-unit">Unidade</Label>
                 <Select value={form.unit} onValueChange={(v) => setForm((f) => ({ ...f, unit: v ?? 'un' }))}>
-                  <SelectTrigger>
+                  <SelectTrigger id="st-unit">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -431,31 +432,30 @@ export function EstoquePage() {
                 />
               </div>
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="st-controlled"
                 checked={form.controlled}
-                onChange={(e) => setForm((f) => ({ ...f, controlled: e.target.checked }))}
-                className="size-4 accent-amber-500"
+                onCheckedChange={(checked) => setForm((f) => ({ ...f, controlled: checked }))}
               />
-              <span className="flex items-center gap-1.5">
-                <ShieldAlert className="size-3.5 text-amber-500" /> Substância controlada
-              </span>
-            </label>
+              <Label htmlFor="st-controlled" className="gap-1.5 font-normal">
+                <ShieldAlert className="size-3.5 text-amber-500" aria-hidden /> Substância controlada
+              </Label>
+            </div>
             {isSalesPolo ? (
               <div className="space-y-1.5">
-                <Label className="flex items-center gap-1.5">
-                  <Boxes className="size-3.5" /> Produto no Bling (vínculo)
+                <Label htmlFor="st-bling" className="flex items-center gap-1.5">
+                  <Boxes className="size-3.5" aria-hidden /> Produto no Bling (vínculo)
                 </Label>
                 <Select
                   value={form.blingProductId || '__none__'}
                   onValueChange={(v) => setForm((f) => ({ ...f, blingProductId: v === '__none__' ? '' : (v ?? '') }))}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="st-bling">
                     <SelectValue placeholder="Sem vínculo" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none__">— sem vínculo —</SelectItem>
+                    <SelectItem value="__none__">Sem vínculo</SelectItem>
                     {blingItems.map((b) => (
                       <SelectItem key={b.id} value={b.id}>
                         {b.nome}
@@ -498,23 +498,25 @@ export function EstoquePage() {
                     }
                   }}
                   placeholder="Bipar código…"
+                  aria-label="Bipar código de barras"
                   className="h-8 w-[150px]"
                   inputMode="numeric"
                 />
                 <Button
-                  size="sm"
+                  size="icon"
                   variant="outline"
-                  className="h-8 px-2"
                   onClick={() => setCameraOpen(true)}
                   title="Ler pela câmera"
+                  aria-label="Ler pela câmera"
                 >
-                  <ScanBarcode className="size-4" />
+                  <ScanBarcode className="size-4" aria-hidden />
                 </Button>
               </div>
               <Input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Buscar item…"
+                aria-label="Buscar item"
                 className="h-8 w-[160px]"
               />
             </div>
@@ -567,8 +569,13 @@ export function EstoquePage() {
                               <Button size="sm" variant="outline" onClick={() => openMove(item, 'saida')}>
                                 <ArrowUpFromLine className="size-3.5" /> Saída
                               </Button>
-                              <Button size="sm" variant="ghost" onClick={() => void openHistory(item)}>
-                                <History className="size-3.5" />
+                              <Button
+                                size="icon-sm"
+                                variant="ghost"
+                                onClick={() => void openHistory(item)}
+                                aria-label={`Histórico de ${item.name}`}
+                              >
+                                <History className="size-3.5" aria-hidden />
                               </Button>
                               <Button size="sm" variant="ghost" onClick={() => openEdit(item)}>
                                 Editar
@@ -596,9 +603,9 @@ export function EstoquePage() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label>Tipo</Label>
+              <Label htmlFor="mv-kind">Tipo</Label>
               <Select value={moveKind} onValueChange={(v) => setMoveKind((v ?? 'entrada') as typeof moveKind)}>
-                <SelectTrigger>
+                <SelectTrigger id="mv-kind">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -626,7 +633,7 @@ export function EstoquePage() {
                   value={moveCost}
                   onChange={(e) => setMoveCost(e.target.value)}
                   inputMode="decimal"
-                  placeholder="Opcional — alimenta o custo por cirurgia"
+                  placeholder="Opcional, alimenta o custo por cirurgia"
                 />
               </div>
             ) : null}
@@ -653,7 +660,7 @@ export function EstoquePage() {
       <Dialog open={historyItem != null} onOpenChange={(open) => (!open ? setHistoryItem(null) : null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Histórico — {historyItem?.name}</DialogTitle>
+            <DialogTitle>Histórico · {historyItem?.name}</DialogTitle>
             <DialogDescription>Últimos {historyRows.length} movimentos.</DialogDescription>
           </DialogHeader>
           <div className="max-h-[50vh] space-y-1 overflow-y-auto text-sm">

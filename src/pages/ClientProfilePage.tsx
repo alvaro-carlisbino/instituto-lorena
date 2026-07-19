@@ -4,6 +4,7 @@ import { Search, User, MapPin, Route, Star, Stethoscope, CreditCard } from 'luci
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
 import { pacienteTabs } from '@/lib/patientFileTabs'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -13,7 +14,7 @@ import { fetchClientProfile, type ClientProfile } from '@/services/clientProfile
 
 const STAGE_LABEL: Record<string, string> = {
   novo: 'Novo lead', triagem: 'Triagem', contato: 'Contato', consulta: 'Consulta agendada',
-  'stage-1777902160674': 'Consulta realizada', fechado: 'Encerrado', 'ligar-formulario': 'Ligar — Formulário',
+  'stage-1777902160674': 'Consulta realizada', fechado: 'Encerrado', 'ligar-formulario': 'Ligar · Formulário',
 }
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const isPaid = (s: string) => ['paid', 'confirmed', 'received', 'approved'].includes(s)
@@ -21,7 +22,7 @@ const isPaid = (s: string) => ['paid', 'confirmed', 'received', 'approved'].incl
 function Section({ icon: Icon, title, children }: { icon: React.ComponentType<{ className?: string }>; title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-border bg-card p-5">
-      <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground"><Icon className="h-4 w-4 text-muted-foreground" /> {title}</p>
+      <p className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground"><Icon className="h-4 w-4 text-muted-foreground" aria-hidden /> {title}</p>
       {children}
     </div>
   )
@@ -66,10 +67,12 @@ export function ClientProfilePage() {
       {/* busca */}
       <div className="mb-6 max-w-lg">
         <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden />
           <Input
+            type="search"
             className="pl-8"
             placeholder="Buscar paciente pelo nome…"
+            aria-label="Buscar paciente pelo nome"
             value={term}
             onChange={(e) => { setTerm(e.target.value); setLeadId(null) }}
           />
@@ -77,11 +80,16 @@ export function ClientProfilePage() {
         {!leadId && results.length > 0 && (
           <div className="mt-1 max-h-56 overflow-auto rounded-lg border border-border bg-card">
             {results.map((r) => (
-              <button key={r.id} onClick={() => { setLeadId(r.id); setTerm(r.name); setResults([]) }}
-                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted/60">
-                <span className="font-medium">{r.name}</span>
-                <span className="text-xs text-muted-foreground">{r.phone}</span>
-              </button>
+              <Button
+                key={r.id}
+                type="button"
+                variant="ghost"
+                onClick={() => { setLeadId(r.id); setTerm(r.name); setResults([]) }}
+                className="h-auto w-full justify-between rounded-none px-3 py-2 text-left font-normal hover:bg-muted/60"
+              >
+                <span className="min-w-0 truncate font-medium">{r.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{r.phone}</span>
+              </Button>
             ))}
           </div>
         )}
@@ -135,7 +143,7 @@ export function ClientProfilePage() {
           <Section icon={Route} title="Jornada">
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <Badge variant="outline">Entrou {new Date(profile.createdAt).toLocaleDateString('pt-BR')}</Badge>
-              <span className="text-muted-foreground">→</span>
+              <span className="text-muted-foreground" aria-hidden>→</span>
               <Badge variant="outline">{STAGE_LABEL[profile.stageId] ?? profile.stageId}</Badge>
               {profile.lastInteractionAt ? (
                 <>

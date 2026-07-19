@@ -56,35 +56,43 @@ export function AuthPage({
             Use o e-mail e a senha fornecidos pela equipe para acessar o painel.
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-5 pt-2">
-          <Field label="E-mail" inputSize="comfortable">
-            <FieldControl
-              type="email"
-              value={email}
-              onChange={(event) => onEmailChange(event.target.value)}
-              placeholder="voce@empresa.com"
-              autoComplete="email"
-            />
-          </Field>
-          <Field label="Senha" inputSize="comfortable">
-            <FieldControl
-              type="password"
-              value={password}
-              onChange={(event) => onPasswordChange(event.target.value)}
-              placeholder="••••••••"
-              autoComplete="current-password"
-            />
-          </Field>
-          <NoticeBanner message={notice} variant={noticeVariantFromMessage(notice)} />
-        </CardContent>
-        <CardFooter className="flex flex-col gap-3 border-t border-border/60 bg-muted/20 px-6 py-5 sm:flex-row sm:justify-stretch">
-          <Button className="h-11 w-full font-medium sm:flex-1" onClick={onSignIn} disabled={isLoading}>
-            {isLoading ? 'Entrando…' : 'Entrar'}
-          </Button>
-          <Button type="button" variant="outline" className="h-11 w-full sm:flex-1" onClick={onSignUp} disabled={isLoading}>
-            Solicitar acesso
-          </Button>
-        </CardFooter>
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            onSignIn()
+          }}
+        >
+          <CardContent className="grid gap-5 pt-2">
+            <Field label="E-mail" inputSize="comfortable">
+              <FieldControl
+                type="email"
+                value={email}
+                onChange={(event) => onEmailChange(event.target.value)}
+                placeholder="voce@empresa.com"
+                autoComplete="email"
+              />
+            </Field>
+            <Field label="Senha" inputSize="comfortable">
+              <FieldControl
+                type="password"
+                value={password}
+                onChange={(event) => onPasswordChange(event.target.value)}
+                placeholder="••••••••"
+                autoComplete="current-password"
+              />
+            </Field>
+            <NoticeBanner message={notice} variant={noticeVariantFromMessage(notice)} />
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3 border-t border-border/60 bg-muted/20 px-6 py-5 sm:flex-row sm:justify-stretch">
+            <Button type="submit" className="h-11 w-full font-medium sm:flex-1" disabled={isLoading} aria-busy={isLoading || undefined}>
+              {isLoading ? 'Entrando…' : 'Entrar'}
+            </Button>
+            <Button type="button" variant="outline" className="h-11 w-full sm:flex-1" onClick={onSignUp} disabled={isLoading}>
+              Solicitar acesso
+            </Button>
+          </CardFooter>
+        </form>
       </Card>
     </div>
   )

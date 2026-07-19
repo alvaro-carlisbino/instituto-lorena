@@ -6,7 +6,8 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { cn } from '@/lib/utils'
 import {
   fetchTricopillReengage,
@@ -100,21 +101,22 @@ export function TricopillReengagePage() {
 
   return (
     <AppLayout
-      title="Reengajamento — follow-up e recompra sem fim"
+      title="Reengajamento · follow-up e recompra sem fim"
       actions={
         <div className="flex items-center gap-2">
           <Link to="/tricopill" className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-lg')}>
             <MessageSquare className="size-4 mr-2" />
             Conversas
           </Link>
-          <button
+          <Button
             type="button"
+            size="sm"
             onClick={() => setReloadKey((k) => k + 1)}
-            className={cn(buttonVariants({ size: 'sm' }), 'rounded-lg')}
+            className="rounded-lg"
           >
-            <RefreshCw className={cn('size-4 mr-2', loading && 'animate-spin')} />
+            <RefreshCw className={cn('size-4 mr-2', loading && 'animate-spin')} aria-hidden />
             Atualizar
-          </button>
+          </Button>
         </div>
       }
     >
@@ -162,7 +164,7 @@ export function TricopillReengagePage() {
       <SectionTitle>Em andamento ({ativos.length})</SectionTitle>
       <section className="mb-8 rounded-xl border border-border bg-card p-6">
         {ativos.length === 0 ? (
-          <p className="py-8 text-center text-xs text-muted-foreground">Ninguém em cadência ainda.</p>
+          <EmptyState className="py-8" title="Ninguém em cadência ainda" description="Quando alguém entrar em reativação ou recompra, aparece aqui." />
         ) : (
           <Table className="w-full text-xs">
             <TableHeader>
@@ -191,10 +193,10 @@ export function TricopillReengagePage() {
         )}
       </section>
 
-      <SectionTitle>Na fila — vão entrar ({fila.length})</SectionTitle>
+      <SectionTitle>Na fila · vão entrar ({fila.length})</SectionTitle>
       <section className="rounded-xl border border-border bg-card p-6">
         {fila.length === 0 ? (
-          <p className="py-8 text-center text-xs text-muted-foreground">Fila vazia — todo mundo elegível já está em cadência.</p>
+          <EmptyState className="py-8" title="Fila vazia" description="Todo mundo elegível já está em cadência." />
         ) : (
           <Table className="w-full text-xs">
             <TableHeader>

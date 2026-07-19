@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
@@ -44,6 +45,7 @@ type Props = {
 export function LeadLossReasonDialog({ open, onOpenChange, onConfirm, patientName, stageName }: Props) {
   const [reason, setReason] = useState('')
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
+  const notesId = useId()
 
   const isCancellation = stageName ? /cancel/i.test(stageName) : false
   const cancelledWhat = /cirurgia/i.test(stageName ?? '')
@@ -67,7 +69,7 @@ export function LeadLossReasonDialog({ open, onOpenChange, onConfirm, patientNam
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <div className="flex items-center gap-2 text-destructive mb-2">
-            <AlertCircle className="size-5" />
+            <AlertCircle className="size-5" aria-hidden />
             <DialogTitle className="uppercase tracking-wider font-black">
               {isCancellation ? 'Registrar Cancelamento' : 'Encerrar Lead'}
             </DialogTitle>
@@ -82,29 +84,32 @@ export function LeadLossReasonDialog({ open, onOpenChange, onConfirm, patientNam
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Motivos comuns">
             {presets.map((preset) => (
-              <button
+              <Button
                 key={preset}
                 type="button"
+                variant="ghost"
+                aria-pressed={selectedPreset === preset}
                 onClick={() => setSelectedPreset(preset === selectedPreset ? null : preset)}
                 className={cn(
-                  "px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-tight transition-all border",
+                  'h-auto whitespace-normal rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-tight',
                   selectedPreset === preset
-                    ? "bg-destructive border-destructive text-white shadow-lg shadow-destructive/20"
-                    : "bg-muted/50 border-border/50 text-muted-foreground hover:border-destructive/30 hover:text-destructive"
+                    ? 'border-destructive bg-destructive text-destructive-foreground shadow-lg shadow-destructive/20 hover:bg-destructive hover:text-destructive-foreground'
+                    : 'border-border/50 bg-muted/50 text-muted-foreground hover:bg-muted/50 hover:border-destructive/30 hover:text-destructive',
                 )}
               >
                 {preset}
-              </button>
+              </Button>
             ))}
           </div>
 
           <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70 ml-1">
+            <Label htmlFor={notesId} className="ml-1 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70">
               Observações Adicionais
-            </label>
+            </Label>
             <Textarea
+              id={notesId}
               placeholder={isCancellation ? 'Detalhes do cancelamento...' : 'Detalhes sobre a perda do lead...'}
               value={reason}
               onChange={(e) => setReason(e.target.value)}

@@ -1,4 +1,12 @@
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 type LayoutMode = 'auto' | 'grid'
 
@@ -34,29 +42,32 @@ export function WidgetLayoutEditor({ layout, onLayoutChange, helpId }: Props) {
         Na grade de 12 colunas, defina em que célula o bloco aparece. Em modo automático, o painel reparte o espaço sozinho.
       </p>
       <div className="grid gap-2">
-        <Label className="text-xs font-medium">Posição no painel</Label>
-        <select
-          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-          aria-describedby={helpId}
+        <Label htmlFor={`${helpId}-mode`} className="text-xs font-medium">Posição no painel</Label>
+        <Select
           value={mode}
-          onChange={(e) => {
-            const nextMode = e.target.value as LayoutMode
-            onLayoutChange(buildLayout(nextMode, col, row, span))
+          onValueChange={(value) => {
+            if (!value) return
+            onLayoutChange(buildLayout(value as LayoutMode, col, row, span))
           }}
         >
-          <option value="auto">Automático (reparte o espaço)</option>
-          <option value="grid">Grade personalizada (12 colunas)</option>
-        </select>
+          <SelectTrigger id={`${helpId}-mode`} className="w-full" aria-describedby={helpId}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">Automático (reparte o espaço)</SelectItem>
+            <SelectItem value="grid">Grade personalizada (12 colunas)</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       {mode === 'grid' ? (
         <div className="grid grid-cols-3 gap-2">
           <div className="grid gap-1">
-            <Label className="text-xs">Coluna (1–12)</Label>
-            <input
+            <Label htmlFor={`${helpId}-col`} className="text-xs">Coluna (1 a 12)</Label>
+            <Input
+              id={`${helpId}-col`}
               type="number"
               min={1}
               max={12}
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
               value={col}
               onChange={(e) => {
                 const v = Math.min(12, Math.max(1, Number(e.target.value) || 1))
@@ -65,12 +76,12 @@ export function WidgetLayoutEditor({ layout, onLayoutChange, helpId }: Props) {
             />
           </div>
           <div className="grid gap-1">
-            <Label className="text-xs">Linha (≥1)</Label>
-            <input
+            <Label htmlFor={`${helpId}-row`} className="text-xs">Linha (mínimo 1)</Label>
+            <Input
+              id={`${helpId}-row`}
               type="number"
               min={1}
               max={99}
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
               value={row}
               onChange={(e) => {
                 const v = Math.max(1, Number(e.target.value) || 1)
@@ -79,12 +90,12 @@ export function WidgetLayoutEditor({ layout, onLayoutChange, helpId }: Props) {
             />
           </div>
           <div className="grid gap-1">
-            <Label className="text-xs">Largura (span 1–12)</Label>
-            <input
+            <Label htmlFor={`${helpId}-span`} className="text-xs">Largura (1 a 12)</Label>
+            <Input
+              id={`${helpId}-span`}
               type="number"
               min={1}
               max={12}
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
               value={span}
               onChange={(e) => {
                 const v = Math.min(12, Math.max(1, Number(e.target.value) || 1))

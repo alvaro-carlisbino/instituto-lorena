@@ -5,6 +5,8 @@ import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { sourceLabel } from '@/mocks/crmMock'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   fetchLeadIdsWithAppointment,
   fetchLeadIdsWithShospLink,
@@ -112,14 +114,18 @@ function KpiCard({
 }) {
   return (
     <div className="relative overflow-hidden rounded-3xl border border-border/40 bg-card/60 p-6 backdrop-blur-sm transition-all duration-300 hover:bg-card hover:shadow-xl hover:-translate-y-0.5">
-      <div className="absolute top-0 right-0 p-5 opacity-[0.04]">
+      <div className="absolute top-0 right-0 p-5 opacity-[0.04]" aria-hidden>
         <Icon className="size-16" />
       </div>
       <p className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground/60">{label}</p>
-      <div className="mt-2 flex items-baseline gap-2">
-        <span className={cn('text-4xl font-black tracking-tighter tabular-nums', accent ?? 'text-foreground')}>
-          {loading ? '—' : value}
-        </span>
+      <div className="mt-2 flex items-baseline gap-2" aria-busy={loading || undefined}>
+        {loading ? (
+          <Skeleton className="h-9 w-16" />
+        ) : (
+          <span className={cn('text-4xl font-black tracking-tighter tabular-nums', accent ?? 'text-foreground')}>
+            {value}
+          </span>
+        )}
         {!loading ? <TrendChip trend={trend ?? null} /> : null}
       </div>
       {sub ? <p className="mt-1.5 text-[12px] font-medium text-muted-foreground/70">{loading ? ' ' : sub}</p> : null}
@@ -324,19 +330,24 @@ export function DashboardKpiSection() {
         <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/50">
           Indicadores do período
         </h3>
-        <div className="inline-flex rounded-xl border border-border/40 bg-muted/30 p-1">
+        <div role="group" aria-label="Período dos indicadores" className="inline-flex rounded-xl border border-border/40 bg-muted/30 p-1">
           {RANGES.map((r) => (
-            <button
+            <Button
               key={r.key}
               type="button"
+              variant="ghost"
+              size="xs"
+              aria-pressed={range === r.key}
               onClick={() => setRange(r.key)}
               className={cn(
-                'rounded-lg px-3 py-1 text-[11px] font-black uppercase tracking-wider transition-all',
-                range === r.key ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground/60 hover:text-foreground',
+                'h-auto rounded-lg px-3 py-1 text-[11px] font-black uppercase tracking-wider',
+                range === r.key
+                  ? 'bg-background text-foreground shadow-sm hover:bg-background hover:text-foreground'
+                  : 'text-muted-foreground/60 hover:bg-transparent hover:text-foreground',
               )}
             >
               {r.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
