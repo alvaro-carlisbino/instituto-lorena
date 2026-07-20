@@ -804,7 +804,14 @@ export async function autoShipToCart(
     // NÃO vão pro Melhor Envio (a etiqueta sairia inútil). delivery_mode é gravado pela IA.
     const deliveryMode = String(entrega.delivery_mode ?? '').trim()
     if (deliveryMode === 'retirada_clinica') return { ok: false, skipped: true, reason: 'retirada_clinica' }
-    if (deliveryMode === 'entrega_local_maringa') return { ok: false, skipped: true, reason: 'entrega_local_maringa' }
+    if (deliveryMode === 'entrega_local_maringa') {
+      // A IA já gravou modo local com CEP de Londrina (caso Guilherme 20/07) e o pedido
+      // ficou sem etiqueta, parado na fila do motoboy. O modo local só é respeitado se o
+      // CEP resolve MESMO para a praça local; cidade de fora segue para a etiqueta abaixo.
+      const cepLocal = onlyDigitsStr(entrega.cep ?? entrega.postalCode ?? cad.cep ?? '')
+      const infoLocal = cepLocal.length === 8 ? await resolveCepBrasil(cepLocal) : null
+      if (!infoLocal || isLocalDeliveryCity(infoLocal)) return { ok: false, skipped: true, reason: 'entrega_local_maringa' }
+    }
 
     if (!melhorEnvioConfigured()) return { ok: false, skipped: true, reason: 'me_nao_configurado' }
 
@@ -929,7 +936,12 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
       [ster(entrega.logradouro), ster(entrega.numero)].filter(Boolean).join(', '),
       ster(entrega.complemento), ster(entrega.bairro), [ster(entrega.cidade), ster(entrega.uf)].filter(Boolean).join('/'),
     ].filter(Boolean).join(' - ')
-    const mode = String(entrega.delivery_mode ?? '').trim()
+    let mode = String(entrega.delivery_mode ?? '').trim()
+    // Modo local gravado com cidade FORA da praça (caso Guilherme/Londrina 20/07): ignora a
+    // nota de motoboy e segue o fluxo de etiqueta (autoShipToCart revalida pelo CEP).
+    if (mode === 'entrega_local_maringa' && ster(entrega.cidade) && !isLocalDeliveryCity({ localidade: ster(entrega.cidade), uf: ster(entrega.uf) })) {
+      mode = ''
+    }
     if (mode === 'retirada_clinica' || mode === 'entrega_local_maringa') {
       // Force (fluxo sem etiqueta, ex.: cartão do site ou pedido que passou a ter endereço):
       // registra a nota operacional pra equipe saber que é entrega interna/retirada. Loga só

@@ -7,13 +7,26 @@ import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.
 import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit, SHAMPOO_ADDON } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
-import { enrichEnderecoViaCep, resolveCepBrasil } from './cep.ts'
+import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
 
 /** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
 const DELIVERY_MODES = ['retirada_clinica', 'entrega_local_maringa', 'envio_externo'] as const
 function normalizeDeliveryMode(v: unknown): string {
   const s = String(v ?? '').trim().toLowerCase()
   return (DELIVERY_MODES as readonly string[]).includes(s) ? s : ''
+}
+
+/**
+ * O modo "entrega_local_maringa" SÓ vale se o CEP resolve para a praça local (Maringá/
+ * Sarandi/Paiçandu/Marialva) — a IA já marcou entrega local com CEP de Londrina e o
+ * pedido caiu na fila do motoboy com frete R$ 15 (caso Guilherme 20/07). Cidade fora
+ * da praça → vira "envio_externo" (cota e despacha pelos Correios). CEP ausente ou
+ * não resolvível mantém o modo como veio (a trava de prontidão já exige CEP).
+ */
+async function validateDeliveryMode(mode: string, cepDigits: string): Promise<string> {
+  if (mode !== 'entrega_local_maringa' || cepDigits.length !== 8) return mode
+  const info = await resolveCepBrasil(cepDigits)
+  return info && !isLocalDeliveryCity(info) ? 'envio_externo' : mode
 }
 
 /**
@@ -46,7 +59,9 @@ async function resolveFreightCents(
   if (deliveryMode === 'entrega_local_maringa') {
     const cepDigits = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
     const cityInfo = cepDigits.length === 8 ? await resolveCepBrasil(cepDigits) : null
-    return localDeliveryCents(cityInfo)
+    // Cidade FORA da praça local = a IA errou o modo (caso Guilherme/Londrina 20/07):
+    // NÃO cobra a taxa de motoboy — cai na cotação externa abaixo, como envio_externo.
+    if (!cityInfo || isLocalDeliveryCity(cityInfo)) return localDeliveryCents(cityInfo)
   }
 
   const toCep = String(op.to_cep ?? op.toCep ?? op.cep ?? '').replace(/\D/g, '')
@@ -126,6 +141,12 @@ async function persistEntrega(
     // Cliente manda só "CEP + número" — rua/bairro/cidade/UF vêm do ViaCEP (senão o
     // endereço fica salvo só com o número).
     entrega = await enrichEnderecoViaCep(entrega)
+    // Modo local só vale na praça local — valida contra o CEP FINAL (novo ou herdado),
+    // senão o comprovante/Bling saem "Entrega local (Maringá)" e a etiqueta é pulada.
+    const mergedMode = normalizeDeliveryMode(entrega.delivery_mode)
+    if (mergedMode) {
+      entrega.delivery_mode = await validateDeliveryMode(mergedMode, String(entrega.cep ?? '').replace(/\D/g, ''))
+    }
 
     // CADASTRO completo (NF-e): nome, CPF, telefone, e-mail, nascimento, sexo — merge quando vierem no op.
     const cpf = String(op.to_cpf ?? op.cpf ?? '').replace(/\D/g, '')
