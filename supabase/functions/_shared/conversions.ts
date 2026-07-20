@@ -86,7 +86,7 @@ function fbcFromFbclid(fbclid: string | undefined, tsMs: number): string | undef
 // + refresh token com o escopo https://www.googleapis.com/auth/datamanager
 // (o escopo adwords sozinho dá 403). Developer token NÃO é usado aqui.
 
-async function googleAdsAccessToken(): Promise<string | null> {
+export async function googleAdsAccessToken(): Promise<string | null> {
   const clientId = (Deno.env.get('GOOGLE_ADS_CLIENT_ID') ?? '').trim()
   const clientSecret = (Deno.env.get('GOOGLE_ADS_CLIENT_SECRET') ?? '').trim()
   const refreshToken = (Deno.env.get('GOOGLE_ADS_REFRESH_TOKEN') ?? '').trim()

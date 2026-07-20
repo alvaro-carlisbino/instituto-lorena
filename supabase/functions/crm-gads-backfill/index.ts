@@ -11,7 +11,7 @@
  *                                          -> sobe cada venda paga do site com gclid no período.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { uploadGoogleAdsConversion } from '../_shared/conversions.ts'
+import { googleAdsAccessToken, uploadGoogleAdsConversion } from '../_shared/conversions.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -60,6 +60,35 @@ Deno.serve(async (req) => {
       if (!res.ok) accessTokenError = (await res.text()).slice(0, 200)
     } catch (e) { accessTokenError = e instanceof Error ? e.message : String(e) }
     return json({ ok: true, secrets, accessTokenOk, accessTokenError })
+  }
+
+  // Proxy autenticado pra Google Ads API (auditar/configurar a conta sem expor secrets:
+  // as credenciais só existem aqui no env). Ex.:
+  //   {"action":"ads","path":"googleAds:search","body":{"query":"SELECT ..."}}
+  //   {"action":"ads","path":"conversionActions:mutate","body":{"operations":[...]}}
+  if (action === 'ads') {
+    const devToken = (Deno.env.get('GOOGLE_ADS_DEVELOPER_TOKEN') ?? '').trim()
+    const customerId = (Deno.env.get('GOOGLE_ADS_CUSTOMER_ID') ?? '').replace(/\D/g, '')
+    const loginCustomerId = (Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID') ?? '').replace(/\D/g, '')
+    if (!devToken || !customerId) return json({ error: 'nao_configurado' }, 500)
+    const accessToken = await googleAdsAccessToken()
+    if (!accessToken) return json({ error: 'sem_access_token' }, 500)
+    const path = String(p.path ?? 'googleAds:search')
+    const apiVersion = (Deno.env.get('GOOGLE_ADS_API_VERSION') ?? 'v22').trim()
+    const res = await fetch(`https://googleads.googleapis.com/${apiVersion}/customers/${customerId}/${path}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'developer-token': devToken,
+        ...(loginCustomerId ? { 'login-customer-id': loginCustomerId } : {}),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(p.body ?? {}),
+      signal: AbortSignal.timeout(20000),
+    })
+    const text = await res.text()
+    try { return json({ status: res.status, body: JSON.parse(text) }, res.ok ? 200 : 502) }
+    catch { return json({ status: res.status, body: text.slice(0, 1000) }, res.ok ? 200 : 502) }
   }
 
   if (action === 'backfill') {
