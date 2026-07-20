@@ -1,6 +1,6 @@
 /**
- * crm-gads-backfill — sobe conversões PASSADAS pro Google Ads (uploadClickConversions) e
- * serve de diagnóstico do setup. Server-side: usa o gclid que já guardamos no lead.
+ * crm-gads-backfill — sobe conversões PASSADAS pro Google Ads (Data Manager API,
+ * events:ingest) e serve de diagnóstico do setup. Server-side: usa o gclid do lead.
  *
  * Auth: header x-reship-secret == env RESHIP_SECRET (verify_jwt=false no config.toml).
  *

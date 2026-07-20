@@ -75,15 +75,16 @@ function fbcFromFbclid(fbclid: string | undefined, tsMs: number): string | undef
   return `fb.1.${tsMs}.${fbclid}`
 }
 
-// ---- Google Ads API (offline click conversion via gclid) -----------------
-// Sobe a venda direto pro Google Ads pela API — 100% server-side, imune a
+// ---- Google Data Manager API (offline click conversion via gclid) --------
+// Sobe a venda direto pro Google Ads — 100% server-side, imune a
 // bloqueador/consentimento/tag do site. Atribui ao clique do anúncio pelo gclid.
-// Tudo por env (secret): liga sem mexer no código. Requer developer token com
-// acesso BÁSICO aprovado (token novo só funciona em conta de teste até aprovar).
-function gAdsDateTime(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}+00:00`
-}
+// Tudo por env (secret): liga sem mexer no código.
+// ATENÇÃO: integrações novas são OBRIGADAS a usar a Data Manager API — o endpoint
+// antigo (ConversionUploadService.UploadClickConversions do Google Ads API) devolve
+// "limited to existing users" pra developer tokens aprovados de 2025 em diante.
+// Requisitos: Data Manager API habilitada no projeto Google Cloud do OAuth client
+// + refresh token com o escopo https://www.googleapis.com/auth/datamanager
+// (o escopo adwords sozinho dá 403). Developer token NÃO é usado aqui.
 
 async function googleAdsAccessToken(): Promise<string | null> {
   const clientId = (Deno.env.get('GOOGLE_ADS_CLIENT_ID') ?? '').trim()
@@ -113,46 +114,38 @@ async function googleAdsAccessToken(): Promise<string | null> {
 export async function uploadGoogleAdsConversion(args: {
   gclid: string; valueReais: number; orderId: string; when?: Date
 }): Promise<{ ok: boolean; error?: string }> {
-  const devToken = (Deno.env.get('GOOGLE_ADS_DEVELOPER_TOKEN') ?? '').trim()
   const customerId = onlyDigits(Deno.env.get('GOOGLE_ADS_CUSTOMER_ID'))
   const loginCustomerId = onlyDigits(Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID'))
   const actionId = onlyDigits(Deno.env.get('GOOGLE_ADS_CONVERSION_ACTION_ID'))
-  // Google aposenta versão da API ~a cada 4 meses (a antiga passa a devolver 404 HTML, não
-  // erro JSON). v18 morreu e deixava o upload em http_404. Sondar as vivas sem secret:
-  //   for v in v20 v21 v22 v23 v24; do curl -so/dev/null -w "$v %{http_code}\n" \
-  //     https://googleads.googleapis.com/$v/customers:listAccessibleCustomers; done  (401=viva, 404=morta)
-  // Quando a v22 cair, bump aqui ou via secret GOOGLE_ADS_API_VERSION.
-  const apiVersion = (Deno.env.get('GOOGLE_ADS_API_VERSION') ?? 'v22').trim()
-  if (!devToken || !customerId || !actionId) return { ok: false, error: 'nao_configurado' }
+  if (!customerId || !actionId) return { ok: false, error: 'nao_configurado' }
   if (!args.gclid) return { ok: false, error: 'sem_gclid' }
   const accessToken = await googleAdsAccessToken()
   if (!accessToken) return { ok: false, error: 'sem_access_token (confira client_id/secret/refresh_token)' }
-  const conversion = {
-    gclid: args.gclid,
-    conversionAction: `customers/${customerId}/conversionActions/${actionId}`,
-    conversionDateTime: gAdsDateTime(args.when ?? new Date()),
-    conversionValue: Math.max(0, args.valueReais),
-    currencyCode: 'BRL',
-    orderId: args.orderId,
+  const body = {
+    destinations: [{
+      operatingAccount: { accountType: 'GOOGLE_ADS', accountId: customerId },
+      // Quando o acesso é via conta de gerenciador (MCC), o login vai aqui.
+      ...(loginCustomerId ? { loginAccount: { accountType: 'GOOGLE_ADS', accountId: loginCustomerId } } : {}),
+      productDestinationId: actionId,
+    }],
+    events: [{
+      adIdentifiers: { gclid: args.gclid },
+      eventTimestamp: (args.when ?? new Date()).toISOString(),
+      transactionId: args.orderId,
+      conversionValue: Math.max(0, args.valueReais),
+      currency: 'BRL',
+      eventSource: 'WEB',
+    }],
   }
   try {
-    const res = await fetch(`https://googleads.googleapis.com/${apiVersion}/customers/${customerId}:uploadClickConversions`, {
+    const res = await fetch('https://datamanager.googleapis.com/v1/events:ingest', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'developer-token': devToken,
-        ...(loginCustomerId ? { 'login-customer-id': loginCustomerId } : {}),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ conversions: [conversion], partialFailure: true }),
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(12000),
     })
     const text = await res.text()
     if (!res.ok) return { ok: false, error: `http_${res.status}: ${text.slice(0, 400)}` }
-    try {
-      const j = JSON.parse(text) as { partialFailureError?: unknown; results?: unknown[] }
-      if (j.partialFailureError) return { ok: false, error: JSON.stringify(j.partialFailureError).slice(0, 400) }
-    } catch { /* corpo vazio em sucesso é ok */ }
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
