@@ -173,20 +173,11 @@ export function TricopilReportsPage() {
         </Button>
       </div>
 
-      {/* ---- Fechamento ---- */}
-      <SectionHeader icon={<Receipt className="size-4 text-emerald-600" />} title="Fechamento" onExport={exportClose} />
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Receita total" value={brl(c?.totalCents ?? 0)} hint={`${c?.count ?? 0} venda(s)`} delta={<DeltaBadge cur={c?.totalCents ?? 0} prev={prevPoint?.totalCents} />} />
-        <StatCard label="Ticket médio" value={brl(c?.ticketCents ?? 0)} delta={<DeltaBadge cur={c?.ticketCents ?? 0} prev={prevTicket} />} />
-        <StatCard label="Produtos" value={brl(c?.productCents ?? 0)} hint={`Frete: ${brl(c?.freightCents ?? 0)}`} />
-        <StatCard label="Cartão · Pix" valueClassName="text-base" value={`${brl(c?.cardCents ?? 0)} · ${brl(c?.pixCents ?? 0)}`} hint={`${c?.cardCount ?? 0} cartão · ${c?.pixCount ?? 0} Pix · descontos ${brl(c?.discountCents ?? 0)}`} />
-      </div>
-      {trend.length > 1 ? <div className="mt-3"><TrendChart points={trend} month={month} /></div> : null}
-
-      {/* ---- Bling completo: TUDO que foi vendido (site, WhatsApp, marketplace, manual) ---- */}
+      {/* ---- FECHAMENTO = BLING (tudo que foi vendido: site, WhatsApp, marketplace, manual).
+           O numero principal da tela e a venda COMPLETA; os gateways viram recorte abaixo. ---- */}
       <SectionHeader
         icon={<Store className="size-4 text-primary" />}
-        title="Bling · venda completa"
+        title="Fechamento · tudo que vendemos (Bling)"
         onExport={blingRows?.length ? () => downloadCsv(`bling-${month}.csv`, blingCsv(blingRows)) : undefined}
       />
       {blingRows === null ? (
@@ -203,7 +194,7 @@ export function TricopilReportsPage() {
           <>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard
-                label="Receita Bling (tudo)"
+                label="Receita total"
                 value={brl(totalCents)}
                 hint={`${ativos.length} pedido(s) · ticket ${brl(ativos.length ? Math.round(totalCents / ativos.length) : 0)}`}
               />
@@ -259,6 +250,16 @@ export function TricopilReportsPage() {
           </>
         )
       })()}
+
+      {/* ---- Recorte: recebido nos GATEWAYS (site + WhatsApp via e.Rede/Asaas) ---- */}
+      <SectionHeader icon={<Receipt className="size-4 text-emerald-600" />} title="Site + WhatsApp (recebido nos gateways)" onExport={exportClose} />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Recebido no período" value={brl(c?.totalCents ?? 0)} hint={`${c?.count ?? 0} venda(s)`} delta={<DeltaBadge cur={c?.totalCents ?? 0} prev={prevPoint?.totalCents} />} />
+        <StatCard label="Ticket médio" value={brl(c?.ticketCents ?? 0)} delta={<DeltaBadge cur={c?.ticketCents ?? 0} prev={prevTicket} />} />
+        <StatCard label="Produtos" value={brl(c?.productCents ?? 0)} hint={`Frete: ${brl(c?.freightCents ?? 0)}`} />
+        <StatCard label="Cartão · Pix" valueClassName="text-base" value={`${brl(c?.cardCents ?? 0)} · ${brl(c?.pixCents ?? 0)}`} hint={`${c?.cardCount ?? 0} cartão · ${c?.pixCount ?? 0} Pix · descontos ${brl(c?.discountCents ?? 0)}`} />
+      </div>
+      {trend.length > 1 ? <div className="mt-3"><TrendChart points={trend} month={month} /></div> : null}
       {c && c.byProduct.length > 0 ? (
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           <div className="rounded-md border border-border bg-card p-3">
