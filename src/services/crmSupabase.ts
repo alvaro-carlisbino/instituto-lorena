@@ -288,6 +288,33 @@ const mapSurveyResponseFromDb = (row: Record<string, unknown>): SurveyResponse =
   respondedAt: String(row.responded_at ?? new Date().toISOString()),
 })
 
+// Leads SEM teto: o PostgREST corta em 1000 linhas SILENCIOSAMENTE (mesmo golpe das
+// interactions) e a base já passou de 1.600 leads vivos — o excedente sumia do painel
+// (lead "não encontrado" no /pedidos → Entrega "Não inform.", origem "Site"). Pagina em
+// blocos de 1000 até esgotar; o desempate por id é OBRIGATÓRIO pro range não pular/duplicar
+// linhas entre páginas (position tem centenas de empates).
+const LEAD_SELECT =
+  'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at, stage_entered_at, tenant_id'
+const fetchAllLeadsPaged = async (
+  client: ReturnType<typeof assertSupabase>,
+): Promise<{ data: Record<string, unknown>[]; error: unknown }> => {
+  const PAGE = 1000
+  const all: Record<string, unknown>[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await client
+      .from('leads')
+      .select(LEAD_SELECT)
+      .is('deleted_at', null)
+      .order('position', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) return { data: all, error }
+    all.push(...((data ?? []) as Record<string, unknown>[]))
+    if (!data || data.length < PAGE) break
+  }
+  return { data: all, error: null }
+}
+
 export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   const client = assertSupabase()
 
@@ -311,13 +338,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     client.from('pipelines').select('id, name, board_config, tenant_id').order('name', { ascending: true }),
     client.from('pipeline_stages').select('id, pipeline_id, name, position').order('position', { ascending: true }),
     client.from('app_users').select('id, name, email, auth_user_id, active, role').order('name', { ascending: true }),
-    client
-      .from('leads')
-      .select(
-        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at, stage_entered_at, tenant_id',
-      )
-      .is('deleted_at', null)
-      .order('position', { ascending: true }),
+    fetchAllLeadsPaged(client),
     client
       .from('interactions')
       .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
@@ -687,13 +708,7 @@ export type ChatSlice = {
 export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
   const client = assertSupabase()
   const [leadsRes, interactionsRes, tagAssignRes, mediaRes, followupRes] = await Promise.all([
-    client
-      .from('leads')
-      .select(
-        'id, patient_name, phone, source, created_at, position, score, temperature, owner_id, pipeline_id, stage_id, summary, custom_fields, whatsapp_instance_id, conversation_status, lost_reason, last_interaction_at, stage_entered_at, tenant_id',
-      )
-      .is('deleted_at', null)
-      .order('position', { ascending: true }),
+    fetchAllLeadsPaged(client),
     client
       .from('interactions')
       .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')

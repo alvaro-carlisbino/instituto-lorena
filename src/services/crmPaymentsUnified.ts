@@ -49,7 +49,7 @@ export type UnifiedPayment = {
   blingOrderId: string | null
   createdAt: string
   paidAt: string | null
-  /** Frete em centavos embutido no total (só Asaas grava; null = não informado). */
+  /** Frete em centavos embutido no total (Asaas e Rede gravam; null = não informado). */
   freightCents: number | null
   /** ID do pedido no Melhor Envio (base p/ rastreio; só Asaas). */
   meOrderId: string | null
@@ -82,7 +82,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
       .limit(limit),
     supabase
       .from('rede_payments')
-      .select('id, lead_id, method, amount_cents, description, kit, installments, status, tid, return_code, customer_name, phone, customer_doc, bling_order_id, created_at, paid_at, items, nfe_status, nfe_numero')
+      .select('id, lead_id, method, amount_cents, description, kit, installments, status, tid, return_code, customer_name, phone, customer_doc, bling_order_id, created_at, paid_at, items, nfe_status, nfe_numero, freight_cents')
       .order('created_at', { ascending: false })
       .limit(limit),
     supabase
@@ -147,7 +147,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         blingOrderId: str(rec.bling_order_id),
         createdAt: String(rec.created_at ?? ''),
         paidAt,
-        freightCents: null,
+        freightCents: rec.freight_cents != null ? Number(rec.freight_cents) : null,
         meOrderId: null,
         items: parseItems(rec.items),
         nfeStatus: str(rec.nfe_status),

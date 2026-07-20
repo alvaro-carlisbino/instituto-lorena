@@ -901,6 +901,12 @@ export function TricopilOrdersPage() {
                               <span className="text-muted-foreground">Cobrado</span>
                               <span className="font-semibold tabular-nums">{brl(p.amountCents)}</span>
                             </div>
+                            {p.freightCents != null && p.freightCents > 0 ? (
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground">Frete incluído</span>
+                                <span className="font-semibold tabular-nums">{brl(p.freightCents)}</span>
+                              </div>
+                            ) : null}
                             {recon?.bankAmountCents != null ? (
                               <div className="mt-1 space-y-1">
                                 <div className="flex items-center justify-between text-xs">
