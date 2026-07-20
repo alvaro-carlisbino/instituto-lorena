@@ -178,12 +178,20 @@ export async function dispatchPurchaseConversions(admin: SupabaseClient, input: 
     if (!lead) return
     const cf = (lead.custom_fields ?? {}) as Record<string, unknown>
     const origin = String(cf.origin ?? '').trim()
-    // Escopo: conversão WEB é só do SITE. Vendas do bot/link do WhatsApp têm o próprio
-    // relatório no CRM e não são tráfego web (não devem entrar no funil nem no GA4/Meta site).
-    if (origin !== 'site') return
+    const { gclid, fbclid, gaClientId, gaSessionId } = pickAttr(cf)
+    // Escopo: funil interno + GA4 + Meta são só do SITE. Vendas do bot/link do WhatsApp têm
+    // o próprio relatório no CRM e não são tráfego web. MAS o Google Ads é exceção: se o
+    // lead tem gclid (clicou no anúncio e fechou na conversa — ponte SITE-<sid>), a
+    // conversão volta pro Google mesmo com a venda fechando fora do site.
+    if (origin !== 'site') {
+      if (gclid) {
+        const r = await uploadGoogleAdsConversion({ gclid, valueReais: Math.round(input.valueCents) / 100, orderId: input.orderId })
+        if (!r.ok && r.error && r.error !== 'nao_configurado') console.warn('[gads] upload falhou:', r.error)
+      }
+      return
+    }
     const cad = (cf.cadastro ?? {}) as Record<string, unknown>
     const ent = (cf.entrega ?? {}) as Record<string, unknown>
-    const { gclid, fbclid, gaClientId, gaSessionId } = pickAttr(cf)
 
     const email = String(input.email ?? cf.email ?? cad.email ?? '').trim().toLowerCase()
     const phone = phoneE164BR(input.phone ?? lead.phone ?? cad.telefone ?? ent.telefone)

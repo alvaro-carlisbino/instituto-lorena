@@ -90,7 +90,8 @@ Deno.serve(async (req) => {
       if (!r.lead_id) { results.push({ orderId: r.id, hasGclid: false, ok: false, error: 'sem_lead' }); continue }
       const { data: l } = await admin.from('leads').select('patient_name, custom_fields').eq('id', r.lead_id).maybeSingle()
       const cf = (((l as { custom_fields?: Record<string, unknown> } | null)?.custom_fields) ?? {}) as Record<string, unknown>
-      if (String(cf.origin ?? '') !== 'site') { results.push({ orderId: r.id, hasGclid: false, ok: false, error: 'nao_site' }); continue }
+      // Qualquer origem serve: venda do bot/WhatsApp com gclid (ponte SITE-<sid>) também
+      // volta pro Google. O que decide é ter gclid, não onde a venda fechou.
       const attr = (cf.attribution ?? {}) as Record<string, unknown>
       const first = (attr.first ?? {}) as Record<string, unknown>
       const gclid = String(first.gclid ?? (attr as Record<string, unknown>).gclid ?? '').trim()
