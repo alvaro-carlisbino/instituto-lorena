@@ -679,6 +679,43 @@ export async function blingCreateSaleOrder(
   }
   const orderId = await blingCreateOrder(token, payload)
 
+  // TOTAL DO PEDIDO = VALOR COBRADO, sempre (decisão do Álvaro, 20/jul — "opção B").
+  // Produto de KIT tem preço fixo no cadastro do Bling e ele IGNORA o valor de item que a
+  // gente manda (casos Jean/Fernando 19/07: cobrado R$635,96/633,35 no 12x, pedido gravado
+  // R$626,45/623,88 — a diferença é o juros do parcelado que o rateio acima não consegue
+  // colar no item de kit). Conferimos o total que o Bling GRAVOU e, se ficou abaixo do
+  // cobrado, lançamos a diferença em `outrasDespesas` via GET+PUT (Bling não tem PATCH).
+  // A NF-e continua saindo por itens+frete (sem o encargo financeiro — correto fiscalmente).
+  // Best-effort: nunca derruba a venda.
+  if (orderId) {
+    try {
+      const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' }
+      const gr = await fetch(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, { headers: bh })
+      if (gr.ok) {
+        const od = (JSON.parse((await gr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+        const chargedReais = Math.round(args.amountCents) / 100
+        const totalBling = Number(od.total ?? 0)
+        const diff = Math.round((chargedReais - totalBling) * 100) / 100
+        // Sanidade: só corrige diferenças plausíveis de juros/arredondamento (até R$100).
+        if (totalBling > 0 && diff > 0.05 && diff < 100) {
+          od.outrasDespesas = Math.round(((Number(od.outrasDespesas) || 0) + diff) * 100) / 100
+          // O Bling valida que as PARCELAS somam o total: joga a diferença na última.
+          const parc = Array.isArray(od.parcelas) ? (od.parcelas as Array<Record<string, unknown>>) : []
+          if (parc.length) {
+            const last = parc[parc.length - 1]
+            last.valor = Math.round(((Number(last.valor) || 0) + diff) * 100) / 100
+          }
+          const pr = await fetch(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, {
+            method: 'PUT', headers: bh, body: JSON.stringify(od),
+          })
+          if (!pr.ok) console.warn('[bling] ajuste outrasDespesas falhou:', pr.status, (await pr.text()).slice(0, 200))
+        }
+      }
+    } catch (e) {
+      console.warn('[bling] conferência total × cobrado falhou:', e instanceof Error ? e.message : String(e))
+    }
+  }
+
   // NF-e automática (gated): só quando o tenant habilitou (auto_nfe_enabled) E configurou a
   // natureza de operação (natureza_operacao_id). Emitir nota é AÇÃO FISCAL irreversível — por
   // isso fica OFF por padrão e a transmissão ao SEFAZ exige auto_nfe_transmit=true. Sem CPF
