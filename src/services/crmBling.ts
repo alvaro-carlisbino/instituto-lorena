@@ -184,6 +184,25 @@ export async function nfeEmit(paymentId: string, transmit?: boolean): Promise<Nf
   }
 }
 
+// Linha do relatório COMPLETO de vendas: todo pedido do Bling no período, com a origem
+// classificada ('crm' = casado com pagamento rede/asaas; senão marketplace/manual).
+export type BlingSaleRow = {
+  orderId: string
+  numero: string
+  date: string
+  name: string
+  totalCents: number
+  canceled: boolean
+  viaCrm: boolean
+  gateway: string | null
+}
+
+/** TODOS os pedidos de venda do Bling no período, com origem CRM × externo. */
+export async function blingSalesList(from: string, to: string): Promise<BlingSaleRow[]> {
+  const p = await invokeBling({ action: 'bling_sales_list', from, to })
+  return Array.isArray(p.items) ? (p.items as BlingSaleRow[]) : []
+}
+
 /** Emite a NF-e de UM pedido do Bling pelo id do pedido (não exige venda no CRM). */
 export async function nfeEmitOrder(orderId: string, transmit?: boolean): Promise<NfeEmitResult> {
   if (!supabase) return { ok: false, message: 'Sistema não configurado.' }

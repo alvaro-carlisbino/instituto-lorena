@@ -614,6 +614,65 @@ Deno.serve(async (req) => {
     return json({ ok: true, items })
   }
 
+  // bling_sales_list: TODOS os pedidos de venda do Bling num período, classificados por
+  // origem — 'crm' (casado com pagamento rede/asaas pelo bling_order_id) ou 'externo'
+  // (marketplace/manual, só existe no Bling). Base do relatório de vendas COMPLETO:
+  // receita total = Bling, não só site/WhatsApp.
+  if (action === 'bling_sales_list') {
+    const from = String(payload.from ?? '').trim()
+    const to = String(payload.to ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return json({ ok: false, error: 'periodo_invalido' }, 400)
+    }
+    const token = await getValidBlingToken(admin, 'tricopill')
+    if (!token) return json({ ok: false, error: 'bling_indisponivel' }, 502)
+    const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json' }
+
+    const orders: Array<Record<string, unknown>> = []
+    for (let page = 1; page <= 10; page++) {
+      const u = `https://api.bling.com.br/Api/v3/pedidos/vendas?pagina=${page}&limite=100&dataInicial=${from}&dataFinal=${to}`
+      const r = await fetch(u, { headers: bh })
+      if (!r.ok) {
+        if (page === 1) return json({ ok: false, error: 'bling_pedidos_falhou', status: r.status }, 502)
+        break
+      }
+      const data = (JSON.parse((await r.text()) || '{}')?.data ?? []) as Array<Record<string, unknown>>
+      orders.push(...data)
+      if (data.length < 100) break
+      await new Promise((res) => setTimeout(res, 350))
+    }
+
+    const ids = orders.map((o) => String(o.id))
+    const gatewayByOrder = new Map<string, string>()
+    if (ids.length) {
+      for (const [table, gw] of [['rede_payments', 'rede'], ['asaas_payments', 'asaas']] as const) {
+        const { data: pays } = await admin
+          .from(table).select('bling_order_id')
+          .eq('tenant_id', 'tricopill').in('bling_order_id', ids)
+        for (const p of (pays ?? []) as Array<Record<string, unknown>>) {
+          gatewayByOrder.set(String(p.bling_order_id), gw)
+        }
+      }
+    }
+
+    const items = orders.map((o) => {
+      const contato = (o.contato ?? {}) as Record<string, unknown>
+      const situacao = (o.situacao ?? {}) as Record<string, unknown>
+      const gw = gatewayByOrder.get(String(o.id)) ?? null
+      return {
+        orderId: String(o.id),
+        numero: String(o.numero ?? ''),
+        date: String(o.data ?? ''),
+        name: String(contato.nome ?? '').trim() || 'Cliente',
+        totalCents: Math.round(Number(o.total ?? 0) * 100),
+        canceled: Number(situacao.id ?? 0) === 12,
+        viaCrm: gw != null,
+        gateway: gw,
+      }
+    })
+    return json({ ok: true, items })
+  }
+
   // nfe_emit_order: emite a NF-e de UM pedido do Bling pelo id do PEDIDO (não exige venda no
   // CRM). CPF sai do contato do pedido. Grava o desfecho em bling_nfe_emissions e espelha em
   // rede_payments quando o pedido veio de uma venda do CRM (mantém /pedidos coerente).

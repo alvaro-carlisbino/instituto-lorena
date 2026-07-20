@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { Download, RefreshCw, FileSpreadsheet, Package, Repeat, Receipt, TrendingUp, TrendingDown } from 'lucide-react'
+import { Download, RefreshCw, FileSpreadsheet, Package, Repeat, Receipt, Store, TrendingUp, TrendingDown } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
@@ -23,6 +23,21 @@ import {
   type MonthPoint,
   type Shipment,
 } from '@/services/tricopillReports'
+import { blingSalesList, type BlingSaleRow } from '@/services/crmBling'
+
+// CSV do relatório completo do Bling (todos os pedidos, com origem CRM × externo).
+function blingCsv(rows: BlingSaleRow[]): string {
+  const head = 'data;numero;cliente;valor;origem;status'
+  const body = rows.map((r) => [
+    r.date,
+    r.numero,
+    r.name.replace(/;/g, ','),
+    (r.totalCents / 100).toFixed(2).replace('.', ','),
+    r.viaCrm ? `CRM (${r.gateway})` : 'Marketplace/Manual',
+    r.canceled ? 'cancelado' : 'ativo',
+  ].join(';'))
+  return [head, ...body].join('\n')
+}
 
 const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-BR') : '—')
@@ -75,13 +90,15 @@ function TrendChart({ points, month }: { points: MonthPoint[]; month: string }) 
   )
 }
 
-function SectionHeader({ icon, title, onExport }: { icon: React.ReactNode; title: string; onExport: () => void }) {
+function SectionHeader({ icon, title, onExport }: { icon: React.ReactNode; title: string; onExport?: () => void }) {
   return (
     <div className="mb-2 mt-6 flex items-center justify-between">
       <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">{icon} {title}</h2>
-      <Button type="button" variant="outline" size="sm" onClick={onExport}>
-        <Download className="mr-1.5 size-4" aria-hidden /> CSV
-      </Button>
+      {onExport ? (
+        <Button type="button" variant="outline" size="sm" onClick={onExport}>
+          <Download className="mr-1.5 size-4" aria-hidden /> CSV
+        </Button>
+      ) : null}
     </div>
   )
 }
@@ -91,19 +108,25 @@ export function TricopilReportsPage() {
   const [report, setReport] = useState<MonthlyReport | null>(null)
   const [shipments, setShipments] = useState<Shipment[]>([])
   const [trend, setTrend] = useState<MonthPoint[]>([])
+  const [blingRows, setBlingRows] = useState<BlingSaleRow[] | null>(null)
   const [loading, setLoading] = useState(false)
 
   const load = useCallback(async (m: string) => {
     setLoading(true)
     try {
-      const [rep, ship, tr] = await Promise.all([
+      // Intervalo do mês pro Bling (data do pedido): 1º dia até o último dia.
+      const [y, mm] = m.split('-').map(Number)
+      const lastDay = new Date(y, mm, 0).getDate()
+      const [rep, ship, tr, bl] = await Promise.all([
         fetchMonthlyReport(m),
         fetchShipmentsReport(m).catch(() => [] as Shipment[]),
         fetchMonthlyTrend(m, 6).catch(() => [] as MonthPoint[]),
+        blingSalesList(`${m}-01`, `${m}-${String(lastDay).padStart(2, '0')}`).catch(() => null),
       ])
       setReport(rep)
       setShipments(ship)
       setTrend(tr)
+      setBlingRows(bl)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar os relatórios.')
     } finally {
@@ -159,6 +182,83 @@ export function TricopilReportsPage() {
         <StatCard label="Cartão · Pix" valueClassName="text-base" value={`${brl(c?.cardCents ?? 0)} · ${brl(c?.pixCents ?? 0)}`} hint={`${c?.cardCount ?? 0} cartão · ${c?.pixCount ?? 0} Pix · descontos ${brl(c?.discountCents ?? 0)}`} />
       </div>
       {trend.length > 1 ? <div className="mt-3"><TrendChart points={trend} month={month} /></div> : null}
+
+      {/* ---- Bling completo: TUDO que foi vendido (site, WhatsApp, marketplace, manual) ---- */}
+      <SectionHeader
+        icon={<Store className="size-4 text-primary" />}
+        title="Bling · venda completa"
+        onExport={blingRows?.length ? () => downloadCsv(`bling-${month}.csv`, blingCsv(blingRows)) : undefined}
+      />
+      {blingRows === null ? (
+        <p className="rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+          Bling indisponível agora. O fechamento acima cobre só site e WhatsApp; atualize pra tentar de novo.
+        </p>
+      ) : (() => {
+        const ativos = blingRows.filter((r) => !r.canceled)
+        const viaCrm = ativos.filter((r) => r.viaCrm)
+        const externos = ativos.filter((r) => !r.viaCrm)
+        const sum = (rows: BlingSaleRow[]) => rows.reduce((s, r) => s + r.totalCents, 0)
+        const totalCents = sum(ativos)
+        return (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard
+                label="Receita Bling (tudo)"
+                value={brl(totalCents)}
+                hint={`${ativos.length} pedido(s) · ticket ${brl(ativos.length ? Math.round(totalCents / ativos.length) : 0)}`}
+              />
+              <StatCard
+                label="Via CRM (site + WhatsApp)"
+                value={brl(sum(viaCrm))}
+                hint={`${viaCrm.length} pedido(s)`}
+              />
+              <StatCard
+                label="Marketplace / manual"
+                value={brl(sum(externos))}
+                hint={`${externos.length} pedido(s) que só existem no Bling`}
+              />
+              <StatCard
+                label="Cancelados"
+                value={String(blingRows.length - ativos.length)}
+                hint="fora da soma"
+              />
+            </div>
+            {externos.length > 0 ? (
+              <div className="mt-3 rounded-md border border-border bg-card p-3">
+                <p className="mb-2 text-xs font-semibold text-muted-foreground">
+                  Pedidos fora do CRM (invisíveis nos relatórios antigos)
+                </p>
+                <div className="overflow-x-auto">
+                  <Table className="text-xs">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Data</TableHead>
+                        <TableHead>Pedido</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {externos.map((r) => (
+                        <TableRow key={r.orderId} className="border-border/40">
+                          <TableCell className="py-1.5 whitespace-nowrap">{r.date.split('-').reverse().join('/')}</TableCell>
+                          <TableCell className="py-1.5 tabular-nums">#{r.numero || r.orderId}</TableCell>
+                          <TableCell className="py-1.5">{r.name}</TableCell>
+                          <TableCell className="py-1.5 text-right tabular-nums font-medium">{brl(r.totalCents)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+                Neste mês, todo pedido do Bling nasceu no CRM (site ou WhatsApp). Quando entrar venda de marketplace ou manual, ela aparece aqui.
+              </p>
+            )}
+          </>
+        )
+      })()}
       {c && c.byProduct.length > 0 ? (
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           <div className="rounded-md border border-border bg-card p-3">
