@@ -186,67 +186,16 @@ export function TricopilReportsPage() {
         </p>
       ) : (() => {
         const ativos = blingRows.filter((r) => !r.canceled)
-        const viaCrm = ativos.filter((r) => r.viaCrm)
-        const externos = ativos.filter((r) => !r.viaCrm)
-        const sum = (rows: BlingSaleRow[]) => rows.reduce((s, r) => s + r.totalCents, 0)
-        const totalCents = sum(ativos)
+        const totalCents = ativos.reduce((acc, r) => acc + r.totalCents, 0)
         return (
           <>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <StatCard
-                label="Receita total"
-                value={brl(totalCents)}
-                hint={`${ativos.length} pedido(s) · ticket ${brl(ativos.length ? Math.round(totalCents / ativos.length) : 0)}`}
-              />
-              <StatCard
-                label="Via CRM (site + WhatsApp)"
-                value={brl(sum(viaCrm))}
-                hint={`${viaCrm.length} pedido(s)`}
-              />
-              <StatCard
-                label="Marketplace / manual"
-                value={brl(sum(externos))}
-                hint={`${externos.length} pedido(s) que só existem no Bling`}
-              />
-              <StatCard
-                label="Cancelados"
-                value={String(blingRows.length - ativos.length)}
-                hint="fora da soma"
-              />
+              <StatCard label="Receita total" value={brl(totalCents)} hint="todos os canais somados" />
+              <StatCard label="Pedidos" value={String(ativos.length)} hint="no mês, todos os canais" />
+              <StatCard label="Ticket médio" value={brl(ativos.length ? Math.round(totalCents / ativos.length) : 0)} />
+              <StatCard label="Cancelados" value={String(blingRows.length - ativos.length)} hint="fora da soma" />
             </div>
-            {externos.length > 0 ? (
-              <div className="mt-3 rounded-md border border-border bg-card p-3">
-                <p className="mb-2 text-xs font-semibold text-muted-foreground">
-                  Pedidos fora do CRM (invisíveis nos relatórios antigos)
-                </p>
-                <div className="overflow-x-auto">
-                  <Table className="text-xs">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Data</TableHead>
-                        <TableHead>Pedido</TableHead>
-                        <TableHead>Cliente</TableHead>
-                        <TableHead className="text-right">Valor</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {externos.map((r) => (
-                        <TableRow key={r.orderId} className="border-border/40">
-                          <TableCell className="py-1.5 whitespace-nowrap">{r.date.split('-').reverse().join('/')}</TableCell>
-                          <TableCell className="py-1.5 tabular-nums">#{r.numero || r.orderId}</TableCell>
-                          <TableCell className="py-1.5">{r.name}</TableCell>
-                          <TableCell className="py-1.5 text-right tabular-nums font-medium">{brl(r.totalCents)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-3 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-                Neste mês, todo pedido do Bling nasceu no CRM (site ou WhatsApp). Quando entrar venda de marketplace ou manual, ela aparece aqui.
-              </p>
-            )}
+            
           </>
         )
       })()}
