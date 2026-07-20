@@ -432,6 +432,11 @@ verify_jwt = false
 [functions.crm-reengage-scheduler]
 verify_jwt = false
 
+# Follow-up do lead magnet (popup de cupom): 1x/dia via pg_cron, só e-mail. Mesma
+# razão do verify_jwt=false; aceita x-cron-secret opcional. Nasce em dry-run.
+[functions.crm-leadmagnet-followup]
+verify_jwt = false
+
 # Webhook de pagamento PagBank: chamado pelo PagBank sem JWT (mapeia pelo reference_id).
 [functions.crm-pagbank-webhook]
 verify_jwt = false

@@ -92,3 +92,35 @@ export async function sendCartRecoveryEmail(args: {
     html: shell(inner),
   })
 }
+
+// Follow-up de quem pegou o cupom no popup do site (lead magnet) e não comprou.
+// Relembra o CLUBE10, mostra o kit mais escolhido e leva de volta pra loja.
+export async function sendLeadMagnetFollowupEmail(args: {
+  to: string
+  firstName?: string
+  couponCode?: string
+  couponPct?: number
+}): Promise<{ ok: boolean; error?: string }> {
+  const nome = (args.firstName && args.firstName.trim()) ? args.firstName.trim() : 'oi'
+  const cupom = args.couponCode || 'CLUBE10'
+  const pct = args.couponPct ?? 10
+  const inner = `
+    <h1 style="font-size:21px;margin:0 0 14px;">${nome}, seu cupom de ${pct}% ainda está de pé 🌿</h1>
+    <p style="font-size:15px;line-height:1.65;margin:0 0 12px;">
+      Você pegou o cupom <strong>${cupom}</strong> no nosso site, mas não chegou a fazer o pedido.
+      Ele continua valendo em <strong>qualquer produto</strong> da Tricopill, é só aplicar no carrinho.
+    </p>
+    <div style="background:#faf6ef;border:1px solid #e7dcc7;border-radius:10px;padding:16px 18px;margin:16px 0;">
+      <p style="font-size:14px;line-height:1.6;margin:0 0 4px;"><strong>Mais escolhido:</strong> Kit Fortalecimento (3 meses)</p>
+      <p style="font-size:13px;line-height:1.6;color:#6b6156;margin:0;">4 frascos pelo preço de 3 · equivale a R$149/frasco · Pix com 5% off.</p>
+    </div>
+    ${btn('https://tricopill.com.br/produto/tricopill-fortalecimento', `Usar meu cupom ${cupom}`)}
+    <p style="font-size:13px;line-height:1.6;color:#6b6156;text-align:center;margin:0;">
+      Prefere tirar uma dúvida antes? Chama no WhatsApp (44) 99906-7665, a gente te ajuda a escolher.
+    </p>`
+  return sendEmail({
+    to: args.to,
+    subject: `${nome}, seu cupom ${cupom} de ${pct}% ainda está ativo`,
+    html: shell(inner),
+  })
+}
