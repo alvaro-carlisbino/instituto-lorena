@@ -479,6 +479,73 @@ Deno.serve(async (req) => {
     }
   }
 
+  // product_update_price: grava preço novo de UM produto no Bling (GET completo + PUT, o
+  // Bling não tem PATCH) e derruba o cache do catálogo pra loja/bot verem o preço na hora.
+  if (action === 'product_update_price') {
+    const productId = String(payload.productId ?? '').trim()
+    const precoReais = Number(payload.preco ?? NaN)
+    if (!productId || !Number.isFinite(precoReais) || precoReais < 0) {
+      return json({ ok: false, error: 'dados_invalidos' }, 400)
+    }
+    const token = await getValidBlingToken(admin, 'tricopill')
+    if (!token) return json({ ok: false, error: 'bling_indisponivel' }, 502)
+    const bh = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Accept: 'application/json' }
+    try {
+      const gr = await fetch(`https://api.bling.com.br/Api/v3/produtos/${productId}`, { headers: bh })
+      if (!gr.ok) return json({ ok: false, error: 'produto_nao_lido', status: gr.status }, 502)
+      const full = (JSON.parse((await gr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+      const precoAntigo = Number(full.preco ?? 0)
+      full.preco = precoReais
+      const pr = await fetch(`https://api.bling.com.br/Api/v3/produtos/${productId}`, {
+        method: 'PUT', headers: bh, body: JSON.stringify(full),
+      })
+      const txt = await pr.text()
+      if (!pr.ok) return json({ ok: false, error: 'bling_preco_falhou', status: pr.status, message: txt.slice(0, 300) }, 502)
+      try { await buildBlingCatalog(admin, 'tricopill', { forceRefresh: true }) } catch { /* cache atualiza no próximo uso */ }
+      return json({ ok: true, precoAntigo, preco: precoReais })
+    } catch (e) {
+      return json({ ok: false, error: 'bling_preco_erro', message: e instanceof Error ? e.message : String(e) }, 502)
+    }
+  }
+
+  // stock_adjust: movimentação de estoque manual no Bling (E = entrada, S = saída/baixa),
+  // no depósito padrão. Complementa o stock_entry (que é só entrada por NF-e).
+  if (action === 'stock_adjust') {
+    const blingProductId = String(payload.blingProductId ?? '').trim()
+    const qty = Number(payload.qty ?? 0)
+    const op = payload.operacao === 'S' ? 'S' : 'E'
+    const note = String(payload.note ?? 'Ajuste manual (painel do site)').slice(0, 200)
+    if (!blingProductId || !(qty > 0)) return json({ ok: false, error: 'dados_invalidos' }, 400)
+    const token = await getValidBlingToken(admin, 'tricopill')
+    if (!token) return json({ ok: false, error: 'bling_indisponivel' }, 502)
+    const bh = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Accept: 'application/json' }
+    try {
+      let depositoId = ''
+      const dr = await fetch('https://api.bling.com.br/Api/v3/depositos', { headers: bh })
+      if (dr.ok) {
+        const deps = (JSON.parse((await dr.text()) || '{}')?.data ?? []) as Array<Record<string, unknown>>
+        depositoId = String((deps.find((d) => d.padrao === true) ?? deps[0] ?? {}).id ?? '')
+      }
+      if (!depositoId) return json({ ok: false, error: 'deposito_nao_encontrado' }, 502)
+      const er = await fetch('https://api.bling.com.br/Api/v3/estoques', {
+        method: 'POST', headers: bh,
+        body: JSON.stringify({
+          produto: { id: Number(blingProductId) || blingProductId },
+          deposito: { id: Number(depositoId) || depositoId },
+          operacao: op,
+          quantidade: qty,
+          observacoes: note,
+        }),
+      })
+      const txt = await er.text()
+      if (!er.ok) return json({ ok: false, error: 'bling_estoque_falhou', status: er.status, message: txt.slice(0, 300) }, 502)
+      try { await buildBlingCatalog(admin, 'tricopill', { forceRefresh: true }) } catch { /* cache atualiza no próximo uso */ }
+      return json({ ok: true, operacao: op, qty })
+    } catch (e) {
+      return json({ ok: false, error: 'bling_estoque_erro', message: e instanceof Error ? e.message : String(e) }, 502)
+    }
+  }
+
   // nfe_list_bling: TODOS os pedidos de venda do Bling no período (data do pedido), não só os
   // que nasceram no CRM — inclui pedidos criados direto no Bling e de marketplace. O estado da
   // NF-e vem de bling_nfe_emissions (emissões por pedido) + rede_payments (emissões antigas).
