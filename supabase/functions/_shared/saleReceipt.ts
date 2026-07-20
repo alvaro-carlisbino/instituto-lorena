@@ -334,7 +334,7 @@ async function deliverOwnerCopy(admin: SupabaseClient, d: SaleReceiptInput): Pro
 }
 
 type RedeRow = {
-  id: string; tenant_id: string; method?: string; amount_cents: number; installments?: number
+  id: string; tenant_id: string; lead_id?: string | null; method?: string; amount_cents: number; installments?: number
   kit?: string | null; description?: string | null; coupon_code?: string | null; discount_cents?: number | null
   bling_order_id?: string | null; tid?: string | null; customer_name?: string | null
   phone?: string | null; customer_doc?: string | null; freight_cents?: number | null; paid_at?: string | null
@@ -344,6 +344,41 @@ type AsaasRow = RedeRow & { asaas_payment_id?: string | null }
 function methodOf(m?: string | null): 'pix' | 'card' | 'other' {
   const v = String(m ?? '').toLowerCase()
   return v === 'pix' ? 'pix' : v === 'card' || v === 'credit_card' || v === 'cartao' ? 'card' : 'other'
+}
+
+type LeadLite = { patient_name?: string | null; phone?: string | null; custom_fields?: Record<string, unknown> | null }
+
+/**
+ * Completa o comprador pelo LEAD quando a linha do pagamento veio sem cadastro — cobrança
+ * do bot é criada ANTES de o cliente ditar os dados, então customer_name/doc ficam nulos
+ * na tabela e o comprovante saía "(sem dados do comprador)" mesmo com o lead completo
+ * (caso Jacqueline 20/07). O cadastro vive em custom_fields.cadastro/entrega.
+ */
+async function enrichBuyerFromLead(admin: SupabaseClient, leadId: string | null | undefined, d: SaleReceiptInput): Promise<SaleReceiptInput> {
+  const id = String(leadId ?? '').trim()
+  const b = d.buyer ?? {}
+  const falta = !(b.name ?? '').trim() || !(b.cpf ?? '').trim() || !(b.phone ?? '').trim() || !b.entrega
+  if (!id || !falta) return d
+  try {
+    const { data } = await admin.from('leads').select('patient_name, phone, custom_fields').eq('id', id).maybeSingle()
+    const lead = data as LeadLite | null
+    if (!lead) return d
+    const cf = (lead.custom_fields ?? {}) as Record<string, unknown>
+    const cad = (cf.cadastro ?? {}) as Record<string, unknown>
+    const s = (v: unknown) => { const t = String(v ?? '').trim(); return t || undefined }
+    return {
+      ...d,
+      buyer: {
+        name: (b.name ?? '').trim() || s(cad.nomeCompleto) || s(lead.patient_name),
+        cpf: (b.cpf ?? '').trim() || s(cad.cpf),
+        phone: (b.phone ?? '').trim() || s(lead.phone),
+        email: (b.email ?? '').trim() || s(cad.email) || s(cf.email),
+        entrega: b.entrega ?? ((cf.entrega ?? null) as Record<string, unknown> | null),
+      },
+    }
+  } catch {
+    return d // enriquecimento nunca segura o comprovante
+  }
 }
 
 function rowToReceipt(row: RedeRow, gateway: string, transactionId?: string | null): SaleReceiptInput {
@@ -385,7 +420,7 @@ export async function resendMissingSaleReceipts(
   let checked = 0, groupSent = 0, ownerSent = 0
   const handle = async (row: RedeRow & { receipt_group_sent_at?: string | null; receipt_owner_sent_at?: string | null }, gateway: string, txId?: string | null) => {
     checked++
-    const d = rowToReceipt(row, gateway, txId)
+    const d = await enrichBuyerFromLead(admin, row.lead_id, rowToReceipt(row, gateway, txId))
     // Comprovante do GRUPO (financeiro) — só se ainda não foi.
     if (row.receipt_group_sent_at == null && await sendSaleReceiptToGroup(admin, d)) groupSent++
     // CÓPIA do DONO (Álvaro) — marca própria, independente do grupo.
@@ -396,7 +431,7 @@ export async function resendMissingSaleReceipts(
   }
 
   try {
-    const redeCols = 'id, tenant_id, method, amount_cents, installments, kit, description, coupon_code, discount_cents, bling_order_id, tid, customer_name, phone, customer_doc, freight_cents, paid_at, receipt_group_sent_at, receipt_owner_sent_at'
+    const redeCols = 'id, tenant_id, lead_id, method, amount_cents, installments, kit, description, coupon_code, discount_cents, bling_order_id, tid, customer_name, phone, customer_doc, freight_cents, paid_at, receipt_group_sent_at, receipt_owner_sent_at'
     const { data: rede } = await admin.from('rede_payments').select(redeCols)
       .eq('status', 'paid').or(missing)
       .gte('paid_at', sinceIso).lte('paid_at', untilIso).limit(limit)
