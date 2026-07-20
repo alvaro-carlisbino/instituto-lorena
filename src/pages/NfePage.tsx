@@ -14,11 +14,11 @@ import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  type NfeRow,
+  type NfeOrderRow,
   getBlingOrderConfig,
   setBlingOrderConfig,
-  nfeList,
-  nfeEmit,
+  nfeListBling,
+  nfeEmitOrder,
 } from '@/services/crmBling'
 import { useTenant } from '@/context/TenantContext'
 
@@ -38,11 +38,12 @@ const fmtCpf = (v: string) => {
 }
 const fmtDate = (iso: string | null) => {
   if (!iso) return ''
-  const d = new Date(iso)
+  // Data do pedido vem como YYYY-MM-DD do Bling; parse local pra não voltar um dia no fuso.
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T12:00:00` : iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('pt-BR')
 }
 
-type RowState = NfeRow & { emitting?: boolean }
+type RowState = NfeOrderRow & { emitting?: boolean }
 
 export function NfePage() {
   const { tenant } = useTenant()
@@ -81,10 +82,10 @@ export function NfePage() {
     setLoading(true)
     setSelected(new Set())
     try {
-      const list = await nfeList(from, to)
+      const list = await nfeListBling(from, to)
       setRows(list)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao carregar as vendas')
+      toast.error(e instanceof Error ? e.message : 'Falha ao carregar os pedidos do Bling')
     } finally {
       setLoading(false)
     }
@@ -108,10 +109,10 @@ export function NfePage() {
     }
   }
 
-  // Só dá pra emitir quem ainda não tem nota. Já emitidas ficam travadas.
-  const pending = useMemo(() => rows.filter((r) => !r.nfeNumero), [rows])
-  const emitidas = rows.length - pending.length
-  const selectableIds = useMemo(() => pending.map((r) => r.paymentId), [pending])
+  // Só dá pra emitir quem ainda não tem nota; pedido cancelado no Bling também fica de fora.
+  const pending = useMemo(() => rows.filter((r) => !r.nfeNumero && !r.canceled), [rows])
+  const emitidas = rows.filter((r) => !!r.nfeNumero).length
+  const selectableIds = useMemo(() => pending.map((r) => r.orderId), [pending])
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
 
   const toggleAll = () => {
@@ -129,8 +130,8 @@ export function NfePage() {
     })
   }
 
-  const patchRow = (paymentId: string, patch: Partial<RowState>) => {
-    setRows((prev) => prev.map((r) => (r.paymentId === paymentId ? { ...r, ...patch } : r)))
+  const patchRow = (orderId: string, patch: Partial<RowState>) => {
+    setRows((prev) => prev.map((r) => (r.orderId === orderId ? { ...r, ...patch } : r)))
   }
 
   const emitSelected = async () => {
@@ -147,7 +148,7 @@ export function NfePage() {
     for (const id of ids) {
       patchRow(id, { emitting: true, nfeError: null })
       try {
-        const res = await nfeEmit(id, transmit)
+        const res = await nfeEmitOrder(id, transmit)
         if (res.ok || res.alreadyEmitted) {
           ok += 1
           patchRow(id, {
@@ -186,7 +187,7 @@ export function NfePage() {
   return (
     <AppLayout
       title="Emissão de NF-e"
-      subtitle="Depois da conciliação, marque as vendas pagas e emita as notas no Bling de uma vez."
+      subtitle="Todos os pedidos de venda do Bling no período. Marque os que quer e emita as notas de uma vez."
     >
       <SubTabs tabs={financeiroTabs(isSalesPolo)} />
 
@@ -262,7 +263,7 @@ export function NfePage() {
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="flex items-center gap-2 text-sm">
-            <FileText className="size-4 text-primary" /> Vendas pagas ({rows.length})
+            <FileText className="size-4 text-primary" /> Pedidos do Bling ({rows.length})
           </CardTitle>
           <Button onClick={() => void emitSelected()} disabled={emitting || selectedCount === 0}>
             {emitting ? (
@@ -276,8 +277,8 @@ export function NfePage() {
           {rows.length === 0 ? (
             <EmptyState
               icon={FileText}
-              title={loading ? 'Carregando...' : 'Nenhuma venda paga com pedido no Bling no período'}
-              description="Ajuste as datas e clique em Carregar. Aparecem aqui as vendas pagas que já têm pedido no Bling."
+              title={loading ? 'Carregando...' : 'Nenhum pedido de venda no Bling no período'}
+              description="Ajuste as datas e clique em Carregar. Aparecem aqui todos os pedidos do Bling, inclusive os criados fora do CRM."
             />
           ) : (
             <div className="overflow-x-auto">
@@ -300,20 +301,23 @@ export function NfePage() {
                     const done = !!r.nfeNumero
                     const err = r.nfeStatus === 'erro' && !done
                     return (
-                      <TableRow key={r.paymentId} className={err ? 'bg-red-50/50' : done ? 'bg-emerald-50/40' : undefined}>
+                      <TableRow key={r.orderId} className={err ? 'bg-red-50/50' : done ? 'bg-emerald-50/40' : r.canceled ? 'opacity-50' : undefined}>
                         <TableCell>
                           <Checkbox
-                            checked={selected.has(r.paymentId)}
-                            onCheckedChange={() => toggleOne(r.paymentId)}
-                            disabled={done || r.emitting}
+                            checked={selected.has(r.orderId)}
+                            onCheckedChange={() => toggleOne(r.orderId)}
+                            disabled={done || r.emitting || r.canceled}
                             aria-label={`Selecionar ${r.name}`}
                           />
                         </TableCell>
-                        <TableCell className="font-medium">{r.name}</TableCell>
+                        <TableCell className="font-medium">
+                          {r.name}
+                          {r.canceled ? <span className="ml-2 text-xs text-muted-foreground">(cancelado)</span> : null}
+                        </TableCell>
                         <TableCell className="tabular-nums">{fmtCpf(r.cpf)}</TableCell>
                         <TableCell className="text-right tabular-nums">{brl(r.valueCents)}</TableCell>
-                        <TableCell className="text-muted-foreground">{fmtDate(r.paidAt)}</TableCell>
-                        <TableCell className="text-muted-foreground tabular-nums">#{r.blingOrderId}</TableCell>
+                        <TableCell className="text-muted-foreground">{fmtDate(r.date)}</TableCell>
+                        <TableCell className="text-muted-foreground tabular-nums">#{r.orderNumero || r.orderId}</TableCell>
                         <TableCell>
                           {r.emitting ? (
                             <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">

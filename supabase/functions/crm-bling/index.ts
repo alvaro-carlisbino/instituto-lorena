@@ -479,5 +479,179 @@ Deno.serve(async (req) => {
     }
   }
 
+  // nfe_list_bling: TODOS os pedidos de venda do Bling no período (data do pedido), não só os
+  // que nasceram no CRM — inclui pedidos criados direto no Bling e de marketplace. O estado da
+  // NF-e vem de bling_nfe_emissions (emissões por pedido) + rede_payments (emissões antigas).
+  if (action === 'nfe_list_bling') {
+    const from = String(payload.from ?? '').trim() // 'YYYY-MM-DD'
+    const to = String(payload.to ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return json({ ok: false, error: 'periodo_invalido' }, 400)
+    }
+    const token = await getValidBlingToken(admin, 'tricopill')
+    if (!token) return json({ ok: false, error: 'bling_indisponivel' }, 502)
+    const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json' }
+
+    const orders: Array<Record<string, unknown>> = []
+    // Bling limita ~3 req/s e pagina em 100; 10 páginas = 1000 pedidos, muito acima do volume real.
+    for (let page = 1; page <= 10; page++) {
+      const u = `https://api.bling.com.br/Api/v3/pedidos/vendas?pagina=${page}&limite=100&dataInicial=${from}&dataFinal=${to}`
+      const r = await fetch(u, { headers: bh })
+      if (!r.ok) {
+        if (page === 1) return json({ ok: false, error: 'bling_pedidos_falhou', status: r.status }, 502)
+        break
+      }
+      const data = (JSON.parse((await r.text()) || '{}')?.data ?? []) as Array<Record<string, unknown>>
+      orders.push(...data)
+      if (data.length < 100) break
+      await new Promise((res) => setTimeout(res, 350))
+    }
+
+    const ids = orders.map((o) => String(o.id))
+    const emisMap = new Map<string, Record<string, unknown>>()
+    const payMap = new Map<string, Record<string, unknown>>()
+    if (ids.length) {
+      const { data: emis } = await admin
+        .from('bling_nfe_emissions').select('bling_order_id, nfe_numero, nfe_status, nfe_error')
+        .eq('tenant_id', 'tricopill').in('bling_order_id', ids)
+      for (const e of (emis ?? []) as Array<Record<string, unknown>>) emisMap.set(String(e.bling_order_id), e)
+      const { data: pays } = await admin
+        .from('rede_payments').select('bling_order_id, nfe_numero, nfe_status, nfe_error')
+        .eq('tenant_id', 'tricopill').in('bling_order_id', ids)
+      for (const p of (pays ?? []) as Array<Record<string, unknown>>) payMap.set(String(p.bling_order_id), p)
+    }
+
+    const items = orders.map((o) => {
+      const contato = (o.contato ?? {}) as Record<string, unknown>
+      const situacao = (o.situacao ?? {}) as Record<string, unknown>
+      const st = emisMap.get(String(o.id)) ?? payMap.get(String(o.id)) ?? {}
+      return {
+        orderId: String(o.id),
+        orderNumero: String(o.numero ?? ''),
+        date: String(o.data ?? ''),
+        name: String(contato.nome ?? '').trim() || 'Cliente',
+        cpf: String(contato.numeroDocumento ?? '').replace(/\D/g, ''),
+        valueCents: Math.round(Number(o.total ?? 0) * 100),
+        // 12 = "Cancelado" padrão do módulo de vendas do Bling (a UI trava a seleção).
+        canceled: Number(situacao.id ?? 0) === 12,
+        nfeStatus: st.nfe_status != null ? String(st.nfe_status) : null,
+        nfeNumero: st.nfe_numero != null ? String(st.nfe_numero) : null,
+        nfeError: st.nfe_error != null ? String(st.nfe_error) : null,
+      }
+    })
+    return json({ ok: true, items })
+  }
+
+  // nfe_emit_order: emite a NF-e de UM pedido do Bling pelo id do PEDIDO (não exige venda no
+  // CRM). CPF sai do contato do pedido. Grava o desfecho em bling_nfe_emissions e espelha em
+  // rede_payments quando o pedido veio de uma venda do CRM (mantém /pedidos coerente).
+  if (action === 'nfe_emit_order') {
+    const orderId = String(payload.orderId ?? '').trim()
+    if (!orderId) return json({ ok: false, error: 'missing_order' }, 400)
+
+    const recordOutcome = async (patch: Record<string, unknown>) => {
+      await admin.from('bling_nfe_emissions').upsert(
+        { tenant_id: 'tricopill', bling_order_id: orderId, emitted_at: new Date().toISOString(), ...patch },
+        { onConflict: 'tenant_id,bling_order_id' },
+      )
+      await admin.from('rede_payments').update(patch).eq('tenant_id', 'tricopill').eq('bling_order_id', orderId)
+    }
+
+    // Já emitida? (por esta tela ou pela emissão antiga baseada em pagamento)
+    const { data: prev } = await admin
+      .from('bling_nfe_emissions').select('nfe_numero').eq('tenant_id', 'tricopill').eq('bling_order_id', orderId).maybeSingle()
+    const prevNumero = (prev as { nfe_numero?: string } | null)?.nfe_numero
+    if (prevNumero) return json({ ok: true, alreadyEmitted: true, numero: prevNumero })
+    const { data: prevPay } = await admin
+      .from('rede_payments').select('nfe_numero').eq('tenant_id', 'tricopill').eq('bling_order_id', orderId).not('nfe_numero', 'is', null).limit(1).maybeSingle()
+    const prevPayNumero = (prevPay as { nfe_numero?: string } | null)?.nfe_numero
+    if (prevPayNumero) return json({ ok: true, alreadyEmitted: true, numero: prevPayNumero })
+
+    const { data: intRow2 } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', 'tricopill').maybeSingle()
+    const bcfg2 = ((intRow2 as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+    const naturezaOperacaoId = String(bcfg2.natureza_operacao_id ?? '').trim()
+    if (!naturezaOperacaoId) {
+      return json({ ok: false, error: 'natureza_nao_configurada', message: 'Configure a natureza de operação da NF-e antes de emitir.' }, 400)
+    }
+    const transmit = payload.transmit !== undefined ? payload.transmit === true : bcfg2.auto_nfe_transmit === true
+
+    const token = await getValidBlingToken(admin, 'tricopill')
+    if (!token) return json({ ok: false, error: 'bling_indisponivel' }, 502)
+    const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' }
+
+    // Pedido: contato, desconto, data e itens (mesmo caminho do nfe_emit por pagamento).
+    let contatoId = ''
+    let descontoReais = 0
+    let dataPedido = ''
+    let itens: Array<Record<string, unknown>> = []
+    try {
+      const gr = await fetch(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, { headers: bh })
+      if (!gr.ok) return json({ ok: false, error: 'pedido_bling_nao_lido', status: gr.status }, 502)
+      const o = (JSON.parse((await gr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+      if (Number(((o.situacao ?? {}) as Record<string, unknown>).id ?? 0) === 12) {
+        return json({ ok: false, error: 'pedido_cancelado', message: 'Pedido cancelado no Bling não gera nota.' })
+      }
+      contatoId = String(((o.contato ?? {}) as Record<string, unknown>).id ?? '')
+      descontoReais = Number(((o.desconto ?? {}) as Record<string, unknown>).valor ?? 0) || 0
+      dataPedido = String(o.data ?? '')
+      const brutos = (Array.isArray(o.itens) ? o.itens : []) as Array<Record<string, unknown>>
+      itens = []
+      for (const i of brutos) {
+        const prodId = ((i.produto ?? {}) as Record<string, unknown>).id
+        let codigo = String(i.codigo ?? '').trim()
+        if (!codigo && prodId) {
+          const pr = await fetch(`https://api.bling.com.br/Api/v3/produtos/${prodId}`, { headers: bh })
+          if (pr.ok) {
+            const pd = (JSON.parse((await pr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+            codigo = String(pd.codigo ?? '').trim()
+          }
+        }
+        itens.push({
+          codigo: codigo || String(prodId ?? ''),
+          produto: { id: prodId },
+          descricao: i.descricao,
+          quantidade: i.quantidade,
+          valor: i.valor,
+        })
+      }
+    } catch (e) {
+      return json({ ok: false, error: 'pedido_bling_erro', message: e instanceof Error ? e.message : String(e) }, 502)
+    }
+    if (!contatoId || itens.length === 0) return json({ ok: false, error: 'pedido_sem_itens_ou_contato' }, 400)
+
+    // CPF/CNPJ: do próprio contato do Bling (marketplace já traz; cadastro manual pode faltar).
+    try {
+      const cr = await fetch(`https://api.bling.com.br/Api/v3/contatos/${contatoId}`, { headers: bh })
+      if (!cr.ok) return json({ ok: false, error: 'contato_bling_nao_lido', status: cr.status }, 502)
+      const cd = (JSON.parse((await cr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+      const doc = String(cd.numeroDocumento ?? '').replace(/\D/g, '')
+      if (doc.length !== 11 && doc.length !== 14) {
+        const msg = 'Contato do pedido sem CPF/CNPJ no Bling. Complete o cadastro do contato e tente de novo.'
+        await recordOutcome({ nfe_status: 'erro', nfe_error: msg })
+        return json({ ok: false, error: 'sem_cpf', message: msg })
+      }
+    } catch (e) {
+      return json({ ok: false, error: 'contato_bling_erro', message: e instanceof Error ? e.message : String(e) }, 502)
+    }
+
+    try {
+      const out = await blingEmitNfe(token, {
+        naturezaOperacaoId, contatoId, itens, transmit,
+        dataOperacaoISO: dataPedido ? `${dataPedido}T12:00:00-03:00` : undefined,
+        descontoReais,
+      })
+      const status = out.error ? 'erro' : (out.transmitted ? 'emitida' : 'rascunho')
+      await recordOutcome({
+        nfe_id: out.nfeId, nfe_numero: out.numero ?? null, nfe_status: status, nfe_error: out.error ?? null,
+      })
+      if (out.error) return json({ ok: false, error: 'nfe_falhou', message: out.error })
+      return json({ ok: true, nfeId: out.nfeId, numero: out.numero ?? null, status, transmitted: out.transmitted })
+    } catch (e) {
+      const msg = (e instanceof Error ? e.message : String(e)).slice(0, 400)
+      await recordOutcome({ nfe_status: 'erro', nfe_error: msg })
+      return json({ ok: false, error: 'nfe_falhou', message: msg })
+    }
+  }
+
   return json({ error: 'unknown_action' }, 400)
 })

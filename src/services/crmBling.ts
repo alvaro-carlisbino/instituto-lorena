@@ -134,6 +134,26 @@ export async function nfeList(from: string, to: string): Promise<NfeRow[]> {
   return Array.isArray(p.items) ? (p.items as NfeRow[]) : []
 }
 
+// Linha da listagem por PEDIDO do Bling (inclui pedidos criados fora do CRM: manual/marketplace).
+export type NfeOrderRow = {
+  orderId: string
+  orderNumero: string
+  date: string
+  name: string
+  cpf: string
+  valueCents: number
+  canceled: boolean
+  nfeStatus: string | null
+  nfeNumero: string | null
+  nfeError: string | null
+}
+
+/** TODOS os pedidos de venda do Bling no período (data do pedido) + estado da NF-e. */
+export async function nfeListBling(from: string, to: string): Promise<NfeOrderRow[]> {
+  const p = await invokeBling({ action: 'nfe_list_bling', from, to })
+  return Array.isArray(p.items) ? (p.items as NfeOrderRow[]) : []
+}
+
 export type NfeEmitResult = {
   ok: boolean
   numero?: string | null
@@ -147,6 +167,27 @@ export type NfeEmitResult = {
 export async function nfeEmit(paymentId: string, transmit?: boolean): Promise<NfeEmitResult> {
   if (!supabase) return { ok: false, message: 'Sistema não configurado.' }
   const body: Record<string, unknown> = { action: 'nfe_emit', paymentId }
+  if (transmit !== undefined) body.transmit = transmit
+  const { data, error } = await supabase.functions.invoke('crm-bling', { body })
+  if (error) {
+    const ctx = (error as { context?: { body?: unknown } }).context
+    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
+    return { ok: false, message: String(msg || 'Falha ao emitir NF-e') }
+  }
+  const p = (data ?? {}) as Record<string, unknown>
+  return {
+    ok: p.ok === true,
+    numero: p.numero != null ? String(p.numero) : null,
+    status: p.status != null ? String(p.status) : undefined,
+    alreadyEmitted: p.alreadyEmitted === true,
+    message: p.message != null ? String(p.message) : (p.error != null ? String(p.error) : undefined),
+  }
+}
+
+/** Emite a NF-e de UM pedido do Bling pelo id do pedido (não exige venda no CRM). */
+export async function nfeEmitOrder(orderId: string, transmit?: boolean): Promise<NfeEmitResult> {
+  if (!supabase) return { ok: false, message: 'Sistema não configurado.' }
+  const body: Record<string, unknown> = { action: 'nfe_emit_order', orderId }
   if (transmit !== undefined) body.transmit = transmit
   const { data, error } = await supabase.functions.invoke('crm-bling', { body })
   if (error) {
