@@ -841,14 +841,17 @@ export async function autoShipToCart(
     }
     if (!to.address) return { ok: false, skipped: true, reason: 'sem_rua' }
 
-    // COTA ANTES e escolhe a transportadora MAIS BARATA que REALMENTE atende o trecho — qualquer
-    // empresa (Correios, Jadlog, Loggi…), não Correios fixo. Isso bate com o que foi COBRADO do
-    // cliente (resolveFreightCents também usa a mais barata), então a etiqueta nunca sai mais cara
-    // que o cobrado. options[0] já vem ordenado do mais barato pelo Melhor Envio.
+    // COTA ANTES e HONRA o serviço que o cliente ESCOLHEU (entrega.service, ex.: 'SEDEX'): gera a
+    // etiqueta DESSE serviço. Antes gerava sempre a opção MAIS BARATA (PAC) ignorando a escolha —
+    // a IA prometia SEDEX/2 dias e a etiqueta saía PAC/6 dias (caso Angela Maria, 07/07). A cobrança
+    // (resolveFreightCents) também passou a honrar a escolha, então cobrança e etiqueta continuam
+    // batendo. Sem serviço escolhido (ou que não atende o trecho), cai na mais barata. options[0]
+    // já vem ordenado do mais barato pelo Melhor Envio.
     const box = boxForKit(opts.kit) ?? undefined
     const q = await quoteFreteMelhorEnvio(admin, tenantId, cep, { box, cityInfo })
     if (!q.ok || q.options.length === 0) return { ok: false, skipped: true, reason: 'sem_servico_atende' }
-    const chosen = q.options[0]
+    const chosenService = String(entrega.service ?? '').trim()
+    const chosen = (chosenService ? pickFreteOption(q, chosenService) : null) ?? q.options[0]
     const serviceId = chosen.serviceId
 
     const res = await createMeShipment(admin, tenantId, {

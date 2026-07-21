@@ -6,7 +6,7 @@ import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
 import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit, SHAMPOO_ADDON } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
-import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
 
 /** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
@@ -83,11 +83,13 @@ async function resolveFreightCents(
         ...(box ? { box } : {}),
         ...(insuranceCents != null ? { insuranceCents } : {}),
       })
-      // COBRA SEMPRE a transportadora MAIS BARATA cotada (qualquer empresa: Correios, Jadlog,
-      // Loggi…), não o serviço que a IA citou — assim o valor bate com o real e fica idêntico
-      // ao que a etiqueta (autoShipToCart) vai pagar, que também pega a mais barata. options[0]
-      // já vem ordenado do mais barato pelo Melhor Envio. Aplica margem (markup + arredonda).
-      const chosen = q.ok ? (q.options[0] ?? null) : null
+      // HONRA o serviço que o cliente ESCOLHEU (freight_service/service, ex.: 'SEDEX'): cobra o
+      // preço DESSE serviço, pra bater com a etiqueta (autoShipToCart também passou a honrar a
+      // escolha). Antes cobrava/enviava sempre o mais barato (PAC) ignorando a escolha — a IA
+      // vendia SEDEX/2 dias e saía PAC/6 dias (caso Angela Maria, 07/07). Sem serviço escolhido
+      // (ou serviço que não atende o trecho), cai na mais barata. Aplica margem (markup + arredonda).
+      const svc = op.freight_service != null ? String(op.freight_service).trim() : (op.service != null ? String(op.service).trim() : '')
+      const chosen = q.ok ? ((svc ? pickFreteOption(q, svc) : null) ?? q.options[0] ?? null) : null
       if (chosen) return applyFreightMarkup(chosen.priceCents, { internal: chosen.internal })
     } catch {
       // cai no literal abaixo
