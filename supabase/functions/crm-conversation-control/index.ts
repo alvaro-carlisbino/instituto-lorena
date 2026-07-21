@@ -94,6 +94,13 @@ Deno.serve(async (req) => {
     }
     if (ownerMode === 'human') {
       patch.last_human_reply_at = new Date().toISOString()
+      // "Humano" escolhido na UI = o operador quer a IA DESLIGADA neste lead, e desligada fica.
+      // Sem isto o estado era owner_mode=human COM ai_enabled=true, que o gate trata como
+      // "handoff da equipe" e REVIVE sozinho após handoff_expires_days (7d) — foi o que fez a
+      // IA voltar a responder (e vazar rascunho) na conversa da Eliane, 26 dias depois de um
+      // humano assumir. Zerar ai_enabled torna o desligamento permanente até religarem no modo
+      // IA/Auto (que abaixo repõe ai_enabled=true). [[feedback_handoff_desliga_ia]]
+      patch.ai_enabled = false
     } else {
       // 'ai' ou 'auto': se o utilizador escolheu modo IA conscientemente, o flag
       // `ai_enabled` deve seguir o gesto. Antes ficávamos com `ai_enabled=false`

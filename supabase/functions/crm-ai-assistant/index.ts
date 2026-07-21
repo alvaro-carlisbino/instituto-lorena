@@ -493,25 +493,33 @@ function stripInternalPatientReply(raw: string): string {
     }
   }
 
-  const cotSignature = /Analyze the User'?s?\s+Input|Interpretation:\s*\*\*|Constraint Check:/i
+  // Assinaturas de RACIOCÍNIO/RASCUNHO vazado. Além do CoT clássico ("Analyze the User's
+  // Input"), os GLM às vezes despejam um monólogo com passos numerados e VÁRIOS rascunhos
+  // rotulados em inglês — foi o caso da Eliane (18/jul): "2. *Determine the Intent:* …",
+  // "*Draft:*", "*Refining for Sofia's voice:*", "*Even simpler:*", "Let's stick to the most
+  // likely intent … keep it open". Nada disso pode chegar ao paciente.
+  const cotSignature =
+    /Analyze the User'?s?\s+Input|Interpretation:\s*\*\*|Constraint Check:|Determine the Intent|\*+\s*Draft\s*:?\s*\*+|\bDraft:|\*Refining\b|Sofia'?s voice|\bI hand off\b|most likely intent|\*+\s*Even simpler|Let'?s stick to|keep it open/i
   if (!cotSignature.test(t)) return t
 
-  let lastGreeting: string | undefined
-  for (const m of t.matchAll(/\n\n((?:Bom dia|Boa tarde|Boa noite|Olá|Oi)\b[\s\S]+)/gi)) {
-    lastGreeting = m[1].trim()
-  }
-  if (lastGreeting && lastGreeting.length >= 12 && !/^(\d+\.|Analyze)/i.test(lastGreeting)) {
-    return lastGreeting
-  }
+  // Marcadores que denunciam que um bloco AINDA é raciocínio/rótulo de rascunho — um bloco
+  // com qualquer um destes NÃO é a resposta final, mesmo que traga uma saudação junto.
+  const reasoningMark =
+    /Analyze|Interpretation|Constraint Check|Determine the Intent|leadFocus|`channel`|Draft\s*:|Refining|Sofia'?s voice|hand off|most likely intent|keep it open|Even simpler|Let'?s stick|^\s*\d+\.\s/i
 
+  // Recupera SÓ um bloco limpo (começa com saudação/abertura e não contém marcador de
+  // raciocínio). Varre de baixo pra cima: a versão final costuma ser a última.
   const blocks = t.split(/\n{2,}/)
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i].trim()
     if (b.length < 16) continue
-    if (/Analyze|Interpretation|Constraint Check|leadFocus|`channel`|^\d+\.\s+\*{0,2}Analyze/i.test(b)) continue
-    if (/^(Olá|Oi|Bom dia|Boa tarde|Boa noite|Seja)/i.test(b)) return b
+    if (reasoningMark.test(b)) continue
+    if (/^(Olá|Oi|Opa|Bom dia|Boa tarde|Boa noite|Seja|Que bom|Perfeito|Prontinho|Claro)/i.test(b)) return b
   }
-  return t
+  // Não deu pra isolar uma resposta limpa → SUPRIME. Devolver o monólogo cru (comportamento
+  // antigo) era o que fazia o rascunho/raciocínio ir pro WhatsApp do paciente. Vazio faz o
+  // chamador não enviar nada (o cron/humano assume) — silêncio é melhor que mandar lixo.
+  return ''
 }
 
 Deno.serve(async (req) => {
