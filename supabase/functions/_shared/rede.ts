@@ -624,6 +624,21 @@ export async function finalizeRedePaid(
       }
     } catch { /* nunca derruba o pagamento por causa do enriquecimento do cadastro */ }
 
+    // Grava o COMPRADOR de volta no rede_payments quando o intent nasceu sem ele (ex.: link de
+    // cartão gerado pelo operador sem nome digitado). O código já resolve o nome do lead pra
+    // montar o pedido no Bling, mas antes NÃO regravava aqui — então o painel/relatórios/comprovante,
+    // que leem customer_name, mostravam "Cliente" mesmo com o lead tendo o nome. [[crm_cadastro_venda_completo]]
+    try {
+      const cadR = ((l.custom_fields as { cadastro?: Record<string, string> } | undefined)?.cadastro ?? {}) as Record<string, string>
+      const resolvedName = String(cadR.nomeCompleto || intent.customerName || opts.cardholderName || l.patient_name || '').trim()
+      const resolvedDoc = String(cadR.cpf || intent.customerDoc || '').replace(/\D/g, '')
+      const patch: Record<string, unknown> = {}
+      if (!intent.customerName && resolvedName) patch.customer_name = resolvedName
+      if (!intent.customerDoc && resolvedDoc) patch.customer_doc = resolvedDoc
+      if (!intent.phone && l.phone) patch.phone = String(l.phone)
+      if (Object.keys(patch).length) await admin.from('rede_payments').update(patch).eq('id', intent.id)
+    } catch { /* cosmético — nunca derruba o pagamento */ }
+
     // Procura a etapa "Pago" do PRÓPRIO pipeline do lead — nunca chuta uma etapa fixa
     // (senão um lead do Instituto cairia na etapa de "Pago" do Tricopill).
     let pagoStageId: string | null = null

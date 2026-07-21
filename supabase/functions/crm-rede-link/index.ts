@@ -75,6 +75,10 @@ Deno.serve(async (req) => {
     const customerName = payload.customerName != null ? String(payload.customerName).trim() : ''
     const appBaseUrl = String(payload.appBaseUrl ?? '').trim()
     if (!appBaseUrl) return json({ ok: false, error: 'missing_app_base_url' }, 400)
+    // Nome que vai pro intent (rede_payments.customer_name). Se o operador NÃO digitou, puxa do
+    // lead — senão o pedido nascia sem comprador e aparecia como "Cliente" no painel/comprovante.
+    let effectiveName = customerName
+    let effectiveDoc: string | undefined
     // Nome completo digitado no link → grava em cadastro.nomeCompleto do lead, pra o pedido
     // no Bling (criado no pagamento) sair com o NOME COMPLETO certo, não o pushname parcial.
     if (leadId && customerName) {
@@ -85,12 +89,21 @@ Deno.serve(async (req) => {
         // Atualiza tb o patient_name → o lead passa a MOSTRAR o nome completo no CRM (não o pushname).
         await admin.from('leads').update({ patient_name: customerName, custom_fields: { ...cf, cadastro: { ...cad, nomeCompleto: customerName } } }).eq('id', leadId)
       } catch { /* best-effort */ }
+    } else if (leadId && !customerName) {
+      // Operador gerou o link sem digitar o nome, mas o lead já tem: hidrata nome + CPF do lead.
+      try {
+        const { data: lr } = await admin.from('leads').select('patient_name, custom_fields').eq('id', leadId).maybeSingle()
+        const row = lr as { patient_name?: string; custom_fields?: { cadastro?: Record<string, string> } } | null
+        const cad = (row?.custom_fields?.cadastro ?? {}) as Record<string, string>
+        effectiveName = String(cad.nomeCompleto || row?.patient_name || '').trim()
+        effectiveDoc = String(cad.cpf || '').replace(/\D/g, '') || undefined
+      } catch { /* best-effort */ }
     }
     try {
       // `kit` opcional: link atrelado a kit do Bling → o pedido automático sai com os itens
       // certos (sem kit o pedido vai como avulso, com a descrição livre).
       const kit = payload.kit != null && String(payload.kit).trim() ? String(payload.kit).trim() : undefined
-      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl, freightCents, couponCode, customerName: customerName || undefined, kit })
+      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl, freightCents, couponCode, customerName: effectiveName || undefined, customerDoc: effectiveDoc, kit })
       return json({ ok: true, payLink: out.url, id: out.id, amountCents })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
