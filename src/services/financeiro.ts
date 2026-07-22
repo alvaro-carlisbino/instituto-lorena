@@ -25,9 +25,14 @@ export type FinAccount = {
   openingBalanceCents: number
   active: boolean
   note: string | null
+  /** Vínculo Open Finance (Pluggy): quando preenchido, a conta sincroniza sozinha. */
+  ofProvider: string | null
+  ofAccountId: string | null
+  ofLastSyncAt: string | null
 }
 
-const ACCOUNT_COLS = 'id, name, kind, bank_name, branch, number, opening_balance_cents, active, note'
+const ACCOUNT_COLS =
+  'id, name, kind, bank_name, branch, number, opening_balance_cents, active, note, of_provider, of_account_id, of_last_sync_at'
 
 function mapAccount(r: Record<string, unknown>): FinAccount {
   const kind = (r.kind === 'caixa' || r.kind === 'carteira' ? r.kind : 'banco') as AccountKind
@@ -41,6 +46,9 @@ function mapAccount(r: Record<string, unknown>): FinAccount {
     openingBalanceCents: Number(r.opening_balance_cents ?? 0),
     active: Boolean(r.active),
     note: r.note != null ? String(r.note) : null,
+    ofProvider: r.of_provider != null ? String(r.of_provider) : null,
+    ofAccountId: r.of_account_id != null ? String(r.of_account_id) : null,
+    ofLastSyncAt: r.of_last_sync_at != null ? String(r.of_last_sync_at) : null,
   }
 }
 
@@ -159,7 +167,7 @@ export async function upsertCategory(payload: {
 // ───────────────────────────────────────────────── lançamentos de caixa (razão)
 
 export type TxnDirection = 'in' | 'out'
-export type TxnSource = 'manual' | 'ofx' | 'csv' | 'payable' | 'receivable'
+export type TxnSource = 'manual' | 'ofx' | 'csv' | 'payable' | 'receivable' | 'openfinance'
 
 export type FinTransaction = {
   id: string
@@ -190,7 +198,7 @@ function mapTxn(r: Record<string, unknown>): FinTransaction {
     categoryId: r.category_id != null ? String(r.category_id) : null,
     description: r.description != null ? String(r.description) : null,
     counterparty: r.counterparty != null ? String(r.counterparty) : null,
-    source: (['ofx', 'csv', 'payable', 'receivable'].includes(String(r.source)) ? r.source : 'manual') as TxnSource,
+    source: (['ofx', 'csv', 'payable', 'receivable', 'openfinance'].includes(String(r.source)) ? r.source : 'manual') as TxnSource,
     externalId: r.external_id != null ? String(r.external_id) : null,
     reconciledRefType:
       r.reconciled_ref_type === 'payable' || r.reconciled_ref_type === 'receivable'

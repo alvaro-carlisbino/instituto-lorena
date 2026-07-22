@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowLeftRight, Check, FileUp, Link2, X } from 'lucide-react'
+import { ArrowLeftRight, Check, FileUp, Landmark, Link2, RefreshCw, X } from 'lucide-react'
+import { PluggyConnect } from 'react-pluggy-connect'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
@@ -27,6 +28,7 @@ import {
   suggestMatches,
 } from '@/services/financeiro'
 import { parseBankStatement } from '@/services/ofx'
+import { getConnectToken, linkItem, syncOpenFinance } from '@/services/openFinance'
 
 function formatBRL(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -46,6 +48,12 @@ export function ConciliacaoPage() {
   const [importing, setImporting] = useState(false)
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement | null>(null)
+
+  // Open Finance (Pluggy): token do widget + estados de conexão/sync.
+  const [connectToken, setConnectToken] = useState<string | null>(null)
+  const [connecting, setConnecting] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const hasOpenFinance = useMemo(() => accounts.some((a) => a.ofAccountId != null), [accounts])
 
   const load = async () => {
     setLoading(true)
@@ -137,6 +145,51 @@ export function ConciliacaoPage() {
     }
   }
 
+  // ── Open Finance (Pluggy) ────────────────────────────────────────────────
+  const connectBank = async () => {
+    setConnecting(true)
+    try {
+      const token = await getConnectToken()
+      setConnectToken(token)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao abrir conexão com o banco')
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  const onPluggySuccess = async (data: unknown) => {
+    setConnectToken(null)
+    const itemId = (data as { item?: { id?: string } })?.item?.id
+    if (!itemId) {
+      toast.error('Conexão não retornou o identificador do banco.')
+      return
+    }
+    setSyncing(true)
+    try {
+      const res = await linkItem(itemId)
+      toast.success(`Banco conectado (${res.bankName}): ${res.accountsLinked} conta(s), ${res.inserted} lançamento(s).`)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao ligar as contas do banco')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const doSync = async () => {
+    setSyncing(true)
+    try {
+      const res = await syncOpenFinance()
+      toast.success(`Sincronizado: ${res.inserted} lançamento(s) novo(s) de ${res.accounts} conta(s).`)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao sincronizar')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   return (
     <AppLayout
       title="Conciliação bancária"
@@ -145,10 +198,49 @@ export function ConciliacaoPage() {
       <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,360px)_1fr]">
+        <div className="space-y-4">
+        <Card className="h-fit border-emerald-500/40 bg-emerald-500/[0.04]">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Landmark className="size-4 text-emerald-600" /> Banco automático (Open Finance)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Conecte o banco uma vez (login seguro pelo Pluggy) e o extrato passa a entrar sozinho —
+              sem precisar baixar arquivo. Você loga direto no banco; a gente nunca vê sua senha.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={connectBank} disabled={connecting || syncing}>
+                <Landmark className="size-4" /> {connecting ? 'Abrindo…' : hasOpenFinance ? 'Conectar outro banco' : 'Conectar banco'}
+              </Button>
+              {hasOpenFinance ? (
+                <Button variant="outline" onClick={doSync} disabled={syncing}>
+                  <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} /> {syncing ? 'Sincronizando…' : 'Sincronizar agora'}
+                </Button>
+              ) : null}
+            </div>
+            {hasOpenFinance ? (
+              <div className="space-y-1 pt-1">
+                {accounts
+                  .filter((a) => a.ofAccountId)
+                  .map((a) => (
+                    <div key={a.id} className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="truncate">🔗 {a.name}</span>
+                      <span className="shrink-0">
+                        {a.ofLastSyncAt ? `sync ${new Date(a.ofLastSyncAt).toLocaleDateString('pt-BR')}` : 'aguardando'}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+
         <Card className="h-fit border-primary/40 bg-primary/[0.03]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <FileUp className="size-4 text-primary" /> Importar extrato
+              <FileUp className="size-4 text-primary" /> Importar extrato (OFX/CSV)
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -183,6 +275,7 @@ export function ConciliacaoPage() {
             </div>
           </CardContent>
         </Card>
+        </div>
 
         <div className="space-y-4">
           <Card>
@@ -264,6 +357,17 @@ export function ConciliacaoPage() {
           </Card>
         </div>
       </div>
+      {connectToken ? (
+        <PluggyConnect
+          connectToken={connectToken}
+          onSuccess={onPluggySuccess}
+          onError={() => {
+            setConnectToken(null)
+            toast.error('Não foi possível concluir a conexão com o banco.')
+          }}
+          onClose={() => setConnectToken(null)}
+        />
+      ) : null}
     </AppLayout>
   )
 }

@@ -442,6 +442,11 @@ verify_jwt = false
 [functions.crm-fin-recurring]
 verify_jwt = false
 
+# Open Finance (Pluggy): conciliação bancária automática. verify_jwt=TRUE (default explícito)
+# — só usuário logado; escreve com o JWT dele (RLS → tenant). Secrets: PLUGGY_CLIENT_ID/SECRET.
+[functions.crm-openfinance]
+verify_jwt = true
+
 # Webhook de pagamento PagBank: chamado pelo PagBank sem JWT (mapeia pelo reference_id).
 [functions.crm-pagbank-webhook]
 verify_jwt = false
