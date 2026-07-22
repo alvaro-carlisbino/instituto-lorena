@@ -522,6 +522,8 @@ export type Payable = {
   invoiceId: string | null
   supplierId: string | null
   supplierName: string | null
+  categoryId: string | null
+  accountId: string | null
   description: string
   dueDate: string
   amountCents: number
@@ -537,7 +539,7 @@ export async function listPayables(): Promise<Payable[]> {
   const client = assertClient()
   const { data, error } = await client
     .from('payable_installments')
-    .select('id, invoice_id, supplier_id, description, due_date, amount_cents, status, paid_at, payment_method, barcode, storage_path, note, stock_suppliers(name)')
+    .select('id, invoice_id, supplier_id, category_id, account_id, description, due_date, amount_cents, status, paid_at, payment_method, barcode, storage_path, note, stock_suppliers(name)')
     .order('due_date')
     .limit(500)
   if (error) throw new Error(error.message)
@@ -550,6 +552,8 @@ export async function listPayables(): Promise<Payable[]> {
       invoiceId: r.invoice_id != null ? String(r.invoice_id) : null,
       supplierId: r.supplier_id != null ? String(r.supplier_id) : null,
       supplierName: supplier?.name != null ? String(supplier.name) : null,
+      categoryId: r.category_id != null ? String(r.category_id) : null,
+      accountId: r.account_id != null ? String(r.account_id) : null,
       description: String(r.description ?? ''),
       dueDate: String(r.due_date ?? ''),
       amountCents: Number(r.amount_cents ?? 0),
@@ -567,6 +571,8 @@ export async function createPayables(payload: {
   description: string
   supplierId?: string | null
   invoiceId?: string | null
+  categoryId?: string | null
+  accountId?: string | null
   amountCents: number
   firstDueDate: string
   installments: number
@@ -583,6 +589,8 @@ export async function createPayables(payload: {
       description: n > 1 ? `${payload.description.trim()} (${i + 1}/${n})` : payload.description.trim(),
       supplier_id: payload.supplierId || null,
       invoice_id: payload.invoiceId || null,
+      category_id: payload.categoryId || null,
+      account_id: payload.accountId || null,
       amount_cents: payload.amountCents,
       due_date: due.toISOString().slice(0, 10),
       payment_method: payload.paymentMethod || null,
@@ -599,6 +607,8 @@ export async function createPayablesExact(rows: Array<{
   description: string
   supplierId?: string | null
   invoiceId?: string | null
+  categoryId?: string | null
+  accountId?: string | null
   dueDate: string
   amountCents: number
   paymentMethod?: string | null
@@ -611,6 +621,8 @@ export async function createPayablesExact(rows: Array<{
       description: r.description.trim(),
       supplier_id: r.supplierId || null,
       invoice_id: r.invoiceId || null,
+      category_id: r.categoryId || null,
+      account_id: r.accountId || null,
       due_date: r.dueDate,
       amount_cents: r.amountCents,
       payment_method: r.paymentMethod || null,
@@ -620,10 +632,44 @@ export async function createPayablesExact(rows: Array<{
   if (error) throw new Error(error.message)
 }
 
-export async function setPayableStatus(id: string, status: PayableStatus): Promise<void> {
+/** Baixa uma conta a pagar. Se `pay` trouxer uma conta (banco/caixa), grava também a SAÍDA
+ *  real no razão de caixa (fin_transactions) — é assim que a baixa manual aparece no fluxo
+ *  de caixa da clínica. Sem conta → só muda o status (comportamento antigo preservado). */
+export async function setPayableStatus(
+  id: string,
+  status: PayableStatus,
+  pay?: {
+    accountId?: string | null
+    paidOn?: string
+    amountCents?: number
+    categoryId?: string | null
+    description?: string
+    supplierName?: string | null
+  },
+): Promise<void> {
   const client = assertClient()
+  const paidOn = pay?.paidOn ?? new Date().toISOString().slice(0, 10)
   const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() }
-  patch.paid_at = status === 'pago' ? new Date().toISOString() : null
+  patch.paid_at = status === 'pago' ? new Date(`${paidOn}T12:00:00`).toISOString() : null
+  if (status === 'pago' && pay?.accountId) patch.account_id = pay.accountId
   const { error } = await client.from('payable_installments').update(patch).eq('id', id)
   if (error) throw new Error(error.message)
+
+  // Lançamento de caixa (saída) quando pago via uma conta. Escrito direto aqui pra não criar
+  // ciclo de import com financeiro.ts (que só importa o TIPO Payable deste módulo).
+  if (status === 'pago' && pay?.accountId && pay.amountCents && pay.amountCents > 0) {
+    const { error: txnErr } = await client.from('fin_transactions').insert({
+      account_id: pay.accountId,
+      date: paidOn,
+      amount_cents: -Math.abs(Math.round(pay.amountCents)),
+      direction: 'out',
+      category_id: pay.categoryId || null,
+      description: pay.description ?? null,
+      counterparty: pay.supplierName ?? null,
+      source: 'payable',
+      reconciled_ref_type: 'payable',
+      reconciled_ref_id: id,
+    })
+    if (txnErr) throw new Error(txnErr.message)
+  }
 }

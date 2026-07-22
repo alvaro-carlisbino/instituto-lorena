@@ -437,6 +437,11 @@ verify_jwt = false
 [functions.crm-leadmagnet-followup]
 verify_jwt = false
 
+# Recorrentes financeiros (aluguel/salários/contas fixas): 1x/dia via pg_cron gera as
+# contas a pagar/receber do mês. verify_jwt=false (cron não manda JWT); x-cron-secret opcional.
+[functions.crm-fin-recurring]
+verify_jwt = false
+
 # Webhook de pagamento PagBank: chamado pelo PagBank sem JWT (mapeia pelo reference_id).
 [functions.crm-pagbank-webhook]
 verify_jwt = false

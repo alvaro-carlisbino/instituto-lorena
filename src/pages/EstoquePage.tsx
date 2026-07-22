@@ -54,9 +54,14 @@ export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: st
 export function financeiroTabs(isSalesPolo: boolean): Array<{ to: string; label: string }> {
   return [
     ...(isSalesPolo ? [{ to: '/recebimentos', label: 'Recebimentos' }] : []),
+    { to: '/contas-a-receber', label: 'Contas a receber' },
+    { to: '/contas-a-pagar', label: 'Contas a pagar' },
+    { to: '/contas-caixa', label: 'Contas & caixa' },
+    { to: '/recorrentes', label: 'Recorrentes' },
+    { to: '/conciliacao', label: 'Conciliação' },
+    { to: '/fluxo-caixa', label: 'Fluxo de caixa' },
     { to: '/links-pagamento', label: 'Links de pagamento' },
     ...(isSalesPolo ? [{ to: '/cupons', label: 'Cupons' }] : []),
-    { to: '/contas-a-pagar', label: 'Contas a pagar' },
     ...(isSalesPolo ? [{ to: '/nfe', label: 'Emissão de NF-e' }] : []),
     ...(isSalesPolo ? [{ to: '/tricopill-relatorios', label: 'Relatórios' }] : []),
   ]

@@ -38,6 +38,7 @@ import {
 } from '@/services/estoqueCompras'
 import { type NfeParsed, parseNfeXml } from '@/services/nfeXml'
 import { type NfeItemPlan, importNfe, suggestItemPlan } from '@/services/nfeImport'
+import { type FinAccount, type FinCategory, listAccounts, listCategories } from '@/services/financeiro'
 
 function formatBRL(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -65,6 +66,8 @@ const EMPTY_PAYABLE = {
   description: '',
   supplierId: '',
   invoiceId: '',
+  categoryId: '',
+  accountId: '',
   amount: '',
   firstDue: '',
   installments: '1',
@@ -87,6 +90,15 @@ export function ContasPagarPage() {
   const [payForm, setPayForm] = useState({ ...EMPTY_PAYABLE })
   const [savingPayable, setSavingPayable] = useState(false)
 
+  // Plano de contas + contas bancárias/caixa (para categorizar e dar baixa no caixa).
+  const [accounts, setAccounts] = useState<FinAccount[]>([])
+  const [categories, setCategories] = useState<FinCategory[]>([])
+
+  // Diálogo de baixa: escolher conta (banco/caixa) e data — registra a saída no fluxo de caixa.
+  const [payingPayable, setPayingPayable] = useState<Payable | null>(null)
+  const [payAccountId, setPayAccountId] = useState('')
+  const [payDate, setPayDate] = useState('')
+
   // Importador de NF-e (XML)
   const [stockItems, setStockItems] = useState<StockItem[]>([])
   const [nfe, setNfe] = useState<NfeParsed | null>(null)
@@ -99,16 +111,20 @@ export function ContasPagarPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [p, inv, sup, items] = await Promise.all([
+      const [p, inv, sup, items, acc, cats] = await Promise.all([
         listPayables(),
         listPurchaseInvoices(),
         listSuppliers(),
         listStockItems(true),
+        listAccounts(),
+        listCategories('despesa'),
       ])
       setPayables(p)
       setInvoices(inv)
       setSuppliers(sup)
       setStockItems(items)
+      setAccounts(acc)
+      setCategories(cats)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar contas a pagar')
     } finally {
@@ -238,6 +254,8 @@ export function ContasPagarPage() {
         description: payForm.description,
         supplierId: payForm.supplierId || null,
         invoiceId: payForm.invoiceId || null,
+        categoryId: payForm.categoryId || null,
+        accountId: payForm.accountId || null,
         amountCents: parseBRL(payForm.amount),
         firstDueDate: payForm.firstDue,
         installments: Number(payForm.installments) || 1,
@@ -254,10 +272,30 @@ export function ContasPagarPage() {
     }
   }
 
-  const markPaid = async (p: Payable) => {
+  const openPayDialog = (p: Payable) => {
+    setPayingPayable(p)
+    setPayAccountId(p.accountId ?? '')
+    setPayDate(new Date().toISOString().slice(0, 10))
+  }
+
+  const confirmPay = async () => {
+    const p = payingPayable
+    if (!p) return
     try {
-      await setPayableStatus(p.id, 'pago')
-      toast.success(`"${p.description}" marcada como paga.`)
+      await setPayableStatus(p.id, 'pago', {
+        accountId: payAccountId || null,
+        paidOn: payDate || undefined,
+        amountCents: p.amountCents,
+        categoryId: p.categoryId,
+        description: p.description,
+        supplierName: p.supplierName,
+      })
+      toast.success(
+        payAccountId
+          ? `"${p.description}" paga — saída lançada no caixa.`
+          : `"${p.description}" marcada como paga.`,
+      )
+      setPayingPayable(null)
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao marcar como paga')
@@ -468,6 +506,38 @@ export function ContasPagarPage() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
+                  <Label htmlFor="pg-category">Categoria</Label>
+                  <Select value={payForm.categoryId} onValueChange={(v) => setPayForm((f) => ({ ...f, categoryId: v ?? '' }))}>
+                    <SelectTrigger id="pg-category">
+                      <SelectValue placeholder="Opcional" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="pg-account">Conta (débito)</Label>
+                  <Select value={payForm.accountId} onValueChange={(v) => setPayForm((f) => ({ ...f, accountId: v ?? '' }))}>
+                    <SelectTrigger id="pg-account">
+                      <SelectValue placeholder="Opcional" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
                   <Label htmlFor="pg-method">Forma</Label>
                   <Select value={payForm.method} onValueChange={(v) => setPayForm((f) => ({ ...f, method: v ?? 'boleto' }))}>
                     <SelectTrigger id="pg-method">
@@ -582,7 +652,7 @@ export function ContasPagarPage() {
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
                             <span className="font-semibold">{formatBRL(p.amountCents)}</span>
-                            <Button size="sm" variant="outline" onClick={() => void markPaid(p)}>
+                            <Button size="sm" variant="outline" onClick={() => openPayDialog(p)}>
                               <Check className="size-3.5" /> Pago
                             </Button>
                           </div>
@@ -765,6 +835,47 @@ export function ContasPagarPage() {
             <Button onClick={confirmImport} disabled={importing}>
               {importing ? 'Importando…' : 'Confirmar importação'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={payingPayable != null} onOpenChange={(open) => (!open ? setPayingPayable(null) : null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Marcar como paga</DialogTitle>
+            <DialogDescription>
+              {payingPayable?.description} · {formatBRL(payingPayable?.amountCents ?? 0)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="pay-account">Conta que pagou</Label>
+              <Select value={payAccountId} onValueChange={(v) => setPayAccountId(v ?? '')}>
+                <SelectTrigger id="pay-account">
+                  <SelectValue placeholder="Sem lançar no caixa" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Com uma conta, a saída entra no fluxo de caixa. Sem conta, só marca como paga.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pay-date">Data do pagamento</Label>
+              <Input id="pay-date" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPayingPayable(null)}>
+              Cancelar
+            </Button>
+            <Button onClick={confirmPay}>Confirmar pagamento</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
