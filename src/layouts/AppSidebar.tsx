@@ -46,6 +46,8 @@ import {
   ClipboardPen,
   AlarmClock,
   ShoppingCart,
+  Landmark,
+  HandCoins,
 } from 'lucide-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
@@ -226,9 +228,14 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {isSalesPolo ? <NavItem to="/recebimentos" label="Recebimentos" icon={Wallet} /> : null}
+                {showBoards ? <NavItem to="/contas-a-receber" label="Contas a receber" icon={HandCoins} /> : null}
+                {showBoards ? <NavItem to="/contas-a-pagar" label="Contas a pagar" icon={CalendarClock} /> : null}
+                {showBoards ? <NavItem to="/contas-caixa" label="Contas & caixa" icon={Landmark} /> : null}
+                {showBoards ? <NavItem to="/recorrentes" label="Recorrentes" icon={Repeat} /> : null}
+                {showBoards ? <NavItem to="/conciliacao" label="Conciliação" icon={ArrowLeftRight} /> : null}
+                {showBoards ? <NavItem to="/fluxo-caixa" label="Fluxo de caixa" icon={TrendingUp} /> : null}
                 <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} />
                 {isSalesPolo ? <NavItem to="/cupons" label="Cupons" icon={Ticket} /> : null}
-                {showBoards ? <NavItem to="/contas-a-pagar" label="Contas a pagar" icon={CalendarClock} /> : null}
                 {isSalesPolo ? <NavItem to="/tricopill-relatorios" label="Relatórios de vendas" icon={FileSpreadsheet} /> : null}
               </SidebarMenu>
             </SidebarGroupContent>
