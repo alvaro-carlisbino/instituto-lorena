@@ -6,7 +6,43 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+// base-ui só mostra o RÓTULO do item selecionado (em vez do valor cru, tipo um UUID) quando a
+// Root recebe a prop `items`. Em vez de exigir isso em cada tela (dezenas de <Select>), a gente
+// deriva `items` automaticamente varrendo os <SelectItem> filhos: value → children (o texto).
+// Assim todo dropdown do sistema passa a exibir o nome, não o ID. Quem já passar `items` na mão
+// tem prioridade.
+function deriveSelectItems(children: React.ReactNode): Record<string, React.ReactNode> {
+  const acc: Record<string, React.ReactNode> = {}
+  const walk = (nodes: React.ReactNode) => {
+    React.Children.forEach(nodes, (child) => {
+      if (!React.isValidElement(child)) return
+      if (child.type === SelectItem) {
+        const props = child.props as { value?: unknown; children?: React.ReactNode }
+        if (props.value !== undefined && props.value !== null && props.value !== '') {
+          acc[String(props.value)] = props.children
+        }
+        return // não desce dentro do próprio item
+      }
+      const nested = (child.props as { children?: React.ReactNode })?.children
+      if (nested) walk(nested)
+    })
+  }
+  walk(children)
+  return acc
+}
+
+function Select<Value, Multiple extends boolean | undefined = false>({
+  items,
+  children,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
+  const derived = React.useMemo(() => deriveSelectItems(children), [children])
+  return (
+    <SelectPrimitive.Root items={items ?? derived} {...props}>
+      {children}
+    </SelectPrimitive.Root>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
