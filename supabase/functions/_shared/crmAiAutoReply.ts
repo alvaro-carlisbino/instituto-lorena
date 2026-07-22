@@ -58,32 +58,56 @@ const TRIAGE_MAPPING: Record<string, { pipelineId: string; stageId: string }> = 
   '5': { pipelineId: 'pipeline-tratamento-capilar', stageId: 'tc-triagem' },
 }
 
-/** Detecta opção 1–5 em texto livre (várias linhas, erros comuns de escrita). */
-export function inferTriageTargetFromText(raw: string): { pipelineId: string; stageId: string } | null {
+export type TriageOption = '1' | '2' | '3' | '4' | '5'
+
+/** Rótulo humano de cada opção — usado no eco determinístico da escolha ao paciente. */
+const SERVICE_LABEL_BY_OPTION: Record<TriageOption, string> = {
+  '1': 'Transplante Capilar Masculino',
+  '2': 'Transplante Capilar Feminino',
+  '3': 'Consulta Clínica Masculina',
+  '4': 'Consulta Clínica Feminina',
+  '5': 'Transplante de Sobrancelha',
+}
+
+/** Detecta a OPÇÃO 1–5 em texto livre (número solto, "opção 3", ou o nome do serviço). */
+export function inferTriageOptionFromText(raw: string): TriageOption | null {
   const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
   const joined = lines.join(' ')
   const t = joined.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
   const opt = joined.match(/(?:^|\s)(?:opc[aã]o|op[cç][aã]o|numero|n[º°]?)\s*([1-5])(?:\s|$|[).:,])/i)
-  if (opt?.[1] && TRIAGE_MAPPING[opt[1]]) return TRIAGE_MAPPING[opt[1]]
+  if (opt?.[1] && TRIAGE_MAPPING[opt[1]]) return opt[1] as TriageOption
   const loneLine = lines.find((l) => /^[1-5]$/.test(l))
-  if (loneLine && TRIAGE_MAPPING[loneLine]) return TRIAGE_MAPPING[loneLine]
-  if (/transplante\s+capilar\s+masculin|transplate\s+capilar\s+masculin|capilar\s+masculino\b/.test(t)) {
-    return TRIAGE_MAPPING['1']
-  }
-  if (/transplante\s+capilar\s+feminin|capilar\s+feminina\b|capilar\s+feminino\b/.test(t)) {
-    return TRIAGE_MAPPING['2']
-  }
-  if (/consulta\s+cl[ií]nica\s+masculin/.test(t)) return TRIAGE_MAPPING['3']
-  if (/consulta\s+cl[ií]nica\s+feminin/.test(t)) return TRIAGE_MAPPING['4']
-  if (/\bsobrancelha/.test(t)) return TRIAGE_MAPPING['5']
+  if (loneLine && TRIAGE_MAPPING[loneLine]) return loneLine as TriageOption
+  if (/transplante\s+capilar\s+masculin|transplate\s+capilar\s+masculin|capilar\s+masculino\b/.test(t)) return '1'
+  if (/transplante\s+capilar\s+feminin|capilar\s+feminina\b|capilar\s+feminino\b/.test(t)) return '2'
+  if (/consulta\s+cl[ií]nica\s+masculin/.test(t)) return '3'
+  if (/consulta\s+cl[ií]nica\s+feminin/.test(t)) return '4'
+  if (/\bsobrancelha/.test(t)) return '5'
   return null
 }
 
-function resolveTriageTarget(normalized: string): { pipelineId: string; stageId: string } | null {
+/** Detecta opção 1–5 em texto livre (várias linhas, erros comuns de escrita). */
+export function inferTriageTargetFromText(raw: string): { pipelineId: string; stageId: string } | null {
+  const opt = inferTriageOptionFromText(raw)
+  return opt ? TRIAGE_MAPPING[opt] : null
+}
+
+function resolveTriageOption(normalized: string): TriageOption | null {
   const n = normalized.trim()
   if (!n) return null
-  if (TRIAGE_MAPPING[n]) return TRIAGE_MAPPING[n]
-  return inferTriageTargetFromText(n)
+  if (TRIAGE_MAPPING[n]) return n as TriageOption
+  return inferTriageOptionFromText(n)
+}
+
+function resolveTriageTarget(normalized: string): { pipelineId: string; stageId: string } | null {
+  const opt = resolveTriageOption(normalized)
+  return opt ? TRIAGE_MAPPING[opt] : null
+}
+
+/** Paciente já mencionou período (manhã/tarde) na MESMA mensagem da escolha? */
+function mentionsPreferredPeriod(raw: string): boolean {
+  const t = raw.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+  return /\b(manha|tarde|periodo)\b/.test(t)
 }
 
 /** Só junta rajada quando o texto parece cumprimento curto / incompleto — evita atrasar quem já pediu o serviço numa linha. */
@@ -402,6 +426,30 @@ Para começarmos, digite o número da opção desejada:
 3. Consulta Clínica Masculino
 4. Consulta Clínica Feminino
 5. Transplante de Sobrancelha`
+}
+
+/**
+ * Eco DETERMINÍSTICO da escolha de triagem (opção 1–5). Substitui a geração pela IA logo após a
+ * seleção: o GLM re-apresentava o MENU inteiro (mensagem duplicada — caso Carlos 22/07) em vez de
+ * avançar. Aqui confirmamos o serviço escolhido e já perguntamos a preferência de período — que é
+ * exatamente o próximo passo da triagem (crm-ai-assistant). `includeIntro` = a escolha veio já na
+ * 1ª mensagem (o menu nunca chegou a ser mostrado) → apresenta a Sofia antes de perguntar.
+ */
+function buildTriageOptionAckMessage(
+  name: string,
+  option: TriageOption,
+  includeIntro: boolean,
+  now: Date = new Date(),
+): string {
+  const first = String(name ?? '').trim().split(/\s+/)[0] ?? ''
+  const vocative = first ? `, ${first}` : ''
+  const service = SERVICE_LABEL_BY_OPTION[option]
+  const intro = includeIntro
+    ? `Olá${vocative}! ${brasilGreetingNow(now)}, tudo bem? Eu sou a *Sofia*, assistente virtual do Instituto Lorena Visentainer. 💆\n\n`
+    : ''
+  return `${intro}Perfeito${vocative}! Anotei aqui o seu interesse em *${service}*. 💚
+
+Você prefere ser atendido(a) no período da *manhã* ou da *tarde*? Assim já adianto tudo para a nossa equipa confirmar o melhor horário.`
 }
 
 export function nowIso(): string {
@@ -869,8 +917,51 @@ export async function runWhatsappAiAutoReply(
             updated_at: nowIso(),
           })
           .eq('id', options.leadId)
-        
-        // Lead moved. AI will now generate a response based on the NEW stage in the snapshot.
+
+        // ECO DETERMINÍSTICO DA ESCOLHA (não delegar à IA): o paciente escolheu uma opção válida
+        // (1–5). Antes caíamos na geração do GLM, que re-apresentava o MENU inteiro — mensagem
+        // duplicada (caso Carlos 22/07). Respondemos aqui o próximo passo FIXO da triagem
+        // (confirmar o serviço + perguntar o período), a menos que o período já tenha vindo na
+        // mesma mensagem — aí a IA fecha a triagem com o contexto completo (opção + período).
+        const option = resolveTriageOption(normalized)
+        if (option && !mentionsPreferredPeriod(normalized)) {
+          const { data: ackState } = await admin
+            .from('crm_conversation_states')
+            .select('last_ai_reply_at')
+            .eq('lead_id', options.leadId)
+            .maybeSingle()
+          const ack = buildTriageOptionAckMessage(options.patientName, option, !ackState?.last_ai_reply_at)
+
+          const sentAck = await options.sendProvider.sendMessage({
+            to: options.fromPhone,
+            text: ack,
+            leadId: options.leadId,
+          })
+
+          await insertInteraction(admin, {
+            leadId: options.leadId,
+            patientName: options.patientName,
+            channel: 'whatsapp',
+            direction: 'out',
+            author: 'Assistente IA',
+            content: ack,
+            happenedAt: nowIso(),
+            externalMessageId: sentAck.externalMessageId,
+          })
+
+          await admin.from('crm_conversation_states').upsert({
+            lead_id: options.leadId,
+            last_inbound_at: options.inboundHappenedAt,
+            last_ai_reply_at: nowIso(),
+            updated_at: nowIso(),
+            followup_count: 0,
+            followup_window_start: null,
+            last_followup_at: null,
+          })
+
+          return { replied: true, replyText: ack }
+        }
+        // Paciente mandou opção + período juntos: deixa a IA finalizar a triagem (tem tudo).
       } else {
         // Not a valid option yet. Check if we should send the initial question.
         const { data: state } = await admin
@@ -881,7 +972,7 @@ export async function runWhatsappAiAutoReply(
 
         if (!state?.last_ai_reply_at) {
           const welcome = buildInitialTriageMessage(options.patientName)
-          
+
           const sent = await options.sendProvider.sendMessage({
             to: options.fromPhone,
             text: welcome,
@@ -1199,8 +1290,41 @@ export async function runManychatAiAutoReply(
             updated_at: nowIso(),
           })
           .eq('id', options.leadId)
-        
-        // Lead moved. AI will now generate a response based on the NEW stage in the snapshot.
+
+        // ECO DETERMINÍSTICO DA ESCOLHA (mesmo motivo do caminho WhatsApp): não delegar à IA, que
+        // re-apresentava o menu inteiro (mensagem duplicada). Confirma o serviço + pergunta o
+        // período; se o período já veio junto com a opção, deixa a IA fechar a triagem.
+        const option = resolveTriageOption(normalized)
+        if (option && !mentionsPreferredPeriod(normalized)) {
+          const { data: ackState } = await admin
+            .from('crm_conversation_states')
+            .select('last_ai_reply_at')
+            .eq('lead_id', options.leadId)
+            .maybeSingle()
+          const ack = buildTriageOptionAckMessage(options.patientName, option, !ackState?.last_ai_reply_at)
+
+          await insertInteraction(admin, {
+            leadId: options.leadId,
+            patientName: options.patientName,
+            channel: replyChannel,
+            direction: 'out',
+            author: 'Assistente IA',
+            content: ack,
+            happenedAt: nowIso(),
+          })
+
+          await admin.from('crm_conversation_states').upsert({
+            lead_id: options.leadId,
+            last_inbound_at: options.inboundHappenedAt,
+            last_ai_reply_at: nowIso(),
+            updated_at: nowIso(),
+            followup_count: 0,
+            followup_window_start: null,
+            last_followup_at: null,
+          })
+
+          return { replied: true, replyText: ack }
+        }
       } else {
         // Not a valid option yet. Check if we should send the initial question.
         const { data: state } = await admin
@@ -1211,7 +1335,7 @@ export async function runManychatAiAutoReply(
 
         if (!state?.last_ai_reply_at) {
           const welcome = buildInitialTriageMessage(options.patientName)
-          
+
           await insertInteraction(admin, {
             leadId: options.leadId,
             patientName: options.patientName,

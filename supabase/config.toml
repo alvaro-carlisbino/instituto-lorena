@@ -416,6 +416,12 @@ verify_jwt = false
 [functions.crm-wapi-webhook]
 verify_jwt = false
 
+# Backstop de flush de rajada, disparado por pg_cron com x-cron-secret (auth própria no
+# handler, sem JWT de sessão). Pinado aqui senão um redeploy via CLI volta pro default
+# verify_jwt=true e o cron toma 401 no gateway antes de chegar no código.
+[functions.crm-ai-burst-flush]
+verify_jwt = false
+
 [functions.crm-ingest-webhook]
 verify_jwt = false
 
