@@ -447,6 +447,11 @@ verify_jwt = false
 [functions.crm-openfinance]
 verify_jwt = true
 
+# Sync diário do Open Finance via pg_cron (service_role, multi-tenant). verify_jwt=false
+# (cron não manda JWT de usuário); x-cron-secret opcional (OPENFINANCE_CRON_SECRET).
+[functions.crm-openfinance-sync]
+verify_jwt = false
+
 # Webhook de pagamento PagBank: chamado pelo PagBank sem JWT (mapeia pelo reference_id).
 [functions.crm-pagbank-webhook]
 verify_jwt = false

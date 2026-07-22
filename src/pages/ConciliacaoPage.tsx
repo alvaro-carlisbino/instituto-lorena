@@ -361,9 +361,18 @@ export function ConciliacaoPage() {
         <PluggyConnect
           connectToken={connectToken}
           onSuccess={onPluggySuccess}
-          onError={() => {
+          onError={(err) => {
+            // Mostra o motivo REAL que a Pluggy devolveu (senão fica "não deu" sem pista).
+            // eslint-disable-next-line no-console
+            console.error('[pluggy] erro na conexão:', err)
+            const msg = (err as { message?: string })?.message
+            toast.error(msg ? `Banco: ${msg}` : 'Não foi possível concluir a conexão com o banco.')
+          }}
+          onLoadError={(err) => {
             setConnectToken(null)
-            toast.error('Não foi possível concluir a conexão com o banco.')
+            // eslint-disable-next-line no-console
+            console.error('[pluggy] falha ao carregar o widget:', err)
+            toast.error('Falha ao carregar o conector do banco. Tente novamente.')
           }}
           onClose={() => setConnectToken(null)}
         />
