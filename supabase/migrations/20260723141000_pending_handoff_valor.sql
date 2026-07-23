@@ -10,6 +10,14 @@
 -- Dandara priorizar (quem está esperando um PREÇO é diferente de quem está esperando agendamento).
 -- Mesma mecânica de sempre: a última SAÍDA é da IA; se um humano responder, ele vira a saída mais
 -- recente e o lead some da lista.
+--
+-- Sai também o padrão "equipe médica especializada pronta": esse é o Passo 2 do script (a Sofia
+-- apresenta os 3 profissionais e pergunta com qual o paciente quer ser atendido), ou seja, quem está
+-- sendo esperado é o PACIENTE, não a Dandara. Enquanto o texto era gerado pelo GLM ele aparecia de
+-- vez em quando; desde que o eco do Passo 2 virou determinístico, ele passaria a acender o card para
+-- TODO lead triado e só apagaria quando um humano respondesse — 3 falsos positivos nas últimas 48h,
+-- e seria 100% deles daqui pra frente. O handoff de verdade é o Passo 3 ("vou encaminhar seu
+-- atendimento para a nossa consultora Dandara"), que os outros padrões já pegam.
 
 drop function if exists public.crm_pending_human_handoff(int);
 
@@ -53,7 +61,7 @@ as $$
   where l.deleted_at is null
     and coalesce(l.conversation_status, '') not in ('archived','closed','lost','won','human_active')
     and coalesce(lo.author, '') not like '%@%'  -- IA (Sofia), não consultor humano
-    and lo.content ~* '(equipe m[ée]dica especializada pronta|excelente escolha|dandara|vou (chamar|encaminhar|transferir)|encaminhar (o |seu )?(contato|atendimento)|passar as op[çc]|verificar a disponibilidade|entra em contato|te (retornar|contatar)|um instante que a nossa equip|te env(ia|io) o valor|passar essas informa[çc][õo]es)'
+    and lo.content ~* '(excelente escolha|dandara|vou (chamar|encaminhar|transferir)|encaminhar (o |seu )?(contato|atendimento)|passar as op[çc]|verificar a disponibilidade|entra em contato|te (retornar|contatar)|um instante que a nossa equip|te env(ia|io) o valor|passar essas informa[çc][õo]es)'
   order by lo.created_at asc;
 $$;
 
