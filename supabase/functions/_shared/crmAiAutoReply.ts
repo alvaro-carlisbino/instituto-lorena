@@ -104,10 +104,42 @@ function resolveTriageTarget(normalized: string): { pipelineId: string; stageId:
   return opt ? TRIAGE_MAPPING[opt] : null
 }
 
-/** Paciente já mencionou período (manhã/tarde) na MESMA mensagem da escolha? */
-function mentionsPreferredPeriod(raw: string): boolean {
+/**
+ * Move o lead para o pipeline/stage da opção escolhida. O erro é CONFERIDO de propósito: este
+ * update mandava `updated_at`, coluna que não existe em `leads` — o PostgREST devolvia 400
+ * (PGRST204) e descartava o payload inteiro, então o lead nunca saía de "Novo" e cada repetição da
+ * opção re-disparava a mesma mensagem (caso Aline 22/jul). A coluna passou a existir na migration
+ * 20260723140000; o log fica para a próxima divergência de schema não voltar a ser silenciosa.
+ */
+async function moveLeadToTriageStage(
+  admin: SupabaseClient,
+  leadId: string,
+  target: { pipelineId: string; stageId: string },
+): Promise<void> {
+  const { error } = await admin
+    .from('leads')
+    .update({ pipeline_id: target.pipelineId, stage_id: target.stageId, updated_at: nowIso() })
+    .eq('id', leadId)
+  if (error) {
+    console.error('[triagem] falha ao mover lead', {
+      leadId,
+      target,
+      code: error.code,
+      message: error.message,
+    })
+  }
+}
+
+/**
+ * Paciente já indicou o MÉDICO na mesma mensagem da escolha (ex.: "1, com a Dra. Lorena")? Aí o
+ * Passo 2 já está respondido e quem fecha é a IA, com o contexto completo. Cobre também o "tanto
+ * faz", que o script manda direcionar para a Dra. Lorena.
+ */
+function mentionsDoctorPreference(raw: string): boolean {
   const t = raw.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
-  return /\b(manha|tarde|periodo)\b/.test(t)
+  if (/\b(lorena|visentainer|matheus|amaral|jaqueline|jaque)\b/.test(t)) return true
+  return /\b(tanto faz|qualquer um|qualquer med|indiferente|voce escolhe|o que estiver disponivel|o que for melhor)\b/
+    .test(t)
 }
 
 /** Só junta rajada quando o texto parece cumprimento curto / incompleto — evita atrasar quem já pediu o serviço numa linha. */
@@ -413,43 +445,64 @@ export function brasilGreetingNow(now: Date = new Date()): string {
   return 'Boa noite'
 }
 
-function buildInitialTriageMessage(name: string, now: Date = new Date()): string {
-  const greeting = brasilGreetingNow(now)
-  return `Olá, ${name}! ${greeting}, tudo bem? Eu sou a *Sofia*, assistente virtual do Instituto Lorena Visentainer. 💆
+/**
+ * Passo 1 do script da Sofia (crm_ai_configs.system_prompt do instituto-lorena), palavra por palavra.
+ * O texto antigo divergia em 4 pontos que a equipa cobrou: dizia "assistente *virtual*" (o script
+ * proíbe em caixa alta se identificar como IA/assistente virtual), tratava toda paciente no
+ * masculino ("ajudá-lo"), escrevia "equipa" (pt-PT) e listava "Consulta Clínica Masculino/Feminino"
+ * sem concordância.
+ */
+function buildInitialTriageMessage(name: string): string {
+  const first = String(name ?? '').trim().split(/\s+/)[0] ?? ''
+  const vocative = first ? `, ${first}` : ''
+  return `Olá${vocative}! 😊
+Seja muito bem-vindo(a) ao Instituto Lorena Visentainer.
+Será um prazer cuidar de você! ✨
 
-Posso ajudá-lo a escolher o tipo de atendimento e a reunir as informações para o agendamento — a nossa equipa confirma depois o melhor horário na agenda.
+Eu sou a *Sofia*, assistente do Instituto, e vou te auxiliar neste primeiro atendimento, identificando o melhor tipo de consulta para o seu caso.
 
-Para começarmos, digite o número da opção desejada:
+Para começarmos, por favor escolha uma das opções abaixo:
 
-1. Transplante Capilar Masculino
-2. Transplante Capilar Feminino
-3. Consulta Clínica Masculino
-4. Consulta Clínica Feminino
-5. Transplante de Sobrancelha`
+1️⃣ Transplante Capilar Masculino
+2️⃣ Transplante Capilar Feminino
+3️⃣ Consulta Clínica Masculina
+4️⃣ Consulta Clínica Feminina
+5️⃣ Transplante de Sobrancelha`
 }
 
 /**
  * Eco DETERMINÍSTICO da escolha de triagem (opção 1–5). Substitui a geração pela IA logo após a
  * seleção: o GLM re-apresentava o MENU inteiro (mensagem duplicada — caso Carlos 22/07) em vez de
- * avançar. Aqui confirmamos o serviço escolhido e já perguntamos a preferência de período — que é
- * exatamente o próximo passo da triagem (crm-ai-assistant). `includeIntro` = a escolha veio já na
- * 1ª mensagem (o menu nunca chegou a ser mostrado) → apresenta a Sofia antes de perguntar.
+ * avançar.
+ *
+ * O texto é o Passo 2 do script (escolha do médico). A versão anterior perguntava "manhã ou tarde",
+ * que é justamente o que o script proíbe a Sofia de fazer ("❌ Não confirma horários, dias ou
+ * turnos" / "Você NUNCA informa dias da semana ou horários dos médicos" — quem fecha agenda é a
+ * Dandara). `includeIntro` = a escolha veio já na 1ª mensagem (o menu nunca chegou a ser mostrado)
+ * → apresenta a Sofia antes, como no Passo 1.
  */
 function buildTriageOptionAckMessage(
   name: string,
   option: TriageOption,
   includeIntro: boolean,
-  now: Date = new Date(),
 ): string {
   const first = String(name ?? '').trim().split(/\s+/)[0] ?? ''
   const vocative = first ? `, ${first}` : ''
   const service = SERVICE_LABEL_BY_OPTION[option]
   const intro = includeIntro
-    ? `Olá${vocative}! ${brasilGreetingNow(now)}, tudo bem? Eu sou a *Sofia*, assistente virtual do Instituto Lorena Visentainer. 💆\n\n`
+    ? `Olá${vocative}! 😊\nSeja muito bem-vindo(a) ao Instituto Lorena Visentainer.\nEu sou a *Sofia*, assistente do Instituto. ✨\n\n`
     : ''
   return `${intro}Perfeito${vocative}! Anotei aqui o seu interesse em *${service}*. 💚
 
-Você prefere ser atendido(a) no período da *manhã* ou da *tarde*? Assim já adianto tudo para a nossa equipa confirmar o melhor horário.`
+Temos uma equipe médica especializada pronta para cuidar do seu caso com excelência e atenção individualizada.
+
+Atualmente, você pode agendar seu atendimento com um dos profissionais abaixo:
+
+👩‍⚕️ Dra. Lorena Visentainer
+👨‍⚕️ Dr. Matheus Amaral
+👩‍⚕️ Dra. Jaqueline Augusto
+
+Com qual profissional você gostaria de realizar sua consulta?`
 }
 
 export function nowIso(): string {
@@ -909,22 +962,15 @@ export async function runWhatsappAiAutoReply(
       const target = resolveTriageTarget(normalized)
 
       if (target) {
-        await admin
-          .from('leads')
-          .update({
-            pipeline_id: target.pipelineId,
-            stage_id: target.stageId,
-            updated_at: nowIso(),
-          })
-          .eq('id', options.leadId)
+        await moveLeadToTriageStage(admin, options.leadId, target)
 
         // ECO DETERMINÍSTICO DA ESCOLHA (não delegar à IA): o paciente escolheu uma opção válida
         // (1–5). Antes caíamos na geração do GLM, que re-apresentava o MENU inteiro — mensagem
         // duplicada (caso Carlos 22/07). Respondemos aqui o próximo passo FIXO da triagem
-        // (confirmar o serviço + perguntar o período), a menos que o período já tenha vindo na
-        // mesma mensagem — aí a IA fecha a triagem com o contexto completo (opção + período).
+        // (Passo 2 do script: escolha do médico), a menos que o médico já tenha vindo na mesma
+        // mensagem — aí a IA fecha a triagem com o contexto completo (opção + médico).
         const option = resolveTriageOption(normalized)
-        if (option && !mentionsPreferredPeriod(normalized)) {
+        if (option && !mentionsDoctorPreference(normalized)) {
           const { data: ackState } = await admin
             .from('crm_conversation_states')
             .select('last_ai_reply_at')
@@ -1282,20 +1328,13 @@ export async function runManychatAiAutoReply(
       const target = resolveTriageTarget(normalized)
 
       if (target) {
-        await admin
-          .from('leads')
-          .update({
-            pipeline_id: target.pipelineId,
-            stage_id: target.stageId,
-            updated_at: nowIso(),
-          })
-          .eq('id', options.leadId)
+        await moveLeadToTriageStage(admin, options.leadId, target)
 
         // ECO DETERMINÍSTICO DA ESCOLHA (mesmo motivo do caminho WhatsApp): não delegar à IA, que
-        // re-apresentava o menu inteiro (mensagem duplicada). Confirma o serviço + pergunta o
-        // período; se o período já veio junto com a opção, deixa a IA fechar a triagem.
+        // re-apresentava o menu inteiro (mensagem duplicada). Confirma o serviço + faz o Passo 2
+        // (escolha do médico); se o médico já veio junto com a opção, deixa a IA fechar a triagem.
         const option = resolveTriageOption(normalized)
-        if (option && !mentionsPreferredPeriod(normalized)) {
+        if (option && !mentionsDoctorPreference(normalized)) {
           const { data: ackState } = await admin
             .from('crm_conversation_states')
             .select('last_ai_reply_at')

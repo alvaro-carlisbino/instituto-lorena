@@ -30,7 +30,7 @@ const MAX_VISIBLE = 5
 const WINDOW_HOURS = 48
 const POLL_MS = 30_000
 
-type WaitingItem = { id: string; name: string; since: string | null }
+type WaitingItem = { id: string; name: string; since: string | null; reason: string | null }
 
 type PendingHandoffRow = {
   lead_id: string
@@ -38,6 +38,8 @@ type PendingHandoffRow = {
   waiting_since: string | null
   last_message: string | null
   channel: string | null
+  /** 'valor' = a Sofia prometeu que a equipa manda o preço; 'handoff' = encaminhamento normal. */
+  reason?: string | null
 }
 
 export function PendingHumanHandoffPanel() {
@@ -79,6 +81,7 @@ export function PendingHumanHandoffPanel() {
         id: r.lead_id,
         name: r.patient_name || 'Lead sem nome',
         since: r.waiting_since,
+        reason: r.reason ?? null,
       }))
     }
     return crm.leads
@@ -88,7 +91,12 @@ export function PendingHumanHandoffPanel() {
         const tb = b.last_interaction_at ? new Date(b.last_interaction_at).getTime() : 0
         return ta - tb
       })
-      .map((l) => ({ id: l.id, name: l.patientName || 'Lead sem nome', since: l.last_interaction_at ?? null }))
+      .map((l) => ({
+        id: l.id,
+        name: l.patientName || 'Lead sem nome',
+        since: l.last_interaction_at ?? null,
+        reason: null,
+      }))
   }, [usingRpc, rpcRows, crm.leads])
 
   // Primeira carga do RPC ainda em andamento: não renderiza nada (sem flash do estado vazio).
@@ -149,7 +157,14 @@ export function PendingHumanHandoffPanel() {
               className="flex items-center justify-between gap-3 rounded-xl border border-red-500/10 bg-background/60 px-3 py-2"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-foreground/90">{lead.name}</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="truncate text-sm font-bold text-foreground/90">{lead.name}</p>
+                  {lead.reason === 'valor' ? (
+                    <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-700">
+                      Pediu valor
+                    </span>
+                  ) : null}
+                </div>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-red-700/70">
                   Aguardando {formatWaitingFor(lead.since, nowMs)}
                 </p>
