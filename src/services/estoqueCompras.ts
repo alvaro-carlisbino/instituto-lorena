@@ -506,6 +506,41 @@ export async function createPurchaseInvoice(payload: {
   }
 }
 
+export type InvoiceMovement = {
+  id: string
+  itemId: string
+  itemName: string
+  qtyDelta: number
+  unit: string
+  unitCostCents: number | null
+  createdAt: string
+}
+
+/** O que essa NF colocou no estoque. Sem isso a nota registrada é só um total: não dava
+ *  pra conferir se a entrada bateu com o que veio na caixa. */
+export async function listInvoiceMovements(invoiceId: string): Promise<InvoiceMovement[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('stock_movements')
+    .select('id, item_id, qty_delta, unit_cost_cents, created_at, stock_items(name, unit)')
+    .eq('ref_type', 'purchase_invoice')
+    .eq('ref_id', invoiceId)
+    .order('created_at')
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const item = r.stock_items as { name?: unknown; unit?: unknown } | null
+    return {
+      id: String(r.id),
+      itemId: String(r.item_id),
+      itemName: item?.name != null ? String(item.name) : 'Item removido',
+      qtyDelta: Number(r.qty_delta ?? 0),
+      unit: item?.unit != null ? String(item.unit) : 'un',
+      unitCostCents: r.unit_cost_cents != null ? Number(r.unit_cost_cents) : null,
+      createdAt: String(r.created_at ?? ''),
+    }
+  })
+}
+
 export async function getAttachmentSignedUrl(storagePath: string, expires = 3600): Promise<string> {
   const client = assertClient()
   const { data, error } = await client.storage.from(BUCKET).createSignedUrl(storagePath, expires)

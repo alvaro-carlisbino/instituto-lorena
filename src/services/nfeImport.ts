@@ -42,6 +42,9 @@ export type NfeImportPlan = {
   createSupplier: boolean
   supplierId: string | null
   createPayables: boolean
+  /** NF sem duplicatas (compra à vista/balcão): vencimento da parcela ÚNICA, valor = total da nota.
+   *  Sem isso a nota entra só no estoque e o gasto some do financeiro. */
+  singleDueDate?: string | null
   itemsPlan: NfeItemPlan[]
 }
 
@@ -211,20 +214,35 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
     }
   }
 
-  // 4) Parcelas (duplicatas) → contas a pagar
+  // 4) Parcelas → contas a pagar. Nota a prazo traz as duplicatas em cobr/dup; compra à vista
+  //    (papelaria, balcão) não traz cobr nenhum — e antes disso o gasto entrava no estoque e
+  //    nunca aparecia no financeiro. Sem duplicata, a parcela única é o total da nota.
   let payables = 0
-  if (plan.createPayables && nfe.installments.length > 0) {
-    await createPayablesExact(
-      nfe.installments.map((inst) => ({
-        description: `NF ${nfe.number} — parcela ${inst.number}`,
-        supplierId,
-        invoiceId: invoice.id,
-        dueDate: inst.dueDate,
-        amountCents: inst.amountCents,
-        paymentMethod: 'boleto',
-      })),
-    )
-    payables = nfe.installments.length
+  if (plan.createPayables) {
+    const rows =
+      nfe.installments.length > 0
+        ? nfe.installments.map((inst) => ({
+            description: `NF ${nfe.number} — parcela ${inst.number}`,
+            dueDate: inst.dueDate,
+            amountCents: inst.amountCents,
+            paymentMethod: 'boleto' as string | null,
+          }))
+        : plan.singleDueDate && nfe.totalCents > 0
+          ? [
+              {
+                description: `NF ${nfe.number} — à vista`,
+                dueDate: plan.singleDueDate,
+                amountCents: nfe.totalCents,
+                paymentMethod: null as string | null,
+              },
+            ]
+          : []
+    if (rows.length > 0) {
+      await createPayablesExact(
+        rows.map((r) => ({ ...r, supplierId, invoiceId: invoice.id })),
+      )
+      payables = rows.length
+    }
   }
 
   return {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarClock, Check, FileCode, FileText, Paperclip, Plus, Receipt } from 'lucide-react'
+import { CalendarClock, Check, ChevronDown, FileCode, FileText, Paperclip, Plus, Receipt } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
@@ -23,6 +23,7 @@ import {
 import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import {
+  type InvoiceMovement,
   type Payable,
   type PurchaseInvoice,
   type StockItem,
@@ -30,6 +31,7 @@ import {
   createPayables,
   createPurchaseInvoice,
   getAttachmentSignedUrl,
+  listInvoiceMovements,
   listPayables,
   listPurchaseInvoices,
   listStockItems,
@@ -105,8 +107,15 @@ export function ContasPagarPage() {
   const [nfePlan, setNfePlan] = useState<NfeItemPlan[]>([])
   const [nfeCreateSupplier, setNfeCreateSupplier] = useState(true)
   const [nfeCreatePayables, setNfeCreatePayables] = useState(true)
+  /** Vencimento da parcela única quando a nota não traz duplicatas. */
+  const [nfeSingleDue, setNfeSingleDue] = useState('')
   const [importing, setImporting] = useState(false)
   const nfeFileRef = useRef<HTMLInputElement | null>(null)
+
+  // Histórico da nota: quais entradas de estoque saíram dela (carrega ao expandir).
+  const [openInvoiceId, setOpenInvoiceId] = useState<string | null>(null)
+  const [invoiceMovements, setInvoiceMovements] = useState<Record<string, InvoiceMovement[]>>({})
+  const [loadingInvoiceId, setLoadingInvoiceId] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -140,7 +149,10 @@ export function ContasPagarPage() {
       setNfe(parsed)
       setNfePlan(suggestItemPlan(parsed, stockItems))
       setNfeCreateSupplier(true)
-      setNfeCreatePayables(parsed.installments.length > 0)
+      // Sem duplicata a nota também vira conta a pagar (parcela única, vence na emissão) —
+      // senão a compra à vista entra no estoque e nunca aparece no financeiro.
+      setNfeCreatePayables(parsed.totalCents > 0)
+      setNfeSingleDue(parsed.issueDate ?? new Date().toISOString().slice(0, 10))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao ler o XML')
     } finally {
@@ -162,6 +174,7 @@ export function ContasPagarPage() {
         createSupplier: nfeCreateSupplier && !existingSupplierMatch,
         supplierId: existingSupplierMatch?.id ?? null,
         createPayables: nfeCreatePayables,
+        singleDueDate: nfe.installments.length === 0 ? nfeSingleDue || null : null,
         itemsPlan: nfePlan,
       })
       toast.success(
@@ -308,6 +321,25 @@ export function ContasPagarPage() {
       window.open(url, '_blank', 'noopener')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao abrir anexo')
+    }
+  }
+
+  const toggleInvoice = async (invoiceId: string) => {
+    if (openInvoiceId === invoiceId) {
+      setOpenInvoiceId(null)
+      return
+    }
+    setOpenInvoiceId(invoiceId)
+    if (invoiceMovements[invoiceId]) return
+    setLoadingInvoiceId(invoiceId)
+    try {
+      const rows = await listInvoiceMovements(invoiceId)
+      setInvoiceMovements((prev) => ({ ...prev, [invoiceId]: rows }))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao carregar o histórico da nota')
+      setOpenInvoiceId(null)
+    } finally {
+      setLoadingInvoiceId(null)
     }
   }
 
@@ -578,30 +610,80 @@ export function ContasPagarPage() {
               {invoices.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma NF de compra registrada.</p>
               ) : (
-                invoices.map((inv) => (
-                  <div key={inv.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm">
-                    <div className="min-w-0">
-                      <div className="font-medium">NF {inv.number}</div>
-                      <div className="truncate text-xs text-muted-foreground">
-                        {inv.supplierName ?? 'Sem fornecedor'}
-                        {inv.issueDate ? ` · ${formatDay(inv.issueDate)}` : ''}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className="font-semibold">{formatBRL(inv.totalCents)}</span>
-                      {inv.storagePath ? (
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => void openAttachment(inv.storagePath!)}
-                          aria-label={`Abrir anexo da NF ${inv.number}`}
+                invoices.map((inv) => {
+                  const expanded = openInvoiceId === inv.id
+                  const movements = invoiceMovements[inv.id] ?? []
+                  const linked = payables.filter((p) => p.invoiceId === inv.id)
+                  return (
+                    <div key={inv.id} className="rounded-md border border-border">
+                      <div className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                        <button
+                          type="button"
+                          onClick={() => void toggleInvoice(inv.id)}
+                          aria-expanded={expanded}
+                          aria-label={`Histórico da NF ${inv.number}`}
+                          className="flex min-w-0 flex-1 items-center gap-2 text-left"
                         >
-                          <Paperclip className="size-3.5" aria-hidden />
-                        </Button>
+                          <ChevronDown
+                            className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`}
+                            aria-hidden
+                          />
+                          <div className="min-w-0">
+                            <div className="font-medium">NF {inv.number}</div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {inv.supplierName ?? 'Sem fornecedor'}
+                              {inv.issueDate ? ` · ${formatDay(inv.issueDate)}` : ''}
+                            </div>
+                          </div>
+                        </button>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {linked.length === 0 ? (
+                            <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-600">
+                              sem parcela
+                            </Badge>
+                          ) : null}
+                          <span className="font-semibold">{formatBRL(inv.totalCents)}</span>
+                          {inv.storagePath ? (
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => void openAttachment(inv.storagePath!)}
+                              aria-label={`Abrir anexo da NF ${inv.number}`}
+                            >
+                              <Paperclip className="size-3.5" aria-hidden />
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                      {expanded ? (
+                        <div className="border-t border-border px-3 py-2 text-xs">
+                          {loadingInvoiceId === inv.id ? (
+                            <p className="text-muted-foreground">Carregando…</p>
+                          ) : movements.length === 0 ? (
+                            <p className="text-muted-foreground">Nenhuma entrada de estoque vinculada a esta nota.</p>
+                          ) : (
+                            <ul className="space-y-1">
+                              {movements.map((m) => (
+                                <li key={m.id} className="flex items-center justify-between gap-2">
+                                  <span className="min-w-0 truncate">{m.itemName}</span>
+                                  <span className="shrink-0 text-muted-foreground">
+                                    {m.qtyDelta} {m.unit}
+                                    {m.unitCostCents != null ? ` · ${formatBRL(m.unitCostCents)}/un` : ''}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <p className="mt-2 border-t border-border pt-2 text-muted-foreground">
+                            {linked.length === 0
+                              ? 'Sem conta a pagar vinculada — esta compra não está no financeiro.'
+                              : `${linked.length} ${linked.length === 1 ? 'parcela' : 'parcelas'} em contas a pagar.`}
+                          </p>
+                        </div>
                       ) : null}
                     </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </CardContent>
           </Card>
@@ -823,7 +905,37 @@ export function ContasPagarPage() {
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">A nota não traz duplicatas (parcelas), só entra estoque e a NF.</p>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="nfe-create-payables"
+                      checked={nfeCreatePayables}
+                      onCheckedChange={(checked) => setNfeCreatePayables(checked)}
+                      disabled={nfe.totalCents <= 0}
+                    />
+                    <Label htmlFor="nfe-create-payables" className="font-semibold">
+                      Criar 1 parcela de {formatBRL(nfe.totalCents)} em contas a pagar
+                    </Label>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    A nota não traz duplicatas (compra à vista). Sem essa parcela o gasto entra só no
+                    estoque e não aparece no financeiro.
+                  </p>
+                  {nfeCreatePayables ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <Label htmlFor="nfe-single-due" className="text-xs font-normal text-muted-foreground">
+                        Vencimento
+                      </Label>
+                      <Input
+                        id="nfe-single-due"
+                        type="date"
+                        className="h-8 w-[160px]"
+                        value={nfeSingleDue}
+                        onChange={(e) => setNfeSingleDue(e.target.value)}
+                      />
+                    </div>
+                  ) : null}
+                </div>
               )}
             </div>
           ) : null}
