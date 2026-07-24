@@ -149,19 +149,13 @@ export function GastosControlePage() {
   }
 
   return (
-    <AppLayout>
-      <div className="space-y-4 p-4 md:p-6">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">Gastos e controle</h1>
-            <p className="text-sm text-muted-foreground">
-              Espelho da planilha: data, razão social, forma, centro de custo, subcategoria e valor.
-            </p>
-          </div>
-          <SubTabs items={financeiroTabs(isSalesPolo)} />
-        </div>
+    <AppLayout
+      title="Gastos e controle"
+      subtitle="Espelho da planilha: data, razão social, forma, centro de custo, subcategoria e valor."
+    >
+      <SubTabs tabs={financeiroTabs(isSalesPolo)} />
 
-        <div className="flex flex-wrap items-end gap-2">
+      <div className="mb-4 flex flex-wrap items-end gap-2">
           <div className="space-y-1">
             <Label>Mês</Label>
             <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-[160px]" />
@@ -290,7 +284,6 @@ export function GastosControlePage() {
             </CardContent>
           </Card>
         </div>
-      </div>
 
       <Dialog open={openForm} onOpenChange={setOpenForm}>
         <DialogContent>
