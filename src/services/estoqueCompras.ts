@@ -589,15 +589,22 @@ export type Payable = {
   barcode: string | null
   storagePath: string | null
   note: string | null
+  /** Centro de custo da planilha de gastos (ex.: Centro Cirúrgico, SPA). */
+  costCenter: string | null
+  /** Razão social / favorecido (quando não há supplier cadastrado). */
+  counterparty: string | null
+  /** Subcategoria livre (NF, VT, diarista, nome do colaborador…). */
+  subcategory: string | null
+  importKey: string | null
 }
 
 export async function listPayables(): Promise<Payable[]> {
   const client = assertClient()
   const { data, error } = await client
     .from('payable_installments')
-    .select('id, invoice_id, supplier_id, category_id, account_id, description, due_date, amount_cents, status, paid_at, payment_method, barcode, storage_path, note, stock_suppliers(name)')
+    .select('id, invoice_id, supplier_id, category_id, account_id, description, due_date, amount_cents, status, paid_at, payment_method, barcode, storage_path, note, cost_center, counterparty, subcategory, import_key, stock_suppliers(name)')
     .order('due_date')
-    .limit(500)
+    .limit(2000)
   if (error) throw new Error(error.message)
   return (data ?? []).map((r) => {
     const supplier = r.stock_suppliers as { name?: unknown } | null
@@ -619,6 +626,10 @@ export async function listPayables(): Promise<Payable[]> {
       barcode: r.barcode != null ? String(r.barcode) : null,
       storagePath: r.storage_path != null ? String(r.storage_path) : null,
       note: r.note != null ? String(r.note) : null,
+      costCenter: r.cost_center != null ? String(r.cost_center) : null,
+      counterparty: r.counterparty != null ? String(r.counterparty) : null,
+      subcategory: r.subcategory != null ? String(r.subcategory) : null,
+      importKey: r.import_key != null ? String(r.import_key) : null,
     }
   })
 }
@@ -635,6 +646,12 @@ export async function createPayables(payload: {
   paymentMethod?: string | null
   barcode?: string | null
   note?: string
+  costCenter?: string | null
+  counterparty?: string | null
+  subcategory?: string | null
+  status?: PayableStatus
+  paidAt?: string | null
+  importKey?: string | null
 }): Promise<void> {
   const client = assertClient()
   const n = Math.max(1, Math.round(payload.installments))
@@ -652,6 +669,14 @@ export async function createPayables(payload: {
       payment_method: payload.paymentMethod || null,
       barcode: i === 0 ? payload.barcode?.trim() || null : null,
       note: payload.note?.trim() || null,
+      cost_center: payload.costCenter?.trim() || null,
+      counterparty: payload.counterparty?.trim() || null,
+      subcategory: payload.subcategory?.trim() || null,
+      status: payload.status ?? 'aberto',
+      paid_at: payload.status === 'pago'
+        ? (payload.paidAt ? new Date(`${payload.paidAt}T12:00:00`).toISOString() : new Date().toISOString())
+        : null,
+      import_key: payload.importKey || null,
     }
   })
   const { error } = await client.from('payable_installments').insert(rows)

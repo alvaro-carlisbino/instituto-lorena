@@ -565,7 +565,9 @@ export async function finalizeRedePaid(
             description: orderKit ? undefined : String(intent.description ?? 'Pedido Tricopill').trim(),
             customerName: String(intent.customerName || opts.cardholderName || 'Cliente Tricopill').trim(),
             cpf: intent.customerDoc || undefined,
-            saleDateISO: intent.paidAt || intent.createdAt || undefined,
+            // Data do pedido = quando PAGOU. Nunca usar createdAt (geração do QR/link) —
+            // senão PIX gerado ontem e pago hoje sai no Bling com data de ontem (Paula 24/07).
+            saleDateISO: intent.paidAt || new Date().toISOString(),
           })
           await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
           receiptBlingId = out.orderId ?? null
@@ -709,7 +711,9 @@ export async function finalizeRedePaid(
               cep?: string; numero?: string; complemento?: string
               bairro?: string; logradouro?: string; cidade?: string; uf?: string; delivery_mode?: string
             }) ?? undefined,
-            saleDateISO: intent.paidAt || intent.createdAt || undefined,
+            // Data do pedido = quando PAGOU. Nunca usar createdAt (geração do QR/link) —
+            // senão PIX gerado ontem e pago hoje sai no Bling com data de ontem (Paula 24/07).
+            saleDateISO: intent.paidAt || new Date().toISOString(),
           })
           await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
           receiptBlingId = out.orderId ?? null

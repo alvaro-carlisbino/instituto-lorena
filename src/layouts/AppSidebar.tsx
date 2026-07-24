@@ -231,6 +231,7 @@ export function AppSidebar() {
                 {isSalesPolo ? <NavItem to="/recebimentos" label="Recebimentos" icon={Wallet} /> : null}
                 {showBoards ? <NavItem to="/contas-a-receber" label="Contas a receber" icon={HandCoins} /> : null}
                 {showBoards ? <NavItem to="/contas-a-pagar" label="Contas a pagar" icon={CalendarClock} /> : null}
+                {showBoards ? <NavItem to="/gastos" label="Gastos e controle" icon={FileSpreadsheet} /> : null}
                 {showBoards ? <NavItem to="/contas-caixa" label="Contas & caixa" icon={Landmark} /> : null}
                 {showBoards ? <NavItem to="/recorrentes" label="Recorrentes" icon={Repeat} /> : null}
                 {showBoards ? <NavItem to="/conciliacao" label="Conciliação" icon={ArrowLeftRight} /> : null}

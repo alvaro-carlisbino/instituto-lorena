@@ -73,6 +73,7 @@ const EstoquePage = lazyPage(() => import('./pages/EstoquePage'), 'EstoquePage')
 const BipagemPage = lazyPage(() => import('./pages/BipagemPage'), 'BipagemPage')
 const ComprasPage = lazyPage(() => import('./pages/ComprasPage'), 'ComprasPage')
 const ContasPagarPage = lazyPage(() => import('./pages/ContasPagarPage'), 'ContasPagarPage')
+const GastosControlePage = lazyPage(() => import('./pages/GastosControlePage'), 'GastosControlePage')
 const ContasReceberPage = lazyPage(() => import('./pages/ContasReceberPage'), 'ContasReceberPage')
 const FinAccountsPage = lazyPage(() => import('./pages/FinAccountsPage'), 'FinAccountsPage')
 const ConciliacaoPage = lazyPage(() => import('./pages/ConciliacaoPage'), 'ConciliacaoPage')
@@ -122,6 +123,7 @@ function AppRoutes() {
         <Route path="/bipagem" element={<BipagemPage />} />
         <Route path="/compras" element={<ComprasPage />} />
         <Route path="/contas-a-pagar" element={<ContasPagarPage />} />
+        <Route path="/gastos" element={<GastosControlePage />} />
         <Route path="/contas-a-receber" element={<ContasReceberPage />} />
         <Route path="/contas-caixa" element={<FinAccountsPage />} />
         <Route path="/conciliacao" element={<ConciliacaoPage />} />
