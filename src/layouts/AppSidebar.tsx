@@ -48,6 +48,7 @@ import {
   ShoppingCart,
   Landmark,
   HandCoins,
+  Bell,
 } from 'lucide-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
@@ -233,7 +234,9 @@ export function AppSidebar() {
                 {showBoards ? <NavItem to="/contas-caixa" label="Contas & caixa" icon={Landmark} /> : null}
                 {showBoards ? <NavItem to="/recorrentes" label="Recorrentes" icon={Repeat} /> : null}
                 {showBoards ? <NavItem to="/conciliacao" label="Conciliação" icon={ArrowLeftRight} /> : null}
+                {showBoards ? <NavItem to="/alertas-pagamento" label="Alertas pagamento" icon={Bell} /> : null}
                 {showBoards ? <NavItem to="/fluxo-caixa" label="Fluxo de caixa" icon={TrendingUp} /> : null}
+                {showBoards ? <NavItem to="/importar-shop" label="Importar shop" icon={FileSpreadsheet} /> : null}
                 <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} />
                 {isSalesPolo ? <NavItem to="/cupons" label="Cupons" icon={Ticket} /> : null}
                 {isSalesPolo ? <NavItem to="/tricopill-relatorios" label="Relatórios de vendas" icon={FileSpreadsheet} /> : null}
@@ -253,9 +256,12 @@ export function AppSidebar() {
                 <NavItem to="/estoque" label="Estoque" icon={Warehouse} />
                 <NavItem to="/bipagem" label="Bipagem" icon={ScanBarcode} />
                 <NavItem to="/compras" label="Ordens de compra" icon={ClipboardList} />
+                <NavItem to="/transferencias-estoque" label="Transferências" icon={ArrowLeftRight} />
                 <NavItem to="/inventario" label="Inventário" icon={ClipboardCheck} />
                 {isClinicPolo ? <NavItem to="/kits" label="Kits cirúrgicos" icon={PackageCheck} /> : null}
+                {isClinicPolo ? <NavItem to="/conta-cirurgica" label="Conta cirúrgica" icon={FileBarChart2} /> : null}
                 <NavItem to="/estoque-relatorios" label="Relatórios de estoque" icon={FileBarChart2} />
+                {isClinicPolo ? <NavItem to="/integracoes-clinica" label="Meta4 / Enfermagem" icon={Unplug} /> : null}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

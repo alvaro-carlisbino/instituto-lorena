@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { estoqueTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
+import { listAppUsersForLink } from '@/services/rhPonto'
 import {
   type PurchaseOrder,
   type PurchaseOrderStatus,
@@ -47,9 +48,11 @@ export function ComprasPage() {
   const [orders, setOrders] = useState<PurchaseOrder[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [stockItems, setStockItems] = useState<StockItem[]>([])
+  const [buyers, setBuyers] = useState<Array<{ authUserId: string; name: string; email: string }>>([])
   const [loading, setLoading] = useState(false)
 
   const [supplierId, setSupplierId] = useState('')
+  const [responsibleId, setResponsibleId] = useState('')
   const [expectedDate, setExpectedDate] = useState('')
   const [note, setNote] = useState('')
   const [rows, setRows] = useState<DraftItem[]>([{ ...EMPTY_ROW }])
@@ -57,14 +60,21 @@ export function ComprasPage() {
 
   const [newSupplierName, setNewSupplierName] = useState('')
   const [showNewSupplier, setShowNewSupplier] = useState(false)
+  const [itemFilter, setItemFilter] = useState('')
 
   const load = async () => {
     setLoading(true)
     try {
-      const [po, sup, items] = await Promise.all([listPurchaseOrders(), listSuppliers(), listStockItems()])
+      const [po, sup, items, users] = await Promise.all([
+        listPurchaseOrders(),
+        listSuppliers(),
+        listStockItems(),
+        listAppUsersForLink(),
+      ])
       setOrders(po)
       setSuppliers(sup)
       setStockItems(items)
+      setBuyers(users)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar compras')
     } finally {
@@ -86,6 +96,14 @@ export function ComprasPage() {
     [rows],
   )
 
+  const filteredItems = useMemo(() => {
+    const q = itemFilter.trim().toLowerCase()
+    if (!q) return stockItems
+    return stockItems.filter(
+      (i) => i.name.toLowerCase().includes(q) || (i.sku ?? '').toLowerCase().includes(q),
+    )
+  }, [stockItems, itemFilter])
+
   const setRow = (index: number, patch: Partial<DraftItem>) => {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
   }
@@ -93,6 +111,21 @@ export function ComprasPage() {
   const pickStockItem = (index: number, itemId: string) => {
     const item = stockItems.find((i) => i.id === itemId)
     setRow(index, { itemId, description: item ? item.name : '' })
+  }
+
+  const addItemFirst = (itemId: string) => {
+    const item = stockItems.find((i) => i.id === itemId)
+    if (!item) return
+    setRows((prev) => {
+      const emptyIdx = prev.findIndex((r) => !r.itemId && !r.description)
+      if (emptyIdx >= 0) {
+        return prev.map((r, i) =>
+          i === emptyIdx ? { itemId, description: item.name, qty: r.qty || '1', unitCost: r.unitCost } : r,
+        )
+      }
+      return [...prev, { itemId, description: item.name, qty: '1', unitCost: '' }]
+    })
+    toast.message(`Item "${item.name}" na solicitação`)
   }
 
   const handleCreateSupplier = async () => {
@@ -125,11 +158,20 @@ export function ComprasPage() {
       toast.error('Inclua ao menos um item com descrição e quantidade.')
       return
     }
+    const buyer = buyers.find((b) => b.authUserId === responsibleId)
     setSaving(true)
     try {
-      await createPurchaseOrder({ supplierId: supplierId || null, expectedDate: expectedDate || null, note, items })
+      await createPurchaseOrder({
+        supplierId: supplierId || null,
+        expectedDate: expectedDate || null,
+        note,
+        responsibleUserId: responsibleId || null,
+        responsibleName: buyer?.name || null,
+        items,
+      })
       toast.success('Ordem de compra criada.')
       setSupplierId('')
+      setResponsibleId('')
       setExpectedDate('')
       setNote('')
       setRows([{ ...EMPTY_ROW }])
@@ -156,7 +198,8 @@ export function ComprasPage() {
       const { stocked, skipped } = await receivePurchaseOrder(po)
       toast.success(
         `${po.code} recebida — ${stocked} ${stocked === 1 ? 'item deu' : 'itens deram'} entrada no estoque` +
-          (skipped > 0 ? ` (${skipped} sem vínculo, não movimentado)` : '') + '.',
+          (skipped > 0 ? ` (${skipped} sem vínculo, não movimentado)` : '') +
+          '.',
       )
       await load()
     } catch (e) {
@@ -167,7 +210,7 @@ export function ComprasPage() {
   return (
     <AppLayout
       title="Ordens de compra"
-      subtitle="Solicitação, aprovação e recebimento — receber a OC dá entrada automática no estoque."
+      subtitle="Abra por item, escolha o responsável e (opcional) o fornecedor — receber dá entrada no estoque."
     >
       <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
@@ -175,16 +218,59 @@ export function ComprasPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <Plus className="size-4 text-primary" /> Nova solicitação
+              <Plus className="size-4 text-primary" /> Nova solicitação (por item)
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-1.5">
-              <Label>Fornecedor</Label>
+              <Label>Buscar item do estoque</Label>
+              <Input
+                value={itemFilter}
+                onChange={(e) => setItemFilter(e.target.value)}
+                placeholder="Digite para filtrar e clicar no item…"
+              />
+              {itemFilter.trim().length >= 1 ? (
+                <div className="max-h-36 overflow-auto rounded-md border border-border">
+                  {filteredItems.slice(0, 30).map((it) => (
+                    <button
+                      key={it.id}
+                      type="button"
+                      className="flex w-full justify-between gap-2 border-b border-border/50 px-2.5 py-1.5 text-left text-sm last:border-0 hover:bg-muted/50"
+                      onClick={() => addItemFirst(it.id)}
+                    >
+                      <span className="truncate font-medium">{it.name}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {it.qty} {it.unit}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Responsável pela compra</Label>
+              <Select value={responsibleId || 'nenhum'} onValueChange={(v) => setResponsibleId(!v || v === 'nenhum' ? '' : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Quem compra" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="nenhum">Não definido</SelectItem>
+                  {buyers.map((b) => (
+                    <SelectItem key={b.authUserId} value={b.authUserId}>
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Fornecedor (opcional)</Label>
               <div className="flex gap-2">
                 <Select value={supplierId} onValueChange={(v) => setSupplierId(v ?? '')}>
                   <SelectTrigger className="flex-1">
-                    <SelectValue placeholder="Selecionar (opcional)" />
+                    <SelectValue placeholder="Selecionar depois" />
                   </SelectTrigger>
                   <SelectContent>
                     {suppliers.map((s) => (
@@ -223,7 +309,7 @@ export function ComprasPage() {
             </div>
 
             <div className="space-y-2">
-              <Label>Itens</Label>
+              <Label>Itens da OC</Label>
               {rows.map((row, i) => (
                 <div key={i} className="space-y-1.5 rounded-md border border-border p-2.5">
                   <Select value={row.itemId || 'livre'} onValueChange={(v) => pickStockItem(i, !v || v === 'livre' ? '' : v)}>
@@ -299,7 +385,7 @@ export function ComprasPage() {
               <EmptyState
                 icon={ClipboardList}
                 title={loading ? 'Carregando…' : 'Nenhuma ordem de compra'}
-                description="Crie a primeira solicitação ao lado — ela passa por aprovação antes da compra."
+                description="Comece pelos itens à esquerda — depois escolha responsável e fornecedor."
               />
             ) : (
               orders.map((po) => {
@@ -316,7 +402,9 @@ export function ComprasPage() {
                       <span className="font-semibold">{formatBRL(po.totalCents)}</span>
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      {po.supplierName ?? 'Sem fornecedor'} ·{' '}
+                      {po.supplierName ?? 'Sem fornecedor'}
+                      {po.responsibleName ? ` · resp. ${po.responsibleName}` : ''}
+                      {' · '}
                       {new Date(po.createdAt).toLocaleDateString('pt-BR')}
                       {po.expectedDate
                         ? ` · previsão ${new Date(`${po.expectedDate}T12:00:00`).toLocaleDateString('pt-BR')}`

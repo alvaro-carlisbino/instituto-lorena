@@ -70,12 +70,30 @@ export async function createClinicalNote(input: {
   if (error) throw new Error(error.message)
 }
 
-/** Busca leads por nome (pro seletor de paciente da nota). */
-export async function searchLeadsByName(tenantId: string, term: string): Promise<Array<{ id: string; name: string; phone: string }>> {
+/** Busca leads por nome/telefone (ficha, notas, conta cirúrgica…). Default 40 p/ ~1000 clientes. */
+export async function searchLeadsByName(
+  tenantId: string,
+  term: string,
+  limit = 40,
+): Promise<Array<{ id: string; name: string; phone: string }>> {
   if (!supabase || !term.trim()) return []
-  const { data } = await supabase.from('leads').select('id, patient_name, phone')
-    .eq('tenant_id', tenantId).ilike('patient_name', `%${term.trim()}%`)
-    .order('created_at', { ascending: false }).limit(12)
-  return ((data ?? []) as Array<{ id: string; patient_name: string; phone: string }>)
-    .map((l) => ({ id: String(l.id), name: String(l.patient_name ?? 'Sem nome'), phone: String(l.phone ?? '') }))
+  const q = term.trim()
+  const digits = q.replace(/\D/g, '')
+  let query = supabase
+    .from('leads')
+    .select('id, patient_name, phone')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(limit, 5), 80))
+  if (digits.length >= 4 && digits === q.replace(/\s/g, '')) {
+    query = query.ilike('phone', `%${digits}%`)
+  } else {
+    query = query.or(`patient_name.ilike.%${q}%,phone.ilike.%${q}%`)
+  }
+  const { data } = await query
+  return ((data ?? []) as Array<{ id: string; patient_name: string; phone: string }>).map((l) => ({
+    id: String(l.id),
+    name: String(l.patient_name ?? 'Sem nome'),
+    phone: String(l.phone ?? ''),
+  }))
 }

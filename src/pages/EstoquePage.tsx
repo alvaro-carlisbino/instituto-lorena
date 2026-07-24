@@ -43,8 +43,14 @@ export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: st
     { to: '/estoque', label: 'Estoque' },
     { to: '/bipagem', label: 'Bipagem' },
     { to: '/compras', label: 'Ordens de compra' },
+    { to: '/transferencias-estoque', label: 'Transferências' },
     { to: '/inventario', label: 'Inventário' },
-    ...(isSalesPolo ? [] : [{ to: '/kits', label: 'Kits cirúrgicos' }]),
+    ...(isSalesPolo
+      ? []
+      : [
+          { to: '/kits', label: 'Kits cirúrgicos' },
+          { to: '/conta-cirurgica', label: 'Conta cirúrgica' },
+        ]),
     { to: '/estoque-relatorios', label: 'Relatórios' },
   ]
 }
@@ -59,7 +65,9 @@ export function financeiroTabs(isSalesPolo: boolean): Array<{ to: string; label:
     { to: '/contas-caixa', label: 'Contas & caixa' },
     { to: '/recorrentes', label: 'Recorrentes' },
     { to: '/conciliacao', label: 'Conciliação' },
+    { to: '/alertas-pagamento', label: 'Alertas pagamento' },
     { to: '/fluxo-caixa', label: 'Fluxo de caixa' },
+    { to: '/importar-shop', label: 'Importar shop' },
     { to: '/links-pagamento', label: 'Links de pagamento' },
     ...(isSalesPolo ? [{ to: '/cupons', label: 'Cupons' }] : []),
     ...(isSalesPolo ? [{ to: '/nfe', label: 'Emissão de NF-e' }] : []),
@@ -337,27 +345,36 @@ export function EstoquePage() {
         </Card>
       ) : null}
 
-      {belowMin.length > 0 ? (
-        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm">
-          <strong>{belowMin.length} {belowMin.length === 1 ? 'item abaixo' : 'itens abaixo'} do mínimo:</strong>{' '}
-          {belowMin.map((i) => `${i.name} (${i.qty}/${i.minQty})`).join(' · ')}
-        </div>
-      ) : null}
-
-      {expiringBatches.length > 0 ? (
-        <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2.5 text-sm">
-          <strong>
-            {expiringBatches.filter((b) => b.expired).length > 0
-              ? `${expiringBatches.filter((b) => b.expired).length} ${expiringBatches.filter((b) => b.expired).length === 1 ? 'lote vencido' : 'lotes vencidos'}`
-              : `${expiringBatches.length} ${expiringBatches.length === 1 ? 'lote vencendo' : 'lotes vencendo'}`}
-            :
-          </strong>{' '}
-          {expiringBatches
-            .map(
-              (b) =>
-                `${b.itemName} lote ${b.lotCode} (${b.qty}un, ${b.expired ? 'venceu' : 'vence'} ${new Date(`${b.expiresOn}T12:00:00`).toLocaleDateString('pt-BR')})`,
-            )
-            .join(' · ')}
+      {belowMin.length > 0 || expiringBatches.length > 0 ? (
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+            <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Estoque baixo</div>
+            <div className="mt-1 text-2xl font-black tabular-nums">{belowMin.length}</div>
+            <div className="mt-1 line-clamp-3 text-sm text-amber-900/80">
+              {belowMin.length === 0
+                ? 'Nenhum item abaixo do mínimo.'
+                : belowMin.map((i) => `${i.name} (${i.qty}/${i.minQty})`).join(' · ')}
+            </div>
+          </div>
+          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
+            <div className="text-xs font-bold uppercase tracking-wide text-red-700">Validade</div>
+            <div className="mt-1 text-2xl font-black tabular-nums">
+              {expiringBatches.filter((b) => b.expired).length}
+              <span className="ml-1 text-sm font-semibold text-red-700/70">
+                vencidos · {expiringBatches.length} em 30d
+              </span>
+            </div>
+            <div className="mt-1 line-clamp-3 text-sm text-red-900/80">
+              {expiringBatches.length === 0
+                ? 'Nenhum lote vencendo nos próximos 30 dias.'
+                : expiringBatches
+                    .map(
+                      (b) =>
+                        `${b.itemName} lote ${b.lotCode} (${b.expired ? 'venceu' : 'vence'} ${new Date(`${b.expiresOn}T12:00:00`).toLocaleDateString('pt-BR')})`,
+                    )
+                    .join(' · ')}
+            </div>
+          </div>
         </div>
       ) : null}
 

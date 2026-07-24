@@ -181,7 +181,14 @@ export async function listKitCosts(leadId?: string): Promise<Map<string, KitCost
 // -------------------------------------------------------------- kits montados
 
 export type KitStatus = 'montado' | 'consumido' | 'cancelado'
-export type StockKitItem = { id: string; itemId: string; qty: number }
+export type StockKitItem = {
+  id: string
+  itemId: string
+  qty: number
+  isExtra: boolean
+  chargeCents: number
+  label: string | null
+}
 export type StockKit = {
   id: string
   name: string
@@ -206,7 +213,7 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
   kitsQuery = leadId ? kitsQuery.eq('lead_id', leadId) : kitsQuery.limit(100)
   const [kits, items] = await Promise.all([
     kitsQuery,
-    client.from('stock_kit_items').select('id, kit_id, item_id, qty'),
+    client.from('stock_kit_items').select('id, kit_id, item_id, qty, is_extra, charge_cents, label'),
   ])
   if (kits.error) throw new Error(kits.error.message)
   if (items.error) throw new Error(items.error.message)
@@ -214,7 +221,14 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
   for (const r of items.data ?? []) {
     const key = String(r.kit_id)
     const list = byKit.get(key) ?? []
-    list.push({ id: String(r.id), itemId: String(r.item_id), qty: Number(r.qty ?? 0) })
+    list.push({
+      id: String(r.id),
+      itemId: String(r.item_id),
+      qty: Number(r.qty ?? 0),
+      isExtra: Boolean(r.is_extra),
+      chargeCents: Number(r.charge_cents ?? 0),
+      label: r.label != null ? String(r.label) : null,
+    })
     byKit.set(key, list)
   }
   return (kits.data ?? []).map((r) => ({
@@ -251,7 +265,13 @@ export async function createKit(payload: {
   patientName?: string
   procedureLabel?: string
   scheduledFor?: string | null
-  items: Array<{ itemId: string; qty: number }>
+  items: Array<{
+    itemId: string
+    qty: number
+    isExtra?: boolean
+    chargeCents?: number
+    label?: string | null
+  }>
   /** ids dos itens controlados — vão pro livro na baixa (Portaria 344). */
   controlledItemIds?: Set<string>
 }): Promise<{ kitId: string; movements: number; controlled: number }> {
@@ -273,7 +293,14 @@ export async function createKit(payload: {
   if (error) throw new Error(error.message)
   const kitId = String((data as { id: unknown }).id)
   const { error: itemsErr } = await client.from('stock_kit_items').insert(
-    items.map((i) => ({ kit_id: kitId, item_id: i.itemId, qty: i.qty })),
+    items.map((i) => ({
+      kit_id: kitId,
+      item_id: i.itemId,
+      qty: i.qty,
+      is_extra: Boolean(i.isExtra),
+      charge_cents: Math.max(0, Math.round(i.chargeCents ?? 0)),
+      label: i.label?.trim() || null,
+    })),
   )
   if (itemsErr) {
     await client.from('stock_kits').delete().eq('id', kitId)
@@ -490,4 +517,49 @@ export async function logControlledExit(payload: {
     note: payload.note?.trim() || null,
   })
   if (error) throw new Error(error.message)
+}
+
+/** Conta do paciente a partir do kit (itens + avulsos + acréscimos) — PDF via print. */
+export function printKitPatientBill(
+  kit: StockKit,
+  itemNames: Map<string, string>,
+): void {
+  const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const chargeTotal = kit.items.reduce((s, i) => s + Math.max(0, i.chargeCents), 0)
+  const rows = kit.items
+    .map((i) => {
+      const name = i.label || itemNames.get(i.itemId) || '?'
+      return `<tr>
+        <td>${i.isExtra ? 'Avulso' : 'Kit'}</td>
+        <td>${i.qty}× ${name}</td>
+        <td style="text-align:right">${i.chargeCents > 0 ? brl(i.chargeCents) : '—'}</td>
+      </tr>`
+    })
+    .join('')
+  const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Conta — ${kit.patientName ?? kit.name}</title>
+    <style>
+      body{font-family:Georgia,serif;padding:32px;max-width:720px;margin:0 auto;color:#1a1a1a}
+      h1{font-size:22px;margin:0 0 4px}.meta{color:#555;font-size:13px;margin-bottom:20px}
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      th,td{border-bottom:1px solid #ddd;padding:8px 6px;text-align:left}
+      th{font-size:11px;text-transform:uppercase;color:#666}
+      .tot{margin-top:18px;font-size:16px;font-weight:700}
+    </style></head><body>
+    <h1>Conta do paciente</h1>
+    <div class="meta">
+      <div><strong>${kit.patientName ?? '—'}</strong></div>
+      <div>${[kit.name, kit.procedureLabel].filter(Boolean).join(' · ')}</div>
+      <div>${kit.scheduledFor ? new Date(`${kit.scheduledFor}T12:00:00`).toLocaleDateString('pt-BR') : new Date(kit.createdAt).toLocaleDateString('pt-BR')}</div>
+    </div>
+    <table>
+      <thead><tr><th>Tipo</th><th>Item</th><th style="text-align:right">Cobrança</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="tot">Total cobrado: ${brl(chargeTotal)}</div>
+    <script>window.onload=()=>window.print()</script>
+    </body></html>`
+  const w = window.open('', '_blank', 'noopener,noreferrer,width=860,height=700')
+  if (!w) throw new Error('Permita pop-ups para imprimir o PDF.')
+  w.document.write(html)
+  w.document.close()
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Boxes, Plus, Trash2, PackageCheck, Ban, ShieldAlert, Layers } from 'lucide-react'
+import { Boxes, Plus, Trash2, PackageCheck, Ban, ShieldAlert, Layers, Printer } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
@@ -30,10 +30,14 @@ import {
   listKitCosts,
   listKitTemplates,
   listKits,
+  printKitPatientBill,
 } from '@/services/estoqueKits'
 
 type DraftRow = { itemId: string; qty: string }
 const EMPTY_ROW: DraftRow = { itemId: '', qty: '' }
+
+type MountRow = { itemId: string; qty: string; isExtra: boolean; charge: string }
+const EMPTY_MOUNT: MountRow = { itemId: '', qty: '', isExtra: false, charge: '' }
 
 const formatBRL = (cents: number): string =>
   (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -60,6 +64,7 @@ export function KitsPage() {
   const [kitPatient, setKitPatient] = useState('')
   const [kitProcedure, setKitProcedure] = useState('')
   const [kitDate, setKitDate] = useState('')
+  const [kitRows, setKitRows] = useState<MountRow[]>([])
   const [savingKit, setSavingKit] = useState(false)
 
   // Leads do polo ativo, mais recentes primeiro — pra vincular o kit ao paciente do CRM.
@@ -133,36 +138,63 @@ export function KitsPage() {
     }
   }
 
+  const applyTemplate = (templateId: string) => {
+    setKitTemplateId(templateId)
+    const tpl = templates.find((t) => t.id === templateId)
+    if (!tpl) {
+      setKitRows([])
+      return
+    }
+    setKitRows(
+      tpl.items.map((i) => ({
+        itemId: i.itemId,
+        qty: String(i.qty),
+        isExtra: false,
+        charge: '',
+      })),
+    )
+  }
+
   const mountKit = async () => {
     const tpl = templates.find((t) => t.id === kitTemplateId)
-    if (!tpl) {
-      toast.error('Escolha um modelo de kit.')
+    const items = kitRows
+      .map((r) => ({
+        itemId: r.itemId,
+        qty: Number(r.qty.replace(',', '.')) || 0,
+        isExtra: r.isExtra,
+        chargeCents: Math.round((Number(r.charge.replace(',', '.')) || 0) * 100),
+      }))
+      .filter((r) => r.itemId && r.qty > 0)
+    if (items.length === 0) {
+      toast.error('Inclua ao menos um item (modelo ou avulso).')
       return
     }
     setSavingKit(true)
     try {
-      // Se vinculou um lead e não digitou paciente, usa o nome do lead.
       const patientName = kitPatient.trim() || (kitLeadId ? leadNameById.get(kitLeadId) ?? '' : '')
+      const name = tpl?.name || 'Kit avulso'
       const { movements, controlled } = await createKit({
-        templateId: tpl.id,
-        name: tpl.name,
+        templateId: tpl?.id || null,
+        name,
         leadId: kitLeadId || null,
         patientName,
         procedureLabel: kitProcedure,
         scheduledFor: kitDate || null,
-        items: tpl.items.map((i) => ({ itemId: i.itemId, qty: i.qty })),
+        items,
         controlledItemIds: controlledIds,
       })
       toast.success(
-        `Kit "${tpl.name}" montado${patientName ? ` para ${patientName}` : ''} — ` +
+        `Kit "${name}" montado${patientName ? ` para ${patientName}` : ''} — ` +
           `${movements} ${movements === 1 ? 'baixa' : 'baixas'} no estoque (FEFO)` +
-          (controlled > 0 ? `, ${controlled} no livro de controlados` : '') + '.',
+          (controlled > 0 ? `, ${controlled} no livro de controlados` : '') +
+          '.',
       )
       setKitTemplateId('')
       setKitLeadId('')
       setKitPatient('')
       setKitProcedure('')
       setKitDate('')
+      setKitRows([])
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao montar kit')
@@ -271,10 +303,10 @@ export function KitsPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-1.5">
-                <Label>Modelo</Label>
-                <Select value={kitTemplateId} onValueChange={(v) => setKitTemplateId(v ?? '')}>
+                <Label>Modelo (opcional)</Label>
+                <Select value={kitTemplateId} onValueChange={(v) => applyTemplate(v ?? '')}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Escolher modelo" />
+                    <SelectValue placeholder="Escolher modelo ou só avulsos" />
                   </SelectTrigger>
                   <SelectContent>
                     {templates.map((t) => (
@@ -284,6 +316,75 @@ export function KitsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Itens (kit + avulsos / acréscimos)</Label>
+                {kitRows.map((row, i) => (
+                  <div key={i} className="space-y-1 rounded-md border border-border p-2">
+                    <div className="flex gap-2">
+                      <Select
+                        value={row.itemId}
+                        onValueChange={(v) =>
+                          setKitRows((prev) => prev.map((r, j) => (j === i ? { ...r, itemId: v ?? '' } : r)))
+                        }
+                      >
+                        <SelectTrigger className="h-8 flex-1">
+                          <SelectValue placeholder="Item" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {items.map((it) => (
+                            <SelectItem key={it.id} value={it.id}>
+                              {it.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        className="h-8 w-16"
+                        value={row.qty}
+                        onChange={(e) =>
+                          setKitRows((prev) => prev.map((r, j) => (j === i ? { ...r, qty: e.target.value } : r)))
+                        }
+                        placeholder="Qtd"
+                        inputMode="decimal"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={row.isExtra}
+                          onChange={(e) =>
+                            setKitRows((prev) =>
+                              prev.map((r, j) => (j === i ? { ...r, isExtra: e.target.checked } : r)),
+                            )
+                          }
+                        />
+                        Avulso
+                      </label>
+                      <Input
+                        className="h-8 flex-1"
+                        value={row.charge}
+                        onChange={(e) =>
+                          setKitRows((prev) => prev.map((r, j) => (j === i ? { ...r, charge: e.target.value } : r)))
+                        }
+                        placeholder="Acréscimo / cobrança R$"
+                        inputMode="decimal"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="px-2"
+                        onClick={() => setKitRows((prev) => prev.filter((_, j) => j !== i))}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                <Button variant="outline" size="sm" onClick={() => setKitRows((p) => [...p, { ...EMPTY_MOUNT, isExtra: true }])}>
+                  <Plus className="size-3.5" /> Item avulso
+                </Button>
               </div>
               <div className="space-y-1.5">
                 <Label>Lead do CRM (opcional)</Label>
@@ -421,7 +522,13 @@ export function KitsPage() {
                       <ul className="mt-2 space-y-0.5 text-sm">
                         {kit.items.map((i) => (
                           <li key={i.id} className="flex justify-between gap-2">
-                            <span>{i.qty}× {itemName.get(i.itemId) ?? '?'}</span>
+                            <span>
+                              {i.qty}× {i.label || itemName.get(i.itemId) || '?'}
+                              {i.isExtra ? <span className="text-xs text-muted-foreground"> (avulso)</span> : null}
+                              {i.chargeCents > 0 ? (
+                                <span className="text-xs text-muted-foreground"> · {formatBRL(i.chargeCents)}</span>
+                              ) : null}
+                            </span>
                             {controlledIds.has(i.itemId) ? <ShieldAlert className="size-3.5 text-amber-500" /> : null}
                           </li>
                         ))}
@@ -439,16 +546,31 @@ export function KitsPage() {
                           {estimate.missing > 0 ? ` (${estimate.missing} ${estimate.missing === 1 ? 'item' : 'itens'} sem custo)` : ''}
                         </div>
                       ) : null}
-                      {kit.status === 'montado' ? (
-                        <div className="mt-2.5 flex gap-1.5">
-                          <Button size="sm" onClick={() => void consume(kit)}>
-                            <PackageCheck className="size-3.5" /> Confirmar uso
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => void handleCancel(kit)} title="Devolve o material ao estoque">
-                            <Ban className="size-3.5" /> Cancelar (devolve ao estoque)
-                          </Button>
-                        </div>
-                      ) : null}
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            try {
+                              printKitPatientBill(kit, itemName)
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : 'Falha ao imprimir')
+                            }
+                          }}
+                        >
+                          <Printer className="size-3.5" /> Conta PDF
+                        </Button>
+                        {kit.status === 'montado' ? (
+                          <>
+                            <Button size="sm" onClick={() => void consume(kit)}>
+                              <PackageCheck className="size-3.5" /> Confirmar uso
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => void handleCancel(kit)} title="Devolve o material ao estoque">
+                              <Ban className="size-3.5" /> Cancelar (devolve ao estoque)
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
                     </div>
                   )
                 })

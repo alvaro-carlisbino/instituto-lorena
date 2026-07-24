@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Search, User, MapPin, Route, Star, Stethoscope, CreditCard } from 'lucide-react'
+import { User, MapPin, Route, Star, Stethoscope, CreditCard } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
 import { pacienteTabs } from '@/lib/patientFileTabs'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
-import { useTenant } from '@/context/TenantContext'
-import { searchLeadsByName } from '@/services/clinicalNotes'
+import { PatientSearchField, type PatientPick } from '@/components/PatientSearchField'
 import { fetchClientProfile, type ClientProfile } from '@/services/clientProfile'
 
 const STAGE_LABEL: Record<string, string> = {
@@ -37,62 +34,43 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export function ClientProfilePage() {
-  const { tenant } = useTenant()
-  const [term, setTerm] = useState('')
-  const [results, setResults] = useState<Array<{ id: string; name: string; phone: string }>>([])
-  const [leadId, setLeadId] = useState<string | null>(null)
+  const [picked, setPicked] = useState<PatientPick | null>(null)
   const [profile, setProfile] = useState<ClientProfile | null>(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (term.trim().length < 2 || leadId) { setResults([]); return }
-    let cancelled = false
-    searchLeadsByName(tenant.id, term).then((r) => { if (!cancelled) setResults(r) }).catch(() => {})
-    return () => { cancelled = true }
-  }, [term, leadId, tenant.id])
-
-  useEffect(() => {
-    if (!leadId) { setProfile(null); return }
+    if (!picked) {
+      setProfile(null)
+      return
+    }
     let cancelled = false
     setLoading(true)
-    fetchClientProfile(leadId).then((p) => { if (!cancelled) setProfile(p) }).finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [leadId])
+    fetchClientProfile(picked.id)
+      .then((p) => {
+        if (!cancelled) setProfile(p)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [picked])
 
   const paidTotal = profile?.payments.filter((p) => isPaid(p.status)).reduce((s, p) => s + p.amountCents, 0) ?? 0
 
   return (
     <AppLayout title="Ficha do paciente" subtitle="Visão consolidada: origem, jornada, feedback, notas e financeiro">
       <SubTabs tabs={pacienteTabs()} />
-      {/* busca */}
-      <div className="mb-6 max-w-lg">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden />
-          <Input
-            type="search"
-            className="pl-8"
-            placeholder="Buscar paciente pelo nome…"
-            aria-label="Buscar paciente pelo nome"
-            value={term}
-            onChange={(e) => { setTerm(e.target.value); setLeadId(null) }}
-          />
-        </div>
-        {!leadId && results.length > 0 && (
-          <div className="mt-1 max-h-56 overflow-auto rounded-lg border border-border bg-card">
-            {results.map((r) => (
-              <Button
-                key={r.id}
-                type="button"
-                variant="ghost"
-                onClick={() => { setLeadId(r.id); setTerm(r.name); setResults([]) }}
-                className="h-auto w-full justify-between rounded-none px-3 py-2 text-left font-normal hover:bg-muted/60"
-              >
-                <span className="min-w-0 truncate font-medium">{r.name}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">{r.phone}</span>
-              </Button>
-            ))}
-          </div>
-        )}
+      <div className="mb-6 w-full max-w-4xl">
+        <PatientSearchField
+          picked={picked}
+          onPick={setPicked}
+          onClear={() => setPicked(null)}
+          size="xl"
+          autoFocus
+          placeholder="Buscar entre ~1000 pacientes — digite nome ou telefone…"
+        />
       </div>
 
       {loading ? (

@@ -82,6 +82,11 @@ const NfePage = lazyPage(() => import('./pages/NfePage'), 'NfePage')
 const KitsPage = lazyPage(() => import('./pages/KitsPage'), 'KitsPage')
 const InventarioPage = lazyPage(() => import('./pages/InventarioPage'), 'InventarioPage')
 const EstoqueRelatoriosPage = lazyPage(() => import('./pages/EstoqueRelatoriosPage'), 'EstoqueRelatoriosPage')
+const TransferenciasEstoquePage = lazyPage(() => import('./pages/TransferenciasEstoquePage'), 'TransferenciasEstoquePage')
+const ContaCirurgicaPage = lazyPage(() => import('./pages/ContaCirurgicaPage'), 'ContaCirurgicaPage')
+const AlertasPagamentoPage = lazyPage(() => import('./pages/AlertasPagamentoPage'), 'AlertasPagamentoPage')
+const ImportShopPage = lazyPage(() => import('./pages/ImportShopPage'), 'ImportShopPage')
+const IntegracoesClinicaPage = lazyPage(() => import('./pages/IntegracoesClinicaPage'), 'IntegracoesClinicaPage')
 const ProtocolosPage = lazyPage(() => import('./pages/ProtocolosPage'), 'ProtocolosPage')
 const PontoPage = lazyPage(() => import('./pages/PontoPage'), 'PontoPage')
 const PontoGestaoPage = lazyPage(() => import('./pages/PontoGestaoPage'), 'PontoGestaoPage')
@@ -126,6 +131,11 @@ function AppRoutes() {
         <Route path="/kits" element={<KitsPage />} />
         <Route path="/inventario" element={<InventarioPage />} />
         <Route path="/estoque-relatorios" element={<EstoqueRelatoriosPage />} />
+        <Route path="/transferencias-estoque" element={<TransferenciasEstoquePage />} />
+        <Route path="/conta-cirurgica" element={<ContaCirurgicaPage />} />
+        <Route path="/alertas-pagamento" element={<AlertasPagamentoPage />} />
+        <Route path="/importar-shop" element={<ImportShopPage />} />
+        <Route path="/integracoes-clinica" element={<IntegracoesClinicaPage />} />
         <Route path="/protocolos" element={<ProtocolosPage />} />
         <Route path="/ponto" element={<PontoPage />} />
         <Route path="/ponto-gestao" element={<PontoGestaoPage />} />

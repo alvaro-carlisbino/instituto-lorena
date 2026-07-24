@@ -297,15 +297,15 @@ export function KanbanToolbar({
         </div>
 
         <div className="flex flex-col sm:flex-row items-center gap-3 lg:shrink-0">
-          <InputGroup className="w-full sm:w-[260px]">
+          <InputGroup className="w-full sm:w-[min(100%,520px)] lg:w-[560px]">
             <InputGroupAddon className="bg-muted/20 border-border/40 rounded-l-xl">
-              <Search className="size-3.5 opacity-50" />
+              <Search className="size-4 opacity-50" />
             </InputGroupAddon>
             <InputGroupInput
               value={searchTerm}
               onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Buscar paciente..."
-              className="rounded-r-xl border-border/40 bg-muted/10 text-xs font-medium placeholder:text-muted-foreground/50"
+              placeholder="Buscar paciente entre ~1000 clientes (nome, telefone, resumo)…"
+              className="h-11 rounded-r-xl border-border/40 bg-muted/10 text-sm font-medium placeholder:text-muted-foreground/50"
             />
           </InputGroup>
 

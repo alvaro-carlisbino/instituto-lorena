@@ -228,6 +228,8 @@ export async function registerMovement(payload: {
   batchId?: string | null
   /** Custo unitário em centavos no momento do movimento (base do gasto por paciente). */
   unitCostCents?: number | null
+  /** Armazém/setor — null usa o padrão do tenant na view de saldos. */
+  warehouseId?: string | null
 }): Promise<string> {
   const client = assertClient()
   const qty = Math.abs(payload.qty)
@@ -244,6 +246,7 @@ export async function registerMovement(payload: {
       ref_type: payload.refType ?? null,
       ref_id: payload.refId ?? null,
       batch_id: payload.batchId ?? null,
+      warehouse_id: payload.warehouseId || null,
       unit_cost_cents:
         payload.unitCostCents != null && payload.unitCostCents > 0
           ? Math.round(payload.unitCostCents)
@@ -276,6 +279,8 @@ export type PurchaseOrder = {
   expectedDate: string | null
   totalCents: number
   note: string | null
+  responsibleUserId: string | null
+  responsibleName: string | null
   createdAt: string
   items: PurchaseOrderItem[]
 }
@@ -287,7 +292,9 @@ export async function listPurchaseOrders(): Promise<PurchaseOrder[]> {
   const [orders, items] = await Promise.all([
     client
       .from('purchase_orders')
-      .select('id, code, supplier_id, status, expected_date, total_cents, note, created_at, stock_suppliers(name)')
+      .select(
+        'id, code, supplier_id, status, expected_date, total_cents, note, responsible_user_id, responsible_name, created_at, stock_suppliers(name)',
+      )
       .order('created_at', { ascending: false })
       .limit(200),
     client
@@ -323,6 +330,8 @@ export async function listPurchaseOrders(): Promise<PurchaseOrder[]> {
       expectedDate: r.expected_date != null ? String(r.expected_date) : null,
       totalCents: Number(r.total_cents ?? 0),
       note: r.note != null ? String(r.note) : null,
+      responsibleUserId: r.responsible_user_id != null ? String(r.responsible_user_id) : null,
+      responsibleName: r.responsible_name != null ? String(r.responsible_name) : null,
       createdAt: String(r.created_at ?? ''),
       items: itemsByPo.get(String(r.id)) ?? [],
     }
@@ -333,6 +342,8 @@ export async function createPurchaseOrder(payload: {
   supplierId?: string | null
   expectedDate?: string | null
   note?: string
+  responsibleUserId?: string | null
+  responsibleName?: string | null
   items: Array<{ itemId: string | null; description: string; qty: number; unitCostCents: number }>
 }): Promise<void> {
   const client = assertClient()
@@ -348,6 +359,8 @@ export async function createPurchaseOrder(payload: {
       expected_date: payload.expectedDate || null,
       total_cents: totalCents,
       note: payload.note?.trim() || null,
+      responsible_user_id: payload.responsibleUserId || null,
+      responsible_name: payload.responsibleName?.trim() || null,
     })
     .select('id')
     .single()
