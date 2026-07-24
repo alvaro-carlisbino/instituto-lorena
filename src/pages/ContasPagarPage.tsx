@@ -823,7 +823,9 @@ export function ContasPagarPage() {
                           ? 'casou por SKU'
                           : plan?.matchedBy === 'nome'
                             ? 'casou por nome'
-                            : null
+                            : plan?.matchedBy === 'alias'
+                              ? 'casou por alias (NF)'
+                              : null
                     return (
                       <div key={index} className="rounded-md border border-border p-2.5 text-sm">
                         <div className="flex items-start justify-between gap-2">

@@ -28,7 +28,7 @@ import {
   suggestMatches,
 } from '@/services/financeiro'
 import { parseBankStatement } from '@/services/ofx'
-import { getConnectToken, linkItem, syncOpenFinance } from '@/services/openFinance'
+import { getConnectToken, linkItem, syncOpenFinance, getBancoMcpStatus, linkBancoMcp, syncBancoMcp } from '@/services/openFinance'
 
 function formatBRL(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -49,11 +49,32 @@ export function ConciliacaoPage() {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement | null>(null)
 
-  // Open Finance (Pluggy): token do widget + estados de conexão/sync.
+  // Open Finance (Pluggy + Banco MCP): token do widget + estados de conexão/sync.
   const [connectToken, setConnectToken] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [mcpNotice, setMcpNotice] = useState<string | null>(null)
+  const [mcpReconnectUrl, setMcpReconnectUrl] = useState<string | null>(null)
+  const [mcpBankName, setMcpBankName] = useState<string | null>(null)
   const hasOpenFinance = useMemo(() => accounts.some((a) => a.ofAccountId != null), [accounts])
+
+  const refreshMcpStatus = async () => {
+    try {
+      const st = await getBancoMcpStatus()
+      const conn = st.connections?.connections?.[0]
+      setMcpBankName(conn?.connector_name ?? null)
+      setMcpReconnectUrl(conn?.reconnect_url ?? null)
+      const total = Number(st.accounts?.total ?? st.accounts?.results?.length ?? 0)
+      if (st.accounts?.notice) setMcpNotice(st.accounts.notice)
+      else if (conn && total === 0) {
+        setMcpNotice(
+          'Itaú Empresas conectado no Banco MCP, mas sem contas liberadas. Aprove o Open Finance no app do banco (múltipla alçada) ou reconecte selecionando as contas.',
+        )
+      } else if (conn) setMcpNotice(null)
+    } catch {
+      // silencioso — Pluggy segue disponível
+    }
+  }
 
   const load = async () => {
     setLoading(true)
@@ -78,6 +99,7 @@ export function ConciliacaoPage() {
 
   useEffect(() => {
     void load()
+    void refreshMcpStatus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -180,11 +202,50 @@ export function ConciliacaoPage() {
   const doSync = async () => {
     setSyncing(true)
     try {
-      const res = await syncOpenFinance()
-      toast.success(`Sincronizado: ${res.inserted} lançamento(s) novo(s) de ${res.accounts} conta(s).`)
+      let inserted = 0
+      let accountsN = 0
+      try {
+        const pluggy = await syncOpenFinance()
+        inserted += pluggy.inserted
+        accountsN += pluggy.accounts
+      } catch {
+        // pode não ter Pluggy ligado
+      }
+      try {
+        const mcp = await syncBancoMcp()
+        inserted += mcp.inserted
+        accountsN += mcp.accounts
+      } catch {
+        // pode não ter MCP ligado
+      }
+      toast.success(`Sincronizado: ${inserted} lançamento(s) novo(s) de ${accountsN} conta(s).`)
       await load()
+      await refreshMcpStatus()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao sincronizar')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  const linkMcpBank = async () => {
+    setSyncing(true)
+    try {
+      const res = await linkBancoMcp()
+      if (!res.ok || (res.accountsLinked ?? 0) === 0) {
+        setMcpNotice(res.notice ?? 'Sem contas liberadas no banco.')
+        if (res.reconnectUrl) setMcpReconnectUrl(res.reconnectUrl)
+        toast.error(res.notice ?? 'Conexão MCP sem contas. Autorize no app do banco.')
+      } else {
+        toast.success(
+          `Banco MCP (${res.bankName}): ${res.accountsLinked} conta(s), ${res.inserted ?? 0} lançamento(s).`,
+        )
+        setMcpNotice(null)
+      }
+      await load()
+      await refreshMcpStatus()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao ligar Banco MCP')
     } finally {
       setSyncing(false)
     }
@@ -207,18 +268,36 @@ export function ConciliacaoPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Conecte o banco uma vez (login seguro pelo Pluggy) e o extrato passa a entrar sozinho —
-              sem precisar baixar arquivo. Você loga direto no banco; a gente nunca vê sua senha.
+              Conecte o banco uma vez (Pluggy ou Banco MCP) e o extrato entra sozinho — sem baixar arquivo.
+              O login é no banco; a gente nunca vê a senha.
             </p>
+            {mcpBankName ? (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-100">
+                <div className="font-medium">Banco MCP: {mcpBankName}</div>
+                {mcpNotice ? <p className="mt-1 opacity-90">{mcpNotice}</p> : null}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" onClick={() => void linkMcpBank()} disabled={syncing}>
+                    Ligar ao sistema
+                  </Button>
+                  {mcpReconnectUrl ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => window.open(mcpReconnectUrl, '_blank', 'noopener,noreferrer')}
+                    >
+                      Reautorizar no banco
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <Button onClick={connectBank} disabled={connecting || syncing}>
                 <Landmark className="size-4" /> {connecting ? 'Abrindo…' : hasOpenFinance ? 'Conectar outro banco' : 'Conectar banco'}
               </Button>
-              {hasOpenFinance ? (
-                <Button variant="outline" onClick={doSync} disabled={syncing}>
-                  <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} /> {syncing ? 'Sincronizando…' : 'Sincronizar agora'}
-                </Button>
-              ) : null}
+              <Button variant="outline" onClick={doSync} disabled={syncing}>
+                <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} /> {syncing ? 'Sincronizando…' : 'Sincronizar agora'}
+              </Button>
             </div>
             {hasOpenFinance ? (
               <div className="space-y-1 pt-1">

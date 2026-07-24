@@ -24,7 +24,7 @@ export type NfeItemPlan = {
   action: 'novo' | 'existente' | 'ignorar'
   matchedItemId: string | null
   /** Como a sugestão casou com o estoque (pra mostrar na tela). null = não casou / manual. */
-  matchedBy: 'ean' | 'sku' | 'nome' | null
+  matchedBy: 'ean' | 'sku' | 'nome' | 'alias' | null
 }
 
 const onlyDigitsStr = (v: string | null | undefined) => String(v ?? '').replace(/\D/g, '')
@@ -53,13 +53,17 @@ export type NfeImportPlan = {
  * usa o mesmo nome/código que a gente, então casa em cascata pela chave mais confiável:
  *   1) EAN/GTIN (cEAN da nota × barcode do item) — chave global, não muda de fornecedor;
  *   2) SKU (cProd da nota × sku do item) — código próprio, quando o fornecedor repete o nosso;
- *   3) nome normalizado (sem acento/maiúscula/espaço duplo) — última tentativa.
+ *   3) nome normalizado (sem acento/maiúscula/espaço duplo);
+ *   4) alias do item (nome da NF / princípio ativo cadastrado no estoque);
+ *   5) alias contido na descrição da NF (quando a NF traz nome longo).
  * Sem casar → 'novo'. O usuário revê e pode conectar manualmente na tela.
  */
 export function suggestItemPlan(nfe: NfeParsed, stock: StockItem[]): NfeItemPlan[] {
   const byEan = new Map<string, string>()
   const bySku = new Map<string, string>()
   const byName = new Map<string, string>()
+  const byAlias = new Map<string, string>()
+  const aliasEntries: Array<{ alias: string; id: string }> = []
   for (const s of stock) {
     const ean = onlyDigitsStr(s.barcode)
     if (ean.length >= 8 && !byEan.has(ean)) byEan.set(ean, s.id)
@@ -67,6 +71,12 @@ export function suggestItemPlan(nfe: NfeParsed, stock: StockItem[]): NfeItemPlan
     if (sku && !bySku.has(sku)) bySku.set(sku, s.id)
     const name = normalizeName(s.name)
     if (name && !byName.has(name)) byName.set(name, s.id)
+    for (const raw of s.aliases ?? []) {
+      const alias = normalizeName(raw)
+      if (!alias) continue
+      if (!byAlias.has(alias)) byAlias.set(alias, s.id)
+      aliasEntries.push({ alias, id: s.id })
+    }
   }
   return nfe.items.map((item, index) => {
     const ean = onlyDigitsStr(item.ean)
@@ -74,8 +84,18 @@ export function suggestItemPlan(nfe: NfeParsed, stock: StockItem[]): NfeItemPlan
     if (eanHit) return { index, action: 'existente' as const, matchedItemId: eanHit, matchedBy: 'ean' as const }
     const skuHit = item.supplierCode ? bySku.get(normalizeCode(item.supplierCode)) : undefined
     if (skuHit) return { index, action: 'existente' as const, matchedItemId: skuHit, matchedBy: 'sku' as const }
-    const nameHit = byName.get(normalizeName(item.description))
+    const desc = normalizeName(item.description)
+    const nameHit = byName.get(desc)
     if (nameHit) return { index, action: 'existente' as const, matchedItemId: nameHit, matchedBy: 'nome' as const }
+    const aliasExact = byAlias.get(desc)
+    if (aliasExact) return { index, action: 'existente' as const, matchedItemId: aliasExact, matchedBy: 'alias' as const }
+    // NF longa contendo o alias (ex.: "ACIDO TRANEXAMICO 250MG ..." ↔ alias "acido tranexamico")
+    const aliasPartial = aliasEntries
+      .filter((a) => a.alias.length >= 6 && (desc.includes(a.alias) || a.alias.includes(desc)))
+      .sort((a, b) => b.alias.length - a.alias.length)[0]
+    if (aliasPartial) {
+      return { index, action: 'existente' as const, matchedItemId: aliasPartial.id, matchedBy: 'alias' as const }
+    }
     return { index, action: 'novo' as const, matchedItemId: null, matchedBy: null }
   })
 }

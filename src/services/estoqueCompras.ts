@@ -75,6 +75,8 @@ export type StockItem = {
   controlled: boolean
   note: string | null
   active: boolean
+  /** Nomes alternativos (NF / princípio ativo) p/ match na entrada de nota. */
+  aliases: string[]
   /** ID do produto no Bling — quando vinculado, a entrada de estoque é espelhada no Bling. */
   blingProductId: string | null
   /** saldo atual (da view stock_balances) */
@@ -86,7 +88,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
   const client = assertClient()
   let itemsQuery = client
     .from('stock_items')
-    .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active, bling_product_id')
+    .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active, aliases, bling_product_id')
     .order('name')
   if (!includeInactive) itemsQuery = itemsQuery.eq('active', true)
   const [items, balances] = await Promise.all([
@@ -100,6 +102,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
   )
   return (items.data ?? []).map((r) => {
     const bal = byItem.get(String(r.id))
+    const aliasesRaw = (r as { aliases?: unknown }).aliases
     return {
       id: String(r.id),
       name: String(r.name),
@@ -112,6 +115,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
       controlled: Boolean(r.controlled),
       note: r.note != null ? String(r.note) : null,
       active: Boolean(r.active),
+      aliases: Array.isArray(aliasesRaw) ? aliasesRaw.map((a) => String(a)) : [],
       blingProductId: r.bling_product_id != null ? String(r.bling_product_id) : null,
       qty: Number(bal?.qty ?? 0),
       lastMovementAt: bal?.last_movement_at ? String(bal.last_movement_at) : null,
@@ -130,6 +134,7 @@ export async function upsertStockItem(payload: {
   controlled?: boolean
   source?: string
   note?: string | null
+  aliases?: string[]
   active?: boolean
   blingProductId?: string | null
 }): Promise<string> {
@@ -145,6 +150,9 @@ export async function upsertStockItem(payload: {
     note: payload.note?.trim() || null,
     active: payload.active ?? true,
     updated_at: new Date().toISOString(),
+  }
+  if (payload.aliases !== undefined) {
+    row.aliases = payload.aliases.map((a) => a.trim()).filter(Boolean)
   }
   if (payload.source) row.source = payload.source
   if (payload.blingProductId !== undefined) row.bling_product_id = payload.blingProductId?.trim() || null
