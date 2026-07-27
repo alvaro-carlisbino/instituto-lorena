@@ -178,6 +178,16 @@ export function EstoquePage() {
 
   const belowMin = items.filter((i) => i.minQty > 0 && i.qty < i.minQty)
 
+  // Cadastro pela metade = módulo NO AR e MORTO. Item sem mínimo nunca dispara o alerta de
+  // estoque baixo (o cron roda todo dia, varre e não acha nada); item sem código de barras
+  // não pode ser bipado; item sem saldo nunca teve carga inicial. Na clínica isso passou
+  // batido: 110 itens cadastrados, 0 com mínimo, e o alerta diário gerou zero notificação
+  // desde que existe. O painel precisa DIZER isso, senão o silêncio parece "está tudo bem".
+  const semMinimo = items.filter((i) => !i.minQty || i.minQty <= 0)
+  const semCodigoBarras = items.filter((i) => !i.barcode)
+  const semSaldo = items.filter((i) => i.qty <= 0)
+  const cadastroIncompleto = items.length > 0 && semMinimo.length > 0
+
   // Lotes com saldo > 0 vencidos ou vencendo em ≤30 dias (o mais urgente primeiro).
   const expiringBatches = useMemo(() => {
     const today = new Date()
@@ -344,6 +354,30 @@ export function EstoquePage() {
             )}
           </CardContent>
         </Card>
+      ) : null}
+
+      {cadastroIncompleto ? (
+        <div className="mb-4 rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-3">
+          <div className="text-xs font-bold uppercase tracking-wide text-sky-700">Cadastro incompleto</div>
+          <div className="mt-1 text-sm text-sky-900/90">
+            <strong className="tabular-nums">{semMinimo.length}</strong> de {items.length}{' '}
+            {items.length === 1 ? 'item está' : 'itens estão'} sem estoque mínimo definido, então o alerta
+            diário de estoque baixo <strong>não vai avisar</strong> sobre {items.length === 1 ? 'ele' : 'eles'}.
+            {semCodigoBarras.length > 0 ? (
+              <>
+                {' '}
+                <strong className="tabular-nums">{semCodigoBarras.length}</strong> sem código de barras (o leitor
+                não bipa).
+              </>
+            ) : null}
+            {semSaldo.length > 0 ? (
+              <>
+                {' '}
+                <strong className="tabular-nums">{semSaldo.length}</strong> sem saldo (falta a carga inicial).
+              </>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       {belowMin.length > 0 || expiringBatches.length > 0 ? (
