@@ -372,7 +372,13 @@ export async function createManychatWhatsappSubscriber(input: {
   if (!input.apiKey?.trim() || digits.length < 10) return { ok: false, error: 'missing_params' }
   const e164 = `+${digits}`
 
-  const body: Record<string, unknown> = { whatsapp_phone: e164, phone: e164 }
+  // SÓ `whatsapp_phone`. Mandar `phone` junto quebrava de duas formas (testado em prod 27/07):
+  //   1) 400 "has_opt_in_sms is required if phone is not empty";
+  //   2) mesmo com o flag, 400 "Permission denied to import phone" — a conta não tem
+  //      permissão de importar telefone de SMS.
+  // Com isso, a criação NUNCA dava certo e o primeiro contato do lead de formulário
+  // morria em silêncio. `has_opt_in_whatsapp` é obrigatório pra criar contato de WhatsApp.
+  const body: Record<string, unknown> = { whatsapp_phone: e164, has_opt_in_whatsapp: true }
   const firstName = (input.firstName ?? '').trim()
   if (firstName) body.first_name = firstName.slice(0, 80)
   const consent = (input.consentPhrase ?? '').trim()
@@ -384,7 +390,11 @@ export async function createManychatWhatsappSubscriber(input: {
     return { ok: true, subscriberId: createdId }
   }
 
-  // Telefone já cadastrado (ou plano bloqueou a criação): tenta achar o contato existente.
+  // Já existe ("This WhatsApp ID already exists"): tenta achar o contato.
+  // ATENÇÃO: `findBySystemField` só aceita `phone` ou `email` — contato criado apenas
+  // com `whatsapp_phone` NÃO é encontrado por aqui (confirmado em prod: devolve data: []).
+  // Deixamos a tentativa porque resolve quem tem o telefone no campo `phone`; para o
+  // resto, o caller cai no erro e o subscriber_id tem que vir do lead (custom_fields).
   const found = await manychatGet(
     `/fb/subscriber/findBySystemField?phone=${encodeURIComponent(e164)}`,
     input.apiKey,
