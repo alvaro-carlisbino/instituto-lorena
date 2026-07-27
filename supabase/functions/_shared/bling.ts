@@ -172,6 +172,33 @@ async function blingFetchWithRetry(
   return res
 }
 
+/**
+ * Traduz um corpo de erro do Bling na mensagem que o operador precisa ler.
+ *
+ * O motivo REAL nunca está no topo do JSON: `message` é sempre genérico ("Não foi possível
+ * emitir a nota fiscal") e o que interessa mora em `error.fields[].msg`. Guardar o JSON cru
+ * cortado em N chars esconde exatamente essa parte — foi o que aconteceu em 25/jul/2026:
+ * 10 notas falharam com `"fields":[{"code":9,"msg":"Há` e o resto da frase se perdeu, sem
+ * como saber o que o Bling recusou. Extrair os `msg` antes de truncar resolve na origem.
+ */
+export function blingErrorMessage(status: number, body: string): string {
+  try {
+    const e = (JSON.parse(body)?.error ?? {}) as {
+      message?: string
+      description?: string
+      fields?: Array<{ code?: number; msg?: string; element?: string }>
+    }
+    const campos = (e.fields ?? [])
+      .map((f) => [f.element, f.msg].filter(Boolean).join(': '))
+      .filter(Boolean)
+      .join(' | ')
+    const texto = [e.message, campos || e.description].filter(Boolean).join(' — ')
+    return texto ? `${texto} (HTTP ${status})` : `HTTP ${status}: ${body.slice(0, 500)}`
+  } catch {
+    return `HTTP ${status}: ${body.slice(0, 500)}`
+  }
+}
+
 /** Lista produtos (catálogo + saldo de estoque quando disponível). */
 export async function blingListProducts(
   token: string,
@@ -749,6 +776,9 @@ export async function blingCreateSaleOrder(
       itens: nfeItens,
       observacoes: obs,
       transmit: cfg.auto_nfe_transmit === true,
+      dataOperacaoISO: args.saleDateISO,
+      descontoReais: descontoReais > 0.05 ? descontoReais : 0,
+      contatoNome: args.customerName,
     }).catch((e) => ({ nfeId: null, transmitted: false, error: e instanceof Error ? e.message : String(e) }))
   }
   return { orderId, bottles, contatoFallback, nfe }
@@ -759,8 +789,7 @@ export async function blingCreateSaleOrder(
  * Bling auto-preenche a tributação a partir do cadastro fiscal do PRODUTO + da natureza de
  * operação informada. `transmit=false` deixa a nota em rascunho pro operador conferir e
  * transmitir num clique. Requer `natureza_operacao_id` configurado no tenant.
- */
-/**
+ *
  * Rateia o desconto do pedido (Pix 5%, cupom) NOS ITENS da NF-e.
  *
  * Por que não manda `desconto` no corpo da nota: o Bling ACEITA o campo (200, sem erro) e
@@ -793,6 +822,52 @@ function descontarItens(
   })
 }
 
+/**
+ * Monta o bloco `contato` da NF-e a partir do cadastro no Bling.
+ * POST /nfe com só `{ id }` NÃO copia nome/CPF/endereço — a nota sai sem destinatário
+ * (caso 25/jul/2026: NFs 000103–000110 em rascunho com Nome vazio, contato ok no pedido).
+ */
+async function blingContatoPayloadForNfe(
+  token: string,
+  contatoId: string,
+  nomeFallback?: string,
+): Promise<Record<string, unknown>> {
+  const idNum = Number(contatoId) || contatoId
+  const base: Record<string, unknown> = { id: idNum }
+  try {
+    const res = await blingFetchWithRetry(token, `/contatos/${contatoId}`)
+    if (!res.ok) return base
+    const cur = (JSON.parse((await res.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+    const nome = String(cur.nome ?? '').trim() || String(nomeFallback ?? '').trim()
+    const doc = String(cur.numeroDocumento ?? '').replace(/\D/g, '')
+    const tipo = String(cur.tipo ?? 'F').toUpperCase().slice(0, 1) || 'F'
+    if (nome) base.nome = nome.slice(0, 120)
+    if (doc) base.numeroDocumento = doc
+    base.tipoPessoa = tipo
+    const tel = String(cur.telefone ?? cur.celular ?? '').trim()
+    const email = String(cur.email ?? '').trim()
+    if (tel) base.telefone = tel.slice(0, 30)
+    if (email) base.email = email.slice(0, 60)
+    const g = ((cur.endereco as { geral?: Record<string, unknown> } | undefined)?.geral) ?? {}
+    const rua = String(g.endereco ?? '').trim()
+    const cep = String(g.cep ?? '').replace(/\D/g, '')
+    if (rua && cep.length === 8) {
+      base.endereco = {
+        endereco: rua.slice(0, 90),
+        numero: String(g.numero ?? 'S/N').slice(0, 20),
+        complemento: String(g.complemento ?? '').slice(0, 60),
+        bairro: String(g.bairro ?? '').slice(0, 60),
+        cep,
+        municipio: String(g.municipio ?? '').slice(0, 60),
+        uf: String(g.uf ?? '').toUpperCase().slice(0, 2),
+      }
+    }
+  } catch {
+    if (nomeFallback?.trim()) base.nome = nomeFallback.trim().slice(0, 120)
+  }
+  return base
+}
+
 export async function blingEmitNfe(
   token: string,
   args: {
@@ -806,6 +881,8 @@ export async function blingEmitNfe(
     /** Desconto do pedido em REAIS (ex.: os 5% do Pix). Sem isto a nota sai com o preço
      *  de tabela e NÃO bate com o valor cobrado — erro fiscal. */
     descontoReais?: number
+    /** Nome do CRM se o cadastro Bling vier vazio (fallback). */
+    contatoNome?: string
   },
 ): Promise<{ nfeId: string | null; numero?: string; situacao?: string; transmitted: boolean; error?: string }> {
   // dataOperacao é OBRIGATÓRIA no Bling e a gente nunca mandava: toda emissão morria em
@@ -817,18 +894,26 @@ export async function blingEmitNfe(
   const dataOperacao = `${spDate.getFullYear()}-${pad(spDate.getMonth() + 1)}-${pad(spDate.getDate())} ` +
     `${pad(spDate.getHours())}:${pad(spDate.getMinutes())}:${pad(spDate.getSeconds())}`
 
+  const contato = await blingContatoPayloadForNfe(token, args.contatoId, args.contatoNome)
+  if (!String(contato.nome ?? '').trim()) {
+    throw new Error('contato_sem_nome: o destinatário da NF-e precisa de nome no Bling')
+  }
+
   const payload: Record<string, unknown> = {
     tipo: 1, // 1 = saída
     finalidade: 1, // 1 = NF-e normal
     dataOperacao,
     naturezaOperacao: { id: Number(args.naturezaOperacaoId) || args.naturezaOperacaoId },
-    contato: { id: Number(args.contatoId) || args.contatoId },
+    contato,
     itens: descontarItens(args.itens, args.descontoReais ?? 0),
     ...(args.observacoes ? { observacoes: args.observacoes } : {}),
   }
-  const res = await blingFetch(token, '/nfe', { method: 'POST', body: JSON.stringify(payload) })
+  // Retry obrigatório: o Bling corta em 3 req/s e uma emissão gasta 4-6 chamadas (pedido +
+  // produto por item + contato + nota + envio). Em lote, o 429 caía justo aqui e a linha
+  // morria com "bling_nfe_429" (caso Kauan 25/jul/2026) — ver blingFetchWithRetry.
+  const res = await blingFetchWithRetry(token, '/nfe', { method: 'POST', body: JSON.stringify(payload) })
   const text = await res.text()
-  if (!res.ok) throw new Error(`bling_nfe_${res.status}: ${text.slice(0, 300)}`)
+  if (!res.ok) throw new Error(blingErrorMessage(res.status, text))
   let parsed: { data?: { id?: number | string; numero?: string | number; situacao?: string | number } } = {}
   try {
     parsed = text ? JSON.parse(text) : {}
@@ -842,10 +927,10 @@ export async function blingEmitNfe(
 
   // Transmissão ao SEFAZ (envio). Falha aqui não invalida a nota criada (rascunho).
   try {
-    const send = await blingFetch(token, `/nfe/${nfeId}/enviar`, { method: 'POST' })
+    const send = await blingFetchWithRetry(token, `/nfe/${nfeId}/enviar`, { method: 'POST' })
     if (!send.ok) {
       const t = await send.text()
-      return { nfeId, numero, situacao, transmitted: false, error: `envio_${send.status}: ${t.slice(0, 200)}` }
+      return { nfeId, numero, situacao, transmitted: false, error: blingErrorMessage(send.status, t) }
     }
     return { nfeId, numero, situacao, transmitted: true }
   } catch (e) {

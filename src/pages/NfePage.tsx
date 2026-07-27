@@ -145,7 +145,14 @@ export function NfePage() {
     let ok = 0
     let fail = 0
     // Sequencial: o Bling limita ~3 req/s e a emissão fiscal não deve correr em paralelo.
+    // Sequencial não basta, porém: CADA nota gasta 4-6 chamadas ao Bling (pedido + produto
+    // por item + contato + nota + envio), então sem respiro entre as notas o lote estoura o
+    // teto e volta 429 no meio — foi o que derrubou 6 linhas em 25/jul/2026. A edge já faz
+    // retry com backoff; esta pausa evita chegar no limite em primeiro lugar.
+    let primeira = true
     for (const id of ids) {
+      if (!primeira) await new Promise((r) => setTimeout(r, 700))
+      primeira = false
       patchRow(id, { emitting: true, nfeError: null })
       try {
         const res = await nfeEmitOrder(id, transmit)
@@ -160,7 +167,14 @@ export function NfePage() {
           setSelected((prev) => { const n = new Set(prev); n.delete(id); return n })
         } else {
           fail += 1
-          patchRow(id, { emitting: false, nfeStatus: 'erro', nfeError: res.message ?? 'Falha ao emitir' })
+          // Se o rascunho nasceu e só a TRANSMISSÃO falhou, a nota já existe no Bling —
+          // mostrar o número evita que o operador reemita e duplique o rascunho.
+          patchRow(id, {
+            emitting: false,
+            nfeStatus: 'erro',
+            nfeNumero: res.numero ?? null,
+            nfeError: res.message ?? 'Falha ao emitir',
+          })
         }
       } catch (e) {
         fail += 1

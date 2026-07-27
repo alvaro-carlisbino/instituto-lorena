@@ -72,13 +72,36 @@ export async function fetchBlingCatalog(refresh = false): Promise<{ items: Bling
   return { items: Array.isArray(p.items) ? p.items : [], fetchedAt: p.fetchedAt ?? null }
 }
 
+/**
+ * Extrai o motivo REAL de um erro de edge function.
+ *
+ * `FunctionsHttpError.context` é o `Response` cru, e `context.body` é um ReadableStream —
+ * NUNCA uma string. O `typeof ctx.body === 'string'` que existia aqui portanto dava sempre
+ * falso, e todo erro não-2xx caía no `error.message` genérico do supabase-js: o famoso
+ * "Edge Function returned a non-2xx status code" que o Kauan viu em 25/jul/2026 no lugar de
+ * "o Bling recusou por X". O corpo precisa ser lido de verdade.
+ */
+async function edgeErrorMessage(error: unknown, fallback: string): Promise<string> {
+  const ctx = (error as { context?: unknown }).context
+  if (ctx instanceof Response) {
+    try {
+      const txt = await ctx.clone().text()
+      try {
+        const p = JSON.parse(txt) as { message?: unknown; error?: unknown }
+        if (p.message) return String(p.message)
+        if (p.error) return String(p.error)
+      } catch { /* corpo não é JSON — usa o texto puro */ }
+      if (txt.trim()) return txt.slice(0, 400)
+    } catch { /* stream já consumido */ }
+  }
+  return String((error as { message?: unknown }).message || fallback)
+}
+
 async function invokeBling(body: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (!supabase) throw new Error('Sistema não configurado.')
   const { data, error } = await supabase.functions.invoke('crm-bling', { body })
   if (error) {
-    const ctx = (error as { context?: { body?: unknown } }).context
-    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
-    throw new Error(String(msg || 'Falha na operação Bling'))
+    throw new Error(await edgeErrorMessage(error, 'Falha na operação Bling'))
   }
   const p = (data ?? {}) as Record<string, unknown>
   if (p.ok !== true) throw new Error(String(p.message || p.error || 'Falha na operação Bling'))
@@ -170,9 +193,7 @@ export async function nfeEmit(paymentId: string, transmit?: boolean): Promise<Nf
   if (transmit !== undefined) body.transmit = transmit
   const { data, error } = await supabase.functions.invoke('crm-bling', { body })
   if (error) {
-    const ctx = (error as { context?: { body?: unknown } }).context
-    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
-    return { ok: false, message: String(msg || 'Falha ao emitir NF-e') }
+    return { ok: false, message: await edgeErrorMessage(error, 'Falha ao emitir NF-e') }
   }
   const p = (data ?? {}) as Record<string, unknown>
   return {
@@ -210,9 +231,7 @@ export async function nfeEmitOrder(orderId: string, transmit?: boolean): Promise
   if (transmit !== undefined) body.transmit = transmit
   const { data, error } = await supabase.functions.invoke('crm-bling', { body })
   if (error) {
-    const ctx = (error as { context?: { body?: unknown } }).context
-    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
-    return { ok: false, message: String(msg || 'Falha ao emitir NF-e') }
+    return { ok: false, message: await edgeErrorMessage(error, 'Falha ao emitir NF-e') }
   }
   const p = (data ?? {}) as Record<string, unknown>
   return {
