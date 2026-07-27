@@ -15,6 +15,30 @@ export function stripManychatHandoffMarker(reply: string): { clean: string; hand
 }
 
 /**
+ * Detecta monólogo de raciocínio/debug da IA (inglês) que NUNCA pode ir ao paciente.
+ * Caso Janaine 24/jul: "Correction on History Analysis" + análise de `recent_conversation`.
+ */
+export function looksLikeAiReasoningLeak(text: string): boolean {
+  const t = text.trim()
+  if (!t) return false
+  if (
+    /Correction on History Analysis|History Analysis\s*:|Hypothesis\s*\d|recent_conversation|Analyze the User'?s?\s+Input|Interpretation:\s*\*\*|Constraint Check:|Determine the Intent|\*+\s*Draft\s*:?\s*\*+|\bDraft:|\*Refining\b|Sofia'?s voice|\bI hand off\b|most likely intent|\*+\s*Even simpler|Let'?s stick to|keep it open|The prompt'?s?\s*`|Looking at the conversation|I need to (?:check|verify|analyze|correct)/i
+      .test(t)
+  ) {
+    return true
+  }
+  // Dump longo em inglês sem abertura típica de atendimento em PT
+  if (
+    t.length >= 800 &&
+    /\b(the prompt|the user's|based on the|hypothesis|conversation history|I should|I will)\b/i.test(t) &&
+    !/^(Olá|Oi|Opa|Bom dia|Boa tarde|Boa noite|Perfeito|Prontinho|Claro|Obrigada|Obrigado)/im.test(t.slice(0, 120))
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
  * Texto visível ao paciente / ManyChat: remove marca de handoff e vazamentos comuns de "tools"
  * (blocos fenced, XML de function_call, etc.). Não substitui o system prompt — só a saída.
  */
@@ -29,7 +53,10 @@ export function sanitizeCrmAiPatientReply(reply: string): { clean: string; hando
   t = t.replace(/<invoke[\s\S]*?<\/invoke>/gi, '')
   t = t.replace(/<tool_call[\s\S]*?<\/tool_call>/gi, '')
   t = t.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
+  t = t.replace(/<(thinking|thought|reasoning)>[\s\S]*?<\/\1>/gi, '')
   t = t.replace(/\n{3,}/g, '\n\n').trim()
+  // Rede de segurança: se ainda parecer CoT/debug em inglês, zera (caller faz fallback/handover).
+  if (looksLikeAiReasoningLeak(t)) return { clean: '', handoffSuggested }
   return { clean: t, handoffSuggested }
 }
 
@@ -735,6 +762,7 @@ export async function invokeCrmAiAssistantForLead(
     reply = reply.replace(/^(?:\d+\.\s+\*?Analyze[\s\S]*?)(?:\n\n|\n[A-Z\xC0-\xDF]|$)/gi, '').trim()
     reply = reply.replace(/<(thinking|thought|reasoning)>[\s\S]*?<\/\1>/gi, '').trim()
     reply = reply.replace(/```(?:thinking|thought|reasoning)[\s\S]*?```/gi, '').trim()
+    if (looksLikeAiReasoningLeak(reply)) reply = ''
 
     // QR do Pix (op rede_pix; `pagbank_pix` é alias legado) para enviar como IMAGEM, via crm_actions.
     const acts = Array.isArray(aiObj.crm_actions) ? (aiObj.crm_actions as Array<Record<string, unknown>>) : []

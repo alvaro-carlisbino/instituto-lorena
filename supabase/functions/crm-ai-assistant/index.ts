@@ -495,17 +495,17 @@ function stripInternalPatientReply(raw: string): string {
 
   // Assinaturas de RACIOCÍNIO/RASCUNHO vazado. Além do CoT clássico ("Analyze the User's
   // Input"), os GLM às vezes despejam um monólogo com passos numerados e VÁRIOS rascunhos
-  // rotulados em inglês — foi o caso da Eliane (18/jul): "2. *Determine the Intent:* …",
-  // "*Draft:*", "*Refining for Sofia's voice:*", "*Even simpler:*", "Let's stick to the most
-  // likely intent … keep it open". Nada disso pode chegar ao paciente.
+  // rotulados em inglês — Eliane (18/jul): "Determine the Intent" / "*Draft:*";
+  // Janaine (24/jul): "Correction on History Analysis" + `recent_conversation`.
+  // Nada disso pode chegar ao paciente.
   const cotSignature =
-    /Analyze the User'?s?\s+Input|Interpretation:\s*\*\*|Constraint Check:|Determine the Intent|\*+\s*Draft\s*:?\s*\*+|\bDraft:|\*Refining\b|Sofia'?s voice|\bI hand off\b|most likely intent|\*+\s*Even simpler|Let'?s stick to|keep it open/i
+    /Analyze the User'?s?\s+Input|Interpretation:\s*\*\*|Constraint Check:|Determine the Intent|\*+\s*Draft\s*:?\s*\*+|\bDraft:|\*Refining\b|Sofia'?s voice|\bI hand off\b|most likely intent|\*+\s*Even simpler|Let'?s stick to|keep it open|Correction on History Analysis|History Analysis\s*:|Hypothesis\s*\d|recent_conversation|The prompt'?s?\s*`|Looking at the conversation|I need to (?:check|verify|analyze|correct)/i
   if (!cotSignature.test(t)) return t
 
   // Marcadores que denunciam que um bloco AINDA é raciocínio/rótulo de rascunho — um bloco
   // com qualquer um destes NÃO é a resposta final, mesmo que traga uma saudação junto.
   const reasoningMark =
-    /Analyze|Interpretation|Constraint Check|Determine the Intent|leadFocus|`channel`|Draft\s*:|Refining|Sofia'?s voice|hand off|most likely intent|keep it open|Even simpler|Let'?s stick|^\s*\d+\.\s/i
+    /Analyze|Interpretation|Constraint Check|Determine the Intent|leadFocus|`channel`|Draft\s*:|Refining|Sofia'?s voice|hand off|most likely intent|keep it open|Even simpler|Let'?s stick|History Analysis|Hypothesis|recent_conversation|The prompt|^\s*\d+\.\s/i
 
   // Recupera SÓ um bloco limpo (começa com saudação/abertura e não contém marcador de
   // raciocínio). Varre de baixo pra cima: a versão final costuma ser a última.
