@@ -113,6 +113,14 @@ export function AnalyticsV2Panel() {
 
   const sf = data?.shosp_funnel
 
+  // Espelho da agenda congelado (cota da Shosp estourada, p.ex.) = número de
+  // consulta desatualizado. Melhor avisar do que exibir foto velha como se fosse
+  // o dado de hoje.
+  const agendaAtrasada = (data?.agenda_sync?.dias_atras ?? 0) >= 1
+  const ultimoSyncLabel = data?.agenda_sync?.ultimo_sync
+    ? new Date(data.agenda_sync.ultimo_sync).toLocaleDateString('pt-BR')
+    : '—'
+
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
@@ -161,14 +169,39 @@ export function AnalyticsV2Panel() {
 
       {error && <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>}
 
-      {/* Resumo */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard label="Leads" value={data?.summary.total_leads ?? 0} />
-        <StatCard label="Ativos" value={data?.summary.ativos ?? 0} />
-        <StatCard label="Perdidos" value={data?.summary.perdidos ?? 0} tone="text-destructive" />
-        <StatCard label="Agendados" value={sf?.leads_agendados ?? 0} tone="text-amber-600" />
-        <StatCard label="Compareceram" value={sf?.leads_comparecidos ?? 0} tone="text-emerald-600" />
-        <StatCard label="No-show" value={sf?.leads_no_show ?? 0} tone="text-destructive" />
+      {agendaAtrasada && (
+        <p role="alert" className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-500">
+          Agenda da Shosp sem sincronizar há {data?.agenda_sync?.dias_atras} dia
+          {(data?.agenda_sync?.dias_atras ?? 0) > 1 ? 's' : ''} (última atualização em {ultimoSyncLabel}). Os números de
+          consulta abaixo são a foto daquela data — marcações e cancelamentos feitos depois ainda não entraram.
+        </p>
+      )}
+
+      {/* Resumo — dois blocos com contas DIFERENTES, explicitados pra não se lerem
+          como a mesma coisa: leads criados no período × consultas do período. */}
+      <div className="flex flex-col gap-3">
+        <div>
+          <p className="mb-2 text-xs font-medium text-muted-foreground">Leads que entraram no período</p>
+          <div className="grid grid-cols-3 gap-3">
+            <StatCard label="Leads" value={data?.summary.total_leads ?? 0} />
+            <StatCard label="Ativos" value={data?.summary.ativos ?? 0} />
+            <StatCard label="Perdidos" value={data?.summary.perdidos ?? 0} tone="text-destructive" />
+          </div>
+        </div>
+        <div>
+          <p className="mb-2 text-xs font-medium text-muted-foreground">
+            Consultas com data no período{' '}
+            <span className="font-normal">
+              — conta pelo dia em que a consulta acontece, não pelo dia em que foi marcada (a Shosp não informa quando o
+              agendamento foi feito). São leads do CRM já vinculados a um paciente da Shosp.
+            </span>
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            <StatCard label="Leads com consulta" value={sf?.leads_agendados ?? 0} tone="text-amber-600" />
+            <StatCard label="Compareceram" value={sf?.leads_comparecidos ?? 0} tone="text-emerald-600" />
+            <StatCard label="No-show" value={sf?.leads_no_show ?? 0} tone="text-destructive" />
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

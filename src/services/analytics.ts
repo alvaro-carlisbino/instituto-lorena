@@ -80,6 +80,9 @@ export type AnalyticsV2 = {
   by_sdr: Array<{ owner_id: string; owner_name: string; total: number; perdidos: number; agendados: number; conversao_pct: number | null }>
   lost_reasons: Array<{ reason: string; count: number }>
   time_in_stage: Array<{ stage_id: string; stage_name: string; leads: number; avg_days: number }>
+  /** Frescor do espelho da agenda Shosp. Quando a cota da API estoura, o espelho
+   *  congela e os números de consulta viram foto velha — a tela precisa avisar. */
+  agenda_sync?: { ultimo_sync: string | null; dias_atras: number | null }
 }
 
 /** Busca o analytics v2 (funil real cruzando agendamentos Shosp) com filtros.
