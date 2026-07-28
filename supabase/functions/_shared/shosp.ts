@@ -43,7 +43,39 @@ export type ShospResult = {
   error?: string
 }
 
+/**
+ * MEDIDOR DE CONSUMO — por invocação da Edge Function.
+ *
+ * A Shosp tem cota. Em 09/jul/2026 ela estourou e a API passou a devolver 429
+ * "Limit Exceeded" em TODOS os endpoints. O sync continuou rodando de 15 em 15
+ * minutos, respondendo `ok` e carimbando `last_appointments_sync_at`, mas sem
+ * trazer um único agendamento — 19 dias cego, e ninguém viu porque o 429 era
+ * tratado como "não veio nada" e seguia adiante.
+ *
+ * Agora toda chamada passa por aqui: contamos quantas foram e levantamos a
+ * bandeira no primeiro 429. Quem orquestra lê `shospIsRateLimited()` para abortar
+ * a rodada e, principalmente, para NÃO carimbar sucesso em cima de nada.
+ */
+let callCount = 0
+let rateLimited = false
+
+export function shospResetCallStats(): void {
+  callCount = 0
+  rateLimited = false
+}
+
+export function shospCallCount(): number {
+  return callCount
+}
+
+/** True depois do primeiro 429 da invocação: a cota da Shosp está estourada. */
+export function shospIsRateLimited(): boolean {
+  return rateLimited
+}
+
 async function parseResult(res: Response): Promise<ShospResult> {
+  callCount++
+  if (res.status === 429) rateLimited = true
   const text = await res.text()
   let data: unknown = text
   try {

@@ -2,12 +2,15 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { insertInteraction } from './crm.ts'
 import {
   shospAgendaPorPaciente,
+  shospCallCount,
   shospGetAgenda,
+  shospIsRateLimited,
   shospListEspecialidades,
   shospListPlanosSaude,
   shospListPrestadores,
   shospListServicos,
   shospListUnidades,
+  shospResetCallStats,
   shospSearchPaciente,
 } from './shosp.ts'
 
@@ -86,6 +89,15 @@ export async function syncShospReferences(admin: SupabaseClient): Promise<{ upse
   const byKey = new Map<string, (typeof rows)[number]>()
   for (const r of rows) byKey.set(`${r.kind}:${r.codigo}`, r)
   const deduped = Array.from(byKey.values())
+
+  // Cota estourada: as 5 listas voltaram 429 e `deduped` está vazio. Antes isto
+  // devolvia `{ upserted: 0, error: null }` — indistinguível de "a Shosp não tem
+  // nada cadastrado" — e ainda carimbava `last_reference_sync_at`. Agora falha alto
+  // e não mente sobre a data do último sync.
+  if (shospIsRateLimited()) {
+    console.error('[shosp-sync] referências: cota da Shosp estourada (HTTP 429)')
+    return { upserted: 0, error: 'rate_limited' }
+  }
 
   let error: string | null = null
   if (deduped.length) {
@@ -427,6 +439,9 @@ async function advanceLeadStageFromShosp(
 }
 
 export async function syncAppointments(admin: SupabaseClient, limit = 25): Promise<{ leads: number; appts: number; advanced: number }> {
+  // Cota já estourada nesta rodada: não gasta mais chamada nem carimba sucesso.
+  if (shospIsRateLimited()) return { leads: 0, appts: 0, advanced: 0 }
+
   const { data: leads } = await admin
     .from('leads')
     .select('id, shosp_prontuario')
@@ -481,7 +496,11 @@ export async function syncAppointments(admin: SupabaseClient, limit = 25): Promi
     }
   }
 
-  await admin.from('shosp_sync_state').update({ last_appointments_sync_at: nowIso() }).eq('id', 'default')
+  // Só carimba se a rodada realmente falou com a Shosp. Carimbar depois de um 429
+  // é o que fazia o painel jurar que sincronizou hoje com dado parado em 09/jul.
+  if (!shospIsRateLimited()) {
+    await admin.from('shosp_sync_state').update({ last_appointments_sync_at: nowIso() }).eq('id', 'default')
+  }
   return { leads: (leads ?? []).length, appts, advanced }
 }
 
@@ -494,14 +513,25 @@ function ymdOffset(days: number): string {
  * casado. Extrai os slots OCUPADOS da grade Shosp para `shosp_appointments`,
  * dando base para métricas de volume/ocupação por médico. Atenção: a grade geral
  * traz paciente/status/plano, mas NÃO o serviço (esse só vem no por-paciente).
+ *
+ * MULTI-UNIDADE: varre todas as unidades cadastradas em `shosp_reference`, não a
+ * unidade 1 fixa. Enquanto o código estava cravado em `codigoUnidade: 1`, agenda
+ * de qualquer outra praça (Londrina) simplesmente nunca era buscada — e como o
+ * `codigo_unidade` gravado também era '1' na mão, nem dava pra separar depois.
  */
 export async function syncFullAgenda(
   admin: SupabaseClient,
   opts: { diasTotal?: number } = {},
-): Promise<{ appts: number; prestadores: number }> {
+): Promise<{ appts: number; prestadores: number; unidades: number }> {
   const diasTotal = Math.min(120, Math.max(7, opts.diasTotal ?? 45))
   const { data: prestadores } = await admin.from('shosp_reference').select('codigo, nome').eq('kind', 'prestador')
   const presList = (prestadores ?? []) as Array<{ codigo: string; nome: string }>
+
+  const { data: unidadesRef } = await admin.from('shosp_reference').select('codigo, nome').eq('kind', 'unidade')
+  // Sem referência sincronizada (ex.: primeira execução), cai na unidade 1 — o
+  // comportamento antigo — em vez de não varrer nada.
+  const uniList = ((unidadesRef ?? []) as Array<{ codigo: string; nome: string }>).filter((u) => u.codigo)
+  const unidades = uniList.length ? uniList : [{ codigo: '1', nome: '' }]
 
   const { data: matched } = await admin.from('leads').select('id, shosp_prontuario').not('shosp_prontuario', 'is', null)
   const leadByPront = new Map<string, string>()
@@ -510,12 +540,14 @@ export async function syncFullAgenda(
   }
 
   let appts = 0
+  for (const u of unidades) {
   for (const p of presList) {
     for (let offset = 0; offset < diasTotal; offset += 31) {
+      if (shospIsRateLimited()) break // cota estourada: para de queimar chamada
       const dias = Math.min(31, diasTotal - offset)
       let agendaData: unknown = null
       try {
-        agendaData = (await shospGetAgenda({ codigoUnidade: 1, dataInicial: ymdOffset(offset), diasMostrar: dias, codigoPrestador: Number(p.codigo) })).data
+        agendaData = (await shospGetAgenda({ codigoUnidade: u.codigo, dataInicial: ymdOffset(offset), diasMostrar: dias, codigoPrestador: Number(p.codigo) })).data
       } catch {
         continue
       }
@@ -538,7 +570,7 @@ export async function syncFullAgenda(
               codigo_agendamento: codigo,
               prontuario: pront,
               lead_id: pront ? leadByPront.get(pront) ?? null : null,
-              codigo_unidade: '1',
+              codigo_unidade: String(u.codigo),
               codigo_prestador: String(p.codigo),
               prestador: pr.nomePrestador != null ? String(pr.nomePrestador) : p.nome,
               servico: h.servico != null ? String(h.servico) : null,
@@ -558,8 +590,11 @@ export async function syncFullAgenda(
       }
     }
   }
-  await admin.from('shosp_sync_state').update({ last_appointments_sync_at: nowIso() }).eq('id', 'default')
-  return { appts, prestadores: presList.length }
+  }
+  if (!shospIsRateLimited()) {
+    await admin.from('shosp_sync_state').update({ last_appointments_sync_at: nowIso() }).eq('id', 'default')
+  }
+  return { appts, prestadores: presList.length, unidades: unidades.length }
 }
 
 export async function runShospSync(
@@ -568,9 +603,26 @@ export async function runShospSync(
 ): Promise<Record<string, unknown>> {
   const steps = opts.steps ?? ['references', 'match', 'appointments']
   const result: Record<string, unknown> = {}
+  shospResetCallStats()
+
   if (steps.includes('references')) result.references = await syncShospReferences(admin)
   if (steps.includes('match')) result.match = await matchLeadsToPatients(admin, opts.matchLimit ?? 15, opts.agendaLimit ?? 20)
   if (steps.includes('appointments')) result.appointments = await syncAppointments(admin, opts.apptLimit ?? 25)
   if (steps.includes('full_agenda')) result.full_agenda = await syncFullAgenda(admin, { diasTotal: opts.diasTotal })
+
+  // Consumo e saúde da rodada vão na resposta E no estado — é o que faltava para
+  // alguém perceber que a integração estava morta. `notes` é lido no painel.
+  result.shosp_calls = shospCallCount()
+  result.rate_limited = shospIsRateLimited()
+  if (shospIsRateLimited()) {
+    console.error(`[shosp-sync] COTA ESTOURADA (HTTP 429) após ${shospCallCount()} chamadas — nada foi sincronizado`)
+    await admin
+      .from('shosp_sync_state')
+      .update({ notes: `rate_limited em ${nowIso()} — a API da Shosp devolveu 429 "Limit Exceeded". Nenhum dado novo entrou.` })
+      .eq('id', 'default')
+      .then(() => {}, () => {})
+  } else {
+    await admin.from('shosp_sync_state').update({ notes: null }).eq('id', 'default').then(() => {}, () => {})
+  }
   return result
 }
