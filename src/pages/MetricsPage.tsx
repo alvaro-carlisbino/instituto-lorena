@@ -15,8 +15,9 @@ import { SubTabs } from '@/components/page/SubTabs'
 import { cn } from '@/lib/utils'
 
 const DADOS_TABS = [
-  { to: '/metricas', label: 'Métricas' },
-  { to: '/analytics', label: 'Analytics' },
+  { to: '/resultados', label: 'Resultados' },
+  { to: '/analytics', label: 'Análise do funil' },
+  { to: '/metricas', label: 'Metas' },
 ]
 
 const UNIT_OPTIONS = [

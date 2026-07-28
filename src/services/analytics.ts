@@ -113,6 +113,68 @@ export async function fetchAnalyticsV2(params: {
   return (data as AnalyticsV2) ?? null
 }
 
+// ---- Funil comercial (Centro de Resultados) ---------------------------------
+// Usa SÓ dado confiável hoje: a tabela `leads` e o histórico de `interactions`.
+// Nada aqui depende do vínculo com a Shosp (1,6% dos leads) nem de faturamento
+// (que a clínica ainda não registra). Ver a migration crm_funil_comercial.
+
+export type FunilComercial = {
+  range: { start: string; end: string; anterior_start: string }
+  resumo: {
+    leads_novos: number
+    leads_novos_anterior: number
+    variacao_pct: number | null
+    ativos: number
+    perdidos: number
+    respondidos: number
+    sem_resposta: number
+    taxa_resposta_pct: number | null
+    atendidos_por_humano: number
+    dias_no_periodo: number
+  }
+  por_dia: Array<{ dia: string; leads: number }>
+  por_origem: Array<{ origem: string; leads: number; perdidos: number }>
+  por_campanha: Array<{ campanha: string; leads: number }>
+  por_atendente: Array<{
+    atendente: string
+    leads: number
+    respondidos: number
+    sem_resposta: number
+    atendidos_por_humano: number
+    mediana_humano_min: number | null
+    perdidos: number
+  }>
+  sla: {
+    ia: { respondidos: number; mediana_min: number | null; p90_min: number | null }
+    humano: { respondidos: number; mediana_min: number | null; p90_min: number | null }
+    faixas_humano: Array<{ faixa: string; leads: number }>
+  }
+  perdas: Array<{ motivo: string; leads: number }>
+  etapas: Array<{ etapa: string; position: number; leads: number; dias_medios: number }>
+  qualidade_dado: {
+    com_campanha_pct: number | null
+    com_motivo_perda_pct: number | null
+    com_vinculo_shosp_pct: number | null
+    agenda_ultimo_sync: string | null
+    agenda_dias_atras: number | null
+  }
+}
+
+export async function fetchFunilComercial(params: {
+  start: Date
+  end: Date
+  tenant?: string | null
+}): Promise<FunilComercial | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('crm_funil_comercial', {
+    p_start: params.start.toISOString(),
+    p_end: params.end.toISOString(),
+    p_tenant: params.tenant ?? null,
+  })
+  if (error) throw new Error(error.message)
+  return (data as FunilComercial) ?? null
+}
+
 // ---- Métricas da agenda Shosp (clínica inteira) -----------------------------
 
 export type ShospAgendaMetrics = {

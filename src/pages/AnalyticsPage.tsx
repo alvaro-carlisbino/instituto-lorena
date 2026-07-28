@@ -89,7 +89,13 @@ export function AnalyticsPage() {
 
   return (
     <AppLayout title="Analytics">
-      <SubTabs tabs={[{ to: '/metricas', label: 'Métricas' }, { to: '/analytics', label: 'Analytics' }]} />
+      <SubTabs
+        tabs={[
+          { to: '/resultados', label: 'Resultados' },
+          { to: '/analytics', label: 'Análise do funil' },
+          { to: '/metricas', label: 'Metas' },
+        ]}
+      />
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div>

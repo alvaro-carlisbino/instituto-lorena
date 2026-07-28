@@ -30,6 +30,7 @@ const HistoryPage = lazyPage(() => import('./pages/HistoryPage'), 'HistoryPage')
 const ChannelsPage = lazyPage(() => import('./pages/ChannelsPage'), 'ChannelsPage')
 const MetricsPage = lazyPage(() => import('./pages/MetricsPage'), 'MetricsPage')
 const AnalyticsPage = lazyPage(() => import('./pages/AnalyticsPage'), 'AnalyticsPage')
+const ResultadosPage = lazyPage(() => import('./pages/ResultadosPage'), 'ResultadosPage')
 const FeedbackDashboardPage = lazyPage(() => import('./pages/FeedbackDashboardPage'), 'FeedbackDashboardPage')
 const ClinicalNotesPage = lazyPage(() => import('./pages/ClinicalNotesPage'), 'ClinicalNotesPage')
 const ClientProfilePage = lazyPage(() => import('./pages/ClientProfilePage'), 'ClientProfilePage')
@@ -169,6 +170,7 @@ function AppRoutes() {
         <Route path="/canais" element={<ChannelsPage />} />
         <Route path="/metricas" element={<MetricsPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/resultados" element={<ResultadosPage />} />
         <Route path="/feedback" element={<FeedbackDashboardPage />} />
         <Route path="/notas-clinicas" element={<ClinicalNotesPage />} />
         <Route path="/perfil" element={<ClientProfilePage />} />

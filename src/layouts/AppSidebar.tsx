@@ -275,6 +275,7 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
+              {isClinicPolo ? <NavItem to="/resultados" label="Resultados" icon={ChartColumn} /> : null}
               {isClinicPolo ? <NavItem to="/analytics" label="Análise do funil" icon={Gauge} /> : null}
               {showLeadsHub ? <NavItem to="/feedback" label="Feedback e NPS" icon={Star} /> : null}
               <NavItem to="/metricas" label="Metas" icon={Target} />
