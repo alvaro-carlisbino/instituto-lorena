@@ -3,6 +3,7 @@ import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { resendMissingSaleReceipts } from '../_shared/saleReceipt.ts'
 import { sendManychatFlow } from '../_shared/manychatPublicApi.ts'
 import { sendPostPurchaseEmail } from '../_shared/tricopillEmails.ts'
+import { leadsWithRecentNpsDispatch } from '../_shared/surveyCooldown.ts'
 
 // Rede de segurança de confirmação de pagamento.
 //
@@ -90,6 +91,31 @@ async function promotePaidTricopillToPago(admin: SupabaseClient): Promise<number
   return (data ?? []).length
 }
 
+// Marca `custom_fields.feedback_sent_at` de forma ATÔMICA (jsonb_set no servidor, sem
+// read-modify-write). Devolve true só se ESTA chamada conseguiu o claim — se a marca já
+// existia, devolve false e o chamador não envia nada.
+async function claimFeedbackDispatch(
+  admin: SupabaseClient,
+  leadId: string,
+  skippedReason?: string,
+): Promise<boolean> {
+  const { data, error } = await admin.rpc('crm_claim_feedback_dispatch', {
+    p_lead_id: leadId,
+    p_skipped: skippedReason ?? null,
+  })
+  if (error) {
+    console.warn('[feedback-clinica] claim falhou:', error.message)
+    return false
+  }
+  return data === true
+}
+
+// Solta a marca quando o envio falhou, pra tentar de novo na próxima rodada.
+async function releaseFeedbackDispatch(admin: SupabaseClient, leadId: string): Promise<void> {
+  await admin.rpc('crm_release_feedback_dispatch', { p_lead_id: leadId })
+    .then(() => {}, () => {})
+}
+
 // Pesquisa de satisfação da CLÍNICA: quando o lead entra em "Consulta agendada" (o 1º
 // atendimento da Dandara/IA acabou), dispara o fluxo do ManyChat (sendFlow) pra colher a
 // nota. Dedup por custom_fields.feedback_sent_at → uma pesquisa por lead. Best-effort.
@@ -117,36 +143,44 @@ async function dispatchClinicFeedbackOnStage(admin: SupabaseClient): Promise<num
     .in('stage_id', ['consulta', 'fechado']) // agendou OU fechou → pede avaliação (Álvaro, 16/jul)
     // Filtro NO SQL, não em JS: antes o limit pegava sempre os mesmos 25 já marcados e a
     // fila travava no primeiro lote (bug 16/jul: parou em 24 pra sempre).
-    .is('custom_fields->feedback_sent_at', null)
+    // `->>` e não `->`: o mesmo teste que a RPC do claim usa, então a fila e o claim
+    // nunca divergem (com `->`, um valor null explícito escapava do filtro).
+    .is('custom_fields->>feedback_sent_at', null)
     .order('stage_entered_at', { ascending: false })
     .limit(batch)
 
+  const fila = (leads ?? []) as Array<{ id: string; custom_fields: Record<string, unknown> | null }>
+
+  // TRAVA CRUZADA: quem já levou o NPS da Sofia (texto "0 a 10") na janela não recebe o
+  // card. Uma query só pro lote — sem isso o paciente recebia as duas pesquisas seguidas.
+  const jaTemNps = await leadsWithRecentNpsDispatch(admin, fila.map((l) => l.id))
+
   let sent = 0
-  for (const l of (leads ?? []) as Array<{ id: string; custom_fields: Record<string, unknown> | null }>) {
+  for (const l of fila) {
     const cf = (l.custom_fields ?? {}) as Record<string, unknown>
     const sid = String(cf.manychat_subscriber_id ?? '').trim()
-    if (!sid) {
-      // Sem subscriber não tem como enviar: carimba (data ISO, senão a conta por hora quebra)
-      // + motivo, pra sair da fila de vez.
-      await admin.from('leads').update({ custom_fields: { ...cf, feedback_sent_at: new Date().toISOString(), feedback_skipped: 'sem_manychat' } }).eq('id', l.id).then(() => {}, () => {})
+    if (!sid || jaTemNps.has(l.id)) {
+      // Sem subscriber não tem como enviar; com NPS recente não DEVE enviar. Nos dois casos
+      // carimba (data ISO, senão a conta por hora quebra) + motivo, pra sair da fila de vez.
+      await claimFeedbackDispatch(admin, l.id, !sid ? 'sem_manychat' : 'nps_sofia_recente')
       continue
     }
     // CLAIM ATÔMICO antes de enviar: só envia quem conseguiu gravar a marca. Duas execuções
     // simultâneas (cron + disparo manual) não duplicam mais — caso Ezequiel, que recebeu 2x
     // porque as duas leram a fila antes de qualquer marca ser gravada.
-    const { data: claimed } = await admin.from('leads')
-      .update({ custom_fields: { ...cf, feedback_sent_at: new Date().toISOString() } })
-      .eq('id', l.id)
-      .is('custom_fields->feedback_sent_at', null)
-      .select('id')
-    if (!claimed || claimed.length === 0) continue // outra execução já pegou este lead
+    // O claim vive numa RPC com `jsonb_set`: o UPDATE antigo reescrevia `custom_fields`
+    // INTEIRO a partir da cópia lida, então qualquer escrita concorrente (webhook do
+    // ManyChat, captura de cadastro) apagava o carimbo e o card saía de novo na rodada
+    // seguinte — 2 min depois.
+    const claimed = await claimFeedbackDispatch(admin, l.id)
+    if (!claimed) continue // outra execução já pegou este lead
 
     const r = await sendManychatFlow(apiKey, sid, flowNs)
     if (r.ok) {
       sent++
     } else {
       // Envio falhou: solta a marca pra tentar de novo na próxima rodada.
-      await admin.from('leads').update({ custom_fields: cf }).eq('id', l.id).then(() => {}, () => {})
+      await releaseFeedbackDispatch(admin, l.id)
     }
   }
   return sent

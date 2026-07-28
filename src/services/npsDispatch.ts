@@ -1,7 +1,10 @@
 import { supabase } from '@/lib/supabaseClient'
 
 export type NpsDispatchResult =
-  | { ok: true; dispatchId: string; templateId: string; channel: 'whatsapp' | 'meta'; sentVia: string }
+  | { ok: true; skipped?: false; dispatchId: string; templateId: string; channel: 'whatsapp' | 'meta'; sentVia: string }
+  // Pulado de propósito (trava cruzada: o paciente já recebeu o card de avaliação do
+  // ManyChat na janela). Não é erro — não deve virar nota de falha na ficha.
+  | { ok: true; skipped: true; reason: string; message: string }
   | { ok: false; error: string; detail?: string }
 
 /**
@@ -22,6 +25,14 @@ export async function dispatchNps(leadId: string, templateId?: string): Promise<
   }
 
   const parsed = data && typeof data === 'object' ? (data as Record<string, unknown>) : {}
+  if (parsed.ok === true && parsed.skipped === true) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: String(parsed.reason ?? 'pesquisa_recente'),
+      message: String(parsed.message ?? 'Pesquisa não enviada: o paciente já recebeu uma avaliação recentemente.'),
+    }
+  }
   if (parsed.ok === true && typeof parsed.dispatchId === 'string') {
     return {
       ok: true,

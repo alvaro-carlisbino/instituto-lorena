@@ -7,6 +7,7 @@ import {
   pushManychatWhatsappDmAfterReply,
   readManychatPushConfigForTenantChannel,
 } from '../_shared/manychatPublicApi.ts'
+import { SURVEY_COOLDOWN_DAYS, manychatFeedbackSentRecently } from '../_shared/surveyCooldown.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -123,6 +124,20 @@ Deno.serve(async (req) => {
     .maybeSingle()
   if (leadErr || !leadRaw) return json({ error: 'lead_not_found' }, 404)
   const lead = leadRaw as LeadRow
+
+  // TRAVA CRUZADA: se o card de avaliação do ManyChat já saiu para este lead dentro da
+  // janela, a Sofia fica calada. Sem isso, o paciente recebia as duas pesquisas — o cron
+  // do card roda a cada 2 min e pegava o mesmo lead que acabou de entrar em fechado.
+  const mcFeedback = manychatFeedbackSentRecently(lead.custom_fields)
+  if (mcFeedback.blocked) {
+    return json({
+      ok: true,
+      skipped: true,
+      status: 'skipped_recent_survey',
+      reason: 'manychat_feedback_recente',
+      message: `Este paciente já recebeu o card de avaliação em ${mcFeedback.at ?? 'data desconhecida'} (janela de ${SURVEY_COOLDOWN_DAYS} dias).`,
+    })
+  }
 
   // Não envia NPS de novo se há um dispatch pendente sem resposta nas últimas 24h
   const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()

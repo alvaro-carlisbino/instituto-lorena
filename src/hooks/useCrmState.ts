@@ -438,7 +438,19 @@ export const useCrmState = () => {
         // Em modo mock/local, mantém comportamento antigo (in-app + nota na ficha).
         if (dataMode === 'supabase' && isSupabaseConfigured) {
           void dispatchNps(targetLead.id, tmpl.id).then((result) => {
-            if (result.ok) {
+            if (result.ok && result.skipped) {
+              // Trava cruzada: o paciente já recebeu o card de avaliação do ManyChat.
+              // Registra na ficha como informação, não como falha.
+              addInteraction({
+                leadId: targetLead.id,
+                patientName: targetLead.patientName,
+                channel: 'system',
+                direction: 'system',
+                author: 'NPS',
+                content: `Pesquisa NPS não enviada — ${result.message}`,
+                happenedAt: new Date().toISOString(),
+              })
+            } else if (result.ok) {
               const dispatch: SurveyDispatch = {
                 id: result.dispatchId,
                 templateId: result.templateId || tmpl.id,
@@ -1688,7 +1700,7 @@ export const useCrmState = () => {
       }
       setSurveyDispatches((prev) => [...prev, optimistic])
       void dispatchNps(leadId, templateId).then((result) => {
-        if (result.ok) {
+        if (result.ok && !result.skipped) {
           setSurveyDispatches((prev) =>
             prev.map((d) =>
               d.id === optimistic.id
@@ -1697,7 +1709,8 @@ export const useCrmState = () => {
             ),
           )
         } else {
-          // Reverte o otimismo e regista o erro na ficha do lead.
+          // Reverte o otimismo e regista na ficha do lead o motivo — falha real ou
+          // pulo deliberado da trava cruzada (o paciente já recebeu o card do ManyChat).
           setSurveyDispatches((prev) => prev.filter((d) => d.id !== optimistic.id))
           const lead = leads.find((l) => l.id === leadId)
           if (lead) {
@@ -1707,7 +1720,9 @@ export const useCrmState = () => {
               channel: 'system',
               direction: 'system',
               author: 'NPS',
-              content: `Falha ao enviar pesquisa NPS: ${result.error}${result.detail ? ` · ${result.detail}` : ''}`,
+              content: result.ok
+                ? `Pesquisa NPS não enviada — ${result.message}`
+                : `Falha ao enviar pesquisa NPS: ${result.error}${result.detail ? ` · ${result.detail}` : ''}`,
               happenedAt: new Date().toISOString(),
             })
           }
