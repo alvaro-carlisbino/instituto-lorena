@@ -565,6 +565,10 @@ export async function finalizeRedePaid(
             description: orderKit ? undefined : String(intent.description ?? 'Pedido Tricopill').trim(),
             customerName: String(intent.customerName || opts.cardholderName || 'Cliente Tricopill').trim(),
             cpf: intent.customerDoc || undefined,
+            // Forma de pagamento REAL no Bling (Pix / Cartão Nx) — sem isto o pedido nascia
+            // com o padrão da conta ("Conta a receber/pagar") e o caixa não separava por meio.
+            paymentMethod: opts.method,
+            installments: opts.installments ?? intent.installments,
             // Data do pedido = quando PAGOU. Nunca usar createdAt (geração do QR/link) —
             // senão PIX gerado ontem e pago hoje sai no Bling com data de ontem (Paula 24/07).
             saleDateISO: intent.paidAt || new Date().toISOString(),
@@ -711,6 +715,10 @@ export async function finalizeRedePaid(
               cep?: string; numero?: string; complemento?: string
               bairro?: string; logradouro?: string; cidade?: string; uf?: string; delivery_mode?: string
             }) ?? undefined,
+            // Forma de pagamento REAL no Bling (Pix / Cartão Nx) — sem isto o pedido nascia
+            // com o padrão da conta ("Conta a receber/pagar") e o caixa não separava por meio.
+            paymentMethod: opts.method,
+            installments: opts.installments ?? intent.installments,
             // Data do pedido = quando PAGOU. Nunca usar createdAt (geração do QR/link) —
             // senão PIX gerado ontem e pago hoje sai no Bling com data de ontem (Paula 24/07).
             saleDateISO: intent.paidAt || new Date().toISOString(),
@@ -899,9 +907,20 @@ export async function payRedeIntent(
   // e.Rede: returnCode "00" = aprovado.
   const approved = returnCode === '00'
 
+  // `method`/`installments` REAIS: uma cobrança criada como Pix e paga no CARTÃO (o cliente abre
+  // o /pagar/<id> e digita o cartão) continuava gravada como 'pix' — só status/tid mudavam. O
+  // caixa por meio de pagamento mentia e não fechava contra o extrato da Rede (casos Maria Barros
+  // 28/07 e Paula Rodrigues 24/07, ambos Credit 1x gravados como Pix). Quem paga define o método.
+  const paidInstallments = Math.max(1, Math.min(12, args.installments ?? intent.installments ?? 1))
   await admin
     .from('rede_payments')
-    .update({ status: approved ? 'paid' : 'failed', tid, return_code: returnCode, paid_at: approved ? new Date().toISOString() : null })
+    .update({
+      status: approved ? 'paid' : 'failed',
+      tid,
+      return_code: returnCode,
+      paid_at: approved ? new Date().toISOString() : null,
+      ...(approved ? { method: 'card', installments: paidInstallments } : {}),
+    })
     .eq('id', intent.id)
 
   // Pagamento aprovado: roda o downstream COMPARTILHADO (cupom, comprovante, lead, Bling, envio).

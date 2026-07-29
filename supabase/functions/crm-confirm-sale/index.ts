@@ -183,6 +183,11 @@ Deno.serve(async (req) => {
         // Carrinho → 1 linha por produto cadastrado no Bling; kit → produto do kit; senão avulso.
         items: cartItems.length ? cartItems : undefined,
         description: kitKey || cartItems.length ? undefined : label,
+        // Forma de pagamento REAL no Bling (Pix / Cartão Nx) — sem isto o pedido nascia com o
+        // padrão da conta ("Conta a receber/pagar") e o caixa não separava por meio. 'other'
+        // (dinheiro/transferência) fica sem carimbo: o método exato não é informado na tela.
+        paymentMethod: isCard ? 'card' : method === 'other' ? undefined : 'pix',
+        installments: isCard ? installments : 1,
         customerName, phone: lead.phone ? String(lead.phone) : undefined,
         cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo,
         entrega: (lead.custom_fields?.entrega as {

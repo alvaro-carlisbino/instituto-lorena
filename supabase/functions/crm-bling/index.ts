@@ -192,7 +192,7 @@ Deno.serve(async (req) => {
 
     // Pagamento pago mais recente SEM pedido Bling (cartão tem a coluna bling_order_id; Pix não).
     const { data: rede } = await admin
-      .from('rede_payments').select('id, kit, amount_cents, installments, bling_order_id, freight_cents, paid_at, created_at')
+      .from('rede_payments').select('id, kit, amount_cents, installments, method, bling_order_id, freight_cents, paid_at, created_at')
       .eq('lead_id', leadId).eq('status', 'paid').is('bling_order_id', null)
       .order('paid_at', { ascending: false }).limit(1).maybeSingle()
     const { data: pb } = await admin
@@ -223,13 +223,20 @@ Deno.serve(async (req) => {
       // Valor/frete/data REAIS da venda (caso Jean 19/07: o retry pós-meia-noite criava o
       // pedido com a data do DIA DO RETRY, preço de tabela e sem frete — sumia do filtro
       // do dia da venda no Bling e o total não batia com o cartão).
-      const redeRow = rede as { freight_cents?: number; paid_at?: string; created_at?: string } | null
+      const redeRow = rede as {
+        freight_cents?: number; paid_at?: string; created_at?: string
+        method?: string; installments?: number
+      } | null
       const productCents = Number(pay.amount_cents ?? 0) ||
         (kit ? (REDE_KITS[kit]?.amountCents ?? PAGBANK_KITS[kit]?.amountCents ?? 0) : 0)
       const out = await blingCreateSaleOrder(admin, 'tricopill', {
         kit, amountCents: productCents, description,
         freightCents: Number(redeRow?.freight_cents ?? 0) || undefined,
         saleDateISO: redeRow?.paid_at || redeRow?.created_at || undefined,
+        // Relançamento herda o meio de pagamento da venda (Pix/cartão Nx). Só a Rede tem o dado;
+        // no PagBank o retry cai sem método e o pedido mantém o padrão do Bling.
+        paymentMethod: redeRow?.method,
+        installments: redeRow?.installments,
         customerName: String(cad.nomeCompleto || lead.patient_name || 'Cliente Tricopill').trim(),
         phone: lead.phone ? String(lead.phone) : undefined,
         cpf: cad.cpf, email: cad.email, dataNascimento: cad.dataNascimento, sexo: cad.sexo,

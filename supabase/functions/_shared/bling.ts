@@ -334,6 +334,81 @@ export async function buildBlingCatalog(
   }
 }
 
+/**
+ * Formas de pagamento cadastradas na conta do Bling, com cache em
+ * tenant_integrations.bling.formas_cache.
+ *
+ * Os ids NÃO são fixos (mudam por conta/ambiente), então nada de hardcode: resolvemos pela
+ * API e guardamos. `tipoPagamento`: 3 = crédito, 4 = débito, 17 = Pix.
+ * Best-effort: em erro devolve o cache (ou vazio) — nunca derruba a venda.
+ */
+export type BlingFormaPagamento = { id: string; descricao: string; tipoPagamento: number }
+
+async function blingFormasPagamento(
+  admin: SupabaseClient,
+  tenantId: string,
+  token: string,
+  maxAgeMs = 24 * 3_600_000,
+): Promise<BlingFormaPagamento[]> {
+  const { data } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', tenantId).maybeSingle()
+  const cfg = ((data as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+  const cache = Array.isArray(cfg.formas_cache) ? (cfg.formas_cache as BlingFormaPagamento[]) : []
+  const fetchedAt = typeof cfg.formas_fetched_at === 'string' ? cfg.formas_fetched_at : null
+  if (cache.length && fetchedAt && Date.now() - Date.parse(fetchedAt) < maxAgeMs) return cache
+
+  try {
+    const res = await fetch('https://api.bling.com.br/Api/v3/formas-pagamentos?limite=100', {
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' },
+    })
+    if (!res.ok) return cache
+    const raw = (JSON.parse((await res.text()) || '{}')?.data ?? []) as Array<Record<string, unknown>>
+    const items: BlingFormaPagamento[] = raw
+      .filter((f) => Number(f.situacao ?? 1) === 1)
+      .map((f) => ({
+        id: String(f.id ?? ''),
+        descricao: String(f.descricao ?? ''),
+        tipoPagamento: Number(f.tipoPagamento ?? 0),
+      }))
+      .filter((f) => f.id)
+    if (!items.length) return cache
+    await admin.from('tenant_integrations').upsert({
+      tenant_id: tenantId,
+      bling: { ...cfg, formas_cache: items, formas_fetched_at: new Date().toISOString() },
+    })
+    return items
+  } catch {
+    return cache
+  }
+}
+
+/**
+ * Escolhe a forma de pagamento que corresponde ao MÉTODO REAL da venda.
+ * Pix → tipo 17. Cartão → o "Nx" exato; sem ele, cai no crédito à vista e, por último,
+ * em qualquer forma de crédito (melhor um cartão genérico do que a conta genérica).
+ * Devolve null quando não dá pra afirmar nada — aí o pedido segue com o padrão do Bling.
+ */
+export function pickBlingFormaPagamento(
+  formas: BlingFormaPagamento[],
+  method: string | null | undefined,
+  installments = 1,
+): string | null {
+  if (!formas.length) return null
+  const m = String(method ?? '').trim().toLowerCase()
+  if (m === 'pix') {
+    const pix = formas.find((f) => f.tipoPagamento === 17) ?? formas.find((f) => /pix/i.test(f.descricao))
+    return pix?.id ?? null
+  }
+  if (m !== 'card' && m !== 'credit_card' && m !== 'cartao') return null
+
+  const credito = formas.filter((f) => f.tipoPagamento === 3)
+  if (!credito.length) return null
+  const n = Math.max(1, Math.min(12, Math.round(Number(installments) || 1)))
+  const aVista = credito.find((f) => /(\bà\s*vista\b|\ba\s*vista\b)/i.test(f.descricao))
+  if (n <= 1) return (aVista ?? credito[0]).id
+  const exata = credito.find((f) => new RegExp(`(^|\\D)${n}x(\\D|$)`, 'i').test(f.descricao))
+  return (exata ?? aVista ?? credito[0]).id
+}
+
 // Mapa padrão kit -> frascos a abater (compra 3→4º grátis; compra 5→6º grátis).
 const DEFAULT_KIT_BOTTLES: Record<string, number> = { '1_mes': 1, '3_meses': 4, '5_meses': 6 }
 const DEFAULT_KIT_PRODUCT_ID = '16322942669' // "Tricopill - Suplemento Capilar" = frasco INDIVIDUAL (SKU 00001)
@@ -531,6 +606,15 @@ export async function blingCreateSaleOrder(
     saleDateISO?: string
     /** Força a quantidade de frascos (ex.: envio de assinatura = 1 ou 3). Ignora o mapa de kit. */
     bottlesOverride?: number
+    /**
+     * Método REAL do pagamento ('pix' | 'card') → vira a forma de pagamento da parcela no Bling.
+     * Sem isto o pedido nascia com a forma PADRÃO da conta ("Conta a receber/pagar") e o
+     * financeiro não conseguia separar Pix de cartão pra fechar o caixa contra o extrato da
+     * Rede (reclamação do Kauan, 29/jul/2026). Omitido = mantém o padrão do Bling.
+     */
+    paymentMethod?: string
+    /** Parcelas do cartão — escolhe "Cartão de Crédito Nx" em vez do genérico à vista. */
+    installments?: number
     /** Endereço de entrega capturado p/ completar o contato (NF-e) + modalidade da venda. */
     entrega?: {
       cep?: string; numero?: string; complemento?: string
@@ -714,12 +798,18 @@ export async function blingCreateSaleOrder(
   // cobrado, lançamos a diferença em `outrasDespesas` via GET+PUT (Bling não tem PATCH).
   // A NF-e continua saindo por itens+frete (sem o encargo financeiro — correto fiscalmente).
   // Best-effort: nunca derruba a venda.
+  // O mesmo GET+PUT também carimba a FORMA DE PAGAMENTO real (Pix / Cartão Nx) nas parcelas —
+  // o pedido é criado sem `parcelas` (deixar o Bling gerar evita o erro "somatório das parcelas
+  // difere do total"), então a forma só dá pra ajustar depois que ele gravou.
   if (orderId) {
     try {
       const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' }
       const gr = await fetch(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, { headers: bh })
       if (gr.ok) {
         const od = (JSON.parse((await gr.text()) || '{}')?.data ?? {}) as Record<string, unknown>
+        const parc = Array.isArray(od.parcelas) ? (od.parcelas as Array<Record<string, unknown>>) : []
+        let mustPut = false
+
         const chargedReais = Math.round(args.amountCents) / 100
         const totalBling = Number(od.total ?? 0)
         const diff = Math.round((chargedReais - totalBling) * 100) / 100
@@ -727,15 +817,29 @@ export async function blingCreateSaleOrder(
         if (totalBling > 0 && diff > 0.05 && diff < 100) {
           od.outrasDespesas = Math.round(((Number(od.outrasDespesas) || 0) + diff) * 100) / 100
           // O Bling valida que as PARCELAS somam o total: joga a diferença na última.
-          const parc = Array.isArray(od.parcelas) ? (od.parcelas as Array<Record<string, unknown>>) : []
           if (parc.length) {
             const last = parc[parc.length - 1]
             last.valor = Math.round(((Number(last.valor) || 0) + diff) * 100) / 100
           }
+          mustPut = true
+        }
+
+        if (parc.length && args.paymentMethod) {
+          const formas = await blingFormasPagamento(admin, tenantId, token)
+          const formaId = pickBlingFormaPagamento(formas, args.paymentMethod, args.installments ?? 1)
+          if (formaId) {
+            for (const p of parc) p.formaPagamento = { id: Number(formaId) || formaId }
+            mustPut = true
+          } else {
+            console.warn('[bling] forma de pagamento não resolvida p/', args.paymentMethod, args.installments)
+          }
+        }
+
+        if (mustPut) {
           const pr = await fetch(`https://api.bling.com.br/Api/v3/pedidos/vendas/${orderId}`, {
             method: 'PUT', headers: bh, body: JSON.stringify(od),
           })
-          if (!pr.ok) console.warn('[bling] ajuste outrasDespesas falhou:', pr.status, (await pr.text()).slice(0, 200))
+          if (!pr.ok) console.warn('[bling] ajuste do pedido falhou:', pr.status, (await pr.text()).slice(0, 200))
         }
       }
     } catch (e) {

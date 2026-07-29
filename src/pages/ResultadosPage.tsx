@@ -392,6 +392,7 @@ export function ResultadosPage() {
                       <TableHead className="pb-2 text-right">Leads</TableHead>
                       <TableHead className="pb-2 text-right">Falou com a equipe</TableHead>
                       <TableHead className="pb-2 text-right">Sem nenhuma resposta</TableHead>
+                      <TableHead className="pb-2 text-right">Respondeu em pessoa</TableHead>
                       <TableHead className="pb-2 text-right">1ª resposta (mediana)</TableHead>
                       <TableHead className="pb-2 text-right">Perdidos</TableHead>
                     </TableRow>
@@ -410,6 +411,7 @@ export function ResultadosPage() {
                         >
                           {a.sem_resposta}
                         </TableCell>
+                        <TableCell className="py-1.5 text-right tabular-nums">{a.respondidos_por_ela}</TableCell>
                         <TableCell className="py-1.5 text-right tabular-nums">
                           {duracao(a.mediana_humano_min)}
                         </TableCell>
@@ -418,6 +420,26 @@ export function ResultadosPage() {
                     ))}
                   </TableBody>
                 </Table>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                  O responsável é rodízio automático, então "Leads" é quem recebeu, não quem
+                  trabalhou. "Respondeu em pessoa" e a mediana contam só os leads que aquela
+                  pessoa respondeu de fato.
+                </p>
+                {(data?.por_quem_respondeu ?? []).length > 0 ? (
+                  <div className="mt-3 border-t border-border/40 pt-3">
+                    <p className="mb-2 text-xs font-medium">Quem deu a primeira resposta</p>
+                    <ul className="grid gap-1 text-xs">
+                      {(data?.por_quem_respondeu ?? []).map((q) => (
+                        <li key={q.pessoa} className="flex items-center justify-between gap-3">
+                          <span className="truncate">{q.pessoa}</span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {q.respondeu} {q.respondeu === 1 ? 'lead' : 'leads'} · mediana {duracao(q.mediana_min)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             )}
           </CardContent>

@@ -750,16 +750,27 @@ Deno.serve(async (req) => {
     const dispatchId = `disp-fb-${Date.now()}-${rand}`
     const respId = `resp-fb-${Date.now()}-${rand}`
     const nowIso = new Date().toISOString()
-    try {
-      await admin.from('survey_dispatches').insert({
-        id: dispatchId, template_id: 'feedback-atendimento', lead_id: fbLeadId,
-        channel: 'manychat', sent_at: nowIso, tenant_id: tenantId,
-      })
-      await admin.from('survey_responses').insert({
-        id: respId, dispatch_id: dispatchId, score, comment, responded_at: nowIso, tenant_id: tenantId,
-      })
-    } catch (e) {
-      return json({ error: 'feedback_insert_failed', message: e instanceof Error ? e.message : String(e) }, 500)
+    // O supabase-js NÃO lança em erro de banco: devolve `{ data, error }`. O try/catch que
+    // existia aqui era decorativo, então uma violação de NOT NULL (avaliação só com
+    // comentário) passava batido: o código seguia, gravava na ficha do lead, agradecia o
+    // cliente e respondia ok. A avaliação simplesmente não existia no painel.
+    // Conferir `error` explicitamente é a única forma de perceber.
+    const { error: erroDispatch } = await admin.from('survey_dispatches').insert({
+      id: dispatchId, template_id: 'feedback-atendimento', lead_id: fbLeadId,
+      channel: 'manychat', sent_at: nowIso, tenant_id: tenantId,
+    })
+    if (erroDispatch) {
+      console.error('[feedback] falha ao gravar o disparo:', erroDispatch.message)
+      return json({ error: 'feedback_dispatch_failed', message: erroDispatch.message }, 500)
+    }
+    const { error: erroResposta } = await admin.from('survey_responses').insert({
+      id: respId, dispatch_id: dispatchId, score, comment, responded_at: nowIso, tenant_id: tenantId,
+    })
+    if (erroResposta) {
+      console.error('[feedback] falha ao gravar a resposta:', erroResposta.message)
+      // Sem a resposta, o disparo vira órfão e o painel contaria um envio sem retorno.
+      await admin.from('survey_dispatches').delete().eq('id', dispatchId)
+      return json({ error: 'feedback_insert_failed', message: erroResposta.message }, 500)
     }
     const nomeCliente = String(body.user_name ?? body.name ?? '').trim()
     await insertInteraction(admin, {

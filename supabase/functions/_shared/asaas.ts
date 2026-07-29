@@ -707,6 +707,9 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
       amountCents: shipValueCents,
       freightCents: shipFreightCents,
       description: `Assinatura Tricopill (${shipUnits} ${shipUnits === 1 ? 'frasco' : 'frascos'}) — ciclo ${cycle}`,
+      // Sem `paymentMethod` de propósito: `asaas_subscriptions` não guarda o meio de pagamento do
+      // ciclo, e chutar 'card' carimbaria forma errada no financeiro. Fica com o padrão do Bling
+      // até a coluna existir (aí é só passar aqui, como nos outros call sites).
       customerName: s.customer_name != null ? String(s.customer_name) : undefined,
       phone: s.phone != null ? String(s.phone) : undefined,
       cpf: s.customer_doc != null ? String(s.customer_doc) : undefined,
@@ -881,6 +884,10 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
           customerName: String(cad.nomeCompleto || p.customer_name || l.patient_name || 'Cliente Tricopill').trim(),
           phone: l.phone ? String(l.phone) : (p.phone != null ? String(p.phone) : undefined),
           cpf: cad.cpf || (p.customer_doc != null ? String(p.customer_doc) : undefined),
+          // Forma de pagamento REAL no Bling (Pix / Cartão Nx) — sem isto o pedido nascia com o
+          // padrão da conta ("Conta a receber/pagar") e o caixa não separava por meio.
+          paymentMethod: method,
+          installments: Number(p.installments ?? 1) || 1,
           email: cad.email,
           dataNascimento: cad.dataNascimento,
           sexo: cad.sexo,

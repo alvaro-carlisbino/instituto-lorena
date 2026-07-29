@@ -142,9 +142,14 @@ export type FunilComercial = {
     respondidos: number
     sem_resposta: number
     atendidos_por_humano: number
+    /** Quantos destes leads a PRÓPRIA pessoa respondeu (o dono é rodízio automático). */
+    respondidos_por_ela: number
+    /** Mediana só dos leads que a própria pessoa respondeu. Nulo se ela não respondeu nenhum. */
     mediana_humano_min: number | null
     perdidos: number
   }>
+  /** Quem de fato deu a primeira resposta, que é diferente de quem recebeu o lead. */
+  por_quem_respondeu: Array<{ pessoa: string; respondeu: number; mediana_min: number | null }>
   sla: {
     ia: { respondidos: number; mediana_min: number | null; p90_min: number | null }
     humano: { respondidos: number; mediana_min: number | null; p90_min: number | null }
