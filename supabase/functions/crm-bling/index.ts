@@ -166,7 +166,10 @@ Deno.serve(async (req) => {
 
   if (action === 'create_test_order') {
     const kit = String(payload.kit ?? '3_meses')
-    const amountCents = PAGBANK_KITS[kit]?.amountCents ?? 18905
+    // Fallback = preço do frasco avulso. Era 18905 (R$189,05), um preço que NUNCA existiu:
+    // o kit de 1 mês é preço único de R$199 no Pix e no cartão (ver PAGBANK_KITS/REDE_KITS).
+    // Kit desconhecido caía aqui e gerava pedido no Bling R$9,95 abaixo do cobrado.
+    const amountCents = PAGBANK_KITS[kit]?.amountCents ?? 19900
     try {
       const out = await blingCreateSaleOrder(admin, tenantId, { kit, amountCents, customerName: 'Pedido de teste' })
       return json({ ok: true, orderId: out.orderId, bottles: out.bottles })
