@@ -46,9 +46,25 @@ export type SalesReport = {
   }
 }
 
-const PAID = new Set(['paid', 'pago', 'available', 'approved', 'completed'])
-const isPaid = (status: unknown, paidAt: unknown) =>
-  (paidAt != null && String(paidAt).length > 0) || (typeof status === 'string' && PAID.has(status.toLowerCase()))
+/** Este relatório é do polo de VENDAS. A clínica roda em Shosp, com o CRM como dono do
+ *  financeiro, e não deve ser somada aqui. */
+const POLO_VENDAS = 'tricopill'
+
+const PAID = new Set(['paid', 'pago', 'available', 'approved', 'completed', 'received', 'confirmed'])
+const NAO_PAGO = new Set(['failed', 'falhou', 'declined', 'refused', 'canceled', 'cancelled', 'cancelado', 'refunded', 'estornado', 'chargeback'])
+
+/**
+ * Ter `paid_at` NÃO basta para ser venda.
+ *
+ * O gateway carimba `paid_at` no momento da tentativa e depois marca o status final; havia
+ * linhas com `status='failed'` E `paid_at` preenchido entrando como venda paga (R$ 1,00 em
+ * 13/06 e R$ 333,00 em 16/06). Status de recusa agora vence o carimbo de data.
+ */
+const isPaid = (status: unknown, paidAt: unknown) => {
+  const s = typeof status === 'string' ? status.toLowerCase() : ''
+  if (NAO_PAGO.has(s)) return false
+  return (paidAt != null && String(paidAt).length > 0) || PAID.has(s)
+}
 
 const KIT_LABEL: Record<string, string> = {
   '1_mes': '1 frasco',
@@ -72,7 +88,7 @@ function dayBoundsIso(dateYmd: string): { startIso: string; endIso: string } {
 
 type RawSale = {
   id: string
-  src: 'rede' | 'pagbank'
+  src: 'rede' | 'pagbank' | 'asaas'
   /** Método real do pagamento (e.Rede faz cartão E Pix; PagBank é Pix). */
   method: 'card' | 'pix'
   leadId: string
@@ -122,21 +138,37 @@ export async function fetchSalesRowsInRange(startIso: string, endIso: string): P
   if (!supabase) return { rows: [], totals: emptyTotals() }
 
   // Janela por paid_at: pega só as PAGAS no período (paid_at não-nulo já exclui links pendentes).
-  const [redeRes, pagRes] = await Promise.all([
+  //
+  // ESCOPO DE POLO: `rede_payments` guarda os dois polos (a clínica também cobra no cartão
+  // pela Rede). Este relatório é do TRICOPILL: a clínica roda em Shosp e tem o CRM como
+  // dono do financeiro, então misturar os dois aqui soma dinheiro de operações diferentes.
+  //
+  // TERCEIRA FONTE: o Asaas ficava de fora, e ele é o gateway desde 17/jun. Em junho isso
+  // escondia R$ 4.253,97 em 7 vendas, e três dias apareciam como "nenhuma venda paga".
+  const [redeRes, pagRes, asaasRes] = await Promise.all([
     supabase
       .from('rede_payments')
       .select('id, lead_id, method, customer_name, kit, amount_cents, freight_cents, discount_cents, coupon_code, installments, status, paid_at, description, bling_order_id, phone')
+      .eq('tenant_id', POLO_VENDAS)
       .gte('paid_at', startIso)
       .lt('paid_at', endIso),
     supabase
       .from('pagbank_checkouts')
       .select('checkout_id, lead_id, kit, amount_cents, discount_cents, coupon_code, status, paid_at, phone')
+      .eq('tenant_id', POLO_VENDAS)
+      .gte('paid_at', startIso)
+      .lt('paid_at', endIso),
+    supabase
+      .from('asaas_payments')
+      .select('id, lead_id, method, customer_name, kit, amount_cents, freight_cents, discount_cents, coupon_code, installments, status, paid_at, description, bling_order_id, phone')
+      .eq('tenant_id', POLO_VENDAS)
       .gte('paid_at', startIso)
       .lt('paid_at', endIso),
   ])
 
   const rede = (redeRes.error ? [] : redeRes.data ?? []) as Array<Record<string, unknown>>
   const pag = (pagRes.error ? [] : pagRes.data ?? []) as Array<Record<string, unknown>>
+  const asaas = (asaasRes.error ? [] : asaasRes.data ?? []) as Array<Record<string, unknown>>
 
   // Normaliza tudo num formato único, só as realmente pagas.
   const raw: RawSale[] = []
@@ -176,6 +208,27 @@ export async function fetchSalesRowsInRange(startIso: string, endIso: string): P
       discountCents: Number(r.discount_cents) || 0,
       couponCode: r.coupon_code != null ? String(r.coupon_code) : null,
       blingOrderId: null,
+      paidAt: (r.paid_at as string) ?? null,
+      phone: String(r.phone ?? ''),
+    })
+  }
+
+  for (const r of asaas) {
+    if (!isPaid(r.status, r.paid_at)) continue
+    raw.push({
+      id: String(r.id ?? ''),
+      src: 'asaas',
+      method: String(r.method ?? '') === 'card' ? 'card' : 'pix',
+      leadId: r.lead_id != null ? String(r.lead_id) : '',
+      customerName: String(r.customer_name ?? '').trim(),
+      kit: r.kit != null ? String(r.kit) : '',
+      description: r.description != null ? String(r.description) : '',
+      amountCents: Number(r.amount_cents) || 0,
+      freightCents: Number(r.freight_cents) || 0,
+      installments: r.installments != null ? Number(r.installments) : null,
+      discountCents: Number(r.discount_cents) || 0,
+      couponCode: r.coupon_code != null ? String(r.coupon_code) : null,
+      blingOrderId: r.bling_order_id != null ? String(r.bling_order_id) : null,
       paidAt: (r.paid_at as string) ?? null,
       phone: String(r.phone ?? ''),
     })

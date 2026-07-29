@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { getValidBlingToken, blingListSaleOrders, buildBlingCatalog } from '../_shared/bling.ts'
+import { getValidBlingToken, blingListSaleOrdersDetalhado, buildBlingCatalog } from '../_shared/bling.ts'
 
 // BI do Tricopill — agrega 3 fontes para o polo de vendas ativo (current_tenant_id):
 //   1) Funil/CRM  -> leads por estágio, por origem, conversão para "pago"
@@ -291,17 +291,42 @@ Deno.serve(async (req) => {
     por_dia: [] as DayBucket[],
     estoque: [] as Array<{ nome: string; codigo: string; estoque: number | null; preco: number }>,
     error: null as string | null,
+    /** true quando a listagem bateu no teto de páginas: o total mostrado está incompleto. */
+    truncado: false,
+    /**
+     * Quebra por situação do pedido no Bling, para o faturamento deixar de ser um número
+     * único e opaco. A auditoria de 29/07 mostrou que pedido CANCELADO entra no total
+     * (2 em julho, R$ 298) e que "Em aberto" pesa R$ 152 mil em 12 meses. Decidir o que
+     * conta como faturamento é do negócio, não do código: aqui a informação fica visível
+     * em vez de o total embutir a escolha em silêncio.
+     */
+    por_situacao: [] as Array<{ situacao_id: number | null; pedidos: number; total_cents: number }>,
   }
   const token = await getValidBlingToken(admin, tenantId)
   if (token) {
     bling.connected = true
     try {
-      const orders = await blingListSaleOrders(token, { dataInicial, dataFinal, maxPages: 10 })
+      // maxPages 10 (1.000 pedidos) cortava o botão "12 meses" pela metade: 2.281 pedidos
+      // reais viravam 1.000, e como o Bling ordena do mais recente para o mais antigo a
+      // tela dizia 12 meses e cobria 5. `truncado` avisa em vez de cortar calado.
+      const { orders, truncado } = await blingListSaleOrdersDetalhado(token, { dataInicial, dataFinal })
       const faturamento = orders.reduce((acc, o) => acc + o.totalCents, 0)
       bling.faturamento_cents = faturamento
       bling.pedidos = orders.length
+      bling.truncado = truncado
       bling.ticket_medio_cents = orders.length ? Math.round(faturamento / orders.length) : 0
       bling.por_dia = bucketByDay(orders.map((o) => ({ day: o.data, cents: o.totalCents })))
+      const porSituacao = new Map<number | null, { pedidos: number; total_cents: number }>()
+      for (const o of orders) {
+        const chave = o.situacaoId ?? null
+        const atual = porSituacao.get(chave) ?? { pedidos: 0, total_cents: 0 }
+        atual.pedidos += 1
+        atual.total_cents += o.totalCents
+        porSituacao.set(chave, atual)
+      }
+      bling.por_situacao = [...porSituacao.entries()]
+        .map(([situacao_id, v]) => ({ situacao_id, ...v }))
+        .sort((a, b) => b.total_cents - a.total_cents)
     } catch (e) {
       bling.error = e instanceof Error ? e.message : String(e)
     }

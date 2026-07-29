@@ -550,7 +550,10 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: FileSpreadsheet,
     group: 'relatorios',
     keywords: ['diário', 'fechamento do dia', 'vendas'],
-    visible: canRoute,
+    // SÓ vendas. Esta tela lê os gateways do Tricopill (Rede, PagBank, Asaas); a clínica
+    // roda em Shosp e tem o CRM como dono do financeiro, então o número aqui não é dela.
+    // Ficava visível nos dois polos por engano meu na reorganização da navegação.
+    visible: (ctx) => isSales(ctx) && canRoute(ctx),
   },
 
   // ── Equipe (RH)

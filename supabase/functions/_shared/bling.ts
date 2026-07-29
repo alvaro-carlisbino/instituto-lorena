@@ -1055,14 +1055,30 @@ export type BlingSaleOrder = {
 
 /**
  * Lista pedidos de venda do Bling num intervalo de datas (paginado).
- * `dataInicial`/`dataFinal` no formato YYYY-MM-DD. Cap de páginas para não
- * estourar latência — devolve o que conseguiu coletar.
+ * `dataInicial`/`dataFinal` no formato YYYY-MM-DD.
+ *
+ * O teto era 10 páginas de 100 (1.000 pedidos) e o Bling ordena do mais recente para o
+ * mais antigo, então o botão "12 meses" do BI mostrava R$ 389.158,87 em 1.000 pedidos
+ * quando o real eram R$ 927.310,89 em 2.281 (23 páginas): a tela dizia 12 meses e cobria 5.
+ * Como o corte era silencioso, o número parecia completo.
+ *
+ * O teto continua existindo (é uma API externa e a Edge Function tem limite de tempo), mas
+ * agora é alto o bastante para o uso real e o estouro é DENUNCIADO: quem chama recebe
+ * `truncado: true` e mostra a ressalva em vez de exibir um total menor com cara de fechado.
  */
 export async function blingListSaleOrders(
   token: string,
   opts: { dataInicial: string; dataFinal: string; maxPages?: number },
 ): Promise<BlingSaleOrder[]> {
-  const maxPages = Math.max(1, Math.min(20, opts.maxPages ?? 10))
+  const { orders } = await blingListSaleOrdersDetalhado(token, opts)
+  return orders
+}
+
+export async function blingListSaleOrdersDetalhado(
+  token: string,
+  opts: { dataInicial: string; dataFinal: string; maxPages?: number },
+): Promise<{ orders: BlingSaleOrder[]; truncado: boolean; paginasLidas: number }> {
+  const maxPages = Math.max(1, Math.min(60, opts.maxPages ?? 40))
   const out: BlingSaleOrder[] = []
   for (let pagina = 1; pagina <= maxPages; pagina++) {
     const qs = new URLSearchParams({
@@ -1090,9 +1106,12 @@ export async function blingListSaleOrders(
         situacaoId: (r.situacao as { id?: number } | undefined)?.id ?? null,
       })
     }
-    if (rows.length < 100) break
+    // Página incompleta = fim do conjunto. Se o laço terminar pelo teto, quem chama
+    // precisa saber que o total está cortado.
+    if (rows.length < 100) return { orders: out, truncado: false, paginasLidas: pagina }
   }
-  return out
+  console.warn(`[bling] listagem de pedidos parou no teto de ${maxPages} páginas; o total pode estar truncado.`)
+  return { orders: out, truncado: true, paginasLidas: maxPages }
 }
 
 /**
