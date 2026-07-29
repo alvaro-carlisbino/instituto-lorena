@@ -4,7 +4,7 @@ import { insertInteraction } from './crm.ts'
 import { notifyAgents } from './notifyAgents.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
-import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, inferRedeKit, SHAMPOO_ADDON } from './rede.ts'
+import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, SHAMPOO_ADDON } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
@@ -782,7 +782,13 @@ export async function executeCrmAiOpsFromModel(
           continue
         }
         const pixKey = op.kit != null ? normalizeKitKey(String(op.kit)) : null
-        const pixKit = pixKey ? PAGBANK_KITS[pixKey] : undefined
+        // Desconto NÃO acumula (regra do dono, 28/07/2026): é um ou é outro.
+        // PAGBANK_KITS já É o preço do Pix (tabela − 5%). Com cupom, cobrar a partir dele fazia
+        // os dois descontos se somarem: CLUBE10 no kit de 3 meses saía a R$510,44 em vez de
+        // R$537,30. Então com cupom a base vira o preço de TABELA (REDE_KITS) e quem desconta
+        // é só o cupom; sem cupom, segue a tabela do Pix.
+        const pixTemCupom = !!normalizeCouponCode(String(op.coupon ?? ''))
+        const pixKit = pixKey ? (pixTemCupom ? REDE_KITS[pixKey] : PAGBANK_KITS[pixKey]) : undefined
         // Upsell: Shampoo Ozonizado como item extra (junto do kit OU sozinho).
         const pixShampooQty = Math.max(0, Math.floor(Number(op.shampoo) || 0))
         let pixAmount = 0
