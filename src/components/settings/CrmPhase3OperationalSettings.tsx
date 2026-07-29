@@ -231,7 +231,7 @@ export function CrmPhase3OperationalSettings() {
           {online ? (
             crm.pipelineCatalog.map((pipeline) => (
               <div key={pipeline.id} className="space-y-3">
-                <h3 className="m-0 text-xs font-black uppercase tracking-widest text-muted-foreground">{pipeline.name}</h3>
+                <h3 className="m-0 text-xs font-medium text-muted-foreground">{pipeline.name}</h3>
                 {FOLLOWUP_DAYS.map((day) => {
                   const row = followupFor(pipeline.id, day)
                   return (
@@ -369,7 +369,7 @@ function FollowupDayEditor({
   return (
     <div className="rounded-xl border border-border/40 bg-background/40 p-3 space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Dia {day}</span>
+        <span className="text-xs font-medium text-muted-foreground">Dia {day}</span>
         <div className="flex items-center gap-2">
           <Switch checked={enabled} onCheckedChange={setEnabled} id={`fu-${pipelineId}-${day}`} />
           <Label htmlFor={`fu-${pipelineId}-${day}`} className="text-xs cursor-pointer">

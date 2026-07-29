@@ -321,7 +321,7 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
       </SheetHeader>
 
       <section className="grid gap-3 border-b border-border/40 pb-4">
-        <h3 className="text-xs font-black uppercase tracking-widest text-muted-foreground">
+        <h3 className="text-xs font-medium text-muted-foreground">
           Marca
         </h3>
         <div className="grid gap-1">
@@ -383,7 +383,7 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
       </section>
 
       <section className="grid gap-3">
-        <h3 className="text-xs font-black uppercase tracking-widest text-muted-foreground">
+        <h3 className="text-xs font-medium text-muted-foreground">
           ManyChat
         </h3>
         {loadingIntegrations ? (
@@ -443,7 +443,7 @@ function EditTenantDialog({ tenant, onSaved }: { tenant: Tenant; onSaved: () => 
       </section>
 
       <section className="grid gap-3 border-t border-border/40 pt-4">
-        <h3 className="text-xs font-black uppercase tracking-widest text-muted-foreground">
+        <h3 className="text-xs font-medium text-muted-foreground">
           LLM (IA)
         </h3>
         <p className="text-[11px] text-muted-foreground">

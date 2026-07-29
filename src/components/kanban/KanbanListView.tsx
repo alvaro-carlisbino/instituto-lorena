@@ -7,6 +7,7 @@ import { temperaturePillClass } from '@/components/kanban/temperatureClass'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { getSourceStyle } from '@/lib/channelStyles'
 import { getLeadFieldValue } from '@/lib/leadFields'
+import { formatDurationFromMinutes } from '@/lib/formatDuration'
 import { formatTemperature } from '@/lib/fieldLabels'
 import { cn } from '@/lib/utils'
 import type { Lead, Stage } from '@/mocks/crmMock'
@@ -76,7 +77,7 @@ export function KanbanListView({
             >
               <div className="flex items-center gap-3">
                 <div className="size-2.5 rounded-full bg-primary" aria-hidden />
-                <h2 id={`list-stage-${stage.id}`} className="m-0 text-[14px] font-black uppercase tracking-[0.15em] text-foreground/80">
+                <h2 id={`list-stage-${stage.id}`} className="m-0 text-[14px] font-semibold uppercase tracking-[0.15em] text-foreground/80">
                   {stage.name}
                 </h2>
               </div>
@@ -84,10 +85,10 @@ export function KanbanListView({
                 {stageSlaMinutes?.[stage.id] != null ? (
                   <span className="flex items-center gap-1.5 text-destructive ring-1 ring-destructive/20 bg-destructive/5 px-2.5 py-1 rounded-full">
                     <RefreshCw className="size-3" />
-                    SLA: {stageSlaMinutes[stage.id]}m
+                    Prazo: {formatDurationFromMinutes(stageSlaMinutes[stage.id])}
                   </span>
                 ) : null}
-                <span className="flex items-center justify-center min-w-[28px] h-7 rounded-full bg-primary/10 px-2.5 text-primary tabular-nums font-black">
+                <span className="flex items-center justify-center min-w-[28px] h-7 rounded-full bg-primary/10 px-2.5 text-primary tabular-nums font-semibold">
                   {stageLeads.length}
                 </span>
               </div>
@@ -95,7 +96,7 @@ export function KanbanListView({
 
             {stageLeads.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center opacity-30">
-                <p className="text-[11px] font-black uppercase tracking-[0.2em]">Vazio por aqui</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em]">Vazio por aqui</p>
               </div>
             ) : (
               <>
@@ -118,7 +119,7 @@ export function KanbanListView({
                         >
                           <div className="flex items-start justify-between gap-3">
                             <p className="m-0 text-[15px] font-bold text-foreground/90 leading-tight">{lead.patientName}</p>
-                            <span className={cn('shrink-0 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider', temperaturePillClass(temp))}>
+                            <span className={cn('shrink-0 px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider', temperaturePillClass(temp))}>
                               {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
                             </span>
                           </div>
@@ -152,7 +153,7 @@ export function KanbanListView({
                                 <Badge
                                   key={t.id}
                                   variant="secondary"
-                                  className="h-5 px-2 rounded-md border-border/40 text-[9px] font-black uppercase tracking-tight"
+                                  className="h-5 px-2 rounded-md border-border/40 text-[9px] font-semibold uppercase tracking-tight"
                                   style={{ color: t.color, backgroundColor: `${t.color}11`, borderColor: `${t.color}33` }}
                                 >
                                   {t.name}
@@ -169,7 +170,7 @@ export function KanbanListView({
                 <div className="hidden overflow-x-auto md:block">
                   <Table className="w-full min-w-[50rem] border-collapse text-left">
                     <TableHeader>
-                      <TableRow className="border-b border-border/20 bg-muted/10 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70">
+                      <TableRow className="border-b border-border/20 bg-muted/10 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/70">
                         <TableHead className="px-6 py-4">Paciente</TableHead>
                         <TableHead className="px-4 py-4">Status</TableHead>
                         <TableHead className="px-4 py-4 text-center">Responsável</TableHead>
@@ -217,7 +218,7 @@ export function KanbanListView({
                               </div>
                             </TableCell>
                             <TableCell className="px-4 py-4">
-                              <span className={cn('inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider', temperaturePillClass(temp))}>
+                              <span className={cn('inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider', temperaturePillClass(temp))}>
                                 {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
                               </span>
                             </TableCell>
@@ -241,7 +242,7 @@ export function KanbanListView({
                                   <Badge
                                     key={t.id}
                                     variant="secondary"
-                                    className="h-5 px-2 rounded-md border-border/40 text-[9px] font-black uppercase tracking-tight"
+                                    className="h-5 px-2 rounded-md border-border/40 text-[9px] font-semibold uppercase tracking-tight"
                                     style={{ color: t.color, backgroundColor: `${t.color}11`, borderColor: `${t.color}33` }}
                                   >
                                     {t.name}

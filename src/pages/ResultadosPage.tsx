@@ -63,12 +63,12 @@ function KpiCard({
       <div className="absolute top-0 right-0 p-5 opacity-[0.04]" aria-hidden>
         <Icon className="size-16" />
       </div>
-      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground/60">{label}</p>
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <div className="mt-2 flex items-baseline gap-2">
         {loading ? (
           <Skeleton className="h-9 w-20" />
         ) : (
-          <span className={cn('text-4xl font-black tracking-tighter tabular-nums', accent ?? 'text-foreground')}>
+          <span className={cn('text-4xl font-semibold tracking-tighter tabular-nums', accent ?? 'text-foreground')}>
             {value}
           </span>
         )}

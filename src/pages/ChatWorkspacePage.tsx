@@ -18,6 +18,7 @@ import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { getSourceStyle } from '@/lib/channelStyles'
+import { formatDurationFromMinutes } from '@/lib/formatDuration'
 import { cn } from '@/lib/utils'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { labelForIdName } from '@/lib/selectDisplay'
@@ -394,9 +395,8 @@ export function ChatWorkspacePage({
                 {conversations.map((lead) => {
                   const waitingSince = waitingSinceByLead.get(lead.id) ?? null
                   const waitingMinutes = waitingSince ? Math.floor((Date.now() - waitingSince) / 60000) : 0
-                  const waitingLabel = waitingMinutes >= 60
-                    ? `${Math.floor(waitingMinutes / 60)}h${waitingMinutes % 60 ? ` ${waitingMinutes % 60}m` : ''}`
-                    : `${waitingMinutes}m`
+                  // Sem isto, conversas paradas há semanas viravam "2486H 39M".
+                  const waitingLabel = formatDurationFromMinutes(waitingMinutes)
                   const unread = isUnread(lead.id)
                   const isActive = crm.selectedLeadId === lead.id
                   return (
@@ -492,7 +492,10 @@ export function ChatWorkspacePage({
             <>
               <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-3 sm:px-5 sm:py-4">
                 <div className="flex flex-wrap items-start justify-between gap-2 sm:items-center sm:gap-4">
-                  <div className="flex min-w-0 flex-1 items-start gap-2">
+                  {/* basis-56: o nome do paciente reserva ~14rem antes de deixar as ações
+                      quebrarem para a linha de baixo — saber com quem se fala vem antes
+                      de economizar uma linha (o nome virava "Maria…"). */}
+                  <div className="flex min-w-0 flex-1 basis-56 items-start gap-2">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -541,7 +544,7 @@ export function ChatWorkspacePage({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
                     <Button
                       variant="outline"
                       size="sm"
@@ -566,27 +569,17 @@ export function ChatWorkspacePage({
                       <UserRound className="size-3.5" aria-hidden />
                       Ficha
                     </Button>
-                    <div className="hidden lg:block">
-                      <ConversationModeSwitch
-                        value={leadMode}
-                        loading={modeLoading}
-                        onChange={handleModeChange}
-                      />
-                    </div>
+                    {/* Compacto e na MESMA linha em qualquer largura: o atendente precisa
+                        desligar a IA pelo celular, mas não às custas de meia tela. */}
+                    <ConversationModeSwitch
+                      variant="compact"
+                      value={leadMode}
+                      loading={modeLoading}
+                      onChange={handleModeChange}
+                    />
                   </div>
                 </div>
               </CardHeader>
-              {/* Toggle da IA no MOBILE/TABLET: no desktop ele fica no cabeçalho (hidden lg:block).
-                  Aqui aparece como faixa própria (lg:hidden) — antes o atendente não tinha como
-                  desligar a IA pelo celular. */}
-              <div className="shrink-0 border-b border-border/20 bg-muted/5 px-3 py-2.5 lg:hidden">
-                <ConversationModeSwitch
-                  value={leadMode}
-                  loading={modeLoading}
-                  onChange={handleModeChange}
-                  showFooterHint={false}
-                />
-              </div>
               <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/10 p-2 sm:p-4 dark:bg-background/20">
                 <LeadChatThread
                   leadId={activeLead.id}

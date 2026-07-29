@@ -1,63 +1,23 @@
+import { useMemo, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
-import {
-  type LucideIcon,
-  ChartColumn,
-  TrendingUp,
-  Boxes,
-  History,
-  FlaskConical,
-  Settings,
-  Monitor,
-  Radio,
-  Bot,
-  Shield,
-  List,
-  SlidersHorizontal,
-  LayoutGrid,
-  Tv,
-  Users,
-  UserSearch,
-  SquareCheck,
-  Star,
-  MessagesSquare,
-  ArrowLeftRight,
-  Calendar,
-  PackageOpen,
-  Store,
-  Wallet,
-  CreditCard,
-  Ticket,
-  Unplug,
-  Repeat,
-  Send,
-  LineChart,
-  FileSpreadsheet,
-  Gauge,
-  Target,
-  ClipboardList,
-  CalendarClock,
-  Warehouse,
-  ScanBarcode,
-  PackageCheck,
-  ClipboardCheck,
-  ListChecks,
-  FileBarChart2,
-  Fingerprint,
-  ClipboardPen,
-  AlarmClock,
-  ShoppingCart,
-  Landmark,
-  HandCoins,
-  Bell,
-} from 'lucide-react'
+import { ChevronRight, Search, Star, X } from 'lucide-react'
 
 import { InboxMenu } from '@/components/InboxMenu'
 import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher'
 import { Badge } from '@/components/ui/badge'
 import { BRAND_FAVICON_URL } from '@/config/brandAssets'
 import { APP_ENV_BADGE, APP_NAME, APP_TAGLINE } from '@/config/branding'
+import {
+  destinationForPath,
+  groupedDestinations,
+  searchDestinations,
+  visibleDestinations,
+  type NavDestination,
+} from '@/config/navigation'
+import { useNavContext } from '@/hooks/useNavContext'
+import { useNavPrefs } from '@/hooks/useNavPrefs'
 import { useTenant } from '@/context/TenantContext'
-import { useCrm } from '@/context/CrmContext'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   Sidebar,
   SidebarContent,
@@ -66,79 +26,128 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
+  SidebarInput,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
   SidebarSeparator,
+  useSidebar,
 } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
 
-function NavItem({ to, label, icon: NavIcon }: { to: string; label: string; icon: LucideIcon }) {
+/**
+ * Item de navegação. A estrela aparece no hover (e sempre no que já é favorito),
+ * então fixar uma tela é um clique de onde você já está — sem tela de configuração.
+ */
+function NavItem({
+  destination,
+  isFavorite,
+  onToggleFavorite,
+}: {
+  destination: NavDestination
+  isFavorite: boolean
+  onToggleFavorite: (id: string) => void
+}) {
   const location = useLocation()
-  const isActive = location.pathname === to || location.pathname.startsWith(`${to}/`)
+  const { path, label, icon: NavIcon } = destination
+  const isActive = location.pathname === path || location.pathname.startsWith(`${path}/`)
 
   return (
-    <SidebarMenuItem>
+    <SidebarMenuItem className="group/menu-item relative">
       <SidebarMenuButton
         isActive={isActive}
-        render={<NavLink to={to} />}
+        render={<NavLink to={path} />}
         tooltip={label}
         className={cn(
-          "h-9 rounded-lg px-3 text-[13px] transition-colors duration-150",
+          'h-8 rounded-md px-2.5 pr-8 text-[13px] transition-colors duration-150',
           isActive
-            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-            : "font-normal text-sidebar-foreground hover:bg-sidebar-accent/40 hover:text-sidebar-accent-foreground"
+            ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+            : 'font-normal text-sidebar-foreground hover:bg-sidebar-accent/40 hover:text-sidebar-accent-foreground',
         )}
       >
-        <NavIcon className={cn("size-[18px] shrink-0", isActive ? "opacity-100" : "opacity-70")} aria-hidden />
-        <span>{label}</span>
+        <NavIcon className={cn('size-4 shrink-0', isActive ? 'opacity-100' : 'opacity-70')} aria-hidden />
+        <span className="truncate">{label}</span>
       </SidebarMenuButton>
+      <SidebarMenuAction
+        showOnHover={!isFavorite}
+        aria-label={isFavorite ? `Desafixar ${label}` : `Fixar ${label} nos favoritos`}
+        title={isFavorite ? 'Desafixar' : 'Fixar nos favoritos'}
+        onClick={() => onToggleFavorite(destination.id)}
+      >
+        <Star className={cn('size-3.5', isFavorite ? 'fill-current text-primary' : 'opacity-60')} aria-hidden />
+      </SidebarMenuAction>
     </SidebarMenuItem>
   )
 }
 
+function NavList({
+  items,
+  isFavorite,
+  onToggleFavorite,
+}: {
+  items: NavDestination[]
+  isFavorite: (id: string) => boolean
+  onToggleFavorite: (id: string) => void
+}) {
+  return (
+    <SidebarMenu className="gap-0.5">
+      {items.map((destination) => (
+        <NavItem
+          key={destination.id}
+          destination={destination}
+          isFavorite={isFavorite(destination.id)}
+          onToggleFavorite={onToggleFavorite}
+        />
+      ))}
+    </SidebarMenu>
+  )
+}
+
 export function AppSidebar() {
-  const crm = useCrm()
   const { tenant } = useTenant()
+  const location = useLocation()
+  const navContext = useNavContext()
+  const { state, isMobile } = useSidebar()
+  const [query, setQuery] = useState('')
+  // No celular a barra vira drawer e sempre abre por extenso; "ícone" só existe no desktop.
+  const isIconMode = state === 'collapsed' && !isMobile
 
   // No mobile, o primitivo Sidebar renderiza um drawer (Sheet) sozinho — NÃO retornar null
   // aqui, senão o celular fica sem navegação (o hamburger no header abre este drawer).
 
-  // Fallback para o constant APP_NAME garante UX continua intacta enquanto a
-  // Fase 0 migration não estiver aplicada ou enquanto o tenant ainda carrega.
   const displayName = tenant.brand.app_name || APP_NAME
   const logoUrl = tenant.brand.logo_url || BRAND_FAVICON_URL
 
-  const showDashboardConfig = crm.currentPermission.canRouteLeads
-  const showLeadsHub = crm.currentPermission.canRouteLeads
-  const showBoards = crm.currentPermission.canEditBoards
-  const showAdmin = crm.currentPermission.canManageUsers
-  const showTv = crm.currentPermission.canViewTvPanel
+  const available = useMemo(() => visibleDestinations(navContext), [navContext])
+  const groups = useMemo(() => groupedDestinations(navContext), [navContext])
+  const { favorites, recents, isFavorite, toggleFavorite } = useNavPrefs(available)
 
-  // Navegação por polo: a clínica tem Agenda/Prontuário; o polo de vendas (Tricopill) não.
-  const isSalesPolo = tenant.poloType === 'sales'
-  const isClinicPolo = !isSalesPolo
+  const results = useMemo(() => searchDestinations(query, navContext), [query, navContext])
+  const isSearching = query.trim().length > 0
+
+  // Só o grupo da tela atual nasce aberto: 11 grupos abertos de uma vez é a razão
+  // de a lista ter ~50 linhas e exigir rolagem para chegar em Configuração.
+  const activeGroup = destinationForPath(location.pathname)?.group
 
   return (
     <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border/50">
-      <SidebarHeader className="px-4 py-6">
+      <SidebarHeader className="px-3 py-3">
         <SidebarMenu>
           <SidebarMenuItem>
-            <div className="flex w-full items-center gap-3">
-              <SidebarMenuButton 
-                size="lg" 
-                className="min-w-0 flex-1 hover:bg-transparent" 
+            <div className="flex w-full items-center gap-2">
+              <SidebarMenuButton
+                size="lg"
+                className="min-w-0 flex-1 hover:bg-transparent"
                 render={<Link to="/dashboard" />}
               >
-                <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-primary shadow-xl shadow-primary/20 p-1.5 transition-transform hover:scale-105 active:scale-95">
+                <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary p-1.5 shadow-lg shadow-primary/20 transition-transform hover:scale-105 active:scale-95">
                   <img src={logoUrl} alt="" className="size-full object-contain brightness-0 invert" />
                 </div>
-                <div className="grid min-w-0 flex-1 text-left leading-tight ml-1">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-sm font-black uppercase tracking-tight text-sidebar-foreground">{displayName}</span>
-                  </span>
-                  <span className="truncate text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/60">{APP_TAGLINE}</span>
+                <div className="grid min-w-0 flex-1 text-left leading-tight">
+                  <span className="truncate text-[13px] font-semibold text-sidebar-foreground">{displayName}</span>
+                  <span className="truncate text-[10px] text-sidebar-foreground/50">{APP_TAGLINE}</span>
                 </div>
               </SidebarMenuButton>
               <div className="group-data-[collapsible=icon]:hidden">
@@ -149,212 +158,127 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent className="px-3 gap-0">
-        <div className="px-1 pb-3 group-data-[collapsible=icon]:hidden">
+      <SidebarContent className="gap-0 px-2">
+        <div className="px-1 pb-2 group-data-[collapsible=icon]:hidden">
           <WorkspaceSwitcher />
         </div>
 
-        {/* Início — porta de entrada */}
-        <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-            Início
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-0.5">
-              <NavItem to="/dashboard" label="Painel" icon={TrendingUp} />
-              <NavItem to="/assistente" label="Assistente IA" icon={Bot} />
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {/* Busca de telas — com ~50 destinos, procurar é mais rápido que percorrer a lista. */}
+        <div className="relative px-1 pb-2 group-data-[collapsible=icon]:hidden">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-foreground/50" aria-hidden />
+          <SidebarInput
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Buscar tela…"
+            aria-label="Buscar tela"
+            className="h-8 rounded-md pl-8 pr-8 text-[13px]"
+          />
+          {isSearching ? (
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              aria-label="Limpar busca"
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-0.5 text-sidebar-foreground/50 hover:text-sidebar-foreground"
+            >
+              <X className="size-3.5" aria-hidden />
+            </button>
+          ) : null}
+        </div>
 
-        {/* Leads — operação comercial (comum aos dois polos) */}
-        <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-            Leads
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-0.5">
-              <NavItem to="/kanban" label="Funil de leads" icon={LayoutGrid} />
-              {showLeadsHub ? <NavItem to="/leads" label="Todos os leads" icon={List} /> : null}
-              {showLeadsHub && isClinicPolo ? <NavItem to="/chat" label="Chat comercial" icon={MessagesSquare} /> : null}
-              <NavItem to="/historico" label="Histórico" icon={History} />
-              {showLeadsHub ? <NavItem to="/tarefas" label="Tarefas" icon={SquareCheck} /> : null}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* Clínica — telas por-paciente (só polo clínica) */}
-        {isClinicPolo && showLeadsHub ? (
-          <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-              Clínica
+        {isSearching ? (
+          <SidebarGroup className="py-1">
+            <SidebarGroupLabel className="px-2.5 py-2 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/50">
+              {results.length > 0 ? `${results.length} resultado${results.length > 1 ? 's' : ''}` : 'Nada encontrado'}
             </SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                <NavItem to="/agenda" label="Agenda" icon={Calendar} />
-                <NavItem to="/perfil" label="Ficha do paciente" icon={UserSearch} />
-                <NavItem to="/protocolos" label="Protocolos" icon={ListChecks} />
-              </SidebarMenu>
+              {results.length > 0 ? (
+                <NavList items={results} isFavorite={isFavorite} onToggleFavorite={toggleFavorite} />
+              ) : (
+                <p className="px-2.5 py-2 text-xs text-sidebar-foreground/60">
+                  Nenhuma tela com “{query}”.
+                </p>
+              )}
             </SidebarGroupContent>
           </SidebarGroup>
-        ) : null}
+        ) : (
+          <>
+            {favorites.length > 0 ? (
+              <SidebarGroup className="py-1">
+                <SidebarGroupLabel className="px-2.5 py-2 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/50">
+                  Favoritos
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <NavList items={favorites} isFavorite={isFavorite} onToggleFavorite={toggleFavorite} />
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ) : null}
 
-        {/* Vendas — operação do e-commerce (só polo vendas) */}
-        {isSalesPolo && showLeadsHub ? (
-          <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-              Vendas
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                <NavItem to="/bi-vendas" label="Visão de vendas" icon={ChartColumn} />
-                <NavItem to="/tricopill" label="Chat de vendas" icon={MessagesSquare} />
-                <NavItem to="/pedidos" label="Pedidos" icon={PackageOpen} />
-                <NavItem to="/carrinhos-abandonados" label="Carrinhos abandonados" icon={ShoppingCart} />
-                <NavItem to="/assinaturas" label="Assinaturas" icon={Repeat} />
-                <NavItem to="/frente-loja" label="Frente de loja" icon={Store} />
-                <NavItem to="/reengajamento" label="Reengajamento" icon={Send} />
-                <NavItem to="/loja-analytics" label="Analytics do site" icon={LineChart} />
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ) : null}
+            {recents.length > 0 ? (
+              <SidebarGroup className="py-1">
+                <SidebarGroupLabel className="px-2.5 py-2 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/50">
+                  Recentes
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <NavList items={recents} isFavorite={isFavorite} onToggleFavorite={toggleFavorite} />
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ) : null}
 
-        {/* Financeiro — a "casa do dinheiro", agora existe nos DOIS polos */}
-        {showLeadsHub ? (
-          <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-              Financeiro
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {isSalesPolo ? <NavItem to="/recebimentos" label="Recebimentos" icon={Wallet} /> : null}
-                {showBoards ? <NavItem to="/contas-a-receber" label="Contas a receber" icon={HandCoins} /> : null}
-                {showBoards ? <NavItem to="/contas-a-pagar" label="Contas a pagar" icon={CalendarClock} /> : null}
-                {showBoards ? <NavItem to="/gastos" label="Gastos e controle" icon={FileSpreadsheet} /> : null}
-                {showBoards ? <NavItem to="/contas-caixa" label="Contas & caixa" icon={Landmark} /> : null}
-                {showBoards ? <NavItem to="/recorrentes" label="Recorrentes" icon={Repeat} /> : null}
-                {showBoards ? <NavItem to="/conciliacao" label="Conciliação" icon={ArrowLeftRight} /> : null}
-                {showBoards ? <NavItem to="/alertas-pagamento" label="Alertas pagamento" icon={Bell} /> : null}
-                {showBoards ? <NavItem to="/fluxo-caixa" label="Fluxo de caixa" icon={TrendingUp} /> : null}
-                {showBoards ? <NavItem to="/importar-shop" label="Importar shop" icon={FileSpreadsheet} /> : null}
-                <NavItem to="/links-pagamento" label="Links de pagamento" icon={CreditCard} />
-                {isSalesPolo ? <NavItem to="/cupons" label="Cupons" icon={Ticket} /> : null}
-                {isSalesPolo ? <NavItem to="/tricopill-relatorios" label="Relatórios de vendas" icon={FileSpreadsheet} /> : null}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ) : null}
+            {favorites.length > 0 || recents.length > 0 ? (
+              <SidebarSeparator className="mx-2 my-1 opacity-60 group-data-[collapsible=icon]:hidden" />
+            ) : null}
 
-        {/* Estoque e compras */}
-        {showBoards ? (
-          <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-              Estoque e compras
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                <NavItem to="/estoque" label="Estoque" icon={Warehouse} />
-                <NavItem to="/bipagem" label="Bipagem" icon={ScanBarcode} />
-                <NavItem to="/compras" label="Ordens de compra" icon={ClipboardList} />
-                <NavItem to="/transferencias-estoque" label="Transferências" icon={ArrowLeftRight} />
-                <NavItem to="/inventario" label="Inventário" icon={ClipboardCheck} />
-                {isClinicPolo ? <NavItem to="/kits" label="Kits cirúrgicos" icon={PackageCheck} /> : null}
-                {isClinicPolo ? <NavItem to="/conta-cirurgica" label="Conta cirúrgica" icon={FileBarChart2} /> : null}
-                <NavItem to="/estoque-relatorios" label="Relatórios de estoque" icon={FileBarChart2} />
-                {isClinicPolo ? <NavItem to="/integracoes-clinica" label="Meta4 / Enfermagem" icon={Unplug} /> : null}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ) : null}
-
-        {/* Relatórios — números de verdade (comum aos dois polos) */}
-        <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-            Relatórios
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-0.5">
-              {isClinicPolo ? <NavItem to="/resultados" label="Resultados" icon={ChartColumn} /> : null}
-              {isClinicPolo ? <NavItem to="/analytics" label="Análise do funil" icon={Gauge} /> : null}
-              {showLeadsHub ? <NavItem to="/feedback" label="Feedback e NPS" icon={Star} /> : null}
-              <NavItem to="/metricas" label="Metas" icon={Target} />
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* Equipe (RH) — só polo clínica */}
-        {isClinicPolo ? (
-          <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-              Equipe (RH)
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                <NavItem to="/ponto" label="Meu ponto" icon={Fingerprint} />
-                <NavItem to="/rh-formularios" label="Formulários RH" icon={ClipboardPen} />
-                {showAdmin ? <NavItem to="/ponto-gestao" label="Gestão de ponto" icon={AlarmClock} /> : null}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ) : null}
-
-        {/* Configuração — setup + integrações (Configurações sempre disponível) */}
-        <SidebarGroup>
-          <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-            Configuração
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu className="gap-0.5">
-              <NavItem to="/configuracoes" label="Configurações" icon={Settings} />
-              {showBoards ? <NavItem to="/config-funis" label="Configurar funis" icon={Boxes} /> : null}
-              {showDashboardConfig ? <NavItem to="/canais" label="Canais" icon={Radio} /> : null}
-              {showAdmin ? <NavItem to="/admin-whatsapp" label="Roteamento WhatsApp" icon={ArrowLeftRight} /> : null}
-              {showAdmin ? <NavItem to="/integracoes" label="Integrações" icon={Unplug} /> : null}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {showTv ? (
-          <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-              TV
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                <NavItem to="/tv" label="Tela TV" icon={Monitor} />
-                <NavItem to="/tv-config" label="Config. TV" icon={Tv} />
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ) : null}
-
-        {showAdmin ? (
-          <SidebarGroup>
-            <SidebarGroupLabel className="px-3 py-3 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-              Administração
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                <NavItem to="/usuarios" label="Usuários" icon={Users} />
-                <NavItem to="/auditoria" label="Auditoria" icon={Shield} />
-                <NavItem to="/admin-operacao" label="Operação Admin" icon={SlidersHorizontal} />
-                <NavItem to="/admin-lab" label="Ferramentas de dev" icon={FlaskConical} />
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ) : null}
+            {groups.map((group) =>
+              // Recolhida em ícones não há rótulo de grupo para clicar, então lá a lista
+              // é sempre plana — senão a barra estreita ficaria vazia e sem saída.
+              isIconMode ? (
+                <SidebarGroup key={group.id} className="py-0.5">
+                  <SidebarGroupContent>
+                    <NavList items={group.items} isFavorite={isFavorite} onToggleFavorite={toggleFavorite} />
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              ) : (
+                <Collapsible
+                  key={group.id}
+                  defaultOpen={group.id === activeGroup || group.id === 'inicio'}
+                  className="group/collapsible"
+                >
+                  <SidebarGroup className="py-0.5">
+                    <CollapsibleTrigger
+                      className={cn(
+                        'flex w-full items-center gap-1 rounded-md px-2.5 py-2 text-[10px] font-medium uppercase tracking-wider',
+                        'text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground',
+                      )}
+                    >
+                      <ChevronRight
+                        className="size-3 shrink-0 transition-transform duration-150 group-data-[panel-open]/collapsible:rotate-90"
+                        aria-hidden
+                      />
+                      <span>{group.label}</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarGroupContent>
+                        <NavList items={group.items} isFavorite={isFavorite} onToggleFavorite={toggleFavorite} />
+                      </SidebarGroupContent>
+                    </CollapsibleContent>
+                  </SidebarGroup>
+                </Collapsible>
+              ),
+            )}
+          </>
+        )}
       </SidebarContent>
 
-      <SidebarSeparator className="mx-6 opacity-50" />
-      <SidebarFooter className="px-6 py-8">
-        <div className="flex flex-col gap-1 group-data-[collapsible=icon]:hidden">
-          <Badge variant="outline" className="w-fit h-5 px-1.5 text-[9px] font-black uppercase tracking-widest border-primary/30 text-primary bg-primary/5">
+      <SidebarSeparator className="mx-3 opacity-50" />
+      <SidebarFooter className="px-3 py-3">
+        <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
+          <Badge
+            variant="outline"
+            className="h-4 w-fit border-primary/30 bg-primary/5 px-1.5 text-[9px] font-bold uppercase tracking-widest text-primary"
+          >
             {APP_ENV_BADGE}
           </Badge>
-          <span className="text-[9px] font-bold uppercase tracking-widest text-sidebar-foreground/40 mt-1">
-            Gestão da Clínica · 2026
-          </span>
+          <span className="text-[10px] text-sidebar-foreground/40">Gestão da Clínica · 2026</span>
         </div>
       </SidebarFooter>
       <SidebarRail />

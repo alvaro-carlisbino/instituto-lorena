@@ -8,6 +8,7 @@ import { AttributionBadge } from '@/components/leads/AttributionBadge'
 import { useNowMs } from '@/hooks/useNowMs'
 import { getSourceStyle } from '@/lib/channelStyles'
 import { cn } from '@/lib/utils'
+import { formatDurationFromMinutes } from '@/lib/formatDuration'
 import { formatTemperature } from '@/lib/fieldLabels'
 import { getLeadFieldValue } from '@/lib/leadFields'
 
@@ -102,12 +103,12 @@ export function KanbanLeadCard({
       }}
     >
       {isSlaBreached && (
-        <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-destructive ring-1 ring-destructive/20">
-          <span className="relative flex h-2 w-2">
+        <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-2 py-1 text-[11px] font-semibold text-destructive ring-1 ring-destructive/20">
+          <span className="relative flex h-2 w-2 shrink-0">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-destructive"></span>
           </span>
-          ATENÇÃO: {elapsedMinutes - (slaMinutes ?? 0)}m ATRASADO
+          {formatDurationFromMinutes(elapsedMinutes - (slaMinutes ?? 0))} de atraso
         </div>
       )}
       

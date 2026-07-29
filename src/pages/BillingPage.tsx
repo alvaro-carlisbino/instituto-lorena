@@ -84,7 +84,7 @@ function PlanCard({ plan, currentPlan, onSubscribe, loading }: {
           ) : null}
         </div>
         <CardDescription>
-          <span className="text-3xl font-black text-foreground">{plan.price_brl}</span>
+          <span className="text-3xl font-semibold text-foreground">{plan.price_brl}</span>
           <span className="text-xs text-muted-foreground"> /mês</span>
         </CardDescription>
       </CardHeader>

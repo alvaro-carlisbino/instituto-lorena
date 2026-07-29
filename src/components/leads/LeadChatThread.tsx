@@ -549,6 +549,20 @@ export function LeadChatThread({
 
   const hasWaInstagramMerge = useMemo(() => history.some(isWaInstagramMergeNotice), [history])
 
+  // Filtrar por canal só faz sentido quando a conversa TEM mais de um canal. A esmagadora
+  // maioria é só WhatsApp, e mesmo assim os três botões apareciam sempre — ocupando uma
+  // faixa da tela para uma escolha que não existe.
+  const hasMultipleChannels = useMemo(() => {
+    let whatsapp = false
+    let meta = false
+    for (const row of history) {
+      if (row.channel === 'whatsapp') whatsapp = true
+      else if (row.channel === 'meta') meta = true
+      if (whatsapp && meta) return true
+    }
+    return false
+  }, [history])
+
   useEffect(() => {
     for (const row of history) {
       if (!isWaInstagramMergeNotice(row)) continue
@@ -777,33 +791,30 @@ export function LeadChatThread({
             IG → WhatsApp vinculado
           </Badge>
         ) : null}
-        <Button
-          type="button"
-          size="sm"
-          variant={filter === 'whatsapp' ? 'default' : 'outline'}
-          className="h-7 rounded-lg px-2 text-[10px] sm:h-8 sm:px-3 sm:text-xs"
-          onClick={() => setFilter('whatsapp')}
-        >
-          WhatsApp
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={filter === 'meta' ? 'default' : 'outline'}
-          className="h-7 rounded-lg px-2 text-[10px] sm:h-8 sm:px-3 sm:text-xs"
-          onClick={() => setFilter('meta')}
-        >
-          Instagram
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={filter === 'all' ? 'default' : 'outline'}
-          className="h-7 rounded-lg px-2 text-[10px] sm:h-8 sm:px-3 sm:text-xs"
-          onClick={() => setFilter('all')}
-        >
-          Tudo
-        </Button>
+        {hasMultipleChannels ? (
+          <div className="inline-flex shrink-0 items-center rounded-lg bg-muted/60 p-0.5" role="group" aria-label="Filtrar por canal">
+            {([
+              { id: 'all', label: 'Tudo' },
+              { id: 'whatsapp', label: 'WhatsApp' },
+              { id: 'meta', label: 'Instagram' },
+            ] as const).map((channel) => (
+              <Button
+                key={channel.id}
+                type="button"
+                size="sm"
+                variant="ghost"
+                aria-pressed={filter === channel.id}
+                className={cn(
+                  'h-7 rounded-md px-2.5 text-xs font-medium',
+                  filter === channel.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
+                )}
+                onClick={() => setFilter(channel.id)}
+              >
+                {channel.label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
         {showForceAiButton || forceAiHumanBlocked ? (
           <Button
             type="button"
@@ -1074,7 +1085,7 @@ export function LeadChatThread({
             {showQuickMenu && filteredQuick.length > 0 && (
               <div className="absolute bottom-full left-0 mb-2 w-full max-w-sm z-50 rounded-xl border border-border bg-popover shadow-xl overflow-hidden">
                 <div className="px-3 py-2 border-b border-border bg-muted/30">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Mensagens Rápidas</span>
+                  <span className="text-xs font-medium text-muted-foreground">Mensagens Rápidas</span>
                 </div>
                 <div className="max-h-48 overflow-y-auto p-1">
                   {filteredQuick.map((m, idx) => (
@@ -1180,7 +1191,7 @@ export function LeadChatThread({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="max-h-60 w-[min(100vw-2rem,22rem)] overflow-y-auto p-1">
                     <div className="px-2 py-1.5 border-b border-border/40 mb-1">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                      <span className="text-xs font-medium text-muted-foreground">
                         Mensagens Rápidas
                       </span>
                     </div>

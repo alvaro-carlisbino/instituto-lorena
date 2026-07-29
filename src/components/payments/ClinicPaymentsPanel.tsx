@@ -73,8 +73,8 @@ function statusBadge(s: UnifiedPayment['status']) {
 function Kpi({ label, value, tone, hint }: { label: string; value: string; tone?: string; hint?: string }) {
   return (
     <div className="rounded-xl border border-border/40 bg-card/60 p-4">
-      <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">{label}</p>
-      <p className={`mt-1 text-2xl font-black tabular-nums ${tone ?? ''}`}>{value}</p>
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className={`mt-1 text-2xl font-bold tabular-nums ${tone ?? ''}`}>{value}</p>
       {hint ? <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p> : null}
     </div>
   )
@@ -381,7 +381,7 @@ export function PaymentsPanel() {
         {/* Recebido por dia (até 14 dias do filtro) */}
         {dash.days.length > 0 ? (
           <div className="rounded-xl border border-border/40 bg-card/40 p-3">
-            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Recebido por dia</p>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">Recebido por dia</p>
             <div className="flex items-end gap-1.5" style={{ height: 64 }}>
               {dash.days.map(([day, v]) => (
                 <div key={day} className="flex flex-1 flex-col items-center justify-end gap-1" title={`${day.split('-').reverse().join('/')}: ${formatBRL(v)}`}>

@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 
+import { MobileNav } from '@/components/MobileNav'
 import { PageHeader } from '@/components/page/PageHeader'
 import { TopControls } from '@/components/TopControls'
-import { SidebarInset } from '@/components/ui/sidebar'
+import { SidebarInset, SidebarTrigger } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
 
 type Props = {
@@ -39,22 +40,24 @@ export function AppLayout({ title, subtitle, actions, children, mainClassName, f
   }, [fullHeight, location.pathname])
 
   return (
-    <SidebarInset className={cn(
-      "flex w-full min-w-0 flex-1 min-h-0 flex-col overflow-hidden bg-transparent transition-all duration-300 ease-in-out",
-    )}>
+    <SidebarInset className="flex w-full min-w-0 flex-1 min-h-0 flex-col overflow-hidden bg-transparent">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(circle_at_12%_10%,oklch(0.95_0.03_50/.6),transparent_28%),radial-gradient(circle_at_88%_4%,oklch(0.93_0.03_250/.5),transparent_22%)] dark:bg-[radial-gradient(circle_at_12%_10%,oklch(0.27_0.03_50/.4),transparent_28%),radial-gradient(circle_at_88%_4%,oklch(0.25_0.03_250/.35),transparent_22%)]" />
+
+      {/* Uma faixa só: navegação, título, ações da tela e utilitários. Eram duas faixas
+          somando 105px — em telas de dado (leads, pedidos) isso empurrava a tabela
+          inteira para fora da primeira dobra. */}
       <header
         role="banner"
         className={cn(
-        'sticky top-0 z-20 shrink-0 border-b border-border/70 bg-background/90 backdrop-blur-xl supports-[backdrop-filter]:bg-background/75 transition-shadow duration-200',
-        scrolled && 'shadow-sm',
-      )}
+          'sticky top-0 z-20 shrink-0 border-b border-border/70 bg-background/90 backdrop-blur-xl supports-[backdrop-filter]:bg-background/75 transition-shadow duration-200',
+          scrolled && 'shadow-sm',
+        )}
       >
-        <div className="mx-auto flex w-full max-w-[min(100%,1800px)] min-w-0 items-start gap-2 px-4 py-2 sm:items-center sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-[min(100%,1800px)] min-w-0 items-center gap-2 px-3 py-2 sm:px-6 lg:px-8">
+          <SidebarTrigger className="-ml-1 shrink-0" />
+          <PageHeader title={title} titleId={titleId} description={subtitle} actions={actions} />
+          <div className="mx-1 hidden h-5 w-px shrink-0 bg-border/70 sm:block" aria-hidden />
           <TopControls />
-        </div>
-        <div className="mx-auto w-full max-w-[min(100%,1800px)] min-w-0 px-4 sm:px-6 lg:px-8">
-          <PageHeader title={title} titleId={titleId} description={subtitle} actions={actions} className="border-0 pb-4" />
         </div>
       </header>
 
@@ -63,15 +66,17 @@ export function AppLayout({ title, subtitle, actions, children, mainClassName, f
         id="main-content"
         aria-labelledby={titleId}
         className={cn(
-          "mx-auto w-full max-w-[min(100%,1800px)] min-w-0 relative flex flex-col min-h-0 flex-1",
+          'mx-auto w-full max-w-[min(100%,1800px)] min-w-0 relative flex flex-col min-h-0 flex-1',
           fullHeight
-            ? "overflow-hidden"
-            : "overflow-y-auto overflow-x-hidden space-y-5 px-4 py-5 sm:space-y-6 sm:px-6 sm:py-6 lg:px-8 [&>*]:shrink-0",
-          mainClassName
+            ? 'overflow-hidden'
+            : 'overflow-y-auto overflow-x-hidden space-y-4 px-3 py-4 sm:space-y-5 sm:px-6 sm:py-5 lg:px-8 [&>*]:shrink-0',
+          mainClassName,
         )}
       >
         {children}
       </main>
+
+      <MobileNav />
     </SidebarInset>
   )
 }

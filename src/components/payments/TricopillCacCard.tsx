@@ -42,18 +42,18 @@ export function TricopillCacCard({ paidCount, revenueCents }: { paidCount: numbe
 
       <div className="mt-4 grid grid-cols-3 gap-3 border-t border-border/20 pt-4">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">CAC</p>
-          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-foreground">{spend > 0 ? brl(cac) : '—'}</p>
+          <p className="text-xs font-medium text-muted-foreground">CAC</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-foreground">{spend > 0 ? brl(cac) : '—'}</p>
           <p className="text-[10px] text-muted-foreground">{paidCount} venda(s) paga(s)</p>
         </div>
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">ROAS</p>
-          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-emerald-600">{spend > 0 ? `${roas.toFixed(1)}x` : '—'}</p>
+          <p className="text-xs font-medium text-muted-foreground">ROAS</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-emerald-600">{spend > 0 ? `${roas.toFixed(1)}x` : '—'}</p>
           <p className="text-[10px] text-muted-foreground">receita ÷ investimento</p>
         </div>
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Receita paga</p>
-          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-foreground">{brl(revenueCents)}</p>
+          <p className="text-xs font-medium text-muted-foreground">Receita paga</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-foreground">{brl(revenueCents)}</p>
         </div>
       </div>
     </div>

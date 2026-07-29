@@ -1,6 +1,7 @@
 import { Loader2, Scale, Sparkles, User } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { ConversationOwnerMode } from '@/services/conversationControl'
 
@@ -37,12 +38,26 @@ type Props = {
   loading?: boolean
   onChange: (next: ConversationOwnerMode) => void
   className?: string
-  /** Título curto acima do grupo */
+  /** Título curto acima do grupo (só na variante 'full'). */
   title?: string
-  /** Texto de ajuda por baixo, sincronizado com a opção activa */
+  /** Texto de ajuda por baixo, sincronizado com a opção ativa (só na variante 'full'). */
   showFooterHint?: boolean
+  /**
+   * 'compact' — controle segmentado de uma linha, para o cabeçalho da conversa.
+   * 'full' — com título e explicação, para a tela de Configurações.
+   */
+  variant?: 'compact' | 'full'
 }
 
+/**
+ * Escolha de quem responde a conversa.
+ *
+ * Na tela de chat era um bloco de três botões grandes com título e parágrafo de ajuda:
+ * junto com os chips de canal, consumia ~450px dos 812 do celular ANTES da primeira
+ * mensagem — numa tela cuja razão de existir é ler a conversa. A explicação continua
+ * disponível (tooltip aqui, texto completo nas Configurações), mas não ocupa mais a
+ * tela toda a cada conversa aberta.
+ */
 export function ConversationModeSwitch({
   value,
   loading = false,
@@ -50,7 +65,57 @@ export function ConversationModeSwitch({
   className,
   title = 'Modo de atendimento',
   showFooterHint = true,
+  variant = 'full',
 }: Props) {
+  if (variant === 'compact') {
+    return (
+      <div
+        className={cn('relative inline-flex shrink-0 items-center rounded-lg bg-muted/60 p-0.5', className)}
+        role="radiogroup"
+        aria-label="Modo de atendimento: humano, assistente, ou misto"
+      >
+        {loading ? (
+          <span className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/70" aria-live="polite" aria-busy>
+            <Loader2 className="size-4 animate-spin text-primary" aria-hidden />
+            <span className="sr-only">Salvando…</span>
+          </span>
+        ) : null}
+        {MODES.map((mode) => {
+          const active = value === mode.id
+          const Icon = mode.icon
+          return (
+            <Tooltip key={mode.id}>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={loading}
+                    onClick={() => onChange(mode.id)}
+                    role="radio"
+                    aria-checked={active}
+                    aria-label={`${mode.label}. ${mode.hint}`}
+                    className={cn(
+                      'h-7 gap-1.5 rounded-md px-2.5 text-xs font-medium',
+                      active
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    <Icon className={cn('size-3.5 shrink-0', active && 'text-primary')} aria-hidden />
+                    {mode.label}
+                  </Button>
+                }
+              />
+              <TooltipContent className="max-w-64">{mode.hint}</TooltipContent>
+            </Tooltip>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <div className={cn('w-full', className)}>
       <p className="m-0 mb-2 text-xs font-medium tracking-wide text-muted-foreground sm:text-sm">{title}</p>

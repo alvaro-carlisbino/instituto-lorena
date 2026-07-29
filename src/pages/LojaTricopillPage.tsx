@@ -70,8 +70,8 @@ function StatCard({
 }) {
   return (
     <div className="rounded-xl border border-border bg-card p-6 transition-all hover:bg-card/80">
-      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">{label}</p>
-      <p className={cn('mt-2 text-3xl font-black tabular-nums tracking-tight', tone)}>{value}</p>
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className={cn('mt-2 text-3xl font-bold tabular-nums tracking-tight', tone)}>{value}</p>
       {hint ? <p className="mt-1 text-[11px] text-muted-foreground/70">{hint}</p> : null}
     </div>
   )
@@ -80,7 +80,7 @@ function StatCard({
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <div className="mb-5 mt-2 flex items-center gap-3">
-      <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/50">{children}</h3>
+      <h3 className="text-xs font-medium text-muted-foreground">{children}</h3>
       <div className="h-px flex-1 bg-border/40" />
     </div>
   )

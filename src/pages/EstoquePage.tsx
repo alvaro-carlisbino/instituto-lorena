@@ -384,7 +384,7 @@ export function EstoquePage() {
         <div className="mb-4 grid gap-3 sm:grid-cols-2">
           <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
             <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Estoque baixo</div>
-            <div className="mt-1 text-2xl font-black tabular-nums">{belowMin.length}</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums">{belowMin.length}</div>
             <div className="mt-1 line-clamp-3 text-sm text-amber-900/80">
               {belowMin.length === 0
                 ? 'Nenhum item abaixo do mínimo.'
@@ -393,7 +393,7 @@ export function EstoquePage() {
           </div>
           <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
             <div className="text-xs font-bold uppercase tracking-wide text-red-700">Validade</div>
-            <div className="mt-1 text-2xl font-black tabular-nums">
+            <div className="mt-1 text-2xl font-bold tabular-nums">
               {expiringBatches.filter((b) => b.expired).length}
               <span className="ml-1 text-sm font-semibold text-red-700/70">
                 vencidos · {expiringBatches.length} em 30d

@@ -114,7 +114,7 @@ export function PendingHumanHandoffPanel() {
             <MessageSquare className="size-5 text-emerald-600" />
           </div>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700/70">Atendimento Pendente</p>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-700/70">Atendimento Pendente</p>
             <h4 className="text-sm font-bold text-foreground/80">Nenhum lead aguardando consultor.</h4>
           </div>
         </div>
@@ -137,15 +137,15 @@ export function PendingHumanHandoffPanel() {
               <AlertOctagon className="size-5 text-red-600" />
             </div>
             <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-red-700/80">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-red-700/80">
                 Atendimento Pendente
               </p>
-              <h4 className="text-base font-black text-foreground tracking-tight">
+              <h4 className="text-base font-semibold text-foreground tracking-tight">
                 {count} {count === 1 ? 'lead aguarda consultor' : 'leads aguardam consultor'}
               </h4>
             </div>
           </div>
-          <span className="flex size-8 items-center justify-center rounded-full bg-red-500 text-xs font-black text-white tabular-nums">
+          <span className="flex size-8 items-center justify-center rounded-full bg-red-500 text-xs font-semibold text-white tabular-nums">
             {count > 99 ? '99+' : count}
           </span>
         </div>
@@ -160,7 +160,7 @@ export function PendingHumanHandoffPanel() {
                 <div className="flex items-center gap-1.5">
                   <p className="truncate text-sm font-bold text-foreground/90">{lead.name}</p>
                   {lead.reason === 'valor' ? (
-                    <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-700">
+                    <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-700">
                       Pediu valor
                     </span>
                   ) : null}

@@ -70,7 +70,7 @@ export function LeadLossReasonDialog({ open, onOpenChange, onConfirm, patientNam
         <DialogHeader>
           <div className="flex items-center gap-2 text-destructive mb-2">
             <AlertCircle className="size-5" aria-hidden />
-            <DialogTitle className="uppercase tracking-wider font-black">
+            <DialogTitle className="uppercase tracking-wider font-semibold">
               {isCancellation ? 'Registrar Cancelamento' : 'Encerrar Lead'}
             </DialogTitle>
           </div>
@@ -105,7 +105,7 @@ export function LeadLossReasonDialog({ open, onOpenChange, onConfirm, patientNam
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor={notesId} className="ml-1 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70">
+            <Label htmlFor={notesId} className="ml-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/70">
               Observações Adicionais
             </Label>
             <Textarea
@@ -130,7 +130,7 @@ export function LeadLossReasonDialog({ open, onOpenChange, onConfirm, patientNam
             variant="destructive"
             onClick={handleConfirm}
             disabled={!selectedPreset && !reason.trim()}
-            className="rounded-xl uppercase font-black text-xs shadow-lg shadow-destructive/20"
+            className="rounded-xl uppercase font-semibold text-xs shadow-lg shadow-destructive/20"
           >
             {isCancellation ? 'Confirmar Cancelamento' : 'Confirmar Encerramento'}
           </Button>

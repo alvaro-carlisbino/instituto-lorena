@@ -175,23 +175,23 @@ export function TricopillMarginCard({
 
       <div className="mt-4 grid grid-cols-3 gap-3 border-t border-border/20 pt-4">
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Custo (período)</p>
-          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-rose-600">{brl(margin.cost)}</p>
+          <p className="text-xs font-medium text-muted-foreground">Custo (período)</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-rose-600">{brl(margin.cost)}</p>
         </div>
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Margem bruta</p>
-          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-emerald-600">{brl(margin.lucro)}</p>
+          <p className="text-xs font-medium text-muted-foreground">Margem bruta</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-emerald-600">{brl(margin.lucro)}</p>
         </div>
         <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Margem %</p>
-          <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-foreground">{margin.pct}%</p>
+          <p className="text-xs font-medium text-muted-foreground">Margem %</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums tracking-tight text-foreground">{margin.pct}%</p>
         </div>
       </div>
       <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-muted/40 px-3 py-2">
         <span className="text-[11px] font-semibold text-foreground/80">
           Margem líquida <span className="font-normal text-muted-foreground">(− frete {brl(freightCollected)})</span>
         </span>
-        <span className="text-sm font-black tabular-nums text-emerald-700 dark:text-emerald-400">
+        <span className="text-sm font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
           {brl(margin.lucroLiq)} <span className="text-muted-foreground">· {margin.pctLiq}%</span>
         </span>
       </div>

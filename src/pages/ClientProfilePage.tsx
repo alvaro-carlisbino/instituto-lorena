@@ -83,7 +83,7 @@ export function ClientProfilePage() {
           <div className="rounded-xl border border-border bg-card p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-xl font-black text-foreground">{profile.name}</h2>
+                <h2 className="text-xl font-semibold text-foreground">{profile.name}</h2>
                 <p className="text-xs text-muted-foreground">
                   Cliente desde {new Date(profile.createdAt).toLocaleDateString('pt-BR')} · {profile.interactionsCount} interações
                 </p>

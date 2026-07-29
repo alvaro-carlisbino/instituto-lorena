@@ -1,7 +1,8 @@
-import { LayoutGrid, List, Search } from 'lucide-react'
+import { useMemo } from 'react'
+import { LayoutGrid, List } from 'lucide-react'
 
+import { FilterBar, type FilterDef } from '@/components/page/FilterBar'
 import { Button } from '@/components/ui/button'
-import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { labelForIdName } from '@/lib/selectDisplay'
@@ -18,6 +19,20 @@ const TEMP_OPTIONS: { value: Temperature; label: string }[] = [
   { value: 'hot', label: 'Quente' },
   { value: 'warm', label: 'Morna' },
   { value: 'cold', label: 'Fria' },
+]
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'position', label: 'Ordem padrão' },
+  { value: 'idle_time', label: 'Mais tempo sem resposta' },
+  { value: 'score', label: 'Melhor score' },
+]
+
+const CONVERSATION_OPTIONS: { value: ConversationFilterOption; label: string }[] = [
+  { value: 'all', label: 'Todas' },
+  { value: 'new', label: 'Novo' },
+  { value: 'ai_triaging', label: 'Triagem IA' },
+  { value: 'waiting_human', label: 'Aguardando SDR' },
+  { value: 'human_active', label: 'Atendimento humano' },
 ]
 
 type Props = {
@@ -48,6 +63,15 @@ type Props = {
   onDeliveryFilterChange: (value: 'all' | DeliveryKind) => void
 }
 
+/**
+ * Barra do quadro de leads.
+ *
+ * Antes eram seis seletores de 140px disputando a linha com uma busca de 560px fixos:
+ * em 1280px eles empilhavam e passavam por cima do alternador Quadro/Lista — a primeira
+ * coisa que se via ao abrir o funil era a barra quebrada. Agora usa a mesma FilterBar
+ * das outras listas: o funil (que define QUAL quadro você vê) fica sempre à mão, os
+ * filtros abrem sob demanda e o que está ativo aparece como etiqueta.
+ */
 export function KanbanToolbar({
   pipelineId,
   pipelineOptions,
@@ -75,263 +99,154 @@ export function KanbanToolbar({
   onDeliveryFilterChange,
 }: Props) {
   const showPolo = !!poloOptions && poloOptions.length >= 2 && !!onPoloChange
-  const poloLabel = labelForIdName(
-    poloFilter ?? 'all',
-    poloOptions ?? [],
-    { value: 'all', label: 'Todos os polos' },
-    'Polo',
-  )
-  const pipelineLabel = labelForIdName(
-    pipelineId,
-    pipelineOptions,
-    undefined,
-    'Funil',
-  )
-  const ownerLabel = labelForIdName(
+
+  const pipelineLabel = labelForIdName(pipelineId, pipelineOptions, undefined, 'Funil')
+
+  const filters = useMemo<FilterDef[]>(() => {
+    const defs: FilterDef[] = []
+
+    if (showPolo) {
+      defs.push({
+        id: 'polo',
+        label: 'Polo',
+        value: poloFilter ?? 'all',
+        onChange: (value) => onPoloChange?.(value),
+        options: [
+          { value: 'all', label: 'Todos os polos' },
+          ...(poloOptions ?? []).map((polo) => ({ value: polo.id, label: polo.name })),
+        ],
+      })
+    }
+
+    defs.push(
+      {
+        id: 'owner',
+        label: 'Responsável',
+        value: ownerFilter,
+        onChange: onOwnerChange,
+        options: [
+          { value: 'all', label: 'Todos' },
+          ...ownerOptions.map((owner) => ({ value: owner.id, label: owner.name })),
+        ],
+      },
+      {
+        id: 'temperature',
+        label: 'Interesse',
+        value: temperatureFilter,
+        onChange: (value) => onTemperatureChange(value as Temperature),
+        options: TEMP_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
+      },
+      {
+        id: 'tag',
+        label: 'Etiqueta',
+        value: tagFilter,
+        onChange: onTagFilterChange,
+        options: [
+          { value: 'all', label: 'Todas as etiquetas' },
+          ...tagOptions.map((tag) => ({ value: tag.id, label: tag.name })),
+        ],
+      },
+      {
+        id: 'conversation',
+        label: 'Conversa',
+        value: conversationFilter,
+        onChange: (value) => onConversationFilterChange(value as ConversationFilterOption),
+        options: CONVERSATION_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
+      },
+      {
+        id: 'delivery',
+        label: 'Entrega',
+        value: deliveryFilter,
+        onChange: (value) => onDeliveryFilterChange(value as 'all' | DeliveryKind),
+        options: [{ value: 'all', label: 'Todas' }, ...DELIVERY_FILTER_OPTIONS],
+      },
+      {
+        id: 'sort',
+        label: 'Ordenar por',
+        value: sortOrder,
+        onChange: (value) => onSortOrderChange(value as SortOption),
+        // 'position' é a ordem natural do quadro, então conta como "sem ordenação".
+        emptyValue: 'position',
+        options: SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label })),
+      },
+    )
+
+    return defs
+  }, [
+    showPolo,
+    poloFilter,
+    poloOptions,
+    onPoloChange,
     ownerFilter,
+    onOwnerChange,
     ownerOptions,
-    { value: 'all', label: 'Todos' },
-    'Responsável',
-  )
-  const tagLabel = labelForIdName(
+    temperatureFilter,
+    onTemperatureChange,
     tagFilter,
+    onTagFilterChange,
     tagOptions,
-    { value: 'all', label: 'Todas as etiquetas' },
-    'Etiqueta',
-  )
-
-  const deliveryLabel =
-    deliveryFilter === 'all'
-      ? 'Entrega'
-      : DELIVERY_FILTER_OPTIONS.find((o) => o.value === deliveryFilter)?.label ?? 'Entrega'
-
-  const conversationLabel =
-    conversationFilter === 'all'
-      ? 'Conversa'
-      : conversationFilter === 'ai_triaging'
-        ? 'Triagem IA'
-        : conversationFilter === 'waiting_human'
-          ? 'Aguardando SDR'
-          : conversationFilter === 'human_active'
-            ? 'Humano ativo'
-            : 'Novo'
+    conversationFilter,
+    onConversationFilterChange,
+    deliveryFilter,
+    onDeliveryFilterChange,
+    sortOrder,
+    onSortOrderChange,
+  ])
 
   return (
-    <div className="flex flex-col gap-5 border-b border-border/20 pb-6 mb-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center flex-1 min-w-0">
-          <div
-            className="inline-flex shrink-0 rounded-xl bg-muted/40 p-1.5 backdrop-blur-sm"
-            role="group"
-            aria-label="Modo de visualização"
-          >
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className={cn(
-                'h-8 px-4 gap-2 rounded-lg transition-all duration-200',
-                viewMode === 'board' 
-                  ? 'bg-background text-primary shadow-sm ring-1 ring-border/50' 
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-              onClick={() => onViewModeChange('board')}
-            >
-              <LayoutGrid className="size-3.5" />
-              <span className="text-[11px] font-bold uppercase tracking-wider">Quadro</span>
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className={cn(
-                'h-8 px-4 gap-2 rounded-lg transition-all duration-200',
-                viewMode === 'list' 
-                  ? 'bg-background text-primary shadow-sm ring-1 ring-border/50' 
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-              onClick={() => onViewModeChange('list')}
-            >
-              <List className="size-3.5" />
-              <span className="text-[11px] font-bold uppercase tracking-wider">Lista</span>
-            </Button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            {showPolo ? (
-              <Select value={poloFilter ?? 'all'} onValueChange={(v) => v && onPoloChange!(v)}>
-                <LabeledSelectTrigger
-                  className="min-w-[140px] rounded-xl border-primary/30 bg-primary/[0.06] text-xs font-bold uppercase tracking-tight"
-                  size="default"
-                >
-                  {poloLabel}
-                </LabeledSelectTrigger>
-                <SelectContent className="rounded-xl">
-                  <SelectItem value="all" className="text-xs uppercase font-bold tracking-tight">
-                    Todos os polos
-                  </SelectItem>
-                  {poloOptions!.map((polo) => (
-                    <SelectItem key={polo.id} value={polo.id} className="text-xs uppercase font-bold tracking-tight">
-                      {polo.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
-
-            <Select value={pipelineId} onValueChange={(v) => v && onPipelineChange(v)}>
-              <LabeledSelectTrigger
-                className="min-w-[140px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
-                size="default"
-              >
-                {pipelineLabel}
-              </LabeledSelectTrigger>
-              <SelectContent className="rounded-xl">
-                {pipelineOptions.map((pipeline) => (
-                  <SelectItem key={pipeline.id} value={pipeline.id} className="text-xs uppercase font-bold tracking-tight">
-                    {pipeline.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={ownerFilter} onValueChange={(v) => v && onOwnerChange(v)}>
-              <LabeledSelectTrigger
-                className="min-w-[140px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
-                size="default"
-              >
-                {ownerLabel}
-              </LabeledSelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="all" className="text-xs uppercase font-bold tracking-tight">Todos</SelectItem>
-                {ownerOptions.map((owner) => (
-                  <SelectItem key={owner.id} value={owner.id} className="text-xs uppercase font-bold tracking-tight">
-                    {owner.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={tagFilter} onValueChange={(v) => v && onTagFilterChange(v)}>
-              <LabeledSelectTrigger
-                className="min-w-[140px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
-                size="default"
-              >
-                {tagLabel}
-              </LabeledSelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="all" className="text-xs uppercase font-bold tracking-tight">Todas as etiquetas</SelectItem>
-                {tagOptions.map((t) => (
-                  <SelectItem key={t.id} value={t.id} className="text-xs uppercase font-bold tracking-tight">
-                    {t.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={sortOrder} onValueChange={(v) => v && onSortOrderChange(v as SortOption)}>
-              <LabeledSelectTrigger
-                className="min-w-[140px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
-                size="default"
-              >
-                {sortOrder === 'idle_time' ? 'Mais tempo sem resposta' : sortOrder === 'score' ? 'Melhor Score' : 'Ordem Padrão'}
-              </LabeledSelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="position" className="text-xs uppercase font-bold tracking-tight">Ordem Padrão</SelectItem>
-                <SelectItem value="idle_time" className="text-xs uppercase font-bold tracking-tight">Mais tempo sem resposta</SelectItem>
-                <SelectItem value="score" className="text-xs uppercase font-bold tracking-tight">Melhor Score</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={conversationFilter}
-              onValueChange={(v) => v && onConversationFilterChange(v as ConversationFilterOption)}
-            >
-              <LabeledSelectTrigger
-                className="min-w-[160px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
-                size="default"
-              >
-                {conversationLabel}
-              </LabeledSelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="all" className="text-xs uppercase font-bold tracking-tight">
-                  Todas (conversa)
-                </SelectItem>
-                <SelectItem value="new" className="text-xs uppercase font-bold tracking-tight">
-                  Novo
-                </SelectItem>
-                <SelectItem value="ai_triaging" className="text-xs uppercase font-bold tracking-tight">
-                  Triagem IA
-                </SelectItem>
-                <SelectItem value="waiting_human" className="text-xs uppercase font-bold tracking-tight">
-                  Aguardando SDR
-                </SelectItem>
-                <SelectItem value="human_active" className="text-xs uppercase font-bold tracking-tight">
-                  Atendimento humano
-                </SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select
-              value={deliveryFilter}
-              onValueChange={(v) => v && onDeliveryFilterChange(v as 'all' | DeliveryKind)}
-            >
-              <LabeledSelectTrigger
-                className="min-w-[160px] rounded-xl border-border/40 bg-muted/20 text-xs font-bold uppercase tracking-tight"
-                size="default"
-              >
-                {deliveryLabel}
-              </LabeledSelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="all" className="text-xs uppercase font-bold tracking-tight">
-                  Todas (entrega)
-                </SelectItem>
-                {DELIVERY_FILTER_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value} className="text-xs uppercase font-bold tracking-tight">
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-center gap-3 lg:shrink-0">
-          <InputGroup className="w-full sm:w-[min(100%,520px)] lg:w-[560px]">
-            <InputGroupAddon className="bg-muted/20 border-border/40 rounded-l-xl">
-              <Search className="size-4 opacity-50" />
-            </InputGroupAddon>
-            <InputGroupInput
-              value={searchTerm}
-              onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Buscar paciente entre ~1000 clientes (nome, telefone, resumo)…"
-              className="h-11 rounded-r-xl border-border/40 bg-muted/10 text-sm font-medium placeholder:text-muted-foreground/50"
-            />
-          </InputGroup>
-
-          <div
-            className="flex items-center gap-1 rounded-xl bg-muted/40 p-1.5 backdrop-blur-sm"
-          >
-            {TEMP_OPTIONS.map((opt) => (
-              <Button
-                key={opt.value}
-                type="button"
-                size="sm"
-                variant="ghost"
-                className={cn(
-                  'h-8 px-3 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all duration-200',
-                  temperatureFilter === opt.value 
-                    ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' 
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-                onClick={() => onTemperatureChange(opt.value)}
-              >
-                {opt.label}
-              </Button>
+    <FilterBar
+      className="mb-4 border-b border-border/40 pb-4"
+      searchValue={searchTerm}
+      onSearchChange={onSearchChange}
+      searchPlaceholder="Buscar por nome, telefone ou resumo…"
+      searchLabel="Buscar paciente no funil"
+      filters={filters}
+      leading={
+        <Select value={pipelineId} onValueChange={(value) => value && onPipelineChange(value)}>
+          <LabeledSelectTrigger aria-label="Escolher funil" className="h-9 w-44" size="default">
+            {pipelineLabel}
+          </LabeledSelectTrigger>
+          <SelectContent>
+            {pipelineOptions.map((pipeline) => (
+              <SelectItem key={pipeline.id} value={pipeline.id}>
+                {pipeline.name}
+              </SelectItem>
             ))}
-          </div>
+          </SelectContent>
+        </Select>
+      }
+      trailing={
+        <div className="inline-flex shrink-0 rounded-lg bg-muted/60 p-0.5" role="group" aria-label="Modo de visualização">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            aria-pressed={viewMode === 'board'}
+            className={cn(
+              'h-8 gap-1.5 rounded-md px-3',
+              viewMode === 'board' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
+            )}
+            onClick={() => onViewModeChange('board')}
+          >
+            <LayoutGrid className="size-3.5" aria-hidden />
+            <span className="hidden sm:inline">Quadro</span>
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            aria-pressed={viewMode === 'list'}
+            className={cn(
+              'h-8 gap-1.5 rounded-md px-3',
+              viewMode === 'list' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
+            )}
+            onClick={() => onViewModeChange('list')}
+          >
+            <List className="size-3.5" aria-hidden />
+            <span className="hidden sm:inline">Lista</span>
+          </Button>
         </div>
-      </div>
-    </div>
+      }
+    />
   )
 }

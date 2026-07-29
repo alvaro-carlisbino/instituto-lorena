@@ -19,6 +19,7 @@ import { useTenant } from '@/context/TenantContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
 import { getLeadFieldValue } from '@/lib/leadFields'
+import { formatDurationFromMinutes } from '@/lib/formatDuration'
 import { classifyDelivery, type DeliveryKind } from '@/lib/deliveryType'
 import { cn } from '@/lib/utils'
 import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
@@ -370,16 +371,16 @@ export function KanbanPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <div className="size-2 rounded-full bg-primary" />
-                      <h2 className="m-0 text-[13px] font-black uppercase tracking-[0.1em] text-foreground/80">{stage.name}</h2>
+                      <h2 className="m-0 truncate text-[13px] font-semibold text-foreground">{stage.name}</h2>
                     </div>
                     {crm.selectedPipeline.boardConfig?.stageSlaMinutes?.[stage.id] != null ? (
-                      <div className="flex items-center gap-1.5 mt-1 text-[10px] font-bold text-destructive/80 uppercase tracking-wider">
-                        <RefreshCw className="size-3" />
-                        SLA: {crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id]}m
+                      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <RefreshCw className="size-3 shrink-0" aria-hidden />
+                        Prazo: {formatDurationFromMinutes(crm.selectedPipeline.boardConfig.stageSlaMinutes![stage.id])}
                       </div>
                     ) : null}
                   </div>
-                  <span className="flex items-center justify-center min-w-[24px] h-6 rounded-full bg-primary/10 px-2 text-[11px] font-black text-primary">
+                  <span className="flex items-center justify-center min-w-[24px] h-6 rounded-full bg-primary/10 px-2 text-[11px] font-semibold text-primary">
                     {stageLeads.length}
                   </span>
                 </header>

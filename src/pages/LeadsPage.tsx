@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { MessageCircle, Search } from 'lucide-react'
+import { MessageCircle } from 'lucide-react'
 import { HelpDrawer } from '@/components/page/HelpDrawer'
 
 const LEADS_HELP = [
@@ -38,14 +38,15 @@ const LEADS_HELP = [
 import { toast } from 'sonner'
 
 import { PaymentBadge, PoloBadge } from '@/components/leads/PaymentBadge'
+import { BulkActionBar } from '@/components/page/BulkActionBar'
+import { ColumnVisibilityMenu } from '@/components/page/ColumnVisibilityMenu'
+import { FilterBar, type FilterDef } from '@/components/page/FilterBar'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -58,7 +59,7 @@ import { parseCsv, rowsToObjects } from '@/lib/csvParse'
 import { getLeadFieldValue } from '@/lib/leadFields'
 import { formatTemperature } from '@/lib/fieldLabels'
 import { archiveImportFileToStorage } from '@/lib/importArchiveStorage'
-import { labelForIdName, labelForKeyMap } from '@/lib/selectDisplay'
+import { labelForIdName } from '@/lib/selectDisplay'
 import { parseInteractionsImportJson } from '@/lib/interactionsImportSchema'
 import { cn } from '@/lib/utils'
 
@@ -119,17 +120,6 @@ export function LeadsPage() {
   const showPolo = poloOptions.length >= 2
   const poloNameForLead = (tenantId?: string) =>
     showPolo && crm.tenantFilter === 'all' && tenantId ? tenantNameById.get(tenantId) ?? tenantId : undefined
-  const poloSelectLabel = useMemo(
-    () =>
-      labelForIdName(
-        crm.tenantFilter,
-        poloOptions,
-        { value: 'all', label: 'Todos os polos' },
-        'Polo',
-      ),
-    [crm.tenantFilter, poloOptions],
-  )
-
   const stagesInFilterPipeline = useMemo(() => {
     const p = crm.pipelineCatalog.find((x) => x.id === pipelineFilter)
     return p?.stages ?? []
@@ -139,46 +129,91 @@ export function LeadsPage() {
     return p?.stages ?? []
   }, [crm.pipelineCatalog, crm.selectedPipeline, crm.selectedPipelineId])
 
-  const pipelineSelectLabel = useMemo(
-    () =>
-      labelForIdName(
-        pipelineFilter,
-        crm.pipelineCatalog.map((p) => ({ id: p.id, name: p.name })),
-        { value: 'all', label: 'Todos os funis' },
-        'Funil',
-      ),
-    [pipelineFilter, crm.pipelineCatalog],
-  )
-  const stageSelectLabel = useMemo(
-    () =>
-      labelForIdName(
-        stageFilter,
-        stagesInFilterPipeline.map((s) => ({ id: s.id, name: s.name })),
-        { value: 'all', label: 'Todas' },
-        'Etapa',
-      ),
-    [stageFilter, stagesInFilterPipeline],
-  )
-  const ownerSelectLabel = useMemo(
-    () =>
-      labelForIdName(
-        ownerFilter,
-        crm.users.map((u) => ({ id: u.id, name: u.name })),
-        { value: 'all', label: 'Todos' },
-        'Responsável',
-      ),
-    [ownerFilter, crm.users],
-  )
-  const sourceSelectLabel = useMemo(
-    () =>
-      labelForKeyMap(
-        sourceFilter,
-        sourceLabel,
-        { value: 'all', label: 'Todas' },
-        'Origem',
-      ),
-    [sourceFilter],
-  )
+  // Filtros declarados uma vez: a FilterBar cuida de rótulo, etiqueta ativa e limpeza.
+  const leadFilters = useMemo<FilterDef[]>(() => {
+    const sourceOptions = (() => {
+      const seen = new Set<string>()
+      return (Object.keys(sourceLabel) as (keyof typeof sourceLabel)[])
+        .filter((key) => {
+          const label = sourceLabel[key]
+          if (seen.has(label)) return false
+          seen.add(label)
+          return true
+        })
+        .map((key) => ({ value: key as string, label: sourceLabel[key] }))
+    })()
+
+    const defs: FilterDef[] = []
+
+    if (showPolo) {
+      defs.push({
+        id: 'polo',
+        label: 'Polo',
+        value: crm.tenantFilter,
+        onChange: (value) => crm.setTenantFilter(value),
+        options: [
+          { value: 'all', label: 'Todos os polos' },
+          ...poloOptions.map((p) => ({ value: p.id, label: p.name })),
+        ],
+      })
+    }
+
+    defs.push(
+      {
+        id: 'pipeline',
+        label: 'Funil',
+        value: pipelineFilter,
+        onChange: (value) => {
+          setPipelineFilter(value)
+          setStageFilter('all')
+        },
+        options: [
+          { value: 'all', label: 'Todos os funis' },
+          ...crm.pipelineCatalog.map((p) => ({ value: p.id, label: p.name })),
+        ],
+      },
+      {
+        id: 'stage',
+        label: 'Etapa',
+        value: stageFilter,
+        onChange: setStageFilter,
+        disabled: pipelineFilter === 'all',
+        options: [
+          { value: 'all', label: 'Todas as etapas' },
+          ...stagesInFilterPipeline.map((s) => ({ value: s.id, label: s.name })),
+        ],
+      },
+      {
+        id: 'owner',
+        label: 'Responsável',
+        value: ownerFilter,
+        onChange: setOwnerFilter,
+        options: [
+          { value: 'all', label: 'Todos' },
+          ...crm.users.map((u) => ({ value: u.id, label: u.name })),
+        ],
+      },
+      {
+        id: 'source',
+        label: 'Origem',
+        value: sourceFilter,
+        onChange: setSourceFilter,
+        options: [{ value: 'all', label: 'Todas' }, ...sourceOptions],
+      },
+    )
+
+    return defs
+  }, [
+    showPolo,
+    poloOptions,
+    crm,
+    pipelineFilter,
+    stageFilter,
+    stagesInFilterPipeline,
+    ownerFilter,
+    sourceFilter,
+  ])
+
   const bulkOwnerLabel = useMemo(
     () =>
       labelForIdName(
@@ -403,218 +438,34 @@ export function LeadsPage() {
     >
       {crm.isLoading ? <SkeletonBlocks rows={3} /> : null}
 
-      <div className="mb-6 grid w-full max-w-full gap-4 rounded-[2rem] border border-border/30 bg-card/40 p-6 shadow-sm backdrop-blur-md lg:grid-cols-4 lg:items-end">
-        <div className="flex flex-col gap-2 lg:col-span-2">
-          <Label htmlFor="leads-search" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">
-            Pesquisa Inteligente
-          </Label>
-          <div className="relative group">
-            <Search className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/40 group-focus-within:text-primary transition-colors" aria-hidden />
-            <Input
-              id="leads-search"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar por nome, telefone ou contexto..."
-              className="h-12 rounded-2xl border-border/40 bg-muted/20 pl-11 pr-4 text-sm font-medium transition-all focus:bg-background"
-            />
-          </div>
-        </div>
+      <FilterBar
+        searchValue={searchTerm}
+        onSearchChange={setSearchTerm}
+        searchPlaceholder="Buscar por nome, telefone ou contexto…"
+        searchLabel="Buscar leads"
+        filters={leadFilters}
+        trailing={
+          <ColumnVisibilityMenu
+            columns={TABLE_COLUMNS}
+            visible={visibleColumns}
+            labelFor={(col) => columnLabel(col, crm.workflowFields)}
+            onToggle={(col) =>
+              setVisibleColumns((prev) => (prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]))
+            }
+          />
+        }
+      />
 
-        {showPolo ? (
-          <div className="flex flex-col gap-2 lg:col-span-2">
-            <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-primary/70 ml-1">Polo</Label>
-            <Select value={crm.tenantFilter} onValueChange={(v) => v && crm.setTenantFilter(v)}>
-              <LabeledSelectTrigger aria-label="Filtrar por polo" className="h-12 rounded-2xl border-primary/30 bg-primary/[0.06] text-xs font-bold uppercase" size="default">
-                {poloSelectLabel}
-              </LabeledSelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="all" className="text-xs font-bold uppercase">Todos os polos</SelectItem>
-                {poloOptions.map((p) => (
-                  <SelectItem key={p.id} value={p.id} className="text-xs font-bold uppercase">
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        ) : null}
-
-        <div className="flex flex-col gap-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Funil</Label>
-          <Select value={pipelineFilter} onValueChange={(v) => { if (v) { setPipelineFilter(v); setStageFilter('all') } }}>
-            <LabeledSelectTrigger aria-label="Filtrar por funil" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
-              {pipelineSelectLabel}
-            </LabeledSelectTrigger>
-            <SelectContent className="rounded-xl">
-              <SelectItem value="all" className="text-xs font-bold uppercase">Todos os funis</SelectItem>
-              {crm.pipelineCatalog.map((p) => (
-                <SelectItem key={p.id} value={p.id} className="text-xs font-bold uppercase">
-                  {p.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Etapa</Label>
-          <Select value={stageFilter} onValueChange={(v) => v && setStageFilter(v)} disabled={pipelineFilter === 'all'}>
-            <LabeledSelectTrigger aria-label="Filtrar por etapa" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
-              {stageSelectLabel}
-            </LabeledSelectTrigger>
-            <SelectContent className="rounded-xl">
-              <SelectItem value="all" className="text-xs font-bold uppercase">Todas as etapas</SelectItem>
-              {stagesInFilterPipeline.map((s) => (
-                <SelectItem key={s.id} value={s.id} className="text-xs font-bold uppercase">
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Responsável</Label>
-          <Select value={ownerFilter} onValueChange={(v) => v && setOwnerFilter(v)}>
-            <LabeledSelectTrigger aria-label="Filtrar por responsável" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
-              {ownerSelectLabel}
-            </LabeledSelectTrigger>
-            <SelectContent className="rounded-xl">
-              <SelectItem value="all" className="text-xs font-bold uppercase">Todos</SelectItem>
-              {crm.users.map((u) => (
-                <SelectItem key={u.id} value={u.id} className="text-xs font-bold uppercase">
-                  {u.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Origem</Label>
-          <Select value={sourceFilter} onValueChange={(v) => v && setSourceFilter(v)}>
-            <LabeledSelectTrigger aria-label="Filtrar por origem" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
-              {sourceSelectLabel}
-            </LabeledSelectTrigger>
-            <SelectContent className="rounded-xl">
-              <SelectItem value="all" className="text-xs font-bold uppercase">Todas</SelectItem>
-              {(() => {
-                const keys = Object.keys(sourceLabel) as (keyof typeof sourceLabel)[]
-                const seen = new Set<string>()
-                return keys.filter((k) => {
-                  const label = sourceLabel[k]
-                  if (seen.has(label)) return false
-                  seen.add(label)
-                  return true
-                }).map((k) => (
-                  <SelectItem key={k} value={k} className="text-xs font-bold uppercase">
-                    {sourceLabel[k]}
-                  </SelectItem>
-                ))
-              })()}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="lg:col-span-2 flex flex-col gap-3">
-          <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 ml-1">Visibilidade de Colunas</Label>
-          <div className="flex flex-wrap gap-2">
-            {TABLE_COLUMNS.map((col) => {
-              const active = visibleColumns.includes(col)
-              return (
-                <Button
-                  key={col}
-                  type="button"
-                  size="sm"
-                  variant={active ? 'default' : 'outline'}
-                  className={cn(
-                    "h-8 rounded-xl text-[10px] font-bold uppercase tracking-tight transition-all",
-                    active ? "bg-primary shadow-lg shadow-primary/20 border-transparent" : "border-border/40 hover:bg-muted/30"
-                  )}
-                  onClick={() =>
-                    setVisibleColumns((prev) => (active ? prev.filter((c) => c !== col) : [...prev, col]))
-                  }
-                >
-                  {columnLabel(col, crm.workflowFields)}
-                </Button>
-              )
-            })}
-          </div>
-        </div>
-      </div>
-
-      <Card className="mb-6 rounded-[2rem] border-border/30 bg-card/40 shadow-sm backdrop-blur-md overflow-hidden">
-        <CardHeader className="px-8 pt-8 pb-4 border-b border-border/10">
-          <div className="flex items-center gap-3">
-            <div className="size-2 rounded-full bg-primary" />
-            <CardTitle className="text-base font-black uppercase tracking-[0.15em] text-foreground/80">Ações em Lote</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="p-8 flex flex-col lg:flex-row lg:items-end gap-6">
-          <div className="flex flex-col gap-2 flex-1">
-            <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Novo Responsável</Label>
-            <Select value={bulkOwnerId} onValueChange={(value) => setBulkOwnerId(value ?? 'all')}>
-              <LabeledSelectTrigger aria-label="Novo responsável em lote" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
-                {bulkOwnerLabel}
-              </LabeledSelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="all" className="text-xs font-bold uppercase">Escolher responsável</SelectItem>
-                {crm.users.map((u) => (
-                  <SelectItem key={u.id} value={u.id} className="text-xs font-bold uppercase">
-                    {u.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex flex-col gap-2 flex-1">
-            <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/50 ml-1">Nova Etapa</Label>
-            <Select value={bulkStageId} onValueChange={(value) => setBulkStageId(value ?? 'all')}>
-              <LabeledSelectTrigger aria-label="Nova etapa em lote" className="h-12 rounded-2xl border-border/40 bg-muted/20 text-xs font-bold uppercase" size="default">
-                {bulkStageLabel}
-              </LabeledSelectTrigger>
-              <SelectContent className="rounded-xl">
-                <SelectItem value="all" className="text-xs font-bold uppercase">Escolher etapa</SelectItem>
-                {stagesForBulk.map((s) => (
-                  <SelectItem key={s.id} value={s.id} className="text-xs font-bold uppercase">
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            type="button"
-            className="h-12 px-8 rounded-2xl bg-primary shadow-xl shadow-primary/20 font-black uppercase tracking-[0.1em] text-[11px] disabled:opacity-30 transition-all hover:-translate-y-0.5 active:translate-y-0"
-            disabled={selectedLeadIds.length === 0}
-            onClick={() => {
-              const patch: Record<string, unknown> = {}
-              if (bulkOwnerId !== 'all') patch.ownerId = bulkOwnerId
-              if (bulkStageId !== 'all') patch.stageId = bulkStageId
-              if (Object.keys(patch).length === 0) {
-                toast.error('Selecione ao menos uma alteração para aplicar.')
-                return
-              }
-              crm.bulkUpdateLeads(selectedLeadIds, patch)
-              toast.success(`${selectedLeadIds.length} lead(s) atualizados.`)
-              setSelectedLeadIds([])
-            }}
-          >
-            Atualizar Selecionados ({selectedLeadIds.length})
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card className="mb-8 overflow-hidden rounded-[2.5rem] border-border/30 bg-card/60 shadow-xl backdrop-blur-xl">
-        <header className="px-8 py-6 border-b border-border/10 bg-muted/10 backdrop-blur-md flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h2 className="text-xl font-black tracking-tight text-foreground/90">Repositório de Leads</h2>
-            <span className="flex items-center justify-center min-w-[32px] h-8 rounded-full bg-primary/10 px-3 text-sm font-black text-primary">
+      <Card className="mb-8 overflow-hidden">
+        <header className="flex items-center justify-between border-b border-border/60 bg-muted/20 px-4 py-3 sm:px-5">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-sm font-semibold text-foreground">Leads</h2>
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-primary">
               {filteredLeads.length}
             </span>
           </div>
         </header>
-        
+
         <CardContent className="p-0">
           <ul className="m-0 flex list-none flex-col divide-y divide-border/10 md:hidden">
             {filteredLeads.map((lead) => {
@@ -643,13 +494,13 @@ export function LeadsPage() {
                       <div className="mt-4 flex flex-wrap items-center gap-2">
                         <PoloBadge name={poloNameForLead(lead.tenantId)} />
                         <PaymentBadge payment={crm.paymentByLeadId[lead.id] ?? null} />
-                        <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tight rounded-md border-border/40">
+                        <Badge variant="outline" className="text-[9px] font-semibold uppercase tracking-tight rounded-md border-border/40">
                           {stage?.name ?? lead.stageId}
                         </Badge>
-                        <Badge variant="secondary" className="text-[9px] font-black uppercase tracking-tight rounded-md bg-muted/40 text-muted-foreground">
+                        <Badge variant="secondary" className="text-[9px] font-semibold uppercase tracking-tight rounded-md bg-muted/40 text-muted-foreground">
                           {sourceLabel[lead.source]}
                         </Badge>
-                        <span className={cn('px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider', temperatureBadgeClass(lead.temperature))}>
+                        <span className={cn('px-2.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider', temperatureBadgeClass(lead.temperature))}>
                           {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
                         </span>
                       </div>
@@ -677,7 +528,7 @@ export function LeadsPage() {
           <div className="hidden w-full overflow-x-auto md:block">
             <Table className="w-full border-collapse text-left">
               <TableHeader>
-                <TableRow className="border-b border-border/20 bg-muted/10 text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/50">
+                <TableRow className="border-b border-border/20 bg-muted/10 text-xs font-medium text-muted-foreground">
                   <TableHead className="w-16 px-8 py-5">
                     <div className="flex items-center justify-center">
                       <div className="size-4 rounded border-border/40 border" aria-hidden />
@@ -685,7 +536,7 @@ export function LeadsPage() {
                     </div>
                   </TableHead>
                   {visibleColumns.map((col) => (
-                    <TableHead key={col} className="px-4 py-5 font-black">
+                    <TableHead key={col} className="px-4 py-5 font-semibold">
                       {columnLabel(col, crm.workflowFields)}
                     </TableHead>
                   ))}
@@ -731,16 +582,16 @@ export function LeadsPage() {
                           )}
                           {col === 'phone' && <span className="text-[13px] font-bold tabular-nums text-muted-foreground/70">{lead.phone}</span>}
                           {col === 'summary' && <span className="text-xs font-medium text-muted-foreground/60 line-clamp-1">{lead.summary || '·'}</span>}
-                          {col === 'pipeline_id' && <span className="text-[10px] font-black uppercase tracking-tight text-muted-foreground/80">{pipe?.name ?? lead.pipelineId}</span>}
-                          {col === 'stage_id' && <span className="text-[10px] font-black uppercase tracking-tight text-muted-foreground/80">{stage?.name ?? lead.stageId}</span>}
-                          {col === 'owner_id' && <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/60">{crm.getOwnerName(lead.ownerId)}</span>}
+                          {col === 'pipeline_id' && <span className="text-xs text-muted-foreground">{pipe?.name ?? lead.pipelineId}</span>}
+                          {col === 'stage_id' && <span className="text-xs text-muted-foreground">{stage?.name ?? lead.stageId}</span>}
+                          {col === 'owner_id' && <span className="text-xs text-muted-foreground">{crm.getOwnerName(lead.ownerId)}</span>}
                           {col === 'source' && (
-                            <Badge variant="secondary" className="bg-muted/40 text-muted-foreground/80 text-[9px] font-black uppercase tracking-tight rounded-md border-border/20">
+                            <Badge variant="secondary" className="bg-muted/40 text-muted-foreground/80 text-[9px] font-semibold uppercase tracking-tight rounded-md border-border/20">
                               {sourceLabel[lead.source]}
                             </Badge>
                           )}
                           {col === 'temperature' && (
-                            <span className={cn('px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider', temperatureBadgeClass(lead.temperature))}>
+                            <span className={cn('px-2.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider', temperatureBadgeClass(lead.temperature))}>
                               {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
                             </span>
                           )}
@@ -792,10 +643,62 @@ export function LeadsPage() {
         </CardContent>
       </Card>
 
+      <BulkActionBar
+        count={selectedLeadIds.length}
+        onClear={() => setSelectedLeadIds([])}
+        noun={['lead', 'leads']}
+      >
+        <Select value={bulkOwnerId} onValueChange={(value) => setBulkOwnerId(value ?? 'all')}>
+          <LabeledSelectTrigger aria-label="Novo responsável" className="h-8 w-44" size="sm">
+            {bulkOwnerLabel}
+          </LabeledSelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Escolher responsável</SelectItem>
+            {crm.users.map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {u.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={bulkStageId} onValueChange={(value) => setBulkStageId(value ?? 'all')}>
+          <LabeledSelectTrigger aria-label="Nova etapa" className="h-8 w-40" size="sm">
+            {bulkStageLabel}
+          </LabeledSelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Escolher etapa</SelectItem>
+            {stagesForBulk.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 shrink-0"
+          onClick={() => {
+            const patch: Record<string, unknown> = {}
+            if (bulkOwnerId !== 'all') patch.ownerId = bulkOwnerId
+            if (bulkStageId !== 'all') patch.stageId = bulkStageId
+            if (Object.keys(patch).length === 0) {
+              toast.error('Escolha um responsável ou uma etapa para aplicar.')
+              return
+            }
+            crm.bulkUpdateLeads(selectedLeadIds, patch)
+            toast.success(`${selectedLeadIds.length} lead(s) atualizados.`)
+            setSelectedLeadIds([])
+          }}
+        >
+          Aplicar
+        </Button>
+      </BulkActionBar>
+
       <section className="grid gap-6 lg:grid-cols-2 mb-20">
         <Card className="rounded-[2.5rem] border-border/30 bg-card/40 backdrop-blur-md overflow-hidden">
           <CardHeader className="p-8 border-b border-border/10">
-            <CardTitle className="text-base font-black uppercase tracking-widest text-foreground/80">Importação (CSV)</CardTitle>
+            <CardTitle className="text-sm font-semibold text-foreground">Importação (CSV)</CardTitle>
           </CardHeader>
           <CardContent className="p-8 flex flex-col gap-6">
             <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="sr-only" aria-label="Selecionar arquivo CSV de leads" onChange={onCsvInputChange} />
@@ -804,14 +707,14 @@ export function LeadsPage() {
               <Button type="button" variant="link" className="font-bold text-primary" onClick={() => csvInputRef.current?.click()}>
                 Selecionar Arquivo CSV
               </Button>
-              <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest text-center mt-2">
+              <p className="mt-2 text-center text-xs text-muted-foreground">
                 {csvFileLabel || "Nenhum arquivo selecionado"}
                 {csvPreviewRows != null && ` · ${csvPreviewRows} leads`}
               </p>
             </div>
             <Button
               type="button"
-              className="h-14 rounded-2xl bg-foreground text-background font-black uppercase tracking-widest text-[11px] disabled:opacity-30 transition-all hover:scale-[1.02]"
+              className="h-11 rounded-xl"
               disabled={!pendingCsvFile}
               onClick={() => pendingCsvFile && runCsvImportFromFile(pendingCsvFile)}
             >
@@ -822,7 +725,7 @@ export function LeadsPage() {
 
         <Card className="rounded-[2.5rem] border-border/30 bg-card/40 backdrop-blur-md overflow-hidden">
           <CardHeader className="p-8 border-b border-border/10">
-            <CardTitle className="text-base font-black uppercase tracking-widest text-foreground/80">Histórico de Conversas (JSON)</CardTitle>
+            <CardTitle className="text-sm font-semibold text-foreground">Histórico de Conversas (JSON)</CardTitle>
           </CardHeader>
           <CardContent className="p-8 flex flex-col gap-6">
             <input ref={jsonInputRef} type="file" accept=".json,application/json" className="sr-only" aria-label="Selecionar arquivo JSON de conversas" onChange={onJsonInputChange} />
@@ -831,7 +734,7 @@ export function LeadsPage() {
               <Button type="button" variant="link" className="font-bold text-amber-600" onClick={() => jsonInputRef.current?.click()}>
                 Selecionar Arquivo JSON
               </Button>
-              <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest text-center mt-2">
+              <p className="mt-2 text-center text-xs text-muted-foreground">
                 {jsonFileLabel || "Nenhum arquivo selecionado"}
                 {jsonPreviewCount != null && ` · ${jsonPreviewCount} interações`}
               </p>
@@ -839,7 +742,7 @@ export function LeadsPage() {
             <Button
               type="button"
               variant="secondary"
-              className="h-14 rounded-2xl bg-amber-500 text-white font-black uppercase tracking-widest text-[11px] disabled:opacity-30 transition-all hover:scale-[1.02] border-none"
+              className="h-11 rounded-xl bg-amber-500 text-white hover:bg-amber-600 border-none"
               disabled={!pendingJsonFile}
               onClick={() => pendingJsonFile && runJsonImportFromFile(pendingJsonFile)}
             >

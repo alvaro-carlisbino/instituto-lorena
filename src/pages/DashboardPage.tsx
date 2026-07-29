@@ -132,7 +132,7 @@ export function DashboardPage() {
         <Card className="rounded-[2rem] border-border/30 bg-card/40 shadow-sm lg:col-span-8 overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between gap-4 p-8 border-b border-border/10">
             <div className="min-w-0">
-              <CardTitle className="text-xl font-black tracking-tight text-foreground/90">Funil de Vendas</CardTitle>
+              <CardTitle className="text-base font-semibold text-foreground">Funil de Vendas</CardTitle>
               <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/50 mt-1">Volume de leads por estágio</CardDescription>
             </div>
             <Select
@@ -141,7 +141,7 @@ export function DashboardPage() {
                 if (value) crm.setSelectedPipelineId(value)
               }}
             >
-              <LabeledSelectTrigger className="w-[180px] rounded-xl border-border/40 bg-muted/40 text-[10px] font-black uppercase tracking-widest" size="sm">
+              <LabeledSelectTrigger className="w-[180px] rounded-xl border-border/40 bg-muted/40 text-[10px] font-semibold uppercase tracking-widest" size="sm">
                 {pipelineSelectLabel}
               </LabeledSelectTrigger>
               <SelectContent className="rounded-xl p-2">
@@ -186,7 +186,7 @@ export function DashboardPage() {
                       <LabelList 
                         dataKey="leads" 
                         position="right" 
-                        className="fill-foreground/80 text-[14px] font-black tabular-nums"
+                        className="fill-foreground/80 text-[14px] font-bold tabular-nums"
                       />
                     </Bar>
                   </BarChart>
@@ -198,7 +198,7 @@ export function DashboardPage() {
 
         <Card className="rounded-[2rem] border-border/30 bg-card/40 shadow-sm lg:col-span-4 overflow-hidden flex flex-col">
           <CardHeader className="p-8 border-b border-border/10">
-            <CardTitle className="text-xl font-black tracking-tight text-foreground/90">Top SDRs</CardTitle>
+            <CardTitle className="text-base font-semibold text-foreground">Top SDRs</CardTitle>
             <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/50 mt-1">Produtividade individual</CardDescription>
           </CardHeader>
           <CardContent className="p-8 flex-1 flex flex-col">
@@ -224,7 +224,7 @@ export function DashboardPage() {
                       className="text-muted-foreground/60 uppercase tracking-tighter"
                     />
                     <Bar dataKey="leads" radius={[0, 8, 8, 0]} maxBarSize={30} className="fill-primary/20">
-                      <LabelList dataKey="leads" position="right" className="fill-primary font-black tabular-nums text-[12px]" />
+                      <LabelList dataKey="leads" position="right" className="fill-primary font-bold tabular-nums text-[12px]" />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
