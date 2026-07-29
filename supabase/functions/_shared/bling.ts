@@ -199,7 +199,34 @@ export function blingErrorMessage(status: number, body: string): string {
   }
 }
 
-/** Lista produtos (catálogo + saldo de estoque quando disponível). */
+/**
+ * Lista TODOS os produtos, paginando.
+ *
+ * `blingListProducts` busca uma página só (100 itens). Como o `buildBlingCatalog` usava
+ * essa função e depois SUBSTITUÍA o `catalog_cache` inteiro pelo resultado, abrir o
+ * /bi-vendas encolhia o catálogo de 156 para 100 produtos, e esse cache é compartilhado
+ * com a loja do site e com o bot de vendas. Os 56 que sobravam de fora sumiam até o
+ * keepalive do site reescrever.
+ *
+ * Devolve `truncado` para quem escreve poder decidir entre substituir e mesclar: nunca se
+ * deve substituir um catálogo inteiro por uma leitura que se sabe incompleta.
+ */
+export async function blingListAllProducts(
+  token: string,
+  opts?: { maxPaginas?: number },
+): Promise<{ produtos: Array<Record<string, unknown>>; truncado: boolean }> {
+  const maxPaginas = Math.max(1, Math.min(50, opts?.maxPaginas ?? 20))
+  const todos: Array<Record<string, unknown>> = []
+  for (let pagina = 1; pagina <= maxPaginas; pagina += 1) {
+    const lote = await blingListProducts(token, { limite: 100, pagina })
+    todos.push(...lote)
+    if (lote.length < 100) return { produtos: todos, truncado: false }
+  }
+  console.warn(`[bling] catálogo parou no teto de ${maxPaginas} páginas; leitura incompleta.`)
+  return { produtos: todos, truncado: true }
+}
+
+/** Lista produtos de UMA página (catálogo + saldo de estoque quando disponível). */
 export async function blingListProducts(
   token: string,
   opts?: { limite?: number; pagina?: number },
@@ -297,7 +324,7 @@ export async function buildBlingCatalog(
   try {
     const token = await getValidBlingToken(admin, tenantId)
     if (!token) return { items: cache, fetchedAt, fromCache: true }
-    const raw = await blingListProducts(token, { limite: 100 })
+    const { produtos: raw, truncado } = await blingListAllProducts(token)
     const ids = raw.map((p) => String(p.id ?? '')).filter(Boolean)
     const stock = await blingStockMap(token, ids)
     // Imagens já no cache (populadas pelo keepalive do site, que faz fetch detalhado): preserva
@@ -323,12 +350,26 @@ export async function buildBlingCatalog(
         gtin: String(p.gtin ?? '') || priorGtin.get(id) || '',
       }
     })
+    // TRAVA CONTRA ENCOLHIMENTO. Este cache é compartilhado com a loja do site e com o bot;
+    // substituí-lo por uma leitura incompleta tira produto do ar. Se a leitura veio truncada
+    // ou trouxe MENOS itens do que já havia, os que faltam são preservados do cache anterior
+    // em vez de sumirem. Só uma leitura completa pode remover produto.
+    const porId = new Map(items.map((i) => [i.id, i]))
+    let finais = items
+    if (truncado || items.length < cache.length) {
+      const preservados = cache.filter((c) => !porId.has(c.id))
+      finais = [...items, ...preservados]
+      console.warn(
+        `[bling] catálogo veio com ${items.length} itens contra ${cache.length} em cache` +
+          `${truncado ? ' (leitura truncada)' : ''}; ${preservados.length} preservados para não sumirem do bot e da loja.`,
+      )
+    }
     const nowIso = new Date().toISOString()
     await admin.from('tenant_integrations').upsert({
       tenant_id: tenantId,
-      bling: { ...cfg, catalog_cache: items, catalog_fetched_at: nowIso },
+      bling: { ...cfg, catalog_cache: finais, catalog_fetched_at: nowIso },
     })
-    return { items, fetchedAt: nowIso, fromCache: false }
+    return { items: finais, fetchedAt: nowIso, fromCache: false }
   } catch {
     return { items: cache, fetchedAt, fromCache: true }
   }
