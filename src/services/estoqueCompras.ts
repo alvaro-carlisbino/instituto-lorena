@@ -1,3 +1,4 @@
+import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { supabase } from '@/lib/supabaseClient'
 
 // Estoque + Compras + Contas a pagar. Todas as tabelas são multi-tenant com
@@ -665,7 +666,7 @@ export async function createPayables(payload: {
       category_id: payload.categoryId || null,
       account_id: payload.accountId || null,
       amount_cents: payload.amountCents,
-      due_date: due.toISOString().slice(0, 10),
+      due_date: diaLocal(due),
       payment_method: payload.paymentMethod || null,
       barcode: i === 0 ? payload.barcode?.trim() || null : null,
       note: payload.note?.trim() || null,
@@ -729,7 +730,7 @@ export async function setPayableStatus(
   },
 ): Promise<void> {
   const client = assertClient()
-  const paidOn = pay?.paidOn ?? new Date().toISOString().slice(0, 10)
+  const paidOn = pay?.paidOn ?? hojeLocal()
   const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() }
   patch.paid_at = status === 'pago' ? new Date(`${paidOn}T12:00:00`).toISOString() : null
   if (status === 'pago' && pay?.accountId) patch.account_id = pay.accountId

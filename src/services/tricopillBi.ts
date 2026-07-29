@@ -34,6 +34,10 @@ export type TricopillBi = {
     por_dia: TricopillDayBucket[]
     estoque: Array<{ nome: string; codigo: string; estoque: number | null; preco: number }>
     error: string | null
+    /** true quando a listagem bateu no teto de páginas: o total exibido está incompleto. */
+    truncado?: boolean
+    /** Pedidos e valor por situação do Bling, para saber o que compõe o faturamento. */
+    por_situacao?: Array<{ situacao_id: number | null; pedidos: number; total_cents: number }>
   }
 }
 

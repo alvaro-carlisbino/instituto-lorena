@@ -1,3 +1,4 @@
+import { hojeLocal } from '@/lib/diaLocal'
 import { supabase } from '@/lib/supabaseClient'
 
 // Protocolos de tratamento da clínica (além do tratamento capilar):
@@ -204,7 +205,7 @@ export async function setLeadProtocolStatus(id: string, status: LeadProtocolStat
   const client = assertClient()
   const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() }
   if (status === 'concluido' || status === 'cancelado') {
-    patch.finished_on = new Date().toISOString().slice(0, 10)
+    patch.finished_on = hojeLocal()
   } else {
     patch.finished_on = null
   }

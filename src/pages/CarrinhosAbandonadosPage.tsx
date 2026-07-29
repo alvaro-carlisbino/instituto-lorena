@@ -1,3 +1,4 @@
+import { hojeLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useState } from 'react'
 import { Download, MessageCircle, RefreshCw, ShoppingCart } from 'lucide-react'
 
@@ -94,7 +95,7 @@ export function CarrinhosAbandonadosPage() {
       (c.valueCents / 100).toFixed(2).replace('.', ','),
       c.source ?? '', c.gclid ? 'sim' : '', c.lastSeen.slice(0, 16).replace('T', ' '), c.alreadyCustomer ? 'sim' : '',
     ])
-    downloadCsv(`carrinhos-abandonados-${new Date().toISOString().slice(0, 10)}.csv`, [header, ...body])
+    downloadCsv(`carrinhos-abandonados-${hojeLocal()}.csv`, [header, ...body])
   }
 
   return (

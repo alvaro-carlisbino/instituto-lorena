@@ -1,3 +1,4 @@
+import { diaLocal } from '@/lib/diaLocal'
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabaseClient'
 import { createPayables, type Payable } from '@/services/estoqueCompras'
@@ -35,6 +36,14 @@ function assertClient() {
   return supabase
 }
 
+/**
+ * NÃO trocar por `diaLocal` daqui.
+ *
+ * Isto normaliza valor vindo de PLANILHA, e o serial do Excel converte para meia-noite
+ * UTC (`(value - 25569) * 86400 * 1000`). Uma data sem hora já em meia-noite UTC fatiada
+ * como UTC dá o dia certo; convertida para America/Sao_Paulo daria o dia ANTERIOR, porque
+ * meia-noite UTC é 21h do dia anterior em Brasília. Aqui UTC é o correto.
+ */
 function toISODate(value: unknown): string | null {
   if (value == null || value === '') return null
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -165,7 +174,7 @@ export async function listGastos(opts?: {
     const [y, m] = opts.month.split('-').map(Number)
     const start = `${opts.month}-01`
     const endDate = new Date(y, m, 0)
-    const end = endDate.toISOString().slice(0, 10)
+    const end = diaLocal(endDate)
     query = query.gte('due_date', start).lte('due_date', end)
   }
   if (opts?.costCenter) query = query.eq('cost_center', opts.costCenter)

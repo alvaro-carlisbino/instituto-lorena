@@ -1,3 +1,4 @@
+import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { CalendarClock, Check, ChevronDown, FileCode, FileText, Paperclip, Plus, Receipt } from 'lucide-react'
@@ -152,7 +153,7 @@ export function ContasPagarPage() {
       // Sem duplicata a nota também vira conta a pagar (parcela única, vence na emissão) —
       // senão a compra à vista entra no estoque e nunca aparece no financeiro.
       setNfeCreatePayables(parsed.totalCents > 0)
-      setNfeSingleDue(parsed.issueDate ?? new Date().toISOString().slice(0, 10))
+      setNfeSingleDue(parsed.issueDate ?? hojeLocal())
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao ler o XML')
     } finally {
@@ -198,14 +199,14 @@ export function ContasPagarPage() {
     void load()
   }, [])
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = hojeLocal()
   const thisMonth = today.slice(0, 7)
 
   const kpis = useMemo(() => {
     const open = payables.filter((p) => p.status === 'aberto')
     const in7 = new Date()
     in7.setDate(in7.getDate() + 7)
-    const in7Key = in7.toISOString().slice(0, 10)
+    const in7Key = diaLocal(in7)
     return {
       overdueCents: open.filter((p) => p.dueDate < today).reduce((s, p) => s + p.amountCents, 0),
       next7Cents: open.filter((p) => p.dueDate >= today && p.dueDate <= in7Key).reduce((s, p) => s + p.amountCents, 0),
@@ -288,7 +289,7 @@ export function ContasPagarPage() {
   const openPayDialog = (p: Payable) => {
     setPayingPayable(p)
     setPayAccountId(p.accountId ?? '')
-    setPayDate(new Date().toISOString().slice(0, 10))
+    setPayDate(hojeLocal())
   }
 
   const confirmPay = async () => {

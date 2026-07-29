@@ -1,3 +1,4 @@
+import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { CalendarClock, Check, HandCoins, Plus } from 'lucide-react'
@@ -92,14 +93,14 @@ export function ContasReceberPage() {
     void load()
   }, [])
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = hojeLocal()
   const thisMonth = today.slice(0, 7)
 
   const kpis = useMemo(() => {
     const open = receivables.filter((r) => r.status === 'aberto')
     const in7 = new Date()
     in7.setDate(in7.getDate() + 7)
-    const in7Key = in7.toISOString().slice(0, 10)
+    const in7Key = diaLocal(in7)
     return {
       overdueCents: open.filter((r) => r.dueDate < today).reduce((s, r) => s + r.amountCents, 0),
       next7Cents: open.filter((r) => r.dueDate >= today && r.dueDate <= in7Key).reduce((s, r) => s + r.amountCents, 0),
@@ -152,7 +153,7 @@ export function ContasReceberPage() {
   const openReceiveDialog = (r: Receivable) => {
     setReceiving(r)
     setRecvAccountId(r.accountId ?? '')
-    setRecvDate(new Date().toISOString().slice(0, 10))
+    setRecvDate(hojeLocal())
   }
 
   const confirmReceive = async () => {

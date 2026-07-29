@@ -1,3 +1,4 @@
+import { diaLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { ArrowDownUp, Boxes, CalendarClock, FileDown, FileBarChart2, Flame } from 'lucide-react'
@@ -28,7 +29,7 @@ const formatBRL = (cents: number): string =>
 const csvCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
 const csvRow = (cells: unknown[]) => cells.map(csvCell).join(';')
 
-const ymd = (d: Date) => d.toISOString().slice(0, 10)
+const ymd = (d: Date) => diaLocal(d)
 const firstDayOfMonth = () => {
   const d = new Date()
   d.setDate(1)

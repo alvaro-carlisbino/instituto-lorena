@@ -1,3 +1,4 @@
+import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { supabase } from '@/lib/supabaseClient'
 import type { Payable } from '@/services/estoqueCompras'
 
@@ -369,7 +370,7 @@ export async function createReceivables(payload: {
       category_id: payload.categoryId || null,
       account_id: payload.accountId || null,
       amount_cents: Math.round(payload.amountCents),
-      due_date: due.toISOString().slice(0, 10),
+      due_date: diaLocal(due),
       method: payload.method || null,
       note: payload.note?.trim() || null,
     }
@@ -385,7 +386,7 @@ export async function receiveReceivable(
 ): Promise<void> {
   const client = assertClient()
   const accountId = opts?.accountId ?? r.accountId
-  const receivedOn = opts?.receivedOn ?? new Date().toISOString().slice(0, 10)
+  const receivedOn = opts?.receivedOn ?? hojeLocal()
   const { error } = await client
     .from('fin_receivables')
     .update({

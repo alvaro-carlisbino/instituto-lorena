@@ -1,3 +1,4 @@
+import { hojeLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { FileSpreadsheet, Plus, RefreshCw, Search, Upload } from 'lucide-react'
@@ -45,7 +46,7 @@ function currentMonth(): string {
 }
 
 const EMPTY_FORM = {
-  date: new Date().toISOString().slice(0, 10),
+  date: hojeLocal(),
   counterparty: '',
   paymentMethod: 'PIX - Pagamentos Instantâneos',
   costCenter: 'Administrativo',

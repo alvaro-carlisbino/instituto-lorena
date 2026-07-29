@@ -1,3 +1,4 @@
+import { diaLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Boxes, Plus, ArrowDownToLine, ArrowUpFromLine, History, ScanBarcode, ShieldAlert } from 'lucide-react'
@@ -193,8 +194,8 @@ export function EstoquePage() {
     const today = new Date()
     const in30 = new Date()
     in30.setDate(in30.getDate() + 30)
-    const todayYmd = today.toISOString().slice(0, 10)
-    const in30Ymd = in30.toISOString().slice(0, 10)
+    const todayYmd = diaLocal(today)
+    const in30Ymd = diaLocal(in30)
     const nameById = new Map(items.map((i) => [i.id, i.name] as const))
     return batches
       .filter((b) => b.qty > 0 && b.expiresOn && b.expiresOn <= in30Ymd)

@@ -1,3 +1,4 @@
+import { hojeLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { FileText, RefreshCw, ShieldAlert, CheckCircle2, XCircle, Loader2, Settings2 } from 'lucide-react'
@@ -26,11 +27,9 @@ import { useTenant } from '@/context/TenantContext'
 // marca as que quer, e emite todas de uma vez pelo Bling. Cada linha volta com o desfecho
 // (número da nota ou o motivo da rejeição do SEFAZ). Só o polo Tricopill tem Bling/NF-e.
 
-const todayStr = () => {
-  const d = new Date()
-  const off = d.getTimezoneOffset() * 60000
-  return new Date(d.getTime() - off).toISOString().slice(0, 10)
-}
+// Usa o fuso DO NEGÓCIO, não o do navegador: o relatório é da clínica em Maringá mesmo
+// quando alguém abre de outro fuso.
+const todayStr = () => hojeLocal()
 const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const fmtCpf = (v: string) => {
   const d = String(v ?? '').replace(/\D/g, '')

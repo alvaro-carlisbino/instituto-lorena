@@ -1,3 +1,4 @@
+import { diaLocal } from '@/lib/diaLocal'
 import { useEffect, useId, useMemo, useState } from 'react'
 import {
   Bar,
@@ -40,7 +41,7 @@ const QUICK_RANGES = [
 ]
 
 function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  return diaLocal(d)
 }
 
 function StatCard({ label, value, tone }: { label: string; value: number | string; tone?: string }) {
@@ -198,9 +199,20 @@ export function AnalyticsV2Panel() {
           </p>
           <div className="grid grid-cols-3 gap-3">
             <StatCard label="Leads com consulta" value={sf?.leads_agendados ?? 0} tone="text-amber-600" />
-            <StatCard label="Compareceram" value={sf?.leads_comparecidos ?? 0} tone="text-emerald-600" />
+            <StatCard label="Compareceram (estimado)" value={sf?.leads_comparecidos ?? 0} tone="text-emerald-600" />
             <StatCard label="No-show" value={sf?.leads_no_show ?? 0} tone="text-destructive" />
           </div>
+          {/* A Shosp NÃO registra comparecimento: em toda a base só existem os status
+              Agendado, Confirmado, Desmarcado e Faltou. "Compareceu" é sempre dedução, e
+              como a dedução compara a hora de AGORA com um status que pode estar congelado,
+              o número cresce sozinho: foi de 11 para 25 entre 09/07 e 28/07 sem nenhuma
+              informação nova entrar. Isso é limite da fonte, não defeito do CRM, e a tela
+              precisa dizer. */}
+          <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+            "Compareceram" é estimativa, não registro: a Shosp grava agendamento e cancelamento,
+            nunca presença. O número deduz que a consulta aconteceu quando a data passou e ninguém
+            cancelou, então ele sobe sozinho com o tempo, mesmo sem dado novo.
+          </p>
         </div>
       </div>
 

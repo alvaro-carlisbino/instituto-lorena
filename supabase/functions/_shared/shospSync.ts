@@ -5,6 +5,7 @@ import {
   shospCallCount,
   shospGetAgenda,
   shospIsRateLimited,
+  shospRateLimitDetalhe,
   shospListEspecialidades,
   shospListPlanosSaude,
   shospListPrestadores,
@@ -639,7 +640,14 @@ export async function runShospSync(
     // O número de chamadas até o 429 separa dois problemas MUITO diferentes: estourar
     // depois de dezenas de chamadas é ritmo (dá para espaçar), estourar na primeira é
     // conta bloqueada ou cota do período esgotada, e aí nenhum ajuste de código resolve.
-    notes = `rate_limited em ${nowIso()}: a API da Shosp devolveu 429 "Limit Exceeded" na chamada ${shospCallCount()} desta rodada. Nenhum dado novo entrou.`
+    // Guarda a resposta LITERAL: é o que diferencia ritmo, cota do período e conta
+    // bloqueada, e é o que se leva para a Shosp em vez de "está dando 429".
+    const detalhe = shospRateLimitDetalhe()
+    const extra = [
+      detalhe.body ? `Resposta: ${detalhe.body}` : '',
+      detalhe.headers ? `Cabeçalhos: ${detalhe.headers}` : '',
+    ].filter(Boolean).join(' | ')
+    notes = `rate_limited em ${nowIso()}: a API da Shosp devolveu 429 na chamada ${shospCallCount()} desta rodada. Nenhum dado novo entrou.${extra ? ` ${extra}` : ''}`
   } else if (pediuAgendamento && apptsIngeridos === 0) {
     console.error(`[shosp-sync] rodada sem ingestão após ${shospCallCount()} chamadas`)
     notes = `sem ingestão em ${nowIso()}: a rodada terminou sem 429, mas nenhum agendamento entrou em ${shospCallCount()} chamadas. O espelho continua com a data anterior.`

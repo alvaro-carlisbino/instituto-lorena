@@ -1,3 +1,4 @@
+import { diaLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { TrendingUp, TrendingDown, Wallet } from 'lucide-react'
@@ -42,7 +43,7 @@ export function FluxoCaixaPage() {
     const d = new Date()
     d.setMonth(d.getMonth() - MONTHS_BACK)
     d.setDate(1)
-    return d.toISOString().slice(0, 10)
+    return diaLocal(d)
   }, [])
 
   const load = async () => {

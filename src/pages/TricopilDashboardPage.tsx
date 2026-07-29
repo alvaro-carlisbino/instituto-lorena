@@ -1,3 +1,4 @@
+import { diaLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -60,7 +61,7 @@ const SOURCE_LABELS: Record<string, string> = {
 }
 
 function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  return diaLocal(d)
 }
 function shortDay(iso: string): string {
   const [, m, d] = iso.split('-')
@@ -272,7 +273,7 @@ export function TricopilDashboardPage() {
           value={bling?.connected ? formatBRL(bling.faturamento_cents) : '—'}
           hint={
             bling?.connected
-              ? `${bling.pedidos} pedidos · ticket ${formatBRL(bling.ticket_medio_cents)}`
+              ? `${bling.pedidos} pedidos · ticket ${formatBRL(bling.ticket_medio_cents)}${bling.truncado ? ' · lista cortada' : ''}`
               : 'Bling não conectado'
           }
           tone="text-emerald-600"
@@ -593,6 +594,38 @@ export function TricopilDashboardPage() {
           )}
         </div>
       </section>
+
+      {/* Composição do faturamento por situação do pedido.
+          O card "Faturamento Bling" é um número único e opaco: ele soma pedido cancelado
+          (2 em julho) e pedido "Em aberto" (R$ 152 mil em 12 meses) junto com venda
+          concluída. Decidir o que conta como receita é do negócio, não do código, então a
+          tela mostra a composição em vez de embutir a escolha em silêncio. */}
+      {bling?.connected && (bling.por_situacao ?? []).length > 0 ? (
+        <section className="mt-6 rounded-xl border border-border bg-card p-4">
+          <h3 className="text-sm font-semibold">O que compõe o faturamento</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Situação do pedido no Bling. O card acima soma todas: se alguma não deveria contar como
+            receita, é aqui que dá para ver o peso dela antes de decidir.
+          </p>
+          <ul className="mt-3 grid gap-1.5 text-xs">
+            {(bling.por_situacao ?? []).map((s) => (
+              <li key={String(s.situacao_id)} className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">
+                  Situação {s.situacao_id ?? 'sem código'}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  {s.pedidos} {s.pedidos === 1 ? 'pedido' : 'pedidos'} · {formatBRL(s.total_cents)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {bling.truncado ? (
+            <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-500">
+              A listagem do Bling bateu no teto de páginas: os valores acima estão incompletos.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       {bling?.connected && bling.error ? (
         <p className="mt-6 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700">

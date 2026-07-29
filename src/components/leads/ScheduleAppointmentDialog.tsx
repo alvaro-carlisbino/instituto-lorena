@@ -1,3 +1,4 @@
+import { diaLocal } from '@/lib/diaLocal'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Calendar, Clock } from 'lucide-react'
@@ -65,7 +66,7 @@ export function ScheduleAppointmentDialog({ isOpen, onClose, leadId, onScheduled
     const end = new Date()
     end.setDate(end.getDate() + 14) // look 14 days ahead
     
-    const ymd = (d: Date) => d.toISOString().slice(0, 10)
+    const ymd = (d: Date) => diaLocal(d)
     
     try {
       const slot = await findFirstFreeSlot({

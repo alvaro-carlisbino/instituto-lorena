@@ -58,10 +58,28 @@ export type ShospResult = {
  */
 let callCount = 0
 let rateLimited = false
+/** Resposta LITERAL do primeiro 429, para diferenciar cota, plano e conta bloqueada. */
+let rateLimitedBody = ''
+/** Cabeçalhos de cota que a API devolver no 429 (Retry-After, X-RateLimit-*). */
+let rateLimitedHeaders = ''
 
 export function shospResetCallStats(): void {
   callCount = 0
   rateLimited = false
+  rateLimitedBody = ''
+  rateLimitedHeaders = ''
+}
+
+/**
+ * O que a Shosp respondeu no 429, cru.
+ *
+ * "429" sozinho não distingue três situações muito diferentes: ritmo alto demais (some
+ * espaçando as chamadas), cota do período esgotada (some virando o mês, ou comprando mais)
+ * e conta bloqueada (não some sozinha). O corpo e os cabeçalhos costumam dizer qual é, e
+ * essa é a informação que falta para cobrar o fornecedor em vez de seguir tentando.
+ */
+export function shospRateLimitDetalhe(): { body: string; headers: string } {
+  return { body: rateLimitedBody, headers: rateLimitedHeaders }
 }
 
 export function shospCallCount(): number {
@@ -75,8 +93,20 @@ export function shospIsRateLimited(): boolean {
 
 async function parseResult(res: Response): Promise<ShospResult> {
   callCount++
-  if (res.status === 429) rateLimited = true
   const text = await res.text()
+  if (res.status === 429) {
+    rateLimited = true
+    if (!rateLimitedBody) {
+      rateLimitedBody = text.slice(0, 400)
+      const interessantes = ['retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset', 'ratelimit-reset']
+      const achados: string[] = []
+      res.headers.forEach((v, k) => {
+        if (interessantes.includes(k.toLowerCase())) achados.push(`${k}=${v}`)
+      })
+      rateLimitedHeaders = achados.join(' ')
+      console.error(`[shosp] 429 na chamada ${callCount}. Corpo: ${rateLimitedBody} | Cabeçalhos: ${rateLimitedHeaders}`)
+    }
+  }
   let data: unknown = text
   try {
     data = text ? JSON.parse(text) : null

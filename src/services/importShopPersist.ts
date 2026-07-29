@@ -1,3 +1,4 @@
+import { hojeLocal } from '@/lib/diaLocal'
 import { supabase } from '@/lib/supabaseClient'
 import { createReceivables } from '@/services/financeiro'
 import type { ShopImportRow } from '@/services/importShop'
@@ -14,7 +15,7 @@ export async function createPayablesFromImport(
   const client = assertClient()
   let receivables = 0
   let payables = 0
-  const today = new Date().toISOString().slice(0, 10)
+  const today = hojeLocal()
 
   for (const r of rows) {
     const due = r.date || today

@@ -1,3 +1,4 @@
+import { hojeLocal } from '@/lib/diaLocal'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CheckCircle2, ChevronDown, ChevronRight, Download, ExternalLink, FileText, PackageCheck, Plus, RefreshCw, Search, Truck, Upload, X } from 'lucide-react'
@@ -436,7 +437,7 @@ export function TricopilOrdersPage() {
         p.method === 'card' ? nm.label : 'Pix (sem NF)', p.nfeNumero ?? '', persistedTracking(p),
       ]
     })
-    const stamp = new Date().toISOString().slice(0, 10)
+    const stamp = hojeLocal()
     downloadCsv(`pedidos-tricopill-${stamp}.csv`, [header, ...body])
     toast.success(`${filtered.length} pedido${filtered.length === 1 ? '' : 's'} exportado${filtered.length === 1 ? '' : 's'}.`)
   }

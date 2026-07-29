@@ -1,3 +1,4 @@
+import { diaLocal } from '@/lib/diaLocal'
 import { supabase } from '@/lib/supabaseClient'
 
 // Analytics de feedback/avaliação: lê survey_responses (nota+comentário) + survey_dispatches
@@ -35,8 +36,9 @@ function isoDay(d: Date): string {
   return new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' }).format(d)
 }
 function dayKey(iso: string): string {
-  // chave AAAA-MM-DD em horário de Brasília (UTC-3)
-  return new Date(new Date(iso).getTime() - 3 * 3_600_000).toISOString().slice(0, 10)
+  // Era `- 3 * 3_600_000` fixo. Funciona enquanto o Brasil não tiver horário de verão;
+  // o helper resolve pelo fuso e não depende disso.
+  return diaLocal(iso)
 }
 
 export async function fetchFeedbackAnalytics(tenantId: string, days: number): Promise<FeedbackAnalytics> {
