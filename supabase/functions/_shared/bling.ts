@@ -403,7 +403,10 @@ export function pickBlingFormaPagamento(
   const credito = formas.filter((f) => f.tipoPagamento === 3)
   if (!credito.length) return null
   const n = Math.max(1, Math.min(12, Math.round(Number(installments) || 1)))
-  const aVista = credito.find((f) => /(\bà\s*vista\b|\ba\s*vista\b)/i.test(f.descricao))
+  // `/\bà vista\b/` NÃO funciona: `\b` do JS é fronteira de [A-Za-z0-9_] e `à` fica de fora, então
+  // "Cartão de Crédito à vista" não casava e TODA venda 1x caía no primeiro crédito da lista
+  // (que é "Cartão de Crédito 10x", ordenada alfabeticamente pelo Bling). Basta procurar "vista".
+  const aVista = credito.find((f) => /vista/i.test(f.descricao))
   if (n <= 1) return (aVista ?? credito[0]).id
   const exata = credito.find((f) => new RegExp(`(^|\\D)${n}x(\\D|$)`, 'i').test(f.descricao))
   return (exata ?? aVista ?? credito[0]).id
