@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { getValidBlingToken, blingListSaleOrdersDetalhado, buildBlingCatalog } from '../_shared/bling.ts'
+import { brPhoneVariants } from '../_shared/crm.ts'
 
 // BI do Tricopill — agrega 3 fontes para o polo de vendas ativo (current_tenant_id):
 //   1) Funil/CRM  -> leads por estágio, por origem, conversão para "pago"
@@ -15,8 +16,22 @@ function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 }
 
+const FUSO_NEGOCIO = 'America/Sao_Paulo'
+
+/**
+ * Dia de CALENDÁRIO no fuso do negócio.
+ *
+ * Era `String(d).slice(0, 10)`, ou seja, o dia em UTC. Às 21h de Brasília já é o dia
+ * seguinte em UTC, então: (a) a janela enviada ao Bling puxava o dia seguinte inteiro
+ * (junho fechava com R$ 82.407,58 em 202 pedidos quando eram R$ 78.108,58 em 193, e os
+ * 9 extras de 01/07 contavam DE NOVO em julho); e (b) o gráfico por dia misturava
+ * calendários, porque o checkout usava dia UTC e o Bling dia local.
+ */
 function isoDay(d: string): string {
-  return String(d ?? '').slice(0, 10)
+  const t = new Date(d)
+  if (Number.isNaN(t.getTime())) return String(d ?? '').slice(0, 10)
+  // 'en-CA' formata como YYYY-MM-DD.
+  return t.toLocaleDateString('en-CA', { timeZone: FUSO_NEGOCIO })
 }
 
 // "pago" = estágio final de venda (ex.: tricopill__vd-pago).
@@ -149,21 +164,23 @@ Deno.serve(async (req) => {
   const [pagbankRes, redeRes, asaasRes] = await Promise.all([
     admin
       .from('pagbank_checkouts')
-      .select('amount_cents, kit, status, created_at, paid_at, coupon_code, discount_cents')
+      .select('amount_cents, kit, status, created_at, paid_at, coupon_code, discount_cents, phone, lead_id')
       .eq('tenant_id', tenantId),
     admin
       .from('rede_payments')
       // `method` estava fora do select, e por isso o código não tinha como separar PIX de
       // cartão nesta tabela: jogava tudo no balde de cartão.
-      .select('amount_cents, method, installments, status, created_at, paid_at, kit, coupon_code, discount_cents')
+      .select('amount_cents, method, installments, status, created_at, paid_at, kit, coupon_code, discount_cents, phone, lead_id')
       .eq('tenant_id', tenantId),
     admin
       .from('asaas_payments')
-      .select('amount_cents, method, installments, status, created_at, paid_at, kit, coupon_code, discount_cents')
+      .select('amount_cents, method, installments, status, created_at, paid_at, kit, coupon_code, discount_cents, phone, lead_id')
       .eq('tenant_id', tenantId),
   ])
   type CheckoutRow = {
     amount_cents: number | null
+    phone?: string | null
+    lead_id?: string | null
     installments?: number | null
     status: string | null
     created_at: string | null
@@ -221,6 +238,58 @@ Deno.serve(async (req) => {
     couponMap.set(c, v)
   }
 
+  /**
+   * DEDUPLICAÇÃO. A mesma venda costuma virar 2 ou 3 registros: o link real mais a
+   * confirmação manual, e às vezes PIX e cartão do mesmo pedido. Sem isto o card
+   * "Recebido (checkout)" contava cada linha: junho mostrava R$ 18.402,52 em 39 vendas
+   * quando eram R$ 17.124,52 em 36. Caso concreto de 16/06: R$ 612,00 do mesmo cliente
+   * registrados às 16:50 (link) e às 17:33 (confirmação manual), com só 2 autorizações
+   * reais na Rede naquele dia.
+   *
+   * Mesmo critério de identidade já usado em `crmSalesReport.ts`: telefone, senão lead,
+   * senão o kit. Duas linhas com a mesma identidade e o MESMO valor são a mesma venda.
+   */
+  // O telefone do LEAD resolve o caso em que os dois registros da mesma venda não têm
+  // nenhum campo em comum: o do gateway traz telefone e nenhum lead, o manual traz lead e
+  // nenhum telefone. Sem isto eles nunca se encontram.
+  const leadIdsCheckout = [...new Set(
+    [...pixSource, ...cardSource].map((r) => String(r.lead_id ?? '')).filter(Boolean),
+  )]
+  const telefonePorLead = new Map<string, string>()
+  if (leadIdsCheckout.length > 0) {
+    const { data: leadsTel } = await admin
+      .from('leads').select('id, phone').in('id', leadIdsCheckout)
+    for (const l of (leadsTel ?? []) as Array<{ id: string; phone: string | null }>) {
+      if (l.phone) telefonePorLead.set(l.id, l.phone)
+    }
+  }
+
+  /**
+   * Todas as chaves possíveis de uma linha. Uma linha com telefone E lead registra as duas,
+   * para casar com outra que só tenha uma delas.
+   *
+   * `brPhoneVariants` (o mesmo do resto do sistema) resolve o formato: o gateway grava
+   * "4499260766" e o cadastro do lead "554499260766". São a mesma pessoa.
+   */
+  const chavesDe = (r: CheckoutRow): string[] => {
+    const chaves: string[] = []
+    const tel = String(r.phone ?? '') || telefonePorLead.get(String(r.lead_id ?? '')) || ''
+    for (const v of brPhoneVariants(tel)) chaves.push(`T:${v}`)
+    if (r.lead_id) chaves.push(`L:${r.lead_id}`)
+    if (chaves.length === 0) chaves.push(`K:${String(r.kit ?? '').trim().toLowerCase()}`)
+    return chaves
+  }
+
+  const vistos = new Set<string>()
+  /** true na PRIMEIRA vez que esta venda aparece; false nas repetições. */
+  const primeiraVez = (r: CheckoutRow): boolean => {
+    const cents = r.amount_cents ?? 0
+    const chaves = chavesDe(r).map((c) => `${c}|${cents}`)
+    if (chaves.some((c) => vistos.has(c))) return false
+    for (const c of chaves) vistos.add(c)
+    return true
+  }
+
   // PIX/PagBank
   let pixPagos = 0
   let pixCents = 0
@@ -228,7 +297,7 @@ Deno.serve(async (req) => {
   const pixDayRows: Array<{ day: string; cents: number }> = []
   for (const r of pixSource) {
     if (inRange(r.created_at)) pixGerados += 1
-    if (isPaid(r.status, r.paid_at) && inRange(r.paid_at ?? r.created_at)) {
+    if (isPaid(r.status, r.paid_at) && inRange(r.paid_at ?? r.created_at) && primeiraVez(r)) {
       const cents = r.amount_cents ?? 0
       pixPagos += 1
       pixCents += cents
@@ -246,7 +315,7 @@ Deno.serve(async (req) => {
   const cardDayRows: Array<{ day: string; cents: number }> = []
   for (const r of cardSource) {
     if (inRange(r.created_at)) cardGerados += 1
-    if (isPaid(r.status, r.paid_at) && inRange(r.paid_at ?? r.created_at)) {
+    if (isPaid(r.status, r.paid_at) && inRange(r.paid_at ?? r.created_at) && primeiraVez(r)) {
       const cents = r.amount_cents ?? 0
       cardPagos += 1
       cardCents += cents
