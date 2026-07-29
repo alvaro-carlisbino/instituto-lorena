@@ -153,7 +153,9 @@ Deno.serve(async (req) => {
       .eq('tenant_id', tenantId),
     admin
       .from('rede_payments')
-      .select('amount_cents, installments, status, created_at, paid_at, kit, coupon_code, discount_cents')
+      // `method` estava fora do select, e por isso o código não tinha como separar PIX de
+      // cartão nesta tabela: jogava tudo no balde de cartão.
+      .select('amount_cents, method, installments, status, created_at, paid_at, kit, coupon_code, discount_cents')
       .eq('tenant_id', tenantId),
     admin
       .from('asaas_payments')
@@ -171,11 +173,22 @@ Deno.serve(async (req) => {
     discount_cents: number | null
   }
   const pagbank = (pagbankRes.data ?? []) as CheckoutRow[]
-  const rede = (redeRes.data ?? []) as CheckoutRow[]
+  const rede = (redeRes.data ?? []) as Array<CheckoutRow & { method: string | null }>
   const asaas = (asaasRes.data ?? []) as Array<CheckoutRow & { method: string | null }>
-  // Asaas vivo somado ao histórico: pix (PagBank + Asaas pix), cartão (e.Rede + Asaas card).
-  const pixSource: CheckoutRow[] = [...pagbank, ...asaas.filter((r) => String(r.method ?? '') !== 'card')]
-  const cardSource: CheckoutRow[] = [...rede, ...asaas.filter((r) => String(r.method ?? '') === 'card')]
+
+  // A e.Rede processa PIX desde 20/jun. Antes desta correção a tabela `rede_payments`
+  // inteira ia para o balde "cartão", sem olhar a coluna `method`: 51 pagamentos PIX
+  // (R$ 23.734) apareciam como cartão. O total ficava certo e a divisão invertida, que é
+  // pior do que errar os dois, porque o número fecha e ninguém desconfia.
+  const ehCartao = (r: { method: string | null }) => String(r.method ?? '') === 'card'
+
+  // PagBank é PIX por natureza (checkout PIX); Rede e Asaas se declaram em `method`.
+  const pixSource: CheckoutRow[] = [
+    ...pagbank,
+    ...rede.filter((r) => !ehCartao(r)),
+    ...asaas.filter((r) => !ehCartao(r)),
+  ]
+  const cardSource: CheckoutRow[] = [...rede.filter(ehCartao), ...asaas.filter(ehCartao)]
 
   const startMs = Date.parse(startIso)
   const endMs = Date.parse(endIso)

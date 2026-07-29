@@ -496,9 +496,15 @@ export async function syncAppointments(admin: SupabaseClient, limit = 25): Promi
     }
   }
 
-  // Só carimba se a rodada realmente falou com a Shosp. Carimbar depois de um 429
-  // é o que fazia o painel jurar que sincronizou hoje com dado parado em 09/jul.
-  if (!shospIsRateLimited()) {
+  // O carimbo significa "dado NOVO entrou", não "eu tentei".
+  //
+  // A guarda anterior era só `!shospIsRateLimited()`, e a bandeira de 429 é por invocação:
+  // uma rodada que não estourou a cota mas também não trouxe nenhum agendamento carimbava
+  // sucesso do mesmo jeito. Foi assim que em 28/jul o estado dizia "sincronizado às 11:00"
+  // com o espelho parado em 09/jul, 19 dias, e o painel exibindo a foto velha como se
+  // fosse de hoje. Exigir `appts > 0` amarra o carimbo ao único fato que interessa: a
+  // Shosp respondeu com agendamento.
+  if (!shospIsRateLimited() && appts > 0) {
     await admin.from('shosp_sync_state').update({ last_appointments_sync_at: nowIso() }).eq('id', 'default')
   }
   return { leads: (leads ?? []).length, appts, advanced }
@@ -591,7 +597,8 @@ export async function syncFullAgenda(
     }
   }
   }
-  if (!shospIsRateLimited()) {
+  // Mesma regra do `syncAppointments`: carimba só se agendamento realmente entrou.
+  if (!shospIsRateLimited() && appts > 0) {
     await admin.from('shosp_sync_state').update({ last_appointments_sync_at: nowIso() }).eq('id', 'default')
   }
   return { appts, prestadores: presList.length, unidades: unidades.length }
@@ -614,15 +621,29 @@ export async function runShospSync(
   // alguém perceber que a integração estava morta. `notes` é lido no painel.
   result.shosp_calls = shospCallCount()
   result.rate_limited = shospIsRateLimited()
+
+  // Quantos agendamentos realmente entraram nesta rodada, somando os dois passos que
+  // escrevem em `shosp_appointments`.
+  const apptsIngeridos =
+    Number((result.appointments as { appts?: number } | undefined)?.appts ?? 0) +
+    Number((result.full_agenda as { appts?: number } | undefined)?.appts ?? 0)
+  result.appts_ingeridos = apptsIngeridos
+
+  // `notes` é o que a operação lê para saber se pode confiar no número. Antes só o 429
+  // deixava rastro: uma rodada que terminava sem trazer nada limpava o campo e ficava
+  // indistinguível de uma rodada saudável.
+  const pediuAgendamento = steps.includes('appointments') || steps.includes('full_agenda')
+  let notes: string | null = null
   if (shospIsRateLimited()) {
-    console.error(`[shosp-sync] COTA ESTOURADA (HTTP 429) após ${shospCallCount()} chamadas — nada foi sincronizado`)
-    await admin
-      .from('shosp_sync_state')
-      .update({ notes: `rate_limited em ${nowIso()} — a API da Shosp devolveu 429 "Limit Exceeded". Nenhum dado novo entrou.` })
-      .eq('id', 'default')
-      .then(() => {}, () => {})
-  } else {
-    await admin.from('shosp_sync_state').update({ notes: null }).eq('id', 'default').then(() => {}, () => {})
+    console.error(`[shosp-sync] COTA ESTOURADA (HTTP 429) após ${shospCallCount()} chamadas, nada foi sincronizado`)
+    // O número de chamadas até o 429 separa dois problemas MUITO diferentes: estourar
+    // depois de dezenas de chamadas é ritmo (dá para espaçar), estourar na primeira é
+    // conta bloqueada ou cota do período esgotada, e aí nenhum ajuste de código resolve.
+    notes = `rate_limited em ${nowIso()}: a API da Shosp devolveu 429 "Limit Exceeded" na chamada ${shospCallCount()} desta rodada. Nenhum dado novo entrou.`
+  } else if (pediuAgendamento && apptsIngeridos === 0) {
+    console.error(`[shosp-sync] rodada sem ingestão após ${shospCallCount()} chamadas`)
+    notes = `sem ingestão em ${nowIso()}: a rodada terminou sem 429, mas nenhum agendamento entrou em ${shospCallCount()} chamadas. O espelho continua com a data anterior.`
   }
+  await admin.from('shosp_sync_state').update({ notes }).eq('id', 'default').then(() => {}, () => {})
   return result
 }

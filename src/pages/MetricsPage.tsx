@@ -45,7 +45,10 @@ export function MetricsPage() {
 
   if (!crm.currentPermission.canRouteLeads) {
     return (
-      <AppLayout title="Métricas">
+      <AppLayout
+      title="Metas"
+      subtitle="Valores digitados à mão por você, não apurados pelo sistema. Para número medido, use Resultados ou Análise do funil."
+    >
         <Card className="shadow-sm">
           <CardContent className="pt-6 text-sm text-muted-foreground">
             <p className="m-0">Seu perfil não pode editar metas.</p>
@@ -56,7 +59,10 @@ export function MetricsPage() {
   }
 
   return (
-    <AppLayout title="Métricas">
+    <AppLayout
+      title="Metas"
+      subtitle="Valores digitados à mão por você, não apurados pelo sistema. Para número medido, veja Resultados ou Análise do funil."
+    >
       <SubTabs tabs={DADOS_TABS} />
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={() => { crm.addMetric(); toast.success('Métrica criada.') }}>
@@ -73,7 +79,14 @@ export function MetricsPage() {
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {crm.metrics.map((metric) => {
-            const performance = metric.target > 0 ? Math.round((metric.value / metric.target) * 100) : 0
+            // Para minutos, MENOR é melhor (tempo de primeira resposta). Sem inverter,
+            // 11 min contra uma meta de 8 aparecia como 138% em verde, quando na verdade
+            // a meta foi estourada e o certo é 73%.
+            const menorEhMelhor = metric.unit === 'minutes'
+            const performance =
+              metric.target > 0
+                ? Math.round((menorEhMelhor ? metric.target / Math.max(metric.value, 0.0001) : metric.value / metric.target) * 100)
+                : 0
 
             return (
               <Card key={metric.id} className="shadow-sm">

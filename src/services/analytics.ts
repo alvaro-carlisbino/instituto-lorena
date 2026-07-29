@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient'
+import { buscarTudo } from '@/lib/supabasePaginate'
 
 export type AnalyticsSummary = {
   total_leads: number
@@ -206,28 +207,55 @@ export type ShospApptRow = { status: string; data: string; lead_id: string | nul
 /** Agendamentos com DATA da consulta dentro de [startYmd, endYmd] (inclusive). */
 export async function fetchShospAppointmentsBetween(startYmd: string, endYmd: string): Promise<ShospApptRow[]> {
   if (!supabase) return []
+  return buscarTudo<ShospApptRow>(() =>
+    supabase!
+      .from('shosp_appointments')
+      .select('status, data, lead_id')
+      .gte('data', startYmd)
+      .lte('data', endYmd)
+      .order('codigo_agendamento', { ascending: true }),
+    { rotulo: 'shosp_appointments (janela)' },
+  )
+}
+
+export type ShospFrescor = { ultimoSync: string | null; diasAtras: number | null }
+
+/**
+ * Quando o espelho da agenda foi escrito pela última vez.
+ *
+ * Fonte é `max(synced_at)` da própria tabela, e NÃO `shosp_sync_state.last_appointments_sync_at`:
+ * esse campo marca "tentei", não "consegui", e ficou carimbado com a data de hoje durante os
+ * 20 dias em que a cota da Shosp esteve estourada e nada entrou.
+ */
+export async function fetchShospFrescor(): Promise<ShospFrescor> {
+  if (!supabase) return { ultimoSync: null, diasAtras: null }
   const { data, error } = await supabase
     .from('shosp_appointments')
-    .select('status, data, lead_id')
-    .gte('data', startYmd)
-    .lte('data', endYmd)
-    .limit(5000)
+    .select('synced_at')
+    .order('synced_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
   if (error) throw new Error(error.message)
-  return (data as ShospApptRow[]) ?? []
+  const ultimoSync = (data as { synced_at: string } | null)?.synced_at ?? null
+  if (!ultimoSync) return { ultimoSync: null, diasAtras: null }
+  const diasAtras = Math.floor((Date.now() - new Date(ultimoSync).getTime()) / 86_400_000)
+  return { ultimoSync, diasAtras }
 }
 
 /** IDs de leads que possuem ao menos um agendamento (qualquer data). Base do
- *  numerador da conversão lead→consulta. Tabela é pequena (~1k linhas). */
+ *  numerador da conversão lead→consulta. */
 export async function fetchLeadIdsWithAppointment(): Promise<Set<string>> {
   if (!supabase) return new Set()
-  const { data, error } = await supabase
-    .from('shosp_appointments')
-    .select('lead_id')
-    .not('lead_id', 'is', null)
-    .limit(5000)
-  if (error) throw new Error(error.message)
+  const linhas = await buscarTudo<{ lead_id: string | null }>(() =>
+    supabase!
+      .from('shosp_appointments')
+      .select('lead_id')
+      .not('lead_id', 'is', null)
+      .order('codigo_agendamento', { ascending: true }),
+    { rotulo: 'shosp_appointments (lead_id)' },
+  )
   const set = new Set<string>()
-  for (const row of (data as Array<{ lead_id: string | null }>) ?? []) {
+  for (const row of linhas) {
     if (row.lead_id) set.add(row.lead_id)
   }
   return set

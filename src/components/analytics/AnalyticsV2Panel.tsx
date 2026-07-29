@@ -190,9 +190,9 @@ export function AnalyticsV2Panel() {
         </div>
         <div>
           <p className="mb-2 text-xs font-medium text-muted-foreground">
-            Consultas com data no período{' '}
+            Consultas com data no período
             <span className="font-normal">
-             , conta pelo dia em que a consulta acontece, não pelo dia em que foi marcada (a Shosp não informa quando o
+              , conta pelo dia em que a consulta acontece, não pelo dia em que foi marcada (a Shosp não informa quando o
               agendamento foi feito). São leads do CRM já vinculados a um paciente da Shosp.
             </span>
           </p>

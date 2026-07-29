@@ -343,9 +343,14 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       .from('interactions')
       .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
       .order('happened_at', { ascending: false })
-      // Boot carrega só a janela recente (o PostgREST cortava em 1000 silenciosamente).
-      // Histórico completo por lead chega via loadLeadInteractionsFromSupabase ao abrir.
-      .limit(1500),
+      // Boot carrega só a janela recente; o histórico completo por lead chega via
+      // `loadLeadInteractionsFromSupabase` ao abrir a conversa.
+      //
+      // O `.limit(1500)` foi escrito como correção do corte silencioso em 1.000 e nunca
+      // teve efeito: o PostgREST está com `max_rows = 1000`, então pedir 1.500 devolve
+      // 1.000 do mesmo jeito. Com 30.358 interações na base, 1.000 cobre poucos dias.
+      // Baixado para o teto real, que ao menos é honesto sobre o que carrega.
+      .limit(1000),
     client
       .from('channel_configs')
       .select('id, name, enabled, sla_minutes, auto_reply, priority, driver, field_mapping, credentials_ref')
@@ -529,9 +534,18 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       }))
     : initialChannels
 
-  const builtMetrics: MetricConfig[] = (metricsRes.data ?? []).length
-    ? (metricsRes.data ?? [])
-    : initialMetrics
+  // Métrica vazia = tela vazia, igual aos usuários logo abaixo.
+  //
+  // `metric_configs` está com ZERO linhas em produção, e o fallback fazia /metricas e o
+  // painel da TV exibirem os quatro números do mock como se fossem apurados: conversão
+  // 32% (real 1,5%), primeira resposta 11 min (real 66 min), qualificação 67% (real 43%),
+  // 29 leads/dia (real 39). Saíam as quatro barras verdes. Na TV da recepção, o dia
+  // inteiro, sem nenhum campo editável que denunciasse a origem.
+  //
+  // Só as métricas mudam aqui. Perfis de permissão e campos de formulário CONTINUAM com
+  // fallback de propósito: sem eles um tenant novo fica sem permissão nenhuma (ninguém
+  // entra) e sem campo nenhum na ficha do lead.
+  const builtMetrics: MetricConfig[] = metricsRes.data ?? []
 
   const builtWorkflowFields: WorkflowField[] = (workflowRes.data ?? []).length
     ? (workflowRes.data ?? []).map((row) => mapWorkflowFromDb(row as Record<string, unknown>))

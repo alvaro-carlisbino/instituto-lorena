@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient'
+import { buscarTudo } from '@/lib/supabasePaginate'
 
 // Analytics da LOJA Tricopill (storefront). Lê comportamento gravado pelo site na tabela
 // public.storefront_events (RLS liberado p/ "authenticated") + a view agregada
@@ -6,7 +7,6 @@ import { supabase } from '@/lib/supabaseClient'
 // Agregação on-demand no front (mesmo padrão de fetchTricopillPaidOrders).
 
 const TENANT = 'tricopill'
-const ROW_LIMIT = 50000
 
 export type StorefrontEventType =
   | 'view_page'
@@ -93,20 +93,27 @@ export async function fetchLojaAnalytics(params: {
 }): Promise<LojaAnalytics | null> {
   if (!supabase) return null
 
-  let query = supabase
-    .from('storefront_events')
-    .select('type, product_id, product_name, value_cents, session_id, path, created_at')
-    .eq('tenant_id', TENANT)
-    .order('created_at', { ascending: true })
-    .limit(ROW_LIMIT)
+  // Era `.limit(50000)` numa tacada. O PostgREST corta em 1.000 sem avisar, e como a
+  // ordem é crescente o corte descartava os eventos MAIS RECENTES: a tela de "30 dias"
+  // na verdade parava em 10/07 e mostrava 470 sessões onde havia 2.958, com receita de
+  // R$ 4.616 onde eram R$ 10.453. O sintoma que denunciava sozinho era a aba "Tudo"
+  // exibir menos sessões que a de 30 dias.
+  const eventos = await buscarTudo<RawEvent>(
+    () => {
+      let query = supabase!
+        .from('storefront_events')
+        .select('type, product_id, product_name, value_cents, session_id, path, created_at')
+        .eq('tenant_id', TENANT)
+        .order('created_at', { ascending: true })
+        .order('session_id', { ascending: true })
+      if (params.start) query = query.gte('created_at', params.start.toISOString())
+      if (params.end) query = query.lte('created_at', params.end.toISOString())
+      return query
+    },
+    { rotulo: 'storefront_events', maxPaginas: 60 },
+  )
 
-  if (params.start) query = query.gte('created_at', params.start.toISOString())
-  if (params.end) query = query.lte('created_at', params.end.toISOString())
-
-  const { data, error } = await query
-  if (error) throw new Error(error.message || 'Falha ao carregar os eventos da loja.')
-
-  return aggregate((data ?? []) as RawEvent[])
+  return aggregate(eventos)
 }
 
 /**

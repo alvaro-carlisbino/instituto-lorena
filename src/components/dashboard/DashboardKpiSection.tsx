@@ -11,7 +11,9 @@ import {
   fetchLeadIdsWithAppointment,
   fetchLeadIdsWithShospLink,
   fetchShospAppointmentsBetween,
+  fetchShospFrescor,
   type ShospApptRow,
+  type ShospFrescor,
 } from '@/services/analytics'
 import { cn } from '@/lib/utils'
 
@@ -46,7 +48,10 @@ function windowFor(key: RangeKey): { start: Date; end: Date; prevStart: Date; pr
     return { start, end: now, prevStart, prevEnd }
   }
   const days = key === '7d' ? 7 : 30
-  const span = days * 86_400_000
+  // `(days - 1)`: com `days` cheio, "7 dias" começava 7 dias atrás E incluía hoje, ou seja,
+  // varria 8 datas (e "30 dias" varria 31). A janela anterior tinha o mesmo tamanho errado,
+  // então a comparação parecia coerente enquanto os dois lados estavam inflados.
+  const span = (days - 1) * 86_400_000
   const start = startOfDay(new Date(now.getTime() - span))
   const prevEnd = new Date(start.getTime() - 1)
   const prevStart = startOfDay(new Date(prevEnd.getTime() - span))
@@ -144,6 +149,9 @@ export function DashboardKpiSection() {
   const [appts, setAppts] = useState<ShospApptRow[]>([])
   const [linkedLeadIds, setLinkedLeadIds] = useState<Set<string>>(new Set())
   const [shospLinkedIds, setShospLinkedIds] = useState<Set<string>>(new Set())
+  // Frescor do espelho da agenda. Sem isto, o Painel mostrava a foto de 09/07 como se
+  // fosse de hoje, com "0 faltas" em verde, durante os 20 dias de cota estourada da Shosp.
+  const [frescor, setFrescor] = useState<ShospFrescor>({ ultimoSync: null, diasAtras: null })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -157,6 +165,7 @@ export function DashboardKpiSection() {
     if (isSalesPolo) {
       setAppts([])
       setLinkedLeadIds(new Set())
+      setFrescor({ ultimoSync: null, diasAtras: null })
       setLoading(false)
       setError(null)
       return
@@ -168,12 +177,14 @@ export function DashboardKpiSection() {
       fetchShospAppointmentsBetween(ymd(win.prevStart), ymd(win.end)),
       fetchLeadIdsWithAppointment(),
       fetchLeadIdsWithShospLink(),
+      fetchShospFrescor(),
     ])
-      .then(([rows, linked, shospLinked]) => {
+      .then(([rows, linked, shospLinked, fresco]) => {
         if (cancelled) return
         setAppts(rows)
         setLinkedLeadIds(linked)
         setShospLinkedIds(shospLinked)
+        setFrescor(fresco)
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Falha ao carregar a agenda.')
@@ -328,6 +339,12 @@ export function DashboardKpiSection() {
   }, [novosCurr, linkedLeadIds])
   const maxMidia = Math.max(1, ...midia.rows.map((r) => r.total))
 
+  // 1 dia já basta: a agenda muda todo dia, então um espelho de ontem já engana.
+  const agendaVelha = !isSalesPolo && (frescor.diasAtras ?? 0) >= 1
+  const ultimoSyncLabel = frescor.ultimoSync
+    ? new Date(frescor.ultimoSync).toLocaleDateString('pt-BR')
+    : null
+
   return (
     <section className="mb-10">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -360,15 +377,28 @@ export function DashboardKpiSection() {
         <p className="mb-3 rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p>
       ) : null}
 
+      {/* O espelho da agenda congela quando a cota da Shosp estoura. Enquanto isso, os
+          cards de consulta seriam a foto do último sync. Avisar e apagar o número é o
+          contrário de mostrar "0 faltas" em verde, que é o que acontecia. */}
+      {agendaVelha ? (
+        <p role="alert" className="mb-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-500">
+          Agenda da Shosp sem sincronizar há {frescor.diasAtras} dia{(frescor.diasAtras ?? 0) > 1 ? 's' : ''}
+          {ultimoSyncLabel ? ` (última atualização em ${ultimoSyncLabel})` : ''}. Os cards de consulta ficam sem número
+          até a sincronização voltar, porque o que existe aqui é a foto daquela data.
+        </p>
+      ) : null}
+
       <div className={cn('grid gap-4 sm:grid-cols-2', isSalesPolo ? null : 'xl:grid-cols-4')}>
         {!isSalesPolo ? (
           <KpiCard
             label="Consultas agendadas"
-            value={apptCurr.agendadas}
+            value={agendaVelha ? '—' : apptCurr.agendadas}
             sub={
-              apptCurr.faltas + apptCurr.desmarcadas > 0
-                ? `${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} desmarcadas`
-                : 'agenda da clínica (Shosp)'
+              agendaVelha
+                ? `sem dado desde ${ultimoSyncLabel ?? 'o último sync'}`
+                : apptCurr.faltas + apptCurr.desmarcadas > 0
+                  ? `${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} desmarcadas`
+                  : 'agenda da clínica (Shosp)'
             }
             icon={CalendarCheck2}
             loading={loading}
@@ -377,9 +407,13 @@ export function DashboardKpiSection() {
         {!isSalesPolo ? (
           <KpiCard
             label="Conversão lead → consulta"
-            value={`${conversao}%`}
-            sub={`${vinculados} de ${novosCurr.length} novos leads vincularam consulta`}
-            trend={trendPP(conversao, conversaoPrev)}
+            value={agendaVelha ? '—' : `${conversao}%`}
+            sub={
+              agendaVelha
+                ? `depende da agenda, parada desde ${ultimoSyncLabel ?? 'o último sync'}`
+                : `${vinculados} de ${novosCurr.length} novos leads vincularam consulta`
+            }
+            trend={agendaVelha ? null : trendPP(conversao, conversaoPrev)}
             icon={TrendingUp}
             loading={loading}
           />
@@ -406,9 +440,13 @@ export function DashboardKpiSection() {
         {!isSalesPolo ? (
           <KpiCard
             label="Faltas + desmarques"
-            value={`${perdaCurr}%`}
-            sub={`${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} desmarcadas no período`}
-            trend={perdaTrend}
+            value={agendaVelha ? '—' : `${perdaCurr}%`}
+            sub={
+              agendaVelha
+                ? `sem dado desde ${ultimoSyncLabel ?? 'o último sync'}`
+                : `${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} desmarcadas no período`
+            }
+            trend={agendaVelha ? null : perdaTrend}
             icon={CalendarX2}
             accent={perdaCurr > 15 ? 'text-rose-500' : undefined}
             loading={loading}

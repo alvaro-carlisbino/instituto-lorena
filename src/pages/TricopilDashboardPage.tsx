@@ -459,13 +459,13 @@ export function TricopilDashboardPage() {
       <section className="grid gap-4 lg:grid-cols-12">
         <div className="grid content-start gap-4 sm:grid-cols-2 lg:col-span-7">
           <StatCard
-            label="PIX (Asaas)"
+            label="PIX"
             value={formatBRL(checkout?.pix.total_cents ?? 0)}
             hint={`${checkout?.pix.pagos ?? 0} pagos · ${checkout?.pix.gerados ?? 0} links gerados`}
             tone="text-emerald-600"
           />
           <StatCard
-            label="Cartão (Asaas)"
+            label="Cartão"
             value={formatBRL(checkout?.cartao.total_cents ?? 0)}
             hint={`${checkout?.cartao.pagos ?? 0} pagos · ${checkout?.cartao.parcelamento_medio ?? 0}x médio`}
             tone="text-primary"

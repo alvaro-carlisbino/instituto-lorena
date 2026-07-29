@@ -513,13 +513,13 @@ export function WhatsappConnectionPage() {
                       Chave webhook:{' '}
                       <span className="font-mono text-[0.7rem]">
                         {selectedInstance.manychatInstanceKey ?? '—'}
-                      </span>{' '}
-                     , id <span className="font-mono text-[0.7rem]">{selectedInstance.id}</span>
+                      </span>
+                      , id <span className="font-mono text-[0.7rem]">{selectedInstance.id}</span>
                     </>
                   ) : (
                     <>
-                      <span className="font-mono text-[0.7rem]">{selectedInstance.evolutionInstanceName ?? '—'}</span>{' '}
-                     , Evolution
+                      <span className="font-mono text-[0.7rem]">{selectedInstance.evolutionInstanceName ?? '—'}</span>
+                      , Evolution
                     </>
                   )}
                 </p>
