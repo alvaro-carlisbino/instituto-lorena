@@ -143,7 +143,7 @@ export function CrmAssistantChat({
       setLoading(false)
       if (!result.ok) {
         setMessages((prev) => prev.slice(0, -1))
-        setNotice([result.error, result.detail].filter(Boolean).join(' — '))
+        setNotice([result.error, result.detail].filter(Boolean).join(': '))
         scrollToEnd()
         return
       }

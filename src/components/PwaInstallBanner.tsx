@@ -68,7 +68,7 @@ export function PwaInstallBanner() {
   }
 
   return (
-    <div className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-w-md items-center gap-3 rounded-xl border border-border/60 bg-background/95 p-3 shadow-lg backdrop-blur-md sm:bottom-4 sm:inset-x-auto sm:right-4">
+    <div className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-w-md items-center gap-3 rounded-xl border border-border/60 bg-background/95 p-3 shadow-lg sm:bottom-4 sm:inset-x-auto sm:right-4">
       <Download className="size-5 shrink-0 text-primary" aria-hidden />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold">Instalar o CRM no celular</p>

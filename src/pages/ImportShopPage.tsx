@@ -63,7 +63,7 @@ export function ImportShopPage() {
   return (
     <AppLayout
       title="Importar planilha do shop"
-      subtitle="CSV do Excel com custos e pagamentos — mapeamento automático de colunas."
+      subtitle="CSV do Excel com custos e pagamentos, mapeamento automático de colunas."
     >
       <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
 

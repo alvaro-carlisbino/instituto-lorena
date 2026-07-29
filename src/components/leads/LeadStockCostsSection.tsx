@@ -91,7 +91,7 @@ export function LeadStockCostsSection({ leadId }: { leadId: string }) {
                   ? cost
                     ? `${formatBRL(cost.totalCostCents)}${cost.fullyCosted ? '' : ' (parcial)'}`
                     : 'sem custo registrado'
-                  : 'separado — aguardando consumo'}
+                  : 'separado, aguardando consumo'}
               </span>
             </div>
           )
@@ -101,7 +101,7 @@ export function LeadStockCostsSection({ leadId }: { leadId: string }) {
       {consumed.length > 0 ? (
         <div className="mt-2 flex items-center justify-between text-sm">
           <span className="text-xs text-muted-foreground">
-            Total em materiais {hasPartial ? '(parcial — há itens sem custo)' : ''}
+            Total em materiais {hasPartial ? '(parcial, há itens sem custo)' : ''}
           </span>
           <span className="font-semibold">{formatBRL(totalCents)}</span>
         </div>

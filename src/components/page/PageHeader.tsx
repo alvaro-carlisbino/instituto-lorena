@@ -39,7 +39,7 @@ export function PageHeader({ title, description, actions, className, titleId }: 
       {/* Ações da tela.
           No desktop quebram em linhas quando não cabem (melhor do que espremer o título).
           No celular viram UMA faixa rolável na horizontal: /pedidos tem quatro ações e,
-          empilhadas, o cabeçalho sozinho comia 340px dos 812 da tela — deslizar de lado
+          empilhadas, o cabeçalho sozinho comia 340px dos 812 da tela, deslizar de lado
           custa menos que perder metade do conteúdo. */}
       {actions ? (
         <div

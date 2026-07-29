@@ -268,7 +268,7 @@ export function ConciliacaoPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Conecte o banco uma vez (Pluggy ou Banco MCP) e o extrato entra sozinho — sem baixar arquivo.
+              Conecte o banco uma vez (Pluggy ou Banco MCP) e o extrato entra sozinho, sem baixar arquivo.
               O login é no banco; a gente nunca vê a senha.
             </p>
             {mcpBankName ? (
@@ -305,7 +305,7 @@ export function ConciliacaoPage() {
                   .filter((a) => a.ofAccountId)
                   .map((a) => (
                     <div key={a.id} className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span className="truncate">🔗 {a.name}</span>
+                      <span className="truncate">{a.name}</span>
                       <span className="shrink-0">
                         {a.ofLastSyncAt ? `sync ${new Date(a.ofLastSyncAt).toLocaleDateString('pt-BR')}` : 'aguardando'}
                       </span>

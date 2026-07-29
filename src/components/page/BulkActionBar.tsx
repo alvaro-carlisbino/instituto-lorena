@@ -35,7 +35,7 @@ export function BulkActionBar({
       aria-label="Ações em lote"
       className={cn(
         'sticky bottom-3 z-30 mx-auto flex w-fit max-w-full flex-wrap items-center gap-2 rounded-xl',
-        'border border-border bg-popover/95 px-3 py-2 shadow-lg backdrop-blur',
+        'border border-border bg-popover/95 px-3 py-2 shadow-lg ',
         'supports-[backdrop-filter]:bg-popover/90',
         className,
       )}

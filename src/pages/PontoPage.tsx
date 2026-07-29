@@ -240,7 +240,7 @@ export function PontoPage() {
       },
       () => {
         if (settings.enforceFence) {
-          toast.error('Não foi possível obter sua localização — libere o GPS para bater o ponto.')
+          toast.error('Não foi possível obter sua localização, libere o GPS para bater o ponto.')
           setPunching(false)
         } else {
           pendingGeo.current = { lat: null, lng: null, distanceM: null, withinFence: null }
@@ -257,7 +257,7 @@ export function PontoPage() {
     setSelfieOpen(false)
     try {
       await registerPunch({ employeeId: me.id, ...pendingGeo.current, selfieBlob: selfie })
-      toast.success(`Ponto registrado — ${nextIsEntrada ? 'entrada' : 'saída'} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`)
+      toast.success(`Ponto registrado, ${nextIsEntrada ? 'entrada' : 'saída'} às ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.`)
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao registrar o ponto')
@@ -284,7 +284,7 @@ export function PontoPage() {
   }
 
   return (
-    <AppLayout title="Meu ponto" subtitle="Registro de jornada com selfie e localização — o ponto só vale dentro da clínica.">
+    <AppLayout title="Meu ponto" subtitle="Registro de jornada com selfie e localização, o ponto só vale dentro da clínica.">
       {!loaded ? null : !me ? (
         <EmptyState
           icon={Fingerprint}

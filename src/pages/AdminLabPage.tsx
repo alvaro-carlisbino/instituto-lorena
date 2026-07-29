@@ -119,7 +119,7 @@ export function AdminLabPage() {
         }
         if (webhookSource === 'manychat') {
           if (d.accepted && d.routing === 'queued') {
-            toast.success('Pedido aceite — IA em segundo plano (modo ManyChat). Sincroniza o CRM daqui a pouco para ver a resposta.')
+            toast.success('Pedido aceite, IA em segundo plano (modo ManyChat). Sincroniza o CRM daqui a pouco para ver a resposta.')
           } else {
             toast.success(
               d.reply ? `Resposta IA (${(d.routing ?? '').trim() || 'ok'}).` : 'Pedido ManyChat processado (sem texto de IA).',

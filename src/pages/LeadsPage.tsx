@@ -474,7 +474,10 @@ export function LeadsPage() {
               return (
                 <li key={lead.id} className="p-6 transition-all active:bg-muted/20">
                   <div className="flex gap-4">
-                    <div className="pt-1">
+                    {/* shrink-0 no EMBRULHO, não só no Checkbox: o filho tem shrink-0, mas
+                        quem é item do flex é esta div, e sem isso ela era espremida a 2px de
+                        largura pelo texto ao lado. No celular ninguém conseguia selecionar. */}
+                    <div className="shrink-0 pt-1">
                       <Checkbox
                         checked={selectedLeadIds.includes(lead.id)}
                         onCheckedChange={() => toggleLeadSelection(lead.id)}
@@ -696,13 +699,13 @@ export function LeadsPage() {
       </BulkActionBar>
 
       <section className="grid gap-6 lg:grid-cols-2 mb-20">
-        <Card className="rounded-[2.5rem] border-border/30 bg-card/40 backdrop-blur-md overflow-hidden">
+        <Card className="rounded-xl border-border/30 bg-card/40 overflow-hidden">
           <CardHeader className="p-8 border-b border-border/10">
             <CardTitle className="text-sm font-semibold text-foreground">Importação (CSV)</CardTitle>
           </CardHeader>
           <CardContent className="p-8 flex flex-col gap-6">
             <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="sr-only" aria-label="Selecionar arquivo CSV de leads" onChange={onCsvInputChange} />
-            <div className="flex flex-col items-center justify-center border-2 border-dashed border-border/40 rounded-[2rem] p-8 transition-all hover:bg-muted/20">
+            <div className="flex flex-col items-center justify-center border-2 border-dashed border-border/40 rounded-xl p-8 transition-all hover:bg-muted/20">
               <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-4 text-xl">CSV</div>
               <Button type="button" variant="link" className="font-bold text-primary" onClick={() => csvInputRef.current?.click()}>
                 Selecionar Arquivo CSV
@@ -723,13 +726,13 @@ export function LeadsPage() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-[2.5rem] border-border/30 bg-card/40 backdrop-blur-md overflow-hidden">
+        <Card className="rounded-xl border-border/30 bg-card/40 overflow-hidden">
           <CardHeader className="p-8 border-b border-border/10">
             <CardTitle className="text-sm font-semibold text-foreground">Histórico de Conversas (JSON)</CardTitle>
           </CardHeader>
           <CardContent className="p-8 flex flex-col gap-6">
             <input ref={jsonInputRef} type="file" accept=".json,application/json" className="sr-only" aria-label="Selecionar arquivo JSON de conversas" onChange={onJsonInputChange} />
-            <div className="flex flex-col items-center justify-center border-2 border-dashed border-border/40 rounded-[2rem] p-8 transition-all hover:bg-muted/20">
+            <div className="flex flex-col items-center justify-center border-2 border-dashed border-border/40 rounded-xl p-8 transition-all hover:bg-muted/20">
               <div className="size-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 mb-4 text-xl">JSON</div>
               <Button type="button" variant="link" className="font-bold text-amber-600" onClick={() => jsonInputRef.current?.click()}>
                 Selecionar Arquivo JSON

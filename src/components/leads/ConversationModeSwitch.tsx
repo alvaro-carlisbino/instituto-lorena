@@ -122,7 +122,7 @@ export function ConversationModeSwitch({
       <div className="relative w-full max-w-2xl">
         {loading ? (
           <div
-            className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-background/60 backdrop-blur-sm dark:bg-background/80"
+            className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-background/60 dark:bg-background/80"
             aria-live="polite"
             aria-busy
           >

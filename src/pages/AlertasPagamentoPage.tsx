@@ -56,7 +56,7 @@ export function AlertasPagamentoPage() {
   return (
     <AppLayout
       title="Alertas de pagamento"
-      subtitle="Consultas agendadas sem pagamento — alerta para Luana e conciliação."
+      subtitle="Consultas agendadas sem pagamento, alerta para Luana e conciliação."
     >
       <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
 

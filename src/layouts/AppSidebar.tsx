@@ -13,6 +13,7 @@ import {
   searchDestinations,
   visibleDestinations,
   type NavDestination,
+  type NavGroupId,
 } from '@/config/navigation'
 import { useNavContext } from '@/hooks/useNavContext'
 import { useNavPrefs } from '@/hooks/useNavPrefs'
@@ -131,6 +132,27 @@ export function AppSidebar() {
   // de a lista ter ~50 linhas e exigir rolagem para chegar em Configuração.
   const activeGroup = destinationForPath(location.pathname)?.group
 
+  // Aberto/fechado é CONTROLADO, não `defaultOpen`: com defaultOpen o valor mudava a cada
+  // navegação (o grupo ativo muda) e o base-ui avisava que um Collapsible não controlado
+  // teve o padrão alterado depois de montado.
+  //
+  // O padrão é derivado (grupo da tela atual + Início). O que o usuário abre ou fecha na mão
+  // vira exceção temporária e é descartado ao trocar de tela, para a tela nova sempre abrir
+  // com o grupo dela à vista. Ajuste feito no render, e não num efeito, que é o caminho
+  // recomendado pelo React para estado que reage a uma mudança de valor.
+  const [overrides, setOverrides] = useState<Map<NavGroupId, boolean>>(() => new Map())
+  const [grupoAnterior, setGrupoAnterior] = useState(activeGroup)
+  if (activeGroup !== grupoAnterior) {
+    setGrupoAnterior(activeGroup)
+    setOverrides(new Map())
+  }
+
+  const isGroupOpen = (id: NavGroupId) => overrides.get(id) ?? (id === activeGroup || id === 'inicio')
+
+  const toggleGroup = (id: NavGroupId, open: boolean) => {
+    setOverrides((prev) => new Map(prev).set(id, open))
+  }
+
   return (
     <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border/50">
       <SidebarHeader className="px-3 py-3">
@@ -142,7 +164,7 @@ export function AppSidebar() {
                 className="min-w-0 flex-1 hover:bg-transparent"
                 render={<Link to="/dashboard" />}
               >
-                <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary p-1.5 shadow-lg shadow-primary/20 transition-transform hover:scale-105 active:scale-95">
+                <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary p-1.5 shadow-sm transition-transform ">
                   <img src={logoUrl} alt="" className="size-full object-contain brightness-0 invert" />
                 </div>
                 <div className="grid min-w-0 flex-1 text-left leading-tight">
@@ -163,7 +185,7 @@ export function AppSidebar() {
           <WorkspaceSwitcher />
         </div>
 
-        {/* Busca de telas — com ~50 destinos, procurar é mais rápido que percorrer a lista. */}
+        {/* Busca de telas, com ~50 destinos, procurar é mais rápido que percorrer a lista. */}
         <div className="relative px-1 pb-2 group-data-[collapsible=icon]:hidden">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-foreground/50" aria-hidden />
           <SidebarInput
@@ -240,7 +262,8 @@ export function AppSidebar() {
               ) : (
                 <Collapsible
                   key={group.id}
-                  defaultOpen={group.id === activeGroup || group.id === 'inicio'}
+                  open={isGroupOpen(group.id)}
+                  onOpenChange={(open) => toggleGroup(group.id, open)}
                   className="group/collapsible"
                 >
                   <SidebarGroup className="py-0.5">

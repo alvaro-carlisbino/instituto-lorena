@@ -59,7 +59,7 @@ function KpiCard({
 }) {
   const boa = variacao == null ? null : variacaoBoaSubindo ? variacao >= 0 : variacao <= 0
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-border/40 bg-card/60 p-6 backdrop-blur-sm">
+    <div className="relative overflow-hidden rounded-xl border border-border/40 bg-card/60 p-6 ">
       <div className="absolute top-0 right-0 p-5 opacity-[0.04]" aria-hidden>
         <Icon className="size-16" />
       </div>
@@ -147,7 +147,7 @@ export function ResultadosPage() {
             <h1 className="text-xl font-bold">Resultados comerciais</h1>
             <p className="text-xs text-muted-foreground">
               Quantos leads entraram, de onde vieram, quanto tempo levamos para responder e quem atendeu. Números do CRM
-              e do histórico de conversas — não dependem da Shosp.
+              e do histórico de conversas, não dependem da Shosp.
             </p>
           </div>
           <div className="flex gap-1">
@@ -179,7 +179,7 @@ export function ResultadosPage() {
                 {semResposta} leads ({semRespostaPct}%) não receberam nenhuma mensagem
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Entraram no CRM no período e ninguém — nem a IA nem a equipe — enviou uma única resposta. Veja em qual
+                Entraram no CRM no período e ninguém, nem a IA nem a equipe, enviou uma única resposta. Veja em qual
                 origem eles estão concentrados na tabela abaixo.
               </p>
             </div>
@@ -494,7 +494,7 @@ export function ResultadosPage() {
           </Card>
         </div>
 
-        {/* Qualidade da base — o antídoto contra número bonito sobre base vazia. */}
+        {/* Qualidade da base, o antídoto contra número bonito sobre base vazia. */}
         <Card className="border-dashed">
           <CardHeader>
             <CardTitle className="text-sm">O quanto dá para confiar nestes números</CardTitle>
@@ -502,7 +502,7 @@ export function ResultadosPage() {
           <CardContent className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
             <p>
               <span className="font-semibold text-foreground">{q?.com_campanha_pct ?? 0}%</span> dos leads têm campanha
-              identificada — o resto entra sem saber de qual anúncio veio.
+              identificada, o resto entra sem saber de qual anúncio veio.
             </p>
             <p>
               <span className="font-semibold text-foreground">{q?.com_motivo_perda_pct ?? 0}%</span> dos leads encerrados
@@ -510,7 +510,7 @@ export function ResultadosPage() {
             </p>
             <p>
               <span className="font-semibold text-foreground">{q?.com_vinculo_shosp_pct ?? 0}%</span> dos leads estão
-              vinculados a um paciente da Shosp — por isso esta tela não mede consulta nem comparecimento.
+              vinculados a um paciente da Shosp, por isso esta tela não mede consulta nem comparecimento.
             </p>
             <p>
               Agenda da Shosp sincronizada pela última vez{' '}

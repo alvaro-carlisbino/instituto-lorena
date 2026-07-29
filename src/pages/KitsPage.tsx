@@ -184,7 +184,7 @@ export function KitsPage() {
         controlledItemIds: controlledIds,
       })
       toast.success(
-        `Kit "${name}" montado${patientName ? ` para ${patientName}` : ''} — ` +
+        `Kit "${name}" montado${patientName ? ` para ${patientName}` : ''}, ` +
           `${movements} ${movements === 1 ? 'baixa' : 'baixas'} no estoque (FEFO)` +
           (controlled > 0 ? `, ${controlled} no livro de controlados` : '') +
           '.',
@@ -221,7 +221,7 @@ export function KitsPage() {
       const { restored } = await cancelKit(kit)
       toast.success(
         restored > 0
-          ? `Kit cancelado — ${restored} ${restored === 1 ? 'item devolvido' : 'itens devolvidos'} ao estoque.`
+          ? `Kit cancelado, ${restored} ${restored === 1 ? 'item devolvido' : 'itens devolvidos'} ao estoque.`
           : 'Kit cancelado.',
       )
       await load()
@@ -537,7 +537,7 @@ export function KitsPage() {
                         <div className="mt-1.5 text-xs font-medium">
                           Materiais: <span className="font-semibold">{formatBRL(realCost.totalCostCents)}</span>
                           {!realCost.fullyCosted ? (
-                            <span className="ml-1 text-muted-foreground">(parcial — há item sem custo)</span>
+                            <span className="ml-1 text-muted-foreground">(parcial, há item sem custo)</span>
                           ) : null}
                         </div>
                       ) : kit.status === 'montado' && estimate.cents > 0 ? (

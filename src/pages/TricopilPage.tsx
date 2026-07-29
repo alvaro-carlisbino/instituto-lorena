@@ -7,5 +7,5 @@ import { ChatWorkspacePage } from './ChatWorkspacePage'
  * supabase/functions/crm-ai-assistant/index.ts (SALES_MODE_BLOCK).
  */
 export function TricopilPage() {
-  return <ChatWorkspacePage title="Tricopill — Vendas" restrictToBotKind="sales" />
+  return <ChatWorkspacePage title="Tricopill, Vendas" restrictToBotKind="sales" />
 }

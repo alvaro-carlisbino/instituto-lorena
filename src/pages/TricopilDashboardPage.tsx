@@ -296,7 +296,7 @@ export function TricopilDashboardPage() {
         />
       </section>
 
-      {/* BLOCO 1 — Vendas & Faturamento */}
+      {/* BLOCO 1, Vendas & Faturamento */}
       <SectionTitle>Vendas & Faturamento</SectionTitle>
 
       <section className="mb-8 grid gap-4 lg:grid-cols-12">
@@ -375,7 +375,7 @@ export function TricopilDashboardPage() {
         </div>
       </section>
 
-      {/* BLOCO 2 — Funil comercial */}
+      {/* BLOCO 2, Funil comercial */}
       <SectionTitle>Funil comercial</SectionTitle>
 
       <section className="mb-8 grid gap-4 lg:grid-cols-12">
@@ -453,7 +453,7 @@ export function TricopilDashboardPage() {
         </p>
       </section>
 
-      {/* BLOCO 3 — Pagamentos */}
+      {/* BLOCO 3, Pagamentos */}
       <SectionTitle>Pagamentos</SectionTitle>
 
       <section className="grid gap-4 lg:grid-cols-12">

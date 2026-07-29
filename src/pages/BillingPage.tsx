@@ -193,7 +193,7 @@ export function BillingPage() {
         </div>
 
         <p className="text-[11px] text-muted-foreground">
-          Pagamento processado pela Stripe. Você pode cancelar a qualquer momento — o acesso
+          Pagamento processado pela Stripe. Você pode cancelar a qualquer momento, o acesso
           continua até o fim do período pago. Trial de 14 dias automático no primeiro signup.
         </p>
       </div>

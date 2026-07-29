@@ -134,7 +134,7 @@ export function LeadProtocolsSection({ leadId, leadName }: Props) {
 
       {protocols.length === 0 && !loading ? (
         <p className="mb-2 text-xs text-muted-foreground">
-          Nenhum protocolo para este paciente. Inicie um pelo catálogo — a gestão do catálogo fica
+          Nenhum protocolo para este paciente. Inicie um pelo catálogo, a gestão do catálogo fica
           em Protocolos, no menu.
         </p>
       ) : null}
@@ -192,7 +192,7 @@ export function LeadProtocolsSection({ leadId, leadName }: Props) {
       <div className="mt-2.5 flex flex-wrap gap-2">
         <Select value={selectedProtocolId || undefined} onValueChange={(v) => setSelectedProtocolId(v ?? '')}>
           <SelectTrigger className="h-9 flex-1 text-xs">
-            <SelectValue placeholder={catalog.length === 0 ? 'Catálogo vazio — cadastre em Protocolos' : 'Iniciar protocolo do catálogo…'} />
+            <SelectValue placeholder={catalog.length === 0 ? 'Catálogo vazio, cadastre em Protocolos' : 'Iniciar protocolo do catálogo…'} />
           </SelectTrigger>
           <SelectContent>
             {availableCatalog.map((c) => (

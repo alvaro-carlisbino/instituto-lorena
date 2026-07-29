@@ -101,7 +101,7 @@ export function AnalyticsPage() {
           <div>
             <h1 className="text-xl font-bold">Analytics</h1>
             <p className="text-xs text-muted-foreground">
-              Conversão, perdas e gargalos do funil — filtrado pela clínica atual, excluindo leads marcados como
+              Conversão, perdas e gargalos do funil, filtrado pela clínica atual, excluindo leads marcados como
               "fora das métricas".
             </p>
           </div>
@@ -206,7 +206,7 @@ export function AnalyticsPage() {
                 </CardHeader>
                 <CardContent>
                   {data.stuck_leads.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Nenhum lead parado — bom sinal.</p>
+                    <p className="text-xs text-muted-foreground">Nenhum lead parado, bom sinal.</p>
                   ) : (
                     <ul className="divide-y divide-border/40">
                       {data.stuck_leads.map((l) => (

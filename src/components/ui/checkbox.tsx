@@ -9,7 +9,11 @@ function Checkbox({ className, indeterminate, ...props }: CheckboxPrimitive.Root
       data-slot="checkbox"
       indeterminate={indeterminate}
       className={cn(
-        "peer size-4 shrink-0 cursor-pointer rounded-[5px] border border-input bg-background outline-none transition-[border-color,background-color,box-shadow] duration-150 after:absolute after:-inset-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground data-indeterminate:border-primary data-indeterminate:bg-primary data-indeterminate:text-primary-foreground data-disabled:cursor-not-allowed data-disabled:opacity-50 relative dark:bg-input/30 dark:data-checked:bg-primary",
+        // `inline-flex` é obrigatório, não estilo: o primitivo renderiza um <span>, e span
+        // é `display: inline` — que IGNORA width/height. Sem isto o `size-4` não valia nada
+        // e a caixa colapsava para ~2px de largura em toda a aplicação; em tela estreita
+        // (lista de leads no celular) não havia como acertar o toque.
+        "peer inline-flex size-4 shrink-0 items-center justify-center cursor-pointer rounded-[5px] border border-input bg-background outline-none transition-[border-color,background-color,box-shadow] duration-150 after:absolute after:-inset-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground data-indeterminate:border-primary data-indeterminate:bg-primary data-indeterminate:text-primary-foreground data-disabled:cursor-not-allowed data-disabled:opacity-50 relative dark:bg-input/30 dark:data-checked:bg-primary",
         className
       )}
       {...props}

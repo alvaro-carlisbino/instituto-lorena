@@ -530,7 +530,7 @@ export function LeadShipPage() {
               Vazio = caixa padrão do polo (0,3 kg · 20×20×10). Pra <b>4 frascos</b> use o peso real (≈ 0,6–1 kg) pra o preço bater.
             </p>
 
-            {/* Serviço — cotado de verdade; só aparece o que ATENDE o CEP/caixa */}
+            {/* Serviço, cotado de verdade; só aparece o que ATENDE o CEP/caixa */}
             <div className="space-y-1.5 rounded-lg border border-border/40 px-3 py-2.5 sm:max-w-2xl">
               <div className="flex items-center justify-between">
                 <Label htmlFor="sl-service" className="text-xs font-semibold">Serviço (frete real)</Label>

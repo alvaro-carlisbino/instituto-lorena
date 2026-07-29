@@ -238,6 +238,39 @@
   animation: crm-ai-indeterminate 1.35s ease-in-out infinite;
 }
 
+/*
+ * Alvo de toque em tela sem mouse (celular, tablet do balcão, TV).
+ *
+ * A interface é densa de propósito no desktop: botão `sm` tem 28px e `icon-sm` 28px, o que
+ * é ótimo com ponteiro e ruim com o dedo (a recomendação é 44px, e a equipe usa o CRM em pé,
+ * de celular na mão, entre atendimentos). Em vez de engordar tudo e perder densidade onde
+ * ela ajuda, o alvo cresce SÓ onde o ponteiro é grosseiro. `pointer: coarse` é o próprio
+ * dispositivo dizendo que é dedo, não mouse.
+ *
+ * Cresce a área clicável, não o desenho: por isso min-height/min-width, sem mudar fonte
+ * nem padding, para o layout não saltar.
+ */
+@media (pointer: coarse) {
+  button:not([data-slot='sidebar-menu-button']),
+  a[role='button'],
+  [role='checkbox'],
+  [role='radio'],
+  [role='switch'] {
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+  }
+
+  /* Alvo dentro de tabela e de linha de lista continua compacto: ali a linha inteira
+     costuma ser clicável e engordar cada célula quebraria a leitura da tabela. */
+  td button,
+  th button,
+  td [role='checkbox'],
+  th [role='checkbox'] {
+    min-height: 0;
+    min-width: 0;
+  }
+}
+
 @layer utilities {
   .skip-link {
     position: fixed;

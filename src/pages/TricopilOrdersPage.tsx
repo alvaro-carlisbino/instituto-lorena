@@ -985,7 +985,7 @@ export function TricopilOrdersPage() {
 
 function KpiCard({ label, value, tone, hint }: { label: string; value: string; tone?: string; hint?: string }) {
   return (
-    <div className="rounded-3xl border border-border/40 bg-card/50 p-5 transition-all hover:bg-card/80">
+    <div className="rounded-xl border border-border/40 bg-card/50 p-5 transition-all hover:bg-card/80">
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <p className={cn('mt-2 text-2xl font-bold tabular-nums tracking-tight', tone ?? 'text-foreground')}>{value}</p>
       {hint ? <p className="mt-1 text-[11px] text-muted-foreground/70">{hint}</p> : null}

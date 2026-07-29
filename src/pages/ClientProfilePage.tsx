@@ -60,7 +60,7 @@ export function ClientProfilePage() {
   const paidTotal = profile?.payments.filter((p) => isPaid(p.status)).reduce((s, p) => s + p.amountCents, 0) ?? 0
 
   return (
-    <AppLayout title="Ficha do paciente" subtitle="Visão consolidada: origem, jornada, feedback, notas e financeiro">
+    <AppLayout title="Ficha do paciente" subtitle="Origem, situação no funil, feedback, notas e financeiro">
       <SubTabs tabs={pacienteTabs()} />
       <div className="mb-6 w-full max-w-4xl">
         <PatientSearchField
@@ -69,7 +69,7 @@ export function ClientProfilePage() {
           onClear={() => setPicked(null)}
           size="xl"
           autoFocus
-          placeholder="Buscar entre ~1000 pacientes — digite nome ou telefone…"
+          placeholder="Buscar entre ~1000 pacientes, digite nome ou telefone…"
         />
       </div>
 
@@ -117,8 +117,8 @@ export function ClientProfilePage() {
             </Section>
           </div>
 
-          {/* jornada resumida */}
-          <Section icon={Route} title="Jornada">
+          {/* onde o paciente esta no funil */}
+          <Section icon={Route} title="Situação no funil">
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <Badge variant="outline">Entrou {new Date(profile.createdAt).toLocaleDateString('pt-BR')}</Badge>
               <span className="text-muted-foreground" aria-hidden>→</span>

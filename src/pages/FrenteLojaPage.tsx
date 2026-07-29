@@ -127,7 +127,7 @@ export function FrenteLojaPage() {
         customFields,
         shospProntuario: input.shospProntuario ?? null,
       })
-      toast.success('Cliente pronto — abrindo a venda.')
+      toast.success('Cliente pronto, abrindo a venda.')
       await goToSale(id)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao criar o cliente.')
@@ -154,7 +154,7 @@ export function FrenteLojaPage() {
   return (
     <AppLayout
       title="Frente de Loja"
-      subtitle="Venda de balcão — busca o cliente e leva pro fechamento com pedido no Bling."
+      subtitle="Venda de balcão, busca o cliente e leva pro fechamento com pedido no Bling."
     >
       <div className="grid gap-4">
         {tenant.poloType !== 'sales' ? (

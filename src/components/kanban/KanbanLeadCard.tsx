@@ -76,9 +76,9 @@ export function KanbanLeadCard({
   return (
     <div
       className={cn(
-        'group cursor-grab flex flex-col gap-2.5 rounded-2xl border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-lg active:cursor-grabbing hover:-translate-y-0.5',
+        'group cursor-grab flex flex-col gap-2.5 rounded-2xl border bg-card p-4 shadow-sm transition-all duration-200 hover:shadow-lg active:cursor-grabbing ',
         selected ? 'ring-2 ring-primary/30 border-primary/40 bg-primary/[0.02]' : 'border-border/60 hover:border-primary/40',
-        isSlaBreached && 'border-destructive/50 bg-destructive/[0.02] shadow-[0_0_15px_-5px_rgba(239,68,68,0.3)]'
+        isSlaBreached && 'border-destructive/50 bg-destructive/[0.02] '
       )}
       draggable
       onDragStart={(event) => {

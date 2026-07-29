@@ -197,7 +197,7 @@ export function ComprasPage() {
     try {
       const { stocked, skipped } = await receivePurchaseOrder(po)
       toast.success(
-        `${po.code} recebida — ${stocked} ${stocked === 1 ? 'item deu' : 'itens deram'} entrada no estoque` +
+        `${po.code} recebida, ${stocked} ${stocked === 1 ? 'item deu' : 'itens deram'} entrada no estoque` +
           (skipped > 0 ? ` (${skipped} sem vínculo, não movimentado)` : '') +
           '.',
       )
@@ -210,7 +210,7 @@ export function ComprasPage() {
   return (
     <AppLayout
       title="Ordens de compra"
-      subtitle="Abra por item, escolha o responsável e (opcional) o fornecedor — receber dá entrada no estoque."
+      subtitle="Abra por item, escolha o responsável e (opcional) o fornecedor, receber dá entrada no estoque."
     >
       <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
@@ -385,7 +385,7 @@ export function ComprasPage() {
               <EmptyState
                 icon={ClipboardList}
                 title={loading ? 'Carregando…' : 'Nenhuma ordem de compra'}
-                description="Comece pelos itens à esquerda — depois escolha responsável e fornecedor."
+                description="Comece pelos itens à esquerda, depois escolha responsável e fornecedor."
               />
             ) : (
               orders.map((po) => {

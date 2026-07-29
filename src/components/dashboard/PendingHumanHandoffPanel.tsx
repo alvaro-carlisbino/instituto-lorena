@@ -76,7 +76,7 @@ export function PendingHumanHandoffPanel() {
 
   const waiting = useMemo<WaitingItem[] | null>(() => {
     if (usingRpc) {
-      if (rpcRows === null) return null // ainda carregando — evita piscar verde→vermelho
+      if (rpcRows === null) return null // ainda carregando, evita piscar verde→vermelho
       return rpcRows.map((r) => ({
         id: r.lead_id,
         name: r.patient_name || 'Lead sem nome',
@@ -108,7 +108,7 @@ export function PendingHumanHandoffPanel() {
 
   if (count === 0) {
     return (
-      <div className="rounded-3xl border border-emerald-500/15 bg-emerald-500/[0.03] p-6">
+      <div className="rounded-xl border border-emerald-500/15 bg-emerald-500/[0.03] p-6">
         <div className="flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-2xl bg-emerald-500/10">
             <MessageSquare className="size-5 text-emerald-600" />
@@ -125,11 +125,11 @@ export function PendingHumanHandoffPanel() {
   return (
     <div
       className={cn(
-        'relative rounded-3xl border bg-card/60 p-6 shadow-lg',
+        'relative rounded-xl border bg-card/60 p-6 shadow-lg',
         'border-red-500/30 bg-red-500/[0.04] shadow-red-500/5',
       )}
     >
-      <div className="absolute inset-0 rounded-3xl ring-1 ring-red-500/20 animate-pulse pointer-events-none" />
+      <div className="absolute inset-0 rounded-xl ring-1 ring-red-500/20 animate-pulse pointer-events-none" />
       <div className="relative">
         <div className="flex items-start justify-between gap-4 mb-4">
           <div className="flex items-center gap-3">
@@ -184,7 +184,7 @@ export function PendingHumanHandoffPanel() {
 
         {overflow > 0 ? (
           <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground/70">
-            +{overflow} {overflow === 1 ? 'outro lead' : 'outros leads'} aguardando — veja todos no quadro.
+            +{overflow} {overflow === 1 ? 'outro lead' : 'outros leads'} aguardando, veja todos no quadro.
           </p>
         ) : null}
       </div>

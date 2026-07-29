@@ -173,11 +173,11 @@ export function AnalyticsV2Panel() {
         <p role="alert" className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-500">
           Agenda da Shosp sem sincronizar há {data?.agenda_sync?.dias_atras} dia
           {(data?.agenda_sync?.dias_atras ?? 0) > 1 ? 's' : ''} (última atualização em {ultimoSyncLabel}). Os números de
-          consulta abaixo são a foto daquela data — marcações e cancelamentos feitos depois ainda não entraram.
+          consulta abaixo são a foto daquela data, marcações e cancelamentos feitos depois ainda não entraram.
         </p>
       )}
 
-      {/* Resumo — dois blocos com contas DIFERENTES, explicitados pra não se lerem
+      {/* Resumo, dois blocos com contas DIFERENTES, explicitados pra não se lerem
           como a mesma coisa: leads criados no período × consultas do período. */}
       <div className="flex flex-col gap-3">
         <div>
@@ -192,7 +192,7 @@ export function AnalyticsV2Panel() {
           <p className="mb-2 text-xs font-medium text-muted-foreground">
             Consultas com data no período{' '}
             <span className="font-normal">
-              — conta pelo dia em que a consulta acontece, não pelo dia em que foi marcada (a Shosp não informa quando o
+             , conta pelo dia em que a consulta acontece, não pelo dia em que foi marcada (a Shosp não informa quando o
               agendamento foi feito). São leads do CRM já vinculados a um paciente da Shosp.
             </span>
           </p>

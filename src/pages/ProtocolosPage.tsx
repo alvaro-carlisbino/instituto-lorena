@@ -192,7 +192,7 @@ export function ProtocolosPage() {
   return (
     <AppLayout
       title="Protocolos de tratamento"
-      subtitle="Catálogo de protocolos da clínica e acompanhamento das sessões por paciente — além do tratamento capilar."
+      subtitle="Catálogo de protocolos da clínica e acompanhamento das sessões por paciente, além do tratamento capilar."
     >
       <div className="grid gap-4 xl:grid-cols-[minmax(0,380px)_1fr]">
         <div className="space-y-4">
@@ -399,7 +399,7 @@ export function ProtocolosPage() {
                 <EmptyState
                   icon={ListChecks}
                   title={loading ? 'Carregando…' : 'Nenhum paciente em protocolo'}
-                  description="Cadastre os protocolos da clínica no catálogo e inicie o acompanhamento por paciente — as sessões ficam registradas aqui e na ficha do lead."
+                  description="Cadastre os protocolos da clínica no catálogo e inicie o acompanhamento por paciente, as sessões ficam registradas aqui e na ficha do lead."
                 />
               ) : (
                 sortedProtocols.map((p) => {

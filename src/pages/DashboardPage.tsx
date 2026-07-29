@@ -86,14 +86,14 @@ export function DashboardPage() {
       actions={
         <div className="flex items-center gap-2">
           {crm.currentPermission.canRouteLeads ? (
-            <Link to="/kanban" className={cn(buttonVariants({ size: 'sm' }), 'bg-primary/90 hover:bg-primary shadow-lg shadow-primary/20 transition-all active:scale-95 rounded-xl px-4')}>
+            <Link to="/kanban" className={cn(buttonVariants({ size: 'sm' }), 'bg-primary/90 hover:bg-primary shadow-sm transition-all rounded-xl px-4')}>
               <KanbanSquare className="size-4 mr-2" />
               Ver Quadro
             </Link>
           ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger
-              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-xl border-border/40 bg-background/50 backdrop-blur-sm')}
+              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-xl border-border/40 bg-background/50 ')}
             >
               <MoreHorizontal className="size-4 mr-2" />
               Ações
@@ -129,7 +129,7 @@ export function DashboardPage() {
       <DashboardKpiSection />
 
       <section className="grid gap-8 lg:grid-cols-12">
-        <Card className="rounded-[2rem] border-border/30 bg-card/40 shadow-sm lg:col-span-8 overflow-hidden">
+        <Card className="rounded-xl border-border/30 bg-card/40 shadow-sm lg:col-span-8 overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between gap-4 p-8 border-b border-border/10">
             <div className="min-w-0">
               <CardTitle className="text-base font-semibold text-foreground">Funil de Vendas</CardTitle>
@@ -196,7 +196,7 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-[2rem] border-border/30 bg-card/40 shadow-sm lg:col-span-4 overflow-hidden flex flex-col">
+        <Card className="rounded-xl border-border/30 bg-card/40 shadow-sm lg:col-span-4 overflow-hidden flex flex-col">
           <CardHeader className="p-8 border-b border-border/10">
             <CardTitle className="text-base font-semibold text-foreground">Top SDRs</CardTitle>
             <CardDescription className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/50 mt-1">Produtividade individual</CardDescription>

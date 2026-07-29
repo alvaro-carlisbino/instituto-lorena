@@ -52,7 +52,7 @@ const BOARDS_HELP = [
     title: 'O que é um funil?',
     content: (
       <p>
-        Um funil representa uma jornada do lead, por exemplo "Consulta Inicial" ou "Cirurgia".
+        Um funil é um caminho que o paciente percorre, por exemplo "Consulta Inicial" ou "Cirurgia".
         Cada funil tem etapas que mostram em que fase o paciente está.
       </p>
     ),

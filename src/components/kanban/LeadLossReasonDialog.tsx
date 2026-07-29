@@ -95,7 +95,7 @@ export function LeadLossReasonDialog({ open, onOpenChange, onConfirm, patientNam
                 className={cn(
                   'h-auto whitespace-normal rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-tight',
                   selectedPreset === preset
-                    ? 'border-destructive bg-destructive text-destructive-foreground shadow-lg shadow-destructive/20 hover:bg-destructive hover:text-destructive-foreground'
+                    ? 'border-destructive bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive hover:text-destructive-foreground'
                     : 'border-border/50 bg-muted/50 text-muted-foreground hover:bg-muted/50 hover:border-destructive/30 hover:text-destructive',
                 )}
               >
@@ -130,7 +130,7 @@ export function LeadLossReasonDialog({ open, onOpenChange, onConfirm, patientNam
             variant="destructive"
             onClick={handleConfirm}
             disabled={!selectedPreset && !reason.trim()}
-            className="rounded-xl uppercase font-semibold text-xs shadow-lg shadow-destructive/20"
+            className="rounded-xl uppercase font-semibold text-xs shadow-sm"
           >
             {isCancellation ? 'Confirmar Cancelamento' : 'Confirmar Encerramento'}
           </Button>

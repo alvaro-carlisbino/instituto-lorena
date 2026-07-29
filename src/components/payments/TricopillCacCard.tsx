@@ -26,7 +26,7 @@ export function TricopillCacCard({ paidCount, revenueCents }: { paidCount: numbe
   }, [spend, paidCount, revenueCents])
 
   return (
-    <div className="rounded-3xl border border-border/40 bg-card/50 p-6 transition-all hover:bg-card/80">
+    <div className="rounded-xl border border-border/40 bg-card/50 p-6 transition-all hover:bg-card/80">
       <p className="mb-1 text-sm font-bold text-foreground/90">CAC &amp; ROAS</p>
       <p className="mb-4 text-[11px] text-muted-foreground">
         Digite quanto investiu em anúncios <b>neste período</b> pra ver o custo por venda e o retorno.

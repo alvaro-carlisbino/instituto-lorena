@@ -217,7 +217,7 @@ export function LojaTricopillPage() {
         </div>
       ) : (
         <>
-          {/* 1 — KPIs */}
+          {/* 1, KPIs */}
           <section className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
             <StatCard label="Sessões" value={k?.sessions ?? 0} hint="visitantes únicos no período" />
             <StatCard label="Viu produto" value={k?.viewItem ?? 0} hint="eventos view_item" tone="text-primary" />
@@ -232,7 +232,7 @@ export function LojaTricopillPage() {
             />
           </section>
 
-          {/* 2 — Funil de conversão */}
+          {/* 2, Funil de conversão */}
           <SectionTitle>Funil de conversão</SectionTitle>
           <section className="mb-8 rounded-xl border border-border bg-card p-6">
             {(data?.funnel.viewItem ?? 0) === 0 ? (
@@ -273,9 +273,9 @@ export function LojaTricopillPage() {
             </div>
           </section>
 
-          {/* 3 + 4 — Produtos & Páginas */}
+          {/* 3 + 4, Produtos & Páginas */}
           <section className="mb-8 grid gap-4 lg:grid-cols-12">
-            {/* Produtos mais acessados (view agregada — acumulado) */}
+            {/* Produtos mais acessados (view agregada, acumulado) */}
             <div className="rounded-xl border border-border bg-card p-6 lg:col-span-7">
               <div className="mb-4 flex items-center justify-between gap-2">
                 <p className="text-sm font-bold text-foreground/90">Produtos mais vistos</p>
@@ -363,7 +363,7 @@ export function LojaTricopillPage() {
             </div>
           </section>
 
-          {/* 5 — Linha do tempo */}
+          {/* 5, Linha do tempo */}
           <SectionTitle>Linha do tempo</SectionTitle>
           <section className="mb-8 rounded-xl border border-border bg-card p-6">
             <p className="mb-4 text-sm font-bold text-foreground/90">Eventos por dia</p>
@@ -397,7 +397,7 @@ export function LojaTricopillPage() {
             )}
           </section>
 
-          {/* 6 — Assinatura vs avulso */}
+          {/* 6, Assinatura vs avulso */}
           <SectionTitle>Assinatura vs avulso</SectionTitle>
           <section className="mb-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard

@@ -191,7 +191,7 @@ export function WhatsappConnectionPage() {
         connected: null,
         qrCode: '',
         error: '',
-        message: 'Esta linha atende pelo ManyChat — não há código QR nem Evolution neste ecrã.',
+        message: 'Esta linha atende pelo ManyChat, não há código QR nem Evolution neste ecrã.',
       })
       setLoadingAction(null)
       return
@@ -228,7 +228,7 @@ export function WhatsappConnectionPage() {
     try {
       const res = await evolutionInstanceLifecycle('create_instance', { instanceName: instanceNameRequest })
       if (!res.ok) {
-        toast.error(res.message || res.error || 'Não foi possível criar o número no servidor. O nome pode já existir — escolha outro.')
+        toast.error(res.message || res.error || 'Não foi possível criar o número no servidor. O nome pode já existir, escolha outro.')
         return
       }
       const evoName = (res.instance ?? instanceNameRequest).trim()
@@ -309,7 +309,7 @@ export function WhatsappConnectionPage() {
     const keyRaw = mcKey.trim() || suggestInstanceNameFromLabel(label)
     const key = sanitizeManychatKey(keyRaw)
     if (!key || key.length < 2) {
-      toast.error('Chave inválida — use letras minúsculas, números, _ ou - (ex.: sdr).')
+      toast.error('Chave inválida, use letras minúsculas, números, _ ou - (ex.: sdr).')
       return
     }
     setSavingInstance(true)
@@ -468,7 +468,7 @@ export function WhatsappConnectionPage() {
         <PageHelp title="Conexão">
           <p>
             Evolution: QR e webhook para WhatsApp directo ao CRM. ManyChat: configure linhas abaixo e envie{' '}
-            <span className="font-mono text-xs">crm_instance_key</span> no External Request — sem Evolution neste ecrã.
+            <span className="font-mono text-xs">crm_instance_key</span> no External Request, sem Evolution neste ecrã.
           </p>
         </PageHelp>
       }
@@ -514,12 +514,12 @@ export function WhatsappConnectionPage() {
                       <span className="font-mono text-[0.7rem]">
                         {selectedInstance.manychatInstanceKey ?? '—'}
                       </span>{' '}
-                      — id <span className="font-mono text-[0.7rem]">{selectedInstance.id}</span>
+                     , id <span className="font-mono text-[0.7rem]">{selectedInstance.id}</span>
                     </>
                   ) : (
                     <>
                       <span className="font-mono text-[0.7rem]">{selectedInstance.evolutionInstanceName ?? '—'}</span>{' '}
-                      — Evolution
+                     , Evolution
                     </>
                   )}
                 </p>
@@ -579,7 +579,7 @@ export function WhatsappConnectionPage() {
           </div>
 
           <div className="space-y-3 border-t border-border/60 pt-4">
-            <h3 className="m-0 text-sm font-semibold">Linha ManyChat (SDR / Meta — sem Evolution)</h3>
+            <h3 className="m-0 text-sm font-semibold">Linha ManyChat (SDR / Meta, sem Evolution)</h3>
             <p className="m-0 text-xs text-muted-foreground">
               Cria a linha aqui, define o prompt da IA abaixo em cada registo e envia no External Request o mesmo JSON com{' '}
               <span className="font-mono">crm_instance_key</span> igual à chave ou ao id da linha.
@@ -600,7 +600,7 @@ export function WhatsappConnectionPage() {
                   id="wa-mc-key"
                   value={mcKey}
                   onChange={(e) => setMcKey(e.target.value)}
-                  placeholder="ex.: sdr — omita para gerar automaticamente"
+                  placeholder="ex.: sdr, omita para gerar automaticamente"
                   className="font-mono text-xs"
                 />
               </div>
@@ -653,7 +653,7 @@ export function WhatsappConnectionPage() {
                   id="wa-wapi-label"
                   value={waLabel}
                   onChange={(e) => setWaLabel(e.target.value)}
-                  placeholder="ex.: Aline — Comercial TC"
+                  placeholder="ex.: Aline, Comercial TC"
                 />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
@@ -694,12 +694,12 @@ export function WhatsappConnectionPage() {
                     <SelectValue placeholder="Tipo de linha" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="clinic">Clínica (Sofia — Instituto Lorena, agenda)</SelectItem>
-                    <SelectItem value="sales">Vendas (atendente comercial — ex.: Tricopill)</SelectItem>
+                    <SelectItem value="clinic">Clínica (Sofia, Instituto Lorena, agenda)</SelectItem>
+                    <SelectItem value="sales">Vendas (atendente comercial, ex.: Tricopill)</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-[0.7rem] text-muted-foreground">
-                  Vendas troca a persona da IA: sem triagem de consulta nem agenda da clínica — foco em
+                  Vendas troca a persona da IA: sem triagem de consulta nem agenda da clínica, foco em
                   apresentar produto, tirar dúvidas e conduzir à compra.
                 </p>
               </div>
@@ -968,7 +968,7 @@ export function WhatsappConnectionPage() {
           </CardHeader>
           <CardContent>
             <p className="m-0 text-sm text-muted-foreground">
-              Esta linha atende pelo ManyChat — não há Evolution nem QR aqui. No External Request, inclua no JSON o campo{' '}
+              Esta linha atende pelo ManyChat, não há Evolution nem QR aqui. No External Request, inclua no JSON o campo{' '}
               <span className="font-mono text-[0.7rem]">crm_instance_key</span> com o valor{' '}
               <span className="font-mono text-[0.7rem]">
                 {selectedInstance.manychatInstanceKey ?? selectedInstance.id}
@@ -1085,7 +1085,7 @@ export function WhatsappConnectionPage() {
         title="Apagar este telefone?"
         description={
           instances.find((i) => i.id === instanceToRemove)?.channelProvider === 'manychat'
-            ? 'Apagar esta linha ManyChat do CRM? Os fluxos no ManyChat continuam — atualize o External Request se deixar de usar esta chave. Esta ação não pode ser desfeita.'
+            ? 'Apagar esta linha ManyChat do CRM? Os fluxos no ManyChat continuam, atualize o External Request se deixar de usar esta chave. Esta ação não pode ser desfeita.'
             : 'Apagar este telefone? O WhatsApp desta linha deixa de receber mensagens no CRM, e a sessão no servidor (se ainda existir) será removida. Esta ação não pode ser desfeita.'
         }
         confirmLabel="Apagar"

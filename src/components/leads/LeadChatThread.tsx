@@ -1083,7 +1083,7 @@ export function LeadChatThread({
 
             {/* Menu de Mensagens Rápidas */}
             {showQuickMenu && filteredQuick.length > 0 && (
-              <div className="absolute bottom-full left-0 mb-2 w-full max-w-sm z-50 rounded-xl border border-border bg-popover shadow-xl overflow-hidden">
+              <div className="absolute bottom-full left-0 mb-2 w-full max-w-sm z-50 rounded-xl border border-border bg-popover shadow-sm overflow-hidden">
                 <div className="px-3 py-2 border-b border-border bg-muted/30">
                   <span className="text-xs font-medium text-muted-foreground">Mensagens Rápidas</span>
                 </div>

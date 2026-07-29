@@ -61,7 +61,7 @@ export function AdminOperationsPage() {
   return (
     <AppLayout title="Operação Admin">
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
+        <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm ">
           <CardHeader>
             <CardTitle>Kanban padrão</CardTitle>
           </CardHeader>
@@ -79,7 +79,7 @@ export function AdminOperationsPage() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
+        <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm ">
           <CardHeader>
             <CardTitle>Campanha de aniversário</CardTitle>
           </CardHeader>
@@ -87,7 +87,7 @@ export function AdminOperationsPage() {
             <Button
               type="button"
               variant="outline"
-              className="rounded-xl border-border/70 transition-all duration-200 hover:-translate-y-0.5"
+              className="rounded-xl border-border/70 transition-all duration-200 "
               onClick={() => {
                 const count = crm.runBirthdayCampaign()
                 toast.success(count > 0 ? `${count} lead(s) com aniversário processado(s).` : 'Nenhum aniversariante hoje.')
@@ -98,7 +98,7 @@ export function AdminOperationsPage() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
+        <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm ">
           <CardHeader>
             <CardTitle>Automações</CardTitle>
           </CardHeader>
@@ -113,7 +113,7 @@ export function AdminOperationsPage() {
               </div>
             ) : null}
             {crm.automationRules.map((rule) => (
-              <div key={rule.id} className="rounded-xl border border-border/70 bg-background/70 p-3 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-sm">
+              <div key={rule.id} className="rounded-xl border border-border/70 bg-background/70 p-3 transition-all duration-200 hover:shadow-sm">
                 <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <Input
                     className="min-w-0 flex-1 rounded-lg border-border/70"
@@ -146,7 +146,7 @@ export function AdminOperationsPage() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm backdrop-blur-sm">
+        <Card className="rounded-2xl border-border/70 bg-card/85 shadow-sm ">
           <CardHeader>
             <CardTitle>Governança e escala</CardTitle>
           </CardHeader>

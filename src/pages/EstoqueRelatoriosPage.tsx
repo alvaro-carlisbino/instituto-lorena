@@ -167,7 +167,7 @@ export function EstoqueRelatoriosPage() {
   return (
     <AppLayout
       title="Relatórios de estoque"
-      subtitle="Posição e valor do estoque, movimentações e consumo por período — tudo exportável em CSV."
+      subtitle="Posição e valor do estoque, movimentações e consumo por período, tudo exportável em CSV."
     >
       <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 

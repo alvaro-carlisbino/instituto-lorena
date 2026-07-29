@@ -305,7 +305,7 @@ export function ContasPagarPage() {
       })
       toast.success(
         payAccountId
-          ? `"${p.description}" paga — saída lançada no caixa.`
+          ? `"${p.description}" paga, saída lançada no caixa.`
           : `"${p.description}" marcada como paga.`,
       )
       setPayingPayable(null)
@@ -676,7 +676,7 @@ export function ContasPagarPage() {
                           )}
                           <p className="mt-2 border-t border-border pt-2 text-muted-foreground">
                             {linked.length === 0
-                              ? 'Sem conta a pagar vinculada — esta compra não está no financeiro.'
+                              ? 'Sem conta a pagar vinculada, esta compra não está no financeiro.'
                               : `${linked.length} ${linked.length === 1 ? 'parcela' : 'parcelas'} em contas a pagar.`}
                           </p>
                         </div>

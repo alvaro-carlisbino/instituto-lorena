@@ -69,11 +69,11 @@ export function KanbanListView({
         return (
           <section
             key={stage.id}
-            className="overflow-hidden rounded-3xl border border-border/30 bg-card shadow-sm transition-all duration-300 hover:shadow-md"
+            className="overflow-hidden rounded-xl border border-border/30 bg-card shadow-sm transition-all duration-300 hover:shadow-md"
             aria-labelledby={`list-stage-${stage.id}`}
           >
             <header
-              className="flex flex-wrap items-center justify-between gap-4 border-b border-border/20 bg-muted/20 px-6 py-4 backdrop-blur-md"
+              className="flex flex-wrap items-center justify-between gap-4 border-b border-border/20 bg-muted/20 px-6 py-4 "
             >
               <div className="flex items-center gap-3">
                 <div className="size-2.5 rounded-full bg-primary" aria-hidden />

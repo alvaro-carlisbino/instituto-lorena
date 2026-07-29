@@ -160,7 +160,7 @@ export function ContasReceberPage() {
     if (!r) return
     try {
       await receiveReceivable(r, { accountId: recvAccountId || null, receivedOn: recvDate || undefined })
-      toast.success(recvAccountId ? `"${r.description}" recebida — entrada lançada no caixa.` : `"${r.description}" recebida.`)
+      toast.success(recvAccountId ? `"${r.description}" recebida, entrada lançada no caixa.` : `"${r.description}" recebida.`)
       setReceiving(null)
       await load()
     } catch (e) {
@@ -205,7 +205,7 @@ export function ContasReceberPage() {
                 id="rc-desc"
                 value={form.description}
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                placeholder="Ex.: Pacote 10 sessões — Maria"
+                placeholder="Ex.: Pacote 10 sessões, Maria"
               />
             </div>
             <div className="space-y-1.5">

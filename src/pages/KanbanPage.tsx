@@ -367,7 +367,7 @@ export function KanbanPage() {
                 key={stage.id}
                 className="flex flex-col w-[320px] shrink-0 overflow-hidden rounded-2xl border border-border/40 bg-muted/5 shadow-none transition-all duration-300 hover:bg-muted/10"
               >
-                <header className="flex items-center justify-between px-5 py-4 bg-background/50 backdrop-blur-sm border-b border-border/20">
+                <header className="flex items-center justify-between px-5 py-4 bg-background/50 border-b border-border/20">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <div className="size-2 rounded-full bg-primary" />

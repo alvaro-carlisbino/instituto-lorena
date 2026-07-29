@@ -115,11 +115,13 @@ function KpiCard({
   // Compacto de propósito: seis cartões de ~180px empurravam gráficos e listas para
   // fora da primeira tela; quem abre o painel quer ver o conjunto, não um número por vez.
   return (
-    <div className="relative overflow-hidden rounded-xl border border-border/60 bg-card/60 p-4 transition-colors hover:bg-card">
-      <div className="absolute right-0 top-0 p-3 opacity-[0.04]" aria-hidden>
-        <Icon className="size-12" />
-      </div>
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+    <div className="rounded-xl border border-border bg-card p-4">
+      {/* O ícone gigante a 4% de opacidade atrás do número saiu: marca-d'água decorativa
+          é assinatura de template, e num painel ela concorre com o dado que importa. */}
+      <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <Icon className="size-3.5 shrink-0 opacity-60" aria-hidden />
+        {label}
+      </p>
       <div className="mt-1 flex items-baseline gap-2" aria-busy={loading || undefined}>
         {loading ? (
           <Skeleton className="h-8 w-14" />
@@ -425,7 +427,7 @@ export function DashboardKpiSection() {
         ) : null}
       </div>
 
-      <div className="mt-4 rounded-3xl border border-border/40 bg-card/40 p-6">
+      <div className="mt-4 rounded-xl border border-border/40 bg-card/40 p-6">
         <p className="mb-4 text-xs font-medium text-muted-foreground">
           Novos leads por origem
         </p>
@@ -451,7 +453,7 @@ export function DashboardKpiSection() {
         )}
       </div>
 
-      <div className="mt-4 rounded-3xl border border-border/40 bg-card/40 p-6">
+      <div className="mt-4 rounded-xl border border-border/40 bg-card/40 p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs font-medium text-muted-foreground">
             Mídia paga · leads por campanha

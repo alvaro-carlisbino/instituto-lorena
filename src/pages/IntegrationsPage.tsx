@@ -209,7 +209,7 @@ export function IntegrationsPage() {
   return (
     <AppLayout title="Integrações" subtitle="Conecte ERP e meios de pagamento">
       <div className="mt-4 grid gap-4 md:grid-cols-2">
-        {/* Bling — só polo de vendas */}
+        {/* Bling, só polo de vendas */}
         {isSalesPolo ? (
           <Card>
             <CardHeader>
@@ -251,7 +251,7 @@ export function IntegrationsPage() {
           </Card>
         ) : null}
 
-        {/* Asaas — gateway único cartão + Pix (ambos os polos) */}
+        {/* Asaas, gateway único cartão + Pix (ambos os polos) */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-2 text-sm">

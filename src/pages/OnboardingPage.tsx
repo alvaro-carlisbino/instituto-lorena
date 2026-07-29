@@ -62,7 +62,7 @@ export function OnboardingPage({
             <>
               <CardTitle className="text-xl">Sobre sua clínica</CardTitle>
               <CardDescription>
-                Vamos configurar seu CRM. Comece pelo nome da sua clínica — é o que vai aparecer
+                Vamos configurar seu CRM. Comece pelo nome da sua clínica, é o que vai aparecer
                 pra você e sua equipe.
               </CardDescription>
             </>
@@ -145,7 +145,7 @@ export function OnboardingPage({
                 className="mt-2 rounded-md border border-border/40 p-3 text-sm"
                 style={{ backgroundColor: primaryColor, color: '#fff' }}
               >
-                Preview de cabeçalho — {clinicName.trim() || 'sua clínica'}
+                Preview de cabeçalho, {clinicName.trim() || 'sua clínica'}
               </div>
             </div>
           )}

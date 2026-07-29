@@ -145,7 +145,7 @@ export function TopControls() {
           </Button>
 
           {isToolsOpen && (
-            <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(100vw-2rem,22rem)] rounded-xl border border-border/80 bg-popover/95 p-3.5 text-sm shadow-xl backdrop-blur supports-[backdrop-filter]:bg-popover/90">
+            <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(100vw-2rem,22rem)] rounded-xl border border-border/80 bg-popover/95 p-3.5 text-sm shadow-sm ">
               <div className="grid gap-3 text-muted-foreground">
                 <div className="flex items-center justify-between border-b border-border/60 pb-2">
                   <span className="text-xs font-semibold text-foreground">Ajustes operacionais</span>

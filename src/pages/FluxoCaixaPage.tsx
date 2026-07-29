@@ -136,7 +136,7 @@ export function FluxoCaixaPage() {
             <EmptyState
               icon={Wallet}
               title={loading ? 'Carregando…' : 'Sem movimentações ainda'}
-              description="Dê baixa em contas a pagar/receber por uma conta, ou concilie um extrato — os lançamentos aparecem aqui."
+              description="Dê baixa em contas a pagar/receber por uma conta, ou concilie um extrato, os lançamentos aparecem aqui."
             />
           </CardContent>
         </Card>

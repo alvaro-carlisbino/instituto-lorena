@@ -150,7 +150,7 @@ export function LeadAnalyticsActions({ leadId, canManage }: Props) {
           title={`Paciente pediu pra parar (${new Date(optedOutAt).toLocaleString('pt-BR')}). Clique para reativar após contato.`}
         >
           <BellOff className="mr-1.5 size-4" />
-          Opt-out — clicar para reativar
+          Opt-out: clicar para reativar
         </Button>
       ) : null}
       <Button variant={lostReason ? 'destructive' : 'outline'} size="sm" onClick={() => setDialogOpen(true)}>

@@ -101,7 +101,7 @@ export function TvDashboardPage() {
               <article
                 key={widget.id}
                 className={cn(
-                  'rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg backdrop-blur-sm',
+                  'rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg ',
                   hasLayout ? '' : '',
                 )}
                 style={hasLayout ? layoutStyle(widget.layout) : undefined}

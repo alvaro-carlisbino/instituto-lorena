@@ -141,7 +141,7 @@ export function TricopillMarginCard({
   }
 
   return (
-    <div className="rounded-3xl border border-border/40 bg-card/50 p-6 transition-all hover:bg-card/80">
+    <div className="rounded-xl border border-border/40 bg-card/50 p-6 transition-all hover:bg-card/80">
       <p className="mb-1 text-sm font-bold text-foreground/90">Custos &amp; Margem</p>
       <p className="mb-4 text-[11px] text-muted-foreground">
         Informe o custo de cada kit pra ver a margem. A margem só conta os kits com custo cadastrado.

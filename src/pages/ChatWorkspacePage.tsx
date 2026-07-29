@@ -309,7 +309,7 @@ export function ChatWorkspacePage({
   return (
     <AppLayout title={title} fullHeight={true} mainClassName="min-h-0 p-2 sm:p-3 md:p-4 bg-muted/30 dark:bg-transparent">
       <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col gap-2 overflow-hidden sm:gap-3 md:flex-row md:gap-4">
-        {/* Left Column: Lead List — no mobile ocupa a tela inteira e some ao abrir uma conversa */}
+        {/* Left Column: Lead List, no mobile ocupa a tela inteira e some ao abrir uma conversa */}
         <Card className={cn(
           "flex min-h-0 w-full flex-1 flex-col gap-0 overflow-hidden rounded-2xl border border-border/40 bg-card/70 py-0 shadow-xl backdrop-blur-md md:h-full md:min-h-0 md:flex-none md:w-[min(300px,34vw)] md:max-w-[340px] md:min-w-[260px]",
           hasSelection && "hidden md:flex",
@@ -493,7 +493,7 @@ export function ChatWorkspacePage({
               <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-3 sm:px-5 sm:py-4">
                 <div className="flex flex-wrap items-start justify-between gap-2 sm:items-center sm:gap-4">
                   {/* basis-56: o nome do paciente reserva ~14rem antes de deixar as ações
-                      quebrarem para a linha de baixo — saber com quem se fala vem antes
+                      quebrarem para a linha de baixo, saber com quem se fala vem antes
                       de economizar uma linha (o nome virava "Maria…"). */}
                   <div className="flex min-w-0 flex-1 basis-56 items-start gap-2">
                     <Button

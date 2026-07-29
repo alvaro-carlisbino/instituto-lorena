@@ -138,7 +138,7 @@ export function ContaCirurgicaPage() {
   return (
     <AppLayout
       title="Conta do centro cirúrgico"
-      subtitle="Mat/Med, hora sala, anestesia, consumo, acréscimos e pagamentos — imprima a conta do paciente."
+      subtitle="Mat/Med, hora sala, anestesia, consumo, acréscimos e pagamentos, imprima a conta do paciente."
     >
       <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 

@@ -36,7 +36,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="Navegação principal"
-      className="shrink-0 border-t border-border/70 bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
+      className="shrink-0 border-t border-border/70 bg-background/95 pb-[env(safe-area-inset-bottom)] md:hidden"
     >
       <ul className="flex items-stretch">
         {items.map((destination) => {
