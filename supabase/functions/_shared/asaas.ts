@@ -1,8 +1,8 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { insertInteraction, recordAutoReceipt } from './crm.ts'
+import { findLeadByPhone, insertInteraction, recordAutoReceipt } from './crm.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
 import { blingCreateSaleOrder } from './bling.ts'
-import { autoShipToCart } from './melhorEnvio.ts'
+import { autoShipToCart, type AutoShipResult } from './melhorEnvio.ts'
 import { sendEmail } from './resend.ts'
 import { sendSaleReceiptToGroup } from './saleReceipt.ts'
 import { dispatchPurchaseConversions } from './conversions.ts'
@@ -618,9 +618,27 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
   const unitsPerShipment = Number(s.units_per_shipment ?? 1) || 1
   const unitPriceCents = Number(s.unit_price_cents ?? 15000) || 15000
   const monthlyValueCents = Number(s.monthly_value_cents ?? 0)
-  const leadId = s.lead_id != null ? String(s.lead_id) : ''
   const entrega = (s.entrega ?? {}) as Record<string, unknown>
   const cycle = (Number(s.paid_cycles ?? 0) || 0) + 1
+
+  // LEAD ÓRFÃO: a assinatura da Chayenne apontava para `site-da10f02d-…`, um lead que NÃO
+  // existe (o do site foi mesclado/removido depois). Todo insertInteraction caía no
+  // `.catch(() => {})` e a assinatura ficava SEM NENHUMA timeline no CRM — foi por isso que
+  // ninguém conseguiu responder "o envio saiu?" sem ir na API do Melhor Envio na mão.
+  // Confere se o lead existe e, se não, reencontra pelo telefone (variantes ±55/±9º dígito) e
+  // conserta o vínculo na própria assinatura, pra não ter que redescobrir todo ciclo.
+  let leadId = s.lead_id != null ? String(s.lead_id) : ''
+  if (leadId) {
+    const { data: exists } = await admin.from('leads').select('id').eq('id', leadId).maybeSingle()
+    if (!exists) leadId = ''
+  }
+  if (!leadId && s.phone) {
+    leadId = (await findLeadByPhone(admin, String(s.phone))) ?? ''
+    if (leadId) {
+      await admin.from('asaas_subscriptions').update({ lead_id: leadId }).eq('id', localSubId)
+      console.warn('[assinatura] lead_id órfão religado', { localSubId, leadId })
+    }
+  }
 
   // Marca o ciclo como pago + reativa a assinatura se estava em atraso.
   await admin.from('asaas_subscriptions').update({ paid_cycles: cycle, status: 'active', updated_at: new Date().toISOString() }).eq('id', localSubId)
@@ -693,7 +711,27 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
     }
   } catch { /* best-effort: notificação nunca derruba o ciclo */ }
 
-  if (!ships) return
+  // Ciclo SEM envio (trimestral cobra todo mês e manda 3 frascos a cada 3): registra o motivo
+  // e QUANDO é o próximo. Antes isso era um `return` mudo, então "não caiu no Melhor Envio"
+  // parecia falha quando era o comportamento correto (caso Chayenne, ciclo 2 em 29/jul).
+  if (!ships) {
+    const proximo = cycle + (3 - ((cycle - 1) % 3))
+    await admin.from('asaas_subscriptions').update({
+      last_ship_cycle: cycle,
+      last_ship_status: 'skipped',
+      last_ship_reason: `ciclo_sem_envio_${cadence}`,
+      last_ship_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', localSubId)
+    if (leadId) {
+      await insertInteraction(admin, {
+        leadId, patientName: String(synthLead.patient_name), channel: 'system', direction: 'system', author: 'Assinatura',
+        content: `📅 Ciclo ${cycle} pago, SEM envio neste mês (${cadence}: ${unitsPerShipment} frascos a cada 3 ciclos). Próximo envio no ciclo ${proximo}.`,
+        tenantId,
+      }).catch(() => {})
+    }
+    return
+  }
 
   const shipUnits = unitsPerShipment
   const shipFreightCents = Math.max(0, Math.round(Number(s.freight_cents) || 0))
@@ -733,17 +771,47 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
     }
   }
 
-  // Envio automático no Melhor Envio (best-effort).
+  // Envio automático no Melhor Envio.
+  //
+  // O resultado ERA DESCARTADO com `catch {}` mudo: se a etiqueta não saísse (endereço sem
+  // número, ME fora do ar, serviço que não atende o CEP), ninguém ficava sabendo e o ciclo
+  // era marcado como enviado assim mesmo — a falha nunca voltava. Agora o desfecho fica
+  // gravado na assinatura (único lugar que sempre existe: ciclo não gera asaas_payments) e
+  // `last_shipped_cycle` só avança quando a etiqueta REALMENTE saiu, então um ciclo que
+  // falhou continua pendente em vez de virar "enviado".
+  let ship: AutoShipResult
   try {
-    await autoShipToCart(admin, blingTenant, {
+    ship = await autoShipToCart(admin, blingTenant, {
       lead: synthLead,
       kit: null,
       productName: `Tricopill assinatura (${shipUnits}x)`,
       productValueCents: shipValueCents,
     })
-  } catch { /* best-effort */ }
+  } catch (e) {
+    ship = { ok: false, reason: 'exception', error: e instanceof Error ? e.message : String(e) }
+  }
 
-  await admin.from('asaas_subscriptions').update({ last_shipped_cycle: cycle, updated_at: new Date().toISOString() }).eq('id', localSubId)
+  const shipReason = [ship.reason, ship.error].filter(Boolean).join(': ').slice(0, 200) || null
+  await admin.from('asaas_subscriptions').update({
+    ...(ship.ok ? { last_shipped_cycle: cycle } : {}),
+    last_ship_cycle: cycle,
+    last_ship_status: ship.ok ? 'shipped' : 'failed',
+    last_ship_reason: ship.ok ? null : shipReason,
+    last_ship_me_order_id: ship.cartId ?? null,
+    last_ship_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq('id', localSubId)
+
+  if (!ship.ok) console.error('[assinatura] envio NÃO saiu', { localSubId, cycle, reason: shipReason })
+  if (leadId) {
+    await insertInteraction(admin, {
+      leadId, patientName: String(synthLead.patient_name), channel: 'system', direction: 'system', author: 'Melhor Envio',
+      content: ship.ok
+        ? `🚚 Assinatura: envio do ciclo ${cycle} montado no Melhor Envio (${shipUnits} frascos${ship.cartId ? `, carrinho ${ship.cartId}` : ''}). Compre a etiqueta no painel.`
+        : `⚠️ Assinatura: o envio do ciclo ${cycle} NÃO foi montado no Melhor Envio (${shipReason ?? 'motivo desconhecido'}). Monte na mão — o ciclo segue pendente.`,
+      tenantId,
+    }).catch(() => {})
+  }
 }
 
 /**
