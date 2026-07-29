@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { quoteGatewayFee } from './gatewayFees.ts'
 import { insertInteraction, recordAutoReceipt } from './crm.ts'
 import { normalizeKitKey } from './pagbank.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
@@ -510,6 +511,24 @@ export async function finalizeRedePaid(
   },
 ): Promise<void> {
   const isPix = opts.method === 'pix'
+
+  // Taxa da adquirente: a API da e.Rede NÃO devolve a taxa da transação (só o extrato tem),
+  // então calculamos pela tabela cadastrada em tenant_integrations.rede.fees. Modalidade sem
+  // taxa cadastrada devolve null e a conta a receber fica em aberto — nunca chuta. O import do
+  // extrato corrige depois com o valor REAL cobrado pela Rede.
+  const feeQuote = await quoteGatewayFee(admin, intent.tenantId, 'rede', {
+    method: opts.method,
+    installments: opts.installments ?? intent.installments,
+    amountCents: intent.amountCents,
+  })
+  if (feeQuote) {
+    await admin.from('rede_payments').update({
+      fee_cents: feeQuote.feeCents,
+      net_cents: feeQuote.netCents,
+      fee_source: 'tabela',
+    }).eq('id', intent.id)
+  }
+
   // Conta o uso do cupom só agora (no pago), não na geração do link.
   await incrementCouponUse(admin, intent.tenantId, intent.couponCode)
 
@@ -569,11 +588,18 @@ export async function finalizeRedePaid(
             // com o padrão da conta ("Conta a receber/pagar") e o caixa não separava por meio.
             paymentMethod: opts.method,
             installments: opts.installments ?? intent.installments,
+            // Taxa da adquirente → vira `tarifa` na baixa da conta a receber, pra o caixa
+            // fechar pelo LÍQUIDO sem mexer no valor da venda nem da NF-e.
+            feeCents: feeQuote?.feeCents ?? null,
             // Data do pedido = quando PAGOU. Nunca usar createdAt (geração do QR/link) —
             // senão PIX gerado ontem e pago hoje sai no Bling com data de ontem (Paula 24/07).
             saleDateISO: intent.paidAt || new Date().toISOString(),
           })
-          await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
+          await admin.from('rede_payments').update({
+            bling_order_id: out.orderId ?? null,
+            bling_receivable_id: out.receivable.receivableId,
+            bling_settled_at: out.receivable.settled ? new Date().toISOString() : null,
+          }).eq('id', intent.id)
           receiptBlingId = out.orderId ?? null
         }
       } catch (e) {
@@ -719,11 +745,18 @@ export async function finalizeRedePaid(
             // com o padrão da conta ("Conta a receber/pagar") e o caixa não separava por meio.
             paymentMethod: opts.method,
             installments: opts.installments ?? intent.installments,
+            // Taxa da adquirente → vira `tarifa` na baixa da conta a receber, pra o caixa
+            // fechar pelo LÍQUIDO sem mexer no valor da venda nem da NF-e.
+            feeCents: feeQuote?.feeCents ?? null,
             // Data do pedido = quando PAGOU. Nunca usar createdAt (geração do QR/link) —
             // senão PIX gerado ontem e pago hoje sai no Bling com data de ontem (Paula 24/07).
             saleDateISO: intent.paidAt || new Date().toISOString(),
           })
-          await admin.from('rede_payments').update({ bling_order_id: out.orderId ?? null }).eq('id', intent.id)
+          await admin.from('rede_payments').update({
+            bling_order_id: out.orderId ?? null,
+            bling_receivable_id: out.receivable.receivableId,
+            bling_settled_at: out.receivable.settled ? new Date().toISOString() : null,
+          }).eq('id', intent.id)
           receiptBlingId = out.orderId ?? null
           const nfeNote = out.nfe
             ? (out.nfe.transmitted

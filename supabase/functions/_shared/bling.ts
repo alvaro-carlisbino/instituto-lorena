@@ -423,6 +423,88 @@ async function blingFormasPagamento(
 }
 
 /**
+ * Cria a CONTA A RECEBER da venda e, quando a taxa do gateway é conhecida, já dá a BAIXA pelo
+ * líquido recebido.
+ *
+ * Descoberto em 29/jul/2026 conferindo o caixa com o Kauan: dos 21 pedidos que o nosso sistema
+ * criou no Bling entre 20 e 29/jul, **nenhum** tinha conta a receber — contra 62 de 70 lançados
+ * à mão pela equipe. O pedido via API nasce "Em aberto" e o Bling NÃO gera o financeiro sozinho,
+ * então toda venda automática ficava invisível no financeiro do Bling. Não era o valor que
+ * estava errado: a venda simplesmente não existia lá pra conferir.
+ *
+ * A conta guarda o valor BRUTO (o que o cliente pagou = o que sai na NF-e). A taxa da adquirente
+ * entra como `tarifa` na baixa, então o Bling mostra recebido líquido + tarifa e o caixa fecha
+ * contra o extrato SEM mexer no valor da venda nem da nota — taxa de cartão é despesa
+ * financeira, não desconto na mercadoria.
+ *
+ * `feeCents` null (modalidade sem taxa cadastrada) → cria a conta e deixa EM ABERTO pra baixa
+ * manual/pelo extrato. Melhor conta em aberto do que baixa com taxa chutada.
+ *
+ * `idOrigem`/vínculo com o pedido é READ-ONLY na API (só o Bling preenche quando ele mesmo gera
+ * o financeiro), por isso a rastreabilidade vai em `numeroDocumento` + `historico` com o número
+ * do pedido. Best-effort: nunca derruba a venda.
+ */
+async function blingEnsureReceivable(
+  token: string,
+  args: {
+    contatoId: string
+    amountCents: number
+    feeCents: number | null
+    dataISO: string
+    orderNumber: string
+    formaPagamentoId: string | null
+  },
+): Promise<{ receivableId: string | null; settled: boolean }> {
+  const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' }
+  const valor = Math.round(args.amountCents) / 100
+  if (!(valor > 0) || !args.contatoId) return { receivableId: null, settled: false }
+  try {
+    const body: Record<string, unknown> = {
+      vencimento: args.dataISO,
+      dataEmissao: args.dataISO,
+      valor,
+      contato: { id: Number(args.contatoId) || args.contatoId },
+      historico: `Venda ${args.orderNumber || '?'} — automática (CRM)`.slice(0, 200),
+      ...(args.orderNumber ? { numeroDocumento: String(args.orderNumber).slice(0, 20) } : {}),
+      ...(args.formaPagamentoId ? { formaPagamento: { id: Number(args.formaPagamentoId) || args.formaPagamentoId } } : {}),
+    }
+    const res = await fetch(`${API_BASE}/contas/receber`, { method: 'POST', headers: bh, body: JSON.stringify(body) })
+    if (!res.ok) {
+      console.warn('[bling] conta a receber falhou:', res.status, (await res.text()).slice(0, 200))
+      return { receivableId: null, settled: false }
+    }
+    const receivableId = String((JSON.parse((await res.text()) || '{}')?.data ?? {}).id ?? '')
+    if (!receivableId) return { receivableId: null, settled: false }
+
+    // Sem taxa conhecida: conta fica em aberto de propósito (ver doc acima).
+    const fee = args.feeCents == null ? null : Math.max(0, Math.round(args.feeCents))
+    if (fee == null || fee >= Math.round(args.amountCents)) return { receivableId, settled: false }
+
+    // valorPago + tarifa = valor da conta → o Bling zera o saldo e marca como baixada.
+    const baixa = {
+      data: args.dataISO,
+      valorPago: Math.round(args.amountCents - fee) / 100,
+      juros: 0,
+      desconto: 0,
+      acrescimo: 0,
+      tarifa: fee / 100,
+      historico: `Recebido líquido (taxa da adquirente) — venda ${args.orderNumber || '?'}`.slice(0, 200),
+    }
+    const br = await fetch(`${API_BASE}/contas/receber/${receivableId}/baixar`, {
+      method: 'POST', headers: bh, body: JSON.stringify(baixa),
+    })
+    if (!br.ok) {
+      console.warn('[bling] baixa da conta falhou:', br.status, (await br.text()).slice(0, 200))
+      return { receivableId, settled: false }
+    }
+    return { receivableId, settled: true }
+  } catch (e) {
+    console.warn('[bling] conta a receber falhou:', e instanceof Error ? e.message : String(e))
+    return { receivableId: null, settled: false }
+  }
+}
+
+/**
  * Escolhe a forma de pagamento que corresponde ao MÉTODO REAL da venda.
  * Pix → tipo 17. Cartão → o "Nx" exato; sem ele, cai no crédito à vista e, por último,
  * em qualquer forma de crédito (melhor um cartão genérico do que a conta genérica).
@@ -659,6 +741,12 @@ export async function blingCreateSaleOrder(
     paymentMethod?: string
     /** Parcelas do cartão — escolhe "Cartão de Crédito Nx" em vez do genérico à vista. */
     installments?: number
+    /**
+     * Taxa da adquirente (centavos) retida nesta venda. Vira `tarifa` na baixa da conta a
+     * receber, pra o financeiro fechar o caixa pelo LÍQUIDO sem mexer no valor da venda/NF-e.
+     * `null`/omitido = taxa desconhecida → a conta é criada e fica em aberto (nunca chuta).
+     */
+    feeCents?: number | null
     /** Endereço de entrega capturado p/ completar o contato (NF-e) + modalidade da venda. */
     entrega?: {
       cep?: string; numero?: string; complemento?: string
@@ -672,6 +760,8 @@ export async function blingCreateSaleOrder(
   /** true: o contato REAL não pôde ser criado/achado e o pedido saiu no contato GENÉRICO. */
   contatoFallback: boolean
   nfe?: { nfeId: string | null; numero?: string; situacao?: string; transmitted: boolean; error?: string }
+  /** Conta a receber criada no Bling; `settled` = já baixada pelo líquido (taxa conhecida). */
+  receivable: { receivableId: string | null; settled: boolean }
 }> {
   const token = await getValidBlingToken(admin, tenantId)
   if (!token) throw new Error('bling_nao_conectado')
@@ -845,6 +935,7 @@ export async function blingCreateSaleOrder(
   // O mesmo GET+PUT também carimba a FORMA DE PAGAMENTO real (Pix / Cartão Nx) nas parcelas —
   // o pedido é criado sem `parcelas` (deixar o Bling gerar evita o erro "somatório das parcelas
   // difere do total"), então a forma só dá pra ajustar depois que ele gravou.
+  let receivable: { receivableId: string | null; settled: boolean } = { receivableId: null, settled: false }
   if (orderId) {
     try {
       const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' }
@@ -885,6 +976,20 @@ export async function blingCreateSaleOrder(
           })
           if (!pr.ok) console.warn('[bling] ajuste do pedido falhou:', pr.status, (await pr.text()).slice(0, 200))
         }
+
+        // Financeiro: o pedido criado por API NÃO gera conta a receber sozinho — sem isto a
+        // venda automática fica invisível no financeiro do Bling (21 de 21 pedidos nossos
+        // estavam assim em 20-29/jul). Vai com o valor BRUTO; a taxa entra na baixa.
+        receivable = await blingEnsureReceivable(token, {
+          contatoId,
+          amountCents: Math.round(args.amountCents),
+          feeCents: args.feeCents ?? null,
+          dataISO: dataPedido,
+          orderNumber: String(od.numero ?? ''),
+          formaPagamentoId: parc.length
+            ? String(((parc[0].formaPagamento ?? {}) as Record<string, unknown>).id ?? '') || null
+            : null,
+        })
       }
     } catch (e) {
       console.warn('[bling] conferência total × cobrado falhou:', e instanceof Error ? e.message : String(e))
@@ -929,7 +1034,7 @@ export async function blingCreateSaleOrder(
       contatoNome: args.customerName,
     }).catch((e) => ({ nfeId: null, transmitted: false, error: e instanceof Error ? e.message : String(e) }))
   }
-  return { orderId, bottles, contatoFallback, nfe }
+  return { orderId, bottles, contatoFallback, nfe, receivable }
 }
 
 /**

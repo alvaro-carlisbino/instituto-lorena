@@ -1,6 +1,7 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { findLeadByPhone, insertInteraction, recordAutoReceipt } from './crm.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
+import { quoteGatewayFee } from './gatewayFees.ts'
 import { blingCreateSaleOrder } from './bling.ts'
 import { autoShipToCart, type AutoShipResult } from './melhorEnvio.ts'
 import { sendEmail } from './resend.ts'
@@ -825,6 +826,14 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
   const p = data as Record<string, unknown>
   const tenantId = String(p.tenant_id ?? '')
   const method = String(p.method ?? 'card') === 'pix' ? 'pix' : 'card'
+
+  // Taxa da adquirente pela tabela do polo (tenant_integrations.asaas.fees). null = sem taxa
+  // cadastrada p/ a modalidade → conta a receber fica em aberto em vez de baixar com chute.
+  const feeQuote = await quoteGatewayFee(admin, tenantId, 'asaas', {
+    method,
+    installments: Number(p.installments ?? 1) || 1,
+    amountCents: Number(p.amount_cents ?? 0),
+  })
   const amountCents = Number(p.amount_cents ?? 0)
   const leadId = p.lead_id != null ? String(p.lead_id) : ''
   const kit = p.kit != null ? String(p.kit) : ''
@@ -956,6 +965,8 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
           // padrão da conta ("Conta a receber/pagar") e o caixa não separava por meio.
           paymentMethod: method,
           installments: Number(p.installments ?? 1) || 1,
+          // Taxa da adquirente → `tarifa` na baixa da conta a receber (caixa fecha no líquido).
+          feeCents: feeQuote?.feeCents ?? null,
           email: cad.email,
           dataNascimento: cad.dataNascimento,
           sexo: cad.sexo,
