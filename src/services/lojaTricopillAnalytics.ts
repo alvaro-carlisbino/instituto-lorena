@@ -155,12 +155,41 @@ function aggregate(rows: RawEvent[]): LojaAnalytics {
   let subscribeRevenueCents = 0
   let purchaseRevenueCents = 0
 
+  const FUSO_NEGOCIO = 'America/Sao_Paulo'
+  /** Dia de calendário no fuso do negócio (era `.slice(0,10)`, que dá o dia em UTC). */
+  const diaLocal = (iso: string): string => {
+    const t = new Date(iso)
+    if (Number.isNaN(t.getTime())) return String(iso ?? '').slice(0, 10)
+    return t.toLocaleDateString('en-CA', { timeZone: FUSO_NEGOCIO })
+  }
+
+  /**
+   * O site grava o MESMO kit com dois identificadores: `view_item` manda `3_meses` e
+   * `add_to_cart` manda `kit:3_meses`. Sem normalizar, cada kit vira duas linhas no ranking
+   * e a coluna "Taxa" fica 0% para todos PERMANENTEMENTE, porque a linha de visualização
+   * nunca tem carrinho e a de carrinho nunca tem visualização. São 213 view_item contra 80
+   * add_to_cart só no kit de 3 meses.
+   */
+  const chaveProduto = (id: string): string => id.replace(/^kit:/, '')
+
+  /**
+   * Caminho da página SEM querystring. Com ela, `/` e `/?utm_source=...` viravam páginas
+   * diferentes: 2.590 caminhos distintos para 100 páginas reais, e a home aparecia com uma
+   * fração das sessões que teve.
+   */
+  const caminhoLimpo = (path: string): string => {
+    const semQuery = path.split('?')[0].split('#')[0]
+    // Mantém a barra final só na raiz, para "/produto" e "/produto/" não se separarem.
+    return semQuery.length > 1 ? semQuery.replace(/\/+$/, '') : semQuery
+  }
+
   const pageMap = new Map<string, { views: number; sessions: Set<string> }>()
   const prodMap = new Map<string, { productId: string; productName: string; views: number; addToCart: number; sessions: Set<string> }>()
   const bumpProduct = (r: RawEvent, key: 'views' | 'addToCart') => {
-    const id = r.product_id || r.product_name
-    if (!id) return
-    const entry = prodMap.get(id) ?? { productId: r.product_id ?? '', productName: r.product_name ?? r.product_id ?? '—', views: 0, addToCart: 0, sessions: new Set<string>() }
+    const bruto = r.product_id || r.product_name
+    if (!bruto) return
+    const id = chaveProduto(bruto)
+    const entry = prodMap.get(id) ?? { productId: id, productName: r.product_name ?? id, views: 0, addToCart: 0, sessions: new Set<string>() }
     entry[key] += 1
     if (r.product_name) entry.productName = r.product_name
     if (r.session_id) entry.sessions.add(r.session_id)
@@ -177,7 +206,7 @@ function aggregate(rows: RawEvent[]): LojaAnalytics {
   for (const r of rows) {
     const type = r.type ?? ''
     const val = Number(r.value_cents) || 0
-    const day = (r.created_at ?? '').slice(0, 10)
+    const day = diaLocal(r.created_at ?? '')
     if (r.session_id) sessions.add(r.session_id)
 
     switch (type) {
@@ -201,7 +230,7 @@ function aggregate(rows: RawEvent[]): LojaAnalytics {
         bumpDay(day, 'purchase')
         break
       case 'view_page': {
-        const path = r.path || '(sem path)'
+        const path = r.path ? caminhoLimpo(r.path) : '(sem path)'
         const entry = pageMap.get(path) ?? { views: 0, sessions: new Set<string>() }
         entry.views += 1
         if (r.session_id) entry.sessions.add(r.session_id)
