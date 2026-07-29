@@ -111,9 +111,17 @@ Deno.serve(async (req) => {
     resultado.enviados++
     // Carimba só depois do OK: se a marcação falhar, a próxima rodada tenta de novo e o
     // Google deduplica pelo transactionId. Perder o carimbo custa um reenvio, não uma venda.
+    // Guarda o requestId junto: "enviado" só vira "registrado" quando a conversão aparece no
+    // Google, e sem o protocolo não dá pra rastrear o que sumiu no meio do caminho.
     await db
       .from('storefront_events')
-      .update({ meta: { ...(ev.meta ?? {}), gads_lead_uploaded_at: new Date().toISOString() } })
+      .update({
+        meta: {
+          ...(ev.meta ?? {}),
+          gads_lead_uploaded_at: new Date().toISOString(),
+          ...(r.requestId ? { gads_lead_request_id: r.requestId } : {}),
+        },
+      })
       .eq('id', ev.id)
   }
 

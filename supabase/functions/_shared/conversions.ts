@@ -113,7 +113,7 @@ export async function googleAdsAccessToken(): Promise<string | null> {
  */
 export async function uploadGoogleAdsConversion(args: {
   gclid: string; valueReais: number; orderId: string; when?: Date; actionId?: string
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<{ ok: boolean; error?: string; requestId?: string }> {
   const customerId = onlyDigits(Deno.env.get('GOOGLE_ADS_CUSTOMER_ID'))
   const loginCustomerId = onlyDigits(Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID'))
   // actionId explícito permite subir pra OUTRA ação que não a de compra. Hoje quem usa é o
@@ -152,7 +152,24 @@ export async function uploadGoogleAdsConversion(args: {
     // depois de um bloco de metadados. Cortar em 400 devolvia só "INVALID_ARGUMENT" genérico
     // e escondia qual campo estava errado.
     if (!res.ok) return { ok: false, error: `http_${res.status}: ${text.replace(/\s+/g, ' ').slice(0, 1200)}` }
-    return { ok: true }
+    // HTTP 200 do Data Manager NÃO quer dizer conversão registrada: a ingestão é assíncrona e
+    // o corpo pode trazer erro por evento. Em 29/07/2026 subimos 29 leads com 200 em todos e o
+    // Google não registrou nenhum — o carimbo no banco dizia "enviado" e a conta seguia zerada.
+    // Devolvemos o requestId (é o protocolo pra rastrear/abrir chamado) e tratamos qualquer
+    // sinal de erro no corpo como falha, em vez de assumir sucesso pelo status.
+    let requestId: string | undefined
+    try {
+      const j = JSON.parse(text) as Record<string, unknown>
+      requestId = typeof j.requestId === 'string' ? j.requestId : undefined
+      const falhas = j.errors ?? j.error ?? j.eventErrors
+      if (falhas && (!Array.isArray(falhas) || falhas.length > 0)) {
+        return { ok: false, error: `recusado: ${JSON.stringify(falhas).slice(0, 800)}`, requestId }
+      }
+    } catch {
+      // corpo não-JSON: não inventa sucesso silencioso, mas também não trata como falha —
+      // o status foi 200 e o requestId é o que se perde.
+    }
+    return { ok: true, requestId }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
