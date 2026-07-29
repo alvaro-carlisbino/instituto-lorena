@@ -500,3 +500,9 @@ verify_jwt = false
 # interna/manual guardada por x-reship-secret == RESHIP_SECRET no handler (sem JWT).
 [functions.crm-gads-backfill]
 verify_jwt = false
+
+# Varredura que sobe os cliques de WhatsApp com gclid pra ação "Lead WhatsApp" do Google Ads.
+# Chamada por pg_cron; sem JWT porque o cron não consegue assinar (ver crm_cron_auth_gotcha).
+# Só LÊ storefront_events e carimba meta — não expõe dado de cliente na resposta.
+[functions.crm-gads-lead-upload]
+verify_jwt = false

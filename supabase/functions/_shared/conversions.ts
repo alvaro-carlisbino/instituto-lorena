@@ -112,11 +112,14 @@ export async function googleAdsAccessToken(): Promise<string | null> {
  * (ex.: "developer token não aprovado", "gclid não encontrado na conta").
  */
 export async function uploadGoogleAdsConversion(args: {
-  gclid: string; valueReais: number; orderId: string; when?: Date
+  gclid: string; valueReais: number; orderId: string; when?: Date; actionId?: string
 }): Promise<{ ok: boolean; error?: string }> {
   const customerId = onlyDigits(Deno.env.get('GOOGLE_ADS_CUSTOMER_ID'))
   const loginCustomerId = onlyDigits(Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID'))
-  const actionId = onlyDigits(Deno.env.get('GOOGLE_ADS_CONVERSION_ACTION_ID'))
+  // actionId explícito permite subir pra OUTRA ação que não a de compra. Hoje quem usa é o
+  // crm-gads-lead-upload, que manda os cliques de WhatsApp pra ação "Lead WhatsApp": as vendas
+  // do Google fecham na conversa, então otimizar só por compra no site deixa a conta cega.
+  const actionId = onlyDigits(args.actionId ?? Deno.env.get('GOOGLE_ADS_CONVERSION_ACTION_ID'))
   if (!customerId || !actionId) return { ok: false, error: 'nao_configurado' }
   if (!args.gclid) return { ok: false, error: 'sem_gclid' }
   const accessToken = await googleAdsAccessToken()
@@ -145,7 +148,10 @@ export async function uploadGoogleAdsConversion(args: {
       signal: AbortSignal.timeout(12000),
     })
     const text = await res.text()
-    if (!res.ok) return { ok: false, error: `http_${res.status}: ${text.slice(0, 400)}` }
+    // 1200 e não 400: o Data Manager põe o motivo REAL (campo + razão) no fim do payload,
+    // depois de um bloco de metadados. Cortar em 400 devolvia só "INVALID_ARGUMENT" genérico
+    // e escondia qual campo estava errado.
+    if (!res.ok) return { ok: false, error: `http_${res.status}: ${text.replace(/\s+/g, ' ').slice(0, 1200)}` }
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
