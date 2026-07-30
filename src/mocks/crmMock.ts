@@ -408,6 +408,10 @@ export const initialLeads: Lead[] = [
     customFields: {},
     whatsappInstanceId: null,
     tagIds: [],
+    // Alguém na fila do consultor: sem isto o card do painel e o sino do cabeçalho
+    // ficam sempre verdes na demonstração, e o alerta nunca é visto no treinamento.
+    conversation_status: 'waiting_human',
+    last_interaction_at: new Date(Date.now() - 40 * 60_000).toISOString(),
   },
   {
     id: 'lead-003',
@@ -920,11 +924,13 @@ export const initialOrgSettings: OrgSettings = {
   },
 }
 
+// Um follow-up de cada estado (atrasado, hoje, futuro): no modo demonstração a tela de
+// tarefas e o sino do cabeçalho só provam que funcionam se houver o que vencer.
 export const initialLeadTasks: LeadTask[] = [
   {
     id: 'task-demo-1',
     leadId: 'lead-001',
-    title: 'Retornar ligação — harmonização',
+    title: 'Retornar ligação sobre harmonização',
     assigneeId: 'sdr-1',
     dueAt: new Date(Date.now() + 86400000).toISOString(),
     status: 'open',
@@ -932,6 +938,30 @@ export const initialLeadTasks: LeadTask[] = [
     metadata: {},
     createdAt: '2026-04-16T10:05:00Z',
     sortOrder: 0,
+  },
+  {
+    id: 'task-demo-2',
+    leadId: 'lead-002',
+    title: 'Cliente pediu para chamar quando voltar de viagem',
+    assigneeId: 'sdr-1',
+    dueAt: new Date().toISOString(),
+    status: 'open',
+    taskType: 'follow_up',
+    metadata: {},
+    createdAt: '2026-04-16T10:05:00Z',
+    sortOrder: 1,
+  },
+  {
+    id: 'task-demo-3',
+    leadId: 'lead-003',
+    title: 'Enviar orçamento do protocolo capilar',
+    assigneeId: 'sdr-1',
+    dueAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    status: 'open',
+    taskType: 'follow_up',
+    metadata: {},
+    createdAt: '2026-04-14T10:05:00Z',
+    sortOrder: 2,
   },
 ]
 

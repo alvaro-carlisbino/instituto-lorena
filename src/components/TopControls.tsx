@@ -1,6 +1,7 @@
 import { LogOut, Moon, RefreshCw, Search, Sun, User, Wrench } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 
+import { AlertsBell } from '@/components/AlertsBell'
 import { NoticeBanner } from '@/components/NoticeBanner'
 import { noticeVariantFromMessage } from '@/lib/noticeVariant'
 import { useCrm } from '@/context/CrmContext'
@@ -74,6 +75,10 @@ export function TopControls() {
 
   return (
     <div className="flex shrink-0 items-center gap-0.5">
+      {/* Primeiro controle da barra: quem está esperando resposta vem antes de
+          qualquer utilitário, e acompanha a equipe em todas as telas. */}
+      <AlertsBell />
+
       <Tooltip>
         <TooltipTrigger
           render={

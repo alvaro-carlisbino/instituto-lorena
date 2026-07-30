@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { MessageCircle } from 'lucide-react'
+import { Download, MessageCircle } from 'lucide-react'
 import { HelpDrawer } from '@/components/page/HelpDrawer'
 
 const LEADS_HELP = [
@@ -56,7 +56,9 @@ import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
 import { columnLabel } from '@/lib/leadColumnLabels'
 import { parseCsv, rowsToObjects } from '@/lib/csvParse'
-import { getLeadFieldValue } from '@/lib/leadFields'
+import { downloadCsv } from '@/lib/csvExport'
+import { hojeLocal } from '@/lib/diaLocal'
+import { getLeadFieldValue, getLeadPhoneDisplay } from '@/lib/leadFields'
 import { formatTemperature } from '@/lib/fieldLabels'
 import { archiveImportFileToStorage } from '@/lib/importArchiveStorage'
 import { labelForIdName } from '@/lib/selectDisplay'
@@ -257,6 +259,53 @@ export function LeadsPage() {
     })
   }, [crm.leads, crm.tenantFilter, searchTerm, pipelineFilter, stageFilter, ownerFilter, sourceFilter])
 
+  /**
+   * Exporta exatamente o que os filtros da tela deixaram na lista. É assim que sai a
+   * pergunta do dia a dia ("quem passou em consulta este ano e não fechou") sem
+   * ninguém precisar de acesso ao banco: filtra na tela, exporta, manda a campanha.
+   *
+   * O telefone sai pelo mesmo formatador da tela: os leads de ManyChat sem número real
+   * têm um `888001…` sintético no banco, e um CSV que os entregasse como telefone
+   * viraria uma lista de discagem para números que não existem.
+   */
+  const exportarCsv = () => {
+    const header = [
+      'Nome',
+      'Telefone',
+      'Origem',
+      'Funil',
+      'Etapa',
+      'Responsável',
+      'Temperatura',
+      'Criado em',
+      'Último contato',
+      'Resumo',
+    ]
+    if (showPolo) header.splice(1, 0, 'Polo')
+
+    const body = filteredLeads.map((lead) => {
+      const pipe = crm.pipelineCatalog.find((p) => p.id === lead.pipelineId)
+      const stage = pipe?.stages.find((s) => s.id === lead.stageId)
+      const linha = [
+        lead.patientName,
+        getLeadPhoneDisplay(lead).label,
+        sourceLabel[lead.source] ?? lead.source,
+        pipe?.name ?? lead.pipelineId,
+        stage?.name ?? lead.stageId,
+        crm.getOwnerName(lead.ownerId),
+        formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature),
+        lead.createdAt ? new Date(lead.createdAt).toLocaleDateString('pt-BR') : '',
+        lead.last_interaction_at ? new Date(lead.last_interaction_at).toLocaleDateString('pt-BR') : '',
+        lead.summary ?? '',
+      ]
+      if (showPolo) linha.splice(1, 0, poloNameForLead(lead.tenantId) ?? '')
+      return linha
+    })
+
+    downloadCsv(`leads-${hojeLocal()}.csv`, [header, ...body])
+    toast.success(`${body.length} ${body.length === 1 ? 'lead exportado' : 'leads exportados'}.`)
+  }
+
   const crmRef = useRef(crm)
   crmRef.current = crm
 
@@ -434,7 +483,20 @@ export function LeadsPage() {
   return (
     <AppLayout
       title="Leads"
-      actions={<HelpDrawer title="Ajuda com Leads" sections={LEADS_HELP} />}
+      actions={
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-xl"
+            onClick={exportarCsv}
+            disabled={filteredLeads.length === 0}
+          >
+            <Download className="size-3.5" aria-hidden /> Exportar CSV
+          </Button>
+          <HelpDrawer title="Ajuda com Leads" sections={LEADS_HELP} />
+        </div>
+      }
     >
       {crm.isLoading ? <SkeletonBlocks rows={3} /> : null}
 

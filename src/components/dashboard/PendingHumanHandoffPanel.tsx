@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertOctagon, MessageSquare } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { useCrm } from '@/context/CrmContext'
-import { useTenant } from '@/context/TenantContext'
+import { usePendingHandoff } from '@/hooks/usePendingHandoff'
 import { useNowMs } from '@/hooks/useNowMs'
-import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
 
 function formatWaitingFor(iso: string | null | undefined, now: number): string {
@@ -26,78 +24,29 @@ function formatWaitingFor(iso: string | null | undefined, now: number): string {
 }
 
 const MAX_VISIBLE = 5
-/** Handoffs mais antigos que isto viram "lead frio" (vão p/ follow-up, não p/ este card). */
-const WINDOW_HOURS = 48
-const POLL_MS = 30_000
 
 type WaitingItem = { id: string; name: string; since: string | null; reason: string | null }
 
-type PendingHandoffRow = {
-  lead_id: string
-  patient_name: string | null
-  waiting_since: string | null
-  last_message: string | null
-  channel: string | null
-  /** 'valor' = a Sofia prometeu que a equipa manda o preço; 'handoff' = encaminhamento normal. */
-  reason?: string | null
-}
-
 export function PendingHumanHandoffPanel() {
-  const crm = useCrm()
-  const { tenant } = useTenant()
   const navigate = useNavigate()
   const nowMs = useNowMs(60_000)
 
   // Fonte da verdade real: RPC que deriva das interactions (independe da escrita de
-  // conversation_status, que historicamente nunca acendia para a clínica). Em modo
-  // mock (sem Supabase) cai no filtro client-side de crm.leads.
-  const usingRpc = isSupabaseConfigured && !!supabase
-  const [rpcRows, setRpcRows] = useState<PendingHandoffRow[] | null>(null)
+  // conversation_status, que historicamente nunca acendia para a clínica). A busca, a
+  // ordenação e o fallback de modo demonstração moram em usePendingHandoff, que este
+  // card divide com o sino do cabeçalho para os dois nunca mostrarem números diferentes.
+  const rows = usePendingHandoff()
 
-  useEffect(() => {
-    if (!usingRpc || !supabase) return
-    const sb = supabase
-    let cancelled = false
-    const fetchRows = async () => {
-      const { data, error } = await sb.rpc('crm_pending_human_handoff', {
-        p_window_hours: WINDOW_HOURS,
-      })
-      if (cancelled || error) return // em erro, preserva a última lista boa
-      setRpcRows((data as PendingHandoffRow[]) ?? [])
-    }
-    void fetchRows()
-    const id = window.setInterval(fetchRows, POLL_MS)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-    // tenant.id: ao trocar de workspace, re-busca os handoffs do polo novo.
-  }, [usingRpc, tenant.id])
-
-  const waiting = useMemo<WaitingItem[] | null>(() => {
-    if (usingRpc) {
-      if (rpcRows === null) return null // ainda carregando, evita piscar verde→vermelho
-      return rpcRows.map((r) => ({
+  const waiting = useMemo<WaitingItem[] | null>(
+    () =>
+      rows?.map((r) => ({
         id: r.lead_id,
         name: r.patient_name || 'Lead sem nome',
         since: r.waiting_since,
         reason: r.reason ?? null,
-      }))
-    }
-    return crm.leads
-      .filter((l) => l.conversation_status === 'waiting_human')
-      .sort((a, b) => {
-        const ta = a.last_interaction_at ? new Date(a.last_interaction_at).getTime() : 0
-        const tb = b.last_interaction_at ? new Date(b.last_interaction_at).getTime() : 0
-        return ta - tb
-      })
-      .map((l) => ({
-        id: l.id,
-        name: l.patientName || 'Lead sem nome',
-        since: l.last_interaction_at ?? null,
-        reason: null,
-      }))
-  }, [usingRpc, rpcRows, crm.leads])
+      })) ?? null,
+    [rows],
+  )
 
   // Primeira carga do RPC ainda em andamento: não renderiza nada (sem flash do estado vazio).
   if (waiting === null) return null
