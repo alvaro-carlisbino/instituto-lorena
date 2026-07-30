@@ -190,7 +190,6 @@ export async function dispatchPurchaseConversions(admin: SupabaseClient, input: 
       .eq('meta->>payId', input.orderId)
       .limit(1)
       .maybeSingle()
-    if (dup) return
 
     const { data: leadRow } = await admin
       .from('leads')
@@ -202,6 +201,21 @@ export async function dispatchPurchaseConversions(admin: SupabaseClient, input: 
     const cf = (lead.custom_fields ?? {}) as Record<string, unknown>
     const origin = String(cf.origin ?? '').trim()
     const { gclid, fbclid, gaClientId, gaSessionId } = pickAttr(cf)
+
+    // A /obrigado registra a compra no funil pelo navegador, mas ela NUNCA sobe conversão
+    // pro Google Ads por gclid: a tag de lá é gtag do browser e o relatório por clique vive
+    // do upload server-side. Sair aqui pelo dedupe silenciava justamente a venda que fecha
+    // no site. Em julho/2026, 4 das 5 vendas com gclid caíram nesse buraco (só a que não
+    // passou pela /obrigado subiu ao vivo; duas foram resgatadas por backfill manual), e o
+    // Google Ads apareceu com um terço do resultado real. Reenviar é seguro: o Google
+    // deduplica pelo transactionId, que é o mesmo orderId.
+    if (dup) {
+      if (gclid) {
+        const r = await uploadGoogleAdsConversion({ gclid, valueReais: Math.round(input.valueCents) / 100, orderId: input.orderId })
+        if (!r.ok && r.error && r.error !== 'nao_configurado') console.warn('[gads] upload falhou (pós-dedupe):', r.error)
+      }
+      return
+    }
     // Escopo: funil interno + GA4 + Meta são só do SITE. Vendas do bot/link do WhatsApp têm
     // o próprio relatório no CRM e não são tráfego web. MAS o Google Ads é exceção: se o
     // lead tem gclid (clicou no anúncio e fechou na conversa — ponte SITE-<sid>), a
