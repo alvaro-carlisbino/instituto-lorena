@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
     return json({ ok: true, manual_finalized: localId }, 200)
   }
 
-  const { event, asaasPaymentId, externalRef, subscriptionId, paid } = parseAsaasWebhook(payload)
+  const { event, asaasPaymentId, externalRef, subscriptionId, paid, billingType, valueCents, netValueCents } = parseAsaasWebhook(payload)
 
   // Dedup. Assinatura: por PAGAMENTO (sem o evento) — assim CONFIRMED e RECEIVED do MESMO ciclo
   // processam só uma vez (não duplica envio). Avulso: por pagamento + evento (comportamento atual).
@@ -101,7 +101,9 @@ Deno.serve(async (req) => {
       }
     }
     try {
-      await finalizeSubscriptionCycle(admin, String((sub as { id: string }).id), asaasPaymentId)
+      // billingType/netValue do payload: única fonte do meio de pagamento e da taxa do ciclo —
+      // a assinatura não guarda nenhum dos dois, e sem eles o financeiro do ciclo não fecha.
+      await finalizeSubscriptionCycle(admin, String((sub as { id: string }).id), asaasPaymentId, { billingType, valueCents, netValueCents })
     } catch (e) {
       await markRetry(e instanceof Error ? e.message : String(e))
       return json({ ok: false, error: 'finalize_subscription_failed' }, 200)

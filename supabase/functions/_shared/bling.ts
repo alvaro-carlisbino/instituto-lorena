@@ -453,6 +453,8 @@ async function blingEnsureReceivable(
     dataISO: string
     orderNumber: string
     formaPagamentoId: string | null
+    /** Texto do lançamento. Omitido = "Venda <nº> — automática (CRM)". */
+    historico?: string
   },
 ): Promise<{ receivableId: string | null; settled: boolean }> {
   const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' }
@@ -464,7 +466,7 @@ async function blingEnsureReceivable(
       dataEmissao: args.dataISO,
       valor,
       contato: { id: Number(args.contatoId) || args.contatoId },
-      historico: `Venda ${args.orderNumber || '?'} — automática (CRM)`.slice(0, 200),
+      historico: (args.historico || `Venda ${args.orderNumber || '?'} — automática (CRM)`).slice(0, 200),
       ...(args.orderNumber ? { numeroDocumento: String(args.orderNumber).slice(0, 20) } : {}),
       ...(args.formaPagamentoId ? { formaPagamento: { id: Number(args.formaPagamentoId) || args.formaPagamentoId } } : {}),
     }
@@ -502,6 +504,82 @@ async function blingEnsureReceivable(
     console.warn('[bling] conta a receber falhou:', e instanceof Error ? e.message : String(e))
     return { receivableId: null, settled: false }
   }
+}
+
+/**
+ * Lança uma CONTA A RECEBER avulsa — dinheiro que entrou SEM pedido de venda novo.
+ *
+ * Existe por causa da ASSINATURA: o plano trimestral cobra R$160,59 TODO MÊS mas só manda
+ * produto a cada 3 ciclos. Como o pedido no Bling só nascia no ciclo de envio, os ciclos 2 e 3
+ * não deixavam rastro NENHUM no Bling — nem pedido, nem financeiro (Kauan, 30/jul/2026:
+ * "esse não foi pro Bling"). Não é caso de criar pedido: não sai mercadoria nesses meses, e um
+ * pedido a mais baixaria estoque que não saiu e sujaria a NF-e. O que falta é só o financeiro.
+ *
+ * Mesma política de baixa do `blingEnsureReceivable`: com a taxa conhecida, baixa pelo líquido
+ * (a taxa vai em `tarifa`); sem taxa, a conta fica EM ABERTO pra baixa manual — nunca chuta.
+ *
+ * Best-effort: devolve `{ receivableId: null }` em vez de estourar, mas o caller DEVE gravar o
+ * desfecho (ver `asaas_subscriptions.last_fin_*`) — conta que não entrou tem que aparecer em
+ * algum lugar, senão vira o mesmo buraco silencioso de antes.
+ */
+export async function blingRecordReceivable(
+  admin: SupabaseClient,
+  tenantId: string,
+  args: {
+    amountCents: number
+    /** Taxa do gateway (centavos). `null`/omitido = desconhecida → conta fica em aberto. */
+    feeCents?: number | null
+    /** Data do lançamento/vencimento (YYYY-MM-DD). Omitida = hoje no fuso de Brasília. */
+    dateISO?: string
+    historico: string
+    /** Vai em `numeroDocumento` — é o que dá pra rastrear (o vínculo com pedido é read-only). */
+    numeroDocumento?: string
+    /** 'pix' | 'card' → forma de pagamento real no Bling. Omitido = padrão da conta. */
+    paymentMethod?: string
+    installments?: number
+    customerName?: string; phone?: string; cpf?: string; email?: string
+  },
+): Promise<{ receivableId: string | null; settled: boolean; contatoFallback: boolean }> {
+  const token = await getValidBlingToken(admin, tenantId)
+  if (!token) throw new Error('bling_nao_conectado')
+
+  const { data } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', tenantId).maybeSingle()
+  const cfg = ((data as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+  let contatoId = cfg.default_contato_id != null ? String(cfg.default_contato_id).trim() : ''
+  if (!contatoId) throw new Error('bling_default_contato_nao_configurado')
+
+  // Contato REAL do cliente (o mesmo do pedido de envio, casado por telefone/CPF). Sem endereço:
+  // conta a receber não emite nota, então não precisa do cadastro fiscal completo.
+  let contatoFallback = false
+  if (args.customerName) {
+    const realId = await blingFindOrCreateContato(token, {
+      nome: args.customerName, phone: args.phone, cpf: args.cpf, email: args.email,
+    })
+    if (realId) contatoId = realId
+    else contatoFallback = true
+  }
+
+  let formaPagamentoId: string | null = null
+  if (args.paymentMethod) {
+    const formas = await blingFormasPagamento(admin, tenantId, token)
+    formaPagamentoId = pickBlingFormaPagamento(formas, args.paymentMethod, args.installments ?? 1)
+    if (!formaPagamentoId) console.warn('[bling] forma de pagamento não resolvida p/', args.paymentMethod, args.installments)
+  }
+
+  const dataISO = args.dateISO && /^\d{4}-\d{2}-\d{2}$/.test(args.dateISO)
+    ? args.dateISO
+    : new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
+
+  const out = await blingEnsureReceivable(token, {
+    contatoId,
+    amountCents: Math.round(args.amountCents),
+    feeCents: args.feeCents ?? null,
+    dataISO,
+    orderNumber: args.numeroDocumento ?? '',
+    formaPagamentoId,
+    historico: args.historico,
+  })
+  return { ...out, contatoFallback }
 }
 
 /**
@@ -747,6 +825,16 @@ export async function blingCreateSaleOrder(
      * `null`/omitido = taxa desconhecida → a conta é criada e fica em aberto (nunca chuta).
      */
     feeCents?: number | null
+    /**
+     * Valor da CONTA A RECEBER, quando é diferente do total do pedido. Só a ASSINATURA usa:
+     * o pedido carrega a mercadoria do envio inteiro (3 frascos = R$481,76) mas o dinheiro que
+     * entrou NESTE mês é uma mensalidade (R$160,59). Lançar o pedido inteiro como recebido
+     * inflava o mês do envio e zerava os outros dois (caso Chayenne: junho lançou R$481,76
+     * quando entraram R$160,59). Omitido = `amountCents` (venda à vista normal).
+     */
+    receivableAmountCents?: number
+    /** Texto do lançamento financeiro. Omitido = "Venda <nº> — automática (CRM)". */
+    receivableHistorico?: string
     /** Endereço de entrega capturado p/ completar o contato (NF-e) + modalidade da venda. */
     entrega?: {
       cep?: string; numero?: string; complemento?: string
@@ -982,13 +1070,15 @@ export async function blingCreateSaleOrder(
         // estavam assim em 20-29/jul). Vai com o valor BRUTO; a taxa entra na baixa.
         receivable = await blingEnsureReceivable(token, {
           contatoId,
-          amountCents: Math.round(args.amountCents),
+          // Assinatura: a conta é a MENSALIDADE recebida, não o pedido inteiro (ver doc do arg).
+          amountCents: Math.round(args.receivableAmountCents ?? args.amountCents),
           feeCents: args.feeCents ?? null,
           dataISO: dataPedido,
           orderNumber: String(od.numero ?? ''),
           formaPagamentoId: parc.length
             ? String(((parc[0].formaPagamento ?? {}) as Record<string, unknown>).id ?? '') || null
             : null,
+          historico: args.receivableHistorico,
         })
       }
     } catch (e) {

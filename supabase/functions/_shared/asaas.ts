@@ -2,7 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { findLeadByPhone, insertInteraction, recordAutoReceipt } from './crm.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
 import { quoteGatewayFee } from './gatewayFees.ts'
-import { blingCreateSaleOrder } from './bling.ts'
+import { blingCreateSaleOrder, blingRecordReceivable } from './bling.ts'
 import { autoShipToCart, type AutoShipResult } from './melhorEnvio.ts'
 import { sendEmail } from './resend.ts'
 import { sendSaleReceiptToGroup } from './saleReceipt.ts'
@@ -582,7 +582,14 @@ export async function createAsaasPix(
   }
 }
 
-export type AsaasWebhookEvent = { event: string; asaasPaymentId: string | null; externalRef: string | null; subscriptionId: string | null; paid: boolean }
+export type AsaasWebhookEvent = {
+  event: string; asaasPaymentId: string | null; externalRef: string | null; subscriptionId: string | null; paid: boolean
+  /** CREDIT_CARD / PIX / BOLETO — meio REAL do pagamento, direto do Asaas. */
+  billingType: string | null
+  /** Bruto cobrado e LÍQUIDO creditado (centavos). A diferença é a taxa EXATA do Asaas. */
+  valueCents: number | null
+  netValueCents: number | null
+}
 
 /** Normaliza o corpo do webhook do Asaas. Eventos de pagamento: PAYMENT_CONFIRMED/RECEIVED. */
 export function parseAsaasWebhook(payload: Record<string, unknown>): AsaasWebhookEvent {
@@ -599,18 +606,45 @@ export function parseAsaasWebhook(payload: Record<string, unknown>): AsaasWebhoo
     status === 'CONFIRMED' ||
     status === 'RECEIVED' ||
     status === 'RECEIVED_IN_CASH'
-  return { event, asaasPaymentId, externalRef, subscriptionId, paid }
+  // `billingType` e `netValue` vêm no próprio payload do Asaas. Para o CICLO de assinatura são a
+  // ÚNICA fonte do meio de pagamento e da taxa: `asaas_subscriptions` não guarda nenhum dos dois,
+  // e sem eles a conta a receber do ciclo nascia sem forma de pagamento e sem poder ser baixada.
+  const reais = (v: unknown): number | null => {
+    const n = Number(v)
+    return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null
+  }
+  return {
+    event, asaasPaymentId, externalRef, subscriptionId, paid,
+    billingType: payment.billingType ? String(payment.billingType).toUpperCase() : null,
+    valueCents: reais(payment.value),
+    netValueCents: reais(payment.netValue),
+  }
 }
 
 /**
  * Downstream de um CICLO de ASSINATURA pago (idempotente — chamado 1x por pagamento do ciclo).
- * Incrementa paid_cycles, grava comprovante, e — se for ciclo de ENVIO conforme a cadência —
- * cria o pedido no Bling (qtd exata de frascos) e monta o envio no Melhor Envio.
+ * Incrementa paid_cycles, grava comprovante, LANÇA O DINHEIRO NO FINANCEIRO DO BLING e — se for
+ * ciclo de ENVIO conforme a cadência — cria o pedido no Bling (qtd exata de frascos) e monta o
+ * envio no Melhor Envio.
  *  • mensal     -> envia todo ciclo (1 frasco).
  *  • trimestral -> envia nos ciclos 1, 4, 7… (3 frascos).
- * `localSubId` = asaas_subscriptions.id; `asaasPaymentId` = id do pagamento do ciclo (Asaas).
+ *
+ * DINHEIRO ≠ MERCADORIA (conserto de 30/jul/2026, reclamação do Kauan "esse não foi pro Bling"):
+ * a assinatura trimestral COBRA todo mês e ENVIA a cada 3. Antes o Bling só era tocado no ciclo
+ * de envio, e com o valor do envio inteiro — então junho lançou R$481,76 (3 meses de uma vez,
+ * tendo entrado R$160,59) e julho/agosto não lançaram NADA. Agora todo ciclo pago lança a
+ * MENSALIDADE como conta a receber (baixada pelo líquido quando o Asaas informa a taxa); o
+ * pedido de venda continua saindo só no ciclo que envia produto, que é o que mexe estoque e NF-e.
+ *
+ * `localSubId` = asaas_subscriptions.id; `asaasPaymentId` = id do pagamento do ciclo (Asaas);
+ * `charge` = meio de pagamento e líquido do ciclo, direto do webhook (ver `parseAsaasWebhook`).
  */
-export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubId: string, asaasPaymentId: string | null): Promise<void> {
+export async function finalizeSubscriptionCycle(
+  admin: SupabaseClient,
+  localSubId: string,
+  asaasPaymentId: string | null,
+  charge?: { billingType?: string | null; valueCents?: number | null; netValueCents?: number | null },
+): Promise<void> {
   const { data } = await admin.from('asaas_subscriptions').select('*').eq('id', localSubId).maybeSingle()
   if (!data) return
   const s = data as Record<string, unknown>
@@ -696,6 +730,35 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
   // Decide se ESTE ciclo envia produto.
   const ships = cadence === 'trimestral' ? ((cycle - 1) % 3 === 0) : true
 
+  // ===== FINANCEIRO DO CICLO =====
+  // Meio de pagamento e taxa vêm do webhook do Asaas (a assinatura não guarda nenhum dos dois).
+  // Taxa EXATA = bruto − líquido; sem líquido no payload, cai na tabela de taxas do polo; sem
+  // nenhum dos dois fica null e a conta nasce EM ABERTO — nunca chuta (ver gatewayFees.ts).
+  const billing = String(charge?.billingType ?? '').toUpperCase()
+  const cycleMethod = billing.includes('PIX') ? 'pix' : (billing.includes('CREDIT') || billing.includes('DEBIT') ? 'card' : '')
+  const bruto = charge?.valueCents ?? null
+  const liquido = charge?.netValueCents ?? null
+  let cycleFeeCents: number | null = bruto != null && liquido != null && liquido > 0 && liquido < bruto ? bruto - liquido : null
+  if (cycleFeeCents == null && cycleMethod) {
+    cycleFeeCents = (await quoteGatewayFee(admin, tenantId, 'asaas', {
+      method: cycleMethod, installments: 1, amountCents: monthlyValueCents,
+    }))?.feeCents ?? null
+  }
+  const finHistorico = `Assinatura Tricopill — ciclo ${cycle} (${cadence})${asaasPaymentId ? ` · ${asaasPaymentId}` : ''}`
+  // Desfecho do lançamento fica gravado na assinatura: conta que não entrou TEM que aparecer em
+  // algum lugar, senão volta a ser o buraco silencioso que ninguém enxergava.
+  const gravarFin = async (status: string, receivableId: string | null, reason: string | null) => {
+    await admin.from('asaas_subscriptions').update({
+      last_fin_cycle: cycle,
+      last_fin_status: status,
+      last_fin_receivable_id: receivableId,
+      last_fin_reason: reason ? reason.slice(0, 200) : null,
+      last_fin_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', localSubId)
+    if (status !== 'ok') console.error('[assinatura] financeiro do ciclo NÃO lançado', { localSubId, cycle, status, reason })
+  }
+
   // Confirmação ao cliente (WhatsApp + e-mail) — renovação paga + status do envio. Best-effort.
   try {
     const nome = String(s.customer_name ?? '').trim().split(/\s+/).filter(Boolean)[0] || 'tudo bem'
@@ -724,10 +787,41 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
       last_ship_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('id', localSubId)
+
+    // Não sai mercadoria, mas ENTROU DINHEIRO: lança a mensalidade no financeiro do Bling. Sem
+    // isto o mês inteiro sumia do caixa (era exatamente o "esse não foi pro Bling" do ciclo 2 da
+    // Chayenne, 29/jul). Pedido de venda NÃO se cria aqui: baixaria estoque que não saiu.
+    let finNota = ''
+    try {
+      const rec = await blingRecordReceivable(admin, 'tricopill', {
+        amountCents: monthlyValueCents,
+        feeCents: cycleFeeCents,
+        historico: finHistorico,
+        numeroDocumento: asaasPaymentId ?? undefined,
+        paymentMethod: cycleMethod || undefined,
+        customerName: s.customer_name != null ? String(s.customer_name) : undefined,
+        phone: s.phone != null ? String(s.phone) : undefined,
+        cpf: s.customer_doc != null ? String(s.customer_doc) : undefined,
+        email: s.email != null ? String(s.email) : undefined,
+      })
+      if (rec.receivableId) {
+        await gravarFin(rec.settled ? 'ok' : 'em_aberto', rec.receivableId, rec.settled ? null : 'taxa_desconhecida')
+        finNota = rec.settled
+          ? ` Financeiro: baixado no Bling (líquido).`
+          : ` Financeiro: conta a receber criada no Bling, EM ABERTO (taxa não informada) — baixar pelo extrato.`
+      } else {
+        await gravarFin('falhou', null, 'conta_nao_criada')
+        finNota = ` ⚠️ Financeiro: a conta a receber NÃO foi criada no Bling — lançar na mão.`
+      }
+    } catch (e) {
+      await gravarFin('falhou', null, e instanceof Error ? e.message : String(e))
+      finNota = ` ⚠️ Financeiro: falha ao lançar no Bling (${(e instanceof Error ? e.message : String(e)).slice(0, 120)}) — lançar na mão.`
+    }
+
     if (leadId) {
       await insertInteraction(admin, {
         leadId, patientName: String(synthLead.patient_name), channel: 'system', direction: 'system', author: 'Assinatura',
-        content: `📅 Ciclo ${cycle} pago, SEM envio neste mês (${cadence}: ${unitsPerShipment} frascos a cada 3 ciclos). Próximo envio no ciclo ${proximo}.`,
+        content: `📅 Ciclo ${cycle} pago, SEM envio neste mês (${cadence}: ${unitsPerShipment} frascos a cada 3 ciclos). Próximo envio no ciclo ${proximo}.${finNota}`,
         tenantId,
       }).catch(() => {})
     }
@@ -746,23 +840,41 @@ export async function finalizeSubscriptionCycle(admin: SupabaseClient, localSubI
       amountCents: shipValueCents,
       freightCents: shipFreightCents,
       description: `Assinatura Tricopill (${shipUnits} ${shipUnits === 1 ? 'frasco' : 'frascos'}) — ciclo ${cycle}`,
-      // Sem `paymentMethod` de propósito: `asaas_subscriptions` não guarda o meio de pagamento do
-      // ciclo, e chutar 'card' carimbaria forma errada no financeiro. Fica com o padrão do Bling
-      // até a coluna existir (aí é só passar aqui, como nos outros call sites).
+      // Meio de pagamento REAL do ciclo, vindo do webhook (a assinatura não guarda a coluna).
+      // Vazio = webhook sem billingType → mantém o padrão do Bling em vez de chutar.
+      paymentMethod: cycleMethod || undefined,
+      // FINANCEIRO ≠ PEDIDO: o pedido carrega a mercadoria do envio inteiro (3 frascos), mas o
+      // que entrou no caixa neste mês é UMA mensalidade. Lançar o pedido todo como recebido
+      // inflava o mês do envio e zerava os outros dois (junho da Chayenne: R$481,76 lançados
+      // contra R$160,59 recebidos). Os demais ciclos lançam a mensalidade deles lá em cima.
+      receivableAmountCents: monthlyValueCents,
+      receivableHistorico: finHistorico,
+      feeCents: cycleFeeCents,
       customerName: s.customer_name != null ? String(s.customer_name) : undefined,
       phone: s.phone != null ? String(s.phone) : undefined,
       cpf: s.customer_doc != null ? String(s.customer_doc) : undefined,
       email: s.email != null ? String(s.email) : undefined,
       entrega: { ...entrega, delivery_mode: 'envio_externo' } as Record<string, string>,
     })
+    // A conta a receber sai DENTRO do blingCreateSaleOrder (pela mensalidade, não pelo pedido).
+    const finOk = !!out.receivable.receivableId
+    await gravarFin(
+      finOk ? (out.receivable.settled ? 'ok' : 'em_aberto') : 'falhou',
+      out.receivable.receivableId,
+      finOk ? (out.receivable.settled ? null : 'taxa_desconhecida') : 'conta_nao_criada',
+    )
+    const finNota = finOk
+      ? (out.receivable.settled ? ' Financeiro: baixado no Bling (líquido).' : ' Financeiro: conta EM ABERTO (taxa não informada) — baixar pelo extrato.')
+      : ' ⚠️ Financeiro: conta a receber NÃO criada — lançar na mão.'
     if (leadId) {
       await insertInteraction(admin, {
         leadId, patientName: String(synthLead.patient_name), channel: 'system', direction: 'system', author: 'Bling',
-        content: `📦 Assinatura: pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos) — ciclo ${cycle}.`,
+        content: `📦 Assinatura: pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos) — ciclo ${cycle}.${finNota}`,
         tenantId: blingTenant,
       }).catch(() => {})
     }
   } catch (e) {
+    await gravarFin('falhou', null, e instanceof Error ? e.message : String(e))
     if (leadId) {
       await insertInteraction(admin, {
         leadId, patientName: String(synthLead.patient_name), channel: 'system', direction: 'system', author: 'Bling',
