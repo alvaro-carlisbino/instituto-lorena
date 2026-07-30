@@ -92,8 +92,12 @@ Deno.serve(async (req) => {
 
     if (dry) { resultado.enviados++; continue }
 
-    // valor 0: a ação "Lead WhatsApp" está com alwaysUseDefaultValue, então quem manda no
-    // valor é o Google (R$ 200 = 33% de fechamento × ticket de ~R$ 634 observado).
+    // valor 0 de verdade desde 29/07/2026. Antes a ação "Lead WhatsApp" tinha
+    // defaultValue R$ 200 + alwaysUseDefaultValue, e o Google carimbava esse valor por cima
+    // do 0 daqui. Era receita fictícia: 4 leads viravam "R$ 800 de conversão" no painel.
+    // Inofensivo em Maximizar Cliques, mas envenenaria Maximizar Valor de Conversão, onde
+    // o R$ 200 falso disputa com o valor real das Compras. Lead é sinal de volume, não de
+    // receita — quem tem valor é a ação "Compras".
     const r = await uploadGoogleAdsConversion({
       gclid,
       valueReais: 0,
