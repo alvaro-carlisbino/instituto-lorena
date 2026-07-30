@@ -1014,10 +1014,15 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
       .select('kit, amount_cents, freight_cents, created_at')
       .eq('lead_id', leadId).eq('status', 'paid')
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    // Ciclo de ASSINATURA (`sub-…`) fica de fora: ele é mensalidade, não pedido. O envio da
+    // assinatura já sai pelo finalizeSubscriptionCycle, nos ciclos certos. Se entrasse aqui,
+    // seria o pagamento "mais recente" do assinante e a etiqueta sairia pelo valor do MÊS —
+    // e um ciclo que nem envia produto (trimestral, meses 2 e 3) geraria envio do nada.
     const { data: asaas } = await admin
       .from('asaas_payments')
       .select('kit, amount_cents, freight_cents, created_at')
       .eq('lead_id', leadId).eq('status', 'paid')
+      .not('id', 'like', 'sub-%')
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
     const paid = [rede, asaas]
       .filter(Boolean)

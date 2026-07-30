@@ -802,6 +802,9 @@ export function TricopilOrdersPage() {
                       <div className="flex flex-col items-start gap-1">
                         {p.blingOrderId ? (
                           <span className="rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">Bling #{p.blingOrderId}</span>
+                        ) : p.subscriptionCycle ? (
+                          // "sem pedido" aqui leria como falha; nesse ciclo é o certo.
+                          <span className="rounded-md bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-bold text-sky-700" title="Assinatura: mês sem envio. O valor entra no Bling como conta a receber.">mensalidade</span>
                         ) : (
                           <span className="text-[10px] text-muted-foreground">sem pedido</span>
                         )}
@@ -953,10 +956,19 @@ export function TricopilOrdersPage() {
                               <Button size="sm" variant="outline" className="rounded-lg" disabled={!p.leadId || savingShip === p.leadId || shipOf(p) === 'entregue'} onClick={() => void markDelivered(p)}>
                                 <PackageCheck className="size-3.5" /> Marcar entregue
                               </Button>
-                              {!p.blingOrderId ? (
+                              {!p.blingOrderId && !p.subscriptionCycle ? (
                                 <Button size="sm" variant="outline" className="rounded-lg" disabled={relaunching === p.id || !p.leadId} onClick={() => void doRelaunchBling(p)}>
                                   <RefreshCw className={cn('size-3.5', relaunching === p.id && 'animate-spin')} /> {relaunching === p.id ? 'Relançando…' : 'Criar pedido no Bling'}
                                 </Button>
+                              ) : null}
+                              {/* Mensalidade de assinatura sem pedido no Bling é o esperado: o
+                                  trimestral cobra todo mês e envia a cada 3. O botão de relançar
+                                  criaria um pedido pelo lead (frascos e valor errados) e baixaria
+                                  estoque que não saiu — por isso some, com o motivo no lugar. */}
+                              {!p.blingOrderId && p.subscriptionCycle ? (
+                                <span className="text-[11px] text-muted-foreground">
+                                  Mensalidade de assinatura — sem pedido porque não há envio neste ciclo. O dinheiro entra no Bling como conta a receber.
+                                </span>
                               ) : null}
                               {p.leadId ? (
                                 <Link to={`/leads/${p.leadId}`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'rounded-lg')}>

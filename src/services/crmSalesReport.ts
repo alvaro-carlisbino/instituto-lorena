@@ -103,6 +103,14 @@ type RawSale = {
   blingOrderId: string | null
   paidAt: string | null
   phone: string
+  /**
+   * Impede que a dedup por identidade+valor junte cobranças que são LEGITIMAMENTE iguais.
+   * A dedup existe pra unir a MESMA venda registrada 2x (link real + confirmação manual).
+   * Assinatura quebra essa premissa: o mesmo cliente paga o mesmo valor todo mês, então num
+   * relatório de 3 meses os 3 ciclos colapsariam em UM e o faturamento sairia menor. Com o
+   * salt (o id do pagamento do ciclo no Asaas), cada ciclo é uma venda própria.
+   */
+  dedupSalt?: string
 }
 
 /** Pontua uma linha para escolher a representante do grupo (maior = melhor). */
@@ -215,9 +223,13 @@ export async function fetchSalesRowsInRange(startIso: string, endIso: string): P
 
   for (const r of asaas) {
     if (!isPaid(r.status, r.paid_at)) continue
+    const idAsaas = String(r.id ?? '')
     raw.push({
-      id: String(r.id ?? ''),
+      id: idAsaas,
       src: 'asaas',
+      // Ciclo de assinatura (`sub-<assinatura>-c<ciclo>`): cobrança recorrente do mesmo valor
+      // pro mesmo cliente é venda NOVA, não registro repetido — não pode entrar na dedup.
+      dedupSalt: idAsaas.startsWith('sub-') ? idAsaas : undefined,
       method: String(r.method ?? '') === 'card' ? 'card' : 'pix',
       leadId: r.lead_id != null ? String(r.lead_id) : '',
       customerName: String(r.customer_name ?? '').trim(),
@@ -279,7 +291,7 @@ export async function fetchSalesRowsInRange(startIso: string, endIso: string): P
   // Agrupa por identidade + valor no dia; mantém a de maior score (desempate: mais cedo).
   const groups = new Map<string, RawSale>()
   for (const r of raw) {
-    const key = `${identity(r)}|${r.amountCents}`
+    const key = `${identity(r)}|${r.amountCents}${r.dedupSalt ? `|${r.dedupSalt}` : ''}`
     const cur = groups.get(key)
     if (!cur) {
       groups.set(key, r)

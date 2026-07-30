@@ -58,6 +58,12 @@ export type UnifiedPayment = {
   /** NF-e: emitida | rascunho | erro | null (sem nota). Só Rede. */
   nfeStatus: string | null
   nfeNumero: string | null
+  /**
+   * Mensalidade de ASSINATURA (não uma compra avulsa). O trimestral cobra todo mês e só envia
+   * produto a cada 3 ciclos, então é NORMAL um ciclo aparecer sem pedido no Bling — a tela não
+   * deve tratar isso como falha nem oferecer "criar pedido" (criaria estoque saindo à toa).
+   */
+  subscriptionCycle: boolean
 }
 
 const PAID_STATUSES = new Set(['paid', 'pago', 'approved', 'available', 'completed'])
@@ -98,8 +104,10 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
     for (const r of asaas.data ?? []) {
       const rec = asRec(r)
       const paidAt = rec.paid_at != null ? String(rec.paid_at) : null
+      const idAsaas = String(rec.id ?? '')
       rows.push({
-        id: String(rec.id ?? ''),
+        id: idAsaas,
+        subscriptionCycle: idAsaas.startsWith('sub-'),
         method: String(rec.method ?? 'card') === 'pix' ? 'pix' : 'card',
         leadId: str(rec.lead_id),
         customerName: str(rec.customer_name),
@@ -152,6 +160,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         items: parseItems(rec.items),
         nfeStatus: str(rec.nfe_status),
         nfeNumero: str(rec.nfe_numero),
+        subscriptionCycle: false,
       })
     }
   }
@@ -182,6 +191,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         items: null,
         nfeStatus: null,
         nfeNumero: null,
+        subscriptionCycle: false,
       })
     }
   }

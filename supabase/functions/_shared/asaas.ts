@@ -678,6 +678,67 @@ export async function finalizeSubscriptionCycle(
   // Marca o ciclo como pago + reativa a assinatura se estava em atraso.
   await admin.from('asaas_subscriptions').update({ paid_cycles: cycle, status: 'active', updated_at: new Date().toISOString() }).eq('id', localSubId)
 
+  // ===== MEIO DE PAGAMENTO E TAXA DO CICLO =====
+  // Vêm do webhook do Asaas — a assinatura não guarda nenhum dos dois. Taxa EXATA = bruto −
+  // líquido; sem líquido no payload, cai na tabela de taxas do polo; sem nenhum dos dois fica
+  // null e a conta a receber nasce EM ABERTO — nunca chuta (ver gatewayFees.ts).
+  const billing = String(charge?.billingType ?? '').toUpperCase()
+  const cycleMethod = billing.includes('PIX') ? 'pix' : (billing.includes('CREDIT') || billing.includes('DEBIT') ? 'card' : '')
+  const bruto = charge?.valueCents ?? null
+  const liquido = charge?.netValueCents ?? null
+  let cycleFeeCents: number | null = bruto != null && liquido != null && liquido > 0 && liquido < bruto ? bruto - liquido : null
+  if (cycleFeeCents == null && cycleMethod) {
+    cycleFeeCents = (await quoteGatewayFee(admin, tenantId, 'asaas', {
+      method: cycleMethod, installments: 1, amountCents: monthlyValueCents,
+    }))?.feeCents ?? null
+  }
+  const finHistorico = `Assinatura Tricopill — ciclo ${cycle} (${cadence})${asaasPaymentId ? ` · ${asaasPaymentId}` : ''}`
+
+  // LINHA DE VENDA DO CICLO. O ciclo não criava nada em `asaas_payments`, então a receita
+  // recorrente sumia do /pedidos E dos relatórios de venda (junho e julho da Chayenne não
+  // aparecem em nenhum dos dois). Não é risco de dobrar faturamento: hoje é omissão total.
+  //
+  // `id` DETERMINÍSTICO (`sub-<assinatura>-c<ciclo>`) = idempotente por construção: webhook
+  // repetido do mesmo ciclo reescreve a MESMA linha em vez de criar venda nova.
+  //
+  // Tem que nascer ANTES do comprovante: `markReceiptSent` carimba `receipt_group_sent_at`
+  // procurando a venda por ESTE id. Se a linha não existisse ainda, a marca não colaria e o
+  // vigia do crm-payment-confirm-watch reenviaria o mesmo comprovante ao grupo em ~5 min.
+  //
+  // NÃO dispara conversão de compra (Meta/GA4): renovação não é aquisição, e mandar isso
+  // inflaria a conversão dos anúncios com dinheiro que não veio de clique novo.
+  // Decide se ESTE ciclo envia produto (mensal envia sempre; trimestral nos ciclos 1, 4, 7…).
+  const ships = cadence === 'trimestral' ? ((cycle - 1) % 3 === 0) : true
+
+  const cyclePaymentRowId = `sub-${localSubId}-c${cycle}`
+  // A descrição DIZ se o mês tem envio. É o que evita a próxima pergunta do financeiro: a linha
+  // de um ciclo sem envio aparece no /pedidos sem pedido no Bling, e sem essa frase parece
+  // exatamente o defeito que acabamos de consertar.
+  const cycleDescricao = ships
+    ? `Assinatura Tricopill — ciclo ${cycle} (${cadence}) · envio de ${unitsPerShipment} frasco${unitsPerShipment > 1 ? 's' : ''}`
+    : `Assinatura Tricopill — ciclo ${cycle} (${cadence}) · mensalidade, sem envio neste mês`
+  {
+    const { error } = await admin.from('asaas_payments').upsert({
+      id: cyclePaymentRowId,
+      tenant_id: tenantId,
+      lead_id: leadId || null,
+      method: cycleMethod || 'card',
+      amount_cents: monthlyValueCents,
+      installments: 1,
+      description: cycleDescricao,
+      status: 'paid',
+      paid_at: new Date().toISOString(),
+      asaas_payment_id: asaasPaymentId,
+      customer_name: s.customer_name != null ? String(s.customer_name) : null,
+      phone: s.phone != null ? String(s.phone) : null,
+      customer_doc: s.customer_doc != null ? String(s.customer_doc) : null,
+      ...(cycleFeeCents != null
+        ? { fee_cents: cycleFeeCents, net_cents: monthlyValueCents - cycleFeeCents, fee_source: liquido != null ? 'asaas_webhook' : 'tabela_polo' }
+        : {}),
+    }, { onConflict: 'id' })
+    if (error) console.error('[assinatura] venda do ciclo não registrada em asaas_payments', { localSubId, cycle, error: error.message })
+  }
+
   // Comprovante automático do ciclo (idempotente pelo payment_id).
   await recordAutoReceipt(admin, {
     tenantId,
@@ -690,11 +751,13 @@ export async function finalizeSubscriptionCycle(
   })
 
   // Comprovante do ciclo no grupo do financeiro (best-effort).
+  // `paymentId` = id da LINHA DE VENDA (não o id do Asaas): é por ele que `markReceiptSent`
+  // carimba `receipt_group_sent_at`, e sem o carimbo o vigia reenviaria o comprovante.
   await sendSaleReceiptToGroup(admin, {
     tenantId: 'tricopill',
-    paymentId: asaasPaymentId || `${localSubId}:cycle:${cycle}`,
+    paymentId: cyclePaymentRowId,
     gateway: 'Asaas',
-    method: 'card',
+    method: cycleMethod === 'pix' ? 'pix' : 'card',
     amountCents: monthlyValueCents,
     produto: `Assinatura Tricopill (${unitsPerShipment} frasco${unitsPerShipment > 1 ? 's' : ''}/envio, ${cadence})`,
     transactionId: asaasPaymentId,
@@ -727,24 +790,6 @@ export async function finalizeSubscriptionCycle(
     }).catch(() => {})
   }
 
-  // Decide se ESTE ciclo envia produto.
-  const ships = cadence === 'trimestral' ? ((cycle - 1) % 3 === 0) : true
-
-  // ===== FINANCEIRO DO CICLO =====
-  // Meio de pagamento e taxa vêm do webhook do Asaas (a assinatura não guarda nenhum dos dois).
-  // Taxa EXATA = bruto − líquido; sem líquido no payload, cai na tabela de taxas do polo; sem
-  // nenhum dos dois fica null e a conta nasce EM ABERTO — nunca chuta (ver gatewayFees.ts).
-  const billing = String(charge?.billingType ?? '').toUpperCase()
-  const cycleMethod = billing.includes('PIX') ? 'pix' : (billing.includes('CREDIT') || billing.includes('DEBIT') ? 'card' : '')
-  const bruto = charge?.valueCents ?? null
-  const liquido = charge?.netValueCents ?? null
-  let cycleFeeCents: number | null = bruto != null && liquido != null && liquido > 0 && liquido < bruto ? bruto - liquido : null
-  if (cycleFeeCents == null && cycleMethod) {
-    cycleFeeCents = (await quoteGatewayFee(admin, tenantId, 'asaas', {
-      method: cycleMethod, installments: 1, amountCents: monthlyValueCents,
-    }))?.feeCents ?? null
-  }
-  const finHistorico = `Assinatura Tricopill — ciclo ${cycle} (${cadence})${asaasPaymentId ? ` · ${asaasPaymentId}` : ''}`
   // Desfecho do lançamento fica gravado na assinatura: conta que não entrou TEM que aparecer em
   // algum lugar, senão volta a ser o buraco silencioso que ninguém enxergava.
   const gravarFin = async (status: string, receivableId: string | null, reason: string | null) => {
@@ -756,6 +801,11 @@ export async function finalizeSubscriptionCycle(
       last_fin_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('id', localSubId)
+    // Espelha na linha de venda do ciclo, pra ficha do /pedidos mostrar a conta como nas demais.
+    await admin.from('asaas_payments').update({
+      bling_receivable_id: receivableId,
+      bling_settled_at: status === 'ok' ? new Date().toISOString() : null,
+    }).eq('id', cyclePaymentRowId)
     if (status !== 'ok') console.error('[assinatura] financeiro do ciclo NÃO lançado', { localSubId, cycle, status, reason })
   }
 
@@ -856,6 +906,11 @@ export async function finalizeSubscriptionCycle(
       email: s.email != null ? String(s.email) : undefined,
       entrega: { ...entrega, delivery_mode: 'envio_externo' } as Record<string, string>,
     })
+    // Pedido do envio na linha de venda do ciclo (a ficha do /pedidos linka pro Bling por aqui).
+    await admin.from('asaas_payments')
+      .update({ bling_order_id: out.orderId ?? null, freight_cents: shipFreightCents })
+      .eq('id', cyclePaymentRowId)
+
     // A conta a receber sai DENTRO do blingCreateSaleOrder (pela mensalidade, não pelo pedido).
     const finOk = !!out.receivable.receivableId
     await gravarFin(
@@ -905,6 +960,8 @@ export async function finalizeSubscriptionCycle(
   }
 
   const shipReason = [ship.reason, ship.error].filter(Boolean).join(': ').slice(0, 200) || null
+  // Carrinho do ME na linha de venda: é por `me_order_id` que o /pedidos mostra o rastreio.
+  if (ship.cartId) await admin.from('asaas_payments').update({ me_order_id: ship.cartId }).eq('id', cyclePaymentRowId)
   await admin.from('asaas_subscriptions').update({
     ...(ship.ok ? { last_shipped_cycle: cycle } : {}),
     last_ship_cycle: cycle,
