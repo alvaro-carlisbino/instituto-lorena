@@ -26,6 +26,16 @@ const MARCO = '2026-07-27'
 const PMAX_ID = '24022345891'
 const BUSCA_ID = '24041701832'
 
+// Ações de conversão. Só "Compras" é venda; "Lead WhatsApp" é sinal de volume.
+// Somar as duas num número só foi o erro do relatório de 29/07: mostrou "4 conversões,
+// CPA R$ 47" quando eram 4 cliques de WhatsApp e ZERO venda naquele recorte.
+const ACAO_VENDA = 'Compras'
+
+// Promoção do Google: gastar META até FIM devolve o mesmo valor em crédito.
+// Álvaro confirmou em 29/07/2026 que o código foi aplicado. INICIO é a data que
+// assumimos para a contagem — se o crédito não bater no fim, é aqui que está o erro.
+const PROMO = { inicio: '2026-07-27', fim: '2026-08-15', meta: 880 }
+
 function secret() {
   try {
     const env = readFileSync(join(ROOT, '.env.local'), 'utf8')
@@ -75,7 +85,11 @@ async function leadsEnviados() {
 const brl = (n) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const num = (n) => Number(n ?? 0).toLocaleString('pt-BR')
 const micros = (v) => Number(v ?? 0) / 1e6
-const ymd = (d) => d.toISOString().slice(0, 10)
+// Dia LOCAL, não UTC. toISOString() vira o dia às 21h de Maringá e o relatório passaria
+// a pedir ao Google um dia que ainda não começou. Mesma pegadinha de fuso do resto do CRM.
+const FUSO = 'America/Sao_Paulo'
+const fmtDia = new Intl.DateTimeFormat('en-CA', { timeZone: FUSO, year: 'numeric', month: '2-digit', day: '2-digit' })
+const ymd = (d) => fmtDia.format(d)
 
 function janela(dias) {
   const fim = new Date()
@@ -115,22 +129,46 @@ async function main() {
     SELECT campaign.id, campaign.name, metrics.cost_micros, metrics.clicks,
            metrics.impressions, metrics.conversions, metrics.conversions_value
     FROM campaign WHERE segments.date BETWEEN '${desde}' AND '${ate}'`)
+  // Conversões separadas por ação: venda e lead NÃO podem virar um número só.
+  const convPorAcao = await gaql(`
+    SELECT segments.conversion_action_name, metrics.conversions, metrics.all_conversions,
+           metrics.conversions_value
+    FROM campaign
+    WHERE segments.date BETWEEN '${desde}' AND '${ate}' AND metrics.all_conversions > 0`)
+  // `conversions` só conta o que entra no lance; `all_conversions` conta tudo que a conta
+  // registrou. Em 29/07 uma venda apareceu como all=1 e conv=0 — reportar só a primeira
+  // faria o relatório dizer "0 vendas" num dia em que houve venda.
+  let vendas = 0, vendasTodas = 0, receita = 0, leads = 0
+  for (const r of convPorAcao) {
+    const qtd = Number(r.metrics.conversions ?? 0)
+    const todas = Number(r.metrics.allConversions ?? 0)
+    if (r.segments.conversionActionName === ACAO_VENDA) {
+      vendas += qtd; vendasTodas += todas; receita += Number(r.metrics.conversionsValue ?? 0)
+    } else leads += todas
+  }
+
   console.log('\n▸ DESEMPENHO NO PERÍODO')
-  let custoTotal = 0, convTotal = 0, cliquesTotal = 0
+  let custoTotal = 0, cliquesTotal = 0
   if (!perf.length) console.log('  (nenhuma veiculação ainda)')
   for (const r of perf) {
     const m = r.metrics, custo = micros(m.costMicros)
-    const cliques = Number(m.clicks ?? 0), conv = Number(m.conversions ?? 0)
-    custoTotal += custo; convTotal += conv; cliquesTotal += cliques
+    const cliques = Number(m.clicks ?? 0)
+    custoTotal += custo; cliquesTotal += cliques
     const cpc = cliques ? custo / cliques : 0
-    const cpa = conv ? custo / conv : 0
     console.log(`  ${r.campaign.name}`)
-    console.log(`     ${brl(custo)} · ${num(cliques)} cliques · ${num(m.impressions)} impressões`)
-    console.log(`     CPC ${brl(cpc)} · ${conv} conversões` + (conv ? ` · CPA ${brl(cpa)}` : ''))
+    console.log(`     ${brl(custo)} · ${num(cliques)} cliques · ${num(m.impressions)} impressões · CPC ${brl(cpc)}`)
   }
   if (perf.length) {
-    console.log(`  ── total: ${brl(custoTotal)} · ${num(cliquesTotal)} cliques · ${convTotal} conversões` +
-      (convTotal ? ` · CPA ${brl(custoTotal / convTotal)}` : ''))
+    console.log(`  ── total: ${brl(custoTotal)} · ${num(cliquesTotal)} cliques`)
+    console.log(`\n  VENDAS (ação "${ACAO_VENDA}"): ${vendasTodas}` +
+      (vendasTodas !== vendas ? ` (${vendas} contam para o lance)` : '') +
+      (receita ? ` · receita ${brl(receita)} · CAC ${brl(custoTotal / vendasTodas)} · ROAS ${(receita / custoTotal).toFixed(1)}x` : ''))
+    console.log(`  Leads (WhatsApp e afins): ${leads}  ← sinal de volume, NÃO é venda`)
+    if (!vendasTodas && leads) {
+      console.log('     ⚠ Zero venda no período. Os leads acima não viram receita nenhuma.')
+    }
+    console.log('     Obs.: o Google data a conversão no dia do CLIQUE, não da compra. Uma venda de')
+    console.log('     hoje pode aparecer numa data anterior — não casar "gasto de hoje x venda de hoje".')
   }
 
   // ── 3. Termos de pesquisa: onde o dinheiro da Busca está indo ──
@@ -191,6 +229,25 @@ async function main() {
     } else if (enviados > leadReg) {
       console.log(`  ⚠ ${enviados - leadReg} enviadas ainda não apareceram no Google (atraso ou recusa).`)
     }
+  }
+
+  // ── 5. Ritmo da promoção ──
+  // Gastar de menos perde o crédito; gastar de mais só para bater a meta compra lixo.
+  const hoje = ymd(new Date())
+  if (hoje <= PROMO.fim) {
+    const gastoPromo = (await gaql(`
+      SELECT metrics.cost_micros FROM customer
+      WHERE segments.date BETWEEN '${PROMO.inicio}' AND '${hoje}'`))
+      .reduce((a, r) => a + micros(r.metrics.costMicros), 0)
+    const falta = Math.max(0, PROMO.meta - gastoPromo)
+    const diasRestantes = Math.max(1, Math.round((new Date(PROMO.fim) - new Date(hoje)) / 864e5))
+    const precisa = falta / diasRestantes
+    const ritmo = gastoPromo / Math.max(1, Math.round((new Date(hoje) - new Date(PROMO.inicio)) / 864e5) + 1)
+    console.log(`\n▸ PROMOÇÃO (${brl(PROMO.meta)} de crédito até ${PROMO.fim})`)
+    console.log(`  gasto desde ${PROMO.inicio}: ${brl(gastoPromo)} · falta ${brl(falta)} em ${diasRestantes} dia(s)`)
+    console.log(`  precisa ${brl(precisa)}/dia · ritmo atual ${brl(ritmo)}/dia` +
+      (ritmo >= precisa ? ' ✔ no ritmo' : ' ⚠ abaixo do necessário'))
+    if (falta === 0) console.log('  ✔ meta batida.')
   }
 
   console.log('\n▸ LEMBRETE DE LEITURA')
