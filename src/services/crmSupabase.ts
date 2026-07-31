@@ -334,6 +334,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     dataViewsRes,
     orgSettingsRes,
     mediaItemsRes,
+    tenantAtivoRes,
   ] = await Promise.all([
     client.from('pipelines').select('id, name, board_config, tenant_id').order('name', { ascending: true }),
     client.from('pipeline_stages').select('id, pipeline_id, name, position').order('position', { ascending: true }),
@@ -371,15 +372,21 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       .select('id, title, metric_key, enabled, position, layout, widget_config')
       .order('position', { ascending: true }),
     client.from('data_views').select('id, name, config').order('name', { ascending: true }),
+    // `org_settings` tem UMA linha 'default' POR TENANT (PK composta), e a RLS entrega todas
+    // as que o usuário enxerga. Quem tem acesso aos dois polos recebe 2 linhas — o
+    // `.maybeSingle()` que existia aqui estourava PGRST116 e derrubava o BOOT INTEIRO: sem
+    // leads, sem pipelines, sem usuários, com as telas presas no esqueleto. Lê como lista e
+    // escolhe a linha do polo ativo logo abaixo.
     client
       .from('org_settings')
-      .select('id, timezone, date_format, week_starts_on, appointment_completed_routing')
-      .eq('id', 'default')
-      .maybeSingle(),
+      .select('id, timezone, date_format, week_starts_on, appointment_completed_routing, tenant_id')
+      .eq('id', 'default'),
     // SEM media_base64 no boot: eram ~9MB de base64 baixados no login. Metadados bastam
     // pra listar (tipo/URL/caption); o base64 chega por lead ao abrir a conversa
     // (loadLeadInteractionsFromSupabase) e, pra mídia nova, pela janela de 48h do refresh.
     client.from('crm_media_items').select('id, interaction_id, media_type, mime_type, storage_path, metadata'),
+    // Polo ativo, pra escolher a linha certa de `org_settings` sem um round-trip a mais.
+    client.rpc('current_tenant_id'),
   ])
 
   if (pipelinesRes.error) throw pipelinesRes.error
@@ -395,8 +402,10 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   if (tvWidgetsRes.error) throw tvWidgetsRes.error
   if (dashboardWidgetsRes.error) throw dashboardWidgetsRes.error
   if (dataViewsRes.error) throw dataViewsRes.error
-  if (orgSettingsRes.error) throw orgSettingsRes.error
   if (mediaItemsRes.error) throw mediaItemsRes.error
+  // `org_settings` NÃO entra na lista acima de propósito: é preferência de exibição (fuso,
+  // formato de data, roteamento pós-consulta) e tem fallback local em `initialOrgSettings`.
+  // Derrubar o CRM inteiro por causa dela já aconteceu uma vez; não pode acontecer de novo.
 
   const [tasksRes, rulesRes, tmplRes, dispRes, respRes, tagAssignRes, followupRes] = await Promise.all([
     client
@@ -616,7 +625,13 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
       }))
     : initialDataViews
 
-  const orgRow = orgSettingsRes.data as Record<string, unknown> | null
+  // Linha do polo ativo; se a RPC falhar (ou a base ainda não for multi-polo), a primeira serve.
+  const orgRows = (orgSettingsRes.error ? [] : (orgSettingsRes.data ?? [])) as Record<string, unknown>[]
+  const tenantAtivo = typeof tenantAtivoRes.data === 'string' ? tenantAtivoRes.data.trim() : ''
+  const orgRow =
+    (tenantAtivo ? orgRows.find((r) => String(r.tenant_id ?? '') === tenantAtivo) : undefined) ??
+    orgRows[0] ??
+    null
   const routingRaw = orgRow?.appointment_completed_routing
   let appointmentCompletedRouting: OrgSettings['appointmentCompletedRouting'] | undefined
   if (routingRaw && typeof routingRaw === 'object' && !Array.isArray(routingRaw)) {
