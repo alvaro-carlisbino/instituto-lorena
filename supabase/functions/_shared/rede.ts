@@ -22,13 +22,17 @@ export const REDE_KITS: Record<string, { label: string; amountCents: number; qty
 
 /**
  * Único produto EXTRA (além dos kits) que o bot pode vender — upsell do Shampoo Ozonizado.
- * Vai como item próprio no pedido do Bling (id real → baixa o estoque do shampoo). Preço =
- * catálogo Bling (R$119,90). Se mudar o preço, alinhe aqui + Bling + catalog_cache.
+ * Vai como item próprio no pedido do Bling (id real → baixa o estoque do shampoo).
+ *
+ * Preço = catálogo Bling (R$130,00). Ficou em R$119,90 aqui por ~3 semanas depois do Bling
+ * subir pra R$130: o bot vendia mais barato que o site e que o PDV, que leem do catálogo.
+ * Se mudar de novo, alinhe os TRÊS: aqui, o prompt do crm-ai-assistant (o valor que a IA
+ * FALA) e o Bling. O site e o PDV se ajustam sozinhos.
  */
 export const SHAMPOO_ADDON = {
   blingProductId: '16675535462',
   nome: 'Shampoo Ozonizado Multifuncional - Ozoncare 200ml',
-  amountCents: 11990,
+  amountCents: 13000,
 }
 
 /**
