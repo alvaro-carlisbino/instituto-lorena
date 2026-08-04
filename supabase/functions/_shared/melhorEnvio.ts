@@ -950,8 +950,11 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
       .maybeSingle()
     const lastContent = String((lastShip as { content?: string } | null)?.content ?? '')
     const lastShipAt = (lastShip as { created_at?: string } | null)?.created_at
-    // envio já gerado PRA ESTE pedido
-    if (/carrinho do Melhor Envio|adicionado ao carrinho/i.test(lastContent) && isFromCurrentOrder(lastShipAt)) return
+    // Envio já gerado PRA ESTE pedido. "Etiqueta ... gerada" é o desfecho do botão do painel
+    // (crm-frete-ship com finalize), que grava só o ENDEREÇO na entrega, nunca o rastreio —
+    // sem esse termo aqui, um reship forçado depois da etiqueta comprada saía com etiqueta
+    // duplicada, porque nenhuma das outras provas existia.
+    if (/carrinho do Melhor Envio|adicionado ao carrinho|Etiqueta Melhor Envio gerada/i.test(lastContent) && isFromCurrentOrder(lastShipAt)) return
     if (!force) {
       if (!lastContent) return // nunca tentou enviar por aqui — não inventa envio
       const m = lastContent.match(/NÃO gerado automaticamente \(([a-z_]+)\)/)
