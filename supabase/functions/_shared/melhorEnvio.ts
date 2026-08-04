@@ -892,6 +892,26 @@ export async function maybeReshipAfterAddressComplete(admin: SupabaseClient, lea
 }
 
 /**
+ * Quando o lead pagou pela última vez (ms). É o marco que separa "envio deste pedido" de
+ * "envio da compra anterior" — sem ele, recompra do mesmo cliente nunca gera etiqueta nova.
+ * Ciclo de assinatura (`sub-…`) fica de fora pelo mesmo motivo do passo 3.
+ */
+async function lastPaidAtMs(admin: SupabaseClient, leadId: string): Promise<number | null> {
+  const pick = (rows: Array<{ paid_at?: string | null }> | null): number => {
+    const t = Date.parse(String(rows?.[0]?.paid_at ?? ''))
+    return Number.isFinite(t) ? t : 0
+  }
+  const [{ data: rede }, { data: asaas }] = await Promise.all([
+    admin.from('rede_payments').select('paid_at').eq('lead_id', leadId).eq('status', 'paid')
+      .order('paid_at', { ascending: false }).limit(1),
+    admin.from('asaas_payments').select('paid_at').eq('lead_id', leadId).eq('status', 'paid')
+      .not('id', 'like', 'sub-%').order('paid_at', { ascending: false }).limit(1),
+  ])
+  const ms = Math.max(pick(rede as Array<{ paid_at?: string | null }> | null), pick(asaas as Array<{ paid_at?: string | null }> | null))
+  return ms > 0 ? ms : null
+}
+
+/**
  * Núcleo do religamento. `force: true` (crm-reship manual / fechamento do cartão do site,
  * que não deixa NENHUM evento de ME na timeline) dispensa a exigência de um skip retentável
  * como último evento — mas NUNCA dispensa as provas de envio existente: rastreio no próprio
@@ -904,18 +924,34 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
     if (!leadId) return
     const force = opts.force === true
 
+    // 0. Marco do PEDIDO ATUAL. As provas de "esse envio já saiu" moram no lead, não no
+    //    pedido — então valiam pra sempre e a RECOMPRA do mesmo cliente nunca gerava
+    //    etiqueta: o carrinho/rastreio da compra ANTERIOR abortava o religamento, e sem
+    //    nenhum evento na timeline ninguém percebia (caso Thais Ferrero 04/08 — comprou
+    //    de novo pelo site 1 mês depois e o pedido ficou parado, sem etiqueta e sem nota).
+    //    Agora só conta como prova o que aconteceu DEPOIS do último pagamento pago.
+    const orderSince = await lastPaidAtMs(admin, leadId)
+    const isFromCurrentOrder = (iso: unknown): boolean => {
+      if (!orderSince) return true // lead sem pagamento datado: comportamento antigo
+      const t = Date.parse(String(iso ?? ''))
+      if (!Number.isFinite(t)) return true // prova sem data: não dá pra saber de qual pedido é
+      return t >= orderSince - 5 * 60 * 1000 // folga: o envio sai junto do pagamento
+    }
+
     // 1. Última interação de envio: sucesso de carrinho nunca repete; sem force, exige
     //    um skip retentável (endereço incompleto).
     const { data: lastShip } = await admin
       .from('interactions')
-      .select('content, author')
+      .select('content, author, created_at')
       .eq('lead_id', leadId)
       .in('author', ['Melhor Envio', 'Logística'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
     const lastContent = String((lastShip as { content?: string } | null)?.content ?? '')
-    if (/carrinho do Melhor Envio|adicionado ao carrinho/i.test(lastContent)) return // envio já gerado
+    const lastShipAt = (lastShip as { created_at?: string } | null)?.created_at
+    // envio já gerado PRA ESTE pedido
+    if (/carrinho do Melhor Envio|adicionado ao carrinho/i.test(lastContent) && isFromCurrentOrder(lastShipAt)) return
     if (!force) {
       if (!lastContent) return // nunca tentou enviar por aqui — não inventa envio
       const m = lastContent.match(/NÃO gerado automaticamente \(([a-z_]+)\)/)
@@ -963,9 +999,13 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
       }
       return
     }
-    // Prova de envio existente no PRÓPRIO lead: rastreio/status gravados pelo poller.
-    if (String(entrega.tracking ?? '').trim()) return
-    if (['enviado', 'postado', 'entregue'].includes(String(entrega.status ?? '').trim())) return
+    // Prova de envio existente no PRÓPRIO lead: rastreio/status gravados pelo poller — só
+    // valem se forem DESTE pedido. O checkout do site reescreve o custom_fields da recompra
+    // por cima, mas deixa o bloco `entrega` da compra anterior intacto (rastreio + status
+    // 'enviado'), e era isso que matava a etiqueta nova.
+    const entShippedAt = entrega.tracking_updated_at
+    if (String(entrega.tracking ?? '').trim() && isFromCurrentOrder(entShippedAt)) return
+    if (['enviado', 'postado', 'entregue'].includes(String(entrega.status ?? '').trim()) && isFromCurrentOrder(entShippedAt)) return
     const cep = onlyDigitsStr(entrega.cep ?? entrega.postalCode)
     const numero = String(entrega.numero ?? entrega.number ?? '').trim()
     // Sem force: espera a próxima mensagem completar o endereço. Com force, segue até o
@@ -1043,6 +1083,24 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
     // 5. Timeline: registra sucesso ou falha nova (nunca repete o mesmo evento — é o
     //    "último evento" que fecha a idempotência). No force, os skips retentáveis também
     //    são registrados no formato padrão pra habilitar o religamento automático depois.
+    // 4.5. Etiqueta NOVA com rastreio/status da compra ANTERIOR ainda gravados na entrega:
+    //      zera o bloco de envio (guardando o código antigo em `tracking_anterior`). Senão o
+    //      pedido novo nasce "enviado" no /pedidos com o rastreio do mês passado e o poller
+    //      fica relendo uma entrega já concluída.
+    if (ship.ok && !isFromCurrentOrder(entrega.tracking_updated_at)) {
+      const entLimpa: Record<string, unknown> = { ...entrega }
+      const antigo = String(entrega.tracking ?? '').trim()
+      if (antigo) entLimpa.tracking_anterior = antigo
+      entLimpa.tracking = null
+      entLimpa.me_status_raw = null
+      entLimpa.tracking_updated_at = null
+      entLimpa.status = 'a_preparar'
+      await admin
+        .from('leads')
+        .update({ custom_fields: { ...(l.custom_fields ?? {}), entrega: entLimpa } })
+        .eq('id', l.id)
+    }
+
     let content: string | null = null
     let author = 'Melhor Envio'
     if (ship.ok) {

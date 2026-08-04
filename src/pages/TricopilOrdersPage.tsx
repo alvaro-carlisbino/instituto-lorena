@@ -187,13 +187,16 @@ export function TricopilOrdersPage() {
   const originOf = (p: UnifiedPayment): OrderOrigin => {
     const lead = p.leadId ? leadById.get(p.leadId) : undefined
     if (!lead) return 'site' // checkout da loja: cliente não vira lead do WhatsApp
+    // O checkout do site grava custom_fields.origin='site' no lead — sinal CONFIÁVEL de venda
+    // do site, mesmo quando o lead foi deduplicado por telefone e ficou com source 'manual'.
+    // Vale MAIS que a instância do W-API: quem já falou com o bot carrega whatsapp_instance_id
+    // pra sempre, e a recompra pelo site aparecia como "WhatsApp" sem nenhuma conversa de venda
+    // pra mostrar (caso Thais Ferrero 04/08 — a Ingrid caçou a conversa que não existia).
+    if (String((lead.customFields as Record<string, unknown> | undefined)?.origin ?? '') === 'site') return 'site'
+    if (String(p.leadId ?? '').startsWith('site-')) return 'site'
     if (lead.whatsappInstanceId) return 'whatsapp' // veio do bot de vendas (W-API)
     const src = String(lead.source ?? '').toLowerCase()
     if (src.includes('whatsapp') || src.startsWith('meta')) return 'whatsapp'
-    // O checkout do site grava custom_fields.origin='site' no lead — sinal CONFIÁVEL de venda
-    // do site, mesmo quando o lead foi deduplicado por telefone e ficou com source 'manual'.
-    if (String((lead.customFields as Record<string, unknown> | undefined)?.origin ?? '') === 'site') return 'site'
-    if (String(p.leadId ?? '').startsWith('site-')) return 'site'
     return 'manual' // lead criado à mão / sem origem clara
   }
 
