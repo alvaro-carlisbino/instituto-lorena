@@ -103,7 +103,8 @@ Deno.serve(async (req) => {
       // `kit` opcional: link atrelado a kit do Bling → o pedido automático sai com os itens
       // certos (sem kit o pedido vai como avulso, com a descrição livre).
       const kit = payload.kit != null && String(payload.kit).trim() ? String(payload.kit).trim() : undefined
-      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl, freightCents, couponCode, customerName: effectiveName || undefined, customerDoc: effectiveDoc, kit })
+      // Painel: link gerado por uma pessoa da equipe (a rota exige JWT de usuário).
+      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl, freightCents, couponCode, customerName: effectiveName || undefined, customerDoc: effectiveDoc, kit, origin: 'manual' })
       return json({ ok: true, payLink: out.url, id: out.id, amountCents })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -131,7 +132,7 @@ Deno.serve(async (req) => {
     }
     try {
       const kit = payload.kit != null && String(payload.kit).trim() ? String(payload.kit).trim() : undefined
-      const out = await createRedePix(admin, { tenantId, amountCents, description, leadId, freightCents, couponCode, customerName: customerName || undefined, customerDoc, kit })
+      const out = await createRedePix(admin, { tenantId, amountCents, description, leadId, freightCents, couponCode, customerName: customerName || undefined, customerDoc, kit, origin: 'manual' })
       return json({ ok: true, id: out.id, qrText: out.qrText, qrImage: out.qrImage, amountCents: out.amountCents })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

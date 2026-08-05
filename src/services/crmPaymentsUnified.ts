@@ -55,6 +55,11 @@ export type UnifiedPayment = {
   meOrderId: string | null
   /** Itens do pedido (o que foi comprado). Só Rede grava; null nos demais. */
   items: OrderItem[] | null
+  /**
+   * Onde o pedido nasceu, carimbado na criação da cobrança: 'site' | 'whatsapp' | 'manual' |
+   * 'assinatura'. null = linha anterior à coluna; a tela cai na heurística pelo lead.
+   */
+  origin: string | null
   /** NF-e: emitida | rascunho | erro | null (sem nota). Só Rede. */
   nfeStatus: string | null
   nfeNumero: string | null
@@ -83,12 +88,12 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
   const [asaas, rede, pix] = await Promise.all([
     supabase
       .from('asaas_payments')
-      .select('id, lead_id, method, amount_cents, description, kit, installments, status, return_code, customer_name, phone, customer_doc, asaas_payment_id, bling_order_id, created_at, paid_at, freight_cents, me_order_id')
+      .select('id, lead_id, method, amount_cents, description, kit, installments, status, return_code, customer_name, phone, customer_doc, asaas_payment_id, bling_order_id, created_at, paid_at, freight_cents, me_order_id, origin')
       .order('created_at', { ascending: false })
       .limit(limit),
     supabase
       .from('rede_payments')
-      .select('id, lead_id, method, amount_cents, description, kit, installments, status, tid, return_code, customer_name, phone, customer_doc, bling_order_id, created_at, paid_at, items, nfe_status, nfe_numero, freight_cents')
+      .select('id, lead_id, method, amount_cents, description, kit, installments, status, tid, return_code, customer_name, phone, customer_doc, bling_order_id, created_at, paid_at, items, nfe_status, nfe_numero, freight_cents, origin')
       .order('created_at', { ascending: false })
       .limit(limit),
     supabase
@@ -126,6 +131,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         freightCents: rec.freight_cents != null ? Number(rec.freight_cents) : null,
         meOrderId: str(rec.me_order_id),
         items: null,
+        origin: str(rec.origin),
         nfeStatus: null,
         nfeNumero: null,
       })
@@ -158,6 +164,7 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         freightCents: rec.freight_cents != null ? Number(rec.freight_cents) : null,
         meOrderId: null,
         items: parseItems(rec.items),
+        origin: str(rec.origin),
         nfeStatus: str(rec.nfe_status),
         nfeNumero: str(rec.nfe_numero),
         subscriptionCycle: false,
@@ -189,6 +196,8 @@ export async function fetchUnifiedPayments(limit = 500): Promise<UnifiedPayment[
         freightCents: null,
         meOrderId: null,
         items: null,
+        // pagbank_checkouts não tem a coluna: caminho legado, sem venda nova entrando.
+        origin: null,
         nfeStatus: null,
         nfeNumero: null,
         subscriptionCycle: false,

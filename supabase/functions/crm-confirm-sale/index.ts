@@ -135,6 +135,7 @@ Deno.serve(async (req) => {
         id: manualPayId, tenant_id: tenantId, lead_id: leadId, amount_cents: totalCents,
         description: freightCents > 0 ? `${label} + frete` : label, installments, status: 'paid', paid_at: new Date().toISOString(),
         coupon_code: coupon.applied ? coupon.code : null, discount_cents: coupon.discountCents,
+        origin: 'manual', // venda fechada à mão no painel
       })
     } else {
       await admin.from('pagbank_checkouts').insert({

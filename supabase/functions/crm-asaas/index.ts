@@ -94,6 +94,9 @@ Deno.serve(async (req) => {
         freightCents: payload.freightCents != null ? Number(payload.freightCents) : undefined,
         kit: payload.kit != null ? String(payload.kit) : undefined,
         customer,
+        // generate_* só é chamado pelo painel (invoke com JWT do usuário); a loja usa as
+        // funções tricopill-* do repo do site, que carimbam 'site'.
+        origin: 'manual',
       })
       return json({ ok: true, payLink: out.url, id: out.id, amountCents: out.amountCents })
     } catch (e) {
@@ -114,6 +117,7 @@ Deno.serve(async (req) => {
         freightCents: payload.freightCents != null ? Number(payload.freightCents) : undefined,
         kit: payload.kit != null ? String(payload.kit) : undefined,
         customer,
+        origin: 'manual',
       })
       return json({ ok: true, id: out.id, qrText: out.qrText, qrImageUrl: out.qrImageUrl, amountCents: out.amountCents })
     } catch (e) {

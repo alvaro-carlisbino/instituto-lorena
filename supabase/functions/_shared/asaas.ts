@@ -263,6 +263,11 @@ export async function createAsaasCardIntent(
     freightCents?: number
     kit?: string
     customer?: AsaasCustomerInput
+    /**
+     * Onde o pedido nasceu: 'site' (loja), 'whatsapp' (bot), 'manual' (painel). Ver o comentário
+     * gêmeo em rede.ts — origem é do PEDIDO, não do cliente.
+     */
+    origin?: string | null
   },
 ): Promise<{ id: string; url: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null; freightCents: number }> {
   const cfg = await readAsaasConfig(admin, args.tenantId)
@@ -320,6 +325,7 @@ export async function createAsaasCardIntent(
     customer_doc: digits(args.customer?.cpf) || null,
     freight_cents: freightCents,
     status: 'pending',
+    origin: args.origin ?? null,
   })
   const base = args.appBaseUrl.replace(/\/$/, '')
   return {
@@ -470,6 +476,7 @@ export async function createAsaasPix(
     freightCents?: number
     kit?: string
     customer?: AsaasCustomerInput
+    origin?: string | null
   },
 ): Promise<{ id: string; asaasPaymentId: string; qrText: string; qrImageUrl: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null }> {
   const cfg = await readAsaasConfig(admin, args.tenantId)
@@ -568,6 +575,7 @@ export async function createAsaasPix(
     pix_payload: qrText || null,
     freight_cents: freightCents,
     status: 'pending',
+    origin: args.origin ?? null,
   })
 
   return {
@@ -729,6 +737,9 @@ export async function finalizeSubscriptionCycle(
       status: 'paid',
       paid_at: new Date().toISOString(),
       asaas_payment_id: asaasPaymentId,
+      // Ciclo de assinatura tem origem própria: não é venda do site nem do bot, é a
+      // mensalidade rodando. Sem isto ele herdaria o selo errado no /pedidos.
+      origin: 'assinatura',
       customer_name: s.customer_name != null ? String(s.customer_name) : null,
       phone: s.phone != null ? String(s.phone) : null,
       customer_doc: s.customer_doc != null ? String(s.customer_doc) : null,

@@ -90,15 +90,17 @@ const DELIVERY_META: Record<DeliveryKind, { label: string; cls: string }> = {
   desconhecido: { label: 'Não inform.', cls: 'bg-muted text-muted-foreground ring-border/40' },
 }
 
-// Origem do pedido. Não há campo de origem nos pagamentos, então é derivado do lead
-// vinculado (best-effort): bot de vendas no WhatsApp (lead com instância W-API ou source
-// whatsapp/meta) × loja no site (checkout sem lead do CRM) × lançamento manual.
-type OrderOrigin = 'whatsapp' | 'site' | 'manual'
+// Origem do pedido. Desde 04/ago é um CAMPO, carimbado por quem cria a cobrança
+// (`payments.origin`): loja, bot, painel ou ciclo de assinatura. Linha antiga vem sem o
+// campo e cai na heurística pelo lead, que continua abaixo só como fallback.
+type OrderOrigin = 'whatsapp' | 'site' | 'manual' | 'assinatura'
 const ORIGIN_META: Record<OrderOrigin, { label: string; cls: string }> = {
   whatsapp: { label: 'WhatsApp', cls: 'bg-green-500/10 text-green-700 ring-green-500/25 dark:text-green-300' },
   site: { label: 'Site', cls: 'bg-indigo-500/10 text-indigo-700 ring-indigo-500/25 dark:text-indigo-300' },
   manual: { label: 'Manual', cls: 'bg-muted text-muted-foreground ring-border/40' },
+  assinatura: { label: 'Assinatura', cls: 'bg-violet-500/10 text-violet-700 ring-violet-500/25 dark:text-violet-300' },
 }
+const ORIGENS = Object.keys(ORIGIN_META) as OrderOrigin[]
 
 // NF-e: só o cartão (rede_payments) carrega estado de nota. Traduz o status cru do Bling
 // num selo curto. `emitida`/`autorizada` = ok; `rejeitada`/`erro` = falha; resto = pendente.
@@ -185,6 +187,12 @@ export function TricopilOrdersPage() {
   }
 
   const originOf = (p: UnifiedPayment): OrderOrigin => {
+    // Campo carimbado na criação da cobrança: é a verdade, não precisa de adivinhação.
+    const carimbado = String(p.origin ?? '')
+    if ((ORIGENS as string[]).includes(carimbado)) return carimbado as OrderOrigin
+    if (p.subscriptionCycle) return 'assinatura'
+
+    // Daqui pra baixo é fallback das linhas anteriores à coluna.
     const lead = p.leadId ? leadById.get(p.leadId) : undefined
     if (!lead) return 'site' // checkout da loja: cliente não vira lead do WhatsApp
     // O checkout do site grava custom_fields.origin='site' no lead — sinal CONFIÁVEL de venda
@@ -634,9 +642,11 @@ export function TricopilOrdersPage() {
             </LabeledSelectTrigger>
             <SelectContent className="rounded-xl">
               <SelectItem value="all" className="text-xs font-bold uppercase tracking-tight">Todas as origens</SelectItem>
-              <SelectItem value="whatsapp" className="text-xs font-bold uppercase tracking-tight">WhatsApp</SelectItem>
-              <SelectItem value="site" className="text-xs font-bold uppercase tracking-tight">Site</SelectItem>
-              <SelectItem value="manual" className="text-xs font-bold uppercase tracking-tight">Manual</SelectItem>
+              {ORIGENS.map((o) => (
+                <SelectItem key={o} value={o} className="text-xs font-bold uppercase tracking-tight">
+                  {ORIGIN_META[o].label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
 

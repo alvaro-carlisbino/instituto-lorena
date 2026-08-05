@@ -227,6 +227,12 @@ export async function createRedeIntent(
     phone?: string
     /** CPF do cliente (dígitos) — gravado p/ casar com a NF-e/Bling na conciliação. */
     customerDoc?: string
+    /**
+     * Onde o pedido nasceu: 'site' (loja), 'whatsapp' (bot), 'manual' (painel). Carimbado aqui
+     * porque origem é do PEDIDO, não do cliente — adivinhar pelo lead marcava a recompra pelo
+     * site como WhatsApp só porque ele já tinha falado com o bot (caso Thais Ferrero 04/ago).
+     */
+    origin?: string | null
     /** Itens do pedido (carrinho): kit + extras. Se vier, o pedido no Bling sai por estes itens. */
     items?: Array<Record<string, unknown>> | null
   },
@@ -268,6 +274,7 @@ export async function createRedeIntent(
     customer_name: args.customerName?.trim() || null,
     phone: args.phone?.replace(/\D/g, '') || null,
     customer_doc: args.customerDoc?.replace(/\D/g, '') || null,
+    origin: args.origin ?? null,
   })
   const base = args.appBaseUrl.replace(/\/$/, '')
   return {
@@ -303,6 +310,7 @@ export async function createRedePix(
     customerDoc?: string
     /** Validade do QR em horas (≤ 15 dias). Default 24h. */
     expiresInHours?: number
+    origin?: string | null
     /** Itens do pedido (carrinho): kit + extras. Se vier, o pedido no Bling sai por estes itens. */
     items?: Array<Record<string, unknown>> | null
   },
@@ -383,6 +391,7 @@ export async function createRedePix(
     customer_name: args.customerName?.trim() || null,
     phone: args.phone?.replace(/\D/g, '') || null,
     customer_doc: args.customerDoc?.replace(/\D/g, '') || null,
+    origin: args.origin ?? null,
   })
 
   return {

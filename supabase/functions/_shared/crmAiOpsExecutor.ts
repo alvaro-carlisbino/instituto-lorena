@@ -824,6 +824,7 @@ export async function executeCrmAiOpsFromModel(
             customerName: String(snapPix.cadastro.nomeCompleto ?? '').trim() || undefined,
             customerDoc: String(snapPix.cadastro.cpf ?? '').replace(/\D/g, '') || undefined,
             phone: String(snapPix.cadastro.telefone ?? '').replace(/\D/g, '') || undefined,
+            origin: 'whatsapp', // quem está executando esta op é o bot
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           const pixNote = [note, pickupAdviceNote(snapPix.entrega)].filter(Boolean).join('\n\n')
@@ -925,6 +926,7 @@ export async function executeCrmAiOpsFromModel(
             customerName: String(snap.cadastro.nomeCompleto ?? '').trim() || undefined,
             customerDoc: String(snap.cadastro.cpf ?? '').replace(/\D/g, '') || undefined,
             phone: String(snap.cadastro.telefone ?? '').replace(/\D/g, '') || undefined,
+            origin: 'whatsapp',
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           const linkNote = [note, pickupAdviceNote(snap.entrega)].filter(Boolean).join('\n\n')
