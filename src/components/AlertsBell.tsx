@@ -94,7 +94,7 @@ export function AlertsBell() {
         {aguardando.length > 0 ? (
           <>
             <p className="px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-red-700/80">
-              Aguardando consultor · {aguardando.length}
+              Aguardando atendimento · {aguardando.length}
             </p>
             {aguardando.slice(0, MAX_POR_SECAO).map((row) => (
               <DropdownMenuItem
@@ -103,6 +103,11 @@ export function AlertsBell() {
               >
                 <MessageSquare className="size-4 text-red-600" aria-hidden />
                 <span className="min-w-0 flex-1 truncate">{row.patient_name || 'Lead sem nome'}</span>
+                {row.reason === 'cliente' ? (
+                  <span className="shrink-0 rounded bg-emerald-500/15 px-1 text-[9px] font-semibold uppercase text-emerald-700">
+                    comprou
+                  </span>
+                ) : null}
                 <span className="shrink-0 text-[10px] text-muted-foreground">
                   {esperandoHa(row.waiting_since, agora)}
                 </span>

@@ -3,7 +3,7 @@ import { ArrowDownRight, ArrowUpRight, BotIcon, CalendarCheck2, CalendarX2, Link
 
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
-import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
+import { isSupabaseConfigured } from '@/lib/supabaseClient'
 import { sourceLabel } from '@/mocks/crmMock'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -16,6 +16,7 @@ import {
   type ShospFrescor,
 } from '@/services/analytics'
 import { cn } from '@/lib/utils'
+import { usePendingHandoff } from '@/hooks/usePendingHandoff'
 
 type RangeKey = 'today' | '7d' | '30d'
 
@@ -267,24 +268,11 @@ export function DashboardKpiSection() {
   // Aguardando consultor: derivado das interactions via RPC (mesma fonte do card de
   // Atendimento Pendente). conversation_status='waiting_human' nunca acende p/ a clínica,
   // então contar por ele dava 0 falso. Em modo mock cai no filtro de crm.leads.
-  const [pendingHandoff, setPendingHandoff] = useState<number | null>(null)
-  useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return
-    const sb = supabase
-    let cancelled = false
-    const fetchCount = async () => {
-      const { data, error } = await sb.rpc('crm_pending_human_handoff', { p_window_hours: 48 })
-      if (cancelled || error) return
-      setPendingHandoff(Array.isArray(data) ? data.length : 0)
-    }
-    void fetchCount()
-    const id = window.setInterval(fetchCount, 30_000)
-    return () => {
-      cancelled = true
-      window.clearInterval(id)
-    }
-    // tenant.id: re-conta ao trocar de workspace.
-  }, [tenant.id])
+  // Vem do MESMO hook do card e do sino. Um poller próprio aqui já divergia por meio ciclo,
+  // e agora divergiria de vez: a fila passou a somar cliente pagante sem resposta, que este
+  // contador não conhecia.
+  const handoffRows = usePendingHandoff()
+  const pendingHandoff = handoffRows === null ? null : handoffRows.length
 
   // Saúde da IA — snapshot ao vivo, ISOLADO ao polo ativo. crm.leads traz os dois
   // polos por RLS (p/ quem é multi-polo), então filtramos por tenant pra não somar
@@ -432,7 +420,9 @@ export function DashboardKpiSection() {
           sub={
             aiHealth.waiting === 0
               ? `IA em dia • ${aiHealth.inAi} em triagem`
-              : `aguardando consultor • ${aiHealth.inAi} em triagem`
+              // "consultor" ficou estreito: a fila passou a incluir cliente que já pagou e
+              // só quer resposta. O número tem que bater com o card, e bate (mesmo hook).
+              : `aguardando atendimento • ${aiHealth.inAi} em triagem`
           }
           icon={BotIcon}
           accent={aiHealth.waiting === 0 ? 'text-emerald-600' : 'text-amber-600'}

@@ -14,7 +14,10 @@ export type PendingHandoffRow = {
   waiting_since: string | null
   last_message: string | null
   channel: string | null
-  /** 'valor' = a Sofia prometeu que a equipe manda o preço; 'handoff' = encaminhamento normal. */
+  /**
+   * 'valor' = a Sofia prometeu que a equipe manda o preço; 'handoff' = encaminhamento normal;
+   * 'cliente' = quem JÁ COMPROU mandou mensagem e ninguém respondeu.
+   */
   reason?: string | null
 }
 
@@ -38,13 +41,23 @@ function emit() {
 
 async function fetchRows(tenantId: string) {
   if (!supabase) return
-  const { data, error } = await supabase.rpc('crm_pending_human_handoff', {
-    p_window_hours: HANDOFF_WINDOW_HOURS,
-  })
+  // Duas filas, um alerta só. A segunda (cliente que já pagou e ficou sem resposta) NÃO é
+  // handoff da IA: ela olha o outro lado da conversa e, de propósito, não respeita opt-out
+  // nem conversa arquivada — foi exatamente aí que o Márcio (R$ 1.890,50) se escondeu por
+  // 4 dias. Manter no mesmo card evita mais um lugar pra equipe ter que lembrar de olhar.
+  const [handoff, clientes] = await Promise.all([
+    supabase.rpc('crm_pending_human_handoff', { p_window_hours: HANDOFF_WINDOW_HOURS }),
+    supabase.rpc('crm_paying_customers_waiting', {}),
+  ])
   // Em erro preserva a última lista boa: um 500 passageiro não pode apagar o alerta
   // da tela e fazer a equipe achar que a fila esvaziou.
-  if (error || tenantId !== currentTenant) return
-  rows = (data as PendingHandoffRow[]) ?? []
+  if (handoff.error || tenantId !== currentTenant) return
+  const base = (handoff.data as PendingHandoffRow[]) ?? []
+  // Se só a fila nova falhar, mostra a antiga em vez de zerar o card.
+  const pagantes = clientes.error ? [] : ((clientes.data as PendingHandoffRow[]) ?? [])
+  // Quem está nas duas listas entra como 'cliente': já comprou, é a espera mais cara.
+  const porCliente = new Set(pagantes.map((r) => r.lead_id))
+  rows = [...pagantes, ...base.filter((r) => !porCliente.has(r.lead_id))]
   emit()
 }
 

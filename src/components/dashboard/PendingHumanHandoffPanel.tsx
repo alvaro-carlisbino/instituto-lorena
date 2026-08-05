@@ -64,7 +64,7 @@ export function PendingHumanHandoffPanel() {
           </div>
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-700/70">Atendimento Pendente</p>
-            <h4 className="text-sm font-bold text-foreground/80">Nenhum lead aguardando consultor.</h4>
+            <h4 className="text-sm font-bold text-foreground/80">Ninguém aguardando atendimento.</h4>
           </div>
         </div>
       </div>
@@ -90,7 +90,9 @@ export function PendingHumanHandoffPanel() {
                 Atendimento Pendente
               </p>
               <h4 className="text-base font-semibold text-foreground tracking-tight">
-                {count} {count === 1 ? 'lead aguarda consultor' : 'leads aguardam consultor'}
+                {/* "consultor" não cabe mais: metade da fila pode ser cliente que já pagou
+                    e só quer resposta, não atendimento comercial. */}
+                {count} {count === 1 ? 'pessoa aguarda atendimento' : 'pessoas aguardam atendimento'}
               </h4>
             </div>
           </div>
@@ -111,6 +113,11 @@ export function PendingHumanHandoffPanel() {
                   {lead.reason === 'valor' ? (
                     <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-700">
                       Pediu valor
+                    </span>
+                  ) : null}
+                  {lead.reason === 'cliente' ? (
+                    <span className="shrink-0 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-emerald-700">
+                      Já comprou
                     </span>
                   ) : null}
                 </div>
