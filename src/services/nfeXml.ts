@@ -24,6 +24,8 @@ export type NfeInstallment = {
 }
 
 export type NfeParsed = {
+  /** Chave de acesso (44 dígitos, do Id de infNFe). Identidade da nota — trava reimportação. */
+  key: string | null
   number: string
   series: string | null
   issueDate: string | null
@@ -62,6 +64,9 @@ export function parseNfeXml(xml: string): NfeParsed {
 
   const ide = infNFe.getElementsByTagName('ide')[0]
   const emit = infNFe.getElementsByTagName('emit')[0]
+  // Id vem como "NFe4126..." — só os 44 dígitos interessam.
+  const rawKey = (infNFe.getAttribute('Id') ?? '').replace(/\D/g, '')
+  const key = rawKey.length === 44 ? rawKey : null
 
   const items: NfeItem[] = []
   const dets = infNFe.getElementsByTagName('det')
@@ -102,6 +107,7 @@ export function parseNfeXml(xml: string): NfeParsed {
   const icmsTot = infNFe.getElementsByTagName('ICMSTot')[0]
 
   return {
+    key,
     number: (ide ? text(ide, 'nNF') : null) ?? '',
     series: ide ? text(ide, 'serie') : null,
     issueDate: ide ? toDay(text(ide, 'dhEmi') ?? text(ide, 'dEmi')) : null,

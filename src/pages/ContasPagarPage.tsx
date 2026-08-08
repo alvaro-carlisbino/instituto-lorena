@@ -31,6 +31,7 @@ import {
   type Supplier,
   createPayables,
   createPurchaseInvoice,
+  findInvoiceByNfeKey,
   getAttachmentSignedUrl,
   listInvoiceMovements,
   listPayables,
@@ -110,6 +111,8 @@ export function ContasPagarPage() {
   const [nfeCreatePayables, setNfeCreatePayables] = useState(true)
   /** Vencimento da parcela única quando a nota não traz duplicatas. */
   const [nfeSingleDue, setNfeSingleDue] = useState('')
+  /** Nota já importada com a mesma chave de acesso — bloqueia a segunda entrada. */
+  const [nfeJaImportada, setNfeJaImportada] = useState<{ number: string; issueDate: string | null } | null>(null)
   const [importing, setImporting] = useState(false)
   const nfeFileRef = useRef<HTMLInputElement | null>(null)
 
@@ -147,6 +150,10 @@ export function ContasPagarPage() {
     try {
       const xml = await file.text()
       const parsed = parseNfeXml(xml)
+      // Mesma nota subindo de novo (outro arquivo, outra pessoa, mesmo mês) — avisa antes de
+      // montar o plano, senão o usuário confirma e só descobre no erro do índice único.
+      const jaImportada = parsed.key ? await findInvoiceByNfeKey(parsed.key) : null
+      setNfeJaImportada(jaImportada ? { number: jaImportada.number, issueDate: jaImportada.issueDate } : null)
       setNfe(parsed)
       setNfePlan(suggestItemPlan(parsed, stockItems))
       setNfeCreateSupplier(true)
@@ -788,6 +795,16 @@ export function ContasPagarPage() {
 
           {nfe ? (
             <div className="space-y-4">
+              {nfeJaImportada ? (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
+                  <p className="font-semibold text-destructive">Esta nota já foi importada</p>
+                  <p className="text-muted-foreground">
+                    A chave de acesso já está na NF {nfeJaImportada.number}
+                    {nfeJaImportada.issueDate ? ` (emitida ${formatDay(nfeJaImportada.issueDate)})` : ''}. Importar de novo
+                    duplicaria a entrada de estoque e as parcelas.
+                  </p>
+                </div>
+              ) : null}
               <div className="rounded-lg border border-border p-3 text-sm">
                 <p className="mb-1 font-semibold">Fornecedor</p>
                 {existingSupplierMatch ? (
@@ -947,8 +964,8 @@ export function ContasPagarPage() {
             <Button variant="ghost" onClick={() => setNfe(null)}>
               Cancelar
             </Button>
-            <Button onClick={confirmImport} disabled={importing}>
-              {importing ? 'Importando…' : 'Confirmar importação'}
+            <Button onClick={confirmImport} disabled={importing || nfeJaImportada != null}>
+              {importing ? 'Importando…' : nfeJaImportada ? 'Já importada' : 'Confirmar importação'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -483,6 +483,8 @@ export async function createPurchaseInvoice(payload: {
   totalCents: number
   note?: string
   file?: File | null
+  /** Chave de acesso da NF-e — única por polo, impede a mesma nota entrar duas vezes. */
+  nfeKey?: string | null
 }): Promise<PurchaseInvoice> {
   const client = assertClient()
   let storagePath: string | null = null
@@ -505,11 +507,16 @@ export async function createPurchaseInvoice(payload: {
       storage_path: storagePath,
       file_name: payload.file?.name ?? null,
       note: payload.note?.trim() || null,
+      nfe_key: payload.nfeKey || null,
     })
     .select('id, supplier_id, po_id, number, issue_date, total_cents, storage_path, file_name, note, created_at')
     .single()
   if (error) {
     if (storagePath) await client.storage.from(BUCKET).remove([storagePath]).catch(() => {})
+    // 23505 = índice único da chave: a nota já foi importada antes (por outra pessoa ou em lote).
+    if (error.code === '23505' && error.message.includes('nfe_key')) {
+      throw new Error('Esta NF-e já foi importada — a chave de acesso já existe neste polo.')
+    }
     throw new Error(error.message)
   }
   const r = data as Record<string, unknown>
@@ -524,6 +531,30 @@ export async function createPurchaseInvoice(payload: {
     storagePath: r.storage_path != null ? String(r.storage_path) : null,
     fileName: r.file_name != null ? String(r.file_name) : null,
     note: r.note != null ? String(r.note) : null,
+    createdAt: String(r.created_at ?? ''),
+  }
+}
+
+/** Nota já importada com esta chave de acesso, se houver. Deixa a tela avisar ANTES de importar,
+ *  em vez de deixar o índice único estourar depois que o usuário já confirmou. */
+export async function findInvoiceByNfeKey(
+  nfeKey: string,
+): Promise<{ id: string; number: string; issueDate: string | null; createdAt: string } | null> {
+  const key = nfeKey.replace(/\D/g, '')
+  if (key.length !== 44) return null
+  const client = assertClient()
+  const { data, error } = await client
+    .from('purchase_invoices')
+    .select('id, number, issue_date, created_at')
+    .eq('nfe_key', key)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return null
+  const r = data as Record<string, unknown>
+  return {
+    id: String(r.id),
+    number: String(r.number ?? ''),
+    issueDate: r.issue_date != null ? String(r.issue_date) : null,
     createdAt: String(r.created_at ?? ''),
   }
 }

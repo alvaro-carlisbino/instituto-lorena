@@ -1,4 +1,5 @@
 import { diaLocal } from '@/lib/diaLocal'
+import { normHeader, pickCol, toCents, toISODate } from '@/lib/planilha'
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabaseClient'
 import { createPayables, type Payable } from '@/services/estoqueCompras'
@@ -36,69 +37,6 @@ function assertClient() {
   return supabase
 }
 
-/**
- * NÃO trocar por `diaLocal` daqui.
- *
- * Isto normaliza valor vindo de PLANILHA, e o serial do Excel converte para meia-noite
- * UTC (`(value - 25569) * 86400 * 1000`). Uma data sem hora já em meia-noite UTC fatiada
- * como UTC dá o dia certo; convertida para America/Sao_Paulo daria o dia ANTERIOR, porque
- * meia-noite UTC é 21h do dia anterior em Brasília. Aqui UTC é o correto.
- */
-function toISODate(value: unknown): string | null {
-  if (value == null || value === '') return null
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10)
-  }
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    // Excel serial date
-    const utc = Math.round((value - 25569) * 86400 * 1000)
-    const d = new Date(utc)
-    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10)
-  }
-  const s = String(value).trim()
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
-  const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
-  if (br) {
-    const dd = br[1].padStart(2, '0')
-    const mm = br[2].padStart(2, '0')
-    return `${br[3]}-${mm}-${dd}`
-  }
-  const d = new Date(s)
-  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10)
-  return null
-}
-
-function toCents(value: unknown): number | null {
-  if (value == null || value === '') return null
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value * 100)
-  const s = String(value).trim().replace(/R\$\s?/i, '').replace(/\s/g, '')
-  if (!s) return null
-  // 1.234,56 ou 1234.56
-  const normalized = s.includes(',')
-    ? s.replace(/\./g, '').replace(',', '.')
-    : s
-  const n = Number(normalized)
-  if (!Number.isFinite(n)) return null
-  return Math.round(n * 100)
-}
-
-function normHeader(h: unknown): string {
-  return String(h ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function pickCol(headers: string[], ...aliases: string[]): number {
-  for (const a of aliases) {
-    const i = headers.findIndex((h) => h === a || h.includes(a))
-    if (i >= 0) return i
-  }
-  return -1
-}
-
 export function buildGastoImportKey(row: Omit<GastoRow, 'importKey'>): string {
   return [
     row.date,
@@ -113,7 +51,11 @@ export function buildGastoImportKey(row: Omit<GastoRow, 'importKey'>): string {
 /** Lê a planilha no formato Data | Razão Social | Forma Pagto | C. Custo | Subcategoria | Valor. */
 export async function parseGastosSpreadsheet(file: File): Promise<GastoRow[]> {
   const buf = await file.arrayBuffer()
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+  // `raw: true` porque esta tela aceita .csv e o parser de CSV do SheetJS adivinha data no
+  // padrão AMERICANO: "10/07/2026" volta como 7 de outubro, enquanto "25/12/2026" fica string
+  // (não existe mês 25). Metade da coluna deslocava de mês, calado. Com `raw` a célula chega
+  // como texto e quem converte é o toISODate, que sabe dd/mm/yyyy.
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true, raw: true })
   const sheetName = wb.SheetNames[0]
   if (!sheetName) return []
   const sheet = wb.Sheets[sheetName]

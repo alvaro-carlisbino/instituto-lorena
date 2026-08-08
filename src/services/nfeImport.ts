@@ -10,6 +10,7 @@ import {
 } from '@/services/estoqueCompras'
 import { ensureBatch, logControlledEntry } from '@/services/estoqueKits'
 import { fetchBlingCatalog, pushBlingStockEntry } from '@/services/crmBling'
+import { limparNomeItemNfe, temRastroNoNome } from '@/lib/nfeNomeItem'
 
 const onlyDigits = (v: string | null | undefined) => String(v ?? '').replace(/\D/g, '')
 
@@ -84,10 +85,13 @@ export function suggestItemPlan(nfe: NfeParsed, stock: StockItem[]): NfeItemPlan
     if (eanHit) return { index, action: 'existente' as const, matchedItemId: eanHit, matchedBy: 'ean' as const }
     const skuHit = item.supplierCode ? bySku.get(normalizeCode(item.supplierCode)) : undefined
     if (skuHit) return { index, action: 'existente' as const, matchedItemId: skuHit, matchedBy: 'sku' as const }
+    // Compara pelo nome cru E pelo nome sem o rastro de lote/validade: o catálogo guarda o
+    // nome limpo, mas o alias guarda o cru — a nota do mês seguinte muda só o lote.
     const desc = normalizeName(item.description)
-    const nameHit = byName.get(desc)
+    const descLimpo = normalizeName(limparNomeItemNfe(item.description))
+    const nameHit = byName.get(desc) ?? byName.get(descLimpo)
     if (nameHit) return { index, action: 'existente' as const, matchedItemId: nameHit, matchedBy: 'nome' as const }
-    const aliasExact = byAlias.get(desc)
+    const aliasExact = byAlias.get(desc) ?? byAlias.get(descLimpo)
     if (aliasExact) return { index, action: 'existente' as const, matchedItemId: aliasExact, matchedBy: 'alias' as const }
     // NF longa contendo o alias (ex.: "ACIDO TRANEXAMICO 250MG ..." ↔ alias "acido tranexamico")
     const aliasPartial = aliasEntries
@@ -125,6 +129,7 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
     issueDate: nfe.issueDate,
     totalCents: nfe.totalCents,
     note: `Importada do XML da NF-e${nfe.series ? ` (série ${nfe.series})` : ''}`,
+    nfeKey: nfe.key,
   })
 
   // 3) Itens → estoque (cria ou reusa, dá entrada, cria lote e loga controlado)
@@ -154,11 +159,14 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
     let stockItemId = itemPlan.matchedItemId
     let controlled = false
     if (itemPlan.action === 'novo' || !stockItemId) {
+      // O fornecedor põe lote/validade dentro do xProd. Item nasce com o nome limpo e guarda
+      // o nome cru como alias — senão a próxima nota, com outro lote, cria um item repetido.
       stockItemId = await upsertStockItem({
-        name: nfeItem.description,
+        name: limparNomeItemNfe(nfeItem.description),
         unit: nfeItem.unit,
         source: 'nfe',
         barcode: nfeItem.ean,
+        aliases: temRastroNoNome(nfeItem.description) ? [nfeItem.description] : [],
       })
       itemsCreated += 1
     } else {
