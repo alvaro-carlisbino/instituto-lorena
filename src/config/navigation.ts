@@ -371,6 +371,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: canBoards,
   },
   {
+    id: 'conciliacao-shosp',
+    path: '/conciliacao-shosp',
+    label: 'Conciliação Shosp',
+    icon: ArrowLeftRight,
+    group: 'financeiro',
+    keywords: ['shosp', 'vendas', 'extrato', 'banco', 'bater', 'divergencia'],
+    visible: (ctx) => isClinic(ctx) && canBoards(ctx),
+  },
+  {
     id: 'alertas-pagamento',
     path: '/alertas-pagamento',
     label: 'Alertas de pagamento',

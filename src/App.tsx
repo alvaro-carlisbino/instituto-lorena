@@ -78,6 +78,7 @@ const GastosControlePage = lazyPage(() => import('./pages/GastosControlePage'), 
 const ContasReceberPage = lazyPage(() => import('./pages/ContasReceberPage'), 'ContasReceberPage')
 const FinAccountsPage = lazyPage(() => import('./pages/FinAccountsPage'), 'FinAccountsPage')
 const ConciliacaoPage = lazyPage(() => import('./pages/ConciliacaoPage'), 'ConciliacaoPage')
+const ConciliacaoShospPage = lazyPage(() => import('./pages/ConciliacaoShospPage'), 'ConciliacaoShospPage')
 const FluxoCaixaPage = lazyPage(() => import('./pages/FluxoCaixaPage'), 'FluxoCaixaPage')
 const RecorrentesPage = lazyPage(() => import('./pages/RecorrentesPage'), 'RecorrentesPage')
 const NfePage = lazyPage(() => import('./pages/NfePage'), 'NfePage')
@@ -128,6 +129,7 @@ function AppRoutes() {
         <Route path="/contas-a-receber" element={<ContasReceberPage />} />
         <Route path="/contas-caixa" element={<FinAccountsPage />} />
         <Route path="/conciliacao" element={<ConciliacaoPage />} />
+        <Route path="/conciliacao-shosp" element={<ConciliacaoShospPage />} />
         <Route path="/fluxo-caixa" element={<FluxoCaixaPage />} />
         <Route path="/recorrentes" element={<RecorrentesPage />} />
         <Route path="/nfe" element={<NfePage />} />

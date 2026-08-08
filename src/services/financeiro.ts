@@ -1,4 +1,5 @@
 import { diaLocal, hojeLocal } from '@/lib/diaLocal'
+import { buscarTudo } from '@/lib/supabasePaginate'
 import { supabase } from '@/lib/supabaseClient'
 import type { Payable } from '@/services/estoqueCompras'
 
@@ -210,6 +211,15 @@ function mapTxn(r: Record<string, unknown>): FinTransaction {
   }
 }
 
+/**
+ * Lançamentos da conta. `limit` acima de 1.000 PAGINA de verdade.
+ *
+ * O PostgREST daqui tem max_rows = 1000: `.limit(5000)` devolvia 1.000 linhas, sem erro e
+ * sem aviso. O fluxo de caixa pedia 5.000 e somava 1.000 como se fosse o mês inteiro, e a
+ * conciliação com o Shosp era pior — como a ordem é data DESC, o corte come as entradas
+ * mais ANTIGAS, então toda venda do começo do período apareceria como "não caiu no banco".
+ * Divergência inventada no lugar exato onde a tela promete a verdade.
+ */
 export async function listTransactions(opts?: {
   accountId?: string
   from?: string
@@ -218,14 +228,33 @@ export async function listTransactions(opts?: {
   limit?: number
 }): Promise<FinTransaction[]> {
   const client = assertClient()
-  let query = client.from('fin_transactions').select(TXN_COLS).order('date', { ascending: false }).limit(opts?.limit ?? 1000)
-  if (opts?.accountId) query = query.eq('account_id', opts.accountId)
-  if (opts?.from) query = query.gte('date', opts.from)
-  if (opts?.to) query = query.lte('date', opts.to)
-  if (opts?.onlyUnreconciled) query = query.is('reconciled_ref_id', null)
-  const { data, error } = await query
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => mapTxn(r as Record<string, unknown>))
+  const teto = opts?.limit ?? 1000
+  const montar = () => {
+    // `id` como desempate: data sozinha repete muito, e sem ordem determinística o
+    // PostgREST não promete a mesma linha na mesma página entre uma busca e outra.
+    let q = client
+      .from('fin_transactions')
+      .select(TXN_COLS)
+      .order('date', { ascending: false })
+      .order('id', { ascending: false })
+    if (opts?.accountId) q = q.eq('account_id', opts.accountId)
+    if (opts?.from) q = q.gte('date', opts.from)
+    if (opts?.to) q = q.lte('date', opts.to)
+    if (opts?.onlyUnreconciled) q = q.is('reconciled_ref_id', null)
+    return q
+  }
+
+  if (teto <= 1000) {
+    const { data, error } = await montar().limit(teto)
+    if (error) throw new Error(error.message)
+    return (data ?? []).map((r) => mapTxn(r as Record<string, unknown>))
+  }
+
+  const rows = await buscarTudo<Record<string, unknown>>(montar, {
+    rotulo: 'fin_transactions',
+    maxPaginas: Math.ceil(teto / 1000),
+  })
+  return rows.slice(0, teto).map((r) => mapTxn(r))
 }
 
 export type NewTransaction = {
