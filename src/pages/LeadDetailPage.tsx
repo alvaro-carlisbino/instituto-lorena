@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AlertTriangle, Trash2 } from 'lucide-react'
+import { AlertTriangle, FolderOpen, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
 import { LeadAnalyticsActions } from '@/components/leads/LeadAnalyticsActions'
@@ -211,6 +212,13 @@ export function LeadDetailPage() {
     if (p?.stages[0]) setDestStageId(p.stages[0].id)
   }
 
+  const handleStageChange = (stageId: string) => {
+    if (!lead || !stageId || stageId === lead.stageId) return
+    crm.reorderLeadCard(lead.id, { stageId, index: 0 })
+    const nextName = pipeline?.stages.find((s) => s.id === stageId)?.name ?? 'Nova etapa'
+    toast.success(`Lead movido para "${nextName}"`)
+  }
+
   const handleDeleteLead = async () => {
     if (lead) {
       await crm.removeLead(lead.id)
@@ -289,7 +297,7 @@ export function LeadDetailPage() {
             <h2 className="text-lg font-semibold text-foreground sm:text-xl">{lead.patientName}</h2>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <Badge variant="secondary">{pipeline?.name ?? lead.pipelineId}</Badge>
-              <Badge variant="outline">{stageName}</Badge>
+              {crm.currentPermission.canRouteLeads ? null : <Badge variant="outline">{stageName}</Badge>}
               <span
                 className={cn(
                   'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium',
@@ -300,6 +308,38 @@ export function LeadDetailPage() {
               </span>
               <Badge variant="outline">{crm.getOwnerName(lead.ownerId)}</Badge>
             </div>
+            {crm.currentPermission.canRouteLeads ? (
+              <div className="mt-3 max-w-xs space-y-2 rounded-lg border border-border/40 bg-background/50 p-2.5">
+                <div className="flex items-center gap-2">
+                  <FolderOpen className="size-3.5 shrink-0 text-muted-foreground/60" aria-hidden />
+                  <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                    Funil · {pipeline?.name ?? lead.pipelineId}
+                  </Label>
+                </div>
+                <Select
+                  value={lead.stageId}
+                  onValueChange={(v) => {
+                    if (v) handleStageChange(v)
+                  }}
+                  disabled={!pipeline || pipeline.stages.length === 0}
+                >
+                  <LabeledSelectTrigger
+                    aria-label="Etapa do funil"
+                    className="h-8 w-full text-left text-xs font-medium"
+                    size="default"
+                  >
+                    {stageName || 'Etapa'}
+                  </LabeledSelectTrigger>
+                  <SelectContent>
+                    {(pipeline?.stages ?? []).map((s) => (
+                      <SelectItem key={s.id} value={s.id} className="text-xs">
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             {lead.lost_reason?.trim() ? (
               <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive">
                 Motivo do encerramento: {lead.lost_reason}
