@@ -848,7 +848,9 @@ export function ContasPagarPage() {
                       <div key={index} className="rounded-md border border-border p-2.5 text-sm">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="font-medium">{item.description}</div>
+                            {/* Descrição de item de NF-e chega com mediana de 32 e até 90
+                                caracteres: sem truncar, empurrava o valor para fora da linha. */}
+                            <div className="truncate font-medium" title={item.description}>{item.description}</div>
                             <div className="text-xs text-muted-foreground">
                               {item.qty} {item.unit} · {formatBRL(item.unitCostCents)}/un
                               {item.ean ? ` · EAN ${item.ean}` : ''}

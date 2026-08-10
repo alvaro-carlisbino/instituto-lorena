@@ -236,20 +236,20 @@ export function EstoqueRelatoriosPage() {
               <EmptyState icon={Boxes} title={loading ? 'Carregando…' : 'Sem itens'} description="Cadastre itens na aba Estoque." />
             ) : (
               <div className="max-h-[420px] overflow-auto">
-                <Table>
+                <Table className="table-fixed">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item</TableHead>
-                      <TableHead className="text-right">Saldo</TableHead>
-                      <TableHead className="text-right">Mínimo</TableHead>
-                      <TableHead className="text-right">Último custo</TableHead>
-                      <TableHead className="text-right">Valor</TableHead>
+                      <TableHead className="w-[7rem] text-right">Saldo</TableHead>
+                      <TableHead className="w-[6rem] text-right">Mínimo</TableHead>
+                      <TableHead className="w-[9rem] text-right">Último custo</TableHead>
+                      <TableHead className="w-[9rem] text-right">Valor</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {position.map((p) => (
                       <TableRow key={p.id}>
-                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell className="truncate font-medium" title={p.name}>{p.name}</TableCell>
                         <TableCell className="text-right">
                           <Badge variant={p.low ? 'destructive' : 'secondary'}>
                             {p.qty} {p.unit}
@@ -290,18 +290,18 @@ export function EstoqueRelatoriosPage() {
                 />
               ) : (
                 <div className="max-h-[360px] overflow-auto">
-                  <Table>
+                  <Table className="table-fixed">
                     <TableHeader>
                       <TableRow>
                         <TableHead>Item</TableHead>
-                        <TableHead className="text-right">Qtd</TableHead>
-                        <TableHead className="text-right">Custo</TableHead>
+                        <TableHead className="w-[7rem] text-right">Qtd</TableHead>
+                        <TableHead className="w-[9rem] text-right">Custo</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {consumption.map((c) => (
                         <TableRow key={c.itemId}>
-                          <TableCell className="font-medium">{c.name}</TableCell>
+                          <TableCell className="truncate font-medium" title={c.name}>{c.name}</TableCell>
                           <TableCell className="text-right">{c.qty} {c.unit}</TableCell>
                           <TableCell className="text-right">
                             {formatBRL(c.costCents)}
@@ -367,14 +367,17 @@ export function EstoqueRelatoriosPage() {
               />
             ) : (
               <div className="max-h-[420px] overflow-auto">
-                <Table>
+                <Table className="table-fixed">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Data</TableHead>
+                      {/* Data e Tipo têm tamanho conhecido; Item e Motivo ficam com a
+                          sobra, que é onde mora o texto longo (nome de item vai a 120
+                          caracteres nos dados reais) e onde cortar não custa nada. */}
+                      <TableHead className="w-[9rem]">Data</TableHead>
                       <TableHead>Item</TableHead>
-                      <TableHead>Tipo</TableHead>
-                      <TableHead className="text-right">Qtd</TableHead>
-                      <TableHead className="text-right">Valor</TableHead>
+                      <TableHead className="w-[7rem]">Tipo</TableHead>
+                      <TableHead className="w-[7rem] text-right">Qtd</TableHead>
+                      <TableHead className="w-[9rem] text-right">Valor</TableHead>
                       <TableHead>Motivo</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -384,7 +387,7 @@ export function EstoqueRelatoriosPage() {
                         <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                           {new Date(m.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                         </TableCell>
-                        <TableCell className="font-medium">{itemById.get(m.itemId)?.name ?? '?'}</TableCell>
+                        <TableCell className="truncate font-medium" title={itemById.get(m.itemId)?.name}>{itemById.get(m.itemId)?.name ?? "?"}</TableCell>
                         <TableCell>
                           <span className={m.qtyDelta < 0 ? 'font-medium text-red-500' : 'font-medium text-emerald-600'}>
                             {KIND_LABEL[m.kind] ?? m.kind}
@@ -394,7 +397,10 @@ export function EstoqueRelatoriosPage() {
                         <TableCell className="text-right">
                           {m.unitCostCents != null ? formatBRL(Math.round(Math.abs(m.qtyDelta) * m.unitCostCents)) : '—'}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell
+                          className="truncate text-xs text-muted-foreground"
+                          title={[m.reason, m.note].filter(Boolean).join(' · ') || undefined}
+                        >
                           {[m.reason, m.note].filter(Boolean).join(' · ') || '—'}
                         </TableCell>
                       </TableRow>

@@ -701,6 +701,8 @@ export function TricopilOrdersPage() {
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
               <TableHead className="w-8" />
+              {/* "Kit" guarda `description` quando não é kit fechado: mediana de 43 e
+                  máximo de 96 caracteres nos dados reais. */}
               <TableHead>Cliente</TableHead>
               <TableHead>Kit</TableHead>
               <TableHead className="text-right">Valor</TableHead>
@@ -761,13 +763,24 @@ export function TricopilOrdersPage() {
                         {isOpen ? <ChevronDown className="size-4" aria-hidden /> : <ChevronRight className="size-4" aria-hidden />}
                       </Button>
                     </TableCell>
+                    {/* O teto vai no div INTERNO, não na coluna: esta tabela precisa de
+                        layout automático (tem Select e botões que não podem ser espremidos),
+                        e em layout automático `width` na coluna é só sugestão — quem de
+                        fato limita é o max-width do conteúdo. Sem isso, medido a 960px,
+                        "Cliente" ficava com 109px e "Kit" com 87px, os dois quebravam e a
+                        linha do pedido media 169px. */}
                     <TableCell>
-                      <div className="font-semibold text-foreground/90">{name}</div>
-                      {p.phone ? <div className="text-xs text-muted-foreground">{p.phone}</div> : null}
+                      <div className="max-w-[11rem] truncate font-semibold text-foreground/90" title={name}>{name}</div>
+                      {p.phone ? <div className="text-xs tabular-nums text-muted-foreground">{p.phone}</div> : null}
                       <div className="mt-1"><span className={cn(PILL, om.cls)}>{om.label}</span></div>
                     </TableCell>
                     <TableCell className="text-xs">
-                      <div>{p.kit ? kitLabel(p.kit) : (p.description ?? '—')}</div>
+                      <div
+                        className="line-clamp-2 min-w-[9rem] max-w-[13rem]"
+                        title={p.kit ? kitLabel(p.kit) : (p.description ?? undefined)}
+                      >
+                        {p.kit ? kitLabel(p.kit) : (p.description ?? '—')}
+                      </div>
                       {p.items && p.items.length > 1 ? (
                         <div className="mt-0.5 text-[10px] font-semibold text-muted-foreground">+{p.items.length - 1} item{p.items.length - 1 === 1 ? '' : 's'}</div>
                       ) : null}
@@ -778,7 +791,7 @@ export function TricopilOrdersPage() {
                     </TableCell>
                     <TableCell>
                       <span className={cn(PILL, sm.cls)}>{sm.label}</span>
-                      {p.paidAt ? <div className="mt-1 text-[10px] text-muted-foreground">{shortDateTime(p.paidAt)}</div> : null}
+                      {p.paidAt ? <div className="mt-1 text-[10px] tabular-nums text-muted-foreground">{shortDateTime(p.paidAt)}</div> : null}
                     </TableCell>
                     <TableCell>
                       <span className={cn(PILL, dm.cls)}>{dm.label}</span>

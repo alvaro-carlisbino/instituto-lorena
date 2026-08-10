@@ -589,13 +589,19 @@ export function EstoquePage() {
               />
             ) : (
               <div className="overflow-x-auto">
-                <Table>
+                {/* table-fixed: sem ele a largura por coluna é só sugestão e o navegador
+                    reparte pelo conteúdo — medido, a mesma tabela vai de 37px para 57px
+                    por linha e estoura 1219px num contêiner de 960px. */}
+                <Table className="table-fixed">
                   <TableHeader>
                     <TableRow>
+                      {/* Nome de item tem mediana de 38 e máximo de 120 caracteres nos
+                          dados reais: sem teto ele empurrava as outras três colunas e
+                          quebrava em três linhas. Categoria e saldo são curtos e fixos. */}
                       <TableHead>Item</TableHead>
-                      <TableHead>Categoria</TableHead>
-                      <TableHead className="text-right">Saldo</TableHead>
-                      <TableHead className="text-right">Ações</TableHead>
+                      <TableHead className="w-[10rem]">Categoria</TableHead>
+                      <TableHead className="w-[7rem] text-right">Saldo</TableHead>
+                      <TableHead className="w-[6rem] text-right">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -604,12 +610,12 @@ export function EstoquePage() {
                       return (
                         <TableRow key={item.id}>
                           <TableCell>
-                            <div className="flex items-center gap-1.5 font-medium">
-                              {item.name}
-                              {item.controlled ? <ShieldAlert className="size-3.5 text-amber-500" /> : null}
+                            <div className="flex min-w-0 items-center gap-1.5 font-medium">
+                              <span className="truncate" title={item.name}>{item.name}</span>
+                              {item.controlled ? <ShieldAlert className="size-3.5 shrink-0 text-amber-500" /> : null}
                             </div>
                             {item.sku || item.barcode ? (
-                              <div className="text-xs text-muted-foreground">
+                              <div className="truncate text-xs tabular-nums text-muted-foreground">
                                 {[item.sku, item.barcode].filter(Boolean).join(' · ')}
                               </div>
                             ) : null}

@@ -151,8 +151,17 @@ export function TricopilSubscriptionsPage() {
                   <Fragment key={s.id}>
                   <TableRow className="hover:bg-muted/20">
                     <TableCell>
-                      <p className="font-medium text-foreground">{s.customerName || '—'}</p>
-                      <p className="text-xs text-muted-foreground">{s.phone || ''}{s.email ? ` · ${s.email}` : ''}</p>
+                      {/* Nome + telefone + e-mail na mesma coluna passam fácil de 60
+                          caracteres e quebravam em três linhas; o e-mail é o pior deles. */}
+                      <p className="max-w-[13rem] truncate font-medium text-foreground" title={s.customerName || undefined}>
+                        {s.customerName || '—'}
+                      </p>
+                      <p
+                        className="max-w-[13rem] truncate text-xs text-muted-foreground"
+                        title={[s.phone, s.email].filter(Boolean).join(' · ') || undefined}
+                      >
+                        {s.phone || ''}{s.email ? ` · ${s.email}` : ''}
+                      </p>
                     </TableCell>
                     <TableCell>
                       <p>{CADENCE_LABEL[s.cadence] ?? s.cadence}</p>
