@@ -324,7 +324,7 @@ terceiro, então vale a UX de dizer "não achamos esse número".
 | Verificação | Resultado |
 |---|---|
 | `flutter analyze` nos 4 pacotes | sem nenhum apontamento |
-| `flutter build apk` do app da equipe (o de dependências nativas mais pesadas) | APK gerado |
+| `flutter build apk` dos **três** apps | 3 APKs gerados (145–148 MB, debug) |
 | RPCs do paciente com sessão simulada | cirurgia do prontuário 5188 com as áreas somando exatos 6.079 |
 | Isolamento do paciente | usuário sem conta recebe `[]`, 0 consultas, 0 fotos |
 | RPCs da equipe | 46 consultas hoje; cirurgia 300 ao vivo, etapa IMPLANTE, 5.386 extraídos |
