@@ -47,6 +47,7 @@ import {
   Tv,
   Unplug,
   UserSearch,
+  Upload,
   Users,
   Wallet,
   Warehouse,
@@ -402,6 +403,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: ArrowLeftRight,
     group: 'financeiro',
     keywords: ['shosp', 'vendas', 'extrato', 'banco', 'bater', 'divergencia'],
+    visible: (ctx) => canFinance(ctx) && isClinic(ctx) && canBoards(ctx),
+  },
+  {
+    id: 'importar-vendas',
+    path: '/importar-vendas',
+    label: 'Importar vendas',
+    icon: Upload,
+    group: 'financeiro',
+    keywords: ['importar', 'shosp', 'planilha', 'recepcao', 'lion', 'entradas', 'receber', 'faturamento'],
     visible: (ctx) => canFinance(ctx) && isClinic(ctx) && canBoards(ctx),
   },
   {
