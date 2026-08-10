@@ -4,6 +4,7 @@ import {
   type LeadAttribution,
 } from './attribution.ts'
 import { notifyAgents } from './notifyAgents.ts'
+import { setLineConversationMode } from './conversationLineState.ts'
 
 export type LeadSource = 'meta_facebook' | 'meta_instagram' | 'meta_whatsapp' | 'whatsapp' | 'manual'
 export type LeadTemperature = 'cold' | 'warm' | 'hot'
@@ -701,6 +702,8 @@ export async function escalateLeadToHuman(
     /** Anti-spam: não repete a mesma notificação para o lead dentro da janela. */
     dedupeKey?: string
     dedupeWindowMinutes?: number
+    /** Linha em que a escalada aconteceu. Sem isto, cai na linha atual do lead. */
+    whatsappInstanceId?: string | null
   },
 ): Promise<void> {
   try {
@@ -711,6 +714,14 @@ export async function escalateLeadToHuman(
       .eq('id', input.leadId)
       .not('conversation_status', 'in', '(human_active,lost,closed,archived)')
     if (input.turnOffAi !== false) {
+      // Desliga NA LINHA da escalada. O cliente que pede "quero falar com uma pessoa" na
+      // linha de vendas não pode calar a triagem da clínica pra mesma pessoa (nem o contrário).
+      await setLineConversationMode(admin, {
+        leadId: input.leadId,
+        instanceId: input.whatsappInstanceId,
+        ownerMode: 'human',
+        aiEnabled: false,
+      })
       await admin.from('crm_conversation_states').upsert({
         lead_id: input.leadId,
         ai_enabled: false,
@@ -956,17 +967,88 @@ export async function mergeLeadDropIntoKeep(
     .update({ custom_fields: normalizedCf, patient_name: patientName, deleted_at: null })
     .eq('id', keepLeadId)
 
+  // TUDO que aponta pro lead tem que mudar de dono ANTES do delete lá embaixo.
+  //
+  // Metade destas tabelas não tem foreign key pra `leads` (pagamento, recebível, prontuário,
+  // evento do site). Sem FK não existe cascade nem erro: o delete passava limpo e a linha
+  // ficava apontando pra um id que não existe mais. O card do Álvaro no Tricopill tinha 4
+  // pagamentos e.Rede, 3 Asaas e 1 PagBank pendurados assim; o do André, 1 Asaas.
+  //
+  // As que TÊM cascade e não estavam nesta lista eram pior ainda: sumiam de vez no delete
+  // (protocolo de tratamento, follow-up, estado de reengajamento).
   const fkTables = [
     'interactions',
     'crm_media_items',
+    'crm_media_retry_jobs',
     'lead_tasks',
     'survey_dispatches',
     'appointments',
     'lead_wa_line_events',
+    'lead_treatment_protocols',
+    // Sem FK: o delete não reclamaria e a linha viraria órfã silenciosa.
+    'rede_payments',
+    'asaas_payments',
+    'asaas_subscriptions',
+    'pagbank_checkouts',
+    'fin_receivables',
+    'stock_kits',
+    'storefront_events',
+    'meta_leadgen_events',
+    'medical_records',
+    'medical_records_access_log',
+    'clinical_notes',
+    // FK com SET NULL: sobreviveriam ao delete, mas perdendo o vínculo com a pessoa.
+    'clinic_sales',
+    'patient_accounts',
+    'patient_photos',
+    'shosp_appointments',
+    'shosp_patients',
+    'srg_surgeries',
+    'surgery_accounts',
   ] as const
   for (const t of fkTables) {
     const { error } = await admin.from(t).update({ lead_id: keepLeadId }).eq('lead_id', dropLeadId)
     if (error) console.warn(`mergeLeadDropIntoKeep ${t}:`, error.message)
+  }
+
+  // Tabelas com índice único por lead: se o keep já tem linha, a do drop não cabe. São
+  // estados/consentimentos (não são dinheiro), então a do keep vence e a do drop sai.
+  const singletonTables = ['crm_reengage_state', 'lead_followups', 'patient_consents'] as const
+  for (const t of singletonTables) {
+    const { error } = await admin.from(t).update({ lead_id: keepLeadId }).eq('lead_id', dropLeadId)
+    if (error) {
+      await admin.from(t).delete().eq('lead_id', dropLeadId)
+      console.warn(`mergeLeadDropIntoKeep ${t} (conflito, linha do drop descartada):`, error.message)
+    }
+  }
+
+  // Estado por LINHA: o keep manda em cada linha que já tenha; o resto vem do drop.
+  const { data: dropLineStates } = await admin
+    .from('crm_conversation_line_states')
+    .select('whatsapp_instance_id')
+    .eq('lead_id', dropLeadId)
+  const { data: keepLineStates } = await admin
+    .from('crm_conversation_line_states')
+    .select('whatsapp_instance_id')
+    .eq('lead_id', keepLeadId)
+  const keepLines = new Set(
+    (keepLineStates ?? []).map((r) => String((r as { whatsapp_instance_id: unknown }).whatsapp_instance_id)),
+  )
+  for (const row of dropLineStates ?? []) {
+    const line = String((row as { whatsapp_instance_id: unknown }).whatsapp_instance_id)
+    if (keepLines.has(line)) {
+      await admin
+        .from('crm_conversation_line_states')
+        .delete()
+        .eq('lead_id', dropLeadId)
+        .eq('whatsapp_instance_id', line)
+    } else {
+      await admin
+        .from('crm_conversation_line_states')
+        .update({ lead_id: keepLeadId })
+        .eq('lead_id', dropLeadId)
+        .eq('whatsapp_instance_id', line)
+    }
   }
 
   const { data: dropTags } = await admin

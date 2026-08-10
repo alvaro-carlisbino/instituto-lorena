@@ -1,7 +1,8 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
 import { insertInteraction, resolveConversationTenantId } from './crm.ts'
-import { matchesInternalTerm } from './internalContacts.ts'
+import { loadLineConversationMode, setLineConversationMode } from './conversationLineState.ts'
+import { matchesInternalContact } from './internalContacts.ts'
 import { alertOwnerAiOutOfBalance } from './saleReceipt.ts'
 import type { WhatsappProvider } from './whatsapp/types.ts'
 
@@ -566,6 +567,8 @@ export async function evaluateCrmAiAutoReplyGate(
   leadId: string,
   options: {
     directionIsInbound: boolean
+    /** Linha por onde a mensagem entrou. Quem decide se o bot responde é o par (lead, linha). */
+    whatsappInstanceId?: string | null
   },
 ): Promise<CrmAiAutoReplyGate> {
   const { data: state } = await admin
@@ -575,7 +578,7 @@ export async function evaluateCrmAiAutoReplyGate(
     .maybeSingle()
   const { data: leadRowGate } = await admin
     .from('leads')
-    .select('opted_out_at, tenant_id, patient_name')
+    .select('opted_out_at, tenant_id, patient_name, phone')
     .eq('id', leadId)
     .maybeSingle()
   const leadOptedOut = Boolean(
@@ -583,8 +586,11 @@ export async function evaluateCrmAiAutoReplyGate(
   )
   // Contato INTERNO (clínica/financeiro/sócios, ex.: Kauan do Instituto Lorena fazendo
   // conciliação de caixa): o bot de vendas não responde. Mesma lista do reengajamento.
-  const internalContact = matchesInternalTerm(
+  // Por nome E por telefone: o card que ganha hoje é o mais antigo (normalmente o da
+  // clínica, com nome curto tipo "Aline"), que não casa com termo nenhum.
+  const internalContact = matchesInternalContact(
     (leadRowGate as { patient_name?: string | null } | null)?.patient_name,
+    (leadRowGate as { phone?: string | null } | null)?.phone,
   )
   // crm_ai_configs tem PK (tenant_id, id): escopar por tenant, senão com >1 tenant
   // o .maybeSingle() falha e a config (default_owner_mode, enabled) vem nula.
@@ -595,8 +601,20 @@ export async function evaluateCrmAiAutoReplyGate(
     ? await admin.from('crm_ai_configs').select('*').eq('id', 'default').eq('tenant_id', gateTenantId).maybeSingle()
     : { data: null }
 
-  const rawOwnerMode = String(state?.owner_mode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
-  const aiEnabled = Boolean((state?.ai_enabled ?? true) && (config?.enabled ?? true))
+  // ESTADO POR LINHA. A conversa segue a linha (20260810180848), então quem atende também
+  // tem que seguir: a atendente da clínica assumir na mão NÃO pode calar o bot de vendas do
+  // Tricopill. Sem registro pra esta linha = ninguém decidiu nada aqui ainda → vale o default
+  // da config (IA responde). Ver 20260810220000_estado_da_conversa_por_linha.sql.
+  //
+  // Canal sem linha (ManyChat/Instagram) continua caindo no estado por lead, como antes.
+  const lineId = String(options.whatsappInstanceId ?? '').trim()
+  const lineMode = lineId ? await loadLineConversationMode(admin, leadId, lineId) : null
+  const stateOwnerMode = lineId ? lineMode?.ownerMode : String(state?.owner_mode ?? '').toLowerCase() || undefined
+  const stateAiEnabled = lineId ? lineMode?.aiEnabled : (state?.ai_enabled as boolean | undefined)
+  const stateLastHumanReplyAt = lineId ? lineMode?.lastHumanReplyAt : (state?.last_human_reply_at as string | null | undefined)
+
+  const rawOwnerMode = String(stateOwnerMode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
+  const aiEnabled = Boolean((stateAiEnabled ?? true) && (config?.enabled ?? true))
 
   // HANDOFF EXPIRA (16/jul). A conversa vira 'human' sempre que a equipe manda mensagem
   // manual (crm-send-message) — correto, a IA não pode atropelar a atendente no meio do
@@ -614,13 +632,15 @@ export async function evaluateCrmAiAutoReplyGate(
   let ownerMode = rawOwnerMode
   let handoffExpired = false
   if (rawOwnerMode === 'human' && aiEnabled && handoffDays > 0) {
-    const lastHumanAt = state?.last_human_reply_at ? new Date(String(state.last_human_reply_at)).getTime() : 0
+    const lastHumanAt = stateLastHumanReplyAt ? new Date(String(stateLastHumanReplyAt)).getTime() : 0
     const daysSinceHuman = lastHumanAt ? (Date.now() - lastHumanAt) / 86400000 : Number.POSITIVE_INFINITY
     if (daysSinceHuman >= handoffDays) {
       ownerMode = 'auto'
       handoffExpired = true
       // Persiste, senão o painel seguiria mostrando "Humano" e a IA responderia — a tela
-      // mentiria pra equipe sobre quem está atendendo.
+      // mentiria pra equipe sobre quem está atendendo. Nos dois lugares: a linha decide
+      // quem atende, a tabela por lead é o que o painel mostra.
+      if (lineId) await setLineConversationMode(admin, { leadId, instanceId: lineId, ownerMode: 'auto' })
       await admin.from('crm_conversation_states')
         .update({ owner_mode: 'auto', updated_at: new Date().toISOString() })
         .eq('lead_id', leadId)
@@ -820,6 +840,8 @@ export async function wasLastAiReplyFallback(
 export async function disableAiOnHandoff(
   admin: SupabaseClient,
   leadId: string,
+  /** Linha em que o handoff aconteceu. Sem isto, cai na linha atual do lead. */
+  instanceId?: string | null,
 ): Promise<void> {
   try {
     const { data: lead } = await admin
@@ -838,6 +860,15 @@ export async function disableAiOnHandoff(
         .update({ stage_id: targetStage, updated_at: nowIso() })
         .eq('id', leadId)
     }
+
+    // Desliga NA LINHA do handoff: a triagem da clínica terminar não pode calar o bot de
+    // vendas do Tricopill (nem o contrário) quando é a mesma pessoa nos dois polos.
+    await setLineConversationMode(admin, {
+      leadId,
+      instanceId,
+      ownerMode: 'human',
+      aiEnabled: false,
+    })
 
     await admin
       .from('crm_conversation_states')
@@ -1123,7 +1154,10 @@ export async function runWhatsappAiAutoReply(
   // ANTI-ATROPELO: o z.ai leva ~30-120s. Se durante esse tempo o HUMANO assumiu a conversa
   // (owner_mode=human ou ai_enabled=false), NÃO enviamos mais nada — a equipa é dona do
   // atendimento agora. Re-checa o gate imediatamente antes de QUALQUER envio.
-  const postGate = await evaluateCrmAiAutoReplyGate(admin, options.leadId, { directionIsInbound: true })
+  const postGate = await evaluateCrmAiAutoReplyGate(admin, options.leadId, {
+    directionIsInbound: true,
+    whatsappInstanceId: options.whatsappInstanceId,
+  })
   if (!postGate.canAutoReply) {
     console.warn('runWhatsappAiAutoReply: humano assumiu durante a geração — envio abortado', {
       leadId: options.leadId,
@@ -1184,7 +1218,7 @@ export async function runWhatsappAiAutoReply(
           happenedAt: nowIso(),
           externalMessageId: sent.externalMessageId,
         })
-        await disableAiOnHandoff(admin, options.leadId)
+        await disableAiOnHandoff(admin, options.leadId, options.whatsappInstanceId)
         return { replied: true, replyText: handoverText, handoffSuggested: true }
       } catch (e) {
         console.error('runWhatsappAiAutoReply handover send:', e)

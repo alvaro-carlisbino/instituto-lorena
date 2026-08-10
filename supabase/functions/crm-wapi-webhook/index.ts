@@ -457,6 +457,9 @@ Deno.serve(async (req) => {
 
     const gate = await evaluateCrmAiAutoReplyGate(admin, lead.leadId, {
       directionIsInbound: true,
+      // Quem decide se o bot responde é o par (lead, LINHA): handoff feito na clínica não
+      // pode calar a linha de vendas pra mesma pessoa. Ver 20260810220000.
+      whatsappInstanceId: wInstanceId,
     })
 
     // Só mídia, sem legenda (texto = "📷 Imagem" etc.): a IA não "vê" o conteúdo, então
@@ -503,6 +506,7 @@ Deno.serve(async (req) => {
           aiEnabled: gate.aiEnabled,
           statePrompt,
           aiJobSource: 'wapi-webhook',
+          whatsappInstanceId: wInstanceId,
           sendProvider: provider,
           keepAiOn: isSalesBot,
           deferForMediaMs,
@@ -522,6 +526,7 @@ Deno.serve(async (req) => {
         body: `${normalized.fromName} pediu para falar com uma pessoa.`,
         dedupeKey: 'wants_human',
         dedupeWindowMinutes: 30,
+        whatsappInstanceId: wInstanceId,
       })
       routing = 'human_requested'
     } else if (gate.canAutoReply) {
@@ -535,6 +540,7 @@ Deno.serve(async (req) => {
         aiEnabled: gate.aiEnabled,
         statePrompt,
         aiJobSource: 'wapi-webhook',
+        whatsappInstanceId: wInstanceId,
         sendProvider: provider,
         keepAiOn: isSalesBot,
         deferForMediaMs,
@@ -549,7 +555,7 @@ Deno.serve(async (req) => {
           last_interaction_at: new Date().toISOString(),
           conversation_status: 'waiting_human',
         }).eq('id', lead.leadId)
-        await disableAiOnHandoff(admin, lead.leadId)
+        await disableAiOnHandoff(admin, lead.leadId, wInstanceId)
         await notifyAgents(admin, {
           leadId: lead.leadId,
           kind: 'handoff',

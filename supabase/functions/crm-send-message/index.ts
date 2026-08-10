@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
+import { setLineConversationMode } from '../_shared/conversationLineState.ts'
 import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
 import {
@@ -570,6 +571,16 @@ Deno.serve(async (req) => {
     })
     const preservedAiEnabled =
       state?.ai_enabled !== undefined && state?.ai_enabled !== null ? Boolean(state.ai_enabled) : true
+
+    // "Assumi na mão" vale NA LINHA em que a equipe respondeu. A atendente da clínica
+    // responder aqui não pode calar o bot de vendas do Tricopill pra mesma pessoa.
+    await setLineConversationMode(admin, {
+      leadId,
+      instanceId: row.whatsapp_instance_id,
+      ownerMode: 'human',
+      aiEnabled: preservedAiEnabled,
+      lastHumanReplyAt: nowIso(),
+    })
 
     await admin.from('crm_conversation_states').upsert({
       lead_id: leadId,

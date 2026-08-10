@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { coercePgBoolean } from '../_shared/coercePgBoolean.ts'
 import { disableAiOnHandoff, runManychatAiAutoReply, runWhatsappAiAutoReply } from '../_shared/crmAiAutoReply.ts'
+import { setLineConversationMode } from '../_shared/conversationLineState.ts'
 import { pushManychatInstagramDmAfterReply, readManychatPushConfigFromEnv } from '../_shared/manychatPublicApi.ts'
 import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
@@ -109,6 +110,13 @@ Deno.serve(async (req) => {
     }
     const { data, error } = await admin.from('crm_conversation_states').upsert(patch).select('*').single()
     if (error) return json({ error: error.message }, 400)
+    // O botão Humano/IA do painel age na LINHA atual do lead (é a conversa que a pessoa
+    // está vendo na tela). A tabela por lead acima é o que a tela lê de volta.
+    await setLineConversationMode(admin, {
+      leadId,
+      ownerMode,
+      aiEnabled: Boolean(patch.ai_enabled),
+    })
     const row = data as Record<string, unknown>
     return json({
       ok: true,

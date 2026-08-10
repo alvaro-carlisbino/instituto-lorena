@@ -70,6 +70,9 @@ async function deliverAiReply(
     aiEnabled: true,
     statePrompt,
     aiJobSource: args.aiJobSource,
+    // O cron retoma a conversa PELA LINHA do lead — sem isso o gate cairia no estado
+    // por lead e voltaria a herdar o "human" do outro polo. Ver 20260810220000.
+    whatsappInstanceId: String(lead.whatsapp_instance_id ?? '') || null,
     sendProvider: provider,
     keepAiOn: isSalesBot,
     burstFlush: true,

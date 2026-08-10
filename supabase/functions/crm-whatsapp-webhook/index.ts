@@ -389,6 +389,9 @@ Deno.serve(async (req) => {
 
     const gate = await evaluateCrmAiAutoReplyGate(admin, lead.leadId, {
       directionIsInbound: normalized.direction === 'in',
+      // Estado por LINHA: o handoff da linha de vendas não cala a triagem da clínica
+      // pra mesma pessoa (nem o contrário). Ver 20260810220000.
+      whatsappInstanceId: wInstanceId,
     })
 
     const statePrompt = String(state?.prompt_override ?? config?.system_prompt ?? '').trim()
@@ -410,6 +413,7 @@ Deno.serve(async (req) => {
         aiEnabled: gate.aiEnabled,
         statePrompt,
         aiJobSource: 'whatsapp-webhook',
+        whatsappInstanceId: wInstanceId,
         sendProvider,
       })
 
@@ -420,7 +424,7 @@ Deno.serve(async (req) => {
           conversation_status: 'waiting_human'
         }).eq('id', lead.leadId)
 
-        await disableAiOnHandoff(admin, lead.leadId)
+        await disableAiOnHandoff(admin, lead.leadId, wInstanceId)
 
         await notifyAgents(admin, {
           leadId: lead.leadId,
