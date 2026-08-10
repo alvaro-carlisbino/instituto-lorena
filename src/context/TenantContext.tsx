@@ -5,6 +5,7 @@ import {
   applyTenantBrandToCssVars,
   DEFAULT_TENANT,
   fetchCurrentTenant,
+  fetchCanViewFinance,
   fetchCurrentTenantBilling,
   fetchIsSuperAdmin,
   fetchMyTenants,
@@ -21,6 +22,8 @@ type TenantContextValue = {
   switchTenant: (tenantId: string) => Promise<void>
   switching: boolean
   isSuperAdmin: boolean
+  /** Financeiro (extrato, contas, conciliação) só aparece para quem tem a permissão. */
+  canViewFinance: boolean
   loading: boolean
   reload: () => Promise<void>
 }
@@ -32,6 +35,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [availableTenants, setAvailableTenants] = useState<PoloOption[]>([])
   const [switching, setSwitching] = useState<boolean>(false)
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false)
+  const [canViewFinance, setCanViewFinance] = useState<boolean>(false)
   const [loading, setLoading] = useState<boolean>(false)
 
   const load = useMemo(
@@ -41,19 +45,22 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           setTenant(DEFAULT_TENANT)
           setAvailableTenants([])
           setIsSuperAdmin(false)
+          setCanViewFinance(false)
           applyTenantBrandToCssVars(DEFAULT_TENANT.brand)
           return
         }
         setLoading(true)
         try {
-          const [t, sa, billing, polos] = await Promise.all([
+          const [t, sa, billing, polos, finance] = await Promise.all([
             fetchCurrentTenant(),
             fetchIsSuperAdmin(),
             fetchCurrentTenantBilling(),
             fetchMyTenants(),
+            fetchCanViewFinance(),
           ])
           setTenant({ ...t, billing })
           setIsSuperAdmin(sa)
+          setCanViewFinance(finance)
           setAvailableTenants(polos)
           applyTenantBrandToCssVars(t.brand)
         } finally {
@@ -98,8 +105,8 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   }, [load])
 
   const value = useMemo<TenantContextValue>(
-    () => ({ tenant, availableTenants, switchTenant, switching, isSuperAdmin, loading, reload: load }),
-    [tenant, availableTenants, switchTenant, switching, isSuperAdmin, loading, load],
+    () => ({ tenant, availableTenants, switchTenant, switching, isSuperAdmin, canViewFinance, loading, reload: load }),
+    [tenant, availableTenants, switchTenant, switching, isSuperAdmin, canViewFinance, loading, load],
   )
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>

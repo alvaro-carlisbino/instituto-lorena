@@ -342,3 +342,19 @@ export async function fetchIsSuperAdmin(): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * Permissão de financeiro do login atual (`app_users.can_view_finance`, ou super admin).
+ * É a MESMA função que a RLS das tabelas fin_ e payable_installments usa — a tela esconde
+ * o menu, o banco é quem de fato barra. Sem permissão, essas tabelas voltam vazias.
+ */
+export async function fetchCanViewFinance(): Promise<boolean> {
+  if (!supabase) return false
+  try {
+    const { data, error } = await supabase.rpc('current_user_can_finance')
+    if (error) return false
+    return Boolean(data)
+  } catch {
+    return false
+  }
+}
