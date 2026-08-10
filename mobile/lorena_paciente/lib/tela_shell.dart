@@ -28,14 +28,22 @@ class TelaShellState extends State<TelaShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _aba,
-        children: const [
-          TelaInicioPublico(),
-          TelaServicos(),
-          TelaClinica(),
-          TelaMinhaArea(),
-        ],
+      // Trava de largura: no tablet e no navegador o conteúdo esticava a linha
+      // inteira e virava texto ilegível. Celular não muda nada (fica abaixo de
+      // 560), e tablet passa a ler como coluna, não como faixa.
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: IndexedStack(
+            index: _aba,
+            children: const [
+              TelaInicioPublico(),
+              TelaServicos(),
+              TelaClinica(),
+              TelaMinhaArea(),
+            ],
+          ),
+        ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _aba,
