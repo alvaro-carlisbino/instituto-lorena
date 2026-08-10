@@ -13,10 +13,15 @@ const BLOCK_TERMS = [
   'atendimento', 'guegrorioda',
 ]
 
+// Nomes internos curtos demais para busca por substring: 'spa' casaria dentro de "espaco"
+// e barraria paciente de verdade. Estes só valem como nome INTEIRO da conversa.
+const EXACT_TERMS = ['spa']
+
 /** Só os termos internos (clínica/financeiro/sócios). Usado no AUTO-REPLY — não barra
  *  nome-de-emoji, senão travaria o atendimento de um cliente com nome esquisito. */
 export function matchesInternalTerm(name: unknown): boolean {
   const n = norm(String(name ?? '')).trim()
+  if (EXACT_TERMS.includes(n)) return true
   return BLOCK_TERMS.some((t) => n.includes(t))
 }
 
