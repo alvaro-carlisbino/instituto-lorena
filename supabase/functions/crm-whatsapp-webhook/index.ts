@@ -39,7 +39,14 @@ Deno.serve(async (req) => {
 
   const envProvider = (Deno.env.get('WHATSAPP_PROVIDER') ?? 'evolution').trim().toLowerCase()
 
-  if (req.method === 'GET' && envProvider === 'official') {
+  // Handshake da Meta (GET com hub.challenge). NÃO exige que o provider já seja 'official':
+  // exigir isso obrigava a virar WHATSAPP_PROVIDER=official só para validar a URL no painel
+  // — e essa mesma variável troca o provider de ENTRADA deste webhook, o que derrubaria a
+  // linha que está no Evolution/W-API. A migração fica em duas etapas: primeiro valida a URL
+  // aqui, depois vira o provider quando o número for migrado de verdade.
+  //
+  // Devolver o challenge é inócuo: só responde a quem manda o token combinado, que é segredo.
+  if (req.method === 'GET') {
     const url = new URL(req.url)
     const mode = url.searchParams.get('hub.mode')
     const token = url.searchParams.get('hub.verify_token')
