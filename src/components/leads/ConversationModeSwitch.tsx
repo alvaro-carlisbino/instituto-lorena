@@ -97,14 +97,18 @@ export function ConversationModeSwitch({
                     aria-checked={active}
                     aria-label={`${mode.label}. ${mode.hint}`}
                     className={cn(
-                      'h-7 gap-1.5 rounded-md px-2.5 text-xs font-medium',
+                      'h-7 gap-1.5 rounded-md px-2 text-xs font-medium sm:px-2.5',
                       active
                         ? 'bg-background text-foreground shadow-sm'
                         : 'text-muted-foreground hover:text-foreground',
                     )}
                   >
                     <Icon className={cn('size-3.5 shrink-0', active && 'text-primary')} aria-hidden />
-                    {mode.label}
+                    {/* No celular só o modo ATIVO se escreve; os outros dois viram ícone.
+                        Com os três rótulos o controle media ~220px dos 375 e empurrava as
+                        ações do cabeçalho para uma terceira linha. O aria-label de cada
+                        botão continua completo, então leitor de tela não perde nada. */}
+                    <span className={cn(active ? 'inline' : 'hidden sm:inline')}>{mode.label}</span>
                   </Button>
                 }
               />

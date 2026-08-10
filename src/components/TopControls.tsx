@@ -46,6 +46,13 @@ function initialsFromEmail(email: string) {
  * Utilitários do cabeçalho, em ícones. Antes eram quatro controles largos (e-mail
  * completo, tema, "Atualizar", "Ferramentas") ocupando metade da barra superior; agora
  * cabem à direita e sobra largura para as ações da própria tela.
+ *
+ * No celular sobram DOIS: o sino e o perfil. Os seis ícones tomavam ~200px dos 375 e a
+ * ação da própria tela era cortada no meio — em /leads o botão aparecia como "Exporta"
+ * e em /kanban "Painel" ficava por baixo do sino. Buscar, atualizar e tema viram itens
+ * do menu de perfil, que no telefone é onde já se procura esse tipo de coisa. Os ajustes
+ * operacionais (simular perfil, ver como) ficam só no desktop: é ferramenta de quem está
+ * depurando o sistema, não de quem está atendendo na rua.
  */
 export function TopControls() {
   const crm = useCrm()
@@ -85,7 +92,7 @@ export function TopControls() {
             <Button
               variant="ghost"
               size="icon-sm"
-              className="rounded-lg"
+              className="hidden rounded-lg sm:inline-flex"
               aria-label="Buscar tela ou ação"
               onClick={openCommandPalette}
             >
@@ -102,7 +109,7 @@ export function TopControls() {
             <Button
               variant="ghost"
               size="icon-sm"
-              className="rounded-lg"
+              className="hidden rounded-lg sm:inline-flex"
               disabled={crm.isLoading || !canSync}
               aria-label={crm.isLoading ? 'Atualizando dados' : 'Atualizar dados'}
               onClick={() => void crm.syncFromSupabase()}
@@ -120,7 +127,7 @@ export function TopControls() {
             <Button
               variant="ghost"
               size="icon-sm"
-              className="rounded-lg"
+              className="hidden rounded-lg sm:inline-flex"
               aria-label={theme === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
               onClick={toggleTheme}
             >
@@ -132,7 +139,7 @@ export function TopControls() {
       </Tooltip>
 
       {showTools ? (
-        <div className="relative" ref={toolsRef}>
+        <div className="relative hidden sm:block" ref={toolsRef}>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -211,10 +218,15 @@ export function TopControls() {
 
       <DropdownMenu>
         <DropdownMenuTrigger
-          className="ml-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-[11px] font-semibold text-secondary-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="relative ml-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-[11px] font-semibold text-secondary-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           aria-label={isSignedIn ? `Perfil: ${email}` : 'Perfil (não conectado)'}
         >
           {isSignedIn ? initialsFromEmail(email) : <User className="size-4" aria-hidden />}
+          {/* No desktop este ponto vive no botão de ferramentas; no celular ele é a única
+              pista de que há aviso de sincronização esperando dentro do menu. */}
+          {hasNotice ? (
+            <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-primary ring-2 ring-background sm:hidden" aria-hidden />
+          ) : null}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-60">
           <DropdownMenuLabel className="font-normal">
@@ -224,6 +236,40 @@ export function TopControls() {
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+
+          {/* Só no celular: aqui estão os utilitários que no desktop são ícones soltos.
+              Sem isto, esconder os ícones em telas estreitas tiraria o acesso a eles. */}
+          <div className="sm:hidden">
+            <DropdownMenuItem onClick={openCommandPalette}>
+              <Search className="size-4" />
+              Buscar tela
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={crm.isLoading || !canSync}
+              onClick={() => void crm.syncFromSupabase()}
+            >
+              <RefreshCw className={cn('size-4', crm.isLoading && 'animate-spin')} />
+              {crm.isLoading ? 'Atualizando…' : 'Atualizar dados'}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={toggleTheme}>
+              {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+              {theme === 'dark' ? 'Tema claro' : 'Tema escuro'}
+            </DropdownMenuItem>
+            {/* Os avisos de sincronização moravam dentro do painel de ferramentas, que no
+                celular não existe mais: sem esta cópia, uma falha de sync ficaria muda. */}
+            {hasNotice ? (
+              <div className="grid gap-1.5 px-2 py-1.5">
+                {crm.syncNotice ? (
+                  <NoticeBanner message={crm.syncNotice} variant={noticeVariantFromMessage(crm.syncNotice)} />
+                ) : null}
+                {crm.authNotice ? (
+                  <NoticeBanner message={crm.authNotice} variant={noticeVariantFromMessage(crm.authNotice)} />
+                ) : null}
+              </div>
+            ) : null}
+            <DropdownMenuSeparator />
+          </div>
+
           <DropdownMenuItem disabled={crm.isLoading || !isSignedIn} onClick={() => void crm.runSignOut()}>
             <LogOut className="size-4" />
             Sair

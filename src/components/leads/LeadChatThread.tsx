@@ -14,6 +14,7 @@ import {
   MoreVertical,
   Pencil,
   Trash2,
+  Paperclip,
   Smile,
   Sticker,
   CreditCard,
@@ -825,7 +826,7 @@ export function LeadChatThread({
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {/* Header / Filters */}
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-1 py-2 sm:gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-1 py-0.5 sm:gap-2 sm:py-2">
         {hasWaInstagramMerge ? (
           <Badge variant="secondary" className="max-w-full shrink truncate rounded-lg px-2 py-0.5 text-[10px] font-normal sm:text-xs">
             IG → WhatsApp vinculado
@@ -1203,9 +1204,16 @@ export function LeadChatThread({
                 </div>
               </div>
             )}
+            {/* No celular estas ações são só ícone. Escritas por extenso, "Anexar",
+                "Agendar" e "Reenviar Bling" estouravam os 375px e quebravam para uma
+                segunda linha: o compositor comia 142px dos 812 numa tela feita para ler
+                a conversa. O title/sr-only de cada botão mantém o significado. */}
             <div className="flex items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-[10px] font-medium text-muted-foreground hover:bg-muted/50 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50">
+                <label
+                  title="Anexar arquivo"
+                  className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border px-2 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted/50 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 sm:px-3"
+                >
                   <input
                     type="file"
                     multiple
@@ -1213,7 +1221,14 @@ export function LeadChatThread({
                     className="sr-only"
                     onChange={(e) => void handleAttachFiles(e.target.files)}
                   />
-                  {draftAttachments.length > 0 ? `${draftAttachments.length} arquivos` : 'Anexar'}
+                  <Paperclip className="size-4 shrink-0 sm:hidden" aria-hidden />
+                  {draftAttachments.length > 0 ? (
+                    <span className="tabular-nums">{draftAttachments.length}</span>
+                  ) : null}
+                  <span className="hidden sm:inline">
+                    {draftAttachments.length > 0 ? 'arquivos' : 'Anexar'}
+                  </span>
+                  <span className="sr-only sm:hidden">Anexar arquivo</span>
                 </label>
                 <input
                   ref={stickerInputRef}
@@ -1337,8 +1352,9 @@ export function LeadChatThread({
                     className="h-8 rounded-lg px-2 text-[10px]"
                     onClick={() => navigate(`/leads/${leadId}/venda`)}
                   >
-                    <CheckCircle2 className="mr-1.5 h-3.5 w-3.5 text-emerald-600" aria-hidden />
-                    Confirmar venda
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 sm:mr-1.5" aria-hidden />
+                    <span className="hidden sm:inline">Confirmar venda</span>
+                    <span className="sr-only sm:hidden">Confirmar venda</span>
                   </Button>
                   <Button
                     type="button"
@@ -1348,8 +1364,9 @@ export function LeadChatThread({
                     className="h-8 rounded-lg px-2 text-[10px]"
                     onClick={() => navigate(`/leads/${leadId}/envio`)}
                   >
-                    <Truck className="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden />
-                    Gerar envio
+                    <Truck className="h-3.5 w-3.5 shrink-0 text-primary sm:mr-1.5" aria-hidden />
+                    <span className="hidden sm:inline">Gerar envio</span>
+                    <span className="sr-only sm:hidden">Gerar envio</span>
                   </Button>
                   </>
                 ) : (
@@ -1357,11 +1374,13 @@ export function LeadChatThread({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-8 rounded-lg text-[10px]"
+                    className="h-8 rounded-lg px-2 text-[10px]"
+                    title="Agendar consulta"
                     onClick={() => setIsScheduleOpen(true)}
                   >
-                    <CalendarPlus className="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden />
-                    Agendar
+                    <CalendarPlus className="h-3.5 w-3.5 shrink-0 text-primary sm:mr-1.5" aria-hidden />
+                    <span className="hidden sm:inline">Agendar</span>
+                    <span className="sr-only sm:hidden">Agendar consulta</span>
                   </Button>
                 )}
                 <Button
@@ -1373,8 +1392,9 @@ export function LeadChatThread({
                   disabled={retryingBling}
                   onClick={() => void handleRetryBling()}
                 >
-                  <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5 text-primary', retryingBling && 'animate-spin')} aria-hidden />
-                  {retryingBling ? 'Enviando…' : 'Reenviar Bling'}
+                  <RefreshCw className={cn('h-3.5 w-3.5 shrink-0 text-primary sm:mr-1.5', retryingBling && 'animate-spin')} aria-hidden />
+                  <span className="hidden sm:inline">{retryingBling ? 'Enviando…' : 'Reenviar Bling'}</span>
+                  <span className="sr-only sm:hidden">Relançar venda no Bling</span>
                 </Button>
               </div>
               <Button

@@ -502,12 +502,18 @@ export function ChatWorkspacePage({
         )}>
           {activeLead ? (
             <>
-              <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 p-3 sm:px-5 sm:py-4">
-                <div className="flex flex-wrap items-start justify-between gap-2 sm:items-center sm:gap-4">
-                  {/* basis-56: o nome do paciente reserva ~14rem antes de deixar as ações
-                      quebrarem para a linha de baixo, saber com quem se fala vem antes
-                      de economizar uma linha (o nome virava "Maria…"). */}
-                  <div className="flex min-w-0 flex-1 basis-56 items-start gap-2">
+              {/* O cabeçalho da conversa media 179px dos 812 do celular, numa tela cuja
+                  razão de existir é ler a conversa: nome, meta, dois botões e o seletor de
+                  modo caíam em três linhas. Com os botões e o seletor em ícone abaixo de
+                  `sm`, cabe em duas linhas curtas. */}
+              <CardHeader className="shrink-0 border-b border-border/20 bg-muted/5 px-3 py-2 sm:px-5 sm:py-4">
+                <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 sm:items-center sm:gap-4">
+                  {/* No celular o nome toma a linha INTEIRA e as ações descem para a
+                      segunda: dividindo a mesma linha, o bloco do nome era espremido a
+                      ~110px, "Mariana Alves" virava "M." e o telefone quebrava em quatro
+                      linhas — o cabeçalho ficava maior do que era antes. A partir de `sm`
+                      volta a reservar 14rem e dividir a linha com as ações. */}
+                  <div className="flex min-w-0 flex-1 basis-full items-start gap-2 sm:basis-56">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -520,7 +526,7 @@ export function ChatWorkspacePage({
                     </Button>
                     <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <CardTitle className="truncate text-base font-bold tracking-tight sm:text-lg">
+                      <CardTitle className="truncate text-sm font-bold tracking-tight sm:text-lg">
                         {activeLead.patientName}
                       </CardTitle>
                       {activeLead.temperature === 'hot' && (
@@ -545,10 +551,13 @@ export function ChatWorkspacePage({
                       <span className="capitalize">{activeLead.source.replace('meta_', '')}</span>
                       {(() => {
                         const stamp = formatConversationHeaderStamp(activeLead.last_interaction_at ?? activeLead.createdAt)
+                        // A data da última mensagem só aparece a partir de `sm`: no celular
+                        // ela empurrava a meta para uma segunda linha, e o próprio fio da
+                        // conversa já traz o separador de dia logo abaixo.
                         return stamp ? (
                           <>
-                            <span className="text-muted-foreground/30">•</span>
-                            <span title="Data da última mensagem">{stamp}</span>
+                            <span className="hidden text-muted-foreground/30 sm:inline">•</span>
+                            <span className="hidden sm:inline" title="Data da última mensagem">{stamp}</span>
                           </>
                         ) : null
                       })()}
@@ -579,7 +588,8 @@ export function ChatWorkspacePage({
                       onClick={() => setLeadSheetOpen(true)}
                     >
                       <UserRound className="size-3.5" aria-hidden />
-                      Ficha
+                      <span className="hidden sm:inline">Ficha</span>
+                      <span className="sr-only sm:hidden">Abrir ficha do lead</span>
                     </Button>
                     {/* Compacto e na MESMA linha em qualquer largura: o atendente precisa
                         desligar a IA pelo celular, mas não às custas de meia tela. */}
