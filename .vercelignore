@@ -1,0 +1,16 @@
+# O que o build do site NÃO precisa e que só engorda o upload do deploy.
+#
+# `mobile/` são os três apps Flutter (paciente, equipe, cliente Tricopill) com build
+# completo dentro: 5,8 GB em 10/ago/2026. O CLI do Vercel tentava subir a pasta inteira e
+# abortava o deploy com "AbortError" no meio do upload, sem dizer o motivo. O site é Vite +
+# React e não toca em nada disso.
+mobile/
+
+# Planilhas e relatórios que ficam na raiz por conveniência de análise.
+*.xlsx
+*.pdf
+
+# Testes de ponta a ponta não rodam no build de produção.
+e2e/
+playwright-report/
+test-results/
