@@ -278,10 +278,13 @@ export function normalizarFormaPagamento(raw: unknown): PaymentMethod {
   if (s.includes('cheque')) return 'cheque'
   if (/conveni|plano de saude|unimed|amil|sulamerica|bradesco saude|cassi|ipe/.test(s)) return 'convenio'
   if (/dinheiro|especie|a vista em especie|caixa/.test(s)) return 'dinheiro'
-  // cartão: decide crédito × débito
-  const ehCartao = /cart|credito|crédito|debito|débito|visa|master|elo|amex|hiper/.test(s)
+  // Cartão: decide crédito × débito. Casa por PREFIXO porque quem escreve à mão abrevia —
+  // "CRÉD", "CRED A VISTA", "DÉB.", "deb" — e exigir a palavra inteira jogava 320 dos 567
+  // lançamentos da planilha da recepção em "outro", que é o mesmo que não ler a forma.
+  // (`normHeader` já tirou o acento, então "créd" chega como "cred".)
+  const ehCartao = /cart|\bcred|\bdeb|visa|master|\belo\b|amex|hiper/.test(s)
   if (ehCartao) {
-    if (/debito|débito/.test(s)) return 'cartao_debito'
+    if (/\bdeb/.test(s)) return 'cartao_debito'
     return 'cartao_credito'
   }
   if (/transfer|ted|doc |deposito|depósito/.test(s)) return 'transferencia'
