@@ -93,14 +93,14 @@ export function TopControls() {
               variant="ghost"
               size="icon-sm"
               className="hidden rounded-lg sm:inline-flex"
-              aria-label="Buscar tela ou ação"
+              aria-label="Buscar paciente, tela ou ação"
               onClick={openCommandPalette}
             >
               <Search className="size-4" aria-hidden />
             </Button>
           }
         />
-        <TooltipContent>Buscar tela ou ação (⌘K)</TooltipContent>
+        <TooltipContent>Buscar paciente, tela ou ação (⌘K)</TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -242,7 +242,7 @@ export function TopControls() {
           <div className="sm:hidden">
             <DropdownMenuItem onClick={openCommandPalette}>
               <Search className="size-4" />
-              Buscar tela
+              Buscar paciente ou tela
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={crm.isLoading || !canSync}

@@ -44,6 +44,7 @@ import { getLeadPhoneDisplay, isLeadWhatsappComposeBlocked, workflowFieldsForCon
 import { labelForIdName } from '@/lib/selectDisplay'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
+import { Paciente360Panel } from '@/components/Paciente360Panel'
 import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
 import {
   getAiConfig,
@@ -369,6 +370,7 @@ export function LeadDetailPage() {
         <TabsList>
           <TabsTrigger value="visao">Visão geral</TabsTrigger>
           <TabsTrigger value="conversa">Conversa</TabsTrigger>
+          <TabsTrigger value="historico">Histórico clínico</TabsTrigger>
           {crm.currentPermission.canRouteLeads ? (
             <TabsTrigger value="tarefas">Tarefas</TabsTrigger>
           ) : null}
@@ -707,6 +709,12 @@ export function LeadDetailPage() {
         </TabsContent>
 
         {/* Conversa */}
+        {/* Consultas, cirurgias, tricoscopia, vendas e pagamentos — tudo o que existia
+            no banco com lead_id e nunca aparecia perto da pessoa. */}
+        <TabsContent value="historico">
+          <Paciente360Panel leadId={lead.id} />
+        </TabsContent>
+
         <TabsContent value="conversa">
           <div className="flex h-[calc(100dvh-20rem)] min-h-[28rem] flex-col overflow-hidden rounded-md border border-border bg-card p-2">
             <LeadChatThread
