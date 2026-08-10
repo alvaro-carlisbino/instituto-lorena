@@ -8,7 +8,10 @@
 //   instalado abre instantaneamente quando online.
 // - Não usa Workbox — manter dependência zero.
 
-const CACHE = 'crm-app-v1'
+// v2: a v1 podia guardar uma página HTML sob a URL de um chunk .js (ver o fetch de
+// assets abaixo). Trocar o nome faz o `activate` apagar o cache envenenado de quem já
+// estava com o problema — é o que desfaz o erro sem pedir limpeza manual de cache.
+const CACHE = 'crm-app-v2'
 const STATIC_ASSETS = ['/', '/favicon.png', '/favicon.svg', '/manifest.webmanifest']
 
 self.addEventListener('install', (event) => {
@@ -55,7 +58,20 @@ self.addEventListener('fetch', (event) => {
     caches.match(req).then((cached) => {
       if (cached) return cached
       return fetch(req).then((res) => {
-        if (res.ok && (url.pathname.startsWith('/assets/') || url.pathname.match(/\.(js|css|png|svg|webp|woff2?)$/))) {
+        const ehAsset =
+          url.pathname.startsWith('/assets/') || url.pathname.match(/\.(js|css|png|svg|webp|woff2?)$/)
+
+        // `res.ok` NÃO basta. Quando um chunk com hash antigo some (deploy novo), o
+        // rewrite do Vercel respondia a página com status 200 e `text/html` — a
+        // condição antiga aceitava isso e GRAVAVA O HTML sob a URL do .js. Daí em
+        // diante o cache-first servia HTML como script para sempre, e o erro
+        // "Expected a JavaScript-or-Wasm module script" sobrevivia a qualquer reload.
+        // Agora um asset só entra no cache se o tipo devolvido combinar com o pedido.
+        const tipo = res.headers.get('content-type') || ''
+        const pediuScript = /\.(js|mjs)$/.test(url.pathname) || url.pathname.startsWith('/assets/')
+        const veioHtml = tipo.includes('text/html')
+
+        if (res.ok && ehAsset && !(pediuScript && veioHtml)) {
           const copy = res.clone()
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => undefined)
         }

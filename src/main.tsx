@@ -2,10 +2,15 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { APP_DOCUMENT_TITLE } from './config/branding'
+import { instalarRecuperacaoDeChunk } from './lib/chunkReload'
 import './index.css'
 import App from './App.tsx'
 
 document.title = APP_DOCUMENT_TITLE
+
+// Antes de montar: deploy no meio da sessão deixa o index.html apontando para chunks
+// que não existem mais, e a tela abre em branco. Isto recarrega uma vez e resolve.
+instalarRecuperacaoDeChunk()
 
 // PWA service worker — só em produção e em browser real.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
