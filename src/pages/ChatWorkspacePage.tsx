@@ -153,6 +153,24 @@ export function ChatWorkspacePage({
       return [lead.patientName, lead.phone, lead.summary].join(' ').toLowerCase().includes(text)
     })
 
+    // Última mensagem por lead, calculada UMA vez.
+    //
+    // Antes isto era um `crm.interactions.find(...)` DENTRO do comparador do sort: com
+    // 1.000 interações em memória e algumas centenas de conversas na lista, dava milhões
+    // de varreduras de array a cada re-render — e a lista re-renderiza a cada mensagem
+    // que chega. Era o congelamento ao rolar/filtrar as conversas.
+    //
+    // `interactions` já vem ordenada por happened_at DESC, então o PRIMEIRO registro de
+    // cada lead é o mais recente: um passe só monta o mapa inteiro.
+    const ultimaMsgPorLead = new Map<string, number>()
+    for (const i of crm.interactions) {
+      if (!ultimaMsgPorLead.has(i.leadId)) {
+        ultimaMsgPorLead.set(i.leadId, new Date(i.happenedAt).getTime())
+      }
+    }
+    const recencia = (lead: (typeof filtered)[number]): number =>
+      ultimaMsgPorLead.get(lead.id) ?? new Date(lead.createdAt).getTime()
+
     if (sortMode === 'long_wait') {
       // Leads aguardando resposta primeiro, mais antigos no topo.
       // Lead sem espera pendente cai pro fim (ordenado por interação recente).
@@ -162,17 +180,11 @@ export function ChatWorkspacePage({
         if (aw !== null && bw !== null) return aw - bw
         if (aw !== null) return -1
         if (bw !== null) return 1
-        const ah = crm.interactions.find((i) => i.leadId === a.id)?.happenedAt ?? a.createdAt
-        const bh = crm.interactions.find((i) => i.leadId === b.id)?.happenedAt ?? b.createdAt
-        return new Date(bh).getTime() - new Date(ah).getTime()
+        return recencia(b) - recencia(a)
       })
     }
 
-    return filtered.sort((a, b) => {
-      const ah = crm.interactions.find((i) => i.leadId === a.id)?.happenedAt ?? a.createdAt
-      const bh = crm.interactions.find((i) => i.leadId === b.id)?.happenedAt ?? b.createdAt
-      return new Date(bh).getTime() - new Date(ah).getTime()
-    })
+    return filtered.sort((a, b) => recencia(b) - recencia(a))
   }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread, tenant.id])
 
   // Contador do selo "Não lidas" com o MESMO escopo da lista (workspace/tenant + linha

@@ -37,6 +37,7 @@ import {
   loadWebhookJobs,
   loadCrmData,
   loadChatSliceFromSupabase,
+  loadInteractionsSliceFromSupabase,
   loadLeadInteractionsFromSupabase,
   loadRoomsAndAppointmentsFromSupabase,
   loadAuditLogsPage,
@@ -879,22 +880,46 @@ export const useCrmState = () => {
 
   const refreshChatFromSupabase = useCallback(async () => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured) return
+    // Os três blocos são independentes: rodavam em série (await atrás de await), somando
+    // ~9 round-trips ENFILEIRADOS por refresh. Em paralelo o refresh completo passa a
+    // custar o tempo do mais lento, não a soma dos três.
+    await Promise.all([
+      (async () => {
+        try {
+          const slice = await loadChatSliceFromSupabase()
+          setLeads(slice.leads)
+          setInteractions(slice.interactions)
+        } catch {
+          // noop
+        }
+      })(),
+      (async () => {
+        try {
+          const agendaSlice = await loadRoomsAndAppointmentsFromSupabase()
+          setRooms(agendaSlice.rooms)
+          setAppointments(agendaSlice.appointments)
+        } catch {
+          // noop
+        }
+      })(),
+      (async () => {
+        try {
+          setPaymentByLeadId(await fetchLeadPaymentSummaries())
+        } catch {
+          // noop
+        }
+      })(),
+    ])
+  }, [dataMode])
+
+  /**
+   * Refresh BARATO: só a lista de mensagens. É o que roda quando chega mensagem nova —
+   * o evento mais frequente do sistema. Não toca nos leads, na agenda nem nos pagamentos.
+   */
+  const refreshInteractionsOnly = useCallback(async () => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) return
     try {
-      const slice = await loadChatSliceFromSupabase()
-      setLeads(slice.leads)
-      setInteractions(slice.interactions)
-    } catch {
-      // noop
-    }
-    try {
-      const agendaSlice = await loadRoomsAndAppointmentsFromSupabase()
-      setRooms(agendaSlice.rooms)
-      setAppointments(agendaSlice.appointments)
-    } catch {
-      // noop
-    }
-    try {
-      setPaymentByLeadId(await fetchLeadPaymentSummaries())
+      setInteractions(await loadInteractionsSliceFromSupabase())
     } catch {
       // noop
     }
@@ -918,21 +943,40 @@ export const useCrmState = () => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured || !supabase) return
     const client = supabase
 
-    let debounceTimer: ReturnType<typeof setTimeout> | undefined
-    const scheduleSliceRefresh = () => {
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        debounceTimer = undefined
+    // Dois caminhos, porque os eventos têm custo MUITO diferente:
+    //
+    //   mensagem nova (`interactions`) → refresh barato, só a lista de mensagens.
+    //   É o evento mais frequente de longe (~40/h na média, 272/h no pico) e antes
+    //   arrastava junto os 2.419 leads, a agenda e os pagamentos.
+    //
+    //   lead/agenda mudou → refresh completo. Acontece muito menos.
+    //
+    // O debounce das mensagens subiu de 260ms para 1,2s: o bot manda 3-4 mensagens
+    // seguidas e a 260ms cada uma virava um refresh. Agora a rajada vira um só.
+    let msgTimer: ReturnType<typeof setTimeout> | undefined
+    let fullTimer: ReturnType<typeof setTimeout> | undefined
+
+    const scheduleInteractionsRefresh = () => {
+      if (msgTimer) clearTimeout(msgTimer)
+      msgTimer = setTimeout(() => {
+        msgTimer = undefined
+        void refreshInteractionsOnly()
+      }, 1200)
+    }
+    const scheduleFullRefresh = () => {
+      if (fullTimer) clearTimeout(fullTimer)
+      fullTimer = setTimeout(() => {
+        fullTimer = undefined
         void refreshChatFromSupabase()
-      }, 260)
+      }, 600)
     }
 
     const channel = client
       .channel('crm-global-chat-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, scheduleSliceRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, scheduleSliceRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, scheduleSliceRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, scheduleSliceRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, scheduleInteractionsRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, scheduleFullRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, scheduleFullRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, scheduleFullRefresh)
       .subscribe()
 
     // O realtime (postgres_changes acima) é o mecanismo primário de atualização; o poll
@@ -951,10 +995,11 @@ export const useCrmState = () => {
     return () => {
       document.removeEventListener('visibilitychange', onVisibility)
       window.clearInterval(pollId)
-      if (debounceTimer) clearTimeout(debounceTimer)
+      if (msgTimer) clearTimeout(msgTimer)
+      if (fullTimer) clearTimeout(fullTimer)
       void client.removeChannel(channel)
     }
-  }, [dataMode, refreshChatFromSupabase])
+  }, [dataMode, refreshChatFromSupabase, refreshInteractionsOnly])
 
   // Ao abrir um lead, carrega o histórico COMPLETO dele (por lead_id) — assim
   // conversas mais antigas que a janela de 1000 do fetch global voltam a aparecer.

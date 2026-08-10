@@ -818,6 +818,68 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
 }
 
 /**
+ * SÓ as interações (+ mídia recente) — sem os leads.
+ *
+ * O caminho quente do CRM é "chegou mensagem nova": o realtime dispara a cada linha
+ * inserida em `interactions`, e isso acontece ~40x/hora na média e 272x/hora no pico.
+ * A `loadChatSliceFromSupabase` rebaixava os 2.419 leads INTEIROS (1,4 MB no banco,
+ * 559 kB só de custom_fields) a cada uma dessas mensagens — três round-trips
+ * sequenciais de paginação por mensagem recebida. Era isso que travava a tela.
+ *
+ * Mensagem nova não muda o cadastro de 2.419 leads: muda a lista de mensagens. Esta
+ * função busca só isso. Os leads voltam a ser recarregados quando a tabela `leads`
+ * muda de verdade (aí sim o realtime de `leads` dispara o refresh completo).
+ */
+export const loadInteractionsSliceFromSupabase = async (): Promise<Interaction[]> => {
+  const client = assertSupabase()
+  const [interactionsRes, mediaRes] = await Promise.all([
+    client
+      .from('interactions')
+      .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
+      .order('happened_at', { ascending: false })
+      .limit(1000),
+    client
+      .from('crm_media_items')
+      .select('id, interaction_id, media_type, mime_type, media_base64, storage_path, metadata')
+      .gte('created_at', new Date(Date.now() - 48 * 3_600_000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(120),
+  ])
+  if (interactionsRes.error) throw interactionsRes.error
+
+  const mediaByInteraction = new Map<string, Interaction['media']>()
+  if (!mediaRes.error && mediaRes.data) {
+    for (const row of mediaRes.data) {
+      const iid = String(row.interaction_id)
+      if (!iid) continue
+      const list = mediaByInteraction.get(iid) ?? []
+      list.push({
+        id: String(row.id),
+        type: row.media_type as any,
+        mimeType: row.mime_type,
+        base64: row.media_base64,
+        url: (row as { storage_path?: string | null }).storage_path ?? undefined,
+        caption: (row.metadata as any)?.caption,
+      })
+      mediaByInteraction.set(iid, list)
+    }
+  }
+
+  return ((interactionsRes.data ?? []) as DbInteraction[]).map((interaction) => ({
+    id: interaction.id,
+    leadId: interaction.lead_id,
+    patientName: interaction.patient_name,
+    channel: interaction.channel,
+    direction: interaction.direction,
+    author: interaction.author,
+    content: interaction.content,
+    happenedAt: interaction.happened_at,
+    externalMessageId: interaction.external_message_id || undefined,
+    media: mediaByInteraction.get(interaction.id),
+  }))
+}
+
+/**
  * Carrega TODAS as interações de um lead (sem o teto de 1000 linhas do fetch
  * global). O carregamento global é cortado pelo "Max rows" do PostgREST, então
  * conversas mais antigas que a janela recente sumiam do chat. Ao abrir um lead,
