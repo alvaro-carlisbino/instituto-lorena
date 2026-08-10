@@ -2036,17 +2036,32 @@ export const useCrmState = () => {
     setLeads((previous) => previous.filter((lead) => lead.stageId !== stageId))
   }
 
+  // Boot só COM sessão. Antes disparava no mount de qualquer jeito e, na tela de login,
+  // as 16 consultas saíam como `anon`. Isso não é só desperdício: a policy de
+  // `interactions` é `tenant_id = current_tenant_id() OR is_super_admin() OR
+  // current_tenant_can_see_lead(lead_id)`, e sem `auth.uid()` os dois primeiros termos
+  // nunca casam — sobra a terceira, que é SECURITY DEFINER com COST 500 e consulta
+  // `leads` UMA VEZ POR LINHA, nas 36 mil interações. Medido no banco: logado o boot
+  // custa 410ms; deslogado estoura o statement_timeout e a produção cospe
+  // "57014: canceling statement due to statement timeout" no console do login.
+  //
+  // Quem entra depois já era re-sincronizado pelo onAuthStateChanged abaixo (o comentário
+  // lá dizia, com todas as letras, que "o sync do mount rodou sem sessão e falhou").
   useEffect(() => {
-    if (dataMode === 'supabase' && isSupabaseConfigured) {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) return
+    void getCurrentSession().then((currentSession) => {
+      if (!currentSession) return
       void syncFromSupabase()
-    }
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-sync apenas quando dataMode muda
   }, [dataMode])
 
   useEffect(() => {
-    if (dataMode === 'supabase' && isSupabaseConfigured) {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) return
+    void getCurrentSession().then((currentSession) => {
+      if (!currentSession) return
       void refreshWebhookJobs()
-    }
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh apenas quando dataMode muda
   }, [dataMode])
 
