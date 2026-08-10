@@ -105,6 +105,19 @@ class LorenaApi {
     }
   }
 
+  /// Referência de unidades foliculares por área, tirada do histórico REAL da
+  /// clínica (quartis das cirurgias finalizadas). É a base da calculadora.
+  Future<List<AreaReferencia>> clinicaReferenciaPorArea() async {
+    try {
+      final r = await _db.rpc('clinica_referencia_por_area');
+      return ((r as List?) ?? [])
+          .map((e) => AreaReferencia.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
   // =========================================================== PACIENTE
   /// Pede o código. A resposta é sempre a mesma, exista o CPF ou não — de
   /// propósito: confirmar "este CPF é paciente daqui" é dado de saúde.

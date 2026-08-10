@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:lorena_core/lorena_core.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import '../conteudo.dart';
 
 /// Peças visuais que se repetem nas telas públicas. Ficam juntas para a marca
 /// não escorregar de tela em tela.
@@ -8,7 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 Future<void> abrirWhatsapp({String? mensagem}) async {
   final texto = mensagem == null ? '' : '?text=${Uri.encodeComponent(mensagem)}';
   await launchUrl(
-    Uri.parse('https://wa.me/${AppBrand.paciente.suporteWhatsapp}$texto'),
+    Uri.parse('https://wa.me/${Contato.whatsapp}$texto'),
     mode: LaunchMode.externalApplication,
   );
 }
@@ -20,59 +22,29 @@ Future<void> abrirMapa(String busca) async {
   );
 }
 
-/// Marca desenhada, não ícone de biblioteca: três folículos saindo de uma
-/// mesma base, que é a ideia do transplante.
+Future<void> abrirLink(String url) async {
+  await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+}
+
+/// A marca oficial, o mesmo SVG do site. No escuro ela é recolorida, senão o
+/// grafite do símbolo some no fundo.
 class MarcaLorena extends StatelessWidget {
-  const MarcaLorena({super.key, this.tamanho = 44, this.cor});
-  final double tamanho;
+  const MarcaLorena({super.key, this.altura = 40, this.cor});
+  final double altura;
   final Color? cor;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: tamanho,
-      height: tamanho,
-      child: CustomPaint(
-        painter: _MarcaPainter(cor ?? Theme.of(context).colorScheme.primary),
-      ),
+    final tinta = cor ??
+        (Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.onSurface
+            : null);
+    return SvgPicture.asset(
+      'assets/marca/logo.svg',
+      height: altura,
+      colorFilter: tinta == null ? null : ColorFilter.mode(tinta, BlendMode.srcIn),
     );
   }
-}
-
-class _MarcaPainter extends CustomPainter {
-  _MarcaPainter(this.cor);
-  final Color cor;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint()
-      ..color = cor
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = size.width * 0.075;
-
-    final baseX = size.width / 2;
-    final baseY = size.height * 0.88;
-
-    for (final inclinacao in [-0.34, 0.0, 0.34]) {
-      final caminho = Path()..moveTo(baseX, baseY);
-      caminho.cubicTo(
-        baseX + inclinacao * size.width * 0.85, baseY - size.height * 0.34,
-        baseX + inclinacao * size.width * 1.15, baseY - size.height * 0.55,
-        baseX + inclinacao * size.width * 0.62, baseY - size.height * 0.74,
-      );
-      canvas.drawPath(caminho, p);
-    }
-
-    canvas.drawCircle(
-      Offset(baseX, baseY),
-      size.width * 0.055,
-      Paint()..color = cor,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_MarcaPainter old) => old.cor != cor;
 }
 
 /// Título de seção com a régua tipográfica da marca.
@@ -92,12 +64,12 @@ class TituloSecao extends StatelessWidget {
           Text(
             apoio!.toUpperCase(),
             style: tt.labelSmall?.copyWith(
-              color: cs.primary,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.4,
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 2.2,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
         ],
         Text(texto, style: tt.headlineMedium),
       ],
@@ -106,17 +78,41 @@ class TituloSecao extends StatelessWidget {
 }
 
 class BotaoWhatsapp extends StatelessWidget {
-  const BotaoWhatsapp({super.key, this.rotulo = 'Falar no WhatsApp', this.mensagem, this.tonal = false});
+  const BotaoWhatsapp({
+    super.key,
+    this.rotulo = 'Falar no WhatsApp',
+    this.mensagem,
+    this.tonal = false,
+  });
   final String rotulo;
   final String? mensagem;
   final bool tonal;
 
   @override
   Widget build(BuildContext context) {
-    final icone = const Icon(Icons.chat_bubble_rounded, size: 20);
+    const icone = Icon(Icons.chat_bubble_outline_rounded, size: 19);
     final label = Text(rotulo);
     return tonal
-        ? FilledButton.tonalIcon(onPressed: () => abrirWhatsapp(mensagem: mensagem), icon: icone, label: label)
-        : FilledButton.icon(onPressed: () => abrirWhatsapp(mensagem: mensagem), icon: icone, label: label);
+        ? OutlinedButton.icon(
+            onPressed: () => abrirWhatsapp(mensagem: mensagem), icon: icone, label: label)
+        : FilledButton.icon(
+            onPressed: () => abrirWhatsapp(mensagem: mensagem), icon: icone, label: label);
+  }
+}
+
+/// Faixa areia, que é como o site separa blocos.
+class FaixaAreia extends StatelessWidget {
+  const FaixaAreia({super.key, required this.filho, this.padding});
+  final Widget filho;
+  final EdgeInsets? padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      padding: padding ?? const EdgeInsets.fromLTRB(20, 36, 20, 36),
+      child: filho,
+    );
   }
 }

@@ -8,20 +8,36 @@ import 'config.dart';
 /// e marca de clínica não pode parecer template.
 ThemeData lorenaTheme(AppBrand brand, Brightness brilho) {
   final scheme = brilho == Brightness.dark ? brand.escuro : brand.claro;
-  final baseTexto = GoogleFonts.getTextTheme(
-    brand.fonteTexto,
-    ThemeData(brightness: brilho).textTheme,
-  );
+
+  // Fonte da marca empacotada (caso da clínica, que usa a Bould do site) ou
+  // baixada do Google Fonts. O app precisa abrir igual sem rede, então marca
+  // com fonte própria nunca depende de download.
+  final base = ThemeData(brightness: brilho).textTheme;
+  final baseTexto = brand.fonteEmpacotada
+      ? base.apply(fontFamily: brand.fonteTexto)
+      : GoogleFonts.getTextTheme(brand.fonteTexto, base);
+
+  TextStyle fonte(String familia, double tam, FontWeight peso, double espaco, double altura) =>
+      brand.fonteEmpacotada
+          ? TextStyle(
+              fontFamily: familia,
+              fontSize: tam,
+              fontWeight: peso,
+              height: altura,
+              letterSpacing: espaco,
+              color: scheme.onSurface,
+            )
+          : GoogleFonts.getFont(
+              familia,
+              fontSize: tam,
+              fontWeight: peso,
+              height: altura,
+              letterSpacing: espaco,
+              color: scheme.onSurface,
+            );
 
   TextStyle titulo(double tam, {FontWeight peso = FontWeight.w600, double espaco = -0.6}) =>
-      GoogleFonts.getFont(
-        brand.fonteTitulo,
-        fontSize: tam,
-        fontWeight: peso,
-        height: 1.12,
-        letterSpacing: espaco,
-        color: scheme.onSurface,
-      );
+      fonte(brand.fonteTitulo, tam, peso, espaco, 1.14);
 
   final texto = baseTexto.copyWith(
     displayLarge: titulo(46, espaco: -1.4),
@@ -58,30 +74,27 @@ ThemeData lorenaTheme(AppBrand brand, Brightness brilho) {
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         minimumSize: const Size.fromHeight(54),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        textStyle: GoogleFonts.getFont(brand.fonteTexto,
-            fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0.1),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        textStyle: fonte(brand.fonteTexto, 16, FontWeight.w600, 0.1, 1.2),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         minimumSize: const Size.fromHeight(54),
         side: BorderSide(color: scheme.outline),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        textStyle: GoogleFonts.getFont(brand.fonteTexto,
-            fontSize: 16, fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        textStyle: fonte(brand.fonteTexto, 16, FontWeight.w600, 0, 1.2),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        textStyle: GoogleFonts.getFont(brand.fonteTexto,
-            fontSize: 15, fontWeight: FontWeight.w600),
+        textStyle: fonte(brand.fonteTexto, 15, FontWeight.w600, 0, 1.2),
       ),
     ),
     chipTheme: ChipThemeData(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
       side: BorderSide(color: scheme.outlineVariant),
-      labelStyle: GoogleFonts.getFont(brand.fonteTexto, fontSize: 13.5),
+      labelStyle: fonte(brand.fonteTexto, 13.5, FontWeight.w400, 0, 1.2),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
@@ -106,7 +119,7 @@ ThemeData lorenaTheme(AppBrand brand, Brightness brilho) {
       elevation: 0,
       height: 68,
       labelTextStyle: WidgetStatePropertyAll(
-        GoogleFonts.getFont(brand.fonteTexto, fontSize: 12, fontWeight: FontWeight.w600),
+        fonte(brand.fonteTexto, 12, FontWeight.w600, 0.2, 1.2),
       ),
     ),
     dividerTheme: DividerThemeData(color: scheme.outlineVariant, thickness: 1),

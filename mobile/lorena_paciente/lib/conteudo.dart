@@ -1,12 +1,39 @@
 import 'package:flutter/material.dart';
 
-/// Conteúdo institucional do app. Fica num arquivo só, em Dart puro, para
-/// mudar texto ser uma linha e não uma migration.
+/// Conteúdo institucional do app, tirado do site institutolorenavisentainer.com.br.
+/// Nada aqui é invenção: método, formação, procedimentos, endereços e contato
+/// são os que a clínica já publica.
 ///
-/// PREÇO DE CONSULTA NÃO ENTRA AQUI DE PROPÓSITO. A clínica já decidiu que
-/// valor é conversa com a consultora, não tabela publicada: a Sofia (IA do
-/// WhatsApp) também não passa preço, empurra para o humano. Publicar no app
-/// contrariaria a regra e criaria expectativa que a clínica não quer.
+/// PREÇO NÃO ENTRA. A clínica já decidiu que valor é conversa depois da
+/// avaliação, e a Sofia (IA do WhatsApp) segue a mesma regra.
+
+class Contato {
+  static const whatsapp = '5544991493656';
+  static const telefoneVisivel = '(44) 99149-3656';
+  static const email = 'atendimento@lorenavisentainer.com.br';
+  static const site = 'https://institutolorenavisentainer.com.br';
+  static const prazoResposta = 'Respondemos em até 24 horas úteis.';
+}
+
+class Unidade {
+  const Unidade({required this.cidade, required this.endereco, required this.busca});
+  final String cidade;
+  final String endereco;
+  final String busca;
+}
+
+const unidades = <Unidade>[
+  Unidade(
+    cidade: 'Maringá, PR',
+    endereco: 'Av. Nóbrega, 814 — Zona 4, 87014-180',
+    busca: 'Instituto Lorena Visentainer, Av. Nóbrega 814, Maringá PR',
+  ),
+  Unidade(
+    cidade: 'Londrina, PR',
+    endereco: 'Mesmo padrão de atendimento da unidade de Maringá',
+    busca: 'Instituto Lorena Visentainer Londrina',
+  ),
+];
 
 class Servico {
   const Servico({
@@ -14,160 +41,193 @@ class Servico {
     required this.nome,
     required this.resumo,
     required this.icone,
-    required this.paraQuem,
-    required this.comoFunciona,
-    required this.duracao,
+    required this.texto,
+    this.destaques = const [],
   });
 
   final String id;
   final String nome;
   final String resumo;
   final IconData icone;
-  final String paraQuem;
-  final List<String> comoFunciona;
-  final String duracao;
+  final String texto;
+  final List<String> destaques;
 }
 
 const servicos = <Servico>[
   Servico(
-    id: 'transplante_masculino',
-    nome: 'Transplante capilar masculino',
-    resumo: 'Recuperação de entradas, coroa e linha frontal com fio próprio.',
-    icone: Icons.face_retouching_natural_rounded,
-    paraQuem: 'Homens com calvície de padrão masculino, entradas recuadas, '
-        'coroa aberta ou falhas por cicatriz.',
-    comoFunciona: [
-      'Avaliação clínica para entender a causa da queda e a área doadora.',
-      'Desenho da linha frontal junto com você, respeitando o seu rosto.',
-      'Extração dos folículos da nuca e implante fio a fio nas áreas de falha.',
-      'Acompanhamento ao longo dos meses seguintes, com fotos comparativas.',
+    id: 'regenerativo',
+    nome: 'Transplante Capilar Regenerativo®',
+    resumo: 'O método exclusivo da casa: técnica FUE somada a tratamento regenerativo.',
+    icone: Icons.auto_awesome_outlined,
+    texto:
+        'O Transplante Capilar Regenerativo® é um método registrado, desenvolvido '
+        'pela Dra. Lorena Visentainer. Ele associa a técnica FUE ao tratamento com '
+        'células autólogas ainda no intraoperatório: além dos fios transplantados, os '
+        'fios nativos passam por um processo de regeneração e voltam a ser fios '
+        'saudáveis. É esse o nosso grande diferencial.',
+    destaques: [
+      'Megassessão de Transplante Capilar FUE',
+      'Terapia regenerativa com células autólogas no intraoperatório',
+      'Tratamento também dos fios nativos, não só dos implantados',
     ],
-    duracao: 'Procedimento de um dia, geralmente entre 6 e 11 horas.',
   ),
   Servico(
-    id: 'transplante_feminino',
+    id: 'feminino',
     nome: 'Transplante capilar feminino',
-    resumo: 'Densidade na linha frontal e no topo, sem raspar o cabelo todo.',
-    icone: Icons.woman_rounded,
-    paraQuem: 'Mulheres com rarefação no topo, testa alta, ou falhas por tração '
-        'de penteados e químicas.',
-    comoFunciona: [
-      'Investigação da causa antes de qualquer procedimento.',
-      'Planejamento respeitando o formato do rosto e o cabelo comprido.',
-      'Extração e implante fio a fio, com técnica que preserva o volume atual.',
-      'Acompanhamento com registro fotográfico padronizado.',
+    resumo: 'Sem raspagem, com resultados naturais.',
+    icone: Icons.woman_outlined,
+    texto:
+        'Dados da Sociedade Brasileira de Dermatologia indicam que cerca de 50% das '
+        'mulheres podem ser afetadas pela alopecia androgenética em algum momento. '
+        'Poucas sabem que dá para recuperar os fios acometidos pela calvície com o '
+        'Transplante Capilar Regenerativo®, procedimento seguro e de resultado '
+        'duradouro. Também pode ser feito por motivo estético, como reduzir o tamanho '
+        'da testa.',
+    destaques: [
+      'Sem raspar o cabelo',
+      'Indicado também para redução de testa',
+      'Resultados duradouros',
     ],
-    duracao: 'Procedimento de um dia, conforme a área a tratar.',
   ),
   Servico(
     id: 'sobrancelha',
-    nome: 'Transplante de sobrancelha',
-    resumo: 'Reconstrução de falhas e desenho definitivo, com fio próprio.',
+    nome: 'Transplante de sobrancelhas',
+    resumo: 'Brow FUE Long Hair, desenhado traço a traço para o seu rosto.',
     icone: Icons.remove_red_eye_outlined,
-    paraQuem: 'Quem tem falhas por excesso de depilação, cicatriz ou queda, e '
-        'quer parar de depender de maquiagem e micropigmentação.',
-    comoFunciona: [
-      'Desenho do formato junto com você antes de começar.',
-      'Implante fio a fio respeitando o ângulo natural de cada região.',
-      'Orientação de aparo, porque o fio implantado cresce como cabelo.',
+    texto:
+        'Dentro do Instituto temos um centro dedicado à técnica Brow FUE Long Hair: um '
+        'encontro entre arte e técnica, personalizado para cada pessoa, levando em '
+        'conta cada detalhe e cada traço do rosto. A cicatrização e a recuperação são '
+        'rápidas. É indicado para quem está insatisfeito com as sobrancelhas por perda '
+        'de pelos, falhas ou formatos irregulares. Feito com anestesia local, e o '
+        'resultado é permanente, diferente da micropigmentação.',
+    destaques: [
+      'Técnica FUE Long Hair',
+      'Resultado permanente, ao contrário da micropigmentação',
+      'Anestesia local, recuperação rápida',
     ],
-    duracao: 'Algumas horas, no mesmo dia.',
   ),
   Servico(
     id: 'barba',
     nome: 'Transplante de barba',
-    resumo: 'Preenchimento de falhas e desenho de contorno.',
-    icone: Icons.face_rounded,
-    paraQuem: 'Homens com falhas no rosto, barba irregular ou cicatrizes que '
-        'impedem o crescimento.',
-    comoFunciona: [
-      'Avaliação da área doadora e do desenho desejado.',
-      'Implante fio a fio, seguindo a direção natural da barba.',
-      'Acompanhamento do crescimento nos meses seguintes.',
+    resumo: 'Para quem sonhou com barba cheia e a genética não cooperou.',
+    icone: Icons.face_outlined,
+    texto:
+        'Além de melhorar a estética facial, o transplante de barba pode ter impacto '
+        'significativo na qualidade de vida. Uma barba bem definida confere uma '
+        'aparência masculina distinta e ajuda a projetar confiança e maturidade.',
+    destaques: [
+      'Preenchimento de falhas e cicatrizes',
+      'Desenho do contorno junto com você',
     ],
-    duracao: 'Procedimento de um dia.',
   ),
   Servico(
-    id: 'consulta',
-    nome: 'Consulta clínica capilar',
-    resumo: 'Diagnóstico da queda antes de decidir qualquer tratamento.',
-    icone: Icons.medical_information_outlined,
-    paraQuem: 'Quem está perdendo cabelo e ainda não sabe o motivo, ou quer '
-        'saber se é candidato ao transplante.',
-    comoFunciona: [
-      'Avaliação médica com exame do couro cabeludo.',
-      'Investigação das causas: genética, hormonal, nutricional, estresse.',
-      'Plano de tratamento realista, que pode ou não incluir cirurgia.',
-    ],
-    duracao: 'Presencial em Maringá ou por teleconsulta.',
-  ),
-  Servico(
-    id: 'tratamento',
-    nome: 'Tratamentos clínicos',
-    resumo: 'Protocolos para frear a queda e fortalecer o que você ainda tem.',
+    id: 'tratamentos',
+    nome: 'Tratamentos capilares',
+    resumo: 'Eletroporação, terapia regenerativa e laser de baixa frequência.',
     icone: Icons.science_outlined,
-    paraQuem: 'Quem precisa tratar a causa da queda, antes, depois ou no lugar '
-        'do transplante.',
-    comoFunciona: [
-      'Protocolo definido na consulta, conforme o diagnóstico.',
-      'Sessões acompanhadas pela equipe, com intervalos planejados.',
-      'Reavaliação periódica para ajustar o que não estiver respondendo.',
+    texto:
+        'Usamos tecnologias que infundem ativos no couro cabeludo sem agulhas, por '
+        'eletroporação, com conforto e eficácia. A terapia regenerativa usa células '
+        'autólogas para estimular o crescimento capilar e é indicada para diversos '
+        'tipos de calvície. O laser de baixa frequência estimula crescimento e '
+        'espessura dos fios, e pode ser usado antes e depois do transplante. A terapia '
+        'capilar fortalece, nutre e cuida da saúde do couro cabeludo, combatendo queda, '
+        'inflamação e fragilidade dos fios.',
+    destaques: [
+      'Eletroporação, sem agulhas',
+      'Terapia regenerativa com células autólogas',
+      'Laser de baixa frequência, pré e pós-transplante',
     ],
-    duracao: 'Varia conforme o protocolo indicado.',
   ),
 ];
 
 class Medico {
-  const Medico({required this.nome, required this.atuacao});
+  const Medico({required this.nome, required this.registro, required this.atuacao});
   final String nome;
+  final String registro;
   final String atuacao;
 }
 
-const equipe = <Medico>[
-  Medico(nome: 'Dra. Lorena Visentainer', atuacao: 'Saúde e restauração capilar'),
-  Medico(nome: 'Dr. Matheus Amaral', atuacao: 'Avaliação clínica capilar'),
-  Medico(nome: 'Dra. Jaqueline Augusto', atuacao: 'Saúde capilar e atendimento online'),
-];
+class Dra {
+  static const nome = 'Dra. Lorena Visentainer';
+  static const registro = 'CRM 33717 | RQE 27798';
+  static const resumo =
+      'Referência em medicina capilar. Se dedica diariamente à junção de ciência, arte '
+      'e medicina para recuperar a autoestima e a qualidade de vida dos seus pacientes '
+      'através do Transplante Capilar Regenerativo®.';
+
+  static const formacao = <String>[
+    'Medicina pela Universidade Estadual de Londrina (UEL)',
+    'Residência em dermatologia e mestrado na UNICAMP',
+    'Tricologia pela Universidade de São Paulo (USP)',
+    'Membro titular da SBD (Sociedade Brasileira de Dermatologia)',
+    'Membro da ISHRS (International Society of Hair Restoration Surgery)',
+    'Membro da ABCRC (Associação Brasileira de Cirurgia da Restauração Capilar)',
+  ];
+
+  static const ensino = <String>[
+    'Fundadora do Hair Academy, pós-graduação para médicos',
+    'Palestrante internacional',
+  ];
+
+  static const livros = <String>[
+    'Primeiro livro de Transplante Capilar FUE do Brasil',
+    'Primeiro livro de Transplante de Sobrancelhas do mundo',
+    'Primeiro livro de Terapia Regenerativa do Brasil',
+  ];
+}
 
 class Clinica {
   static const nome = 'Instituto Lorena Visentainer';
-  static const endereco = 'Av. Nóbrega, 814, Zona 4';
-  static const cidade = 'Maringá, PR';
-  static const estacionamento = 'Estacionamento próprio';
-  static const mapsBusca = 'Instituto Lorena Visentainer, Av. Nóbrega 814, Maringá PR';
+
+  static const missao =
+      'Melhorar a qualidade de vida e a autoestima dos nossos pacientes através da '
+      'recuperação da saúde capilar, usando o melhor da tecnologia, inovação e ciência.';
 
   static const sobre =
-      'Somos uma clínica de Maringá especializada em saúde capilar. Tratamos a '
-      'causa da queda antes de falar em cirurgia, e quando o transplante é o '
-      'caminho, ele é feito pela nossa própria equipe, no nosso centro cirúrgico.';
+      'Somos uma clínica totalmente focada e capacitada em tratamentos capilares, com '
+      'um método exclusivo: o Transplante Capilar Regenerativo®, desenvolvido pela '
+      'diretora clínica Dra. Lorena Visentainer.';
 
-  static const diferenciais = <(IconData, String, String)>[
-    (
-      Icons.biotech_outlined,
-      'Diagnóstico antes de tudo',
-      'Nem toda queda se resolve com cirurgia. A consulta investiga a causa e o '
-          'plano pode ser clínico.',
-    ),
-    (
-      Icons.groups_2_outlined,
-      'Equipe própria',
-      'O procedimento é feito pela equipe da casa, no nosso centro cirúrgico, '
-          'não por terceiros contratados.',
-    ),
-    (
-      Icons.query_stats_rounded,
-      'Cada folículo é contado',
-      'Extração e implante são registrados por área durante a cirurgia. Depois '
-          'você vê esse número no app, não uma estimativa.',
-    ),
-    (
-      Icons.photo_camera_outlined,
-      'Acompanhamento com foto',
-      'Registro padronizado nos marcos do tratamento, no mesmo enquadramento, '
-          'para comparar de verdade.',
-    ),
+  static const valores = <String>[
+    'Gentileza',
+    'Proatividade',
+    'Responsabilidade',
+    'Honestidade',
+    'Inovação',
   ];
 }
+
+class Depoimento {
+  const Depoimento({required this.texto, required this.autor, this.papel});
+  final String texto;
+  final String autor;
+  final String? papel;
+}
+
+const depoimentos = <Depoimento>[
+  Depoimento(
+    texto: 'Melhor tratamento capilar do Brasil. Dra. Lorena maravilhosa.',
+    autor: 'Salsicha',
+    papel: 'Apresentador',
+  ),
+  Depoimento(
+    texto:
+        'Excelente atendimento, aconchegante e acolhedor. Fiz meu procedimento há uma '
+        'semana e a recuperação está ótima. Agradeço a todos os profissionais '
+        'envolvidos, muito atenciosos, educados e comprometidos.',
+    autor: 'Eneida Peixoto',
+  ),
+  Depoimento(
+    texto:
+        'A Dra. Lorena Visentainer hoje figura entre os grandes nomes no cenário '
+        'nacional de transplante capilar, aliando competência técnica e apurado senso '
+        'estético, o que faz com que os resultados sejam extremamente naturais. Sair do '
+        'país é desnecessário quando se tem o nível da Dra. Lorena tão perto.',
+    autor: 'Rafael Januário Rocha',
+  ),
+];
 
 class PerguntaFrequente {
   const PerguntaFrequente(this.pergunta, this.resposta);
@@ -178,37 +238,38 @@ class PerguntaFrequente {
 const faq = <PerguntaFrequente>[
   PerguntaFrequente(
     'Quanto custa?',
-    'Depende do que a sua avaliação indicar: o número de folículos e o tipo de '
-        'procedimento mudam bastante de pessoa para pessoa. Por isso o valor é '
-        'passado depois da avaliação, e não por tabela. Chame no WhatsApp que a '
-        'consultora te explica as condições.',
+    'Depende do que a sua avaliação indicar: o número de unidades foliculares e o tipo '
+        'de procedimento mudam bastante de pessoa para pessoa. Por isso o valor é '
+        'passado depois da avaliação, e não por tabela. Chame no WhatsApp que a equipe '
+        'te explica as condições.',
   ),
   PerguntaFrequente(
-    'O resultado é natural?',
-    'O fio implantado é o seu, retirado da própria nuca. O que faz parecer '
-        'natural é o desenho da linha e o ângulo de cada implante, e é por isso '
-        'que o desenho é feito com você antes de começar.',
+    'Tenho indicação para transplante?',
+    'É a pergunta mais comum, e quem responde com precisão é a avaliação. Usamos a '
+        'escala de Norwood para classificar a progressão da calvície. Pela calculadora '
+        'do app você já tem uma estimativa de quantas unidades foliculares seriam '
+        'necessárias no seu caso.',
   ),
   PerguntaFrequente(
-    'Dói?',
-    'O procedimento é feito com anestesia local. O desconforto maior costuma ser '
-        'a duração do dia, não a dor. Nos dias seguintes a orientação de analgesia '
-        'vem por escrito.',
-  ),
-  PerguntaFrequente(
-    'Quando aparece o resultado?',
-    'Os fios implantados caem nas primeiras semanas e a raiz permanece. O '
-        'crescimento novo costuma dar os primeiros sinais por volta do terceiro '
-        'mês, e o resultado fecha entre 12 e 18 meses.',
+    'O que é o Transplante Capilar Regenerativo®?',
+    'É um método registrado da clínica: a técnica FUE somada, no intraoperatório, a um '
+        'tratamento com células autólogas. Além dos fios transplantados, os fios nativos '
+        'passam por regeneração e voltam a ser fios saudáveis.',
   ),
   PerguntaFrequente(
     'Preciso raspar a cabeça?',
-    'Nem sempre. No caso feminino existe técnica que preserva o cabelo comprido. '
-        'Isso é definido na avaliação, conforme a área a tratar.',
+    'No transplante feminino, não. É possível fazer sem raspagem, preservando o cabelo '
+        'comprido. Nos demais casos isso é definido na avaliação.',
   ),
   PerguntaFrequente(
-    'Vocês atendem de fora de Maringá?',
-    'Sim. A avaliação pode começar por teleconsulta e muita gente vem de outras '
-        'cidades para o procedimento. A equipe te orienta sobre o roteiro.',
+    'Quando aparece o resultado?',
+    'Os fios implantados caem nas primeiras semanas e a raiz permanece. O crescimento '
+        'novo costuma dar os primeiros sinais por volta do terceiro mês, e o resultado '
+        'fecha entre 12 e 18 meses.',
+  ),
+  PerguntaFrequente(
+    'Vocês atendem fora de Maringá?',
+    'Sim. Temos unidade em Londrina, com o mesmo padrão de atendimento, e recebemos '
+        'pacientes de todo o país. A equipe te orienta sobre o roteiro.',
   ),
 ];

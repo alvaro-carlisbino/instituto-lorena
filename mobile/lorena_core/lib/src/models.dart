@@ -285,3 +285,25 @@ class CirurgiaHoje {
   final int totalImplantados;
   final String? etapaAtual;
 }
+
+/// Quanto a clínica costuma implantar em cada área, pelos quartis do próprio
+/// histórico. Usado pela calculadora: leve = 1º quartil, médio = mediana,
+/// avançado = 3º quartil.
+class AreaReferencia {
+  AreaReferencia.fromJson(Map<String, dynamic> j)
+      : area = _s(j['area']) ?? '—',
+        ordem = _i(j['ordem']),
+        cirurgias = _i(j['cirurgias']),
+        leve = _i(j['leve']),
+        medio = _i(j['medio']),
+        avancado = _i(j['avancado']);
+
+  final String area;
+  final int ordem;
+  final int cirurgias;
+  final int leve;
+  final int medio;
+  final int avancado;
+
+  int paraNivel(int nivel) => switch (nivel) { 0 => leve, 1 => medio, _ => avancado };
+}

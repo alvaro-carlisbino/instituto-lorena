@@ -1,5 +1,5 @@
 name: lorena_paciente
-description: App do paciente do Instituto Lorena — consultas, resultado da cirurgia e evolução em fotos.
+description: App do Instituto Lorena Visentainer — a clínica no bolso do paciente e de quem ainda não é.
 publish_to: none
 version: 1.0.0+1
 
@@ -11,6 +11,7 @@ dependencies:
     sdk: flutter
   lorena_core:
     path: ../lorena_core
+  flutter_svg: ^2.0.16
   intl: ^0.20.2
   url_launcher: ^6.3.1
 
@@ -21,3 +22,20 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/marca/
+
+  # Bould é a fonte da marca, a mesma do site. Vai empacotada em vez de vir do
+  # Google Fonts porque é fonte própria e o app precisa abrir igual sem rede.
+  fonts:
+    - family: Bould
+      fonts:
+        - asset: assets/fontes/Bould-ExtraLight.otf
+          weight: 200
+        - asset: assets/fontes/Bould-Regular.otf
+          weight: 400
+        - asset: assets/fontes/Bould-SemiBold.otf
+          weight: 600
+        - asset: assets/fontes/Bould-Bold.otf
+          weight: 700

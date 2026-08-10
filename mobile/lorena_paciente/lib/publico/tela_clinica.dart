@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../conteudo.dart';
 import 'comum.dart';
 
-/// Quem somos, equipe, onde ficamos e como falar com a gente. O SAC entra
-/// aqui e não numa aba própria: canal de atendimento escondido é canal que
-/// ninguém usa, e é a mesma equipe que responde tudo.
+/// Quem somos, unidades e contato. O SAC entra aqui e não numa aba própria:
+/// canal escondido é canal que ninguém usa, e é a mesma equipe que responde.
 class TelaClinica extends StatelessWidget {
   const TelaClinica({super.key});
 
@@ -19,53 +17,39 @@ class TelaClinica extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
         children: [
-          Row(
-            children: [
-              const MarcaLorena(tamanho: 46),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(Clinica.nome, style: tt.titleLarge),
-                    Text('${Clinica.cidade} · ${Clinica.estacionamento}',
-                        style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 26),
-          Text(Clinica.sobre, style: tt.bodyLarge?.copyWith(height: 1.55)),
-
-          const SizedBox(height: 36),
-          const TituloSecao('Equipe médica', apoio: 'Quem cuida de você'),
+          const MarcaLorena(altura: 44),
+          const SizedBox(height: 28),
+          const TituloSecao('Sobre o Instituto', apoio: 'Quem somos'),
           const SizedBox(height: 14),
-          Card(
+          Text(Clinica.sobre, style: tt.bodyMedium?.copyWith(height: 1.6)),
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(14),
+            ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (var i = 0; i < equipe.length; i++) ...[
-                  if (i > 0) const Divider(height: 1),
-                  ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: cs.primaryContainer,
-                      child: Text(
-                        equipe[i].nome.replaceAll(RegExp(r'^Dra?\.\s*'), '').characters.first,
-                        style: TextStyle(
-                            color: cs.onPrimaryContainer, fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    title: Text(equipe[i].nome,
-                        style: tt.bodyLarge?.copyWith(fontWeight: FontWeight.w600)),
-                    subtitle: Text(equipe[i].atuacao),
-                  ),
-                ],
+                Text('NOSSA MISSÃO',
+                    style: tt.labelSmall?.copyWith(
+                        letterSpacing: 2, fontWeight: FontWeight.w600,
+                        color: cs.onSurfaceVariant)),
+                const SizedBox(height: 8),
+                Text(Clinica.missao, style: tt.bodyMedium?.copyWith(height: 1.55)),
               ],
             ),
           ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [for (final v in Clinica.valores) Chip(label: Text(v))],
+          ),
 
-          const SizedBox(height: 36),
-          const TituloSecao('Onde ficamos', apoio: 'Visite a clínica'),
+          const SizedBox(height: 40),
+          const TituloSecao('Direção clínica', apoio: 'Equipe'),
           const SizedBox(height: 14),
           Card(
             child: Padding(
@@ -73,69 +57,91 @@ class TelaClinica extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.location_on_rounded, size: 20, color: cs.primary),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(Clinica.endereco,
-                                style: tt.bodyLarge?.copyWith(fontWeight: FontWeight.w600)),
-                            Text(Clinica.cidade,
-                                style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
-                            const SizedBox(height: 4),
-                            Text(Clinica.estacionamento,
-                                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  OutlinedButton.icon(
-                    onPressed: () => abrirMapa(Clinica.mapsBusca),
-                    icon: const Icon(Icons.map_outlined, size: 20),
-                    label: const Text('Abrir no mapa'),
-                  ),
+                  Text(Dra.nome, style: tt.titleLarge),
+                  Text(Dra.registro,
+                      style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                  const SizedBox(height: 12),
+                  Text(Dra.resumo, style: tt.bodyMedium?.copyWith(height: 1.55)),
                 ],
               ),
             ),
           ),
 
-          const SizedBox(height: 36),
-          const TituloSecao('Fale com a gente', apoio: 'Atendimento e SAC'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 40),
+          const TituloSecao('Unidades', apoio: 'Onde estamos'),
+          const SizedBox(height: 14),
+          for (final u in unidades) ...[
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.location_on_outlined, size: 19, color: cs.onSurfaceVariant),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(u.cidade,
+                                  style: tt.bodyLarge?.copyWith(fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 2),
+                              Text(u.endereco,
+                                  style: tt.bodySmall?.copyWith(
+                                      color: cs.onSurfaceVariant, height: 1.4)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    OutlinedButton.icon(
+                      onPressed: () => abrirMapa(u.busca),
+                      icon: const Icon(Icons.map_outlined, size: 18),
+                      label: const Text('Abrir no mapa'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          const SizedBox(height: 32),
+          const TituloSecao('Fale conosco', apoio: 'Atendimento e SAC'),
+          const SizedBox(height: 10),
           Text(
-            'Agendamento, dúvida sobre tratamento, pós-operatório, elogio ou '
-            'reclamação: é o mesmo caminho, e uma pessoa responde.',
+            'Agendamento, dúvida, pós-operatório, elogio ou reclamação: é o mesmo '
+            'caminho, e uma pessoa responde. ${Contato.prazoResposta}',
             style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant, height: 1.5),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           const BotaoWhatsapp(
-            rotulo: 'WhatsApp da clínica',
-            mensagem: 'Oi! Vim pelo app do Instituto Lorena.',
+            rotulo: 'WhatsApp ${Contato.telefoneVisivel}',
+            mensagem: 'Oi! Vim pelo app do Instituto Lorena Visentainer.',
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: () => abrirLink('mailto:${Contato.email}'),
+            icon: const Icon(Icons.mail_outline_rounded, size: 18),
+            label: const Text(Contato.email),
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: () => abrirWhatsapp(
-              mensagem: 'Oi! Quero registrar uma reclamação ou sugestão sobre o '
-                  'meu atendimento.',
+              mensagem: 'Oi! Quero registrar uma reclamação ou sugestão sobre o meu atendimento.',
             ),
-            icon: const Icon(Icons.support_agent_rounded, size: 20),
+            icon: const Icon(Icons.support_agent_rounded, size: 18),
             label: const Text('Reclamação ou sugestão'),
           ),
-
-          const SizedBox(height: 30),
+          const SizedBox(height: 24),
           Center(
             child: TextButton(
-              onPressed: () => launchUrl(
-                Uri.parse('https://www.instagram.com/institutolorenavisentainer'),
-                mode: LaunchMode.externalApplication,
-              ),
-              child: const Text('Instagram da clínica'),
+              onPressed: () => abrirLink(Contato.site),
+              child: const Text('institutolorenavisentainer.com.br'),
             ),
           ),
         ],

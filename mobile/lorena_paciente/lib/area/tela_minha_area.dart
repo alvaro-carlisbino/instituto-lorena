@@ -43,7 +43,7 @@ class _Convite extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 32, 20, 40),
         children: [
-          const Center(child: MarcaLorena(tamanho: 56)),
+          const Center(child: MarcaLorena(altura: 52)),
           const SizedBox(height: 24),
           Text('Sua área de paciente', style: tt.headlineMedium, textAlign: TextAlign.center),
           const SizedBox(height: 10),
