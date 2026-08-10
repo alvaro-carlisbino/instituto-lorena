@@ -41,6 +41,7 @@ import {
   Store,
   Target,
   Ticket,
+  Scissors,
   TrendingUp,
   Tv,
   Unplug,
@@ -200,6 +201,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   },
 
   // ── Clínica
+  {
+    id: 'cirurgias-vinculo',
+    path: '/cirurgias-vinculo',
+    label: 'Cirurgias sem paciente',
+    icon: Scissors,
+    group: 'clinica',
+    keywords: ['cirurgia', 'centro cirúrgico', 'vínculo', 'prontuário', 'folículos'],
+    visible: (ctx) => isClinic(ctx) && canRoute(ctx),
+  },
   {
     id: 'agenda',
     path: '/agenda',

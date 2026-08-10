@@ -79,6 +79,7 @@ const ContasReceberPage = lazyPage(() => import('./pages/ContasReceberPage'), 'C
 const FinAccountsPage = lazyPage(() => import('./pages/FinAccountsPage'), 'FinAccountsPage')
 const ConciliacaoPage = lazyPage(() => import('./pages/ConciliacaoPage'), 'ConciliacaoPage')
 const ConciliacaoShospPage = lazyPage(() => import('./pages/ConciliacaoShospPage'), 'ConciliacaoShospPage')
+const CirurgiasVinculoPage = lazyPage(() => import('./pages/CirurgiasVinculoPage'), 'CirurgiasVinculoPage')
 const FluxoCaixaPage = lazyPage(() => import('./pages/FluxoCaixaPage'), 'FluxoCaixaPage')
 const RecorrentesPage = lazyPage(() => import('./pages/RecorrentesPage'), 'RecorrentesPage')
 const NfePage = lazyPage(() => import('./pages/NfePage'), 'NfePage')
@@ -128,6 +129,7 @@ function AppRoutes() {
         <Route path="/frente-loja" element={<FrenteLojaPage />} />
         <Route path="/tarefas" element={<TasksPage />} />
         <Route path="/agenda" element={<AgendaPage />} />
+        <Route path="/cirurgias-vinculo" element={<CirurgiasVinculoPage />} />
         <Route path="/estoque" element={<EstoquePage />} />
         <Route path="/bipagem" element={<BipagemPage />} />
         <Route path="/compras" element={<ComprasPage />} />

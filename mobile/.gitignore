@@ -1,0 +1,10 @@
+# Artefatos de build do Flutter (cada app tem o seu .gitignore; isto é a rede de segurança)
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.podspec
+**/android/.gradle/
+**/android/local.properties

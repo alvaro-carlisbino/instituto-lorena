@@ -1,0 +1,26 @@
+name: tricopill_app
+description: App do cliente Tricopill — lembrete da cápsula, assinatura, pedidos e entregas.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  lorena_core:
+    path: ../lorena_core
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.10.0
+  shared_preferences: ^2.3.3
+  url_launcher: ^6.3.1
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

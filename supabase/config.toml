@@ -539,3 +539,8 @@ verify_jwt = false
 # envios, 5 tentativas por código, código guardado só como hash.
 [functions.crm-patient-auth]
 verify_jwt = false
+
+# Login do cliente Tricopill no app (telefone + código). Mesma razão do
+# crm-patient-auth: o cliente ainda não tem sessão quando pede o código.
+[functions.crm-tricopill-auth]
+verify_jwt = false

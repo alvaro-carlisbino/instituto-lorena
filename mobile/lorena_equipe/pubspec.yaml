@@ -1,0 +1,24 @@
+name: lorena_equipe
+description: App interno do Instituto Lorena — ponto com selfie e cerca, agenda do dia, centro cirúrgico e captura de foto clínica.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  lorena_core:
+    path: ../lorena_core
+  camera: ^0.11.0+2
+  geolocator: ^13.0.2
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

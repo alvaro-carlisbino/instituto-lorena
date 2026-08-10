@@ -1,0 +1,20 @@
+name: lorena_core
+description: Núcleo compartilhado dos apps do Instituto Lorena e do Tricopill (Supabase, login, tema, widgets).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.12.0
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: ^2.8.0
+  http: ^1.2.2
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+
+flutter:
