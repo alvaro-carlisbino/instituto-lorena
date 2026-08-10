@@ -926,14 +926,20 @@ export const useCrmState = () => {
   }, [dataMode])
 
   // Carga inicial do status de pagamento (o poll de chat mantém atualizado depois).
+  // Só COM sessão, pelo mesmo motivo do boot: deslogado a RLS devolve vazio e as
+  // consultas a rede_payments/pagbank_checkouts (ambas sem limite) saíam à toa na
+  // tela de login.
   useEffect(() => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured) return
     let cancelled = false
-    void fetchLeadPaymentSummaries()
-      .then((m) => {
-        if (!cancelled) setPaymentByLeadId(m)
-      })
-      .catch(() => {})
+    void getCurrentSession().then((currentSession) => {
+      if (!currentSession || cancelled) return
+      void fetchLeadPaymentSummaries()
+        .then((m) => {
+          if (!cancelled) setPaymentByLeadId(m)
+        })
+        .catch(() => {})
+    })
     return () => {
       cancelled = true
     }
@@ -1010,6 +1016,10 @@ export const useCrmState = () => {
     }
     let cancelled = false
     void (async () => {
+      // `selectedLeadId` nasce apontando para o catálogo mock, então na tela de login
+      // isto disparava um SELECT em interactions para o lead fictício "lead-001".
+      const currentSession = await getCurrentSession()
+      if (!currentSession || cancelled) return
       try {
         const items = await loadLeadInteractionsFromSupabase(selectedLeadId)
         if (!cancelled) setOpenLeadHistory({ leadId: selectedLeadId, items })
