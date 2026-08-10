@@ -548,3 +548,10 @@ verify_jwt = false
 # crm-patient-auth: o cliente ainda não tem sessão quando pede o código.
 [functions.crm-tricopill-auth]
 verify_jwt = false
+
+# Agente do HairMetrix (Canfield Mirror) na maquina da clinica empurra os exames de
+# tricoscopia. verify_jwt=false porque quem chama e um servico Windows com token
+# proprio (hairmetrix_agent_keys), nao um usuario logado. Ver crm_edge_verify_jwt_gotcha:
+# se isto sair daqui, o redeploy religa a exigencia de JWT e o agente passa a tomar 401.
+[functions.hairmetrix-sync]
+verify_jwt = false
