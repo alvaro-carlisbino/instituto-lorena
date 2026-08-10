@@ -1,0 +1,77 @@
+-- srg_match_patients estourava statement timeout: normalizava o nome de cada um
+-- dos 690 pacientes Shosp DENTRO do loop de cada cirurgia (173 × 690 = ~119 mil
+-- chamadas de unaccent+regexp). Agora normaliza os pacientes UMA vez num CTE
+-- materializado e faz um join só — 863 chamadas no total.
+
+create or replace function public.srg_match_patients(p_only_pending boolean default true)
+returns table (matched int, ambiguous int, unmatched int)
+language plpgsql
+security definer
+set search_path = public
+as $fn$
+declare v_matched int := 0; v_amb int := 0; v_unm int := 0;
+begin
+  with pac as materialized (
+    select public.srg_norm_name(p.nome) as nm, p.prontuario, p.lead_id
+    from public.shosp_patients p
+    where p.nome is not null
+  ),
+  agg as materialized (
+    select nm, count(*)::int as n, min(prontuario) as pront, min(lead_id) as lead_id
+    from pac
+    where nm is not null
+    group by nm
+  ),
+  alvo as materialized (
+    select s.id, public.srg_norm_name(s.paciente_nome) as nm
+    from public.srg_surgeries s
+    where s.deleted_at is null
+      and (not p_only_pending or s.match_status = 'pendente')
+      and s.paciente_nome is not null
+  ),
+  upd as (
+    update public.srg_surgeries s
+       set shosp_prontuario = case when g.n = 1 then g.pront    else s.shosp_prontuario end,
+           lead_id          = case when g.n = 1 then g.lead_id  else s.lead_id end,
+           match_status     = case when g.n = 1 then 'auto'
+                                   when g.n > 1 then 'pendente'   -- nome ambíguo: humano decide
+                                   else 'sem_match' end,
+           match_score      = case when g.n = 1 then 1.0 else null end,
+           matched_at       = case when g.n = 1 then now() else s.matched_at end
+      from alvo a
+      left join agg g on g.nm = a.nm
+     where s.id = a.id
+    returning coalesce(g.n, 0) as n
+  )
+  select count(*) filter (where n = 1)::int,
+         count(*) filter (where n > 1)::int,
+         count(*) filter (where n = 0)::int
+    into v_matched, v_amb, v_unm
+  from upd;
+
+  -- Prontuário embutido no nome ("5480 - fulano") é vínculo explícito e ganha de
+  -- qualquer casamento por nome — roda depois, sobrescrevendo.
+  update public.srg_surgeries s
+     set paciente_prontuario = m.pront,
+         shosp_prontuario    = m.pront,
+         lead_id             = coalesce(
+                                 (select sp.lead_id from public.shosp_patients sp where sp.prontuario = m.pront),
+                                 s.lead_id),
+         match_status        = 'auto',
+         match_score         = 1.0,
+         matched_at          = now()
+    from (
+      select id, (regexp_match(coalesce(paciente_nome, ''), '^\s*([0-9]+)\s*-\s*'))[1] as pront
+      from public.srg_surgeries
+      where deleted_at is null
+        and paciente_nome ~ '^\s*[0-9]+\s*-\s*'
+    ) m
+   where s.id = m.id
+     and m.pront is not null
+     and exists (select 1 from public.shosp_patients sp where sp.prontuario = m.pront);
+
+  return query select v_matched, v_amb, v_unm;
+end $fn$;
+
+revoke all on function public.srg_match_patients(boolean) from public, anon;
+grant execute on function public.srg_match_patients(boolean) to service_role, authenticated;

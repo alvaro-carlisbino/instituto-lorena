@@ -516,3 +516,17 @@ verify_jwt = false
 # Só LÊ storefront_events e carimba meta — não expõe dado de cliente na resposta.
 [functions.crm-gads-lead-upload]
 verify_jwt = false
+
+# Espelho do centro cirúrgico (MySQL c7lorenaap) nas tabelas srg_*. Roda por pg_cron,
+# que não assina JWT (ver crm_cron_auth_gotcha) — daí verify_jwt=false; a função exige
+# x-cron-secret = CIRURGIA_CRON_SECRET (ou a service_role key no Bearer). Pinado aqui
+# senão um redeploy pela CLI volta pro default true e o cron toma 401 no gateway.
+[functions.crm-cirurgia-sync]
+verify_jwt = false
+
+# Login do paciente nos apps (CPF + código). verify_jwt=false porque o paciente
+# AINDA NÃO tem sessão quando pede o código — é justamente o que esta função emite.
+# Proteções no handler: resposta neutra (não revela se o CPF existe), 60s entre
+# envios, 5 tentativas por código, código guardado só como hash.
+[functions.crm-patient-auth]
+verify_jwt = false
