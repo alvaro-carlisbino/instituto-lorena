@@ -31,19 +31,30 @@ export type FinAccount = {
   ofProvider: string | null
   ofAccountId: string | null
   ofLastSyncAt: string | null
-  /** Saldo que o banco informou no último sync. Em conta de cartão é a fatura em aberto. */
+  /** Saldo que o banco informou. Em conta de cartão o significado varia por banco. */
   ofBalanceCents: number | null
+  /** QUANDO O BANCO FOI LIDO, segundo o provedor. Não é a hora em que gravamos. */
   ofBalanceAt: string | null
   ofStatus: string | null
   /** Motivo do último sync que falhou. Preenchido = a conta parou de receber extrato. */
   ofLastError: string | null
   /** Extra do banco: no cartão traz fechamento, vencimento e limite da fatura. */
   ofMeta: OfAccountMeta | null
+  /** Cartão: fatura do ciclo aberto, fatura fechada a vencer e dívida total. */
+  ofBillOpenCents: number | null
+  ofBillDueCents: number | null
+  ofDebtTotalCents: number | null
+  ofBillCloseDate: string | null
+  ofBillDueDate: string | null
+  /** Incidente aberto no provedor: os números podem vir degradados. */
+  ofProviderNote: string | null
 }
 
 export type OfAccountMeta = {
   subtype?: string | null
   owner?: string | null
+  /** true = saldo lido do banco na hora; false = último retrato guardado pelo provedor. */
+  realtime?: boolean
   credit?: {
     brand?: string
     balanceCloseDate?: string
@@ -51,10 +62,11 @@ export type OfAccountMeta = {
     creditLimit?: string
     availableCreditLimit?: string
   } | null
+  bank?: { transferNumber?: string; closingBalance?: string } | null
 }
 
 const ACCOUNT_COLS =
-  'id, name, kind, bank_name, branch, number, opening_balance_cents, active, note, of_provider, of_account_id, of_last_sync_at, of_balance_cents, of_balance_at, of_status, of_last_error, of_meta'
+  'id, name, kind, bank_name, branch, number, opening_balance_cents, active, note, of_provider, of_account_id, of_last_sync_at, of_balance_cents, of_balance_at, of_status, of_last_error, of_meta, of_bill_open_cents, of_bill_due_cents, of_debt_total_cents, of_bill_close_date, of_bill_due_date, of_provider_note'
 
 function mapAccount(r: Record<string, unknown>): FinAccount {
   const kind = (r.kind === 'caixa' || r.kind === 'carteira' ? r.kind : 'banco') as AccountKind
@@ -76,6 +88,12 @@ function mapAccount(r: Record<string, unknown>): FinAccount {
     ofStatus: r.of_status != null ? String(r.of_status) : null,
     ofLastError: r.of_last_error != null ? String(r.of_last_error) : null,
     ofMeta: (r.of_meta as OfAccountMeta | null) ?? null,
+    ofBillOpenCents: r.of_bill_open_cents != null ? Number(r.of_bill_open_cents) : null,
+    ofBillDueCents: r.of_bill_due_cents != null ? Number(r.of_bill_due_cents) : null,
+    ofDebtTotalCents: r.of_debt_total_cents != null ? Number(r.of_debt_total_cents) : null,
+    ofBillCloseDate: r.of_bill_close_date != null ? String(r.of_bill_close_date) : null,
+    ofBillDueDate: r.of_bill_due_date != null ? String(r.of_bill_due_date) : null,
+    ofProviderNote: r.of_provider_note != null ? String(r.of_provider_note) : null,
   }
 }
 
@@ -119,18 +137,27 @@ export async function upsertAccount(payload: {
   return mapAccount(data as Record<string, unknown>)
 }
 
-/** Saldo atual por conta = saldo inicial + soma dos lançamentos (fin_transactions, já assinados). */
+/**
+ * Saldo atual por conta = saldo inicial + soma dos lançamentos (fin_transactions, assinados).
+ *
+ * PAGINA de verdade. A versão anterior fazia um `select` cru em fin_transactions, e o
+ * PostgREST daqui corta em 1.000 linhas sem erro e sem aviso: com 1.339 lançamentos na
+ * clínica, o "Saldo total" da tela somava só parte deles e mostrava um número errado com
+ * cara de certo. Ver [[postgrest_teto_1000_linhas]].
+ */
 export async function accountBalances(): Promise<Map<string, number>> {
   const client = assertClient()
   const [accounts, txns] = await Promise.all([
     client.from('fin_accounts').select('id, opening_balance_cents'),
-    client.from('fin_transactions').select('account_id, amount_cents'),
+    buscarTudo<{ account_id: string; amount_cents: number }>(
+      () => client.from('fin_transactions').select('account_id, amount_cents').order('id', { ascending: true }),
+      { rotulo: 'fin_transactions (saldos)', maxPaginas: 50 },
+    ),
   ])
   if (accounts.error) throw new Error(accounts.error.message)
-  if (txns.error) throw new Error(txns.error.message)
   const balances = new Map<string, number>()
   for (const a of accounts.data ?? []) balances.set(String(a.id), Number(a.opening_balance_cents ?? 0))
-  for (const t of txns.data ?? []) {
+  for (const t of txns) {
     const id = String(t.account_id)
     balances.set(id, (balances.get(id) ?? 0) + Number(t.amount_cents ?? 0))
   }

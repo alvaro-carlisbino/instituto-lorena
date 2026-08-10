@@ -37,8 +37,26 @@ async function ofPost(
     body: JSON.stringify(body),
   })
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
-  const err = data.error != null ? String(data.error) : ''
-  const upstreamMsg = data.message != null ? String(data.message) : ''
+  // `String(obj)` vira "[object Object]" e some com o motivo. A api.mcp.ai devolve `error`
+  // como OBJETO em parte das rotas (/connections/status é uma delas), então o diagnóstico
+  // que a gente mais precisa era justamente o que chegava ilegível na tela.
+  const texto = (v: unknown): string => {
+    if (v == null) return ''
+    if (typeof v === 'string') return v
+    if (typeof v === 'object') {
+      const o = v as Record<string, unknown>
+      const dentro = o.message ?? o.detail ?? o.description ?? o.code
+      if (dentro != null && typeof dentro !== 'object') return String(dentro)
+      try {
+        return JSON.stringify(v).slice(0, 300)
+      } catch {
+        return String(v)
+      }
+    }
+    return String(v)
+  }
+  const err = texto(data.error)
+  const upstreamMsg = texto(data.message)
 
   // O teto do MCP.AI é 2 req/s e a paginação do extrato estoura isso fácil. Sem retry, um
   // 429 no meio virava "conta falhou" e o dia inteiro ficava sem extrato.
@@ -69,6 +87,37 @@ async function ofPostSoft(path: string, body: Record<string, unknown> = {}): Pro
   }
 }
 
+// A api.mcp.ai não publica catálogo de rotas, e chutar path em produção vira dado faltando
+// calado. `action=probe` bate em cada candidato e diz qual respondeu, pra quem for mexer
+// aqui descobrir o path certo sem adivinhar. Diagnóstico, não roda no sync.
+const PROBE: Record<string, string[]> = {
+  bills: [
+    '/credit-card-bills/list',
+    '/credit_card_bills/list',
+    '/bills/list',
+    '/credit-cards/bills/list',
+    '/cards/bills/list',
+    '/credit-card/bills/list',
+  ],
+  balance: ['/accounts/balance', '/accounts/balances', '/accounts/get-balance', '/balance/get'],
+  detail: ['/accounts/detail', '/accounts/get', '/accounts/details'],
+}
+
+async function ofProbe(path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const token = bearer()
+  try {
+    const res = await fetch(`${OF}${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const raw = await res.text()
+    return { path, http: res.status, sample: raw.slice(0, 1200) }
+  } catch (e) {
+    return { path, http: 0, sample: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 const pad = (n: number) => String(n).padStart(2, '0')
 const dayStr = (d: Date) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
 
@@ -82,10 +131,33 @@ type OfAccount = {
   subtype?: string
   owner?: string
   currencyCode?: string
-  /** Vem como string ("48224.32"). Em conta CRÉDITO é o valor da fatura em aberto. */
+  /**
+   * Vem como string ("48224.32"). Em conta CRÉDITO o significado MUDA por conector: uns
+   * mandam a fatura aberta, outros a dívida total com parcelas futuras. Por isso o cartão
+   * não usa mais este campo como "fatura" — ver lerFatura().
+   */
   balance?: string | number
+  /** Carimbo do provedor quando o saldo veio do endpoint de tempo real. */
+  balanceAt?: string
+  realtime?: boolean
   creditData?: Record<string, unknown>
   bankData?: Record<string, unknown>
+}
+
+/** Situação da conexão + quando o BANCO foi lido de verdade (não quando a gente gravou). */
+type Frescor = { status: string; exec: string; dadoEm: string | null }
+
+/** Números padronizados da fatura, que o `balance` do cartão não garante. */
+type Fatura = {
+  abertaCents: number | null
+  aVencerCents: number | null
+  dividaTotalCents: number | null
+  fechamento: string | null
+  vencimento: string | null
+  /** Por que não veio número, em português, pra tela não fingir que veio. */
+  nota?: string
+  /** Amostra do retorno quando o formato não bate com o esperado — pra acertar sem adivinhar. */
+  debug?: string
 }
 
 const centavos = (v: unknown): number | null => {
@@ -93,14 +165,124 @@ const centavos = (v: unknown): number | null => {
   return Number.isFinite(n) ? Math.round(n * 100) : null
 }
 
+const numero = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+const dataCurta = (v: unknown): string | null => {
+  const s = String(v ?? '').slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null
+}
+
+/**
+ * Manda o provedor buscar no banco e ESPERA terminar, até 60s.
+ *
+ * O refresh do provedor é assíncrono. Sem esperar, a leitura logo em seguida devolve o
+ * retrato antigo — que é como o saldo da tela ficava horas atrasado parecendo novo.
+ * Se o pedido não for aceito (o teto é 1x/hora por conexão), não espera nada: lê o que há
+ * e o carimbo devolvido já diz a idade real.
+ */
+async function atualizarEEsperar(item: string): Promise<Frescor> {
+  const ler = async (): Promise<Frescor> => {
+    const st = await ofPostSoft('/connections/status', { item })
+    return {
+      status: String(st?.status ?? ''),
+      exec: String(st?.executionStatus ?? ''),
+      dadoEm: (st?.lastUpdatedAt ?? st?.updatedAt) ? String(st.lastUpdatedAt ?? st.updatedAt) : null,
+    }
+  }
+
+  const antes = await ler()
+  const pedido = await ofPostSoft('/connections/sync', { item })
+  if (!pedido) return antes
+
+  let atual = antes
+  for (let i = 0; i < 12; i += 1) {
+    await dorme(5000)
+    atual = await ler()
+    // Terminou quando o carimbo do provedor andou e ele não está mais atualizando.
+    if (atual.status !== 'UPDATING' && atual.dadoEm && atual.dadoEm !== antes.dadoEm) return atual
+    // LOGIN_ERROR / pedido de MFA não termina sozinho: para de esperar e deixa o status falar.
+    if (atual.status && atual.status !== 'UPDATING' && atual.status !== 'UPDATED') return atual
+  }
+  return atual
+}
+
+const VAZIO: Fatura = {
+  abertaCents: null,
+  aVencerCents: null,
+  dividaTotalCents: null,
+  fechamento: null,
+  vencimento: null,
+}
+
+/**
+ * Lê os números da fatura do retorno de /credit-card-bills/list.
+ *
+ * Formato observado (modo bulk): { results: [{ id, ok, data: { total, results: [faturas] } }] }.
+ * A api.mcp.ai não publica schema, então em vez de fixar um caminho a gente procura as
+ * chaves conhecidas na linha e um nível abaixo, e guarda amostra em `debug` quando o
+ * formato não bate — é o que permite acertar depois sem chutar em produção.
+ *
+ * Atenção ao caso que o Itaú Empresas devolve hoje: `ok: true` com `total: 0`, ou seja,
+ * conexão de pé e NENHUMA fatura compartilhada. Isso não é erro nem fatura zerada, e a
+ * diferença importa: a tela precisa dizer "o banco não mandou a fatura" em vez de mostrar
+ * R$ 0,00, que seria mentira tranquilizadora.
+ */
+function lerFatura(linha: Record<string, unknown>): Fatura {
+  if (linha.ok === false) {
+    return { ...VAZIO, nota: `O banco recusou a fatura: ${String(linha.error ?? 'motivo não informado')}` }
+  }
+
+  const fontes: Record<string, unknown>[] = [linha]
+  for (const chave of ['result', 'data', 'bill', 'summary']) {
+    const filho = linha[chave]
+    if (filho && typeof filho === 'object' && !Array.isArray(filho)) fontes.push(filho as Record<string, unknown>)
+  }
+  const busca = (...chaves: string[]): unknown => {
+    for (const f of fontes) for (const c of chaves) if (f[c] !== undefined && f[c] !== null) return f[c]
+    return null
+  }
+
+  const aberta = numero(busca('open_bill', 'openBill', 'open_bill_amount'))
+  const divida = numero(busca('total_pending_debt', 'totalPendingDebt', 'pending_debt'))
+
+  // A fatura fechada a vencer é a mais recente ainda não paga da lista de faturas.
+  const listas = fontes.flatMap((f) => {
+    const l = f.results ?? f.bills ?? f.items
+    return Array.isArray(l) ? (l as Record<string, unknown>[]) : []
+  })
+  const naoPagas = listas.filter((b) => String(b.status ?? '').toUpperCase() !== 'PAID')
+  const proxima = naoPagas.sort((a, b) => String(a.dueDate ?? a.due_date ?? '').localeCompare(String(b.dueDate ?? b.due_date ?? '')))[0] ?? null
+  const aVencer = proxima ? numero(proxima.totalAmount ?? proxima.total_amount ?? proxima.amount) : null
+
+  const achouAlgo = aberta != null || divida != null || aVencer != null
+  const semFatura = !achouAlgo && listas.length === 0
+  return {
+    abertaCents: aberta != null ? Math.round(aberta * 100) : null,
+    aVencerCents: aVencer != null ? Math.round(aVencer * 100) : null,
+    dividaTotalCents: divida != null ? Math.round(divida * 100) : null,
+    fechamento: dataCurta(proxima?.closeDate ?? proxima?.close_date ?? busca('close_date', 'closeDate')),
+    vencimento: dataCurta(proxima?.dueDate ?? proxima?.due_date ?? busca('due_date', 'dueDate')),
+    ...(semFatura ? { nota: 'O banco não compartilha a lista de faturas deste cartão.' } : {}),
+    ...(achouAlgo || semFatura ? {} : { debug: JSON.stringify(linha).slice(0, 400) }),
+  }
+}
+
 /** O que a tela mostra do banco além do saldo: fechamento/vencimento da fatura, titular. */
-function metaDaConta(a: OfAccount): Record<string, unknown> {
+function metaDaConta(a: OfAccount, fatura?: Fatura | null): Record<string, unknown> {
   return {
     subtype: a.subtype ?? null,
     owner: a.owner ?? null,
     currency: a.currencyCode ?? null,
     credit: a.creditData ?? null,
     bank: a.bankData ?? null,
+    // Diz de onde veio o saldo: tempo real (bateu no banco agora) ou o retrato guardado.
+    realtime: a.realtime ?? false,
+    ...(fatura?.nota ? { billNote: fatura.nota } : {}),
+    ...(fatura?.debug ? { billDebug: fatura.debug } : {}),
   }
 }
 
@@ -175,6 +357,19 @@ Deno.serve(async (req) => {
       const totalContas = Number(accounts?.total ?? (accounts?.results as unknown[] | undefined)?.length ?? 0)
       const notice = totalContas === 0 ? warningsNotice(status?.statusDetail) : null
       return json({ ok: true, connections, accounts, status, notice })
+    }
+
+    if (action === 'probe') {
+      const grupo = String((payload as { group?: string }).group ?? 'bills')
+      const alvo = String((payload as { account_id?: string }).account_id ?? '')
+      const corpo: Record<string, unknown> = { ...(payload.item ? { item: payload.item } : {}) }
+      if (alvo) {
+        corpo.account_id = alvo
+        corpo.account_ids = [alvo]
+      }
+      const results = []
+      for (const p of PROBE[grupo] ?? []) results.push(await ofProbe(p, corpo))
+      return json({ ok: true, group: grupo, body: corpo, results })
     }
 
     // link + sync precisam de JWT de usuário (RLS) OU cron+service_role+tenant_id
@@ -367,16 +562,52 @@ async function syncMcpAccounts(
   // extrato (o saldo de abertura fica de fora).
   const itens = [...new Set(contas.map((c) => c.of_item_id).filter(Boolean))] as string[]
   const saldos = new Map<string, OfAccount>()
-  const situacao = new Map<string, { status: string; exec: string }>()
+  const situacao = new Map<string, Frescor>()
+  const faturas = new Map<string, Fatura>()
+  const avisoProvedor = new Map<string, string | null>()
+
   for (const it of itens) {
+    // PEDE ANTES DE LER. Este pedido ficava no FIM da rodada, e como o refresh do provedor
+    // é assíncrono, cada rodada colhia o retrato que a rodada ANTERIOR mandou buscar. Com
+    // 3 rodadas por dia isso deixava o saldo da tela até 7h velho — em 10/ago o banco tinha
+    // R$ 82.644,32 e a tela mostrava R$ 67.644,32, faltando dois PIX já creditados.
+    situacao.set(it, await atualizarEEsperar(it))
+
     const res = await ofPostSoft('/accounts/list', { item: it })
+    const doItem: string[] = []
     for (const a of ((res?.results as OfAccount[]) ?? [])) {
       const id = String(a.id ?? a.account_id ?? '')
-      if (id) saldos.set(id, a)
+      if (!id) continue
+      saldos.set(id, a)
+      doItem.push(id)
     }
-    const st = await ofPostSoft('/connections/status', { item: it })
-    if (st) {
-      situacao.set(it, { status: String(st.status ?? ''), exec: String(st.executionStatus ?? '') })
+
+    // O provedor avisa quando está degradado ("limite pode vir zerado, não é valor real").
+    // A gente descartava esse aviso e mostrava o número como se fosse verdade.
+    const incidente = res?.provider_incident as { degraded?: boolean; note?: string } | undefined
+    avisoProvedor.set(it, incidente?.degraded ? String(incidente.note ?? 'Provedor com incidente aberto.') : null)
+
+    // Saldo em tempo real (endpoint próprio, bate no banco na hora). É melhor que o
+    // /accounts/list, que sempre devolve o último retrato guardado. Best effort: quando o
+    // provedor está fora, cai no retrato mesmo.
+    const rt = await ofPostSoft('/accounts/balance', { account_ids: doItem })
+    for (const linha of ((rt?.results as Array<Record<string, unknown>>) ?? [])) {
+      const id = String(linha.id ?? linha.account_id ?? '')
+      const valor = numero(linha.balance ?? linha.amount ?? linha.value)
+      const atual = id ? saldos.get(id) : null
+      if (!id || !atual || valor == null) continue
+      atual.balance = valor
+      atual.balanceAt = String(linha.updatedAt ?? linha.updated_at ?? '') || undefined
+      atual.realtime = linha.realtime !== false
+    }
+
+    const cartoes = doItem.filter((id) => String(saldos.get(id)?.type ?? '').toUpperCase().includes('CREDIT'))
+    if (cartoes.length > 0) {
+      const bills = await ofPostSoft('/credit-card-bills/list', { account_ids: cartoes })
+      for (const linha of ((bills?.results as Array<Record<string, unknown>>) ?? [])) {
+        const id = String(linha.id ?? linha.account_id ?? '')
+        if (id) faturas.set(id, lerFatura(linha))
+      }
     }
   }
 
@@ -448,6 +679,12 @@ async function syncMcpAccounts(
       }
       const saldo = saldos.get(acc.of_account_id)
       const sit = acc.of_item_id ? situacao.get(acc.of_item_id) : null
+      const fatura = faturas.get(acc.of_account_id) ?? null
+      const credito = (saldo?.creditData ?? {}) as Record<string, unknown>
+      // A HORA DO BANCO, não a nossa. Carimbar new Date() aqui era o que fazia a tela dizer
+      // "atualizado agora" sobre número velho: o dado podia ser da rodada anterior e nada
+      // na interface deixava isso aparecer.
+      const lidoEm = saldo?.balanceAt ?? sit?.dadoEm ?? null
       await db
         .from('fin_accounts')
         .update({
@@ -455,13 +692,30 @@ async function syncMcpAccounts(
           // Zera o erro: enquanto isso não existia, uma falha antiga nunca "sarava" e o
           // alerta ficaria tocando pra sempre depois que o banco voltasse.
           of_last_error: null,
+          of_provider_note: (acc.of_item_id ? avisoProvedor.get(acc.of_item_id) : null) ?? null,
           ...(saldo
             ? {
                 of_balance_cents: centavos(saldo.balance),
-                of_balance_at: new Date().toISOString(),
-                of_meta: metaDaConta(saldo),
+                of_balance_at: lidoEm,
+                of_meta: metaDaConta(saldo, fatura),
               }
             : {}),
+          ...(fatura
+            ? {
+                of_bill_open_cents: fatura.abertaCents,
+                of_bill_due_cents: fatura.aVencerCents,
+                of_debt_total_cents: fatura.dividaTotalCents,
+                of_bill_close_date: fatura.fechamento ?? dataCurta(credito.balanceCloseDate),
+                of_bill_due_date: fatura.vencimento ?? dataCurta(credito.balanceDueDate),
+              }
+            : saldo && String(saldo.type ?? '').toUpperCase().includes('CREDIT')
+              ? {
+                  // Fatura não veio (provedor fora do ar). Mantém o que já havia e só
+                  // atualiza as datas, que vêm junto com a conta.
+                  of_bill_close_date: dataCurta(credito.balanceCloseDate),
+                  of_bill_due_date: dataCurta(credito.balanceDueDate),
+                }
+              : {}),
           ...(sit ? { of_status: [sit.status, sit.exec].filter(Boolean).join(' / ') } : {}),
         })
         .eq('id', acc.id)
@@ -475,10 +729,8 @@ async function syncMcpAccounts(
     }
   }
 
-  // Manda o provedor buscar de novo no banco DEPOIS de puxar: a atualização dele é
-  // assíncrona (leva minutos), então quem colhe é a próxima rodada. Limite de 1x/hora por
-  // item — por isso é soft: estourar o limite não pode derrubar o sync.
-  for (const it of itens) await ofPostSoft('/connections/sync', { item: it })
+  // O pedido de atualização subiu para o INÍCIO da rodada (atualizarEEsperar): aqui no fim
+  // ele fazia cada rodada colher o retrato que a anterior pediu.
 
   return { inserted, accounts: contas.length, results }
 }
