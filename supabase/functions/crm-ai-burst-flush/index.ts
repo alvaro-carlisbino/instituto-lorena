@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { nowIso, runWhatsappAiAutoReply } from '../_shared/crmAiAutoReply.ts'
+import { evaluateCrmAiAutoReplyGate, nowIso, runWhatsappAiAutoReply } from '../_shared/crmAiAutoReply.ts'
 import { createWapiProviderForRow, loadWapiInstanceByRowId } from '../_shared/whatsapp/wapiConfig.ts'
 
 /**
@@ -31,6 +31,17 @@ const STALE_SECS = 45
 // buffer no claim → Passo 1 fica cego). Detectada pelo histórico. Margem alta p/ não competir com
 // o caminho normal nem com o Passo 1 (z.ai lento chega a ~55s).
 const STUCK_SECS = 180
+
+// TETO DE IDADE. O Passo 2 filtrava por `owner_mode`/`ai_enabled` da tabela POR LEAD, então
+// ele nunca enxergava justamente as conversas que o estado por linha (20260810220000)
+// destravou: a Carla pediu preço na linha de vendas com o card em 'human' herdado da clínica
+// e continuaria sem resposta. Quem decide agora é o gate (que é por linha).
+//
+// Só que trocar o filtro sem teto abriria a porteira: eram 26 conversas presas acumuladas
+// contra 3 nas últimas 6h. Despejar resposta de IA em mensagem de dias atrás é o mesmo erro
+// do last_inbound_at, que quase disparou 93 mensagens de uma vez. Rede de segurança é pra
+// pegar o que acabou de cair, não pra ressuscitar backlog.
+const STUCK_MAX_AGE_SECS = 6 * 3600
 
 type Admin = ReturnType<typeof createClient>
 type FlushLead = {
@@ -163,18 +174,21 @@ Deno.serve(async (req) => {
   // desde a última resposta e disparamos a IA. Idempotência por external_message_id do inbound
   // (claim em webhook_jobs) p/ não duplicar com a reply normal que possa chegar atrasada.
   const stuckCutoff = new Date(Date.now() - STUCK_SECS * 1000).toISOString()
+  const stuckFloor = new Date(Date.now() - STUCK_MAX_AGE_SECS * 1000).toISOString()
   let recovered = 0
   const stuckResults: Array<{ leadId: string; status: string }> = []
+  // Sem filtro de owner_mode/ai_enabled aqui: aquilo era o estado POR LEAD e cegava o cron
+  // pras conversas destravadas por linha. Quem barra é `evaluateCrmAiAutoReplyGate` lá
+  // embaixo, que já olha a linha, o contato interno e o opt-out.
   const { data: stuckRows } = await admin
     .from('crm_conversation_states')
     .select(`
       lead_id, owner_mode, last_inbound_at, last_ai_reply_at, last_human_reply_at,
       leads!inner ( id, patient_name, phone, whatsapp_instance_id, deleted_at, conversation_status, tenant_id )
     `)
-    .neq('owner_mode', 'human')
-    .eq('ai_enabled', true)
     .not('last_inbound_at', 'is', null)
     .lt('last_inbound_at', stuckCutoff)
+    .gte('last_inbound_at', stuckFloor)
     .is('leads.deleted_at', null)
     // Mais recente primeiro: uma conversa presa AGORA tem last_inbound recente → vai pro topo
     // (PostgREST não compara coluna-a-coluna, então o filtro inbound>reply é feito em código).
@@ -191,6 +205,17 @@ Deno.serve(async (req) => {
     const phoneDigits = String(lead.phone ?? '').replace(/\D/g, '')
     const isRealWhatsapp = phoneDigits.length >= 10 && !phoneDigits.startsWith('888001')
     if (!isRealWhatsapp || !lead.whatsapp_instance_id) continue
+
+    // Gate REAL (por linha), antes de gastar z.ai: barra humano que assumiu NAQUELA linha,
+    // contato interno e opt-out. É o que substituiu o filtro por lead do select acima.
+    const stuckGate = await evaluateCrmAiAutoReplyGate(admin, leadId, {
+      directionIsInbound: true,
+      whatsappInstanceId: lead.whatsapp_instance_id,
+    })
+    if (!stuckGate.canAutoReply) {
+      stuckResults.push({ leadId, status: `gate:${stuckGate.skipReasons.join(',') || 'blocked'}` })
+      continue
+    }
 
     const lastInboundAt = String((row as { last_inbound_at?: string }).last_inbound_at ?? '')
     const inboundMs = lastInboundAt ? Date.parse(lastInboundAt) : 0
@@ -231,7 +256,8 @@ Deno.serve(async (req) => {
       const res = await deliverAiReply(admin, lead, {
         text,
         inboundHappenedAt: lastInboundAt || nowIso(),
-        ownerMode: String((row as { owner_mode?: string }).owner_mode ?? 'auto'),
+        // O do gate (por linha), não o da tabela por lead — que pra Carla ainda diz 'human'.
+        ownerMode: stuckGate.ownerMode,
         aiJobSource: 'burst-flush-stuck',
       })
       if (!res.replied) {

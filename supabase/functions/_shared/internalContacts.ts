@@ -32,6 +32,10 @@ const INTERNAL_PHONES = [
   '554491828888', // Recepção
   '554497168329', // Álvaro Carlisbino
   '5543991143090', // Lorena Visentainer
+  // Mesa do financeiro/admin: manda conciliação de caixa pra linha do Tricopill ("tem uns de
+  // maio que ainda não foram lançados") e "Estorno realizado!" + nome de paciente pra clínica.
+  // Duas pessoas no mesmo aparelho, Kauan e Jayne, por isso o nome sozinho nunca bastou.
+  '5511996109567',
 ]
 
 /** 55 + DDD + número, sem o 9º dígito, para comparar variantes com/sem ele. */
