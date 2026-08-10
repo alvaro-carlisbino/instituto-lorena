@@ -79,6 +79,7 @@ exames, o que mudou foi a técnica de captura, não o tratamento.
 | `01-rede-diagnostico-e-fix.ps1` | diagnostica e corrige a comunicação entre as duas máquinas | nas **duas** |
 | `02-hairmetrix-descoberta.ps1` | mapeia instância, bancos, schema e pastas. Somente leitura | principal |
 | `sync-hairmetrix.ps1` | o agente: lê as pastas, agrega e envia pro CRM | principal |
+| `enviar-imagens.ps1` | miniatura JPEG das fotos, para o bucket privado | principal |
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
@@ -123,8 +124,27 @@ artificialmente.
 `fios_por_uf` é a métrica mais confiável do conjunto, por ser razão entre duas
 contagens: sai correta mesmo sem calibração.
 
+## Imagens
+
+O `tricho_N.png` tem 2274×2048 e 4 a 8 MB. As 32 mil capturas dariam **130 a 250 GB**
+e dias de upload. O `enviar-imagens.ps1` converte para JPEG de no máximo 1400px
+(~250 KB) e sobe só a **captura mais recente de cada paciente**, que já traz uma foto
+de cada região: ~18 mil imagens, ~4,5 GB.
+
+```powershell
+.\enviar-imagens.ps1 -Teste           # 3 pacientes
+.\enviar-imagens.ps1                  # captura mais recente de cada um
+.\enviar-imagens.ps1 -PausaMs 800     # segura o upload em horário de atendimento
+.\enviar-imagens.ps1 -Tudo            # todas as capturas (vários dias)
+```
+
+Bucket `hairmetrix` é **privado**, aceita só `image/jpeg` e trava em 3 MB por arquivo
+— o limite existe para impedir que alguém suba o PNG original por engano. Exibição
+tem que usar URL assinada de vida curta, nunca link público.
+
 ## Pendente
 
-- Tela no CRM consumindo `hairmetrix_evolucao` e `hairmetrix_pendentes_vinculo`
-- Envio das imagens pro bucket privado (o agente hoje só manda os agregados)
+- Exibir a foto na ficha (o caminho já vem em `tricoscopia[].imagem_path`)
 - Tirar as duas máquinas da rede de visitantes; principal idealmente em cabo
+- Sobrou no bucket um `.../99.jpg` de 160 bytes, do teste do endpoint. Inofensivo,
+  dá para apagar pelo painel do Storage.

@@ -133,6 +133,53 @@ Deno.serve(async (req) => {
   }
 
   // --------------------------------------------------------------------------
+  // imagem: miniatura JPEG de uma captura
+  // --------------------------------------------------------------------------
+  // O PNG original tem 2274x2048 e 4 a 8 MB. As 32 mil capturas dariam 130 a 250 GB
+  // e dias de upload na internet da clínica. O agente manda JPEG reduzido, e só da
+  // captura mais recente de cada região por paciente: ~18 mil imagens, ~4,5 GB.
+  //
+  // Bucket PRIVADO: couro cabeludo é dado sensível de saúde. Quem exibe usa URL
+  // assinada de vida curta, nunca link público.
+  if (action === 'imagem') {
+    const captureId = str(body.capture_id)
+    const indice = int(body.indice)
+    const b64 = str(body.jpeg_base64)
+    if (!captureId || !b64) return json({ ok: false, error: 'faltou capture_id ou jpeg_base64' }, 400)
+
+    const { data: exame } = await db
+      .from('hairmetrix_exames')
+      .select('id, mirror_patient_id')
+      .eq('tenant_id', tenantId)
+      .eq('capture_id', captureId)
+      .maybeSingle()
+    if (!exame) return json({ ok: false, error: 'exame_desconhecido', capture_id: captureId }, 404)
+
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+    if (bytes.length > 3_000_000) return json({ ok: false, error: 'imagem_grande_demais' }, 400)
+
+    const caminho = `${tenantId}/${exame.mirror_patient_id}/${captureId}/${indice}.jpg`
+    const { error: errUp } = await db.storage
+      .from('hairmetrix')
+      .upload(caminho, bytes, { contentType: 'image/jpeg', upsert: true })
+    if (errUp) return json({ ok: false, etapa: 'storage', error: errUp.message }, 500)
+
+    const { error: errReg } = await db.from('hairmetrix_imagens').upsert({
+      tenant_id: tenantId,
+      exame_id: exame.id,
+      indice,
+      regiao: str(body.regiao),
+      storage_path: caminho,
+      sha256: str(body.sha256),
+      bytes: bytes.length,
+      enviado_em: new Date().toISOString(),
+    }, { onConflict: 'exame_id,indice' })
+    if (errReg) return json({ ok: false, etapa: 'registro', error: errReg.message }, 500)
+
+    return json({ ok: true, action: 'imagem', caminho, bytes: bytes.length })
+  }
+
+  // --------------------------------------------------------------------------
   // ingest
   // --------------------------------------------------------------------------
   const pacientes = Array.isArray(body.pacientes) ? (body.pacientes as Paciente[]) : []
