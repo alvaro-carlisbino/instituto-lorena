@@ -42,6 +42,11 @@ export function toCents(value: unknown): number | null {
   // "1.200" é mil e duzentos, não um e vinte: ponto separando grupos de 3 sem decimal
   // é separador de milhar. Sem essa guarda, R$ 1.200 virava R$ 1,20.
   if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) return Math.round(Number(s.replace(/\./g, '')) * 100)
+  // "R$2,500" digitado à mão é DOIS MIL E QUINHENTOS, não dois e cinquenta: centavo tem 2
+  // casas, nunca 3, então vírgula seguida de exatamente 3 dígitos só pode ser milhar (o
+  // teclado numérico americano escapando na planilha da recepção). Sem isto, a entrada de
+  // transplante de R$ 2.500 entrava como R$ 2,50 e sumiam R$ 2.497,50 calados.
+  if (/^-?[1-9]\d{0,2}(,\d{3})+$/.test(s)) return Math.round(Number(s.replace(/,/g, '')) * 100)
   // 1.234,56 ou 1234.56
   const normalized = s.includes(',') ? s.replace(/\./g, '').replace(',', '.') : s
   const n = Number(normalized)
