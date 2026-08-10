@@ -10,8 +10,8 @@ class _Resumo {
   final List<Consulta> consultas;
 }
 
-class TelaInicio extends StatelessWidget {
-  const TelaInicio({super.key});
+class TelaResumo extends StatelessWidget {
+  const TelaResumo({super.key});
 
   Future<_Resumo> _buscar() async {
     final api = LorenaApi.instance;

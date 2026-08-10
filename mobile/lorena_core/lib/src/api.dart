@@ -86,6 +86,25 @@ class LorenaApi {
     await _db.auth.verifyOTP(tokenHash: tokenHash, type: OtpType.magiclink);
   }
 
+  // =========================================================== PÚBLICO
+  /// Números da clínica para quem ainda não é paciente. Vem do servidor em vez
+  /// de chumbado no app: número chumbado envelhece e vira mentira na loja.
+  Future<({int cirurgias, int foliculos, int desdeAno})?> clinicaNumeros() async {
+    try {
+      final r = await _db.rpc('clinica_numeros_publicos');
+      final l = (r as List?) ?? [];
+      if (l.isEmpty) return null;
+      final m = Map<String, dynamic>.from(l.first);
+      return (
+        cirurgias: int.tryParse('${m['cirurgias_realizadas']}') ?? 0,
+        foliculos: int.tryParse('${m['foliculos_implantados']}') ?? 0,
+        desdeAno: int.tryParse('${m['desde_ano']}') ?? 0,
+      );
+    } catch (_) {
+      return null; // sem internet a home ainda abre, só sem os números
+    }
+  }
+
   // =========================================================== PACIENTE
   /// Pede o código. A resposta é sempre a mesma, exista o CPF ou não — de
   /// propósito: confirmar "este CPF é paciente daqui" é dado de saúde.
