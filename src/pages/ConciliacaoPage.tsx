@@ -55,24 +55,33 @@ export function ConciliacaoPage() {
   const [syncing, setSyncing] = useState(false)
   const [mcpNotice, setMcpNotice] = useState<string | null>(null)
   const [mcpReconnectUrl, setMcpReconnectUrl] = useState<string | null>(null)
+  const [mcpAddUrl, setMcpAddUrl] = useState<string | null>(null)
   const [mcpBankName, setMcpBankName] = useState<string | null>(null)
+  const [mcpError, setMcpError] = useState<string | null>(null)
   const hasOpenFinance = useMemo(() => accounts.some((a) => a.ofAccountId != null), [accounts])
 
   const refreshMcpStatus = async () => {
     try {
       const st = await getBancoMcpStatus()
       const conn = st.connections?.connections?.[0]
+      setMcpError(null)
       setMcpBankName(conn?.connector_name ?? null)
       setMcpReconnectUrl(conn?.reconnect_url ?? null)
+      setMcpAddUrl(st.connections?.add_connection_url ?? null)
       const total = Number(st.accounts?.total ?? st.accounts?.results?.length ?? 0)
-      if (st.accounts?.notice) setMcpNotice(st.accounts.notice)
+      // `notice` da edge é o motivo traduzido (ACCT_001/ACCT_002…); só cai no texto
+      // longo do provedor quando não veio aviso nenhum.
+      if (st.notice) setMcpNotice(st.notice)
+      else if (st.accounts?.notice) setMcpNotice(st.accounts.notice)
       else if (conn && total === 0) {
         setMcpNotice(
-          'Itaú Empresas conectado no Banco MCP, mas sem contas liberadas. Aprove o Open Finance no app do banco (múltipla alçada) ou reconecte selecionando as contas.',
+          `${conn.connector_name ?? 'Banco'} conectado no Banco MCP, mas sem contas liberadas. Aprove o Open Finance no app do banco (múltipla alçada) ou reconecte selecionando as contas.`,
         )
       } else if (conn) setMcpNotice(null)
-    } catch {
-      // silencioso — Pluggy segue disponível
+    } catch (e) {
+      // Antes era silencioso: com o token vencido o cartão sumia e o erro só aparecia
+      // (genérico) na hora de ligar. Agora o motivo fica na tela.
+      setMcpError(e instanceof Error ? e.message : 'Banco MCP indisponível')
     }
   }
 
@@ -235,6 +244,7 @@ export function ConciliacaoPage() {
       if (!res.ok || (res.accountsLinked ?? 0) === 0) {
         setMcpNotice(res.notice ?? 'Sem contas liberadas no banco.')
         if (res.reconnectUrl) setMcpReconnectUrl(res.reconnectUrl)
+        if (res.addConnectionUrl) setMcpAddUrl(res.addConnectionUrl)
         toast.error(res.notice ?? 'Conexão MCP sem contas. Autorize no app do banco.')
       } else {
         toast.success(
@@ -271,14 +281,25 @@ export function ConciliacaoPage() {
               Conecte o banco uma vez (Pluggy ou Banco MCP) e o extrato entra sozinho, sem baixar arquivo.
               O login é no banco; a gente nunca vê a senha.
             </p>
-            {mcpBankName ? (
+            {mcpError ? (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2.5 text-xs">
+                <div className="font-medium">Banco MCP fora do ar</div>
+                <p className="mt-1 opacity-90">{mcpError}</p>
+                <Button size="sm" variant="outline" className="mt-2" onClick={() => void refreshMcpStatus()}>
+                  Tentar de novo
+                </Button>
+              </div>
+            ) : null}
+            {mcpBankName || mcpAddUrl ? (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-100">
-                <div className="font-medium">Banco MCP: {mcpBankName}</div>
+                <div className="font-medium">Banco MCP{mcpBankName ? `: ${mcpBankName}` : ' — nenhum banco conectado'}</div>
                 {mcpNotice ? <p className="mt-1 opacity-90">{mcpNotice}</p> : null}
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" onClick={() => void linkMcpBank()} disabled={syncing}>
-                    Ligar ao sistema
-                  </Button>
+                  {mcpBankName ? (
+                    <Button size="sm" variant="outline" onClick={() => void linkMcpBank()} disabled={syncing}>
+                      Ligar ao sistema
+                    </Button>
+                  ) : null}
                   {mcpReconnectUrl ? (
                     <Button
                       size="sm"
@@ -286,6 +307,15 @@ export function ConciliacaoPage() {
                       onClick={() => window.open(mcpReconnectUrl, '_blank', 'noopener,noreferrer')}
                     >
                       Reautorizar no banco
+                    </Button>
+                  ) : null}
+                  {mcpAddUrl ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => window.open(mcpAddUrl, '_blank', 'noopener,noreferrer')}
+                    >
+                      {mcpBankName ? 'Conectar outro banco' : 'Conectar banco (Banco MCP)'}
                     </Button>
                   ) : null}
                 </div>

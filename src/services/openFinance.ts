@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient'
+import { edgeErrorMessage } from '@/lib/edgeError'
 
 // Cliente do front pra edge crm-openfinance (Open Finance / Pluggy). As credenciais Pluggy
 // ficam no backend; aqui a gente só pede o token do widget, e manda o itemId que o widget
@@ -13,7 +14,9 @@ const assertClient = () => {
 async function invoke<T>(fn: string, action: string, body: Record<string, unknown> = {}): Promise<T> {
   const client = assertClient()
   const { data, error } = await client.functions.invoke(fn, { body: { action, ...body } })
-  if (error) throw new Error(error.message)
+  // O motivo real (Pluggy recusou, item sem autorização, RLS) vem no corpo da resposta;
+  // `error.message` sozinho é sempre o genérico "non-2xx status code".
+  if (error) throw new Error(await edgeErrorMessage(error, `Falha no banco (${action})`))
   if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
     throw new Error(String((data as { message?: string; error?: string }).message ?? (data as { error?: string }).error))
   }
@@ -56,9 +59,13 @@ export type BancoMcpStatus = {
     bank?: string
   }
   status?: {
+    status?: string
+    executionStatus?: string
     statusDetail?: unknown
     reconnect_url?: string
   }
+  /** Motivo em português quando a conexão está de pé mas o banco não compartilha conta. */
+  notice?: string | null
 }
 
 export async function getBancoMcpStatus(item?: string): Promise<BancoMcpStatus> {
@@ -71,6 +78,8 @@ export async function linkBancoMcp(item?: string): Promise<{
   accountsLinked?: number
   inserted?: number
   notice?: string
+  itemStatus?: string | null
+  executionStatus?: string | null
   reconnectUrl?: string | null
   addConnectionUrl?: string | null
 }> {

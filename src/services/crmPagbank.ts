@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient'
+import { edgeErrorMessage } from '@/lib/edgeError'
 
 export type PagbankKit = '1_mes' | '3_meses' | '5_meses'
 
@@ -33,11 +34,7 @@ export async function generatePagbankLink(args: {
       ...(args.couponCode?.trim() ? { couponCode: args.couponCode.trim() } : {}),
     },
   })
-  if (error) {
-    const ctx = (error as { context?: { body?: unknown } }).context
-    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
-    throw new Error(String(msg || 'Falha ao gerar link PagBank'))
-  }
+  if (error) throw new Error(await edgeErrorMessage(error, 'Falha ao gerar link PagBank'))
   const p = (data ?? {}) as { ok?: boolean; payLink?: string; label?: string; amountCents?: number; message?: string }
   if (!p.ok || !p.payLink) throw new Error(String(p.message || 'Falha ao gerar link PagBank'))
   return { ok: true, payLink: p.payLink, label: String(p.label ?? ''), amountCents: Number(p.amountCents ?? 0) }

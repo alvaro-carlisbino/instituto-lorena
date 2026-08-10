@@ -22,19 +22,27 @@ function bearer(): string {
 
 async function ofPost(path: string, body: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
   const token = bearer()
-  if (!token) throw new Error('BANCOMCP_ACCESS_TOKEN/BANCOMCP_TOKEN ausente')
+  if (!token) {
+    throw new Error('Banco MCP sem credencial: falta o secret BANCOMCP_ACCESS_TOKEN (ou BANCOMCP_TOKEN) no Supabase.')
+  }
   const res = await fetch(`${OF}${path}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
-  if (!res.ok || data.ok === false) {
-    const msg =
-      (data as { error?: string; message?: string }).message ||
-      (data as { error?: string }).error ||
-      `http_${res.status}`
-    throw new Error(String(msg))
+  const err = data.error != null ? String(data.error) : ''
+  const upstreamMsg = data.message != null ? String(data.message) : ''
+
+  // O MCP.AI devolve 200 com { error, message } em caso de assinatura vencida / chave
+  // inválida — sem `ok:false`. Sem esta checagem isso passava como "resultado" e virava
+  // "nenhuma conexão" mais adiante, escondendo o motivo real.
+  if (!res.ok || data.ok === false || err) {
+    const detail = upstreamMsg || err || `http_${res.status}`
+    if (res.status === 401 || res.status === 403 || err === 'unauthorized') {
+      throw new Error(`Banco MCP recusou a credencial (${res.status}). Atualize o secret BANCOMCP_ACCESS_TOKEN. Detalhe: ${detail}`)
+    }
+    throw new Error(`Banco MCP ${path}: ${detail}`)
   }
   return (data.result as Record<string, unknown>) ?? data
 }
@@ -50,6 +58,33 @@ type OfAccount = {
   number?: string
   type?: string
   balance?: number
+}
+
+// Conexão UPDATED com 0 contas quase sempre é consentimento incompleto no banco, e o
+// motivo exato vem em código dentro de statusDetail.<produto>.warnings. Traduz pra uma
+// instrução que a clínica consegue executar — "sem contas compartilhadas" não ajuda.
+const WARNING_PT: Record<string, string> = {
+  ACCT_001:
+    'o consentimento foi criado SEM a permissão de contas (ACCOUNTS_ALL): refaça a autorização marcando "dados de conta / saldos e lançamentos"',
+  ACCT_002:
+    'a conta está PENDENTE DE APROVAÇÃO no banco: em conta PJ com múltipla alçada, o outro administrador precisa aprovar o compartilhamento no app do Itaú',
+  CC_002: 'o cartão de crédito está pendente de aprovação no banco',
+  TXN_002: 'sem conta compartilhada não há lançamentos para puxar',
+  LOAN_001: 'sem permissão de operações de crédito (não atrapalha o extrato)',
+}
+
+function warningsNotice(statusDetail: unknown): string | null {
+  if (!statusDetail || typeof statusDetail !== 'object') return null
+  const codes = new Set<string>()
+  for (const produto of Object.values(statusDetail as Record<string, unknown>)) {
+    const warns = (produto as { warnings?: Array<{ code?: string }> } | null)?.warnings
+    for (const w of warns ?? []) if (w?.code) codes.add(String(w.code))
+  }
+  // LOAN_001 sozinho não explica extrato vazio — só entra se houver outro aviso junto.
+  const relevantes = [...codes].filter((c) => c !== 'LOAN_001' || codes.size === 1)
+  const frases = relevantes.map((c) => WARNING_PT[c] ?? `aviso ${c} do banco`)
+  if (frases.length === 0) return null
+  return `O banco respondeu, mas ${frases.join('; ')}.`
 }
 
 Deno.serve(async (req) => {
@@ -87,7 +122,9 @@ Deno.serve(async (req) => {
       } catch (e) {
         status = { error: e instanceof Error ? e.message : String(e) }
       }
-      return json({ ok: true, connections, accounts, status })
+      const totalContas = Number(accounts?.total ?? (accounts?.results as unknown[] | undefined)?.length ?? 0)
+      const notice = totalContas === 0 ? warningsNotice(status?.statusDetail) : null
+      return json({ ok: true, connections, accounts, status, notice })
     }
 
     // link + sync precisam de JWT de usuário (RLS) OU cron+service_role+tenant_id
@@ -120,7 +157,15 @@ Deno.serve(async (req) => {
                   String(c.connector_name).toLowerCase() === item.toLowerCase(),
               )
             : list[0]) ?? null
-        if (!conn) return json({ error: 'no_connection', message: 'Nenhuma conexão Open Finance no Banco MCP.' }, 404)
+        if (!conn) {
+          return json({
+            ok: false,
+            accountsLinked: 0,
+            inserted: 0,
+            notice: 'Nenhum banco conectado no Banco MCP. Conecte pelo widget e tente de novo.',
+            addConnectionUrl: connections.add_connection_url ?? null,
+          })
+        }
 
         const itemId = String(conn.item_id)
         const bankName = String(conn.connector_name ?? 'Open Finance')
@@ -129,15 +174,34 @@ Deno.serve(async (req) => {
         const notice = accountsRes.notice ? String(accountsRes.notice) : null
 
         if (results.length === 0) {
+          // Sem conta compartilhada não há o que ligar. O motivo verdadeiro está no status
+          // da conexão (ex.: LOGIN_ERROR / USER_AUTHORIZATION_NOT_GRANTED) — devolve junto,
+          // senão a tela só diz "sem contas" e ninguém sabe o que fazer.
+          let itemStatus: Record<string, unknown> | null = null
+          try {
+            itemStatus = await ofPost('/connections/status', { item: itemId })
+          } catch {
+            // status é extra — não derruba o link por causa dele
+          }
+          const st = String(itemStatus?.status ?? '')
+          const exec = String(itemStatus?.executionStatus ?? '')
+          const precisaLogin = st === 'LOGIN_ERROR' || exec.includes('AUTHORIZATION_NOT_GRANTED')
+          const avisos = warningsNotice(itemStatus?.statusDetail)
+          const motivo = precisaLogin
+            ? `${bankName}: o banco não concedeu a autorização (${st}${exec ? ` / ${exec}` : ''}). Refaça o login pelo "Reautorizar no banco" e MARQUE as contas no consentimento.`
+            : avisos
+              ? `${bankName}: ${avisos} Use "Reautorizar no banco" para refazer o consentimento.`
+              : (notice ??
+                'Conexão ativa, mas sem contas compartilhadas. Autorize as contas no app do banco (Open Finance / múltipla alçada) ou reconecte selecionando as contas.')
           return json({
             ok: false,
             bankName,
             itemId,
             accountsLinked: 0,
             inserted: 0,
-            notice:
-              notice ??
-              'Conexão ativa, mas sem contas compartilhadas. Autorize as contas no app do banco (Open Finance / múltipla alçada) ou reconecte selecionando as contas.',
+            itemStatus: st || null,
+            executionStatus: exec || null,
+            notice: motivo,
             reconnectUrl: conn.reconnect_url ?? null,
             addConnectionUrl: connections.add_connection_url ?? null,
           })
@@ -161,15 +225,24 @@ Deno.serve(async (req) => {
             updated_at: new Date().toISOString(),
             ...(tenantId && isCron ? { tenant_id: tenantId } : {}),
           }
-          const { data: existing } = await db
+          // Erro de escrita aqui NÃO pode passar batido: sem isso a tela dizia
+          // "banco conectado, N contas" com o banco de dados vazio (RLS barrando, coluna
+          // faltando) e ninguém descobria até o extrato não chegar.
+          const { data: existing, error: selErr } = await db
             .from('fin_accounts')
             .select('id')
             .eq('of_account_id', ofAccountId)
             .maybeSingle()
+          if (selErr) throw new Error(`fin_accounts (busca ${ofAccountId}): ${selErr.message}`)
           if (existing) {
-            await db.from('fin_accounts').update(row).eq('id', (existing as { id: string }).id)
+            const { error: updErr } = await db
+              .from('fin_accounts')
+              .update(row)
+              .eq('id', (existing as { id: string }).id)
+            if (updErr) throw new Error(`fin_accounts (atualizar ${ofAccountId}): ${updErr.message}`)
           } else {
-            await db.from('fin_accounts').insert(row)
+            const { error: insErr } = await db.from('fin_accounts').insert(row)
+            if (insErr) throw new Error(`fin_accounts (criar ${ofAccountId}): ${insErr.message}`)
           }
           linked += 1
         }

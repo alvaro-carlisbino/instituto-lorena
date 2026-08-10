@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient'
+import { edgeErrorMessage } from '@/lib/edgeError'
 
 export type BlingStatus = {
   connected: boolean
@@ -62,39 +63,10 @@ export async function fetchBlingCatalog(refresh = false): Promise<{ items: Bling
   const { data, error } = await supabase.functions.invoke('crm-bling', {
     body: { action: 'list_products', refresh },
   })
-  if (error) {
-    const ctx = (error as { context?: { body?: unknown } }).context
-    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
-    throw new Error(String(msg || 'Falha ao listar catálogo'))
-  }
+  if (error) throw new Error(await edgeErrorMessage(error, 'Falha ao listar catálogo'))
   const p = (data ?? {}) as { ok?: boolean; items?: BlingCatalogItem[]; fetchedAt?: string; message?: string }
   if (!p.ok) throw new Error(String(p.message || 'Falha ao listar catálogo'))
   return { items: Array.isArray(p.items) ? p.items : [], fetchedAt: p.fetchedAt ?? null }
-}
-
-/**
- * Extrai o motivo REAL de um erro de edge function.
- *
- * `FunctionsHttpError.context` é o `Response` cru, e `context.body` é um ReadableStream —
- * NUNCA uma string. O `typeof ctx.body === 'string'` que existia aqui portanto dava sempre
- * falso, e todo erro não-2xx caía no `error.message` genérico do supabase-js: o famoso
- * "Edge Function returned a non-2xx status code" que o Kauan viu em 25/jul/2026 no lugar de
- * "o Bling recusou por X". O corpo precisa ser lido de verdade.
- */
-async function edgeErrorMessage(error: unknown, fallback: string): Promise<string> {
-  const ctx = (error as { context?: unknown }).context
-  if (ctx instanceof Response) {
-    try {
-      const txt = await ctx.clone().text()
-      try {
-        const p = JSON.parse(txt) as { message?: unknown; error?: unknown }
-        if (p.message) return String(p.message)
-        if (p.error) return String(p.error)
-      } catch { /* corpo não é JSON — usa o texto puro */ }
-      if (txt.trim()) return txt.slice(0, 400)
-    } catch { /* stream já consumido */ }
-  }
-  return String((error as { message?: unknown }).message || fallback)
 }
 
 async function invokeBling(body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -267,11 +239,7 @@ export async function startBlingConnect(returnUrl: string): Promise<void> {
   const { data, error } = await supabase.functions.invoke('crm-bling-oauth', {
     body: { action: 'authorize_url', returnUrl },
   })
-  if (error) {
-    const ctx = (error as { context?: { body?: unknown } }).context
-    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
-    throw new Error(String(msg || 'Falha ao iniciar conexão Bling'))
-  }
+  if (error) throw new Error(await edgeErrorMessage(error, 'Falha ao iniciar conexão Bling'))
   const p = (data ?? {}) as { ok?: boolean; authorizeUrl?: string; error?: string }
   if (!p.ok || !p.authorizeUrl) throw new Error(String(p.error || 'Falha ao iniciar conexão Bling'))
   window.location.assign(p.authorizeUrl)

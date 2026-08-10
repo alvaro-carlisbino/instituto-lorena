@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient'
+import { edgeErrorMessage } from '@/lib/edgeError'
 
 // BI do Tricopill — funil (CRM) + checkout (PagBank/e.Rede) + faturamento Bling.
 // Tudo agregado on-demand pela edge function crm-tricopill-bi para o polo ativo.
@@ -47,11 +48,7 @@ export async function fetchTricopillBi(params: { start: Date; end: Date }): Prom
   const { data, error } = await supabase.functions.invoke('crm-tricopill-bi', {
     body: { start: params.start.toISOString(), end: params.end.toISOString() },
   })
-  if (error) {
-    const ctx = (error as { context?: { body?: unknown } }).context
-    const msg = ctx && typeof ctx.body === 'string' ? ctx.body : error.message
-    throw new Error(String(msg || 'Falha ao carregar o BI do Tricopill'))
-  }
+  if (error) throw new Error(await edgeErrorMessage(error, 'Falha ao carregar o BI do Tricopill'))
   const p = (data ?? {}) as { ok?: boolean; message?: string } & Partial<TricopillBi>
   if (!p.ok || !p.funnel || !p.checkout || !p.bling) {
     throw new Error(String(p.message || 'Falha ao carregar o BI do Tricopill'))
