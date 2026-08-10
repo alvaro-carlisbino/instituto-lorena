@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Ban, FileSpreadsheet, Pencil, Plus } from 'lucide-react'
+import { Ban, FileSpreadsheet, Pencil, Plus, UserX } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -55,6 +55,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [motivo, setMotivo] = useState('')
   const [estorno, setEstorno] = useState('Em avaliação')
   const [obsCancel, setObsCancel] = useState('')
+  const [soSemPaciente, setSoSemPaciente] = useState(false)
   const [mes, setMes] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -84,9 +85,20 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
     return [...set].sort().reverse()
   }, [sales])
 
+  // Venda sem paciente vinculado não move card nem recebe lembrete: fica órfã.
+  // Acontece quando o telefone da planilha bate com dois leads (parente, cadastro
+  // duplicado) e casar por semelhança em saúde é mostrar a cirurgia de um
+  // paciente para outro. Então o sistema não adivinha, ele mostra a lista.
+  const semPaciente = useMemo(() => sales.filter((s) => !s.leadId && s.status !== 'cancelada'), [sales])
+
   const doMes = useMemo(
-    () => sales.filter((s) => s.soldAt.startsWith(mes) && s.status !== 'cancelada'),
-    [sales, mes],
+    () =>
+      sales.filter(
+        (s) =>
+          s.status !== 'cancelada' &&
+          (soSemPaciente ? !s.leadId : s.soldAt.startsWith(mes)),
+      ),
+    [sales, mes, soSemPaciente],
   )
 
   const resumo = useMemo(() => {
@@ -151,7 +163,16 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           <CardTitle>{kind === 'cirurgia' ? 'Vendas cirúrgicas' : 'Vendas de protocolo'}</CardTitle>
           <CardAction>
             <div className="flex items-center gap-2">
-              <Select value={mes} onValueChange={(v) => setMes(String(v ?? mes))}>
+              {semPaciente.length > 0 && (
+                <Button
+                  size="sm"
+                  variant={soSemPaciente ? 'default' : 'outline'}
+                  onClick={() => setSoSemPaciente((v) => !v)}
+                >
+                  <UserX className="size-3.5" /> Sem paciente ({semPaciente.length})
+                </Button>
+              )}
+              <Select value={mes} disabled={soSemPaciente} onValueChange={(v) => setMes(String(v ?? mes))}>
                 <SelectTrigger className="h-8 w-40">
                   <SelectValue />
                 </SelectTrigger>
@@ -173,7 +194,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           {doMes.length === 0 ? (
             <EmptyState
               icon={FileSpreadsheet}
-              title={loading ? 'Carregando…' : `Nenhuma venda em ${nomeDoMes(mes)}`}
+              title={loading ? 'Carregando…' : soSemPaciente ? 'Todas as vendas têm paciente' : `Nenhuma venda em ${nomeDoMes(mes)}`}
               description={loading ? undefined : 'Escolha outro mês ou registre a primeira venda.'}
             />
           ) : (
@@ -199,6 +220,9 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                       <TableCell>
                         <div className="font-medium">{s.patientName}</div>
                         {s.city && <div className="text-xs text-muted-foreground">{s.city}</div>}
+                        {!s.leadId && (
+                          <div className="text-xs text-destructive">sem paciente vinculado</div>
+                        )}
                       </TableCell>
                       <TableCell className="max-w-[200px] truncate">{s.procedureLabel}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">
@@ -253,7 +277,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
       {porMedico.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Por médico em {nomeDoMes(mes)}</CardTitle>
+            <CardTitle>Por médico em {soSemPaciente ? 'toda a base' : nomeDoMes(mes)}</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
               Quem vendeu, quanto vendeu e quantas executa. É o fechamento que hoje é digitado na mão no rodapé
               da planilha.
