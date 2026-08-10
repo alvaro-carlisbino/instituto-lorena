@@ -2,7 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { findLeadByPhone, insertInteraction, recordAutoReceipt } from './crm.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
 import { quoteGatewayFee } from './gatewayFees.ts'
-import { blingCreateSaleOrder, blingRecordReceivable } from './bling.ts'
+import { blingCreateSaleOrder, blingOrderLabel, blingRecordReceivable } from './bling.ts'
 import { autoShipToCart, type AutoShipResult } from './melhorEnvio.ts'
 import { sendEmail } from './resend.ts'
 import { sendSaleReceiptToGroup } from './saleReceipt.ts'
@@ -935,7 +935,7 @@ export async function finalizeSubscriptionCycle(
     if (leadId) {
       await insertInteraction(admin, {
         leadId, patientName: String(synthLead.patient_name), channel: 'system', direction: 'system', author: 'Bling',
-        content: `📦 Assinatura: pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos) — ciclo ${cycle}.${finNota}`,
+        content: `📦 Assinatura: pedido criado no Bling (${blingOrderLabel(out)}) — ciclo ${cycle}.${finNota}`,
         tenantId: blingTenant,
       }).catch(() => {})
     }
@@ -1167,7 +1167,7 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
           : ''
         await insertInteraction(admin, {
           leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author: 'Bling',
-          content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).${nfeNote}${fbNote}`, tenantId: blingTenant,
+          content: `📦 Pedido criado no Bling (${blingOrderLabel(out)}).${nfeNote}${fbNote}`, tenantId: blingTenant,
         })
       }
     } catch (e) {

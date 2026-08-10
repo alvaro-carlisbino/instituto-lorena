@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { buildBlingCatalog, blingCreateSaleOrder, blingEmitNfe, blingFindOrCreateContato, getValidBlingToken } from '../_shared/bling.ts'
+import { buildBlingCatalog, blingCreateSaleOrder, blingEmitNfe, blingFindOrCreateContato, blingOrderLabel, getValidBlingToken } from '../_shared/bling.ts'
 import { resolveCepBrasil } from '../_shared/cep.ts'
 import { PAGBANK_KITS } from '../_shared/pagbank.ts'
 import { REDE_KITS, inferRedeKit } from '../_shared/rede.ts'
@@ -172,7 +172,7 @@ Deno.serve(async (req) => {
     const amountCents = PAGBANK_KITS[kit]?.amountCents ?? 19900
     try {
       const out = await blingCreateSaleOrder(admin, tenantId, { kit, amountCents, customerName: 'Pedido de teste' })
-      return json({ ok: true, orderId: out.orderId, bottles: out.bottles })
+      return json({ ok: true, orderId: out.orderId, bottles: out.bottles, frascos: out.frascos, label: blingOrderLabel(out) })
     } catch (e) {
       return json({ ok: false, error: 'bling_order_failed', message: e instanceof Error ? e.message : String(e) }, 502)
     }
@@ -250,11 +250,11 @@ Deno.serve(async (req) => {
         leadId, patientName: String(cad.nomeCompleto || lead.patient_name || 'Cliente'), channel: 'system', direction: 'system',
         author: 'Bling',
         content: kit
-          ? `📦 Pedido relançado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`
+          ? `📦 Pedido relançado no Bling (${blingOrderLabel(out)}).`
           : `📦 Pedido AVULSO relançado no Bling (#${out.orderId ?? '?'}): ${description}. Confira itens/estoque no Bling.`,
         tenantId: 'tricopill',
       })
-      return json({ ok: true, orderId: out.orderId, bottles: out.bottles })
+      return json({ ok: true, orderId: out.orderId, bottles: out.bottles, frascos: out.frascos, label: blingOrderLabel(out) })
     } catch (e) {
       return json({ ok: false, error: 'bling_order_failed', message: e instanceof Error ? e.message : String(e) }, 502)
     }

@@ -844,7 +844,14 @@ export async function blingCreateSaleOrder(
   },
 ): Promise<{
   orderId: string | null
+  /** QUANTIDADE DA LINHA do pedido no Bling. Vale 1 quando a venda sai no produto próprio do
+   *  kit (a composição do Bling é que abate os N frascos). Não use para falar com o cliente. */
   bottles: number
+  /** Frascos de Tricopill que a venda REPRESENTA (kit 3+1 = 4). É este o número que vai em
+   *  mensagem/relatório; `bottles` mente sempre que o pedido sai no produto do kit. */
+  frascos: number
+  /** Linhas do pedido. Carrinho só de catálogo (shampoo etc.) tem `frascos` 0 e `itens` > 0. */
+  itens: number
   /** true: o contato REAL não pôde ser criado/achado e o pedido saiu no contato GENÉRICO. */
   contatoFallback: boolean
   nfe?: { nfeId: string | null; numero?: string; situacao?: string; transmitted: boolean; error?: string }
@@ -939,6 +946,20 @@ export async function blingCreateSaleOrder(
   const itens = cartItens.length
     ? cartItens
     : [{ produto: { id: Number(productId) || productId }, descricao: itemDescricao, quantidade: bottles, valor: valorUnit }]
+
+  // Frascos REAIS da venda (o que o cliente leva), separado de `bottles` (linha do pedido).
+  // Quando o pedido sai no produto próprio do kit, a linha é 1 e quem abate os 4/6 frascos é a
+  // composição do Bling — usar `bottles` na mensagem fazia o 3+1 aparecer como "1 frascos"
+  // (caso Carla Regina, 10/ago). Item de catálogo que não é Tricopill não conta frasco.
+  const kitFrascos = (k: string): number => Number(bottlesMap[k] ?? DEFAULT_KIT_BOTTLES[k] ?? 0) || 0
+  const frascos = cartItens.length
+    ? (Array.isArray(args.items) ? args.items : []).reduce((soma, it) => {
+      const kitKey = typeof it.kit === 'string' ? it.kit : (String(it.id ?? '').startsWith('kit:') ? String(it.id).slice(4) : '')
+      const qty = Number(it.qty) || 1
+      if (kitKey === 'bump_frasco') return soma + qty
+      return soma + kitFrascos(kitKey) * qty
+    }, 0)
+    : (overrideBottles || (hasKit ? (kitFrascos(args.kit) || 1) : 1))
 
   // ACRÉSCIMO (pago MAIOR que os itens): juros do parcelado no cartão. O total cobrado do
   // cliente (produtoReais) fica ACIMA do preço de tabela dos itens. Antes a diferença era
@@ -1124,7 +1145,17 @@ export async function blingCreateSaleOrder(
       contatoNome: args.customerName,
     }).catch((e) => ({ nfeId: null, transmitted: false, error: e instanceof Error ? e.message : String(e) }))
   }
-  return { orderId, bottles, contatoFallback, nfe, receivable }
+  return { orderId, bottles, frascos, itens: itens.length, contatoFallback, nfe, receivable }
+}
+
+/**
+ * Rótulo do pedido pra mensagem no chat: "#123, 4 frascos". Carrinho só de catálogo (shampoo,
+ * Grandha) não tem frasco de Tricopill — aí conta itens em vez de mentir "1 frascos".
+ */
+export function blingOrderLabel(out: { orderId: string | null; frascos: number; itens: number }): string {
+  const id = `#${out.orderId ?? '?'}`
+  if (out.frascos > 0) return `${id}, ${out.frascos} ${out.frascos === 1 ? 'frasco' : 'frascos'}`
+  return `${id}, ${out.itens} ${out.itens === 1 ? 'item' : 'itens'}`
 }
 
 /**

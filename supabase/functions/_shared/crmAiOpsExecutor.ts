@@ -4,7 +4,7 @@ import { insertInteraction } from './crm.ts'
 import { notifyAgents } from './notifyAgents.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
-import { createRedeIntent, createRedePix, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, SHAMPOO_ADDON } from './rede.ts'
+import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, SHAMPOO_ADDON } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
@@ -217,32 +217,6 @@ function pickupAdviceNote(entrega: EntregaSnapshot): string {
 }
 
 /** Host do gerador de imagem do QR Code Pix (override por env). O payload Pix (EMV) é público. */
-const PIX_QR_IMAGE_BASE = (Deno.env.get('PIX_QR_IMAGE_BASE') ?? 'https://api.qrserver.com/v1/create-qr-code/').trim()
-
-/**
- * Gera a imagem do QR Code Pix a partir do copia-e-cola (EMV) e devolve um DATA URI base64
- * (data:image/png;base64,...). A e.Rede raramente devolve a imagem do QR, e a W-API só aceita
- * imagem como base64 OU URL terminada em .png/.jpg — a URL do gerador (com query string) é
- * REJEITADA ("A URL da imagem deve ser nos formatos .png/.jpeg/.jpg"). Por isso baixamos o PNG
- * e mandamos em base64. Best-effort: devolve '' se o gerador falhar (o copia-e-cola no texto da
- * mensagem já resolve o pagamento). O PNG do QR é ~1KB, então o base64 trafega tranquilo no JSON.
- */
-async function pixQrImageDataUri(emv: string): Promise<string> {
-  try {
-    const sep = PIX_QR_IMAGE_BASE.includes('?') ? '&' : '?'
-    const url = `${PIX_QR_IMAGE_BASE}${sep}size=400x400&margin=12&format=png&data=${encodeURIComponent(emv)}`
-    const res = await fetch(url, { signal: AbortSignal.timeout(6000) })
-    if (!res.ok) return ''
-    const buf = new Uint8Array(await res.arrayBuffer())
-    if (buf.length === 0) return ''
-    let bin = ''
-    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]!)
-    return `data:image/png;base64,${btoa(bin)}`
-  } catch {
-    return ''
-  }
-}
-
 const CRM_OPS_MARKER = '<<<CRM_OPS>>>'
 
 /** URL pública do app (rota /pagar/:id do checkout de cartão). */

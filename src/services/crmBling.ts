@@ -215,15 +215,22 @@ export async function nfeEmitOrder(orderId: string, transmit?: boolean): Promise
   }
 }
 
-export async function createBlingTestOrder(kit: string): Promise<{ orderId: string | null; bottles: number }> {
+/** `label` = "#123, 4 frascos" já pronto pro toast, montado no servidor (só ele sabe se o kit
+ *  saiu como 1 linha com composição ou como N frascos avulsos). Fallback = edge function antiga. */
+function blingOrderLabel(p: Record<string, unknown>): string {
+  if (typeof p.label === 'string' && p.label) return p.label
+  return `#${p.orderId != null ? String(p.orderId) : '?'}`
+}
+
+export async function createBlingTestOrder(kit: string): Promise<{ orderId: string | null; label: string }> {
   const p = await invokeBling({ action: 'create_test_order', kit })
-  return { orderId: p.orderId != null ? String(p.orderId) : null, bottles: Number(p.bottles ?? 0) }
+  return { orderId: p.orderId != null ? String(p.orderId) : null, label: blingOrderLabel(p) }
 }
 
 /** Relança no Bling uma venda PAGA que não entrou (lead de outro canal, bug, etc.). */
-export async function retryBlingOrder(leadId: string, kit?: string): Promise<{ orderId: string | null; bottles: number }> {
+export async function retryBlingOrder(leadId: string, kit?: string): Promise<{ orderId: string | null; label: string }> {
   const p = await invokeBling({ action: 'retry_bling', leadId, ...(kit ? { kit } : {}) })
-  return { orderId: p.orderId != null ? String(p.orderId) : null, bottles: Number(p.bottles ?? 0) }
+  return { orderId: p.orderId != null ? String(p.orderId) : null, label: blingOrderLabel(p) }
 }
 
 /** Cria/atualiza o contato do cliente no Bling a partir do cadastro/endereço do lead

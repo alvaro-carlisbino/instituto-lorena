@@ -4,7 +4,7 @@ import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { PAGBANK_KITS, normalizeKitKey } from '../_shared/pagbank.ts'
 import { REDE_KITS, resolveRedeKit } from '../_shared/rede.ts'
 import { formatBRLCents, incrementCouponUse, quoteCoupon } from '../_shared/coupons.ts'
-import { blingCreateSaleOrder } from '../_shared/bling.ts'
+import { blingCreateSaleOrder, blingOrderLabel } from '../_shared/bling.ts'
 import { autoShipToCart } from '../_shared/melhorEnvio.ts'
 import { sendSaleReceiptToGroup } from '../_shared/saleReceipt.ts'
 
@@ -198,7 +198,7 @@ Deno.serve(async (req) => {
       })
       blingOrderId = out.orderId
       blingNote = kitKey
-        ? `Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`
+        ? `Pedido criado no Bling (${blingOrderLabel(out)}).`
         : cartItems.length
         ? `Pedido criado no Bling (#${out.orderId ?? '?'}) com ${cartItems.length} produto(s) do catálogo.`
         : `Pedido AVULSO criado no Bling (#${out.orderId ?? '?'}): ${label}. Confira os itens/estoque no Bling.`

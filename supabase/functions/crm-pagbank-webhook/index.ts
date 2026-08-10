@@ -3,7 +3,7 @@ import { insertInteraction, recordAutoReceipt } from '../_shared/crm.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { parsePagBankNotification } from '../_shared/pagbank.ts'
 import { incrementCouponUse } from '../_shared/coupons.ts'
-import { blingCreateSaleOrder } from '../_shared/bling.ts'
+import { blingCreateSaleOrder, blingOrderLabel } from '../_shared/bling.ts'
 import { autoShipToCart } from '../_shared/melhorEnvio.ts'
 
 // Webhook de pagamento do PagBank. Quando o pagamento confirma, move o lead para a
@@ -255,7 +255,7 @@ Deno.serve(async (req) => {
               channel: 'system',
               direction: 'system',
               author: 'Bling',
-              content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).`,
+              content: `📦 Pedido criado no Bling (${blingOrderLabel(out)}).`,
               tenantId,
             })
           } catch (e) {

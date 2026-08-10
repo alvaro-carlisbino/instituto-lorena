@@ -362,7 +362,7 @@ export function LeadChatThread({
     try {
       const { retryBlingOrder } = await import('@/services/crmBling')
       const res = await retryBlingOrder(leadId)
-      toast.success(`Pedido lançado no Bling (#${res.orderId ?? '?'}, ${res.bottles} frascos).`)
+      toast.success(`Pedido lançado no Bling (${res.label}).`)
       void crm.refreshChatFromSupabase?.()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao reenviar pro Bling')

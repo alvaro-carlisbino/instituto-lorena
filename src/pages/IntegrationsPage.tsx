@@ -101,7 +101,7 @@ export function IntegrationsPage() {
     setTestingOrder(true)
     try {
       const out = await createBlingTestOrder('3_meses')
-      toast.success(`Pedido de teste criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos). Confira no Bling.`)
+      toast.success(`Pedido de teste criado no Bling (${out.label}). Confira no Bling.`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao criar pedido de teste')
     } finally {

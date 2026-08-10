@@ -3,12 +3,38 @@ import { quoteGatewayFee } from './gatewayFees.ts'
 import { insertInteraction, recordAutoReceipt } from './crm.ts'
 import { normalizeKitKey } from './pagbank.ts'
 import { incrementCouponUse, quoteCoupon } from './coupons.ts'
-import { blingCreateSaleOrder } from './bling.ts'
+import { blingCreateSaleOrder, blingOrderLabel } from './bling.ts'
 import { sendEmail } from './resend.ts'
 import { internalSaleEmail, orderConfirmEmail, TEAM_EMAIL } from './emails.ts'
 import { autoShipToCart } from './melhorEnvio.ts'
 import { sendSaleReceiptToGroup } from './saleReceipt.ts'
 import { dispatchPurchaseConversions } from './conversions.ts'
+
+const PIX_QR_IMAGE_BASE = (Deno.env.get('PIX_QR_IMAGE_BASE') ?? 'https://api.qrserver.com/v1/create-qr-code/').trim()
+
+/**
+ * Gera a imagem do QR Code Pix a partir do copia-e-cola (EMV) e devolve um DATA URI base64
+ * (data:image/png;base64,...). A e.Rede raramente devolve a imagem do QR, e a W-API só aceita
+ * imagem como base64 OU URL terminada em .png/.jpg — a URL do gerador (com query string) é
+ * REJEITADA ("A URL da imagem deve ser nos formatos .png/.jpeg/.jpg"). Por isso baixamos o PNG
+ * e mandamos em base64. Best-effort: devolve '' se o gerador falhar (o copia-e-cola no texto da
+ * mensagem já resolve o pagamento). O PNG do QR é ~1KB, então o base64 trafega tranquilo no JSON.
+ */
+export async function pixQrImageDataUri(emv: string): Promise<string> {
+  try {
+    const sep = PIX_QR_IMAGE_BASE.includes('?') ? '&' : '?'
+    const url = `${PIX_QR_IMAGE_BASE}${sep}size=400x400&margin=12&format=png&data=${encodeURIComponent(emv)}`
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) })
+    if (!res.ok) return ''
+    const buf = new Uint8Array(await res.arrayBuffer())
+    if (buf.length === 0) return ''
+    let bin = ''
+    for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]!)
+    return `data:image/png;base64,${btoa(bin)}`
+  } catch {
+    return ''
+  }
+}
 
 /**
  * Kits do Tricopill no CARTÃO (e.Rede) — preço CHEIO, sem o desconto de 5% do Pix.
@@ -330,6 +356,52 @@ export async function createRedePix(
   const amountCents = productCents + freightCents
   const baseDesc = String(args.description ?? 'Pagamento').slice(0, 100)
   const description = freightCents > 0 ? `${baseDesc} + frete` : baseDesc
+
+  // RETRY NÃO GERA COBRANÇA NOVA. Quando a resposta da IA sai vazia e engole o link (ou o envio
+  // falha), o fluxo tenta de novo em segundos — e antes disso nascia UMA COBRANÇA POR TENTATIVA,
+  // deixando `pending` órfã no financeiro (6 clientes em 30 dias; caso Carla Regina 10/ago:
+  // 16:44 pending + 16:46 paga, mesmo kit, mesmo valor). Se já existe um Pix PENDENTE IDÊNTICO e
+  // recente pro mesmo lead, devolve o MESMO QR em vez de criar outro. Janela curta de propósito:
+  // o QR vale 24h, mas só o retry imediato é duplicata — meia hora depois é outra intenção
+  // de compra, e aí cobrança nova é o certo.
+  const REUSE_WINDOW_MINUTES = 30
+  if (args.leadId) {
+    const { data: pendentes } = await admin
+      .from('rede_payments')
+      .select('id, tid, pix_payload, description, kit, freight_cents, coupon_code, items')
+      .eq('tenant_id', args.tenantId)
+      .eq('lead_id', args.leadId)
+      .eq('method', 'pix')
+      .eq('status', 'pending')
+      .eq('amount_cents', amountCents)
+      .gte('created_at', new Date(Date.now() - REUSE_WINDOW_MINUTES * 60_000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(5)
+    const itemsKey = Array.isArray(args.items) && args.items.length ? JSON.stringify(args.items) : null
+    const gemea = ((pendentes ?? []) as Array<Record<string, unknown>>).find((r) =>
+      typeof r.pix_payload === 'string' && r.pix_payload
+      && String(r.description ?? '') === description.slice(0, 120)
+      && String(r.kit ?? '') === String(args.kit || '')
+      && Number(r.freight_cents ?? 0) === freightCents
+      && String(r.coupon_code ?? '') === String(coupon.applied ? coupon.code : '')
+      && (r.items == null ? null : JSON.stringify(r.items)) === itemsKey)
+    if (gemea) {
+      const qrTextReuso = String(gemea.pix_payload)
+      return {
+        id: String(gemea.id),
+        qrText: qrTextReuso,
+        // A e.Rede só devolve a imagem na criação — regenera o PNG do copia-e-cola pra quem
+        // consome `qrImage` (tela de links de pagamento) não ficar sem o QR no reuso.
+        qrImage: (await pixQrImageDataUri(qrTextReuso)) || null,
+        tid: gemea.tid != null ? String(gemea.tid) : null,
+        amountCents,
+        baseCents,
+        discountCents: coupon.discountCents,
+        couponCode: coupon.applied ? coupon.code : null,
+        freightCents,
+      }
+    }
+  }
 
   const id = shortId() // 16 hex → reference ≤ 16 alfanuméricos (limite da e.Rede)
 
@@ -784,7 +856,7 @@ export async function finalizeRedePaid(
             channel: 'system',
             direction: 'system',
             author: 'Bling',
-            content: `📦 Pedido criado no Bling (#${out.orderId ?? '?'}, ${out.bottles} frascos).${nfeNote}`,
+            content: `📦 Pedido criado no Bling (${blingOrderLabel(out)}).${nfeNote}`,
             tenantId: blingTenant,
           })
         }
