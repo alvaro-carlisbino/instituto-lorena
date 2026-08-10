@@ -533,6 +533,10 @@ verify_jwt = false
 [functions.crm-cirurgia-ics]
 verify_jwt = false
 
+# Empurra a cirurgia vendida para o MySQL do centro cirúrgico. Chamado por cron.
+[functions.crm-cirurgia-push]
+verify_jwt = false
+
 # Login do paciente nos apps (CPF + código). verify_jwt=false porque o paciente
 # AINDA NÃO tem sessão quando pede o código — é justamente o que esta função emite.
 # Proteções no handler: resposta neutra (não revela se o CPF existe), 60s entre

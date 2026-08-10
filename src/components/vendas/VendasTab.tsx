@@ -15,6 +15,7 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
@@ -30,6 +31,13 @@ import {
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dia = (iso: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR') : '—')
+
+const nomeDoMes = (m: string) => {
+  const [ano, mes] = m.split('-')
+  const d = new Date(Number(ano), Number(mes) - 1, 1)
+  const nome = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+  return nome.charAt(0).toUpperCase() + nome.slice(1)
+}
 
 const STATUS_LABEL: Record<ClinicSale['status'], string> = {
   vendida: 'Vendida',
@@ -47,6 +55,10 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [motivo, setMotivo] = useState('')
   const [estorno, setEstorno] = useState('Em avaliação')
   const [obsCancel, setObsCancel] = useState('')
+  const [mes, setMes] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
 
   const load = async () => {
     setLoading(true)
@@ -66,10 +78,18 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind])
 
-  const mesAtual = useMemo(() => {
-    const agora = new Date()
-    const prefixo = `${agora.getFullYear()}-${String(agora.getMonth() + 1).padStart(2, '0')}`
-    const doMes = sales.filter((s) => s.soldAt.startsWith(prefixo) && s.status !== 'cancelada')
+  /** Meses que existem nos dados, do mais novo para o mais velho. */
+  const mesesDisponiveis = useMemo(() => {
+    const set = new Set(sales.map((s) => s.soldAt.slice(0, 7)).filter(Boolean))
+    return [...set].sort().reverse()
+  }, [sales])
+
+  const doMes = useMemo(
+    () => sales.filter((s) => s.soldAt.startsWith(mes) && s.status !== 'cancelada'),
+    [sales, mes],
+  )
+
+  const resumo = useMemo(() => {
     const total = doMes.reduce((acc, s) => acc + s.valueCents, 0)
     return {
       qtd: doMes.length,
@@ -77,9 +97,11 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
       ticket: doMes.length > 0 ? Math.round(total / doMes.length) : 0,
       semData: sales.filter((s) => s.status !== 'cancelada' && !s.scheduledAt).length,
     }
-  }, [sales])
+  }, [doMes, sales])
 
-  const porMedico = useMemo(() => salesByDoctor(sales), [sales])
+  // O "por médico" acompanha o mês escolhido: é o fechamento que ela digita hoje
+  // no rodapé da planilha ("4 fechamentos, 37% de conversão").
+  const porMedico = useMemo(() => salesByDoctor(doMes), [doMes])
 
   const confirmarCancelamento = async () => {
     if (!cancelando) return
@@ -101,25 +123,25 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
         <Card>
           <CardContent className="pt-4">
             <p className="text-xs text-muted-foreground">Vendas no mês</p>
-            <p className="font-heading text-2xl">{mesAtual.qtd}</p>
+            <p className="font-heading text-2xl">{resumo.qtd}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
             <p className="text-xs text-muted-foreground">Faturamento do mês</p>
-            <p className="font-heading text-2xl">{brl(mesAtual.total)}</p>
+            <p className="font-heading text-2xl">{brl(resumo.total)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
             <p className="text-xs text-muted-foreground">Ticket médio</p>
-            <p className="font-heading text-2xl">{brl(mesAtual.ticket)}</p>
+            <p className="font-heading text-2xl">{brl(resumo.ticket)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
             <p className="text-xs text-muted-foreground">Vendidas sem data</p>
-            <p className="font-heading text-2xl">{mesAtual.semData}</p>
+            <p className="font-heading text-2xl">{resumo.semData}</p>
           </CardContent>
         </Card>
       </div>
@@ -128,17 +150,31 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
         <CardHeader>
           <CardTitle>{kind === 'cirurgia' ? 'Vendas cirúrgicas' : 'Vendas de protocolo'}</CardTitle>
           <CardAction>
-            <Button size="sm" onClick={() => setForm({ open: true, editing: null })}>
-              <Plus className="size-3.5" /> Nova venda
-            </Button>
+            <div className="flex items-center gap-2">
+              <Select value={mes} onValueChange={(v) => setMes(String(v ?? mes))}>
+                <SelectTrigger className="h-8 w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {mesesDisponiveis.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {nomeDoMes(m)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button size="sm" onClick={() => setForm({ open: true, editing: null })}>
+                <Plus className="size-3.5" /> Nova venda
+              </Button>
+            </div>
           </CardAction>
         </CardHeader>
         <CardContent>
-          {sales.length === 0 ? (
+          {doMes.length === 0 ? (
             <EmptyState
               icon={FileSpreadsheet}
-              title={loading ? 'Carregando…' : 'Nenhuma venda registrada'}
-              description={loading ? undefined : 'A primeira venda registrada aqui já entra nos relatórios por médico.'}
+              title={loading ? 'Carregando…' : `Nenhuma venda em ${nomeDoMes(mes)}`}
+              description={loading ? undefined : 'Escolha outro mês ou registre a primeira venda.'}
             />
           ) : (
             <div className="overflow-x-auto">
@@ -157,7 +193,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sales.map((s) => (
+                  {doMes.map((s) => (
                     <TableRow key={s.id} className={s.status === 'cancelada' ? 'opacity-60' : undefined}>
                       <TableCell className="whitespace-nowrap">{dia(s.soldAt)}</TableCell>
                       <TableCell>
@@ -217,7 +253,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
       {porMedico.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Por médico</CardTitle>
+            <CardTitle>Por médico em {nomeDoMes(mes)}</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
               Quem vendeu, quanto vendeu e quantas executa. É o fechamento que hoje é digitado na mão no rodapé
               da planilha.
