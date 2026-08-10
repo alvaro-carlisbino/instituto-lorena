@@ -1,4 +1,4 @@
-package br.com.institutolorena.lorena_equipe
+package br.com.tricopill.app
 
 import io.flutter.embedding.android.FlutterActivity
 
