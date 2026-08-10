@@ -195,8 +195,13 @@ export function FeedbackDashboardPage() {
                   {data.comentarios.map((c, i) => (
                     <TableRow key={i}>
                       <TableCell>{scoreBadge(c.score)}</TableCell>
-                      <TableCell className="font-medium">{c.nome}</TableCell>
-                      <TableCell className="text-muted-foreground">"{c.comment}"</TableCell>
+                      <TableCell className="truncate font-medium" title={c.nome}>{c.nome}</TableCell>
+                      {/* Comentário é o único texto sem limite de tamanho da tela; duas
+                          linhas mostram o suficiente para triar e o resto fica no title,
+                          sem deixar um desabafo longo esticar a linha inteira. */}
+                      <TableCell className="text-muted-foreground">
+                        <span className="line-clamp-2" title={c.comment}>"{c.comment}"</span>
+                      </TableCell>
                       <TableCell className="text-right text-xs text-muted-foreground">
                         {new Date(c.quando).toLocaleDateString('pt-BR')}
                       </TableCell>

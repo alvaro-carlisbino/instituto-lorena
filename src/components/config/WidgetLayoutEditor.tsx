@@ -60,7 +60,7 @@ export function WidgetLayoutEditor({ layout, onLayoutChange, helpId }: Props) {
         </Select>
       </div>
       {mode === 'grid' ? (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <div className="grid gap-1">
             <Label htmlFor={`${helpId}-col`} className="text-xs">Coluna (1 a 12)</Label>
             <Input

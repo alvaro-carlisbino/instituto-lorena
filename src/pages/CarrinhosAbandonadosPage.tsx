@@ -180,8 +180,10 @@ export function CarrinhosAbandonadosPage() {
                 return (
                   <TableRow key={c.sessionId} className={cn((c.alreadyCustomer || c.recovered) && 'opacity-55')}>
                     <TableCell>
-                      <div className="font-semibold text-foreground/90">{c.name ?? 'Sem nome'}</div>
-                      {c.phone ? <div className="text-xs text-muted-foreground">{c.phone}</div> : null}
+                      <div className="max-w-[11rem] truncate font-semibold text-foreground/90" title={c.name ?? undefined}>
+                        {c.name ?? 'Sem nome'}
+                      </div>
+                      {c.phone ? <div className="text-xs tabular-nums text-muted-foreground">{c.phone}</div> : null}
                       <div className="mt-1 flex flex-wrap gap-1">
                         {c.recovered ? <span className={cn(PILL, 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25')}>Recuperado ✓</span> : null}
                         {c.alreadyCustomer ? <span className={cn(PILL, 'bg-muted text-muted-foreground ring-border/40')}>Cliente antigo</span> : null}

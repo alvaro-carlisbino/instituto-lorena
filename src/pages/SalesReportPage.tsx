@@ -157,10 +157,14 @@ export function SalesReportPage() {
                         </TableCell>
                         <TableCell className="tabular-nums text-muted-foreground">{hora(r.paidAt)}</TableCell>
                         <TableCell className="font-medium">
-                          {r.customerName}
-                          {r.cpf ? <span className="ml-2 text-xs font-normal text-muted-foreground">CPF {r.cpf}</span> : null}
+                          {/* Nome (até 54) + CPF na mesma célula: sem teto, quebrava em
+                              três linhas e engordava a linha inteira do relatório. */}
+                          <span className="line-clamp-1 max-w-[13rem]" title={r.customerName}>{r.customerName}</span>
+                          {r.cpf ? <span className="text-xs font-normal tabular-nums text-muted-foreground">CPF {r.cpf}</span> : null}
                         </TableCell>
-                        <TableCell>{r.product}</TableCell>
+                        <TableCell>
+                          <span className="line-clamp-2 max-w-[13rem]" title={r.product}>{r.product}</span>
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-[0.7rem]">
                             {r.method === 'card' ? `Cartão${r.installments ? ` ${r.installments}x` : ''}` : 'Pix'}

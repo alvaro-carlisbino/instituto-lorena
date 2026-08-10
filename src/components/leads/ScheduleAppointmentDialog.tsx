@@ -125,10 +125,10 @@ export function ScheduleAppointmentDialog({ isOpen, onClose, leadId, onScheduled
           </SheetDescription>
         </SheetHeader>
         <div className="grid gap-4 px-4 py-4">
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Sala Preferida</Label>
+          <div className="grid grid-cols-1 items-start gap-1.5 sm:grid-cols-4 sm:items-center sm:gap-4">
+            <Label className="sm:text-right">Sala Preferida</Label>
             <Select value={roomId} onValueChange={(v) => v && setRoomId(v)}>
-              <SelectTrigger className="col-span-3 rounded-lg">
+              <SelectTrigger className="sm:col-span-3 rounded-lg">
                 <SelectValue placeholder="Selecione a sala" />
               </SelectTrigger>
               <SelectContent>
@@ -138,9 +138,9 @@ export function ScheduleAppointmentDialog({ isOpen, onClose, leadId, onScheduled
               </SelectContent>
             </Select>
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Duração</Label>
-            <div className="col-span-3 flex items-center gap-2">
+          <div className="grid grid-cols-1 items-start gap-1.5 sm:grid-cols-4 sm:items-center sm:gap-4">
+            <Label className="sm:text-right">Duração</Label>
+            <div className="sm:col-span-3 flex items-center gap-2">
               <Input
                 type="number"
                 min={5}
@@ -153,12 +153,12 @@ export function ScheduleAppointmentDialog({ isOpen, onClose, leadId, onScheduled
               <span className="text-sm text-muted-foreground">minutos</span>
             </div>
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Notas</Label>
+          <div className="grid grid-cols-1 items-start gap-1.5 sm:grid-cols-4 sm:items-center sm:gap-4">
+            <Label className="sm:text-right">Notas</Label>
             <Input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="col-span-3 rounded-lg"
+              className="sm:col-span-3 rounded-lg"
               placeholder="Ex: Primeira consulta..."
             />
           </div>

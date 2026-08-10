@@ -495,17 +495,22 @@ export function ResultadosPage() {
                   Nenhum lead perdido com motivo registrado no período.
                 </p>
               ) : (
-                <Table className="w-full text-xs">
+                // table-fixed para "Leads" respeitar w-20 e o motivo ficar com a sobra.
+                // Em layout automático a largura é só sugestão e, com truncate, a coluna
+                // de texto cede a folga inteira para a vizinha.
+                <Table className="w-full table-fixed text-xs">
                   <TableHeader>
                     <TableRow className="text-left text-muted-foreground">
                       <TableHead className="pb-2">Motivo</TableHead>
-                      <TableHead className="pb-2 text-right">Leads</TableHead>
+                      <TableHead className="w-20 pb-2 text-right">Leads</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {(data?.perdas ?? []).map((p) => (
                       <TableRow key={p.motivo} className="border-t border-border/20">
-                        <TableCell className="py-1.5">{p.motivo}</TableCell>
+                        {/* Motivo de perda é digitado à mão: mediana de 19 mas chega a 81
+                            caracteres nos dados reais, e aí quebrava em três linhas. */}
+                        <TableCell className="truncate py-1.5" title={p.motivo}>{p.motivo}</TableCell>
                         <TableCell className="py-1.5 text-right tabular-nums">{p.leads}</TableCell>
                       </TableRow>
                     ))}

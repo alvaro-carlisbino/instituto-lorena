@@ -206,7 +206,7 @@ export function FinAccountsPage() {
                 </div>
               </div>
               {accForm.kind === 'banco' ? (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="acc-bank">Banco</Label>
                     <Input id="acc-bank" value={accForm.bankName} onChange={(e) => setAccForm((f) => ({ ...f, bankName: e.target.value }))} placeholder="Itaú" />

@@ -262,9 +262,15 @@ export function TricopilReportsPage() {
           <TableBody>
             {(report?.sales ?? []).map((r, i) => (
               <TableRow key={i} className="hover:bg-muted/20">
-                <TableCell className="whitespace-nowrap py-2">{dt(r.paidAt)}</TableCell>
-                <TableCell className="py-2">{r.customerName}</TableCell>
-                <TableCell className="py-2">{r.product}</TableCell>
+                <TableCell className="whitespace-nowrap py-2 tabular-nums">{dt(r.paidAt)}</TableCell>
+                {/* Nome de cliente vai a 54 caracteres e produto a 52 nos dados reais:
+                    juntos numa linha de 7 colunas, os dois quebravam. */}
+                <TableCell className="py-2">
+                  <span className="line-clamp-1 max-w-[12rem]" title={r.customerName}>{r.customerName}</span>
+                </TableCell>
+                <TableCell className="py-2">
+                  <span className="line-clamp-2 max-w-[14rem]" title={r.product}>{r.product}</span>
+                </TableCell>
                 <TableCell className="py-2">{r.method === 'card' ? `Cartão${r.installments ? ` ${r.installments}x` : ''}` : 'Pix'}</TableCell>
                 <TableCell className="py-2 text-right tabular-nums text-muted-foreground">{r.freightCents ? brl(r.freightCents) : '—'}</TableCell>
                 <TableCell className="py-2 text-right tabular-nums font-medium">{brl(r.amountCents)}</TableCell>
@@ -300,12 +306,18 @@ export function TricopilReportsPage() {
           <TableBody>
             {shipments.map((s, i) => (
               <TableRow key={i} className="hover:bg-muted/20">
-                <TableCell className="py-2">{s.cliente}</TableCell>
-                <TableCell className="py-2 font-mono">{s.tracking ?? '—'}</TableCell>
+                <TableCell className="py-2">
+                  <span className="line-clamp-1 max-w-[11rem]" title={s.cliente}>{s.cliente}</span>
+                </TableCell>
+                <TableCell className="py-2 font-mono tabular-nums">{s.tracking ?? '—'}</TableCell>
                 <TableCell className="py-2">{s.status}</TableCell>
-                <TableCell className="py-2 text-muted-foreground">{s.service}</TableCell>
-                <TableCell className="whitespace-nowrap py-2">{dt(s.postedAt)}</TableCell>
-                <TableCell className="py-2 text-muted-foreground">{s.cidade}</TableCell>
+                <TableCell className="py-2 text-muted-foreground">
+                  <span className="line-clamp-1 max-w-[9rem]" title={s.service}>{s.service}</span>
+                </TableCell>
+                <TableCell className="whitespace-nowrap py-2 tabular-nums">{dt(s.postedAt)}</TableCell>
+                <TableCell className="py-2 text-muted-foreground">
+                  <span className="line-clamp-1 max-w-[9rem]" title={s.cidade}>{s.cidade}</span>
+                </TableCell>
                 <TableCell className="py-2 text-right tabular-nums">{s.priceCents ? brl(s.priceCents) : '—'}</TableCell>
               </TableRow>
             ))}

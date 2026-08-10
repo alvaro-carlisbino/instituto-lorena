@@ -324,12 +324,12 @@ export function NfePage() {
                           />
                         </TableCell>
                         <TableCell className="font-medium">
-                          {r.name}
-                          {r.canceled ? <span className="ml-2 text-xs text-muted-foreground">(cancelado)</span> : null}
+                          <span className="line-clamp-1 max-w-[14rem]" title={r.name}>{r.name}</span>
+                          {r.canceled ? <span className="text-xs text-muted-foreground">(cancelado)</span> : null}
                         </TableCell>
                         <TableCell className="tabular-nums">{fmtCpf(r.cpf)}</TableCell>
                         <TableCell className="text-right tabular-nums">{brl(r.valueCents)}</TableCell>
-                        <TableCell className="text-muted-foreground">{fmtDate(r.date)}</TableCell>
+                        <TableCell className="tabular-nums text-muted-foreground">{fmtDate(r.date)}</TableCell>
                         <TableCell className="text-muted-foreground tabular-nums">#{r.orderNumero || r.orderId}</TableCell>
                         <TableCell>
                           {r.emitting ? (
