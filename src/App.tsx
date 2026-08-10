@@ -8,6 +8,7 @@ import { AuthPage } from './pages/AuthPage'
 import { OnboardingPage } from './pages/OnboardingPage'
 import { PwaInstallBanner } from './components/PwaInstallBanner'
 import { BillingGate } from './components/BillingGate'
+import { FinanceOnly } from './components/FinanceOnly'
 import { CommandPalette } from './components/CommandPalette'
 import { RouteTransition } from './components/RouteTransition'
 import { SidebarProvider } from '@/components/ui/sidebar'
@@ -80,6 +81,7 @@ const FinAccountsPage = lazyPage(() => import('./pages/FinAccountsPage'), 'FinAc
 const ConciliacaoPage = lazyPage(() => import('./pages/ConciliacaoPage'), 'ConciliacaoPage')
 const ConciliacaoShospPage = lazyPage(() => import('./pages/ConciliacaoShospPage'), 'ConciliacaoShospPage')
 const CirurgiasVinculoPage = lazyPage(() => import('./pages/CirurgiasVinculoPage'), 'CirurgiasVinculoPage')
+const TricoscopiaPage = lazyPage(() => import('./pages/TricoscopiaPage'), 'TricoscopiaPage')
 const FluxoCaixaPage = lazyPage(() => import('./pages/FluxoCaixaPage'), 'FluxoCaixaPage')
 const RecorrentesPage = lazyPage(() => import('./pages/RecorrentesPage'), 'RecorrentesPage')
 const NfePage = lazyPage(() => import('./pages/NfePage'), 'NfePage')
@@ -92,13 +94,6 @@ const AlertasPagamentoPage = lazyPage(() => import('./pages/AlertasPagamentoPage
 const ImportShopPage = lazyPage(() => import('./pages/ImportShopPage'), 'ImportShopPage')
 const IntegracoesClinicaPage = lazyPage(() => import('./pages/IntegracoesClinicaPage'), 'IntegracoesClinicaPage')
 const ProtocolosPage = lazyPage(() => import('./pages/ProtocolosPage'), 'ProtocolosPage')
-const CentralVendasVendasPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasVendasPage')
-const CentralVendasFollowUpPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasFollowUpPage')
-const CentralVendasPosConsultaPage = lazyPage(
-  () => import('./pages/CentralVendasPage'),
-  'CentralVendasPosConsultaPage',
-)
-const CentralVendasCirurgiasPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasCirurgiasPage')
 const PontoPage = lazyPage(() => import('./pages/PontoPage'), 'PontoPage')
 const PontoGestaoPage = lazyPage(() => import('./pages/PontoGestaoPage'), 'PontoGestaoPage')
 const FormulariosRhPage = lazyPage(() => import('./pages/FormulariosRhPage'), 'FormulariosRhPage')
@@ -130,31 +125,28 @@ function AppRoutes() {
         <Route path="/tarefas" element={<TasksPage />} />
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/cirurgias-vinculo" element={<CirurgiasVinculoPage />} />
+        <Route path="/tricoscopia" element={<TricoscopiaPage />} />
         <Route path="/estoque" element={<EstoquePage />} />
         <Route path="/bipagem" element={<BipagemPage />} />
         <Route path="/compras" element={<ComprasPage />} />
-        <Route path="/contas-a-pagar" element={<ContasPagarPage />} />
-        <Route path="/gastos" element={<GastosControlePage />} />
-        <Route path="/contas-a-receber" element={<ContasReceberPage />} />
-        <Route path="/contas-caixa" element={<FinAccountsPage />} />
-        <Route path="/conciliacao" element={<ConciliacaoPage />} />
-        <Route path="/conciliacao-shosp" element={<ConciliacaoShospPage />} />
-        <Route path="/fluxo-caixa" element={<FluxoCaixaPage />} />
-        <Route path="/recorrentes" element={<RecorrentesPage />} />
+        <Route path="/contas-a-pagar" element={<FinanceOnly><ContasPagarPage /></FinanceOnly>} />
+        <Route path="/gastos" element={<FinanceOnly><GastosControlePage /></FinanceOnly>} />
+        <Route path="/contas-a-receber" element={<FinanceOnly><ContasReceberPage /></FinanceOnly>} />
+        <Route path="/contas-caixa" element={<FinanceOnly><FinAccountsPage /></FinanceOnly>} />
+        <Route path="/conciliacao" element={<FinanceOnly><ConciliacaoPage /></FinanceOnly>} />
+        <Route path="/conciliacao-shosp" element={<FinanceOnly><ConciliacaoShospPage /></FinanceOnly>} />
+        <Route path="/fluxo-caixa" element={<FinanceOnly><FluxoCaixaPage /></FinanceOnly>} />
+        <Route path="/recorrentes" element={<FinanceOnly><RecorrentesPage /></FinanceOnly>} />
         <Route path="/nfe" element={<NfePage />} />
         <Route path="/kits" element={<KitsPage />} />
         <Route path="/inventario" element={<InventarioPage />} />
         <Route path="/estoque-relatorios" element={<EstoqueRelatoriosPage />} />
         <Route path="/transferencias-estoque" element={<TransferenciasEstoquePage />} />
         <Route path="/conta-cirurgica" element={<ContaCirurgicaPage />} />
-        <Route path="/alertas-pagamento" element={<AlertasPagamentoPage />} />
-        <Route path="/importar-shop" element={<ImportShopPage />} />
+        <Route path="/alertas-pagamento" element={<FinanceOnly><AlertasPagamentoPage /></FinanceOnly>} />
+        <Route path="/importar-shop" element={<FinanceOnly><ImportShopPage /></FinanceOnly>} />
         <Route path="/integracoes-clinica" element={<IntegracoesClinicaPage />} />
         <Route path="/protocolos" element={<ProtocolosPage />} />
-        <Route path="/central-vendas" element={<CentralVendasVendasPage />} />
-        <Route path="/central-vendas/follow-up" element={<CentralVendasFollowUpPage />} />
-        <Route path="/central-vendas/pos-consulta" element={<CentralVendasPosConsultaPage />} />
-        <Route path="/central-vendas/cirurgias" element={<CentralVendasCirurgiasPage />} />
         <Route path="/ponto" element={<PontoPage />} />
         <Route path="/ponto-gestao" element={<PontoGestaoPage />} />
         <Route path="/rh-formularios" element={<FormulariosRhPage />} />
@@ -171,7 +163,7 @@ function AppRoutes() {
         <Route path="/pedidos" element={<TricopilOrdersPage />} />
         <Route path="/carrinhos-abandonados" element={<CarrinhosAbandonadosPage />} />
         <Route path="/tricopill-pedidos" element={<Navigate to="/pedidos" replace />} />
-        <Route path="/recebimentos" element={<TricopilFinancePage />} />
+        <Route path="/recebimentos" element={<FinanceOnly><TricopilFinancePage /></FinanceOnly>} />
         <Route path="/tricopill-financeiro" element={<Navigate to="/recebimentos" replace />} />
         <Route path="/assinaturas" element={<TricopilSubscriptionsPage />} />
         <Route path="/tricopill-assinaturas" element={<Navigate to="/assinaturas" replace />} />

@@ -86,6 +86,40 @@ const TRIAGE_MAPPING: Record<string, { pipelineId: string; stageId: string }> = 
   '5': { pipelineId: 'pipeline-tratamento-capilar', stageId: 'tc-triagem' },
 }
 
+/**
+ * Pipeline dono da triagem. O tenant sai DAQUI, não de um slug cravado: a triagem pertence a
+ * quem é dono dos pipelines para onde o TRIAGE_MAPPING move o lead.
+ */
+const TRIAGE_OWNER_PIPELINE_ID = 'pipeline-clinica'
+
+/**
+ * A triagem (menu 1–5 da Sofia) é da CLÍNICA: o texto abre com "Instituto Lorena Visentainer" e o
+ * TRIAGE_MAPPING só aponta para pipelines da clínica. Quem decide se ela roda é a LINHA que recebeu
+ * a mensagem (`resolveConversationTenantId` — conversa segue a linha), não o cadastro da pessoa.
+ *
+ * Sem esta trava, cliente do Tricopill falando com o bot de VENDAS caía na triagem da clínica de
+ * duas formas: recebia "escolha o melhor tipo de consulta" ao cair num stage de entrada, e um "1"
+ * (que na venda é *um frasco*) movia o lead para `pipeline-tratamento-capilar` — o pedido some do
+ * funil de vendas e reaparece no CRM da clínica. Caso Luana 10/ago.
+ */
+async function triageAppliesToConversation(admin: SupabaseClient, leadId: string): Promise<boolean> {
+  try {
+    const [ownerRow, conversationTenant] = await Promise.all([
+      admin.from('pipelines').select('tenant_id').eq('id', TRIAGE_OWNER_PIPELINE_ID).maybeSingle(),
+      resolveConversationTenantId(admin, leadId),
+    ])
+    const ownerTenant = String(
+      (ownerRow.data as { tenant_id?: string } | null)?.tenant_id ?? '',
+    ).trim()
+    // Sem dono resolvido não dá pra afirmar que é a clínica: FAIL-CLOSED (não dispara triagem).
+    if (!ownerTenant) return false
+    return String(conversationTenant ?? '').trim() === ownerTenant
+  } catch (e) {
+    console.error('[triagem] falha ao resolver tenant da conversa:', e instanceof Error ? e.message : String(e))
+    return false
+  }
+}
+
 export type TriageOption = '1' | '2' | '3' | '4' | '5'
 
 /** Rótulo humano de cada opção — usado no eco determinístico da escolha ao paciente. */
@@ -1012,7 +1046,7 @@ export async function runWhatsappAiAutoReply(
     .eq('id', options.leadId)
     .maybeSingle()
 
-  if (lead) {
+  if (lead && await triageAppliesToConversation(admin, options.leadId)) {
     const isEntry = lead.stage_id === 'novo' || lead.stage_id === 'tc-novo'
     if (isEntry) {
       const normalized = options.aiInboundUserText.trim()
@@ -1381,7 +1415,7 @@ export async function runManychatAiAutoReply(
     ? 'meta'
     : 'whatsapp'
 
-  if (lead) {
+  if (lead && await triageAppliesToConversation(admin, options.leadId)) {
     const isEntry = lead.stage_id === 'novo' || lead.stage_id === 'tc-novo'
     if (isEntry) {
       const normalized = options.aiInboundUserText.trim()

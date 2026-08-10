@@ -160,18 +160,46 @@ async function coerceOwnerIdToExistingAppUser(
   return fallback
 }
 
-export async function resolveDefaultRouting(admin: SupabaseClient): Promise<{
+/**
+ * Roteamento de entrada de um lead sem linha amarrada.
+ *
+ * `tenantId` é OBRIGATÓRIO na prática: sem ele esta função pegava o pipeline mais ANTIGO da tabela
+ * inteira — sempre `pipeline-clinica` (27/abr, o primeiro que existiu) — e todo lead nascia no funil
+ * da clínica, em qualquer polo. Junto com o stage de entrada `novo`, era o que fazia o Tricopill
+ * aparecer no CRM da clínica e receber a triagem "escolha o tipo de consulta". Caso Luana 10/ago.
+ */
+export async function resolveDefaultRouting(
+  admin: SupabaseClient,
+  tenantId?: string | null,
+): Promise<{
   ownerId: string
   pipelineId: string
   stageId: string
 }> {
-  const { data: pipelineRows } = await admin
+  const tenant = String(tenantId ?? '').trim()
+
+  const pipelineQuery = admin
     .from('pipelines')
     .select('id')
     .order('created_at', { ascending: true })
     .limit(1)
+  const { data: pipelineRows } = await (tenant ? pipelineQuery.eq('tenant_id', tenant) : pipelineQuery)
 
   let pipelineId = pipelineRows?.[0]?.id ? String(pipelineRows[0].id) : ''
+
+  // Tenant existe mas não tem pipeline: cair no global manteria o lead no funil da clínica, que é
+  // o bug. Não dá pra deixar o lead sem funil, então usa o global — mas GRITA, porque significa
+  // polo sem funil configurado.
+  if (!pipelineId && tenant) {
+    console.error('[routing] tenant sem pipeline próprio, caindo no mais antigo global', { tenant })
+    const { data: globalRows } = await admin
+      .from('pipelines')
+      .select('id')
+      .order('created_at', { ascending: true })
+      .limit(1)
+    pipelineId = globalRows?.[0]?.id ? String(globalRows[0].id) : ''
+  }
+
   if (!pipelineId) {
     pipelineId = 'pipeline-clinica'
     await admin.from('pipelines').upsert({ id: pipelineId, name: 'Pipeline Clinica', board_config: {} })
@@ -283,15 +311,20 @@ export async function resolveRoutingForInstance(
   admin: SupabaseClient,
   instanceId: string | null,
 ): Promise<{ ownerId: string; pipelineId: string; stageId: string }> {
-  const fallback = await resolveDefaultRouting(admin)
-  if (!instanceId) return fallback
+  if (!instanceId) return await resolveDefaultRouting(admin)
   const { data: row } = await admin
     .from('whatsapp_channel_instances')
-    .select('entry_pipeline_id, entry_stage_id, default_owner_id')
+    .select('entry_pipeline_id, entry_stage_id, default_owner_id, tenant_id')
     .eq('id', instanceId)
     .maybeSingle()
-  if (!row) return fallback
+  if (!row) return await resolveDefaultRouting(admin)
   const r = row as Record<string, unknown>
+  // Fallback no tenant DA LINHA: linha do Tricopill sem entry configurado não pode cair no funil
+  // da clínica só porque ele é o pipeline mais antigo do banco.
+  const fallback = await resolveDefaultRouting(
+    admin,
+    r.tenant_id != null && String(r.tenant_id).trim() ? String(r.tenant_id).trim() : null,
+  )
   const rawOwner =
     r.default_owner_id != null && String(r.default_owner_id).trim()
       ? String(r.default_owner_id).trim()
@@ -385,12 +418,12 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
 
   const newLeadRouting = instanceId
     ? await resolveRoutingForInstance(admin, instanceId)
-    : await resolveDefaultRouting(admin)
+    : await resolveDefaultRouting(admin, input.tenantId)
 
   const ownerIdForCreate = input.ownerId?.trim() || newLeadRouting.ownerId
   const pipelineIdForCreate = input.pipelineId?.trim() || newLeadRouting.pipelineId
   const stageIdForCreate = input.stageId?.trim() || newLeadRouting.stageId
-  const routingFallback = await resolveDefaultRouting(admin)
+  const routingFallback = await resolveDefaultRouting(admin, input.tenantId)
 
   if (existingId) {
     const { data: cur, error: curErr } = await admin

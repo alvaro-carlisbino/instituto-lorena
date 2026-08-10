@@ -25,6 +25,7 @@ import {
   List,
   ListChecks,
   MessagesSquare,
+  Microscope,
   Monitor,
   PackageCheck,
   PackageOpen,
@@ -67,6 +68,8 @@ export type NavPermissions = {
   canRouteLeads: boolean
   canManageUsers: boolean
   canViewTvPanel: boolean
+  /** Financeiro (extrato, contas, conciliação, fluxo de caixa) — só financeiro@/gerencia@. */
+  canViewFinance: boolean
 }
 
 export type NavContext = {
@@ -132,6 +135,9 @@ const isSales = (ctx: NavContext) => ctx.isSalesPolo
 const canRoute = (ctx: NavContext) => ctx.permissions.canRouteLeads
 const canBoards = (ctx: NavContext) => ctx.permissions.canEditBoards
 const canAdmin = (ctx: NavContext) => ctx.permissions.canManageUsers
+// Financeiro é dado restrito: a RLS de fin_*/payable_installments já barra no banco, aqui
+// é só pra não oferecer tela que voltaria vazia.
+const canFinance = (ctx: NavContext) => ctx.permissions.canViewFinance
 
 export const NAV_DESTINATIONS: NavDestination[] = [
   // ── Início
@@ -211,6 +217,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: (ctx) => isClinic(ctx) && canRoute(ctx),
   },
   {
+    id: 'tricoscopia',
+    path: '/tricoscopia',
+    label: 'Tricoscopia',
+    icon: Microscope,
+    group: 'clinica',
+    keywords: ['hairmetrix', 'canfield', 'mirror', 'densidade', 'folículos', 'exame', 'couro cabeludo', 'miniaturização'],
+    visible: (ctx) => isClinic(ctx) && canRoute(ctx),
+  },
+  {
     id: 'agenda',
     path: '/agenda',
     label: 'Agenda',
@@ -237,16 +252,6 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     group: 'clinica',
     keywords: ['tratamento', 'sessões', 'capilar'],
     visible: (ctx) => isClinic(ctx) && canRoute(ctx),
-  },
-  {
-    id: 'central-vendas',
-    path: '/central-vendas',
-    label: 'Central de Vendas',
-    icon: HandCoins,
-    group: 'clinica',
-    keywords: ['venda', 'follow-up', 'cirurgia', 'aline', 'ingrid', 'fechamento', 'proposta', 'agendar'],
-    visible: (ctx) => isClinic(ctx) && canRoute(ctx),
-    mobilePriority: 5,
   },
 
   // ── Vendas
@@ -334,7 +339,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: Wallet,
     group: 'financeiro',
     keywords: ['pagamentos', 'pix', 'cartão', 'entradas'],
-    visible: (ctx) => isSales(ctx) && canRoute(ctx),
+    visible: (ctx) => canFinance(ctx) && isSales(ctx) && canRoute(ctx),
   },
   {
     id: 'contas-receber',
@@ -343,7 +348,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: HandCoins,
     group: 'financeiro',
     keywords: ['cobrança', 'inadimplência', 'a receber'],
-    visible: canBoards,
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
     id: 'contas-pagar',
@@ -352,7 +357,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: CalendarClock,
     group: 'financeiro',
     keywords: ['fornecedor', 'boleto', 'despesas', 'vencimento'],
-    visible: canBoards,
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
     id: 'gastos',
@@ -361,7 +366,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: FileSpreadsheet,
     group: 'financeiro',
     keywords: ['despesas', 'custos', 'categorias'],
-    visible: canBoards,
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
     id: 'contas-caixa',
@@ -370,7 +375,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: Landmark,
     group: 'financeiro',
     keywords: ['banco', 'saldo', 'conta corrente'],
-    visible: canBoards,
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
     id: 'recorrentes',
@@ -379,7 +384,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: Repeat,
     group: 'financeiro',
     keywords: ['assinatura', 'mensalidade', 'fixo'],
-    visible: canBoards,
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
     id: 'conciliacao',
@@ -388,7 +393,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: ArrowLeftRight,
     group: 'financeiro',
     keywords: ['extrato', 'bater', 'ofx', 'banco'],
-    visible: canBoards,
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
     id: 'conciliacao-shosp',
@@ -397,7 +402,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: ArrowLeftRight,
     group: 'financeiro',
     keywords: ['shosp', 'vendas', 'extrato', 'banco', 'bater', 'divergencia'],
-    visible: (ctx) => isClinic(ctx) && canBoards(ctx),
+    visible: (ctx) => canFinance(ctx) && isClinic(ctx) && canBoards(ctx),
   },
   {
     id: 'alertas-pagamento',
@@ -406,7 +411,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: Bell,
     group: 'financeiro',
     keywords: ['aviso', 'vencido', 'atraso'],
-    visible: canBoards,
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
     id: 'fluxo-caixa',
@@ -415,7 +420,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: TrendingUp,
     group: 'financeiro',
     keywords: ['projeção', 'saldo futuro', 'dre'],
-    visible: canBoards,
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
     id: 'importar-shop',
@@ -424,7 +429,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: FileSpreadsheet,
     group: 'financeiro',
     keywords: ['shopee', 'planilha', 'importação'],
-    visible: canBoards,
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
     id: 'links-pagamento',
@@ -441,7 +446,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: Ticket,
     group: 'financeiro',
     keywords: ['desconto', 'promoção', 'voucher'],
-    visible: isSales,
+    visible: (ctx) => isSales(ctx),
   },
   {
     id: 'relatorios-vendas-mes',
@@ -450,7 +455,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: FileSpreadsheet,
     group: 'financeiro',
     keywords: ['mensal', 'faturamento', 'fechamento'],
-    visible: isSales,
+    visible: (ctx) => isSales(ctx),
   },
 
   // ── Estoque e compras
