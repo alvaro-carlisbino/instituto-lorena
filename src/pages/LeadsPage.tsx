@@ -67,6 +67,30 @@ import { cn } from '@/lib/utils'
 
 const TABLE_COLUMNS = ['patient_name', 'phone', 'pipeline_id', 'stage_id', 'owner_id', 'source', 'temperature', 'summary'] as const
 
+/**
+ * Largura por coluna. Sem isto o navegador reparte a largura por igual entre as dez
+ * colunas: "Telefone" ficava com 95px, `+55 11 91234-2222` quebrava em TRÊS linhas e a
+ * linha inteira ia a 101px de altura — cinco leads por tela em 800px, e a tabela ainda
+ * estourava para o lado. Quem tem texto de tamanho conhecido (telefone, etiquetas) ganha
+ * largura fixa; o resumo fica com o que sobrar, porque é o único que pode ser cortado
+ * sem prejuízo (a linha inteira abre o lead).
+ */
+const COLUMN_WIDTH: Record<string, string> = {
+  patient_name: 'w-[9rem]',
+  // Telefone não encolhe abaixo disto: `+55 11 91234-2222` a 13px mede ~118px e é o
+  // dado que a atendente copia para ligar. Foi ele que, espremido a 95px, quebrava em
+  // três linhas e levava a linha inteira a 101px.
+  phone: 'w-[8.5rem]',
+  pipeline_id: 'w-[6rem]',
+  stage_id: 'w-[5.5rem]',
+  owner_id: 'w-[6rem]',
+  source: 'w-[6rem]',
+  temperature: 'w-[4.75rem]',
+  // Sem largura: fica com a sobra. É a única coluna que pode ser cortada sem prejuízo,
+  // porque a linha inteira abre o lead com o resumo completo.
+  summary: '',
+}
+
 function temperatureBadgeClass(t: string): string {
   const x = t.toLowerCase()
   if (x === 'hot' || x === 'quente') {
@@ -507,44 +531,43 @@ export function LeadsPage() {
         searchLabel="Buscar leads"
         filters={leadFilters}
         trailing={
-          <ColumnVisibilityMenu
-            columns={TABLE_COLUMNS}
-            visible={visibleColumns}
-            labelFor={(col) => columnLabel(col, crm.workflowFields)}
-            onToggle={(col) =>
-              setVisibleColumns((prev) => (prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]))
-            }
-          />
+          <>
+            {/* A contagem morava numa faixa própria de 45px dentro do card, abaixo de um
+                <h2> "Leads" que repetia o título da página logo acima. Aqui ela não custa
+                altura nenhuma e fica ao lado dos filtros que a mudam. */}
+            <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+              {filteredLeads.length} {filteredLeads.length === 1 ? 'lead' : 'leads'}
+            </span>
+            <ColumnVisibilityMenu
+              columns={TABLE_COLUMNS}
+              visible={visibleColumns}
+              labelFor={(col) => columnLabel(col, crm.workflowFields)}
+              onToggle={(col) =>
+                setVisibleColumns((prev) => (prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]))
+              }
+            />
+          </>
         }
       />
 
       <Card className="mb-8 overflow-hidden">
-        <header className="flex items-center justify-between border-b border-border/60 bg-muted/20 px-4 py-3 sm:px-5">
-          <div className="flex items-center gap-2.5">
-            <h2 className="text-sm font-semibold text-foreground">Leads</h2>
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-primary">
-              {filteredLeads.length}
-            </span>
-          </div>
-        </header>
-
         <CardContent className="p-0">
           <ul className="m-0 flex list-none flex-col divide-y divide-border/10 md:hidden">
             {filteredLeads.map((lead) => {
               const pipe = crm.pipelineCatalog.find((p) => p.id === lead.pipelineId)
               const stage = pipe?.stages.find((s) => s.id === lead.stageId)
               return (
-                <li key={lead.id} className="p-6 transition-all active:bg-muted/20">
-                  <div className="flex gap-4">
+                <li key={lead.id} className="px-3 py-2.5 transition-colors active:bg-muted/20">
+                  <div className="flex items-start gap-2.5">
                     {/* shrink-0 no EMBRULHO, não só no Checkbox: o filho tem shrink-0, mas
                         quem é item do flex é esta div, e sem isso ela era espremida a 2px de
                         largura pelo texto ao lado. No celular ninguém conseguia selecionar. */}
-                    <div className="shrink-0 pt-1">
+                    <div className="shrink-0 pt-0.5">
                       <Checkbox
                         checked={selectedLeadIds.includes(lead.id)}
                         onCheckedChange={() => toggleLeadSelection(lead.id)}
                         aria-label={`Selecionar ${lead.patientName}`}
-                        className="size-5 rounded-lg border-border/40"
+                        className="size-5 rounded-md border-border/40"
                       />
                     </div>
                     <Button
@@ -553,19 +576,23 @@ export function LeadsPage() {
                       onClick={() => openLead(lead.id)}
                       className="block h-auto min-w-0 flex-1 whitespace-normal rounded-none border-0 p-0 text-left font-normal hover:bg-transparent hover:text-foreground"
                     >
-                      <h3 className="text-lg font-bold text-foreground/90 leading-tight">{lead.patientName}</h3>
-                      <p className="text-[13px] font-bold text-muted-foreground/60 mt-0.5">{lead.phone}</p>
-                      {lead.summary && <p className="mt-2 text-xs font-medium text-muted-foreground/80 line-clamp-2 leading-relaxed">{lead.summary}</p>}
-                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                      {/* Nome e telefone na mesma linha: o telefone é o que a atendente lê
+                          para ligar, não precisa de linha própria nem de negrito. */}
+                      <div className="flex min-w-0 items-baseline gap-2">
+                        <h3 className="truncate text-sm font-semibold leading-tight text-foreground">{lead.patientName}</h3>
+                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{lead.phone}</span>
+                      </div>
+                      {lead.summary && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground/80">{lead.summary}</p>}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         <PoloBadge name={poloNameForLead(lead.tenantId)} />
                         <PaymentBadge payment={crm.paymentByLeadId[lead.id] ?? null} />
-                        <Badge variant="outline" className="text-[9px] font-semibold uppercase tracking-tight rounded-md border-border/40">
+                        <Badge variant="outline" className="rounded text-[9px] font-semibold uppercase tracking-tight border-border/40">
                           {stage?.name ?? lead.stageId}
                         </Badge>
-                        <Badge variant="secondary" className="text-[9px] font-semibold uppercase tracking-tight rounded-md bg-muted/40 text-muted-foreground">
+                        <Badge variant="secondary" className="rounded text-[9px] font-semibold uppercase tracking-tight bg-muted/40 text-muted-foreground">
                           {sourceLabel[lead.source]}
                         </Badge>
-                        <span className={cn('px-2.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider', temperatureBadgeClass(lead.temperature))}>
+                        <span className={cn('rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider', temperatureBadgeClass(lead.temperature))}>
                           {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
                         </span>
                       </div>
@@ -580,7 +607,7 @@ export function LeadsPage() {
                           aria-label={`Abrir conversa com ${lead.patientName}`}
                         />
                       }
-                      className="size-11 rounded-2xl bg-primary/[0.08] text-primary transition-all hover:bg-primary/20 hover:text-primary active:scale-90"
+                      className="size-10 shrink-0 rounded-xl bg-primary/[0.08] text-primary transition-colors hover:bg-primary/20 hover:text-primary active:scale-95"
                     >
                       <MessageCircle className="size-5" aria-hidden />
                     </Button>
@@ -591,21 +618,29 @@ export function LeadsPage() {
           </ul>
 
           <div className="hidden w-full overflow-x-auto md:block">
-            <Table className="w-full border-collapse text-left">
+            {/* table-fixed: sem isto o navegador reparte a largura pelo CONTEÚDO e ignora
+                as larguras acima — era assim que "Telefone" ganhava 95px e o número
+                quebrava em três linhas enquanto "Resumo" sobrava. Toda célula corta
+                (truncate/line-clamp), então fixar é seguro. */}
+            <Table className="w-full min-w-[56rem] table-fixed border-collapse text-left">
               <TableHeader>
                 <TableRow className="border-b border-border/20 bg-muted/10 text-xs font-medium text-muted-foreground">
-                  <TableHead className="w-16 px-8 py-5">
+                  <TableHead className="w-10">
                     <div className="flex items-center justify-center">
                       <div className="size-4 rounded border-border/40 border" aria-hidden />
                       <span className="sr-only">Seleção</span>
                     </div>
                   </TableHead>
                   {visibleColumns.map((col) => (
-                    <TableHead key={col} className="px-4 py-5 font-semibold">
+                    <TableHead key={col} className={cn('font-semibold', COLUMN_WIDTH[col])}>
                       {columnLabel(col, crm.workflowFields)}
                     </TableHead>
                   ))}
-                  <TableHead className="px-8 py-5 text-right">Interação</TableHead>
+                  {/* Rótulo só para leitor de tela: "Interação" por extenso não cabe na
+                      coluna do botão e, com table-fixed, transbordava por cima de "Resumo". */}
+                  <TableHead className="w-12 text-right">
+                    <span className="sr-only">Interação</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody className="divide-y divide-border/5">
@@ -622,34 +657,34 @@ export function LeadsPage() {
                       )}
                       onClick={() => openLead(lead.id)}
                     >
-                      <TableCell className="px-8 py-5" onClick={(e) => e.stopPropagation()}>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-center">
                           <Checkbox
                             checked={selected}
                             onCheckedChange={() => toggleLeadSelection(lead.id)}
                             aria-label={`Selecionar ${lead.patientName}`}
-                            className="size-5 rounded-lg border-border/40"
+                            className="size-4 rounded border-border/40"
                           />
                         </div>
                       </TableCell>
                       {visibleColumns.map((col) => (
-                        <TableCell key={col} className="px-4 py-5 max-w-[20rem]">
+                        <TableCell key={col}>
                           {col === 'patient_name' && (
-                            <div className="flex flex-col gap-1">
-                              <span className="text-[14px] font-bold text-foreground/90 group-hover:text-primary transition-colors">{lead.patientName}</span>
-                              {(poloNameForLead(lead.tenantId) || crm.paymentByLeadId[lead.id]) && (
-                                <div className="flex flex-wrap items-center gap-1">
-                                  <PoloBadge name={poloNameForLead(lead.tenantId)} />
-                                  <PaymentBadge payment={crm.paymentByLeadId[lead.id] ?? null} />
-                                </div>
-                              )}
+                            // Nome e etiquetas na MESMA linha: empilhados, cada lead custava
+                            // duas alturas de texto mesmo quando não havia etiqueta nenhuma.
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <span className="truncate text-[13px] font-semibold text-foreground/90 transition-colors group-hover:text-primary">
+                                {lead.patientName}
+                              </span>
+                              <PoloBadge name={poloNameForLead(lead.tenantId)} />
+                              <PaymentBadge payment={crm.paymentByLeadId[lead.id] ?? null} />
                             </div>
                           )}
-                          {col === 'phone' && <span className="text-[13px] font-bold tabular-nums text-muted-foreground/70">{lead.phone}</span>}
-                          {col === 'summary' && <span className="text-xs font-medium text-muted-foreground/60 line-clamp-1">{lead.summary || '·'}</span>}
-                          {col === 'pipeline_id' && <span className="text-xs text-muted-foreground">{pipe?.name ?? lead.pipelineId}</span>}
-                          {col === 'stage_id' && <span className="text-xs text-muted-foreground">{stage?.name ?? lead.stageId}</span>}
-                          {col === 'owner_id' && <span className="text-xs text-muted-foreground">{crm.getOwnerName(lead.ownerId)}</span>}
+                          {col === 'phone' && <span className="whitespace-nowrap text-[13px] tabular-nums text-muted-foreground">{lead.phone}</span>}
+                          {col === 'summary' && <span className="line-clamp-1 text-xs text-muted-foreground/70">{lead.summary || '·'}</span>}
+                          {col === 'pipeline_id' && <span className="line-clamp-1 text-xs text-muted-foreground">{pipe?.name ?? lead.pipelineId}</span>}
+                          {col === 'stage_id' && <span className="line-clamp-1 text-xs text-muted-foreground">{stage?.name ?? lead.stageId}</span>}
+                          {col === 'owner_id' && <span className="line-clamp-1 text-xs text-muted-foreground">{crm.getOwnerName(lead.ownerId)}</span>}
                           {col === 'source' && (
                             <Badge variant="secondary" className="bg-muted/40 text-muted-foreground/80 text-[9px] font-semibold uppercase tracking-tight rounded-md border-border/20">
                               {sourceLabel[lead.source]}
@@ -667,7 +702,7 @@ export function LeadsPage() {
                           )}
                         </TableCell>
                       ))}
-                      <TableCell className="px-8 py-5 text-right" onClick={(e) => e.stopPropagation()}>
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -678,7 +713,7 @@ export function LeadsPage() {
                               aria-label={`Abrir conversa com ${lead.patientName}`}
                             />
                           }
-                          className="size-10 rounded-2xl bg-primary/[0.08] text-primary transition-all hover:bg-primary/20 hover:text-primary active:scale-90"
+                          className="size-7 rounded-lg bg-primary/[0.08] text-primary transition-colors hover:bg-primary/20 hover:text-primary"
                         >
                           <MessageCircle className="size-4" aria-hidden />
                         </Button>

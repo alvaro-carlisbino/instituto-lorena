@@ -171,11 +171,11 @@ export function KanbanListView({
                   <Table className="w-full min-w-[50rem] border-collapse text-left">
                     <TableHeader>
                       <TableRow className="border-b border-border/20 bg-muted/10 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/70">
-                        <TableHead className="px-6 py-4">Paciente</TableHead>
-                        <TableHead className="px-4 py-4">Status</TableHead>
-                        <TableHead className="px-4 py-4 text-center">Responsável</TableHead>
-                        <TableHead className="px-4 py-4">Origem</TableHead>
-                        <TableHead className="px-6 py-4">Etiquetas</TableHead>
+                        <TableHead>Paciente</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-center">Responsável</TableHead>
+                        <TableHead>Origem</TableHead>
+                        <TableHead>Etiquetas</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody className="divide-y divide-border/10">
@@ -199,7 +199,7 @@ export function KanbanListView({
                             tabIndex={0}
                             role="button"
                           >
-                            <TableCell className="px-6 py-4">
+                            <TableCell>
                               <div className="flex flex-col">
                                 <span className="text-[14px] font-bold text-foreground/90 group-hover:text-primary transition-colors">{lead.patientName}</span>
                                 {lead.summary ? (
@@ -217,15 +217,15 @@ export function KanbanListView({
                                 ) : null}
                               </div>
                             </TableCell>
-                            <TableCell className="px-4 py-4">
+                            <TableCell>
                               <span className={cn('inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider', temperaturePillClass(temp))}>
                                 {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
                               </span>
                             </TableCell>
-                            <TableCell className="px-4 py-4 text-center">
+                            <TableCell className="text-center">
                               <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground/80">{getOwnerName(lead.ownerId)}</span>
                             </TableCell>
-                            <TableCell className="px-4 py-4">
+                            <TableCell>
                               <span
                                 className={cn(
                                   'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
@@ -236,7 +236,7 @@ export function KanbanListView({
                                 {sourceLabel[lead.source]}
                               </span>
                             </TableCell>
-                            <TableCell className="px-6 py-4">
+                            <TableCell>
                               <div className="flex flex-wrap gap-1.5 max-w-[15rem]">
                                 {tagPillsForLead(lead.id).map((t) => (
                                   <Badge

@@ -4,6 +4,12 @@ import { cn } from "@/lib/utils"
 
 // Primitivos de tabela estilizados — substituem os <table> crus espalhados (LeadsPage,
 // SalesReportPage, DataViewsPage, AnalyticsPage, etc.). Densidade SaaS, borda fina, hover.
+//
+// Densidade é decisão de sistema, não de tela: linha de ~40px com texto simples. Estas
+// medidas valem para as 27 telas com tabela, então NÃO sobrescreva `py-*` na página —
+// era o que /leads (py-5) e o funil em lista (py-4) faziam, e uma linha de lead custava
+// 101px, cinco leads por tela. Precisa de linha alta? O conteúdo da célula manda; o
+// padding fica quieto.
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
@@ -49,7 +55,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-10 px-3 text-left align-middle text-xs font-medium tracking-wide text-muted-foreground uppercase whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        "h-9 px-3 text-left align-middle text-xs font-medium tracking-wide text-muted-foreground uppercase whitespace-nowrap [&:has([role=checkbox])]:pr-0",
         className
       )}
       {...props}
@@ -61,7 +67,7 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
   return (
     <td
       data-slot="table-cell"
-      className={cn("px-3 py-2.5 align-middle [&:has([role=checkbox])]:pr-0", className)}
+      className={cn("px-3 py-2 align-middle [&:has([role=checkbox])]:pr-0", className)}
       {...props}
     />
   )

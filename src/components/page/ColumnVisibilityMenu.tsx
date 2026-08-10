@@ -24,6 +24,9 @@ type ColumnVisibilityMenuProps<T extends string> = {
  *
  * Eram oito botões-pílula sempre visíveis ocupando duas linhas do bloco de filtros —
  * ajuste que se faz uma vez e depois só atrapalha. Vira menu; o padrão continua o mesmo.
+ *
+ * Some abaixo de `md` porque lá a tabela não existe: as telas de lista trocam para cards,
+ * onde não há coluna para esconder. No celular ele só empurrava a lista para baixo.
  */
 export function ColumnVisibilityMenu<T extends string>({
   columns,
@@ -36,7 +39,7 @@ export function ColumnVisibilityMenu<T extends string>({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-9 shrink-0')}
+        className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'hidden h-9 shrink-0 md:inline-flex')}
         aria-label="Escolher colunas visíveis"
       >
         <Columns3 className="size-4" aria-hidden />
