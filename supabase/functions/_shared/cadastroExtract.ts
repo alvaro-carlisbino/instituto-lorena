@@ -2,6 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { enrichEnderecoViaCep } from './cep.ts'
 import { maybeReshipAfterAddressComplete } from './melhorEnvio.ts'
 import { brPhoneVariants, isPlaceholderName } from './crm.ts'
+import { matchesInternalTerm } from './internalContacts.ts'
 
 // LLM = mesma config do resto do CRM: Z.ai (GLM) por env, com fallback OpenAI.
 function normalizeApiRoot(raw: string): string {
@@ -148,25 +149,65 @@ export async function extractCadastro(conversationText: string): Promise<Cadastr
   }
 }
 
+const normNome = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+
+/** Nome sem letras de verdade (emoji, "~", "☺️"): não identifica ninguém, vale como vazio. */
+const semNomeReal = (s: string) => (s.match(/\p{L}/gu) ?? []).length < 2
+
+/**
+ * Nomes default que os providers gravam quando o WhatsApp/ManyChat não manda push name.
+ * `isPlaceholderName` (crm.ts) não os cobre, e "contato whatsapp" ainda por cima está na lista
+ * de contato interno — sem esta exceção o paciente sem push name jamais ganharia nome.
+ */
+const DEFAULTS_DE_PROVIDER = ['contato whatsapp', 'lead whatsapp']
+
+/**
+ * Apelido do mesmo primeiro nome ("gabi" → "Gabriela"). Não é prefixo (o "i" quebra), então
+ * medimos o prefixo COMUM: pelo menos 3 letras e cobrindo a maior parte do apelido. Segura
+ * "gabi"/"gabriela" (3 de 4) e barra "sarah"/"samuel" (2 de 5) e "rodrigo"/"rodolfo" (3 de 7).
+ */
+function ehApelidoDe(apelido: string, primeiroToken: string): boolean {
+  let comum = 0
+  while (comum < apelido.length && comum < primeiroToken.length && apelido[comum] === primeiroToken[comum]) comum++
+  return comum >= 3 && comum >= Math.ceil(apelido.length * 0.6)
+}
+
 /**
  * O nome do lead vem do "push name" do WhatsApp — quase sempre o apelido, em minúsculas
  * ("giovana"). Quando o paciente manda o nome completo pra Dandara fazer o cadastro, esse
  * nome tem que virar o nome do lead: é ele que aparece no quadro, na agenda da Shosp, no
  * pedido e no PDF do histórico. Antes ficava só enterrado em custom_fields.cadastro.
  *
- * Só promove quando é seguro — ou o nome atual é placeholder, ou é um primeiro nome solto,
- * ou o nome completo COMEÇA com o atual (é a mesma pessoa, mais completa). Nome já editado
- * à mão com sobrenome diferente NUNCA é sobrescrito.
+ * Só promove quando o nome completo é REALMENTE a versão completa do atual. A regra antiga
+ * ("nome atual de uma palavra? pode trocar") não checava parentesco nenhum entre os dois, e
+ * qualquer nome citado na conversa sequestrava o card: a thread da recepção virou "ADRIANO
+ * RAMANDELLI" em 20/jun e "LEONARDO ZAMBON SILVA" em 29/jul, só porque alguém digitou o nome
+ * do paciente do dia ali dentro (a data junto ligava o gate de cadastro).
+ *
+ * Nome já editado à mão com sobrenome diferente NUNCA é sobrescrito.
  */
 export function shouldPromoteName(atual: string, completo: string): boolean {
   const a = (atual ?? '').trim()
   const c = (completo ?? '').trim()
   if (c.split(/\s+/).length < 2) return false
-  if (!a || isPlaceholderName(a)) return true
-  if (a.toLowerCase() === c.toLowerCase()) return false
-  const soUmNome = a.split(/\s+/).length === 1
-  const ehPrefixo = c.toLowerCase().startsWith(a.toLowerCase() + ' ')
-  return soUmNome || ehPrefixo
+  const aN = normNome(a)
+  if (!a || isPlaceholderName(a) || DEFAULTS_DE_PROVIDER.includes(aN)) return true
+  // Contato INTERNO (recepção, financeiro, marketing, sócios) nunca vira nome de paciente.
+  // Além de errado no quadro, o rename era pior que cosmético: o NOME é a chave de
+  // `matchesInternalTerm`, então virar "Leonardo" desarmava a proteção que impede a IA e o
+  // reengajamento de responderem a própria equipe.
+  if (matchesInternalTerm(a)) return false
+  if (semNomeReal(a)) return true
+  const cN = normNome(c)
+  if (aN === cN) return false
+  // Já tem sobrenome: só aceita o completo que começa com ele ("Ana Paula" → "Ana Paula Dias").
+  if (a.split(/\s+/).length > 1) return cN.startsWith(aN + ' ')
+  // Primeiro nome solto: o completo precisa CONTER esse nome. Ou como token igual
+  // ("Fernando" → "Luiz Fernando Mesquita"), ou como apelido do primeiro token
+  // ("gabi" → "Gabriela Zanetti"). Sem parentesco, não promove.
+  if (aN.length < 3) return false
+  const tokens = cN.split(/\s+/)
+  return tokens.includes(aN) || ehApelidoDe(aN, String(tokens[0] ?? ''))
 }
 
 /** Telefone sintético do ManyChat (prefixo 888001): placeholder, qualquer real é melhor. */

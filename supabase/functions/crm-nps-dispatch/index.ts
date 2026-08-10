@@ -8,6 +8,7 @@ import {
   readManychatPushConfigForTenantChannel,
 } from '../_shared/manychatPublicApi.ts'
 import { SURVEY_COOLDOWN_DAYS, manychatFeedbackSentRecently } from '../_shared/surveyCooldown.ts'
+import { matchesInternalTerm } from '../_shared/internalContacts.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -124,6 +125,19 @@ Deno.serve(async (req) => {
     .maybeSingle()
   if (leadErr || !leadRaw) return json({ error: 'lead_not_found' }, 404)
   const lead = leadRaw as LeadRow
+
+  // Contato INTERNO (recepção, financeiro, marketing) não recebe pesquisa: é a equipe, não
+  // paciente. A trava já existia na IA e no reengajamento, faltava aqui — a thread da recepção
+  // levou NPS em 28/jul depois que um rename a disfarçou de paciente.
+  if (matchesInternalTerm(lead.patient_name)) {
+    return json({
+      ok: true,
+      skipped: true,
+      status: 'skipped_internal_contact',
+      reason: 'contato_interno',
+      message: `"${lead.patient_name}" é contato interno da equipe, não recebe pesquisa.`,
+    })
+  }
 
   // TRAVA CRUZADA: se o card de avaliação do ManyChat já saiu para este lead dentro da
   // janela, a Sofia fica calada. Sem isso, o paciente recebia as duas pesquisas — o cron
