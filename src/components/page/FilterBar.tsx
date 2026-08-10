@@ -70,9 +70,14 @@ export function FilterBar({
 
   return (
     <div className={cn('flex flex-col gap-2', className)}>
+      {/* A ordem muda no celular. Em 375px cada bloco caía numa linha própria e a pilha
+          (funil, busca, Filtros, alternador de visão) comia ~330px dos 812 antes do
+          primeiro card. Juntando os dois controles curtos — o seletor da esquerda e as
+          ações da direita — numa linha, e busca + Filtros na outra, são duas linhas em
+          vez de três. No desktop a ordem original volta. */}
       <div className="flex flex-wrap items-center gap-2">
-        {leading ? <div className="flex shrink-0 items-center gap-2">{leading}</div> : null}
-        <div className="relative min-w-0 flex-1 basis-56">
+        {leading ? <div className="order-1 flex shrink-0 items-center gap-2">{leading}</div> : null}
+        <div className="relative order-3 min-w-0 flex-1 basis-56 sm:order-2">
           <Search
             className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden
@@ -101,7 +106,7 @@ export function FilterBar({
             type="button"
             variant={active.length > 0 ? 'secondary' : 'outline'}
             size="sm"
-            className="h-9 shrink-0"
+            className="order-4 h-9 shrink-0 sm:order-3"
             aria-expanded={open}
             onClick={() => setOpen((value) => !value)}
           >
@@ -113,7 +118,7 @@ export function FilterBar({
           </Button>
         ) : null}
 
-        {trailing ? <div className="flex shrink-0 items-center gap-2">{trailing}</div> : null}
+        {trailing ? <div className="order-2 flex shrink-0 items-center gap-2 sm:order-4">{trailing}</div> : null}
       </div>
 
       {/* Etiquetas do que está filtrado: dá para ver e desfazer sem abrir o painel. */}

@@ -73,6 +73,12 @@ export function KanbanLeadCard({
     (f) => f.fieldKey !== 'patient_name' && f.fieldKey !== 'temperature',
   )
 
+  // O rodapé mostra "Score" fixo. Se a pontuação também estiver entre os campos
+  // configurados do quadro, o mesmo número aparecia duas vezes no card — "Pontuação: 45"
+  // e logo abaixo "Score: 45". Vence o campo configurado, que carrega o nome que a
+  // equipe deu a ele; o rodapé só entra quando a pontuação não está na lista.
+  const pontuacaoJaNosCampos = detailFields.some((f) => f.fieldKey === 'score')
+
   return (
     <div
       className={cn(
@@ -224,10 +230,14 @@ export function KanbanLeadCard({
       </div>
 
       <div className="flex items-center justify-between border-t border-border/40 pt-3 mt-1 text-[11px] font-semibold text-muted-foreground/60">
-        <div className="flex items-center gap-1.5">
-          <div className="size-1.5 rounded-full bg-primary/40" />
-          <span>Score: {String(getLeadFieldValue(lead, 'score') ?? lead.score)}</span>
-        </div>
+        {pontuacaoJaNosCampos ? (
+          <span />
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <div className="size-1.5 rounded-full bg-primary/40" />
+            <span>Score: {String(getLeadFieldValue(lead, 'score') ?? lead.score)}</span>
+          </div>
+        )}
         <span className="truncate max-w-[100px]">{ownerName}</span>
       </div>
 
