@@ -59,10 +59,17 @@ export function normHeader(h: unknown): string {
     .trim()
 }
 
-/** Acha a coluna pelo primeiro apelido que casar (igual ou contido). -1 se não achar. */
+/**
+ * Acha a coluna pelo primeiro apelido que casar (igual ou contido). -1 se não achar.
+ *
+ * Apelido curto só casa IGUAL. Com `includes` solto, apelido de 2 ou 3 letras pega palavra
+ * do meio de outro cabeçalho: 'id' casava com "Unidade" ("un-ID-ade") e roubava a coluna do
+ * documento no export do Shosp. O piso de 4 letras corta esse tipo de falso positivo sem
+ * mexer na ordem dos apelidos, que é o que decide a prioridade.
+ */
 export function pickCol(headers: string[], ...aliases: string[]): number {
   for (const a of aliases) {
-    const i = headers.findIndex((h) => h === a || h.includes(a))
+    const i = headers.findIndex((h) => (a.length >= 4 ? h === a || h.includes(a) : h === a))
     if (i >= 0) return i
   }
   return -1

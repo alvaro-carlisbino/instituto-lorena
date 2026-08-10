@@ -15,6 +15,14 @@
 //     quanto entrou em espécie × quanto foi depositado.
 //
 //   Convênio / outro → o repasse vem do plano, agrupado e semanas depois. Fica informativo.
+//
+// Duas coisas saem da conta ANTES de qualquer regra, porque não têm como fechar:
+//
+//   Caixa que não é a conta do extrato (anestesista, outra praça, gaveta) — o dinheiro
+//     existe, só não passa por aqui. Sem tirar, viram "não caiu no banco" falsos.
+//
+//   Pagamento dividido ("CC 6x/PX") — o Shosp registra as formas, não quanto foi em cada uma.
+//     Sem o rateio não dá pra procurar valor nenhum no extrato; vira conferência na mão.
 
 import { difDias, difDiasComSinal, normHeader } from '@/lib/planilha'
 import {
@@ -42,6 +50,8 @@ export type ReconcileConfig = {
   cartaoAtrasoMax: number
   /** teto de taxa do adquirente, em % — acima disso vira alerta */
   taxaMaxPct: number
+  /** caixas do Shosp cujo dinheiro NÃO passa pelo extrato que está sendo conciliado */
+  caixasFora: string[]
 }
 
 export const CONFIG_PADRAO: ReconcileConfig = {
@@ -49,6 +59,7 @@ export const CONFIG_PADRAO: ReconcileConfig = {
   cartaoAtrasoMin: 0,
   cartaoAtrasoMax: 35,
   taxaMaxPct: 8,
+  caixasFora: [],
 }
 
 export type DivergenceKind =
@@ -58,6 +69,7 @@ export type DivergenceKind =
   | 'venda_duplicada'
   | 'repasse_nao_encontrado'
   | 'taxa_fora_da_faixa'
+  | 'pagamento_misto'
 
 export type Severity = 'alta' | 'media' | 'baixa'
 
@@ -82,6 +94,7 @@ export const DIVERGENCE_LABEL: Record<DivergenceKind, string> = {
   venda_duplicada: 'Venda repetida na planilha',
   repasse_nao_encontrado: 'Repasse de cartão não encontrado',
   taxa_fora_da_faixa: 'Taxa do cartão acima do esperado',
+  pagamento_misto: 'Pagamento dividido entre formas',
 }
 
 /** Versão curta pro badge da tabela: o Badge é whitespace-nowrap, então rótulo comprido
@@ -93,6 +106,7 @@ export const DIVERGENCE_BADGE: Record<DivergenceKind, string> = {
   venda_duplicada: 'Repetida',
   repasse_nao_encontrado: 'Sem repasse',
   taxa_fora_da_faixa: 'Taxa alta',
+  pagamento_misto: 'Dividido',
 }
 
 // ──────────────────────────────────────────── classificação do extrato bancário
@@ -178,6 +192,13 @@ export type ResumoDinheiro = {
   diferencaCents: number
 }
 
+/** Vendas que o usuário marcou como de outra conta — ficam fora de toda regra, mas somadas à vista. */
+export type ResumoForaDoExtrato = {
+  qtd: number
+  amountCents: number
+  porCaixa: Array<{ name: string; qtd: number; amountCents: number }>
+}
+
 export type ReconcileResult = {
   divergences: Divergence[]
   /** vendas 1 pra 1 que casaram certinho */
@@ -185,9 +206,15 @@ export type ReconcileResult = {
   porMetodo: ResumoMetodo[]
   cartao: ResumoCartao
   dinheiro: ResumoDinheiro
+  foraDoExtrato: ResumoForaDoExtrato
+  mistos: { qtd: number; amountCents: number }
   totais: {
+    /** vendas que entraram nas regras (já sem as de caixa fora do extrato) */
     vendasQtd: number
     vendasBrutoCents: number
+    /** tudo que veio na planilha, inclusive o que ficou fora das regras */
+    vendasTotalQtd: number
+    vendasTotalBrutoCents: number
     creditosQtd: number
     creditosCents: number
     /** entradas que a gente classificou como "não é venda" e tirou da conta */
@@ -199,14 +226,31 @@ export type ReconcileResult = {
 // ──────────────────────────────────────────── motor
 
 export function reconcileShospVsBanco(
-  sales: ShospSale[],
+  todasAsVendas: ShospSale[],
   credits: BankCredit[],
   config: ReconcileConfig = CONFIG_PADRAO,
 ): ReconcileResult {
   const divergences: Divergence[] = []
   const casados: ReconcileResult['casados'] = []
 
-  // ── 0. linha repetida na própria planilha
+  // ── 0a. caixa que não é a conta deste extrato sai antes de tudo
+  const foraSet = new Set(config.caixasFora.map((c) => normHeader(c)))
+  const fora: ShospSale[] = []
+  const sales: ShospSale[] = []
+  for (const s of todasAsVendas) {
+    if (foraSet.size > 0 && foraSet.has(normHeader(s.caixa || '—'))) fora.push(s)
+    else sales.push(s)
+  }
+  const porCaixaFora = new Map<string, { name: string; qtd: number; amountCents: number }>()
+  for (const s of fora) {
+    const name = s.caixa || '—'
+    const atual = porCaixaFora.get(name) ?? { name, qtd: 0, amountCents: 0 }
+    atual.qtd += 1
+    atual.amountCents += s.amountCents
+    porCaixaFora.set(name, atual)
+  }
+
+  // ── 0b. linha repetida na própria planilha
   const porChave = new Map<string, ShospSale[]>()
   for (const s of sales) {
     const lista = porChave.get(s.key) ?? []
@@ -241,9 +285,23 @@ export function reconcileShospVsBanco(
     else vendaLike.push(c)
   }
 
+  // ── 1b. pagamento dividido: sai das regras e vira conferência na mão
+  const mistos = sales.filter((s) => s.mixed)
+  for (const s of mistos) {
+    divergences.push({
+      kind: 'pagamento_misto',
+      severity: 'baixa',
+      date: s.date,
+      amountCents: s.amountCents,
+      title: `${s.patient || 'Paciente sem nome'} — ${brl(s.amountCents)} em ${s.methodRaw}`,
+      detail: `Pagamento dividido entre ${s.methods.map((m) => PAYMENT_LABEL[m]).join(' e ')} (linha ${s.rowNumber}). O Shosp registra as formas mas não quanto foi em cada uma, então não dá pra procurar valor no extrato — confira na mão.`,
+      sale: s,
+    })
+  }
+
   // ── 2. casamento 1 pra 1 (PIX / TED / boleto)
   const umPraUm = sales
-    .filter((s) => METODOS_UM_PRA_UM.includes(s.method))
+    .filter((s) => !s.mixed && METODOS_UM_PRA_UM.includes(s.method))
     .sort((a, b) => a.date.localeCompare(b.date))
 
   // índice por valor: casamento exato fica O(1) por venda
@@ -304,7 +362,9 @@ export function reconcileShospVsBanco(
       date: s.date,
       amountCents: s.amountCents,
       title: `${s.patient || 'Paciente sem nome'} — ${brl(s.amountCents)}`,
-      detail: `${PAYMENT_LABEL[s.method]} lançado no Shosp em ${dia(s.date)} (linha ${s.rowNumber}), sem nenhuma entrada de mesmo valor no banco em ±${config.janelaDias} dia(s). Ou o dinheiro não entrou, ou entrou em conta que não está sendo lida aqui.`,
+      detail:
+        `${PAYMENT_LABEL[s.method]} lançado no Shosp em ${dia(s.date)} (linha ${s.rowNumber}), sem nenhuma entrada de mesmo valor no banco em ±${config.janelaDias} dia(s). Ou o dinheiro não entrou, ou entrou em conta que não está sendo lida aqui.` +
+        (s.caixa ? ` Caixa no Shosp: ${s.caixa}.` : ''),
       sale: s,
     })
   }
@@ -324,14 +384,27 @@ export function reconcileShospVsBanco(
   }
 
   // ── 4. cartão: soma do dia × repasse do adquirente
-  const cartaoPorDia = new Map<string, { gross: number; qtd: number }>()
+  //
+  // Venda de pagamento dividido entra pelo valor CHEIO, e o dia fica marcado. Deixar de fora
+  // seria pior: o repasse do adquirente inclui a parte que foi no cartão, então o bruto do dia
+  // ficaria menor que o repasse e o dia inteiro cairia como "repasse não encontrado". Entrando
+  // cheio o erro puxa pro outro lado — taxa aparente maior — e o aviso do dia explica por quê.
+  const cartaoPorDia = new Map<string, { gross: number; qtd: number; mistos: number }>()
   for (const s of sales) {
-    if (!METODOS_CARTAO.includes(s.method)) continue
-    const atual = cartaoPorDia.get(s.date) ?? { gross: 0, qtd: 0 }
+    const temCartao = s.methods.some((m) => METODOS_CARTAO.includes(m))
+    if (!temCartao) continue
+    const atual = cartaoPorDia.get(s.date) ?? { gross: 0, qtd: 0, mistos: 0 }
     atual.gross += s.amountCents
     atual.qtd += 1
+    if (s.mixed) atual.mistos += 1
     cartaoPorDia.set(s.date, atual)
   }
+
+  /** Aviso pra colar no detalhe do dia que tem pagamento dividido — senão o número parece errado à toa. */
+  const avisoMisto = (n: number): string =>
+    n > 0
+      ? ` Atenção: ${n} venda(s) desse dia foram pagas em mais de uma forma e entraram aqui pelo valor cheio, então o bruto do cartão está superestimado.`
+      : ''
 
   const repasseUsado = new Set<string>()
   let diasSemRepasse = 0
@@ -341,7 +414,7 @@ export function reconcileShospVsBanco(
   const diasCartao = [...cartaoPorDia.keys()].sort()
 
   for (const d of diasCartao) {
-    const { gross, qtd } = cartaoPorDia.get(d)!
+    const { gross, qtd, mistos: mistosNoDia } = cartaoPorDia.get(d)!
     // procura numa faixa MAIS LARGA que o teto de taxa: se achar algo com taxa alta,
     // é melhor mostrar "taxa acima do esperado" do que "repasse sumiu".
     const pisoLargo = Math.round(gross * (1 - (config.taxaMaxPct * 2) / 100))
@@ -370,7 +443,9 @@ export function reconcileShospVsBanco(
         date: d,
         amountCents: gross,
         title: `Cartão de ${dia(d)} — ${brl(gross)} em ${qtd} venda(s)`,
-        detail: `Não achei repasse de adquirente entre D+${config.cartaoAtrasoMin} e D+${config.cartaoAtrasoMax} com valor compatível (esperado entre ${brl(pisoLargo)} e ${brl(gross)}). Pode ser repasse que ainda não caiu, repasse que cai agrupado com outro dia, ou venda de cartão que não foi capturada.`,
+        detail:
+          `Não achei repasse de adquirente entre D+${config.cartaoAtrasoMin} e D+${config.cartaoAtrasoMax} com valor compatível (esperado entre ${brl(pisoLargo)} e ${brl(gross)}). Pode ser repasse que ainda não caiu, repasse que cai agrupado com outro dia, ou venda de cartão que não foi capturada.` +
+          avisoMisto(mistosNoDia),
       })
       continue
     }
@@ -386,7 +461,9 @@ export function reconcileShospVsBanco(
         date: d,
         amountCents: gross,
         title: `Cartão de ${dia(d)} — taxa de ${taxaPct.toFixed(2)}%`,
-        detail: `${brl(gross)} vendidos, ${brl(achado.amountCents)} repassados em ${dia(achado.date)} (${achado.description || 'sem descrição'}). Ficou ${brl(gross - achado.amountCents)} de taxa, acima do teto de ${config.taxaMaxPct}% configurado.`,
+        detail:
+          `${brl(gross)} vendidos, ${brl(achado.amountCents)} repassados em ${dia(achado.date)} (${achado.description || 'sem descrição'}). Ficou ${brl(gross - achado.amountCents)} de taxa, acima do teto de ${config.taxaMaxPct}% configurado.` +
+          avisoMisto(mistosNoDia),
         credit: achado,
         deltaCents: achado.amountCents - gross,
       })
@@ -439,9 +516,20 @@ export function reconcileShospVsBanco(
       depositadoCents: depositado,
       diferencaCents: vendidoDinheiro - depositado,
     },
+    foraDoExtrato: {
+      qtd: fora.length,
+      amountCents: fora.reduce((acc, s) => acc + s.amountCents, 0),
+      porCaixa: [...porCaixaFora.values()].sort((a, b) => b.amountCents - a.amountCents),
+    },
+    mistos: {
+      qtd: mistos.length,
+      amountCents: mistos.reduce((acc, s) => acc + s.amountCents, 0),
+    },
     totais: {
       vendasQtd: sales.length,
       vendasBrutoCents: sales.reduce((acc, s) => acc + s.amountCents, 0),
+      vendasTotalQtd: todasAsVendas.length,
+      vendasTotalBrutoCents: todasAsVendas.reduce((acc, s) => acc + s.amountCents, 0),
       creditosQtd: credits.length,
       creditosCents: credits.reduce((acc, c) => acc + c.amountCents, 0),
       ignoradosQtd: naoVenda.length,

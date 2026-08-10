@@ -6,6 +6,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -46,13 +47,29 @@ function dia(iso: string): string {
 const COLUNA_LABEL: Record<ShospColumnKey, string> = {
   date: 'Data do pagamento',
   patient: 'Paciente',
-  amount: 'Valor',
+  cpf: 'CPF',
+  amount: 'Valor cobrado',
   method: 'Forma de pagamento',
   installments: 'Parcelas',
-  doc: 'Documento / recibo',
+  caixa: 'Caixa / conta',
+  service: 'Serviço',
+  provider: 'Prestador',
+  doc: 'Código da venda',
   status: 'Situação',
 }
-const COLUNAS: ShospColumnKey[] = ['date', 'patient', 'amount', 'method', 'installments', 'doc', 'status']
+const COLUNAS: ShospColumnKey[] = [
+  'date',
+  'patient',
+  'cpf',
+  'amount',
+  'method',
+  'installments',
+  'caixa',
+  'service',
+  'provider',
+  'doc',
+  'status',
+]
 
 type FonteBanco = 'conectado' | 'arquivo'
 
@@ -66,6 +83,7 @@ export function ConciliacaoShospPage() {
   const [creditos, setCreditos] = useState<BankCredit[] | null>(null)
   const [resultado, setResultado] = useState<ReconcileResult | null>(null)
   const [config, setConfig] = useState<ReconcileConfig>(CONFIG_PADRAO)
+  const [caixasFora, setCaixasFora] = useState<string[]>([])
   const [filtro, setFiltro] = useState<DivergenceKind | 'todas'>('todas')
   const [busy, setBusy] = useState(false)
 
@@ -89,6 +107,8 @@ export function ConciliacaoShospPage() {
       const res = await parseShospSales(file, mapa)
       setParse(res)
       setResultado(null)
+      // Caixa marcado some quando o arquivo muda: a lista de caixas é outra.
+      setCaixasFora([])
       if (res.sales.length === 0) {
         if (res.map.date < 0 || res.map.amount < 0) {
           toast.error('Não achei as colunas de data e valor. Aponte na mão ali embaixo em "Colunas lidas".')
@@ -98,6 +118,7 @@ export function ConciliacaoShospPage() {
       } else {
         toast.success(
           `Shosp: ${res.sales.length} venda(s)` +
+            (res.groupedRows > 0 ? ` em ${res.rowsRead} linha(s) de serviço` : '') +
             (res.canceled > 0 ? `, ${res.canceled} cancelada(s) fora da conta` : '') +
             '.',
         )
@@ -191,7 +212,7 @@ export function ConciliacaoShospPage() {
       toast.error('Falta o extrato do banco.')
       return
     }
-    setResultado(reconcileShospVsBanco(vendas, creditos, config))
+    setResultado(reconcileShospVsBanco(vendas, creditos, { ...config, caixasFora }))
   }
 
   const baixarCsv = () => {
@@ -271,6 +292,23 @@ export function ConciliacaoShospPage() {
                   {periodo && (
                     <div className="mt-0.5 text-muted-foreground">
                       Período {dia(periodo.from)} a {dia(periodo.to)} · aba “{parse.sheetName}”
+                    </div>
+                  )}
+                  {/* O Shosp traz uma linha por SERVIÇO. Dizer isso aqui evita a pergunta
+                      "por que 300 vendas se a planilha tem 306 linhas?". */}
+                  {parse.groupedRows > 0 && (
+                    <div className="mt-0.5 text-muted-foreground">
+                      {parse.rowsRead} linha(s) de serviço agrupadas por código da venda
+                    </div>
+                  )}
+                  {parse.mixedCount > 0 && (
+                    <div className="mt-0.5 text-muted-foreground">
+                      {parse.mixedCount} com pagamento dividido entre formas
+                    </div>
+                  )}
+                  {parse.statusCounts.length > 0 && (
+                    <div className="mt-0.5 text-muted-foreground">
+                      Situação: {parse.statusCounts.map((s) => `${s.status} (${s.qtd})`).join(', ')}
                     </div>
                   )}
                 </div>
@@ -382,6 +420,38 @@ export function ConciliacaoShospPage() {
                   />
                 </div>
               </div>
+              {/* Caixa do Shosp = em que conta o dinheiro entrou. Venda lançada no caixa de um
+                  anestesista ou de outra praça nunca vai estar NESTE extrato; sem desmarcar,
+                  cada uma vira "não caiu no banco" — erro alto, no lugar mais visível da tela.
+                  Dinheiro não precisa: já tem tratamento próprio e nunca cai como divergência. */}
+              {parse && parse.caixas.length > 1 && (
+                <div className="space-y-1.5 border-t border-border pt-3">
+                  <Label className="text-xs">Caixas do Shosp neste extrato</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Desmarque a conta que não passa pelo extrato do banco que você subiu.
+                  </p>
+                  {parse.caixas.map((c) => {
+                    const dentro = !caixasFora.includes(c.name)
+                    return (
+                      <label key={c.name} className="flex cursor-pointer items-center gap-2 text-xs">
+                        <Checkbox
+                          checked={dentro}
+                          onCheckedChange={() =>
+                            setCaixasFora((atual) =>
+                              dentro ? [...atual, c.name] : atual.filter((n) => n !== c.name),
+                            )
+                          }
+                        />
+                        <span className={`min-w-0 flex-1 truncate ${dentro ? '' : 'text-muted-foreground line-through'}`}>
+                          {c.name}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">{brl(c.amountCents)}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+
               <Button className="w-full" disabled={busy || vendas.length === 0 || !creditos} onClick={conciliar}>
                 <Sparkles className="size-4" /> Conciliar
               </Button>
@@ -444,7 +514,15 @@ export function ConciliacaoShospPage() {
                   <CardContent className="pt-4">
                     <div className="text-xs text-muted-foreground">Vendas no Shosp</div>
                     <div className="mt-0.5 text-lg font-semibold">{brl(resultado.totais.vendasBrutoCents)}</div>
-                    <div className="text-xs text-muted-foreground">{resultado.totais.vendasQtd} lançamento(s)</div>
+                    <div className="text-xs text-muted-foreground">{resultado.totais.vendasQtd} venda(s)</div>
+                    {/* Quando o usuário tira um caixa, o total da tela deixa de ser o total do mês.
+                        Mostrar os dois evita a conclusão errada de que a clínica faturou menos. */}
+                    {resultado.foraDoExtrato.qtd > 0 && (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        de {brl(resultado.totais.vendasTotalBrutoCents)} na planilha ·{' '}
+                        {brl(resultado.foraDoExtrato.amountCents)} em caixa fora deste extrato
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
                 <Card>
@@ -540,6 +618,37 @@ export function ConciliacaoShospPage() {
                   </CardContent>
                 </Card>
               </div>
+
+              {(resultado.foraDoExtrato.qtd > 0 || resultado.mistos.qtd > 0) && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Fora das regras</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-1 text-sm">
+                    {resultado.foraDoExtrato.porCaixa.map((c) => (
+                      <div key={c.name} className="flex justify-between gap-2">
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          {c.name} <span className="text-xs">({c.qtd})</span>
+                        </span>
+                        <span className="shrink-0">{brl(c.amountCents)}</span>
+                      </div>
+                    ))}
+                    {resultado.mistos.qtd > 0 && (
+                      <div className="flex justify-between gap-2">
+                        <span className="text-muted-foreground">
+                          Pagamento dividido <span className="text-xs">({resultado.mistos.qtd})</span>
+                        </span>
+                        <span>{brl(resultado.mistos.amountCents)}</span>
+                      </div>
+                    )}
+                    <p className="pt-1 text-xs text-muted-foreground">
+                      Esse dinheiro existe, só não dá pra cobrar deste extrato: caixa marcado como de
+                      outra conta, e venda paga em mais de uma forma — o Shosp não diz quanto foi em
+                      cada uma. Aparece na lista abaixo para conferência na mão.
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* divergências */}
               <Card>
