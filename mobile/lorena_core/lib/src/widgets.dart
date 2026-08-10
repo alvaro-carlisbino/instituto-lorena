@@ -35,7 +35,14 @@ class _CarregaState<T> extends State<Carrega<T>> {
 
   Future<void> _recarregar() async {
     setState(() => _f = widget.buscar());
-    await _f.catchError((_) => null as T);
+    // O erro já é tratado pelo FutureBuilder; aqui só seguramos para o
+    // RefreshIndicator fechar. `catchError((_) => null as T)` estouraria de
+    // novo quando T é não-anulável, que é o caso de quase toda tela.
+    try {
+      await _f;
+    } catch (_) {
+      /* estado de erro é desenhado pelo FutureBuilder */
+    }
   }
 
   @override

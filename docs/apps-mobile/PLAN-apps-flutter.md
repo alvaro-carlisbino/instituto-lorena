@@ -1,7 +1,7 @@
 # Apps Flutter — Instituto Lorena e Tricopill
 
 Data: 10/ago/2026. Autor: Álvaro + Claude.
-Status: **Fase 0 (fundação) no ar**. Nenhum app Flutter escrito ainda — ver §7 e §9.
+Status: **Fases 0 a 3 construídas**. Três apps Flutter compilando, backend no ar — ver §7 e §10.
 
 ---
 
@@ -257,3 +257,96 @@ Deixar tenant-estrito (`tenant_id = current_tenant_id()`) resolveria também o v
 1. Tela de conferência do vínculo no CRM (usa `srg_suggest_patients` + `srg_link_patient`), para fechar os 67 pendentes.
 2. Instalar Flutter e montar o monorepo com os três flavors.
 3. App da equipe primeiro — é a captura de foto que dá conteúdo ao app do paciente (decisão de 10/ago).
+
+---
+
+## 10. Os três apps (construídos em 10/ago/2026)
+
+Monorepo em `mobile/`. SDK vem do FVM (stable 3.44.5, já em cache na máquina do Álvaro).
+
+```
+mobile/
+  lorena_core/       pacote compartilhado: LorenaApi, modelos, tema, login por código
+  lorena_paciente/   Instituto Lorena       br.com.institutolorena.app
+  lorena_equipe/     Lorena Equipe          br.com.institutolorena.equipe
+  tricopill_app/     Tricopill              br.com.tricopill.app
+```
+
+**Nenhuma tela fala direto com o Supabase.** Tudo passa por `LorenaApi`, e o servidor
+devolve por RPC o recorte que aquele perfil pode ver. Regra de acesso não mora no app.
+
+### 10.1 App do paciente
+
+Início (próxima consulta + resumo do procedimento), Minha cirurgia, Minha evolução,
+Consultas, Cuidados pós-operatórios.
+
+A tela da cirurgia é a que justifica o app: número grande de folículos implantados,
+quanto foi para cada área com barra proporcional, e a linha do tempo das etapas com
+horário. Tudo vem de `patient_surgeries()`, que já devolve pronto.
+
+Cuidados pós-operatórios é conteúdo fixo no binário de propósito: funciona sem
+internet, não depende de nada cadastrado, e toda dúvida específica devolve para a
+clínica — o app não substitui a equipe.
+
+### 10.2 App da equipe
+
+Ponto, agenda do dia, centro cirúrgico (leitura) e captura de foto clínica.
+
+**A cerca do ponto é conferida no servidor** (`staff_punch`). Hoje o cálculo mora no
+front (`src/services/rhPonto.ts`); num app instalado no celular de quem a regra
+regula, regra só no cliente é regra que não existe. Fora da cerca, o servidor recusa
+e devolve a distância para a tela explicar.
+
+**A captura de foto sobrepõe a foto anterior do mesmo ângulo**, translúcida e com
+controle de opacidade. É isso que faz a comparação de 6 meses valer alguma coisa;
+sem o guia, "antes e depois" vira duas fotos diferentes. O caminho no bucket começa
+pelo prontuário, que é como a policy de storage sabe de quem é a imagem.
+
+O centro cirúrgico é **somente leitura**: quem opera durante a cirurgia é a tela do
+PHP, com paciente na mesa.
+
+### 10.3 App do cliente Tricopill
+
+Hoje (lembrete da cápsula), Minha assinatura, Meus pedidos.
+
+O lembrete é local, sem push e sem servidor: escolhe o horário da primeira cápsula
+e a segunda é agendada 12 horas depois, seguindo a posologia. É o motivo do app
+existir para um suplemento — quem esquece de tomar para de comprar, e reposição
+perdida não volta com anúncio, volta com hábito.
+
+Login por telefone, não CPF: o cliente Tricopill nasce de uma conversa no WhatsApp e
+`tricopill_customers` já é chaveado por telefone. E aqui a resposta **não** é neutra
+(ao contrário da clínica): "este número comprou suplemento" não é dado de saúde de
+terceiro, então vale a UX de dizer "não achamos esse número".
+
+### 10.4 O que foi verificado
+
+| Verificação | Resultado |
+|---|---|
+| `flutter analyze` nos 4 pacotes | sem nenhum apontamento |
+| `flutter build apk` do app da equipe (o de dependências nativas mais pesadas) | APK gerado |
+| RPCs do paciente com sessão simulada | cirurgia do prontuário 5188 com as áreas somando exatos 6.079 |
+| Isolamento do paciente | usuário sem conta recebe `[]`, 0 consultas, 0 fotos |
+| RPCs da equipe | 46 consultas hoje; cirurgia 300 ao vivo, etapa IMPLANTE, 5.386 extraídos |
+| RPCs do cliente | 18 pedidos reais devolvidos, o último de 10/jul |
+| Login Tricopill, caminhos sem envio | telefone curto, número não cadastrado e código errado tratados |
+
+Não disparei código de acesso real para nenhum paciente ou cliente: isso manda
+mensagem para terceiro e depende do aval do Álvaro.
+
+### 10.5 Tela nova no CRM
+
+`/cirurgias-vinculo` fecha as 67 cirurgias que não casaram sozinhas. Filtra por
+situação, roda o casamento automático de novo, e no diálogo mostra candidatos
+ranqueados por semelhança de nome com CPF e telefone para conferência. **Sugerir não
+é gravar**: quem decide é a pessoa na tela, porque vincular errado mostra a cirurgia
+de um paciente para outro.
+
+## 11. O que falta para as lojas
+
+1. Ícone e splash de cada app (hoje é o padrão do Flutter).
+2. Conta de desenvolvedor Apple e Google, bundle IDs registrados, assinatura.
+3. **Política de privacidade publicada** — obrigatória, e para app de saúde a revisão
+   é mais rigorosa.
+4. Formulário de dados coletados nas duas lojas (saúde, foto, localização).
+5. Verificar o domínio da clínica no Resend antes de qualquer código sair por e-mail.

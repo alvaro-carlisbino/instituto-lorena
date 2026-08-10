@@ -8,3 +8,4 @@
 **/ios/Flutter/Flutter.podspec
 **/android/.gradle/
 **/android/local.properties
+**/android/.kotlin/
