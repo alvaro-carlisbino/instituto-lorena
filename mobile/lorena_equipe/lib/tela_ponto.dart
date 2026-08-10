@@ -106,7 +106,7 @@ class _TelaPontoState extends State<TelaPonto> {
                   padding: const EdgeInsets.all(16),
                   child: Text(
                     'Seu usuário ainda não tem ficha de colaborador no RH. '
-                    'Sem ela não dá para bater ponto — fale com a gestão.',
+                    'Sem ela não dá para bater ponto. Fale com a gestão.',
                     style: tt.bodyMedium?.copyWith(color: cs.onErrorContainer),
                   ),
                 ),

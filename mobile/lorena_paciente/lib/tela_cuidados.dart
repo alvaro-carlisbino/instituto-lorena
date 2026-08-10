@@ -24,7 +24,7 @@ class TelaCuidados extends StatelessWidget {
       [
         'A primeira lavagem segue a orientação que a equipe passou na alta.',
         'Água morna, jamais quente, e sem jato direto sobre a área.',
-        'Espuma nas mãos, aplicada com toque leve — sem esfregar.',
+        'Espuma nas mãos, aplicada com toque leve, sem esfregar.',
         'Secar dando batidinhas com toalha limpa, sem atrito.',
       ],
     ),
@@ -35,7 +35,7 @@ class TelaCuidados extends StatelessWidget {
         'Sol direto na área implantada.',
         'Academia, corrida e qualquer esforço que aumente a pressão.',
         'Piscina, mar, sauna e banho muito quente.',
-        'Bebida alcoólica e cigarro — atrapalham a cicatrização.',
+        'Bebida alcoólica e cigarro, que atrapalham a cicatrização.',
         'Boné apertado ou capacete sobre a área.',
       ],
     ),

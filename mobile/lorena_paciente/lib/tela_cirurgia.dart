@@ -15,8 +15,8 @@ class TelaCirurgia extends StatelessWidget {
       vazio: const MensagemVazia(
         icone: Icons.event_available_outlined,
         titulo: 'Ainda não há cirurgia registrada',
-        descricao: 'Assim que seu procedimento acontecer, o resultado aparece aqui — '
-            'com o número de folículos, as áreas tratadas e a linha do tempo do dia.',
+        descricao: 'Assim que seu procedimento acontecer, o resultado aparece aqui: '
+            'número de folículos, áreas tratadas e a linha do tempo do dia.',
       ),
       constroi: (context, cirurgias, _) => ListView.separated(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),

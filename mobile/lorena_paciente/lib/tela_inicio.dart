@@ -118,7 +118,7 @@ class TelaInicio extends StatelessWidget {
                 children: [
                   Text(
                     'Nossa equipe responde pelo WhatsApp. Dúvida sobre cuidados, '
-                    'agendamento ou o seu tratamento — é só chamar.',
+                    'agendamento ou o seu tratamento? É só chamar.',
                     style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
                   ),
                   const SizedBox(height: 14),
