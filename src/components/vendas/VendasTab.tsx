@@ -166,9 +166,9 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                       </TableCell>
                       <TableCell className="max-w-[200px] truncate">{s.procedureLabel}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {s.sellerDoctor ?? '—'}
-                        {s.performingDoctor && s.performingDoctor !== s.sellerDoctor && (
-                          <span className="block text-xs">executa: {s.performingDoctor}</span>
+                        {s.attendingDoctor ?? s.sellerDoctor ?? '—'}
+                        {s.performingDoctor && s.performingDoctor !== (s.attendingDoctor ?? s.sellerDoctor) && (
+                          <span className="block text-xs">opera: {s.performingDoctor}</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right whitespace-nowrap">{brl(s.valueCents)}</TableCell>

@@ -36,12 +36,20 @@ function json(body: Record<string, unknown>, status = 200): Response {
 const ENABLED = (Deno.env.get('CIRURGIA_LEMBRETES_ENABLED') ?? '').trim().toLowerCase() === 'true'
 const MAX_POR_RODADA = Number(Deno.env.get('CIRURGIA_LEMBRETES_MAX') ?? '25')
 
-// Texto provisório. A cláusula real do contrato entra pelo secret; enquanto ela
-// não vem, o aviso fala do prazo sem citar valor de multa, porque cobrar número
-// errado de paciente é pior do que não citar número nenhum.
+// Redação fiel ao Item 40 do contrato ("TERMO DE CONSENTIMENTO LIVRE E ESCLARECIDO
+// / CONTRATO DE PRESTAÇÃO DE SERVIÇOS"): aviso com no mínimo 30 dias, multa de 30%
+// do valor total abaixo disso, e isenção por motivo de saúde comprovado. O secret
+// permite trocar sem deploy se o jurídico mudar a cláusula.
 const POLITICA =
   (Deno.env.get('CIRURGIA_POLITICA_TEXTO') ?? '').trim() ||
-  'Lembrando que remanejamento de cirurgia precisa ser solicitado com mais de 30 dias de antecedência, ou mediante atestado médico.'
+  'Sobre remarcação: o contrato pede aviso com no mínimo 30 dias de antecedência. ' +
+    'Abaixo desse prazo, está prevista multa de 30% do valor total, que não se aplica ' +
+    'quando há impedimento por motivo de saúde comprovado.'
+
+// Item 39 do mesmo contrato. Vai no D-15, que é quando ainda dá tempo de resolver.
+const PAGAMENTO =
+  (Deno.env.get('CIRURGIA_PAGAMENTO_TEXTO') ?? '').trim() ||
+  'O contrato prevê o valor do procedimento quitado até 10 dias antes da cirurgia.'
 
 type Kind = 'd30' | 'd15' | 'd7' | 'd2'
 
@@ -73,20 +81,36 @@ const horaBonita = (iso: string | null) => {
   return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
 }
 
-/** Sem travessão e sem emoji: é aviso de procedimento cirúrgico, não promoção. */
+/**
+ * Sem travessão e sem emoji: é aviso de procedimento cirúrgico, não promoção.
+ *
+ * O texto pede conferência em vez de afirmar que falta. O checklist é preenchido
+ * pela clínica, e item não marcado quer dizer "ninguém marcou aqui", não
+ * "o paciente não entregou". Cobrar o que já foi entregue queima a confiança do
+ * aviso inteiro, e aí ninguém lê mais. Corta em 4 itens para não virar parede.
+ */
+const MAX_ITENS = 4
+
 function montarTexto(kind: Kind, nome: string, quando: string, hora: string, pendentes: string[]): string {
-  const falta = pendentes.length > 0 ? `\n\nAinda estamos aguardando: ${pendentes.join(', ')}.` : ''
+  const lista = pendentes.slice(0, MAX_ITENS).join(', ')
+  const resto = pendentes.length > MAX_ITENS ? `, entre outros` : ''
+  const falta = pendentes.length > 0
+    ? `\n\nConfere se já nos enviou: ${lista}${resto}. Se já mandou, pode desconsiderar.`
+    : ''
   switch (kind) {
     case 'd30':
       return (
         `Oi, ${nome}! Sua cirurgia está marcada para ${quando}${hora ? `, às ${hora}` : ''}.\n\n` +
-        `Já dá para começar a preparar os exames pré-operatórios e a avaliação de risco cirúrgico. ` +
-        `Assim que estiverem prontos, é só enviar aqui neste contato.${falta}\n\n${POLITICA}`
+        (pendentes.length > 0
+          ? `Já dá para ir preparando a documentação.${falta}`
+          : `Os exames pré-operatórios e a avaliação de risco cirúrgico podem ser feitos a partir de agora. ` +
+            `Assim que estiverem prontos, é só enviar aqui neste contato.`) +
+        `\n\n${POLITICA}`
       )
     case 'd15':
       return (
         `Oi, ${nome}! Faltam 15 dias para a sua cirurgia (${quando}).${falta}\n\n` +
-        `Se já tiver enviado tudo, pode desconsiderar. Qualquer dúvida é só chamar.`
+        `${PAGAMENTO}\n\nQualquer dúvida é só chamar por aqui.`
       )
     case 'd7':
       return (

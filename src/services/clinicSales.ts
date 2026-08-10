@@ -231,9 +231,11 @@ function toRow(input: ClinicSaleInput) {
     consultation_at: input.consultationAt || null,
     consultation_type: input.consultationType?.trim() || null,
     procedure_label: input.procedureLabel.trim(),
-    seller_doctor: input.sellerDoctor || null,
+    // seller_doctor espelha quem atendeu: na planilha quem vende é quem faz a
+    // consulta. A coluna fica por compatibilidade com quem já consulta a tabela.
+    seller_doctor: input.attendingDoctor || input.sellerDoctor || null,
     attending_doctor: input.attendingDoctor || null,
-    performing_doctor: input.performingDoctor || input.sellerDoctor || null,
+    performing_doctor: input.performingDoctor || input.attendingDoctor || null,
     anesthetist: input.anesthetist || null,
     value_cents: Math.max(0, Math.round(input.valueCents)),
     deposit_cents: input.depositCents != null ? Math.max(0, Math.round(input.depositCents)) : null,
@@ -407,7 +409,15 @@ export async function listSurgicalStaff(): Promise<StaffMember[]> {
   }))
 }
 
-/** Faturamento e conversão por médico, o relatório que hoje é digitado na mão. */
+/**
+ * Faturamento e conversão por médico, o relatório que hoje é digitado na mão.
+ *
+ * Quem vendeu é quem ATENDEU a consulta, não a coluna "MÉDICO" da planilha. A
+ * própria planilha prova: na aba "Relatorio Dr Matheus" as duas colunas se
+ * chamam "Médico para quem fechou" e "Médico que atendeu", e em 159 das 163
+ * linhas do relatório dele a primeira é Matheus enquanto a segunda é Lorena em
+ * 98 delas. Ou seja, a Lorena atende e fecha para o Matheus operar.
+ */
 export function salesByDoctor(sales: ClinicSale[]) {
   const map = new Map<string, { vendeu: number; valorCents: number; executa: number }>()
   const touch = (nome: string) => {
@@ -417,8 +427,9 @@ export function salesByDoctor(sales: ClinicSale[]) {
   }
   for (const s of sales) {
     if (s.status === 'cancelada') continue
-    if (s.sellerDoctor) {
-      const e = touch(s.sellerDoctor)
+    const vendedor = s.attendingDoctor ?? s.sellerDoctor
+    if (vendedor) {
+      const e = touch(vendedor)
       e.vendeu += 1
       e.valorCents += s.valueCents
     }
@@ -427,4 +438,46 @@ export function salesByDoctor(sales: ClinicSale[]) {
   return [...map.entries()]
     .map(([nome, v]) => ({ nome, ...v, ticketCents: v.vendeu > 0 ? Math.round(v.valorCents / v.vendeu) : 0 }))
     .sort((a, b) => b.valorCents - a.valorCents)
+}
+
+/**
+ * URL do calendário assinável da agenda cirúrgica.
+ *
+ * Vem por RPC porque o token mora em app_cron_secrets, que é service_role only.
+ * A função só devolve para quem é da equipe. No Google Agenda: "Outras agendas",
+ * "Da URL", colar, e as cirurgias passam a aparecer lá sozinhas.
+ */
+export async function getAgendaIcsUrl(): Promise<string | null> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_ics_cirurgias_url')
+  if (error) throw new Error(error.message)
+  return data ? String(data) : null
+}
+
+const gcalStamp = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
+
+/**
+ * Link que abre o Google Agenda com o evento já preenchido. Serve para o caso em
+ * que a cirurgia acabou de ser marcada e precisa estar na agenda agora, sem
+ * esperar o Google reler o calendário assinado.
+ */
+export function googleCalendarLink(sale: ClinicSale): string | null {
+  if (!sale.scheduledAt) return null
+  const inicio = new Date(sale.scheduledAt)
+  const fim = new Date(inicio.getTime() + (sale.durationMinutes && sale.durationMinutes > 0 ? sale.durationMinutes : 480) * 60000)
+  const detalhes = [
+    sale.performingDoctor ? `Médico: ${sale.performingDoctor}` : '',
+    sale.anesthetist ? `Anestesista: ${sale.anesthetist}` : '',
+    sale.city ? `Cidade do paciente: ${sale.city}` : '',
+    sale.hotelNeeded ? 'Precisa de hotel' : '',
+  ].filter(Boolean).join('\n')
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `Cirurgia: ${sale.patientName} (${sale.procedureLabel})`,
+    dates: `${gcalStamp(inicio)}/${gcalStamp(fim)}`,
+    details: detalhes,
+    location: sale.room || 'Instituto Lorena Visentainer',
+    ctz: 'America/Sao_Paulo',
+  })
+  return `https://calendar.google.com/calendar/render?${params.toString()}`
 }

@@ -528,6 +528,11 @@ verify_jwt = false
 [functions.crm-cirurgia-lembretes]
 verify_jwt = false
 
+# Feed .ics da agenda cirúrgica. verify_jwt=false porque quem consome é o Google
+# Agenda, que não manda header nenhum; a proteção é o token no query string.
+[functions.crm-cirurgia-ics]
+verify_jwt = false
+
 # Login do paciente nos apps (CPF + código). verify_jwt=false porque o paciente
 # AINDA NÃO tem sessão quando pede o código — é justamente o que esta função emite.
 # Proteções no handler: resposta neutra (não revela se o CPF existe), 60s entre

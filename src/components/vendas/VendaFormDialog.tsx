@@ -73,7 +73,6 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
   const [dataConsulta, setDataConsulta] = useState('')
   const [tipoConsulta, setTipoConsulta] = useState('')
   const [procedimento, setProcedimento] = useState('')
-  const [medicoVendeu, setMedicoVendeu] = useState('')
   const [medicoAtendeu, setMedicoAtendeu] = useState('')
   const [medicoExecuta, setMedicoExecuta] = useState('')
   const [anestesista, setAnestesista] = useState('')
@@ -102,7 +101,6 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
       setDataConsulta(editing.consultationAt ?? '')
       setTipoConsulta(editing.consultationType ?? '')
       setProcedimento(editing.procedureLabel)
-      setMedicoVendeu(editing.sellerDoctor ?? '')
       setMedicoAtendeu(editing.attendingDoctor ?? '')
       setMedicoExecuta(editing.performingDoctor ?? '')
       setAnestesista(editing.anesthetist ?? '')
@@ -135,7 +133,6 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
     setDataConsulta('')
     setTipoConsulta('')
     setProcedimento('')
-    setMedicoVendeu('')
     setMedicoAtendeu('')
     setMedicoExecuta('')
     setAnestesista('')
@@ -153,11 +150,12 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
     setObs('')
   }, [open, editing])
 
-  // "sempre é o médico que vendeu que realiza" — mas os dois campos existem
-  // porque a planilha registra exceção, então aqui só sugere.
+  // Sugere o mesmo médico para operar, que é o caso comum. Fica editável porque
+  // a exceção é frequente: a Dra Lorena atende e fecha para o Dr Matheus operar
+  // em boa parte das cirurgias dele.
   useEffect(() => {
-    if (medicoVendeu && !medicoExecuta) setMedicoExecuta(medicoVendeu)
-  }, [medicoVendeu, medicoExecuta])
+    if (medicoAtendeu && !medicoExecuta) setMedicoExecuta(medicoAtendeu)
+  }, [medicoAtendeu, medicoExecuta])
 
   const salvar = async () => {
     const nome = picked?.name ?? nomeLivre
@@ -173,7 +171,7 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
       consultationAt: dataConsulta || null,
       consultationType: tipoConsulta || null,
       procedureLabel: procedimento,
-      sellerDoctor: medicoVendeu || null,
+      sellerDoctor: medicoAtendeu || null,
       attendingDoctor: medicoAtendeu || null,
       performingDoctor: medicoExecuta || null,
       anesthetist: anestesista || null,
@@ -298,24 +296,9 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
             </div>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Médico que vendeu</Label>
-              <Select value={medicoVendeu} onValueChange={(v) => setMedicoVendeu(String(v ?? ''))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Escolher" />
-                </SelectTrigger>
-                <SelectContent>
-                  {medicos.map((m) => (
-                    <SelectItem key={m.id} value={m.nome}>
-                      {m.nome}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Médico que atendeu</Label>
+              <Label>Médico que atendeu e vendeu</Label>
               <Select value={medicoAtendeu} onValueChange={(v) => setMedicoAtendeu(String(v ?? ''))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Escolher" />
@@ -331,7 +314,7 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
             </div>
             {cirurgia && (
               <div className="space-y-1.5">
-                <Label>Médico que executa</Label>
+                <Label>Médico que vai operar</Label>
                 <Select value={medicoExecuta} onValueChange={(v) => setMedicoExecuta(String(v ?? ''))}>
                   <SelectTrigger>
                     <SelectValue placeholder="Escolher" />
@@ -344,6 +327,9 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Na planilha isto é a coluna MÉDICO, o "para quem fechou".
+                </p>
               </div>
             )}
           </div>

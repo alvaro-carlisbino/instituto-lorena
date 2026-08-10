@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, CalendarCheck2, FileWarning } from 'lucide-react'
+import { AlertTriangle, CalendarCheck2, CalendarPlus, Copy, FileWarning } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -10,6 +11,8 @@ import {
   type ChecklistItem,
   type ClinicSale,
   type SurgeryReminder,
+  getAgendaIcsUrl,
+  googleCalendarLink,
   listChecklist,
   listClinicSales,
   listReminders,
@@ -43,6 +46,7 @@ export function CirurgiasTab() {
   const [checklist, setChecklist] = useState<Map<string, ChecklistItem[]>>(new Map())
   const [reminders, setReminders] = useState<Map<string, SurgeryReminder[]>>(new Map())
   const [loading, setLoading] = useState(false)
+  const [icsUrl, setIcsUrl] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -56,6 +60,7 @@ export function CirurgiasTab() {
       const [ck, rm] = await Promise.all([listChecklist(ids), listReminders(ids)])
       setChecklist(ck)
       setReminders(rm)
+      setIcsUrl(await getAgendaIcsUrl().catch(() => null))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar as cirurgias')
     } finally {
@@ -102,6 +107,37 @@ export function CirurgiasTab() {
 
   return (
     <div className="space-y-4">
+      {icsUrl && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Essa agenda no Google</CardTitle>
+            <CardAction>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void navigator.clipboard.writeText(icsUrl)
+                  toast.success('Endereço copiado.')
+                }}
+              >
+                <Copy className="size-3.5" /> Copiar endereço
+              </Button>
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              No Google Agenda, em "Outras agendas", escolha "Da URL" e cole o endereço copiado. Toda cirurgia
+              marcada aqui passa a aparecer lá, e remarcação e cancelamento acompanham. O Google relê por conta
+              própria, o que costuma levar algumas horas: para a cirurgia que acabou de ser marcada, use o botão
+              "Google Agenda" do card, que cria o evento na hora.
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              O endereço mostra nome de paciente e procedimento. Trate como dado de prontuário, não mande em grupo.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardContent className="pt-4">
@@ -147,13 +183,25 @@ export function CirurgiasTab() {
                   {s.hotelNeeded ? ' · precisa de hotel' : ''}
                 </p>
               </div>
-              {faltando.length > 0 && (
-                <CardAction>
-                  <Badge variant="destructive">
-                    <FileWarning className="size-3" /> {faltando.length} pendente{faltando.length > 1 ? 's' : ''}
-                  </Badge>
-                </CardAction>
-              )}
+              <CardAction>
+                <div className="flex items-center gap-2">
+                  {faltando.length > 0 && (
+                    <Badge variant="destructive">
+                      <FileWarning className="size-3" /> {faltando.length} pendente{faltando.length > 1 ? 's' : ''}
+                    </Badge>
+                  )}
+                  {googleCalendarLink(s) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      nativeButton={false}
+                      render={<a href={googleCalendarLink(s) as string} target="_blank" rel="noreferrer noopener" />}
+                    >
+                      <CalendarPlus className="size-3.5" /> Google Agenda
+                    </Button>
+                  )}
+                </div>
+              </CardAction>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid gap-1.5 sm:grid-cols-2">
