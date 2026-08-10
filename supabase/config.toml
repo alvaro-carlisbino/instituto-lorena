@@ -454,9 +454,18 @@ verify_jwt = false
 verify_jwt = true
 
 # Sync diário do Open Finance via pg_cron (service_role, multi-tenant). verify_jwt=false
-# (cron não manda JWT de usuário); x-cron-secret opcional (OPENFINANCE_CRON_SECRET).
+# (cron não manda JWT de usuário); x-cron-secret opcional (OPENFINANCE_CRON_SECRET —
+# mantido VAZIO em prod: o cron manda o header em branco e passaria a tomar 401 se alguém
+# preenchesse o secret. Por isso o Banco MCP usa chave própria, ver abaixo).
 [functions.crm-openfinance-sync]
 verify_jwt = false
+
+# Open Finance via Banco MCP (api.mcp.ai). verify_jwt=TRUE: pela tela vai o JWT do usuário
+# (RLS → polo); o cron (job 'crm-banco-mcp-sync-job', 08:20 UTC) manda Bearer anon +
+# x-cron-secret = BANCOMCP_CRON_SECRET e aí grava com service_role no tenant do payload.
+# Secrets: BANCOMCP_ACCESS_TOKEN (ou BANCOMCP_TOKEN) + BANCOMCP_CRON_SECRET.
+[functions.crm-banco-mcp]
+verify_jwt = true
 
 # Webhook de pagamento PagBank: chamado pelo PagBank sem JWT (mapeia pelo reference_id).
 [functions.crm-pagbank-webhook]

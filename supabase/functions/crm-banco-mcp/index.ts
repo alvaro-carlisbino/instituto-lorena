@@ -94,9 +94,15 @@ Deno.serve(async (req) => {
   const url = Deno.env.get('SUPABASE_URL') ?? ''
   const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
   const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-  const cronSecret = (Deno.env.get('OPENFINANCE_CRON_SECRET') ?? '').trim()
+  // Secret próprio do Banco MCP: o OPENFINANCE_CRON_SECRET (Pluggy) está VAZIO em prod de
+  // propósito — o cron do Pluggy manda o header em branco e passaria a tomar 401 se alguém
+  // o preenchesse. Por isso o sync automático daqui tem chave separada.
+  const cronSecrets = [
+    (Deno.env.get('BANCOMCP_CRON_SECRET') ?? '').trim(),
+    (Deno.env.get('OPENFINANCE_CRON_SECRET') ?? '').trim(),
+  ].filter(Boolean)
   const providedCron = (req.headers.get('x-cron-secret') ?? '').trim()
-  const isCron = Boolean(cronSecret && providedCron === cronSecret)
+  const isCron = Boolean(providedCron && cronSecrets.includes(providedCron))
 
   let payload: { action?: string; item?: string; tenant_id?: string; from?: string } = {}
   try {
@@ -228,11 +234,11 @@ Deno.serve(async (req) => {
           // Erro de escrita aqui NÃO pode passar batido: sem isso a tela dizia
           // "banco conectado, N contas" com o banco de dados vazio (RLS barrando, coluna
           // faltando) e ninguém descobria até o extrato não chegar.
-          const { data: existing, error: selErr } = await db
-            .from('fin_accounts')
-            .select('id')
-            .eq('of_account_id', ofAccountId)
-            .maybeSingle()
+          let busca = db.from('fin_accounts').select('id').eq('of_account_id', ofAccountId)
+          // service_role enxerga todos os polos: sem este filtro a conta de um polo
+          // poderia ser reescrita pelo sync do outro.
+          if (isCron && tenantId) busca = busca.eq('tenant_id', tenantId)
+          const { data: existing, error: selErr } = await busca.maybeSingle()
           if (selErr) throw new Error(`fin_accounts (busca ${ofAccountId}): ${selErr.message}`)
           if (existing) {
             const { error: updErr } = await db
