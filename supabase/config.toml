@@ -524,6 +524,10 @@ verify_jwt = false
 [functions.crm-cirurgia-sync]
 verify_jwt = false
 
+# Lembretes D-30/D-15/D-7/D-2 da cirurgia. Chamado por cron, sem sessão de usuário.
+[functions.crm-cirurgia-lembretes]
+verify_jwt = false
+
 # Login do paciente nos apps (CPF + código). verify_jwt=false porque o paciente
 # AINDA NÃO tem sessão quando pede o código — é justamente o que esta função emite.
 # Proteções no handler: resposta neutra (não revela se o CPF existe), 60s entre

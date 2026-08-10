@@ -91,6 +91,13 @@ const AlertasPagamentoPage = lazyPage(() => import('./pages/AlertasPagamentoPage
 const ImportShopPage = lazyPage(() => import('./pages/ImportShopPage'), 'ImportShopPage')
 const IntegracoesClinicaPage = lazyPage(() => import('./pages/IntegracoesClinicaPage'), 'IntegracoesClinicaPage')
 const ProtocolosPage = lazyPage(() => import('./pages/ProtocolosPage'), 'ProtocolosPage')
+const CentralVendasVendasPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasVendasPage')
+const CentralVendasFollowUpPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasFollowUpPage')
+const CentralVendasPosConsultaPage = lazyPage(
+  () => import('./pages/CentralVendasPage'),
+  'CentralVendasPosConsultaPage',
+)
+const CentralVendasCirurgiasPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasCirurgiasPage')
 const PontoPage = lazyPage(() => import('./pages/PontoPage'), 'PontoPage')
 const PontoGestaoPage = lazyPage(() => import('./pages/PontoGestaoPage'), 'PontoGestaoPage')
 const FormulariosRhPage = lazyPage(() => import('./pages/FormulariosRhPage'), 'FormulariosRhPage')
@@ -142,6 +149,10 @@ function AppRoutes() {
         <Route path="/importar-shop" element={<ImportShopPage />} />
         <Route path="/integracoes-clinica" element={<IntegracoesClinicaPage />} />
         <Route path="/protocolos" element={<ProtocolosPage />} />
+        <Route path="/central-vendas" element={<CentralVendasVendasPage />} />
+        <Route path="/central-vendas/follow-up" element={<CentralVendasFollowUpPage />} />
+        <Route path="/central-vendas/pos-consulta" element={<CentralVendasPosConsultaPage />} />
+        <Route path="/central-vendas/cirurgias" element={<CentralVendasCirurgiasPage />} />
         <Route path="/ponto" element={<PontoPage />} />
         <Route path="/ponto-gestao" element={<PontoGestaoPage />} />
         <Route path="/rh-formularios" element={<FormulariosRhPage />} />

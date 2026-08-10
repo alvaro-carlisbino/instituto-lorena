@@ -228,6 +228,16 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     keywords: ['tratamento', 'sessões', 'capilar'],
     visible: (ctx) => isClinic(ctx) && canRoute(ctx),
   },
+  {
+    id: 'central-vendas',
+    path: '/central-vendas',
+    label: 'Central de Vendas',
+    icon: HandCoins,
+    group: 'clinica',
+    keywords: ['venda', 'follow-up', 'cirurgia', 'aline', 'ingrid', 'fechamento', 'proposta', 'agendar'],
+    visible: (ctx) => isClinic(ctx) && canRoute(ctx),
+    mobilePriority: 5,
+  },
 
   // ── Vendas
   {
