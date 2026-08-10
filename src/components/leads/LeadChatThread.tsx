@@ -19,6 +19,10 @@ import {
   CreditCard,
   CheckCircle2,
   Truck,
+  Download,
+  FileText,
+  FileSpreadsheet,
+  FileType,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -51,6 +55,8 @@ import {
   isWaInstagramMergeNotice,
   tryConsumeWaInstagramMergeToast,
 } from '@/lib/waInstagramMergeNotice'
+import { resolveAuthorLabel } from '@/lib/chatAuthor'
+import { exportChatToCsv, exportChatToPdf, exportChatToTxt } from '@/lib/chatExport'
 import { isAiReplyLikelyPending, type AiConversationGate } from '@/lib/aiTypingIndicator'
 import { getChannelShortLabel, getChannelStyle } from '@/lib/channelStyles'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
@@ -530,6 +536,40 @@ export function LeadChatThread({
     return withoutMergeNoise
   }, [history, filter])
 
+  // Exportar o histórico: leva o que está NA TELA (respeita o filtro de canal), com a ficha
+  // de cadastro no cabeçalho. Serve pro prontuário, pra passar caso adiante e pra LGPD
+  // (paciente pode pedir a própria conversa).
+  const leadDoChat = useMemo(() => crm.leads.find((l) => l.id === leadId) ?? null, [crm.leads, leadId])
+
+  const handleExport = (formato: 'pdf' | 'csv' | 'txt') => {
+    if (!leadDoChat) {
+      toast.error('Lead não encontrado para exportar.')
+      return
+    }
+    if (!items.length) {
+      toast.message('Não há mensagens para exportar.')
+      return
+    }
+    if (formato === 'csv') {
+      exportChatToCsv(leadDoChat, items, crm.users)
+      toast.success(`CSV gerado com ${items.length} mensagens.`)
+      return
+    }
+    if (formato === 'txt') {
+      exportChatToTxt(leadDoChat, items, crm.users)
+      toast.success(`Arquivo de texto gerado com ${items.length} mensagens.`)
+      return
+    }
+    const abriu = exportChatToPdf(leadDoChat, items, { clinica: tenant.name, users: crm.users })
+    if (!abriu) {
+      toast.error('O navegador bloqueou a janela.', {
+        description: 'Libere pop-ups para este site e clique em Exportar de novo.',
+      })
+      return
+    }
+    toast.success('Escolha "Salvar como PDF" no destino da impressão.')
+  }
+
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -815,12 +855,13 @@ export function LeadChatThread({
             ))}
           </div>
         ) : null}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
         {showForceAiButton || forceAiHumanBlocked ? (
           <Button
             type="button"
             size="sm"
             variant={forceAiHumanBlocked ? 'outline' : 'secondary'}
-            className="ml-auto h-7 gap-1 rounded-lg px-2 text-[10px] sm:h-8 sm:px-2.5 sm:text-xs"
+            className="h-7 gap-1 rounded-lg px-2 text-[10px] sm:h-8 sm:px-2.5 sm:text-xs"
             disabled={forceAiLoading}
             title={
               forceAiHumanBlocked
@@ -842,6 +883,39 @@ export function LeadChatThread({
             <span className="sm:hidden">IA</span>
           </Button>
         ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(
+                buttonVariants({ variant: 'outline', size: 'sm' }),
+                'h-7 gap-1 rounded-lg px-2 text-[10px] sm:h-8 sm:px-2.5 sm:text-xs',
+              )}
+              title="Exportar o histórico desta conversa (PDF, CSV ou texto)"
+            >
+              <Download className="h-3 w-3 shrink-0" aria-hidden />
+              <span className="hidden sm:inline">Exportar</span>
+              <span className="sr-only sm:hidden">Exportar conversa</span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-52">
+              <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                <FileText className="mr-2 h-3.5 w-3.5" aria-hidden />
+                PDF (imprimir/salvar)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('csv')}>
+                <FileSpreadsheet className="mr-2 h-3.5 w-3.5" aria-hidden />
+                CSV (Excel)
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('txt')}>
+                <FileType className="mr-2 h-3.5 w-3.5" aria-hidden />
+                Texto (.txt)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <div className="px-2 py-1.5 text-[10px] leading-snug text-muted-foreground">
+                {items.length} mensagem{items.length === 1 ? '' : 's'}
+                {filter === 'all' ? '' : ' (só o canal filtrado)'} · inclui a ficha de cadastro
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       {/* Message History */}
@@ -942,7 +1016,22 @@ export function LeadChatThread({
                     "flex items-center gap-2 px-1 mt-1 text-[10px] font-medium tracking-tight",
                     out ? "flex-row-reverse text-muted-foreground/80" : "text-muted-foreground/60"
                   )}>
-                    <span className="truncate max-w-[100px]">{first.author}</span>
+                    {(() => {
+                      const label = resolveAuthorLabel(first.author, crm.users)
+                      return (
+                        <span
+                          className="max-w-[130px] truncate"
+                          title={label.detalhe || undefined}
+                        >
+                          {label.nome}
+                          {label.compartilhada ? (
+                            <span className="ml-1 opacity-60" aria-label="conta compartilhada da equipe">
+                              (equipe)
+                            </span>
+                          ) : null}
+                        </span>
+                      )
+                    })()}
                     <span className="opacity-30">•</span>
                     <time dateTime={first.happenedAt}>{format(new Date(first.happenedAt), 'HH:mm', { locale: ptBR })}</time>
                     <span

@@ -8,6 +8,7 @@ import {
 } from '../_shared/crmAiAutoReply.ts'
 import { enrichInboundWhatsappMediaAndAppendContext } from '../_shared/crmMediaEnrichment.ts'
 import { findSyntheticInstagramLeadByName, insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
+import { captureCadastroForLead } from '../_shared/cadastroExtract.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { resolveTenantFromEvolutionInstance, DEFAULT_TENANT_ID } from '../_shared/tenantResolve.ts'
@@ -261,6 +262,15 @@ Deno.serve(async (req) => {
       happenedAt: normalized.happenedAt,
       externalMessageId: normalized.externalMessageId,
     })
+
+    // Captura passiva de cadastro (nome/nascimento/CPF/e-mail/telefone/endereço). Estava só
+    // no wapi e no manychat: quem atende pela linha Evolution mandava todos os dados e o
+    // cadastro do lead continuava vazio. Best-effort, gateado por pista no texto.
+    try {
+      await captureCadastroForLead(admin, lead.leadId, normalized.text)
+    } catch {
+      // best-effort
+    }
 
     // Interrompe follow-up ativo em qualquer nova mensagem (entrada ou saída)
     await admin
