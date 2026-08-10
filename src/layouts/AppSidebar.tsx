@@ -16,6 +16,7 @@ import {
   type NavGroupId,
 } from '@/config/navigation'
 import { useNavContext } from '@/hooks/useNavContext'
+import { useNavGroupPrefs } from '@/hooks/useNavGroupPrefs'
 import { useNavPrefs } from '@/hooks/useNavPrefs'
 import { useTenant } from '@/context/TenantContext'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -136,22 +137,21 @@ export function AppSidebar() {
   // navegação (o grupo ativo muda) e o base-ui avisava que um Collapsible não controlado
   // teve o padrão alterado depois de montado.
   //
-  // O padrão é derivado (grupo da tela atual + Início). O que o usuário abre ou fecha na mão
-  // vira exceção temporária e é descartado ao trocar de tela, para a tela nova sempre abrir
-  // com o grupo dela à vista. Ajuste feito no render, e não num efeito, que é o caminho
-  // recomendado pelo React para estado que reage a uma mudança de valor.
-  const [overrides, setOverrides] = useState<Map<NavGroupId, boolean>>(() => new Map())
-  const [grupoAnterior, setGrupoAnterior] = useState(activeGroup)
-  if (activeGroup !== grupoAnterior) {
-    setGrupoAnterior(activeGroup)
-    setOverrides(new Map())
-  }
+  // O que o usuário abre ou fecha PERSISTE (localStorage). Antes era descartado a cada
+  // troca de tela: quem passa o dia entre Leads e Agenda reabria "Clínica" em toda ida e
+  // volta, um clique de imposto por navegação. O grupo da tela atual continua sempre
+  // aberto — é onde você está —, então a tela nova nunca aparece com a própria seção
+  // fechada, que era o motivo original de zerar tudo.
+  const { openGroups, setGroupOpen } = useNavGroupPrefs()
 
-  const isGroupOpen = (id: NavGroupId) => overrides.get(id) ?? (id === activeGroup || id === 'inicio')
+  const isGroupOpen = (id: NavGroupId) =>
+    id === activeGroup ? true : (openGroups.get(id) ?? id === 'inicio')
 
-  const toggleGroup = (id: NavGroupId, open: boolean) => {
-    setOverrides((prev) => new Map(prev).set(id, open))
-  }
+  // Atalho só vale se poupar rolagem: um "recente" cujo grupo está ABERTO logo abaixo
+  // aparece duas vezes na mesma tela. Era o caso normal, não a exceção — com Início
+  // aberto e o grupo da tela atual aberto, Painel, Funil de leads e Chat comercial
+  // ocupavam três das seis primeiras linhas repetindo o que estava à vista.
+  const atalhosRecentes = recents.filter((destination) => !isGroupOpen(destination.group))
 
   return (
     <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border/50">
@@ -235,18 +235,18 @@ export function AppSidebar() {
               </SidebarGroup>
             ) : null}
 
-            {recents.length > 0 ? (
+            {atalhosRecentes.length > 0 ? (
               <SidebarGroup className="py-1">
                 <SidebarGroupLabel className="px-2.5 py-2 text-[10px] font-medium uppercase tracking-wider text-sidebar-foreground/50">
                   Recentes
                 </SidebarGroupLabel>
                 <SidebarGroupContent>
-                  <NavList items={recents} isFavorite={isFavorite} onToggleFavorite={toggleFavorite} />
+                  <NavList items={atalhosRecentes} isFavorite={isFavorite} onToggleFavorite={toggleFavorite} />
                 </SidebarGroupContent>
               </SidebarGroup>
             ) : null}
 
-            {favorites.length > 0 || recents.length > 0 ? (
+            {favorites.length > 0 || atalhosRecentes.length > 0 ? (
               <SidebarSeparator className="mx-2 my-1 opacity-60 group-data-[collapsible=icon]:hidden" />
             ) : null}
 
@@ -263,7 +263,7 @@ export function AppSidebar() {
                 <Collapsible
                   key={group.id}
                   open={isGroupOpen(group.id)}
-                  onOpenChange={(open) => toggleGroup(group.id, open)}
+                  onOpenChange={(open) => setGroupOpen(group.id, open)}
                   className="group/collapsible"
                 >
                   <SidebarGroup className="py-0.5">

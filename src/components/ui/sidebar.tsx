@@ -51,6 +51,14 @@ function useSidebar() {
   return context
 }
 
+/** Preferência de barra recolhida gravada por `setOpen`. `null` = nunca escolheu. */
+function readSidebarCookie(): boolean | null {
+  if (typeof document === "undefined") return null
+  const match = document.cookie.match(new RegExp(`(?:^|; )${SIDEBAR_COOKIE_NAME}=([^;]*)`))
+  if (!match) return null
+  return match[1] === "true"
+}
+
 function SidebarProvider({
   defaultOpen = true,
   open: openProp,
@@ -69,7 +77,12 @@ function SidebarProvider({
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen)
+  //
+  // O estado inicial LÊ o cookie que setOpen grava logo abaixo. No shadcn original quem
+  // lê é o servidor do Next, que passa `defaultOpen`; aqui, que é Vite puro, ninguém lia:
+  // a barra gravava a preferência e nascia aberta de novo a cada F5. Quem trabalha em
+  // notebook recolhia os 256px para caber a tabela e perdia isso em toda recarga.
+  const [_open, _setOpen] = React.useState(() => readSidebarCookie() ?? defaultOpen)
   const open = openProp ?? _open
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
