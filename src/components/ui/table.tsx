@@ -67,7 +67,16 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
   return (
     <td
       data-slot="table-cell"
-      className={cn("px-3 py-2 align-middle [&:has([role=checkbox])]:pr-0", className)}
+      className={cn(
+        "px-3 py-2 align-middle [&:has([role=checkbox])]:pr-0",
+        // Valor atômico não quebra linha. `tabular-nums` já é como o código marca
+        // número, data e dinheiro, então serve de gancho: quando a coluna é espremida,
+        // "R$ 1.234,56" e "10/08/2026" preferem alargar a tabela (o contêiner tem
+        // overflow-x) a virar duas linhas e engordar TODA a linha da tabela. Era essa
+        // quebra que fazia a linha de /leads medir 101px por causa do telefone.
+        "[&_.tabular-nums]:whitespace-nowrap",
+        className,
+      )}
       {...props}
     />
   )

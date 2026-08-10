@@ -241,11 +241,15 @@ export function KanbanLeadCard({
         <span className="truncate max-w-[100px]">{ownerName}</span>
       </div>
 
-      <div className="mt-2 grid grid-cols-2 gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+      {/* No celular estes botões ficam SEMPRE visíveis. Revelar no hover não funciona no
+          toque: eles eram invisíveis mas continuavam ocupando ~44px de cada card, e sem
+          eles a única forma de mover um lead de etapa no telefone era arrastar o card
+          entre colunas que rolam na horizontal. No desktop o hover continua. */}
+      <div className="mt-2 grid grid-cols-2 gap-2 transition-opacity duration-200 md:opacity-0 md:group-hover:opacity-100">
         <Button
           type="button"
           variant="secondary"
-          className="h-7 text-[10px] font-bold uppercase tracking-wider bg-secondary/50 hover:bg-secondary"
+          className="h-9 text-[10px] font-bold uppercase tracking-wider bg-secondary/50 hover:bg-secondary md:h-7"
           onClick={(e) => {
             e.stopPropagation()
             onMovePrev()
@@ -256,7 +260,7 @@ export function KanbanLeadCard({
         <Button
           type="button"
           variant="secondary"
-          className="h-7 text-[10px] font-bold uppercase tracking-wider bg-secondary/50 hover:bg-secondary"
+          className="h-9 text-[10px] font-bold uppercase tracking-wider bg-secondary/50 hover:bg-secondary md:h-7"
           onClick={(e) => {
             e.stopPropagation()
             onMoveNext()
@@ -280,7 +284,11 @@ export function KanbanColumnDropZone({ active, onDragOver, onDragLeave, onDropEn
   return (
     <div
       className={cn(
-        'rounded-md border border-dashed border-muted-foreground/40 px-2 py-3 text-center text-xs text-muted-foreground',
+        // Some no celular: é o alvo de um gesto que não existe ali. O arrastar-e-soltar
+        // do HTML5 depende de eventos de mouse, então no telefone esta faixa nunca
+        // recebia nada e ainda instruía a fazer algo impossível, cobrando ~60px por
+        // coluna. Quem move lead pelo celular usa VOLTAR/AVANÇAR no próprio card.
+        'hidden rounded-md border border-dashed border-muted-foreground/40 px-2 py-3 text-center text-xs text-muted-foreground md:block',
         active && 'border-primary bg-primary/5 text-primary',
       )}
       onDragOver={(event) => {
