@@ -70,7 +70,7 @@ Conferência que fecha: `soma de V. Serv por linha` == `soma de V. Cobr. por ven
 | `CC` | cartão de crédito (`CC 10x` = 10 parcelas) |
 | `CD` | cartão de débito |
 | `DN` | dinheiro |
-| `DB` | lido como depósito bancário — ver ressalva abaixo |
+| `DB` | depósito — confirmado, ver abaixo |
 
 Não existe coluna de parcelas: a parcela está no texto (`CC 10x`). E o pagamento dividido vem
 com barra — `CC 6x/PX`, `CC 5x/CD` — **sem dizer quanto foi em cada forma**. Por isso venda
@@ -78,8 +78,10 @@ dividida sai do casamento automático e vai pra lista de conferência na mão (8
 em julho/2026).
 
 > `DB` apareceu uma vez só, R$ 37.800 no caixa do Itaú. Como `CD` já é o cartão de débito neste
-> mesmo relatório, foi lido como depósito bancário. Se um dia significar outra coisa, o efeito é
-> a venda ser procurada 1 pra 1 no extrato — ela aparece como divergência na tela, não some.
+> mesmo relatório, foi lido como depósito bancário — e a planilha da recepção confirmou: o
+> mesmo lançamento de R$ 37.800, no mesmo dia (27/07), está escrito lá como
+> `CARLOS LINEU MACHADO GONÇALVES - PAGAMENTO TC - DEPOSITO (CHEQUE)`. Duas fontes
+> independentes dizendo depósito é o que fecha a questão.
 
 ### 3. `Caixa` diz se a venda pode ser cobrada do extrato
 
@@ -129,3 +131,19 @@ awk -F';' 'NR>1{print $8}'  "$f" | sort | uniq -c | sort -rn
 Se aparecer sigla de forma fora da tabela acima ou caixa novo, é caso de atualizar
 `CODIGO_FORMA` em `src/services/shospVendas.ts` — ou pelo menos de olhar a tela antes de
 confiar no número.
+
+## Onde isso é usado
+
+- **`/importar-vendas`** — o relatório vira conta a receber em `fin_receivables`, idempotente
+  pelo `Cod` (`external_id = shosp:<Cod>`). Ver
+  [`importVendasFinanceiro.ts`](../src/services/importVendasFinanceiro.ts). A mesma tela cruza
+  com a planilha de entradas diárias da recepção
+  ([`lionEntradas.ts`](../src/services/lionEntradas.ts)) e devolve o que existe num lado e não
+  no outro.
+- **`/conciliacao-shosp`** — o mesmo relatório contra o extrato do banco.
+
+Cuidado ao mexer: a venda entra como conta a **receber**, não como lançamento de caixa. O
+extrato do Open Finance já lança o dinheiro em `fin_transactions` sozinho, três vezes por dia;
+lançar a venda lá também conta o mesmo dinheiro duas vezes. A exceção é caixa sem extrato
+(dinheiro em espécie, conta de terceiro), onde o lançamento é a única prova de que o dinheiro
+existe.
