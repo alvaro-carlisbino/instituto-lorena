@@ -6,6 +6,13 @@ import { useTenant } from '@/context/TenantContext'
 
 /** Handoffs mais antigos que isto viram lead frio: vão para follow-up, não para o alerta. */
 export const HANDOFF_WINDOW_HOURS = 48
+/**
+ * Janela da fila "ninguém respondeu". Maior que a do handoff porque aqui não houve promessa
+ * nenhuma: é só o cliente falando sozinho, e isso costuma passar do fim de semana.
+ * Deliberadamente NÃO é infinita — existem 89 conversas paradas há mais de 7 dias (pior caso
+ * 77 dias) e despejar tudo no alerta enterraria quem está esperando hoje.
+ */
+export const SEM_RESPOSTA_WINDOW_HOURS = 72
 const POLL_MS = 30_000
 
 export type PendingHandoffRow = {
@@ -16,7 +23,8 @@ export type PendingHandoffRow = {
   channel: string | null
   /**
    * 'valor' = a Sofia prometeu que a equipe manda o preço; 'handoff' = encaminhamento normal;
-   * 'cliente' = quem JÁ COMPROU mandou mensagem e ninguém respondeu.
+   * 'cliente' = quem JÁ COMPROU mandou mensagem e ninguém respondeu;
+   * 'sem_resposta' = a última mensagem da conversa é do cliente e ninguém respondeu.
    */
   reason?: string | null
 }
@@ -45,9 +53,15 @@ async function fetchRows(tenantId: string) {
   // handoff da IA: ela olha o outro lado da conversa e, de propósito, não respeita opt-out
   // nem conversa arquivada — foi exatamente aí que o Márcio (R$ 1.890,50) se escondeu por
   // 4 dias. Manter no mesmo card evita mais um lugar pra equipe ter que lembrar de olhar.
-  const [handoff, clientes] = await Promise.all([
+  //
+  // A terceira (`sem_resposta`) é a rede final: a última mensagem da conversa é do cliente
+  // e ninguém respondeu. As outras duas dependem de a IA ter PROMETIDO algo ou de a pessoa
+  // já ter COMPRADO — o Ismael não se encaixava em nenhuma das duas e passou 3 dias pedindo
+  // pra comprar sem aparecer em alerta nenhum.
+  const [handoff, clientes, semResposta] = await Promise.all([
     supabase.rpc('crm_pending_human_handoff', { p_window_hours: HANDOFF_WINDOW_HOURS }),
     supabase.rpc('crm_paying_customers_waiting', {}),
+    supabase.rpc('crm_unanswered_inbound', { p_window_hours: SEM_RESPOSTA_WINDOW_HOURS }),
   ])
   // Em erro preserva a última lista boa: um 500 passageiro não pode apagar o alerta
   // da tela e fazer a equipe achar que a fila esvaziou.
@@ -55,9 +69,15 @@ async function fetchRows(tenantId: string) {
   const base = (handoff.data as PendingHandoffRow[]) ?? []
   // Se só a fila nova falhar, mostra a antiga em vez de zerar o card.
   const pagantes = clientes.error ? [] : ((clientes.data as PendingHandoffRow[]) ?? [])
-  // Quem está nas duas listas entra como 'cliente': já comprou, é a espera mais cara.
-  const porCliente = new Set(pagantes.map((r) => r.lead_id))
-  rows = [...pagantes, ...base.filter((r) => !porCliente.has(r.lead_id))]
+  const mudos = semResposta.error ? [] : ((semResposta.data as PendingHandoffRow[]) ?? [])
+  // Mesma pessoa em mais de uma fila entra uma vez só, pelo motivo mais caro:
+  // já comprou > a IA prometeu retorno > ninguém respondeu.
+  const vistos = new Set<string>()
+  rows = [...pagantes, ...base, ...mudos].filter((r) => {
+    if (vistos.has(r.lead_id)) return false
+    vistos.add(r.lead_id)
+    return true
+  })
   emit()
 }
 

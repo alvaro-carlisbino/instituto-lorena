@@ -120,6 +120,12 @@ export function PendingHumanHandoffPanel() {
                       Já comprou
                     </span>
                   ) : null}
+                  {/* Não houve promessa da IA nem compra: o cliente falou e ficou no vácuo. */}
+                  {lead.reason === 'sem_resposta' ? (
+                    <span className="shrink-0 rounded-md bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-sky-700">
+                      Sem resposta
+                    </span>
+                  ) : null}
                 </div>
                 <p className="text-[10px] font-bold uppercase tracking-wider text-red-700/70">
                   Aguardando {formatWaitingFor(lead.since, nowMs)}
