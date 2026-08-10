@@ -10,7 +10,7 @@ import { useNavPrefs } from '@/hooks/useNavPrefs'
 import { onOpenCommandPalette } from '@/lib/commandPalette'
 import { cn } from '@/lib/utils'
 import { CRM_ASSISTANT_PATH } from '@/services/crmAiAssistant'
-import { buscarPacientes, type PacienteEncontrado } from '@/services/pacienteBusca'
+import { buscarPacientes, rotaDoPaciente, type PacienteEncontrado } from '@/services/pacienteBusca'
 
 const ITEM_CLASS =
   'flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground'
@@ -125,13 +125,18 @@ export function CommandPalette() {
                   // O termo digitado entra como keyword para o filtro do cmdk não
                   // descartar um resultado que o BANCO já disse que casa.
                   keywords={[termo, p.telefone ?? '', p.prontuario ?? '', p.cpf ?? '']}
-                  onSelect={() => go(`/leads/${p.leadId}`)}
+                  onSelect={() => go(rotaDoPaciente(p.tipo, p.ref))}
                 >
                   <User className="size-4 shrink-0 opacity-70" />
                   <span className="flex-1 truncate">
                     {p.nome}
                     {selos ? <span className="ml-2 text-xs text-muted-foreground">{selos}</span> : null}
                   </span>
+                  {p.tipo !== 'lead' && (
+                    <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                      {p.tipo === 'shosp' ? 'sem card' : 'tricoscopia'}
+                    </span>
+                  )}
                   <span className="shrink-0 text-xs text-muted-foreground">por {p.achadoPor}</span>
                 </Command.Item>
               )

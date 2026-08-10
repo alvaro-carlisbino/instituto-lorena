@@ -16,8 +16,16 @@ const assertClient = () => {
  * Em conexão de recepção isso é meio segundo de tela pulando.
  */
 
+/** Onde a pessoa existe. Nem todo paciente tem card: a tabela `leads` exige funil,
+ *  etapa e responsável, e jogar 3 mil pacientes históricos no kanban comercial não
+ *  serve a ninguém. A busca acha os três, a ficha abre os três. */
+export type TipoPaciente = 'lead' | 'shosp' | 'mirror'
+
 export type PacienteEncontrado = {
-  leadId: string
+  tipo: TipoPaciente
+  /** Chave para abrir a ficha: id do lead, prontuário do Shosp ou id da pasta do Mirror. */
+  ref: string
+  leadId: string | null
   nome: string
   telefone: string | null
   prontuario: string | null
@@ -33,7 +41,10 @@ export type PacienteEncontrado = {
 
 export type Paciente360 = {
   paciente: {
-    lead_id: string
+    tipo: TipoPaciente
+    ref: string
+    lead_id: string | null
+    tem_card: boolean
     nome: string | null
     telefone: string | null
     prontuario: string | null
@@ -89,7 +100,9 @@ export async function buscarPacientes(termo: string, limite = 20): Promise<Pacie
   if (error) throw new Error(error.message)
 
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
-    leadId: String(r.lead_id ?? ''),
+    tipo: (String(r.tipo ?? 'lead') as TipoPaciente),
+    ref: String(r.ref ?? r.lead_id ?? ''),
+    leadId: (r.lead_id as string) ?? null,
     nome: String(r.nome ?? '—'),
     telefone: (r.telefone as string) ?? null,
     prontuario: (r.prontuario as string) ?? null,
@@ -103,8 +116,16 @@ export async function buscarPacientes(termo: string, limite = 20): Promise<Pacie
   }))
 }
 
-export async function carregarPaciente360(leadId: string): Promise<Paciente360 | null> {
-  const { data, error } = await assertClient().rpc('crm_paciente_360', { p_lead_id: leadId })
+export async function carregarPaciente360(tipo: TipoPaciente, ref: string): Promise<Paciente360 | null> {
+  const { data, error } = await assertClient().rpc('crm_paciente_360_ref', {
+    p_tipo: tipo,
+    p_ref: ref,
+  })
   if (error) throw new Error(error.message)
   return (data as Paciente360 | null) ?? null
+}
+
+/** Rota da ficha para cada tipo de identidade. */
+export function rotaDoPaciente(tipo: TipoPaciente, ref: string): string {
+  return tipo === 'lead' ? `/leads/${ref}` : `/paciente/${tipo}/${encodeURIComponent(ref)}`
 }

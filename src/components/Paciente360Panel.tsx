@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { carregarPaciente360, type Paciente360 } from '@/services/pacienteBusca'
+import { carregarPaciente360, type Paciente360, type TipoPaciente } from '@/services/pacienteBusca'
 
 /**
  * O histórico clínico e financeiro do paciente, num painel só.
@@ -52,7 +52,9 @@ function Secao({
   )
 }
 
-export function Paciente360Panel({ leadId }: { leadId: string }) {
+// `ref` NÃO serve de nome de prop: React trata como referência de elemento e o valor
+// nunca chega no componente. Daí `refId`.
+export function Paciente360Panel({ tipo = 'lead', refId }: { tipo?: TipoPaciente; refId: string }) {
   const [dados, setDados] = useState<Paciente360 | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
@@ -61,12 +63,12 @@ export function Paciente360Panel({ leadId }: { leadId: string }) {
     let vivo = true
     setCarregando(true)
     setErro(null)
-    carregarPaciente360(leadId)
+    carregarPaciente360(tipo, refId)
       .then((d) => { if (vivo) setDados(d) })
       .catch((e) => { if (vivo) setErro(e instanceof Error ? e.message : 'Não deu para carregar o histórico.') })
       .finally(() => { if (vivo) setCarregando(false) })
     return () => { vivo = false }
-  }, [leadId])
+  }, [tipo, refId])
 
   if (carregando) {
     return <div className="space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>

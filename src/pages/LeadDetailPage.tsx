@@ -712,7 +712,7 @@ export function LeadDetailPage() {
         {/* Consultas, cirurgias, tricoscopia, vendas e pagamentos — tudo o que existia
             no banco com lead_id e nunca aparecia perto da pessoa. */}
         <TabsContent value="historico">
-          <Paciente360Panel leadId={lead.id} />
+          <Paciente360Panel tipo="lead" refId={lead.id} />
         </TabsContent>
 
         <TabsContent value="conversa">

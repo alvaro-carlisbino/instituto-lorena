@@ -83,6 +83,7 @@ const ConciliacaoShospPage = lazyPage(() => import('./pages/ConciliacaoShospPage
 const ImportarVendasPage = lazyPage(() => import('./pages/ImportarVendasPage'), 'ImportarVendasPage')
 const CirurgiasVinculoPage = lazyPage(() => import('./pages/CirurgiasVinculoPage'), 'CirurgiasVinculoPage')
 const TricoscopiaPage = lazyPage(() => import('./pages/TricoscopiaPage'), 'TricoscopiaPage')
+const PacienteFichaPage = lazyPage(() => import('./pages/PacienteFichaPage'), 'PacienteFichaPage')
 const FluxoCaixaPage = lazyPage(() => import('./pages/FluxoCaixaPage'), 'FluxoCaixaPage')
 const RecorrentesPage = lazyPage(() => import('./pages/RecorrentesPage'), 'RecorrentesPage')
 const NfePage = lazyPage(() => import('./pages/NfePage'), 'NfePage')
@@ -127,6 +128,7 @@ function AppRoutes() {
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/cirurgias-vinculo" element={<CirurgiasVinculoPage />} />
         <Route path="/tricoscopia" element={<TricoscopiaPage />} />
+        <Route path="/paciente/:tipo/:ref" element={<PacienteFichaPage />} />
         <Route path="/estoque" element={<EstoquePage />} />
         <Route path="/bipagem" element={<BipagemPage />} />
         <Route path="/compras" element={<ComprasPage />} />
