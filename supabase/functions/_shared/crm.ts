@@ -556,6 +556,48 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
   return { leadId: newId, status: 'created' }
 }
 
+/**
+ * Tenant da CONVERSA: quem atende é a LINHA, não o cadastro do lead.
+ *
+ * `upsertLeadByPhone` só grava `tenant_id` ao CRIAR o lead, e a unificação por
+ * telefone (`useWhatsappUnify`) reaproveita um lead que já existe quando a mesma
+ * pessoa volta por outra linha. Resultado: o Ismael nasceu lead da clínica em
+ * 20/mai e, quando foi comprar Tricopill pela linha de vendas em 07/ago, a IA
+ * resolvia o tenant pelo LEAD e carregava a persona errada — a Sofia da clínica
+ * respondeu "como posso te ajudar hoje?" numa conversa de venda, sem catálogo do
+ * Bling e sem config da Rede, porque tudo isso é escopado por tenant.
+ *
+ * Em 10/ago o mesmo caminho estourou o orçamento de token raciocinando em cima do
+ * prompt clínico (`finish_reason: length`, `content` vazio) e o cliente ficou 3
+ * dias sem resposta pedindo pra comprar.
+ *
+ * O tenant do lead continua sendo a verdade de financeiro e métrica. Aqui só
+ * decidimos QUEM RESPONDE. Sem linha amarrada, cai no tenant do lead.
+ */
+export async function resolveConversationTenantId(
+  admin: SupabaseClient,
+  leadId: string,
+): Promise<string> {
+  const { data: lead } = await admin
+    .from('leads')
+    .select('tenant_id, whatsapp_instance_id')
+    .eq('id', leadId)
+    .maybeSingle()
+  const leadTenant = String((lead as { tenant_id?: string } | null)?.tenant_id ?? '').trim()
+  const instanceId = String(
+    (lead as { whatsapp_instance_id?: string | null } | null)?.whatsapp_instance_id ?? '',
+  ).trim()
+  if (!instanceId) return leadTenant
+
+  const { data: inst } = await admin
+    .from('whatsapp_channel_instances')
+    .select('tenant_id')
+    .eq('id', instanceId)
+    .maybeSingle()
+  const lineTenant = String((inst as { tenant_id?: string } | null)?.tenant_id ?? '').trim()
+  return lineTenant || leadTenant
+}
+
 export async function insertInteraction(
   admin: SupabaseClient,
   input: {

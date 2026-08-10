@@ -1,6 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
-import { insertInteraction } from './crm.ts'
+import { insertInteraction, resolveConversationTenantId } from './crm.ts'
 import { matchesInternalTerm } from './internalContacts.ts'
 import { alertOwnerAiOutOfBalance } from './saleReceipt.ts'
 import type { WhatsappProvider } from './whatsapp/types.ts'
@@ -586,9 +586,11 @@ export async function evaluateCrmAiAutoReplyGate(
   const internalContact = matchesInternalTerm(
     (leadRowGate as { patient_name?: string | null } | null)?.patient_name,
   )
-  // crm_ai_configs tem PK (tenant_id, id): escopar por tenant do lead, senão com >1 tenant
+  // crm_ai_configs tem PK (tenant_id, id): escopar por tenant, senão com >1 tenant
   // o .maybeSingle() falha e a config (default_owner_mode, enabled) vem nula.
-  const gateTenantId = String((leadRowGate as { tenant_id?: string } | null)?.tenant_id ?? '').trim()
+  // Pelo tenant da LINHA: quem decide se o bot responde é o polo dono da linha, não
+  // o cadastro do lead. Ver `resolveConversationTenantId`.
+  const gateTenantId = await resolveConversationTenantId(admin, leadId)
   const { data: config } = gateTenantId
     ? await admin.from('crm_ai_configs').select('*').eq('id', 'default').eq('tenant_id', gateTenantId).maybeSingle()
     : { data: null }
@@ -921,13 +923,9 @@ export async function runWhatsappAiAutoReply(
     deferForMediaMs?: number
   },
 ): Promise<{ replied: boolean; replyText?: string; burstPending?: boolean; handoffSuggested?: boolean }> {
-  // crm_ai_configs tem PK (tenant_id, id): escopar por tenant do lead.
-  const { data: burstLeadRow } = await admin
-    .from('leads')
-    .select('tenant_id')
-    .eq('id', options.leadId)
-    .maybeSingle()
-  const burstTenantId = String((burstLeadRow as { tenant_id?: string } | null)?.tenant_id ?? '').trim()
+  // crm_ai_configs tem PK (tenant_id, id): escopar pelo tenant da LINHA. O debounce
+  // de mensagem picada é regra do bot que está atendendo (Tricopill usa 3000ms).
+  const burstTenantId = await resolveConversationTenantId(admin, options.leadId)
   const { data: burstCfg } = burstTenantId
     ? await admin
         .from('crm_ai_configs')
@@ -1142,8 +1140,8 @@ export async function runWhatsappAiAutoReply(
     // desafogar. 'balance' (sem saldo) também alerta o dono, pois não limpa sozinho.
     if (aiFailKind === 'transient' || aiFailKind === 'balance') {
       if (aiFailKind === 'balance') {
-        const { data: lr } = await admin.from('leads').select('tenant_id').eq('id', options.leadId).maybeSingle()
-        const tId = String((lr as { tenant_id?: string } | null)?.tenant_id ?? '').trim()
+        // Alerta o dono da LINHA que ficou sem saldo, não o do cadastro do lead.
+        const tId = await resolveConversationTenantId(admin, options.leadId)
         if (tId) await alertOwnerAiOutOfBalance(admin, tId).catch(() => {})
       }
       await upsertConversationStateInboundOnly(admin, {

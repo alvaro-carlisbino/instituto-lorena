@@ -8,6 +8,12 @@ export type BotKind = 'clinic' | 'sales'
 
 export type WhatsappChannelInstance = {
   id: string
+  /**
+   * Polo dono da linha. Precisa vir explícito: para super admin o RLS de
+   * `whatsapp_channel_instances` devolve as linhas dos DOIS polos, então "veio na
+   * lista" não é prova de que a linha é do workspace ativo.
+   */
+  tenantId: string | null
   label: string
   channelProvider: ChannelProvider
   botKind: BotKind
@@ -42,6 +48,7 @@ function mapRow(r: Record<string, unknown>): WhatsappChannelInstance {
   const botKind: BotKind = String(r.bot_kind ?? 'clinic').toLowerCase() === 'sales' ? 'sales' : 'clinic'
   return {
     id: String(r.id),
+    tenantId: strOrNull(r.tenant_id),
     label: String(r.label),
     channelProvider,
     botKind,
@@ -63,7 +70,7 @@ function mapRow(r: Record<string, unknown>): WhatsappChannelInstance {
 }
 
 const SELECT_COLS =
-  'id, label, channel_provider, bot_kind, evolution_instance_name, manychat_instance_key, wapi_instance_id, wapi_token, wapi_base_url, wapi_webhook_secret, ai_system_prompt, phone_e164, active, sort_order, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change'
+  'id, tenant_id, label, channel_provider, bot_kind, evolution_instance_name, manychat_instance_key, wapi_instance_id, wapi_token, wapi_base_url, wapi_webhook_secret, ai_system_prompt, phone_e164, active, sort_order, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change'
 
 export async function fetchWhatsappChannelInstances(): Promise<WhatsappChannelInstance[]> {
   if (!supabase) return []

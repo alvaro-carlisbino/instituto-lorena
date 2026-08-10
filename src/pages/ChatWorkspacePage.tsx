@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useEffect } from 'react'
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ChevronLeft, Mail, Search, UserRound } from 'lucide-react'
@@ -72,6 +72,8 @@ export function ChatWorkspacePage({
   // Ids das linhas de WhatsApp do tipo `restrictToBotKind` (ex.: vendas/Tricopill).
   // null = ainda carregando; Set vazio = nenhuma linha desse tipo configurada.
   const [restrictInstanceIds, setRestrictInstanceIds] = useState<Set<string> | null>(null)
+  // Ids das linhas do POLO ATIVO. null = ainda carregando.
+  const [tenantInstanceIds, setTenantInstanceIds] = useState<Set<string> | null>(null)
   const [aiConversationBase, setAiConversationBase] = useState<{
     ownerMode: ConversationOwnerMode
     aiEnabled: boolean
@@ -116,25 +118,44 @@ export function ChatWorkspacePage({
   }, [crm.interactions])
 
   useEffect(() => {
-    if (!restrictToBotKind) {
-      setRestrictInstanceIds(null)
-      return
-    }
     let alive = true
     void fetchWhatsappChannelInstances()
       .then((rows) => {
         if (!alive) return
+        setTenantInstanceIds(new Set(rows.filter((r) => r.tenantId === tenant.id).map((r) => r.id)))
         setRestrictInstanceIds(
-          new Set(rows.filter((r) => r.botKind === restrictToBotKind).map((r) => r.id)),
+          restrictToBotKind
+            ? new Set(rows.filter((r) => r.botKind === restrictToBotKind).map((r) => r.id))
+            : null,
         )
       })
       .catch(() => {
-        if (alive) setRestrictInstanceIds(new Set())
+        if (!alive) return
+        setTenantInstanceIds(new Set())
+        setRestrictInstanceIds(restrictToBotKind ? new Set() : null)
       })
     return () => {
       alive = false
     }
-  }, [restrictToBotKind])
+  }, [restrictToBotKind, tenant.id])
+
+  /**
+   * Uma pessoa pode ser paciente da clínica E cliente do Tricopill ao mesmo tempo.
+   * Por isso o polo do lead não pode ser o único critério: quem é dono da LINHA em
+   * que a conversa acontece precisa enxergar a conversa.
+   *
+   * Sem isto a mensagem caía no banco e não aparecia pra ninguém. Era o caso do
+   * Ismael: lead no polo Clínica, conversa na linha do Tricopill. No workspace
+   * Tricopill o lead sumia daqui, e no workspace Clínica o RLS cortava as
+   * mensagens. Ele ficou 3 dias pedindo pra comprar sem ninguém ver.
+   */
+  const belongsToWorkspace = useCallback(
+    (lead: { tenantId?: string; whatsappInstanceId?: string | null }): boolean => {
+      if (!lead.tenantId || lead.tenantId === tenant.id) return true
+      return Boolean(lead.whatsappInstanceId && tenantInstanceIds?.has(lead.whatsappInstanceId))
+    },
+    [tenant.id, tenantInstanceIds],
+  )
 
   const conversations = useMemo(() => {
     const text = search.trim().toLowerCase()
@@ -142,7 +163,7 @@ export function ChatWorkspacePage({
       // Escopa ao workspace ATIVO (Clínica × Tricopill). Sem isso, o RLS traz os
       // leads dos 2 polos p/ quem é multi-polo e a Dandara via clínica + Tricopill
       // misturados mesmo com o polo trocado no switcher.
-      if (lead.tenantId && lead.tenantId !== tenant.id) return false
+      if (!belongsToWorkspace(lead)) return false
       if (restrictToBotKind) {
         if (!restrictInstanceIds) return false
         if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) return false
@@ -185,7 +206,7 @@ export function ChatWorkspacePage({
     }
 
     return filtered.sort((a, b) => recencia(b) - recencia(a))
-  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread, tenant.id])
+  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread, belongsToWorkspace])
 
   // Contador do selo "Não lidas" com o MESMO escopo da lista (workspace/tenant + linha
   // de bot + responsável) — só sem o filtro de texto e o próprio toggle. O `unreadCount`
@@ -196,7 +217,7 @@ export function ChatWorkspacePage({
   const scopedUnreadCount = useMemo(() => {
     let n = 0
     for (const lead of crm.leads) {
-      if (lead.tenantId && lead.tenantId !== tenant.id) continue
+      if (!belongsToWorkspace(lead)) continue
       if (restrictToBotKind) {
         if (!restrictInstanceIds) continue
         if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) continue
@@ -205,7 +226,7 @@ export function ChatWorkspacePage({
       if (isUnread(lead.id)) n += 1
     }
     return n
-  }, [crm.leads, tenant.id, restrictToBotKind, restrictInstanceIds, ownerFilter, isUnread])
+  }, [crm.leads, belongsToWorkspace, restrictToBotKind, restrictInstanceIds, ownerFilter, isUnread])
 
   const activeLead = crm.selectedLead ?? conversations[0] ?? null
   // No celular o chat é master-detail: mostra a LISTA ou a CONVERSA, nunca as duas empilhadas

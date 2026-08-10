@@ -29,6 +29,7 @@ import {
   type CrmAiActionResult,
   type ListedLeadRow,
 } from '../_shared/crmAiOpsExecutor.ts'
+import { resolveConversationTenantId } from '../_shared/crm.ts'
 import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
@@ -605,18 +606,17 @@ Deno.serve(async (req) => {
     const promptOverride = typeof body.promptOverride === 'string' ? body.promptOverride.trim() : ''
 
     // ===== Resolução de tenant + carga da config Z.ai por tenant =====
-    // Internal (auto-reply): tenant_id vem do lead (context.leadId).
+    // Internal (auto-reply): tenant_id vem da LINHA em que a conversa acontece, com
+    // fallback no lead. Antes vinha direto do lead, e uma pessoa que é paciente da
+    // clínica E cliente do Tricopill puxava a persona da clínica pra dentro da linha
+    // de vendas: prompt da Sofia, sem catálogo do Bling, sem config da Rede.
+    // Ver `resolveConversationTenantId`.
     // User session: tenant_id vem de current_tenant_id() RPC.
     // Fallback: env globais (Instituto Lorena hoje).
     let tenantId = ''
     try {
       if (isInternal && context.leadId) {
-        const { data: leadRow } = await dbClient
-          .from('leads')
-          .select('tenant_id')
-          .eq('id', context.leadId)
-          .maybeSingle()
-        tenantId = String((leadRow as { tenant_id?: string } | null)?.tenant_id ?? '').trim()
+        tenantId = await resolveConversationTenantId(dbClient, context.leadId)
       } else if (!isInternal) {
         const { data: tid } = await dbClient.rpc('current_tenant_id')
         tenantId = typeof tid === 'string' ? tid.trim() : ''
