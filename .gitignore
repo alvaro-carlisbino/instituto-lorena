@@ -39,3 +39,11 @@ supabase/.temp/
 
 # snapshot do site antigo (WordPress) — material de referência, não versionar
 /tricopill-site-snapshot-*/
+
+# Relatórios gerados (xlsx/pdf/csv na raiz). ESTE REPO É PÚBLICO: esses arquivos carregam
+# faturamento, movimento bancário, fornecedores e desempenho nominal da equipe. Um `git add .`
+# ou `git commit -a` distraído publicaria tudo, e apagar depois não limpa histórico nem forks.
+/*.xlsx
+/*.xlsm
+/*.csv
+/*.pdf
