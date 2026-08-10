@@ -57,6 +57,8 @@ export type BancoMcpStatus = {
     results?: unknown[]
     notice?: string
     bank?: string
+    /** Incidente aberto no provedor: saldo/limite podem vir errados mesmo com tudo UPDATED. */
+    provider_incident?: { degraded?: boolean; note?: string; status_page_url?: string }
   }
   status?: {
     status?: string

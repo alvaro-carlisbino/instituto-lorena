@@ -461,7 +461,8 @@ verify_jwt = true
 verify_jwt = false
 
 # Open Finance via Banco MCP (api.mcp.ai). verify_jwt=TRUE: pela tela vai o JWT do usuário
-# (RLS → polo); o cron (job 'crm-banco-mcp-sync-job', 08:20 UTC) manda Bearer anon +
+# (RLS → polo); o cron (job 'crm-banco-mcp-sync-job', 3x/dia às 08:20/15:20/22:20 UTC,
+# action=link pra religar conta nova sozinho) manda Bearer anon +
 # x-cron-secret = BANCOMCP_CRON_SECRET e aí grava com service_role no tenant do payload.
 # Secrets: BANCOMCP_ACCESS_TOKEN (ou BANCOMCP_TOKEN) + BANCOMCP_CRON_SECRET.
 [functions.crm-banco-mcp]

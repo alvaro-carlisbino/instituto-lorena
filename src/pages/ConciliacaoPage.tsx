@@ -28,6 +28,7 @@ import {
   suggestMatches,
 } from '@/services/financeiro'
 import { parseBankStatement } from '@/services/ofx'
+import { diaLocal, diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
 import { getConnectToken, linkItem, syncOpenFinance, getBancoMcpStatus, linkBancoMcp, syncBancoMcp } from '@/services/openFinance'
 
 function formatBRL(cents: number): string {
@@ -35,6 +36,32 @@ function formatBRL(cents: number): string {
 }
 function formatDay(iso: string): string {
   return new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR')
+}
+function formatDayBR(iso?: string | null): string {
+  return iso ? formatDay(String(iso).slice(0, 10)) : '—'
+}
+
+/** "hoje 13:47", "ontem 05:20", "há 3 dias" — a pergunta é sempre "entrou quando?". */
+function sinceLabel(iso: string | null): string {
+  if (!iso) return 'aguardando o primeiro sync'
+  const hora = new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const dia = diaLocal(iso)
+  if (dia === hojeLocal()) return `hoje ${hora}`
+  if (dia === diaLocalComOffset(-1)) return `ontem ${hora}`
+  return `em ${formatDay(dia)}`
+}
+
+/**
+ * Devolve o motivo quando a conta parou de receber extrato — erro gravado pelo sync ou
+ * silêncio longo demais. O cron roda 3x/dia; passar de 30h significa 3 rodadas perdidas.
+ * Sem isto a tela mostrava a data do último sync sem dizer que ela estava velha.
+ */
+function bankSyncTrouble(a: FinAccount): string | null {
+  if (a.ofLastError) return `parou de sincronizar: ${a.ofLastError}`
+  if (!a.ofLastSyncAt) return 'ainda não sincronizou nenhuma vez'
+  const horas = (Date.now() - new Date(a.ofLastSyncAt).getTime()) / 3_600_000
+  if (horas > 30) return `sem extrato novo desde ${sinceLabel(a.ofLastSyncAt)} — reautorize o banco`
+  return null
 }
 
 export function ConciliacaoPage() {
@@ -58,6 +85,7 @@ export function ConciliacaoPage() {
   const [mcpAddUrl, setMcpAddUrl] = useState<string | null>(null)
   const [mcpBankName, setMcpBankName] = useState<string | null>(null)
   const [mcpError, setMcpError] = useState<string | null>(null)
+  const [mcpIncidente, setMcpIncidente] = useState<string | null>(null)
   const hasOpenFinance = useMemo(() => accounts.some((a) => a.ofAccountId != null), [accounts])
 
   const refreshMcpStatus = async () => {
@@ -68,6 +96,13 @@ export function ConciliacaoPage() {
       setMcpBankName(conn?.connector_name ?? null)
       setMcpReconnectUrl(conn?.reconnect_url ?? null)
       setMcpAddUrl(st.connections?.add_connection_url ?? null)
+      // Incidente aberto no provedor: a conexão fica UPDATED e mesmo assim saldo e limite
+      // podem vir errados. Melhor avisar do que a clínica achar que o número está certo.
+      setMcpIncidente(
+        st.accounts?.provider_incident?.degraded
+          ? 'O provedor de Open Finance está com incidente aberto: saldo e limite podem vir incompletos até normalizar.'
+          : null,
+      )
       const total = Number(st.accounts?.total ?? st.accounts?.results?.length ?? 0)
       // `notice` da edge é o motivo traduzido (ACCT_001/ACCT_002…); só cai no texto
       // longo do provedor quando não veio aviso nenhum.
@@ -82,6 +117,7 @@ export function ConciliacaoPage() {
       // Antes era silencioso: com o token vencido o cartão sumia e o erro só aparecia
       // (genérico) na hora de ligar. Agora o motivo fica na tela.
       setMcpError(e instanceof Error ? e.message : 'Banco MCP indisponível')
+      setMcpIncidente(null)
     }
   }
 
@@ -264,7 +300,7 @@ export function ConciliacaoPage() {
   return (
     <AppLayout
       title="Conciliação bancária"
-      subtitle="Suba o extrato (OFX/CSV) e case cada lançamento com uma conta a pagar ou a receber. Open Finance automático vem na próxima fase."
+      subtitle="O extrato do banco conectado entra sozinho 3x por dia. Se precisar, suba um OFX/CSV e case cada lançamento com uma conta a pagar ou a receber."
     >
       <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
 
@@ -289,6 +325,9 @@ export function ConciliacaoPage() {
                   Tentar de novo
                 </Button>
               </div>
+            ) : null}
+            {mcpIncidente ? (
+              <p className="rounded-md bg-muted/60 p-2 text-[11px] text-muted-foreground">{mcpIncidente}</p>
             ) : null}
             {mcpBankName || mcpAddUrl ? (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-100">
@@ -330,17 +369,39 @@ export function ConciliacaoPage() {
               </Button>
             </div>
             {hasOpenFinance ? (
-              <div className="space-y-1 pt-1">
+              <div className="space-y-2 pt-1">
                 {accounts
                   .filter((a) => a.ofAccountId)
-                  .map((a) => (
-                    <div key={a.id} className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span className="truncate">{a.name}</span>
-                      <span className="shrink-0">
-                        {a.ofLastSyncAt ? `sync ${new Date(a.ofLastSyncAt).toLocaleDateString('pt-BR')}` : 'aguardando'}
-                      </span>
-                    </div>
-                  ))}
+                  .map((a) => {
+                    const parada = bankSyncTrouble(a)
+                    const fatura = a.ofMeta?.credit
+                    return (
+                      <div key={a.id} className="rounded-md border bg-background/60 p-2">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="truncate text-xs font-medium">{a.name}</span>
+                          {a.ofBalanceCents != null ? (
+                            <span className="shrink-0 text-sm font-semibold tabular-nums">
+                              {formatBRL(a.ofBalanceCents)}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div
+                          className={`mt-0.5 text-[11px] ${parada ? 'font-medium text-destructive' : 'text-muted-foreground'}`}
+                        >
+                          {parada ?? `atualizado ${sinceLabel(a.ofLastSyncAt)}`}
+                        </div>
+                        {fatura?.balanceDueDate ? (
+                          <div className="mt-0.5 text-[11px] text-muted-foreground">
+                            fatura fecha {formatDayBR(fatura.balanceCloseDate)} · vence{' '}
+                            {formatDayBR(fatura.balanceDueDate)}
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                <p className="text-[11px] text-muted-foreground">
+                  Entra sozinho 3x por dia (5h, 12h e 19h). Se travar, o sino avisa.
+                </p>
               </div>
             ) : null}
           </CardContent>

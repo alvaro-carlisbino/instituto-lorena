@@ -31,10 +31,30 @@ export type FinAccount = {
   ofProvider: string | null
   ofAccountId: string | null
   ofLastSyncAt: string | null
+  /** Saldo que o banco informou no último sync. Em conta de cartão é a fatura em aberto. */
+  ofBalanceCents: number | null
+  ofBalanceAt: string | null
+  ofStatus: string | null
+  /** Motivo do último sync que falhou. Preenchido = a conta parou de receber extrato. */
+  ofLastError: string | null
+  /** Extra do banco: no cartão traz fechamento, vencimento e limite da fatura. */
+  ofMeta: OfAccountMeta | null
+}
+
+export type OfAccountMeta = {
+  subtype?: string | null
+  owner?: string | null
+  credit?: {
+    brand?: string
+    balanceCloseDate?: string
+    balanceDueDate?: string
+    creditLimit?: string
+    availableCreditLimit?: string
+  } | null
 }
 
 const ACCOUNT_COLS =
-  'id, name, kind, bank_name, branch, number, opening_balance_cents, active, note, of_provider, of_account_id, of_last_sync_at'
+  'id, name, kind, bank_name, branch, number, opening_balance_cents, active, note, of_provider, of_account_id, of_last_sync_at, of_balance_cents, of_balance_at, of_status, of_last_error, of_meta'
 
 function mapAccount(r: Record<string, unknown>): FinAccount {
   const kind = (r.kind === 'caixa' || r.kind === 'carteira' ? r.kind : 'banco') as AccountKind
@@ -51,6 +71,11 @@ function mapAccount(r: Record<string, unknown>): FinAccount {
     ofProvider: r.of_provider != null ? String(r.of_provider) : null,
     ofAccountId: r.of_account_id != null ? String(r.of_account_id) : null,
     ofLastSyncAt: r.of_last_sync_at != null ? String(r.of_last_sync_at) : null,
+    ofBalanceCents: r.of_balance_cents != null ? Number(r.of_balance_cents) : null,
+    ofBalanceAt: r.of_balance_at != null ? String(r.of_balance_at) : null,
+    ofStatus: r.of_status != null ? String(r.of_status) : null,
+    ofLastError: r.of_last_error != null ? String(r.of_last_error) : null,
+    ofMeta: (r.of_meta as OfAccountMeta | null) ?? null,
   }
 }
 

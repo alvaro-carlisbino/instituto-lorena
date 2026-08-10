@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
 // Open Finance via Banco MCP (api.mcp.ai/api/openfinance) — alternativa/complemento ao Pluggy.
 // Lê BANCOMCP_ACCESS_TOKEN (JWT agent-auth) ou BANCOMCP_TOKEN (sk_live).
@@ -20,7 +20,13 @@ function bearer(): string {
   return access || sk
 }
 
-async function ofPost(path: string, body: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+const dorme = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+async function ofPost(
+  path: string,
+  body: Record<string, unknown> = {},
+  tentativa = 1,
+): Promise<Record<string, unknown>> {
   const token = bearer()
   if (!token) {
     throw new Error('Banco MCP sem credencial: falta o secret BANCOMCP_ACCESS_TOKEN (ou BANCOMCP_TOKEN) no Supabase.')
@@ -33,6 +39,13 @@ async function ofPost(path: string, body: Record<string, unknown> = {}): Promise
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
   const err = data.error != null ? String(data.error) : ''
   const upstreamMsg = data.message != null ? String(data.message) : ''
+
+  // O teto do MCP.AI é 2 req/s e a paginação do extrato estoura isso fácil. Sem retry, um
+  // 429 no meio virava "conta falhou" e o dia inteiro ficava sem extrato.
+  if (res.status === 429 && tentativa <= 3) {
+    await dorme(1200 * tentativa)
+    return ofPost(path, body, tentativa + 1)
+  }
 
   // O MCP.AI devolve 200 com { error, message } em caso de assinatura vencida / chave
   // inválida — sem `ok:false`. Sem esta checagem isso passava como "resultado" e virava
@@ -47,6 +60,15 @@ async function ofPost(path: string, body: Record<string, unknown> = {}): Promise
   return (data.result as Record<string, unknown>) ?? data
 }
 
+/** Chamada que NÃO pode derrubar o sync (força de atualização, status extra). */
+async function ofPostSoft(path: string, body: Record<string, unknown> = {}): Promise<Record<string, unknown> | null> {
+  try {
+    return await ofPost(path, body)
+  } catch {
+    return null
+  }
+}
+
 const pad = (n: number) => String(n).padStart(2, '0')
 const dayStr = (d: Date) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
 
@@ -57,7 +79,29 @@ type OfAccount = {
   marketingName?: string
   number?: string
   type?: string
-  balance?: number
+  subtype?: string
+  owner?: string
+  currencyCode?: string
+  /** Vem como string ("48224.32"). Em conta CRÉDITO é o valor da fatura em aberto. */
+  balance?: string | number
+  creditData?: Record<string, unknown>
+  bankData?: Record<string, unknown>
+}
+
+const centavos = (v: unknown): number | null => {
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.round(n * 100) : null
+}
+
+/** O que a tela mostra do banco além do saldo: fechamento/vencimento da fatura, titular. */
+function metaDaConta(a: OfAccount): Record<string, unknown> {
+  return {
+    subtype: a.subtype ?? null,
+    owner: a.owner ?? null,
+    currency: a.currencyCode ?? null,
+    credit: a.creditData ?? null,
+    bank: a.bankData ?? null,
+  }
 }
 
 // Conexão UPDATED com 0 contas quase sempre é consentimento incompleto no banco, e o
@@ -154,15 +198,18 @@ Deno.serve(async (req) => {
         const item = payload.item
         const connections = await ofPost('/connections/list')
         const list = (connections.connections as Array<Record<string, unknown>>) ?? []
-        const conn =
-          (item
-            ? list.find(
-                (c) =>
-                  String(c.item_id) === item ||
-                  String(c.connector_id) === item ||
-                  String(c.connector_name).toLowerCase() === item.toLowerCase(),
-              )
-            : list[0]) ?? null
+        // Sem `item`, liga TODAS as conexões — não só a primeira. É por aqui que o cron
+        // conserta sozinho conta nova e reconexão: reconectar cria um item_id novo, e o
+        // `sync` puro (que só varre o que já está ligado) nunca enxergaria essa conta.
+        const alvos = item
+          ? list.filter(
+              (c) =>
+                String(c.item_id) === item ||
+                String(c.connector_id) === item ||
+                String(c.connector_name).toLowerCase() === item.toLowerCase(),
+            )
+          : list
+        const conn = alvos[0] ?? null
         if (!conn) {
           return json({
             ok: false,
@@ -175,9 +222,22 @@ Deno.serve(async (req) => {
 
         const itemId = String(conn.item_id)
         const bankName = String(conn.connector_name ?? 'Open Finance')
-        const accountsRes = await ofPost('/accounts/list', { item: itemId })
-        const results = (accountsRes.results as OfAccount[]) ?? []
-        const notice = accountsRes.notice ? String(accountsRes.notice) : null
+
+        // Uma passada por conexão, guardando o que cada banco devolveu.
+        const porBanco: Array<{ itemId: string; bankName: string; contas: OfAccount[]; notice: string | null }> = []
+        for (const c of alvos) {
+          const cItem = String(c.item_id)
+          const cNome = String(c.connector_name ?? 'Open Finance')
+          const res = await ofPost('/accounts/list', { item: cItem })
+          porBanco.push({
+            itemId: cItem,
+            bankName: cNome,
+            contas: (res.results as OfAccount[]) ?? [],
+            notice: res.notice ? String(res.notice) : null,
+          })
+        }
+        const results = porBanco.flatMap((b) => b.contas)
+        const notice = porBanco.find((b) => b.notice)?.notice ?? null
 
         if (results.length === 0) {
           // Sem conta compartilhada não há o que ligar. O motivo verdadeiro está no status
@@ -214,18 +274,19 @@ Deno.serve(async (req) => {
         }
 
         let linked = 0
-        for (const a of results) {
+        const paraLigar = porBanco.flatMap((b) => b.contas.map((a) => ({ banco: b, a })))
+        for (const { banco, a } of paraLigar) {
           const ofAccountId = String(a.id ?? a.account_id ?? '')
           if (!ofAccountId) continue
           const kind = String(a.type ?? '').toUpperCase().includes('CREDIT') ? 'carteira' : 'banco'
-          const label = a.marketingName || a.name || bankName
+          const label = a.marketingName || a.name || banco.bankName
           const row = {
-            name: `${bankName} · ${label}`.slice(0, 120),
+            name: `${banco.bankName} · ${label}`.slice(0, 120),
             kind,
-            bank_name: bankName,
+            bank_name: banco.bankName,
             number: a.number ?? null,
             of_provider: 'mcp_ai',
-            of_item_id: itemId,
+            of_item_id: banco.itemId,
             of_account_id: ofAccountId,
             active: true,
             updated_at: new Date().toISOString(),
@@ -253,8 +314,16 @@ Deno.serve(async (req) => {
           linked += 1
         }
 
-        const synced = await syncMcpAccounts(db, itemId, payload.from ?? null, tenantId, isCron)
-        return json({ ok: true, bankName, itemId, accountsLinked: linked, ...synced })
+        // `item` vazio = ligou todas as conexões, então sincroniza todas também.
+        const synced = await syncMcpAccounts(db, item ? itemId : null, payload.from ?? null, tenantId, isCron)
+        return json({
+          ok: true,
+          bankName,
+          itemId,
+          accountsLinked: linked,
+          banks: porBanco.map((b) => ({ bankName: b.bankName, itemId: b.itemId, accounts: b.contas.length })),
+          ...synced,
+        })
       }
 
       // sync
@@ -269,7 +338,7 @@ Deno.serve(async (req) => {
 })
 
 async function syncMcpAccounts(
-  db: ReturnType<typeof createClient>,
+  db: SupabaseClient,
   itemId: string | null,
   fromOverride: string | null,
   tenantId: string | null,
@@ -285,15 +354,36 @@ async function syncMcpAccounts(
   const { data: accs, error } = await query
   if (error) throw new Error(error.message)
 
-  let inserted = 0
-  const results: Array<Record<string, unknown>> = []
-
-  for (const acc of (accs ?? []) as Array<{
+  const contas = (accs ?? []) as Array<{
     id: string
     tenant_id: string
     of_account_id: string
+    of_item_id: string | null
     of_last_sync_at: string | null
-  }>) {
+  }>
+
+  // Saldo e situação vêm por CONEXÃO, não por conta: uma chamada por item serve todas as
+  // contas dele. Sem isso a tela só teria a soma dos lançamentos, que nunca bate com o
+  // extrato (o saldo de abertura fica de fora).
+  const itens = [...new Set(contas.map((c) => c.of_item_id).filter(Boolean))] as string[]
+  const saldos = new Map<string, OfAccount>()
+  const situacao = new Map<string, { status: string; exec: string }>()
+  for (const it of itens) {
+    const res = await ofPostSoft('/accounts/list', { item: it })
+    for (const a of ((res?.results as OfAccount[]) ?? [])) {
+      const id = String(a.id ?? a.account_id ?? '')
+      if (id) saldos.set(id, a)
+    }
+    const st = await ofPostSoft('/connections/status', { item: it })
+    if (st) {
+      situacao.set(it, { status: String(st.status ?? ''), exec: String(st.executionStatus ?? '') })
+    }
+  }
+
+  let inserted = 0
+  const results: Array<Record<string, unknown>> = []
+
+  for (const acc of contas) {
     try {
       const fromDate = fromOverride
         ? new Date(`${fromOverride}T00:00:00Z`)
@@ -356,12 +446,39 @@ async function syncMcpAccounts(
         if (insErr) throw insErr
         inserted += (ins ?? []).length
       }
-      await db.from('fin_accounts').update({ of_last_sync_at: new Date().toISOString() }).eq('id', acc.id)
+      const saldo = saldos.get(acc.of_account_id)
+      const sit = acc.of_item_id ? situacao.get(acc.of_item_id) : null
+      await db
+        .from('fin_accounts')
+        .update({
+          of_last_sync_at: new Date().toISOString(),
+          // Zera o erro: enquanto isso não existia, uma falha antiga nunca "sarava" e o
+          // alerta ficaria tocando pra sempre depois que o banco voltasse.
+          of_last_error: null,
+          ...(saldo
+            ? {
+                of_balance_cents: centavos(saldo.balance),
+                of_balance_at: new Date().toISOString(),
+                of_meta: metaDaConta(saldo),
+              }
+            : {}),
+          ...(sit ? { of_status: [sit.status, sit.exec].filter(Boolean).join(' / ') } : {}),
+        })
+        .eq('id', acc.id)
       results.push({ account: acc.id, rows: rows.length })
     } catch (e) {
-      results.push({ account: acc.id, ok: false, note: e instanceof Error ? e.message : String(e) })
+      const motivo = e instanceof Error ? e.message : String(e)
+      // Grava o motivo na conta. Antes o erro só voltava no corpo da resposta, que o cron
+      // joga fora — o extrato podia estar parado há semanas com tudo "ok:true" na tela.
+      await db.from('fin_accounts').update({ of_last_error: motivo.slice(0, 500) }).eq('id', acc.id)
+      results.push({ account: acc.id, ok: false, note: motivo })
     }
   }
 
-  return { inserted, accounts: (accs ?? []).length, results }
+  // Manda o provedor buscar de novo no banco DEPOIS de puxar: a atualização dele é
+  // assíncrona (leva minutos), então quem colhe é a próxima rodada. Limite de 1x/hora por
+  // item — por isso é soft: estourar o limite não pode derrubar o sync.
+  for (const it of itens) await ofPostSoft('/connections/sync', { item: it })
+
+  return { inserted, accounts: contas.length, results }
 }
