@@ -419,9 +419,9 @@ export async function listSurgicalStaff(): Promise<StaffMember[]> {
  * 98 delas. Ou seja, a Lorena atende e fecha para o Matheus operar.
  */
 export function salesByDoctor(sales: ClinicSale[]) {
-  const map = new Map<string, { vendeu: number; valorCents: number; executa: number }>()
+  const map = new Map<string, { vendeu: number; valorCents: number; executa: number; followUp: number }>()
   const touch = (nome: string) => {
-    const cur = map.get(nome) ?? { vendeu: 0, valorCents: 0, executa: 0 }
+    const cur = map.get(nome) ?? { vendeu: 0, valorCents: 0, executa: 0, followUp: 0 }
     map.set(nome, cur)
     return cur
   }
@@ -432,12 +432,89 @@ export function salesByDoctor(sales: ClinicSale[]) {
       const e = touch(vendedor)
       e.vendeu += 1
       e.valorCents += s.valueCents
+      // fechou depois da consulta = veio de follow-up, não do impulso da sala
+      const dias = diasAteFechar(s)
+      if (dias != null && dias > 0) e.followUp += 1
     }
     if (s.performingDoctor) touch(s.performingDoctor).executa += 1
   }
   return [...map.entries()]
     .map(([nome, v]) => ({ nome, ...v, ticketCents: v.vendeu > 0 ? Math.round(v.valorCents / v.vendeu) : 0 }))
     .sort((a, b) => b.valorCents - a.valorCents)
+}
+
+/**
+ * Dias entre a consulta e a venda. Null quando não dá para saber.
+ *
+ * As duas colunas são `date` no banco, então a conta é de calendário e não passa
+ * perto de fuso horário: subtrair timestamp aqui inventaria um dia de diferença
+ * dependendo da hora em que a tela é aberta.
+ */
+export function diasAteFechar(sale: ClinicSale): number | null {
+  if (!sale.consultationAt || !sale.soldAt) return null
+  const consulta = Date.parse(`${sale.consultationAt.slice(0, 10)}T12:00:00Z`)
+  const venda = Date.parse(`${sale.soldAt.slice(0, 10)}T12:00:00Z`)
+  if (Number.isNaN(consulta) || Number.isNaN(venda)) return null
+  return Math.round((venda - consulta) / 86_400_000)
+}
+
+export type FollowUpStats = {
+  total: number
+  /** Fechou na própria consulta. */
+  noDia: number
+  /** Fechou depois, com trabalho de follow-up no meio. */
+  followUp: number
+  semConsulta: number
+  /** Consulta registrada DEPOIS da venda: ou é pré-operatório, ou é data errada. */
+  consultaDepois: number
+  /** Mediana, não média: existe venda fechada 1004 dias depois da consulta, e uma só dessas desloca a média inteira. */
+  medianaDias: number
+  valorNoDiaCents: number
+  valorFollowUpCents: number
+}
+
+/**
+ * O quanto o follow-up vende, separado do que fecha na hora.
+ *
+ * Sem isso a Central de Vendas só mostrava faturamento do mês, e o trabalho de
+ * quem persegue o paciente que saiu da consulta sem fechar ficava invisível — na
+ * base de hoje são 69 das 213 cirurgias, com mediana bem longe da média.
+ */
+export function followUpStats(sales: ClinicSale[]): FollowUpStats {
+  const validas = sales.filter((s) => s.status !== 'cancelada')
+  const stats: FollowUpStats = {
+    total: validas.length,
+    noDia: 0,
+    followUp: 0,
+    semConsulta: 0,
+    consultaDepois: 0,
+    medianaDias: 0,
+    valorNoDiaCents: 0,
+    valorFollowUpCents: 0,
+  }
+  const prazos: number[] = []
+  for (const s of validas) {
+    const dias = diasAteFechar(s)
+    if (dias == null) {
+      stats.semConsulta += 1
+    } else if (dias < 0) {
+      stats.consultaDepois += 1
+    } else if (dias === 0) {
+      stats.noDia += 1
+      stats.valorNoDiaCents += s.valueCents
+    } else {
+      stats.followUp += 1
+      stats.valorFollowUpCents += s.valueCents
+      prazos.push(dias)
+    }
+  }
+  if (prazos.length > 0) {
+    prazos.sort((a, b) => a - b)
+    const meio = Math.floor(prazos.length / 2)
+    stats.medianaDias =
+      prazos.length % 2 === 0 ? Math.round((prazos[meio - 1] + prazos[meio]) / 2) : prazos[meio]
+  }
+  return stats
 }
 
 /**

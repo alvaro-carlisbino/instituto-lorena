@@ -24,6 +24,8 @@ import {
   type ClinicSaleKind,
   type StaffMember,
   cancelClinicSale,
+  diasAteFechar,
+  followUpStats,
   listClinicSales,
   listSurgicalStaff,
   salesByDoctor,
@@ -44,6 +46,15 @@ const STATUS_LABEL: Record<ClinicSale['status'], string> = {
   agendada: 'Agendada',
   realizada: 'Realizada',
   cancelada: 'Cancelada',
+}
+
+/** Quanto tempo a venda levou depois da consulta, em rótulo curto de tabela. */
+function rotuloPrazo(dias: number | null): { texto: string; tom: string } {
+  if (dias == null) return { texto: 'sem consulta', tom: 'text-muted-foreground' }
+  if (dias < 0) return { texto: 'consulta depois', tom: 'text-amber-600' }
+  if (dias === 0) return { texto: 'fechou na consulta', tom: 'text-emerald-600' }
+  if (dias === 1) return { texto: 'follow-up · 1 dia', tom: 'text-sky-600' }
+  return { texto: `follow-up · ${dias} dias`, tom: 'text-sky-600' }
 }
 
 export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
@@ -115,6 +126,13 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   // no rodapé da planilha ("4 fechamentos, 37% de conversão").
   const porMedico = useMemo(() => salesByDoctor(doMes), [doMes])
 
+  // Quanto do mês fechou na própria consulta e quanto veio de follow-up.
+  const prazo = useMemo(() => followUpStats(doMes), [doMes])
+  const pctFollowUp = useMemo(() => {
+    const base = prazo.noDia + prazo.followUp
+    return base > 0 ? Math.round((prazo.followUp / base) * 100) : 0
+  }, [prazo])
+
   const confirmarCancelamento = async () => {
     if (!cancelando) return
     try {
@@ -131,7 +149,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Card>
           <CardContent className="pt-4">
             <p className="text-xs text-muted-foreground">Vendas no mês</p>
@@ -148,6 +166,19 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           <CardContent className="pt-4">
             <p className="text-xs text-muted-foreground">Ticket médio</p>
             <p className="font-heading text-2xl">{brl(resumo.ticket)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <p className="text-xs text-muted-foreground">Fechou em follow-up</p>
+            <p className="font-heading text-2xl">
+              {prazo.followUp}
+              <span className="ml-1 text-sm text-muted-foreground">de {prazo.noDia + prazo.followUp}</span>
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {pctFollowUp}% · {brl(prazo.valorFollowUpCents)}
+              {prazo.medianaDias > 0 ? ` · mediana ${prazo.medianaDias} dias` : ''}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -202,6 +233,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead>Consulta</TableHead>
                     <TableHead>Venda</TableHead>
                     <TableHead>Paciente</TableHead>
                     <TableHead>{kind === 'cirurgia' ? 'Procedimento' : 'Protocolo'}</TableHead>
@@ -214,8 +246,17 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {doMes.map((s) => (
+                  {doMes.map((s) => {
+                    const prazoVenda = rotuloPrazo(diasAteFechar(s))
+                    return (
                     <TableRow key={s.id} className={s.status === 'cancelada' ? 'opacity-60' : undefined}>
+                      <TableCell className="whitespace-nowrap">
+                        <div>{dia(s.consultationAt)}</div>
+                        <div className={`text-xs ${prazoVenda.tom}`}>{prazoVenda.texto}</div>
+                        {s.consultationType && (
+                          <div className="text-xs text-muted-foreground">{s.consultationType}</div>
+                        )}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap">{dia(s.soldAt)}</TableCell>
                       <TableCell>
                         <div className="font-medium">{s.patientName}</div>
@@ -266,7 +307,8 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -290,6 +332,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                   <TableRow>
                     <TableHead>Médico</TableHead>
                     <TableHead className="text-right">Vendeu</TableHead>
+                    <TableHead className="text-right">Em follow-up</TableHead>
                     <TableHead className="text-right">Faturamento</TableHead>
                     <TableHead className="text-right">Ticket médio</TableHead>
                     <TableHead className="text-right">Executa</TableHead>
@@ -300,6 +343,14 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                     <TableRow key={m.nome}>
                       <TableCell className="font-medium">{m.nome}</TableCell>
                       <TableCell className="text-right">{m.vendeu}</TableCell>
+                      <TableCell className="text-right">
+                        {m.followUp}
+                        {m.vendeu > 0 && (
+                          <span className="ml-1 text-xs text-muted-foreground">
+                            {Math.round((m.followUp / m.vendeu) * 100)}%
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">{brl(m.valorCents)}</TableCell>
                       <TableCell className="text-right">{brl(m.ticketCents)}</TableCell>
                       <TableCell className="text-right">{m.executa}</TableCell>
