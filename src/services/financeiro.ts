@@ -850,3 +850,47 @@ export async function bankCoverage(accountId?: string): Promise<{ from: string; 
   const to = (max.data as { date?: string } | null)?.date
   return from && to ? { from, to } : null
 }
+
+// ──────────────────────────────────────────── cirurgia foi paga?
+//
+// A regra da casa é "não se opera sem 100% pago". Ver a migration 20260811200000: o vínculo é
+// por CPF (cirurgia → prontuário do Shosp → paciente → conta a receber), com queda pra nome
+// quando a cirurgia não tem prontuário. `vinculo` diz qual dos dois foi usado — sem isso a
+// tela volta a misturar "não pagou" com "não consegui casar o nome".
+
+export type VinculoCirurgia = 'cpf' | 'nome' | 'sem_pagamento' | 'sem_vinculo'
+
+export type CirurgiaPagamento = {
+  surgeryId: number
+  dia: string
+  paciente: string
+  prontuario: string | null
+  status: string | null
+  vinculo: VinculoCirurgia
+  recebidoCents: number
+  recebidoQtd: number
+  primeiroPagamento: string | null
+  ultimoPagamento: string | null
+  formas: string[]
+  emEspecieCents: number
+}
+
+export async function listCirurgiasPagamento(de: string, ate: string): Promise<CirurgiaPagamento[]> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_cirurgias_pagamento', { p_de: de, p_ate: ate })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    surgeryId: Number(r.surgery_id),
+    dia: String(r.dia ?? ''),
+    paciente: String(r.paciente ?? ''),
+    prontuario: (r.prontuario as string | null) ?? null,
+    status: (r.status as string | null) ?? null,
+    vinculo: (r.vinculo as VinculoCirurgia) ?? 'sem_vinculo',
+    recebidoCents: Number(r.recebido_cents ?? 0),
+    recebidoQtd: Number(r.recebido_qtd ?? 0),
+    primeiroPagamento: (r.primeiro_pagamento as string | null) ?? null,
+    ultimoPagamento: (r.ultimo_pagamento as string | null) ?? null,
+    formas: (r.formas as string[] | null) ?? [],
+    emEspecieCents: Number(r.em_especie_cents ?? 0),
+  }))
+}

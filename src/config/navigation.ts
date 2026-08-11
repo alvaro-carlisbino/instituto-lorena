@@ -2,6 +2,7 @@ import {
   type LucideIcon,
   AlarmClock,
   ArrowLeftRight,
+  HeartPulse,
   Bell,
   Bot,
   Boxes,
@@ -418,6 +419,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     group: 'financeiro',
     keywords: ['extrato', 'bater', 'ofx', 'banco'],
     visible: (ctx) => canFinance(ctx) && canBoards(ctx),
+  },
+  {
+    id: 'cirurgia-paga',
+    path: '/cirurgia-paga',
+    label: 'Cirurgia foi paga?',
+    icon: HeartPulse,
+    group: 'financeiro',
+    keywords: ['cirurgia', 'transplante', 'pagou', 'pagamento', 'auditoria', 'sala'],
+    visible: (ctx) => canFinance(ctx) && isClinic(ctx) && canBoards(ctx),
   },
   {
     id: 'conciliacao-shosp',
