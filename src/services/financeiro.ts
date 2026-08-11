@@ -1460,3 +1460,42 @@ export async function listVendasShosp(de: string, ate: string): Promise<VendaSho
     caixa: String(r.caixa ?? ''),
   }))
 }
+
+// ──────────────────────────────────────────── sugestão de categoria por IA
+//
+// A função `crm-classificar-gastos` NÃO escreve nada: devolve sugestão. Quem grava é o usuário
+// aprovando, e a aprovação passa pelo mesmo `saveCategoryRule` de sempre. IA carimbando sozinha
+// o razão de uma clínica é o mesmo que não ter conferência — e erro de classificação contamina
+// o DRE inteiro sem ninguém perceber.
+
+export type SugestaoIA = {
+  padrao: string
+  qtd: number
+  amountCents: number
+  categoryId: string
+  categoria: string
+  costCenter: string
+  confianca: number
+  motivo: string
+}
+
+export async function sugerirCategoriasIA(opts?: {
+  de?: string
+  ate?: string
+  limite?: number
+}): Promise<{ sugestoes: SugestaoIA[]; pagadores: number; descartadas: number }> {
+  const client = assertClient()
+  const { data, error } = await client.functions.invoke('crm-classificar-gastos', {
+    body: { de: opts?.de, ate: opts?.ate, limite: opts?.limite ?? 30 },
+  })
+  if (error) throw new Error(error.message)
+  const r = (data ?? {}) as Record<string, unknown>
+  if (r.error) throw new Error(String(r.message ?? r.error))
+  return {
+    sugestoes: (r.sugestoes as SugestaoIA[]) ?? [],
+    pagadores: Number(r.pagadores ?? 0),
+    // Quantas o modelo devolveu e a gente recusou por id inválido. Silêncio aqui esconderia
+    // alucinação — se esse número for alto, a sugestão inteira merece desconfiança.
+    descartadas: Number(r.descartadas ?? 0),
+  }
+}

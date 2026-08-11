@@ -42,6 +42,7 @@ import { useTenant } from '@/context/TenantContext'
 import { hojeLocal } from '@/lib/diaLocal'
 import { sugerirPadrao } from '@/lib/extratoPadrao'
 import { LancamentoEditor } from '@/components/financeiro/LancamentoEditor'
+import { SugestaoIAPanel } from '@/components/financeiro/SugestaoIA'
 import {
   listCategories,
   listCostCenters,
@@ -301,6 +302,14 @@ export function ExtratoPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Antes da lista: o caminho rápido é a IA propor os pagadores grandes de uma vez,
+          e a lista abaixo fica pro que sobrar. */}
+      {totais.semCategoria > 0 && (
+        <div className="mt-4">
+          <SugestaoIAPanel de={de} ate={ate} onAplicado={() => void carregar()} />
+        </div>
+      )}
 
       <Card className="mt-4">
         <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
