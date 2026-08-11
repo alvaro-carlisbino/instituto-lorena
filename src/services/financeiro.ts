@@ -1479,16 +1479,34 @@ export type SugestaoIA = {
   motivo: string
 }
 
+/**
+ * A função tem prazo próprio de 100s e devolve parcial quando estoura. Este teto aqui é só a
+ * rede de segurança pra quando ela nem isso conseguir: 130s ainda é menos que o 504 do gateway
+ * (~150s), então o erro que chega na tela é este, e não uma página de proxy. Sem `timeout` o
+ * `invoke` espera para sempre e o painel fica em "Pensando…" até alguém recarregar.
+ */
+const TIMEOUT_SUGESTAO_MS = 130_000
+
 export async function sugerirCategoriasIA(opts?: {
   de?: string
   ate?: string
   limite?: number
-}): Promise<{ sugestoes: SugestaoIA[]; pagadores: number; descartadas: number }> {
+}): Promise<{
+  sugestoes: SugestaoIA[]
+  pagadores: number
+  descartadas: number
+  faltaram: number
+  erros: string[]
+}> {
   const client = assertClient()
   const { data, error } = await client.functions.invoke('crm-classificar-gastos', {
     body: { de: opts?.de, ate: opts?.ate, limite: opts?.limite ?? 30 },
+    timeout: TIMEOUT_SUGESTAO_MS,
   })
-  if (error) throw new Error(error.message)
+  if (error) {
+    const abortou = /abort|timeout/i.test(String(error.name ?? '') + String(error.message ?? ''))
+    throw new Error(abortou ? 'A IA passou de 2 minutos sem responder. Tente de novo.' : error.message)
+  }
   const r = (data ?? {}) as Record<string, unknown>
   if (r.error) throw new Error(String(r.message ?? r.error))
   return {
@@ -1497,6 +1515,9 @@ export async function sugerirCategoriasIA(opts?: {
     // Quantas o modelo devolveu e a gente recusou por id inválido. Silêncio aqui esconderia
     // alucinação — se esse número for alto, a sugestão inteira merece desconfiança.
     descartadas: Number(r.descartadas ?? 0),
+    // Quantos pagadores não voltaram resposta nenhuma (lote falhou ou o prazo acabou).
+    faltaram: Number(r.faltaram ?? 0),
+    erros: (r.erros as string[]) ?? [],
   }
 }
 

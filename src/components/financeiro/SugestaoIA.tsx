@@ -9,7 +9,7 @@
 // porque é onde o modelo acerta quase sempre; abaixo disso vem desmarcado e com o motivo à
 // vista, que é o caso em que ele está chutando num nome de pessoa física ou sigla.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Check, Sparkles } from 'lucide-react'
 
@@ -36,21 +36,37 @@ export function SugestaoIAPanel({
   const [sugestoes, setSugestoes] = useState<SugestaoIA[]>([])
   const [marcadas, setMarcadas] = useState<Set<string>>(new Set())
   const [descartadas, setDescartadas] = useState(0)
+  const [faltaram, setFaltaram] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [pensando, setPensando] = useState(false)
+  const [segundos, setSegundos] = useState(0)
   const [pediu, setPediu] = useState(false)
+
+  // Relógio na espera. São 3 chamadas ao modelo por trás de um botão só, e espera sem número na
+  // tela é indistinguível de tela travada: foi o que aconteceu quando a função dava 504 calada.
+  useEffect(() => {
+    if (!pensando) return
+    const id = window.setInterval(() => setSegundos((s) => s + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [pensando])
 
   const pedir = async () => {
     setBusy(true)
+    setSegundos(0)
+    setPensando(true)
     try {
       const r = await sugerirCategoriasIA({ de, ate })
       setSugestoes(r.sugestoes)
       setDescartadas(r.descartadas)
+      setFaltaram(r.faltaram)
       setMarcadas(new Set(r.sugestoes.filter((s) => s.confianca >= CONFIANCA_SEGURA).map((s) => s.padrao)))
       setPediu(true)
-      if (r.sugestoes.length === 0) toast.message('Nada sem categoria neste período.')
+      if (r.sugestoes.length === 0 && r.pagadores === 0) toast.message('Nada sem categoria neste período.')
+      else if (r.sugestoes.length === 0) toast.error(r.erros[0] ?? 'A IA não devolveu nenhuma sugestão.')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao pedir sugestão')
     } finally {
+      setPensando(false)
       setBusy(false)
     }
   }
@@ -103,7 +119,7 @@ export function SugestaoIAPanel({
         </CardTitle>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" disabled={busy} onClick={() => void pedir()}>
-            {pediu ? 'Pedir de novo' : 'Sugerir categorias'}
+            {pensando ? `Pensando… ${segundos}s` : pediu ? 'Pedir de novo' : 'Sugerir categorias'}
           </Button>
           {sugestoes.length > 0 && (
             <Button size="sm" disabled={busy || marcadas.size === 0} onClick={() => void aplicar()}>
@@ -114,7 +130,7 @@ export function SugestaoIAPanel({
       </CardHeader>
       <CardContent className="space-y-2">
         <p className="text-xs text-muted-foreground">
-          A IA lê só o nome do pagador, quantas vezes pagou e o total — não vai valor individual
+          A IA lê só o nome do pagador, quantas vezes pagou e o total. Não vai valor individual
           nem data. Ela não classifica nada sozinha: o que você marcar vira regra, e regra tem
           desfazer na Configuração.
         </p>
@@ -126,9 +142,20 @@ export function SugestaoIAPanel({
           </p>
         )}
 
+        {faltaram > 0 && (
+          <p className="text-xs text-amber-600">
+            {faltaram} pagador(es) ficaram sem resposta da IA. Aprove o que serve e clique em
+            “Pedir de novo”: quem já virou regra sai da fila e os que faltaram entram.
+          </p>
+        )}
+
         {sugestoes.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            {busy ? 'Pensando…' : pediu ? 'Nada pendente aqui.' : 'Clique em “Sugerir categorias”.'}
+            {pensando
+              ? `Pensando… ${segundos}s (vai em lotes de 6, costuma levar cerca de um minuto)`
+              : pediu
+                ? 'Nada pendente aqui.'
+                : 'Clique em “Sugerir categorias”.'}
           </p>
         ) : (
           <div className="space-y-1">
@@ -147,7 +174,7 @@ export function SugestaoIAPanel({
                     <div className="text-xs text-muted-foreground">
                       {s.qtd}× · {brl(s.amountCents)} → {s.categoria}
                       {s.costCenter ? ` · ${s.costCenter}` : ''}
-                      {s.motivo ? ` — ${s.motivo}` : ''}
+                      {s.motivo ? ` · ${s.motivo}` : ''}
                     </div>
                   </div>
                   <Badge variant={baixa ? 'outline' : 'secondary'} className="shrink-0">
