@@ -27,10 +27,21 @@ export function CheckoutPage() {
 
   useEffect(() => {
     fetchRedeIntent(id)
-      .then(setIntent)
+      // Limpa o erro anterior: sem isso, uma falha transitória de rede deixava a tela
+      // travada em "Cobrança não encontrada" mesmo depois de a cobrança carregar.
+      .then((v) => { setError(''); setIntent(v) })
       .catch((e) => setError(e instanceof Error ? e.message : 'Cobrança não encontrada'))
       .finally(() => setLoading(false))
   }, [id])
+
+  // Título da aba com a marca do POLO da cobrança. O index.html fixa "Instituto Lorena CRM ·
+  // INTERNO" — que era o que o cliente do Tricopill lia enquanto digitava o cartão.
+  useEffect(() => {
+    if (!intent?.brandName) return
+    const anterior = document.title
+    document.title = `Pagamento · ${intent.brandName}`
+    return () => { document.title = anterior }
+  }, [intent?.brandName])
 
   const submit = async () => {
     setPaying(true)
@@ -77,7 +88,10 @@ export function CheckoutPage() {
 
   return (
     <div style={box} className="text-foreground">
-      <h1 className="text-xl font-semibold">Pagamento por cartão</h1>
+      {intent.brandName ? (
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{intent.brandName}</p>
+      ) : null}
+      <h1 className="mt-1 text-xl font-semibold">Pagamento por cartão</h1>
       <p className="mt-1 text-sm text-muted-foreground">{intent.description}</p>
       <div className="my-4 rounded-xl border border-border/60 bg-muted/30 p-4">
         <span className="text-3xl font-semibold">{brl(intent.amountCents)}</span>
@@ -139,6 +153,23 @@ export function CheckoutPage() {
           <p className="text-center text-[0.7rem] text-muted-foreground">Pagamento processado pela Rede.</p>
         </div>
       )}
+
+      {/* Rodapé com a marca do polo: quem cobra, onde falar. Sem isso o cliente pagava
+          numa tela anônima, e a única pista de marca era o domínio (que era o errado). */}
+      {intent.brandName ? (
+        <p className="mt-6 text-center text-[0.7rem] leading-relaxed text-muted-foreground">
+          Cobrança de <strong className="font-semibold">{intent.brandName}</strong>
+          {intent.brandSupportPhone ? <> · Dúvidas: {intent.brandSupportPhone}</> : null}
+          {intent.brandSiteUrl ? (
+            <>
+              <br />
+              <a href={intent.brandSiteUrl} className="underline underline-offset-2">
+                {intent.brandSiteUrl.replace(/^https?:\/\//, '')}
+              </a>
+            </>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   )
 }

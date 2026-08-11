@@ -3,8 +3,14 @@
  * tricopill.com.br (envio habilitado). A API key fica no SECRET do Supabase RESEND_API_KEY
  * (NUNCA no código/git). Remetente padrão configurável via RESEND_FROM.
  *
+ * REGRA DE MARCA: o default abaixo é do TRICOPILL. Todo e-mail que vai para um CLIENTE
+ * precisa passar `from` explícito, vindo de `getEmailFrom(admin, tenantId)` (tenantBrand.ts) —
+ * e não enviar quando o polo não tem remetente próprio. O default só é aceitável em dois
+ * casos: e-mail interno para a equipe, e e-mail que já é comprovadamente do Tricopill.
+ * Sem essa regra, um e-mail da clínica sai assinado "Tricopill" na caixa do paciente.
+ *
  * Uso: import { sendEmail } from '../_shared/resend.ts'
- *      await sendEmail({ to, subject, html })   // best-effort: devolve {ok,id|error}
+ *      await sendEmail({ to, subject, html, from })   // best-effort: devolve {ok,id|error}
  */
 
 const RESEND_API = 'https://api.resend.com/emails'

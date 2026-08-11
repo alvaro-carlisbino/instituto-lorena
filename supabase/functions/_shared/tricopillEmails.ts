@@ -12,6 +12,20 @@
  */
 import { sendEmail } from './resend.ts'
 
+/**
+ * TRAVA DE MARCA: todo template daqui tem "TRICOPILL" no cabeçalho, o rodapé do
+ * tricopill.com.br e o Clube no WhatsApp. Nenhum deles pode sair para um lead da
+ * clínica. As funções exigem o `tenantId` da origem e recusam qualquer outro polo —
+ * a trava mora aqui, não em cada chamador, pra não depender de ninguém lembrar.
+ */
+const TRICOPILL_TENANT_ID = 'tricopill'
+
+function recusaSeNaoForTricopill(tenantId: string): { ok: boolean; error?: string } | null {
+  const id = String(tenantId ?? '').trim().toLowerCase()
+  if (id === TRICOPILL_TENANT_ID) return null
+  return { ok: false, error: `email_tricopill_bloqueado_para_polo:${id || 'vazio'}` }
+}
+
 const CLUBE_LINK = 'https://chat.whatsapp.com/GlRBbbwhjELGZ4u93VGviT'
 const GOLD = '#b8975a'
 const INK = '#241e18'
@@ -37,11 +51,14 @@ const btn = (href: string, label: string) =>
   `<div style="text-align:center;margin:22px 0;"><a href="${href}" style="background:${GOLD};color:#241e18;text-decoration:none;font-weight:bold;padding:13px 30px;border-radius:999px;display:inline-block;font-size:15px;">${label}</a></div>`
 
 export async function sendPostPurchaseEmail(args: {
+  tenantId: string
   to: string
   firstName: string
   amountFmt: string
   description?: string | null
 }): Promise<{ ok: boolean; error?: string }> {
+  const bloqueio = recusaSeNaoForTricopill(args.tenantId)
+  if (bloqueio) return bloqueio
   const inner = `
     <h1 style="font-size:21px;margin:0 0 14px;">Pedido confirmado, ${args.firstName}! 💚</h1>
     <p style="font-size:15px;line-height:1.65;margin:0 0 12px;">
@@ -63,6 +80,7 @@ export async function sendPostPurchaseEmail(args: {
 }
 
 export async function sendCartRecoveryEmail(args: {
+  tenantId: string
   to: string
   firstName: string
   payLink: string
@@ -70,6 +88,8 @@ export async function sendCartRecoveryEmail(args: {
   couponCode?: string
   couponPct?: number
 }): Promise<{ ok: boolean; error?: string }> {
+  const bloqueio = recusaSeNaoForTricopill(args.tenantId)
+  if (bloqueio) return bloqueio
   const inner = args.step === 1
     ? `
     <h1 style="font-size:21px;margin:0 0 14px;">${args.firstName}, seu pedido ficou esperando 💚</h1>
@@ -96,12 +116,15 @@ export async function sendCartRecoveryEmail(args: {
 // Follow-up de quem pegou o cupom no popup do site (lead magnet) e não comprou.
 // Relembra o CLUBE10, mostra o kit mais escolhido e leva de volta pra loja.
 export async function sendLeadMagnetFollowupEmail(args: {
+  tenantId: string
   to: string
   firstName?: string
   couponCode?: string
   couponPct?: number
 }): Promise<{ ok: boolean; error?: string }> {
-  const nome = (args.firstName && args.firstName.trim()) ? args.firstName.trim() : 'oi'
+  const bloqueio = recusaSeNaoForTricopill(args.tenantId)
+  if (bloqueio) return bloqueio
+  const nome =(args.firstName && args.firstName.trim()) ? args.firstName.trim() : 'oi'
   const cupom = args.couponCode || 'CLUBE10'
   const pct = args.couponPct ?? 10
   const inner = `

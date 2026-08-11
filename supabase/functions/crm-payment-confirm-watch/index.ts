@@ -213,7 +213,9 @@ async function sendPostPurchaseEmails(admin: SupabaseClient): Promise<number> {
     }
     const firstName = String(r.customer_name ?? (l as { patient_name?: string } | null)?.patient_name ?? 'tudo bem').trim().split(/\s+/)[0] || 'tudo bem'
     const amountFmt = 'R$ ' + ((Number(r.amount_cents) || 0) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
-    const out = await sendPostPurchaseEmail({ to: email, firstName, amountFmt, description: r.description ?? null })
+    // A query acima já filtra tenant_id='tricopill'; o polo vai explícito porque o template
+    // é Tricopill na marca e a trava de polo mora dentro do próprio template.
+    const out = await sendPostPurchaseEmail({ tenantId: 'tricopill', to: email, firstName, amountFmt, description: r.description ?? null })
     if (out.ok) {
       await admin.from('rede_payments').update({ post_purchase_email_at: new Date().toISOString() }).eq('id', r.id)
       sent++

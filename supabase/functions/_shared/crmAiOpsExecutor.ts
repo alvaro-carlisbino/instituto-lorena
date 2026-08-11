@@ -219,8 +219,10 @@ function pickupAdviceNote(entrega: EntregaSnapshot): string {
 /** Host do gerador de imagem do QR Code Pix (override por env). O payload Pix (EMV) é público. */
 const CRM_OPS_MARKER = '<<<CRM_OPS>>>'
 
-/** URL pública do app (rota /pagar/:id do checkout de cartão). */
-const APP_BASE_URL = (Deno.env.get('APP_BASE_URL') ?? 'https://instituto-lorena.vercel.app').trim()
+// O domínio do link de pagamento NÃO mora mais aqui. Era uma constante global
+// (`APP_BASE_URL`, default `https://instituto-lorena.vercel.app`) usada pelos dois polos:
+// todo link do Tricopill saía no domínio da clínica. Agora cada cobrança nasce com o
+// domínio do próprio polo, resolvido dentro de createRedeIntent via tenants.brand_config.
 
 /**
  * Mensagem ao cliente sobre o cupom: confirma quando aplicou; avisa quando o
@@ -891,7 +893,6 @@ export async function executeCrmAiOpsFromModel(
             description,
             leadId: opts.allowedLeadId,
             installments,
-            appBaseUrl: APP_BASE_URL,
             couponCode: op.coupon != null ? String(op.coupon) : undefined,
             freightCents,
             kit: kitKey ?? undefined, // guarda o kit (ou inferido) p/ criar o pedido no Bling ao pagar

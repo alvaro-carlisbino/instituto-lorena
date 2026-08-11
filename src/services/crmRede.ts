@@ -52,7 +52,6 @@ export async function generateRedeLink(args: {
     action: 'generate_link',
     amountCents: args.amountCents,
     description: args.description,
-    appBaseUrl: window.location.origin,
     ...(args.leadId ? { leadId: args.leadId } : {}),
     ...(args.installments ? { installments: args.installments } : {}),
     ...(args.freightCents && args.freightCents > 0 ? { freightCents: args.freightCents } : {}),
@@ -65,6 +64,9 @@ export async function generateRedeLink(args: {
       throw new Error('Rede não configurada neste polo. Preencha PV e Token (e.Rede) em Integrações.')
     }
     if (m.includes('rede_valor')) throw new Error('Informe um valor válido (mínimo R$ 1,00).')
+    if (m.includes('marca_sem_checkout_base_url')) {
+      throw new Error('Este polo não tem domínio de cobrança configurado. Defina o domínio da marca antes de gerar links.')
+    }
     throw new Error(m || 'Falha ao gerar cobrança')
   }
   return { payLink: String(p.payLink ?? ''), amountCents: Number(p.amountCents ?? 0) }
@@ -125,7 +127,16 @@ export async function testRedeTx(): Promise<{ ok: boolean; returnCode: string; m
 }
 
 // === Checkout público (cliente, sem login) ===
-export type RedeIntentView = { amountCents: number; description: string; installments: number; status: string }
+export type RedeIntentView = {
+  amountCents: number
+  description: string
+  installments: number
+  status: string
+  /** Marca do polo dono da cobrança — o checkout é a única tela que o CLIENTE abre. */
+  brandName: string
+  brandSiteUrl: string
+  brandSupportPhone: string
+}
 
 export async function fetchRedeIntent(id: string): Promise<RedeIntentView> {
   const p = await invoke('crm-rede-pay', { action: 'get_intent', id })
@@ -135,6 +146,9 @@ export async function fetchRedeIntent(id: string): Promise<RedeIntentView> {
     description: String(p.description ?? ''),
     installments: Number(p.installments ?? 1),
     status: String(p.status ?? 'pending'),
+    brandName: String(p.brandName ?? ''),
+    brandSiteUrl: String(p.brandSiteUrl ?? ''),
+    brandSupportPhone: String(p.brandSupportPhone ?? ''),
   }
 }
 

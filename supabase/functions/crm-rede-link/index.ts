@@ -4,7 +4,8 @@ import { checkRedePixStatus, createRedeIntent, createRedePix, readRedeConfig, te
 // e.Rede (cartão) — ações autenticadas do CRM.
 //  get_config    -> { configured, env }
 //  set_config    -> grava { pv?, token?, env?, base_url? }
-//  generate_link -> cria cobrança e devolve a URL /pagar/<id> { amountCents, description?, leadId?, appBaseUrl }
+//  generate_link -> cria cobrança e devolve a URL /pagar/<id> { amountCents, description?, leadId? }
+//                   O domínio do link vem de tenants.brand_config do polo — nunca do cliente.
 //  test_tx       -> autoriza R$20 com cartão de teste (só sandbox) -> { ok, returnCode, message, tid }
 
 const cors = {
@@ -73,8 +74,9 @@ Deno.serve(async (req) => {
     const freightCents = payload.freightCents != null ? Number(payload.freightCents) : undefined
     const couponCode = payload.couponCode != null ? String(payload.couponCode) : undefined
     const customerName = payload.customerName != null ? String(payload.customerName).trim() : ''
-    const appBaseUrl = String(payload.appBaseUrl ?? '').trim()
-    if (!appBaseUrl) return json({ ok: false, error: 'missing_app_base_url' }, 400)
+    // `appBaseUrl` do cliente é IGNORADO de propósito (o painel mandava window.location.origin,
+    // então um operador logado no CRM da clínica gerava link do Tricopill no domínio errado).
+    // O domínio agora sai de tenants.brand_config do polo, dentro de createRedeIntent.
     // Nome que vai pro intent (rede_payments.customer_name). Se o operador NÃO digitou, puxa do
     // lead — senão o pedido nascia sem comprador e aparecia como "Cliente" no painel/comprovante.
     let effectiveName = customerName
@@ -104,7 +106,7 @@ Deno.serve(async (req) => {
       // certos (sem kit o pedido vai como avulso, com a descrição livre).
       const kit = payload.kit != null && String(payload.kit).trim() ? String(payload.kit).trim() : undefined
       // Painel: link gerado por uma pessoa da equipe (a rota exige JWT de usuário).
-      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, appBaseUrl, freightCents, couponCode, customerName: effectiveName || undefined, customerDoc: effectiveDoc, kit, origin: 'manual' })
+      const out = await createRedeIntent(admin, { tenantId, amountCents, description, leadId, installments, freightCents, couponCode, customerName: effectiveName || undefined, customerDoc: effectiveDoc, kit, origin: 'manual' })
       return json({ ok: true, payLink: out.url, id: out.id, amountCents })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

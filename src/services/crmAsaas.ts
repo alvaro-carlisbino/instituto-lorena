@@ -59,7 +59,6 @@ export async function generateAsaasCardLink(args: {
     action: 'generate_card',
     amountCents: args.amountCents,
     description: args.description,
-    appBaseUrl: window.location.origin,
     ...(args.leadId ? { leadId: args.leadId } : {}),
     ...(args.installments ? { installments: args.installments } : {}),
     ...(args.freightCents && args.freightCents > 0 ? { freightCents: args.freightCents } : {}),

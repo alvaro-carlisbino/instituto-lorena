@@ -7,6 +7,7 @@ import { autoShipToCart, type AutoShipResult } from './melhorEnvio.ts'
 import { sendEmail } from './resend.ts'
 import { sendSaleReceiptToGroup } from './saleReceipt.ts'
 import { dispatchPurchaseConversions } from './conversions.ts'
+import { getCheckoutBaseUrl, getEmailFrom, getTenantBrand } from './tenantBrand.ts'
 
 // Envia texto pelo WhatsApp (w-api) usando a linha ativa do tenant. Best-effort.
 async function subSendWapi(admin: SupabaseClient, tenantId: string, phone: string, text: string): Promise<boolean> {
@@ -258,7 +259,6 @@ export async function createAsaasCardIntent(
     description: string
     leadId?: string
     installments?: number
-    appBaseUrl: string
     couponCode?: string
     freightCents?: number
     kit?: string
@@ -272,6 +272,9 @@ export async function createAsaasCardIntent(
 ): Promise<{ id: string; url: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null; freightCents: number }> {
   const cfg = await readAsaasConfig(admin, args.tenantId)
   if (!cfg) throw new Error('asaas_nao_configurado')
+  // Domínio do polo dono da cobrança (ver comentário gêmeo em rede.ts): resolvido aqui,
+  // nunca recebido do chamador, e antes do INSERT pra não deixar cobrança órfã.
+  const checkoutBase = await getCheckoutBaseUrl(admin, args.tenantId)
   const baseCents = Math.round(args.amountCents)
   if (!Number.isFinite(baseCents) || baseCents < 500) throw new Error('asaas_valor_invalido')
 
@@ -295,10 +298,9 @@ export async function createAsaasCardIntent(
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
     const dupRow = dup as { id?: string; discount_cents?: number; coupon_code?: string | null } | null
     if (dupRow?.id) {
-      const base = args.appBaseUrl.replace(/\/$/, '')
       return {
         id: dupRow.id,
-        url: `${base}/pagar/${dupRow.id}`,
+        url: `${checkoutBase}/pagar/${dupRow.id}`,
         amountCents,
         baseCents,
         discountCents: dupRow.discount_cents ?? coupon.discountCents,
@@ -327,10 +329,9 @@ export async function createAsaasCardIntent(
     status: 'pending',
     origin: args.origin ?? null,
   })
-  const base = args.appBaseUrl.replace(/\/$/, '')
   return {
     id,
-    url: `${base}/pagar/${id}`,
+    url: `${checkoutBase}/pagar/${id}`,
     amountCents,
     baseCents,
     discountCents: coupon.discountCents,
@@ -371,6 +372,16 @@ export async function getAsaasIntent(admin: SupabaseClient, id: string): Promise
   }
 }
 
+/**
+ * E-mail de preenchimento quando o cliente não informou nenhum, exigido pelo antifraude
+ * do gateway. Sempre no domínio do polo da cobrança — nunca no do outro negócio.
+ */
+async function placeholderEmail(admin: SupabaseClient, tenantId: string): Promise<string> {
+  const brand = await getTenantBrand(admin, tenantId)
+  const host = brand.siteUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '')
+  return host ? `cliente@${host}` : `cliente@${brand.tenantId}.invalid`
+}
+
 export type AsaasPayResult = { status: 'paid' | 'failed'; detail: string; asaasPaymentId: string | null }
 
 /**
@@ -399,7 +410,10 @@ export async function chargeAsaasCard(
   }
   const cpf = digits(args.holderInfo?.cpf || intent.customerDoc || leadCad.cpf)
   const phone = brPhone(args.holderInfo?.phone || intent.phone || '')
-  const email = args.holderInfo?.email || leadCad.email || 'cliente@tricopill.com.br'
+  // Sem e-mail do cliente, o antifraude do Asaas ainda exige um. O placeholder era
+  // `cliente@tricopill.com.br` fixo — ou seja, uma cobrança da clínica ia pro gateway
+  // carimbada com o domínio do Tricopill. Agora o placeholder segue o domínio do polo.
+  const email = args.holderInfo?.email || leadCad.email || (await placeholderEmail(admin, intent.tenantId))
   const postalCode = digits(args.holderInfo?.postalCode || leadEnt.cep)
   const addressNumber = String(args.holderInfo?.addressNumber || leadEnt.numero || 'S/N').slice(0, 20)
   const customerId = await findOrCreateAsaasCustomer(cfg, {
@@ -832,7 +846,8 @@ export async function finalizeSubscriptionCycle(
     const email = String(s.email ?? '').trim()
     if (email) {
       const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1e1e1e;line-height:1.5"><h2 style="color:#14362E">Assinatura renovada ✅</h2><p>Olá ${nome}!</p><p>Recebemos a renovação da sua assinatura Tricopill — <b>${valorBRL}</b>.</p><p>${ships ? `Seu novo envio (${un} frasco${un > 1 ? 's' : ''}) está sendo preparado; o código de rastreio chega em breve.` : 'Seu próximo envio é no próximo ciclo.'}</p><p>Obrigado por fazer parte do clube! 💚</p></div>`
-      await sendEmail({ to: email, subject: 'Assinatura Tricopill renovada', html })
+      const remetente = await getEmailFrom(admin, tenantId)
+      if (remetente) await sendEmail({ to: email, subject: 'Assinatura Tricopill renovada', html, from: remetente })
     }
   } catch { /* best-effort: notificação nunca derruba o ciclo */ }
 

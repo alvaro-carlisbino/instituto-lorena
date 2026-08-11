@@ -9,6 +9,7 @@ import { internalSaleEmail, orderConfirmEmail, TEAM_EMAIL } from './emails.ts'
 import { autoShipToCart } from './melhorEnvio.ts'
 import { sendSaleReceiptToGroup } from './saleReceipt.ts'
 import { dispatchPurchaseConversions } from './conversions.ts'
+import { getCheckoutBaseUrl, getTenantBrand } from './tenantBrand.ts'
 
 const PIX_QR_IMAGE_BASE = (Deno.env.get('PIX_QR_IMAGE_BASE') ?? 'https://api.qrserver.com/v1/create-qr-code/').trim()
 
@@ -244,7 +245,6 @@ export async function createRedeIntent(
     description: string
     leadId?: string
     installments?: number
-    appBaseUrl: string
     couponCode?: string
     freightCents?: number
     kit?: string
@@ -265,6 +265,11 @@ export async function createRedeIntent(
 ): Promise<{ id: string; url: string; amountCents: number; baseCents: number; discountCents: number; couponCode: string | null; freightCents: number }> {
   const cfg = await readRedeConfig(admin, args.tenantId)
   if (!cfg) throw new Error('rede_nao_configurado')
+  // Domínio do polo DONO da cobrança — resolvido aqui dentro, não recebido por parâmetro.
+  // Enquanto o chamador mandava a base (env global no bot, window.location.origin no painel),
+  // toda cobrança do Tricopill saía no domínio da clínica. Resolvendo antes do INSERT, um
+  // polo mal configurado falha limpo em vez de deixar cobrança pendente órfã no banco.
+  const checkoutBase = await getCheckoutBaseUrl(admin, args.tenantId)
   const baseCents = Math.round(args.amountCents)
   if (!Number.isFinite(baseCents) || baseCents < 100) throw new Error('rede_valor_invalido')
 
@@ -302,10 +307,9 @@ export async function createRedeIntent(
     customer_doc: args.customerDoc?.replace(/\D/g, '') || null,
     origin: args.origin ?? null,
   })
-  const base = args.appBaseUrl.replace(/\/$/, '')
   return {
     id,
-    url: `${base}/pagar/${id}`,
+    url: `${checkoutBase}/pagar/${id}`,
     amountCents,
     baseCents,
     discountCents: coupon.discountCents,
@@ -327,7 +331,6 @@ export async function createRedePix(
     amountCents: number
     description: string
     leadId?: string
-    appBaseUrl?: string
     couponCode?: string
     freightCents?: number
     kit?: string
@@ -937,13 +940,22 @@ export async function finalizeRedePaid(
       // best-effort: envio nunca derruba o pagamento
     }
 
+    // Marca do polo DONO da cobrança, resolvida UMA vez e usada na confirmação, no e-mail e
+    // na conversão. O fallback antigo era o literal "Tricopill", então uma venda da clínica
+    // sem descrição virava "Tricopill" na mensagem que o paciente recebia.
+    // Se a leitura falhar, cai no id do próprio polo — nunca no nome do outro negócio.
+    const brandTenantId = String(l.tenant_id ?? intent.tenantId ?? '')
+    const marca = await getTenantBrand(admin, brandTenantId).catch(() => ({
+      tenantId: brandTenantId, appName: brandTenantId, checkoutBaseUrl: '', siteUrl: '', emailFrom: '', supportPhone: '',
+    }))
+
     // Confirmação no WhatsApp ao cliente: confere nome/CPF/endereço e pede o que faltar.
     // Best-effort — nunca derruba o pagamento. (PIX/bot não mandavam nada antes.)
     try {
       const cadMsg = ((l.custom_fields as Record<string, unknown> | undefined)?.cadastro ?? {}) as Record<string, unknown>
       const entMsg = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>
       const valorBRL = (intent.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-      const pedidoDesc = String(intent.description || 'Tricopill').slice(0, 80)
+      const pedidoDesc = String(intent.description || marca.appName).slice(0, 80)
       const msg = buildConfirmMsg({
         nome: intent.customerName ?? opts.cardholderName ?? undefined,
         cad: cadMsg, ent: entMsg, cpfPayment: intent.customerDoc ?? undefined, pedidoDesc, valorBRL,
@@ -954,12 +966,17 @@ export async function finalizeRedePaid(
         const nomeEmail = intent.customerName ?? opts.cardholderName ?? undefined
         const cfTop = (l.custom_fields ?? {}) as Record<string, unknown>
         const email = String(cfTop.email ?? (cadMsg as Record<string, unknown>).email ?? '').trim()
-        if (email) {
+        // Ao CLIENTE: só sai assinado pela marca do próprio polo. Polo sem remetente
+        // configurado (clínica, enquanto o domínio não é verificado no Resend) não manda —
+        // e-mail da clínica assinado "Tricopill" é o vazamento que estamos fechando.
+        if (email && marca.emailFrom) {
           const c = orderConfirmEmail({ nome: nomeEmail, cad: cadMsg, ent: entMsg, cpfPayment: intent.customerDoc ?? undefined, pedidoDesc, valorBRL })
-          await sendEmail({ to: email, subject: c.subject, html: c.html })
+          await sendEmail({ to: email, subject: c.subject, html: c.html, from: marca.emailFrom })
         }
+        // Aviso INTERNO (equipe, não cliente): segue no remetente padrão, mas com o polo no
+        // assunto pra ninguém confundir venda da clínica com venda do Tricopill.
         const ie = internalSaleEmail({ nome: nomeEmail, cad: cadMsg, ent: entMsg, cpfPayment: intent.customerDoc ?? undefined, pedidoDesc, valorBRL, phone: String(l.phone ?? ''), metodo: isPix ? 'PIX' : 'Cartão' })
-        await sendEmail({ to: TEAM_EMAIL, subject: ie.subject, html: ie.html })
+        await sendEmail({ to: TEAM_EMAIL, subject: `[${marca.appName}] ${ie.subject}`, html: ie.html })
       } catch { /* best-effort: e-mail nunca derruba o pagamento */ }
     } catch { /* best-effort */ }
 
@@ -970,7 +987,7 @@ export async function finalizeRedePaid(
       orderId: intent.id,
       method: opts.method,
       gateway: 'rede',
-      productName: orderKit ? `Tricopill (${orderKit})` : String(intent.description ?? 'Tricopill'),
+      productName: orderKit ? `${marca.appName} (${orderKit})` : String(intent.description || marca.appName),
       phone: l.phone,
       cpf: intent.customerDoc,
     })

@@ -136,6 +136,7 @@ Deno.serve(async (req) => {
     if (!ENABLED) { sent++; continue } // dry-run: conta como "enviaria"
 
     const res = await sendLeadMagnetFollowupEmail({
+      tenantId: TENANT,
       to: c.email,
       firstName: firstName((c as unknown as { name?: string }).name),
       couponCode: 'CLUBE10',

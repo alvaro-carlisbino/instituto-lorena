@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { sendCartRecoveryEmail } from '../_shared/tricopillEmails.ts'
+import { buildCheckoutUrl } from '../_shared/tenantBrand.ts'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Carrinho abandonado — recupera links de pagamento (rede_payments) que ficaram
@@ -18,7 +19,7 @@ import { sendCartRecoveryEmail } from '../_shared/tricopillEmails.ts'
 //
 // Env:
 //   CART_RECOVERY_ENABLED   'true' liga o envio real (default: dry-run)
-//   APP_BASE_URL            base do link de pagamento (default vercel)
+// O domínio do link vem de tenants.brand_config do polo dono da cobrança (não é env).
 //   RECOVERY_COUPON_CODE    (opcional) se setado, o step 2 convida o cliente a responder
 //                           pra ganhar desconto (o cupom é aplicado por quem regerar o link)
 //   RECOVERY_COUPON_PCT     (opcional) % citada no convite (default 5)
@@ -32,7 +33,6 @@ function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 }
 
-const APP_BASE_URL = (Deno.env.get('APP_BASE_URL') ?? 'https://instituto-lorena.vercel.app').trim().replace(/\/$/, '')
 const ENABLED = (Deno.env.get('CART_RECOVERY_ENABLED') ?? '').trim().toLowerCase() === 'true'
 const COUPON = (Deno.env.get('RECOVERY_COUPON_CODE') ?? '').trim()
 const COUPON_PCT = (Deno.env.get('RECOVERY_COUPON_PCT') ?? '5').trim()
@@ -112,7 +112,15 @@ Deno.serve(async (req) => {
     else if (step === 1 && ageH >= 24 && lastSentH >= 20) target = 2
     if (!target) continue
 
-    const link = `${APP_BASE_URL}/pagar/${r.id}`
+    // Link no domínio do polo DONO da cobrança (era env global, sempre o da clínica).
+    // Polo sem domínio configurado: pula a linha em vez de recuperar carrinho com a marca errada.
+    let link: string
+    try {
+      link = await buildCheckoutUrl(admin, r.tenant_id, r.id)
+    } catch (e) {
+      results.push({ id: r.id, lead: r.lead_id, tenant: r.tenant_id, skipped: e instanceof Error ? e.message : String(e) })
+      continue
+    }
     const nome = firstName(r.customer_name)
     const desc = r.description ? ` (${r.description})` : ''
     let text: string
@@ -158,6 +166,7 @@ Deno.serve(async (req) => {
       const email = String(cf.email ?? cad.email ?? '').trim()
       if (email.includes('@')) {
         const out = await sendCartRecoveryEmail({
+          tenantId: r.tenant_id,
           to: email,
           firstName: nome,
           payLink: link,

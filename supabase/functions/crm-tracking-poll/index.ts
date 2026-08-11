@@ -3,6 +3,7 @@ import { getValidMeToken, melhorEnvioBaseUrl, melhorEnvioConfigured, meUserAgent
 import { getValidBlingToken } from '../_shared/bling.ts'
 import { sendEmail } from '../_shared/resend.ts'
 import { trackingEmail } from '../_shared/emails.ts'
+import { getEmailFrom } from '../_shared/tenantBrand.ts'
 
 // Rastreio 100% AUTOMÁTICO: lista os envios da conta Melhor Envio (/me/orders) e, para cada um
 // com RASTREIO, avisa o cliente por WhatsApp (+ e-mail). Acha o destinatário por: 1) lead (CPF via
@@ -112,8 +113,18 @@ Deno.serve(async (req) => {
         const wa = `Oi, ${fn}! 📦 Seu pedido Tricopill já foi postado nos Correios!\n\n*Código de rastreio:* ${tracking}\nAcompanhe aqui: https://www.linkcorreios.com.br/?id=${tracking}\n\nChega em alguns dias úteis. Qualquer dúvida, é só responder por aqui. 💚`
         let sent = false
         if (ph.length >= 10) sent = await sendWapiText(admin, ph, wa)
-        if (email) { const t = trackingEmail({ nome: nomeCli, tracking }); await sendEmail({ to: email, subject: t.subject, html: t.html }) }
-        if (sent || email) {
+        // TENANT_ID aqui é fixo 'tricopill' (o polo que posta nos Correios); o remetente
+        // vem da marca dele, não do default global.
+        const remetente = await getEmailFrom(admin, TENANT_ID)
+        let mailed = false
+        if (email && remetente) {
+          const t = trackingEmail({ nome: nomeCli, tracking })
+          mailed = (await sendEmail({ to: email, subject: t.subject, html: t.html, from: remetente })).ok
+        }
+        // Só carimba como avisado se ALGUM canal saiu de verdade. Antes bastava o cliente
+        // ter e-mail cadastrado; com o remetente por polo isso marcaria como avisado quem
+        // não recebeu nada, e o rastreio nunca mais seria tentado.
+        if (sent || mailed) {
           await admin.from('tracking_sent').insert({ tenant_id: TENANT_ID, tracking, channel: sent ? 'whatsapp' : 'email', phone: ph || null, email: email || null })
           notified += 1
         }

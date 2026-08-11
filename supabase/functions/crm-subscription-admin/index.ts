@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { cancelAsaasSubscription, listAsaasSubscriptionPayments, setAsaasSubscriptionStatus } from '../_shared/asaas.ts'
 import { getValidMeToken, melhorEnvioBaseUrl, meUserAgent } from '../_shared/melhorEnvio.ts'
 import { sendEmail } from '../_shared/resend.ts'
+import { getEmailFrom } from '../_shared/tenantBrand.ts'
 import { trackingEmail } from '../_shared/emails.ts'
 
 // Ações do painel de assinaturas (autenticado): cancelar, pausar, reativar, reenviar rastreio.
@@ -89,8 +90,9 @@ Deno.serve(async (req) => {
     const wa = `Oi, ${fn}! 📦 Seu pedido Tricopill foi postado nos Correios!\n\n*Código de rastreio:* ${tracking}\nAcompanhe aqui: https://www.linkcorreios.com.br/?id=${tracking}\n\nQualquer dúvida, é só responder. 💚`
     const sent = await sendWapi(admin, tenantId, String(s.phone ?? ''), wa)
     const email = String(s.email ?? '').trim()
-    if (email) { const t = trackingEmail({ nome, tracking }); await sendEmail({ to: email, subject: t.subject, html: t.html }) }
-    return json({ ok: true, tracking, whatsapp: sent, email: !!email })
+    const remetente = await getEmailFrom(admin, tenantId)
+    if (email && remetente) { const t = trackingEmail({ nome, tracking }); await sendEmail({ to: email, subject: t.subject, html: t.html, from: remetente }) }
+    return json({ ok: true, tracking, whatsapp: sent, email: !!(email && remetente) })
   }
   if (action === 'history') {
     const payments = asaasSubId ? await listAsaasSubscriptionPayments(admin, tenantId, asaasSubId) : []

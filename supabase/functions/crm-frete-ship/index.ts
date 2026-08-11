@@ -15,6 +15,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
 import { sendEmail } from '../_shared/resend.ts'
+import { getEmailFrom } from '../_shared/tenantBrand.ts'
 import { trackingEmail } from '../_shared/emails.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import {
@@ -191,8 +192,13 @@ Deno.serve(async (req) => {
       try {
         const custEmail = String(to.email ?? '').trim()
         if (custEmail) {
-          const t = trackingEmail({ nome: to.name, tracking: res.tracking })
-          await sendEmail({ to: custEmail, subject: t.subject, html: t.html })
+          // Remetente do polo. Polo sem remetente próprio não manda: e-mail de rastreio
+          // da clínica assinado "Tricopill" é mistura de marca na caixa do paciente.
+          const remetente = await getEmailFrom(admin, tenantId)
+          if (remetente) {
+            const t = trackingEmail({ nome: to.name, tracking: res.tracking })
+            await sendEmail({ to: custEmail, subject: t.subject, html: t.html, from: remetente })
+          }
         }
       } catch { /* ignore */ }
     }
@@ -241,8 +247,11 @@ Deno.serve(async (req) => {
         const cad = (cf.cadastro ?? {}) as Record<string, unknown>
         const email = String(cad.email ?? '').trim()
         if (email) {
-          const t = trackingEmail({ nome: String(cad.nomeCompleto ?? ''), tracking: st.tracking })
-          await sendEmail({ to: email, subject: t.subject, html: t.html })
+          const remetente = await getEmailFrom(admin, tenantId)
+          if (remetente) {
+            const t = trackingEmail({ nome: String(cad.nomeCompleto ?? ''), tracking: st.tracking })
+            await sendEmail({ to: email, subject: t.subject, html: t.html, from: remetente })
+          }
         }
       } catch { /* ignore */ }
     }

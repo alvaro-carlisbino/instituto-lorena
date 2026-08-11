@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { getRedeIntent, payRedeIntent } from '../_shared/rede.ts'
+import { getTenantBrand } from '../_shared/tenantBrand.ts'
 
 // Checkout público (cliente) — sem login.
 //  get_intent -> { id } -> dados da cobrança (valor, descrição, status)
@@ -37,12 +38,19 @@ Deno.serve(async (req) => {
   if (action === 'get_intent') {
     const intent = await getRedeIntent(admin, id)
     if (!intent) return json({ ok: false, error: 'nao_encontrada' }, 404)
+    // Marca do polo dono da cobrança: a tela de pagamento é a única do app que um CLIENTE
+    // abre, e ela não tinha marca nenhuma — o cliente do Tricopill via "Instituto Lorena
+    // CRM · INTERNO" no título da aba. Só dado público (nome/site/telefone de suporte).
+    const marca = await getTenantBrand(admin, intent.tenantId)
     return json({
       ok: true,
       amountCents: intent.amountCents,
       description: intent.description,
       installments: intent.installments,
       status: intent.status,
+      brandName: marca.appName,
+      brandSiteUrl: marca.siteUrl,
+      brandSupportPhone: marca.supportPhone,
     })
   }
 

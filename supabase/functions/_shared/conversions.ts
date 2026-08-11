@@ -1,4 +1,5 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { getTenantBrand } from './tenantBrand.ts'
 
 /**
  * Conversões de COMPRA server-side. Dispara no momento em que o pagamento CONFIRMA no
@@ -249,11 +250,17 @@ export async function dispatchPurchaseConversions(admin: SupabaseClient, input: 
       .maybeSingle()
     sessionId = (sess as { session_id?: string } | null)?.session_id ?? `srv-${input.orderId}`
 
+    // Marca do polo da venda: usada como nome de produto padrão e como site na conversão
+    // do Meta. Os dois eram literais "Tricopill"/"tricopill.com.br", então venda da clínica
+    // sem descrição entrava no funil e no Meta com o nome do outro negócio.
+    const marca = await getTenantBrand(admin, String(lead.tenant_id ?? ''))
+    const produtoPadrao = input.productName ?? marca.appName
+
     // 1) Funil interno (painel /tricopill-loja).
     await admin.from('storefront_events').insert({
       tenant_id: String(lead.tenant_id ?? 'tricopill'),
       type: 'purchase',
-      product_name: input.productName ?? 'Tricopill',
+      product_name: produtoPadrao,
       value_cents: Math.round(input.valueCents),
       session_id: sessionId,
       lead_id: input.leadId,
@@ -280,7 +287,7 @@ export async function dispatchPurchaseConversions(admin: SupabaseClient, input: 
             value: valueReais,
             transaction_id: input.orderId,
             ...(gaSessionId ? { session_id: gaSessionId } : {}),
-            items: [{ item_name: input.productName ?? 'Tricopill', quantity: 1, price: valueReais }],
+            items: [{ item_name: produtoPadrao, quantity: 1, price: valueReais }],
             ...(gclid ? { gclid } : {}),
           },
         }],
@@ -312,7 +319,7 @@ export async function dispatchPurchaseConversions(admin: SupabaseClient, input: 
           event_time: nowSec,
           event_id: input.orderId,
           action_source: 'website',
-          event_source_url: 'https://tricopill.com.br/obrigado',
+          event_source_url: `${marca.siteUrl}/obrigado`,
           user_data: userData,
           custom_data: { currency: 'BRL', value: valueReais },
         }],

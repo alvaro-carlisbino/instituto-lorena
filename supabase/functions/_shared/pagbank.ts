@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { quoteCoupon } from './coupons.ts'
+import { getTenantBrand } from './tenantBrand.ts'
 
 /**
  * PagBank — Checkout / Link de Pagamento (Pix + cartão).
@@ -336,7 +337,11 @@ export async function createPagBankPixOrder(
 
   // Cliente: PagBank Orders aceita email/tax_id/phones; em sandbox usamos fallback de teste.
   const customer: Record<string, unknown> = { name: customerName }
-  customer.email = String(cad.email || 'cliente@tricopill.com.br').slice(0, 60)
+  // Placeholder no domínio do POLO (era `cliente@tricopill.com.br` fixo, então um pedido
+  // da clínica chegava no PagBank com o domínio do outro negócio).
+  const marca = await getTenantBrand(admin, args.tenantId)
+  const marcaHost = marca.siteUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/^www\./, '')
+  customer.email = String(cad.email || (marcaHost ? `cliente@${marcaHost}` : `cliente@${marca.tenantId}.invalid`)).slice(0, 60)
   const taxId = String(cad.cpf || cad.taxId || '').replace(/\D/g, '')
   if (taxId.length === 11) customer.tax_id = taxId
   // (o Pix só roda em produção — trava acima; o CPF real vem do cadastro do cliente)

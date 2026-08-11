@@ -78,8 +78,8 @@ Deno.serve(async (req) => {
   }
 
   if (action === 'generate_card') {
-    const appBaseUrl = String(payload.appBaseUrl ?? '').trim()
-    if (!appBaseUrl) return json({ ok: false, error: 'missing_app_base_url' }, 400)
+    // `appBaseUrl` do cliente é IGNORADO: o domínio do link sai de tenants.brand_config
+    // do polo, dentro de createAsaasCardIntent. Ver o gêmeo em crm-rede-link.
     try {
       const out = await createAsaasCardIntent(admin, {
         tenantId,
@@ -89,7 +89,6 @@ Deno.serve(async (req) => {
         // Sem escolha explícita no painel → undefined: o link nasce com o parcelamento
         // máximo da config (antes ia 1 e o checkout travava "sem parcelamento").
         installments: payload.installments != null ? Number(payload.installments) : undefined,
-        appBaseUrl,
         couponCode: payload.couponCode != null ? String(payload.couponCode) : undefined,
         freightCents: payload.freightCents != null ? Number(payload.freightCents) : undefined,
         kit: payload.kit != null ? String(payload.kit) : undefined,
