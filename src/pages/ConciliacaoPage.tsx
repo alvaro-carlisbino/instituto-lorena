@@ -28,7 +28,7 @@ import {
   suggestMatches,
 } from '@/services/financeiro'
 import { parseBankStatement } from '@/services/ofx'
-import { diaLocal, diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
+import { bankSyncTrouble, sinceLabel } from '@/lib/bankSync'
 import { getConnectToken, linkItem, syncOpenFinance, getBancoMcpStatus, linkBancoMcp, syncBancoMcp } from '@/services/openFinance'
 
 function formatBRL(cents: number): string {
@@ -39,29 +39,6 @@ function formatDay(iso: string): string {
 }
 function formatDayBR(iso?: string | null): string {
   return iso ? formatDay(String(iso).slice(0, 10)) : '—'
-}
-
-/** "hoje 13:47", "ontem 05:20", "há 3 dias" — a pergunta é sempre "entrou quando?". */
-function sinceLabel(iso: string | null): string {
-  if (!iso) return 'aguardando o primeiro sync'
-  const hora = new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  const dia = diaLocal(iso)
-  if (dia === hojeLocal()) return `hoje ${hora}`
-  if (dia === diaLocalComOffset(-1)) return `ontem ${hora}`
-  return `em ${formatDay(dia)}`
-}
-
-/**
- * Devolve o motivo quando a conta parou de receber extrato — erro gravado pelo sync ou
- * silêncio longo demais. O cron roda 3x/dia; passar de 30h significa 3 rodadas perdidas.
- * Sem isto a tela mostrava a data do último sync sem dizer que ela estava velha.
- */
-function bankSyncTrouble(a: FinAccount): string | null {
-  if (a.ofLastError) return `parou de sincronizar: ${a.ofLastError}`
-  if (!a.ofLastSyncAt) return 'ainda não sincronizou nenhuma vez'
-  const horas = (Date.now() - new Date(a.ofLastSyncAt).getTime()) / 3_600_000
-  if (horas > 30) return `sem extrato novo desde ${sinceLabel(a.ofLastSyncAt)} — reautorize o banco`
-  return null
 }
 
 export function ConciliacaoPage() {

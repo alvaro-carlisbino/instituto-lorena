@@ -37,6 +37,7 @@ import {
   type ReconcileRule,
 } from '@/services/financeiro'
 import { parseBankStatement } from '@/services/ofx'
+import { bankSyncTrouble } from '@/lib/bankSync'
 import {
   type ShospColumnKey,
   type ShospColumnMap,
@@ -155,6 +156,13 @@ export function ConciliacaoShospPage() {
       }
     })()
   }, [contaId])
+
+  // `cobertura` diz até QUANDO tem extrato; isto diz se ele ainda está CHEGANDO. Sem os dois, um
+  // feed morto se disfarça de período curto: a janela encolhe sozinha e a tela concilia feliz.
+  const feedParado = useMemo(() => {
+    const conta = contas.find((c) => c.id === contaId)
+    return conta ? bankSyncTrouble(conta) : null
+  }, [contas, contaId])
 
   const vendas: ShospSale[] = useMemo(() => parse?.sales ?? [], [parse])
 
@@ -486,6 +494,16 @@ export function ConciliacaoShospPage() {
                   {cobertura && (
                     <p className="text-xs text-muted-foreground">
                       Extrato desta conta vai de {dia(cobertura.from)} a {dia(cobertura.to)}.
+                    </p>
+                  )}
+                  {/* Toda divergência desta tela é "não achei no extrato". Se o extrato parou de
+                      chegar, isso deixa de significar "o dinheiro não caiu" e vira "eu não sei" —
+                      e o número continua saindo com a mesma cara de certeza. */}
+                  {feedParado && (
+                    <p className="rounded-md border border-red-500/40 bg-red-500/[0.06] p-2 text-xs">
+                      <strong>O extrato desta conta {feedParado}.</strong> Enquanto isso durar, o que
+                      aparecer como "não caiu no banco" pode ser só extrato que faltou chegar. Conserte
+                      a conexão antes de cobrar alguém por dinheiro sumido.
                     </p>
                   )}
                   {/* O usuário sobe um export de um ano e o banco tem três meses. Dizer isso
