@@ -870,6 +870,9 @@ function SortableFieldRow({
     <li
       ref={setNodeRef}
       style={style}
+      // O e2e mira o campo pela chave (workflow-field-temperature). O testid se perdeu na
+      // reforma de densidade e levou junto o único teste que cobria o editor de opções.
+      data-testid={`workflow-field-${field.fieldKey}`}
       className={cn(
         "flex flex-col gap-5 p-5 bg-card transition-colors border-b last:border-0",
         isDragging && "shadow-xl border-primary/20 bg-muted/20"
