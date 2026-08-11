@@ -57,12 +57,20 @@ export async function captureNpsInboundResponse(
   const comment = String(m[2] ?? '').trim().slice(0, 1000) || null
 
   // Procura dispatch pendente (sem resposta) dentro da janela de captura.
+  //
+  // GUARDA DE POLO: o dispatch tem que ser do MESMO polo da linha em que o número
+  // chegou. Sem isso, um NPS pendente da clínica era casado com um "2" digitado dentro
+  // da conversa de vendas do Tricopill (quem é paciente aqui e cliente lá): a nota ia
+  // para a métrica errada, o agradecimento da clínica saía no meio da negociação e a
+  // venda morria, porque a captura devolve `captured: true` e o fluxo para ali.
   const since = new Date(Date.now() - NPS_CAPTURE_WINDOW_MS).toISOString()
-  const { data: rows } = await admin
+  let q = admin
     .from('survey_dispatches')
     .select('id, template_id, sent_at, survey_responses(id)')
     .eq('lead_id', opts.leadId)
     .gte('sent_at', since)
+  if (opts.tenantId) q = q.eq('tenant_id', opts.tenantId)
+  const { data: rows } = await q
     .order('sent_at', { ascending: false })
     .limit(5)
   const pending = (rows ?? []).find(

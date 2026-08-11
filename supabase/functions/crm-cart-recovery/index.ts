@@ -72,6 +72,9 @@ Deno.serve(async (req) => {
     .from('rede_payments')
     .select('id, lead_id, tenant_id, amount_cents, description, customer_name, created_at, recovery_step, recovery_sent_at')
     .eq('status', 'pending')
+    // rede_payments guarda os dois polos. Sem este filtro entrava na fila cobrança da
+    // clínica (sinal de consulta) com texto de carrinho do Tricopill.
+    .eq('tenant_id', 'tricopill')
     .not('lead_id', 'is', null)
     .gte('created_at', since)
     .lte('created_at', until)
@@ -144,7 +147,16 @@ Deno.serve(async (req) => {
       const res = await fetch(`${url}/functions/v1/crm-send-message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceRole}` },
-        body: JSON.stringify({ leadId: r.lead_id, text, source: 'cart_recovery' }),
+        // Carrinho abandonado é assunto de VENDAS. `senderTenantId` escolhe a linha pelo
+        // polo da cobrança (não pelo do lead, que pode ser paciente da clínica), e
+        // `requireBotKind` recusa com 409 se ainda assim cair numa linha da clínica.
+        body: JSON.stringify({
+          leadId: r.lead_id,
+          text,
+          source: 'cart_recovery',
+          senderTenantId: r.tenant_id,
+          requireBotKind: 'sales',
+        }),
       })
       const b = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; error?: string }
       note = b?.message || b?.error || ''

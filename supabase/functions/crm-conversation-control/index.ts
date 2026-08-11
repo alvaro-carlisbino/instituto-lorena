@@ -297,8 +297,9 @@ Deno.serve(async (req) => {
       // instância vinculada ao lead manda; lead sem linha usa a instância padrão do
       // tenant, nunca o default global 'evolution'. Ver resolveProvider.ts.
       let sendProvider: WhatsappProvider
+      let sendInstanceId: string | null = null
       try {
-        ;({ provider: sendProvider } = await resolveOutboundProviderForLead(admin, {
+        ;({ provider: sendProvider, instanceId: sendInstanceId } = await resolveOutboundProviderForLead(admin, {
           id: row.id,
           whatsapp_instance_id: row.whatsapp_instance_id,
           tenant_id: tenantId,
@@ -323,6 +324,11 @@ Deno.serve(async (req) => {
         statePrompt,
         aiJobSource: 'crm-force-ai-reply',
         sendProvider,
+        // A persona tem que seguir a MESMA linha que vai enviar. Sem isso o assistant
+        // caía em `leads.whatsapp_instance_id` — justamente a linha que a guarda de polo
+        // acabou de descartar — e carregava `ai_system_prompt` e `bot_kind` do polo
+        // errado: a linha certa mandava a mensagem, com o bot errado escrevendo.
+        whatsappInstanceId: sendInstanceId,
         typingDelayMs: 0,
         invokeMaxAttempts: 2,
       })
