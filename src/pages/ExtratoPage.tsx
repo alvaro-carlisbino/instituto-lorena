@@ -44,6 +44,7 @@ import { sugerirPadrao } from '@/lib/extratoPadrao'
 import { LancamentoEditor } from '@/components/financeiro/LancamentoEditor'
 import { SugestaoIAPanel } from '@/components/financeiro/SugestaoIA'
 import {
+  listAccounts,
   listCategories,
   listCostCenters,
   listExtratoPorDia,
@@ -53,6 +54,7 @@ import {
   updateTransaction,
   type CostCenter,
   type ExtratoDia,
+  type FinAccount,
   type FinCategory,
   type FinTransaction,
   type SaidaCategoria,
@@ -94,6 +96,7 @@ export function ExtratoPage() {
   const [porCategoria, setPorCategoria] = useState<SaidaCategoria[]>([])
   const [lancamentos, setLancamentos] = useState<FinTransaction[]>([])
   const [categorias, setCategorias] = useState<FinCategory[]>([])
+  const [contas, setContas] = useState<FinAccount[]>([])
   const [filtro, setFiltro] = useState<'todos' | 'in' | 'out' | 'sem_categoria'>('sem_categoria')
   const [criarRegra, setCriarRegra] = useState(true)
   const [centros, setCentros] = useState<CostCenter[]>([])
@@ -104,18 +107,20 @@ export function ExtratoPage() {
   const carregar = async (d = de, a = ate) => {
     setBusy(true)
     try {
-      const [dd, cc, tx, cats, ce] = await Promise.all([
+      const [dd, cc, tx, cats, ce, ac] = await Promise.all([
         listExtratoPorDia(d, a),
         listSaidaPorCategoria(d, a),
         listTransactions({ from: d, to: a, limit: 5000 }),
         listCategories(),
         listCostCenters(),
+        listAccounts(),
       ])
       setDias(dd)
       setPorCategoria(cc)
       setLancamentos(tx)
       setCategorias(cats)
       setCentros(ce)
+      setContas(ac)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar o extrato')
     } finally {
@@ -153,16 +158,33 @@ export function ExtratoPage() {
     [porCategoria],
   )
 
+  // Os cards vêm da RPC, que só olha conta de BANCO. A lista de lançamentos traz cartão e caixa
+  // junto, então todo número tirado dela precisa do mesmo recorte: senão a "maior entrada" pode
+  // ser de um cartão e não fechar com o total logo ao lado.
+  const entradasBanco = useMemo(() => {
+    const banco = new Set(contas.filter((c) => c.kind === 'banco').map((c) => c.id))
+    return lancamentos.filter((t) => t.direction === 'in' && banco.has(t.accountId))
+  }, [lancamentos, contas])
+
   // A maior entrada do período, à vista. Um total de R$ 367 mil não conta que R$ 157 mil vieram
   // de UMA transferência; ver o nome do pagador ao lado do total responde "de onde veio isso?"
   // sem precisar caçar na lista.
   const maiorEntrada = useMemo(
     () =>
-      lancamentos
-        .filter((t) => t.direction === 'in')
-        .reduce<FinTransaction | null>((m, t) => (!m || t.amountCents > m.amountCents ? t : m), null),
-    [lancamentos],
+      entradasBanco.reduce<FinTransaction | null>((m, t) => (!m || t.amountCents > m.amountCents ? t : m), null),
+    [entradasBanco],
   )
+
+  // Entrada que só mudou de conta. Mesma convenção de nome da saída, agora do lado de cá: quem
+  // marcar a TED como "Transferência entre contas próprias (não é receita)" tira ela do que a
+  // tela apresenta como dinheiro que a clínica ganhou.
+  const entradaForaDoResultado = useMemo(() => {
+    const ids = new Set(categorias.filter((c) => /não é receita/i.test(c.name)).map((c) => c.id))
+    if (ids.size === 0) return 0
+    return entradasBanco
+      .filter((t) => t.categoryId && ids.has(t.categoryId))
+      .reduce((s, t) => s + t.amountCents, 0)
+  }, [entradasBanco, categorias])
 
   const atalhos = useMemo(() => {
     const mp = mesPassado()
@@ -283,8 +305,14 @@ export function ExtratoPage() {
             {hojeNoPeriodo && (
               <div className="text-xs text-muted-foreground">{brl(doDia?.entrouCents ?? 0)} entrou hoje</div>
             )}
+            {entradaForaDoResultado > 0 && (
+              <div className="text-xs text-amber-600">
+                {brl(entradaForaDoResultado)} só mudou de conta (transferência sua ou resgate de
+                aplicação), não é faturamento
+              </div>
+            )}
             {maiorEntrada && maiorEntrada.amountCents > totais.entrou / 3 && (
-              <div className="text-xs text-muted-foreground">
+              <div className="truncate text-xs text-muted-foreground">
                 maior: {brl(maiorEntrada.amountCents)} · {maiorEntrada.description ?? maiorEntrada.counterparty ?? ''}
               </div>
             )}
