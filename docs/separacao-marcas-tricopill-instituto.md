@@ -44,39 +44,65 @@ estoura" e "nenhum domínio carrega a marca do outro".
 
 ## Domínios
 
-| Polo | Cobrança | Situação em 11/ago/26 |
+| Polo | Cobrança | Situação |
 |---|---|---|
-| Tricopill | `pagar.tricopill.com.br` | **falta criar** — `tricopill.com.br` já está na Vercel |
-| Instituto Lorena | `pagar.institutolorenavisentainer.com.br` | **falta criar** — apex hospedado fora da Vercel (187.0.210.61) |
+| Tricopill | `pagar.tricopill.com.br` | **no ar** — serve o checkout do próprio site (Next.js), com Pix além do cartão, lendo a mesma `rede_payments` |
+| Instituto Lorena | `instituto-lorena.vercel.app` | domínio do próprio CRM, provisório — a clínica não tem site com checkout, o link cai na tela `/pagar/:id` do CRM |
+
+Para dar um subdomínio bonito à clínica (`pagar.institutolorenavisentainer.com.br`), aponte
+um domínio novo para o **projeto do CRM** na Vercel e troque `checkout_base_url` no banco.
+Não precisa de deploy.
 
 `institutolorena.com.br` **não está registrado** (consulta no registro.br em 11/ago/26). O
 domínio da clínica é `institutolorenavisentainer.com.br`, de LoviDerm Clínica Médica LTDA.
 Se quiserem o nome curto, é preciso registrar antes e trocar o valor na migration.
 
-## Ordem de publicação (importa)
+## Publicado em 11/ago/26
 
-As três partes são acopladas. Publicar uma sem as outras quebra a geração de link:
-o painel para de mandar `appBaseUrl` e a função antiga responde `missing_app_base_url`;
-a função nova sem a migration não encontra `checkout_base_url` e recusa gerar o link.
+Config no banco, 22 edge functions (fecho transitivo de quem importa os módulos
+alterados) e frontend na master. As partes são acopladas — publicar uma sem as outras
+quebra a geração de link, então numa próxima vez siga: config → functions → frontend.
 
-1. **DNS + Vercel** — adicionar os dois domínios ao projeto do CRM na Vercel e criar o
-   CNAME que a Vercel indicar. Conferir:
-   ```bash
-   dig +short pagar.tricopill.com.br && curl -sI https://pagar.tricopill.com.br/pagar/x | head -1
-   ```
-2. **Migration** — `20260811160000_marca_por_polo_nao_se_mistura.sql`. Ela tem uma trava
-   final: aborta se algum tenant ativo ficar sem `checkout_base_url`.
-3. **Edge functions** — `crm-rede-link`, `crm-rede-pay`, `crm-asaas`, `crm-cart-recovery`,
-   `crm-frete-ship`, `crm-tracking-poll`, `crm-subscription-admin`,
-   `crm-payment-confirm-watch`, `crm-leadmagnet-followup` (mais tudo que importa
-   `rede.ts` / `asaas.ts` / `conversions.ts` / `pagbank.ts`).
-4. **Frontend** — push na master.
-
-Conferência depois de publicar: gerar um link de teste em cada polo e olhar o domínio.
+Conferência (o segundo campo mostra onde o link nasceria hoje):
 
 ```sql
-select tenant_id, id, created_at from rede_payments order by created_at desc limit 5;
+select p.id, p.tenant_id, i.tenant_id as polo_da_linha,
+       (select brand_config->>'checkout_base_url' from tenants t
+         where t.id = coalesce(i.tenant_id, p.tenant_id)) || '/pagar/' || p.id as link
+from rede_payments p
+left join leads l on l.id = p.lead_id
+left join whatsapp_channel_instances i on i.id = l.whatsapp_instance_id
+where p.status = 'pending' order by p.created_at desc limit 5;
 ```
+
+## Segundo bug, achado na conferência: a venda seguia a PESSOA, não a LINHA
+
+Quem é paciente da clínica **e** cliente do Tricopill vive no tenant da clínica e escreve
+na linha do Tricopill. O `crmAiOpsExecutor` carimbava a cobrança com o tenant do **lead**,
+então em 11/ago/26 dois kits Tricopill viraram venda da clínica:
+
+| Cobrança | Estado | Estrago |
+|---|---|---|
+| `fdf961a7f7244742` | paga 14:19 | pedido Bling **26573386331** no CNPJ da clínica |
+| `c2d86cec5fe84d63` | pendente | link sairia com a marca da clínica |
+
+A conta Rede é a mesma nos dois polos (mesmo PV e token), então **nenhum dinheiro caiu na
+conta errada** — o estrago é de estoque, nota e atribuição de receita.
+
+Corrigido: cobranças, frete e o aviso de venda quente passam a usar o tenant da **linha**
+de WhatsApp vinculada ao lead. A pessoa segue o polo dela; a venda segue a linha, porque é
+a linha que define catálogo, cupom, gateway, Bling e marca.
+
+**Os dois registros acima continuam com o polo errado no banco** — o fix é para frente. Ver
+"Pendências".
+
+## Pendências
+
+- Corrigir `c2d86cec5fe84d63` (pendente) para `tenant_id = 'tricopill'`, senão, se o cliente
+  pagar, nasce outro pedido no Bling da clínica.
+- Decidir o que fazer com o pedido Bling `26573386331`, já emitido na clínica.
+- Subdomínio próprio para o checkout da clínica (opcional, ver acima).
+- Verificar o domínio da clínica no Resend para religar o e-mail dela.
 
 ## O que ficou de fora, de propósito
 
