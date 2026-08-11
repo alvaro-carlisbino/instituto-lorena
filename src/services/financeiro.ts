@@ -894,3 +894,105 @@ export async function listCirurgiasPagamento(de: string, ate: string): Promise<C
     emEspecieCents: Number(r.em_especie_cents ?? 0),
   }))
 }
+
+// ──────────────────────────────────────────── fechamento de caixa (dinheiro vivo)
+//
+// Ver a migration 20260811210000. Entrega de dinheiro NÃO vira lançamento em fin_transactions
+// quando o destino é depósito: o extrato já entra sozinho pelo Open Finance e lançar aqui
+// também contaria o mesmo dinheiro duas vezes. A entrega é o rastro de quem tirou do caixa.
+
+export type CashDestination = 'deposito' | 'despesa' | 'cofre' | 'outro'
+
+export type CashHandover = {
+  id: string
+  handedAt: string
+  amountCents: number
+  fromPerson: string
+  toPerson: string
+  destination: CashDestination
+  accountId: string | null
+  note: string | null
+}
+
+export type CaixaMes = {
+  mes: string
+  recebidoCents: number
+  entregueCents: number
+  depositadoCents: number
+  despesaCents: number
+  sobraCents: number
+}
+
+const HANDOVER_COLS = 'id, handed_at, amount_cents, from_person, to_person, destination, account_id, note'
+
+const mapHandover = (r: Record<string, unknown>): CashHandover => ({
+  id: String(r.id),
+  handedAt: String(r.handed_at ?? ''),
+  amountCents: Number(r.amount_cents ?? 0),
+  fromPerson: String(r.from_person ?? ''),
+  toPerson: String(r.to_person ?? ''),
+  destination: (r.destination as CashDestination) ?? 'outro',
+  accountId: (r.account_id as string | null) ?? null,
+  note: (r.note as string | null) ?? null,
+})
+
+export async function listCashHandovers(de: string, ate: string): Promise<CashHandover[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('fin_cash_handovers')
+    .select(HANDOVER_COLS)
+    .gte('handed_at', de)
+    .lte('handed_at', ate)
+    .order('handed_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => mapHandover(r as Record<string, unknown>))
+}
+
+export async function createCashHandover(payload: {
+  handedAt: string
+  amountCents: number
+  fromPerson: string
+  toPerson: string
+  destination: CashDestination
+  accountId?: string | null
+  note?: string | null
+}): Promise<CashHandover> {
+  const client = assertClient()
+  // `tenant_id` e `created_by` ficam com o default da tabela — mandar do cliente seria
+  // confiar no chamador pra dizer de quem é o dinheiro e quem registrou.
+  const { data, error } = await client
+    .from('fin_cash_handovers')
+    .insert({
+      handed_at: payload.handedAt,
+      amount_cents: Math.abs(Math.round(payload.amountCents)),
+      from_person: payload.fromPerson.trim(),
+      to_person: payload.toPerson.trim(),
+      destination: payload.destination,
+      account_id: payload.destination === 'deposito' ? (payload.accountId || null) : null,
+      note: payload.note?.trim() || null,
+    })
+    .select(HANDOVER_COLS)
+    .single()
+  if (error) throw new Error(error.message)
+  return mapHandover(data as Record<string, unknown>)
+}
+
+export async function deleteCashHandover(id: string): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.from('fin_cash_handovers').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function listCaixaDinheiro(de: string, ate: string): Promise<CaixaMes[]> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_caixa_dinheiro', { p_de: de, p_ate: ate })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    mes: String(r.mes ?? ''),
+    recebidoCents: Number(r.recebido_cents ?? 0),
+    entregueCents: Number(r.entregue_cents ?? 0),
+    depositadoCents: Number(r.depositado_cents ?? 0),
+    despesaCents: Number(r.despesa_cents ?? 0),
+    sobraCents: Number(r.sobra_cents ?? 0),
+  }))
+}

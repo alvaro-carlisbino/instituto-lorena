@@ -2,6 +2,7 @@ import {
   type LucideIcon,
   AlarmClock,
   ArrowLeftRight,
+  Banknote,
   HeartPulse,
   Bell,
   Bot,
@@ -419,6 +420,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     group: 'financeiro',
     keywords: ['extrato', 'bater', 'ofx', 'banco'],
     visible: (ctx) => canFinance(ctx) && canBoards(ctx),
+  },
+  {
+    id: 'caixa-dinheiro',
+    path: '/caixa-dinheiro',
+    label: 'Caixa em dinheiro',
+    icon: Banknote,
+    group: 'financeiro',
+    keywords: ['dinheiro', 'especie', 'sangria', 'deposito', 'gaveta', 'fechamento'],
+    visible: (ctx) => canFinance(ctx) && isClinic(ctx) && canBoards(ctx),
   },
   {
     id: 'cirurgia-paga',

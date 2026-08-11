@@ -69,6 +69,7 @@ export function financeiroTabs(isSalesPolo: boolean): Array<{ to: string; label:
     { to: '/conciliacao', label: 'Conciliação' },
     ...(isSalesPolo ? [] : [{ to: '/conciliacao-shosp', label: 'Conciliação Shosp' }]),
     ...(isSalesPolo ? [] : [{ to: '/cirurgia-paga', label: 'Cirurgia foi paga?' }]),
+    ...(isSalesPolo ? [] : [{ to: '/caixa-dinheiro', label: 'Caixa em dinheiro' }]),
     ...(isSalesPolo ? [] : [{ to: '/importar-vendas', label: 'Importar vendas' }]),
     { to: '/alertas-pagamento', label: 'Alertas pagamento' },
     { to: '/fluxo-caixa', label: 'Fluxo de caixa' },

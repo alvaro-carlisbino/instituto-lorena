@@ -89,6 +89,7 @@ const FinAccountsPage = lazyPage(() => import('./pages/FinAccountsPage'), 'FinAc
 const ConciliacaoPage = lazyPage(() => import('./pages/ConciliacaoPage'), 'ConciliacaoPage')
 const ConciliacaoShospPage = lazyPage(() => import('./pages/ConciliacaoShospPage'), 'ConciliacaoShospPage')
 const CirurgiaPagamentoPage = lazyPage(() => import('./pages/CirurgiaPagamentoPage'), 'CirurgiaPagamentoPage')
+const CaixaDinheiroPage = lazyPage(() => import('./pages/CaixaDinheiroPage'), 'CaixaDinheiroPage')
 const ImportarVendasPage = lazyPage(() => import('./pages/ImportarVendasPage'), 'ImportarVendasPage')
 const CirurgiasVinculoPage = lazyPage(() => import('./pages/CirurgiasVinculoPage'), 'CirurgiasVinculoPage')
 const TricoscopiaPage = lazyPage(() => import('./pages/TricoscopiaPage'), 'TricoscopiaPage')
@@ -156,6 +157,7 @@ function AppRoutes() {
         <Route path="/conciliacao" element={<FinanceOnly><ConciliacaoPage /></FinanceOnly>} />
         <Route path="/conciliacao-shosp" element={<FinanceOnly><ConciliacaoShospPage /></FinanceOnly>} />
         <Route path="/cirurgia-paga" element={<FinanceOnly><CirurgiaPagamentoPage /></FinanceOnly>} />
+        <Route path="/caixa-dinheiro" element={<FinanceOnly><CaixaDinheiroPage /></FinanceOnly>} />
         <Route path="/importar-vendas" element={<FinanceOnly><ImportarVendasPage /></FinanceOnly>} />
         <Route path="/fluxo-caixa" element={<FinanceOnly><FluxoCaixaPage /></FinanceOnly>} />
         <Route path="/recorrentes" element={<FinanceOnly><RecorrentesPage /></FinanceOnly>} />
