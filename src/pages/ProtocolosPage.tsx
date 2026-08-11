@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Ban, CheckCircle2, ListChecks, NotebookPen, Play, Plus, Trash2 } from 'lucide-react'
+import { Ban, CheckCircle2, ListChecks, NotebookPen, Play, Plus, Stethoscope, Trash2 } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { Badge } from '@/components/ui/badge'
@@ -12,19 +12,23 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { PROTOCOL_STATUS_STYLE } from '@/components/leads/LeadProtocolsSection'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
+import { listSurgicalStaff } from '@/services/clinicSales'
 import {
   type LeadProtocol,
   type TreatmentProtocol,
   createProtocol,
   deactivateProtocol,
+  indicacoesPorMedico,
   listLeadProtocols,
   listProtocolCatalog,
   registerSession,
   rotuloProgresso,
   rotuloSessoes,
   sessoesDefinidas,
+  setLeadProtocolReferral,
   setLeadProtocolStatus,
   startLeadProtocol,
 } from '@/services/treatmentProtocols'
@@ -57,9 +61,13 @@ export function ProtocolosPage() {
   const [startPrice, setStartPrice] = useState('')
   const [startDate, setStartDate] = useState('')
   const [startNote, setStartNote] = useState('')
+  const [startReferral, setStartReferral] = useState('')
   const [starting, setStarting] = useState(false)
 
   const [sessionNote, setSessionNote] = useState<Record<string, string>>({})
+  // Edição da indicação de um protocolo já existente: {id, rascunho}.
+  const [editandoIndicacao, setEditandoIndicacao] = useState<{ id: string; valor: string } | null>(null)
+  const [medicosDaCasa, setMedicosDaCasa] = useState<string[]>([])
 
   // Leads do polo ativo, mais recentes primeiro (mesmo recorte da tela de kits).
   const poloLeads = useMemo(
@@ -91,7 +99,39 @@ export function ProtocolosPage() {
 
   useEffect(() => {
     void load()
+    // Os médicos vêm do espelho do centro cirúrgico, mesma fonte da Central de
+    // Vendas: quem entra ou sai da equipe é cadastrado lá, não numa lista aqui.
+    listSurgicalStaff()
+      .then((staff) => setMedicosDaCasa(staff.filter((s) => s.tipo === 'MEDICO').map((s) => s.nome)))
+      .catch(() => setMedicosDaCasa([]))
   }, [])
+
+  /**
+   * Sugestões do campo de indicação: médicos da casa + quem já foi digitado antes.
+   * O segundo grupo existe porque paciente encaminhado de fora traz nome que não
+   * está no cadastro da equipe, e digitar duas grafias diferentes do mesmo médico
+   * quebra o relatório de indicações.
+   */
+  const sugestoesIndicacao = useMemo(() => {
+    const nomes = new Set(medicosDaCasa)
+    for (const p of protocols) if (p.referredBy) nomes.add(p.referredBy)
+    return [...nomes].sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [medicosDaCasa, protocols])
+
+  const porIndicacao = useMemo(() => indicacoesPorMedico(protocols), [protocols])
+  const semIndicacao = useMemo(() => protocols.filter((p) => !p.referredBy).length, [protocols])
+
+  const salvarIndicacao = async () => {
+    if (!editandoIndicacao) return
+    const { id, valor } = editandoIndicacao
+    try {
+      await setLeadProtocolReferral(id, valor)
+      setProtocols((prev) => prev.map((p) => (p.id === id ? { ...p, referredBy: valor.trim() || null } : p)))
+      setEditandoIndicacao(null)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar a indicação')
+    }
+  }
 
   const saveProtocol = async () => {
     setSavingProtocol(true)
@@ -144,6 +184,7 @@ export function ProtocolosPage() {
         price: parseMoney(startPrice),
         startedOn: startDate || null,
         note: startNote,
+        referredBy: startReferral,
       })
       const patient = leadNameById.get(startLeadId) ?? 'paciente'
       toast.success(`Protocolo "${proto.name}" iniciado para ${patient}.`)
@@ -153,6 +194,7 @@ export function ProtocolosPage() {
       setStartPrice('')
       setStartDate('')
       setStartNote('')
+      setStartReferral('')
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao iniciar protocolo')
@@ -384,20 +426,81 @@ export function ProtocolosPage() {
                   <Input id="start-date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="start-note">Observações</Label>
-                <Input
-                  id="start-note"
-                  value={startNote}
-                  onChange={(e) => setStartNote(e.target.value)}
-                  placeholder="Opcional"
-                />
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="start-referral">Médico que indicou</Label>
+                  <Input
+                    id="start-referral"
+                    list="medicos-indicacao"
+                    value={startReferral}
+                    onChange={(e) => setStartReferral(e.target.value)}
+                    placeholder="Quem prescreveu o protocolo"
+                  />
+                  <datalist id="medicos-indicacao">
+                    {sugestoesIndicacao.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="start-note">Observações</Label>
+                  <Input
+                    id="start-note"
+                    value={startNote}
+                    onChange={(e) => setStartNote(e.target.value)}
+                    placeholder="Opcional"
+                  />
+                </div>
               </div>
               <Button className="w-full sm:w-auto" onClick={startForPatient} disabled={starting || !startLeadId || !startProtocolId}>
                 {starting ? 'Iniciando…' : 'Iniciar protocolo'}
               </Button>
             </CardContent>
           </Card>
+
+          {porIndicacao.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Stethoscope className="size-4 text-primary" /> Indicações por médico
+                </CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Quem prescreveu o protocolo, não quem fechou a venda.
+                  {semIndicacao > 0
+                    ? ` ${semIndicacao} protocolo${semIndicacao > 1 ? 's' : ''} sem médico informado, fora desta conta.`
+                    : ''}
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Médico</TableHead>
+                        <TableHead className="text-right">Indicou</TableHead>
+                        <TableHead className="text-right">Em andamento</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                        <TableHead className="text-right">Cancelados</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {porIndicacao.map((m) => (
+                        <TableRow key={m.medico}>
+                          <TableCell className="font-medium">{m.medico}</TableCell>
+                          <TableCell className="text-right">{m.total}</TableCell>
+                          <TableCell className="text-right">{m.ativos}</TableCell>
+                          <TableCell className="text-right">
+                            {m.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          </TableCell>
+                          <TableCell className="text-right text-muted-foreground">{m.cancelados}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader>
@@ -436,6 +539,45 @@ export function ProtocolosPage() {
                       </div>
                       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
                         <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+                        <Stethoscope className="size-3.5 text-muted-foreground" />
+                        <span className="text-muted-foreground">Indicação:</span>
+                        {editandoIndicacao?.id === p.id ? (
+                          <>
+                            <Input
+                              list="medicos-indicacao"
+                              autoFocus
+                              value={editandoIndicacao.valor}
+                              onChange={(e) => setEditandoIndicacao({ id: p.id, valor: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') void salvarIndicacao()
+                                if (e.key === 'Escape') setEditandoIndicacao(null)
+                              }}
+                              className="h-7 max-w-56 text-xs"
+                              placeholder="Médico que indicou"
+                            />
+                            <Button size="sm" className="h-7" onClick={() => void salvarIndicacao()}>
+                              Salvar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7"
+                              onClick={() => setEditandoIndicacao(null)}
+                            >
+                              Cancelar
+                            </Button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            className="rounded px-1 py-0.5 underline decoration-dotted underline-offset-2 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/60"
+                            onClick={() => setEditandoIndicacao({ id: p.id, valor: p.referredBy ?? '' })}
+                          >
+                            {p.referredBy ?? 'sem médico — clique para informar'}
+                          </button>
+                        )}
                       </div>
                       {p.sessions.length > 0 ? (
                         <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">

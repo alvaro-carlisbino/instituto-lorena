@@ -166,6 +166,9 @@ export function LeadProtocolsSection({ leadId, leadName }: Props) {
               <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
                 <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
               </div>
+              {p.referredBy ? (
+                <p className="mt-1.5 text-xs text-muted-foreground">Indicação: {p.referredBy}</p>
+              ) : null}
               {p.status === 'ativo' ? (
                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                   <Input

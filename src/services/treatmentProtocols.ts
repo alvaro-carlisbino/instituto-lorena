@@ -121,6 +121,8 @@ export type LeadProtocol = {
   startedOn: string
   finishedOn: string | null
   note: string | null
+  /** Médico que indicou o protocolo — o crédito da prescrição, não de quem fechou. */
+  referredBy: string | null
   createdAt: string
   sessions: LeadProtocolSession[]
 }
@@ -133,7 +135,9 @@ export async function listLeadProtocols(leadId?: string): Promise<LeadProtocol[]
   const client = assertClient()
   let query = client
     .from('lead_treatment_protocols')
-    .select('id, lead_id, protocol_id, name, sessions_planned, price, status, started_on, finished_on, note, created_at')
+    .select(
+      'id, lead_id, protocol_id, name, sessions_planned, price, status, started_on, finished_on, note, referred_by, created_at',
+    )
     .order('created_at', { ascending: false })
   query = leadId ? query.eq('lead_id', leadId) : query.limit(200)
   const { data, error } = await query
@@ -172,6 +176,7 @@ export async function listLeadProtocols(leadId?: string): Promise<LeadProtocol[]
     startedOn: String(r.started_on ?? ''),
     finishedOn: r.finished_on != null ? String(r.finished_on) : null,
     note: r.note != null ? String(r.note) : null,
+    referredBy: r.referred_by != null ? String(r.referred_by) : null,
     createdAt: String(r.created_at ?? ''),
     sessions: byProtocol.get(String(r.id)) ?? [],
   }))
@@ -185,6 +190,7 @@ export async function startLeadProtocol(payload: {
   price?: number | null
   startedOn?: string | null
   note?: string
+  referredBy?: string | null
 }): Promise<void> {
   const client = assertClient()
   if (!payload.leadId) throw new Error('Escolha o paciente (lead do CRM).')
@@ -200,8 +206,53 @@ export async function startLeadProtocol(payload: {
     price: payload.price ?? null,
     started_on: payload.startedOn || undefined,
     note: payload.note?.trim() || null,
+    referred_by: payload.referredBy?.trim() || null,
   })
   if (error) throw new Error(error.message)
+}
+
+/**
+ * Corrigir a indicação depois. Existe porque os 158 protocolos que já estavam no
+ * sistema receberam o médico da venda de origem no backfill, e há caso em que quem
+ * atendeu não é quem indicou (paciente que chega encaminhado de fora).
+ */
+export async function setLeadProtocolReferral(id: string, referredBy: string | null): Promise<void> {
+  const client = assertClient()
+  const { error } = await client
+    .from('lead_treatment_protocols')
+    .update({ referred_by: referredBy?.trim() || null, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Quantos protocolos cada médico indicou, e quanto isso vale.
+ *
+ * Protocolo cancelado não conta como indicação — o médico indicou, o paciente
+ * desistiu, e somar os dois no mesmo número é inflar o relatório de quem indica.
+ * Fica separado em `cancelados` para a conta continuar visível.
+ */
+export function indicacoesPorMedico(protocols: LeadProtocol[]) {
+  const map = new Map<string, { medico: string; total: number; ativos: number; cancelados: number; valor: number }>()
+  for (const p of protocols) {
+    if (!p.referredBy) continue
+    const cur = map.get(p.referredBy) ?? {
+      medico: p.referredBy,
+      total: 0,
+      ativos: 0,
+      cancelados: 0,
+      valor: 0,
+    }
+    if (p.status === 'cancelado') {
+      cur.cancelados += 1
+    } else {
+      cur.total += 1
+      cur.valor += p.price ?? 0
+      if (p.status === 'ativo') cur.ativos += 1
+    }
+    map.set(p.referredBy, cur)
+  }
+  return [...map.values()].sort((a, b) => b.total - a.total || b.valor - a.valor)
 }
 
 export async function registerSession(payload: {
