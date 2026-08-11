@@ -47,3 +47,14 @@ supabase/.temp/
 /*.xlsm
 /*.csv
 /*.pdf
+
+# A regra acima só pegava a RAIZ, e o vazamento veio de uma subpasta: docs/tiktok-shop/ chegou
+# com o relatório de 12 meses de vendas do Tricopill (GMV, ticket médio, pedidos mês a mês) mais
+# 2 MB de foto de produto, tudo esperando um `git add .`. Planilha não é código e nenhuma está
+# versionada hoje (0 .xlsx rastreados), então fecha em qualquer pasta.
+*.xlsx
+*.xlsm
+
+# Material de marketplace: planilha de cadastro, foto de produto e relatório de faturamento.
+# Sai do git inteiro — é insumo para subir no painel da TikTok Shop, não fonte do sistema.
+/docs/tiktok-shop/
