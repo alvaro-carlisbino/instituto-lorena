@@ -64,6 +64,7 @@ export const FINANCE_GROUPS: FinanceGroup[] = [
     id: 'fechamento',
     label: 'Fechamento',
     tabs: [
+      { to: '/dre', label: 'DRE' },
       { to: '/fluxo-caixa', label: 'Fluxo de caixa' },
       { to: '/financeiro-config', label: 'Configuração' },
       { to: '/nfe', label: 'Emissão de NF-e', polo: 'vendas' },

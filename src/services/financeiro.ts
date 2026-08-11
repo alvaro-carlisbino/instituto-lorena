@@ -1499,3 +1499,32 @@ export async function sugerirCategoriasIA(opts?: {
     descartadas: Number(r.descartadas ?? 0),
   }
 }
+
+// ──────────────────────────────────────────── DRE
+//
+// Receita por competência (o que o paciente pagou), despesa pelo que saiu da conta. Aplicação
+// e transferência entre contas próprias saem do resultado: é o mesmo dinheiro trocando de
+// lugar, e contá-las como despesa erraria o DRE em R$ 859 mil.
+
+export type DreMes = {
+  mes: string
+  receitaCents: number
+  despesaCents: number
+  despesaClassificadaCents: number
+  foraDoResultadoCents: number
+  resultadoCents: number
+}
+
+export async function listDre(de: string, ate: string): Promise<DreMes[]> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_dre', { p_de: de, p_ate: ate })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    mes: String(r.mes ?? ''),
+    receitaCents: Number(r.receita_cents ?? 0),
+    despesaCents: Number(r.despesa_cents ?? 0),
+    despesaClassificadaCents: Number(r.despesa_classificada_cents ?? 0),
+    foraDoResultadoCents: Number(r.fora_do_resultado_cents ?? 0),
+    resultadoCents: Number(r.resultado_cents ?? 0),
+  }))
+}

@@ -423,6 +423,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
+    id: 'dre',
+    path: '/dre',
+    label: 'DRE',
+    icon: TrendingUp,
+    group: 'financeiro',
+    keywords: ['dre', 'resultado', 'lucro', 'margem', 'receita', 'despesa'],
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
+  },
+  {
     id: 'financeiro-config',
     path: '/financeiro-config',
     label: 'Config. do financeiro',
