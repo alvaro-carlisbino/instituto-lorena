@@ -13,8 +13,12 @@ import { Lock } from 'lucide-react'
 export function FinanceOnly({ children }: { children: ReactNode }) {
   const { canViewFinance, loading } = useTenant()
 
-  if (loading) return null
+  // A ordem importa: quem JÁ passou pela cerca continua dentro durante uma recarga.
+  // Com `if (loading) return null` na frente, qualquer revalidação de sessão desmontava a
+  // tela e levava junto formulário, filtro e lista — o usuário voltava do Google e tinha
+  // perdido tudo. Só segura quem ainda não sabe se pode entrar.
   if (canViewFinance) return <>{children}</>
+  if (loading) return null
 
   return (
     <AppLayout title="Financeiro" subtitle="Área restrita">

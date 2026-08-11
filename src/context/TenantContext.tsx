@@ -38,9 +38,17 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [canViewFinance, setCanViewFinance] = useState<boolean>(false)
   const [loading, setLoading] = useState<boolean>(false)
 
+  /**
+   * `silencioso` = revalidação de fundo, sem ligar `loading`.
+   *
+   * `loading` desmonta tela: o FinanceOnly faz `if (loading) return null`, e quem estiver
+   * preenchendo um formulário perde tudo. Isso acontecia toda vez que a aba voltava do
+   * foco — o usuário ia ao Google, voltava, e o que estava mexendo tinha sumido. Ligar
+   * `loading` só faz sentido na PRIMEIRA carga, quando de fato não há nada na tela.
+   */
   const load = useMemo(
     () =>
-      async () => {
+      async (silencioso = false) => {
         if (!isSupabaseConfigured || !supabase) {
           setTenant(DEFAULT_TENANT)
           setAvailableTenants([])
@@ -49,7 +57,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           applyTenantBrandToCssVars(DEFAULT_TENANT.brand)
           return
         }
-        setLoading(true)
+        if (!silencioso) setLoading(true)
         try {
           const [t, sa, billing, polos, finance] = await Promise.all([
             fetchCurrentTenant(),
@@ -64,7 +72,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           setAvailableTenants(polos)
           applyTenantBrandToCssVars(t.brand)
         } finally {
-          setLoading(false)
+          if (!silencioso) setLoading(false)
         }
       },
     [],
@@ -96,8 +104,14 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   // Reagir a login/logout — quando a sessão muda, o tenant pode mudar (ou ficar vazio).
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      void load()
+    const { data: sub } = supabase.auth.onAuthStateChange((evento) => {
+      // TOKEN_REFRESHED dispara toda vez que a aba volta ao foco e o cliente revalida a
+      // sessão. Não muda tenant, não muda permissão, não muda nada — e era ele que
+      // desmontava a tela inteira e apagava o formulário de quem só foi olhar o Google.
+      // USER_UPDATED idem: mexe no perfil do auth, não em quem é o polo.
+      if (evento === 'TOKEN_REFRESHED' || evento === 'USER_UPDATED') return
+      // Recarga de fundo quando já existe tela montada; só o primeiro load pode piscar.
+      void load(evento === 'INITIAL_SESSION' ? false : true)
     })
     return () => {
       sub.subscription.unsubscribe()
