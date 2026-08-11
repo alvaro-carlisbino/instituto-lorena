@@ -10,6 +10,7 @@ import { APP_ENV_BADGE, APP_NAME, APP_TAGLINE } from '@/config/branding'
 import {
   destinationForPath,
   groupedDestinations,
+  isDestinationActive,
   searchDestinations,
   visibleDestinations,
   type NavDestination,
@@ -54,7 +55,7 @@ function NavItem({
 }) {
   const location = useLocation()
   const { path, label, icon: NavIcon } = destination
-  const isActive = location.pathname === path || location.pathname.startsWith(`${path}/`)
+  const isActive = isDestinationActive(destination, location.pathname)
 
   return (
     <SidebarMenuItem className="group/menu-item relative">

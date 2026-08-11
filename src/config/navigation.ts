@@ -7,6 +7,7 @@ import {
   Boxes,
   Calendar,
   CalendarClock,
+  CalendarRange,
   ChartColumn,
   ClipboardCheck,
   ClipboardList,
@@ -248,6 +249,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     keywords: ['consultas', 'marcação', 'shosp', 'horários', 'sala'],
     visible: (ctx) => isClinic(ctx) && canRoute(ctx),
     mobilePriority: 4,
+  },
+  {
+    id: 'agenda-cirurgica',
+    path: '/agenda/cirurgica',
+    label: 'Agenda cirúrgica',
+    icon: CalendarRange,
+    group: 'clinica',
+    keywords: ['cirurgia', 'centro cirúrgico', 'sala', 'bloco', 'transplante', 'calendário', 'mês'],
+    visible: (ctx) => isClinic(ctx) && canRoute(ctx),
   },
   {
     id: 'perfil',
@@ -766,6 +776,19 @@ export function destinationForPath(pathname: string): NavDestination | undefined
   return NAV_DESTINATIONS.filter(
     (d) => pathname === d.path || pathname.startsWith(`${d.path}/`),
   ).sort((a, b) => b.path.length - a.path.length)[0]
+}
+
+/**
+ * UM item de menu aceso por vez, no menu lateral e no celular.
+ *
+ * Os dois lugares mediam "está ativo" com `pathname.startsWith(path + '/')`, cada um por
+ * conta própria. Isso bastava enquanto nenhuma tela do menu morava dentro de outra — até
+ * a Agenda cirúrgica nascer em /agenda/cirurgica e acender junto com Agenda, deixando o
+ * menu dizendo que você está em dois lugares. Aqui a regra é a mesma de
+ * destinationForPath: ganha o caminho mais específico.
+ */
+export function isDestinationActive(destination: NavDestination, pathname: string): boolean {
+  return destinationForPath(pathname)?.id === destination.id
 }
 
 /**

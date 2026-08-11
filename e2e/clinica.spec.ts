@@ -20,6 +20,7 @@ const telas = [
   { path: '/central-vendas/conferencia', heading: 'Conferência com a sala' },
   { path: '/protocolos', heading: 'Protocolos de tratamento' },
   { path: '/cirurgias-vinculo', heading: 'Cirurgias sem paciente' },
+  { path: '/agenda/cirurgica', heading: 'Agenda cirúrgica' },
 ]
 
 test.describe('clínica: cirurgia e protocolo', () => {

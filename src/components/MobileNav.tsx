@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { Menu } from 'lucide-react'
 
-import { mobilePriorityFor, visibleDestinations } from '@/config/navigation'
+import { isDestinationActive, mobilePriorityFor, visibleDestinations } from '@/config/navigation'
 import { useNavContext } from '@/hooks/useNavContext'
 import { useSidebar } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
@@ -41,7 +41,7 @@ export function MobileNav() {
       <ul className="flex items-stretch">
         {items.map((destination) => {
           const { path, label, icon: NavIcon } = destination
-          const isActive = location.pathname === path || location.pathname.startsWith(`${path}/`)
+          const isActive = isDestinationActive(destination, location.pathname)
           return (
             <li key={destination.id} className="flex-1">
               <NavLink
