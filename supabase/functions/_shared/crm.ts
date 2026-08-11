@@ -940,6 +940,29 @@ export async function findLeadIdByManychatSubscriberId(
 }
 
 async function resolvePhoneLeadIdByDigits(admin: SupabaseClient, digits: string): Promise<string | null> {
+  // Casa por variantes (±55, ±9º dígito) ANTES da RPC, igual a `findLeadByPhone`.
+  //
+  // Sem isto o `merge_phone` do ManyChat só enxerga o card cujo telefone está gravado
+  // exatamente na mesma forma. O card do Álvaro estava como 554497168329 (sem o 9º
+  // dígito) e o ManyChat mandou 5544997168329: a busca não achou nada, então em vez de
+  // mesclar, a rotina caiu no ramo "não existe card com esse telefone" e apenas carimbou
+  // o número no card do ManyChat — deixando DOIS cards da mesma pessoa, agora os dois com
+  // telefone de verdade. Pior que o duplicado original, porque some a pista de que um
+  // deles era sintético.
+  //
+  // Prefere o mais antigo: é o card com histórico, e é ele que deve sobreviver à mesclagem.
+  const variants = brPhoneVariants(digits)
+  if (variants.length) {
+    const { data } = await admin
+      .from('leads')
+      .select('id')
+      .in('phone', variants)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+    if (data?.id) return String(data.id)
+  }
   const { data: fromRpc, error: findError } = await admin.rpc('find_lead_id_by_phone_digits', { p_digits: digits })
   if (!findError && fromRpc) return String(fromRpc)
   const { data: byEq } = await admin.from('leads').select('id').eq('phone', digits).maybeSingle()

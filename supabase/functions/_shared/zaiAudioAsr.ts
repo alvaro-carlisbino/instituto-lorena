@@ -16,6 +16,7 @@
 const SAMPLE_RATE = 48000 // o decode Opus do @evan sai sempre a 48 kHz mono
 const CHUNK_SECONDS = 25 // margem sob o limite de 30s do glm-asr
 const BYTES_PER_SECOND = SAMPLE_RATE * 2 // PCM16 mono
+const MIN_PCM_BYTES = Math.round(0.7 * BYTES_PER_SECOND) // <0,7s não carrega fala útil
 
 function asrModel(): string {
   return (Deno.env.get('ZAI_ASR_MODEL') ?? '').trim() || 'glm-asr-2512'
@@ -36,6 +37,36 @@ export function zaiAsrConfigured(): boolean {
 function trunc(s: string, max: number): string {
   const t = String(s ?? '')
   return t.length <= max ? t : `${t.slice(0, max)}…`
+}
+
+// Escritas que o português não usa: CJK, kana, hangul, cirílico, árabe, hebraico, tailandês.
+const ESCRITA_ESTRANGEIRA_RX =
+  /[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯Ѐ-ӿ؀-ۿ֐-׿฀-๿]/g
+
+/**
+ * O glm-asr ignora `language=pt` de vez em quando e responde em chinês. São dois casos,
+ * e nenhum dos dois serve:
+ *   - tradução: "我明天做手术，知道怎么去那里吗？" era um paciente perguntando como chegar
+ *     para a cirurgia do dia seguinte. O conteúdo está certo, no idioma errado.
+ *   - alucinação: um áudio de 8,9 KB virou "在2018年，他被任命为美国国家科学基金会的首席执行官。"
+ *     (nomeação de um CEO em 2018), que não tem nada a ver com o que foi falado.
+ *
+ * Isso não é cosmético: `transcribed_text` entra no contexto da Sofia como fala do
+ * paciente, e a atendente lê na ficha. Sem transcrição a IA vê "[Áudio]" e pede para
+ * repetir; com transcrição em chinês ela responde a uma conversa que ninguém teve.
+ *
+ * Escrita que o idioma pedido não usa = resposta imprestável. Descarta (o chamador
+ * tenta de novo antes de desistir — costuma acertar na segunda).
+ */
+export function transcricaoEmEscritaErrada(text: string, language?: string): boolean {
+  if (!text) return false
+  // A guarda só vale para idiomas de escrita latina; pedir 'zh' e receber chinês é correto.
+  const lang = (language ?? '').toLowerCase()
+  if (lang && !/^(pt|es|en|fr|it|de)/.test(lang)) return false
+  const semEspaco = text.replace(/\s/g, '')
+  if (!semEspaco) return false
+  const estrangeiros = semEspaco.match(ESCRITA_ESTRANGEIRA_RX)?.length ?? 0
+  return estrangeiros / semEspaco.length > 0.2
 }
 
 /** Extrai pacotes Opus de um container Ogg (reconstrói pacotes que cruzam páginas). */
@@ -146,25 +177,55 @@ async function postToGlmAsr(
   })
   if (!res.ok) return '' // formato não suportado / >30s etc. — best-effort
   const body = await res.text().catch(() => '')
+  let text = ''
   try {
-    return String((JSON.parse(body) as { text?: string }).text ?? '').trim()
+    text = String((JSON.parse(body) as { text?: string }).text ?? '').trim()
   } catch {
     return ''
   }
+  // Filtra por bloco, não só no fim: um bloco alucinado no meio de um áudio longo
+  // envenenaria a transcrição inteira se a checagem fosse só no resultado concatenado.
+  if (transcricaoEmEscritaErrada(text, language)) {
+    console.warn('[zai-asr] transcrição em escrita estrangeira:', trunc(text, 120))
+    return ''
+  }
+  return text
+}
+
+/**
+ * O glm-asr responde em português na maior parte das vezes e, no mesmo áudio, às vezes
+ * devolve chinês — não é um áudio "difícil", é instabilidade do modelo (aconteceu com
+ * 24 áudios desde 17/jun, vários traduzindo corretamente o que o paciente disse). Como é
+ * intermitente, uma segunda tentativa costuma cair no idioma certo; se insistir no
+ * errado, é melhor ficar sem transcrição do que gravar chinês na ficha.
+ */
+async function postToGlmAsrComRetry(
+  file: Uint8Array,
+  filename: string,
+  contentType: string,
+  cfg: { key: string; url: string },
+  language?: string,
+): Promise<string> {
+  const primeira = await postToGlmAsr(file, filename, contentType, cfg, language)
+  if (primeira) return primeira
+  return await postToGlmAsr(file, filename, contentType, cfg, language)
 }
 
 /** ogg/opus -> texto (decode + chunk <=25s + glm-asr por bloco). */
 async function transcribeOggOpus(ogg: Uint8Array, cfg: { key: string; url: string }, language?: string): Promise<string> {
   const pcm = await decodeOggOpusToPcm16(ogg)
-  if (pcm.length === 0) return ''
+  if (pcm.length < MIN_PCM_BYTES) return '' // curto demais para conter fala; só rende alucinação
   const bytesPerChunk = CHUNK_SECONDS * BYTES_PER_SECOND
   const texts: string[] = []
   for (let off = 0; off < pcm.length; off += bytesPerChunk) {
     let end = Math.min(off + bytesPerChunk, pcm.length)
     if (end % 2 !== 0) end -= 1 // mantém alinhamento de amostra de 16 bits
     const slice = pcm.subarray(off, end)
+    // A sobra final do corte costuma ser uma lasca de silêncio — mandá-la ao ASR é
+    // convite a alucinação, e ela não carrega fala que já não esteja no bloco anterior.
+    if (slice.length < MIN_PCM_BYTES) continue
     const wav = wavFromPcm16(slice, SAMPLE_RATE)
-    texts.push(await postToGlmAsr(wav, 'audio.wav', 'audio/wav', cfg, language))
+    texts.push(await postToGlmAsrComRetry(wav, 'audio.wav', 'audio/wav', cfg, language))
   }
   return texts.filter(Boolean).join(' ').trim()
 }
@@ -188,9 +249,9 @@ export async function zaiTranscribeAudio(
     if (mime.includes('ogg') || mime.includes('opus')) {
       text = await transcribeOggOpus(bytes, cfg, language)
     } else if (mime.includes('mpeg') || mime.includes('mp3')) {
-      text = await postToGlmAsr(bytes, 'audio.mp3', 'audio/mpeg', cfg, language)
+      text = await postToGlmAsrComRetry(bytes, 'audio.mp3', 'audio/mpeg', cfg, language)
     } else if (mime.includes('wav')) {
-      text = await postToGlmAsr(bytes, 'audio.wav', 'audio/wav', cfg, language)
+      text = await postToGlmAsrComRetry(bytes, 'audio.wav', 'audio/wav', cfg, language)
     } else {
       // m4a/aac/amr/etc.: tenta direto (glm-asr só aceita wav/mp3, costuma falhar → '')
       text = await postToGlmAsr(bytes, 'audio', mimeType || 'application/octet-stream', cfg, language)

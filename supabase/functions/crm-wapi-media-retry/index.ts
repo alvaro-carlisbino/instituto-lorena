@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { createWapiProviderForRow, loadWapiInstanceByRowId } from '../_shared/whatsapp/wapiConfig.ts'
 import { WapiProvider } from '../_shared/whatsapp/wapi.ts'
 import { enrichMediaRowsFromBase64 } from '../_shared/manychatMediaEnrich.ts'
+import { transcricaoEmEscritaErrada } from '../_shared/zaiAudioAsr.ts'
 
 // Worker (cron, a cada 2 min) que reprocessa downloads de mídia inbound do W-API que
 // FALHARAM no webhook. O áudio (PTT/opus) costuma estourar o timeout na hora da mensagem,
@@ -124,5 +125,68 @@ Deno.serve(async (req) => {
     }
   }
 
-  return json({ ok: true, picked: jobs?.length ?? 0, done, requeued, failed, skipped })
+  // === Reprocessa transcrição que voltou no idioma errado ===
+  // O glm-asr ignora `language=pt` de vez em quando e devolve chinês. Até 11/ago/2026
+  // isso era gravado direto em `transcribed_text`: 24 áudios de paciente viraram chinês
+  // na ficha e no contexto da Sofia — inclusive "我明天做手术，知道怎么去那里吗？", que era
+  // alguém perguntando como chegar para a cirurgia do dia seguinte.
+  //
+  // A guarda em `zaiAudioAsr.ts` impede casos novos, mas não desfaz o que já está gravado.
+  // Como a falha é intermitente, reprocessar costuma acertar — e é a mesma natureza do
+  // trabalho deste worker (mídia que falhou e merece outra chance), por isso vive aqui.
+  //
+  // Converge sozinho: limpamos o texto antes de reprocessar, então ou entra transcrição
+  // boa, ou a guarda descarta e o campo fica nulo. Nos dois casos a linha sai do filtro
+  // e não volta no próximo tick. Sem fila para manter, sem migração para rodar à mão.
+  let retranscritos = 0
+  let retranscricoesLimpas = 0
+  if (Date.now() - start < TIME_BUDGET_MS) {
+    try {
+      // O filtro por regex fica em JS, não no PostgREST: a checagem é a MESMA função que
+      // guarda a gravação (`transcricaoEmEscritaErrada`), então não há como as duas
+      // divergirem com o tempo. São ~poucas dezenas de linhas de áudio com transcrição,
+      // e o select não traz `media_base64` — o peso é desprezível.
+      const { data: candidatos } = await admin
+        .from('crm_media_items')
+        .select('id, transcribed_text')
+        .eq('media_type', 'audio')
+        .not('transcribed_text', 'is', null)
+        .not('media_base64', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(500)
+      const torto = ((candidatos ?? []) as Array<{ id: string; transcribed_text: string | null }>)
+        .filter((r) => transcricaoEmEscritaErrada(String(r.transcribed_text ?? ''), 'pt'))
+        .slice(0, 4)
+      for (const r of torto) {
+        const id = String(r.id)
+        // Zera primeiro: `enrichMediaRowsFromBase64` pula linha que já tem texto.
+        await admin.from('crm_media_items').update({ transcribed_text: null }).eq('id', id)
+        await enrichMediaRowsFromBase64(admin, { rowIds: [id] })
+        const { data: depois } = await admin
+          .from('crm_media_items')
+          .select('transcribed_text')
+          .eq('id', id)
+          .maybeSingle()
+        if (String((depois as { transcribed_text?: string } | null)?.transcribed_text ?? '').trim()) {
+          retranscritos++
+        } else {
+          retranscricoesLimpas++
+        }
+        if (Date.now() - start > TIME_BUDGET_MS) break
+      }
+    } catch (e) {
+      console.warn('[wapi-media-retry] retranscrição falhou:', e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  return json({
+    ok: true,
+    picked: jobs?.length ?? 0,
+    done,
+    requeued,
+    failed,
+    skipped,
+    retranscritos,
+    retranscricoes_limpas: retranscricoesLimpas,
+  })
 })
