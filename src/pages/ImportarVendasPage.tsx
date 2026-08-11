@@ -139,9 +139,14 @@ export function ImportarVendasPage() {
         categoryId: categoryId === SEM_CONTA ? null : categoryId,
         dryRun,
       })
+      // Sem CPF a venda entra no financeiro do mesmo jeito, mas não liga na cirurgia — e quem
+      // for conferir "foi paga?" vai ver a cirurgia como sem pagamento sem saber por quê. O
+      // aviso é aqui porque a causa é a planilha (coluna CPF fora do export), não o sistema.
+      const semDoc = entradas.filter((e) => !e.customerDoc).length
       const resumo =
         `${r.novas} nova(s), ${r.atualizadas} já existia(m), ${brl(r.totalCents)}` +
-        (r.lancamentosCaixa > 0 ? ` · ${r.lancamentosCaixa} lançamento(s) em caixa sem extrato` : '')
+        (r.lancamentosCaixa > 0 ? ` · ${r.lancamentosCaixa} lançamento(s) em caixa sem extrato` : '') +
+        (semDoc > 0 ? ` · ${semDoc} sem CPF (não liga na cirurgia)` : '')
       setResultado(dryRun ? `Simulação: ${resumo}` : `Importado: ${resumo}`)
       if (r.falhas.length > 0) {
         toast.error(`${r.falhas.length} falha(s). Primeira: ${r.falhas[0].motivo}`)

@@ -51,6 +51,15 @@ export type EntradaImportavel = {
   source: 'shosp' | 'lion'
   date: string
   customerName: string
+  /**
+   * CPF/CNPJ do pagador, só dígitos.
+   *
+   * É o que liga esta venda à CIRURGIA lá no centro cirúrgico (`crm_cirurgias_pagamento`), pelo
+   * caminho `srg_surgeries.shosp_prontuario` → `shosp_patients.cpf`. Sem ele o vínculo cai pro
+   * nome, e nome não é chave: o cruzamento por nome acusava 44 de 174 cirurgias "sem nenhum
+   * pagamento" quando o buraco real era 2. A planilha da recepção não traz documento.
+   */
+  customerDoc: string | null
   description: string
   amountCents: number
   method: PaymentMethod
@@ -65,6 +74,7 @@ export function vendaShospParaEntrada(s: ShospSale): EntradaImportavel {
     source: 'shosp',
     date: s.date,
     customerName: s.patient,
+    customerDoc: s.cpf || null,
     description: s.services.length > 0 ? s.services.join(' + ') : 'Venda Shosp',
     amountCents: s.amountCents,
     method: s.method,
@@ -79,6 +89,7 @@ export function lancamentoLionParaEntrada(e: LionEntry): EntradaImportavel {
     source: 'lion',
     date: e.date,
     customerName: e.customerName,
+    customerDoc: null,
     description: e.description,
     amountCents: e.amountCents,
     method: e.method,
@@ -303,6 +314,28 @@ export type ImportResult = {
 const CHUNK = 200
 
 /**
+ * Separa o que vai pro upsert em duas remessas: com documento e sem documento.
+ *
+ * Quem TEM documento manda a coluna `customer_doc`; quem não tem OMITE a coluna em vez de mandar
+ * null. No upsert, coluna ausente do payload não é tocada na linha que já existe — mandar null
+ * junto apagaria o CPF gravado sempre que alguém reimportasse o mês de um export do Shosp sem a
+ * coluna CPF (ela some do export, já aconteceu). E é justo esse CPF que liga a venda à cirurgia.
+ *
+ * Separar também é obrigação do PostgREST, não escolha de estilo: ele exige que todos os objetos
+ * de um upsert tenham exatamente as mesmas chaves. Payload misturado é rejeitado.
+ */
+export function remessasPorDocumento<T extends { customerDoc: string | null }, L extends object>(
+  entradas: T[],
+  linhaBase: (e: T) => L,
+): Array<Array<L & { customer_doc?: string }>> {
+  const comDoc = entradas
+    .filter((e) => e.customerDoc)
+    .map((e) => ({ ...linhaBase(e), customer_doc: e.customerDoc as string }))
+  const semDoc = entradas.filter((e) => !e.customerDoc).map(linhaBase)
+  return [comDoc, semDoc].filter((r) => r.length > 0)
+}
+
+/**
  * Grava as entradas como contas a receber, de forma idempotente.
  *
  * A chave é `external_id`: rodar o mesmo mês duas vezes ATUALIZA a linha em vez de criar
@@ -335,7 +368,7 @@ export async function importarEntradas(
   const contaDe = (caixa: string | null): string | null =>
     caixa ? (opts.caixaParaConta?.[caixa] ?? null) : null
 
-  const linhas = entradas.map((e) => ({
+  const linhaBase = (e: EntradaImportavel) => ({
     external_id: e.externalId,
     source: e.source,
     description: `${e.description}`.slice(0, 300),
@@ -353,7 +386,9 @@ export async function importarEntradas(
     note: `Importado de ${e.source === 'shosp' ? 'Shosp' : 'planilha da recepção'}${
       e.caixa ? ` · caixa ${e.caixa}` : ''
     } · ${PAYMENT_LABEL[e.method]}`,
-  }))
+  })
+
+  const remessas = remessasPorDocumento(entradas, linhaBase)
 
   const novas = entradas.filter((e) => !existentes.has(e.externalId)).length
   const atualizadas = entradas.length - novas
@@ -363,13 +398,15 @@ export async function importarEntradas(
     return { novas, atualizadas, lancamentosCaixa: 0, totalCents, falhas }
   }
 
-  for (let i = 0; i < linhas.length; i += CHUNK) {
-    const chunk = linhas.slice(i, i + CHUNK)
-    const { error } = await client
-      .from('fin_receivables')
-      .upsert(chunk, { onConflict: 'tenant_id,external_id' })
-    if (error) {
-      for (const l of chunk) falhas.push({ externalId: l.external_id, motivo: error.message })
+  for (const remessa of remessas) {
+    for (let i = 0; i < remessa.length; i += CHUNK) {
+      const chunk = remessa.slice(i, i + CHUNK)
+      const { error } = await client
+        .from('fin_receivables')
+        .upsert(chunk, { onConflict: 'tenant_id,external_id' })
+      if (error) {
+        for (const l of chunk) falhas.push({ externalId: l.external_id, motivo: error.message })
+      }
     }
   }
 
