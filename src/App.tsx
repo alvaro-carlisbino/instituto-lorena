@@ -71,6 +71,13 @@ const AdminOperationsPage = lazyPage(() => import('./pages/AdminOperationsPage')
 const TenantsAdminPage = lazyPage(() => import('./pages/TenantsAdminPage'), 'TenantsAdminPage')
 const WhatsappConnectionPage = lazyPage(() => import('./pages/WhatsappConnectionPage'), 'WhatsappConnectionPage')
 const AgendaPage = lazyPage(() => import('./pages/AgendaPage'), 'AgendaPage')
+// Central de Vendas: as 5 abas moram no mesmo chunk, cada uma com a sua porta porque
+// lazyPage() só sabe montar componente sem prop.
+const CentralVendasVendasPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasVendasPage')
+const CentralVendasFollowUpPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasFollowUpPage')
+const CentralVendasPosConsultaPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasPosConsultaPage')
+const CentralVendasCirurgiasPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasCirurgiasPage')
+const CentralVendasConferenciaPage = lazyPage(() => import('./pages/CentralVendasPage'), 'CentralVendasConferenciaPage')
 const EstoquePage = lazyPage(() => import('./pages/EstoquePage'), 'EstoquePage')
 const BipagemPage = lazyPage(() => import('./pages/BipagemPage'), 'BipagemPage')
 const ComprasPage = lazyPage(() => import('./pages/ComprasPage'), 'ComprasPage')
@@ -126,6 +133,11 @@ function AppRoutes() {
         <Route path="/frente-loja" element={<FrenteLojaPage />} />
         <Route path="/tarefas" element={<TasksPage />} />
         <Route path="/agenda" element={<AgendaPage />} />
+        <Route path="/central-vendas" element={<CentralVendasVendasPage />} />
+        <Route path="/central-vendas/follow-up" element={<CentralVendasFollowUpPage />} />
+        <Route path="/central-vendas/pos-consulta" element={<CentralVendasPosConsultaPage />} />
+        <Route path="/central-vendas/cirurgias" element={<CentralVendasCirurgiasPage />} />
+        <Route path="/central-vendas/conferencia" element={<CentralVendasConferenciaPage />} />
         <Route path="/cirurgias-vinculo" element={<CirurgiasVinculoPage />} />
         <Route path="/tricoscopia" element={<TricoscopiaPage />} />
         <Route path="/paciente/:tipo/:ref" element={<PacienteFichaPage />} />

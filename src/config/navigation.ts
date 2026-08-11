@@ -209,6 +209,19 @@ export const NAV_DESTINATIONS: NavDestination[] = [
 
   // ── Clínica
   {
+    id: 'central-vendas',
+    path: '/central-vendas',
+    label: 'Central de Vendas',
+    icon: ClipboardList,
+    group: 'clinica',
+    keywords: [
+      'venda', 'aline', 'ingrid', 'follow-up', 'pós-consulta', 'cirurgia',
+      'transplante', 'protocolo', 'spa', 'conferência', 'fechamento',
+    ],
+    visible: (ctx) => isClinic(ctx) && canRoute(ctx),
+    mobilePriority: 3,
+  },
+  {
     id: 'cirurgias-vinculo',
     path: '/cirurgias-vinculo',
     label: 'Cirurgias sem paciente',

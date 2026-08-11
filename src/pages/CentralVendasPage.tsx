@@ -4,6 +4,7 @@ import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { CirurgiasTab } from '@/components/vendas/CirurgiasTab'
+import { ConferenciaTab } from '@/components/vendas/ConferenciaTab'
 import { FollowUpTab } from '@/components/vendas/FollowUpTab'
 import { PosConsultaTab } from '@/components/vendas/PosConsultaTab'
 import { VendasTab } from '@/components/vendas/VendasTab'
@@ -14,9 +15,15 @@ export const centralVendasTabs = [
   { to: '/central-vendas/follow-up', label: 'Follow-up' },
   { to: '/central-vendas/pos-consulta', label: 'Pós-consulta' },
   { to: '/central-vendas/cirurgias', label: 'Cirurgias' },
+  { to: '/central-vendas/conferencia', label: 'Conferência' },
 ]
 
-export type CentralVendasTab = 'vendas' | 'follow-up' | 'pos-consulta' | 'cirurgias'
+export type CentralVendasTab =
+  | 'vendas'
+  | 'follow-up'
+  | 'pos-consulta'
+  | 'cirurgias'
+  | 'conferencia'
 
 const TITULO: Record<CentralVendasTab, { title: string; subtitle: string }> = {
   vendas: {
@@ -34,6 +41,10 @@ const TITULO: Record<CentralVendasTab, { title: string; subtitle: string }> = {
   cirurgias: {
     title: 'Cirurgias agendadas',
     subtitle: 'Fila do próximo mês, documentação pendente e avisos ao paciente.',
+  },
+  conferencia: {
+    title: 'Conferência com a sala',
+    subtitle: 'O que a venda afirma contra o que o centro cirúrgico registrou.',
   },
 }
 
@@ -71,6 +82,7 @@ export function CentralVendasPage({ tab }: { tab: CentralVendasTab }) {
       {tab === 'follow-up' && <FollowUpTab />}
       {tab === 'pos-consulta' && <PosConsultaTab />}
       {tab === 'cirurgias' && <CirurgiasTab />}
+      {tab === 'conferencia' && <ConferenciaTab />}
     </AppLayout>
   )
 }
@@ -81,3 +93,4 @@ export const CentralVendasVendasPage = () => <CentralVendasPage tab="vendas" />
 export const CentralVendasFollowUpPage = () => <CentralVendasPage tab="follow-up" />
 export const CentralVendasPosConsultaPage = () => <CentralVendasPage tab="pos-consulta" />
 export const CentralVendasCirurgiasPage = () => <CentralVendasPage tab="cirurgias" />
+export const CentralVendasConferenciaPage = () => <CentralVendasPage tab="conferencia" />
