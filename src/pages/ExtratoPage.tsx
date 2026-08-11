@@ -39,7 +39,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useTenant } from '@/context/TenantContext'
-import { hojeLocal } from '@/lib/diaLocal'
+import { diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
 import { sugerirPadrao } from '@/lib/extratoPadrao'
 import { LancamentoEditor } from '@/components/financeiro/LancamentoEditor'
 import { SugestaoIAPanel } from '@/components/financeiro/SugestaoIA'
@@ -69,6 +69,21 @@ const diaCurto = (iso: string) =>
 
 function inicioDoMes(): string {
   return `${hojeLocal().slice(0, 7)}-01`
+}
+
+/** Aritmética de calendário puro sobre o dia local: sem `new Date()` cru pra não voltar o fuso. */
+const isoDia = (d: Date) => d.toISOString().slice(0, 10)
+function mesPassado(): { de: string; ate: string } {
+  const [ano, mes] = hojeLocal().split('-').map(Number)
+  const fim = new Date(Date.UTC(ano, mes - 1, 1) - 86_400_000)
+  return { de: isoDia(new Date(Date.UTC(fim.getUTCFullYear(), fim.getUTCMonth(), 1))), ate: isoDia(fim) }
+}
+function quantosDias(de: string, ate: string): number {
+  if (!de || !ate) return 0
+  const d = Date.parse(`${de}T12:00:00Z`)
+  const a = Date.parse(`${ate}T12:00:00Z`)
+  if (Number.isNaN(d) || Number.isNaN(a) || a < d) return 0
+  return Math.round((a - d) / 86_400_000) + 1
 }
 
 export function ExtratoPage() {
@@ -108,14 +123,20 @@ export function ExtratoPage() {
     }
   }
 
+  // Recarrega sozinho quando as datas mudam. Antes só o botão "Atualizar" buscava, então dava
+  // pra ficar com o filtro dizendo 01/08 a 11/08 e os números sendo de outro período. Filtro que
+  // mente é o jeito mais rápido de um relatório perder a confiança de quem lê.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void carregar()
+    if (!de || !ate || de > ate) return
+    const id = window.setTimeout(() => void carregar(de, ate), 350)
+    return () => window.clearTimeout(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [de, ate])
 
   const hoje = hojeLocal()
   const doDia = useMemo(() => dias.find((d) => d.dia === hoje), [dias, hoje])
+  const hojeNoPeriodo = hoje >= de && hoje <= ate
+  const diasNoPeriodo = quantosDias(de, ate)
 
   const totais = useMemo(() => {
     const entrou = dias.reduce((s, d) => s + d.entrouCents, 0)
@@ -123,6 +144,36 @@ export function ExtratoPage() {
     const classificada = dias.reduce((s, d) => s + d.saidaClassificadaCents, 0)
     return { entrou, saiu, saldo: entrou - saiu, classificada, semCategoria: saiu - classificada }
   }, [dias])
+
+  // Dinheiro que só trocou de conta: aplicação e transferência entre contas próprias. O DRE já
+  // tira isso do resultado (é a convenção do nome "não é despesa"), mas o extrato somava tudo
+  // junto — e é o que faz um dia de R$ 180 mil de "saída" parecer gasto que não houve.
+  const foraDoResultado = useMemo(
+    () => porCategoria.filter((c) => /não é despesa/i.test(c.categoria)).reduce((s, c) => s + c.amountCents, 0),
+    [porCategoria],
+  )
+
+  // A maior entrada do período, à vista. Um total de R$ 367 mil não conta que R$ 157 mil vieram
+  // de UMA transferência; ver o nome do pagador ao lado do total responde "de onde veio isso?"
+  // sem precisar caçar na lista.
+  const maiorEntrada = useMemo(
+    () =>
+      lancamentos
+        .filter((t) => t.direction === 'in')
+        .reduce<FinTransaction | null>((m, t) => (!m || t.amountCents > m.amountCents ? t : m), null),
+    [lancamentos],
+  )
+
+  const atalhos = useMemo(() => {
+    const mp = mesPassado()
+    return [
+      { rotulo: 'Hoje', de: hoje, ate: hoje },
+      { rotulo: '7 dias', de: diaLocalComOffset(-6), ate: hoje },
+      { rotulo: 'Este mês', de: inicioDoMes(), ate: hoje },
+      { rotulo: 'Mês passado', de: mp.de, ate: mp.ate },
+      { rotulo: '90 dias', de: diaLocalComOffset(-89), ate: hoje },
+    ]
+  }, [hoje])
 
   const grafico = useMemo(
     () =>
@@ -189,37 +240,82 @@ export function ExtratoPage() {
           <Label htmlFor="ate" className="text-xs">Até</Label>
           <Input id="ate" type="date" value={ate} onChange={(e) => setAte(e.target.value)} className="w-[150px]" />
         </div>
+        <div className="flex flex-wrap items-center gap-1">
+          {atalhos.map((a) => {
+            const ativo = a.de === de && a.ate === ate
+            return (
+              <Button
+                key={a.rotulo}
+                size="sm"
+                variant={ativo ? 'secondary' : 'ghost'}
+                onClick={() => {
+                  setDe(a.de)
+                  setAte(a.ate)
+                }}
+              >
+                {a.rotulo}
+              </Button>
+            )
+          })}
+        </div>
         <Button size="sm" variant="outline" disabled={busy} onClick={() => void carregar()}>
-          <Landmark className="size-4" /> Atualizar
+          <Landmark className="size-4" /> {busy ? 'Buscando…' : 'Atualizar'}
         </Button>
       </div>
+
+      {/* O período por extenso, uma vez só. Os cards abaixo são todos DESTE intervalo, e era
+          justamente isso que "Entrou hoje" em cima de um filtro de 10 dias não deixava claro. */}
+      <p className="mt-2 text-xs text-muted-foreground">
+        {diasNoPeriodo > 0
+          ? `Mostrando ${dia(de)} a ${dia(ate)} · ${diasNoPeriodo} ${diasNoPeriodo === 1 ? 'dia' : 'dias'}.`
+          : 'Escolha um intervalo válido: a data inicial está depois da final.'}
+      </p>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardContent className="pt-4">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <ArrowDownLeft className="size-3.5 text-emerald-600" /> Entrou hoje
+              <ArrowDownLeft className="size-3.5 text-emerald-600" /> Entrou no período
             </div>
-            <div className="mt-0.5 text-lg font-semibold">{brl(doDia?.entrouCents ?? 0)}</div>
-            <div className="text-xs text-muted-foreground">{brl(totais.entrou)} no período</div>
+            <div className="mt-0.5 text-lg font-semibold">{brl(totais.entrou)}</div>
+            {/* "hoje" só aparece quando hoje está dentro do filtro, e como detalhe. Era o número
+                grande do card, o que fazia um dia parecer o período inteiro. */}
+            {hojeNoPeriodo && (
+              <div className="text-xs text-muted-foreground">{brl(doDia?.entrouCents ?? 0)} entrou hoje</div>
+            )}
+            {maiorEntrada && maiorEntrada.amountCents > totais.entrou / 3 && (
+              <div className="text-xs text-muted-foreground">
+                maior: {brl(maiorEntrada.amountCents)} · {maiorEntrada.description ?? maiorEntrada.counterparty ?? ''}
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <ArrowUpRight className="size-3.5 text-red-500" /> Saiu hoje
+              <ArrowUpRight className="size-3.5 text-red-500" /> Saiu no período
             </div>
-            <div className="mt-0.5 text-lg font-semibold">{brl(doDia?.saiuCents ?? 0)}</div>
-            <div className="text-xs text-muted-foreground">{brl(totais.saiu)} no período</div>
+            <div className="mt-0.5 text-lg font-semibold">{brl(totais.saiu)}</div>
+            {hojeNoPeriodo && (
+              <div className="text-xs text-muted-foreground">{brl(doDia?.saiuCents ?? 0)} saiu hoje</div>
+            )}
+            {foraDoResultado > 0 && (
+              <div className="text-xs text-amber-600">
+                {brl(foraDoResultado)} só mudou de conta (aplicação ou transferência entre contas
+                próprias), não é gasto
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <div className="text-xs text-muted-foreground">Saldo do período</div>
+            <div className="text-xs text-muted-foreground">Entrou menos saiu</div>
             <div className={`mt-0.5 text-lg font-semibold ${totais.saldo < 0 ? 'text-red-500' : ''}`}>
               {brl(totais.saldo)}
             </div>
-            <div className="text-xs text-muted-foreground">entrou menos saiu</div>
+            {/* Não é lucro nem saldo de conta: é o movimento bruto do banco, transferência
+                inclusive. Quem quer resultado olha o DRE, e quem quer saldo olha Contas & saldos. */}
+            <div className="text-xs text-muted-foreground">movimento do banco, não é o lucro</div>
           </CardContent>
         </Card>
         {/* O número que mantém o resto honesto. */}
