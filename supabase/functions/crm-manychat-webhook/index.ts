@@ -252,6 +252,34 @@ async function persistManychatMedia(
   }
 }
 
+/**
+ * Deixa em `webhook_jobs` a marca de um pedido do ManyChat que o CRM recusou antes de
+ * abrir job — hoje esses casos devolvem 400 e desaparecem (o log do edge só vive 24h e
+ * não dá para cruzar com a conversa). Com a linha gravada, "o paciente mandou áudio e
+ * não chegou" vira uma pergunta de SQL: se não existe linha nenhuma para o subscriber
+ * no horário, o ManyChat não chamou; se existe, o problema é o formato do payload —
+ * que fica anexado à nota, truncado.
+ *
+ * Best-effort: nunca lança (não pode transformar um 400 em 500).
+ */
+async function traceManychatDrop(
+  admin: AdminClient,
+  subscriberId: string,
+  reason: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const sample = JSON.stringify(body).slice(0, 380)
+    await admin.from('webhook_jobs').insert({
+      source: 'manychat-webhook',
+      status: 'skipped',
+      note: `manychat_drop:${subscriberId || 'sem_subscriber'}:${reason}|${sample}`.slice(0, 500),
+    })
+  } catch {
+    /* diagnóstico não pode quebrar o webhook */
+  }
+}
+
 function scheduleEdgeBackground(task: Promise<void>): void {
   try {
     const wu = (globalThis as unknown as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } })
@@ -824,6 +852,11 @@ Deno.serve(async (req) => {
 
   // Aceitamos uma mensagem só com mídia (paciente envia foto/áudio sem caption).
   if (!text && inboundMedia.length === 0 && !(action === 'record_outbound' && replyOnly)) {
+    // Sem texto e sem mídia o pedido morre aqui, ANTES da linha em `webhook_jobs` —
+    // ou seja, some sem deixar rastro consultável. Isso torna impossível distinguir
+    // "o ManyChat não chamou" de "chamou e o CRM recusou", que é exatamente a dúvida
+    // quando o paciente manda áudio/foto e nada aparece no chat. Deixa a marca.
+    await traceManychatDrop(admin, subscriberId, 'sem_texto_nem_midia', body)
     return json({ error: 'missing_text' }, 400)
   }
 
