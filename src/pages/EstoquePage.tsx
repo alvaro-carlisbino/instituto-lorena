@@ -71,7 +71,8 @@ export function financeiroTabs(isSalesPolo: boolean): Array<{ to: string; label:
     ...(isSalesPolo ? [] : [{ to: '/importar-vendas', label: 'Importar vendas' }]),
     { to: '/alertas-pagamento', label: 'Alertas pagamento' },
     { to: '/fluxo-caixa', label: 'Fluxo de caixa' },
-    { to: '/importar-shop', label: 'Importar shop' },
+    // Repasse da Shopee = marketplace do Tricopill. Na clínica não existe.
+    ...(isSalesPolo ? [{ to: '/importar-shop', label: 'Importar Shopee' }] : []),
     { to: '/links-pagamento', label: 'Links de pagamento' },
     ...(isSalesPolo ? [{ to: '/cupons', label: 'Cupons' }] : []),
     ...(isSalesPolo ? [{ to: '/nfe', label: 'Emissão de NF-e' }] : []),

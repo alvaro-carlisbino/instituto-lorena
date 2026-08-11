@@ -785,10 +785,10 @@ export function ConciliacaoShospPage() {
                     {resultado.cartao.repasseForaDaConta ? (
                       <p className="pt-1 text-xs text-amber-600">
                         Os adquirentes creditaram só {brl(resultado.cartao.repassadoCents)} dos{' '}
-                        {brl(resultado.cartao.esperadoCents)} que já venceram nesta conta. O repasse do
-                        cartão não passa por aqui — a taxa não dá pra medir sem inventar número. Concilie
-                        o cartão no extrato que recebe o repasse, ou marque o pagador que traz esse
-                        dinheiro em “Quem é quem no extrato”.
+                        {brl(resultado.cartao.esperadoCents)} que já venceram. Com essa cobertura a taxa
+                        não dá pra medir sem inventar número. Confira no portal do adquirente qual das
+                        três é: antecipação que parou, domicílio bancário em outra conta, ou venda
+                        lançada no Shosp que não passou na maquininha.
                       </p>
                     ) : (
                       <p className="pt-1 text-xs text-muted-foreground">

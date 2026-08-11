@@ -458,11 +458,14 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   {
     id: 'importar-shop',
     path: '/importar-shop',
-    label: 'Importar shop',
+    label: 'Importar Shopee',
     icon: FileSpreadsheet,
     group: 'financeiro',
-    keywords: ['shopee', 'planilha', 'importação'],
-    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
+    keywords: ['shopee', 'marketplace', 'planilha', 'importação', 'tricopill'],
+    // Planilha de repasse da SHOPEE: é marketplace do Tricopill e vira conta a pagar de lá.
+    // Sem `isSales` aparecia no menu da clínica, onde não existe Shopee nenhuma — e o rótulo
+    // "Importar shop" não dizia nem de que loja era.
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx) && isSales(ctx),
   },
   {
     id: 'links-pagamento',

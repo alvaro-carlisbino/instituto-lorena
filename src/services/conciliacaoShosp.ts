@@ -623,7 +623,7 @@ export function reconcileShospVsBanco(
       amountCents: esperadoCents - repassadoCartao,
       title: `Cartão: ${brl(esperadoCents)} venceram no adquirente e só ${brl(repassadoCartao)} caíram nesta conta`,
       detail:
-        `Das vendas em cartão do período, ${brl(esperadoCents)} já tinham vencimento até ${dia(fimExtrato ?? '')} pelo cronograma (débito D+${config.debitoDias}, crédito uma parcela a cada ${config.creditoDias} dias). Os adquirentes creditaram ${brl(repassadoCartao)} — ${(cobertura * 100).toFixed(1)}% do esperado. Isso não é dinheiro sumido: é o domicílio bancário do cartão apontando para outra conta. Concilie o cartão no extrato que recebe o repasse, ou marque aqui o pagador que traz esse dinheiro pra cá.` +
+        `Das vendas em cartão do período, ${brl(esperadoCents)} já tinham vencimento até ${dia(fimExtrato ?? '')} pelo cronograma (débito D+${config.debitoDias}, crédito uma parcela a cada ${config.creditoDias} dias). Os adquirentes creditaram ${brl(repassadoCartao)} — ${(cobertura * 100).toFixed(1)}% do esperado. Três causas explicam esse buraco, e elas se distinguem no extrato: ANTECIPAÇÃO que existia e parou (o repasse vinha adiantado num mês e no seguinte só pinga o D+30 normal); domicílio bancário apontando para outra conta (não aparece repasse nenhum, em mês nenhum); ou venda de cartão registrada no Shosp que não foi capturada na maquininha. Compare com o portal do adquirente antes de concluir.` +
         (aReceberCents > 0
           ? ` Fora isso, ${brl(aReceberCents)} ainda nem venceram (parcelas até ${dia(aReceberAte ?? '')}).`
           : ''),
