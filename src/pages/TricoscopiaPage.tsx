@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Activity, Link2, Link2Off, RefreshCw, Search, TrendingDown, TrendingUp } from 'lucide-react'
+import { Activity, ChevronRight, LineChart, Link2, Link2Off, RefreshCw, Search } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { Badge } from '@/components/ui/badge'
@@ -10,15 +11,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StatCard } from '@/components/page/StatCard'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { dia, nomePacienteLegivel } from '@/lib/tricoscopia'
 import {
   type EstadoSync,
   type PacienteTricoscopia,
-  type PontoEvolucao,
   type SugestaoLead,
   type VinculoStatus,
   estadoDoSync,
-  evolucaoDoPaciente,
   ignorarPaciente,
   listarPacientes,
   sugerirLeads,
@@ -32,43 +33,6 @@ const FILTROS: Array<{ id: 'todos' | VinculoStatus; label: string }> = [
   { id: 'todos', label: 'Todos' },
 ]
 
-/**
- * Occipital é área doadora: não rala. Serve de controle interno — se ele oscila
- * entre exames, mudou a técnica de captura, não o tratamento. Por isso a região é
- * exibida sempre, e nunca se soma um ponto com o outro.
- */
-const DOADORA = /occiput|occipital/i
-
-function dia(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('pt-BR')
-}
-
-function nomeLegivel(nomePasta: string): string {
-  // O Mirror grava "SOBRENOME, NOME". Vira "Nome Sobrenome" para leitura.
-  const [sobrenome, nome] = nomePasta.split(',').map((s) => s.trim())
-  const cru = nome ? `${nome} ${sobrenome}` : nomePasta
-  return cru.toLowerCase().replace(/(^|\s)\p{L}/gu, (c) => c.toUpperCase())
-}
-
-function Delta({ valor, inverso = false }: { valor: number | null; inverso?: boolean }) {
-  if (valor === null || Number.isNaN(valor)) return <span className="text-muted-foreground">—</span>
-  const bom = inverso ? valor < 0 : valor > 0
-  const neutro = Math.abs(valor) < 1
-  const cor = neutro
-    ? 'text-muted-foreground'
-    : bom
-      ? 'text-emerald-600 dark:text-emerald-400'
-      : 'text-red-600 dark:text-red-400'
-  const Icone = valor > 0 ? TrendingUp : TrendingDown
-  return (
-    <span className={`inline-flex items-center gap-1 tabular-nums ${cor}`}>
-      {!neutro && <Icone className="h-3 w-3" />}
-      {valor > 0 ? '+' : ''}{valor.toFixed(1)}%
-    </span>
-  )
-}
-
 export function TricoscopiaPage() {
   const [filtro, setFiltro] = useState<'todos' | VinculoStatus>('todos')
   const [busca, setBusca] = useState('')
@@ -77,9 +41,7 @@ export function TricoscopiaPage() {
   const [carregando, setCarregando] = useState(true)
   const [sync, setSync] = useState<EstadoSync | null>(null)
 
-  const [aberto, setAberto] = useState<PacienteTricoscopia | null>(null)
-  const [evolucao, setEvolucao] = useState<PontoEvolucao[]>([])
-  const [carregandoEvolucao, setCarregandoEvolucao] = useState(false)
+  const navigate = useNavigate()
 
   const [vinculando, setVinculando] = useState<PacienteTricoscopia | null>(null)
   const [sugestoes, setSugestoes] = useState<SugestaoLead[]>([])
@@ -99,19 +61,6 @@ export function TricoscopiaPage() {
   }, [filtro, buscaAplicada])
 
   useEffect(() => { void carregar() }, [carregar])
-
-  const abrirEvolucao = useCallback(async (p: PacienteTricoscopia) => {
-    setAberto(p)
-    setCarregandoEvolucao(true)
-    setEvolucao([])
-    try {
-      setEvolucao(await evolucaoDoPaciente(p.id))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Não deu para carregar a evolução.')
-    } finally {
-      setCarregandoEvolucao(false)
-    }
-  }, [])
 
   const abrirVinculo = useCallback(async (p: PacienteTricoscopia) => {
     setVinculando(p)
@@ -138,35 +87,47 @@ export function TricoscopiaPage() {
     }
   }, [vinculando, carregar])
 
-  // Agrupa por região porque comparar vertex com occipital não significa nada.
-  const porRegiao = useMemo(() => {
-    const m = new Map<string, PontoEvolucao[]>()
-    for (const p of evolucao) {
-      const k = p.regiao ?? 'Sem região'
-      if (!m.has(k)) m.set(k, [])
-      m.get(k)!.push(p)
-    }
-    return Array.from(m.entries()).sort((a, b) => b[1].length - a[1].length)
-  }, [evolucao])
-
   return (
     <AppLayout
       title="Tricoscopia"
-      subtitle="Exames do HairMetrix espelhados no CRM. A comparação é sempre dentro da mesma região: occipital é área doadora e não rala, então ele serve de controle — se oscilar, mudou a captura, não o tratamento."
+      subtitle="Exames do HairMetrix espelhados no CRM. Abra um paciente para ver o laudo de evolução: a comparação é sempre dentro da mesma região, e a área doadora entra junto como controle da medida."
+      actions={
+        <Button size="sm" variant="outline" onClick={() => void carregar()}>
+          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />Atualizar
+        </Button>
+      }
     >
       {sync && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-          <span><strong className="text-foreground tabular-nums">{sync.pacientes}</strong> pacientes</span>
-          <span><strong className="text-foreground tabular-nums">{sync.exames}</strong> exames</span>
-          <span><strong className="text-foreground tabular-nums">{sync.medidas}</strong> medidas</span>
-          <span><strong className="text-foreground tabular-nums">{sync.pendentes}</strong> sem paciente do CRM</span>
-          <span className="ml-auto">
-            Última sincronização: {sync.ultimaRodada ? new Date(sync.ultimaRodada).toLocaleString('pt-BR') : 'nunca'}
-          </span>
-          <Button size="sm" variant="outline" onClick={() => void carregar()}>
-            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />Atualizar
-          </Button>
-        </div>
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="Pacientes com exame"
+              value={sync.pacientes.toLocaleString('pt-BR')}
+              hint={`${sync.exames.toLocaleString('pt-BR')} exames · ${sync.medidas.toLocaleString('pt-BR')} medidas`}
+            />
+            {/* O número que importa: laudo de evolução só existe a partir do 2º exame. */}
+            <StatCard
+              label="Com evolução (2+ exames)"
+              value={sync.comEvolucao.toLocaleString('pt-BR')}
+              hint={sync.pacientes > 0 ? `${Math.round((sync.comEvolucao / sync.pacientes) * 100)}% da base` : undefined}
+            />
+            <StatCard
+              label="Vinculados ao CRM"
+              value={sync.vinculados.toLocaleString('pt-BR')}
+              hint={`${sync.pendentes.toLocaleString('pt-BR')} pastas ainda sem paciente`}
+            />
+            <StatCard
+              label="Acervo"
+              value={`${dia(sync.primeiroExameEm)} →`}
+              valueClassName="text-lg"
+              hint={`até ${dia(sync.ultimoExameEm)}`}
+            />
+          </div>
+          <p className="mt-2 mb-4 text-xs text-muted-foreground">
+            Última sincronização do agente:{' '}
+            {sync.ultimaRodada ? new Date(sync.ultimaRodada).toLocaleString('pt-BR') : 'nunca'}
+          </p>
+        </>
       )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -213,18 +174,28 @@ export function TricoscopiaPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Paciente</TableHead>
-                  <TableHead className="w-20 text-right">Exames</TableHead>
+                  <TableHead className="w-24 text-right">Exames</TableHead>
                   <TableHead className="w-28">Primeiro</TableHead>
                   <TableHead className="w-28">Último</TableHead>
                   <TableHead className="w-32">Vínculo</TableHead>
-                  <TableHead className="w-44 text-right">Ações</TableHead>
+                  <TableHead className="w-56 text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {linhas.map((p) => (
-                  <TableRow key={p.id} className="cursor-pointer" onClick={() => void abrirEvolucao(p)}>
-                    <TableCell className="font-medium">{nomeLegivel(p.nomePasta)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{p.totalExames}</TableCell>
+                  <TableRow
+                    key={p.id}
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/tricoscopia/${p.id}`)}
+                  >
+                    <TableCell className="font-medium">{nomePacienteLegivel(p.nomePasta)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {p.totalExames}
+                      {/* Um exame só não tem evolução: dizer isso antes de abrir poupa clique. */}
+                      {p.totalExames === 1 && (
+                        <span className="ml-1.5 text-xs font-normal text-muted-foreground">único</span>
+                      )}
+                    </TableCell>
                     <TableCell className="tabular-nums">{dia(p.primeiroExameEm)}</TableCell>
                     <TableCell className="tabular-nums">{dia(p.ultimoExameEm)}</TableCell>
                     <TableCell>
@@ -236,11 +207,21 @@ export function TricoscopiaPage() {
                         <Badge variant="secondary">sem paciente</Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <Button size="sm" variant="outline" onClick={() => void abrirVinculo(p)}>
-                        <Link2 className="mr-1.5 h-3.5 w-3.5" />
-                        {p.vinculoStatus === 'vinculado' ? 'Trocar' : 'Vincular'}
-                      </Button>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => { e.stopPropagation(); void abrirVinculo(p) }}
+                        >
+                          <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                          {p.vinculoStatus === 'vinculado' ? 'Trocar' : 'Vincular'}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => navigate(`/tricoscopia/${p.id}`)}>
+                          <LineChart className="mr-1.5 h-3.5 w-3.5" />Laudo
+                          <ChevronRight className="ml-0.5 h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -250,72 +231,11 @@ export function TricoscopiaPage() {
         </CardContent>
       </Card>
 
-      {/* Evolução */}
-      <Dialog open={!!aberto} onOpenChange={(o) => { if (!o) setAberto(null) }}>
-        <DialogContent className="max-h-[85vh] max-w-4xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{aberto ? nomeLegivel(aberto.nomePasta) : ''}</DialogTitle>
-          </DialogHeader>
-
-          {carregandoEvolucao ? (
-            <div className="space-y-2">
-              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
-            </div>
-          ) : porRegiao.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sem medidas para este paciente.</p>
-          ) : (
-            <div className="space-y-6">
-              {porRegiao.map(([regiao, pontos]) => (
-                <div key={regiao}>
-                  <div className="mb-2 flex items-center gap-2">
-                    <h3 className="text-sm font-semibold">{regiao}</h3>
-                    {DOADORA.test(regiao) && (
-                      <Badge variant="outline" title="Área doadora: não rala. Serve de controle da técnica de captura.">
-                        controle
-                      </Badge>
-                    )}
-                    <span className="text-xs text-muted-foreground">{pontos.length} exame(s)</span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-28">Data</TableHead>
-                          <TableHead className="text-right">Fios/cm²</TableHead>
-                          <TableHead className="text-right">Δ densidade</TableHead>
-                          <TableHead className="text-right">Espessura</TableHead>
-                          <TableHead className="text-right">Δ espessura</TableHead>
-                          <TableHead className="text-right">% finos</TableHead>
-                          <TableHead className="text-right">Fios/UF</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {pontos.map((p) => (
-                          <TableRow key={p.captureId}>
-                            <TableCell className="tabular-nums">{dia(p.capturadoEm)}</TableCell>
-                            <TableCell className="text-right tabular-nums">{p.densidadeFiosCm2?.toFixed(1) ?? '—'}</TableCell>
-                            <TableCell className="text-right"><Delta valor={p.deltaDensidadePct} /></TableCell>
-                            <TableCell className="text-right tabular-nums">{p.espessuraMediaUm ? `${p.espessuraMediaUm.toFixed(1)} µm` : '—'}</TableCell>
-                            <TableCell className="text-right"><Delta valor={p.deltaEspessuraPct} /></TableCell>
-                            <TableCell className="text-right tabular-nums">{p.pctFiosFinos?.toFixed(1) ?? '—'}%</TableCell>
-                            <TableCell className="text-right tabular-nums">{p.fiosPorUf?.toFixed(2) ?? '—'}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-
       {/* Vínculo */}
       <Dialog open={!!vinculando} onOpenChange={(o) => { if (!o) setVinculando(null) }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Vincular {vinculando ? nomeLegivel(vinculando.nomePasta) : ''}</DialogTitle>
+            <DialogTitle>Vincular {vinculando ? nomePacienteLegivel(vinculando.nomePasta) : ''}</DialogTitle>
           </DialogHeader>
 
           <p className="text-sm text-muted-foreground">

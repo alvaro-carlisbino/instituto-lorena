@@ -133,6 +133,47 @@ Deno.serve(async (req) => {
   }
 
   // --------------------------------------------------------------------------
+  // fila: quais pacientes o CRM pediu foto
+  // --------------------------------------------------------------------------
+  // O menor modo que o enviar-imagens.ps1 tinha era "a captura mais recente de
+  // TODO paciente": ~18 mil imagens, ~4,5 GB, dias de upload. Por isso nunca rodou
+  // e `hairmetrix_imagens` está zerada.
+  //
+  // Com a fila o agente sobe só quem o médico pediu no laudo — primeiro e último
+  // exame daquele paciente, ~12 imagens, ~3 MB. Alguns MB por dia em vez de 250 GB
+  // de uma vez.
+  if (action === 'fila') {
+    const { data, error } = await db
+      .from('hairmetrix_pedidos_imagem')
+      .select('id, mirror_patient_id, solicitado_em')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'pendente')
+      .order('solicitado_em', { ascending: true })
+      .limit(Math.min(int(body.limite) || 20, 100))
+    if (error) return json({ ok: false, error: error.message }, 500)
+    return json({ ok: true, action: 'fila', pedidos: data ?? [] })
+  }
+
+  // fila-ok: o agente fecha o pedido. Fecha SEMPRE, inclusive com zero imagem —
+  // pasta sem PNG existe, e pedido que nunca fecha volta na fila para sempre.
+  if (action === 'fila-ok') {
+    const pedidoId = str(body.pedido_id)
+    if (!pedidoId) return json({ ok: false, error: 'faltou pedido_id' }, 400)
+    const { error } = await db
+      .from('hairmetrix_pedidos_imagem')
+      .update({
+        status: 'atendido',
+        atendido_em: new Date().toISOString(),
+        imagens_enviadas: int(body.imagens_enviadas),
+        detalhe: str(body.detalhe),
+      })
+      .eq('tenant_id', tenantId)
+      .eq('id', pedidoId)
+    if (error) return json({ ok: false, error: error.message }, 500)
+    return json({ ok: true, action: 'fila-ok' })
+  }
+
+  // --------------------------------------------------------------------------
   // imagem: miniatura JPEG de uma captura
   // --------------------------------------------------------------------------
   // O PNG original tem 2274x2048 e 4 a 8 MB. As 32 mil capturas dariam 130 a 250 GB

@@ -79,7 +79,7 @@ exames, o que mudou foi a técnica de captura, não o tratamento.
 | `01-rede-diagnostico-e-fix.ps1` | diagnostica e corrige a comunicação entre as duas máquinas | nas **duas** |
 | `02-hairmetrix-descoberta.ps1` | mapeia instância, bancos, schema e pastas. Somente leitura | principal |
 | `sync-hairmetrix.ps1` | o agente: lê as pastas, agrega e envia pro CRM | principal |
-| `enviar-imagens.ps1` | miniatura JPEG das fotos, para o bucket privado | principal |
+| `enviar-imagens.ps1` | miniatura JPEG das fotos, para o bucket privado. Use `-Fila` | principal |
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
@@ -128,15 +128,47 @@ contagens: sai correta mesmo sem calibração.
 
 O `tricho_N.png` tem 2274×2048 e 4 a 8 MB. As 32 mil capturas dariam **130 a 250 GB**
 e dias de upload. O `enviar-imagens.ps1` converte para JPEG de no máximo 1400px
-(~250 KB) e sobe só a **captura mais recente de cada paciente**, que já traz uma foto
-de cada região: ~18 mil imagens, ~4,5 GB.
+(~250 KB).
+
+Mesmo assim, o modo padrão — a captura mais recente de *cada* paciente — dá ~18 mil
+imagens e ~4,5 GB. Foi por isso que **este script nunca terminou uma rodada e
+`hairmetrix_imagens` está com zero linha** desde 10/08/2026.
+
+### `-Fila` é o modo para o dia a dia
+
+O médico abre o laudo em `/tricoscopia/<paciente>` e clica em *Pedir as fotos deste
+paciente*. Isso enfileira em `hairmetrix_pedidos_imagem`. Com `-Fila`, o agente lê a
+fila (`action: 'fila'`), sobe a **primeira e a última** captura só daqueles pacientes
+— o antes e depois que o laudo compara — e fecha o pedido (`action: 'fila-ok'`).
+
+São ~12 imagens e ~3 MB por paciente. No ritmo real da clínica isso é alguns MB por
+dia, e o acervo se forma sozinho, começando por quem está sendo atendido.
 
 ```powershell
+.\enviar-imagens.ps1 -Fila            # <<< agendar de hora em hora
 .\enviar-imagens.ps1 -Teste           # 3 pacientes
-.\enviar-imagens.ps1                  # captura mais recente de cada um
+.\enviar-imagens.ps1                  # captura mais recente de cada um (~4,5 GB)
 .\enviar-imagens.ps1 -PausaMs 800     # segura o upload em horário de atendimento
 .\enviar-imagens.ps1 -Tudo            # todas as capturas (vários dias)
 ```
+
+Agendador de Tarefas do Windows, de hora em hora:
+
+```powershell
+schtasks /create /tn "LorenaHairMetrix-Fila" /sc hourly ^
+  /tr "powershell -ExecutionPolicy Bypass -File C:\Lorena\enviar-imagens.ps1 -Fila" /ru SYSTEM
+```
+
+Fila vazia sai em 1 segundo com `exit 0`, então rodar de hora em hora não custa nada.
+Pedido cuja pasta não existe no disco, ou que não tem PNG, também é fechado — pedido
+que não fecha voltaria na fila para sempre.
+
+### Enquanto a foto não chega
+
+O laudo não fica vazio: ele **desenha** 1 cm² do campo folicular a partir das medidas
+(unidades por cm², fios por unidade, distribuição de espessura). Ver
+`src/lib/campoFolicular.ts`. Não é a foto, a tela diz isso em letra grande, e custa
+zero de upload — funciona para os 2.984 pacientes hoje.
 
 Bucket `hairmetrix` é **privado**, aceita só `image/jpeg` e trava em 3 MB por arquivo
 — o limite existe para impedir que alguém suba o PNG original por engano. Exibição
@@ -144,7 +176,9 @@ tem que usar URL assinada de vida curta, nunca link público.
 
 ## Pendente
 
-- Exibir a foto na ficha (o caminho já vem em `tricoscopia[].imagem_path`)
+- **Rodar o `enviar-imagens.ps1 -Fila`**: o token ainda está como `COLE_O_TOKEN_AQUI`
+  e nenhuma foto subiu até hoje. Já existe um pedido de teste na fila (Wichoski,
+  Marcio) que serve de primeira rodada.
 - Tirar as duas máquinas da rede de visitantes; principal idealmente em cabo
 - Sobrou no bucket um `.../99.jpg` de 160 bytes, do teste do endpoint. Inofensivo,
   dá para apagar pelo painel do Storage.

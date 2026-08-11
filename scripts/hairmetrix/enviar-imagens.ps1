@@ -35,7 +35,8 @@ param(
   [int]$PausaMs       = 0,
   [int]$MaxPacientes  = 0,
   [switch]$Tudo,
-  [switch]$Teste
+  [switch]$Teste,
+  [switch]$Fila
 )
 
 $ErrorActionPreference = 'Continue'
@@ -105,6 +106,24 @@ function Send-Json($payload, [string]$rotulo) {
   }
 }
 
+# Fecha o pedido da fila. Tem que ser chamado em TODA saida do laco do paciente,
+# inclusive quando a pasta nao tem captura nenhuma: pedido que nao fecha volta na
+# proxima rodada e o script gasta o dia inteiro no mesmo paciente vazio.
+function Close-Pedido($pasta, $quantas, $detalhe) {
+  if (-not $Fila) { return }
+  if ($pasta.Name -notmatch '\((\d{10,})\)\s*$') { return }
+  $mid = $matches[1]
+  if (-not $pedidos.ContainsKey($mid)) { return }
+  Send-Json @{
+    action           = 'fila-ok'
+    pedido_id        = $pedidos[$mid]
+    imagens_enviadas = $quantas
+    detalhe          = $detalhe
+  } "fila-ok $mid" | Out-Null
+  $pedidos.Remove($mid)
+  Log "  pedido fechado: $mid ($quantas imagens)" 'Green'
+}
+
 # ---------------------------------------------------------------------------
 
 if ($Token -eq 'COLE_O_TOKEN_AQUI') { Log 'Token nao configurado.' 'Red'; exit 1 }
@@ -123,7 +142,36 @@ if (Test-Path $arquivoEstado) {
 }
 
 $pastas = @(Get-ChildItem $Raiz -Directory -ErrorAction SilentlyContinue)
-if ($Teste)                  { $pastas = $pastas | Select-Object -First 3 }
+
+# Fila: o CRM diz quais pacientes interessam agora. O mirror_patient_id e o numero
+# entre parenteses no nome da pasta, entao da para casar sem tocar no banco deles.
+$pedidos = @{}
+if ($Fila) {
+  $resp = Send-Json @{ action = 'fila'; limite = 50 } 'fila'
+  if (-not $resp -or -not $resp.ok) { Log 'Nao consegui ler a fila de pedidos.' 'Red'; exit 1 }
+  if (@($resp.pedidos).Count -eq 0) { Log 'Fila vazia: ninguem pediu foto. Nada a fazer.' 'Green'; exit 0 }
+
+  foreach ($ped in $resp.pedidos) { $pedidos[[string]$ped.mirror_patient_id] = $ped.id }
+  Log "$($pedidos.Count) paciente(s) na fila." 'Cyan'
+
+  $pastas = @($pastas | Where-Object {
+    if ($_.Name -match '\((\d{10,})\)\s*$') { $pedidos.ContainsKey($matches[1]) } else { $false }
+  })
+  Log "$($pastas.Count) pasta(s) casaram com a fila." 'Cyan'
+
+  # Pedido cuja pasta sumiu do disco tem que fechar assim mesmo, senao volta na
+  # fila para sempre e o script gasta uma rodada nele todo dia.
+  $achados = @{}
+  foreach ($pa in $pastas) { if ($pa.Name -match '\((\d{10,})\)\s*$') { $achados[$matches[1]] = $true } }
+  foreach ($mid in @($pedidos.Keys)) {
+    if (-not $achados.ContainsKey($mid)) {
+      Log "  pasta nao encontrada para $mid ; fechando o pedido" 'Yellow'
+      Send-Json @{ action='fila-ok'; pedido_id=$pedidos[$mid]; imagens_enviadas=0; detalhe='pasta nao encontrada no disco' } 'fila-ok' | Out-Null
+      $pedidos.Remove($mid)  # tira da hash aqui: Close-Pedido nunca vera esta pasta
+    }
+  }
+}
+elseif ($Teste)              { $pastas = $pastas | Select-Object -First 3 }
 elseif ($MaxPacientes -gt 0) { $pastas = $pastas | Select-Object -First $MaxPacientes }
 Log "$($pastas.Count) pastas de paciente." 'Cyan'
 
@@ -137,12 +185,21 @@ foreach ($pasta in $pastas) {
       $n, $pastas.Count, $tot.enviadas, ($tot.bytes / 1MB)) 'DarkGray'
   }
 
+  $enviadasDestePaciente = 0
+
   $capturas = @(Get-ChildItem $pasta.FullName -Directory -ErrorAction SilentlyContinue |
                   Where-Object { $_.Name -match '^\d{10,}$' } |
                   Sort-Object Name -Descending)
-  if ($capturas.Count -eq 0) { continue }
+  if ($capturas.Count -eq 0) {
+    Close-Pedido $pasta 0 'pasta sem captura'
+    continue
+  }
   # id da captura e timestamp, entao ordenar pelo nome ja da a mais recente primeiro
-  if (-not $Tudo) { $capturas = @($capturas[0]) }
+  if ($Fila) {
+    # antes e depois: a mais antiga e a mais nova. E o par que o laudo compara.
+    $capturas = if ($capturas.Count -gt 1) { @($capturas[0], $capturas[-1]) } else { @($capturas[0]) }
+  }
+  elseif (-not $Tudo) { $capturas = @($capturas[0]) }
 
   foreach ($cap in $capturas) {
     $pngs = @(Get-ChildItem $cap.FullName -Filter 'tricho_*.png' -File -ErrorAction SilentlyContinue)
@@ -172,6 +229,7 @@ foreach ($pasta in $pastas) {
 
       if ($r -and $r.ok) {
         $tot.enviadas++
+        $enviadasDestePaciente++
         $tot.bytes += [int]$r.bytes
         Add-Content -Path $arquivoEstado -Value $chave -Encoding UTF8
       } elseif ($r -and $r.error -eq 'exame_desconhecido') {
@@ -184,6 +242,8 @@ foreach ($pasta in $pastas) {
       if ($PausaMs -gt 0) { Start-Sleep -Milliseconds $PausaMs }
     }
   }
+
+  Close-Pedido $pasta $enviadasDestePaciente $null
 }
 
 Log ''

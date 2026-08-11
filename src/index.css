@@ -313,3 +313,72 @@
     );
   }
 }
+/* ---------------------------------------------------------------------------
+   Paleta de gráfico (escopo .viz)
+   ---------------------------------------------------------------------------
+   Definida como variável CSS, e não como hex no JSX, por dois motivos: o recharts
+   aceita `var()` em atributo SVG, então o modo escuro passa a funcionar sozinho; e
+   os passos ficam num lugar só, auditável.
+
+   Cada conjunto foi validado com o verificador de paleta contra as superfícies
+   reais deste app (claro #fffefe, escuro #1d1e21):
+
+   - divergente ganho/perda: azul x vermelho, ΔE 23,8 no daltonismo protan e 31,6
+     na visão normal (claro); 19,2 / 29,0 no escuro. Passa em todos os testes. E
+     nunca carrega sentido sozinha — cada região do mapa mostra o número com sinal.
+   - faixas de espessura: rampa ordinal de um matiz só, 5 passos, claro→escuro,
+     todos com salto de luminosidade >= 0,06 e a ponta clara acima de 2:1 contra a
+     superfície. Verde/vermelho aqui seria erro: as faixas são ordenadas, não
+     categorias.
+
+   Verde nunca entra como cor de série: verde x vermelho é o par que some no
+   daltonismo mais comum, e este é um laudo de saúde.
+--------------------------------------------------------------------------- */
+.viz {
+  --viz-surface: oklch(0.998 0.001 85);
+  --viz-ink: #0b0b0b;
+  --viz-muted: #898781;
+  --viz-linha: #c3c2b7;
+  --viz-grade: #e1e0d9;
+  --viz-cranio: #f4f3ef;
+
+  --viz-serie: #2a78d6;
+  --viz-controle: #898781;
+
+  --viz-ganho: #2a78d6;
+  --viz-estavel: #e1e0d9;
+  --viz-perda: #d03b3b;
+
+  --viz-faixa-1: #86b6ef;
+  --viz-faixa-2: #3987e5;
+  --viz-faixa-3: #256abf;
+  --viz-faixa-4: #184f95;
+  --viz-faixa-5: #0d366b;
+}
+
+.dark .viz {
+  --viz-surface: oklch(0.235 0.006 270);
+  --viz-ink: #ffffff;
+  --viz-muted: #898781;
+  --viz-linha: #383835;
+  --viz-grade: #2c2c2a;
+  --viz-cranio: #26272b;
+
+  --viz-serie: #3987e5;
+  --viz-controle: #898781;
+
+  --viz-ganho: #3987e5;
+  --viz-estavel: #383835;
+  --viz-perda: #e66767;
+
+  --viz-faixa-1: #cde2fb;
+  --viz-faixa-2: #86b6ef;
+  --viz-faixa-3: #3987e5;
+  --viz-faixa-4: #256abf;
+  --viz-faixa-5: #184f95;
+}
+
+/* Fundo do desenho do campo folicular: tom de couro cabeludo, neutro nos dois temas.
+   Não é foto e não tenta parecer — só tira o traço do branco puro. */
+.viz { --viz-couro: #f6f2ee; }
+.dark .viz { --viz-couro: #222326; }
