@@ -24,7 +24,7 @@ const TENANTS: Record<string, Record<string, unknown> | null> = {
   },
   'instituto-lorena': {
     app_name: 'Instituto Lorena Visentainer',
-    checkout_base_url: 'https://pagar.institutolorenavisentainer.com.br',
+    checkout_base_url: 'https://instituto-lorena.vercel.app',
     site_url: 'https://institutolorenavisentainer.com.br',
     email_from: '',
   },
@@ -56,7 +56,7 @@ function setup() {
 Deno.test('cada polo carrega o próprio domínio de cobrança', async () => {
   const admin = setup()
   assertEquals(await getCheckoutBaseUrl(admin, 'tricopill'), 'https://pagar.tricopill.com.br')
-  assertEquals(await getCheckoutBaseUrl(admin, 'instituto-lorena'), 'https://pagar.institutolorenavisentainer.com.br')
+  assertEquals(await getCheckoutBaseUrl(admin, 'instituto-lorena'), 'https://instituto-lorena.vercel.app')
 })
 
 Deno.test('link de pagamento nasce no domínio do polo dono da cobrança', async () => {
@@ -64,7 +64,7 @@ Deno.test('link de pagamento nasce no domínio do polo dono da cobrança', async
   assertEquals(await buildCheckoutUrl(admin, 'tricopill', 'abc123'), 'https://pagar.tricopill.com.br/pagar/abc123')
   assertEquals(
     await buildCheckoutUrl(admin, 'instituto-lorena', 'abc123'),
-    'https://pagar.institutolorenavisentainer.com.br/pagar/abc123',
+    'https://instituto-lorena.vercel.app/pagar/abc123',
   )
 })
 
@@ -76,9 +76,10 @@ Deno.test('nenhum domínio de cobrança carrega a marca do outro negócio', asyn
   assertEquals(tri.includes('visentainer'), false)
   assertEquals(tri.includes('instituto-lorena'), false)
   assertEquals(clin.includes('tricopill'), false)
-  // E nenhum dos dois pode voltar a apontar para o domínio interno da Vercel.
+  // O Tricopill NUNCA pode voltar para o domínio interno da Vercel: era exatamente ele
+  // que carregava a marca da clínica nas 174 cobranças. (A clínica segue nele por ora —
+  // é domínio dela, não do outro negócio.)
   assertEquals(tri.includes('vercel.app'), false)
-  assertEquals(clin.includes('vercel.app'), false)
 })
 
 Deno.test('polo sem domínio configurado ESTOURA em vez de cair no outro polo', async () => {

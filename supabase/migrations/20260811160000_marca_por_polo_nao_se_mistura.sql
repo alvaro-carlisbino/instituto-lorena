@@ -25,10 +25,16 @@ set brand_config = coalesce(brand_config, '{}'::jsonb) || jsonb_build_object(
     updated_at = now()
 where id = 'tricopill';
 
--- Clínica. O domínio é institutolorenaVISENTAINER.com.br: `institutolorena.com.br` NÃO está
--- registrado (consulta no registro.br em 11/ago/26), então apontar para ele deixaria o
--- paciente num link morto. O registrado é institutolorenavisentainer.com.br, de LoviDerm
--- Clínica Médica LTDA, e é ele que serve o app da enfermagem hoje.
+-- Clínica. Fica no domínio do CRM (instituto-lorena.vercel.app) por enquanto: é feio, mas
+-- é DELA — o requisito é não misturar as marcas, e nenhum link da clínica sai em domínio
+-- Tricopill. O subdomínio bonito (pagar.institutolorenavisentainer.com.br) exige apontar
+-- um domínio novo para o projeto do CRM na Vercel; quando existir, trocar aqui resolve,
+-- sem deploy. Atenção: `institutolorena.com.br` NÃO está registrado (registro.br,
+-- 11/ago/26) — o domínio da clínica é institutolorenavisentainer.com.br, de LoviDerm
+-- Clínica Médica LTDA.
+--
+-- Diferente do Tricopill, a clínica NÃO tem site próprio com checkout: o link dela cai na
+-- tela /pagar/:id do próprio CRM, que agora carrega a marca da clínica.
 --
 -- E-mail fica DESLIGADO ('') de propósito: a conta Resend só tem tricopill.com.br
 -- verificado, então o único jeito de a clínica mandar e-mail hoje seria assinando como
@@ -36,7 +42,7 @@ where id = 'tricopill';
 -- clínica for verificado no Resend, preencher email_from aqui religa o canal, sem deploy.
 update tenants
 set brand_config = coalesce(brand_config, '{}'::jsonb) || jsonb_build_object(
-      'checkout_base_url', 'https://pagar.institutolorenavisentainer.com.br',
+      'checkout_base_url', 'https://instituto-lorena.vercel.app',
       'site_url',          'https://institutolorenavisentainer.com.br',
       'email_from',        ''
     ),
