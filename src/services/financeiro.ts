@@ -230,6 +230,8 @@ export type FinTransaction = {
   amountCents: number // assinado: entrada > 0, saída < 0
   direction: TxnDirection
   categoryId: string | null
+  /** centro de custo da saída; mesmo vocabulário de payable_installments */
+  costCenter: string | null
   description: string | null
   counterparty: string | null
   source: TxnSource
@@ -240,7 +242,7 @@ export type FinTransaction = {
 }
 
 const TXN_COLS =
-  'id, account_id, date, amount_cents, direction, category_id, description, counterparty, source, external_id, reconciled_ref_type, reconciled_ref_id, note'
+  'id, account_id, date, amount_cents, direction, category_id, cost_center, description, counterparty, source, external_id, reconciled_ref_type, reconciled_ref_id, note'
 
 function mapTxn(r: Record<string, unknown>): FinTransaction {
   return {
@@ -250,6 +252,7 @@ function mapTxn(r: Record<string, unknown>): FinTransaction {
     amountCents: Number(r.amount_cents ?? 0),
     direction: (r.direction === 'in' ? 'in' : 'out') as TxnDirection,
     categoryId: r.category_id != null ? String(r.category_id) : null,
+    costCenter: r.cost_center != null ? String(r.cost_center) : null,
     description: r.description != null ? String(r.description) : null,
     counterparty: r.counterparty != null ? String(r.counterparty) : null,
     source: (['ofx', 'csv', 'payable', 'receivable', 'openfinance'].includes(String(r.source)) ? r.source : 'manual') as TxnSource,
@@ -1077,11 +1080,17 @@ export async function entrouNaContaNoPeriodo(de: string, ate: string): Promise<n
 /** Muda o que dá pra mudar num lançamento do banco. Valor e data vêm do extrato e não se editam. */
 export async function updateTransaction(
   id: string,
-  patch: { categoryId?: string | null; note?: string | null; counterparty?: string | null },
+  patch: {
+    categoryId?: string | null
+    note?: string | null
+    counterparty?: string | null
+    costCenter?: string | null
+  },
 ): Promise<void> {
   const client = assertClient()
   const row: Record<string, unknown> = {}
   if (patch.categoryId !== undefined) row.category_id = patch.categoryId || null
+  if (patch.costCenter !== undefined) row.cost_center = patch.costCenter || null
   if (patch.note !== undefined) row.note = patch.note?.trim() || null
   if (patch.counterparty !== undefined) row.counterparty = patch.counterparty?.trim() || null
   if (Object.keys(row).length === 0) return
@@ -1352,4 +1361,59 @@ export async function updateReceivable(
   if (Object.keys(row).length === 0) return
   const { error } = await client.from('fin_receivables').update(row).eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+// ──────────────────────────────────────────── rateio de lançamento
+//
+// Ver a migration 20260811260000. Um PIX que pagou duas coisas só tinha saídas ruins:
+// classificar tudo como uma (e mentir) ou deixar sem categoria (e sumir do relatório).
+// O rateio mora em tabela própria — `fin_transactions` é o que o BANCO disse, e isso não se
+// mexe: no dia que a conciliação discordar do extrato, ninguém saberia qual dos dois foi
+// alterado.
+
+export type Split = {
+  id: string
+  amountCents: number
+  categoryId: string | null
+  costCenter: string | null
+  note: string | null
+}
+
+export async function listSplits(transactionId: string): Promise<Split[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('fin_transaction_splits')
+    .select('id, amount_cents, category_id, cost_center, note')
+    .eq('transaction_id', transactionId)
+    .order('created_at')
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>
+    return {
+      id: String(row.id),
+      amountCents: Number(row.amount_cents ?? 0),
+      categoryId: (row.category_id as string | null) ?? null,
+      costCenter: (row.cost_center as string | null) ?? null,
+      note: (row.note as string | null) ?? null,
+    }
+  })
+}
+
+/** Substitui o rateio inteiro. Lista vazia apaga o rateio e o lançamento volta a valer cheio. */
+export async function saveSplits(
+  transactionId: string,
+  itens: Array<{ amountCents: number; categoryId?: string | null; costCenter?: string | null; note?: string | null }>,
+): Promise<number> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_salvar_rateio', {
+    p_transaction_id: transactionId,
+    p_itens: itens.map((i) => ({
+      amount_cents: Math.abs(Math.round(i.amountCents)),
+      category_id: i.categoryId ?? null,
+      cost_center: i.costCenter ?? null,
+      note: i.note ?? null,
+    })),
+  })
+  if (error) throw new Error(error.message)
+  return Number(data ?? 0)
 }

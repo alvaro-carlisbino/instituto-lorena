@@ -41,13 +41,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useTenant } from '@/context/TenantContext'
 import { hojeLocal } from '@/lib/diaLocal'
 import { sugerirPadrao } from '@/lib/extratoPadrao'
+import { LancamentoEditor } from '@/components/financeiro/LancamentoEditor'
 import {
   listCategories,
+  listCostCenters,
   listExtratoPorDia,
   listSaidaPorCategoria,
   listTransactions,
   saveCategoryRule,
   updateTransaction,
+  type CostCenter,
   type ExtratoDia,
   type FinCategory,
   type FinTransaction,
@@ -77,21 +80,26 @@ export function ExtratoPage() {
   const [categorias, setCategorias] = useState<FinCategory[]>([])
   const [filtro, setFiltro] = useState<'todos' | 'in' | 'out' | 'sem_categoria'>('sem_categoria')
   const [criarRegra, setCriarRegra] = useState(true)
+  const [centros, setCentros] = useState<CostCenter[]>([])
+  /** Linha aberta pra edição. Uma por vez: duas abertas viram formulário perdido. */
+  const [abertoId, setAbertoId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const carregar = async (d = de, a = ate) => {
     setBusy(true)
     try {
-      const [dd, cc, tx, cats] = await Promise.all([
+      const [dd, cc, tx, cats, ce] = await Promise.all([
         listExtratoPorDia(d, a),
         listSaidaPorCategoria(d, a),
         listTransactions({ from: d, to: a, limit: 5000 }),
         listCategories(),
+        listCostCenters(),
       ])
       setDias(dd)
       setPorCategoria(cc)
       setLancamentos(tx)
       setCategorias(cats)
+      setCentros(ce)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar o extrato')
     } finally {
@@ -329,18 +337,23 @@ export function ExtratoPage() {
               {visiveis.map((t) => {
                 const cat = nomeCategoria(t.categoryId)
                 const saida = t.direction === 'out'
+                const aberto = abertoId === t.id
                 return (
-                  <div
-                    key={t.id}
-                    className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2"
-                  >
-                    <div className="min-w-0 flex-1">
+                  <div key={t.id} className="rounded-md border border-border px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => setAbertoId(aberto ? null : t.id)}
+                    >
                       <div className="truncate text-sm">{t.description || t.counterparty || 'sem descrição'}</div>
                       <div className="text-xs text-muted-foreground">
                         {dia(t.date)}
                         {cat ? ` · ${cat}` : ''}
+                        {t.costCenter ? ` · ${t.costCenter}` : ''}
+                        <span className="ml-1 underline">{aberto ? 'fechar' : 'editar'}</span>
                       </div>
-                    </div>
+                    </button>
                     <span className={`shrink-0 font-semibold ${saida ? 'text-red-500' : 'text-emerald-600'}`}>
                       {saida ? '−' : '+'}
                       {brl(Math.abs(t.amountCents))}
@@ -366,6 +379,20 @@ export function ExtratoPage() {
                           ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                  {aberto && (
+                    <div className="mt-2">
+                      <LancamentoEditor
+                        lancamento={t}
+                        categorias={categorias}
+                        centros={centros}
+                        onSalvo={() => {
+                          setAbertoId(null)
+                          void carregar()
+                        }}
+                      />
+                    </div>
+                  )}
                   </div>
                 )
               })}
