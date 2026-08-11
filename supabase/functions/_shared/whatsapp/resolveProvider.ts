@@ -14,6 +14,10 @@ export type ResolvedOutboundProvider = {
   instanceId: string | null
   /** Provider efetivo: 'wapi' | 'official' | 'evolution'. */
   channelProvider: string
+  /** 'clinic' | 'sales' — o polo da linha que vai sair. */
+  botKind: string | null
+  /** Linha do outro polo foi ignorada; o id descartado fica aqui para auditoria. */
+  crossTenantInstanceIgnored: string | null
 }
 
 /**
@@ -26,6 +30,13 @@ export type ResolvedOutboundProvider = {
  * 'evolution', que mandava o Tricopill (W-API) pela linha errada / Evolution fora do
  * ar (evolution_send_failed_530). A linha resolvida é amarrada no lead para os
  * próximos envios (a menos que bindDefault === false).
+ *
+ * GUARDA DE POLO: a linha vinculada ao lead só vale se for do MESMO tenant do lead.
+ * Quem é paciente da clínica E cliente do Tricopill acaba com `whatsapp_instance_id`
+ * apontando para a linha de vendas (foi por lá que a pessoa escreveu por último), e em
+ * 11/ago/26 dois lembretes de cirurgia saíram nessa conversa. A pessoa segue o polo, a
+ * conversa segue a linha: linha do outro polo é descartada aqui, e o envio cai na linha
+ * do próprio tenant. Ver [[crm_conversa_segue_a_linha]].
  */
 export async function resolveOutboundProviderForLead(
   admin: SupabaseClient,
@@ -34,20 +45,33 @@ export async function resolveOutboundProviderForLead(
 ): Promise<ResolvedOutboundProvider> {
   let effectiveInstanceId: string | null = lead.whatsapp_instance_id
   let channelProvider: string | null = null
+  let botKind: string | null = null
+  let crossTenantInstanceIgnored: string | null = null
 
   if (effectiveInstanceId) {
     const { data: instRow } = await admin
       .from('whatsapp_channel_instances')
-      .select('channel_provider')
+      .select('channel_provider, tenant_id, bot_kind')
       .eq('id', effectiveInstanceId)
       .maybeSingle()
-    channelProvider = String(
-      (instRow as { channel_provider?: string } | null)?.channel_provider ?? '',
-    ).toLowerCase() || null
-  } else {
+    const inst = instRow as { channel_provider?: string; tenant_id?: string; bot_kind?: string } | null
+    if (inst && lead.tenant_id && inst.tenant_id && inst.tenant_id !== lead.tenant_id) {
+      // Linha do outro polo. Não sai por aqui: cai no default do próprio tenant.
+      crossTenantInstanceIgnored = effectiveInstanceId
+      console.warn(
+        `[resolveOutboundProvider] linha de outro polo ignorada: lead ${lead.id} (${lead.tenant_id}) apontava para ${effectiveInstanceId} (${inst.tenant_id})`,
+      )
+      effectiveInstanceId = null
+    } else {
+      channelProvider = String(inst?.channel_provider ?? '').toLowerCase() || null
+      botKind = String(inst?.bot_kind ?? '').toLowerCase() || null
+    }
+  }
+
+  if (!effectiveInstanceId) {
     const { data: defRow } = await admin
       .from('whatsapp_channel_instances')
-      .select('id, channel_provider')
+      .select('id, channel_provider, bot_kind')
       .eq('tenant_id', lead.tenant_id)
       .eq('active', true)
       .order('sort_order', { ascending: true })
@@ -58,7 +82,11 @@ export async function resolveOutboundProviderForLead(
       channelProvider = String(
         (defRow as { channel_provider?: string }).channel_provider ?? '',
       ).toLowerCase() || null
-      if (opts?.bindDefault !== false) {
+      botKind = String((defRow as { bot_kind?: string }).bot_kind ?? '').toLowerCase() || null
+      // Só amarra a linha no lead quando ela foi escolhida por ausência de vínculo.
+      // Se descartamos a linha do outro polo, o vínculo original fica de pé: ele conta
+      // onde a pessoa conversa, e sobrescrever aqui apagaria essa informação.
+      if (opts?.bindDefault !== false && !crossTenantInstanceIgnored) {
         try {
           await admin.from('leads').update({ whatsapp_instance_id: effectiveInstanceId }).eq('id', lead.id)
         } catch (e) {
@@ -81,5 +109,5 @@ export async function resolveOutboundProviderForLead(
     provider = await getEvolutionProviderForLead(admin, effectiveInstanceId)
   }
 
-  return { provider, instanceId: effectiveInstanceId, channelProvider: waProvider }
+  return { provider, instanceId: effectiveInstanceId, channelProvider: waProvider, botKind, crossTenantInstanceIgnored }
 }

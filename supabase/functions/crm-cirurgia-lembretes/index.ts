@@ -19,6 +19,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 // mensagem e outra. É mensagem transacional para quem já comprou, mas rajada é
 // rajada e o número é o da clínica.
 //
+// POLO: sai com requireBotKind 'clinic'. Quem é paciente aqui e cliente do Tricopill
+// tem o lead amarrado na linha de vendas, e o lembrete saía por lá.
+//
 // Env:
 //   CIRURGIA_LEMBRETES_ENABLED  'true' liga o envio real (default: dry-run)
 //   CIRURGIA_LEMBRETES_MAX      teto por rodada (default 25)
@@ -202,7 +205,16 @@ Deno.serve(async (req) => {
       const res = await fetch(`${url}/functions/v1/crm-send-message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceRole}` },
-        body: JSON.stringify({ leadId: venda.lead_id, text: texto, source: 'cirurgia_lembrete' }),
+        // requireBotKind: cirurgia é assunto da clínica e só sai pela linha da clínica.
+        // Paciente que também é cliente do Tricopill fica amarrado na linha de vendas, e
+        // sem isso o lembrete sai no meio da conversa de suplemento (11/ago/26: dois
+        // pacientes). Linha errada agora vira erro 409 registrado, não mensagem enviada.
+        body: JSON.stringify({
+          leadId: venda.lead_id,
+          text: texto,
+          source: 'cirurgia_lembrete',
+          requireBotKind: 'clinic',
+        }),
       })
       const ok = res.ok
       const corpo = await res.text()

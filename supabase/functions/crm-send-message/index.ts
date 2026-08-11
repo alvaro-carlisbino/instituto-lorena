@@ -77,6 +77,12 @@ Deno.serve(async (req) => {
      */
     manualOverride?: boolean
     /**
+     * Polo que a rotina chamadora exige da linha de saída ('clinic' | 'sales'). Quando
+     * a linha resolvida for de outro polo, o envio é recusado com 409 em vez de sair
+     * pelo número errado. Use em toda rotina que fala de um assunto de um polo só.
+     */
+    requireBotKind?: string
+    /**
      * Origem do envio. `stage_automation` bloqueia automação para leads ManyChat fora
      * da janela 24h da Meta — o ManyChat aceita o sendFlow mas a Meta dropa em silêncio,
      * dando toast verde mentiroso. `followup_scheduler` é o cron de follow-up (já filtra
@@ -175,6 +181,18 @@ Deno.serve(async (req) => {
     (row.custom_fields as Record<string, unknown> | null)?.channel ?? '',
   ).toLowerCase()
   const bodyChannel = String(body.channel ?? '').toLowerCase()
+  const customFieldsProvider = String(
+    (row.custom_fields as Record<string, unknown> | null)?.provider ?? '',
+  ).toLowerCase()
+  // `custom_fields.channel = 'whatsapp'` NÃO quer dizer ManyChat: o webhook da W-API
+  // grava esse mesmo campo, então quem chegou pela linha direta caía no push do
+  // ManyChat só por causa dele. Quem tem linha WhatsApp própria (instância vinculada ou
+  // provider gravado no lead) é atendido pela linha, não pelo ManyChat.
+  const hasDirectWhatsappLine =
+    Boolean(row.whatsapp_instance_id) ||
+    customFieldsProvider === 'wapi' ||
+    customFieldsProvider === 'evolution' ||
+    customFieldsProvider === 'official'
   // Detecta envio via ManyChat: telefone sintético, canal explícito Instagram,
   // source meta_instagram/meta_whatsapp ou custom_fields.channel sinalizando ManyChat.
   const isManychat =
@@ -182,8 +200,8 @@ Deno.serve(async (req) => {
     bodyChannel === 'instagram' ||
     row.source === 'meta_instagram' ||
     row.source === 'meta_whatsapp' ||
-    customFieldsChannel === 'whatsapp' ||
-    customFieldsChannel === 'instagram'
+    customFieldsChannel === 'instagram' ||
+    (customFieldsChannel === 'whatsapp' && !hasDirectWhatsappLine)
 
   if (isManychat) {
     // Automação de stage + ManyChat: bloqueia fora da janela 24h da Meta.
@@ -425,14 +443,35 @@ Deno.serve(async (req) => {
   // sobrescreve a env WHATSAPP_PROVIDER (que segue sendo o default global).
   // Permite W-API conviver com Evolution/Official no mesmo tenant.
   let provider: WhatsappProvider
+  let resolvedBotKind: string | null = null
+  let resolvedInstanceId: string | null = null
   try {
-    ;({ provider } = await resolveOutboundProviderForLead(admin, {
-      id: row.id,
-      whatsapp_instance_id: row.whatsapp_instance_id,
-      tenant_id: row.tenant_id,
-    }))
+    ;({ provider, botKind: resolvedBotKind, instanceId: resolvedInstanceId } =
+      await resolveOutboundProviderForLead(admin, {
+        id: row.id,
+        whatsapp_instance_id: row.whatsapp_instance_id,
+        tenant_id: row.tenant_id,
+      }))
   } catch (e) {
     return json({ error: 'provider_not_configured', message: e instanceof Error ? e.message : String(e) }, 500)
+  }
+
+  // Guarda de polo do CHAMADOR. Rotina de um polo declara o polo que espera, e um
+  // lembrete de cirurgia nunca sai pela linha de vendas do Tricopill mesmo que o lead
+  // esteja amarrado nela. Falha alto: melhor o paciente não receber e alguém ver o erro
+  // do que receber pelo número errado.
+  const requireBotKind = String(body.requireBotKind ?? '').trim().toLowerCase()
+  if (requireBotKind && resolvedBotKind && resolvedBotKind !== requireBotKind) {
+    return json(
+      {
+        error: 'wrong_bot_kind',
+        message: `Envio bloqueado: a rotina pediu linha '${requireBotKind}' e o lead ${row.id} resolveu para a linha '${resolvedBotKind}' (${resolvedInstanceId}).`,
+        expected: requireBotKind,
+        resolved: resolvedBotKind,
+        instanceId: resolvedInstanceId,
+      },
+      409,
+    )
   }
 
   try {
