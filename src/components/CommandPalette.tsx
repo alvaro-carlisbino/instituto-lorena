@@ -152,8 +152,19 @@ export function CommandPalette() {
               ].filter(Boolean).join(' · ')
               return (
                 <Command.Item
-                  key={`pac-${p.leadId}`}
+                  key={`pac-${p.tipo}-${p.ref}`}
                   className={ITEM_CLASS}
+                  // `value` explícito NÃO é enfeite: sem ele a pessoa nunca aparecia.
+                  //
+                  // Sem a prop, o cmdk lê o valor do item no textContent do elemento. Só que
+                  // ele também não renderiza item com score 0, e item que nasce DEPOIS de já
+                  // haver busca digitada nasce sem score. Sem render não há textContent, sem
+                  // textContent o valor fica vazio, e o cmdk devolve 0 para valor vazio — o
+                  // item nunca sai de 0. As telas escapavam porque montam junto com a paleta,
+                  // com a busca ainda vazia; a pessoa chega depois da resposta do banco.
+                  //
+                  // Sintoma: grupo "Pessoas" no DOM, e vazio. Coberto por e2e/busca-global.spec.ts.
+                  value={`${p.nome} ${p.telefone ?? ''} ${p.tipo}-${p.ref}`}
                   // O termo digitado entra como keyword para o filtro do cmdk não
                   // descartar um resultado que o BANCO já disse que casa.
                   keywords={[termo, p.telefone ?? '', p.prontuario ?? '', p.cpf ?? '']}
