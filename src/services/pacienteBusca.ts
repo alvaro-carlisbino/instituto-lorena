@@ -32,6 +32,11 @@ export type PacienteEncontrado = {
   cpf: string | null
   /** Por que este resultado apareceu: 'telefone', 'CPF', 'nome'… Sem isso o resultado parece mágica. */
   achadoPor: string
+  /** ID do polo dono da pessoa (não o nome — é o que `switchTenant` recebe). A busca
+   *  varre todos os polos de que o usuário é membro, e clínica e vendas não se misturam
+   *  sem etiqueta. Null para paciente do Shosp sem card e para pasta de tricoscopia,
+   *  que são da clínica por natureza. */
+  polo: string | null
   consultas: number
   cirurgias: number
   exames: number
@@ -166,6 +171,7 @@ export async function buscarPacientes(termo: string, limite = 20): Promise<Pacie
     prontuario: (r.prontuario as string) ?? null,
     cpf: (r.cpf as string) ?? null,
     achadoPor: String(r.achado_por ?? ''),
+    polo: (r.polo as string) ?? null,
     consultas: Number(r.consultas ?? 0),
     cirurgias: Number(r.cirurgias ?? 0),
     exames: Number(r.exames ?? 0),

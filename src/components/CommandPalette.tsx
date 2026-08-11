@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Command } from 'cmdk'
 import { RefreshCw, Star, User } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { NAV_GROUPS, groupedDestinations, visibleDestinations } from '@/config/navigation'
 import { useCrm } from '@/context/CrmContext'
+import { useTenant } from '@/context/TenantContext'
 import { useNavContext } from '@/hooks/useNavContext'
 import { useNavPrefs } from '@/hooks/useNavPrefs'
 import { onOpenCommandPalette } from '@/lib/commandPalette'
@@ -33,6 +35,8 @@ export function CommandPalette() {
   const [pacientes, setPacientes] = useState<PacienteEncontrado[]>([])
   const navigate = useNavigate()
   const crm = useCrm()
+  const { tenant, availableTenants, switchTenant } = useTenant()
+  const nomeDoPolo = (id: string) => availableTenants.find((t) => t.id === id)?.name ?? id
   const navContext = useNavContext()
   const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
 
@@ -75,6 +79,30 @@ export function CommandPalette() {
   const go = (path: string) => {
     navigate(path)
     setOpen(false)
+  }
+
+  /**
+   * Abre a pessoa, trocando de polo antes se ela for do outro.
+   *
+   * A busca varre os dois polos, mas a tela do lead lê o estado do polo ATIVO (e a RLS
+   * de `leads` também). Sem a troca, clicar num cliente do Tricopill a partir da
+   * clínica deixava a ficha presa em "Carregando lead…" para sempre. `switchTenant`
+   * é o mesmo caminho do seletor de workspace: recarrega o app sob o novo contexto.
+   */
+  const abrirPessoa = async (p: PacienteEncontrado) => {
+    const destino = rotaDoPaciente(p.tipo, p.ref)
+    if (p.polo && p.polo !== tenant.id) {
+      setOpen(false)
+      try {
+        await switchTenant(p.polo)
+      } catch {
+        toast.error('Não deu para trocar de polo. Abra o polo certo e tente de novo.')
+        return
+      }
+      navigate(destino)
+      return
+    }
+    go(destino)
   }
 
   // O assistente carrega o lead aberto no momento, então não é um link fixo.
@@ -129,13 +157,24 @@ export function CommandPalette() {
                   // O termo digitado entra como keyword para o filtro do cmdk não
                   // descartar um resultado que o BANCO já disse que casa.
                   keywords={[termo, p.telefone ?? '', p.prontuario ?? '', p.cpf ?? '']}
-                  onSelect={() => go(rotaDoPaciente(p.tipo, p.ref))}
+                  onSelect={() => void abrirPessoa(p)}
                 >
                   <User className="size-4 shrink-0 opacity-70" />
                   <span className="flex-1 truncate">
                     {p.nome}
                     {selos ? <span className="ml-2 text-xs text-muted-foreground">{selos}</span> : null}
                   </span>
+                  {/* Etiqueta de polo só quando a pessoa NÃO é do polo aberto: a lista
+                      agora varre clínica e vendas juntas, e a regra da casa é que os
+                      dois nunca se somam. Sem a etiqueta, a lista convida ao erro. */}
+                  {p.polo && p.polo !== tenant.id ? (
+                    <span
+                      className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                      title="Está em outro polo — abrir troca o workspace"
+                    >
+                      {nomeDoPolo(p.polo)}
+                    </span>
+                  ) : null}
                   {p.tipo !== 'lead' && (
                     <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
                       {p.tipo === 'shosp' ? 'sem card' : 'tricoscopia'}
