@@ -50,11 +50,27 @@ Deno.serve(async (req) => {
 
   const admin = createClient(url, serviceRole)
 
-  const { data: accsRaw, error } = await admin
+  // BACKFILL. O sync normal é incremental: parte de `of_last_sync_at` e nunca volta atrás.
+  // Isso está certo pro dia a dia e errado quando falta histórico — o extrato da clínica só
+  // existe de 12/mai/2026 pra frente, e o relatório de vendas do Shosp vem com um ano inteiro,
+  // então tudo antes disso aparecia como venda que "não caiu no banco". Com `?from=YYYY-MM-DD`
+  // (ou `{ from }` no corpo) dá pra pedir o período antigo de novo. O upsert por external_id
+  // cuida da duplicata, então repetir é seguro; o que o Pluggy não tiver, ele não devolve.
+  const body = (await req.json().catch(() => ({}))) as { from?: string; accountId?: string }
+  const qs = new URL(req.url).searchParams
+  const backfillFrom = (body.from ?? qs.get('from') ?? '').trim()
+  const soConta = (body.accountId ?? qs.get('accountId') ?? '').trim()
+  if (backfillFrom && !/^\d{4}-\d{2}-\d{2}$/.test(backfillFrom)) {
+    return json({ error: 'from_invalido', message: 'use from=YYYY-MM-DD' }, 400)
+  }
+
+  let query = admin
     .from('fin_accounts')
     .select('id, tenant_id, of_account_id, of_last_sync_at')
     .eq('of_provider', 'pluggy')
     .not('of_account_id', 'is', null)
+  if (soConta) query = query.eq('id', soConta)
+  const { data: accsRaw, error } = await query
   if (error) return json({ error: 'query_failed', message: error.message }, 500)
   const accs = (accsRaw ?? []) as Acc[]
   if (accs.length === 0) return json({ ok: true, accounts: 0, inserted: 0, note: 'nenhuma conta Open Finance ligada' })
@@ -73,7 +89,8 @@ Deno.serve(async (req) => {
       const fromDate = acc.of_last_sync_at
         ? new Date(new Date(acc.of_last_sync_at).getTime() - 3 * 86400_000)
         : new Date(Date.now() - 180 * 86400_000)
-      const from = dayStr(fromDate)
+      // Backfill pedido na mão ganha do incremental — é justamente para voltar atrás.
+      const from = backfillFrom || dayStr(fromDate)
 
       const rows: Record<string, unknown>[] = []
       let page = 1
@@ -115,11 +132,19 @@ Deno.serve(async (req) => {
         inserted += (ins ?? []).length
       }
       await admin.from('fin_accounts').update({ of_last_sync_at: new Date().toISOString() }).eq('id', acc.id)
-      results.push({ account: acc.id, tenant: acc.tenant_id, rows: rows.length })
+      results.push({
+        account: acc.id,
+        tenant: acc.tenant_id,
+        from,
+        rows: rows.length,
+        // O laço para em 20 páginas × 500. Num backfill longo isso pode cortar o começo do
+        // período — e extrato cortado vira "venda que não caiu no banco". Melhor dizer.
+        ...(totalPages > 20 ? { truncado: true, paginas: totalPages } : {}),
+      })
     } catch (e) {
       results.push({ account: acc.id, ok: false, note: e instanceof Error ? e.message : String(e) })
     }
   }
 
-  return json({ ok: true, accounts: accs.length, inserted, results })
+  return json({ ok: true, accounts: accs.length, inserted, backfillFrom: backfillFrom || null, results })
 })

@@ -1,6 +1,17 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, Banknote, CreditCard, Download, FileSpreadsheet, FileUp, Landmark, Sparkles } from 'lucide-react'
+import {
+  AlertTriangle,
+  Banknote,
+  CreditCard,
+  Download,
+  FileSpreadsheet,
+  FileUp,
+  Landmark,
+  Sparkles,
+  Users,
+  X,
+} from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
@@ -15,7 +26,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
-import { listTransactions } from '@/services/financeiro'
+import {
+  bankCoverage,
+  deleteReconcileRule,
+  listAccounts,
+  listReconcileRules,
+  listTransactions,
+  saveReconcileRule,
+  type FinAccount,
+  type ReconcileRule,
+} from '@/services/financeiro'
 import { parseBankStatement } from '@/services/ofx'
 import {
   type ShospColumnKey,
@@ -29,6 +49,7 @@ import {
   DIVERGENCE_BADGE,
   DIVERGENCE_LABEL,
   type BankCredit,
+  type CreditClass,
   type Divergence,
   type DivergenceKind,
   type ReconcileConfig,
@@ -73,6 +94,15 @@ const COLUNAS: ShospColumnKey[] = [
 
 type FonteBanco = 'conectado' | 'arquivo'
 
+/** Rótulo de cada natureza no painel "quem é quem" — é o que o usuário está declarando. */
+const CLASSE_LABEL: Record<CreditClass, string> = {
+  venda: 'Pagamento de paciente',
+  adquirente: 'Repasse de cartão (adquirente)',
+  deposito: 'Depósito de dinheiro em espécie',
+  nao_venda: 'Não é venda (transferência própria, rendimento, estorno)',
+}
+const CLASSES: CreditClass[] = ['nao_venda', 'adquirente', 'deposito', 'venda']
+
 export function ConciliacaoShospPage() {
   const { tenant } = useTenant()
 
@@ -87,17 +117,75 @@ export function ConciliacaoShospPage() {
   const [filtro, setFiltro] = useState<DivergenceKind | 'todas'>('todas')
   const [busy, setBusy] = useState(false)
 
+  // conta do extrato + até onde ela tem dado
+  const [contas, setContas] = useState<FinAccount[]>([])
+  const [contaId, setContaId] = useState<string>('')
+  const [cobertura, setCobertura] = useState<{ from: string; to: string } | null>(null)
+  // quem é quem no extrato
+  const [regras, setRegras] = useState<ReconcileRule[]>([])
+
   const shospRef = useRef<HTMLInputElement | null>(null)
   const bancoRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [cs, rs] = await Promise.all([listAccounts(), listReconcileRules()])
+        // Conta BANCO primeiro. O cartão corporativo da clínica é `carteira` e também tem
+        // entrada — estorno de anuidade, cashback do Mercado Livre — e nada disso é venda de
+        // paciente: em julho/2026 eram 10 lançamentos que só sabiam virar "entrada sem venda".
+        // A tela deixa trocar, mas não começa no lugar errado.
+        const correntes = cs.filter((c) => c.kind === 'banco')
+        setContas(cs)
+        setContaId((atual) => atual || correntes[0]?.id || cs[0]?.id || '')
+        setRegras(rs)
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Falha ao carregar contas e regras')
+      }
+    })()
+  }, [])
+
+  useEffect(() => {
+    if (!contaId) return
+    void (async () => {
+      try {
+        setCobertura(await bankCoverage(contaId))
+      } catch {
+        setCobertura(null)
+      }
+    })()
+  }, [contaId])
 
   const vendas: ShospSale[] = useMemo(() => parse?.sales ?? [], [parse])
 
   // Período coberto pela planilha — usado pra puxar o extrato da conta conectada.
-  const periodo = useMemo(() => {
+  const periodoPlanilha = useMemo(() => {
     if (vendas.length === 0) return null
     const datas = vendas.map((s) => s.date).sort()
     return { from: datas[0], to: datas[datas.length - 1] }
   }, [vendas])
+
+  /**
+   * Período que dá pra conciliar de verdade: a planilha cortada pelo que o banco tem.
+   *
+   * O export do Shosp vem com um ano (11/ago/2025 a 10/ago/2026) e o fin_transactions da
+   * clínica começa em 12/mai/2026. Sem este corte, os nove meses sem extrato viravam ~2.700
+   * "não caiu no banco" — a tela acusando a clínica de perder dinheiro que ela só não importou.
+   */
+  const periodo = useMemo(() => {
+    if (!periodoPlanilha) return null
+    if (fonte === 'arquivo' || !cobertura) return periodoPlanilha
+    const from = periodoPlanilha.from > cobertura.from ? periodoPlanilha.from : cobertura.from
+    const to = periodoPlanilha.to < cobertura.to ? periodoPlanilha.to : cobertura.to
+    return from <= to ? { from, to } : null
+  }, [periodoPlanilha, cobertura, fonte])
+
+  /** Vendas efetivamente conciliadas — as de fora do período com extrato ficam nomeadas na tela. */
+  const vendasNoPeriodo = useMemo(
+    () => (periodo ? vendas.filter((s) => s.date >= periodo.from && s.date <= periodo.to) : vendas),
+    [vendas, periodo],
+  )
+  const foraDaCobertura = vendas.length - vendasNoPeriodo.length
 
   // ── planilha do Shosp
   const lerShosp = async (file: File | null, mapa: Partial<ShospColumnMap> = {}) => {
@@ -175,11 +263,16 @@ export function ConciliacaoShospPage() {
     try {
       // folga na janela: repasse de cartão de venda do fim do mês cai depois do período
       const ate = new Date(`${periodo.to}T12:00:00`)
-      ate.setDate(ate.getDate() + config.cartaoAtrasoMax)
+      ate.setDate(ate.getDate() + config.creditoDias + 5)
       // Teto alto de propósito: extrato cortado vira divergência falsa. Como a ordem é data
       // DESC, faltar linha significa faltar o COMEÇO do período, e toda venda daqueles dias
       // apareceria como "não caiu no banco". Antes buscar demais do que acusar errado.
-      const txns = await listTransactions({ from: periodo.from, to: ate.toISOString().slice(0, 10), limit: 20000 })
+      const txns = await listTransactions({
+        accountId: contaId || undefined,
+        from: periodo.from,
+        to: ate.toISOString().slice(0, 10),
+        limit: 20000,
+      })
       const entradas = txns
         .filter((t) => t.direction === 'in')
         .map((t) => ({
@@ -203,16 +296,58 @@ export function ConciliacaoShospPage() {
   }
 
   // ── conciliar
-  const conciliar = () => {
-    if (vendas.length === 0) {
-      toast.error('Falta a planilha de vendas do Shosp.')
+  const conciliar = (regrasAgora: ReconcileRule[] = regras) => {
+    if (vendasNoPeriodo.length === 0) {
+      toast.error(
+        vendas.length > 0
+          ? 'Nenhuma venda da planilha cai no período que o banco cobre.'
+          : 'Falta a planilha de vendas do Shosp.',
+      )
       return
     }
     if (!creditos || creditos.length === 0) {
       toast.error('Falta o extrato do banco.')
       return
     }
-    setResultado(reconcileShospVsBanco(vendas, creditos, { ...config, caixasFora }))
+    setResultado(
+      reconcileShospVsBanco(vendasNoPeriodo, creditos, {
+        ...config,
+        caixasFora,
+        regras: regrasAgora.map((r) => ({ pattern: r.pattern, classe: r.classe, label: r.label ?? undefined })),
+        // Até onde dá pra cobrar repasse: o último dia que o extrato entregou.
+        extratoAte: fonte === 'conectado' ? cobertura?.to : creditos.map((c) => c.date).sort().at(-1),
+      }),
+    )
+  }
+
+  /** Declara a natureza de um pagador recorrente e reconcilia de novo já com a regra valendo. */
+  const classificarContraparte = async (pattern: string, classe: CreditClass, label: string) => {
+    setBusy(true)
+    try {
+      const nova = await saveReconcileRule({ pattern, classe, label })
+      const proximas = [...regras.filter((r) => r.id !== nova.id), nova]
+      setRegras(proximas)
+      conciliar(proximas)
+      toast.success(`"${pattern}" agora conta como ${CLASSE_LABEL[classe].toLowerCase()}.`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar a regra')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removerRegra = async (id: string) => {
+    setBusy(true)
+    try {
+      await deleteReconcileRule(id)
+      const proximas = regras.filter((r) => r.id !== id)
+      setRegras(proximas)
+      conciliar(proximas)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao remover a regra')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const baixarCsv = () => {
@@ -335,9 +470,33 @@ export function ConciliacaoShospPage() {
 
               {fonte === 'conectado' ? (
                 <>
-                  <p className="text-xs text-muted-foreground">
-                    Usa o extrato que já entra sozinho na Conciliação bancária, no mesmo período da planilha.
-                  </p>
+                  <Select value={contaId} onValueChange={(v) => setContaId(v ?? '')}>
+                    <SelectTrigger className="text-xs">
+                      <SelectValue placeholder="Conta do extrato" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {contas.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                          {c.kind !== 'banco' ? ` (${c.kind})` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {cobertura && (
+                    <p className="text-xs text-muted-foreground">
+                      Extrato desta conta vai de {dia(cobertura.from)} a {dia(cobertura.to)}.
+                    </p>
+                  )}
+                  {/* O usuário sobe um export de um ano e o banco tem três meses. Dizer isso
+                      ANTES de conciliar evita a leitura de que a clínica perdeu o dinheiro. */}
+                  {foraDaCobertura > 0 && (
+                    <p className="rounded-md border border-amber-500/40 bg-amber-500/[0.06] p-2 text-xs">
+                      {foraDaCobertura} das {vendas.length} vendas da planilha estão fora do período com
+                      extrato e ficam de fora da conciliação. Para incluir, importe o extrato desses meses
+                      ou suba o OFX na opção acima.
+                    </p>
+                  )}
                   <Button size="sm" variant="outline" disabled={busy || !periodo} onClick={() => void puxarBancoConectado()}>
                     <FileUp className="size-4" /> Puxar extrato do período
                   </Button>
@@ -394,32 +553,38 @@ export function ConciliacaoShospPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="atraso-min" className="text-xs">
-                    Repasse cartão de D+
+                  <Label htmlFor="debito-dias" className="text-xs">
+                    Débito cai em D+
                   </Label>
                   <Input
-                    id="atraso-min"
+                    id="debito-dias"
                     type="number"
                     min={0}
-                    max={60}
-                    value={config.cartaoAtrasoMin}
-                    onChange={(e) => setConfig({ ...config, cartaoAtrasoMin: Number(e.target.value) || 0 })}
+                    max={30}
+                    value={config.debitoDias}
+                    onChange={(e) => setConfig({ ...config, debitoDias: Number(e.target.value) || 0 })}
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="atraso-max" className="text-xs">
-                    até D+
+                  <Label htmlFor="credito-dias" className="text-xs">
+                    Parcela a cada (dias)
                   </Label>
                   <Input
-                    id="atraso-max"
+                    id="credito-dias"
                     type="number"
-                    min={0}
-                    max={120}
-                    value={config.cartaoAtrasoMax}
-                    onChange={(e) => setConfig({ ...config, cartaoAtrasoMax: Number(e.target.value) || 0 })}
+                    min={1}
+                    max={60}
+                    value={config.creditoDias}
+                    onChange={(e) => setConfig({ ...config, creditoDias: Number(e.target.value) || 30 })}
                   />
                 </div>
               </div>
+              {/* Sem isto o campo "Parcela a cada" parece burocracia. É ele que faz a venda em
+                  10x ser cobrada em dez pedaços em vez de inteira dentro do mês. */}
+              <p className="text-xs text-muted-foreground">
+                Venda parcelada não cai inteira: o adquirente devolve uma parcela por vez. A tela só
+                cobra a parcela que já venceu e mostra o resto como “ainda vai cair”.
+              </p>
               {/* Caixa do Shosp = em que conta o dinheiro entrou. Venda lançada no caixa de um
                   anestesista ou de outra praça nunca vai estar NESTE extrato; sem desmarcar,
                   cada uma vira "não caiu no banco" — erro alto, no lugar mais visível da tela.
@@ -432,6 +597,10 @@ export function ConciliacaoShospPage() {
                   </p>
                   {parse.caixas.map((c) => {
                     const dentro = !caixasFora.includes(c.name)
+                    // Depois de conciliar, o próprio resultado diz qual caixa está errado:
+                    // "7 de 7 não casaram" é o sinal de que aquele dinheiro é de outra conta.
+                    const falha = resultado?.semCreditoPorCaixa.find((f) => f.name === c.name)
+                    const todasFalharam = falha && falha.totalQtd > 0 && falha.qtd === falha.totalQtd
                     return (
                       <label key={c.name} className="flex cursor-pointer items-center gap-2 text-xs">
                         <Checkbox
@@ -444,15 +613,30 @@ export function ConciliacaoShospPage() {
                         />
                         <span className={`min-w-0 flex-1 truncate ${dentro ? '' : 'text-muted-foreground line-through'}`}>
                           {c.name}
+                          {dentro && falha && (
+                            <span className={todasFalharam ? 'ml-1 text-amber-600' : 'ml-1 text-muted-foreground'}>
+                              · {falha.qtd}/{falha.totalQtd} sem crédito
+                            </span>
+                          )}
                         </span>
                         <span className="shrink-0 text-muted-foreground">{brl(c.amountCents)}</span>
                       </label>
                     )
                   })}
+                  {resultado?.semCreditoPorCaixa.some((f) => f.totalQtd > 0 && f.qtd === f.totalQtd) && (
+                    <p className="text-xs text-amber-600">
+                      Caixa em que NENHUMA venda casou quase sempre é conta que não passa por este
+                      extrato. Desmarque e concilie de novo.
+                    </p>
+                  )}
                 </div>
               )}
 
-              <Button className="w-full" disabled={busy || vendas.length === 0 || !creditos} onClick={conciliar}>
+              <Button
+                className="w-full"
+                disabled={busy || vendasNoPeriodo.length === 0 || !creditos}
+                onClick={() => conciliar()}
+              >
                 <Sparkles className="size-4" /> Conciliar
               </Button>
             </CardContent>
@@ -561,19 +745,30 @@ export function ConciliacaoShospPage() {
                       <span className="text-muted-foreground">Bruto vendido</span>
                       <span>{brl(resultado.cartao.brutoCents)}</span>
                     </div>
+                    {resultado.cartao.parceladoCents > 0 && (
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>disso, parcelado em até {resultado.cartao.maxParcelas}x</span>
+                        <span>{brl(resultado.cartao.parceladoCents)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
-                      <span className="text-muted-foreground">Repassado pelo adquirente</span>
+                      <span className="text-muted-foreground">Já venceu no adquirente</span>
+                      <span>{brl(resultado.cartao.esperadoCents)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Creditado nesta conta</span>
                       <span>{brl(resultado.cartao.repassadoCents)}</span>
                     </div>
-                    {resultado.cartao.brutoPendenteCents > 0 && (
+                    {resultado.cartao.aReceberCents > 0 && (
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">Ainda sem repasse</span>
+                        <span className="text-muted-foreground">Ainda vai cair</span>
                         <span>
-                          {brl(resultado.cartao.brutoPendenteCents)}
-                          <span className="ml-1 text-xs text-muted-foreground">
-                            ({resultado.cartao.diasSemRepasse} dia
-                            {resultado.cartao.diasSemRepasse > 1 ? 's' : ''})
-                          </span>
+                          {brl(resultado.cartao.aReceberCents)}
+                          {resultado.cartao.aReceberAte && (
+                            <span className="ml-1 text-xs text-muted-foreground">
+                              (até {dia(resultado.cartao.aReceberAte)})
+                            </span>
+                          )}
                         </span>
                       </div>
                     )}
@@ -585,11 +780,24 @@ export function ConciliacaoShospPage() {
                           : `${resultado.cartao.taxaEfetivaPct.toFixed(2)}%`}
                       </span>
                     </div>
-                    <p className="pt-1 text-xs text-muted-foreground">
-                      Repasse é agrupado e líquido de taxa — por isso não casa venda a venda. A taxa sai só
-                      sobre {brl(resultado.cartao.brutoConciliadoCents)} que já foram repassados; o que ainda
-                      não caiu ficaria de fora da conta e inflaria o percentual.
-                    </p>
+                    {/* Dois textos porque são dois mundos: ou o repasse cai aqui e a taxa é
+                        medível, ou ele cai em outro lugar e QUALQUER percentual seria invenção. */}
+                    {resultado.cartao.repasseForaDaConta ? (
+                      <p className="pt-1 text-xs text-amber-600">
+                        Os adquirentes creditaram só {brl(resultado.cartao.repassadoCents)} dos{' '}
+                        {brl(resultado.cartao.esperadoCents)} que já venceram nesta conta. O repasse do
+                        cartão não passa por aqui — a taxa não dá pra medir sem inventar número. Concilie
+                        o cartão no extrato que recebe o repasse, ou marque o pagador que traz esse
+                        dinheiro em “Quem é quem no extrato”.
+                      </p>
+                    ) : (
+                      <p className="pt-1 text-xs text-muted-foreground">
+                        Repasse é agrupado e líquido de taxa — por isso não casa venda a venda. A taxa sai
+                        sobre {brl(resultado.cartao.esperadoCents)} que já venceram pelo cronograma
+                        (débito D+{config.debitoDias}, uma parcela do crédito a cada {config.creditoDias}{' '}
+                        dias). O que ainda não venceu fica fora da conta para não inflar o percentual.
+                      </p>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -619,7 +827,86 @@ export function ConciliacaoShospPage() {
                 </Card>
               </div>
 
-              {(resultado.foraDoExtrato.qtd > 0 || resultado.mistos.qtd > 0) && (
+              {/* QUEM É QUEM NO EXTRATO — o conserto de verdade das "entradas sem venda".
+                  Um pagador recorrente com R$ 412 mil não é 22 divergências: é uma pergunta.
+                  Aqui ela é feita uma vez e a resposta fica salva. */}
+              {(resultado.contrapartesAbertas.length > 0 || regras.length > 0) && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm">
+                      <Users className="size-4 text-muted-foreground" /> Quem é quem no extrato
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {resultado.contrapartesAbertas.length > 0 && (
+                      <>
+                        <p className="text-xs text-muted-foreground">
+                          Pagadores que aparecem várias vezes e nenhuma venda explica. Diga o que são e
+                          eles param de contar como divergência — para sempre, não só nesta conciliação.
+                        </p>
+                        <div className="space-y-2">
+                          {resultado.contrapartesAbertas.slice(0, 8).map((c) => (
+                            <div
+                              key={c.label}
+                              className="flex flex-wrap items-center gap-2 rounded-md border border-border p-2"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-sm font-medium">{c.exemplo}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {c.qtd} lançamento(s) · {brl(c.amountCents)}
+                                </div>
+                              </div>
+                              <Select
+                                value=""
+                                onValueChange={(v) =>
+                                  void classificarContraparte(c.label, v as CreditClass, c.exemplo)
+                                }
+                              >
+                                <SelectTrigger className="h-8 w-[210px] text-xs">
+                                  <SelectValue placeholder="Classificar como…" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {CLASSES.map((k) => (
+                                    <SelectItem key={k} value={k}>
+                                      {CLASSE_LABEL[k]}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {regras.length > 0 && (
+                      <div className="space-y-1 border-t border-border pt-3">
+                        <Label className="text-xs">Já classificados</Label>
+                        {regras.map((r) => (
+                          <div key={r.id} className="flex items-center gap-2 text-xs">
+                            <span className="min-w-0 flex-1 truncate">
+                              {r.label || r.pattern}
+                              <span className="text-muted-foreground"> — {CLASSE_LABEL[r.classe]}</span>
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-1.5"
+                              disabled={busy}
+                              onClick={() => void removerRegra(r.id)}
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {(resultado.foraDoExtrato.qtd > 0 ||
+                resultado.mistos.qtd > 0 ||
+                resultado.ignorados.length > 0) && (
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm">Fora das regras</CardTitle>
@@ -641,10 +928,32 @@ export function ConciliacaoShospPage() {
                         <span>{brl(resultado.mistos.amountCents)}</span>
                       </div>
                     )}
+                    {/* Entrada de banco que saiu da conta por não ser venda. Aparece somada e
+                        NOMEADA: "R$ 412.215 de transferência entre contas próprias" é informação;
+                        22 linhas vermelhas de "entrada sem venda" era ruído. */}
+                    {resultado.ignorados.map((i) => (
+                      <div key={i.label} className="flex justify-between gap-2">
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          {i.label} <span className="text-xs">({i.qtd})</span>
+                          {i.declarado && <span className="ml-1 text-xs">· você classificou</span>}
+                        </span>
+                        <span className="shrink-0">{brl(i.amountCents)}</span>
+                      </div>
+                    ))}
+                    {resultado.totais.foraDoPeriodoQtd > 0 && (
+                      <div className="flex justify-between gap-2">
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          Entradas fora do período da planilha{' '}
+                          <span className="text-xs">({resultado.totais.foraDoPeriodoQtd})</span>
+                        </span>
+                        <span className="shrink-0">{brl(resultado.totais.foraDoPeriodoCents)}</span>
+                      </div>
+                    )}
                     <p className="pt-1 text-xs text-muted-foreground">
-                      Esse dinheiro existe, só não dá pra cobrar deste extrato: caixa marcado como de
-                      outra conta, e venda paga em mais de uma forma — o Shosp não diz quanto foi em
-                      cada uma. Aparece na lista abaixo para conferência na mão.
+                      Esse dinheiro existe, só não dá pra cobrar deste extrato: caixa de outra conta,
+                      venda paga em mais de uma forma (o Shosp não diz quanto foi em cada uma), entrada
+                      que não é venda, e o extrato esticado além do mês só para alcançar o repasse do
+                      cartão. As vendas aparecem na lista abaixo para conferência na mão.
                     </p>
                   </CardContent>
                 </Card>

@@ -762,3 +762,91 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
   return out
 }
+
+// ──────────────────────────────────────────── quem é quem no extrato
+//
+// Regras de classificação de pagador recorrente, declaradas na tela de conciliação.
+// Ver a migration 20260811190000: existe porque nenhum regex adivinha que
+// "PIX TRANSF INSTITU16/07" é a conta irmã do grupo, e não a venda de um paciente.
+
+export type ReconcileRule = {
+  id: string
+  pattern: string
+  classe: 'adquirente' | 'deposito' | 'nao_venda' | 'venda'
+  label: string | null
+}
+
+const RULE_COLS = 'id, pattern, classe, label'
+
+export async function listReconcileRules(): Promise<ReconcileRule[]> {
+  const client = assertClient()
+  const { data, error } = await client.from('fin_reconcile_rules').select(RULE_COLS).order('pattern')
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>
+    return {
+      id: String(row.id),
+      pattern: String(row.pattern ?? ''),
+      classe: row.classe as ReconcileRule['classe'],
+      label: (row.label as string | null) ?? null,
+    }
+  })
+}
+
+export async function saveReconcileRule(payload: {
+  pattern: string
+  classe: ReconcileRule['classe']
+  label?: string | null
+}): Promise<ReconcileRule> {
+  const client = assertClient()
+  // `tenant_id` fica com o default da tabela (current_tenant_id()) — mandar do cliente
+  // seria confiar no chamador pra decidir de quem é a regra.
+  const { data, error } = await client
+    .from('fin_reconcile_rules')
+    .upsert(
+      { pattern: payload.pattern.trim(), classe: payload.classe, label: payload.label?.trim() || null },
+      { onConflict: 'tenant_id, pattern' },
+    )
+    .select(RULE_COLS)
+    .single()
+  if (error) throw new Error(error.message)
+  const row = data as Record<string, unknown>
+  return {
+    id: String(row.id),
+    pattern: String(row.pattern ?? ''),
+    classe: row.classe as ReconcileRule['classe'],
+    label: (row.label as string | null) ?? null,
+  }
+}
+
+export async function deleteReconcileRule(id: string): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.from('fin_reconcile_rules').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Primeiro e último dia com extrato de uma conta.
+ *
+ * A tela precisa disso pra não cobrar do banco um período que o banco nunca entregou: o
+ * fin_transactions da clínica começa em 12/mai/2026, e o export do Shosp vem com um ano
+ * inteiro. Conciliar tudo geraria milhares de "não caiu no banco" que só dizem que o
+ * extrato daquele mês não foi importado.
+ */
+export async function bankCoverage(accountId?: string): Promise<{ from: string; to: string } | null> {
+  const client = assertClient()
+  const base = () => {
+    let q = client.from('fin_transactions').select('date')
+    if (accountId) q = q.eq('account_id', accountId)
+    return q
+  }
+  const [min, max] = await Promise.all([
+    base().order('date', { ascending: true }).limit(1).maybeSingle(),
+    base().order('date', { ascending: false }).limit(1).maybeSingle(),
+  ])
+  if (min.error) throw new Error(min.error.message)
+  if (max.error) throw new Error(max.error.message)
+  const from = (min.data as { date?: string } | null)?.date
+  const to = (max.data as { date?: string } | null)?.date
+  return from && to ? { from, to } : null
+}
