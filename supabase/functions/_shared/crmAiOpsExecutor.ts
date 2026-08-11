@@ -526,7 +526,7 @@ export async function executeCrmAiOpsFromModel(
 
   const { data: leadRow } = await admin
     .from('leads')
-    .select('id, pipeline_id, stage_id, patient_name, tenant_id')
+    .select('id, pipeline_id, stage_id, patient_name, tenant_id, whatsapp_instance_id')
     .eq('id', opts.allowedLeadId)
     .maybeSingle()
   if (!leadRow) {
@@ -535,6 +535,28 @@ export async function executeCrmAiOpsFromModel(
   const pipelineId = String((leadRow as { pipeline_id?: string }).pipeline_id ?? '')
   const patientName = String((leadRow as { patient_name?: string }).patient_name ?? opts.patientLabel)
   const leadTenantId = String((leadRow as { tenant_id?: string }).tenant_id ?? '')
+
+  // A PESSOA segue o polo dela, mas a VENDA segue a LINHA em que aconteceu.
+  //
+  // Quem é paciente da clínica E cliente do Tricopill vive no tenant da clínica e escreve
+  // na linha do Tricopill. Com a venda carimbada pelo tenant do LEAD, dois kits Tricopill
+  // foram vendidos em 11/ago/26 como venda da clínica: um deles virou o pedido Bling
+  // 26573386331 no CNPJ da clínica (estoque e nota do produto errado), e o link de
+  // pagamento sairia com a marca da clínica para quem estava comprando Tricopill.
+  //
+  // O polo da venda define catálogo, cupom, gateway, Bling, marca e a quem a receita
+  // pertence — tudo isso é da linha, não da ficha da pessoa. Ver [[crm_conversa_segue_a_linha]].
+  const leadInstanceId = String((leadRow as { whatsapp_instance_id?: string }).whatsapp_instance_id ?? '')
+  let saleTenantId = leadTenantId
+  if (leadInstanceId) {
+    const { data: instRow } = await admin
+      .from('whatsapp_channel_instances')
+      .select('tenant_id')
+      .eq('id', leadInstanceId)
+      .maybeSingle()
+    const instTenant = String((instRow as { tenant_id?: string } | null)?.tenant_id ?? '')
+    if (instTenant) saleTenantId = instTenant
+  }
 
   // Feature flag por tenant: auto-agendamento da IA.
   let autoSchedulingEnabled = false
@@ -719,7 +741,7 @@ export async function executeCrmAiOpsFromModel(
         }
         try {
           const out = await createPagBankCheckout(admin, {
-            tenantId: String(lf.tenant_id ?? leadTenantId),
+            tenantId: String(lf.tenant_id ?? saleTenantId),
             lead: { id: lf.id, patient_name: lf.patient_name, phone: lf.phone, custom_fields: lf.custom_fields ?? null },
             kit: op.kit != null ? String(op.kit) : undefined,
             amountCents: op.amount_cents != null ? Number(op.amount_cents) : undefined,
@@ -744,7 +766,7 @@ export async function executeCrmAiOpsFromModel(
         // Pix DIRETO (copia-e-cola + QR) via e.Rede (createRedePix). Aceita kit OU amount_cents,
         // frete e cupom. (`pagbank_pix`/`pix*` são aliases legados — o motor é 100% e.Rede.)
         // (Preço Pix do kit = tabela PAGBANK_KITS, que já é o valor com 5% off.)
-        const freightCents = await resolveFreightCents(admin, leadTenantId, op)
+        const freightCents = await resolveFreightCents(admin, saleTenantId, op)
         const snapPix = await persistEntrega(admin, opts.allowedLeadId, op)
         // MESMA trava NF-e do cartão: não gera Pix sem cadastro completo (nome+telefone+CPF+CEP+número).
         const readyPix = validateOrderReadiness(snapPix.cadastro, snapPix.entrega)
@@ -789,7 +811,7 @@ export async function executeCrmAiOpsFromModel(
         const pixUseItems = pixShampooQty > 0
         try {
           const out = await createRedePix(admin, {
-            tenantId: leadTenantId,
+            tenantId: saleTenantId,
             amountCents: pixAmount,
             description: pixDesc,
             leadId: opts.allowedLeadId,
@@ -825,7 +847,7 @@ export async function executeCrmAiOpsFromModel(
             title: 'Venda quente — acompanhe',
             body: `${String(snapPix.cadastro.nomeCompleto ?? 'Cliente').trim()} recebeu o Pix (${pixDesc}). Pronto pra fechar!`,
             includeOwner: true,
-            tenantId: leadTenantId,
+            tenantId: saleTenantId,
             dedupeKey: 'venda_quente',
             dedupeWindowMinutes: 360,
           })
@@ -872,7 +894,7 @@ export async function executeCrmAiOpsFromModel(
         // Frete (entrega à parte) somado ao link, em centavos. Cotação real: se a IA mandar
         // freight_service ("PAC"/"SEDEX") + to_cep, o servidor recota (Melhor Envio); senão
         // usa o freight_cents literal.
-        const freightCents = await resolveFreightCents(admin, leadTenantId, op)
+        const freightCents = await resolveFreightCents(admin, saleTenantId, op)
         const snap = await persistEntrega(admin, opts.allowedLeadId, op)
         // TRAVA NF-e: não gera o link sem cadastro completo (nome+CPF+CEP+número). A nota é
         // emitida automática no fechamento, então o pedido precisa estar pronto p/ NF-e.
@@ -888,7 +910,7 @@ export async function executeCrmAiOpsFromModel(
         }
         try {
           const out = await createRedeIntent(admin, {
-            tenantId: leadTenantId,
+            tenantId: saleTenantId,
             amountCents,
             description,
             leadId: opts.allowedLeadId,
