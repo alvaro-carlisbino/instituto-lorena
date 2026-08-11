@@ -101,14 +101,18 @@ export function CommandPalette() {
       <Command.Input
         value={termo}
         onValueChange={setTermo}
-        placeholder="Buscar paciente, tela ou ação…"
+        // O que dá para digitar precisa estar escrito: ninguém tenta o número do pedido
+        // num campo que promete só "paciente".
+        placeholder="Nome, telefone, CPF, e-mail, pedido… ou uma tela"
         className="flex h-11 w-full border-b border-border bg-transparent px-3 text-sm outline-none placeholder:text-muted-foreground"
       />
       <Command.List className="max-h-[min(60vh,28rem)] overflow-y-auto p-1">
         <Command.Empty className="px-3 py-6 text-center text-sm text-muted-foreground">Nenhum resultado.</Command.Empty>
 
+        {/* "Pessoas", não "Pacientes": a mesma busca acha o paciente da clínica e o
+            cliente da loja, e chamar tudo de paciente escondia metade do resultado. */}
         {pacientes.length > 0 ? (
-          <Command.Group heading="Pacientes">
+          <Command.Group heading="Pessoas">
             {pacientes.map((p) => {
               // O que a pessoa tem, resumido: quem atende sabe na hora se tem
               // cirurgia e exame ou se é só um lead sem histórico.
@@ -116,7 +120,7 @@ export function CommandPalette() {
                 p.consultas ? `${p.consultas} consulta${p.consultas > 1 ? 's' : ''}` : '',
                 p.cirurgias ? `${p.cirurgias} cirurgia${p.cirurgias > 1 ? 's' : ''}` : '',
                 p.exames ? `${p.exames} exame${p.exames > 1 ? 's' : ''}` : '',
-                p.vendas ? `${p.vendas} venda${p.vendas > 1 ? 's' : ''}` : '',
+                p.vendas ? `${p.vendas} compra${p.vendas > 1 ? 's' : ''}` : '',
               ].filter(Boolean).join(' · ')
               return (
                 <Command.Item

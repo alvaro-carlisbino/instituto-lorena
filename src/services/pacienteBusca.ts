@@ -39,6 +39,14 @@ export type PacienteEncontrado = {
   ultimoContato: string | null
 }
 
+/** Endereço + rastreio do último envio, como o bot de vendas grava em `custom_fields.entrega`. */
+export type EntregaPaciente = {
+  cep?: string; logradouro?: string; numero?: string; complemento?: string
+  bairro?: string; cidade?: string; uf?: string
+  service?: string; tracking?: string; status?: string
+  me_status_raw?: string; tracking_updated_at?: string
+}
+
 export type Paciente360 = {
   paciente: {
     tipo: TipoPaciente
@@ -46,10 +54,13 @@ export type Paciente360 = {
     lead_id: string | null
     tem_card: boolean
     nome: string | null
+    /** Nome do cadastro de venda — costuma ser o nome inteiro, o do card é o do WhatsApp. */
+    nome_completo: string | null
     telefone: string | null
     prontuario: string | null
     cpf: string | null
     email: string | null
+    nascimento: string | null
     origem: string | null
     canal_atribuicao: string | null
     campanha: string | null
@@ -57,6 +68,11 @@ export type Paciente360 = {
     criado_em: string | null
     ultimo_contato: string | null
     status_conversa: string | null
+    funil: string | null
+    etapa: string | null
+    responsavel: string | null
+    entrega: EntregaPaciente | null
+    tags: Array<{ nome: string; cor: string | null }>
   }
   consultas: Array<{
     codigo: string | null; data: string | null; horario: string | null
@@ -76,14 +92,56 @@ export type Paciente360 = {
     valor_centavos: number | null; entrada_centavos: number | null; forma: string | null
     parcelas: number | null; status: string | null; medico: string | null
   }>
+  /** Pedido da loja: cartão (Rede) e PIX (PagBank) na mesma lista. */
+  pedidos: Array<{
+    id: string; canal: 'cartao' | 'pix'; valor_centavos: number | null
+    metodo: string | null; status: string | null; pago_em: string | null
+    criado_em: string | null; descricao: string | null
+    kit: string | null; itens: Array<{ nome?: string; qty?: number; precoCents?: number }> | null
+    parcelas: number | null; cupom: string | null; desconto_centavos: number | null
+    frete_centavos: number | null; origem: string | null
+    pedido_bling: string | null; nfe_numero: string | null; nfe_status: string | null
+    taxa_centavos: number | null; liquido_centavos: number | null
+  }>
+  /** Formato antigo, mantido para não quebrar quem já lia. Prefira `pedidos`. */
   pagamentos: Array<{
     id: string; valor_centavos: number | null; metodo: string | null; status: string | null
     pago_em: string | null; criado_em: string | null; descricao: string | null
   }>
+  assinatura: {
+    id: string; status: string | null; cadencia: string | null
+    valor_mensal_centavos: number | null; frascos_por_envio: number | null
+    ciclos_pagos: number | null; ultimo_ciclo_enviado: number | null; minimo_ciclos: number | null
+    ultimo_envio_em: string | null; ultimo_envio_status: string | null; criada_em: string | null
+  } | null
+  protocolos: Array<{
+    id: string; nome: string | null; status: string | null
+    sessoes_previstas: number | null; sessoes_feitas: number; preco: number | null
+    iniciado_em: string | null; concluido_em: string | null
+  }>
+  notas_clinicas: Array<{
+    id: string; autor: string | null; papel: string | null
+    categoria: string | null; nota: string | null; criada_em: string | null
+  }>
+  followups: Array<{
+    id: string; tentativa: number | null; agendado_para: string | null
+    feito_em: string | null; canal: string | null; desfecho: string | null; nota: string | null
+  }>
+  nps: Array<{
+    enviado_em: string | null; canal: string | null
+    nota: number | null; comentario: string | null; respondido_em: string | null
+  }>
   tarefas_abertas: Array<{ id: string; titulo: string | null; vence_em: string | null; tipo: string | null }>
+  conversa: {
+    mensagens: number; recebidas: number; enviadas: number
+    primeira_em: string | null; ultima_em: string | null
+    linhas: Array<{ linha: string | null; dono: string | null; ia_ligada: boolean | null; ultima_resposta_humana: string | null }>
+  } | null
   resumo: {
     consultas: number; cirurgias: number; exames_tricoscopia: number; vendas: number
+    pedidos: number; pedidos_pagos: number
     faturado_centavos: number; pago_centavos: number; mensagens: number; nps_enviados: number
+    nps_ultima_nota: number | null
     primeira_consulta: string | null; ultima_consulta: string | null
   }
 }

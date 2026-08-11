@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Download, MessageCircle } from 'lucide-react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Download } from 'lucide-react'
 import { HelpDrawer } from '@/components/page/HelpDrawer'
 
 const LEADS_HELP = [
@@ -37,22 +37,22 @@ const LEADS_HELP = [
 ]
 import { toast } from 'sonner'
 
-import { PaymentBadge, PoloBadge } from '@/components/leads/PaymentBadge'
+import { LeadCard, LeadTableRow } from '@/components/leads/LeadListRows'
 import { BulkActionBar } from '@/components/page/BulkActionBar'
 import { ColumnVisibilityMenu } from '@/components/page/ColumnVisibilityMenu'
 import { FilterBar, type FilterDef } from '@/components/page/FilterBar'
 import { SkeletonBlocks } from '@/components/SkeletonBlocks'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyState } from '@/components/ui/empty-state'
 import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { sourceLabel } from '@/hooks/useCrmState'
+import { useVirtualRows } from '@/hooks/useVirtualRows'
 import { AppLayout } from '@/layouts/AppLayout'
 import { columnLabel } from '@/lib/leadColumnLabels'
 import { parseCsv, rowsToObjects } from '@/lib/csvParse'
@@ -61,9 +61,11 @@ import { hojeLocal } from '@/lib/diaLocal'
 import { getLeadFieldValue, getLeadPhoneDisplay } from '@/lib/leadFields'
 import { formatTemperature } from '@/lib/fieldLabels'
 import { archiveImportFileToStorage } from '@/lib/importArchiveStorage'
+import { LEAD_CARD_HEIGHT, LEAD_TABLE_ROW_HEIGHT } from '@/lib/leadRowStyles'
 import { labelForIdName } from '@/lib/selectDisplay'
 import { parseInteractionsImportJson } from '@/lib/interactionsImportSchema'
 import { cn } from '@/lib/utils'
+import type { Lead } from '@/mocks/crmMock'
 
 const TABLE_COLUMNS = ['patient_name', 'phone', 'pipeline_id', 'stage_id', 'owner_id', 'source', 'temperature', 'summary'] as const
 
@@ -91,18 +93,26 @@ const COLUMN_WIDTH: Record<string, string> = {
   summary: '',
 }
 
-function temperatureBadgeClass(t: string): string {
-  const x = t.toLowerCase()
-  if (x === 'hot' || x === 'quente') {
-    return 'border-rose-200/80 bg-rose-50/90 text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/50 dark:text-rose-100'
-  }
-  if (x === 'warm' || x === 'morno') {
-    return 'border-amber-200/80 bg-amber-50/90 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/50 dark:text-amber-100'
-  }
-  if (x === 'cold' || x === 'frio') {
-    return 'border-slate-200/80 bg-slate-50/90 text-slate-800 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-200'
-  }
-  return 'border-border bg-muted/50 text-foreground'
+/**
+ * Texto de busca por lead, calculado UMA VEZ por objeto de lead.
+ *
+ * A busca varre nome, telefone, resumo e todos os campos personalizados — e
+ * `custom_fields` sozinho são 563 kB no banco. Fazer isso dentro do filtro significava
+ * remontar essa string para os 2.680 leads a cada tecla digitada. O WeakMap é chaveado
+ * pelo próprio objeto do lead: quem não mudou reaproveita o texto já montado, e quem
+ * mudou (objeto novo vindo do realtime) recalcula sozinho. Sem invalidação manual e
+ * sem segurar memória de lead que saiu da lista.
+ */
+const haystackCache = new WeakMap<Lead, string>()
+const leadHaystack = (lead: Lead): string => {
+  const cached = haystackCache.get(lead)
+  if (cached !== undefined) return cached
+  const custom = Object.values(lead.customFields as Record<string, unknown>)
+    .map((v) => (v != null ? String(v) : ''))
+    .join(' ')
+  const built = [lead.patientName, lead.summary, lead.phone, custom].join(' ').toLowerCase()
+  haystackCache.set(lead, built)
+  return built
 }
 
 export function LeadsPage() {
@@ -123,12 +133,20 @@ export function LeadsPage() {
   const [jsonPreviewCount, setJsonPreviewCount] = useState<number | null>(null)
   const [pendingCsvFile, setPendingCsvFile] = useState<File | null>(null)
   const [pendingJsonFile, setPendingJsonFile] = useState<File | null>(null)
-  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([])
+  // Set, não array: a linha pergunta "estou selecionada?" uma vez por lead a cada
+  // render. Com `array.includes` isso era O(n²) — 2.680 linhas × 2.680 comparações a
+  // cada clique numa caixinha.
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(() => new Set())
   const [visibleColumns, setVisibleColumns] = useState<(typeof TABLE_COLUMNS)[number][]>([...TABLE_COLUMNS])
   const [bulkOwnerId, setBulkOwnerId] = useState<string>('all')
   const [bulkStageId, setBulkStageId] = useState<string>('all')
 
   const leadIdParam = searchParams.get('leadId')
+  const isMobile = useIsMobile()
+  // O campo de busca responde na hora; a varredura dos 2.680 leads roda em prioridade
+  // baixa e pode ser interrompida pela tecla seguinte. Sem isto, digitar "maria"
+  // enfileirava cinco filtragens completas e a tela travava entre as letras.
+  const deferredSearch = useDeferredValue(searchTerm)
 
   // Filtro de Polo (tenant) — só aparece quando o login enxerga ≥2 polos (super-admin).
   const tenantNameById = useMemo(() => {
@@ -229,10 +247,17 @@ export function LeadsPage() {
     )
 
     return defs
+    // `crm` inteiro estava aqui — e o `useCrmState` devolve um objeto NOVO a cada
+    // render, então este memo nunca segurava nada: remontava as cinco listas de opções
+    // (incluindo a de usuários) a cada mensagem que chegava. Agora só os campos que a
+    // barra de filtros realmente lê.
   }, [
     showPolo,
     poloOptions,
-    crm,
+    crm.tenantFilter,
+    crm.setTenantFilter,
+    crm.pipelineCatalog,
+    crm.users,
     pipelineFilter,
     stageFilter,
     stagesInFilterPipeline,
@@ -262,7 +287,7 @@ export function LeadsPage() {
   )
 
   const filteredLeads = useMemo(() => {
-    const n = searchTerm.trim().toLowerCase()
+    const n = deferredSearch.trim().toLowerCase()
     return crm.leads.filter((lead) => {
       if (crm.tenantFilter !== 'all' && lead.tenantId !== crm.tenantFilter) return false
       if (pipelineFilter !== 'all' && lead.pipelineId !== pipelineFilter) return false
@@ -275,13 +300,51 @@ export function LeadsPage() {
         if (!matches) return false
       }
       if (!n) return true
-      const custom = Object.values(lead.customFields as Record<string, unknown>)
-        .map((v) => (v != null ? String(v) : ''))
-        .join(' ')
-      const hay = [lead.patientName, lead.summary, lead.phone, custom].join(' ').toLowerCase()
-      return hay.includes(n)
+      return leadHaystack(lead).includes(n)
     })
-  }, [crm.leads, crm.tenantFilter, searchTerm, pipelineFilter, stageFilter, ownerFilter, sourceFilter])
+  }, [crm.leads, crm.tenantFilter, deferredSearch, pipelineFilter, stageFilter, ownerFilter, sourceFilter])
+
+  /**
+   * Nome do funil e da etapa por id, de uma vez. Cada linha fazia
+   * `pipelineCatalog.find()` e depois `stages.find()` — com 6 funis, 41 etapas e 2.680
+   * linhas dava ~130 mil comparações por render, e o render acontece a cada mensagem
+   * que chega.
+   */
+  const pipelineNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const p of crm.pipelineCatalog) m.set(p.id, p.name)
+    return m
+  }, [crm.pipelineCatalog])
+  const stageNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const p of crm.pipelineCatalog) for (const s of p.stages) m.set(s.id, s.name)
+    return m
+  }, [crm.pipelineCatalog])
+  // Mesma fonte e mesmo fallback do `crm.getOwnerName` (sdrMembers, 'Sem dono'), só que
+  // indexado — o original é um `.find()` por linha.
+  const ownerNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of crm.sdrMembers) m.set(s.id, s.name)
+    return m
+  }, [crm.sdrMembers])
+
+  // A janela do que está montado. Só uma das duas roda por vez (a outra fica `enabled:
+  // false`), porque só um dos layouts existe no DOM.
+  const listRef = useRef<HTMLDivElement>(null)
+  // Caixa de seleção + colunas visíveis + botão de conversa.
+  const spacerColSpan = visibleColumns.length + 2
+  const rowWindow = useVirtualRows({
+    count: filteredLeads.length,
+    rowHeight: LEAD_TABLE_ROW_HEIGHT,
+    containerRef: listRef,
+    enabled: !isMobile,
+  })
+  const cardWindow = useVirtualRows({
+    count: filteredLeads.length,
+    rowHeight: LEAD_CARD_HEIGHT,
+    containerRef: listRef,
+    enabled: isMobile,
+  })
 
   /**
    * Exporta exatamente o que os filtros da tela deixaram na lista. É assim que sai a
@@ -339,9 +402,16 @@ export function LeadsPage() {
     },
     [navigate],
   )
-  const toggleLeadSelection = (leadId: string) => {
-    setSelectedLeadIds((prev) => (prev.includes(leadId) ? prev.filter((id) => id !== leadId) : [...prev, leadId]))
-  }
+  // useCallback: é prop de todas as linhas memoizadas. Se mudar de identidade a cada
+  // render, o memo delas nunca segura nada.
+  const toggleLeadSelection = useCallback((leadId: string) => {
+    setSelectedLeadIds((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(leadId)) next.add(leadId)
+      return next
+    })
+  }, [])
+  const clearSelection = useCallback(() => setSelectedLeadIds(new Set()), [])
 
   useEffect(() => {
     if (!leadIdParam) return
@@ -551,179 +621,88 @@ export function LeadsPage() {
       />
 
       <Card className="mb-8 overflow-hidden">
-        <CardContent className="p-0">
-          <ul className="m-0 flex list-none flex-col divide-y divide-border/10 md:hidden">
-            {filteredLeads.map((lead) => {
-              const pipe = crm.pipelineCatalog.find((p) => p.id === lead.pipelineId)
-              const stage = pipe?.stages.find((s) => s.id === lead.stageId)
-              return (
-                <li key={lead.id} className="px-3 py-2.5 transition-colors active:bg-muted/20">
-                  <div className="flex items-start gap-2.5">
-                    {/* shrink-0 no EMBRULHO, não só no Checkbox: o filho tem shrink-0, mas
-                        quem é item do flex é esta div, e sem isso ela era espremida a 2px de
-                        largura pelo texto ao lado. No celular ninguém conseguia selecionar. */}
-                    <div className="shrink-0 pt-0.5">
-                      <Checkbox
-                        checked={selectedLeadIds.includes(lead.id)}
-                        onCheckedChange={() => toggleLeadSelection(lead.id)}
-                        aria-label={`Selecionar ${lead.patientName}`}
-                        className="size-5 rounded-md border-border/40"
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => openLead(lead.id)}
-                      className="block h-auto min-w-0 flex-1 whitespace-normal rounded-none border-0 p-0 text-left font-normal hover:bg-transparent hover:text-foreground"
-                    >
-                      {/* Nome e telefone na mesma linha: o telefone é o que a atendente lê
-                          para ligar, não precisa de linha própria nem de negrito. */}
-                      <div className="flex min-w-0 items-baseline gap-2">
-                        <h3 className="truncate text-sm font-semibold leading-tight text-foreground">{lead.patientName}</h3>
-                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{lead.phone}</span>
+        <CardContent className="p-0" ref={listRef}>
+          {/* Uma lista OU a outra. Antes as duas eram montadas e uma ficava escondida no
+              CSS (`md:hidden` / `hidden md:block`) — o navegador criava os nós das duas,
+              então cada lead custava DOIS blocos de DOM e ninguém via metade deles. */}
+          {isMobile ? (
+            <ul className="m-0 flex list-none flex-col divide-y divide-border/10">
+              <li aria-hidden style={{ height: cardWindow.padTop }} />
+              {filteredLeads.slice(cardWindow.start, cardWindow.end).map((lead) => (
+                <LeadCard
+                  key={lead.id}
+                  lead={lead}
+                  stageName={stageNameById.get(lead.stageId) ?? lead.stageId}
+                  payment={crm.paymentByLeadId[lead.id] ?? null}
+                  poloName={poloNameForLead(lead.tenantId)}
+                  selected={selectedLeadIds.has(lead.id)}
+                  onToggle={toggleLeadSelection}
+                  onOpen={openLead}
+                />
+              ))}
+              <li aria-hidden style={{ height: cardWindow.padBottom }} />
+            </ul>
+          ) : (
+            <div className="w-full overflow-x-auto">
+              {/* table-fixed: sem isto o navegador reparte a largura pelo CONTEÚDO e ignora
+                  as larguras acima — era assim que "Telefone" ganhava 95px e o número
+                  quebrava em três linhas enquanto "Resumo" sobrava. Toda célula corta
+                  (truncate/line-clamp), então fixar é seguro — e é também o que torna a
+                  altura de linha previsível o bastante para virtualizar. */}
+              <Table className="w-full min-w-[56rem] table-fixed border-collapse text-left">
+                <TableHeader>
+                  <TableRow className="border-b border-border/20 bg-muted/10 text-xs font-medium text-muted-foreground">
+                    <TableHead className="w-10">
+                      <div className="flex items-center justify-center">
+                        <div className="size-4 rounded border border-border/40" aria-hidden />
+                        <span className="sr-only">Seleção</span>
                       </div>
-                      {lead.summary && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground/80">{lead.summary}</p>}
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                        <PoloBadge name={poloNameForLead(lead.tenantId)} />
-                        <PaymentBadge payment={crm.paymentByLeadId[lead.id] ?? null} />
-                        <Badge variant="outline" className="rounded text-[9px] font-semibold uppercase tracking-tight border-border/40">
-                          {stage?.name ?? lead.stageId}
-                        </Badge>
-                        <Badge variant="secondary" className="rounded text-[9px] font-semibold uppercase tracking-tight bg-muted/40 text-muted-foreground">
-                          {sourceLabel[lead.source]}
-                        </Badge>
-                        <span className={cn('rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider', temperatureBadgeClass(lead.temperature))}>
-                          {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
-                        </span>
-                      </div>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      nativeButton={false}
-                      render={
-                        <Link
-                          to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
-                          aria-label={`Abrir conversa com ${lead.patientName}`}
-                        />
-                      }
-                      className="size-10 shrink-0 rounded-xl bg-primary/[0.08] text-primary transition-colors hover:bg-primary/20 hover:text-primary active:scale-95"
-                    >
-                      <MessageCircle className="size-5" aria-hidden />
-                    </Button>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-
-          <div className="hidden w-full overflow-x-auto md:block">
-            {/* table-fixed: sem isto o navegador reparte a largura pelo CONTEÚDO e ignora
-                as larguras acima — era assim que "Telefone" ganhava 95px e o número
-                quebrava em três linhas enquanto "Resumo" sobrava. Toda célula corta
-                (truncate/line-clamp), então fixar é seguro. */}
-            <Table className="w-full min-w-[56rem] table-fixed border-collapse text-left">
-              <TableHeader>
-                <TableRow className="border-b border-border/20 bg-muted/10 text-xs font-medium text-muted-foreground">
-                  <TableHead className="w-10">
-                    <div className="flex items-center justify-center">
-                      <div className="size-4 rounded border-border/40 border" aria-hidden />
-                      <span className="sr-only">Seleção</span>
-                    </div>
-                  </TableHead>
-                  {visibleColumns.map((col) => (
-                    <TableHead key={col} className={cn('font-semibold', COLUMN_WIDTH[col])}>
-                      {columnLabel(col, crm.workflowFields)}
                     </TableHead>
-                  ))}
-                  {/* Rótulo só para leitor de tela: "Interação" por extenso não cabe na
-                      coluna do botão e, com table-fixed, transbordava por cima de "Resumo". */}
-                  <TableHead className="w-12 text-right">
-                    <span className="sr-only">Interação</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody className="divide-y divide-border/5">
-                {filteredLeads.map((lead) => {
-                  const pipe = crm.pipelineCatalog.find((p) => p.id === lead.pipelineId)
-                  const stage = pipe?.stages.find((s) => s.id === lead.stageId)
-                  const selected = selectedLeadIds.includes(lead.id)
-                  return (
-                    <TableRow
+                    {visibleColumns.map((col) => (
+                      <TableHead key={col} className={cn('font-semibold', COLUMN_WIDTH[col])}>
+                        {columnLabel(col, crm.workflowFields)}
+                      </TableHead>
+                    ))}
+                    {/* Rótulo só para leitor de tela: "Interação" por extenso não cabe na
+                        coluna do botão e, com table-fixed, transbordava por cima de "Resumo". */}
+                    <TableHead className="w-12 text-right">
+                      <span className="sr-only">Interação</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="divide-y divide-border/5">
+                  {/* Linhas-espaçador no lugar das que não foram montadas: seguram a altura
+                      total para a barra de rolagem continuar honesta.
+
+                      A célula com colSpan é OBRIGATÓRIA. Um <tr> vazio com `height` no
+                      estilo colapsa para zero — o navegador só dá altura à linha se
+                      houver célula dentro. Sem ela a tabela inteira media 720px de
+                      altura, não rolava, e só os ~35 primeiros leads eram alcançáveis. */}
+                  <TableRow aria-hidden className="hover:bg-transparent">
+                    <TableCell colSpan={spacerColSpan} className="p-0" style={{ height: rowWindow.padTop }} />
+                  </TableRow>
+                  {filteredLeads.slice(rowWindow.start, rowWindow.end).map((lead) => (
+                    <LeadTableRow
                       key={lead.id}
-                      className={cn(
-                        'group transition-all duration-200 cursor-pointer',
-                        selected ? 'bg-primary/[0.03]' : 'hover:bg-muted/20'
-                      )}
-                      onClick={() => openLead(lead.id)}
-                    >
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-center">
-                          <Checkbox
-                            checked={selected}
-                            onCheckedChange={() => toggleLeadSelection(lead.id)}
-                            aria-label={`Selecionar ${lead.patientName}`}
-                            className="size-4 rounded border-border/40"
-                          />
-                        </div>
-                      </TableCell>
-                      {visibleColumns.map((col) => (
-                        <TableCell key={col}>
-                          {col === 'patient_name' && (
-                            // Nome e etiquetas na MESMA linha: empilhados, cada lead custava
-                            // duas alturas de texto mesmo quando não havia etiqueta nenhuma.
-                            <div className="flex min-w-0 items-center gap-1.5">
-                              <span className="truncate text-[13px] font-semibold text-foreground/90 transition-colors group-hover:text-primary">
-                                {lead.patientName}
-                              </span>
-                              <PoloBadge name={poloNameForLead(lead.tenantId)} />
-                              <PaymentBadge payment={crm.paymentByLeadId[lead.id] ?? null} />
-                            </div>
-                          )}
-                          {col === 'phone' && <span className="whitespace-nowrap text-[13px] tabular-nums text-muted-foreground">{lead.phone}</span>}
-                          {col === 'summary' && <span className="line-clamp-1 text-xs text-muted-foreground/70">{lead.summary || '·'}</span>}
-                          {col === 'pipeline_id' && <span className="line-clamp-1 text-xs text-muted-foreground">{pipe?.name ?? lead.pipelineId}</span>}
-                          {col === 'stage_id' && <span className="line-clamp-1 text-xs text-muted-foreground">{stage?.name ?? lead.stageId}</span>}
-                          {col === 'owner_id' && <span className="line-clamp-1 text-xs text-muted-foreground">{crm.getOwnerName(lead.ownerId)}</span>}
-                          {col === 'source' && (
-                            <Badge variant="secondary" className="bg-muted/40 text-muted-foreground/80 text-[9px] font-semibold uppercase tracking-tight rounded-md border-border/20">
-                              {sourceLabel[lead.source]}
-                            </Badge>
-                          )}
-                          {col === 'temperature' && (
-                            <span className={cn('px-2.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider', temperatureBadgeClass(lead.temperature))}>
-                              {formatTemperature(getLeadFieldValue(lead, 'temperature'), lead.temperature)}
-                            </span>
-                          )}
-                          {![
-                            'patient_name', 'phone', 'summary', 'pipeline_id', 'stage_id', 'owner_id', 'source', 'temperature'
-                          ].includes(col) && (
-                            <span className="text-xs font-medium text-muted-foreground/60">{String(getLeadFieldValue(lead, col) ?? '·')}</span>
-                          )}
-                        </TableCell>
-                      ))}
-                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          nativeButton={false}
-                          render={
-                            <Link
-                              to={`/chat?leadId=${encodeURIComponent(lead.id)}`}
-                              aria-label={`Abrir conversa com ${lead.patientName}`}
-                            />
-                          }
-                          className="size-7 rounded-lg bg-primary/[0.08] text-primary transition-colors hover:bg-primary/20 hover:text-primary"
-                        >
-                          <MessageCircle className="size-4" aria-hidden />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </div>
+                      lead={lead}
+                      columns={visibleColumns}
+                      pipelineName={pipelineNameById.get(lead.pipelineId) ?? lead.pipelineId}
+                      stageName={stageNameById.get(lead.stageId) ?? lead.stageId}
+                      ownerName={ownerNameById.get(lead.ownerId) ?? 'Sem dono'}
+                      payment={crm.paymentByLeadId[lead.id] ?? null}
+                      poloName={poloNameForLead(lead.tenantId)}
+                      selected={selectedLeadIds.has(lead.id)}
+                      onToggle={toggleLeadSelection}
+                      onOpen={openLead}
+                    />
+                  ))}
+                  <TableRow aria-hidden className="hover:bg-transparent">
+                    <TableCell colSpan={spacerColSpan} className="p-0" style={{ height: rowWindow.padBottom }} />
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
           {!crm.isLoading && filteredLeads.length === 0 && (
             <EmptyState
               title="Nenhum lead encontrado"
@@ -743,11 +722,7 @@ export function LeadsPage() {
         </CardContent>
       </Card>
 
-      <BulkActionBar
-        count={selectedLeadIds.length}
-        onClear={() => setSelectedLeadIds([])}
-        noun={['lead', 'leads']}
-      >
+      <BulkActionBar count={selectedLeadIds.size} onClear={clearSelection} noun={['lead', 'leads']}>
         <Select value={bulkOwnerId} onValueChange={(value) => setBulkOwnerId(value ?? 'all')}>
           <LabeledSelectTrigger aria-label="Novo responsável" className="h-8 w-44" size="sm">
             {bulkOwnerLabel}
@@ -786,9 +761,9 @@ export function LeadsPage() {
               toast.error('Escolha um responsável ou uma etapa para aplicar.')
               return
             }
-            crm.bulkUpdateLeads(selectedLeadIds, patch)
-            toast.success(`${selectedLeadIds.length} lead(s) atualizados.`)
-            setSelectedLeadIds([])
+            crm.bulkUpdateLeads(Array.from(selectedLeadIds), patch)
+            toast.success(`${selectedLeadIds.size} lead(s) atualizados.`)
+            clearSelection()
           }}
         >
           Aplicar

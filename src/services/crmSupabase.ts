@@ -315,6 +315,60 @@ const fetchAllLeadsPaged = async (
   return { data: all, error: null }
 }
 
+/**
+ * Os leads QUE MUDARAM, não os 2.680.
+ *
+ * O gatilho `interactions_advance_last_inbound_at` escreve em `leads` a cada mensagem
+ * que entra. Isso acorda o realtime de `leads`, que até agora respondia rebaixando a
+ * base inteira: três round-trips de 1.000 linhas, 1,5 MB, mais tags, follow-up e 3.200
+ * interações. Em hora de pico (104 mensagens/h medidas em 10/ago) era um refresh
+ * completo a cada ~35 segundos, e cada um trocava a identidade do array `leads` — a
+ * tela de Leads remontava as 2.680 linhas do zero no meio do trabalho da atendente.
+ *
+ * Mensagem nova mexe em UM lead. Esta função busca só ele (ou o punhado que a rajada
+ * juntou), pelo mesmo SELECT e pelo mesmo mapeador do fetch completo — então o
+ * resultado é idêntico ao que a página inteira traria, por ~600 bytes em vez de 1,5 MB.
+ *
+ * Devolve `deletedIds` porque um lead pode ter sido apagado (soft delete) entre o
+ * evento e a consulta: quem sumiu do SELECT sai do estado em vez de ficar fantasma.
+ */
+export const fetchLeadsByIds = async (leadIds: string[]): Promise<{ leads: Lead[]; deletedIds: string[] }> => {
+  const ids = Array.from(new Set(leadIds.filter(Boolean)))
+  if (ids.length === 0) return { leads: [], deletedIds: [] }
+  const client = assertSupabase()
+
+  const [leadsRes, tagAssignRes, followupRes] = await Promise.all([
+    client.from('leads').select(LEAD_SELECT).is('deleted_at', null).in('id', ids),
+    client.from('lead_tag_assignments').select('lead_id, tag_id').in('lead_id', ids),
+    client.from('crm_lead_followup_state').select('lead_id, current_step, status').in('lead_id', ids),
+  ])
+  if (leadsRes.error) throw leadsRes.error
+
+  const rows = (leadsRes.data ?? []) as DbLead[]
+
+  const tagIdsByLead = new Map<string, string[]>()
+  if (!tagAssignRes.error && tagAssignRes.data) {
+    for (const row of tagAssignRes.data as { lead_id: string; tag_id: string }[]) {
+      const list = tagIdsByLead.get(String(row.lead_id)) ?? []
+      list.push(String(row.tag_id))
+      tagIdsByLead.set(String(row.lead_id), list)
+    }
+  }
+
+  const followupByLeadId = new Map<string, DbFollowupStateRow>()
+  if (!followupRes.error && followupRes.data) {
+    for (const row of followupRes.data as DbFollowupStateRow[]) {
+      followupByLeadId.set(String(row.lead_id), row)
+    }
+  }
+
+  const found = new Set(rows.map((r) => String(r.id)))
+  return {
+    leads: rows.map((row) => mapDbLeadToLead(row, tagIdsByLead.get(row.id) ?? [], followupByLeadId.get(row.id))),
+    deletedIds: ids.filter((id) => !found.has(id)),
+  }
+}
+
 export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   const client = assertSupabase()
 

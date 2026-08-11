@@ -36,6 +36,7 @@ import {
   insertLead,
   loadWebhookJobs,
   loadCrmData,
+  fetchLeadsByIds,
   loadChatSliceFromSupabase,
   loadInteractionsSliceFromSupabase,
   loadLeadInteractionsFromSupabase,
@@ -949,18 +950,22 @@ export const useCrmState = () => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured || !supabase) return
     const client = supabase
 
-    // Dois caminhos, porque os eventos têm custo MUITO diferente:
+    // Três caminhos, porque os eventos têm custo MUITO diferente:
     //
     //   mensagem nova (`interactions`) → refresh barato, só a lista de mensagens.
     //   É o evento mais frequente de longe (~40/h na média, 272/h no pico) e antes
     //   arrastava junto os 2.419 leads, a agenda e os pagamentos.
     //
-    //   lead/agenda mudou → refresh completo. Acontece muito menos.
+    //   lead mudou → busca SÓ os leads que mudaram, pelo id que veio no evento.
+    //
+    //   agenda mudou → refresh completo. Acontece muito menos.
     //
     // O debounce das mensagens subiu de 260ms para 1,2s: o bot manda 3-4 mensagens
     // seguidas e a 260ms cada uma virava um refresh. Agora a rajada vira um só.
     let msgTimer: ReturnType<typeof setTimeout> | undefined
     let fullTimer: ReturnType<typeof setTimeout> | undefined
+    let leadTimer: ReturnType<typeof setTimeout> | undefined
+    const dirtyLeadIds = new Set<string>()
 
     const scheduleInteractionsRefresh = () => {
       if (msgTimer) clearTimeout(msgTimer)
@@ -977,20 +982,69 @@ export const useCrmState = () => {
       }, 600)
     }
 
+    /**
+     * O gatilho `interactions_advance_last_inbound_at` carimba `last_interaction_at`
+     * no lead a cada mensagem recebida — ou seja, o evento de `leads` chega junto com
+     * o de `interactions`, o dia inteiro. Antes ele caía no refresh completo e
+     * rebaixava os 2.680 leads (1,5 MB, três round-trips) por causa de um timestamp.
+     *
+     * Agora vai só o id que veio no evento. O array `leads` é reconstruído, mas os
+     * objetos dos leads que NÃO mudaram continuam sendo os mesmos por referência —
+     * é o que deixa o React.memo das linhas da tela de Leads segurar o re-render.
+     */
+    const scheduleLeadPatch = (payload: { new?: Record<string, unknown>; old?: Record<string, unknown> }) => {
+      const id = String(payload.new?.id ?? payload.old?.id ?? '')
+      // Sem id no evento não dá para ser cirúrgico: cai no caminho antigo.
+      if (!id) {
+        scheduleFullRefresh()
+        return
+      }
+      dirtyLeadIds.add(id)
+      if (leadTimer) clearTimeout(leadTimer)
+      leadTimer = setTimeout(() => {
+        leadTimer = undefined
+        const ids = Array.from(dirtyLeadIds)
+        dirtyLeadIds.clear()
+        void (async () => {
+          try {
+            const { leads: changed, deletedIds } = await fetchLeadsByIds(ids)
+            if (changed.length === 0 && deletedIds.length === 0) return
+            const byId = new Map(changed.map((l) => [l.id, l]))
+            const removed = new Set(deletedIds)
+            setLeads((prev) => {
+              const next = prev.filter((l) => !removed.has(l.id)).map((l) => byId.get(l.id) ?? l)
+              // Lead novo (INSERT) não estava na lista: entra no fim, e a ordenação
+              // por `position` de cada tela recoloca no lugar.
+              const known = new Set(next.map((l) => l.id))
+              for (const l of changed) if (!known.has(l.id)) next.push(l)
+              return next
+            })
+          } catch {
+            // Rede caiu no meio: o poll e o retorno ao foco reconciliam.
+          }
+        })()
+      }, 600)
+    }
+
     const channel = client
       .channel('crm-global-chat-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'interactions' }, scheduleInteractionsRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, scheduleFullRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leads' }, scheduleLeadPatch)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, scheduleFullRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, scheduleFullRefresh)
       .subscribe()
 
     // O realtime (postgres_changes acima) é o mecanismo primário de atualização; o poll
     // é só uma rede de segurança. A 12s ele duplicava o tráfego do realtime o dia todo.
+    //
+    // E é rede de segurança para MENSAGEM, que é o que chega sozinho. Puxar os 2.680
+    // leads a cada 45 segundos custava 1,5 MB por ciclo e trocava a identidade do array
+    // — a tela de Leads remontava tudo três vezes por minuto sem nada ter mudado. A
+    // reconciliação completa ficou no retorno ao foco, logo abaixo.
     const pollMs = 45000
     const pollId = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
-      void refreshChatFromSupabase()
+      void refreshInteractionsOnly()
     }, pollMs)
 
     const onVisibility = () => {
