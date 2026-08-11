@@ -1,4 +1,4 @@
-import { hojeLocal } from '@/lib/diaLocal'
+import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { FileSpreadsheet, Plus, RefreshCw, Search, Upload } from 'lucide-react'
@@ -21,15 +21,14 @@ import {
 } from '@/components/ui/dialog'
 import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
-import type { Payable } from '@/services/estoqueCompras'
 import {
   DEFAULT_COST_CENTERS,
   createGastoManual,
   importGastosRows,
-  listGastos,
   parseGastosSpreadsheet,
-  totalsByCostCenter,
 } from '@/services/gastosControle'
+import { listSaidasTudo, type SaidaTudo } from '@/services/financeiro'
+import { Badge } from '@/components/ui/badge'
 
 function formatBRL(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -61,7 +60,11 @@ export function GastosControlePage() {
   const [month, setMonth] = useState(currentMonth())
   const [costCenter, setCostCenter] = useState<string>('all')
   const [q, setQ] = useState('')
-  const [rows, setRows] = useState<Payable[]>([])
+  // `rows` deixou de ser só payable_installments: agora é TUDO que saiu no mês — o que o
+  // banco pagou mais a conta a pagar que ainda não apareceu no extrato. Antes, esta tela
+  // mostrava R$ 122 mil do ano (só o que vinha de XML de nota) enquanto o extrato mostrava
+  // R$ 1,2 milhão só em julho, e as duas "estavam certas" olhando metade cada uma.
+  const [rows, setRows] = useState<SaidaTudo[]>([])
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -73,12 +76,20 @@ export function GastosControlePage() {
   const load = async () => {
     setLoading(true)
     try {
-      const data = await listGastos({
-        month,
-        costCenter: costCenter === 'all' ? undefined : costCenter,
-        q: q.trim() || undefined,
-      })
-      setRows(data)
+      const [y, m] = month.split('-').map(Number)
+      const de = `${month}-01`
+      const ate = diaLocal(new Date(y, m, 0))
+      const todas = await listSaidasTudo(de, ate)
+      const termo = q.trim().toLowerCase()
+      setRows(
+        todas.filter(
+          (r) =>
+            (costCenter === 'all' || (r.centroCusto ?? '') === costCenter) &&
+            (!termo ||
+              r.descricao.toLowerCase().includes(termo) ||
+              r.contraparte.toLowerCase().includes(termo)),
+        ),
+      )
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar gastos')
     } finally {
@@ -91,11 +102,28 @@ export function GastosControlePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [month, costCenter])
 
-  const totals = useMemo(() => totalsByCostCenter(rows), [rows])
+  const totals = useMemo(() => {
+    const map = new Map<string, { cents: number; count: number }>()
+    for (const r of rows) {
+      const key = r.centroCusto?.trim() || 'Sem centro'
+      const cur = map.get(key) ?? { cents: 0, count: 0 }
+      cur.cents += r.amountCents
+      cur.count += 1
+      map.set(key, cur)
+    }
+    return Array.from(map.entries())
+      .map(([costCenter, v]) => ({ costCenter, ...v }))
+      .sort((a, b) => b.cents - a.cents)
+  }, [rows])
+  /** Quanto da saída ainda não tem centro de custo — o que segura o relatório de pé. */
+  const semCentro = useMemo(
+    () => rows.filter((r) => !r.centroCusto).reduce((s, r) => s + r.amountCents, 0),
+    [rows],
+  )
   const totalCents = useMemo(() => rows.reduce((s, r) => s + r.amountCents, 0), [rows])
   const costCenterOptions = useMemo(() => {
     const set = new Set<string>([...DEFAULT_COST_CENTERS])
-    for (const r of rows) if (r.costCenter) set.add(r.costCenter)
+    for (const r of rows) if (r.centroCusto) set.add(r.centroCusto)
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'))
   }, [rows])
 
@@ -152,7 +180,7 @@ export function GastosControlePage() {
   return (
     <AppLayout
       title="Gastos e controle"
-      subtitle="Espelho da planilha: data, razão social, forma, centro de custo, subcategoria e valor."
+      subtitle="Tudo que saiu no mês: o que o banco pagou e a conta a pagar que ainda não caiu, por centro de custo."
     >
       <SubTabs tabs={financeiroTabs(isSalesPolo)} />
 
@@ -230,25 +258,27 @@ export function GastosControlePage() {
                       <tr>
                         <th className="px-3 py-2 text-left">Data</th>
                         <th className="px-3 py-2 text-left">Razão social</th>
-                        <th className="px-3 py-2 text-left">Forma</th>
+                        <th className="px-3 py-2 text-left">Origem</th>
                         <th className="px-3 py-2 text-left">C. custo</th>
-                        <th className="px-3 py-2 text-left">Subcategoria</th>
+                        <th className="px-3 py-2 text-left">Categoria</th>
                         <th className="px-3 py-2 text-right">Valor</th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((r) => (
-                        <tr key={r.id} className="border-t border-border/60 hover:bg-muted/30">
-                          <td className="px-3 py-2 whitespace-nowrap">{formatDay(r.dueDate)}</td>
-                          <td className="px-3 py-2 max-w-[240px] truncate" title={r.counterparty ?? r.supplierName ?? r.description}>
-                            {r.counterparty || r.supplierName || r.description}
+                        <tr key={`${r.origem}-${r.id}`} className="border-t border-border/60 hover:bg-muted/30">
+                          <td className="px-3 py-2 whitespace-nowrap">{formatDay(r.data)}</td>
+                          <td className="px-3 py-2 max-w-[240px] truncate" title={r.contraparte || r.descricao}>
+                            {r.contraparte || r.descricao}
                           </td>
-                          <td className="px-3 py-2 text-xs text-muted-foreground max-w-[140px] truncate">
-                            {r.paymentMethod ?? '—'}
+                          {/* De onde veio importa: "banco" já saiu da conta, "a pagar" é
+                              compromisso que ainda não apareceu no extrato. */}
+                          <td className="px-3 py-2 text-xs">
+                            <Badge variant={r.origem === 'banco' ? 'secondary' : 'outline'}>{r.origem}</Badge>
                           </td>
-                          <td className="px-3 py-2">{r.costCenter ?? '—'}</td>
+                          <td className="px-3 py-2">{r.centroCusto ?? '—'}</td>
                           <td className="px-3 py-2 text-muted-foreground max-w-[180px] truncate">
-                            {r.subcategory || '—'}
+                            {r.categoria || '—'}
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums font-medium">{formatBRL(r.amountCents)}</td>
                         </tr>
@@ -265,6 +295,15 @@ export function GastosControlePage() {
               <CardTitle className="text-base">Total por centro de custo</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
+              {/* Sem isto o relatório por centro de custo parece completo quando não é. A
+                  saída do banco entra sem centro nenhum até alguém classificar no Extrato. */}
+              {semCentro > 0 && (
+                <p className="rounded-md border border-amber-500/40 bg-amber-500/[0.06] p-2 text-xs">
+                  {formatBRL(semCentro)} saíram sem centro de custo neste mês. Classifique em{' '}
+                  <a href="/extrato" className="underline">Extrato</a> — lá a classificação vira
+                  regra e carimba todos os lançamentos iguais de uma vez.
+                </p>
+              )}
               {totals.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Sem dados.</p>
               ) : (

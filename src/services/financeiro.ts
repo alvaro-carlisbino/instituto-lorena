@@ -1094,13 +1094,14 @@ export type CategoryRule = {
   pattern: string
   categoryId: string
   direction: 'in' | 'out' | null
+  costCenter: string | null
 }
 
 export async function listCategoryRules(): Promise<CategoryRule[]> {
   const client = assertClient()
   const { data, error } = await client
     .from('fin_category_rules')
-    .select('id, pattern, category_id, direction')
+    .select('id, pattern, category_id, direction, cost_center')
     .order('pattern')
   if (error) throw new Error(error.message)
   return (data ?? []).map((r) => {
@@ -1110,6 +1111,7 @@ export async function listCategoryRules(): Promise<CategoryRule[]> {
       pattern: String(row.pattern ?? ''),
       categoryId: String(row.category_id ?? ''),
       direction: (row.direction as 'in' | 'out' | null) ?? null,
+      costCenter: (row.cost_center as string | null) ?? null,
     }
   })
 }
@@ -1125,11 +1127,18 @@ export async function saveCategoryRule(payload: {
   categoryId: string
   direction?: 'in' | 'out' | null
   sobrescrever?: boolean
+  /** carimbado junto: quem diz "isto é lavanderia" já sabe que é Infraestrutura */
+  costCenter?: string | null
 }): Promise<number> {
   const client = assertClient()
   const pattern = payload.pattern.trim()
   const { error } = await client.from('fin_category_rules').upsert(
-    { pattern, category_id: payload.categoryId, direction: payload.direction ?? null },
+    {
+      pattern,
+      category_id: payload.categoryId,
+      direction: payload.direction ?? null,
+      cost_center: payload.costCenter ?? null,
+    },
     { onConflict: 'tenant_id, pattern, direction' },
   )
   // Regra repetida não é erro pro usuário: ele quer o carimbo, e o carimbo roda igual.
@@ -1139,6 +1148,7 @@ export async function saveCategoryRule(payload: {
     p_category_id: payload.categoryId,
     p_direction: payload.direction ?? null,
     p_sobrescrever: payload.sobrescrever ?? false,
+    p_cost_center: payload.costCenter ?? null,
   })
   if (err2) throw new Error(err2.message)
   return Number(data ?? 0)
@@ -1180,5 +1190,43 @@ export async function listSaidaPorCategoria(de: string, ate: string): Promise<Sa
     categoryId: (r.category_id as string | null) ?? null,
     qtd: Number(r.qtd ?? 0),
     amountCents: Number(r.amount_cents ?? 0),
+  }))
+}
+
+/**
+ * TUDO que saiu no período: o que o banco pagou + a conta a pagar que ainda não apareceu
+ * no extrato.
+ *
+ * Sem a união, /gastos mostrava R$ 122 mil do ano (só o que veio de XML de nota) e o extrato
+ * mostrava R$ 1,2 milhão só em julho — e as duas telas estavam "certas", cada uma olhando
+ * metade. A conta a pagar já conciliada fica de fora de propósito: ela e o lançamento do
+ * banco são o mesmo dinheiro.
+ */
+export type SaidaTudo = {
+  origem: 'banco' | 'a pagar'
+  id: string
+  data: string
+  descricao: string
+  contraparte: string
+  amountCents: number
+  categoria: string | null
+  centroCusto: string | null
+  conciliado: boolean
+}
+
+export async function listSaidasTudo(de: string, ate: string): Promise<SaidaTudo[]> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_saidas_tudo', { p_de: de, p_ate: ate })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    origem: (r.origem as SaidaTudo['origem']) ?? 'banco',
+    id: String(r.id ?? ''),
+    data: String(r.data ?? ''),
+    descricao: String(r.descricao ?? ''),
+    contraparte: String(r.contraparte ?? ''),
+    amountCents: Number(r.amount_cents ?? 0),
+    categoria: (r.categoria as string | null) ?? null,
+    centroCusto: (r.centro_custo as string | null) ?? null,
+    conciliado: Boolean(r.conciliado),
   }))
 }
