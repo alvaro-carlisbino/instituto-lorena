@@ -59,6 +59,8 @@ export function LeadSalePage() {
   const [loading, setLoading] = useState(false)
   const [pageError, setPageError] = useState<string | null>(null)
   const [pageSuccess, setPageSuccess] = useState<string | null>(null)
+  // Armado quando o servidor barra por duplicidade: o PRÓXIMO clique confirma mesmo assim.
+  const [forceSale, setForceSale] = useState(false)
 
   const goBack = () => navigate(`/leads/${leadId}`)
 
@@ -125,11 +127,22 @@ export function LeadSalePage() {
         couponCode: coupon.trim() || undefined,
         freightCents: freight.trim() ? Math.round(Number(freight.replace(/\./g, '').replace(',', '.')) * 100) : undefined,
         createBlingOrder: createBling,
+        force: forceSale,
       })
+      // Trava anti-duplicidade: nada foi registrado. Arma o force e devolve a decisão pro
+      // operador — antes isso caía no caminho de sucesso e a tela dizia "venda confirmada"
+      // sem ter confirmado nada.
+      if (res.duplicate) {
+        setForceSale(true)
+        setPageError(res.duplicateMessage)
+        toast.warning(res.duplicateMessage ?? 'Venda parecida já registrada agora há pouco.')
+        return
+      }
       const valor = (res.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
       const msg = `Venda confirmada: ${valor} (${res.method}).${res.blingNote ? ' ' + res.blingNote : ''}`
       toast.success(msg)
       setPageSuccess(msg)
+      setForceSale(false)
       void crm.syncFromSupabase?.()
       navigate(`/leads/${leadId}`)
     } catch (e) {

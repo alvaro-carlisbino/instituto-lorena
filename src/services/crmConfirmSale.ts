@@ -34,6 +34,8 @@ export type ConfirmSaleInput = {
   couponCode?: string
   freightCents?: number
   createBlingOrder?: boolean
+  /** Segundo clique consciente: ignora a trava anti-duplicidade do servidor. */
+  force?: boolean
 }
 
 /** Catálogo de produtos cadastrados no Bling (para montar o carrinho da venda manual). */
@@ -51,6 +53,9 @@ export type ConfirmSaleResult = {
   method: string
   blingOrderId: string | null
   blingNote: string | null
+  /** Trava anti-duplicidade: NADA foi registrado, o servidor está pedindo confirmação. */
+  duplicate: boolean
+  duplicateMessage: string | null
 }
 
 export async function confirmSale(input: ConfirmSaleInput): Promise<ConfirmSaleResult> {
@@ -68,6 +73,7 @@ export async function confirmSale(input: ConfirmSaleInput): Promise<ConfirmSaleR
   if (input.paymentMethod === 'card') body.installments = input.installments ?? 1
   if (input.couponCode?.trim()) body.couponCode = input.couponCode.trim()
   if (input.freightCents && input.freightCents > 0) body.freightCents = input.freightCents
+  if (input.force) body.force = true
 
   const p = await invoke('crm-confirm-sale', body)
   if (p.ok !== true) throw new Error(String(p.message || p.error || 'Falha ao confirmar venda'))
@@ -78,5 +84,7 @@ export async function confirmSale(input: ConfirmSaleInput): Promise<ConfirmSaleR
     method: String(p.method ?? ''),
     blingOrderId: (p.blingOrderId as string | null) ?? null,
     blingNote: (p.blingNote as string | null) ?? null,
+    duplicate: p.duplicate === true,
+    duplicateMessage: p.duplicate === true ? String(p.message ?? 'Venda parecida já registrada agora há pouco.') : null,
   }
 }

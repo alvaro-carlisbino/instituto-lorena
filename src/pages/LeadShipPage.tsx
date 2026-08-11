@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Package, TriangleAlert, Truck, Settings, CheckCircle2 } from 'lucide-react'
@@ -75,6 +75,11 @@ const isValidCpf = (raw: string) => {
   return d === parseInt(c[10], 10)
 }
 
+// Comparação tolerante a acento/caixa/espaço extra — serve só pra decidir se vale perguntar
+// antes de trocar o nome já cadastrado no lead.
+const normName = (v: string) =>
+  v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+
 export function LeadShipPage() {
   const crm = useCrm()
   const navigate = useNavigate()
@@ -103,6 +108,14 @@ export function LeadShipPage() {
   const [city, setCity] = useState('')
   const [uf, setUf] = useState('')
   const [birth, setBirth] = useState('')
+  // Armado quando o nome digitado diverge do cadastro: o PRÓXIMO clique confirma a troca.
+  const [nameOverride, setNameOverride] = useState(false)
+
+  // Nome que já está cadastrado no lead (fonte do destinatário nos fluxos automáticos).
+  const cadastroNome = String(
+    (((lead?.customFields ?? {}) as Record<string, unknown>).cadastro as Record<string, unknown> | undefined)
+      ?.nomeCompleto ?? '',
+  ).trim()
 
   // Pedido / frete
   const [productName, setProductName] = useState(KIT_PRESETS['3_meses'].name)
@@ -131,19 +144,22 @@ export function LeadShipPage() {
   const [sender, setSender] = useState<MeAddress>({})
   const [savingSender, setSavingSender] = useState(false)
 
-  // Pré-preenche destinatário com nome/telefone do lead assim que disponível.
+  // Pré-preenche o destinatário UMA vez por lead, com o cadastro salvo na frente do nome do
+  // card (o cadastro é o que vai na NF-e). Antes os campos só eram preenchidos quando vazios
+  // e o efeito não reagia à troca de lead: o que o operador tinha digitado pro lead anterior
+  // ficava grudado e ia parar na etiqueta do próximo (caso "Mariana Alves", 11/ago).
+  const prefilledFor = useRef<string | null>(null)
   useEffect(() => {
-    if (defaultName != null) setName((prev) => (prev ? prev : defaultName))
-    if (defaultPhone != null) setPhone((prev) => (prev ? prev : defaultPhone))
-  }, [defaultName, defaultPhone])
-
-  // Pré-preenche CPF e data de nascimento com o cadastro já salvo do lead (se houver).
-  useEffect(() => {
-    const cad = ((lead?.customFields ?? {}) as Record<string, unknown>).cadastro as Record<string, unknown> | undefined
-    if (!cad) return
-    if (typeof cad.cpf === 'string' && cad.cpf) setDocument((prev) => (prev ? prev : String(cad.cpf)))
-    if (typeof cad.dataNascimento === 'string' && cad.dataNascimento) setBirth((prev) => (prev ? prev : fmtBirth(String(cad.dataNascimento))))
-  }, [lead?.id])
+    if (!ready || !lead || !leadId || prefilledFor.current === leadId) return
+    prefilledFor.current = leadId
+    const cad = ((lead.customFields ?? {}) as Record<string, unknown>).cadastro as Record<string, unknown> | undefined
+    const cadNome = typeof cad?.nomeCompleto === 'string' ? cad.nomeCompleto.trim() : ''
+    setName(cadNome || defaultName || '')
+    setNameOverride(false)
+    setPhone(defaultPhone || '')
+    setDocument(typeof cad?.cpf === 'string' ? cad.cpf : '')
+    setBirth(typeof cad?.dataNascimento === 'string' && cad.dataNascimento ? fmtBirth(cad.dataNascimento) : '')
+  }, [ready, lead, leadId, defaultName, defaultPhone])
 
   useEffect(() => {
     getShipConfig()
@@ -246,6 +262,16 @@ export function LeadShipPage() {
     if (!name.trim()) {
       setPageError('Informe o nome do destinatário.')
       return toast.error('Informe o nome do destinatário.')
+    }
+    // Nome diferente do que já está cadastrado no lead: pergunta antes de trocar. Esta tela
+    // grava o campo em custom_fields.cadastro.nomeCompleto, e é DALI que a venda confirmada e
+    // o envio automático tiram o destinatário depois — nome errado aqui contamina etiqueta,
+    // pedido do Bling e NF-e sem ninguém perceber.
+    if (cadastroNome && normName(cadastroNome) !== normName(name) && !nameOverride) {
+      setNameOverride(true)
+      const aviso = `O cadastro deste lead está como "${cadastroNome}" e você digitou "${name.trim()}". Clique de novo para trocar o nome e gerar o envio.`
+      setPageError(aviso)
+      return toast.warning(aviso)
     }
     if (onlyDigits(cep).length !== 8) {
       setPageError('CEP do destinatário inválido.')
@@ -420,7 +446,14 @@ export function LeadShipPage() {
             <div className="grid grid-cols-2 gap-2 sm:max-w-2xl">
               <div className="col-span-2 space-y-1">
                 <Label htmlFor="sl-name">Nome completo</Label>
-                <Input id="sl-name" value={name} onChange={(e) => setName(e.target.value)} />
+                <Input
+                  id="sl-name"
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value)
+                    setNameOverride(false) // nome mexeu: a confirmação de troca recomeça
+                  }}
+                />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="sl-phone">Telefone</Label>

@@ -24,6 +24,11 @@ function shortId(): string {
   return 'manual-' + crypto.randomUUID().replace(/-/g, '').slice(0, 12)
 }
 
+// Janela da trava anti-duplicidade. Duas confirmações do mesmo lead dentro dela só passam
+// com `force` do painel. Era 2 min e casava por valor: pouco pra quem confere o pedido
+// entre um clique e outro (caso Maria Nereide, 11/ago: 2min15 e valores diferentes).
+const DUP_WINDOW_MS = 15 * 60_000
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -114,16 +119,31 @@ Deno.serve(async (req) => {
     (lead.custom_fields?.cadastro as Record<string, string> | undefined)?.nomeCompleto || lead.patient_name || 'Cliente Tricopill',
   ).slice(0, 60)
 
-  // TRAVA ANTI-DUPLICIDADE: mesma venda (lead + valor) confirmada nos últimos 2 min não
-  // gera segundo registro/pedido (evita o duplo-clique que criou 2 pedidos no Bling).
-  {
-    const since = new Date(Date.now() - 120_000).toISOString()
-    const dupQ = isCard
-      ? admin.from('rede_payments').select('id').eq('tenant_id', tenantId).eq('lead_id', leadId).eq('amount_cents', totalCents).eq('status', 'paid').gte('paid_at', since)
-      : admin.from('pagbank_checkouts').select('checkout_id').eq('tenant_id', tenantId).eq('lead_id', leadId).eq('amount_cents', totalCents).eq('status', 'paid').gte('paid_at', since)
-    const { data: dup } = await dupQ.limit(1)
-    if (dup && dup.length) {
-      return json({ ok: true, duplicate: true, leadId, amountCents: totalCents, message: 'Venda idêntica já registrada há instantes — não dupliquei.' })
+  // TRAVA ANTI-DUPLICIDADE: QUALQUER venda paga do mesmo lead dentro da janela bloqueia a
+  // segunda; só `force` (segundo clique consciente no painel) libera. Antes exigia valor
+  // IGUAL e método igual dentro de 2 min — o duplo-clique da Maria Nereide (11/ago) veio
+  // com 2min15 e valores diferentes (R$ 728,00 e R$ 713,00), escapou dos dois filtros e
+  // rendeu 2 pedidos no Bling + 2 carrinhos no Melhor Envio.
+  if (p.force !== true) {
+    const since = new Date(Date.now() - DUP_WINDOW_MS).toISOString()
+    const recentes = admin.from('rede_payments').select('amount_cents, paid_at')
+      .eq('tenant_id', tenantId).eq('lead_id', leadId).eq('status', 'paid').gte('paid_at', since)
+      .order('paid_at', { ascending: false }).limit(1)
+    const recentesPag = admin.from('pagbank_checkouts').select('amount_cents, paid_at')
+      .eq('tenant_id', tenantId).eq('lead_id', leadId).eq('status', 'paid').gte('paid_at', since)
+      .order('paid_at', { ascending: false }).limit(1)
+    const [rede, pagbank] = await Promise.all([recentes, recentesPag])
+    const prev = [...(rede.data ?? []), ...(pagbank.data ?? [])]
+      .sort((a, b) => String(b.paid_at ?? '').localeCompare(String(a.paid_at ?? '')))[0] as
+        { amount_cents?: number; paid_at?: string } | undefined
+    if (prev) {
+      const min = Math.max(1, Math.round((Date.now() - Date.parse(String(prev.paid_at))) / 60_000))
+      return json({
+        ok: true, duplicate: true, leadId, amountCents: totalCents,
+        previousAmountCents: Number(prev.amount_cents ?? 0), previousAt: prev.paid_at ?? null,
+        message: `Este lead já teve uma venda de ${formatBRLCents(Number(prev.amount_cents ?? 0))} confirmada há ${min} min. ` +
+          'Se for outra venda mesmo, confirme de novo para registrar as duas.',
+      })
     }
   }
 
