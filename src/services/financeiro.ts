@@ -1029,3 +1029,41 @@ export async function listCaixaDinheiro(de: string, ate: string): Promise<CaixaM
     sobraCents: Number(r.sobra_cents ?? 0),
   }))
 }
+
+// ──────────────────────────────────────────── a receber do adquirente
+//
+// Ver a migration 20260811220000. É o "conta a receber" de verdade da clínica: parcela de
+// cartão já vendida e ainda não vencida. NÃO desconta antecipação — o extrato não diz quais
+// parcelas foram adiantadas, só o total. Por isso o número é um teto, e a tela diz isso.
+
+export type AdquirenteMes = { mes: string; parcelas: number; amountCents: number }
+
+export async function listAdquirenteAReceber(): Promise<AdquirenteMes[]> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_adquirente_a_receber', {})
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    mes: String(r.mes ?? ''),
+    parcelas: Number(r.parcelas ?? 0),
+    amountCents: Number(r.amount_cents ?? 0),
+  }))
+}
+
+/** Entradas do mês nas contas BANCO — o número de caixa, sem cartão nem gaveta. */
+export async function entrouNaContaNoPeriodo(de: string, ate: string): Promise<number> {
+  const contas = (await listAccounts()).filter((c) => c.kind === 'banco').map((c) => c.id)
+  if (contas.length === 0) return 0
+  const rows = await buscarTudo<{ amount_cents: number }>(
+    () =>
+      assertClient()
+        .from('fin_transactions')
+        .select('amount_cents, id')
+        .in('account_id', contas)
+        .eq('direction', 'in')
+        .gte('date', de)
+        .lte('date', ate)
+        .order('id'),
+    { rotulo: 'fin_transactions (entrou na conta)', maxPaginas: 10 },
+  )
+  return rows.reduce((s, r) => s + Math.abs(Number(r.amount_cents ?? 0)), 0)
+}

@@ -1,4 +1,4 @@
-import { diaLocal, hojeLocal } from '@/lib/diaLocal'
+import { hojeLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { CalendarClock, Check, HandCoins, Plus } from 'lucide-react'
@@ -23,11 +23,14 @@ import {
 import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import {
+  type AdquirenteMes,
   type FinAccount,
   type FinCategory,
   type Receivable,
   createReceivables,
+  entrouNaContaNoPeriodo,
   listAccounts,
+  listAdquirenteAReceber,
   listCategories,
   listReceivables,
   receiveReceivable,
@@ -78,6 +81,8 @@ export function ContasReceberPage() {
   // Período das RECEBIDAS. Começa no mês corrente, que é o que os KPIs mostram.
   const [de, setDe] = useState(`${hojeLocal().slice(0, 7)}-01`)
   const [ate, setAte] = useState(hojeLocal())
+  const [adquirente, setAdquirente] = useState<AdquirenteMes[]>([])
+  const [bankMonthCents, setBankMonthCents] = useState(0)
 
   const load = async (d = de, a = ate) => {
     setLoading(true)
@@ -85,15 +90,20 @@ export function ContasReceberPage() {
       // ABERTO vem inteiro (é o que a tela cobra, e vencida pode ser de qualquer data).
       // RECEBIDO vem por período: com o ano do Shosp importado são 3.353 contas, e puxar
       // tudo a cada abertura só pra somar o mês é desperdício.
-      const [abertas, recebidas, acc, cats] = await Promise.all([
+      const mesDe = `${hojeLocal().slice(0, 7)}-01`
+      const [abertas, recebidas, acc, cats, adq, banco] = await Promise.all([
         listReceivables({ status: 'aberto' }),
         listReceivables({ status: 'recebido', from: d, to: a }),
         listAccounts(),
         listCategories('receita'),
+        listAdquirenteAReceber(),
+        entrouNaContaNoPeriodo(mesDe, hojeLocal()),
       ])
       setReceivables([...abertas, ...recebidas])
       setAccounts(acc)
       setCategories(cats)
+      setAdquirente(adq)
+      setBankMonthCents(banco)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar contas a receber')
     } finally {
@@ -111,18 +121,20 @@ export function ContasReceberPage() {
 
   const kpis = useMemo(() => {
     const open = receivables.filter((r) => r.status === 'aberto')
-    const in7 = new Date()
-    in7.setDate(in7.getDate() + 7)
-    const in7Key = diaLocal(in7)
     return {
       overdueCents: open.filter((r) => r.dueDate < today).reduce((s, r) => s + r.amountCents, 0),
-      next7Cents: open.filter((r) => r.dueDate >= today && r.dueDate <= in7Key).reduce((s, r) => s + r.amountCents, 0),
-      openMonthCents: open.filter((r) => monthKey(r.dueDate) === thisMonth).reduce((s, r) => s + r.amountCents, 0),
-      receivedMonthCents: receivables
-        .filter((r) => r.status === 'recebido' && r.receivedAt != null && r.receivedAt.slice(0, 7) === thisMonth)
+      // VENDIDO, não recebido: é o que o paciente pagou no mês, independente de onde o
+      // dinheiro esteja. `dueDate` é a data da venda no Shosp.
+      soldMonthCents: receivables
+        .filter((r) => r.status === 'recebido' && monthKey(r.dueDate) === thisMonth)
         .reduce((s, r) => s + r.amountCents, 0),
+      bankMonthCents,
+      acquirerCents: adquirente.reduce((s, m) => s + m.amountCents, 0),
     }
-  }, [receivables, today, thisMonth])
+  }, [receivables, today, thisMonth, bankMonthCents, adquirente])
+
+  /** Último mês com parcela agendada — o "até quando" do a receber. */
+  const adquirenteAte = adquirente.at(-1)?.mes ?? ''
 
   /**
    * Recebidas do período, agrupadas por mês.
@@ -212,21 +224,58 @@ export function ContasReceberPage() {
       <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Estes quatro nomes já mentiram. "Recebido no mês" mostrava R$ 410.681 em agosto/2026
+            quando só R$ 85.956 (o PIX) tinham entrado na conta: o resto era cartão no adquirente
+            e dinheiro na gaveta. Quem pagou foi o paciente — VENDIDO é a palavra certa. E o a
+            receber de verdade, R$ 2,1 milhões de parcela de cartão, não aparecia em lugar nenhum. */}
         {[
-          { label: 'Vencidas', value: kpis.overdueCents, alert: kpis.overdueCents > 0 },
-          { label: 'Vencem em 7 dias', value: kpis.next7Cents, alert: false },
-          { label: 'A receber no mês', value: kpis.openMonthCents, alert: false },
-          { label: 'Recebido no mês', value: kpis.receivedMonthCents, alert: false },
+          {
+            label: 'Vendido no mês',
+            value: kpis.soldMonthCents,
+            hint: 'o paciente pagou, esteja o dinheiro onde estiver',
+            alert: false,
+          },
+          {
+            label: 'Entrou na conta no mês',
+            value: kpis.bankMonthCents,
+            hint: 'extrato das contas de banco',
+            alert: false,
+          },
+          {
+            label: 'A receber do adquirente',
+            value: kpis.acquirerCents,
+            hint: adquirenteAte ? `parcelas de cartão até ${monthLabel(adquirenteAte)}` : 'parcelas de cartão',
+            alert: false,
+          },
+          {
+            label: 'Vencidas',
+            value: kpis.overdueCents,
+            hint: 'contas agendadas na mão que passaram do prazo',
+            alert: kpis.overdueCents > 0,
+          },
         ].map((kpi) => (
           <Card key={kpi.label}>
             <CardContent className="pt-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{kpi.label}</p>
               <p className={`mt-1 text-lg font-bold ${kpi.alert ? 'text-red-500' : ''}`}>{formatBRL(kpi.value)}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{kpi.hint}</p>
             </CardContent>
           </Card>
         ))}
       </div>
 
+      {/* O a receber do adquirente é um TETO, e dizer isso é o que separa número de chute:
+          parcela antecipada já foi paga e deixou de ser a receber, mas o extrato só mostra o
+          valor total do adiantamento, nunca QUAIS parcelas ele cobriu. */}
+      {kpis.acquirerCents > 0 && (
+        <div className="mb-4 -mt-1">
+          <p className="text-xs text-muted-foreground">
+            O valor a receber do adquirente é um teto: ele não desconta antecipação. Parcela
+            antecipada já foi paga e saiu do saldo, mas o extrato só informa o total adiantado,
+            nunca quais parcelas ele cobriu.
+          </p>
+        </div>
+      )}
       <div className="grid gap-4 xl:grid-cols-[minmax(0,400px)_1fr]">
         <Card>
           <CardHeader>
