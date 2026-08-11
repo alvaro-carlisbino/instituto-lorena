@@ -24,6 +24,27 @@ export type TreatmentProtocol = {
   active: boolean
 }
 
+/**
+ * sessionsPlanned = 0 significa "a definir", não "nenhuma sessão".
+ *
+ * O catálogo foi montado a partir das 205 vendas de protocolo de 2026, e a planilha da
+ * Ingrid nunca registrou quantas sessões cada protocolo tem — só os pacotes dizem no
+ * próprio nome ("3 SESSÕES", "5 SESSÕES"). Preencher 4 ou 6 no chute seria inventar
+ * protocolo clínico, então fica 0 até a clínica dizer.
+ *
+ * Estas duas funções existem para que "Sessões 2/0" não apareça em tela nenhuma.
+ */
+export const sessoesDefinidas = (planned: number) => planned > 0
+
+export function rotuloSessoes(planned: number): string {
+  if (!sessoesDefinidas(planned)) return 'sessões a definir'
+  return `${planned} ${planned === 1 ? 'sessão' : 'sessões'}`
+}
+
+export function rotuloProgresso(done: number, planned: number): string {
+  return sessoesDefinidas(planned) ? `Sessões ${done}/${planned}` : `${done} sessões feitas`
+}
+
 export async function listProtocolCatalog(): Promise<TreatmentProtocol[]> {
   const client = assertClient()
   const { data, error } = await client

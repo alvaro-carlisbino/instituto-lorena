@@ -22,6 +22,9 @@ import {
   listLeadProtocols,
   listProtocolCatalog,
   registerSession,
+  rotuloProgresso,
+  rotuloSessoes,
+  sessoesDefinidas,
   setLeadProtocolStatus,
   startLeadProtocol,
 } from '@/services/treatmentProtocols'
@@ -166,7 +169,11 @@ export function ProtocolosPage() {
         sessionNumber: nextNumber,
         note: sessionNote[p.id] || undefined,
       })
-      toast.success(`Sessão ${nextNumber}/${p.sessionsPlanned} registrada.`)
+      toast.success(
+        sessoesDefinidas(p.sessionsPlanned)
+          ? `Sessão ${nextNumber}/${p.sessionsPlanned} registrada.`
+          : `Sessão ${nextNumber} registrada.`,
+      )
       setSessionNote((prev) => ({ ...prev, [p.id]: '' }))
       await load()
     } catch (e) {
@@ -284,7 +291,11 @@ export function ProtocolosPage() {
                     <div>
                       <div className="font-medium">{c.name}</div>
                       <div className="text-xs text-muted-foreground">
-                        {c.sessionsPlanned} {c.sessionsPlanned === 1 ? 'sessão' : 'sessões'}
+                        {/* 0 sessões não quer dizer "nenhuma", quer dizer que ninguém definiu
+                            ainda. O catálogo nasceu das vendas, e a planilha nunca registrou
+                            quantas sessões cada protocolo tem. Chutar seria inventar
+                            protocolo clínico. */}
+                        {rotuloSessoes(c.sessionsPlanned)}
                         {c.intervalDays ? ` · a cada ${c.intervalDays} dias` : ''}
                         {c.category ? ` · ${c.category}` : ''}
                         {c.defaultPrice != null
@@ -341,7 +352,7 @@ export function ProtocolosPage() {
                     <SelectContent>
                       {catalog.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
-                          {c.name} ({c.sessionsPlanned} {c.sessionsPlanned === 1 ? 'sessão' : 'sessões'})
+                          {c.name} ({rotuloSessoes(c.sessionsPlanned)})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -417,7 +428,7 @@ export function ProtocolosPage() {
                           </Badge>
                         </div>
                         <span className="text-xs text-muted-foreground">
-                          Sessões {done}/{p.sessionsPlanned}
+                          {rotuloProgresso(done, p.sessionsPlanned)}
                           {p.price != null
                             ? ` · ${p.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
                             : ''}

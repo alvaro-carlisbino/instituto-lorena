@@ -13,6 +13,9 @@ import {
   listLeadProtocols,
   listProtocolCatalog,
   registerSession,
+  rotuloProgresso,
+  rotuloSessoes,
+  sessoesDefinidas,
   setLeadProtocolStatus,
   startLeadProtocol,
 } from '@/services/treatmentProtocols'
@@ -103,7 +106,11 @@ export function LeadProtocolsSection({ leadId, leadName }: Props) {
         sessionNumber: nextNumber,
         note: sessionNote[p.id] || undefined,
       })
-      toast.success(`Sessão ${nextNumber}/${p.sessionsPlanned} registrada.`)
+      toast.success(
+        sessoesDefinidas(p.sessionsPlanned)
+          ? `Sessão ${nextNumber}/${p.sessionsPlanned} registrada.`
+          : `Sessão ${nextNumber} registrada.`,
+      )
       setSessionNote((prev) => ({ ...prev, [p.id]: '' }))
       await load()
     } catch (e) {
@@ -153,7 +160,7 @@ export function LeadProtocolsSection({ leadId, leadName }: Props) {
                   </Badge>
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  Sessões {done}/{p.sessionsPlanned}
+                  {rotuloProgresso(done, p.sessionsPlanned)}
                 </span>
               </div>
               <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -197,7 +204,7 @@ export function LeadProtocolsSection({ leadId, leadName }: Props) {
           <SelectContent>
             {availableCatalog.map((c) => (
               <SelectItem key={c.id} value={c.id} className="text-xs">
-                {c.name} · {c.sessionsPlanned} {c.sessionsPlanned === 1 ? 'sessão' : 'sessões'}
+                {c.name} · {rotuloSessoes(c.sessionsPlanned)}
                 {c.category ? ` · ${c.category}` : ''}
               </SelectItem>
             ))}
