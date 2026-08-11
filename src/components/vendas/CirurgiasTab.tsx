@@ -234,13 +234,19 @@ export function CirurgiasTab() {
                     }
                   >
                     {REMINDER_LABEL[a.kind]}
+                    {/* 'erro' precisa do próprio ramo. Sem ele o ternário caía no default e
+                        um lembrete que FALHOU era desenhado como "30 dias em 11/08/2026",
+                        idêntico a um agendado — a falha de envio para o paciente ficava
+                        invisível justamente na tela feita para vê-la. */}
                     {a.status === 'enviado'
                       ? ' enviado'
-                      : a.status === 'cancelado'
-                        ? ' cancelado'
-                        : a.status === 'simulado'
-                          ? ' simulado'
-                          : ` em ${new Date(`${a.scheduledFor}T12:00:00`).toLocaleDateString('pt-BR')}`}
+                      : a.status === 'erro'
+                        ? ' falhou'
+                        : a.status === 'cancelado'
+                          ? ' cancelado'
+                          : a.status === 'simulado'
+                            ? ' simulado'
+                            : ` em ${new Date(`${a.scheduledFor}T12:00:00`).toLocaleDateString('pt-BR')}`}
                   </Badge>
                 ))}
               </div>

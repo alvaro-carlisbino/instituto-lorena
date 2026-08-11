@@ -62,6 +62,8 @@ type Fila = {
   id: string
   kind: Kind
   scheduled_for: string
+  /** Tentativas anteriores. Nunca zera — sobrevive ao rearme do trigger. */
+  attempts: number | null
   sale_id: string
   clinic_sales: {
     lead_id: string | null
@@ -146,7 +148,7 @@ Deno.serve(async (req) => {
   const { data, error } = await admin
     .from('surgery_reminders')
     .select(
-      'id, kind, scheduled_for, sale_id, clinic_sales!inner(lead_id, tenant_id, patient_name, scheduled_at, procedure_label, status)',
+      'id, kind, scheduled_for, attempts, sale_id, clinic_sales!inner(lead_id, tenant_id, patient_name, scheduled_at, procedure_label, status)',
     )
     .eq('status', 'pendente')
     .lte('scheduled_for', hoje)
@@ -226,6 +228,9 @@ Deno.serve(async (req) => {
       })
       const ok = res.ok
       const corpo = await res.text()
+      // attempts NUNCA zera: é a auditoria que sobrevive ao rearme, que limpa error e
+      // sent_at. Sem ela, 'erro' apagado no rearme apagava junto a única pista de que já
+      // se tentou falar com esse paciente — e um 502 pode vir DEPOIS de a mensagem sair.
       await admin
         .from('surgery_reminders')
         .update({
@@ -234,6 +239,7 @@ Deno.serve(async (req) => {
           sent_at: new Date().toISOString(),
           error: ok ? null : corpo.slice(0, 400),
           channel: 'whatsapp',
+          attempts: (r.attempts ?? 0) + 1,
         })
         .eq('id', r.id)
       if (ok) enviados += 1
@@ -241,7 +247,12 @@ Deno.serve(async (req) => {
     } catch (e) {
       await admin
         .from('surgery_reminders')
-        .update({ status: 'erro', error: e instanceof Error ? e.message : 'falha no envio', message: texto })
+        .update({
+          status: 'erro',
+          error: e instanceof Error ? e.message : 'falha no envio',
+          message: texto,
+          attempts: (r.attempts ?? 0) + 1,
+        })
         .eq('id', r.id)
       resultado.push({ paciente: venda.patient_name, kind: r.kind, ok: false })
     }

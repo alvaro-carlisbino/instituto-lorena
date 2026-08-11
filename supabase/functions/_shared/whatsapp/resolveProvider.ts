@@ -127,9 +127,9 @@ export async function resolveOutboundProviderForLead(
   if (waProvider === 'wapi') {
     provider = await getWapiProviderForLead(admin, effectiveInstanceId)
   } else if (waProvider === 'official') {
-    provider = await getOfficialProviderForLead(admin, effectiveInstanceId)
+    provider = await getOfficialProviderForLead(admin, effectiveInstanceId, lead.tenant_id)
   } else {
-    provider = await getEvolutionProviderForLead(admin, effectiveInstanceId)
+    provider = await getEvolutionProviderForLead(admin, effectiveInstanceId, lead.tenant_id)
   }
 
   return {

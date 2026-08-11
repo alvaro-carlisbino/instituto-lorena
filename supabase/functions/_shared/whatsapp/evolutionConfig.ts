@@ -15,6 +15,19 @@ export type WhatsappInstanceRow = {
   tenant_id?: string | null
 }
 
+/**
+ * IDENTIDADE DA LINHA DE ENTRADA — não filtra por `active`, de propósito.
+ *
+ * Reconhecer por onde a mensagem ENTROU é pergunta diferente de decidir por onde ela SAI.
+ * Linha desativada continua sendo a identidade de quem escreveu; quem escolhe a saída é
+ * resolveOutboundProviderForLead, e é lá que o `active` manda.
+ *
+ * O filtro estava aqui e custou caro: ao aposentar a linha "SDR" da clínica em 11/ago/26,
+ * o casamento por nome passou a devolver null e o webhook caía em loadDefaultWhatsappInstance,
+ * que escolhe a primeira ativa do banco INTEIRO por sort_order — a linha de vendas do
+ * Tricopill. Paciente da clínica escrevendo no SDR viraria lead do Tricopill, atendido pelo
+ * bot de vendas: a regressão exata que o commit 57cc57c tinha acabado de fechar na saída.
+ */
 export async function loadWhatsappInstanceByEvolutionName(
   admin: SupabaseClient,
   evolutionInstanceName: string,
@@ -25,7 +38,6 @@ export async function loadWhatsappInstanceByEvolutionName(
     .from('whatsapp_channel_instances')
     .select('id, evolution_instance_name, meta_phone_number_id, tenant_id')
     .eq('evolution_instance_name', name)
-    .eq('active', true)
     .maybeSingle()
   if (error || !data) return null
   return {
@@ -57,13 +69,24 @@ export async function loadWhatsappInstanceByMetaPhoneNumberId(
   }
 }
 
+/**
+ * Linha padrão. SEMPRE passe o tenant quando ele for conhecido.
+ *
+ * Sem tenant, isto escolhe a primeira linha ativa do banco INTEIRO por sort_order — e o
+ * banco tem dois polos. Em 11/ago/26 a primeira ativa passou a ser a linha de vendas do
+ * Tricopill, então qualquer caminho que caísse aqui sem tenant mandava paciente da clínica
+ * pela boca do Tricopill. O parâmetro existe para que esse fallback não cruze polo.
+ */
 export async function loadDefaultWhatsappInstance(
   admin: SupabaseClient,
+  tenantId?: string | null,
 ): Promise<WhatsappInstanceRow | null> {
-  const { data, error } = await admin
+  let q = admin
     .from('whatsapp_channel_instances')
     .select('id, evolution_instance_name, meta_phone_number_id, tenant_id')
     .eq('active', true)
+  if (tenantId) q = q.eq('tenant_id', tenantId)
+  const { data, error } = await q
     .order('sort_order', { ascending: true })
     .limit(1)
     .maybeSingle()
@@ -82,23 +105,24 @@ export async function loadDefaultWhatsappInstance(
 export async function resolveWhatsappInstanceRow(
   admin: SupabaseClient,
   evolutionInstanceName: string,
+  tenantId?: string | null,
 ): Promise<WhatsappInstanceRow | null> {
   const fromName = await loadWhatsappInstanceByEvolutionName(admin, evolutionInstanceName)
   if (fromName) return fromName
-  return loadDefaultWhatsappInstance(admin)
+  return loadDefaultWhatsappInstance(admin, tenantId)
 }
 
 export async function resolveWhatsappInstanceRowForProvider(
   admin: SupabaseClient,
-  options: { provider: string; evolutionInstanceName?: string; metaPhoneNumberId?: string },
+  options: { provider: string; evolutionInstanceName?: string; metaPhoneNumberId?: string; tenantId?: string | null },
 ): Promise<WhatsappInstanceRow | null> {
   const p = (options.provider || 'evolution').trim().toLowerCase()
   if (p === 'official') {
     const byMeta = await loadWhatsappInstanceByMetaPhoneNumberId(admin, options.metaPhoneNumberId ?? '')
     if (byMeta) return byMeta
-    return loadDefaultWhatsappInstance(admin)
+    return loadDefaultWhatsappInstance(admin, options.tenantId)
   }
-  return resolveWhatsappInstanceRow(admin, options.evolutionInstanceName ?? '')
+  return resolveWhatsappInstanceRow(admin, options.evolutionInstanceName ?? '', options.tenantId)
 }
 
 /**
@@ -125,6 +149,7 @@ export function createEvolutionProviderFromEnv(): WhatsappProvider {
 export async function getEvolutionProviderForLead(
   admin: SupabaseClient,
   leadWhatsappInstanceId: string | null,
+  tenantId?: string | null,
 ): Promise<WhatsappProvider> {
   if (leadWhatsappInstanceId) {
     const { data } = await admin
@@ -137,7 +162,7 @@ export async function getEvolutionProviderForLead(
       return createEvolutionProviderForInstanceName(String(row.evolution_instance_name))
     }
   }
-  const def = await loadDefaultWhatsappInstance(admin)
+  const def = await loadDefaultWhatsappInstance(admin, tenantId)
   if (def) return createEvolutionProviderForInstanceName(def.evolution_instance_name)
   return createEvolutionProviderFromEnv()
 }
@@ -145,6 +170,7 @@ export async function getEvolutionProviderForLead(
 export async function getOfficialProviderForLead(
   admin: SupabaseClient,
   leadWhatsappInstanceId: string | null,
+  tenantId?: string | null,
 ): Promise<WhatsappProvider> {
   const { OfficialWhatsappProvider } = await import('./official.ts')
   if (leadWhatsappInstanceId) {
@@ -159,7 +185,7 @@ export async function getOfficialProviderForLead(
       if (pid) return new OfficialWhatsappProvider({ phoneNumberId: pid })
     }
   }
-  const def = await loadDefaultWhatsappInstance(admin)
+  const def = await loadDefaultWhatsappInstance(admin, tenantId)
   if (def?.meta_phone_number_id && String(def.meta_phone_number_id).trim()) {
     return new OfficialWhatsappProvider({ phoneNumberId: String(def.meta_phone_number_id).trim() })
   }
