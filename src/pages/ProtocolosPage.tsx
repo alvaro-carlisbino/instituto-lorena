@@ -9,13 +9,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SearchPicker } from '@/components/ui/search-picker'
 import { Textarea } from '@/components/ui/textarea'
 import { PROTOCOL_STATUS_STYLE } from '@/components/leads/LeadProtocolsSection'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { listSurgicalStaff } from '@/services/clinicSales'
+import { searchLeadsByName } from '@/services/clinicalNotes'
 import {
   type LeadProtocol,
   type TreatmentProtocol,
@@ -69,16 +70,11 @@ export function ProtocolosPage() {
   const [editandoIndicacao, setEditandoIndicacao] = useState<{ id: string; valor: string } | null>(null)
   const [medicosDaCasa, setMedicosDaCasa] = useState<string[]>([])
 
-  // Leads do polo ativo, mais recentes primeiro (mesmo recorte da tela de kits).
-  const poloLeads = useMemo(
-    () =>
-      crm.leads
-        .filter((l) => !l.tenantId || l.tenantId === tenant.id)
-        .slice()
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 200),
-    [crm.leads, tenant.id],
-  )
+  // O nome do paciente escolhido vem do próprio resultado da busca, não do crm.leads:
+  // a busca é no servidor e alcança os 2.620 pacientes, enquanto o estado do CRM só
+  // carrega uma fatia. Sem isso o botão mostraria "Paciente" para quem está fora dela.
+  const [startLeadName, setStartLeadName] = useState('')
+
   const leadNameById = useMemo(
     () => new Map(crm.leads.map((l) => [l.id, l.patientName] as const)),
     [crm.leads],
@@ -186,9 +182,10 @@ export function ProtocolosPage() {
         note: startNote,
         referredBy: startReferral,
       })
-      const patient = leadNameById.get(startLeadId) ?? 'paciente'
+      const patient = startLeadName || leadNameById.get(startLeadId) || 'paciente'
       toast.success(`Protocolo "${proto.name}" iniciado para ${patient}.`)
       setStartLeadId('')
+      setStartLeadName('')
       setStartProtocolId('')
       setStartSessions('')
       setStartPrice('')
@@ -371,34 +368,64 @@ export function ProtocolosPage() {
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>Paciente (lead do CRM)</Label>
-                  <Select value={startLeadId || undefined} onValueChange={(v) => setStartLeadId(v ?? '')}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Escolher paciente" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {poloLeads.map((l) => (
-                        <SelectItem key={l.id} value={l.id}>
-                          {l.patientName}
-                          {l.phone ? ` · ${l.phone}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {/* Busca no servidor: são 2.620 pacientes, não cabem num dropdown.
+                      O telefone aparece na lista porque é o que desempata homônimo. */}
+                  <SearchPicker
+                    title="Buscar paciente"
+                    placeholder="Escolher paciente"
+                    searchPlaceholder="Nome ou telefone do paciente…"
+                    value={
+                      startLeadId
+                        ? {
+                            id: startLeadId,
+                            label: startLeadName || leadNameById.get(startLeadId) || 'Paciente',
+                          }
+                        : null
+                    }
+                    onSearch={async (q) =>
+                      (await searchLeadsByName(tenant.id, q, 40)).map((p) => ({
+                        id: p.id,
+                        label: p.name,
+                        hint: p.phone || undefined,
+                      }))
+                    }
+                    onPick={(item) => {
+                      setStartLeadId(item.id)
+                      setStartLeadName(item.label)
+                    }}
+                    onClear={() => {
+                      setStartLeadId('')
+                      setStartLeadName('')
+                    }}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Protocolo</Label>
-                  <Select value={startProtocolId || undefined} onValueChange={(v) => v && handleStartProtocolChange(v)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder={catalog.length === 0 ? 'Cadastre um protocolo primeiro' : 'Escolher protocolo'} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {catalog.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.name} ({rotuloSessoes(c.sessionsPlanned)})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchPicker
+                    title="Escolher protocolo"
+                    placeholder={catalog.length === 0 ? 'Cadastre um protocolo primeiro' : 'Escolher protocolo'}
+                    searchPlaceholder="Nome ou categoria do protocolo…"
+                    disabled={catalog.length === 0}
+                    value={
+                      startProtocolId
+                        ? {
+                            id: startProtocolId,
+                            label: catalog.find((c) => c.id === startProtocolId)?.name ?? 'Protocolo',
+                          }
+                        : null
+                    }
+                    items={catalog.map((c) => ({
+                      id: c.id,
+                      label: c.name,
+                      hint: [rotuloSessoes(c.sessionsPlanned), c.category].filter(Boolean).join(' · '),
+                      meta:
+                        c.defaultPrice != null
+                          ? c.defaultPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                          : undefined,
+                    }))}
+                    onPick={(item) => handleStartProtocolChange(item.id)}
+                    onClear={() => setStartProtocolId('')}
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">

@@ -13,6 +13,8 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { estoqueTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
+import { SearchPicker } from '@/components/ui/search-picker'
+import { searchLeadsByName } from '@/services/clinicalNotes'
 import { useCrm } from '@/context/CrmContext'
 import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 import {
@@ -61,28 +63,39 @@ export function KitsPage() {
   // form de kit montado
   const [kitTemplateId, setKitTemplateId] = useState('')
   const [kitLeadId, setKitLeadId] = useState('')
+  // Nome vindo da busca no servidor: o crm.leads em memória é uma fatia, e o paciente
+  // escolhido pode estar fora dela.
+  const [kitLeadName, setKitLeadName] = useState('')
   const [kitPatient, setKitPatient] = useState('')
   const [kitProcedure, setKitProcedure] = useState('')
   const [kitDate, setKitDate] = useState('')
   const [kitRows, setKitRows] = useState<MountRow[]>([])
   const [savingKit, setSavingKit] = useState(false)
 
-  // Leads do polo ativo, mais recentes primeiro — pra vincular o kit ao paciente do CRM.
-  const poloLeads = useMemo(
-    () =>
-      crm.leads
-        .filter((l) => !l.tenantId || l.tenantId === tenant.id)
-        .slice()
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 200),
-    [crm.leads, tenant.id],
-  )
   const leadNameById = useMemo(
     () => new Map(crm.leads.map((l) => [l.id, l.patientName] as const)),
     [crm.leads],
   )
 
   const itemName = useMemo(() => new Map(items.map((i) => [i.id, i.name] as const)), [items])
+  const itemNameById = itemName
+  /**
+   * Produto para o modal de busca. SKU e código de barras entram como `searchable`:
+   * quem monta kit no balcão costuma ter a caixa na mão e o código é mais rápido de
+   * digitar que o nome. O saldo aparece à direita porque escolher item zerado é o
+   * erro que só aparece na hora de dar baixa.
+   */
+  const produtosParaBusca = useMemo(
+    () =>
+      items.map((i) => ({
+        id: i.id,
+        label: i.name,
+        hint: [i.category, i.unit].filter(Boolean).join(' · ') || undefined,
+        meta: `${i.qty} ${i.unit}`,
+        searchable: [i.sku, i.barcode, ...i.aliases].filter(Boolean).join(' '),
+      })),
+    [items],
+  )
   const controlledIds = useMemo(
     () => new Set(items.filter((i) => i.controlled).map((i) => i.id)),
     [items],
@@ -171,7 +184,7 @@ export function KitsPage() {
     }
     setSavingKit(true)
     try {
-      const patientName = kitPatient.trim() || (kitLeadId ? leadNameById.get(kitLeadId) ?? '' : '')
+      const patientName = kitPatient.trim() || kitLeadName || (kitLeadId ? leadNameById.get(kitLeadId) ?? '' : '')
       const name = tpl?.name || 'Kit avulso'
       const { movements, controlled } = await createKit({
         templateId: tpl?.id || null,
@@ -191,6 +204,7 @@ export function KitsPage() {
       )
       setKitTemplateId('')
       setKitLeadId('')
+      setKitLeadName('')
       setKitPatient('')
       setKitProcedure('')
       setKitDate('')
@@ -259,18 +273,21 @@ export function KitsPage() {
                 <Label>Itens</Label>
                 {tplRows.map((row, i) => (
                   <div key={i} className="flex gap-2">
-                    <Select value={row.itemId} onValueChange={(v) => setTplRows((prev) => prev.map((r, j) => (j === i ? { ...r, itemId: v ?? '' } : r)))}>
-                      <SelectTrigger className="h-8 flex-1">
-                        <SelectValue placeholder="Item" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {items.map((it) => (
-                          <SelectItem key={it.id} value={it.id}>
-                            {it.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchPicker
+                      size="sm"
+                      className="flex-1"
+                      title="Buscar produto"
+                      placeholder="Item"
+                      searchPlaceholder="Nome, SKU ou unidade…"
+                      value={row.itemId ? { id: row.itemId, label: itemNameById.get(row.itemId) ?? 'Item' } : null}
+                      items={produtosParaBusca}
+                      onPick={(picked) =>
+                        setTplRows((prev) => prev.map((r, j) => (j === i ? { ...r, itemId: picked.id } : r)))
+                      }
+                      onClear={() =>
+                        setTplRows((prev) => prev.map((r, j) => (j === i ? { ...r, itemId: '' } : r)))
+                      }
+                    />
                     <Input
                       value={row.qty}
                       onChange={(e) => setTplRows((prev) => prev.map((r, j) => (j === i ? { ...r, qty: e.target.value } : r)))}
@@ -322,23 +339,21 @@ export function KitsPage() {
                 {kitRows.map((row, i) => (
                   <div key={i} className="space-y-1 rounded-md border border-border p-2">
                     <div className="flex gap-2">
-                      <Select
-                        value={row.itemId}
-                        onValueChange={(v) =>
-                          setKitRows((prev) => prev.map((r, j) => (j === i ? { ...r, itemId: v ?? '' } : r)))
+                      <SearchPicker
+                        size="sm"
+                        className="flex-1"
+                        title="Buscar produto"
+                        placeholder="Item"
+                        searchPlaceholder="Nome, SKU ou código de barras…"
+                        value={row.itemId ? { id: row.itemId, label: itemNameById.get(row.itemId) ?? 'Item' } : null}
+                        items={produtosParaBusca}
+                        onPick={(picked) =>
+                          setKitRows((prev) => prev.map((r, j) => (j === i ? { ...r, itemId: picked.id } : r)))
                         }
-                      >
-                        <SelectTrigger className="h-8 flex-1">
-                          <SelectValue placeholder="Item" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {items.map((it) => (
-                            <SelectItem key={it.id} value={it.id}>
-                              {it.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        onClear={() =>
+                          setKitRows((prev) => prev.map((r, j) => (j === i ? { ...r, itemId: '' } : r)))
+                        }
+                      />
                       <Input
                         className="h-8 w-16"
                         value={row.qty}
@@ -388,20 +403,27 @@ export function KitsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Lead do CRM (opcional)</Label>
-                <Select value={kitLeadId || 'nenhum'} onValueChange={(v) => setKitLeadId(!v || v === 'nenhum' ? '' : v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Vincular a um lead" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="nenhum">Sem vínculo</SelectItem>
-                    {poloLeads.map((l) => (
-                      <SelectItem key={l.id} value={l.id}>
-                        {l.patientName}
-                        {l.phone ? ` · ${l.phone}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchPicker
+                  title="Buscar paciente"
+                  placeholder="Vincular a um lead"
+                  searchPlaceholder="Nome ou telefone do paciente…"
+                  value={kitLeadId ? { id: kitLeadId, label: kitLeadName || leadNameById.get(kitLeadId) || 'Paciente' } : null}
+                  onSearch={async (q) =>
+                    (await searchLeadsByName(tenant.id, q, 40)).map((p) => ({
+                      id: p.id,
+                      label: p.name,
+                      hint: p.phone || undefined,
+                    }))
+                  }
+                  onPick={(picked) => {
+                    setKitLeadId(picked.id)
+                    setKitLeadName(picked.label)
+                  }}
+                  onClear={() => {
+                    setKitLeadId('')
+                    setKitLeadName('')
+                  }}
+                />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
@@ -410,7 +432,7 @@ export function KitsPage() {
                     id="kit-patient"
                     value={kitPatient}
                     onChange={(e) => setKitPatient(e.target.value)}
-                    placeholder={kitLeadId ? leadNameById.get(kitLeadId) ?? 'Nome' : 'Nome'}
+                    placeholder={kitLeadId ? kitLeadName || leadNameById.get(kitLeadId) || 'Nome' : 'Nome'}
                   />
                 </div>
                 <div className="space-y-1.5">
