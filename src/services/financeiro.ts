@@ -1417,3 +1417,46 @@ export async function saveSplits(
   if (error) throw new Error(error.message)
   return Number(data ?? 0)
 }
+
+// ──────────────────────────────────────────── vendas do Shosp, já no banco
+//
+// A conciliação Shosp pedia UPLOAD da mesma planilha que a importação de vendas já tinha
+// subido. Duas telas, o mesmo arquivo, duas vezes — e a conciliação só existia no dia em que
+// alguém tivesse o arquivo em mãos. Agora que a venda mora em `fin_receivables` com CPF,
+// parcelas, caixa e forma crua, dá pra conciliar direto do banco.
+
+export type VendaShosp = {
+  externalId: string
+  date: string
+  patient: string
+  amountCents: number
+  method: string
+  methodRaw: string
+  installments: number
+  caixa: string
+}
+
+export async function listVendasShosp(de: string, ate: string): Promise<VendaShosp[]> {
+  const rows = await buscarTudo<Record<string, unknown>>(
+    () =>
+      assertClient()
+        .from('fin_receivables')
+        .select('external_id, due_date, customer_name, amount_cents, method, method_raw, installments, caixa, id')
+        .eq('source', 'shosp')
+        .gte('due_date', de)
+        .lte('due_date', ate)
+        .order('due_date')
+        .order('id'),
+    { rotulo: 'fin_receivables (shosp)', maxPaginas: 20 },
+  )
+  return rows.map((r) => ({
+    externalId: String(r.external_id ?? ''),
+    date: String(r.due_date ?? ''),
+    patient: String(r.customer_name ?? ''),
+    amountCents: Number(r.amount_cents ?? 0),
+    method: String(r.method ?? 'outro'),
+    methodRaw: String(r.method_raw ?? ''),
+    installments: Number(r.installments ?? 1),
+    caixa: String(r.caixa ?? ''),
+  }))
+}

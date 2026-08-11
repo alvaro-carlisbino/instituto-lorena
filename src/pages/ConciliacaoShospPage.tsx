@@ -27,6 +27,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useTenant } from '@/context/TenantContext'
 import {
   bankCoverage,
+  listVendasShosp,
   deleteReconcileRule,
   listAccounts,
   listReconcileRules,
@@ -36,6 +37,7 @@ import {
   type ReconcileRule,
 } from '@/services/financeiro'
 import { parseBankStatement } from '@/services/ofx'
+import { vendaParaShospSale } from '@/services/vendaParaConciliacao'
 import { bankSyncTrouble } from '@/lib/bankSync'
 import {
   type ShospColumnKey,
@@ -93,6 +95,16 @@ const COLUNAS: ShospColumnKey[] = [
 ]
 
 type FonteBanco = 'conectado' | 'arquivo'
+/**
+ * De onde vêm as VENDAS.
+ *
+ * 'banco' é o padrão desde que o ano do Shosp foi importado: a venda já mora em
+ * fin_receivables com caixa, forma crua e parcelas. Pedir upload da mesma planilha que a
+ * /importar-vendas já subiu era trabalho dobrado — e fazia a conciliação só existir no dia em
+ * que alguém tivesse o arquivo em mãos. O upload continua, pra conferir um mês que ainda não
+ * foi importado.
+ */
+type FonteVendas = 'banco' | 'planilha'
 
 /** Rótulo de cada natureza no painel "quem é quem" — é o que o usuário está declarando. */
 const CLASSE_LABEL: Record<CreditClass, string> = {
@@ -106,6 +118,8 @@ const CLASSES: CreditClass[] = ['nao_venda', 'adquirente', 'deposito', 'venda']
 export function ConciliacaoShospPage() {
   const { tenant } = useTenant()
 
+  const [fonteVendas, setFonteVendas] = useState<FonteVendas>('banco')
+  const [vendasDoBanco, setVendasDoBanco] = useState<ShospSale[]>([])
   const [shospFile, setShospFile] = useState<File | null>(null)
   const [parse, setParse] = useState<ShospParseResult | null>(null)
   const [override, setOverride] = useState<Partial<ShospColumnMap>>({})
@@ -163,7 +177,34 @@ export function ConciliacaoShospPage() {
     return conta ? bankSyncTrouble(conta) : null
   }, [contas, contaId])
 
-  const vendas: ShospSale[] = useMemo(() => parse?.sales ?? [], [parse])
+  const vendas: ShospSale[] = useMemo(
+    () => (fonteVendas === 'banco' ? vendasDoBanco : (parse?.sales ?? [])),
+    [fonteVendas, vendasDoBanco, parse],
+  )
+
+  /** Puxa as vendas já importadas do período que o extrato cobre. */
+  const carregarVendasDoBanco = async () => {
+    if (!cobertura) {
+      toast.error('Escolha a conta do extrato primeiro — é ela que define o período.')
+      return
+    }
+    setBusy(true)
+    try {
+      const vs = await listVendasShosp(cobertura.from, cobertura.to)
+      setVendasDoBanco(vs.map(vendaParaShospSale))
+      setResultado(null)
+      setCaixasFora([])
+      if (vs.length === 0) {
+        toast.error('Nenhuma venda do Shosp importada neste período. Importe em “Importar vendas”.')
+      } else {
+        toast.success(`${vs.length} venda(s) já importadas no período do extrato.`)
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao carregar as vendas')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   // Período coberto pela planilha — usado pra puxar o extrato da conta conectada.
   const periodoPlanilha = useMemo(() => {
@@ -193,6 +234,20 @@ export function ConciliacaoShospPage() {
     [vendas, periodo],
   )
   const foraDaCobertura = vendas.length - vendasNoPeriodo.length
+
+  /** Caixas com volume, venha a venda da planilha ou do banco. */
+  const caixasDisponiveis = useMemo(() => {
+    if (fonteVendas === 'planilha') return parse?.caixas ?? []
+    const m = new Map<string, { name: string; qtd: number; amountCents: number }>()
+    for (const v of vendasDoBanco) {
+      const name = v.caixa || '—'
+      const a = m.get(name) ?? { name, qtd: 0, amountCents: 0 }
+      a.qtd += 1
+      a.amountCents += v.amountCents
+      m.set(name, a)
+    }
+    return [...m.values()].sort((a, b) => b.amountCents - a.amountCents)
+  }, [fonteVendas, parse, vendasDoBanco])
 
   // ── planilha do Shosp
   const lerShosp = async (file: File | null, mapa: Partial<ShospColumnMap> = {}) => {
@@ -396,7 +451,7 @@ export function ConciliacaoShospPage() {
   return (
     <AppLayout
       title="Conciliação Shosp × Banco"
-      subtitle="Sobe o extrato de vendas do Shosp, cruza com as entradas da conta e devolve só o que não fecha."
+      subtitle="Cruza a venda do Shosp com as entradas da conta e devolve só o que não fecha."
     >
       <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
@@ -410,22 +465,61 @@ export function ConciliacaoShospPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-xs text-muted-foreground">
-                Exporte o extrato de vendas/recebimentos do Shosp em XLS ou CSV e solte aqui.
-              </p>
-              <Input
-                ref={shospRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                disabled={busy}
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null
-                  setShospFile(f)
-                  setOverride({})
-                  void lerShosp(f, {})
-                }}
-              />
-              {parse && (
+              {/* O padrão é o banco: a venda já foi importada em "Importar vendas", com caixa,
+                  forma e parcelas. Pedir a MESMA planilha de novo aqui era trabalho dobrado. */}
+              <Select value={fonteVendas} onValueChange={(v) => setFonteVendas((v as FonteVendas) ?? 'banco')}>
+                <SelectTrigger className="text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="banco">Vendas já importadas (sem upload)</SelectItem>
+                  <SelectItem value="planilha">Subir a planilha do Shosp agora</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {fonteVendas === 'banco' ? (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Usa o que a tela “Importar vendas” já gravou, no período que o extrato cobre.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || !cobertura}
+                    onClick={() => void carregarVendasDoBanco()}
+                  >
+                    <FileSpreadsheet className="size-4" /> Carregar vendas do período
+                  </Button>
+                  {vendasDoBanco.length > 0 && (
+                    <div className="rounded-md border border-border bg-muted/40 p-2.5 text-xs">
+                      <div className="font-medium">{vendasDoBanco.length} venda(s) importada(s)</div>
+                      <div className="mt-0.5 text-muted-foreground">
+                        {brl(vendasDoBanco.reduce((a, v) => a + v.amountCents, 0))} no período
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    Para conferir um mês que ainda não foi importado. Exporte o relatório de vendas
+                    do Shosp em XLS ou CSV.
+                  </p>
+                  <Input
+                    ref={shospRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    disabled={busy}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null
+                      setShospFile(f)
+                      setOverride({})
+                      void lerShosp(f, {})
+                    }}
+                  />
+                </>
+              )}
+              {fonteVendas === 'planilha' && parse && (
                 <div className="rounded-md border border-border bg-muted/40 p-2.5 text-xs">
                   <div className="font-medium">
                     {parse.sales.length} venda(s) lida(s)
@@ -606,13 +700,13 @@ export function ConciliacaoShospPage() {
                   anestesista ou de outra praça nunca vai estar NESTE extrato; sem desmarcar,
                   cada uma vira "não caiu no banco" — erro alto, no lugar mais visível da tela.
                   Dinheiro não precisa: já tem tratamento próprio e nunca cai como divergência. */}
-              {parse && parse.caixas.length > 1 && (
+              {caixasDisponiveis.length > 1 && (
                 <div className="space-y-1.5 border-t border-border pt-3">
                   <Label className="text-xs">Caixas do Shosp neste extrato</Label>
                   <p className="text-xs text-muted-foreground">
                     Desmarque a conta que não passa pelo extrato do banco que você subiu.
                   </p>
-                  {parse.caixas.map((c) => {
+                  {caixasDisponiveis.map((c) => {
                     const dentro = !caixasFora.includes(c.name)
                     // Depois de conciliar, o próprio resultado diz qual caixa está errado:
                     // "7 de 7 não casaram" é o sinal de que aquele dinheiro é de outra conta.
@@ -659,8 +753,9 @@ export function ConciliacaoShospPage() {
             </CardContent>
           </Card>
 
-          {/* Detecção de colunas: a parte frágil. Fica visível e corrigível. */}
-          {parse && (
+          {/* Detecção de colunas: a parte frágil. Fica visível e corrigível — e só existe
+              quando a fonte é planilha; do banco as colunas já vieram certas. */}
+          {fonteVendas === 'planilha' && parse && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">Colunas lidas</CardTitle>
@@ -703,7 +798,7 @@ export function ConciliacaoShospPage() {
                 <EmptyState
                   icon={AlertTriangle}
                   title="Nada conciliado ainda"
-                  description="Suba a planilha do Shosp, escolha a fonte do extrato e clique em Conciliar."
+                  description="Carregue as vendas do período, puxe o extrato e clique em Conciliar."
                 />
               </CardContent>
             </Card>
