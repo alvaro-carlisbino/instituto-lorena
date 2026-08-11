@@ -420,11 +420,44 @@ function mapReceivable(r: Record<string, unknown>): Receivable {
   }
 }
 
-export async function listReceivables(): Promise<Receivable[]> {
+/**
+ * Contas a receber, com filtro e paginação de verdade.
+ *
+ * Isto era `.order('due_date').limit(500)` — sem filtro nenhum e ordenado do MAIS ANTIGO.
+ * Enquanto a clínica tinha meia dúzia de lançamentos ninguém viu. Depois que o ano de vendas
+ * do Shosp entrou (3.353 contas, R$ 13,2 milhões), a tela passou a enxergar só as 500 mais
+ * velhas — ago a nov/2025 — e nunca alcançava o mês corrente: "Recebido no mês" dava R$ 0,00
+ * com R$ 410 mil recebidos em agosto. Truncar em silêncio de novo, o mesmo erro de
+ * [[postgrest_teto_1000_linhas]], só que com `limit` menor que o teto do servidor.
+ *
+ * Agora o chamador diz o que quer. Sem filtro continua trazendo tudo, mas paginado — nunca
+ * um número menor com cara de completo.
+ */
+export async function listReceivables(opts?: {
+  status?: ReceivableStatus
+  /** filtra por `due_date` */
+  from?: string
+  to?: string
+}): Promise<Receivable[]> {
   const client = assertClient()
-  const { data, error } = await client.from('fin_receivables').select(RECEIVABLE_COLS).order('due_date').limit(500)
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => mapReceivable(r as Record<string, unknown>))
+  const montar = () => {
+    let q = client
+      .from('fin_receivables')
+      .select(RECEIVABLE_COLS)
+      // `id` como desempate: due_date repete muito e sem ordem determinística o PostgREST
+      // não promete a mesma linha na mesma página entre duas buscas.
+      .order('due_date', { ascending: false })
+      .order('id', { ascending: false })
+    if (opts?.status) q = q.eq('status', opts.status)
+    if (opts?.from) q = q.gte('due_date', opts.from)
+    if (opts?.to) q = q.lte('due_date', opts.to)
+    return q
+  }
+  const rows = await buscarTudo<Record<string, unknown>>(montar, {
+    rotulo: 'fin_receivables',
+    maxPaginas: 20,
+  })
+  return rows.map((r) => mapReceivable(r))
 }
 
 export async function createReceivables(payload: {

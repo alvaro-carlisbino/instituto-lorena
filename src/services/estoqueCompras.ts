@@ -1,4 +1,5 @@
 import { diaLocal, hojeLocal } from '@/lib/diaLocal'
+import { buscarTudo } from '@/lib/supabasePaginate'
 import { supabase } from '@/lib/supabaseClient'
 
 // Estoque + Compras + Contas a pagar. Todas as tabelas são multi-tenant com
@@ -630,15 +631,27 @@ export type Payable = {
   importKey: string | null
 }
 
+/**
+ * Parcelas a pagar.
+ *
+ * `.limit(2000)` aqui era ficção: o PostgREST deste projeto tem `max_rows = 1000`, então o
+ * servidor devolvia 1.000 linhas sem erro e sem aviso — ver [[postgrest_teto_1000_linhas]].
+ * Hoje a clínica só tem 94 parcelas e o Tricopill 237, então ninguém sentiu; sentiria calado
+ * no dia que passasse de mil, que é o pior momento pra descobrir.
+ */
 export async function listPayables(): Promise<Payable[]> {
-  const client = assertClient()
-  const { data, error } = await client
-    .from('payable_installments')
-    .select('id, invoice_id, supplier_id, category_id, account_id, description, due_date, amount_cents, status, paid_at, payment_method, barcode, storage_path, note, cost_center, counterparty, subcategory, import_key, stock_suppliers(name)')
-    .order('due_date')
-    .limit(2000)
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => {
+  const rows = await buscarTudo<Record<string, unknown>>(
+    () =>
+      assertClient()
+        .from('payable_installments')
+        .select('id, invoice_id, supplier_id, category_id, account_id, description, due_date, amount_cents, status, paid_at, payment_method, barcode, storage_path, note, cost_center, counterparty, subcategory, import_key, stock_suppliers(name)')
+        // `id` de desempate: sem ordem determinística o PostgREST não promete a mesma
+        // linha na mesma página entre duas buscas.
+        .order('due_date')
+        .order('id'),
+    { rotulo: 'payable_installments', maxPaginas: 20 },
+  )
+  return rows.map((r: Record<string, unknown>) => {
     const supplier = r.stock_suppliers as { name?: unknown } | null
     const status: PayableStatus =
       r.status === 'pago' || r.status === 'cancelado' ? (r.status as PayableStatus) : 'aberto'

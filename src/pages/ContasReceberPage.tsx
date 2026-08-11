@@ -75,11 +75,23 @@ export function ContasReceberPage() {
   const [recvAccountId, setRecvAccountId] = useState('')
   const [recvDate, setRecvDate] = useState('')
 
-  const load = async () => {
+  // Período das RECEBIDAS. Começa no mês corrente, que é o que os KPIs mostram.
+  const [de, setDe] = useState(`${hojeLocal().slice(0, 7)}-01`)
+  const [ate, setAte] = useState(hojeLocal())
+
+  const load = async (d = de, a = ate) => {
     setLoading(true)
     try {
-      const [r, acc, cats] = await Promise.all([listReceivables(), listAccounts(), listCategories('receita')])
-      setReceivables(r)
+      // ABERTO vem inteiro (é o que a tela cobra, e vencida pode ser de qualquer data).
+      // RECEBIDO vem por período: com o ano do Shosp importado são 3.353 contas, e puxar
+      // tudo a cada abertura só pra somar o mês é desperdício.
+      const [abertas, recebidas, acc, cats] = await Promise.all([
+        listReceivables({ status: 'aberto' }),
+        listReceivables({ status: 'recebido', from: d, to: a }),
+        listAccounts(),
+        listCategories('receita'),
+      ])
+      setReceivables([...abertas, ...recebidas])
       setAccounts(acc)
       setCategories(cats)
     } catch (e) {
@@ -91,6 +103,7 @@ export function ContasReceberPage() {
 
   useEffect(() => {
     void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const today = hojeLocal()
@@ -110,6 +123,28 @@ export function ContasReceberPage() {
         .reduce((s, r) => s + r.amountCents, 0),
     }
   }, [receivables, today, thisMonth])
+
+  /**
+   * Recebidas do período, agrupadas por mês.
+   *
+   * Sem isto a tela mostrava só o que está EM ABERTO — e depois que o ano de vendas do Shosp
+   * entrou (3.353 contas, R$ 13,2 milhões, todas já recebidas) ela ficou com quatro zeros e
+   * cara de quebrada. O dinheiro estava lá; a tela é que não tinha onde mostrar.
+   */
+  const recebidas = useMemo(() => {
+    const grupos = new Map<string, Receivable[]>()
+    for (const r of receivables) {
+      if (r.status !== 'recebido') continue
+      const key = monthKey(r.receivedAt?.slice(0, 10) || r.dueDate)
+      grupos.set(key, [...(grupos.get(key) ?? []), r])
+    }
+    return Array.from(grupos.entries()).sort(([a], [b]) => b.localeCompare(a))
+  }, [receivables])
+
+  const totalRecebidas = useMemo(
+    () => receivables.filter((r) => r.status === 'recebido').reduce((s, r) => s + r.amountCents, 0),
+    [receivables],
+  )
 
   const agenda = useMemo(() => {
     const open = receivables.filter((r) => r.status === 'aberto')
@@ -366,6 +401,90 @@ export function ContasReceberPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* JÁ RECEBIDAS. Existe porque a tela inteira acima só fala de "aberto", e a receita
+          real da clínica entra pelo Shosp já paga — sem este painel, R$ 13,2 milhões de
+          venda importada ficavam invisíveis e a tela parecia vazia. */}
+      <Card className="mt-4">
+        <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <HandCoins className="size-4 text-primary" /> Já recebidas
+            <span className="font-normal text-muted-foreground">{formatBRL(totalRecebidas)}</span>
+          </CardTitle>
+          <div className="flex items-end gap-2">
+            <div className="space-y-1">
+              <Label htmlFor="rec-de" className="text-xs">De</Label>
+              <Input
+                id="rec-de"
+                type="date"
+                value={de}
+                onChange={(e) => setDe(e.target.value)}
+                className="h-8 w-[145px]"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="rec-ate" className="text-xs">Até</Label>
+              <Input
+                id="rec-ate"
+                type="date"
+                value={ate}
+                onChange={(e) => setAte(e.target.value)}
+                className="h-8 w-[145px]"
+              />
+            </div>
+            <Button size="sm" variant="outline" disabled={loading} onClick={() => void load()}>
+              Buscar
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {recebidas.length === 0 ? (
+            <EmptyState
+              icon={HandCoins}
+              title={loading ? 'Carregando…' : 'Nada recebido no período'}
+              description="Aumente o período acima. A venda do Shosp entra aqui já como recebida."
+            />
+          ) : (
+            recebidas.map(([key, rows]) => {
+              const total = rows.reduce((s, r) => s + r.amountCents, 0)
+              return (
+                <div key={key}>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold capitalize">{monthLabel(key)}</h3>
+                    <span className="text-sm font-semibold text-muted-foreground">
+                      {formatBRL(total)} · {rows.length} lançamento(s)
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {rows.slice(0, 40).map((r) => (
+                      <div
+                        key={r.id}
+                        className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-sm"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate font-medium">{r.description}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {formatDay(r.receivedAt?.slice(0, 10) || r.dueDate)}
+                            {r.customerName ? ` · ${r.customerName}` : ''}
+                            {r.method ? ` · ${r.method}` : ''}
+                          </div>
+                        </div>
+                        <span className="shrink-0 font-semibold">{formatBRL(r.amountCents)}</span>
+                      </div>
+                    ))}
+                    {/* Nunca cortar calado: dizer quantas ficaram de fora. */}
+                    {rows.length > 40 && (
+                      <p className="text-xs text-muted-foreground">
+                        …e mais {rows.length - 40} lançamento(s) neste mês, somados no total acima.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </CardContent>
+      </Card>
 
       <Dialog open={receiving != null} onOpenChange={(open) => (!open ? setReceiving(null) : null)}>
         <DialogContent className="sm:max-w-md">
