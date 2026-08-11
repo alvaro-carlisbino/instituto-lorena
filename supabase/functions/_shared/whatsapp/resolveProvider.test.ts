@@ -12,6 +12,7 @@ const cred = { wapi_instance_id: 'LITE-FAKE', wapi_token: 'tok', wapi_base_url: 
 const INSTANCIAS: Record<string, Record<string, unknown>> = {
   'tricopill-wapi': { channel_provider: 'wapi', tenant_id: 'tricopill', bot_kind: 'sales', ...cred },
   'wa-clinica': { channel_provider: 'wapi', tenant_id: 'instituto-lorena', bot_kind: 'clinic', ...cred },
+  'wa-morta': { channel_provider: 'wapi', tenant_id: 'instituto-lorena', bot_kind: 'clinic', ...cred, active: false },
 }
 
 /** Cliente fake: só o suficiente para o resolver ler instâncias e tentar amarrar o lead. */
@@ -39,7 +40,9 @@ function fakeAdmin() {
             const inst = INSTANCIAS[q._id]
             return Promise.resolve({ data: inst ? { id: q._id, ...inst } : null })
           }
-          const achou = Object.entries(INSTANCIAS).find(([, i]) => i.tenant_id === q._tenant)
+          const achou = Object.entries(INSTANCIAS).find(
+            ([, i]) => i.tenant_id === q._tenant && i.active !== false,
+          )
           return Promise.resolve({ data: achou ? { id: achou[0], ...achou[1] } : null })
         },
       }
@@ -53,7 +56,13 @@ async function resolverLinha(lead: { id: string; whatsapp_instance_id: string | 
   const { client, updates } = fakeAdmin()
   // deno-lint-ignore no-explicit-any
   const r = await resolveOutboundProviderForLead(client as any, lead)
-  return { instanceId: r.instanceId, botKind: r.botKind, ignorada: r.crossTenantInstanceIgnored, updates }
+  return {
+    instanceId: r.instanceId,
+    botKind: r.botKind,
+    ignorada: r.crossTenantInstanceIgnored,
+    inativaIgnorada: r.inactiveInstanceIgnored,
+    updates,
+  }
 }
 
 Deno.test('linha do outro polo é descartada: lead da clínica não sai pela linha do Tricopill', async () => {
@@ -78,6 +87,21 @@ Deno.test('linha do próprio polo é respeitada', async () => {
   assertEquals(r.ignorada, null)
   assertEquals(r.instanceId, 'wa-clinica')
   assertEquals(r.botKind, 'clinic')
+})
+
+Deno.test('linha desativada no painel sai do ar mesmo para quem já estava fixado nela', async () => {
+  const r = await resolverLinha({
+    id: 'lead-preso',
+    whatsapp_instance_id: 'wa-morta',
+    tenant_id: 'instituto-lorena',
+  })
+  assertEquals(r.inativaIgnorada, 'wa-morta')
+  assertEquals(r.instanceId, 'wa-clinica')
+  assertEquals(r.botKind, 'clinic')
+  // Mesma regra da linha de outro polo: o vínculo antigo NÃO é sobrescrito. Ele conta
+  // onde a pessoa conversava, e religar a instância no painel tem que devolver a
+  // conversa para ela sem precisar de remendo no banco.
+  assertEquals(r.updates.length, 0)
 })
 
 Deno.test('lead sem linha cai no padrão do próprio tenant e fica amarrado', async () => {
