@@ -19,8 +19,10 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 // mensagem e outra. É mensagem transacional para quem já comprou, mas rajada é
 // rajada e o número é o da clínica.
 //
-// POLO: sai com requireBotKind 'clinic'. Quem é paciente aqui e cliente do Tricopill
-// tem o lead amarrado na linha de vendas, e o lembrete saía por lá.
+// POLO: quem manda na linha de saída é o polo do ASSUNTO, não o da pessoa. Vai
+// `senderTenantId` (tenant da venda) para escolher a linha e `requireBotKind: 'clinic'`
+// como trava final. Sem os dois, paciente que também é cliente do Tricopill recebia o
+// aviso de cirurgia no meio da conversa de suplemento (11/ago/26).
 //
 // Env:
 //   CIRURGIA_LEMBRETES_ENABLED  'true' liga o envio real (default: dry-run)
@@ -63,6 +65,7 @@ type Fila = {
   sale_id: string
   clinic_sales: {
     lead_id: string | null
+    tenant_id: string
     patient_name: string
     scheduled_at: string | null
     procedure_label: string
@@ -143,7 +146,7 @@ Deno.serve(async (req) => {
   const { data, error } = await admin
     .from('surgery_reminders')
     .select(
-      'id, kind, scheduled_for, sale_id, clinic_sales!inner(lead_id, patient_name, scheduled_at, procedure_label, status)',
+      'id, kind, scheduled_for, sale_id, clinic_sales!inner(lead_id, tenant_id, patient_name, scheduled_at, procedure_label, status)',
     )
     .eq('status', 'pendente')
     .lte('scheduled_for', hoje)
@@ -209,10 +212,15 @@ Deno.serve(async (req) => {
         // Paciente que também é cliente do Tricopill fica amarrado na linha de vendas, e
         // sem isso o lembrete sai no meio da conversa de suplemento (11/ago/26: dois
         // pacientes). Linha errada agora vira erro 409 registrado, não mensagem enviada.
+        // senderTenantId: o polo do ASSUNTO. Rodrigo Pupin e Evandro Matos têm cirurgia
+        // marcada mas o lead vive no Tricopill (compraram suplemento antes), então o
+        // tenant do lead levaria o aviso para a linha de vendas. Quem manda aqui é o
+        // tenant da VENDA. requireBotKind fica como trava final.
         body: JSON.stringify({
           leadId: venda.lead_id,
           text: texto,
           source: 'cirurgia_lembrete',
+          senderTenantId: venda.tenant_id,
           requireBotKind: 'clinic',
         }),
       })

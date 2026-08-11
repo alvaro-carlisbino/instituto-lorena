@@ -83,6 +83,14 @@ Deno.serve(async (req) => {
      */
     requireBotKind?: string
     /**
+     * Tenant do ASSUNTO, quando ele não é o tenant do lead. Lembrete de cirurgia é
+     * conteúdo da clínica mesmo quando o paciente vive no polo Tricopill (Rodrigo Pupin
+     * e Evandro Matos: cirurgia marcada, lead no Tricopill porque compraram suplemento
+     * primeiro). Sem isso o envio resolvia pela linha de vendas. A linha do lead NÃO é
+     * reescrita nesse caminho: onde a pessoa conversa continua sendo dela.
+     */
+    senderTenantId?: string
+    /**
      * Origem do envio. `stage_automation` bloqueia automação para leads ManyChat fora
      * da janela 24h da Meta — o ManyChat aceita o sendFlow mas a Meta dropa em silêncio,
      * dando toast verde mentiroso. `followup_scheduler` é o cron de follow-up (já filtra
@@ -193,15 +201,22 @@ Deno.serve(async (req) => {
     customFieldsProvider === 'wapi' ||
     customFieldsProvider === 'evolution' ||
     customFieldsProvider === 'official'
+  // O polo do ASSUNTO manda na linha, não o polo da pessoa. Quando a rotina declara
+  // senderTenantId diferente do tenant do lead, ignoramos a linha vinculada (ela é do
+  // polo da pessoa) e resolvemos pela linha do assunto, sem reescrever o vínculo. O
+  // ManyChat também fica de fora: ele é a conta do polo da pessoa.
+  const senderTenantId = String(body.senderTenantId ?? '').trim()
+  const assuntoDeOutroPolo = Boolean(senderTenantId) && senderTenantId !== row.tenant_id
   // Detecta envio via ManyChat: telefone sintético, canal explícito Instagram,
   // source meta_instagram/meta_whatsapp ou custom_fields.channel sinalizando ManyChat.
   const isManychat =
-    effectiveTo.startsWith('888001') ||
+    !assuntoDeOutroPolo &&
+    (effectiveTo.startsWith('888001') ||
     bodyChannel === 'instagram' ||
     row.source === 'meta_instagram' ||
     row.source === 'meta_whatsapp' ||
     customFieldsChannel === 'instagram' ||
-    (customFieldsChannel === 'whatsapp' && !hasDirectWhatsappLine)
+    (customFieldsChannel === 'whatsapp' && !hasDirectWhatsappLine))
 
   if (isManychat) {
     // Automação de stage + ManyChat: bloqueia fora da janela 24h da Meta.
@@ -447,11 +462,15 @@ Deno.serve(async (req) => {
   let resolvedInstanceId: string | null = null
   try {
     ;({ provider, botKind: resolvedBotKind, instanceId: resolvedInstanceId } =
-      await resolveOutboundProviderForLead(admin, {
-        id: row.id,
-        whatsapp_instance_id: row.whatsapp_instance_id,
-        tenant_id: row.tenant_id,
-      }))
+      await resolveOutboundProviderForLead(
+        admin,
+        {
+          id: row.id,
+          whatsapp_instance_id: assuntoDeOutroPolo ? null : row.whatsapp_instance_id,
+          tenant_id: assuntoDeOutroPolo ? senderTenantId : row.tenant_id,
+        },
+        assuntoDeOutroPolo ? { bindDefault: false } : undefined,
+      ))
   } catch (e) {
     return json({ error: 'provider_not_configured', message: e instanceof Error ? e.message : String(e) }, 500)
   }
