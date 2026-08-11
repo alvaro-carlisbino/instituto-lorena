@@ -41,6 +41,11 @@
 //    que o do gateway do Supabase. Estourou o prazo, ela devolve o que já conseguiu e diz
 //    quantos ficaram de fora. Meia sugestão com aviso é útil; 504 depois de dois minutos de
 //    "Pensando…" não é.
+//
+// 7. UMA FATIA POR CHAMADA, `total` NA RESPOSTA. São 315 pagadores diferentes sem categoria:
+//    isso não cabe em requisição nenhuma, então a tela varre chamando aqui com `offset` até
+//    cobrir o `total`. Fatiar do lado do servidor é o que permite barra de progresso, botão de
+//    parar, e retomar de onde parou quando um pedaço falha.
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
@@ -292,10 +297,18 @@ Deno.serve(async (req) => {
     global: { headers: { Authorization: auth } },
   })
 
-  const body = (await req.json().catch(() => ({}))) as { de?: string; ate?: string; limite?: number }
+  const body = (await req.json().catch(() => ({}))) as {
+    de?: string
+    ate?: string
+    limite?: number
+    offset?: number
+  }
   const de = body.de ?? '1900-01-01'
   const ate = body.ate ?? '2999-12-31'
   const limite = Math.min(60, Math.max(5, body.limite ?? 30))
+  // A tela varre TUDO chamando isto em sequência: 300 pagadores não cabem numa requisição só,
+  // e fatiar aqui é o que deixa o front mostrar progresso e o usuário poder parar no meio.
+  const offset = Math.max(0, Math.floor(body.offset ?? 0))
 
   const [lidos, { data: cats, error: e2 }, { data: centros }] = await Promise.all([
     lerLancamentos(db, de, ate),
@@ -316,9 +329,21 @@ Deno.serve(async (req) => {
     a.cents += Math.abs(Number(t.amount_cents ?? 0))
     mapa.set(p, a)
   }
-  // Os que mexem mais dinheiro primeiro: é onde errar dói e onde acertar rende.
-  const pagadores = [...mapa.values()].sort((a, b) => b.cents - a.cents).slice(0, limite)
-  if (pagadores.length === 0) return json({ ok: true, sugestoes: [], nota: 'nada sem categoria no período' })
+  // Os que mexem mais dinheiro primeiro: é onde errar dói e onde acertar rende. O desempate por
+  // nome não é capricho: sem ele, dois pagadores de mesmo valor podem trocar de lugar entre uma
+  // fatia e a seguinte, e a varredura pularia um enquanto repete o outro.
+  const ordenados = [...mapa.values()].sort((a, b) => b.cents - a.cents || a.padrao.localeCompare(b.padrao))
+  const total = ordenados.length
+  const pagadores = ordenados.slice(offset, offset + limite)
+  if (pagadores.length === 0) {
+    return json({
+      ok: true,
+      sugestoes: [],
+      total,
+      offset,
+      nota: total === 0 ? 'nada sem categoria no período' : 'fim da lista',
+    })
+  }
 
   const cfg = llmConfig()
   if (!cfg) return json({ error: 'llm_nao_configurado' }, 503)
@@ -385,7 +410,9 @@ Deno.serve(async (req) => {
   // A v1 não logava nada: quando deu 504 não havia uma linha sequer pra dizer onde travou.
   console.log('crm-classificar-gastos', {
     model: cfg.model,
+    offset,
     pagadores: pagadores.length,
+    total,
     lotes: lotes.length,
     lotesOk,
     sugestoes: sugestoes.length,
@@ -397,6 +424,9 @@ Deno.serve(async (req) => {
   return json({
     ok: true,
     pagadores: pagadores.length,
+    // Quantos pagadores existem no período inteiro, pra tela saber até onde varrer.
+    total,
+    offset,
     sugestoes,
     // Diz o que o modelo devolveu e a gente recusou: silêncio aqui esconde alucinação.
     descartadas: itens.length - sugestoes.length,

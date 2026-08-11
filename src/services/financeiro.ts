@@ -1487,23 +1487,42 @@ export type SugestaoIA = {
  */
 const TIMEOUT_SUGESTAO_MS = 130_000
 
+/**
+ * Quantos pagadores cada chamada leva. Seis lotes de 6 dentro do prazo de 110s da função, com
+ * folga pro dia ruim do provedor. Subir isso não acelera nada: o gargalo é a geração do modelo,
+ * e fatia grande demais só aumenta a chance de a chamada bater no prazo e voltar pela metade.
+ */
+const PAGADORES_POR_CHAMADA = 36
+
+/** Uma fatia da varredura. O `total` diz quantos pagadores existem no período inteiro. */
 export async function sugerirCategoriasIA(opts?: {
   de?: string
   ate?: string
   limite?: number
+  offset?: number
+  signal?: AbortSignal
 }): Promise<{
   sugestoes: SugestaoIA[]
   pagadores: number
+  total: number
   descartadas: number
   faltaram: number
   erros: string[]
 }> {
   const client = assertClient()
   const { data, error } = await client.functions.invoke('crm-classificar-gastos', {
-    body: { de: opts?.de, ate: opts?.ate, limite: opts?.limite ?? 30 },
+    body: {
+      de: opts?.de,
+      ate: opts?.ate,
+      limite: opts?.limite ?? PAGADORES_POR_CHAMADA,
+      offset: opts?.offset ?? 0,
+    },
     timeout: TIMEOUT_SUGESTAO_MS,
+    signal: opts?.signal,
   })
   if (error) {
+    // Parada a pedido do usuário não é falha: quem chama decide o que dizer.
+    if (opts?.signal?.aborted) throw new DOMException('varredura interrompida', 'AbortError')
     const abortou = /abort|timeout/i.test(String(error.name ?? '') + String(error.message ?? ''))
     throw new Error(abortou ? 'A IA passou de 2 minutos sem responder. Tente de novo.' : error.message)
   }
@@ -1512,6 +1531,7 @@ export async function sugerirCategoriasIA(opts?: {
   return {
     sugestoes: (r.sugestoes as SugestaoIA[]) ?? [],
     pagadores: Number(r.pagadores ?? 0),
+    total: Number(r.total ?? 0),
     // Quantas o modelo devolveu e a gente recusou por id inválido. Silêncio aqui esconderia
     // alucinação — se esse número for alto, a sugestão inteira merece desconfiança.
     descartadas: Number(r.descartadas ?? 0),

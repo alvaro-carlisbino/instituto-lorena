@@ -8,10 +8,16 @@
 // A confiança não é enfeite: ela decide o que vem MARCADO. Acima de 0,8 já vem selecionado
 // porque é onde o modelo acerta quase sempre; abaixo disso vem desmarcado e com o motivo à
 // vista, que é o caso em que ele está chutando num nome de pessoa física ou sigla.
+//
+// VARREDURA COMPLETA: são 315 pagadores diferentes sem categoria, e nenhuma requisição aguenta
+// isso de uma vez (o modelo gera ~40 tokens por pagador e o gateway corta em ~150s). Então um
+// clique dispara uma SEQUÊNCIA de chamadas de 36 em 36 até cobrir a lista inteira, mostrando
+// quanto já andou e deixando parar no meio. As sugestões aparecem conforme chegam, e não no
+// fim: quem espera cinco minutos olhando pra tela vazia acha que travou.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, Sparkles } from 'lucide-react'
+import { Check, Sparkles, Square } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,6 +29,9 @@ const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency'
 
 /** Acima disso vem marcado. Abaixo, o modelo está chutando e precisa de olho humano. */
 const CONFIANCA_SEGURA = 0.8
+
+/** Pagadores por chamada. Tem que bater com o que a função aguenta dentro do prazo dela. */
+const PASSO = 36
 
 export function SugestaoIAPanel({
   de,
@@ -41,31 +50,98 @@ export function SugestaoIAPanel({
   const [pensando, setPensando] = useState(false)
   const [segundos, setSegundos] = useState(0)
   const [pediu, setPediu] = useState(false)
+  const [progresso, setProgresso] = useState({ feitos: 0, total: 0 })
+  const [aplicando, setAplicando] = useState({ feitos: 0, total: 0 })
+  const pararRef = useRef<AbortController | null>(null)
 
-  // Relógio na espera. São 3 chamadas ao modelo por trás de um botão só, e espera sem número na
-  // tela é indistinguível de tela travada: foi o que aconteceu quando a função dava 504 calada.
+  // Relógio na espera. A varredura inteira leva minutos, e espera sem número na tela é
+  // indistinguível de tela travada: foi exatamente o que aconteceu quando a função dava 504.
   useEffect(() => {
     if (!pensando) return
     const id = window.setInterval(() => setSegundos((s) => s + 1), 1000)
     return () => window.clearInterval(id)
   }, [pensando])
 
+  // Varredura em andamento tem que morrer junto com a tela, senão fica chamando a IA sozinha.
+  useEffect(() => () => pararRef.current?.abort(), [])
+
   const pedir = async () => {
+    const controller = new AbortController()
+    pararRef.current = controller
     setBusy(true)
     setSegundos(0)
     setPensando(true)
+    setSugestoes([])
+    setMarcadas(new Set())
+    setDescartadas(0)
+    setFaltaram(0)
+    setProgresso({ feitos: 0, total: 0 })
+
+    const acumulado: SugestaoIA[] = []
+    let descartadasTotal = 0
+    let faltaramTotal = 0
+    let offset = 0
+    let total = 0
+    const falhas: string[] = []
+
     try {
-      const r = await sugerirCategoriasIA({ de, ate })
-      setSugestoes(r.sugestoes)
-      setDescartadas(r.descartadas)
-      setFaltaram(r.faltaram)
-      setMarcadas(new Set(r.sugestoes.filter((s) => s.confianca >= CONFIANCA_SEGURA).map((s) => s.padrao)))
+      do {
+        const r = await sugerirCategoriasIA({ de, ate, limite: PASSO, offset, signal: controller.signal })
+          .catch((e: unknown) => {
+            // Fatia que falhou não derruba a varredura: são minutos de trabalho, e perder tudo
+            // por um 429 no meio seria pior que ficar sem 36 dos 315. Segue pra próxima.
+            if (controller.signal.aborted) throw e
+            falhas.push(e instanceof Error ? e.message : 'falha numa fatia')
+            return null
+          })
+        if (controller.signal.aborted) break
+
+        if (r) {
+          total = r.total
+          descartadasTotal += r.descartadas
+          faltaramTotal += r.faltaram
+          acumulado.push(...r.sugestoes)
+          // Mostra o que já chegou em vez de guardar pro fim.
+          setSugestoes([...acumulado])
+          // Só ACRESCENTA as novas de alta confiança: refazer o conjunto do zero apagaria o que
+          // o usuário desmarcou enquanto a varredura corria.
+          setMarcadas((m) => {
+            const n = new Set(m)
+            for (const s of r.sugestoes) if (s.confianca >= CONFIANCA_SEGURA) n.add(s.padrao)
+            return n
+          })
+          setDescartadas(descartadasTotal)
+        } else {
+          // Fatia perdida inteira. No fim da lista ela é menor que o passo.
+          faltaramTotal += total > 0 ? Math.max(0, Math.min(PASSO, total - offset)) : PASSO
+        }
+        setFaltaram(faltaramTotal)
+        offset += PASSO
+        setProgresso({ feitos: Math.min(offset, total), total })
+        // `total` só existe depois da primeira resposta; se a primeira falhou, não há o que varrer.
+      } while (offset < total && !controller.signal.aborted)
+
       setPediu(true)
-      if (r.sugestoes.length === 0 && r.pagadores === 0) toast.message('Nada sem categoria neste período.')
-      else if (r.sugestoes.length === 0) toast.error(r.erros[0] ?? 'A IA não devolveu nenhuma sugestão.')
+      if (controller.signal.aborted) {
+        toast.message(`Parado. ${acumulado.length} sugestão(ões) até aqui.`)
+      } else if (acumulado.length === 0 && total === 0) {
+        toast.message('Nada sem categoria neste período.')
+      } else if (acumulado.length === 0) {
+        toast.error(falhas[0] ?? 'A IA não devolveu nenhuma sugestão.')
+      } else if (falhas.length > 0) {
+        toast.warning(`${acumulado.length} sugestões. ${falhas.length} pedaço(s) falharam: ${falhas[0]}`)
+      } else {
+        toast.success(`${acumulado.length} sugestões para ${total} pagadores.`)
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao pedir sugestão')
+      if (!controller.signal.aborted) {
+        toast.error(e instanceof Error ? e.message : 'Falha ao pedir sugestão')
+      } else {
+        setPediu(true)
+        toast.message(`Parado. ${acumulado.length} sugestão(ões) até aqui.`)
+      }
     } finally {
+      pararRef.current = null
       setPensando(false)
       setBusy(false)
     }
@@ -75,7 +151,9 @@ export function SugestaoIAPanel({
     const alvo = sugestoes.filter((s) => marcadas.has(s.padrao))
     if (alvo.length === 0) return toast.error('Marque ao menos uma sugestão.')
     setBusy(true)
-    let total = 0
+    setAplicando({ feitos: 0, total: alvo.length })
+    let carimbadosTotal = 0
+    let aplicadas = 0
     try {
       // Uma por vez de propósito: cada uma vira uma regra própria, e regra é o que dá o
       // desfazer individual lá na configuração. Um lote só seria impossível de reverter.
@@ -86,15 +164,28 @@ export function SugestaoIAPanel({
           direction: 'out',
           costCenter: s.costCenter || null,
         })
-        total += carimbados
+        carimbadosTotal += carimbados
+        aplicadas += 1
+        setAplicando({ feitos: aplicadas, total: alvo.length })
       }
-      toast.success(`${alvo.length} regra(s) criada(s) · ${total} lançamento(s) classificado(s).`)
+      toast.success(`${aplicadas} regra(s) criada(s) · ${carimbadosTotal} lançamento(s) classificado(s).`)
       setSugestoes((a) => a.filter((s) => !marcadas.has(s.padrao)))
       setMarcadas(new Set())
       onAplicado()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao aplicar')
+      // Falhou na 200ª de 300: as 199 já estão gravadas, e dizer só "falhou" faria o usuário
+      // refazer tudo. Tira da lista o que passou e conta o que sobrou.
+      const feitas = new Set(alvo.slice(0, aplicadas).map((s) => s.padrao))
+      setSugestoes((a) => a.filter((s) => !feitas.has(s.padrao)))
+      setMarcadas((m) => new Set([...m].filter((p) => !feitas.has(p))))
+      if (aplicadas > 0) onAplicado()
+      toast.error(
+        `${aplicadas} de ${alvo.length} aplicadas. Parou em "${alvo[aplicadas]?.padrao ?? ''}": ${
+          e instanceof Error ? e.message : 'falha ao aplicar'
+        }`,
+      )
     } finally {
+      setAplicando({ feitos: 0, total: 0 })
       setBusy(false)
     }
   }
@@ -107,9 +198,21 @@ export function SugestaoIAPanel({
       return n
     })
 
+  const todasMarcadas = sugestoes.length > 0 && marcadas.size === sugestoes.length
+  const alternarTodas = () =>
+    setMarcadas(todasMarcadas ? new Set() : new Set(sugestoes.map((s) => s.padrao)))
+
   const somaMarcada = sugestoes
     .filter((s) => marcadas.has(s.padrao))
     .reduce((a, s) => a + s.amountCents, 0)
+
+  const rotuloBotao = pensando
+    ? progresso.total > 0
+      ? `${progresso.feitos}/${progresso.total} · ${segundos}s`
+      : `Começando… ${segundos}s`
+    : pediu
+      ? 'Sugerir de novo'
+      : 'Sugerir categorias'
 
   return (
     <Card>
@@ -119,12 +222,25 @@ export function SugestaoIAPanel({
         </CardTitle>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" disabled={busy} onClick={() => void pedir()}>
-            {pensando ? `Pensando… ${segundos}s` : pediu ? 'Pedir de novo' : 'Sugerir categorias'}
+            {rotuloBotao}
           </Button>
-          {sugestoes.length > 0 && (
-            <Button size="sm" disabled={busy || marcadas.size === 0} onClick={() => void aplicar()}>
-              <Check className="size-4" /> Aplicar {marcadas.size} ({brl(somaMarcada)})
+          {pensando && (
+            <Button size="sm" variant="ghost" onClick={() => pararRef.current?.abort()}>
+              <Square className="size-3" /> Parar
             </Button>
+          )}
+          {sugestoes.length > 0 && !pensando && (
+            <>
+              <Button size="sm" variant="ghost" onClick={alternarTodas}>
+                {todasMarcadas ? 'Desmarcar todas' : 'Marcar todas'}
+              </Button>
+              <Button size="sm" disabled={busy || marcadas.size === 0} onClick={() => void aplicar()}>
+                <Check className="size-4" />
+                {aplicando.total > 0
+                  ? `Aplicando ${aplicando.feitos}/${aplicando.total}`
+                  : `Aplicar ${marcadas.size} (${brl(somaMarcada)})`}
+              </Button>
+            </>
           )}
         </div>
       </CardHeader>
@@ -145,45 +261,54 @@ export function SugestaoIAPanel({
         {faltaram > 0 && (
           <p className="text-xs text-amber-600">
             {faltaram} pagador(es) ficaram sem resposta da IA. Aprove o que serve e clique em
-            “Pedir de novo”: quem já virou regra sai da fila e os que faltaram entram.
+            “Sugerir de novo”: quem já virou regra sai da fila e os que faltaram entram.
           </p>
         )}
 
         {sugestoes.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             {pensando
-              ? `Pensando… ${segundos}s (vai em lotes de 6, costuma levar cerca de um minuto)`
+              ? progresso.total > 0
+                ? `Varrendo ${progresso.total} pagadores, ${progresso.feitos} até agora (${segundos}s).`
+                : `Levantando quem está sem categoria… ${segundos}s`
               : pediu
                 ? 'Nada pendente aqui.'
                 : 'Clique em “Sugerir categorias”.'}
           </p>
         ) : (
-          <div className="space-y-1">
-            {sugestoes.map((s) => {
-              const baixa = s.confianca < CONFIANCA_SEGURA
-              return (
-                <label
-                  key={s.padrao}
-                  className={`flex cursor-pointer flex-wrap items-center gap-2 rounded-md border px-3 py-2 ${
-                    baixa ? 'border-amber-500/40 bg-amber-500/[0.04]' : 'border-border'
-                  }`}
-                >
-                  <Checkbox checked={marcadas.has(s.padrao)} onCheckedChange={() => alternar(s.padrao)} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{s.padrao}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {s.qtd}× · {brl(s.amountCents)} → {s.categoria}
-                      {s.costCenter ? ` · ${s.costCenter}` : ''}
-                      {s.motivo ? ` · ${s.motivo}` : ''}
+          <>
+            <p className="text-xs text-muted-foreground">
+              {pensando
+                ? `Varrendo: ${progresso.feitos} de ${progresso.total} pagadores (${segundos}s).`
+                : `${sugestoes.length} sugestão(ões) · ${marcadas.size} marcada(s) · ${brl(somaMarcada)}.`}
+            </p>
+            <div className="space-y-1">
+              {sugestoes.map((s) => {
+                const baixa = s.confianca < CONFIANCA_SEGURA
+                return (
+                  <label
+                    key={s.padrao}
+                    className={`flex cursor-pointer flex-wrap items-center gap-2 rounded-md border px-3 py-2 ${
+                      baixa ? 'border-amber-500/40 bg-amber-500/[0.04]' : 'border-border'
+                    }`}
+                  >
+                    <Checkbox checked={marcadas.has(s.padrao)} onCheckedChange={() => alternar(s.padrao)} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{s.padrao}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {s.qtd}× · {brl(s.amountCents)} → {s.categoria}
+                        {s.costCenter ? ` · ${s.costCenter}` : ''}
+                        {s.motivo ? ` · ${s.motivo}` : ''}
+                      </div>
                     </div>
-                  </div>
-                  <Badge variant={baixa ? 'outline' : 'secondary'} className="shrink-0">
-                    {Math.round(s.confianca * 100)}%
-                  </Badge>
-                </label>
-              )
-            })}
-          </div>
+                    <Badge variant={baixa ? 'outline' : 'secondary'} className="shrink-0">
+                      {Math.round(s.confianca * 100)}%
+                    </Badge>
+                  </label>
+                )
+              })}
+            </div>
+          </>
         )}
       </CardContent>
     </Card>
