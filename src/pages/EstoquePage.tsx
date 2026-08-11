@@ -56,32 +56,9 @@ export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: st
   ]
 }
 
-/** Abas do módulo FINANCEIRO: a casa do dinheiro. Espelha o grupo "Financeiro" da sidebar,
- *  na mesma ordem do fluxo real: o que entra → como cobra → o que sai → nota → números. */
-export function financeiroTabs(isSalesPolo: boolean): Array<{ to: string; label: string }> {
-  return [
-    ...(isSalesPolo ? [{ to: '/recebimentos', label: 'Recebimentos' }] : []),
-    { to: '/contas-a-receber', label: 'Contas a receber' },
-    { to: '/contas-a-pagar', label: 'Contas a pagar' },
-    { to: '/gastos', label: 'Gastos e controle' },
-    { to: '/extrato', label: 'Extrato' },
-    { to: '/contas-caixa', label: 'Contas & caixa' },
-    { to: '/recorrentes', label: 'Recorrentes' },
-    { to: '/conciliacao', label: 'Conciliação' },
-    ...(isSalesPolo ? [] : [{ to: '/conciliacao-shosp', label: 'Conciliação Shosp' }]),
-    ...(isSalesPolo ? [] : [{ to: '/cirurgia-paga', label: 'Cirurgia foi paga?' }]),
-    ...(isSalesPolo ? [] : [{ to: '/caixa-dinheiro', label: 'Caixa em dinheiro' }]),
-    ...(isSalesPolo ? [] : [{ to: '/importar-vendas', label: 'Importar vendas' }]),
-    { to: '/alertas-pagamento', label: 'Alertas pagamento' },
-    { to: '/fluxo-caixa', label: 'Fluxo de caixa' },
-    // Repasse da Shopee = marketplace do Tricopill. Na clínica não existe.
-    ...(isSalesPolo ? [{ to: '/importar-shop', label: 'Importar Shopee' }] : []),
-    { to: '/links-pagamento', label: 'Links de pagamento' },
-    ...(isSalesPolo ? [{ to: '/cupons', label: 'Cupons' }] : []),
-    ...(isSalesPolo ? [{ to: '/nfe', label: 'Emissão de NF-e' }] : []),
-    ...(isSalesPolo ? [{ to: '/tricopill-relatorios', label: 'Relatórios' }] : []),
-  ]
-}
+/* A navegação do financeiro mora em `components/page/FinanceTabs.tsx`, em dois níveis.
+ * Ficava aqui, numa régua plana de 14 abas — e uma tela de ESTOQUE ser a dona do menu do
+ * FINANCEIRO era metade do motivo de ninguém achar nada. */
 
 const EMPTY_ITEM = { name: '', sku: '', barcode: '', category: '', unit: 'un', minQty: '', controlled: false, blingProductId: '' }
 

@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { CalendarClock, Check, ChevronDown, FileCode, FileText, Paperclip, Plus, Receipt } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -21,7 +21,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import {
   type InvoiceMovement,
@@ -356,7 +355,7 @@ export function ContasPagarPage() {
       title="Contas a pagar"
       subtitle="Notas fiscais de compra, boletos e a agenda de vencimentos com projeção por mês."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[

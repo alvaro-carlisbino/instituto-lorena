@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { StatCard } from '@/components/page/StatCard'
 import { SaldoSparkline, type PontoSaldo } from '@/components/financeiro/SaldoSparkline'
 import { Button } from '@/components/ui/button'
@@ -24,7 +24,6 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
 import { linkBancoMcp } from '@/services/openFinance'
@@ -331,7 +330,7 @@ export function FinAccountsPage() {
         ) : null
       }
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       {avisos.length > 0 ? (
         <div className="mb-4 space-y-2">

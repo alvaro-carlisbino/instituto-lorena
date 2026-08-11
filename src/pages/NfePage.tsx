@@ -4,8 +4,7 @@ import { toast } from 'sonner'
 import { FileText, RefreshCw, ShieldAlert, CheckCircle2, XCircle, Loader2, Settings2 } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
-import { financeiroTabs } from '@/pages/EstoquePage'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -202,7 +201,7 @@ export function NfePage() {
       title="Emissão de NF-e"
       subtitle="Todos os pedidos de venda do Bling no período. Marque os que quer e emita as notas de uma vez."
     >
-      <SubTabs tabs={financeiroTabs(isSalesPolo)} />
+      <FinanceTabs isSalesPolo={isSalesPolo} />
 
       {/* Pré-requisito fiscal */}
       {naturezaMissing ? (

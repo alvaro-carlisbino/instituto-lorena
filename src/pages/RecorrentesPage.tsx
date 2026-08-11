@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { Plus, Repeat } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -11,7 +11,6 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { type Supplier, listSuppliers } from '@/services/estoqueCompras'
 import {
@@ -126,7 +125,7 @@ export function RecorrentesPage() {
       title="Recorrentes"
       subtitle="Aluguel, salários e contas fixas que viram automaticamente conta a pagar/receber todo mês."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,400px)_1fr]">
         <Card>

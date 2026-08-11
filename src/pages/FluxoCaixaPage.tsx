@@ -4,11 +4,10 @@ import { toast } from 'sonner'
 import { TrendingUp, TrendingDown, Wallet } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { listPayables, type Payable } from '@/services/estoqueCompras'
 import {
@@ -99,7 +98,7 @@ export function FluxoCaixaPage() {
       title="Fluxo de caixa"
       subtitle={`Entrou × saiu × saldo nos últimos ${MONTHS_BACK} meses (realizado no caixa) + o previsto das contas em aberto.`}
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Card>

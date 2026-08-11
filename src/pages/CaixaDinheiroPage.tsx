@@ -12,7 +12,7 @@ import { toast } from 'sonner'
 import { Banknote, Download, Plus, Trash2, Wallet } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,7 +21,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { hojeLocal } from '@/lib/diaLocal'
 import {
@@ -182,7 +181,7 @@ export function CaixaDinheiroPage() {
       title="Caixa em dinheiro"
       subtitle="O que entrou em espécie, o que saiu do caixa e com quem. A diferença é o que tem que estar na gaveta."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="flex flex-wrap items-end gap-2">
         <div className="space-y-1">

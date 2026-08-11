@@ -4,12 +4,11 @@ import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, BellRing, RefreshCw } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import {
   type UnpaidAppointmentAlert,
@@ -58,7 +57,7 @@ export function AlertasPagamentoPage() {
       title="Alertas de pagamento"
       subtitle="Consultas agendadas sem pagamento, alerta para Luana e conciliação."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Badge variant="secondary" className="bg-red-500/15 text-red-600">

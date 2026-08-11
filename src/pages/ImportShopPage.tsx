@@ -3,12 +3,11 @@ import { toast } from 'sonner'
 import { FileSpreadsheet, Upload } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { parseShopSpreadsheet, type ShopImportRow } from '@/services/importShop'
 import { createPayablesFromImport } from '@/services/importShopPersist'
@@ -65,7 +64,7 @@ export function ImportShopPage() {
       title="Importar planilha do shop"
       subtitle="CSV do Excel com custos e pagamentos, mapeamento automático de colunas."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <Card className="mb-4">
         <CardHeader>

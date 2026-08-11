@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Copy, CreditCard, ExternalLink, QrCode, RefreshCw, Truck } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -11,8 +12,6 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
-import { SubTabs } from '@/components/page/SubTabs'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
 import { checkRedePix, generateRedeLink, generateRedePix } from '@/services/crmRede'
 import { quoteFrete, type FreteOption } from '@/services/crmFrete'
@@ -220,7 +219,7 @@ export function PaymentLinksPage() {
       title="Links de pagamento"
       subtitle={isSalesPolo ? 'Pix e cartão (e.Rede) para o Tricopill' : 'Link de pagamento por cartão (e.Rede)'}
     >
-      <SubTabs tabs={financeiroTabs(isSalesPolo)} />
+      <FinanceTabs isSalesPolo={isSalesPolo} />
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,400px)_1fr]">
         <Card>
           <CardHeader>

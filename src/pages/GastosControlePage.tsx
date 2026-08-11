@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { FileSpreadsheet, Plus, RefreshCw, Search, Upload } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -19,7 +19,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import {
   DEFAULT_COST_CENTERS,
@@ -182,7 +181,7 @@ export function GastosControlePage() {
       title="Gastos e controle"
       subtitle="Tudo que saiu no mês: o que o banco pagou e a conta a pagar que ainda não caiu, por centro de custo."
     >
-      <SubTabs tabs={financeiroTabs(isSalesPolo)} />
+      <FinanceTabs isSalesPolo={isSalesPolo} />
 
       <div className="mb-4 flex flex-wrap items-end gap-2">
           <div className="space-y-1">

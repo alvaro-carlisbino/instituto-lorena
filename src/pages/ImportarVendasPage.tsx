@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { AlertTriangle, ArrowRight, Download, FileSpreadsheet, Landmark, Upload } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -12,7 +12,6 @@ import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { listAccounts, listCategories, type FinAccount, type FinCategory } from '@/services/financeiro'
 import { parseShospSales, PAYMENT_LABEL, type ShospParseResult } from '@/services/shospVendas'
@@ -185,7 +184,7 @@ export function ImportarVendasPage() {
       title="Importar vendas"
       subtitle="Relatório do Shosp vira conta a receber. A planilha da recepção mostra o que ficou de fora."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,400px)_1fr]">
         <div className="space-y-4">

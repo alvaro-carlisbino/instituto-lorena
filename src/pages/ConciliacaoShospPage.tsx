@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -24,7 +24,6 @@ import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import {
   bankCoverage,
@@ -399,7 +398,7 @@ export function ConciliacaoShospPage() {
       title="Conciliação Shosp × Banco"
       subtitle="Sobe o extrato de vendas do Shosp, cruza com as entradas da conta e devolve só o que não fecha."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,380px)_1fr]">
         {/* ─────────────────────────────── coluna esquerda: entradas */}

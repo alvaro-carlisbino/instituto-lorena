@@ -1,7 +1,6 @@
 import { AppLayout } from '@/layouts/AppLayout'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { PaymentsPanel } from '@/components/payments/ClinicPaymentsPanel'
-import { SubTabs } from '@/components/page/SubTabs'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 
 /**
@@ -17,7 +16,7 @@ export function TricopilFinancePage() {
       title="Recebimentos"
       subtitle="O que entrou, o que falta conciliar e os comprovantes."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
       <PaymentsPanel />
     </AppLayout>
   )

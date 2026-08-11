@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { CalendarClock, Check, HandCoins, Plus } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -20,7 +20,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import {
   type AdquirenteMes,
@@ -221,7 +220,7 @@ export function ContasReceberPage() {
       title="Contas a receber"
       subtitle="O que a clínica tem para receber: consultas, pacotes e vendas, com vencimento e baixa no caixa."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {/* Estes quatro nomes já mentiram. "Recebido no mês" mostrava R$ 410.681 em agosto/2026

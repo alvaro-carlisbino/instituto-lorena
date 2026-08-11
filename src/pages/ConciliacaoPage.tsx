@@ -4,7 +4,7 @@ import { ArrowLeftRight, Check, FileUp, Landmark, Link2, RefreshCw, X } from 'lu
 import { PluggyConnect } from 'react-pluggy-connect'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -12,7 +12,6 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { type Payable, listPayables } from '@/services/estoqueCompras'
 import {
@@ -279,7 +278,7 @@ export function ConciliacaoPage() {
       title="Conciliação bancária"
       subtitle="O extrato do banco conectado entra sozinho 3x por dia. Se precisar, suba um OFX/CSV e case cada lançamento com uma conta a pagar ou a receber."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,360px)_1fr]">
         <div className="space-y-4">

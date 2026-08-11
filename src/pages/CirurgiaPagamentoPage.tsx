@@ -15,7 +15,7 @@ import { toast } from 'sonner'
 import { AlertTriangle, Banknote, Download, HeartPulse, Link2Off, ShieldCheck } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
+import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -24,7 +24,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { financeiroTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { hojeLocal } from '@/lib/diaLocal'
 import { listCirurgiasPagamento, type CirurgiaPagamento, type VinculoCirurgia } from '@/services/financeiro'
@@ -128,7 +127,7 @@ export function CirurgiaPagamentoPage() {
       title="Cirurgia foi paga?"
       subtitle="Cada cirurgia realizada contra o dinheiro que entrou daquele paciente. A regra é 100% pago antes de operar."
     >
-      <SubTabs tabs={financeiroTabs(tenant.poloType === 'sales')} />
+      <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="flex flex-wrap items-end gap-2">
         <div className="space-y-1">
