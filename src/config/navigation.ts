@@ -2,6 +2,7 @@ import {
   type LucideIcon,
   AlarmClock,
   ArrowLeftRight,
+  Settings2,
   Banknote,
   HeartPulse,
   Bell,
@@ -419,6 +420,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: ArrowLeftRight,
     group: 'financeiro',
     keywords: ['extrato', 'bater', 'ofx', 'banco'],
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
+  },
+  {
+    id: 'financeiro-config',
+    path: '/financeiro-config',
+    label: 'Config. do financeiro',
+    icon: Settings2,
+    group: 'financeiro',
+    keywords: ['centro de custo', 'categoria', 'regra', 'classificacao', 'configurar'],
     visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {

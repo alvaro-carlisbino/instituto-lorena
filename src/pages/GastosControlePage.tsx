@@ -20,13 +20,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useTenant } from '@/context/TenantContext'
-import {
-  DEFAULT_COST_CENTERS,
-  createGastoManual,
-  importGastosRows,
-  parseGastosSpreadsheet,
-} from '@/services/gastosControle'
-import { listSaidasTudo, type SaidaTudo } from '@/services/financeiro'
+import { createGastoManual, importGastosRows, parseGastosSpreadsheet } from '@/services/gastosControle'
+import { listCostCenters, listSaidasTudo, type CostCenter, type SaidaTudo } from '@/services/financeiro'
 import { Badge } from '@/components/ui/badge'
 
 function formatBRL(cents: number): string {
@@ -64,6 +59,9 @@ export function GastosControlePage() {
   // mostrava R$ 122 mil do ano (só o que vinha de XML de nota) enquanto o extrato mostrava
   // R$ 1,2 milhão só em julho, e as duas "estavam certas" olhando metade cada uma.
   const [rows, setRows] = useState<SaidaTudo[]>([])
+  // Centro de custo vem do BANCO, não de um array no fonte: dá pra criar e renomear em
+  // /financeiro-config sem deploy. Ver a migration 20260811250000.
+  const [centros, setCentros] = useState<CostCenter[]>([])
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -78,7 +76,8 @@ export function GastosControlePage() {
       const [y, m] = month.split('-').map(Number)
       const de = `${month}-01`
       const ate = diaLocal(new Date(y, m, 0))
-      const todas = await listSaidasTudo(de, ate)
+      const [todas, cc] = await Promise.all([listSaidasTudo(de, ate), listCostCenters()])
+      setCentros(cc)
       const termo = q.trim().toLowerCase()
       setRows(
         todas.filter(
@@ -121,10 +120,12 @@ export function GastosControlePage() {
   )
   const totalCents = useMemo(() => rows.reduce((s, r) => s + r.amountCents, 0), [rows])
   const costCenterOptions = useMemo(() => {
-    const set = new Set<string>([...DEFAULT_COST_CENTERS])
+    // Os cadastrados MAIS o que já aparece nos dados: centro vindo de importação antiga não
+    // pode sumir do filtro só por não estar cadastrado ainda.
+    const set = new Set<string>(centros.map((c) => c.name))
     for (const r of rows) if (r.centroCusto) set.add(r.centroCusto)
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'))
-  }, [rows])
+  }, [rows, centros])
 
   const handleImport = async (file: File | null) => {
     if (!file) return
@@ -368,8 +369,8 @@ export function GastosControlePage() {
                 list="centros-gasto"
               />
               <datalist id="centros-gasto">
-                {DEFAULT_COST_CENTERS.map((c) => (
-                  <option key={c} value={c} />
+                {centros.map((c) => (
+                  <option key={c.id} value={c.name} />
                 ))}
               </datalist>
             </div>

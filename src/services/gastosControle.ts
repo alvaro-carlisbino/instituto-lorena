@@ -5,6 +5,11 @@ import { supabase } from '@/lib/supabaseClient'
 import { createPayables, type Payable } from '@/services/estoqueCompras'
 
 /** Centros de custo padrão da planilha Instituto Lorena (maio/2026). */
+/**
+ * @deprecated Centro de custo virou DADO (`fin_cost_centers`, migration 20260811250000) e se
+ * edita em /financeiro-config. Esta lista sobrevive só como a semente daquela migration —
+ * ninguém deve mais ler daqui, senão volta a existir estrutura de custo que só muda com deploy.
+ */
 export const DEFAULT_COST_CENTERS = [
   'Centro Cirúrgico',
   'Infraestrutura',

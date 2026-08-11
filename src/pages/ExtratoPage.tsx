@@ -144,8 +144,8 @@ export function ExtratoPage() {
       if (criarRegra) {
         const padrao = sugerirPadrao(t.description ?? t.counterparty ?? '')
         if (padrao.length >= 4) {
-          const n = await saveCategoryRule({ pattern: padrao, categoryId, direction: t.direction })
-          toast.success(`"${padrao}" classificado — ${n} lançamento(s) carimbado(s).`)
+          const { carimbados } = await saveCategoryRule({ pattern: padrao, categoryId, direction: t.direction })
+          toast.success(`"${padrao}" classificado — ${carimbados} lançamento(s) carimbado(s).`)
         } else {
           await updateTransaction(t.id, { categoryId })
           toast.success('Classificado (descrição curta demais para virar regra).')

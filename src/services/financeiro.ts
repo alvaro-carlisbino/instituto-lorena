@@ -1129,10 +1129,10 @@ export async function saveCategoryRule(payload: {
   sobrescrever?: boolean
   /** carimbado junto: quem diz "isto é lavanderia" já sabe que é Infraestrutura */
   costCenter?: string | null
-}): Promise<number> {
+}): Promise<{ ruleId: string | null; carimbados: number }> {
   const client = assertClient()
   const pattern = payload.pattern.trim()
-  const { error } = await client.from('fin_category_rules').upsert(
+  const { data: regra, error } = await client.from('fin_category_rules').upsert(
     {
       pattern,
       category_id: payload.categoryId,
@@ -1140,18 +1140,22 @@ export async function saveCategoryRule(payload: {
       cost_center: payload.costCenter ?? null,
     },
     { onConflict: 'tenant_id, pattern, direction' },
-  )
+  ).select('id').maybeSingle()
   // Regra repetida não é erro pro usuário: ele quer o carimbo, e o carimbo roda igual.
   if (error && !/duplicate|conflict/i.test(error.message)) throw new Error(error.message)
+  // O id volta pra gravar o RASTRO no lançamento: sem saber qual regra carimbou o quê,
+  // desfazer uma regra errada vira caça manual linha por linha.
+  const ruleId = (regra as { id?: string } | null)?.id ?? null
   const { data, error: err2 } = await client.rpc('crm_aplicar_regra_categoria', {
     p_pattern: pattern,
     p_category_id: payload.categoryId,
     p_direction: payload.direction ?? null,
     p_sobrescrever: payload.sobrescrever ?? false,
     p_cost_center: payload.costCenter ?? null,
+    p_rule_id: ruleId,
   })
   if (err2) throw new Error(err2.message)
-  return Number(data ?? 0)
+  return { ruleId, carimbados: Number(data ?? 0) }
 }
 
 export async function deleteCategoryRule(id: string): Promise<void> {
@@ -1229,4 +1233,123 @@ export async function listSaidasTudo(de: string, ate: string): Promise<SaidaTudo
     centroCusto: (r.centro_custo as string | null) ?? null,
     conciliado: Boolean(r.conciliado),
   }))
+}
+
+// ──────────────────────────────────────────── configuração do financeiro
+//
+// Ver a migration 20260811250000. Centro de custo era um array `const` no fonte: criar
+// "Tricoscopia" ou renomear "SPA" exigia deploy. Enquanto for código, o financeiro depende de
+// programador pra mudar a própria estrutura de custo.
+
+export type CostCenter = { id: string; name: string; active: boolean; sortOrder: number }
+
+export async function listCostCenters(includeInactive = false): Promise<CostCenter[]> {
+  const client = assertClient()
+  let q = client.from('fin_cost_centers').select('id, name, active, sort_order').order('sort_order').order('name')
+  if (!includeInactive) q = q.eq('active', true)
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>
+    return {
+      id: String(row.id),
+      name: String(row.name ?? ''),
+      active: Boolean(row.active),
+      sortOrder: Number(row.sort_order ?? 100),
+    }
+  })
+}
+
+export async function upsertCostCenter(payload: {
+  id?: string
+  name: string
+  active?: boolean
+  sortOrder?: number
+}): Promise<void> {
+  const client = assertClient()
+  const row: Record<string, unknown> = { name: payload.name.trim() }
+  if (payload.active !== undefined) row.active = payload.active
+  if (payload.sortOrder !== undefined) row.sort_order = payload.sortOrder
+  const { error } = payload.id
+    ? await client.from('fin_cost_centers').update(row).eq('id', payload.id)
+    : await client.from('fin_cost_centers').insert(row)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Renomear um centro precisa arrastar quem já usa o nome antigo.
+ *
+ * `cost_center` é TEXTO nas duas tabelas que o consomem (herança de quando era array no fonte).
+ * Sem esta varredura, renomear "SPA" para "Estética" deixaria todo o histórico órfão num centro
+ * que não existe mais na lista — e o relatório por centro de custo passaria a ter uma linha
+ * fantasma que ninguém consegue selecionar.
+ */
+export async function renameCostCenter(id: string, de: string, para: string): Promise<void> {
+  const client = assertClient()
+  const novo = para.trim()
+  const { error } = await client.from('fin_cost_centers').update({ name: novo }).eq('id', id)
+  if (error) throw new Error(error.message)
+  const a = await client.from('fin_transactions').update({ cost_center: novo }).eq('cost_center', de)
+  if (a.error) throw new Error(a.error.message)
+  const b = await client.from('payable_installments').update({ cost_center: novo }).eq('cost_center', de)
+  if (b.error) throw new Error(b.error.message)
+  const c = await client.from('fin_category_rules').update({ cost_center: novo }).eq('cost_center', de)
+  if (c.error) throw new Error(c.error.message)
+}
+
+export async function deleteCostCenter(id: string): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.from('fin_cost_centers').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/** Quantos lançamentos cada regra carimbou — dá peso à regra na tela de configuração. */
+export async function listRuleUsage(): Promise<Map<string, { usos: number; amountCents: number }>> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_regras_categoria_uso')
+  if (error) throw new Error(error.message)
+  const m = new Map<string, { usos: number; amountCents: number }>()
+  for (const r of (data ?? []) as Record<string, unknown>[]) {
+    m.set(String(r.rule_id), { usos: Number(r.usos ?? 0), amountCents: Number(r.amount_cents ?? 0) })
+  }
+  return m
+}
+
+/** Desfaz o carimbo de uma regra. O que foi classificado à mão não é tocado. */
+export async function undoCategoryRule(ruleId: string): Promise<number> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_desfazer_regra_categoria', { p_rule_id: ruleId })
+  if (error) throw new Error(error.message)
+  return Number(data ?? 0)
+}
+
+/** Editar conta a receber. Faltava: dava pra criar, receber e cancelar, e só. */
+export async function updateReceivable(
+  id: string,
+  patch: {
+    description?: string
+    customerName?: string | null
+    customerDoc?: string | null
+    amountCents?: number
+    dueDate?: string
+    method?: string | null
+    categoryId?: string | null
+    accountId?: string | null
+    note?: string | null
+  },
+): Promise<void> {
+  const client = assertClient()
+  const row: Record<string, unknown> = {}
+  if (patch.description !== undefined) row.description = patch.description.trim()
+  if (patch.customerName !== undefined) row.customer_name = patch.customerName?.trim() || null
+  if (patch.customerDoc !== undefined) row.customer_doc = patch.customerDoc?.replace(/\D/g, '') || null
+  if (patch.amountCents !== undefined) row.amount_cents = Math.abs(Math.round(patch.amountCents))
+  if (patch.dueDate !== undefined) row.due_date = patch.dueDate
+  if (patch.method !== undefined) row.method = patch.method || null
+  if (patch.categoryId !== undefined) row.category_id = patch.categoryId || null
+  if (patch.accountId !== undefined) row.account_id = patch.accountId || null
+  if (patch.note !== undefined) row.note = patch.note?.trim() || null
+  if (Object.keys(row).length === 0) return
+  const { error } = await client.from('fin_receivables').update(row).eq('id', id)
+  if (error) throw new Error(error.message)
 }
