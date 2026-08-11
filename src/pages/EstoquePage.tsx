@@ -64,6 +64,7 @@ export function financeiroTabs(isSalesPolo: boolean): Array<{ to: string; label:
     { to: '/contas-a-receber', label: 'Contas a receber' },
     { to: '/contas-a-pagar', label: 'Contas a pagar' },
     { to: '/gastos', label: 'Gastos e controle' },
+    { to: '/extrato', label: 'Extrato' },
     { to: '/contas-caixa', label: 'Contas & caixa' },
     { to: '/recorrentes', label: 'Recorrentes' },
     { to: '/conciliacao', label: 'Conciliação' },

@@ -422,6 +422,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {
+    id: 'extrato',
+    path: '/extrato',
+    label: 'Extrato',
+    icon: Landmark,
+    group: 'financeiro',
+    keywords: ['extrato', 'banco', 'classificar', 'categoria', 'entrou', 'saiu', 'grafico'],
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
+  },
+  {
     id: 'caixa-dinheiro',
     path: '/caixa-dinheiro',
     label: 'Caixa em dinheiro',

@@ -1067,3 +1067,118 @@ export async function entrouNaContaNoPeriodo(de: string, ate: string): Promise<n
   )
   return rows.reduce((s, r) => s + Math.abs(Number(r.amount_cents ?? 0)), 0)
 }
+
+// ──────────────────────────────────────────── extrato classificável
+//
+// Ver a migration 20260811230000. `fin_transactions.category_id` existia e nada escrevia nele —
+// por isso o contas a pagar da clínica conhece R$ 122 mil enquanto o extrato mostra R$ 1,2 mi
+// de saída só em julho. Classificar o extrato É construir a despesa.
+
+/** Muda o que dá pra mudar num lançamento do banco. Valor e data vêm do extrato e não se editam. */
+export async function updateTransaction(
+  id: string,
+  patch: { categoryId?: string | null; note?: string | null; counterparty?: string | null },
+): Promise<void> {
+  const client = assertClient()
+  const row: Record<string, unknown> = {}
+  if (patch.categoryId !== undefined) row.category_id = patch.categoryId || null
+  if (patch.note !== undefined) row.note = patch.note?.trim() || null
+  if (patch.counterparty !== undefined) row.counterparty = patch.counterparty?.trim() || null
+  if (Object.keys(row).length === 0) return
+  const { error } = await client.from('fin_transactions').update(row).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export type CategoryRule = {
+  id: string
+  pattern: string
+  categoryId: string
+  direction: 'in' | 'out' | null
+}
+
+export async function listCategoryRules(): Promise<CategoryRule[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('fin_category_rules')
+    .select('id, pattern, category_id, direction')
+    .order('pattern')
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>
+    return {
+      id: String(row.id),
+      pattern: String(row.pattern ?? ''),
+      categoryId: String(row.category_id ?? ''),
+      direction: (row.direction as 'in' | 'out' | null) ?? null,
+    }
+  })
+}
+
+/**
+ * Salva a regra e já carimba os lançamentos que casam. Devolve quantos foram carimbados.
+ *
+ * As duas coisas juntas de propósito: o valor da regra é não ter que classificar
+ * "PIX ENVIADO LAVANDERIA B" de novo no mês que vem E não ter que voltar nos meses passados.
+ */
+export async function saveCategoryRule(payload: {
+  pattern: string
+  categoryId: string
+  direction?: 'in' | 'out' | null
+  sobrescrever?: boolean
+}): Promise<number> {
+  const client = assertClient()
+  const pattern = payload.pattern.trim()
+  const { error } = await client.from('fin_category_rules').upsert(
+    { pattern, category_id: payload.categoryId, direction: payload.direction ?? null },
+    { onConflict: 'tenant_id, pattern, direction' },
+  )
+  // Regra repetida não é erro pro usuário: ele quer o carimbo, e o carimbo roda igual.
+  if (error && !/duplicate|conflict/i.test(error.message)) throw new Error(error.message)
+  const { data, error: err2 } = await client.rpc('crm_aplicar_regra_categoria', {
+    p_pattern: pattern,
+    p_category_id: payload.categoryId,
+    p_direction: payload.direction ?? null,
+    p_sobrescrever: payload.sobrescrever ?? false,
+  })
+  if (err2) throw new Error(err2.message)
+  return Number(data ?? 0)
+}
+
+export async function deleteCategoryRule(id: string): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.from('fin_category_rules').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export type ExtratoDia = {
+  dia: string
+  entrouCents: number
+  saiuCents: number
+  saidaClassificadaCents: number
+}
+
+export async function listExtratoPorDia(de: string, ate: string): Promise<ExtratoDia[]> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_extrato_por_dia', { p_de: de, p_ate: ate })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    dia: String(r.dia ?? ''),
+    entrouCents: Number(r.entrou_cents ?? 0),
+    saiuCents: Number(r.saiu_cents ?? 0),
+    saidaClassificadaCents: Number(r.saida_classificada_cents ?? 0),
+  }))
+}
+
+export type SaidaCategoria = { categoria: string; categoryId: string | null; qtd: number; amountCents: number }
+
+export async function listSaidaPorCategoria(de: string, ate: string): Promise<SaidaCategoria[]> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_saida_por_categoria', { p_de: de, p_ate: ate })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    categoria: String(r.categoria ?? ''),
+    categoryId: (r.category_id as string | null) ?? null,
+    qtd: Number(r.qtd ?? 0),
+    amountCents: Number(r.amount_cents ?? 0),
+  }))
+}
