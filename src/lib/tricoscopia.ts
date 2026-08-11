@@ -16,30 +16,53 @@
  * encostou o aparelho em outro ângulo. Isso dá um piso de ruído medido, não
  * chutado.
  *
- * Levantado em 11/08/2026 sobre 2.352 pares consecutivos de occipital no mesmo
- * aparelho (mediana da variação absoluta entre exames vizinhos):
+ * Levantado em 11/08/2026 sobre pares consecutivos de occipital no mesmo aparelho
+ * (mediana da variação absoluta entre exames vizinhos):
  *
- *   densidade fios/cm² ... 13,8%   <- barulhenta: a área do ROI sozinha varia 5,1%
- *   espessura média ......  5,1%
- *   % de fios finos ......  2,4 pp
- *   fios por UF ..........  6,8%
+ *   % de fios finos .......  2,4 pp    proporção
+ *   comprimento médio .....  4,2%      por fio
+ *   espessura média .......  5,1%      por fio
+ *   espessura mediana .....  5,2%      por fio
+ *   % de fio terminal .....  5,5 pp    proporção
+ *   fios por UF ...........  6,8%      razão entre duas contagens
+ *   espessura p10 ......... 10,8%      percentil extremo, amostra pequena
+ *   densidade fios/cm² .... 13,8%      contagem ÷ área
+ *   massa capilar ......... 15,5%      contagem × calibre
+ *   razão com a doadora ... 23,2%      razão entre dois ruídos
  *
- * Com troca de aparelho tudo piora (densidade 16,1%, área do ROI 12,8%).
+ * A REGRA QUE SAI DAÍ: tudo que é POR FIO é estável; tudo que envolve CONTAR
+ * DENTRO DE UMA ÁREA herda o erro de posicionamento do ROI, que sozinho já anda
+ * 5,1%. Por isso o laudo lidera por espessura e miniaturização, e a densidade
+ * aparece marcada.
  *
- * Conclusão que o desenho da tela obedece: ESPESSURA e MINIATURIZAÇÃO são as
- * métricas confiáveis; DENSIDADE só significa alguma coisa quando o movimento é
- * grande. Um "+12% de densidade" é ruído, e mostrar isso como vitória para quem
- * está pagando tratamento é mentira com gráfico.
+ * Duas montagens boas morreram nessa conta, e ficam registradas para ninguém
+ * tentar de novo achando que é ideia nova:
+ *
+ *   - MASSA CAPILAR (área transversal total de fio por cm², somada faixa a faixa
+ *     do histograma). É o número que corresponde ao que a pessoa vê no espelho, e
+ *     a média por região bate certinho com a fisiologia — occipital 0,57 >
+ *     vértice 0,44 > frontal 0,37 > temporal 0,28 mm²/cm². Mas tem 15,5% de
+ *     ruído, pior que a densidade: multiplica o erro de contagem pelo de calibre.
+ *   - RAZÃO COM A PRÓPRIA DOADORA (normalizar a região pelo teto genético do
+ *     paciente). Parecia cancelar o erro de captura por serem do mesmo dia; na
+ *     prática deu 23,2%, o pior de todos, porque os erros de ROI de duas regiões
+ *     são independentes e a razão soma as duas variâncias em vez de cancelar.
+ *     O que sobrou dessa ideia e vale é comparar ESPESSURA com a doadora dentro
+ *     do mesmo exame — ver PerfilDoCouro.
  *
  * Para refazer a conta quando houver mais exame:
  *   lag() por (paciente, região) em regiao ilike 'occiput%', percentile_cont(0.5)
  *   da variação absoluta, agrupando por serial_dispositivo igual ou diferente.
+ *   Com troca de aparelho tudo piora: densidade 16,1%, área do ROI 12,8%.
  */
 export const RUIDO = {
   densidadePct: 13.8,
   espessuraPct: 5.1,
   finosPp: 2.4,
   fiosPorUfPct: 6.8,
+  comprimentoPct: 4.2,
+  medianaPct: 5.2,
+  p10Pct: 10.8,
 } as const
 
 export type Veredito = 'ganho' | 'estavel' | 'perda' | 'indefinido'

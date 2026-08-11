@@ -15,7 +15,9 @@ import {
 import { AlertTriangle, ArrowLeft, Presentation, TriangleAlert, User } from 'lucide-react'
 
 import { CampoFolicular } from '@/components/tricoscopia/CampoFolicular'
-import { GaleriaFotos } from '@/components/tricoscopia/GaleriaFotos'
+import { FeixeDeFios } from '@/components/tricoscopia/FeixeDeFios'
+import { PerfilDoCouro } from '@/components/tricoscopia/PerfilDoCouro'
+import { montarPerfil } from '@/lib/perfilDoCouro'
 import { MapaCouroCabeludo, type RegiaoNoMapa } from '@/components/tricoscopia/MapaCouroCabeludo'
 import { AppLayout } from '@/layouts/AppLayout'
 import { Badge } from '@/components/ui/badge'
@@ -40,13 +42,8 @@ import {
 } from '@/lib/tricoscopia'
 import {
   cabecalhoDoPaciente,
-  fotosDoPaciente,
-  pedidoDeImagens,
-  pedirImagens,
   serieDoPaciente,
   type CabecalhoPaciente,
-  type FotoExame,
-  type PedidoImagem,
   type PontoSerie,
 } from '@/services/hairmetrix'
 import { cn } from '@/lib/utils'
@@ -145,12 +142,6 @@ export function TricoscopiaPacientePage() {
     erro: string | null
   } | null>(null)
 
-  // Fotos carregam à parte da série: são uma RPC + assinatura de URL no storage, e
-  // o laudo não pode ficar esperando isso para desenhar os números.
-  const [fotos, setFotos] = useState<FotoExame[]>([])
-  const [pedido, setPedido] = useState<PedidoImagem | null>(null)
-  const [pedindo, setPedindo] = useState(false)
-
   const [regiaoEscolhida, setRegiaoEscolhida] = useState<string | null>(null)
   const [metrica, setMetrica] = useState<MetricaId>('espessura')
   const [apresentando, setApresentando] = useState(false)
@@ -168,37 +159,6 @@ export function TricoscopiaPacientePage() {
         toast.error(msg)
       })
     return () => { vivo = false }
-  }, [pacienteId])
-
-  useEffect(() => {
-    let vivo = true
-    if (!pacienteId) return
-    Promise.all([fotosDoPaciente(pacienteId), pedidoDeImagens(pacienteId)])
-      .then(([f, p]) => {
-        if (!vivo) return
-        setFotos(f)
-        setPedido(p)
-      })
-      // foto é extra: se falhar, o laudo continua de pé com os números e o desenho
-      .catch(() => {})
-    return () => { vivo = false }
-  }, [pacienteId])
-
-  const solicitarFotos = useCallback(async () => {
-    setPedindo(true)
-    try {
-      const { jaExistia } = await pedirImagens(pacienteId)
-      setPedido(await pedidoDeImagens(pacienteId))
-      toast.success(
-        jaExistia
-          ? 'Já havia um pedido em aberto para este paciente.'
-          : 'Pedido registrado. O agente da clínica sobe as fotos na próxima rodada.',
-      )
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Não deu para registrar o pedido.')
-    } finally {
-      setPedindo(false)
-    }
   }, [pacienteId])
 
   const carregando = carga?.id !== pacienteId
@@ -270,6 +230,41 @@ export function TricoscopiaPacientePage() {
       }),
     [porRegiao, variacaoDaRegiao, met],
   )
+
+  /**
+   * Perfil: todas as regiões de UM exame. Tem que ser do mesmo exame, senão a
+   * comparação com a doadora atravessa datas e o argumento cai — o que sustenta
+   * essa leitura é a captura ter sido no mesmo dia, pelo mesmo operador.
+   *
+   * Prefere o exame mais recente que INCLUA a doadora; sem nenhum, cai no mais
+   * recente e a tela avisa que não há referência interna.
+   */
+  const perfil = useMemo(() => {
+    const porExame = new Map<string, PontoSerie[]>()
+    for (const p of serie) {
+      if (!porExame.has(p.exameId)) porExame.set(p.exameId, [])
+      porExame.get(p.exameId)!.push(p)
+    }
+    const exames = Array.from(porExame.values()).sort((a, b) =>
+      b[0].capturadoEm.localeCompare(a[0].capturadoEm),
+    )
+    const escolhido = exames.find((ms) => ms.some((m) => ehAreaDoadora(m.regiao))) ?? exames[0]
+    if (!escolhido) return null
+
+    const ordenadas = escolhido
+      .slice()
+      .sort((a, b) => ordemRegiao(a.regiao) - ordemRegiao(b.regiao))
+    const doadoraHistorica = serie
+      .filter(
+        (m) =>
+          m.exameId !== escolhido[0].exameId &&
+          ehAreaDoadora(m.regiao) &&
+          m.espessuraMediaUm !== null,
+      )
+      .map((m) => m.espessuraMediaUm as number)
+
+    return { data: escolhido[0].capturadoEm, ...montarPerfil(ordenadas, doadoraHistorica) }
+  }, [serie])
 
   const pontosSel = useMemo(
     () => (regiaoSel ? (porRegiao.find(([r]) => r === regiaoSel)?.[1] ?? []) : []),
@@ -533,15 +528,62 @@ export function TricoscopiaPacientePage() {
           </Card>
         )}
 
-        {/* --- fotos do exame -------------------------------------------------- */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Fotos do exame</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <GaleriaFotos fotos={fotos} pedido={pedido} pedindo={pedindo} onPedir={() => void solicitarFotos()} />
-          </CardContent>
-        </Card>
+        {/* --- feixe de fios ---------------------------------------------------- */}
+        {regiaoSel && pontosSel.length >= 2 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Cem fios de {regiaoSel}, do mais fino ao mais grosso</CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">
+                A leitura mais direta que o exame permite: a proporção de fio fino e grosso, desenhada. Sem
+                contagem no meio, porque contagem é a parte instável da medida.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <FeixeDeFios
+                primeiro={{
+                  rotulo: 'Primeiro exame',
+                  capturadoEm: pontosSel[0].capturadoEm,
+                  espessuraHist: pontosSel[0].espessuraHist,
+                  espessuraMediaUm: pontosSel[0].espessuraMediaUm,
+                  comprimentoMedioMm: pontosSel[0].comprimentoMedioMm,
+                }}
+                ultimo={{
+                  rotulo: 'Exame mais recente',
+                  capturadoEm: pontosSel[pontosSel.length - 1].capturadoEm,
+                  espessuraHist: pontosSel[pontosSel.length - 1].espessuraHist,
+                  espessuraMediaUm: pontosSel[pontosSel.length - 1].espessuraMediaUm,
+                  comprimentoMedioMm: pontosSel[pontosSel.length - 1].comprimentoMedioMm,
+                }}
+              />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* --- perfil do couro cabeludo ----------------------------------------- */}
+        {perfil && perfil.regioes.length > 1 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">
+                Padrão de rarefação
+                <span className="ml-2 font-normal text-muted-foreground">
+                  exame de {dia(perfil.data)}
+                </span>
+              </CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Onde este paciente perdeu calibre, comparado com a área doadora dele mesmo. É o desenho da
+                alopecia dele, não de uma tabela de referência.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <PerfilDoCouro
+                regioes={perfil.regioes}
+                referenciaUm={perfil.referenciaUm}
+                regiaoReferencia={perfil.regiaoReferencia}
+                referenciaHistoricaUm={perfil.referenciaHistoricaUm}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         {/* --- campo folicular desenhado --------------------------------------- */}
         {regiaoSel && pontosSel.length >= 2 && (
@@ -564,6 +606,7 @@ export function TricoscopiaPacientePage() {
                   densidadeFiosCm2: pontosSel[0].densidadeFiosCm2,
                   espessuraMediaUm: pontosSel[0].espessuraMediaUm,
                   espessuraHist: pontosSel[0].espessuraHist,
+                  comprimentoMedioMm: pontosSel[0].comprimentoMedioMm,
                 }}
                 ultimo={{
                   captureId: pontosSel[pontosSel.length - 1].captureId,
@@ -573,6 +616,7 @@ export function TricoscopiaPacientePage() {
                   densidadeFiosCm2: pontosSel[pontosSel.length - 1].densidadeFiosCm2,
                   espessuraMediaUm: pontosSel[pontosSel.length - 1].espessuraMediaUm,
                   espessuraHist: pontosSel[pontosSel.length - 1].espessuraHist,
+                  comprimentoMedioMm: pontosSel[pontosSel.length - 1].comprimentoMedioMm,
                 }}
               />
             </CardContent>

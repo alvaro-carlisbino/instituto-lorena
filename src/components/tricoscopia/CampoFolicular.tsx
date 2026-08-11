@@ -8,6 +8,9 @@ import { FAIXAS, dia } from '@/lib/tricoscopia'
  *
  * Os dois quadros são o MESMO centímetro quadrado e a MESMA escala de espessura.
  * Sem isso o desenho vira ilusão de ótica em vez de comparação.
+ *
+ * É o único desenho da tela que mostra densidade, que é a medida barulhenta. Por
+ * isso ele vem DEPOIS do feixe de fios no laudo, e o rodapé diz o tamanho do ruído.
  */
 
 const COR_FAIXA: Record<string, string> = Object.fromEntries(
@@ -113,6 +116,10 @@ export function CampoFolicular({
         unidades foliculares, quantos fios em cada uma e a distribuição de espessura são as do exame. A posição
         de cada fio é sorteada — mas com semente fixa, então este desenho é sempre o mesmo para este exame.
         Os dois quadros usam a mesma escala.
+        {' '}
+        <strong className="text-foreground">A quantidade de fios oscila 13,8% entre capturas</strong> mesmo
+        sem nada mudar na cabeça — é o erro de posicionar o quadrado. Diferença menor que isso entre os dois
+        lados não quer dizer nada; para ver o que mudou de verdade, o feixe de fios acima fixa a contagem.
       </p>
     </div>
   )

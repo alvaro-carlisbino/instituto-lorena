@@ -84,6 +84,9 @@ export type PontoSerie = {
   densidadeFiosCm2: number | null
   espessuraMediaUm: number | null
   espessuraP10Um: number | null
+  espessuraMedianaUm: number | null
+  /** segmento visível do fio dentro do quadro, em mm */
+  comprimentoMedioMm: number | null
   pctFiosFinos: number | null
   espessuraHist: Record<string, unknown> | null
   roiAreaMm2: number | null
@@ -248,6 +251,8 @@ export async function serieDoPaciente(pacienteId: string): Promise<PontoSerie[]>
     densidadeFiosCm2: num(r.densidade_fios_cm2),
     espessuraMediaUm: num(r.espessura_media_um),
     espessuraP10Um: num(r.espessura_p10_um),
+    espessuraMedianaUm: num(r.espessura_mediana_um),
+    comprimentoMedioMm: num(r.comprimento_medio_mm),
     pctFiosFinos: num(r.pct_fios_finos),
     espessuraHist: (r.espessura_hist as Record<string, unknown>) ?? null,
     roiAreaMm2: num(r.roi_area_mm2),
@@ -311,91 +316,4 @@ export async function estadoDoSync(): Promise<EstadoSync> {
     primeiroExameEm: (r.primeiro_exame_em as string) ?? null,
     ultimoExameEm: (r.ultimo_exame_em as string) ?? null,
   }
-}
-
-// ---------------------------------------------------------------------------
-// FOTOS
-// ---------------------------------------------------------------------------
-/**
- * O que faz a tricoscopia impressionar é a imagem, e a imagem é o que não temos:
- * 32.331 capturas de PNG 4-8 MB dão 130 a 250 GB. O pipeline de envio existe
- * desde 10/08 e nunca rodou, porque o menor modo disponível ainda eram 4,5 GB.
- *
- * Daí a fila: o médico pede as fotos do paciente que está na frente dele e o
- * agente sobe só aquela pasta. Enquanto não chegam, o laudo desenha o campo
- * folicular a partir das medidas — ver src/lib/campoFolicular.ts.
- */
-
-export type FotoExame = {
-  storagePath: string
-  regiao: string | null
-  capturadoEm: string
-  captureId: string
-  bytes: number | null
-  /** URL assinada de vida curta. Couro cabeludo é dado de saúde: nunca link público. */
-  url: string | null
-}
-
-export type PedidoImagem = {
-  status: 'pendente' | 'atendido' | 'cancelado'
-  solicitadoEm: string
-  atendidoEm: string | null
-  imagensEnviadas: number
-}
-
-/** Uma hora é o bastante para a consulta e curto o bastante para o link não circular. */
-const VALIDADE_URL_SEG = 3600
-
-export async function fotosDoPaciente(pacienteId: string): Promise<FotoExame[]> {
-  const db = assertClient()
-  const { data, error } = await db.rpc('hairmetrix_imagens_paciente', { p_paciente_id: pacienteId })
-  if (error) throw new Error(error.message)
-
-  const linhas = ((data ?? []) as Record<string, unknown>[]).map((r) => ({
-    storagePath: String(r.storage_path ?? ''),
-    regiao: (r.regiao as string) ?? null,
-    capturadoEm: String(r.capturado_em ?? ''),
-    captureId: String(r.capture_id ?? ''),
-    bytes: r.bytes === null ? null : Number(r.bytes),
-    url: null as string | null,
-  }))
-  if (linhas.length === 0) return []
-
-  // Uma chamada para todos os caminhos: assinar um a um é um round-trip por foto,
-  // e uma sessão de seis regiões viraria doze requisições.
-  const { data: assinadas } = await db.storage
-    .from('hairmetrix')
-    .createSignedUrls(linhas.map((l) => l.storagePath), VALIDADE_URL_SEG)
-
-  const porCaminho = new Map((assinadas ?? []).map((a) => [a.path ?? '', a.signedUrl]))
-  for (const l of linhas) l.url = porCaminho.get(l.storagePath) ?? null
-  return linhas
-}
-
-export async function pedidoDeImagens(pacienteId: string): Promise<PedidoImagem | null> {
-  const { data, error } = await assertClient()
-    .from('hairmetrix_pedidos_imagem')
-    .select('status, solicitado_em, atendido_em, imagens_enviadas')
-    .eq('paciente_id', pacienteId)
-    .order('solicitado_em', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error) throw new Error(error.message)
-  if (!data) return null
-  return {
-    status: (data.status as PedidoImagem['status']) ?? 'pendente',
-    solicitadoEm: String(data.solicitado_em ?? ''),
-    atendidoEm: (data.atendido_em as string) ?? null,
-    imagensEnviadas: Number(data.imagens_enviadas ?? 0),
-  }
-}
-
-/** Idempotente do lado do banco: clicar duas vezes não vira duas varreduras. */
-export async function pedirImagens(pacienteId: string): Promise<{ jaExistia: boolean }> {
-  const { data, error } = await assertClient().rpc('hairmetrix_pedir_imagens', {
-    p_paciente_id: pacienteId,
-  })
-  if (error) throw new Error(error.message)
-  const r = ((data ?? []) as Record<string, unknown>[])[0]
-  return { jaExistia: Boolean(r?.ja_existia) }
 }

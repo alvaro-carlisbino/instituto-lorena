@@ -3,26 +3,26 @@ import { faixasDoHistograma, type FaixaId, type HistogramaBruto } from './tricos
 /**
  * O CAMPO FOLICULAR DESENHADO A PARTIR DOS NÚMEROS.
  *
- * A foto é o que impressiona na tricoscopia, e a foto é o que não temos: são
- * 32.331 capturas de PNG 2274×2048, entre 4 e 8 MB cada — 130 a 250 GB, dias de
- * upload na internet da clínica. Subir isso para mostrar evolução na consulta é
- * caro e lento demais para o que entrega.
+ * A foto do exame não sobe: decisão de 11/08/2026, porque 32.331 capturas de PNG
+ * 2274×2048 são 130 a 250 GB de storage do Supabase para sempre. Em troca, a
+ * leitura visual é MONTADA a partir do que já está medido — quantas unidades
+ * foliculares por cm², quantos fios em cada uma, a espessura distribuída em faixas
+ * e o comprimento do segmento visível. Dá para desenhar um centímetro quadrado
+ * representativo daquela captura.
  *
- * Mas quase tudo que a foto comunica já está medido: quantas unidades foliculares
- * por cm², quantos fios em cada uma, e a espessura de cada fio distribuída em
- * faixas. Com isso dá para DESENHAR um centímetro quadrado representativo daquele
- * exame. Lado a lado, primeiro exame contra o último, a diferença aparece do jeito
- * que o paciente entende: menos traço e mais fino de um lado, mais traço e mais
- * grosso do outro.
- *
- * ISTO NÃO É A FOTO, E A TELA DIZ ISSO EM LETRA GRANDE. É uma representação fiel
- * às contagens e à distribuição de espessura, e nada além disso: a posição exata
- * de cada fio é sorteada, porque essa informação o CRM não guarda. Vender desenho
- * como exame seria pior do que não ter imagem nenhuma.
+ * ISTO NÃO É A FOTO, E A TELA DIZ ISSO EM LETRA GRANDE. A posição de cada fio é
+ * sorteada, porque o CRM guarda agregado, não a coordenada de cada fio. Vender
+ * desenho como exame seria pior do que não ter imagem nenhuma.
  *
  * O sorteio é SEMENTE FIXA, derivada do capture_id + região: o mesmo exame desenha
  * sempre igual. Imagem de laudo que muda a cada refresh não é ilustração médica, é
  * enfeite — e o paciente que voltasse na consulta seguinte veria outro "exame".
+ *
+ * CUIDADO AO LER ESTE DESENHO: ele é o único da tela que mostra DENSIDADE, e
+ * densidade é a medida mais instável do exame (13,8% de variação na área doadora,
+ * que não rala). Dois quadros com contagem visivelmente diferente podem ser a mesma
+ * cabeça medida duas vezes. Quem isola a parte confiável é o feixe de fios, em
+ * @/lib/feixeDeFios: lá a contagem é fixa nos dois lados de propósito.
  */
 
 /** Um cm² de couro cabeludo. Casa com a ordem de grandeza do ROI real (~0,9 a 1,2 cm²). */
@@ -58,6 +58,8 @@ export type MedidaParaCampo = {
   densidadeFiosCm2: number | null
   espessuraMediaUm: number | null
   espessuraHist: HistogramaBruto
+  /** segmento visível do fio, em mm. Medido, não derivado da espessura. */
+  comprimentoMedioMm: number | null
 }
 
 /** Faixas em µm, na ordem de FAIXAS. A última é aberta: cortamos em 140 para desenhar. */
@@ -153,13 +155,20 @@ export function montarCampo(m: MedidaParaCampo): CampoFolicular | null {
 
     for (let f = 0; f < quantos && fiosColocados < nFios; f++) {
       const { um, faixa } = sortearEspessura()
+      /**
+       * O comprimento agora é o MEDIDO (comprimento_medio_px ÷ ppmm), não mais um
+       * palpite tirado da espessura. É uma das medidas mais estáveis do exame:
+       * 4,2% de variação na área doadora, contra 13,8% da densidade.
+       *
+       * O tremor por fio existe porque a média é uma só para a captura inteira, e
+       * um campo com todos os fios do mesmo tamanho não parece couro cabeludo.
+       */
+      const base = m.comprimentoMedioMm ?? 0.55
       fios.push({
         x: x + (rnd() - 0.5) * 0.22,
         y: y + (rnd() - 0.5) * 0.22,
         angulo: direcao + (rnd() - 0.5) * 0.9,
-        // fio miniaturizado também é curto: o comprimento acompanha a espessura,
-        // que é o que se vê na tricoscopia de verdade
-        comprimentoMm: 0.5 + (um / 140) * 0.9,
+        comprimentoMm: base * (0.75 + rnd() * 0.5),
         espessuraUm: um,
         faixa,
       })
