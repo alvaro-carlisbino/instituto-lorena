@@ -1,7 +1,7 @@
-import { hojeLocal } from '@/lib/diaLocal'
+import { diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { FileText, RefreshCw, ShieldAlert, CheckCircle2, XCircle, Loader2, Settings2 } from 'lucide-react'
+import { FileText, RefreshCw, ShieldAlert, CheckCircle2, XCircle, Loader2, Settings2, AlertTriangle, FileWarning } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { FinanceTabs } from '@/components/page/FinanceTabs'
@@ -10,13 +10,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 import {
+  type NfeBacklog,
+  type NfeBacklogFaixa,
   type NfeOrderRow,
   getBlingOrderConfig,
   setBlingOrderConfig,
+  nfeBacklog,
   nfeListBling,
   nfeEmitOrder,
 } from '@/services/crmBling'
@@ -25,6 +28,14 @@ import { useTenant } from '@/context/TenantContext'
 // Emissão de NF-e em lote: depois da conciliação do dia, o operador filtra as vendas pagas,
 // marca as que quer, e emite todas de uma vez pelo Bling. Cada linha volta com o desfecho
 // (número da nota ou o motivo da rejeição do SEFAZ). Só o polo Tricopill tem Bling/NF-e.
+//
+// A tela também é o lugar onde o BURACO fiscal aparece, e isso é metade do trabalho dela.
+// Ela abria em hoje..hoje, dizia "nenhum pedido no período" num dia sem venda e pintava
+// rascunho de verde "Emitida" — enquanto todo o histórico de vendas pagas seguia sem uma
+// única nota autorizada e o cliente já perguntava "não veio nota fiscal?". Agora o tamanho
+// do backlog é a primeira coisa da página, sai do nosso banco (não do Bling), não depende
+// do filtro e distingue rascunho de nota. Nada aqui transmite sozinho: quem aperta o botão
+// é gente, e transmitir é ato fiscal.
 
 // Usa o fuso DO NEGÓCIO, não o do navegador: o relatório é da clínica em Maringá mesmo
 // quando alguém abre de outro fuso.
@@ -43,12 +54,80 @@ const fmtDate = (iso: string | null) => {
 
 type RowState = NfeOrderRow & { emitting?: boolean }
 
+/**
+ * Estado REAL da nota de um pedido.
+ *
+ * A tela pintava de verde "Emitida Nº X" qualquer linha com número — e rascunho do Bling
+ * também tem número (todos os rascunhos gravados até hoje têm). Rascunho não é nota: não foi
+ * à SEFAZ, não vale para o cliente e não vale para o contador. Número com status desconhecido
+ * também não vira verde — o lado seguro é "não sabemos se saiu".
+ */
+type NfeEstado = 'autorizada' | 'rascunho' | 'erro' | 'indefinida' | 'ausente'
+function estadoDaNota(r: { nfeStatus: string | null; nfeNumero: string | null }): NfeEstado {
+  const s = (r.nfeStatus ?? '').toLowerCase()
+  if (s.includes('autoriz') || s.includes('emit')) return 'autorizada'
+  if (s.includes('erro') || s.includes('rejeit') || s.includes('deneg') || s.includes('fail')) return 'erro'
+  if (s.includes('rascunho')) return 'rascunho'
+  return r.nfeNumero ? 'indefinida' : 'ausente'
+}
+function rotuloEstado(estado: NfeEstado, numero: string | null): string {
+  // 'gerada' é o marcador que a emissão em lote grava quando o Bling não devolve número.
+  const n = numero && numero !== 'gerada' ? ` Nº ${numero}` : ''
+  if (estado === 'autorizada') return `Autorizada${n}`
+  if (estado === 'rascunho') return `Rascunho${n}`
+  if (estado === 'indefinida') return `Documento${n} · estado não confirmado`
+  if (estado === 'erro') return n ? `Erro · rascunho${n}` : 'Erro'
+  return 'Sem nota'
+}
+const TITULO_ESTADO: Record<NfeEstado, string> = {
+  autorizada: 'Nota autorizada pela SEFAZ.',
+  rascunho: 'Rascunho no Bling: o documento existe, mas NÃO foi transmitido à SEFAZ — não vale como nota. A transmissão é feita no Bling.',
+  indefinida: 'O Bling já tem documento para este pedido, mas o CRM não registrou se ele foi autorizado. Confira no Bling antes de dizer ao cliente que a nota saiu.',
+  erro: 'A emissão falhou. O motivo está logo abaixo.',
+  ausente: 'Nenhuma nota foi gerada para este pedido.',
+}
+const ESTADO_META: Record<NfeEstado, { cls: string; linha?: string }> = {
+  autorizada: { cls: 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300', linha: 'bg-emerald-500/[0.06]' },
+  rascunho: { cls: 'bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300', linha: 'bg-amber-500/[0.06]' },
+  indefinida: { cls: 'bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300', linha: 'bg-amber-500/[0.06]' },
+  erro: { cls: 'bg-rose-500/10 text-rose-700 ring-rose-500/25 dark:text-rose-300', linha: 'bg-rose-500/[0.06]' },
+  ausente: { cls: 'bg-muted text-muted-foreground ring-border/40' },
+}
+
+const TONS = {
+  rose: 'bg-rose-500/10 text-rose-700 ring-rose-500/25 dark:text-rose-300',
+  amber: 'bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300',
+  muted: 'bg-muted text-muted-foreground ring-border/40',
+} as const
+
+/** Uma fatia do backlog (quantos pedidos e quanto dinheiro). Some quando é zero. */
+function Faixa({ rotulo, faixa, tom }: { rotulo: string; faixa: NfeBacklogFaixa; tom: keyof typeof TONS }) {
+  if (faixa.pedidos === 0) return null
+  return (
+    <span className={cn('inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] ring-1', TONS[tom])}>
+      <strong className="font-semibold tabular-nums">{faixa.pedidos}</strong> {rotulo}
+      <span className="tabular-nums opacity-80">· {brl(faixa.valorCents)}</span>
+    </span>
+  )
+}
+
+// Período padrão da lista: 30 dias, não "hoje". Abrir em hoje..hoje fazia a tela dizer
+// "nenhum pedido de venda no Bling no período" num dia sem venda, e quem abria ia embora
+// achando que estava tudo em dia — com o backlog inteiro atrás daquela frase.
+const INICIO_PADRAO_DIAS = 30
+
 export function NfePage() {
   const { tenant } = useTenant()
   const isSalesPolo = tenant.poloType === 'sales'
 
-  const [from, setFrom] = useState(todayStr())
+  const [from, setFrom] = useState(diaLocalComOffset(-(INICIO_PADRAO_DIAS - 1)))
   const [to, setTo] = useState(todayStr())
+  // O período que foi de fato CARREGADO, para rotular os números pelo que está na tela e
+  // não pelo que está digitado no filtro (o card já disse "hoje" com outro filtro na tela).
+  const [carregado, setCarregado] = useState<{ de: string; ate: string } | null>(null)
+  const [backlog, setBacklog] = useState<NfeBacklog | null>(null)
+  const [backlogErro, setBacklogErro] = useState<string | null>(null)
+  const [erroLista, setErroLista] = useState<string | null>(null)
   const [rows, setRows] = useState<RowState[]>([])
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -77,13 +156,32 @@ export function NfePage() {
   }, [isSalesPolo])
 
   const load = async () => {
+    const de = from
+    const ate = to
     setLoading(true)
     setSelected(new Set())
+    setCarregado({ de, ate })
+    // O buraco fiscal sai do NOSSO banco, então roda solto: se o token do Bling estiver
+    // fora do ar a lista some, mas o tamanho do backlog continua na tela.
+    void (async () => {
+      try {
+        setBacklogErro(null)
+        setBacklog(await nfeBacklog(de, ate))
+      } catch (e) {
+        setBacklogErro(e instanceof Error ? e.message : 'Falha ao medir o backlog de NF-e')
+      }
+    })()
     try {
-      const list = await nfeListBling(from, to)
+      const list = await nfeListBling(de, ate)
       setRows(list)
+      setErroLista(null)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao carregar os pedidos do Bling')
+      const msg = e instanceof Error ? e.message : 'Falha ao carregar os pedidos do Bling'
+      // Zera as linhas: manter a lista velha embaixo de um período novo é a mesma mentira
+      // que o filtro padrão fazia — a tela passaria a descrever um período que não carregou.
+      setRows([])
+      setErroLista(msg)
+      toast.error(msg)
     } finally {
       setLoading(false)
     }
@@ -108,8 +206,19 @@ export function NfePage() {
   }
 
   // Só dá pra emitir quem ainda não tem nota; pedido cancelado no Bling também fica de fora.
+  // (Continua valendo o número, não o estado: pedido com rascunho volta 'alreadyEmitted' do
+  // Bling, então reselecionar só duplicaria rascunho — a transmissão se faz no Bling.)
   const pending = useMemo(() => rows.filter((r) => !r.nfeNumero && !r.canceled), [rows])
-  const emitidas = rows.filter((r) => !!r.nfeNumero).length
+  const naLista = useMemo(() => {
+    let autorizadas = 0
+    let rascunhos = 0
+    for (const r of rows) {
+      const e = estadoDaNota(r)
+      if (e === 'autorizada') autorizadas += 1
+      else if (e === 'rascunho') rascunhos += 1
+    }
+    return { autorizadas, rascunhos }
+  }, [rows])
   const selectableIds = useMemo(() => pending.map((r) => r.orderId), [pending])
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
 
@@ -159,7 +268,10 @@ export function NfePage() {
           patchRow(id, {
             emitting: false,
             nfeNumero: res.numero ?? 'gerada',
-            nfeStatus: res.alreadyEmitted ? 'emitida' : (res.status ?? 'emitida'),
+            // Não carimba 'emitida' por conta própria: com transmissão desligada o Bling
+            // devolve 'rascunho', e em alreadyEmitted não devolve status nenhum — dizer
+            // "emitida" ali é a mesma mentira que pintava rascunho de verde.
+            nfeStatus: res.alreadyEmitted ? null : (res.status ?? null),
             nfeError: null,
           })
           setSelected((prev) => { const n = new Set(prev); n.delete(id); return n })
@@ -180,13 +292,23 @@ export function NfePage() {
       }
     }
     setEmitting(false)
-    if (fail === 0) toast.success(`${ok} ${ok === 1 ? 'nota emitida' : 'notas emitidas'} com sucesso.`)
-    else if (ok === 0) toast.error(`Nenhuma nota emitida. ${fail} com erro (veja o motivo em cada linha).`)
-    else toast.warning(`${ok} emitida(s), ${fail} com erro. Confira as linhas em vermelho.`)
+    // Com a transmissão desligada o que sai do Bling é RASCUNHO. Dizer "nota emitida" aqui
+    // era o que fazia todo mundo achar que a nota tinha saído — e o cliente perguntar depois.
+    const feito = transmit
+      ? `${ok} ${ok === 1 ? 'nota emitida' : 'notas emitidas'}`
+      : `${ok} ${ok === 1 ? 'rascunho gerado' : 'rascunhos gerados'} no Bling (rascunho ainda não é nota: falta transmitir)`
+    if (fail === 0) toast.success(`${feito}.`)
+    else if (ok === 0) toast.error(`Nada saiu. ${fail} com erro (veja o motivo em cada linha).`)
+    else toast.warning(`${feito}, ${fail} com erro. Confira as linhas em vermelho.`)
+    // O backlog acabou de mudar de tamanho; remede sem recarregar a lista do Bling.
+    if (ok > 0 && carregado) {
+      void nfeBacklog(carregado.de, carregado.ate).then(setBacklog).catch(() => {})
+    }
   }
 
   const selectedCount = [...selected].filter((id) => selectableIds.includes(id)).length
   const naturezaMissing = configLoaded && !savedNaturezaRef.current
+  const semBuraco = backlog != null && !backlogErro && backlog.total.semNota.pedidos === 0
 
   if (!isSalesPolo) {
     return (
@@ -199,9 +321,87 @@ export function NfePage() {
   return (
     <AppLayout
       title="Emissão de NF-e"
-      subtitle="Todos os pedidos de venda do Bling no período. Marque os que quer e emita as notas de uma vez."
+      subtitle="O que está sem nota, e todos os pedidos de venda do Bling no período. Marque os que quer e gere as notas de uma vez."
     >
       <FinanceTabs isSalesPolo={isSalesPolo} />
+
+      {/* O tamanho do buraco vem ANTES de tudo e NÃO depende do filtro de período: a tela
+          abria em hoje..hoje e, num dia sem venda, dizia "nenhum pedido no período" com o
+          histórico inteiro sem nota atrás daquela frase. Este bloco é o único que não passa
+          pelo Bling — sai do nosso banco, contado lá (o PostgREST corta em 1000 calado). */}
+      <Card className={cn('mb-4', semBuraco ? 'border-border' : 'border-amber-500/40 bg-amber-500/[0.05]')}>
+        <CardContent className="space-y-2 pt-4 text-xs">
+          <div className="flex items-center gap-1.5 font-medium">
+            {semBuraco
+              ? <CheckCircle2 className="size-3.5 text-emerald-600" />
+              : <AlertTriangle className="size-3.5 text-amber-600" />}
+            Vendas pagas sem nota fiscal — todo o histórico do polo
+          </div>
+
+          {backlogErro ? (
+            <p className="text-destructive">
+              Não consegui medir o backlog agora ({backlogErro}). O número não some por isso: clique
+              em Carregar de novo antes de concluir que está tudo em dia.
+            </p>
+          ) : !backlog ? (
+            <p className="text-muted-foreground">Somando as vendas pagas sem nota...</p>
+          ) : semBuraco ? (
+            <p>
+              Nenhuma venda paga sem nota. {backlog.total.autorizada.pedidos} autorizadas até hoje.
+            </p>
+          ) : (
+            <>
+              <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <strong className="text-2xl font-semibold tabular-nums">{backlog.total.semNota.pedidos}</strong>
+                <span>{backlog.total.semNota.pedidos === 1 ? 'pedido pago' : 'pedidos pagos'} ·</span>
+                <strong className="text-2xl font-semibold tabular-nums">{brl(backlog.total.semNota.valorCents)}</strong>
+                {backlog.maisAntigoSemNota ? (
+                  <span className="text-muted-foreground">o mais antigo é de {fmtDate(backlog.maisAntigoSemNota)}</span>
+                ) : null}
+              </p>
+
+              {/* A frase dura só aparece enquanto for verdade: na primeira nota autorizada
+                  ela vira o contador, sem ninguém precisar lembrar de apagar o texto. */}
+              {backlog.total.autorizada.pedidos === 0 ? (
+                <p>
+                  <strong>Nenhuma NF-e foi autorizada pela SEFAZ até hoje.</strong> O certificado digital
+                  do Bling segue pendente — sem ele a emissão para em rascunho, e rascunho não é nota:
+                  não vale para o cliente que pede a nota nem para o contador.
+                </p>
+              ) : (
+                <p>
+                  {backlog.total.autorizada.pedidos} {backlog.total.autorizada.pedidos === 1 ? 'nota autorizada' : 'notas autorizadas'} pela
+                  SEFAZ ({brl(backlog.total.autorizada.valorCents)}). O resto acima continua sem nota.
+                </p>
+              )}
+
+              <div className="flex flex-wrap gap-1.5">
+                <Faixa rotulo="sem nenhuma tentativa" faixa={backlog.total.semTentativa} tom="rose" />
+                <Faixa rotulo="parou em rascunho no Bling" faixa={backlog.total.rascunho} tom="amber" />
+                <Faixa rotulo="deu erro na transmissão" faixa={backlog.total.erro} tom="rose" />
+                {backlog.total.semPedidoBling.pedidos > 0 ? (
+                  <Faixa rotulo="sem pedido no Bling (nem dá pra emitir aqui)" faixa={backlog.total.semPedidoBling} tom="muted" />
+                ) : null}
+              </div>
+
+              {backlog.periodo && carregado ? (
+                <p className="text-muted-foreground">
+                  No período carregado ({fmtDate(carregado.de)} a {fmtDate(carregado.ate)}, por data de
+                  pagamento): <strong className="text-foreground">{backlog.periodo.semNota.pedidos}</strong> sem
+                  nota · <strong className="text-foreground">{brl(backlog.periodo.semNota.valorCents)}</strong>.
+                  A lista abaixo é por data do PEDIDO no Bling, então os dois recortes não batem linha a linha.
+                </p>
+              ) : null}
+
+              {backlog.parcial ? (
+                <p className="text-destructive">
+                  A leitura bateu no limite de páginas — o número acima está SUBESTIMADO.
+                </p>
+              ) : null}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Pré-requisito fiscal */}
       {naturezaMissing ? (
@@ -266,7 +466,9 @@ export function NfePage() {
           </Button>
           <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
             {rows.length > 0 ? (
-              <span>{pending.length} sem nota · {emitidas} já emitidas</span>
+              <span>
+                {pending.length} sem nota · {naLista.rascunhos} em rascunho · {naLista.autorizadas} autorizadas
+              </span>
             ) : null}
           </div>
         </CardContent>
@@ -276,6 +478,11 @@ export function NfePage() {
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="flex items-center gap-2 text-sm">
             <FileText className="size-4 text-primary" /> Pedidos do Bling ({rows.length})
+            {carregado ? (
+              <span className="text-xs font-normal text-muted-foreground">
+                {fmtDate(carregado.de)} a {fmtDate(carregado.ate)}, por data do pedido
+              </span>
+            ) : null}
           </CardTitle>
           <Button onClick={() => void emitSelected()} disabled={emitting || selectedCount === 0}>
             {emitting ? (
@@ -289,8 +496,20 @@ export function NfePage() {
           {rows.length === 0 ? (
             <EmptyState
               icon={FileText}
-              title={loading ? 'Carregando...' : 'Nenhum pedido de venda no Bling no período'}
-              description="Ajuste as datas e clique em Carregar. Aparecem aqui todos os pedidos do Bling, inclusive os criados fora do CRM."
+              title={
+                loading
+                  ? 'Carregando...'
+                  : erroLista
+                    ? 'Não consegui falar com o Bling'
+                    : 'Nenhum pedido de venda no Bling neste período'
+              }
+              // "Nenhum pedido" nunca quer dizer "nada pendente": o backlog está no card
+              // de cima e não depende deste filtro.
+              description={
+                erroLista
+                  ? `${erroLista} O backlog acima continua valendo — ele sai do banco do CRM, não do Bling.`
+                  : 'Ajuste as datas e clique em Carregar. Aparecem aqui todos os pedidos do Bling, inclusive os criados fora do CRM.'
+              }
             />
           ) : (
             <div className="overflow-x-auto">
@@ -310,15 +529,15 @@ export function NfePage() {
                 </TableHeader>
                 <TableBody>
                   {rows.map((r) => {
-                    const done = !!r.nfeNumero
-                    const err = r.nfeStatus === 'erro' && !done
+                    const temNota = !!r.nfeNumero
+                    const estado = estadoDaNota(r)
                     return (
-                      <TableRow key={r.orderId} className={err ? 'bg-red-50/50' : done ? 'bg-emerald-50/40' : r.canceled ? 'opacity-50' : undefined}>
+                      <TableRow key={r.orderId} className={cn(ESTADO_META[estado].linha, r.canceled && 'opacity-50')}>
                         <TableCell>
                           <Checkbox
                             checked={selected.has(r.orderId)}
                             onCheckedChange={() => toggleOne(r.orderId)}
-                            disabled={done || r.emitting || r.canceled}
+                            disabled={temNota || r.emitting || r.canceled}
                             aria-label={`Selecionar ${r.name}`}
                           />
                         </TableCell>
@@ -335,17 +554,26 @@ export function NfePage() {
                             <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                               <Loader2 className="size-3.5 animate-spin" /> Emitindo...
                             </span>
-                          ) : done ? (
-                            <Badge variant="secondary" className="gap-1 bg-emerald-100 text-emerald-700">
-                              <CheckCircle2 className="size-3.5" /> {r.nfeNumero === 'gerada' ? 'Emitida' : `Nº ${r.nfeNumero}`}
-                            </Badge>
-                          ) : err ? (
-                            <span className="inline-flex items-start gap-1 text-xs text-red-600" title={r.nfeError ?? ''}>
-                              <XCircle className="mt-0.5 size-3.5 shrink-0" />
-                              <span className="line-clamp-2 max-w-[280px]">{r.nfeError ?? 'Erro'}</span>
-                            </span>
                           ) : (
-                            <span className="text-xs text-muted-foreground">Sem nota</span>
+                            <div className="flex flex-col items-start gap-0.5">
+                              <span
+                                className={cn(
+                                  'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] ring-1',
+                                  ESTADO_META[estado].cls,
+                                )}
+                                title={TITULO_ESTADO[estado]}
+                              >
+                                {estado === 'autorizada' ? <CheckCircle2 className="size-3.5" /> : null}
+                                {estado === 'erro' ? <XCircle className="size-3.5" /> : null}
+                                {estado === 'rascunho' || estado === 'indefinida' ? <FileWarning className="size-3.5" /> : null}
+                                {rotuloEstado(estado, r.nfeNumero)}
+                              </span>
+                              {estado === 'erro' && r.nfeError ? (
+                                <span className="line-clamp-2 max-w-[280px] text-[11px] text-rose-600 dark:text-rose-300" title={r.nfeError}>
+                                  {r.nfeError}
+                                </span>
+                              ) : null}
+                            </div>
                           )}
                         </TableCell>
                       </TableRow>

@@ -8,6 +8,7 @@ import { LeadAnalyticsActions } from '@/components/leads/LeadAnalyticsActions'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { LeadTaskPanel } from '@/components/leads/LeadTaskPanel'
 import { LeadCadastroCard } from '@/components/leads/LeadCadastroCard'
+import { LeadOutrasComprasSection } from '@/components/leads/LeadOutrasComprasSection'
 import { LeadProtocolsSection } from '@/components/leads/LeadProtocolsSection'
 import { LeadStockCostsSection } from '@/components/leads/LeadStockCostsSection'
 import { ShospLinkSection } from '@/components/leads/ShospLinkSection'
@@ -564,6 +565,10 @@ export function LeadDetailPage() {
 
             {crm.dataMode === 'supabase' ? (
               <>
+                {/* Compra da mesma pessoa pendurada em OUTRO cadastro (às vezes em outro polo).
+                    Fica na Visão geral, e não na aba do 360, porque a pergunta que motivou a
+                    seção — "cadê minha nota, cadê meu pedido" — chega antes de qualquer clique. */}
+                <LeadOutrasComprasSection leadId={lead.id} nomeDoLead={lead.patientName} />
                 <LeadProtocolsSection leadId={lead.id} leadName={lead.patientName} />
                 <LeadStockCostsSection leadId={lead.id} />
               </>
@@ -712,7 +717,15 @@ export function LeadDetailPage() {
         {/* Consultas, cirurgias, tricoscopia, vendas e pagamentos — tudo o que existia
             no banco com lead_id e nunca aparecia perto da pessoa. */}
         <TabsContent value="historico">
-          <Paciente360Panel tipo="lead" refId={lead.id} />
+          <div className="space-y-4">
+            <Paciente360Panel tipo="lead" refId={lead.id} />
+            {/* Logo abaixo de "Pedidos da loja" de propósito: quem vem aqui atrás de compra e
+                encontra a lista vazia precisa ver, na mesma rolagem, que a compra existe em
+                outro cadastro. A segunda montagem não custa banco — o service guarda por 1min. */}
+            {crm.dataMode === 'supabase' ? (
+              <LeadOutrasComprasSection leadId={lead.id} nomeDoLead={lead.patientName} />
+            ) : null}
+          </div>
         </TabsContent>
 
         <TabsContent value="conversa">

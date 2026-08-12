@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { useCrm } from '@/context/CrmContext'
 import { AiCopilotWidget } from '@/components/leads/AiCopilotWidget'
 import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
+import { LeadOutrasComprasSection } from '@/components/leads/LeadOutrasComprasSection'
 import { buttonVariants } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -113,6 +114,14 @@ export function WorkspaceLeadSidebar({ lead, history, className }: Props) {
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2 sm:px-3 sm:py-3">
         <div className="space-y-4 sm:space-y-5">
           <AiCopilotWidget lead={lead} interactions={history} />
+
+          {/* Esta coluna é o que a atendente tem na frente quando a pessoa escreve. Até aqui ela
+              não mostrava nada de compra: no incidente de 12/ago a paciente cobrou nota fiscal
+              pelo WhatsApp da clínica e o pedido estava num lead do Tricopill, invisível daqui.
+              A seção some sozinha quando não há compra em outro cadastro. */}
+          {crm.dataMode === 'supabase' ? (
+            <LeadOutrasComprasSection leadId={lead.id} nomeDoLead={lead.patientName} compact />
+          ) : null}
 
           <div className="space-y-2">
             <h3 className="px-0.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">

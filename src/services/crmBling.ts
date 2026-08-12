@@ -149,6 +149,57 @@ export async function nfeListBling(from: string, to: string): Promise<NfeOrderRo
   return Array.isArray(p.items) ? (p.items as NfeOrderRow[]) : []
 }
 
+// Tamanho do buraco fiscal, medido no BANCO (contagem e soma paginadas na edge, longe do
+// teto de 1000 linhas do PostgREST) e sem depender do Bling estar de pé.
+export type NfeBacklogFaixa = { pedidos: number; valorCents: number }
+export type NfeBacklogResumo = {
+  pagos: NfeBacklogFaixa
+  autorizada: NfeBacklogFaixa
+  /** Tudo que não está autorizado: sem tentativa + rascunho + erro. */
+  semNota: NfeBacklogFaixa
+  semTentativa: NfeBacklogFaixa
+  rascunho: NfeBacklogFaixa
+  erro: NfeBacklogFaixa
+  /** Venda paga que nem pedido no Bling tem — nota nenhuma sai por aqui antes disso. */
+  semPedidoBling: NfeBacklogFaixa
+}
+export type NfeBacklog = {
+  total: NfeBacklogResumo
+  /** Mesmo recorte, só o que foi PAGO no período pedido. Null quando não houve período. */
+  periodo: NfeBacklogResumo | null
+  maisAntigoSemNota: string | null
+  /** true = a leitura bateu no limite de páginas; o número está subestimado. */
+  parcial: boolean
+}
+
+const faixa = (v: unknown): NfeBacklogFaixa => {
+  const o = (v ?? {}) as Record<string, unknown>
+  return { pedidos: Number(o.pedidos ?? 0) || 0, valorCents: Number(o.valorCents ?? 0) || 0 }
+}
+const resumo = (v: unknown): NfeBacklogResumo => {
+  const o = (v ?? {}) as Record<string, unknown>
+  return {
+    pagos: faixa(o.pagos),
+    autorizada: faixa(o.autorizada),
+    semNota: faixa(o.semNota),
+    semTentativa: faixa(o.semTentativa),
+    rascunho: faixa(o.rascunho),
+    erro: faixa(o.erro),
+    semPedidoBling: faixa(o.semPedidoBling),
+  }
+}
+
+/** Quantas vendas pagas do polo estão sem NF-e autorizada, e quanto isso soma. */
+export async function nfeBacklog(from?: string, to?: string): Promise<NfeBacklog> {
+  const p = await invokeBling({ action: 'nfe_backlog', ...(from ? { from } : {}), ...(to ? { to } : {}) })
+  return {
+    total: resumo(p.total),
+    periodo: p.periodo != null ? resumo(p.periodo) : null,
+    maisAntigoSemNota: p.maisAntigoSemNota != null ? String(p.maisAntigoSemNota) : null,
+    parcial: p.parcial === true,
+  }
+}
+
 export type NfeEmitResult = {
   ok: boolean
   numero?: string | null

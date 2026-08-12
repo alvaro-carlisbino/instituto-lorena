@@ -622,6 +622,133 @@ Deno.serve(async (req) => {
     }
   }
 
+  // nfe_backlog: o tamanho do buraco fiscal, medido no BANCO e sem passar pelo Bling.
+  //
+  // Existe porque a tela de NF-e abria em hoje..hoje: num dia sem venda ela dizia "nenhum
+  // pedido no período" enquanto o histórico inteiro de vendas pagas do polo seguia sem uma
+  // única nota autorizada — e o cliente já perguntava "não veio nota fiscal?". Não depender do
+  // Bling é de propósito: se o token cair, o resto da tela some e este número continua de pé.
+  //
+  // SÓ LEITURA E CONTAGEM. Não cria, não transmite e não encosta em documento fiscal.
+  if (action === 'nfe_backlog') {
+    // Guarda de polo: as outras ações de NF-e assumem 'tricopill' na marra; aqui a soma é
+    // dinheiro do polo de vendas e não deve aparecer para quem só tem a clínica.
+    if (tenantId !== 'tricopill') return json({ ok: false, error: 'nfe_polo_invalido' }, 400)
+
+    const from = String(payload.from ?? '').trim() // 'YYYY-MM-DD'
+    const to = String(payload.to ?? '').trim()
+    const iniMs = /^\d{4}-\d{2}-\d{2}$/.test(from) ? Date.parse(`${from}T00:00:00-03:00`) : null
+    const fimMs = /^\d{4}-\d{2}-\d{2}$/.test(to) ? Date.parse(`${to}T23:59:59-03:00`) : null
+
+    // O PostgREST devolve no máximo 1000 linhas e CORTA CALADO — um `select` solto aqui
+    // daria um backlog menor que o real, que é justamente o erro que esta ação combate.
+    // Daí a leitura paginada por range(): a página curta é o fim da tabela, não um teto.
+    const PAGINA = 1000
+    const MAX_PAGINAS = 20
+    let parcial = false
+    const lerPaginado = async (
+      pagina: (de: number, ate: number) => PromiseLike<{ data: unknown[] | null }>,
+    ): Promise<Array<Record<string, unknown>>> => {
+      const saida: Array<Record<string, unknown>> = []
+      for (let p = 0; p < MAX_PAGINAS; p++) {
+        const { data } = await pagina(p * PAGINA, p * PAGINA + PAGINA - 1)
+        const linhas = (data ?? []) as Array<Record<string, unknown>>
+        saida.push(...linhas)
+        if (linhas.length < PAGINA) return saida
+      }
+      parcial = true
+      return saida
+    }
+
+    // Os três gateways que já venderam no polo. asaas/pagbank não têm coluna de NF-e: o
+    // estado deles só existe em bling_nfe_emissions, pelo id do pedido no Bling.
+    const rede = await lerPaginado((de, ate) => admin
+      .from('rede_payments').select('amount_cents, paid_at, bling_order_id, nfe_status')
+      .eq('tenant_id', 'tricopill').eq('status', 'paid')
+      .order('paid_at', { ascending: true }).range(de, ate))
+    const asaas = await lerPaginado((de, ate) => admin
+      .from('asaas_payments').select('amount_cents, paid_at, bling_order_id')
+      .eq('tenant_id', 'tricopill').eq('status', 'paid')
+      .order('paid_at', { ascending: true }).range(de, ate))
+    const pagbank = await lerPaginado((de, ate) => admin
+      .from('pagbank_checkouts').select('amount_cents, paid_at, bling_order_id')
+      .eq('tenant_id', 'tricopill').eq('status', 'paid')
+      .order('paid_at', { ascending: true }).range(de, ate))
+    const emissoes = await lerPaginado((de, ate) => admin
+      .from('bling_nfe_emissions').select('bling_order_id, nfe_status')
+      .eq('tenant_id', 'tricopill')
+      .order('bling_order_id', { ascending: true }).range(de, ate))
+
+    const statusPorPedido = new Map<string, string>()
+    for (const e of emissoes) {
+      const oid = String(e.bling_order_id ?? '').trim()
+      if (oid) statusPorPedido.set(oid, String(e.nfe_status ?? '').trim())
+    }
+
+    type Faixa = { pedidos: number; valorCents: number }
+    const zero = (): Faixa => ({ pedidos: 0, valorCents: 0 })
+    const novoResumo = () => ({
+      pagos: zero(),
+      autorizada: zero(),
+      semNota: zero(),
+      semTentativa: zero(),
+      rascunho: zero(),
+      erro: zero(),
+      semPedidoBling: zero(),
+    })
+    type Resumo = ReturnType<typeof novoResumo>
+    const total = novoResumo()
+    const periodo = novoResumo()
+    const somar = (r: Resumo, faixa: keyof Resumo, cents: number) => {
+      r[faixa].pedidos += 1
+      r[faixa].valorCents += cents
+    }
+
+    let maisAntigoSemNota: string | null = null
+    let maisAntigoMs = Number.POSITIVE_INFINITY
+    for (const p of [...rede, ...asaas, ...pagbank]) {
+      const cents = Number(p.amount_cents ?? 0) || 0
+      const pagoEm = p.paid_at != null ? String(p.paid_at) : ''
+      const oid = String(p.bling_order_id ?? '').trim()
+      // Emissão por pedido manda; nfe_status do pagamento é o espelho antigo.
+      const st = (statusPorPedido.get(oid) || String(p.nfe_status ?? '')).trim().toLowerCase()
+      const faixa: keyof Resumo = st.includes('autoriz') || st.includes('emit')
+        ? 'autorizada'
+        : st.includes('rascunho')
+          ? 'rascunho'
+          : st.includes('erro') || st.includes('rejeit') || st.includes('deneg')
+            ? 'erro'
+            : 'semTentativa'
+
+      const ms = pagoEm ? Date.parse(pagoEm) : NaN
+      const noPeriodo = Number.isFinite(ms)
+        && (iniMs == null || ms >= iniMs)
+        && (fimMs == null || ms <= fimMs)
+      const alvos: Resumo[] = noPeriodo ? [total, periodo] : [total]
+
+      for (const r of alvos) {
+        somar(r, 'pagos', cents)
+        somar(r, faixa, cents)
+        if (faixa !== 'autorizada') somar(r, 'semNota', cents)
+        // Venda paga que nunca virou pedido no Bling: não dá nem para tentar a nota por
+        // esta tela — precisa do pedido antes. Dimensão à parte, já contada acima.
+        if (!oid && faixa !== 'autorizada') somar(r, 'semPedidoBling', cents)
+      }
+      if (faixa !== 'autorizada' && Number.isFinite(ms) && ms < maisAntigoMs) {
+        maisAntigoMs = ms
+        maisAntigoSemNota = pagoEm
+      }
+    }
+
+    return json({
+      ok: true,
+      total,
+      periodo: iniMs != null || fimMs != null ? periodo : null,
+      maisAntigoSemNota,
+      parcial,
+    })
+  }
+
   // nfe_list_bling: TODOS os pedidos de venda do Bling no período (data do pedido), não só os
   // que nasceram no CRM — inclui pedidos criados direto no Bling e de marketplace. O estado da
   // NF-e vem de bling_nfe_emissions (emissões por pedido) + rede_payments (emissões antigas).

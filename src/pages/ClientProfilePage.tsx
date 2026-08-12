@@ -7,6 +7,7 @@ import { pacienteTabs } from '@/lib/patientFileTabs'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PatientSearchField, type PatientPick } from '@/components/PatientSearchField'
+import { LeadOutrasComprasSection } from '@/components/leads/LeadOutrasComprasSection'
 import { fetchClientProfile, type ClientProfile } from '@/services/clientProfile'
 
 const STAGE_LABEL: Record<string, string> = {
@@ -181,6 +182,11 @@ export function ClientProfilePage() {
               </ul>
             )}
           </Section>
+
+          {/* A seção "Pagamentos" acima lê rede/asaas pelo lead_id desta ficha e pelo polo ativo.
+              Compra da mesma pessoa feita por outro cadastro (o checkout do site cria lead novo)
+              não cai ali — e foi essa a lacuna do caso de 12/ago. Some sozinha quando não há. */}
+          <LeadOutrasComprasSection leadId={profile.id} nomeDoLead={profile.name} />
         </div>
       )}
     </AppLayout>
