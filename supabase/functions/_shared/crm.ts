@@ -969,6 +969,38 @@ async function resolvePhoneLeadIdByDigits(admin: SupabaseClient, digits: string)
   return byEq?.id ? String(byEq.id) : null
 }
 
+/**
+ * Os OUTROS cards com este telefone, sem contar um id que já se conhece.
+ *
+ * Existe porque `resolvePhoneLeadIdByDigits` devolve o card MAIS ANTIGO — e quando o card do
+ * ManyChat é justamente o mais antigo, `mcLeadId` e `phoneLeadId` saem iguais. Aí o
+ * `promoteManychatLeadToRealPhone` não entra no ramo de mesclagem (ele exige ids diferentes),
+ * não entra no ramo "não existe card com este telefone", cai no fim e responde sucesso sem ter
+ * mesclado nada. O duplicado sobrevive para sempre e ninguém vê erro nenhum. Caso Álvaro:
+ * lead-ef546dca-8fe (ManyChat, 15/mai, 392 mensagens) e lead-2ce4bc61-e51 (loja, 20/jun).
+ */
+async function outrosLeadsComEsteTelefone(
+  admin: SupabaseClient,
+  digits: string,
+  exceptLeadId: string,
+): Promise<Array<{ id: string; tenantId: string; createdAt: string }>> {
+  const variants = brPhoneVariants(digits)
+  if (!variants.length) return []
+  const { data } = await admin
+    .from('leads')
+    .select('id, tenant_id, created_at')
+    .in('phone', variants)
+    .is('deleted_at', null)
+    .neq('id', exceptLeadId)
+    .order('created_at', { ascending: true })
+    .limit(10)
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    id: String(r.id),
+    tenantId: String(r.tenant_id ?? ''),
+    createdAt: String(r.created_at ?? ''),
+  }))
+}
+
 function maxIso(a: string | null | undefined, b: string | null | undefined): string | null {
   if (!a) return b ?? null
   if (!b) return a
@@ -1184,7 +1216,7 @@ export async function promoteManychatLeadToRealPhone(
     channel?: string
     attribution?: LeadAttribution | null
   },
-): Promise<{ leadId: string; merged: boolean }> {
+): Promise<{ leadId: string; merged: boolean; duplicadoOutroPolo?: string[] }> {
   const sid = String(input.subscriberId).trim()
   const phone = normalizePhone(input.realPhoneDigits)
   if (phone.length < 10) {
@@ -1210,6 +1242,39 @@ export async function promoteManychatLeadToRealPhone(
       tenantId: input.tenantId,
     })
     return { leadId: phoneLeadId, merged: true }
+  }
+
+  // O card do ManyChat É o mais antigo com este telefone, então a busca devolveu ele mesmo e o
+  // ramo acima não roda. Sem isto a rotina responde sucesso e deixa o duplicado de pé, calada.
+  // Aqui o card do ManyChat é quem SOBREVIVE (é o mais antigo, é o que tem o histórico) e o
+  // outro entra nele.
+  //
+  // Cross-polo NÃO se mescla sozinho: `tenant_id` de lead é a verdade de financeiro e métrica,
+  // e puxar um card do Tricopill para dentro de um da clínica move pagamento de polo sem
+  // ninguém ter decidido isso. Nesse caso devolve `merged: false` com o motivo, para a decisão
+  // ser humana — mas devolve o motivo, que é o que faltava.
+  if (mcLeadId && phoneLeadId && mcLeadId === phoneLeadId) {
+    const outros = await outrosLeadsComEsteTelefone(admin, phone, mcLeadId)
+    const { data: mcRow } = await admin
+      .from('leads').select('tenant_id').eq('id', mcLeadId).maybeSingle()
+    const mcTenant = String((mcRow as { tenant_id?: string } | null)?.tenant_id ?? '')
+    const mesmoPolo = outros.filter((o) => o.tenantId === mcTenant)
+    const outroPolo = outros.filter((o) => o.tenantId !== mcTenant)
+
+    for (const alvo of mesmoPolo) {
+      await mergeLeadDropIntoKeep(admin, mcLeadId, alvo.id)
+    }
+    if (mesmoPolo.length > 0) {
+      return { leadId: mcLeadId, merged: true }
+    }
+    if (outroPolo.length > 0) {
+      console.warn('[merge_phone] duplicado em OUTRO polo, não mesclado automaticamente:', {
+        mcLeadId,
+        mcTenant,
+        candidatos: outroPolo.map((o) => `${o.id}@${o.tenantId}`),
+      })
+      return { leadId: mcLeadId, merged: false, duplicadoOutroPolo: outroPolo.map((o) => o.id) }
+    }
   }
 
   if (mcLeadId && !phoneLeadId) {

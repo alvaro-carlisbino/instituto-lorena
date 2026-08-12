@@ -746,7 +746,7 @@ Deno.serve(async (req) => {
       const summary = String(body.summary ?? body.text ?? '').trim().slice(0, 500)
       const channelHint = String(body.channel ?? '').trim().toLowerCase()
       const mergeChannel = channelHint === 'instagram' || channelHint === 'ig' ? 'instagram' : 'whatsapp'
-      const { leadId, merged } = await promoteManychatLeadToRealPhone(admin, {
+      const { leadId, merged, duplicadoOutroPolo } = await promoteManychatLeadToRealPhone(admin, {
         subscriberId,
         patientName: rawUserName || (mergeChannel === 'instagram' ? 'Lead Instagram' : 'Lead WhatsApp'),
         realPhoneDigits: digits,
@@ -754,7 +754,16 @@ Deno.serve(async (req) => {
         tenantId,
         channel: mergeChannel,
       })
-      return json({ ok: true, leadId, merged, action: 'merge_phone' })
+      // `merged: false` sozinho não distingue "não tinha o que mesclar" de "tinha, mas é de
+      // outro polo e eu não mexo". Devolver o motivo é o mínimo: era exatamente esse silêncio
+      // que fazia a rotina parecer que tinha mesclado.
+      return json({
+        ok: true,
+        leadId,
+        merged,
+        action: 'merge_phone',
+        ...(duplicadoOutroPolo?.length ? { duplicadoOutroPolo, motivo: 'duplicado_em_outro_polo' } : {}),
+      })
     } catch (e) {
       return json({ error: 'merge_failed', message: e instanceof Error ? e.message : String(e) }, 400)
     }
