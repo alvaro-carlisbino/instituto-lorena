@@ -155,12 +155,15 @@ export type NfeBacklogFaixa = { pedidos: number; valorCents: number }
 export type NfeBacklogResumo = {
   pagos: NfeBacklogFaixa
   autorizada: NfeBacklogFaixa
-  /** Tudo que não está autorizado: sem tentativa + rascunho + erro. */
+  /** Aceita pelo Bling, sem confirmação da SEFAZ. NÃO conta como nota emitida. */
+  transmitida: NfeBacklogFaixa
+  /** Tudo que não está autorizado: transmitida + sem tentativa + rascunho + erro. */
   semNota: NfeBacklogFaixa
   semTentativa: NfeBacklogFaixa
   rascunho: NfeBacklogFaixa
   erro: NfeBacklogFaixa
-  /** Venda paga que nem pedido no Bling tem — nota nenhuma sai por aqui antes disso. */
+  /** SUBCONJUNTO de semTentativa: venda paga que nem pedido no Bling tem. Não somar com as
+   *  outras faixas, senão o total estoura. */
   semPedidoBling: NfeBacklogFaixa
 }
 export type NfeBacklog = {
@@ -181,6 +184,7 @@ const resumo = (v: unknown): NfeBacklogResumo => {
   return {
     pagos: faixa(o.pagos),
     autorizada: faixa(o.autorizada),
+    transmitida: faixa(o.transmitida),
     semNota: faixa(o.semNota),
     semTentativa: faixa(o.semTentativa),
     rascunho: faixa(o.rascunho),

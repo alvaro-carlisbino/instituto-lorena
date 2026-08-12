@@ -25,9 +25,18 @@ describe('nfeSelo', () => {
     expect(nfeSelo(null, null).label).toBe('Sem nota emitida')
   })
 
-  it('só autorizada/emitida fica verde, e leva o número junto', () => {
+  it('só AUTORIZADA fica verde, e leva o número junto', () => {
     expect(nfeSelo('autorizada', '000210').tom).toBe('ok')
-    expect(nfeSelo('emitida', '000210').label).toContain('000210')
+    expect(nfeSelo('autorizada', '000210').label).toContain('000210')
+  })
+
+  it('"emitida" é aceite de transmissão, não autorização da SEFAZ, então não fica verde', () => {
+    // O CRM grava 'emitida' quando o POST /nfe/{id}/enviar do Bling devolve 2xx. A autorização
+    // vem depois e ninguém relê. Verde aqui faria a atendente afirmar o que não sabe.
+    const s = nfeSelo('emitida', '000210')
+    expect(s.tom).toBe('pendente')
+    expect(s.label).toContain('000210')
+    expect(s.detalhe).toContain('SEFAZ')
   })
 
   it('rejeitada e erro contam como falha, não como pendência', () => {

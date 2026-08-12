@@ -656,6 +656,15 @@ export async function blingFindOrCreateContato(
   if (!nome) return null
   const phoneDigits = String(args.phone ?? '').replace(/\D/g, '')
   const tail8 = phoneDigits.length >= 8 ? phoneDigits.slice(-8) : ''
+  // Telefone NACIONAL (sem o DDI 55). Serve tanto para a BUSCA quanto para a criação lá embaixo.
+  // Antes a busca usava `phoneDigits.slice(-11)`, que só funciona para celular com 9º dígito:
+  // em "554484031689" (12 dígitos, sem o 9) o slice come o primeiro caractere e devolve
+  // "54484031689", ou seja, DDD 54 no lugar de 44. O contato certo não é encontrado, o Bling
+  // cria outro, e a venda vai parar num contato duplicado. Com o telefone da loja passando a
+  // ser gravado canônico (55+DDD+número), o formato de 12 dígitos ficou comum e isso pesa mais.
+  const phoneNacional = phoneDigits.length >= 12 && phoneDigits.startsWith('55')
+    ? phoneDigits.slice(2)
+    : phoneDigits
   const cpf = String(args.cpf ?? '').replace(/\D/g, '')
   const email = String(args.email ?? '').trim().slice(0, 120)
   const nascimento = ddmmaaaaToYmd(args.dataNascimento ?? '')
@@ -678,7 +687,7 @@ export async function blingFindOrCreateContato(
     : null
 
   // 1) Procura por CPF (mais único) e depois por telefone — NUNCA só por nome (xarás).
-  for (const term of [cpf.length === 11 ? cpf : '', tail8 ? phoneDigits.slice(-11) : ''].filter(Boolean)) {
+  for (const term of [cpf.length === 11 ? cpf : '', tail8 ? phoneNacional : ''].filter(Boolean)) {
     try {
       const res = await blingFetchWithRetry(token, `/contatos?pesquisa=${encodeURIComponent(term)}&limite=20`)
       if (res.ok) {
@@ -727,11 +736,8 @@ export async function blingFindOrCreateContato(
   // 2) Cria com DEGRADAÇÃO graduada: tenta o cadastro completo; se a API recusar a
   // estrutura (ex.: dadosAdicionais), tenta sem ela mas com CPF/e-mail; por fim o mínimo.
   // Assim, no pior caso ainda cria o contato no nome certo.
-  // Telefone NACIONAL: tira o DDI 55 (senão "554484031689" → slice(-11) virava "54484031689",
-  // DDD inválido, o Bling recusa e a criação do contato falha → pedido cai no genérico).
   // Celular só quando for mobile de 11 dígitos (senão o Bling reprova o campo celular).
-  let tel = phoneDigits
-  if (tel.length >= 12 && tel.startsWith('55')) tel = tel.slice(2)
+  const tel = phoneNacional
   const base: Record<string, unknown> = { nome, tipo: 'F', situacao: 'A' }
   if (tel.length >= 10) {
     base.telefone = tel

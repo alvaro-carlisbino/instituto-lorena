@@ -62,10 +62,13 @@ type RowState = NfeOrderRow & { emitting?: boolean }
  * à SEFAZ, não vale para o cliente e não vale para o contador. Número com status desconhecido
  * também não vira verde — o lado seguro é "não sabemos se saiu".
  */
-type NfeEstado = 'autorizada' | 'rascunho' | 'erro' | 'indefinida' | 'ausente'
+type NfeEstado = 'autorizada' | 'transmitida' | 'rascunho' | 'erro' | 'indefinida' | 'ausente'
 function estadoDaNota(r: { nfeStatus: string | null; nfeNumero: string | null }): NfeEstado {
   const s = (r.nfeStatus ?? '').toLowerCase()
-  if (s.includes('autoriz') || s.includes('emit')) return 'autorizada'
+  if (s.includes('autoriz')) return 'autorizada'
+  // 'emitida' é só o 2xx do envio ao Bling. Quem autoriza é a SEFAZ, de forma assíncrona, e o
+  // CRM não relê — então isto NÃO é verde. Preventivo: hoje não há nenhuma linha assim na base.
+  if (s.includes('emit') || s.includes('transmit') || s.includes('enviad')) return 'transmitida'
   if (s.includes('erro') || s.includes('rejeit') || s.includes('deneg') || s.includes('fail')) return 'erro'
   if (s.includes('rascunho')) return 'rascunho'
   return r.nfeNumero ? 'indefinida' : 'ausente'
@@ -74,6 +77,7 @@ function rotuloEstado(estado: NfeEstado, numero: string | null): string {
   // 'gerada' é o marcador que a emissão em lote grava quando o Bling não devolve número.
   const n = numero && numero !== 'gerada' ? ` Nº ${numero}` : ''
   if (estado === 'autorizada') return `Autorizada${n}`
+  if (estado === 'transmitida') return `Transmitida${n} · aguarda SEFAZ`
   if (estado === 'rascunho') return `Rascunho${n}`
   if (estado === 'indefinida') return `Documento${n} · estado não confirmado`
   if (estado === 'erro') return n ? `Erro · rascunho${n}` : 'Erro'
@@ -81,6 +85,7 @@ function rotuloEstado(estado: NfeEstado, numero: string | null): string {
 }
 const TITULO_ESTADO: Record<NfeEstado, string> = {
   autorizada: 'Nota autorizada pela SEFAZ.',
+  transmitida: 'O Bling aceitou a transmissão, mas a autorização da SEFAZ é assíncrona e o CRM não relê. Confira no Bling antes de dizer ao cliente que a nota saiu.',
   rascunho: 'Rascunho no Bling: o documento existe, mas NÃO foi transmitido à SEFAZ — não vale como nota. A transmissão é feita no Bling.',
   indefinida: 'O Bling já tem documento para este pedido, mas o CRM não registrou se ele foi autorizado. Confira no Bling antes de dizer ao cliente que a nota saiu.',
   erro: 'A emissão falhou. O motivo está logo abaixo.',
@@ -88,6 +93,7 @@ const TITULO_ESTADO: Record<NfeEstado, string> = {
 }
 const ESTADO_META: Record<NfeEstado, { cls: string; linha?: string }> = {
   autorizada: { cls: 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/25 dark:text-emerald-300', linha: 'bg-emerald-500/[0.06]' },
+  transmitida: { cls: 'bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300', linha: 'bg-amber-500/[0.06]' },
   rascunho: { cls: 'bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300', linha: 'bg-amber-500/[0.06]' },
   indefinida: { cls: 'bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300', linha: 'bg-amber-500/[0.06]' },
   erro: { cls: 'bg-rose-500/10 text-rose-700 ring-rose-500/25 dark:text-rose-300', linha: 'bg-rose-500/[0.06]' },
@@ -375,14 +381,26 @@ export function NfePage() {
                 </p>
               )}
 
+              {/* Estas três faixas PARTICIONAM o "sem nota": somadas, dão o número do título.
+                  A quarta é subconjunto da primeira e por isso vem separada, com o rótulo
+                  dizendo "destes" — juntar as quatro numa fileira só fazia a conta estourar. */}
               <div className="flex flex-wrap gap-1.5">
                 <Faixa rotulo="sem nenhuma tentativa" faixa={backlog.total.semTentativa} tom="rose" />
                 <Faixa rotulo="parou em rascunho no Bling" faixa={backlog.total.rascunho} tom="amber" />
                 <Faixa rotulo="deu erro na transmissão" faixa={backlog.total.erro} tom="rose" />
-                {backlog.total.semPedidoBling.pedidos > 0 ? (
-                  <Faixa rotulo="sem pedido no Bling (nem dá pra emitir aqui)" faixa={backlog.total.semPedidoBling} tom="muted" />
+                {backlog.total.transmitida.pedidos > 0 ? (
+                  <Faixa rotulo="transmitida, sem retorno da SEFAZ" faixa={backlog.total.transmitida} tom="amber" />
                 ) : null}
               </div>
+              {backlog.total.semPedidoBling.pedidos > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  <Faixa
+                    rotulo="destes, sem pedido no Bling (nem dá pra emitir aqui)"
+                    faixa={backlog.total.semPedidoBling}
+                    tom="muted"
+                  />
+                </div>
+              ) : null}
 
               {backlog.periodo && carregado ? (
                 <p className="text-muted-foreground">

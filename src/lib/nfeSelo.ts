@@ -26,11 +26,23 @@ export function nfeSelo(status: string | null | undefined, numeroNota: string | 
   const s = (status ?? '').toLowerCase()
   const n = (numeroNota ?? '').trim()
 
-  if (s.includes('autoriz') || s.includes('emitid') || s === 'emitida' || s === 'ok') {
+  if (s.includes('autoriz') || s === 'ok') {
     return {
-      label: n ? `NF-e ${n}` : 'NF-e emitida',
+      label: n ? `NF-e ${n}` : 'NF-e autorizada',
       tom: 'ok',
-      detalhe: `Nota emitida${n ? ` (nº ${n})` : ''}.`,
+      detalhe: `Nota autorizada pela SEFAZ${n ? ` (nº ${n})` : ''}.`,
+    }
+  }
+  // `emitida` NÃO é autorizada. O CRM grava esse status quando o `POST /nfe/{id}/enviar` do
+  // Bling devolve 2xx, que é só o ACEITE da transmissão; a autorização da SEFAZ vem depois, de
+  // forma assíncrona, e o CRM nunca relê. Hoje não existe nenhuma linha `emitida` na base, então
+  // isto é preventivo: no dia da primeira transmissão, dar verde aqui faria a atendente afirmar
+  // ao cliente que a nota saiu antes de a SEFAZ ter dito qualquer coisa.
+  if (s.includes('emitid') || s.includes('transmit') || s.includes('enviad')) {
+    return {
+      label: n ? `NF-e ${n} · transmitida` : 'NF-e transmitida',
+      tom: 'pendente',
+      detalhe: `Transmitida ao Bling${n ? ` (nº ${n})` : ''}, sem confirmação de autorização da SEFAZ. Confira no Bling antes de dizer ao cliente que a nota saiu.`,
     }
   }
   if (s.includes('rejeit') || s.includes('erro') || s.includes('deneg') || s.includes('fail')) {
