@@ -18,9 +18,11 @@ import { CepInput, CpfInput, PhoneInput } from '@/components/ui/masked-input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { readCadastro, readEntrega } from '@/components/leads/CadastroEnderecoForm'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { cn } from '@/lib/utils'
+import { fetchCadastroDeCompraAnterior, type CadastroAnterior } from '@/services/crmClienteAnterior'
 import {
   createShipment,
   getShipConfig,
@@ -148,18 +150,93 @@ export function LeadShipPage() {
   // card (o cadastro é o que vai na NF-e). Antes os campos só eram preenchidos quando vazios
   // e o efeito não reagia à troca de lead: o que o operador tinha digitado pro lead anterior
   // ficava grudado e ia parar na etiqueta do próximo (caso "Mariana Alves", 11/ago).
+  //
+  // O ENDEREÇO também vem daqui desde 12/ago: `custom_fields.entrega` já guardava CEP/rua/número
+  // (capturados pela Sofia ou digitados na ficha) e esta tela ignorava, pedindo tudo de novo em
+  // cada compra do mesmo cliente.
   const prefilledFor = useRef<string | null>(null)
   useEffect(() => {
     if (!ready || !lead || !leadId || prefilledFor.current === leadId) return
     prefilledFor.current = leadId
-    const cad = ((lead.customFields ?? {}) as Record<string, unknown>).cadastro as Record<string, unknown> | undefined
-    const cadNome = typeof cad?.nomeCompleto === 'string' ? cad.nomeCompleto.trim() : ''
+    const cf = (lead.customFields ?? {}) as Record<string, unknown>
+    const cad = cf.cadastro as Record<string, unknown> | undefined
+    const ent = cf.entrega as Record<string, unknown> | undefined
+    const txt = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+    const cadNome = txt(cad?.nomeCompleto)
     setName(cadNome || defaultName || '')
     setNameOverride(false)
-    setPhone(defaultPhone || '')
-    setDocument(typeof cad?.cpf === 'string' ? cad.cpf : '')
-    setBirth(typeof cad?.dataNascimento === 'string' && cad.dataNascimento ? fmtBirth(cad.dataNascimento) : '')
+    setPhone(txt(cad?.telefone) || defaultPhone || '')
+    setDocument(txt(cad?.cpf))
+    setBirth(txt(cad?.dataNascimento) ? fmtBirth(txt(cad?.dataNascimento)) : '')
+    setCep(txt(ent?.cep))
+    setAddress(txt(ent?.logradouro))
+    setNumber(txt(ent?.numero))
+    setComplement(txt(ent?.complemento))
+    setDistrict(txt(ent?.bairro))
+    setCity(txt(ent?.cidade ?? ent?.municipio))
+    setUf(txt(ent?.uf).toUpperCase().slice(0, 2))
   }, [ready, lead, leadId, defaultName, defaultPhone])
+
+  // Cliente que já comprou ANTES, em outro lead: oferece puxar o cadastro/endereço de lá em vez
+  // de pedir tudo outra vez (a mesma pessoa reaparece como lead novo com frequência).
+  const [anterior, setAnterior] = useState<CadastroAnterior | null>(null)
+  const [anteriorAplicado, setAnteriorAplicado] = useState(false)
+  const buscouAnteriorFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!ready || !lead || !leadId || buscouAnteriorFor.current === leadId) return
+    buscouAnteriorFor.current = leadId
+    setAnterior(null)
+    setAnteriorAplicado(false)
+    const cf = (lead.customFields ?? {}) as Record<string, unknown>
+    const cad = readCadastro(cf)
+    const ent = readEntrega(cf)
+    // Só procura quando falta algo que dá trabalho digitar. Cadastro completo não precisa.
+    const faltaAlgo =
+      onlyDigits(cad.cpf).length !== 11 || onlyDigits(ent.cep).length !== 8 || !ent.numero.trim() || !cad.dataNascimento
+    if (!faltaAlgo) return
+    fetchCadastroDeCompraAnterior({ leadId, phone: lead.phone, cpf: cad.cpf })
+      .then((r) => {
+        if (buscouAnteriorFor.current === leadId) setAnterior(r)
+      })
+      .catch(() => {
+        /* silencioso: é uma conveniência, não pode atrapalhar o envio */
+      })
+  }, [ready, lead, leadId])
+
+  // Preenche SÓ o que está em branco na tela — nunca sobrescreve o que o operador digitou.
+  const aplicarCadastroAnterior = () => {
+    if (!anterior) return
+    const cad = readCadastro(anterior.customFields)
+    const ent = readEntrega(anterior.customFields)
+    const fill = (atual: string, novo: string, set: (v: string) => void) => {
+      if (!atual.trim() && novo.trim()) set(novo.trim())
+    }
+    if (!onlyDigits(document) && onlyDigits(cad.cpf).length === 11) setDocument(cad.cpf)
+    if (!birth.trim() && cad.dataNascimento.trim()) setBirth(fmtBirth(cad.dataNascimento))
+    fill(cep, ent.cep, setCep)
+    fill(address, ent.logradouro, setAddress)
+    fill(number, ent.numero, setNumber)
+    fill(complement, ent.complemento, setComplement)
+    fill(district, ent.bairro, setDistrict)
+    fill(city, ent.cidade, setCity)
+    fill(uf, ent.uf.toUpperCase().slice(0, 2), setUf)
+    setAnteriorAplicado(true)
+    toast.success('Cadastro da compra anterior puxado. Confirme o endereço com o cliente antes de gerar a etiqueta.')
+  }
+
+  // O que o cadastro antigo REALMENTE tem a oferecer — o aviso promete só isso. Prometer
+  // "CPF, nascimento e endereço" e preencher meio endereço faz a atendente clicar e confiar.
+  const anteriorOferece = ((): string => {
+    if (!anterior) return ''
+    const cad = readCadastro(anterior.customFields)
+    const ent = readEntrega(anterior.customFields)
+    const itens: string[] = []
+    if (onlyDigits(cad.cpf).length === 11) itens.push('CPF')
+    if (cad.dataNascimento.trim()) itens.push('nascimento')
+    if (onlyDigits(ent.cep).length === 8 && ent.numero.trim()) itens.push('endereço')
+    if (!itens.length) return 'os dados'
+    return itens.length === 1 ? itens[0] : `${itens.slice(0, -1).join(', ')} e ${itens[itens.length - 1]}`
+  })()
 
   useEffect(() => {
     getShipConfig()
@@ -313,11 +390,25 @@ export function LeadShipPage() {
       // Registra o cadastro obrigatório da venda (nome, CPF, nascimento) no lead — best-effort,
       // não bloqueia o envio se falhar.
       try {
-        await saveLeadCadastro(leadId!, lead?.customFields, {
-          nomeCompleto: name.trim(),
-          cpf: onlyDigits(document),
-          dataNascimento: birth.trim(),
-        })
+        await saveLeadCadastro(
+          leadId!,
+          lead?.customFields,
+          {
+            nomeCompleto: name.trim(),
+            cpf: onlyDigits(document),
+            dataNascimento: birth.trim(),
+          },
+          // Endereço também: é o que faz a PRÓXIMA compra deste cliente já vir preenchida.
+          {
+            cep: onlyDigits(cep),
+            logradouro: address.trim(),
+            numero: number.trim(),
+            complemento: complement.trim(),
+            bairro: district.trim(),
+            cidade: city.trim(),
+            uf: uf.trim().toUpperCase(),
+          },
+        )
       } catch (e) {
         toast.warning(e instanceof Error ? e.message : 'Não foi possível salvar o cadastro do cliente.')
       }
@@ -443,6 +534,21 @@ export function LeadShipPage() {
             <p className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
               <Package className="size-3.5" aria-hidden /> Destinatário
             </p>
+            {anterior && !anteriorAplicado ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-2.5 text-sm sm:max-w-2xl">
+                <span>
+                  Esta pessoa já tem cadastro em outro lead
+                  <strong> ({anterior.fonte.nome}</strong>
+                  {anterior.fonte.criadoEm
+                    ? `, de ${new Date(anterior.fonte.criadoEm).toLocaleDateString('pt-BR')}`
+                    : ''}
+                  ). Puxar {anteriorOferece} de lá?
+                </span>
+                <Button size="sm" variant="secondary" onClick={aplicarCadastroAnterior}>
+                  Puxar cadastro anterior
+                </Button>
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 gap-2 sm:max-w-2xl">
               <div className="col-span-2 space-y-1">
                 <Label htmlFor="sl-name">Nome completo</Label>

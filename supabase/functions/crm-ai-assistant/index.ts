@@ -176,6 +176,126 @@ function parseContext(raw: unknown): AiContext {
   return { leadId, weekStartIso, focus, whatsappInstanceId }
 }
 
+/**
+ * O cadastro que a gente JÁ TEM deste cliente, pronto pra IA CONFERIR em vez de pedir de novo.
+ *
+ * Existia o dado e não existia o aviso: o cadastro da venda (nome, CPF, nascimento, endereço)
+ * fica em `leads.custom_fields`, e a IA só recebia isso como JSON cru truncado em 600 caracteres
+ * dentro de `custom_fields` — então a regra dela era "peça SEMPRE" e o cliente que já comprou
+ * era interrogado outra vez a cada compra.
+ *
+ * Procura primeiro no próprio lead. Se lá faltar o essencial, procura a MESMA pessoa em outro
+ * lead (últimos 8 dígitos do telefone, imune ao 9º dígito/+55, ou CPF nas duas formas em que foi
+ * gravado) — a mesma pessoa reaparece como lead novo com frequência. Nesse caso devolve
+ * `origem: 'compra_anterior'`, e aí a IA precisa mandar os campos no op (o servidor só herda
+ * sozinho o que está no próprio lead).
+ */
+async function montaCadastroConhecido(
+  userClient: SupabaseClient,
+  leadId: string,
+  leadPhone: string,
+  cf: Record<string, unknown> | null,
+): Promise<Record<string, unknown>> {
+  const dig = (v: unknown) => String(v ?? '').replace(/\D/g, '')
+  const txt = (v: unknown) => String(v ?? '').trim()
+
+  const ler = (fonte: Record<string, unknown> | null) => {
+    const cad = ((fonte ?? {}).cadastro ?? {}) as Record<string, unknown>
+    const ent = ((fonte ?? {}).entrega ?? {}) as Record<string, unknown>
+    const faltando: string[] = []
+    if (txt(cad.nomeCompleto).split(/\s+/).filter(Boolean).length < 2) faltando.push('nome completo')
+    if (dig(cad.cpf).length !== 11) faltando.push('CPF')
+    // Mesma lista da trava de prontidão do servidor (validateOrderReadiness), inclusive a rua:
+    // CEP "geral" (cidade inteira/rural) não devolve logradouro no ViaCEP e barra o link.
+    const doEndereco = ['CEP', 'número do endereço', 'nome da rua']
+    if (dig(ent.cep).length !== 8) faltando.push('CEP')
+    if (!txt(ent.numero)) faltando.push('número do endereço')
+    if (!txt(ent.logradouro)) faltando.push('nome da rua')
+    const retirada = txt(ent.delivery_mode) === 'retirada_clinica'
+    return {
+      faltando,
+      // Retirada na clínica não precisa de endereço — só nome e CPF pra nota.
+      completo: retirada ? faltando.every((f) => doEndereco.includes(f)) : faltando.length === 0,
+      dados: {
+        nome: txt(cad.nomeCompleto),
+        cpf: dig(cad.cpf),
+        cpf_ultimos3: dig(cad.cpf).slice(-3),
+        nascimento: txt(cad.dataNascimento),
+        email: txt(cad.email),
+        telefone: dig(cad.telefone) || dig(leadPhone),
+        endereco: {
+          cep: dig(ent.cep),
+          logradouro: txt(ent.logradouro),
+          numero: txt(ent.numero),
+          complemento: txt(ent.complemento),
+          bairro: txt(ent.bairro),
+          cidade: txt(ent.cidade),
+          uf: txt(ent.uf).toUpperCase(),
+        },
+      },
+    }
+  }
+
+  const proprio = ler(cf)
+  if (proprio.completo) return { origem: 'este_lead', completo: true, faltando: [], ...proprio.dados }
+
+  // Falta algo no próprio lead: procura a mesma pessoa em outro lead.
+  const fone8 = dig(leadPhone).slice(-8)
+  const cpfProprio = proprio.dados.cpf
+  const buscas: Array<PromiseLike<{ data: unknown }>> = []
+  const select = 'id, patient_name, created_at, custom_fields'
+  if (fone8.length === 8) {
+    buscas.push(
+      userClient
+        .from('leads')
+        .select(select)
+        .is('deleted_at', null)
+        .neq('id', leadId)
+        .ilike('phone', `%${fone8}%`)
+        .order('created_at', { ascending: false })
+        .limit(20),
+    )
+  }
+  if (cpfProprio.length === 11) {
+    const fmt = `${cpfProprio.slice(0, 3)}.${cpfProprio.slice(3, 6)}.${cpfProprio.slice(6, 9)}-${cpfProprio.slice(9)}`
+    buscas.push(
+      userClient
+        .from('leads')
+        .select(select)
+        .is('deleted_at', null)
+        .neq('id', leadId)
+        .or(`custom_fields->cadastro->>cpf.eq.${cpfProprio},custom_fields->cadastro->>cpf.eq.${fmt}`)
+        .order('created_at', { ascending: false })
+        .limit(20),
+    )
+  }
+  if (!buscas.length) {
+    return { origem: 'este_lead', completo: false, faltando: proprio.faltando, ...proprio.dados }
+  }
+
+  type Row = { id: string; patient_name?: string; created_at?: string; custom_fields?: Record<string, unknown> }
+  const respostas = await Promise.all(buscas.map((p) => Promise.resolve(p).catch(() => ({ data: [] }))))
+  const vistos = new Set<string>()
+  for (const r of respostas) {
+    for (const row of ((r.data ?? []) as Row[])) {
+      if (!row?.id || vistos.has(row.id)) continue
+      vistos.add(row.id)
+      const cand = ler(row.custom_fields ?? null)
+      if (!cand.completo) continue
+      return {
+        origem: 'compra_anterior',
+        completo: true,
+        faltando: [],
+        ...cand.dados,
+        fonte_lead_id: String(row.id),
+        fonte_nome: String(row.patient_name ?? ''),
+        fonte_criado_em: row.created_at ?? null,
+      }
+    }
+  }
+  return { origem: 'este_lead', completo: false, faltando: proprio.faltando, ...proprio.dados }
+}
+
 async function buildCrmSnapshot(
   userClient: SupabaseClient,
   ctx: AiContext,
@@ -376,6 +496,18 @@ async function buildCrmSnapshot(
         upcoming_appointments: upcomingAppointments,
         rooms_catalog,
         recent_conversation,
+      }
+      // Cadastro já conhecido (deste lead ou de compra anterior da mesma pessoa), estruturado —
+      // é o que permite CONFERIR em vez de pedir nome/CPF/nascimento/endereço a cada compra.
+      try {
+        leadFocus.cadastro_conhecido = await montaCadastroConhecido(
+          userClient,
+          String(d.id ?? ctx.leadId),
+          String(d.phone ?? ''),
+          (d.custom_fields ?? null) as Record<string, unknown> | null,
+        )
+      } catch (e) {
+        queryWarnings.push(`cadastro_conhecido: ${e instanceof Error ? e.message : String(e)}`)
       }
     }
   }
@@ -926,7 +1058,8 @@ Deno.serve(async (req) => {
       'KIT no op: passe "kit" com a chave — "1_mes", "3_meses" ou "5_meses" — quando vender um kit. O servidor aplica o PREÇO do kit sozinho; você NÃO calcula nem manda o valor — só o frete (freight_service+to_cep). ⚠️ PROIBIDO vender por valor avulso: NUNCA use "amount_cents"/"description". O ÚNICO produto extra além dos kits é o **Shampoo Ozonizado Multifuncional (R$ 130,00 a unidade)**: pra incluí-lo, mande "shampoo":N no op (N = quantidade) — pode ir JUNTO com o kit (upsell) OU sozinho. O servidor soma o valor e cria o pedido no Bling com o shampoo como item (baixando o estoque). Fora isso (kits + shampoo), não vendemos nada; sem "kit" E sem "shampoo" o servidor RECUSA o pagamento. Se o cliente pedir outro produto, ofereça o kit/shampoo mais próximo ou encaminhe pra atendente.',
       'PARCELAS: cartão em até **12x** em qualquer kit (inclusive 1 frasco) e em valores avulsos. **1x é à vista sem juros**; de **2x a 12x tem juros** (o cliente paga, calculado pelo servidor). Ofereça PIX (à vista), cartão à vista ou parcelado em até 12x. O link de cartão já sai pronto; o cliente escolhe o nº de parcelas e vê o valor de cada uma na própria página de pagamento. Pode dizer "no cartão dá pra parcelar em até 12x" — não precisa cravar o valor da parcela, o cliente vê na hora.',
       'FRETE NO LINK: PREFIRA o caminho robusto — em vez de "freight_cents", passe SEMPRE "freight_service" com o serviço escolhido ("PAC" ou "SEDEX") + "to_cep" com o CEP do cliente. O servidor recota o frete já com a CAIXA DO KIT que você mandou no op (kit), aplicando o valor certo sozinho — assim o frete cobrado é o do kit certo, nunca o de 1 frasco. Só use "freight_cents" (em CENTAVOS) como último recurso, e nesse caso copie o valor_centavos da LINHA do kit escolhido em snapshot.frete.por_kit — NUNCA invente nem use o de outro kit. CIDADE — NUNCA adivinhe a cidade pelo CEP; se existir snapshot.cep_info, a cidade real é cep_info.localidade/cep_info.uf. O frete em si é grátis na retirada e na clínica (o servidor zera), mas o ENDEREÇO continua obrigatório. ENDEREÇO (OBRIGATÓRIO em TODA venda — inclusive retirada e entrega local — porque a nota fiscal é emitida sempre): inclua no op "to_cep" + "to_number" (NÚMERO da casa/prédio) e, se houver, "to_complement" (apto/bloco/referência). Em ENVIO externo, o número também prepara o envio AUTOMÁTICO no Melhor Envio ao confirmar o pagamento. Se ainda não tiver CEP + número, pergunte antes de fechar.',
-      'CADASTRO COMPLETO + NOTA FISCAL (STOP — OBRIGATÓRIO antes de QUALQUER link/Pix, inclusive retirada): a nota fiscal é emitida automaticamente, então NUNCA gere o link sem o cadastro completo. Peça e inclua no op: "to_name" (nome completo), "to_cpf" (CPF), "to_cep", "to_number" (número do endereço) — e, quando o cliente informar, "to_email", "to_birthdate" (DD/MM/AAAA) e "to_sex" ("M"/"F"). TELEFONE: o servidor usa AUTOMATICAMENTE o número do WhatsApp do cliente como telefone do cadastro — você NÃO precisa pedir; só inclua "to_phone" (com DDD) se o cliente pedir para usar OUTRO número. Quanto mais dados, melhor o cadastro. O bairro/cidade saem do CEP. Peça SEMPRE, como cadastro padrão da venda: nome completo, CPF, DATA DE NASCIMENTO (DD/MM/AAAA) e o CEP com o número do endereço — junte tudo numa pergunta só, de forma natural: "Pra deixar tudo certinho e já emitir sua nota fiscal, me confirma seu nome completo, CPF, data de nascimento e o CEP com o número do endereço? (e-mail também, se puder)". BLOQUEIO: o servidor só NÃO gera o link se faltar nome completo, CPF, CEP ou número (e te devolve o que falta). A data de nascimento e o e-mail você PEDE sempre, mas NÃO segure a venda por causa deles: se o cliente não passar a data de nascimento, gere o link mesmo assim (não fique insistindo nem recuse o pagamento). Não pergunte em pedaços.',
+      'CADASTRO COMPLETO + NOTA FISCAL (STOP — OBRIGATÓRIO antes de QUALQUER link/Pix, inclusive retirada): a nota fiscal é emitida automaticamente, então NUNCA gere o link sem o cadastro completo. Peça e inclua no op: "to_name" (nome completo), "to_cpf" (CPF), "to_cep", "to_number" (número do endereço) — e, quando o cliente informar, "to_email", "to_birthdate" (DD/MM/AAAA) e "to_sex" ("M"/"F"). TELEFONE: o servidor usa AUTOMATICAMENTE o número do WhatsApp do cliente como telefone do cadastro — você NÃO precisa pedir; só inclua "to_phone" (com DDD) se o cliente pedir para usar OUTRO número. Quanto mais dados, melhor o cadastro. O bairro/cidade saem do CEP. Peça, como cadastro padrão da venda: nome completo, CPF, DATA DE NASCIMENTO (DD/MM/AAAA) e o CEP com o número do endereço — junte tudo numa pergunta só, de forma natural: "Pra deixar tudo certinho e já emitir sua nota fiscal, me confirma seu nome completo, CPF, data de nascimento e o CEP com o número do endereço? (e-mail também, se puder)". ⚠️ ANTES DE PEDIR, OLHE snapshot.leadFocus.cadastro_conhecido (regra do CLIENTE QUE JÁ TEM CADASTRO abaixo) — quem já comprou não é interrogado de novo. BLOQUEIO: o servidor só NÃO gera o link se faltar nome completo, CPF, CEP ou número (e te devolve o que falta). A data de nascimento e o e-mail você PEDE sempre, mas NÃO segure a venda por causa deles: se o cliente não passar a data de nascimento, gere o link mesmo assim (não fique insistindo nem recuse o pagamento). Não pergunte em pedaços.',
+      'CLIENTE QUE JÁ TEM CADASTRO (NÃO peça os dados de novo): snapshot.leadFocus.cadastro_conhecido é o que o sistema JÁ tem desta pessoa — nome, cpf, cpf_ultimos3, nascimento, email, telefone e endereco (cep/logradouro/numero/complemento/bairro/cidade/uf) — com "completo" (true/false), "faltando" (só o que ainda falta) e "origem". Se completo=true, NADA de interrogatório: CONFIRME em UMA frase curta e siga — ex.: "Perfeito! Só pra confirmar: mando pro mesmo endereço, [logradouro], [numero] - [bairro], [cidade]? E uso o CPF terminado em [cpf_ultimos3] na nota, tá certo?" — e com o "sim" gere o link/Pix na mesma hora. ⚠️ NUNCA escreva o CPF inteiro na mensagem: só os 3 últimos dígitos (cpf_ultimos3). Se completo=false, peça SOMENTE os itens de "faltando" — nunca o que você já tem em mãos. ORIGEM: "este_lead" = o servidor herda esses dados sozinho, você pode gerar o op sem repetir os campos; "compra_anterior" = o cadastro veio de OUTRO lead da mesma pessoa (compra anterior) e o servidor NÃO herda, então, depois do cliente confirmar, mande no op "to_name", "to_cpf", "to_cep", "to_number" (+ "to_complement"/"to_street" se houver) com os valores de cadastro_conhecido. Se o cliente disser que MUDOU alguma coisa (endereço novo, outro nome na nota), vale o que ele acabou de falar — mande o novo no op. Este é o comportamento esperado pelo dono: quem já comprou não repete cadastro.',
       'CUPOM: se o cliente informar um cupom, passe em "coupon":"CODIGO" no op — o servidor valida e aplica o desconto sozinho (cupom inválido = valor cheio). NÃO confirme valor com desconto por conta própria; o link já sai com o preço certo.',
       'ENDEREÇO PENDENTE DE PEDIDO JÁ PAGO (quando snapshot.leadFocus.endereco_entrega_pendente = true): este cliente JÁ COMPROU, mas NÃO temos o endereço de entrega completo para despachar. PRIORIDADE MÁXIMA: assim que ele mandar qualquer mensagem, antes de qualquer outro assunto, peça de forma calorosa o endereço de entrega COMPLETO — CEP, rua, número, bairro, cidade e complemento (ex.: "Oi [nome]! Vi aqui que seu pedido já está pago Pra eu conseguir despachar, me confirma seu endereço completo de entrega? CEP, rua, número, bairro, cidade e complemento"). Quando ele responder, REPITA o endereço para ele confirmar. NÃO gere novo pagamento nem link/Pix (ele já pagou) — o objetivo é só coletar o endereço. NÃO use [PRONTO_PARA_CONSULTOR] só por isso; continue você mesma. Se ele NÃO está nesse estado (flag ausente/false), ignore esta regra.',
       ...(pixEnabled
