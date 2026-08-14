@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
+import { poloFixoDoDeploy } from '@/lib/poloFixo'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import {
   applyTenantBrandToCssVars,
@@ -26,6 +27,16 @@ type TenantContextValue = {
   canViewFinance: boolean
   loading: boolean
   reload: () => Promise<void>
+  /**
+   * Polo ao qual ESTE endereço está preso (`VITE_POLO_FIXO`), ou null no app sem trava.
+   * Quem tem valor aqui não mostra seletor de workspace nem busca no outro polo.
+   */
+  poloFixo: string | null
+  /**
+   * Preenchido quando o login não pertence ao polo deste endereço: a pessoa entrou no
+   * CRM errado. A UI mostra a porta certa em vez de uma tela vazia sem explicação.
+   */
+  poloBloqueado: string | null
 }
 
 const TenantContext = createContext<TenantContextValue | null>(null)
@@ -37,6 +48,13 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false)
   const [canViewFinance, setCanViewFinance] = useState<boolean>(false)
   const [loading, setLoading] = useState<boolean>(false)
+  const [poloBloqueado, setPoloBloqueado] = useState<string | null>(null)
+  const poloFixo = useMemo(() => poloFixoDoDeploy(), [])
+  /**
+   * Trava anti-loop. Se `set_active_tenant` falhar em silêncio (RPC velha, permissão),
+   * sem isto o load se chamaria para sempre tentando alinhar o polo.
+   */
+  const alinhandoPolo = useRef(false)
 
   /**
    * `silencioso` = revalidação de fundo, sem ligar `loading`.
@@ -58,24 +76,62 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           return
         }
         if (!silencioso) setLoading(true)
-        try {
-          const [t, sa, billing, polos, finance] = await Promise.all([
+        const buscar = () =>
+          Promise.all([
             fetchCurrentTenant(),
             fetchIsSuperAdmin(),
             fetchCurrentTenantBilling(),
             fetchMyTenants(),
             fetchCanViewFinance(),
           ])
+        try {
+          let [t, sa, billing, polos, finance] = await buscar()
+
+          // Endereço travado num polo: alinhar o polo ativo do login ao do endereço.
+          //
+          // O `active_tenant_id` é persistido por PESSOA, não por aba. Sem este alinhamento,
+          // quem tivesse deixado o polo ativo no outro negócio abriria o CRM da clínica e
+          // veria o Tricopill. É isto que faz a trava valer para quem tem os dois acessos.
+          if (poloFixo && t.id !== poloFixo && !alinhandoPolo.current) {
+            if (polos.some((p) => p.id === poloFixo)) {
+              alinhandoPolo.current = true
+              try {
+                await setActiveTenant(poloFixo)
+                ;[t, sa, billing, polos, finance] = await buscar()
+              } catch (e) {
+                console.warn('[polo] falha ao alinhar com o endereço:', e instanceof Error ? e.message : String(e))
+              } finally {
+                alinhandoPolo.current = false
+              }
+            } else if (polos.length > 0) {
+              // Login de um polo no endereço do outro. Não há o que trocar: esta pessoa
+              // não tem acesso a este CRM. Melhor dizer isso do que servir tela vazia.
+              setPoloBloqueado(poloFixo)
+              setTenant({ ...t, billing })
+              setIsSuperAdmin(sa)
+              setCanViewFinance(false)
+              setAvailableTenants([])
+              return
+            }
+            // `polos` vazio é IGNORÂNCIA, não negativa: sessão ainda subindo, RPC que
+            // falhou, 401 transitório. Barrar aqui trancaria gente legítima para fora do
+            // CRM inteiro por causa de um soluço de rede. Falhar aberto aqui é seguro:
+            // quem manda no dado é a RLS, e o polo ativo continua sendo o do banco.
+          }
+
+          setPoloBloqueado(null)
           setTenant({ ...t, billing })
           setIsSuperAdmin(sa)
           setCanViewFinance(finance)
+          // Com endereço travado o seletor de workspace some, mas a lista continua
+          // alimentando os rótulos de polo em /leads e no Kanban.
           setAvailableTenants(polos)
           applyTenantBrandToCssVars(t.brand)
         } finally {
           if (!silencioso) setLoading(false)
         }
       },
-    [],
+    [poloFixo],
   )
 
   // Troca de polo: persiste o polo ativo (RLS passa a filtrar por ele) e recarrega
@@ -85,6 +141,9 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       async (tenantId: string) => {
         if (!isSupabaseConfigured || !supabase) return
         if (tenantId === tenant.id) return
+        // Endereço travado não troca de polo, nem por caminho indireto (⌘K abrindo alguém
+        // do outro negócio). Quem precisa do outro lado abre o endereço do outro lado.
+        if (poloFixo) throw new Error('Este CRM atende um negócio só. Abra o endereço do outro polo.')
         setSwitching(true)
         try {
           await setActiveTenant(tenantId)
@@ -94,7 +153,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           throw e
         }
       },
-    [tenant.id],
+    [tenant.id, poloFixo],
   )
 
   useEffect(() => {
@@ -119,8 +178,30 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   }, [load])
 
   const value = useMemo<TenantContextValue>(
-    () => ({ tenant, availableTenants, switchTenant, switching, isSuperAdmin, canViewFinance, loading, reload: load }),
-    [tenant, availableTenants, switchTenant, switching, isSuperAdmin, canViewFinance, loading, load],
+    () => ({
+      tenant,
+      availableTenants,
+      switchTenant,
+      switching,
+      isSuperAdmin,
+      canViewFinance,
+      loading,
+      reload: load,
+      poloFixo,
+      poloBloqueado,
+    }),
+    [
+      tenant,
+      availableTenants,
+      switchTenant,
+      switching,
+      isSuperAdmin,
+      canViewFinance,
+      loading,
+      load,
+      poloFixo,
+      poloBloqueado,
+    ],
   )
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>

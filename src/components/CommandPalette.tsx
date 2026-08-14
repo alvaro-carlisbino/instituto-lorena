@@ -35,7 +35,7 @@ export function CommandPalette() {
   const [pacientes, setPacientes] = useState<PacienteEncontrado[]>([])
   const navigate = useNavigate()
   const crm = useCrm()
-  const { tenant, availableTenants, switchTenant } = useTenant()
+  const { tenant, availableTenants, switchTenant, poloFixo } = useTenant()
   const nomeDoPolo = (id: string) => availableTenants.find((t) => t.id === id)?.name ?? id
   const navContext = useNavContext()
   const canSync = crm.currentPermission.canRouteLeads || crm.currentPermission.canManageUsers
@@ -69,12 +69,14 @@ export function CommandPalette() {
     if (t.length < 2) { setPacientes([]); return }
     let vivo = true
     const id = setTimeout(() => {
-      buscarPacientes(t, 8)
+      // Endereço travado num polo busca só nele. Sem isto, o CRM da clínica continuaria
+      // achando cliente do Tricopill pelo ⌘K, que é a mistura entrando pela porta dos fundos.
+      buscarPacientes(t, 8, poloFixo ? tenant.id : null)
         .then((r) => { if (vivo) setPacientes(r) })
         .catch(() => { if (vivo) setPacientes([]) })
     }, 220)
     return () => { vivo = false; clearTimeout(id) }
-  }, [termo])
+  }, [termo, poloFixo, tenant.id])
 
   const go = (path: string) => {
     navigate(path)
@@ -92,6 +94,12 @@ export function CommandPalette() {
   const abrirPessoa = async (p: PacienteEncontrado) => {
     const destino = rotaDoPaciente(p.tipo, p.ref)
     if (p.polo && p.polo !== tenant.id) {
+      // Num endereço de polo único isto não deveria acontecer (a busca já vem escopada),
+      // mas resultado em cache de antes da trava chegaria aqui e tentaria trocar de polo.
+      if (poloFixo) {
+        toast.error('Esta pessoa é do outro negócio. Abra o CRM dele para ver a ficha.')
+        return
+      }
       setOpen(false)
       try {
         await switchTenant(p.polo)

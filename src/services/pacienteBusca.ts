@@ -151,14 +151,24 @@ export type Paciente360 = {
   }
 }
 
-export async function buscarPacientes(termo: string, limite = 20): Promise<PacienteEncontrado[]> {
+/**
+ * @param polo quando informado, a busca não sai desse polo. É o que mantém o CRM de
+ *   endereço único honesto: no CRM da clínica, cliente do Tricopill não aparece nem aqui.
+ *   `null` preserva o comportamento antigo (varre todos os polos do login).
+ */
+export async function buscarPacientes(
+  termo: string,
+  limite = 20,
+  polo: string | null = null,
+): Promise<PacienteEncontrado[]> {
   const t = termo.trim()
   // Menos de 2 caracteres varre a base inteira e devolve ruído.
   if (t.length < 2) return []
 
-  const { data, error } = await assertClient().rpc('crm_buscar_pacientes', {
+  const { data, error } = await assertClient().rpc('crm_buscar_pacientes_no_polo', {
     p_termo: t,
     p_limit: limite,
+    p_polo: polo,
   })
   if (error) throw new Error(error.message)
 

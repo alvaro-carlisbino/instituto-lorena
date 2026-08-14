@@ -10,6 +10,7 @@ import { PwaInstallBanner } from './components/PwaInstallBanner'
 import { BillingGate } from './components/BillingGate'
 import { FinanceOnly } from './components/FinanceOnly'
 import { CommandPalette } from './components/CommandPalette'
+import { PoloGate } from './components/PoloErrado'
 import { RouteTransition } from './components/RouteTransition'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -277,6 +278,7 @@ function App() {
 
   return (
     <TenantProvider>
+      <PoloGate>
       <CrmProvider value={crmState}>
         <a href="#main-content" className="skip-link">
           Pular para o conteúdo principal
@@ -297,6 +299,7 @@ function App() {
         <Toaster richColors position="top-right" />
         <PwaInstallBanner />
       </CrmProvider>
+      </PoloGate>
     </TenantProvider>
   )
 }

@@ -24,11 +24,13 @@ function poloMeta(polo: PoloOption): { label: string; Icon: typeof Building2 } {
  * Só aparece quando o usuário pertence a 2+ polos.
  */
 export function WorkspaceSwitcher() {
-  const { tenant, availableTenants, reload } = useTenant()
+  const { tenant, availableTenants, reload, poloFixo } = useTenant()
   const crm = useCrm()
   const navigate = useNavigate()
   const [switchingTo, setSwitchingTo] = useState<string | null>(null)
 
+  // Endereço de um polo só não tem para onde trocar: o outro negócio não existe aqui.
+  if (poloFixo) return null
   if (availableTenants.length < 2) return null
 
   const busy = switchingTo !== null
