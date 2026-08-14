@@ -1,6 +1,6 @@
 import { diaLocal } from '@/lib/diaLocal'
 import { supabase } from '@/lib/supabaseClient'
-import { listSurgicalStaff } from '@/services/clinicSales'
+import { type ConfirmationStatus, listSurgicalStaff } from '@/services/clinicSales'
 
 /**
  * A agenda do centro cirúrgico, com as duas metades juntas.
@@ -44,6 +44,8 @@ export type CirurgiaDoDia = {
   srgId: number | null
   /** Status da venda: vendida, agendada, realizada. */
   statusVenda: string | null
+  /** Confirmação com o paciente. Null na cirurgia que só existe no espelho da sala. */
+  confirmacao: ConfirmationStatus | null
   /** Status no centro cirúrgico: AGUARDANDO, EM_PROCESSO, FINALIZADA. */
   statusSala: string | null
   /** Meta de folículos combinada na sala. */
@@ -72,6 +74,7 @@ type LinhaVenda = {
   city: string | null
   hotel_needed: boolean | null
   srg_surgery_id: number | null
+  confirmation_status: string | null
 }
 
 type LinhaEspelho = {
@@ -128,6 +131,11 @@ export function mesclarAgenda(
       saleId: v.id,
       srgId: par?.id ?? null,
       statusVenda: v.status,
+      confirmacao: (['confirmada', 'nao_confirmada', 'remanejar'] as const).includes(
+        v.confirmation_status as ConfirmationStatus,
+      )
+        ? (v.confirmation_status as ConfirmationStatus)
+        : 'nao_confirmada',
       statusSala: par?.status ?? null,
       meta: par?.meta ?? null,
       implantados: par?.total_implantados ?? null,
@@ -156,6 +164,10 @@ export function mesclarAgenda(
       saleId: null,
       srgId: e.id,
       statusVenda: null,
+      // Cirurgia que só existe no espelho não tem venda, logo não tem com quem
+      // confirmar aqui. Null e não 'nao_confirmada': fingir pendência inventaria
+      // trabalho para a recepção em cima de cirurgia que a sala já registrou.
+      confirmacao: null,
       statusSala: e.status,
       meta: e.meta,
       implantados: e.total_implantados,
@@ -201,7 +213,8 @@ export async function listarAgendaCirurgica(deDia: string, ateDia: string): Prom
       .from('clinic_sales')
       .select(
         'id, lead_id, patient_name, procedure_label, performing_doctor, seller_doctor, attending_doctor, ' +
-          'anesthetist, value_cents, scheduled_at, status, room, city, hotel_needed, srg_surgery_id',
+          'anesthetist, value_cents, scheduled_at, status, room, city, hotel_needed, srg_surgery_id, ' +
+          'confirmation_status',
       )
       .eq('kind', 'cirurgia')
       .neq('status', 'cancelada')

@@ -183,10 +183,20 @@ export function AgendaCirurgicaPanel() {
   /** Os números do mês em tela, sem contar os dias vizinhos que a grade traz junto. */
   const resumo = useMemo(() => {
     const doMes = filtrados.filter((i) => i.dia.startsWith(mes))
+    const porTipo = new Map<string, number>()
+    for (const i of doMes) {
+      const tipo = i.procedimento?.trim()
+      if (tipo) porTipo.set(tipo, (porTipo.get(tipo) ?? 0) + 1)
+    }
     return {
       total: doMes.length,
       dias: new Set(doMes.map((i) => i.dia)).size,
       foliculos: doMes.reduce((acc, i) => acc + (i.meta ?? 0), 0),
+      confirmadas: doMes.filter((i) => i.confirmacao === 'confirmada').length,
+      // Denominador é quem TEM venda: cirurgia que só existe no espelho da sala não
+      // tem com quem confirmar, e entraria como pendência falsa.
+      comVenda: doMes.filter((i) => i.confirmacao != null).length,
+      tipos: [...porTipo.entries()].sort((a, b) => b[1] - a[1]),
       semVenda: doMes.filter((i) => i.origem === 'sala').length,
       // Cirurgia cuja data já passou e que a sala nunca registrou: ou não aconteceu,
       // ou aconteceu e ninguém deu baixa. Nos dois casos alguém precisa olhar.
@@ -202,16 +212,20 @@ export function AgendaCirurgicaPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardContent className="pt-4">
             <p className="text-xs text-muted-foreground">Cirurgias no mês</p>
             <p className="font-heading text-2xl">{resumo.total}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              em {resumo.dias} dia{resumo.dias === 1 ? '' : 's'} ·{' '}
+              {resumo.foliculos.toLocaleString('pt-BR')} folículos
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Datas sem paciente</p>
+            <p className="text-xs text-muted-foreground">Vagas em aberto</p>
             <p className={cn('font-heading text-2xl', semPaciente.vagas > 0 && 'text-amber-600')}>
               {semPaciente.vagas}
             </p>
@@ -224,31 +238,59 @@ export function AgendaCirurgicaPanel() {
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Dias com cirurgia</p>
-            <p className="font-heading text-2xl">{resumo.dias}</p>
+            <p className="text-xs text-muted-foreground">Cirurgias confirmadas</p>
+            <p
+              className={cn(
+                'font-heading text-2xl',
+                resumo.comVenda > 0 && resumo.confirmadas < resumo.comVenda && 'text-destructive',
+              )}
+            >
+              {resumo.confirmadas}
+              <span className="ml-1 text-sm text-muted-foreground">de {resumo.comVenda}</span>
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {resumo.comVenda === 0
+                ? 'nenhuma venda marcada no mês'
+                : `faltam ${resumo.comVenda - resumo.confirmadas} confirmar`}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Folículos previstos</p>
-            <p className="font-heading text-2xl">{resumo.foliculos.toLocaleString('pt-BR')}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Sem venda no CRM</p>
-            <p className="font-heading text-2xl">{resumo.semVenda}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Passou sem a sala confirmar</p>
-            <p className={cn('font-heading text-2xl', resumo.semEspelho > 0 && 'text-destructive')}>
-              {resumo.semEspelho}
+            <p className="text-xs text-muted-foreground">Tipos de cirurgia</p>
+            <p className="font-heading text-2xl">{resumo.tipos.length}</p>
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+              {resumo.tipos.length === 0
+                ? 'nenhum procedimento no mês'
+                : resumo.tipos
+                    .slice(0, 3)
+                    .map(([tipo, n]) => `${tipo} ${n}`)
+                    .join(' · ')}
             </p>
           </CardContent>
         </Card>
       </div>
+
+      {(resumo.semVenda > 0 || resumo.semEspelho > 0) && (
+        // Os dois alarmes que saíram dos cards para caber os quatro que a gestão
+        // pediu. Continuam visíveis porque já pegaram problema real: cirurgia que
+        // a sala registrou e o CRM não conhece, e cirurgia que passou sem baixa.
+        <p className="text-sm text-muted-foreground">
+          {resumo.semVenda > 0 && (
+            <>
+              <span className="font-medium text-foreground">{resumo.semVenda}</span> na sala sem venda no
+              CRM
+            </>
+          )}
+          {resumo.semVenda > 0 && resumo.semEspelho > 0 && ' · '}
+          {resumo.semEspelho > 0 && (
+            <>
+              <span className="font-medium text-destructive">{resumo.semEspelho}</span> passou sem a sala
+              confirmar
+            </>
+          )}
+        </p>
+      )}
 
       <Card>
         <CardHeader>
