@@ -1063,9 +1063,20 @@ export async function blingCreateSaleOrder(
         const chargedReais = Math.round(args.amountCents) / 100
         const totalBling = Number(od.total ?? 0)
         const diff = Math.round((chargedReais - totalBling) * 100) / 100
-        // Sanidade: só corrige diferenças plausíveis de juros/arredondamento (até R$100).
-        if (totalBling > 0 && diff > 0.05 && diff < 100) {
-          od.outrasDespesas = Math.round(((Number(od.outrasDespesas) || 0) + diff) * 100) / 100
+        // Sanidade: só corrige diferenças plausíveis de juros/cupom/arredondamento (até R$100).
+        // Vale nos DOIS sentidos: gravado ABAIXO do cobrado é juros do parcelado que o rateio não
+        // colou no item (vira outrasDespesas); gravado ACIMA é cupom que não pegou — o Bling
+        // recusou o `desconto` do payload ou o item saiu pelo preço de tabela — e aí a diferença
+        // entra no DESCONTO do pedido, porque desconto comercial não é despesa. Sem esta metade,
+        // um cupom perdido passava calado e o pedido cobrava mais do que entrou (casos Camila
+        // 08/08 e 13/08, que vieram pelo cartão do site e não por aqui).
+        if (totalBling > 0 && Math.abs(diff) > 0.05 && Math.abs(diff) < 100) {
+          if (diff > 0) {
+            od.outrasDespesas = Math.round(((Number(od.outrasDespesas) || 0) + diff) * 100) / 100
+          } else {
+            const descAtual = Number(((od.desconto ?? {}) as Record<string, unknown>).valor) || 0
+            od.desconto = { valor: Math.round((descAtual - diff) * 100) / 100, unidade: 'REAL' }
+          }
           // O Bling valida que as PARCELAS somam o total: joga a diferença na última.
           if (parc.length) {
             const last = parc[parc.length - 1]
