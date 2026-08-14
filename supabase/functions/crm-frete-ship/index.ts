@@ -219,7 +219,13 @@ Deno.serve(async (req) => {
    * para um pedido que ninguém achou, ou venda paga que nunca virou etiqueta.
    */
   if (action === 'list_orders') {
-    const r = await meListOrders(admin, tenantId, { pages: Number(p.pages ?? 3) })
+    const since = String(p.since ?? '').trim()
+    const r = await meListOrders(admin, tenantId, {
+      // Com janela de data, paginar até cobrir a janela — 3 páginas fixas cortavam a conta
+      // no meio e toda venda mais antiga que isso aparecia como "sem etiqueta".
+      pages: Number(p.pages ?? (since ? 25 : 3)),
+      sinceISO: since || undefined,
+    })
     if (!r.ok) return json({ ok: false, error: r.error ?? 'falha', orders: r.orders }, 200)
     return json({ ok: true, orders: r.orders })
   }

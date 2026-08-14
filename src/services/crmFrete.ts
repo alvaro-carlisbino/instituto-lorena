@@ -210,8 +210,10 @@ export type MeOrderResumo = {
  * Não existe tabela de envios no banco: a conta ME é a fonte da verdade e o CRM só guarda
  * o carimbo em `lead.custom_fields.entrega`. Por isso a lista vem da API a cada abertura.
  */
-export async function listarEnviosMe(pages = 3): Promise<{ ok: boolean; orders: MeOrderResumo[]; error: string | null }> {
-  const p = await shipInvoke({ action: 'list_orders', pages })
+export async function listarEnviosMe(
+  opts: { sinceISO?: string; pages?: number } = {},
+): Promise<{ ok: boolean; orders: MeOrderResumo[]; error: string | null }> {
+  const p = await shipInvoke({ action: 'list_orders', since: opts.sinceISO ?? null, pages: opts.pages ?? null })
   const orders = Array.isArray(p.orders) ? (p.orders as MeOrderResumo[]) : []
   return { ok: p.ok === true, orders, error: p.ok === true ? null : String(p.error ?? 'falha') }
 }

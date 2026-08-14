@@ -830,13 +830,16 @@ export type MeOrderResumo = {
 export async function meListOrders(
   admin: SupabaseClient,
   tenantId: string,
-  opts?: { pages?: number },
+  opts?: { pages?: number; sinceISO?: string },
 ): Promise<{ ok: boolean; orders: MeOrderResumo[]; error?: string }> {
   if (!melhorEnvioConfigured()) return { ok: false, orders: [], error: 'client_not_configured' }
   const token = await getValidMeToken(admin, tenantId)
   if (!token) return { ok: false, orders: [], error: 'not_connected' }
 
-  const paginas = Math.min(Math.max(opts?.pages ?? 3, 1), 10)
+  const paginas = Math.min(Math.max(opts?.pages ?? 3, 1), 25)
+  const sinceMs = opts?.sinceISO ? Date.parse(opts.sinceISO) : NaN
+  const temJanela = Number.isFinite(sinceMs)
+  let viuDentroDaJanela = false
   const orders: MeOrderResumo[] = []
   try {
     for (let page = 1; page <= paginas; page++) {
@@ -870,6 +873,18 @@ export async function meListOrders(
       }
       // Última página: o ME devolve menos que o tamanho cheio.
       if (lista.length === 0) break
+      // Com janela, para quando a página inteira já é mais VELHA que o corte — mas só depois
+      // de ter visto algo dentro da janela. Sem essa segunda condição, uma conta que devolve
+      // do mais antigo pro mais novo pararia na página 1 e a tela ficaria sem nenhum envio.
+      if (temJanela) {
+        const daPagina = orders.slice(orders.length - lista.length)
+        const dentro = daPagina.some((o) => {
+          const t = o.createdAt ? Date.parse(o.createdAt) : NaN
+          return Number.isFinite(t) && t >= sinceMs
+        })
+        if (dentro) viuDentroDaJanela = true
+        else if (viuDentroDaJanela) break
+      }
     }
     return { ok: true, orders }
   } catch (e) {
