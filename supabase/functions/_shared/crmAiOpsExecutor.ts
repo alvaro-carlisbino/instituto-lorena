@@ -6,7 +6,7 @@ import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
 import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, collectAddons } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
-import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
+import { applyFreightMarkup, boxForOrder, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
 
 /** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
@@ -69,14 +69,19 @@ async function resolveFreightCents(
   // autoritativo é o do Melhor Envio, não o serviço que a IA escolheu.
   if (toCep.length === 8 && melhorEnvioConfigured()) {
     try {
-      // A caixa ESCALA com o kit (peso real): sem isto o frete de 4 frascos saía como o de 1.
-      const box = boxForKit(op.kit)
+      // A caixa ESCALA com o kit E com os avulsos (peso real): sem isto o frete de 4 frascos saía
+      // como o de 1, e o avulso vendido sozinho ia na caixa padrão de 1 frasco.
+      const extras = collectAddons(op).map((a) => ({ qty: a.qty, box: a.addon.box }))
+      const box = boxForOrder(op.kit, extras)
       // SEGURO/valor declarado: a etiqueta real (autoShipToCart) é comprada declarando o valor do
       // produto, e os Correios cobram isso como %. A cotação que COBRA o cliente tem que incluir o
-      // MESMO seguro — senão a etiqueta sai sempre mais cara que o cobrado. Usa o valor do kit
-      // (ou amount_cents avulso); kit desconhecido cai no seguro padrão.
+      // MESMO seguro — senão a etiqueta sai sempre mais cara que o cobrado. Soma kit + avulsos;
+      // sem nenhum dos dois, cai no amount_cents e depois no seguro padrão.
+      const addonsValueCents = collectAddons(op).reduce((sum, a) => sum + a.qty * a.addon.amountCents, 0)
+      const kitDeclaredCents = declaredValueCentsForKit(op.kit)
+      const declaradoCents = (kitDeclaredCents ?? 0) + addonsValueCents
       const insuranceCents =
-        declaredValueCentsForKit(op.kit) ??
+        (declaradoCents > 0 ? declaradoCents : undefined) ??
         (op.amount_cents != null && Number.isFinite(Number(op.amount_cents)) ? Math.max(0, Math.round(Number(op.amount_cents))) : undefined) ??
         undefined
       const q = await quoteFreteMelhorEnvio(admin, tenantId, toCep, {

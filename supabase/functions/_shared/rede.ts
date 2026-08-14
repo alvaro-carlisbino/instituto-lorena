@@ -6,7 +6,7 @@ import { incrementCouponUse, quoteCoupon } from './coupons.ts'
 import { blingCreateSaleOrder, blingOrderLabel } from './bling.ts'
 import { sendEmail } from './resend.ts'
 import { internalSaleEmail, orderConfirmEmail, TEAM_EMAIL } from './emails.ts'
-import { autoShipToCart } from './melhorEnvio.ts'
+import { autoShipToCart, type FreteExtra } from './melhorEnvio.ts'
 import { sendSaleReceiptToGroup } from './saleReceipt.ts'
 import { dispatchPurchaseConversions } from './conversions.ts'
 import { getCheckoutBaseUrl, getTenantBrand } from './tenantBrand.ts'
@@ -80,9 +80,41 @@ export const BROWSCULPT_ADDON = {
  * prompt do crm-ai-assistant (o que a IA FALA) e o Bling (o que o site e o PDV leem). Mexeu
  * num, mexa nos três — foi assim que o shampoo passou 3 semanas cobrando menos que o site.
  */
-export const AI_ADDONS: Record<string, { blingProductId: string; nome: string; amountCents: number; labelCurto: string }> = {
-  shampoo: { ...SHAMPOO_ADDON, labelCurto: 'Shampoo Ozonizado' },
-  gel_sobrancelha: { ...BROWSCULPT_ADDON, labelCurto: 'Gel BrowSculpt' },
+export const AI_ADDONS: Record<string, {
+  blingProductId: string
+  nome: string
+  amountCents: number
+  labelCurto: string
+  /** Peso/medidas do cadastro no Bling — entram no frete e na etiqueta (ver boxForOrder). */
+  box: { weightKg: number; lengthCm: number; widthCm: number; heightCm: number }
+}> = {
+  shampoo: {
+    ...SHAMPOO_ADDON,
+    labelCurto: 'Shampoo Ozonizado',
+    box: { weightKg: 0.25, lengthCm: 18, widthCm: 11, heightCm: 6 },
+  },
+  gel_sobrancelha: {
+    ...BROWSCULPT_ADDON,
+    labelCurto: 'Gel BrowSculpt',
+    box: { weightKg: 0.05, lengthCm: 16, widthCm: 11, heightCm: 2 },
+  },
+}
+
+/**
+ * Traduz os `items` de uma cobrança (kit + avulsos) nos volumes que o frete precisa somar.
+ * Casa pelo id do produto no Bling — a linha do kit não tem id e é ignorada aqui (quem
+ * dimensiona o kit é o boxForKit).
+ */
+export function addonExtrasFromItems(items: Array<Record<string, unknown>> | null | undefined): FreteExtra[] {
+  if (!Array.isArray(items)) return []
+  const porId = new Map(Object.values(AI_ADDONS).map((a) => [a.blingProductId, a]))
+  const out: FreteExtra[] = []
+  for (const it of items) {
+    const addon = porId.get(String(it?.id ?? ''))
+    const qty = Math.max(0, Math.floor(Number(it?.qty) || 0))
+    if (addon && qty > 0) out.push({ qty, box: addon.box })
+  }
+  return out
 }
 
 /** Lê do op quais avulsos foram pedidos e em que quantidade. Ignora zero/negativo/lixo. */
@@ -941,6 +973,9 @@ export async function finalizeRedePaid(
       const ship = await autoShipToCart(admin, blingTenant, {
         lead: { id: l.id, patient_name: l.patient_name, phone: l.phone, custom_fields: l.custom_fields },
         kit: orderKit || null,
+        // Avulsos (shampoo, gel) somam peso na etiqueta — e, quando não há kit, são eles que
+        // definem a caixa. Sem isso a etiqueta saía com a caixa do kit (ou a padrão de 1 frasco).
+        extras: addonExtrasFromItems(intent.items),
         productName: orderKit ? `Tricopill (${orderKit})` : 'Tricopill',
         productValueCents: intent.amountCents,
       })

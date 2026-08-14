@@ -92,6 +92,43 @@ export function boxForKit(kitRaw: unknown): FreteBox | null {
 /** Chaves de kit conhecidas (p/ cotar por kit na conversa). */
 export const KIT_KEYS = Object.keys(KIT_BOXES)
 
+/** Produto avulso que viaja no mesmo pedido (shampoo, gel…). `box` vem do cadastro do produto. */
+export type FreteExtra = { qty: number; box?: FreteBox | null }
+
+/**
+ * Mínimo aceito pelos Correios/Melhor Envio (16×11×2 cm). Um gel de 11×2×2 sozinho é recusado
+ * na cotação, então a caixa do avulso sobe pro mínimo em vez de ir com a medida do frasco.
+ */
+const MIN_BOX = { lengthCm: 16, widthCm: 11, heightCm: 2 }
+
+/**
+ * Caixa do pedido INTEIRO: kit + avulsos. Sem isto o frete era dimensionado só pelo kit e o
+ * avulso viajava de graça no cálculo (o shampoo fez isso por semanas) — e avulso VENDIDO
+ * SOZINHO caía na caixa padrão de 1 frasco.
+ *
+ * Com kit, o avulso entra na MESMA caixa: as medidas seguem as do kit e só o peso sobe.
+ * Sem kit, a caixa é a maior dos avulsos (nunca menor que o mínimo dos Correios) e o peso é a
+ * soma. Sem kit e sem avulso, devolve null (cai na caixa padrão de quem chamou).
+ */
+export function boxForOrder(kitRaw: unknown, extras: FreteExtra[] = []): FreteBox | null {
+  const kitBox = boxForKit(kitRaw)
+  const usable = extras.filter((e) => e && Number(e.qty) > 0 && e.box)
+  const extraWeight = usable.reduce((sum, e) => sum + Number(e.qty) * Number(e.box?.weightKg ?? 0), 0)
+  if (kitBox) {
+    if (extraWeight <= 0) return kitBox
+    return { ...kitBox, weightKg: Number(((kitBox.weightKg ?? 0) + extraWeight).toFixed(3)) }
+  }
+  if (!usable.length) return null
+  const maiorDe = (campo: 'lengthCm' | 'widthCm' | 'heightCm') =>
+    usable.reduce((max, e) => Math.max(max, Number(e.box?.[campo] ?? 0)), MIN_BOX[campo])
+  return {
+    weightKg: Number(Math.max(extraWeight, 0.05).toFixed(3)),
+    lengthCm: maiorDe('lengthCm'),
+    widthCm: maiorDe('widthCm'),
+    heightCm: maiorDe('heightCm'),
+  }
+}
+
 /**
  * Valor declarado (seguro) por kit, em centavos — DEVE bater com o que a etiqueta real declara
  * (autoShipToCart usa o valor do produto). Os Correios cobram o seguro/valor declarado como % do
@@ -791,6 +828,8 @@ export async function autoShipToCart(
   opts: {
     lead: { id: string; patient_name?: string | null; phone?: string | null; custom_fields?: Record<string, unknown> | null }
     kit?: string | null
+    /** Avulsos do pedido (shampoo, gel…): somam peso e, sem kit, definem a caixa. */
+    extras?: FreteExtra[]
     productName: string
     productValueCents: number
   },
@@ -847,7 +886,7 @@ export async function autoShipToCart(
     // (resolveFreightCents) também passou a honrar a escolha, então cobrança e etiqueta continuam
     // batendo. Sem serviço escolhido (ou que não atende o trecho), cai na mais barata. options[0]
     // já vem ordenado do mais barato pelo Melhor Envio.
-    const box = boxForKit(opts.kit) ?? undefined
+    const box = boxForOrder(opts.kit, opts.extras ?? []) ?? undefined
     const q = await quoteFreteMelhorEnvio(admin, tenantId, cep, { box, cityInfo })
     if (!q.ok || q.options.length === 0) return { ok: false, skipped: true, reason: 'sem_servico_atende' }
     const chosenService = String(entrega.service ?? '').trim()
@@ -858,7 +897,7 @@ export async function autoShipToCart(
       to,
       serviceId,
       products: [{ name: opts.productName.slice(0, 120), quantity: 1, unitaryValueCents: Math.max(100, opts.productValueCents) }],
-      box: boxForKit(opts.kit) ?? undefined,
+      box,
       insuranceCents: Math.max(0, opts.productValueCents),
       finalize: false, // só carrinho — o operador compra no painel
       nonCommercial: true,
