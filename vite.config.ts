@@ -3,8 +3,19 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
+/**
+ * Caminho onde o app é servido. Vazio (padrão) = raiz do domínio.
+ *
+ * O CRM do Tricopill roda DENTRO da loja, em tricopill.com.br/interno, para não pedir
+ * domínio novo nem registro de DNS. Servir sob subcaminho exige que TRÊS coisas concordem:
+ * o `base` daqui (para os assets saírem em /interno/assets/…), o `basename` do router e o
+ * escopo do service worker. Se uma delas discordar, a tela abre em branco.
+ */
+const BASE_PATH = (process.env.VITE_BASE_PATH ?? '').trim()
+
 // https://vite.dev/config/
 export default defineConfig({
+  base: BASE_PATH ? `${BASE_PATH.replace(/\/+$/, '')}/` : '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {

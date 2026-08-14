@@ -12,7 +12,16 @@
 // assets abaixo). Trocar o nome faz o `activate` apagar o cache envenenado de quem já
 // estava com o problema — é o que desfaz o erro sem pedir limpeza manual de cache.
 const CACHE = 'crm-app-v2'
-const STATIC_ASSETS = ['/', '/favicon.png', '/favicon.svg', '/manifest.webmanifest']
+
+/**
+ * Pasta em que este SW está montado: "/" na raiz, "/interno/" quando o CRM roda dentro
+ * da loja do Tricopill. Tudo aqui é relativo a ela.
+ *
+ * Com caminho fixo "/", o SW do CRM em subcaminho cacheava e servia a HOME DA LOJA como
+ * fallback do app — a página de vendas aparecendo dentro do sistema interno.
+ */
+const BASE = new URL('./', self.location).pathname
+const STATIC_ASSETS = [BASE, `${BASE}favicon.png`, `${BASE}favicon.svg`, `${BASE}manifest.webmanifest`]
 
 self.addEventListener('install', (event) => {
   self.skipWaiting()
@@ -48,7 +57,7 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => undefined)
           return res
         })
-        .catch(() => caches.match(req).then((cached) => cached || caches.match('/'))),
+        .catch(() => caches.match(req).then((cached) => cached || caches.match(BASE))),
     )
     return
   }
@@ -59,7 +68,7 @@ self.addEventListener('fetch', (event) => {
       if (cached) return cached
       return fetch(req).then((res) => {
         const ehAsset =
-          url.pathname.startsWith('/assets/') || url.pathname.match(/\.(js|css|png|svg|webp|woff2?)$/)
+          url.pathname.startsWith(`${BASE}assets/`) || url.pathname.match(/\.(js|css|png|svg|webp|woff2?)$/)
 
         // `res.ok` NÃO basta. Quando um chunk com hash antigo some (deploy novo), o
         // rewrite do Vercel respondia a página com status 200 e `text/html` — a
@@ -68,7 +77,7 @@ self.addEventListener('fetch', (event) => {
         // "Expected a JavaScript-or-Wasm module script" sobrevivia a qualquer reload.
         // Agora um asset só entra no cache se o tipo devolvido combinar com o pedido.
         const tipo = res.headers.get('content-type') || ''
-        const pediuScript = /\.(js|mjs)$/.test(url.pathname) || url.pathname.startsWith('/assets/')
+        const pediuScript = /\.(js|mjs)$/.test(url.pathname) || url.pathname.startsWith(`${BASE}assets/`)
         const veioHtml = tipo.includes('text/html')
 
         if (res.ok && ehAsset && !(pediuScript && veioHtml)) {

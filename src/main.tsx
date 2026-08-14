@@ -12,10 +12,19 @@ document.title = APP_DOCUMENT_TITLE
 // que não existem mais, e a tela abre em branco. Isto recarrega uma vez e resolve.
 instalarRecuperacaoDeChunk()
 
+/**
+ * Caminho em que o app está montado. `import.meta.env.BASE_URL` é o `base` do Vite:
+ * "/" na raiz, "/interno/" quando o CRM roda dentro da loja do Tricopill.
+ * Sem barra final, que é o formato que o react-router espera no `basename`.
+ */
+const BASE = import.meta.env.BASE_URL.replace(/\/+$/, '')
+
 // PWA service worker — só em produção e em browser real.
+// Registrado a partir do BASE: em subcaminho, o escopo do SW não pode passar da pasta em
+// que ele mora, e um SW de escopo errado serve chunk velho e abre a tela em branco.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
+    navigator.serviceWorker.register(`${BASE}/sw.js`, { scope: `${BASE}/` }).catch((err) => {
       console.warn('Service worker register failed:', err)
     })
   })
@@ -23,7 +32,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={BASE || undefined}>
       <App />
     </BrowserRouter>
   </StrictMode>,
