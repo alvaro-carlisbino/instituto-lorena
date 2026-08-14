@@ -232,3 +232,89 @@ export async function listarAgendaCirurgica(deDia: string, ateDia: string): Prom
   )
   return mesclado.filter((c) => c.dia >= deDia && c.dia <= ateDia)
 }
+
+/**
+ * Datas de cirurgia que a clínica abriu, e quantas vagas sobraram em cada uma.
+ *
+ * Data aberta é decisão, não dedução: o sistema sabe o que está MARCADO, e o
+ * calendário vazio de uma segunda-feira pode ser dia sem cirurgia ou dia com sala
+ * reservada e ninguém para operar. Só quem monta a escala sabe a diferença, então
+ * ela registra a data e o painel conta o que ficou sem paciente.
+ */
+export type DataAberta = {
+  id: string
+  dia: string
+  slots: number
+  marcadas: number
+  vagasLivres: number
+  doctor: string | null
+  room: string | null
+  note: string | null
+}
+
+export async function listarDatasAbertas(deDia: string, ateDia: string): Promise<DataAberta[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('v_surgery_open_dates')
+    .select('id, dia, slots, marcadas, vagas_livres, doctor, room, note')
+    .gte('dia', deDia)
+    .lte('dia', ateDia)
+    .order('dia', { ascending: true })
+    .limit(400)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>
+    const str = (v: unknown) => (v == null || String(v).length === 0 ? null : String(v))
+    return {
+      id: String(row.id),
+      dia: String(row.dia),
+      slots: Number(row.slots ?? 1),
+      marcadas: Number(row.marcadas ?? 0),
+      vagasLivres: Number(row.vagas_livres ?? 0),
+      doctor: str(row.doctor),
+      room: str(row.room),
+      note: str(row.note),
+    }
+  })
+}
+
+export async function abrirData(payload: {
+  dia: string
+  slots?: number
+  doctor?: string | null
+  room?: string | null
+  note?: string | null
+}): Promise<void> {
+  const client = assertClient()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(payload.dia)) throw new Error('Escolha a data.')
+  const linha = {
+    dia: payload.dia,
+    slots: Math.min(Math.max(payload.slots ?? 1, 1), 12),
+    doctor: payload.doctor?.trim() || null,
+    room: payload.room?.trim() || null,
+    note: payload.note?.trim() || null,
+  }
+  // Abrir a mesma data duas vezes é reeditar a vaga, não erro de tela.
+  const { data: existente, error: buscaErr } = await client
+    .from('surgery_open_dates')
+    .select('id')
+    .eq('dia', payload.dia)
+    .maybeSingle()
+  if (buscaErr) throw new Error(buscaErr.message)
+  if (existente) {
+    const { error } = await client
+      .from('surgery_open_dates')
+      .update(linha)
+      .eq('id', String((existente as { id: unknown }).id))
+    if (error) throw new Error(error.message)
+    return
+  }
+  const { error } = await client.from('surgery_open_dates').insert(linha)
+  if (error) throw new Error(error.message)
+}
+
+export async function fecharData(id: string): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.from('surgery_open_dates').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}

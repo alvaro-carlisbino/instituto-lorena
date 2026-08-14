@@ -90,6 +90,92 @@ export async function listFollowupAgenda(): Promise<FollowupAgendaRow[]> {
   })
 }
 
+/**
+ * O follow-up em colunas, do jeito que a gerente desenhou: 1º, 2º e 3º contato,
+ * não convertido e encerrado.
+ *
+ * A coluna é do PACIENTE, não da tentativa — por isso vem da view, que já reduz o
+ * histórico a uma linha por lead. Ninguém arrasta card aqui: registrar o contato
+ * move para a coluna seguinte, e é o registro que interessa. Card que anda porque
+ * alguém arrastou é a planilha de novo, com o mesmo problema de 2022 (a coluna
+ * "2º contato" preenchida sem que ligação nenhuma tenha acontecido).
+ */
+export type KanbanColuna = 'contato_1' | 'contato_2' | 'contato_3' | 'nao_convertido' | 'encerrado'
+
+export const KANBAN_COLUNAS: Array<{ id: KanbanColuna; label: string; hint: string }> = [
+  { id: 'contato_1', label: '1º contato', hint: 'Primeira tentativa marcada' },
+  { id: 'contato_2', label: '2º contato', hint: 'Já teve uma tentativa' },
+  { id: 'contato_3', label: '3º contato', hint: 'Terceira tentativa ou mais' },
+  {
+    id: 'nao_convertido',
+    label: 'Não convertido · potencial futuro',
+    hint: 'Saiu da fila sem fechar. Volta quando for a hora',
+  },
+  {
+    id: 'encerrado',
+    label: 'Encerrado · cirurgia do mês seguinte',
+    hint: 'Fechou ou o atendimento terminou',
+  },
+]
+
+export type KanbanCard = {
+  followupId: string
+  leadId: string
+  patientName: string
+  phone: string | null
+  attemptNo: number
+  scheduledFor: string
+  doneAt: string | null
+  outcome: string | null
+  note: string | null
+  coluna: KanbanColuna
+  diasAtraso: number
+  vendaId: string | null
+  cirurgiaEm: string | null
+}
+
+export async function listFollowupKanban(): Promise<KanbanCard[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('v_followup_kanban')
+    .select(
+      'followup_id, lead_id, patient_name, phone, attempt_no, scheduled_for, done_at, outcome, note, ' +
+        'coluna, dias_atraso, venda_id, cirurgia_em',
+    )
+    .order('scheduled_for', { ascending: true })
+    .limit(500)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const row = r as unknown as Record<string, unknown>
+    const str = (v: unknown) => (v == null || String(v).length === 0 ? null : String(v))
+    return {
+      followupId: String(row.followup_id),
+      leadId: String(row.lead_id),
+      patientName: String(row.patient_name ?? ''),
+      phone: str(row.phone),
+      attemptNo: Number(row.attempt_no ?? 1),
+      scheduledFor: String(row.scheduled_for),
+      doneAt: str(row.done_at),
+      outcome: str(row.outcome),
+      note: str(row.note),
+      coluna: (row.coluna as KanbanColuna) ?? 'contato_1',
+      diasAtraso: Number(row.dias_atraso ?? 0),
+      vendaId: str(row.venda_id),
+      cirurgiaEm: str(row.cirurgia_em),
+    }
+  })
+}
+
+/**
+ * Traz de volta para a fila quem estava em "não convertido".
+ *
+ * É o "potencial futuro" da coluna virando ação: a paciente que disse "ano que
+ * vem" precisa de uma data, senão o card vira lápide.
+ */
+export async function reabrirFollowup(leadId: string, scheduledFor: string, note?: string | null) {
+  await scheduleFollowup({ leadId, scheduledFor, note: note ?? 'Reaberto do potencial futuro' })
+}
+
 export async function listLeadFollowups(leadId: string): Promise<FollowupHistoryRow[]> {
   const client = assertClient()
   const { data, error } = await client

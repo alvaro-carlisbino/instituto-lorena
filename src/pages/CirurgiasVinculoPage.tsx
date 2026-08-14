@@ -89,8 +89,8 @@ export function CirurgiasVinculoPage() {
 
   return (
     <AppLayout
-      title="Cirurgias sem paciente"
-      subtitle="No sistema do centro cirúrgico o paciente é texto livre, sem vínculo com o CRM. Aqui você fecha esse vínculo — é ele que faz a cirurgia aparecer no app do paciente."
+      title="Cirurgias sem prontuário"
+      subtitle="Cirurgia que já aconteceu e não achou o paciente no CRM: no sistema do centro cirúrgico o nome é texto livre. Aqui você fecha o vínculo — é ele que faz a cirurgia aparecer no app do paciente. (Data de cirurgia esperando paciente é outra coisa, e mora na agenda cirúrgica.)"
     >
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {FILTROS.map((f) => (

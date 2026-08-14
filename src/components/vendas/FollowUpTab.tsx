@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { CalendarClock, CheckCircle2, MessageCircle, PhoneCall } from 'lucide-react'
+import { CalendarClock, MessageCircle, PhoneCall, RotateCcw } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -17,14 +18,17 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 import {
   FOLLOWUP_CHANNELS,
   FOLLOWUP_OUTCOMES,
-  type FollowupAgendaRow,
+  KANBAN_COLUNAS,
+  type KanbanCard,
+  type KanbanColuna,
   completeFollowup,
-  listFollowupAgenda,
+  listFollowupKanban,
+  reabrirFollowup,
 } from '@/services/leadFollowups'
 
 const hojeIso = () => {
@@ -40,6 +44,9 @@ const emDias = (dias: number) => {
 
 const soDigitos = (v: string | null) => (v ?? '').replace(/\D/g, '')
 
+const dia = (iso: string | null) =>
+  iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR') : '—'
+
 /** Atalhos de reagendamento: é assim que ela fala, "volto nele daqui uma semana". */
 const ATALHOS = [
   { label: 'Amanhã', dias: 1 },
@@ -49,10 +56,31 @@ const ATALHOS = [
   { label: '30 dias', dias: 30 },
 ]
 
+/** Cor da faixa de cada coluna. Só o topo: card colorido em cinco cores vira festa. */
+const FAIXA: Record<KanbanColuna, string> = {
+  contato_1: 'bg-sky-500',
+  contato_2: 'bg-violet-500',
+  contato_3: 'bg-amber-500',
+  nao_convertido: 'bg-muted-foreground',
+  encerrado: 'bg-emerald-500',
+}
+
+const ABERTAS: KanbanColuna[] = ['contato_1', 'contato_2', 'contato_3']
+
+/**
+ * O follow-up em kanban, do desenho da gerente: 1º, 2º e 3º contato, não
+ * convertido (potencial futuro) e encerrado.
+ *
+ * As três primeiras colunas são a fila viva, e o card anda sozinho quando o
+ * contato é registrado — não tem arrastar. Arrastar seria repetir a planilha, em
+ * que a coluna "2º contato" era preenchida sem que ligação nenhuma tivesse
+ * acontecido, e ninguém sabia de qual das quatro colunas cobrar.
+ */
 export function FollowUpTab() {
-  const [rows, setRows] = useState<FollowupAgendaRow[]>([])
+  const [cards, setCards] = useState<KanbanCard[]>([])
   const [loading, setLoading] = useState(false)
-  const [alvo, setAlvo] = useState<FollowupAgendaRow | null>(null)
+  const [alvo, setAlvo] = useState<KanbanCard | null>(null)
+  const [reabrindo, setReabrindo] = useState<KanbanCard | null>(null)
   const [outcome, setOutcome] = useState(FOLLOWUP_OUTCOMES[0])
   const [canal, setCanal] = useState(FOLLOWUP_CHANNELS[0])
   const [nota, setNota] = useState('')
@@ -63,7 +91,7 @@ export function FollowUpTab() {
   const load = async () => {
     setLoading(true)
     try {
-      setRows(await listFollowupAgenda())
+      setCards(await listFollowupKanban())
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar os follow-ups')
     } finally {
@@ -75,19 +103,26 @@ export function FollowUpTab() {
     void load()
   }, [])
 
-  const grupos = useMemo(
-    () => ({
-      atrasado: rows.filter((r) => r.bucket === 'atrasado'),
-      hoje: rows.filter((r) => r.bucket === 'hoje'),
-      semana: rows.filter((r) => r.bucket === 'semana'),
-    }),
-    [rows],
+  const porColuna = useMemo(() => {
+    const mapa = new Map<KanbanColuna, KanbanCard[]>()
+    for (const c of KANBAN_COLUNAS) mapa.set(c.id, [])
+    for (const card of cards) mapa.get(card.coluna)?.push(card)
+    // Atrasado primeiro dentro de cada coluna: é a fila do dia dela.
+    for (const lista of mapa.values()) {
+      lista.sort((a, b) => a.scheduledFor.localeCompare(b.scheduledFor))
+    }
+    return mapa
+  }, [cards])
+
+  const atrasados = useMemo(
+    () => cards.filter((c) => ABERTAS.includes(c.coluna) && c.diasAtraso > 0).length,
+    [cards],
   )
 
-  const abrir = (row: FollowupAgendaRow) => {
-    setAlvo(row)
+  const abrir = (card: KanbanCard) => {
+    setAlvo(card)
     setOutcome(FOLLOWUP_OUTCOMES[0])
-    setCanal(row.channel ?? FOLLOWUP_CHANNELS[0])
+    setCanal(FOLLOWUP_CHANNELS[0])
     setNota('')
     setProxima(emDias(7))
     setSemProxima(false)
@@ -98,7 +133,7 @@ export function FollowUpTab() {
     setSalvando(true)
     try {
       await completeFollowup({
-        id: alvo.id,
+        id: alvo.followupId,
         leadId: alvo.leadId,
         outcome,
         note: nota,
@@ -108,7 +143,7 @@ export function FollowUpTab() {
       toast.success(
         semProxima
           ? `${alvo.patientName} saiu da fila de follow-up.`
-          : `Contato registrado. Próximo em ${new Date(`${proxima}T12:00:00`).toLocaleDateString('pt-BR')}.`,
+          : `Contato registrado. Próximo em ${dia(proxima)}.`,
       )
       setAlvo(null)
       await load()
@@ -119,89 +154,117 @@ export function FollowUpTab() {
     }
   }
 
-  const tabela = (titulo: string, lista: FollowupAgendaRow[], destaque?: boolean) => (
-    <Card key={titulo}>
-      <CardHeader>
-        <CardTitle>{titulo}</CardTitle>
-        <CardAction>
-          <Badge variant={destaque && lista.length > 0 ? 'destructive' : 'secondary'}>{lista.length}</Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
-        {lista.length === 0 ? (
-          <EmptyState icon={CheckCircle2} title="Nada aqui" className="py-6" />
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Paciente</TableHead>
-                  <TableHead>Tentativa</TableHead>
-                  <TableHead>Data</TableHead>
-                  <TableHead>Combinado</TableHead>
-                  <TableHead className="text-right">Ação</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {lista.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell>
-                      <div className="font-medium">{r.patientName}</div>
-                      <div className="text-xs text-muted-foreground">{r.phone ?? 'sem telefone'}</div>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{r.attemptNo}ª</TableCell>
-                    <TableCell>
-                      {new Date(`${r.scheduledFor}T12:00:00`).toLocaleDateString('pt-BR')}
-                      {r.diasAtraso > 0 && (
-                        <Badge variant="destructive" className="ml-2">
-                          {r.diasAtraso}d
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="max-w-[280px] truncate text-muted-foreground">{r.note ?? '—'}</TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-2">
-                        {soDigitos(r.phone).length >= 10 && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            nativeButton={false}
-                            render={
-                              <a
-                                href={`https://wa.me/55${soDigitos(r.phone)}`}
-                                target="_blank"
-                                rel="noreferrer noopener"
-                              />
-                            }
-                          >
-                            <MessageCircle className="size-3.5" /> WhatsApp
-                          </Button>
-                        )}
-                        <Button size="sm" variant="outline" onClick={() => abrir(r)}>
-                          <PhoneCall className="size-3.5" /> Registrar
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+  const reabrir = async () => {
+    if (!reabrindo) return
+    setSalvando(true)
+    try {
+      await reabrirFollowup(reabrindo.leadId, proxima)
+      toast.success(`${reabrindo.patientName} voltou para a fila em ${dia(proxima)}.`)
+      setReabrindo(null)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao reabrir')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  const cardDoPaciente = (c: KanbanCard) => (
+    <div
+      key={c.followupId}
+      className={cn(
+        'rounded-md border border-border bg-card p-2 text-sm',
+        c.diasAtraso > 0 && ABERTAS.includes(c.coluna) && 'border-destructive/50',
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <Link to={`/leads/${c.leadId}`} className="font-medium leading-tight hover:underline">
+          {c.patientName}
+        </Link>
+        {c.diasAtraso > 0 && ABERTAS.includes(c.coluna) && (
+          <Badge variant="destructive" className="shrink-0 text-[10px]">
+            {c.diasAtraso}d
+          </Badge>
         )}
-      </CardContent>
-    </Card>
+      </div>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        {ABERTAS.includes(c.coluna)
+          ? `contato em ${dia(c.scheduledFor)}`
+          : c.cirurgiaEm
+            ? `cirurgia em ${dia(c.cirurgiaEm)}`
+            : (c.outcome ?? 'sem desfecho registrado')}
+      </p>
+      {c.note && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{c.note}</p>}
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {soDigitos(c.phone).length >= 10 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            nativeButton={false}
+            render={<a href={`https://wa.me/55${soDigitos(c.phone)}`} target="_blank" rel="noreferrer noopener" />}
+          >
+            <MessageCircle className="size-3" /> WhatsApp
+          </Button>
+        )}
+        {ABERTAS.includes(c.coluna) ? (
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => abrir(c)}>
+            <PhoneCall className="size-3" /> Registrar
+          </Button>
+        ) : c.coluna === 'nao_convertido' ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            onClick={() => {
+              setProxima(emDias(30))
+              setReabrindo(c)
+            }}
+          >
+            <RotateCcw className="size-3" /> Voltar para a fila
+          </Button>
+        ) : null}
+      </div>
+    </div>
   )
 
   return (
     <div className="space-y-4">
-      {loading && rows.length === 0 ? (
+      {atrasados > 0 && (
+        <p className="text-sm text-muted-foreground">
+          <span className="font-medium text-destructive">{atrasados}</span> paciente
+          {atrasados > 1 ? 's' : ''} com contato atrasado. O card fica com a borda vermelha e o número de
+          dias.
+        </p>
+      )}
+
+      {loading && cards.length === 0 ? (
         <EmptyState icon={CalendarClock} title="Carregando…" />
       ) : (
-        <>
-          {tabela('Atrasados', grupos.atrasado, true)}
-          {tabela('Hoje', grupos.hoje)}
-          {tabela('Próximos 7 dias', grupos.semana)}
-        </>
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
+          {KANBAN_COLUNAS.map((col) => {
+            const lista = porColuna.get(col.id) ?? []
+            return (
+              <Card key={col.id} className="flex flex-col gap-0 overflow-hidden pt-0">
+                <div className={cn('h-1 w-full', FAIXA[col.id])} />
+                <CardHeader className="pt-3 pb-2">
+                  <CardTitle className="text-sm leading-tight">
+                    {col.label}
+                    <span className="ml-1.5 text-muted-foreground">{lista.length}</span>
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground">{col.hint}</p>
+                </CardHeader>
+                <CardContent className="flex-1 space-y-2 pb-3">
+                  {lista.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Ninguém aqui.</p>
+                  ) : (
+                    lista.map(cardDoPaciente)
+                  )}
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
       )}
 
       <Dialog open={alvo != null} onOpenChange={(open) => (!open ? setAlvo(null) : null)}>
@@ -295,7 +358,8 @@ export function FollowUpTab() {
               </div>
               {semProxima && (
                 <p className="text-xs text-muted-foreground">
-                  O paciente sai da fila. Use quando fechou, ou quando ele disse não de vez.
+                  O paciente sai da fila e vai para "não convertido" — ou para "encerrado", se já tiver
+                  venda registrada. Dá para trazer de volta depois.
                 </p>
               )}
             </div>
@@ -307,6 +371,48 @@ export function FollowUpTab() {
             </Button>
             <Button disabled={salvando} onClick={() => void registrar()}>
               {salvando ? 'Salvando…' : 'Registrar contato'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reabrindo != null} onOpenChange={(open) => (!open ? setReabrindo(null) : null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Voltar {reabrindo?.patientName} para a fila</DialogTitle>
+            <DialogDescription>
+              O potencial futuro só existe com data. Quando ela chegar, o paciente aparece na coluna de
+              contato.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-1.5">
+              {[30, 60, 90, 180].map((d) => (
+                <Button
+                  key={d}
+                  type="button"
+                  size="sm"
+                  variant={proxima === emDias(d) ? 'default' : 'outline'}
+                  onClick={() => setProxima(emDias(d))}
+                >
+                  {d} dias
+                </Button>
+              ))}
+            </div>
+            <Input
+              type="date"
+              value={proxima}
+              min={hojeIso()}
+              onChange={(e) => setProxima(e.target.value)}
+              className="w-44"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setReabrindo(null)}>
+              Cancelar
+            </Button>
+            <Button disabled={salvando} onClick={() => void reabrir()}>
+              {salvando ? 'Salvando…' : 'Reabrir'}
             </Button>
           </DialogFooter>
         </DialogContent>

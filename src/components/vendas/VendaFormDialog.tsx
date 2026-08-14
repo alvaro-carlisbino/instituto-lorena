@@ -18,12 +18,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { PatientSearchField, type PatientPick } from '@/components/PatientSearchField'
 import {
   CONSULTATION_TYPES,
+  DEPOSIT_PAYEE_LABEL,
   ORIGIN_OPTIONS,
   PAYMENT_METHODS,
   PROCEDURE_OPTIONS,
   PROTOCOL_OPTIONS,
   type ClinicSale,
   type ClinicSaleKind,
+  type DepositPayee,
   type StaffMember,
   createClinicSale,
   listSellerNames,
@@ -82,6 +84,11 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
   const [valor, setValor] = useState('')
   const [entrada, setEntrada] = useState('')
   const [entradaData, setEntradaData] = useState('')
+  const [entradaPara, setEntradaPara] = useState<'' | DepositPayee>('')
+  const [custoMaterial, setCustoMaterial] = useState('')
+  const [custoMedico, setCustoMedico] = useState('')
+  const [imposto, setImposto] = useState('')
+  const [custoOutros, setCustoOutros] = useState('')
   const [pagamento, setPagamento] = useState('')
   const [parcelas, setParcelas] = useState('')
   const [nf, setNf] = useState(false)
@@ -111,6 +118,11 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
       setValor(showMoney(editing.valueCents))
       setEntrada(showMoney(editing.depositCents))
       setEntradaData(editing.depositAt ?? '')
+      setEntradaPara(editing.depositPayee ?? '')
+      setCustoMaterial(showMoney(editing.costMaterialsCents))
+      setCustoMedico(showMoney(editing.costDoctorCents))
+      setImposto(showMoney(editing.taxCents))
+      setCustoOutros(showMoney(editing.costOtherCents))
       setPagamento(editing.paymentMethod ?? '')
       setParcelas(editing.installments ? String(editing.installments) : '')
       setNf(editing.invoiceIssued)
@@ -144,6 +156,11 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
     setValor('')
     setEntrada('')
     setEntradaData('')
+    setEntradaPara('')
+    setCustoMaterial('')
+    setCustoMedico('')
+    setImposto('')
+    setCustoOutros('')
     setPagamento('')
     setParcelas('')
     setNf(false)
@@ -169,6 +186,13 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
     if (medicoAtendeu && !medicoExecuta) setMedicoExecuta(medicoAtendeu)
   }, [medicoAtendeu, medicoExecuta])
 
+  // O lucro aparece enquanto ela digita: é a conta que hoje ela faz na
+  // calculadora do celular depois de fechar a planilha.
+  const valorCents = parseMoney(valor)
+  const custoCents =
+    parseMoney(custoMaterial) + parseMoney(custoMedico) + parseMoney(imposto) + parseMoney(custoOutros)
+  const lucroCents = valorCents - custoCents
+
   const salvar = async () => {
     const nome = picked?.name ?? nomeLivre
     const scheduledAt = !aDefinir && dataProc ? new Date(`${dataProc}T${horaProc || '07:00'}:00`).toISOString() : null
@@ -191,6 +215,11 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
       valueCents: parseMoney(valor),
       depositCents: entrada ? parseMoney(entrada) : null,
       depositAt: entradaData || null,
+      depositPayee: entradaPara || null,
+      costMaterialsCents: parseMoney(custoMaterial),
+      costDoctorCents: parseMoney(custoMedico),
+      taxCents: parseMoney(imposto),
+      costOtherCents: parseMoney(custoOutros),
       paymentMethod: pagamento || null,
       installments: parcelas ? Number(parcelas) : null,
       invoiceIssued: nf,
@@ -388,6 +417,68 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
                 inputMode="numeric"
               />
             </div>
+          </div>
+
+          {entrada && (
+            <div className="space-y-1.5">
+              <Label>A entrada foi paga para</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {(['clinica', 'anestesista'] as const).map((quem) => (
+                  <Button
+                    key={quem}
+                    type="button"
+                    size="sm"
+                    variant={entradaPara === quem ? 'default' : 'outline'}
+                    onClick={() => setEntradaPara(entradaPara === quem ? '' : quem)}
+                  >
+                    {DEPOSIT_PAYEE_LABEL[quem]}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Entrada que vai direto para o anestesista não passa pela conta da clínica. Sem essa
+                marcação, o financeiro procura no extrato um Pix que nunca existiu.
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-2 rounded-md border border-border p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label>Custos desta venda</Label>
+              <span className="text-sm">
+                Lucro:{' '}
+                <span className={lucroCents < 0 ? 'font-medium text-destructive' : 'font-medium text-emerald-600'}>
+                  {(lucroCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </span>
+                {valorCents > 0 && custoCents > 0 && (
+                  <span className="ml-1 text-xs text-muted-foreground">
+                    {Math.round((lucroCents / valorCents) * 100)}% de margem
+                  </span>
+                )}
+              </span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-normal text-muted-foreground">Material</Label>
+                <Input value={custoMaterial} onChange={(e) => setCustoMaterial(e.target.value)} placeholder="0,00" inputMode="decimal" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-normal text-muted-foreground">Repasse do médico</Label>
+                <Input value={custoMedico} onChange={(e) => setCustoMedico(e.target.value)} placeholder="0,00" inputMode="decimal" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-normal text-muted-foreground">Imposto</Label>
+                <Input value={imposto} onChange={(e) => setImposto(e.target.value)} placeholder="0,00" inputMode="decimal" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-normal text-muted-foreground">Outros</Label>
+                <Input value={custoOutros} onChange={(e) => setCustoOutros(e.target.value)} placeholder="0,00" inputMode="decimal" />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Pode ficar em branco agora e ser preenchido no fechamento — o painel mostra quantas vendas
+              do mês ainda estão sem custo lançado.
+            </p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">

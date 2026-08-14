@@ -230,10 +230,13 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   {
     id: 'cirurgias-vinculo',
     path: '/cirurgias-vinculo',
-    label: 'Cirurgias sem paciente',
+    // "Cirurgias sem paciente" confundia: a gerente leu como data de cirurgia
+    // vazia, esperando paciente, que é outra tela (as datas abertas na agenda
+    // cirúrgica). Aqui a cirurgia ACONTECEU e é o prontuário que falta.
+    label: 'Cirurgias sem prontuário',
     icon: Scissors,
     group: 'clinica',
-    keywords: ['cirurgia', 'centro cirúrgico', 'vínculo', 'prontuário', 'folículos'],
+    keywords: ['cirurgia', 'centro cirúrgico', 'vínculo', 'prontuário', 'paciente', 'folículos'],
     visible: (ctx) => isClinic(ctx) && canRoute(ctx),
   },
   {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Ban, FileSpreadsheet, Pencil, Plus, UserX } from 'lucide-react'
+import { Ban, FileSpreadsheet, Pencil, Plus, Target, UserX } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,20 +18,35 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
 import {
+  DEPOSIT_PAYEE_LABEL,
   type ClinicSale,
   type ClinicSaleKind,
+  type SalesTarget,
   type StaffMember,
   cancelClinicSale,
+  deleteSalesTarget,
   diasAteFechar,
   followUpStats,
   listClinicSales,
+  listSalesTargets,
   listSurgicalStaff,
+  progressoDaMeta,
+  resultadoDasVendas,
   salesByDoctor,
+  saveSalesTarget,
+  tipoNegociacao,
 } from '@/services/clinicSales'
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+const parseMoney = (v: string): number => {
+  const limpo = v.replace(/[^\d,.-]/g, '').replace(/\./g, '').replace(',', '.')
+  const n = Number(limpo)
+  return Number.isFinite(n) ? Math.round(n * 100) : 0
+}
 const dia = (iso: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR') : '—')
 
 const nomeDoMes = (m: string) => {
@@ -60,6 +75,11 @@ function rotuloPrazo(dias: number | null): { texto: string; tom: string } {
 export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [sales, setSales] = useState<ClinicSale[]>([])
   const [staff, setStaff] = useState<StaffMember[]>([])
+  const [targets, setTargets] = useState<SalesTarget[]>([])
+  const [metaAberta, setMetaAberta] = useState(false)
+  const [metaValor, setMetaValor] = useState('')
+  const [metaQtd, setMetaQtd] = useState('')
+  const [salvandoMeta, setSalvandoMeta] = useState(false)
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState<{ open: boolean; editing: ClinicSale | null }>({ open: false, editing: null })
   const [cancelando, setCancelando] = useState<ClinicSale | null>(null)
@@ -77,9 +97,14 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const load = async () => {
     setLoading(true)
     try {
-      const [s, st] = await Promise.all([listClinicSales(kind), listSurgicalStaff()])
+      const [s, st, mt] = await Promise.all([
+        listClinicSales(kind),
+        listSurgicalStaff(),
+        listSalesTargets(kind).catch(() => [] as SalesTarget[]),
+      ])
       setSales(s)
       setStaff(st)
+      setTargets(mt)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar as vendas')
     } finally {
@@ -135,12 +160,68 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   // no rodapé da planilha ("4 fechamentos, 37% de conversão").
   const porMedico = useMemo(() => salesByDoctor(doMes), [doMes])
 
+  // A meta segue o filtro da tela: escolhida uma vendedora, é a meta dela; em
+  // "todas", é a da clínica. Meta de vendedora somada com a da clínica seria
+  // contar o mesmo faturamento duas vezes.
+  const meta = useMemo(
+    () =>
+      targets.find(
+        (t) => t.month === mes && (vendedora === 'todas' ? t.sellerName == null : t.sellerName === vendedora),
+      ) ?? null,
+    [targets, mes, vendedora],
+  )
+  const progresso = useMemo(
+    () => progressoDaMeta(soSemPaciente ? [] : doMes, meta, mes),
+    [doMes, meta, mes, soSemPaciente],
+  )
+  const resultado = useMemo(() => resultadoDasVendas(doMes), [doMes])
+
   // Quanto do mês fechou na própria consulta e quanto veio de follow-up.
   const prazo = useMemo(() => followUpStats(doMes), [doMes])
   const pctFollowUp = useMemo(() => {
     const base = prazo.noDia + prazo.followUp
     return base > 0 ? Math.round((prazo.followUp / base) * 100) : 0
   }, [prazo])
+
+  const abrirMeta = () => {
+    setMetaValor(meta && meta.targetCents > 0 ? String(meta.targetCents / 100).replace('.', ',') : '')
+    setMetaQtd(meta && meta.targetCount > 0 ? String(meta.targetCount) : '')
+    setMetaAberta(true)
+  }
+
+  const salvarMeta = async () => {
+    setSalvandoMeta(true)
+    try {
+      await saveSalesTarget({
+        month: mes,
+        kind,
+        sellerName: vendedora === 'todas' ? null : vendedora,
+        targetCents: parseMoney(metaValor),
+        targetCount: Number(metaQtd || 0),
+      })
+      toast.success('Meta salva.')
+      setMetaAberta(false)
+      setTargets(await listSalesTargets(kind))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar a meta')
+    } finally {
+      setSalvandoMeta(false)
+    }
+  }
+
+  const apagarMeta = async () => {
+    if (!meta) return
+    setSalvandoMeta(true)
+    try {
+      await deleteSalesTarget(meta.id)
+      setMetaAberta(false)
+      setTargets(await listSalesTargets(kind))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao apagar a meta')
+    } finally {
+      setSalvandoMeta(false)
+    }
+  }
 
   const confirmarCancelamento = async () => {
     if (!cancelando) return
@@ -158,7 +239,83 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      {!soSemPaciente && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Meta de {nomeDoMes(mes)}
+              {vendedora !== 'todas' && <span className="text-muted-foreground"> · {vendedora}</span>}
+            </CardTitle>
+            <CardAction>
+              <Button size="sm" variant="outline" onClick={abrirMeta}>
+                <Target className="size-3.5" /> {meta ? 'Editar meta' : 'Definir meta'}
+              </Button>
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            {!meta ? (
+              <p className="text-sm text-muted-foreground">
+                Sem meta definida para este mês. Com a meta, esta faixa mostra o quanto já foi feito e o
+                quanto o ritmo do mês projeta até o dia {progresso.diasNoMes}.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <p className="font-heading text-2xl">
+                      {brl(progresso.realizadoCents)}
+                      <span className="ml-1 text-sm text-muted-foreground">de {brl(progresso.metaCents)}</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {progresso.faltaCents > 0
+                        ? `faltam ${brl(progresso.faltaCents)}`
+                        : 'meta batida'}
+                      {progresso.metaQtd > 0 &&
+                        ` · ${progresso.realizadoQtd} de ${progresso.metaQtd} venda${progresso.metaQtd > 1 ? 's' : ''}`}
+                    </p>
+                  </div>
+                  <p
+                    className={cn(
+                      'font-heading text-2xl',
+                      progresso.pctValor >= 100
+                        ? 'text-emerald-600'
+                        : progresso.pctValor >= 60
+                          ? 'text-foreground'
+                          : 'text-amber-600',
+                    )}
+                  >
+                    {progresso.pctValor}%
+                  </p>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={cn(
+                      'h-full rounded-full transition-[width]',
+                      progresso.pctValor >= 100 ? 'bg-emerald-600' : 'bg-primary',
+                    )}
+                    style={{ width: `${Math.min(progresso.pctValor, 100)}%` }}
+                  />
+                </div>
+                {progresso.diasDecorridos < progresso.diasNoMes && (
+                  <p className="text-xs text-muted-foreground">
+                    No ritmo dos {progresso.diasDecorridos} primeiros dias, o mês fecha em{' '}
+                    <span
+                      className={
+                        progresso.projecaoCents >= progresso.metaCents ? 'text-emerald-600' : 'text-amber-600'
+                      }
+                    >
+                      {brl(progresso.projecaoCents)}
+                    </span>
+                    . Projeção é régua de três, não promessa.
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <Card>
           <CardContent className="pt-4">
             <p className="text-xs text-muted-foreground">Vendas no mês</p>
@@ -175,6 +332,23 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           <CardContent className="pt-4">
             <p className="text-xs text-muted-foreground">Ticket médio</p>
             <p className="font-heading text-2xl">{brl(resumo.ticket)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <p className="text-xs text-muted-foreground">Lucro do mês</p>
+            <p
+              className={cn(
+                'font-heading text-2xl',
+                resultado.lucro < 0 && 'text-destructive',
+              )}
+            >
+              {brl(resultado.lucro)}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {resultado.custo > 0 ? `${resultado.margem}% de margem` : 'nenhum custo lançado'}
+              {resultado.semCusto > 0 && resultado.custo > 0 && ` · ${resultado.semCusto} sem custo`}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -264,6 +438,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                     <TableHead>Vendedora</TableHead>
                     <TableHead>Médico</TableHead>
                     <TableHead className="text-right">Valor</TableHead>
+                    <TableHead className="text-right">Lucro</TableHead>
                     <TableHead>{kind === 'cirurgia' ? 'Cirurgia' : 'Agendado'}</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">NF</TableHead>
@@ -300,7 +475,30 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                           <span className="block text-xs">opera: {s.performingDoctor}</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right whitespace-nowrap">{brl(s.valueCents)}</TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        <div>{brl(s.valueCents)}</div>
+                        <div className="text-xs text-muted-foreground">{tipoNegociacao(s)}</div>
+                        {s.depositCents != null && s.depositCents > 0 && (
+                          <div className="text-xs text-muted-foreground">
+                            entrada {brl(s.depositCents)}
+                            {s.depositPayee ? ` · ${DEPOSIT_PAYEE_LABEL[s.depositPayee]}` : ''}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {s.costMaterialsCents + s.costDoctorCents + s.taxCents + s.costOtherCents === 0 ? (
+                          <span className="text-xs text-muted-foreground">sem custo</span>
+                        ) : (
+                          <>
+                            <div className={s.profitCents < 0 ? 'text-destructive' : undefined}>
+                              {brl(s.profitCents)}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {s.valueCents > 0 ? `${Math.round((s.profitCents / s.valueCents) * 100)}%` : '—'}
+                            </div>
+                          </>
+                        )}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {s.scheduledAt ? (
                           new Date(s.scheduledAt).toLocaleDateString('pt-BR')
@@ -343,6 +541,42 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           )}
         </CardContent>
       </Card>
+
+      {doMes.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Resultado de {soSemPaciente ? 'toda a base' : nomeDoMes(mes)}</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              O que entrou menos o que a venda custou. Custo em branco entra como zero, então lucro só é
+              lucro de verdade quando as {doMes.length} vendas do mês estiverem lançadas —
+              {resultado.semCusto > 0
+                ? ` hoje ${resultado.semCusto} ainda não estão.`
+                : ' todas já estão.'}
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
+              {[
+                { label: 'Faturamento', valor: resultado.receita, tom: '' },
+                { label: 'Material', valor: -resultado.material, tom: 'text-muted-foreground' },
+                { label: 'Repasse médico', valor: -resultado.repasse, tom: 'text-muted-foreground' },
+                { label: 'Imposto', valor: -resultado.imposto, tom: 'text-muted-foreground' },
+                { label: 'Outros', valor: -resultado.outros, tom: 'text-muted-foreground' },
+                {
+                  label: `Lucro · ${resultado.margem}%`,
+                  valor: resultado.lucro,
+                  tom: resultado.lucro < 0 ? 'text-destructive' : 'text-emerald-600',
+                },
+              ].map((linha) => (
+                <div key={linha.label}>
+                  <p className="text-xs text-muted-foreground">{linha.label}</p>
+                  <p className={cn('font-heading text-lg', linha.tom)}>{brl(linha.valor)}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {porMedico.length > 0 && (
         <Card>
@@ -399,6 +633,55 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
         onClose={() => setForm({ open: false, editing: null })}
         onSaved={() => void load()}
       />
+
+      <Dialog open={metaAberta} onOpenChange={(v) => (!v ? setMetaAberta(false) : null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Meta de {nomeDoMes(mes)}
+              {vendedora !== 'todas' ? ` · ${vendedora}` : ''}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Faturamento</Label>
+              <Input
+                value={metaValor}
+                onChange={(e) => setMetaValor(e.target.value)}
+                placeholder="400.000,00"
+                inputMode="decimal"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Quantidade de vendas (opcional)</Label>
+              <Input
+                value={metaQtd}
+                onChange={(e) => setMetaQtd(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="12"
+                inputMode="numeric"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {vendedora === 'todas'
+                ? 'Esta é a meta da clínica inteira. Para a meta de uma consultora, escolha o nome dela no filtro antes de abrir aqui.'
+                : `Meta individual de ${vendedora}. A meta da clínica é definida com o filtro em "todas".`}
+            </p>
+          </div>
+          <DialogFooter>
+            {meta && (
+              <Button variant="ghost" disabled={salvandoMeta} onClick={() => void apagarMeta()}>
+                Apagar
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => setMetaAberta(false)}>
+              Cancelar
+            </Button>
+            <Button disabled={salvandoMeta} onClick={() => void salvarMeta()}>
+              {salvandoMeta ? 'Salvando…' : 'Salvar meta'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={cancelando != null} onOpenChange={(v) => (!v ? setCancelando(null) : null)}>
         <DialogContent className="sm:max-w-lg">

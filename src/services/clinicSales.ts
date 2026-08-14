@@ -16,6 +16,21 @@ const assertClient = () => {
 
 export type ClinicSaleKind = 'cirurgia' | 'protocolo'
 export type ClinicSaleStatus = 'vendida' | 'agendada' | 'realizada' | 'cancelada'
+/** Para quem o paciente pagou a entrada. Nem toda entrada passa pela clínica. */
+export type DepositPayee = 'clinica' | 'anestesista'
+/** A confirmação da cirurgia com o paciente, que substituiu o checklist na tela. */
+export type ConfirmationStatus = 'confirmada' | 'nao_confirmada' | 'remanejar'
+
+export const CONFIRMATION_LABEL: Record<ConfirmationStatus, string> = {
+  confirmada: 'Confirmada',
+  nao_confirmada: 'Não confirmada',
+  remanejar: 'Remanejar',
+}
+
+export const DEPOSIT_PAYEE_LABEL: Record<DepositPayee, string> = {
+  clinica: 'Clínica',
+  anestesista: 'Anestesista',
+}
 
 export type ClinicSale = {
   id: string
@@ -38,9 +53,19 @@ export type ClinicSale = {
   valueCents: number
   depositCents: number | null
   depositAt: string | null
+  depositPayee: DepositPayee | null
   paymentMethod: string | null
   installments: number | null
   invoiceIssued: boolean
+  confirmationStatus: ConfirmationStatus
+  confirmationAt: string | null
+  confirmationNote: string | null
+  costMaterialsCents: number
+  costDoctorCents: number
+  taxCents: number
+  costOtherCents: number
+  /** Coluna gerada no banco: valor menos os quatro custos. */
+  profitCents: number
   scheduledAt: string | null
   schedulePending: boolean
   durationMinutes: number | null
@@ -151,9 +176,23 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
     valueCents: Number(r.value_cents ?? 0),
     depositCents: num(r.deposit_cents),
     depositAt: str(r.deposit_at),
+    depositPayee:
+      r.deposit_payee === 'clinica' || r.deposit_payee === 'anestesista' ? r.deposit_payee : null,
     paymentMethod: str(r.payment_method),
     installments: num(r.installments),
     invoiceIssued: r.invoice_issued === true,
+    confirmationStatus: (['confirmada', 'nao_confirmada', 'remanejar'] as const).includes(
+      r.confirmation_status as ConfirmationStatus,
+    )
+      ? (r.confirmation_status as ConfirmationStatus)
+      : 'nao_confirmada',
+    confirmationAt: str(r.confirmation_at),
+    confirmationNote: str(r.confirmation_note),
+    costMaterialsCents: Number(r.cost_materials_cents ?? 0),
+    costDoctorCents: Number(r.cost_doctor_cents ?? 0),
+    taxCents: Number(r.tax_cents ?? 0),
+    costOtherCents: Number(r.cost_other_cents ?? 0),
+    profitCents: Number(r.profit_cents ?? 0),
     scheduledAt: str(r.scheduled_at),
     schedulePending: r.schedule_pending === true,
     durationMinutes: num(r.duration_minutes),
@@ -177,9 +216,11 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
 const SALE_COLS =
   'id, kind, lead_id, patient_name, phone, city, origin, sold_at, consultation_at, consultation_type, ' +
   'procedure_label, seller_name, seller_doctor, attending_doctor, performing_doctor, anesthetist, value_cents, ' +
-  'deposit_cents, deposit_at, payment_method, installments, invoice_issued, scheduled_at, schedule_pending, ' +
-  'duration_minutes, room, hotel_needed, contract_url, note, status, canceled_at, cancel_reason, ' +
-  'refund_status, cancel_note, surgery_account_id, srg_surgery_id, created_at'
+  'deposit_cents, deposit_at, deposit_payee, payment_method, installments, invoice_issued, scheduled_at, ' +
+  'schedule_pending, duration_minutes, room, hotel_needed, contract_url, note, status, canceled_at, ' +
+  'cancel_reason, refund_status, cancel_note, surgery_account_id, srg_surgery_id, created_at, ' +
+  'confirmation_status, confirmation_at, confirmation_note, cost_materials_cents, cost_doctor_cents, ' +
+  'tax_cents, cost_other_cents, profit_cents'
 
 export async function listClinicSales(kind?: ClinicSaleKind, limit = 400): Promise<ClinicSale[]> {
   const client = assertClient()
@@ -211,9 +252,14 @@ export type ClinicSaleInput = {
   valueCents: number
   depositCents?: number | null
   depositAt?: string | null
+  depositPayee?: DepositPayee | null
   paymentMethod?: string | null
   installments?: number | null
   invoiceIssued?: boolean
+  costMaterialsCents?: number | null
+  costDoctorCents?: number | null
+  taxCents?: number | null
+  costOtherCents?: number | null
   scheduledAt?: string | null
   schedulePending?: boolean
   durationMinutes?: number | null
@@ -245,6 +291,11 @@ function toRow(input: ClinicSaleInput) {
     value_cents: Math.max(0, Math.round(input.valueCents)),
     deposit_cents: input.depositCents != null ? Math.max(0, Math.round(input.depositCents)) : null,
     deposit_at: input.depositAt || null,
+    deposit_payee: input.depositPayee || null,
+    cost_materials_cents: Math.max(0, Math.round(input.costMaterialsCents ?? 0)),
+    cost_doctor_cents: Math.max(0, Math.round(input.costDoctorCents ?? 0)),
+    tax_cents: Math.max(0, Math.round(input.taxCents ?? 0)),
+    cost_other_cents: Math.max(0, Math.round(input.costOtherCents ?? 0)),
     payment_method: input.paymentMethod || null,
     installments: input.installments ?? null,
     invoice_issued: input.invoiceIssued === true,
@@ -325,6 +376,219 @@ export async function cancelClinicSale(
     })
     .eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+/**
+ * Confirmação da cirurgia com o paciente.
+ *
+ * Substituiu, na tela, as seis caixinhas de documento por uma pergunta só. O
+ * carimbo de hora vai junto porque "confirmada" de duas semanas atrás, para uma
+ * cirurgia de amanhã, não é a mesma coisa que confirmada hoje.
+ */
+export async function setSaleConfirmation(
+  id: string,
+  status: ConfirmationStatus,
+  note?: string | null,
+): Promise<void> {
+  const client = assertClient()
+  const { error } = await client
+    .from('clinic_sales')
+    .update({
+      confirmation_status: status,
+      confirmation_at: status === 'nao_confirmada' ? null : new Date().toISOString(),
+      confirmation_note: note?.trim() || null,
+    })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * O "tipo de negociação" que a gestão pede, montado do que já é registrado.
+ *
+ * Não virou coluna nova de propósito: forma de pagamento e parcelas já estão
+ * preenchidas em toda venda, e um segundo campo dizendo a mesma coisa é um campo
+ * a mais para divergir do primeiro.
+ */
+export function tipoNegociacao(sale: ClinicSale): string {
+  const partes: string[] = []
+  if (sale.paymentMethod) partes.push(sale.paymentMethod)
+  if (sale.installments && sale.installments > 1) partes.push(`${sale.installments}x`)
+  else if (sale.paymentMethod && !sale.installments) partes.push('à vista')
+  if (partes.length === 0) return '—'
+  return partes.join(' · ')
+}
+
+export type SalesTarget = {
+  id: string
+  month: string
+  kind: ClinicSaleKind
+  /** Null = meta da clínica inteira. */
+  sellerName: string | null
+  targetCents: number
+  targetCount: number
+  note: string | null
+}
+
+export async function listSalesTargets(kind: ClinicSaleKind): Promise<SalesTarget[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('clinic_sales_targets')
+    .select('id, month, kind, seller_name, target_cents, target_count, note')
+    .eq('kind', kind)
+    .order('month', { ascending: false })
+    .limit(200)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>
+    return {
+      id: String(row.id),
+      month: String(row.month).slice(0, 7),
+      kind: row.kind === 'protocolo' ? 'protocolo' : 'cirurgia',
+      sellerName: row.seller_name != null && String(row.seller_name) ? String(row.seller_name) : null,
+      targetCents: Number(row.target_cents ?? 0),
+      targetCount: Number(row.target_count ?? 0),
+      note: row.note != null ? String(row.note) : null,
+    }
+  })
+}
+
+/**
+ * Grava a meta do mês. `month` chega como AAAA-MM e vira o dia 1: o banco guarda
+ * date para não conviver com "2026-8" e "2026-08" na mesma coluna.
+ */
+export async function saveSalesTarget(payload: {
+  month: string
+  kind: ClinicSaleKind
+  sellerName?: string | null
+  targetCents: number
+  targetCount: number
+  note?: string | null
+}): Promise<void> {
+  const client = assertClient()
+  if (!/^\d{4}-\d{2}$/.test(payload.month)) throw new Error('Escolha o mês da meta.')
+  if (payload.targetCents <= 0 && payload.targetCount <= 0) {
+    throw new Error('Informe a meta de faturamento ou a de quantidade.')
+  }
+  const vendedora = payload.sellerName?.trim() || null
+  const linha = {
+    month: `${payload.month}-01`,
+    kind: payload.kind,
+    seller_name: vendedora,
+    target_cents: Math.max(0, Math.round(payload.targetCents)),
+    target_count: Math.max(0, Math.round(payload.targetCount)),
+    note: payload.note?.trim() || null,
+  }
+
+  // Procura antes de gravar em vez de upsert: o índice único do banco usa
+  // coalesce(seller_name, '*') para que duas metas gerais do mesmo mês não
+  // convivam, e o PostgREST não sabe apontar um onConflict para índice com
+  // expressão — o upsert viraria insert e estouraria no índice.
+  let busca = client
+    .from('clinic_sales_targets')
+    .select('id')
+    .eq('month', linha.month)
+    .eq('kind', linha.kind)
+  busca = vendedora ? busca.eq('seller_name', vendedora) : busca.is('seller_name', null)
+  const { data: existente, error: buscaErr } = await busca.maybeSingle()
+  if (buscaErr) throw new Error(buscaErr.message)
+
+  if (existente) {
+    const { error } = await client
+      .from('clinic_sales_targets')
+      .update(linha)
+      .eq('id', String((existente as { id: unknown }).id))
+    if (error) throw new Error(error.message)
+    return
+  }
+  const { error } = await client.from('clinic_sales_targets').insert(linha)
+  if (error) throw new Error(error.message)
+}
+
+export async function deleteSalesTarget(id: string): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.from('clinic_sales_targets').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export type MetaProgresso = {
+  metaCents: number
+  metaQtd: number
+  realizadoCents: number
+  realizadoQtd: number
+  pctValor: number
+  pctQtd: number
+  faltaCents: number
+  /** Projeção linear pelo ritmo do mês até aqui. Só faz sentido no mês corrente. */
+  projecaoCents: number
+  diasDecorridos: number
+  diasNoMes: number
+}
+
+/**
+ * O quanto do mês já foi feito contra o que foi combinado.
+ *
+ * A projeção é régua de três com o dia de hoje, o mesmo cálculo que ela faz de
+ * cabeça no meio do mês ("nesse ritmo a gente fecha em tanto"). Em mês passado o
+ * ritmo não quer dizer nada, então a tela não mostra.
+ */
+export function progressoDaMeta(
+  vendas: ClinicSale[],
+  meta: SalesTarget | null,
+  mes: string,
+  hoje = new Date(),
+): MetaProgresso {
+  const realizadoCents = vendas.reduce((acc, s) => acc + s.valueCents, 0)
+  const realizadoQtd = vendas.length
+  const [ano, m] = mes.split('-').map(Number)
+  const diasNoMes = new Date(ano, m, 0).getDate()
+  const mesCorrente = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}` === mes
+  const diasDecorridos = mesCorrente ? hoje.getDate() : diasNoMes
+  const metaCents = meta?.targetCents ?? 0
+  const metaQtd = meta?.targetCount ?? 0
+  return {
+    metaCents,
+    metaQtd,
+    realizadoCents,
+    realizadoQtd,
+    pctValor: metaCents > 0 ? Math.round((realizadoCents / metaCents) * 100) : 0,
+    pctQtd: metaQtd > 0 ? Math.round((realizadoQtd / metaQtd) * 100) : 0,
+    faltaCents: Math.max(metaCents - realizadoCents, 0),
+    projecaoCents:
+      diasDecorridos > 0 ? Math.round((realizadoCents / diasDecorridos) * diasNoMes) : realizadoCents,
+    diasDecorridos,
+    diasNoMes,
+  }
+}
+
+/** Faturamento, custo e lucro de um conjunto de vendas. */
+export function resultadoDasVendas(vendas: ClinicSale[]) {
+  let receita = 0
+  let material = 0
+  let repasse = 0
+  let imposto = 0
+  let outros = 0
+  for (const s of vendas) {
+    receita += s.valueCents
+    material += s.costMaterialsCents
+    repasse += s.costDoctorCents
+    imposto += s.taxCents
+    outros += s.costOtherCents
+  }
+  const custo = material + repasse + imposto + outros
+  return {
+    receita,
+    material,
+    repasse,
+    imposto,
+    outros,
+    custo,
+    lucro: receita - custo,
+    margem: receita > 0 ? Math.round(((receita - custo) / receita) * 100) : 0,
+    /** Quantas vendas ainda não tiveram nenhum custo lançado. */
+    semCusto: vendas.filter(
+      (s) => s.costMaterialsCents + s.costDoctorCents + s.taxCents + s.costOtherCents === 0,
+    ).length,
+  }
 }
 
 export async function listChecklist(saleIds: string[]): Promise<Map<string, ChecklistItem[]>> {

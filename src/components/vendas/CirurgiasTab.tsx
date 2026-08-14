@@ -1,32 +1,27 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, CalendarCheck2, CalendarPlus, Copy, FileWarning } from 'lucide-react'
+import { AlertTriangle, CalendarCheck2, CalendarPlus, Copy } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 import {
-  type ChecklistItem,
+  CONFIRMATION_LABEL,
   type ClinicSale,
+  type ConfirmationStatus,
   type SurgeryReminder,
   getAgendaIcsUrl,
   googleCalendarLink,
-  listChecklist,
   listClinicSales,
   listReminders,
-  setChecklistReceived,
+  setSaleConfirmation,
 } from '@/services/clinicSales'
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-
-const REMINDER_LABEL: Record<SurgeryReminder['kind'], string> = {
-  d30: '30 dias',
-  d15: '15 dias',
-  d7: '7 dias',
-  d2: '2 dias',
-}
 
 const diasAte = (iso: string) => {
   const alvo = new Date(iso)
@@ -34,19 +29,44 @@ const diasAte = (iso: string) => {
   return Math.ceil((alvo.getTime() - hoje.getTime()) / 86400000)
 }
 
+const nomeDoMes = (m: string) => {
+  const [ano, mes] = m.split('-')
+  const nome = new Date(Number(ano), Number(mes) - 1, 1).toLocaleDateString('pt-BR', {
+    month: 'long',
+    year: 'numeric',
+  })
+  return nome.charAt(0).toUpperCase() + nome.slice(1)
+}
+
+const ORDEM: ConfirmationStatus[] = ['confirmada', 'nao_confirmada', 'remanejar']
+
+/** Cor só no que está escolhido: três botões coloridos por linha viram semáforo quebrado. */
+const TOM: Record<ConfirmationStatus, string> = {
+  confirmada: 'bg-emerald-600 text-white hover:bg-emerald-600/90',
+  nao_confirmada: 'bg-muted-foreground text-background hover:bg-muted-foreground/90',
+  remanejar: 'bg-amber-500 text-white hover:bg-amber-500/90',
+}
+
 /**
- * A fila de cirurgias com a documentação de cada uma.
+ * A lista de cirurgias do mês, com um status por paciente.
  *
- * O motivo dela existir: hoje a Aline descobre que falta exame quando liga na
- * véspera. Aqui o que falta aparece antes, e o paciente já foi avisado sozinho
- * nos marcos de 30, 15, 7 e 2 dias.
+ * Era um checklist de seis documentos por cirurgia. A gerente pediu para tirar em
+ * 14/08/2026, e a razão está no próprio dado: das cirurgias agendadas, quase
+ * nenhuma tinha mais de uma caixinha marcada — quem atende não abre a tela para
+ * marcar "termo de consentimento assinado", abre para saber quem confirmou e quem
+ * precisa remarcar. O checklist continua nascendo no banco a cada agendamento, e
+ * o histórico dos meses anteriores continua lá; ele só saiu daqui.
  */
 export function CirurgiasTab() {
   const [sales, setSales] = useState<ClinicSale[]>([])
-  const [checklist, setChecklist] = useState<Map<string, ChecklistItem[]>>(new Map())
   const [reminders, setReminders] = useState<Map<string, SurgeryReminder[]>>(new Map())
   const [loading, setLoading] = useState(false)
   const [icsUrl, setIcsUrl] = useState<string | null>(null)
+  const [salvando, setSalvando] = useState<string | null>(null)
+  const [mes, setMes] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
 
   const load = async () => {
     setLoading(true)
@@ -56,10 +76,7 @@ export function CirurgiasTab() {
         .filter((s) => s.scheduledAt && s.status !== 'cancelada' && s.status !== 'realizada')
         .sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)))
       setSales(agendadas)
-      const ids = agendadas.map((s) => s.id)
-      const [ck, rm] = await Promise.all([listChecklist(ids), listReminders(ids)])
-      setChecklist(ck)
-      setReminders(rm)
+      setReminders(await listReminders(agendadas.map((s) => s.id)))
       setIcsUrl(await getAgendaIcsUrl().catch(() => null))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar as cirurgias')
@@ -72,26 +89,44 @@ export function CirurgiasTab() {
     void load()
   }, [])
 
-  const proximoMes = useMemo(() => sales.filter((s) => s.scheduledAt && diasAte(s.scheduledAt) <= 30), [sales])
-  const pendencias = useMemo(
-    () =>
-      proximoMes.filter((s) => (checklist.get(s.id) ?? []).some((i) => i.required && !i.receivedAt)).length,
-    [proximoMes, checklist],
+  /** Meses que têm cirurgia marcada, do mais próximo para o mais distante. */
+  const meses = useMemo(() => {
+    const set = new Set(sales.map((s) => String(s.scheduledAt).slice(0, 7)))
+    return [...set].sort()
+  }, [sales])
+
+  // Se o mês corrente não tem nenhuma cirurgia, abrir numa tela vazia esconderia a
+  // fila inteira. Cai no primeiro mês que tem — derivado, e não um setMes dentro de
+  // efeito, que pisca a tela vazia antes de corrigir.
+  const mesAtivo = meses.length > 0 && !meses.includes(mes) ? meses[0] : mes
+
+  const doMes = useMemo(
+    () => sales.filter((s) => String(s.scheduledAt).slice(0, 7) === mesAtivo),
+    [sales, mesAtivo],
   )
 
-  const marcar = async (item: ChecklistItem, recebido: boolean) => {
+  const contagem = useMemo(() => {
+    const base: Record<ConfirmationStatus, number> = { confirmada: 0, nao_confirmada: 0, remanejar: 0 }
+    for (const s of doMes) base[s.confirmationStatus] += 1
+    return base
+  }, [doMes])
+
+  const marcar = async (sale: ClinicSale, status: ConfirmationStatus) => {
+    if (sale.confirmationStatus === status) return
+    setSalvando(sale.id)
+    const anterior = sale.confirmationStatus
+    // Otimista: a atendente clica descendo a lista inteira, e esperar o banco a
+    // cada clique faz a tela parecer travada.
+    setSales((prev) => prev.map((s) => (s.id === sale.id ? { ...s, confirmationStatus: status } : s)))
     try {
-      await setChecklistReceived(item.id, recebido)
-      setChecklist((prev) => {
-        const copia = new Map(prev)
-        const lista = (copia.get(item.saleId) ?? []).map((i) =>
-          i.id === item.id ? { ...i, receivedAt: recebido ? new Date().toISOString() : null } : i,
-        )
-        copia.set(item.saleId, lista)
-        return copia
-      })
+      await setSaleConfirmation(sale.id, status)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao marcar')
+      setSales((prev) =>
+        prev.map((s) => (s.id === sale.id ? { ...s, confirmationStatus: anterior } : s)),
+      )
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar o status')
+    } finally {
+      setSalvando(null)
     }
   }
 
@@ -107,160 +142,170 @@ export function CirurgiasTab() {
 
   return (
     <div className="space-y-4">
-      {icsUrl && (
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
-          <CardHeader>
-            <CardTitle>Essa agenda no Google</CardTitle>
-            <CardAction>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  void navigator.clipboard.writeText(icsUrl)
-                  toast.success('Endereço copiado.')
-                }}
-              >
-                <Copy className="size-3.5" /> Copiar endereço
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              No Google Agenda, em "Outras agendas", escolha "Da URL" e cole o endereço copiado. Toda cirurgia
-              marcada aqui passa a aparecer lá, e remarcação e cancelamento acompanham. O Google relê por conta
-              própria, o que costuma levar algumas horas: para a cirurgia que acabou de ser marcada, use o botão
-              "Google Agenda" do card, que cria o evento na hora.
-            </p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              O endereço mostra nome de paciente e procedimento. Trate como dado de prontuário, não mande em grupo.
+          <CardContent className="pt-4">
+            <p className="text-xs text-muted-foreground">Cirurgias em {nomeDoMes(mesAtivo)}</p>
+            <p className="font-heading text-2xl">{doMes.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <p className="text-xs text-muted-foreground">Confirmadas</p>
+            <p className="font-heading text-2xl text-emerald-600">{contagem.confirmada}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <p className="text-xs text-muted-foreground">Não confirmadas</p>
+            <p className={cn('font-heading text-2xl', contagem.nao_confirmada > 0 && 'text-destructive')}>
+              {contagem.nao_confirmada}
             </p>
           </CardContent>
         </Card>
-      )}
-
-      <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Agendadas</p>
-            <p className="font-heading text-2xl">{sales.length}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Nos próximos 30 dias</p>
-            <p className="font-heading text-2xl">{proximoMes.length}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Com documento faltando</p>
-            <p className="font-heading text-2xl text-destructive">{pendencias}</p>
+            <p className="text-xs text-muted-foreground">Para remanejar</p>
+            <p className={cn('font-heading text-2xl', contagem.remanejar > 0 && 'text-amber-600')}>
+              {contagem.remanejar}
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      {sales.map((s) => {
-        const itens = checklist.get(s.id) ?? []
-        const faltando = itens.filter((i) => i.required && !i.receivedAt)
-        const avisos = reminders.get(s.id) ?? []
-        const dias = s.scheduledAt ? diasAte(s.scheduledAt) : null
-        return (
-          <Card key={s.id}>
-            <CardHeader>
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  {s.patientName}
-                  {dias != null && dias <= 30 && (
-                    <Badge variant={dias <= 7 ? 'destructive' : 'default'}>
-                      {dias <= 0 ? 'hoje' : `em ${dias} dias`}
-                    </Badge>
-                  )}
-                </CardTitle>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {s.scheduledAt ? new Date(s.scheduledAt).toLocaleString('pt-BR') : '—'} · {s.procedureLabel} ·{' '}
-                  {s.performingDoctor ?? s.sellerDoctor ?? 'sem médico'} · {brl(s.valueCents)}
-                  {s.city ? ` · ${s.city}` : ''}
-                  {s.hotelNeeded ? ' · precisa de hotel' : ''}
-                </p>
-              </div>
-              <CardAction>
-                <div className="flex items-center gap-2">
-                  {faltando.length > 0 && (
-                    <Badge variant="destructive">
-                      <FileWarning className="size-3" /> {faltando.length} pendente{faltando.length > 1 ? 's' : ''}
-                    </Badge>
-                  )}
-                  {googleCalendarLink(s) && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      nativeButton={false}
-                      render={<a href={googleCalendarLink(s) as string} target="_blank" rel="noreferrer noopener" />}
-                    >
-                      <CalendarPlus className="size-3.5" /> Google Agenda
-                    </Button>
-                  )}
-                </div>
-              </CardAction>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid gap-1.5 sm:grid-cols-2">
-                {itens.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Checklist ainda não gerado.</p>
-                ) : (
-                  itens.map((i) => (
-                    <label key={i.id} className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={i.receivedAt != null}
-                        onCheckedChange={(v) => void marcar(i, v === true)}
-                      />
-                      <span className={i.receivedAt ? 'text-muted-foreground line-through' : undefined}>
-                        {i.item}
-                        {!i.required && <span className="text-xs text-muted-foreground"> (opcional)</span>}
-                      </span>
-                    </label>
-                  ))
-                )}
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 border-t border-border pt-3">
-                <span className="text-xs text-muted-foreground">Avisos ao paciente:</span>
-                {avisos.length === 0 && <span className="text-xs text-muted-foreground">nenhum programado</span>}
-                {avisos.map((a) => (
-                  <Badge
-                    key={a.id}
-                    variant={
-                      a.status === 'enviado' ? 'secondary' : a.status === 'erro' ? 'destructive' : 'outline'
-                    }
-                  >
-                    {REMINDER_LABEL[a.kind]}
-                    {/* 'erro' precisa do próprio ramo. Sem ele o ternário caía no default e
-                        um lembrete que FALHOU era desenhado como "30 dias em 11/08/2026",
-                        idêntico a um agendado — a falha de envio para o paciente ficava
-                        invisível justamente na tela feita para vê-la. */}
-                    {a.status === 'enviado'
-                      ? ' enviado'
-                      : a.status === 'erro'
-                        ? ' falhou'
-                        : a.status === 'cancelado'
-                          ? ' cancelado'
-                          : a.status === 'simulado'
-                            ? ' simulado'
-                            : ` em ${new Date(`${a.scheduledFor}T12:00:00`).toLocaleDateString('pt-BR')}`}
-                  </Badge>
-                ))}
-              </div>
-
-              {s.status === 'agendada' && dias != null && dias < 0 && (
-                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <AlertTriangle className="size-3.5" />
-                  A data já passou e o centro cirúrgico ainda não confirmou esta cirurgia no sistema.
-                </p>
+      <Card>
+        <CardHeader>
+          <CardTitle>Pacientes de {nomeDoMes(mesAtivo)}</CardTitle>
+          <CardAction>
+            <div className="flex items-center gap-2">
+              <Select value={mesAtivo} onValueChange={(v) => setMes(String(v ?? mesAtivo))}>
+                <SelectTrigger className="h-8 w-44">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {meses.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {nomeDoMes(m)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {icsUrl && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(icsUrl)
+                    toast.success('Endereço copiado. No Google Agenda: "Outras agendas" › "Da URL".')
+                  }}
+                >
+                  <Copy className="size-3.5" /> Assinar no Google
+                </Button>
               )}
-            </CardContent>
-          </Card>
-        )
-      })}
+            </div>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          {doMes.length === 0 ? (
+            <EmptyState
+              icon={CalendarCheck2}
+              title={`Nenhuma cirurgia em ${nomeDoMes(mesAtivo)}`}
+              className="py-6"
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Paciente</TableHead>
+                    <TableHead>Data</TableHead>
+                    <TableHead>Procedimento</TableHead>
+                    <TableHead>Médico</TableHead>
+                    <TableHead className="text-right">Valor</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {doMes.map((s) => {
+                    const dias = s.scheduledAt ? diasAte(s.scheduledAt) : null
+                    const falhou = (reminders.get(s.id) ?? []).some((a) => a.status === 'erro')
+                    const link = googleCalendarLink(s)
+                    return (
+                      <TableRow key={s.id}>
+                        <TableCell>
+                          <div className="font-medium">{s.patientName}</div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {s.city && <span className="text-xs text-muted-foreground">{s.city}</span>}
+                            {s.hotelNeeded && (
+                              <span className="text-xs text-muted-foreground">precisa de hotel</span>
+                            )}
+                            {falhou && (
+                              <Badge variant="destructive" className="text-[10px]">
+                                aviso não saiu
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {s.scheduledAt ? new Date(s.scheduledAt).toLocaleString('pt-BR') : '—'}
+                          {dias != null && dias <= 30 && (
+                            <div className={cn('text-xs', dias <= 7 ? 'text-destructive' : 'text-muted-foreground')}>
+                              {dias < 0 ? 'já passou' : dias === 0 ? 'hoje' : `em ${dias} dias`}
+                            </div>
+                          )}
+                          {dias != null && dias < 0 && s.status === 'agendada' && (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <AlertTriangle className="size-3" /> a sala não confirmou
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate">{s.procedureLabel}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {s.performingDoctor ?? s.attendingDoctor ?? 'sem médico'}
+                        </TableCell>
+                        <TableCell className="text-right whitespace-nowrap">{brl(s.valueCents)}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {ORDEM.map((op) => (
+                              <Button
+                                key={op}
+                                size="sm"
+                                variant={s.confirmationStatus === op ? 'default' : 'outline'}
+                                disabled={salvando === s.id}
+                                className={cn('h-7 px-2 text-xs', s.confirmationStatus === op && TOM[op])}
+                                onClick={() => void marcar(s, op)}
+                              >
+                                {CONFIRMATION_LABEL[op]}
+                              </Button>
+                            ))}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {link && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              nativeButton={false}
+                              render={<a href={link} target="_blank" rel="noreferrer noopener" />}
+                            >
+                              <CalendarPlus className="size-3.5" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          <p className="mt-3 text-xs text-muted-foreground">
+            Remarcar a cirurgia devolve o paciente para "não confirmada": o sim que ele deu foi para a
+            data antiga.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   )
 }
