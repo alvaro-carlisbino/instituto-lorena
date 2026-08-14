@@ -23,12 +23,14 @@ import {
   createProtocol,
   deactivateProtocol,
   indicacoesPorMedico,
+  lerSessoesDigitadas,
   listLeadProtocols,
   listProtocolCatalog,
   registerSession,
   rotuloProgresso,
   rotuloSessoes,
   sessoesDefinidas,
+  sessoesIniciaisDoCatalogo,
   setLeadProtocolReferral,
   setLeadProtocolStatus,
   startLeadProtocol,
@@ -66,6 +68,8 @@ export function ProtocolosPage() {
   const [starting, setStarting] = useState(false)
 
   const [sessionNote, setSessionNote] = useState<Record<string, string>>({})
+  /** Quem aplicou a sessão. A lista já mostrava esse nome, mas nada nunca o preenchia. */
+  const [sessionBy, setSessionBy] = useState<Record<string, string>>({})
   // Edição da indicação de um protocolo já existente: {id, rascunho}.
   const [editandoIndicacao, setEditandoIndicacao] = useState<{ id: string; valor: string } | null>(null)
   const [medicosDaCasa, setMedicosDaCasa] = useState<string[]>([])
@@ -159,7 +163,7 @@ export function ProtocolosPage() {
     setStartProtocolId(id)
     const proto = catalog.find((c) => c.id === id)
     if (proto) {
-      setStartSessions(String(proto.sessionsPlanned))
+      setStartSessions(sessoesIniciaisDoCatalogo(proto.sessionsPlanned))
       setStartPrice(proto.defaultPrice != null ? String(proto.defaultPrice).replace('.', ',') : '')
     }
   }
@@ -170,13 +174,18 @@ export function ProtocolosPage() {
       toast.error('Escolha um protocolo do catálogo.')
       return
     }
+    const sessoes = lerSessoesDigitadas(startSessions)
+    if (sessoes == null) {
+      toast.error('Informe quantas sessões este paciente vai fazer.')
+      return
+    }
     setStarting(true)
     try {
       await startLeadProtocol({
         leadId: startLeadId,
         protocolId: proto.id,
         name: proto.name,
-        sessionsPlanned: Number(startSessions) || proto.sessionsPlanned,
+        sessionsPlanned: sessoes,
         price: parseMoney(startPrice),
         startedOn: startDate || null,
         note: startNote,
@@ -207,6 +216,7 @@ export function ProtocolosPage() {
         leadProtocolId: p.id,
         sessionNumber: nextNumber,
         note: sessionNote[p.id] || undefined,
+        performedBy: sessionBy[p.id] || undefined,
       })
       toast.success(
         sessoesDefinidas(p.sessionsPlanned)
@@ -214,6 +224,7 @@ export function ProtocolosPage() {
           : `Sessão ${nextNumber} registrada.`,
       )
       setSessionNote((prev) => ({ ...prev, [p.id]: '' }))
+      setSessionBy((prev) => ({ ...prev, [p.id]: '' }))
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao registrar sessão')
@@ -430,12 +441,13 @@ export function ProtocolosPage() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div className="space-y-1.5">
-                  <Label htmlFor="start-sessions">Sessões</Label>
+                  <Label htmlFor="start-sessions">Sessões deste paciente</Label>
                   <Input
                     id="start-sessions"
                     value={startSessions}
                     onChange={(e) => setStartSessions(e.target.value)}
                     inputMode="numeric"
+                    placeholder="Ex.: 6"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -620,6 +632,13 @@ export function ProtocolosPage() {
                       ) : null}
                       {p.status === 'ativo' ? (
                         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                          <Input
+                            value={sessionBy[p.id] ?? ''}
+                            onChange={(e) => setSessionBy((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                            list="medicos-indicacao"
+                            placeholder="Quem aplicou"
+                            className="h-8 max-w-44 text-xs"
+                          />
                           <Input
                             value={sessionNote[p.id] ?? ''}
                             onChange={(e) => setSessionNote((prev) => ({ ...prev, [p.id]: e.target.value }))}

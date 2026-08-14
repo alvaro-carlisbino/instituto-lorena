@@ -45,6 +45,33 @@ export function rotuloProgresso(done: number, planned: number): string {
   return sessoesDefinidas(planned) ? `Sessões ${done}/${planned}` : `${done} sessões feitas`
 }
 
+/**
+ * Quanto o campo "sessões" já vem preenchido ao escolher um protocolo do catálogo.
+ *
+ * Protocolo com sessões a definir devolve string vazia, e não '0'. Parece detalhe de
+ * formulário, mas era o que mantinha a esteira de protocolos parada: o campo enchia com
+ * '0', o '0' descia para startLeadProtocol e voltava "Informe o número de sessões
+ * (mínimo 1)" sem dizer onde arrumar. Como os quatro protocolos capilares — Convencional,
+ * Manutenção, Inicial e Pós-TC — são justamente os que têm sessões a definir, nenhum deles
+ * iniciava pela tela; só os pacotes de spa (1, 3 e 5 sessões) passavam.
+ */
+export function sessoesIniciaisDoCatalogo(planned: number): string {
+  return sessoesDefinidas(planned) ? String(planned) : ''
+}
+
+/**
+ * Lê o que foi digitado no campo de sessões. Devolve null quando não dá para usar.
+ *
+ * Nunca cai no número do catálogo como reserva: quantas sessões o paciente vai fazer é
+ * decisão desta venda, não do catálogo — o mesmo Protocolo Convencional sai com 6 para um
+ * e 10 para outro.
+ */
+export function lerSessoesDigitadas(valor: string): number | null {
+  const n = Number(valor.trim().replace(',', '.'))
+  if (!Number.isFinite(n) || n < 1) return null
+  return Math.round(n)
+}
+
 export async function listProtocolCatalog(): Promise<TreatmentProtocol[]> {
   const client = assertClient()
   const { data, error } = await client

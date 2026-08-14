@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { rotuloProgresso, rotuloSessoes, sessoesDefinidas } from './treatmentProtocols'
+import {
+  lerSessoesDigitadas,
+  rotuloProgresso,
+  rotuloSessoes,
+  sessoesDefinidas,
+  sessoesIniciaisDoCatalogo,
+} from './treatmentProtocols'
 
 /**
  * O catálogo de protocolos nasceu das 205 vendas de 2026, e a planilha nunca registrou
@@ -30,5 +36,42 @@ describe('rótulo de sessões', () => {
   it('mostra o total quando ele existe, mesmo estourado', () => {
     // paciente que fez sessão a mais é dado real, não erro de render
     expect(rotuloProgresso(4, 3)).toBe('Sessões 4/3')
+  })
+})
+
+/**
+ * O bug que estes testes travam: nenhum dos quatro protocolos capilares iniciava.
+ *
+ * Escolher "Protocolo Convencional" enchia o campo de sessões com '0' (o valor "a definir"
+ * do catálogo), o '0' descia como sessionsPlanned e voltava "Informe o número de sessões
+ * (mínimo 1)" — sem indicar o campo. Convencional, Manutenção, Inicial e Pós-TC são
+ * exatamente os de sessões a definir, então só os pacotes de spa passavam. Resultado em
+ * produção: 158 protocolos ativos e nenhuma sessão registrada.
+ */
+describe('sessões ao iniciar protocolo', () => {
+  it('deixa o campo vazio quando o catálogo não define sessões', () => {
+    expect(sessoesIniciaisDoCatalogo(0)).toBe('')
+  })
+
+  it('preenche o campo quando o catálogo define', () => {
+    expect(sessoesIniciaisDoCatalogo(3)).toBe('3')
+    expect(sessoesIniciaisDoCatalogo(5)).toBe('5')
+  })
+
+  it('recusa vazio, zero e lixo em vez de deixar passar', () => {
+    expect(lerSessoesDigitadas('')).toBeNull()
+    expect(lerSessoesDigitadas('   ')).toBeNull()
+    expect(lerSessoesDigitadas('0')).toBeNull()
+    expect(lerSessoesDigitadas('-2')).toBeNull()
+    expect(lerSessoesDigitadas('abc')).toBeNull()
+  })
+
+  it('aceita o número digitado para aquele paciente', () => {
+    expect(lerSessoesDigitadas('6')).toBe(6)
+    expect(lerSessoesDigitadas(' 10 ')).toBe(10)
+  })
+
+  it('não deixa vírgula do teclado virar sessão fracionada', () => {
+    expect(lerSessoesDigitadas('6,4')).toBe(6)
   })
 })
