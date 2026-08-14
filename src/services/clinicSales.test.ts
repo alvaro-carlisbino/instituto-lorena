@@ -13,6 +13,7 @@ const venda = (over: Partial<ClinicSale> = {}): ClinicSale =>
     origin: null,
     soldAt: '2026-08-05',
     consultationAt: '2026-08-05',
+    sellerName: null,
     consultationType: null,
     procedureLabel: 'Tc Frontal/ Coroa',
     sellerDoctor: null,

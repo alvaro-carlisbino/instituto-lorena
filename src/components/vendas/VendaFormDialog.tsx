@@ -26,6 +26,7 @@ import {
   type ClinicSaleKind,
   type StaffMember,
   createClinicSale,
+  listSellerNames,
   updateClinicSale,
 } from '@/services/clinicSales'
 
@@ -73,6 +74,8 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
   const [dataConsulta, setDataConsulta] = useState('')
   const [tipoConsulta, setTipoConsulta] = useState('')
   const [procedimento, setProcedimento] = useState('')
+  const [vendedora, setVendedora] = useState('')
+  const [sugestoesVendedora, setSugestoesVendedora] = useState<string[]>([])
   const [medicoAtendeu, setMedicoAtendeu] = useState('')
   const [medicoExecuta, setMedicoExecuta] = useState('')
   const [anestesista, setAnestesista] = useState('')
@@ -101,6 +104,7 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
       setDataConsulta(editing.consultationAt ?? '')
       setTipoConsulta(editing.consultationType ?? '')
       setProcedimento(editing.procedureLabel)
+      setVendedora(editing.sellerName ?? '')
       setMedicoAtendeu(editing.attendingDoctor ?? '')
       setMedicoExecuta(editing.performingDoctor ?? '')
       setAnestesista(editing.anesthetist ?? '')
@@ -133,6 +137,7 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
     setDataConsulta('')
     setTipoConsulta('')
     setProcedimento('')
+    setVendedora('')
     setMedicoAtendeu('')
     setMedicoExecuta('')
     setAnestesista('')
@@ -149,6 +154,13 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
     setContrato('')
     setObs('')
   }, [open, editing])
+
+  useEffect(() => {
+    if (!open) return
+    listSellerNames()
+      .then(setSugestoesVendedora)
+      .catch(() => setSugestoesVendedora([]))
+  }, [open])
 
   // Sugere o mesmo médico para operar, que é o caso comum. Fica editável porque
   // a exceção é frequente: a Dra Lorena atende e fecha para o Dr Matheus operar
@@ -171,6 +183,7 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
       consultationAt: dataConsulta || null,
       consultationType: tipoConsulta || null,
       procedureLabel: procedimento,
+      sellerName: vendedora || null,
       sellerDoctor: medicoAtendeu || null,
       attendingDoctor: medicoAtendeu || null,
       performingDoctor: medicoExecuta || null,
@@ -295,6 +308,25 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
               </datalist>
             </div>
           )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="venda-vendedora">Vendedora</Label>
+            <Input
+              id="venda-vendedora"
+              list="vendedoras-sugestao"
+              value={vendedora}
+              onChange={(e) => setVendedora(e.target.value)}
+              placeholder="Quem fechou esta venda"
+            />
+            <datalist id="vendedoras-sugestao">
+              {sugestoesVendedora.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+            <p className="text-xs text-muted-foreground">
+              Quem fechou, não o médico da consulta — é o que separa o número da Aline do da Ingrid.
+            </p>
+          </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">

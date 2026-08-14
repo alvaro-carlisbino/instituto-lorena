@@ -67,6 +67,8 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [estorno, setEstorno] = useState('Em avaliação')
   const [obsCancel, setObsCancel] = useState('')
   const [soSemPaciente, setSoSemPaciente] = useState(false)
+  /** "todas" = a clínica inteira; escolher uma dá a visão daquela consultora. */
+  const [vendedora, setVendedora] = useState('todas')
   const [mes, setMes] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -102,14 +104,21 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   // paciente para outro. Então o sistema não adivinha, ele mostra a lista.
   const semPaciente = useMemo(() => sales.filter((s) => !s.leadId && s.status !== 'cancelada'), [sales])
 
+  /** Vendedoras que aparecem nos dados — a lista cresce sozinha conforme elas registram. */
+  const vendedoras = useMemo(() => {
+    const set = new Set(sales.map((s) => s.sellerName).filter((v): v is string => !!v))
+    return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [sales])
+
   const doMes = useMemo(
     () =>
       sales.filter(
         (s) =>
           s.status !== 'cancelada' &&
-          (soSemPaciente ? !s.leadId : s.soldAt.startsWith(mes)),
+          (soSemPaciente ? !s.leadId : s.soldAt.startsWith(mes)) &&
+          (vendedora === 'todas' || s.sellerName === vendedora),
       ),
-    [sales, mes, soSemPaciente],
+    [sales, mes, soSemPaciente, vendedora],
   )
 
   const resumo = useMemo(() => {
@@ -215,6 +224,21 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                   ))}
                 </SelectContent>
               </Select>
+              {vendedoras.length > 0 && (
+                <Select value={vendedora} onValueChange={(v) => setVendedora(String(v ?? 'todas'))}>
+                  <SelectTrigger className="h-8 w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todas">Todas as vendedoras</SelectItem>
+                    {vendedoras.map((v) => (
+                      <SelectItem key={v} value={v}>
+                        {v}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               <Button size="sm" onClick={() => setForm({ open: true, editing: null })}>
                 <Plus className="size-3.5" /> Nova venda
               </Button>
@@ -237,6 +261,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                     <TableHead>Venda</TableHead>
                     <TableHead>Paciente</TableHead>
                     <TableHead>{kind === 'cirurgia' ? 'Procedimento' : 'Protocolo'}</TableHead>
+                    <TableHead>Vendedora</TableHead>
                     <TableHead>Médico</TableHead>
                     <TableHead className="text-right">Valor</TableHead>
                     <TableHead>{kind === 'cirurgia' ? 'Cirurgia' : 'Agendado'}</TableHead>
@@ -266,6 +291,9 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                         )}
                       </TableCell>
                       <TableCell className="max-w-[200px] truncate">{s.procedureLabel}</TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {s.sellerName ?? <span className="text-xs text-muted-foreground">a informar</span>}
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">
                         {s.attendingDoctor ?? s.sellerDoctor ?? '—'}
                         {s.performingDoctor && s.performingDoctor !== (s.attendingDoctor ?? s.sellerDoctor) && (

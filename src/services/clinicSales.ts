@@ -29,6 +29,8 @@ export type ClinicSale = {
   consultationAt: string | null
   consultationType: string | null
   procedureLabel: string
+  /** Consultora que fechou (Aline, Ingrid). Quem vende não é o médico da consulta. */
+  sellerName: string | null
   sellerDoctor: string | null
   attendingDoctor: string | null
   performingDoctor: string | null
@@ -141,6 +143,7 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
     consultationAt: str(r.consultation_at),
     consultationType: str(r.consultation_type),
     procedureLabel: String(r.procedure_label ?? ''),
+    sellerName: str(r.seller_name),
     sellerDoctor: str(r.seller_doctor),
     attendingDoctor: str(r.attending_doctor),
     performingDoctor: str(r.performing_doctor),
@@ -173,7 +176,7 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
 
 const SALE_COLS =
   'id, kind, lead_id, patient_name, phone, city, origin, sold_at, consultation_at, consultation_type, ' +
-  'procedure_label, seller_doctor, attending_doctor, performing_doctor, anesthetist, value_cents, ' +
+  'procedure_label, seller_name, seller_doctor, attending_doctor, performing_doctor, anesthetist, value_cents, ' +
   'deposit_cents, deposit_at, payment_method, installments, invoice_issued, scheduled_at, schedule_pending, ' +
   'duration_minutes, room, hotel_needed, contract_url, note, status, canceled_at, cancel_reason, ' +
   'refund_status, cancel_note, surgery_account_id, srg_surgery_id, created_at'
@@ -200,6 +203,7 @@ export type ClinicSaleInput = {
   consultationAt?: string | null
   consultationType?: string | null
   procedureLabel: string
+  sellerName?: string | null
   sellerDoctor?: string | null
   attendingDoctor?: string | null
   performingDoctor?: string | null
@@ -231,6 +235,7 @@ function toRow(input: ClinicSaleInput) {
     consultation_at: input.consultationAt || null,
     consultation_type: input.consultationType?.trim() || null,
     procedure_label: input.procedureLabel.trim(),
+    seller_name: input.sellerName?.trim() || null,
     // seller_doctor espelha quem atendeu: na planilha quem vende é quem faz a
     // consulta. A coluna fica por compatibilidade com quem já consulta a tabela.
     seller_doctor: input.attendingDoctor || input.sellerDoctor || null,
@@ -385,6 +390,31 @@ export async function listReminders(saleIds: string[]): Promise<Map<string, Surg
     out.set(saleId, list)
   }
   return out
+}
+
+/**
+ * Vendedoras já registradas, para sugerir no campo sem fixar nome de gente no código.
+ *
+ * A lista não vem de uma constante com "Aline" e "Ingrid" porque quem fecha venda muda
+ * (entra, sai, cobre férias) e nome fixo no código só se corrige com deploy. A primeira
+ * venda de cada uma é digitada; da segunda em diante o nome já aparece na sugestão, que
+ * é o que evita "Ingrid" e "ingrid " virarem duas pessoas no relatório.
+ */
+export async function listSellerNames(): Promise<string[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('clinic_sales')
+    .select('seller_name')
+    .not('seller_name', 'is', null)
+    .order('sold_at', { ascending: false })
+    .limit(1000)
+  if (error) throw new Error(error.message)
+  const nomes = new Set<string>()
+  for (const r of data ?? []) {
+    const nome = String((r as Record<string, unknown>).seller_name ?? '').trim()
+    if (nome) nomes.add(nome)
+  }
+  return [...nomes].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 }
 
 export type StaffMember = { id: number; nome: string; tipo: string }
