@@ -5,6 +5,7 @@ import { CalendarClock, Check, ChevronDown, FileCode, FileText, Paperclip, Plus,
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { FinanceTabs } from '@/components/page/FinanceTabs'
+import { NotasSefazPanel } from '@/components/financeiro/NotasSefazPanel'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -375,6 +376,8 @@ export function ContasPagarPage() {
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,400px)_1fr]">
         <div className="space-y-4">
+          <NotasSefazPanel onImportou={() => void load()} />
+
           <Card className="border-primary/40 bg-primary/[0.03]">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-sm">
