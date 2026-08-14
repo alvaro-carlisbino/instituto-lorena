@@ -8,11 +8,15 @@
  * 1. A SEFAZ guarda os documentos por ~90 DIAS. Isto nunca vai trazer o backlog antigo — o que
  *    é velho continua vindo do ZIP de XML do contador. Ver a carga de 27/jul e a de 05/ago.
  *
- * 2. Sem manifestar "ciência da operação", a SEFAZ entrega só o RESUMO (emitente, chave, valor,
- *    data) — sem os itens. Por isso `nfe_completa` vem no relatório: nota com resumo só dá pra
- *    virar conta a pagar, NÃO dá pra dar entrada no estoque.
+ * 2. A SEFAZ só entrega o XML COMPLETO (com itens) de nota que teve "ciência da operação"
+ *    registrada — e ciência tem prazo de **10 dias** a partir da emissão. Passou disso, a SEFAZ
+ *    responde "Evento apresentado após o prazo permitido" e o XML nunca mais existe: sobra o
+ *    resumo (emitente, chave, valor, data). Medido em 14/ago contra a base real da clínica.
+ *    Consequência: nota velha em resumo vira conta a pagar, NÃO vira entrada de estoque.
  *
- * Manifestar não é automático aqui, e não é preguiça: se um fornecedor emitir nota indevida
+ * Por isso `nfe_completa` vem no relatório — é ele que diz o que ainda dá pra importar inteiro.
+ *
+ * Esta função não manifesta nada, e não é preguiça: se um fornecedor emitir nota indevida
  * contra o CNPJ, a resposta certa é "desconhecimento", não "ciência". Dar ciência em lote no
  * escuro carimba como reconhecida uma nota que ninguém olhou.
  */
@@ -65,13 +69,41 @@ Deno.serve(async (req) => {
   const token = (Deno.env.get('FOCUS_NFE_TOKEN_PRODUCAO') ?? '').trim()
   if (!cnpj || !token) return json({ error: 'focus_not_configured' }, 400)
 
+  const basic = `Basic ${btoa(`${token}:`)}`
+
+  // ── xml: entrega o XML cru de uma nota recebida ──
+  // Existe para a tela poder jogar a nota no MESMO `parseNfeXml` + `importNfe` que o upload
+  // manual já usa. Reimplementar o import aqui do lado do servidor duplicaria a cascata de
+  // casamento de item, o de-para de fornecedor e a geração de parcelas — e foi justamente
+  // duplicata de item que queimou as duas cargas anteriores. Um caminho só.
+  let corpo: Record<string, unknown> = {}
+  try {
+    const raw = await req.text()
+    corpo = raw ? JSON.parse(raw) : {}
+  } catch { /* sem corpo = listar */ }
+
+  if (String(corpo.action ?? '') === 'xml') {
+    const chave = String(corpo.chave ?? '').replace(/\D/g, '')
+    if (chave.length !== 44) return json({ error: 'chave_invalida' }, 400)
+    const res = await fetch(`https://api.focusnfe.com.br/v2/nfes_recebidas/${chave}.xml`, {
+      headers: { Authorization: basic },
+    })
+    const texto = await res.text()
+    if (!res.ok || !texto.trimStart().startsWith('<')) {
+      // Sem "ciência da operação" no prazo (10 dias da emissão) a SEFAZ nunca libera o XML
+      // completo — fica só o resumo. Dizer isso aqui evita a tela ficar tentando para sempre.
+      return json({ error: 'xml_indisponivel', chave, detail: texto.slice(0, 200) }, 404)
+    }
+    return json({ ok: true, chave, xml: texto })
+  }
+
   // Paginação por `versao`: a Focus devolve 100 por vez e o X-Max-Version diz onde continuar.
   // Sem seguir isso, uma clínica com muita nota lê só as 100 primeiras e acha que acabou.
   const todas: Recebida[] = []
   let versao = 0
   for (let pagina = 0; pagina < 30; pagina++) {
     const url = `https://api.focusnfe.com.br/v2/nfes_recebidas?cnpj=${cnpj}${versao ? `&versao=${versao}` : ''}`
-    const res = await fetch(url, { headers: { Authorization: `Basic ${btoa(`${token}:`)}` } })
+    const res = await fetch(url, { headers: { Authorization: basic } })
     if (!res.ok) {
       return json({ error: 'focus_erro', status: res.status, detail: (await res.text()).slice(0, 300) }, 502)
     }
