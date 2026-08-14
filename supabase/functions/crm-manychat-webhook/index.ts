@@ -106,6 +106,7 @@ async function ensureManychatLeadId(
           author: 'CRM',
           content: `Existe outro lead com este mesmo nome no WhatsApp. Se for a mesma pessoa, use "Mesclar leads" para unificar. Lead WhatsApp candidato: ${waLeadId}.`,
           happenedAt: nowIso(),
+          tenantId: input.tenantId,
         })
         await insertInteraction(admin, {
           leadId: waLeadId,
@@ -393,6 +394,11 @@ async function runManychatMessagePipeline(
       author: ctx.userName,
       content: inboundContent,
       happenedAt: nowIso(),
+      // Sem isto, o trigger `_stamp_tenant_id_from_lead` carimba pela LINHA de WhatsApp
+      // fixada no lead — e paciente da clínica que um dia comprou na linha do Tricopill
+      // teria a mensagem do Instagram da clínica carimbada como Tricopill, sumindo da
+      // tela de quem precisa responder. O canal ManyChat é a fonte do polo aqui.
+      tenantId: ctx.tenantId,
     })
     const mediaPersist = await persistManychatMedia(admin, {
       leadId,
@@ -919,6 +925,7 @@ Deno.serve(async (req) => {
         author: userName,
         content: ingestContent,
         happenedAt: nowIso(),
+        tenantId,
       })
       const ingestMediaPersist = await persistManychatMedia(admin, {
         leadId,
@@ -975,6 +982,7 @@ Deno.serve(async (req) => {
         author,
         content: outboundText || rawOutbound,
         happenedAt: nowIso(),
+        tenantId,
       })
 
       // Painel "Atendimento Pendente": a Sofia roda no ManyChat (IA do CRM off), então é

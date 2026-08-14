@@ -222,6 +222,7 @@ Deno.serve(async (req) => {
           content: normalized.text,
           happenedAt: normalized.happenedAt,
           externalMessageId: normalized.externalMessageId,
+          tenantId,
         })
       }
 
