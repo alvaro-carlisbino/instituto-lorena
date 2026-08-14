@@ -26,8 +26,20 @@ import { confirmSale, fetchBlingCatalog, type CartItem, type CatalogProduct } fr
 
 const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
-// Cross-sell fixo de marketing: sempre oferecer o Shampoo Ozonizado junto (order bump 1-clique).
-const CROSS_SELL_PRODUCT_ID = '16675535462' // Shampoo Ozonizado Multifuncional - Ozoncare 200ml
+// Cross-sell fixo de marketing: order bump 1-clique, oferecido em toda venda. Produto novo
+// aqui = uma linha (o id é o do Bling; o preço e o estoque vêm do catálogo, nunca daqui).
+const CROSS_SELL_BUMPS = [
+  {
+    id: '16675535462', // Shampoo Ozonizado Multifuncional - Ozoncare 200ml
+    titulo: 'Shampoo Ozonizado',
+    chamada: 'Leve o cuidado capilar completo junto com o tratamento.',
+  },
+  {
+    id: '16691834812', // Gel de Sobrancelha BrowSculpt 10ml
+    titulo: 'Gel de Sobrancelha BrowSculpt',
+    chamada: 'Novidade da casa: alta fixação, sobrancelha alinhada o dia todo.',
+  },
+]
 
 export function LeadSalePage() {
   const crm = useCrm()
@@ -90,11 +102,14 @@ export function LeadSalePage() {
   const cartTotalCents = cart.reduce((s, x) => s + x.qty * x.precoCents, 0)
   const q = search.trim().toLowerCase()
   const filteredCatalog = (q ? catalog.filter((p) => p.nome.toLowerCase().includes(q)) : catalog).slice(0, 12)
-  // Order bump: o Shampoo Ozonizado, oferecido sempre que ainda não está no carrinho.
-  // Só aparece com estoque > 0 (evita vender no negativo enquanto a entrada não é lançada).
-  const bumpProduct = catalog.find((p) => p.id === CROSS_SELL_PRODUCT_ID)
-  const bumpAvailable = !!bumpProduct && (bumpProduct.estoque ?? 0) > 0
-  const bumpInCart = cart.some((x) => x.id === CROSS_SELL_PRODUCT_ID)
+  // Order bumps: oferecidos enquanto não estão no carrinho e só com estoque > 0 (evita vender
+  // no negativo enquanto a entrada não é lançada) — religam sozinhos quando o saldo entra.
+  const bumps = CROSS_SELL_BUMPS.flatMap((b) => {
+    const product = catalog.find((p) => p.id === b.id)
+    if (!product || (product.estoque ?? 0) <= 0) return []
+    if (cart.some((x) => x.id === b.id)) return []
+    return [{ ...b, product }]
+  })
 
   const handleConfirm = async () => {
     setPageError(null)
@@ -302,22 +317,23 @@ export function LeadSalePage() {
                   )}
                 </div>
               )}
-              {bumpProduct && bumpAvailable && !bumpInCart ? (
+              {bumps.map((b) => (
                 <Button
+                  key={b.id}
                   type="button"
                   variant="ghost"
-                  onClick={() => addToCart(bumpProduct)}
+                  onClick={() => addToCart(b.product)}
                   className="h-auto w-full justify-start gap-2 whitespace-normal rounded-lg border-dashed border-primary/50 bg-primary/5 px-3 py-2 text-left text-xs font-normal transition-colors hover:bg-primary/10 hover:text-foreground"
                 >
                   <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
                     <Plus className="size-3.5" aria-hidden />
                   </span>
                   <span className="flex-1">
-                    <strong className="block">Adicione o Shampoo Ozonizado · {brl(bumpProduct.precoCents)}</strong>
-                    <span className="text-muted-foreground">Leve o cuidado capilar completo junto com o tratamento.</span>
+                    <strong className="block">Adicione o {b.titulo} · {brl(b.product.precoCents)}</strong>
+                    <span className="text-muted-foreground">{b.chamada}</span>
                   </span>
                 </Button>
-              ) : null}
+              ))}
               {cart.length > 0 ? (
                 <div className="space-y-1.5 rounded-lg border border-border/40 p-2">
                   {cart.map((it) => (

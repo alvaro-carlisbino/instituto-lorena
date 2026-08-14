@@ -48,8 +48,8 @@ export const REDE_KITS: Record<string, { label: string; amountCents: number; qty
 }
 
 /**
- * Único produto EXTRA (além dos kits) que o bot pode vender — upsell do Shampoo Ozonizado.
- * Vai como item próprio no pedido do Bling (id real → baixa o estoque do shampoo).
+ * Upsell do Shampoo Ozonizado. Vai como item próprio no pedido do Bling (id real → baixa o
+ * estoque do shampoo).
  *
  * Preço = catálogo Bling (R$130,00). Ficou em R$119,90 aqui por ~3 semanas depois do Bling
  * subir pra R$130: o bot vendia mais barato que o site e que o PDV, que leem do catálogo.
@@ -60,6 +60,39 @@ export const SHAMPOO_ADDON = {
   blingProductId: '16675535462',
   nome: 'Shampoo Ozonizado Multifuncional - Ozoncare 200ml',
   amountCents: 13000,
+}
+
+/**
+ * Gel de sobrancelha BrowSculpt (13/08/2026) — marca PRÓPRIA (Health & Beauty), igual ao
+ * Tricopill: fabricação New Concept, rótulo e registro ANVISA nossos. R$129,90, custo R$32,90.
+ */
+export const BROWSCULPT_ADDON = {
+  blingProductId: '16691834812',
+  nome: 'Gel de Sobrancelha BrowSculpt 10ml',
+  amountCents: 12990,
+}
+
+/**
+ * Produtos AVULSOS que o bot pode vender além dos kits do Tricopill. A chave é o campo que a
+ * IA manda no op (`"shampoo":1`, `"gel_sobrancelha":1`) — junto com o kit ou sozinho.
+ *
+ * Produto novo aqui = uma linha. Mas o preço vive em 3 lugares: AQUI (o que é COBRADO), o
+ * prompt do crm-ai-assistant (o que a IA FALA) e o Bling (o que o site e o PDV leem). Mexeu
+ * num, mexa nos três — foi assim que o shampoo passou 3 semanas cobrando menos que o site.
+ */
+export const AI_ADDONS: Record<string, { blingProductId: string; nome: string; amountCents: number; labelCurto: string }> = {
+  shampoo: { ...SHAMPOO_ADDON, labelCurto: 'Shampoo Ozonizado' },
+  gel_sobrancelha: { ...BROWSCULPT_ADDON, labelCurto: 'Gel BrowSculpt' },
+}
+
+/** Lê do op quais avulsos foram pedidos e em que quantidade. Ignora zero/negativo/lixo. */
+export function collectAddons(op: Record<string, unknown>): Array<{ key: string; qty: number; addon: (typeof AI_ADDONS)[string] }> {
+  const out: Array<{ key: string; qty: number; addon: (typeof AI_ADDONS)[string] }> = []
+  for (const [key, addon] of Object.entries(AI_ADDONS)) {
+    const qty = Math.max(0, Math.floor(Number(op[key]) || 0))
+    if (qty > 0) out.push({ key, qty, addon })
+  }
+  return out
 }
 
 /**

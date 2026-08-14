@@ -4,7 +4,7 @@ import { insertInteraction } from './crm.ts'
 import { notifyAgents } from './notifyAgents.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
-import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, SHAMPOO_ADDON } from './rede.ts'
+import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, collectAddons } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
@@ -787,8 +787,9 @@ export async function executeCrmAiOpsFromModel(
         // é só o cupom; sem cupom, segue a tabela do Pix.
         const pixTemCupom = !!normalizeCouponCode(String(op.coupon ?? ''))
         const pixKit = pixKey ? (pixTemCupom ? REDE_KITS[pixKey] : PAGBANK_KITS[pixKey]) : undefined
-        // Upsell: Shampoo Ozonizado como item extra (junto do kit OU sozinho).
-        const pixShampooQty = Math.max(0, Math.floor(Number(op.shampoo) || 0))
+        // Upsell: produtos avulsos (shampoo, gel de sobrancelha) como itens extras — junto do
+        // kit OU sozinhos. Ver AI_ADDONS em _shared/rede.ts.
+        const pixAddons = collectAddons(op)
         let pixAmount = 0
         let pixDesc = ''
         const pixItems: Array<Record<string, unknown>> = []
@@ -797,18 +798,18 @@ export async function executeCrmAiOpsFromModel(
           pixDesc = pixKit.label
           pixItems.push({ kit: pixKey, nome: pixKit.label, qty: 1, precoCents: pixKit.amountCents })
         }
-        if (pixShampooQty > 0) {
-          pixAmount += pixShampooQty * SHAMPOO_ADDON.amountCents
-          pixDesc = pixDesc ? `${pixDesc} + ${pixShampooQty}× Shampoo Ozonizado` : `${pixShampooQty}× Shampoo Ozonizado`
-          pixItems.push({ id: SHAMPOO_ADDON.blingProductId, nome: SHAMPOO_ADDON.nome, qty: pixShampooQty, precoCents: SHAMPOO_ADDON.amountCents })
+        for (const { qty, addon } of pixAddons) {
+          pixAmount += qty * addon.amountCents
+          pixDesc = pixDesc ? `${pixDesc} + ${qty}× ${addon.labelCurto}` : `${qty}× ${addon.labelCurto}`
+          pixItems.push({ id: addon.blingProductId, nome: addon.nome, qty, precoCents: addon.amountCents })
         }
         if (pixItems.length === 0) {
-          // Sem kit e sem shampoo: nada a vender.
-          results.push({ type: 'rede_pix', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o Pix pros kits do Tricopill (1 mês, 3+1 ou 5 meses) e pro Shampoo Ozonizado. O que você quer? 💚' })
+          // Sem kit e sem avulso: nada a vender.
+          results.push({ type: 'rede_pix', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o Pix pros kits do Tricopill (1 mês, 3+1 ou 5 meses), pro Shampoo Ozonizado e pro gel de sobrancelha BrowSculpt. O que você quer? 💚' })
           continue
         }
-        // Só manda "items" quando há shampoo (carrinho misto/avulso); kit puro segue o caminho testado.
-        const pixUseItems = pixShampooQty > 0
+        // Só manda "items" quando há avulso (carrinho misto/avulso); kit puro segue o caminho testado.
+        const pixUseItems = pixAddons.length > 0
         try {
           const out = await createRedePix(admin, {
             tenantId: saleTenantId,
@@ -861,8 +862,9 @@ export async function executeCrmAiOpsFromModel(
         // Cartão (e.Rede), parcelado até 12x. Aceita kit OU amount_cents+description, e cupom.
         const kitRaw = op.kit != null ? String(op.kit) : ''
         const resolved = kitRaw ? resolveRedeKit(kitRaw) : null
-        // Upsell: Shampoo Ozonizado como item extra (junto do kit OU sozinho).
-        const cardShampooQty = Math.max(0, Math.floor(Number(op.shampoo) || 0))
+        // Upsell: produtos avulsos (shampoo, gel de sobrancelha) como itens extras — junto do
+        // kit OU sozinhos. Ver AI_ADDONS em _shared/rede.ts.
+        const cardAddons = collectAddons(op)
         let amountCents = 0
         let description = ''
         const cardItems: Array<Record<string, unknown>> = []
@@ -871,17 +873,17 @@ export async function executeCrmAiOpsFromModel(
           description = resolved.label
           cardItems.push({ kit: resolved.key, nome: resolved.label, qty: 1, precoCents: resolved.amountCents })
         }
-        if (cardShampooQty > 0) {
-          amountCents += cardShampooQty * SHAMPOO_ADDON.amountCents
-          description = description ? `${description} + ${cardShampooQty}× Shampoo Ozonizado` : `${cardShampooQty}× Shampoo Ozonizado`
-          cardItems.push({ id: SHAMPOO_ADDON.blingProductId, nome: SHAMPOO_ADDON.nome, qty: cardShampooQty, precoCents: SHAMPOO_ADDON.amountCents })
+        for (const { qty, addon } of cardAddons) {
+          amountCents += qty * addon.amountCents
+          description = description ? `${description} + ${qty}× ${addon.labelCurto}` : `${qty}× ${addon.labelCurto}`
+          cardItems.push({ id: addon.blingProductId, nome: addon.nome, qty, precoCents: addon.amountCents })
         }
         if (cardItems.length === 0) {
-          // Sem kit e sem shampoo: nada a vender.
-          results.push({ type: 'rede_link', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o link pros kits do Tricopill (1 mês, 3+1 ou 5 meses) e pro Shampoo Ozonizado. O que você quer? 💚' })
+          // Sem kit e sem avulso: nada a vender.
+          results.push({ type: 'rede_link', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o link pros kits do Tricopill (1 mês, 3+1 ou 5 meses), pro Shampoo Ozonizado e pro gel de sobrancelha BrowSculpt. O que você quer? 💚' })
           continue
         }
-        const cardUseItems = cardShampooQty > 0
+        const cardUseItems = cardAddons.length > 0
         // KIT: prioriza o que a IA mandou; se ela mandou amount_cents (sem kit), INFERE o kit
         // pelo valor do produto (match exato com REDE_KITS). Sem isso o kit ficava null no
         // rede_payments e a venda no cartão NÃO ia pro Bling automaticamente.
