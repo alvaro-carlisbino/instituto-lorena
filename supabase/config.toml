@@ -425,6 +425,13 @@ verify_jwt = false
 [functions.crm-ingest-webhook]
 verify_jwt = false
 
+# Aviso de mudança de estado da NFS-e, disparado pela Focus NFe. Autentica pelo header
+# `authorization` combinado no gatilho (FOCUS_NFE_WEBHOOK_SECRET), não por JWT de sessão.
+# Pinado aqui porque um redeploy pelo CLI volta ao default e a nota fica presa em
+# "processando_autorizacao" para sempre, sem erro visível em lugar nenhum.
+[functions.crm-focus-webhook]
+verify_jwt = false
+
 # Chamada interna Edge→Edge com x-crm-ai-internal-secret (sem Bearer de sessão).
 [functions.crm-ai-assistant]
 verify_jwt = false
