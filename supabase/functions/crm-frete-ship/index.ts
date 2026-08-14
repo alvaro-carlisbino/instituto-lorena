@@ -23,6 +23,7 @@ import {
   getMeSender,
   meConnectionStatus,
   meOrderStatus,
+  meListOrders,
   melhorEnvioSandbox,
   meSenderMissing,
   setMeSender,
@@ -210,6 +211,19 @@ Deno.serve(async (req) => {
   }
 
   // ── refresh_tracking: lê o status/rastreio no Melhor Envio e atualiza o status logístico ──
+  /**
+   * Visão de Logística: os pedidos da conta Melhor Envio, para casar com as vendas.
+   *
+   * Quem casa é a tela (por telefone ou nome), não aqui: o banco não tem tabela de envios,
+   * e o que sobra sem par é justamente o que o operador precisa ver — etiqueta comprada
+   * para um pedido que ninguém achou, ou venda paga que nunca virou etiqueta.
+   */
+  if (action === 'list_orders') {
+    const r = await meListOrders(admin, tenantId, { pages: Number(p.pages ?? 3) })
+    if (!r.ok) return json({ ok: false, error: r.error ?? 'falha', orders: r.orders }, 200)
+    return json({ ok: true, orders: r.orders })
+  }
+
   if (action === 'refresh_tracking') {
     const leadId = String(p.leadId ?? '').trim()
     if (!leadId) return json({ error: 'missing_lead' }, 400)

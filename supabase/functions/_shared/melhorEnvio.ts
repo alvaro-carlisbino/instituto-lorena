@@ -808,6 +808,75 @@ export async function meOrderStatus(
   }
 }
 
+export type MeOrderResumo = {
+  id: string
+  status: string | null
+  tracking: string | null
+  protocol: string | null
+  serviceName: string | null
+  toName: string | null
+  toPhone: string | null
+  createdAt: string | null
+  priceCents: number | null
+}
+
+/**
+ * Lista os pedidos da conta Melhor Envio (paginado), para a visão de Logística.
+ *
+ * A conta ME é a fonte da verdade do envio: não existe tabela de envios no banco, só o
+ * carimbo em `leads.custom_fields.entrega`. Quem casa isto com a venda é a tela, por
+ * telefone ou nome — por isso devolvemos destinatário e telefone junto.
+ */
+export async function meListOrders(
+  admin: SupabaseClient,
+  tenantId: string,
+  opts?: { pages?: number },
+): Promise<{ ok: boolean; orders: MeOrderResumo[]; error?: string }> {
+  if (!melhorEnvioConfigured()) return { ok: false, orders: [], error: 'client_not_configured' }
+  const token = await getValidMeToken(admin, tenantId)
+  if (!token) return { ok: false, orders: [], error: 'not_connected' }
+
+  const paginas = Math.min(Math.max(opts?.pages ?? 3, 1), 10)
+  const orders: MeOrderResumo[] = []
+  try {
+    for (let page = 1; page <= paginas; page++) {
+      const res = await fetch(`${melhorEnvioBaseUrl()}/api/v2/me/orders?page=${page}`, {
+        headers: { Accept: 'application/json', Authorization: `Bearer ${token}`, 'User-Agent': meUserAgent() },
+        signal: AbortSignal.timeout(20000),
+      })
+      const text = await res.text()
+      if (!res.ok) {
+        // 401 aqui quase sempre é token revogado no painel do ME, não bug: a tela mostra
+        // o aviso e o operador reconecta em /integracoes.
+        return { ok: false, orders, error: `http_${res.status}: ${text.slice(0, 120)}` }
+      }
+      const body = (text ? JSON.parse(text) : {}) as Record<string, unknown>
+      const lista = Array.isArray(body.data) ? (body.data as Record<string, unknown>[]) : []
+      for (const o of lista) {
+        const to = (o.to ?? {}) as Record<string, unknown>
+        const service = (o.service ?? {}) as Record<string, unknown>
+        const precoRaw = o.price ?? o.insurance_value ?? null
+        orders.push({
+          id: String(o.id ?? ''),
+          status: o.status != null ? String(o.status) : null,
+          tracking: o.tracking != null ? String(o.tracking) : o.self_tracking != null ? String(o.self_tracking) : null,
+          protocol: o.protocol != null ? String(o.protocol) : null,
+          serviceName: service.name != null ? String(service.name) : null,
+          toName: to.name != null ? String(to.name) : null,
+          toPhone: to.phone != null ? String(to.phone) : null,
+          createdAt: o.created_at != null ? String(o.created_at) : null,
+          priceCents: precoRaw != null ? Math.round(Number(precoRaw) * 100) || null : null,
+        })
+      }
+      // Última página: o ME devolve menos que o tamanho cheio.
+      if (lista.length === 0) break
+    }
+    return { ok: true, orders }
+  } catch (e) {
+    return { ok: false, orders, error: (e instanceof Error ? e.message : String(e)).slice(0, 140) }
+  }
+}
+
 export type AutoShipResult = {
   ok: boolean
   skipped?: boolean

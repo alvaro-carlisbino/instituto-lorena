@@ -55,6 +55,8 @@ import {
   Users,
   Wallet,
   Warehouse,
+  Truck,
+  FileText,
 } from 'lucide-react'
 
 /**
@@ -311,6 +313,26 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     keywords: ['vendas', 'bling', 'envio', 'rastreio'],
     visible: (ctx) => isSales(ctx) && canRoute(ctx),
     mobilePriority: 4,
+  },
+  {
+    id: 'logistica',
+    path: '/logistica',
+    label: 'Logística',
+    icon: Truck,
+    group: 'vendas',
+    keywords: ['envio', 'etiqueta', 'melhor envio', 'rastreio', 'correios', 'postagem'],
+    visible: (ctx) => isSales(ctx) && canRoute(ctx),
+  },
+  {
+    // A tela e a rota existiam desde sempre; faltava a entrada no menu, e sem ela a NF-e
+    // do Tricopill só era alcançável digitando /nfe na barra do navegador.
+    id: 'nfe',
+    path: '/nfe',
+    label: 'Notas fiscais',
+    icon: FileText,
+    group: 'vendas',
+    keywords: ['nfe', 'nota fiscal', 'sefaz', 'emissão', 'danfe'],
+    visible: (ctx) => canRoute(ctx),
   },
   {
     id: 'carrinhos',
