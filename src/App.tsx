@@ -1,11 +1,13 @@
-import { lazy, Suspense, type ComponentType } from 'react'
+import { lazy, Suspense, useState, type ComponentType } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { CrmProvider } from './context/CrmContext'
 import { TenantProvider } from './context/TenantContext'
 import { useCrmState } from './hooks/useCrmState'
 import { getDataProviderMode } from './services/dataMode'
 import { AuthPage } from './pages/AuthPage'
+import { DefinirSenhaPage } from './pages/DefinirSenhaPage'
 import { OnboardingPage } from './pages/OnboardingPage'
+import { precisaDefinirSenha } from './lib/authLinkFlow'
 import { PwaInstallBanner } from './components/PwaInstallBanner'
 import { BillingGate } from './components/BillingGate'
 import { FinanceOnly } from './components/FinanceOnly'
@@ -234,6 +236,7 @@ function AppRoutes() {
 function App() {
   const crmState = useCrmState()
   const dataMode = getDataProviderMode()
+  const [senhaDefinida, setSenhaDefinida] = useState(false)
 
   // Checkout de cartão (e.Rede) é PÚBLICO — fora do gate de login/onboarding.
   // Com o code-splitting, o cliente baixa SÓ o chunk do checkout (não o CRM inteiro).
@@ -260,6 +263,13 @@ function App() {
         onSignUp={() => void crmState.runSignUp()}
       />
     )
+  }
+
+  // Quem chegou pelo link de convite tem sessão, mas ainda não tem senha própria.
+  // Vem ANTES do onboarding: sem isto, o primeiro acesso caía na tela de configurar
+  // a clínica e a atendente reconfiguraria nome e cor do consultório inteiro.
+  if (dataMode === 'supabase' && crmState.session && precisaDefinirSenha() && !senhaDefinida) {
+    return <DefinirSenhaPage onPronto={() => setSenhaDefinida(true)} />
   }
 
   if (dataMode === 'supabase' && crmState.session && !crmState.onboardingDone) {

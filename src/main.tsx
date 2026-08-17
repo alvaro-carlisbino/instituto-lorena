@@ -1,6 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
+// Primeiro de todos, e de propósito: lê o #access_token do link de convite antes
+// que o cliente do Supabase consuma e limpe o hash da URL.
+import './lib/authLinkFlow'
 import { APP_DOCUMENT_TITLE } from './config/branding'
 import { instalarRecuperacaoDeChunk } from './lib/chunkReload'
 import './index.css'
