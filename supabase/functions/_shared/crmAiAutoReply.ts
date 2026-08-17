@@ -540,7 +540,7 @@ Para começarmos, por favor escolha uma das opções abaixo:
  * O texto é o Passo 2 do script (escolha do médico). A versão anterior perguntava "manhã ou tarde",
  * que é justamente o que o script proíbe a Sofia de fazer ("❌ Não confirma horários, dias ou
  * turnos" / "Você NUNCA informa dias da semana ou horários dos médicos" — quem fecha agenda é a
- * Dandara). `includeIntro` = a escolha veio já na 1ª mensagem (o menu nunca chegou a ser mostrado)
+ * consultora humana). `includeIntro` = a escolha veio já na 1ª mensagem (o menu nunca chegou a ser mostrado)
  * → apresenta a Sofia antes, como no Passo 1.
  */
 function buildTriageOptionAckMessage(
@@ -836,7 +836,7 @@ export async function invokeCrmAiAssistantForLead(
 
 /**
  * Stage destino quando a IA finaliza a triagem (marker [PRONTO_PARA_CONSULTOR]):
- * o lead sai da triagem da Sofia e passa para a Dandara negociar/agendar manualmente.
+ * o lead sai da triagem da Sofia e passa para a consultora humana negociar/agendar manualmente.
  */
 const HANDOFF_STAGE_BY_PIPELINE: Record<string, string> = {
   'pipeline-clinica': 'contato',
@@ -868,7 +868,7 @@ export async function wasLastAiReplyFallback(
 
 /**
  * Chamada quando a IA produz o marker [PRONTO_PARA_CONSULTOR]: desliga a IA neste lead
- * (ai_enabled=false + owner_mode=human) e move para o stage da Dandara. Idempotente —
+ * (ai_enabled=false + owner_mode=human) e move para o stage da consultora. Idempotente —
  * só atualiza o que ainda não está no estado final, e silencia erros para não bloquear o reply.
  */
 export async function disableAiOnHandoff(

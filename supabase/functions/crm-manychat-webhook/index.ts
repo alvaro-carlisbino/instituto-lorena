@@ -183,14 +183,20 @@ function contentForInboundWithMedia(text: string, media: ExtractedMedia[]): stri
   return labels.join(' • ')
 }
 
-// Detecta a transferência da Sofia para a consultora humana (Dandara) a partir do TEXTO
-// da resposta espelhada. Usado como rede quando o marcador [PRONTO_PARA_CONSULTOR] não
-// chega ao CRM (a clínica roda a Sofia no ManyChat, com a IA do CRM desligada). Exige o
-// nome "Dandara" + um verbo de encaminhamento, pra não disparar em menções soltas.
-function looksLikeDandaraHandoff(text: string): boolean {
+// Detecta a transferência da Sofia para a consultora humana a partir do TEXTO da resposta
+// espelhada. Usado como rede quando o marcador [PRONTO_PARA_CONSULTOR] não chega ao CRM
+// (a clínica roda a Sofia no ManyChat, com a IA do CRM desligada). Exige o nome da
+// consultora + um verbo de encaminhamento, pra não disparar em menções soltas.
+//
+// O nome muda com quem está na linha (era Dandara, hoje Aline Fenato), então aceita os dois
+// — conversa antiga continua sendo lida certo. "Aline" é nome comum de PACIENTE, então o
+// nome só conta quando vem depois de artigo/"consultora"; assim o vocativo ("Olá, Aline!")
+// não é confundido com handoff.
+const CONSULTORA_MENCIONADA = /\b(?:a|à|da|pra|para|consultora)\s+\*{0,2}(?:dandara|aline)\b/
+function looksLikeConsultoraHandoff(text: string): boolean {
   const t = (text || '').toLowerCase()
-  if (!t.includes('dandara')) return false
-  return /encaminh|consultora|vou te passar|vou te chamar|vai te explicar|vai confirmar|seguir com o agendamento|passar (pra|para) (a )?dandara|chamar agora/.test(t)
+  if (!CONSULTORA_MENCIONADA.test(t)) return false
+  return /encaminh|consultora|vou te passar|vou te chamar|vai te explicar|vai confirmar|seguir com o agendamento|chamar agora/.test(t)
 }
 
 /**
@@ -986,13 +992,13 @@ Deno.serve(async (req) => {
       })
 
       // Painel "Atendimento Pendente": a Sofia roda no ManyChat (IA do CRM off), então é
-      // AQUI, no espelho do outbound, que o handoff para a Dandara entra no CRM. Detecta
+      // AQUI, no espelho do outbound, que o handoff para a consultora entra no CRM. Detecta
       // pelo marcador [PRONTO_PARA_CONSULTOR] (handoffSuggested) e, como rede, pelo texto
-      // de apresentação da Dandara. Marca o lead como `waiting_human` pra acender o painel
+      // de apresentação da consultora. Marca o lead como `waiting_human` pra acender o painel
       // e só notifica a equipe quando há transição real (evita spam a cada mensagem).
       try {
         const isAiAuthor = author === 'Assistente IA' || /assistente|sofia/i.test(author)
-        const isHandoff = handoffSuggested || (isAiAuthor && looksLikeDandaraHandoff(outboundText || rawOutbound))
+        const isHandoff = handoffSuggested || (isAiAuthor && looksLikeConsultoraHandoff(outboundText || rawOutbound))
         if (isHandoff) {
           const { data: updated } = await admin
             .from('leads')
@@ -1005,7 +1011,7 @@ Deno.serve(async (req) => {
               leadId,
               kind: 'handoff',
               title: 'Triagem finalizada — assumir',
-              body: `${userName} foi encaminhado(a) para a Dandara e aguarda atendimento.`,
+              body: `${userName} foi encaminhado(a) para a Aline Fenato e aguarda atendimento.`,
               includeOwner: true,
               tenantId,
               dedupeKey: 'handoff_waiting',

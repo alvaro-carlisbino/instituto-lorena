@@ -791,7 +791,7 @@ Deno.serve(async (req) => {
     const isSalesBot = (snapshot as { botKind?: string }).botKind === 'sales'
 
     // Agendamento autônomo da Sofia (kill-switch por tenant). false = "meio-termo":
-    // a Dandara conduz a marcação; a Sofia só auxilia. true = a Sofia agenda sozinha.
+    // a Aline Fenato conduz a marcação; a Sofia só auxilia. true = a Sofia agenda sozinha.
     let autoBookOn = false
     if (isInternal && !isSalesBot) {
       try {
@@ -808,7 +808,7 @@ Deno.serve(async (req) => {
     }
 
     // Shosp = fonte da verdade da agenda. Injeta os agendamentos REAIS do paciente
-    // (sempre) e a disponibilidade real (SÓ no modo auto — no meio-termo a Dandara
+    // (sempre) e a disponibilidade real (SÓ no modo auto — no meio-termo a Aline Fenato
     // conduz, então não tentamos a IA com horários livres).
     if (isInternal && !isSalesBot && context.leadId) {
       try {
@@ -1010,12 +1010,12 @@ Deno.serve(async (req) => {
           'AGENDAR (você pode agendar sozinha): quando o paciente CONFIRMAR um horário de `shosp.disponibilidade`, inclua na MESMA resposta <<<CRM_OPS>>>{"version":1,"ops":[{"type":"shosp_book","codigoPrestador":N,"codigoServico":N,"data":"AAAA-MM-DD","horario":"HH:MM","codigoHorario":N}]}',
           '- codigoPrestador/data/horario/codigoHorario vêm EXATAMENTE do item escolhido; codigoServico vem de `shosp.servicos_consulta` (médico + gênero certos).',
           'O servidor confirma o horário na MESMA mensagem — escreva como já agendado. Se faltar dado (missing_patient_data) peça ao paciente; se slot_taken ofereça outro. A tag <<<CRM_OPS>>> NUNCA aparece para o paciente.',
-          'Se NÃO houver `shosp.disponibilidade`, diga que a Dandara confirma o melhor horário e TERMINE a mensagem com [PRONTO_PARA_CONSULTOR] na última linha (avisa a Dandara no CRM; o paciente não vê).',
+          'Se NÃO houver `shosp.disponibilidade`, diga que a Aline Fenato confirma o melhor horário e TERMINE a mensagem com [PRONTO_PARA_CONSULTOR] na última linha (avisa a Aline Fenato no CRM; o paciente não vê).',
         ]
       : [
-          'MEIO-TERMO — a MARCAÇÃO do horário é conduzida pela DANDARA (consultora humana), NÃO por você. Seu papel é AUXILIAR: identifique o tipo de atendimento e a preferência de período (manhã/tarde), tire dúvidas, e diga que a Dandara vai confirmar o melhor horário e passar os detalhes em seguida.',
+          'MEIO-TERMO — a MARCAÇÃO do horário é conduzida pela ALINE FENATO (consultora humana), NÃO por você. Seu papel é AUXILIAR: identifique o tipo de atendimento e a preferência de período (manhã/tarde), tire dúvidas, e diga que a Aline Fenato vai confirmar o melhor horário e passar os detalhes em seguida.',
           'NÃO fique oferecendo horários específicos, NÃO use ferramentas de agendamento, NÃO diga "já agendei" nem invente protocolo. (Sobre consultas JÁ marcadas, PODE responder usando `shosp.agendamentos`.)',
-          'HANDOFF OBRIGATÓRIO PARA A DANDARA: na MESMA mensagem em que você disser que a Dandara vai confirmar/continuar (isto é, assim que já tiver o tipo de atendimento E a preferência de período — ou se o paciente pedir um atendente humano, ou perguntar valores/detalhes clínicos), TERMINE a resposta com a tag [PRONTO_PARA_CONSULTOR] na ÚLTIMA linha. É ESSA tag — e SÓ ela — que avisa a Dandara no CRM e transfere oficialmente o atendimento para ela; sem a tag, a Dandara NÃO é notificada e o lead fica parado. O paciente NUNCA vê a tag (o sistema a remove automaticamente).',
+          'HANDOFF OBRIGATÓRIO PARA A ALINE FENATO: na MESMA mensagem em que você disser que a Aline Fenato vai confirmar/continuar (isto é, assim que já tiver o tipo de atendimento E a preferência de período — ou se o paciente pedir um atendente humano, ou perguntar valores/detalhes clínicos), TERMINE a resposta com a tag [PRONTO_PARA_CONSULTOR] na ÚLTIMA linha. É ESSA tag — e SÓ ela — que avisa a Aline Fenato no CRM e transfere oficialmente o atendimento para ela; sem a tag, a Aline Fenato NÃO é notificada e o lead fica parado. O paciente NUNCA vê a tag (o sistema a remove automaticamente).',
         ]
 
     // Persona de VENDAS (ex.: Tricopill). Mantém os tokens/regras agnósticos que o
@@ -1085,7 +1085,7 @@ Deno.serve(async (req) => {
             : 'Você é a *Sofia*, a assistente virtual do Instituto Lorena Visentainer. Ao falar com pacientes pelo WhatsApp, apresente-se como Sofia na primeira mensagem da conversa (ex.: "Olá! Eu sou a Sofia, do Instituto Lorena Visentainer"). Em mensagens seguintes da mesma conversa, NÃO repita a apresentação.')
         : 'Você é o assistente de IA do CRM Instituto Lorena (operação comercial / clínica).',
       'Use APENAS o snapshot JSON abaixo; não invente números, leads ou interações que não apareçam.',
-      `Contexto temporal (Maringá/Brasília): agora são ${brasilDateTime} — ${brasilWeekday}, período da ${brasilPeriod}. Saudação apropriada para a primeira mensagem ao paciente: "${brasilGreeting}". Atendimento humano (${isSalesBot ? 'Ingrid' : 'Dandara'}): segunda a sexta, 08h às 18h — neste momento ${isBusinessHours ? 'estamos DENTRO' : 'estamos FORA'} do horário comercial.`,
+      `Contexto temporal (Maringá/Brasília): agora são ${brasilDateTime} — ${brasilWeekday}, período da ${brasilPeriod}. Saudação apropriada para a primeira mensagem ao paciente: "${brasilGreeting}". Atendimento humano (${isSalesBot ? 'Ingrid' : 'Aline Fenato'}): segunda a sexta, 08h às 18h — neste momento ${isBusinessHours ? 'estamos DENTRO' : 'estamos FORA'} do horário comercial.`,
       'Quando existir leadFocus.recent_media_intel, use audio_transcript e document_or_image_text como parte do contexto da conversa (transcrições e OCR/extração de documentos).',
       'Quando existir leadFocus.recent_conversation, é o histórico cronológico deste paciente no CRM — use-o sempre: o cliente pode enviar o mesmo pedido em várias mensagens seguidas; una o sentido e não peça de novo o que já está nas linhas anteriores.',
       isInternal
