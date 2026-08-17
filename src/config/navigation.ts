@@ -329,13 +329,18 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   {
     // A tela e a rota existiam desde sempre; faltava a entrada no menu, e sem ela a NF-e
     // do Tricopill só era alcançável digitando /nfe na barra do navegador.
+    //
+    // O guarda de polo é obrigatório e faltou aqui: a entrada nasceu só com `canRoute` e,
+    // com isso, a única tela do grupo Vendas que aparecia no CRM da CLÍNICA. Quem clicava
+    // batia num beco ("troque de workspace") que, depois da separação por endereço, nem
+    // existe mais — o seletor sumiu. Emissão de NF-e é do Bling, e o Bling é do Tricopill.
     id: 'nfe',
     path: '/nfe',
     label: 'Notas fiscais',
     icon: FileText,
     group: 'vendas',
     keywords: ['nfe', 'nota fiscal', 'sefaz', 'emissão', 'danfe'],
-    visible: (ctx) => canRoute(ctx),
+    visible: (ctx) => isSales(ctx) && canRoute(ctx),
   },
   {
     id: 'carrinhos',

@@ -1,5 +1,6 @@
 import { diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { FileText, RefreshCw, ShieldAlert, CheckCircle2, XCircle, Loader2, Settings2, AlertTriangle, FileWarning } from 'lucide-react'
 
@@ -123,7 +124,7 @@ function Faixa({ rotulo, faixa, tom }: { rotulo: string; faixa: NfeBacklogFaixa;
 const INICIO_PADRAO_DIAS = 30
 
 export function NfePage() {
-  const { tenant } = useTenant()
+  const { tenant, poloFixo } = useTenant()
   const isSalesPolo = tenant.poloType === 'sales'
 
   const [from, setFrom] = useState(diaLocalComOffset(-(INICIO_PADRAO_DIAS - 1)))
@@ -316,10 +317,31 @@ export function NfePage() {
   const naturezaMissing = configLoaded && !savedNaturezaRef.current
   const semBuraco = backlog != null && !backlogErro && backlog.total.semNota.pedidos === 0
 
+  // Beco de polo errado. Continua existindo porque a rota é alcançável digitando /nfe, mesmo
+  // com a entrada do menu escondida — mas o texto precisa caber na realidade do endereço:
+  // num CRM travado num polo (VITE_POLO_FIXO) NÃO existe seletor de workspace, então mandar
+  // "troque de workspace" era mandar apertar um botão que não está na tela.
   if (!isSalesPolo) {
     return (
-      <AppLayout title="Emissão de NF-e" subtitle="Disponível no polo Tricopill (onde fica a integração com o Bling).">
-        <EmptyState icon={FileText} title="NF-e é do polo Tricopill" description="Troque para o workspace Tricopill para emitir notas." />
+      <AppLayout title="Emissão de NF-e" subtitle="A emissão sai do Bling, que é do Tricopill.">
+        <EmptyState
+          icon={FileText}
+          title="NF-e é do polo Tricopill"
+          description={
+            poloFixo
+              ? 'Este endereço é o CRM da clínica. Emitir NF-e é no CRM do Tricopill.'
+              : 'Troque para o workspace Tricopill para emitir notas.'
+          }
+        />
+        {/* Quem chega aqui pela clínica quase sempre queria nota de FORNECEDOR, que a clínica
+            tem e vive noutra tela. Sem esta linha o beco não devolve caminho nenhum. */}
+        <p className="text-center text-sm text-muted-foreground">
+          Notas de fornecedor da clínica ficam em{' '}
+          <Link to="/contas-a-pagar" className="font-medium text-foreground underline underline-offset-4">
+            Contas a pagar
+          </Link>
+          .
+        </p>
       </AppLayout>
     )
   }
