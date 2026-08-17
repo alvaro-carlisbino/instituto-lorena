@@ -132,6 +132,8 @@ export type KanbanCard = {
   diasAtraso: number
   vendaId: string | null
   cirurgiaEm: string | null
+  /** Em qual funil o paciente está: é o que separa a fila da Aline da da Ingrid. */
+  pipelineId: string | null
 }
 
 export async function listFollowupKanban(): Promise<KanbanCard[]> {
@@ -140,7 +142,7 @@ export async function listFollowupKanban(): Promise<KanbanCard[]> {
     .from('v_followup_kanban')
     .select(
       'followup_id, lead_id, patient_name, phone, attempt_no, scheduled_for, done_at, outcome, note, ' +
-        'coluna, dias_atraso, venda_id, cirurgia_em',
+        'coluna, dias_atraso, venda_id, cirurgia_em, pipeline_id',
     )
     .order('scheduled_for', { ascending: true })
     .limit(500)
@@ -162,8 +164,48 @@ export async function listFollowupKanban(): Promise<KanbanCard[]> {
       diasAtraso: Number(row.dias_atraso ?? 0),
       vendaId: str(row.venda_id),
       cirurgiaEm: str(row.cirurgia_em),
+      pipelineId: str(row.pipeline_id),
     }
   })
+}
+
+export const FUNIL_CIRURGICO = 'pipeline-processo-cirurgico'
+export const FUNIL_PROTOCOLOS = 'pipeline-protocolos'
+/** O funil da recepção, antes de a triagem decidir transplante ou protocolo. */
+export const FUNIL_TRIAGEM = 'pipeline-clinica'
+/** Os únicos funis que a Central de Vendas da clínica enxerga. */
+export const FUNIS_DA_CLINICA = [FUNIL_CIRURGICO, FUNIL_PROTOCOLOS, FUNIL_TRIAGEM]
+
+/**
+ * Troca o paciente de funil sem perder o follow-up.
+ *
+ * O caso que pediu isto: paciente passou em consulta de transplante, o médico
+ * indicou protocolo, e ele continuava na fila de transplante da Aline. Ela
+ * conseguia mover pela ficha do paciente (Encaminhar de funil), mas eram quatro
+ * cliques em outra tela, e o follow-up dela ficava para trás.
+ *
+ * O follow-up em aberto NÃO é tocado de propósito: quem vai virar protocolo
+ * continua precisando de contato, na mesma data combinada. Só a fila muda.
+ */
+export async function moverLeadDeFunil(
+  leadId: string,
+  destino: 'cirurgia' | 'protocolo',
+): Promise<void> {
+  const client = assertClient()
+  const alvo =
+    destino === 'cirurgia'
+      ? { pipeline: FUNIL_CIRURGICO, stage: 'cir-follow-up' }
+      : { pipeline: FUNIL_PROTOCOLOS, stage: 'pro-follow-up' }
+  const { error } = await client
+    .from('leads')
+    .update({
+      pipeline_id: alvo.pipeline,
+      stage_id: alvo.stage,
+      stage_entered_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', leadId)
+  if (error) throw new Error(error.message)
 }
 
 /**

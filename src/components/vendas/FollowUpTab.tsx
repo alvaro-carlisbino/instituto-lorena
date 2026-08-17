@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { CalendarClock, MessageCircle, PhoneCall, RotateCcw } from 'lucide-react'
+import { CalendarClock, MessageCircle, PhoneCall, RotateCcw, Scissors, Sparkles } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,11 +23,16 @@ import { cn } from '@/lib/utils'
 import {
   FOLLOWUP_CHANNELS,
   FOLLOWUP_OUTCOMES,
+  FUNIL_CIRURGICO,
+  FUNIL_PROTOCOLOS,
+  FUNIL_TRIAGEM,
+  FUNIS_DA_CLINICA,
   KANBAN_COLUNAS,
   type KanbanCard,
   type KanbanColuna,
   completeFollowup,
   listFollowupKanban,
+  moverLeadDeFunil,
   reabrirFollowup,
 } from '@/services/leadFollowups'
 
@@ -87,6 +92,10 @@ export function FollowUpTab() {
   const [proxima, setProxima] = useState(emDias(7))
   const [semProxima, setSemProxima] = useState(false)
   const [salvando, setSalvando] = useState(false)
+  // A fila da Aline é transplante; a da Ingrid é protocolo. Sem separar, cada uma
+  // trabalhava no meio dos pacientes da outra.
+  const [funil, setFunil] = useState<'cirurgia' | 'protocolo' | 'todos'>('cirurgia')
+  const [movendo, setMovendo] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -103,21 +112,57 @@ export function FollowUpTab() {
     void load()
   }, [])
 
+  const visiveis = useMemo(() => {
+    // Primeiro corte: só funil da CLÍNICA. Quem enxerga os dois polos via 3 leads
+    // do Tricopill no follow-up da clínica — a fila de vender cápsula no meio da
+    // fila de transplante. Polo não se mistura nem na tela.
+    const daClinica = cards.filter(
+      (c) => c.pipelineId != null && FUNIS_DA_CLINICA.includes(c.pipelineId),
+    )
+    if (funil === 'todos') return daClinica
+    const alvo = funil === 'cirurgia' ? FUNIL_CIRURGICO : FUNIL_PROTOCOLOS
+    // Paciente que ainda não foi triado (funil da recepção) aparece nas duas
+    // filas de propósito: se ele só aparecesse em "todos", ninguém o veria.
+    return daClinica.filter((c) => c.pipelineId === alvo || c.pipelineId === FUNIL_TRIAGEM)
+  }, [cards, funil])
+
   const porColuna = useMemo(() => {
     const mapa = new Map<KanbanColuna, KanbanCard[]>()
     for (const c of KANBAN_COLUNAS) mapa.set(c.id, [])
-    for (const card of cards) mapa.get(card.coluna)?.push(card)
+    for (const card of visiveis) mapa.get(card.coluna)?.push(card)
     // Atrasado primeiro dentro de cada coluna: é a fila do dia dela.
     for (const lista of mapa.values()) {
       lista.sort((a, b) => a.scheduledFor.localeCompare(b.scheduledFor))
     }
     return mapa
-  }, [cards])
+  }, [visiveis])
 
   const atrasados = useMemo(
-    () => cards.filter((c) => ABERTAS.includes(c.coluna) && c.diasAtraso > 0).length,
-    [cards],
+    () => visiveis.filter((c) => ABERTAS.includes(c.coluna) && c.diasAtraso > 0).length,
+    [visiveis],
   )
+
+  /**
+   * Troca o paciente de funil. É o caso da consulta de transplante que termina em
+   * indicação de protocolo: o paciente sai da fila de quem vende transplante e
+   * entra na de quem vende protocolo, com o follow-up dele intacto.
+   */
+  const trocarFunil = async (card: KanbanCard, destino: 'cirurgia' | 'protocolo') => {
+    setMovendo(card.leadId)
+    try {
+      await moverLeadDeFunil(card.leadId, destino)
+      toast.success(
+        destino === 'protocolo'
+          ? `${card.patientName} foi para o funil de protocolos. O follow-up continua marcado.`
+          : `${card.patientName} foi para o funil cirúrgico. O follow-up continua marcado.`,
+      )
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao trocar de funil')
+    } finally {
+      setMovendo(null)
+    }
+  }
 
   const abrir = (card: KanbanCard) => {
     setAlvo(card)
@@ -224,19 +269,65 @@ export function FollowUpTab() {
             <RotateCcw className="size-3" /> Voltar para a fila
           </Button>
         ) : null}
+        {/* Consulta de transplante que termina em indicação de protocolo (e o
+            contrário). O paciente troca de fila e o follow-up dele vai junto —
+            antes disto era pela ficha do paciente, em outra tela. */}
+        {c.pipelineId !== FUNIL_PROTOCOLOS && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            disabled={movendo === c.leadId}
+            title="Passar para o funil de protocolos e spa"
+            onClick={() => void trocarFunil(c, 'protocolo')}
+          >
+            <Sparkles className="size-3" /> Protocolo
+          </Button>
+        )}
+        {c.pipelineId !== FUNIL_CIRURGICO && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            disabled={movendo === c.leadId}
+            title="Passar para o funil de transplante"
+            onClick={() => void trocarFunil(c, 'cirurgia')}
+          >
+            <Scissors className="size-3" /> Transplante
+          </Button>
+        )}
       </div>
     </div>
   )
 
   return (
     <div className="space-y-4">
-      {atrasados > 0 && (
-        <p className="text-sm text-muted-foreground">
-          <span className="font-medium text-destructive">{atrasados}</span> paciente
-          {atrasados > 1 ? 's' : ''} com contato atrasado. O card fica com a borda vermelha e o número de
-          dias.
-        </p>
-      )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-1">
+          {(
+            [
+              { id: 'cirurgia', label: 'Transplante' },
+              { id: 'protocolo', label: 'Protocolos e spa' },
+              { id: 'todos', label: 'Todos' },
+            ] as const
+          ).map((op) => (
+            <Button
+              key={op.id}
+              size="sm"
+              variant={funil === op.id ? 'default' : 'outline'}
+              onClick={() => setFunil(op.id)}
+            >
+              {op.label}
+            </Button>
+          ))}
+        </div>
+        {atrasados > 0 && (
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-destructive">{atrasados}</span> paciente
+            {atrasados > 1 ? 's' : ''} com contato atrasado.
+          </p>
+        )}
+      </div>
 
       {loading && cards.length === 0 ? (
         <EmptyState icon={CalendarClock} title="Carregando…" />
