@@ -544,6 +544,12 @@ verify_jwt = false
 [functions.crm-cirurgia-push]
 verify_jwt = false
 
+# Remarca e cancela a cirurgia nos dois lados (CRM + agenda da enfermagem).
+# verify_jwt = true de propósito: quem chama é gente na tela, e a ação altera a
+# agenda de outro sistema — precisa ter dono, não pode ser chamada anônima.
+[functions.crm-cirurgia-remarcar]
+verify_jwt = true
+
 # Login do paciente nos apps (CPF + código). verify_jwt=false porque o paciente
 # AINDA NÃO tem sessão quando pede o código — é justamente o que esta função emite.
 # Proteções no handler: resposta neutra (não revela se o CPF existe), 60s entre

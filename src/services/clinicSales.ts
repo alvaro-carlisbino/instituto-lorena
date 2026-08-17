@@ -345,6 +345,44 @@ export async function updateClinicSale(id: string, input: ClinicSaleInput): Prom
   if (error) throw new Error(error.message)
 }
 
+export type ResultadoEnfermagem = {
+  /** Se a agenda do centro cirúrgico foi de fato alterada. */
+  tocou: boolean
+  acao?: string
+  motivo?: string
+  /** Quando a sala já começou: o sistema não mexe, alguém precisa ligar lá. */
+  precisaAvisar?: boolean
+}
+
+/**
+ * Remarca ou cancela a cirurgia no CRM **e** na agenda da enfermagem.
+ *
+ * Passa por edge function porque o outro lado é o MySQL do centro cirúrgico, que
+ * o navegador não alcança. A resposta diz o que aconteceu lá: cirurgia que a sala
+ * já iniciou não é alterada por sistema nenhum, e nesse caso a tela avisa para
+ * falar com a equipe em vez de deixar a recepção achar que resolveu.
+ */
+async function chamarRemarcacao(payload: Record<string, unknown>): Promise<ResultadoEnfermagem> {
+  const client = assertClient()
+  const { data, error } = await client.functions.invoke('crm-cirurgia-remarcar', { body: payload })
+  const corpo = (data ?? {}) as { ok?: boolean; error?: string; enfermagem?: ResultadoEnfermagem }
+  if (error && !corpo.error) throw new Error(error.message)
+  if (corpo.error || corpo.ok === false) throw new Error(corpo.error || 'Falha ao atualizar a cirurgia')
+  return corpo.enfermagem ?? { tocou: false }
+}
+
+export async function remarcarCirurgia(saleId: string, scheduledAt: string): Promise<ResultadoEnfermagem> {
+  return chamarRemarcacao({ saleId, action: 'remarcar', scheduledAt })
+}
+
+export async function cancelarCirurgia(
+  saleId: string,
+  payload: { reason: string; refundStatus?: string; note?: string },
+): Promise<ResultadoEnfermagem> {
+  if (!payload.reason.trim()) throw new Error('Informe o motivo do cancelamento.')
+  return chamarRemarcacao({ saleId, action: 'cancelar', ...payload })
+}
+
 /** Remarcação: muda só a data, e o gatilho do banco refaz a fila de lembretes. */
 export async function rescheduleSale(id: string, scheduledAt: string | null): Promise<void> {
   const client = assertClient()

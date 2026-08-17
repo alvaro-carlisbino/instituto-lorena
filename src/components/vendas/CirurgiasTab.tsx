@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, CalendarCheck2, CalendarPlus, Copy } from 'lucide-react'
+import { AlertTriangle, Ban, CalendarCheck2, CalendarPlus, CalendarSync, Copy } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
@@ -13,11 +23,14 @@ import {
   CONFIRMATION_LABEL,
   type ClinicSale,
   type ConfirmationStatus,
+  type ResultadoEnfermagem,
   type SurgeryReminder,
+  cancelarCirurgia,
   getAgendaIcsUrl,
   googleCalendarLink,
   listClinicSales,
   listReminders,
+  remarcarCirurgia,
   setSaleConfirmation,
 } from '@/services/clinicSales'
 
@@ -47,6 +60,26 @@ const TOM: Record<ConfirmationStatus, string> = {
   remanejar: 'bg-amber-500 text-white hover:bg-amber-500/90',
 }
 
+/** Data e hora de um ISO, nos formatos que os dois inputs esperam. */
+const partesLocais = (iso: string | null) => {
+  if (!iso) return { dia: '', hora: '07:00' }
+  const d = new Date(iso)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return {
+    dia: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+    hora: `${p(d.getHours())}:${p(d.getMinutes())}`,
+  }
+}
+
+/**
+ * O que aconteceu na agenda da enfermagem, em uma frase para o toast.
+ *
+ * Aparece sempre, inclusive quando NADA foi alterado lá: "atualizei aqui e não
+ * consegui lá" é a informação que decide se alguém precisa descer e avisar a sala.
+ */
+const recadoDaEnfermagem = (r: ResultadoEnfermagem): string =>
+  r.tocou ? `Agenda da enfermagem: ${r.acao}.` : `Agenda da enfermagem NÃO mudou — ${r.motivo}.`
+
 /**
  * A lista de cirurgias do mês, com um status por paciente.
  *
@@ -63,6 +96,13 @@ export function CirurgiasTab() {
   const [loading, setLoading] = useState(false)
   const [icsUrl, setIcsUrl] = useState<string | null>(null)
   const [salvando, setSalvando] = useState<string | null>(null)
+  const [remarcando, setRemarcando] = useState<ClinicSale | null>(null)
+  const [novaData, setNovaData] = useState('')
+  const [novaHora, setNovaHora] = useState('07:00')
+  const [cancelando, setCancelando] = useState<ClinicSale | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [estorno, setEstorno] = useState('Em avaliação')
+  const [enviando, setEnviando] = useState(false)
   const [mes, setMes] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -127,6 +167,53 @@ export function CirurgiasTab() {
       toast.error(e instanceof Error ? e.message : 'Falha ao salvar o status')
     } finally {
       setSalvando(null)
+    }
+  }
+
+  const abrirRemarcacao = (sale: ClinicSale) => {
+    const { dia, hora } = partesLocais(sale.scheduledAt)
+    setNovaData(dia)
+    setNovaHora(hora)
+    setRemarcando(sale)
+  }
+
+  const confirmarRemarcacao = async () => {
+    if (!remarcando || !novaData) return
+    setEnviando(true)
+    try {
+      const iso = new Date(`${novaData}T${novaHora || '07:00'}:00`).toISOString()
+      const enfermagem = await remarcarCirurgia(remarcando.id, iso)
+      toast.success(
+        `${remarcando.patientName} remarcada para ${new Date(iso).toLocaleString('pt-BR')}. ${recadoDaEnfermagem(enfermagem)}`,
+        // A sala já começou: o recado precisa ficar na tela até alguém ler, não
+        // sumir em três segundos como toast de sucesso comum.
+        enfermagem.precisaAvisar ? { duration: 15000 } : undefined,
+      )
+      setRemarcando(null)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao remarcar')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  const confirmarCancelamento = async () => {
+    if (!cancelando) return
+    setEnviando(true)
+    try {
+      const enfermagem = await cancelarCirurgia(cancelando.id, { reason: motivo, refundStatus: estorno })
+      toast.success(
+        `Cirurgia de ${cancelando.patientName} cancelada. ${recadoDaEnfermagem(enfermagem)}`,
+        enfermagem.precisaAvisar ? { duration: 15000 } : undefined,
+      )
+      setCancelando(null)
+      setMotivo('')
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao cancelar')
+    } finally {
+      setEnviando(false)
     }
   }
 
@@ -282,16 +369,39 @@ export function CirurgiasTab() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          {link && (
+                          <div className="flex justify-end gap-0.5">
                             <Button
                               size="sm"
                               variant="ghost"
-                              nativeButton={false}
-                              render={<a href={link} target="_blank" rel="noreferrer noopener" />}
+                              title="Mudar a data — atualiza a agenda da enfermagem"
+                              onClick={() => abrirRemarcacao(s)}
                             >
-                              <CalendarPlus className="size-3.5" />
+                              <CalendarSync className="size-3.5" />
                             </Button>
-                          )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Cancelar a cirurgia — tira da agenda da enfermagem"
+                              onClick={() => {
+                                setMotivo('')
+                                setEstorno('Em avaliação')
+                                setCancelando(s)
+                              }}
+                            >
+                              <Ban className="size-3.5" />
+                            </Button>
+                            {link && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                title="Criar o evento no Google Agenda agora"
+                                nativeButton={false}
+                                render={<a href={link} target="_blank" rel="noreferrer noopener" />}
+                              >
+                                <CalendarPlus className="size-3.5" />
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     )
@@ -301,11 +411,92 @@ export function CirurgiasTab() {
             </div>
           )}
           <p className="mt-3 text-xs text-muted-foreground">
-            Remarcar a cirurgia devolve o paciente para "não confirmada": o sim que ele deu foi para a
-            data antiga.
+            Mudar a data ou cancelar já atualiza a agenda da enfermagem. Remarcar devolve o paciente para
+            "não confirmada": o sim que ele deu foi para a data antiga.
           </p>
         </CardContent>
       </Card>
+
+      <Dialog open={remarcando != null} onOpenChange={(v) => (!v ? setRemarcando(null) : null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nova data para {remarcando?.patientName}</DialogTitle>
+            <DialogDescription>
+              {remarcando?.scheduledAt
+                ? `Hoje está marcada para ${new Date(remarcando.scheduledAt).toLocaleString('pt-BR')}.`
+                : ''}{' '}
+              A agenda da enfermagem é atualizada junto, e os avisos ao paciente são reprogramados para a
+              data nova.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1.5">
+              <Label>Data</Label>
+              <Input
+                type="date"
+                value={novaData}
+                onChange={(e) => setNovaData(e.target.value)}
+                className="w-44"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Hora</Label>
+              <Input
+                type="time"
+                value={novaHora}
+                onChange={(e) => setNovaHora(e.target.value)}
+                className="w-32"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setRemarcando(null)}>
+              Voltar
+            </Button>
+            <Button disabled={enviando || !novaData} onClick={() => void confirmarRemarcacao()}>
+              {enviando ? 'Remarcando…' : 'Remarcar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cancelando != null} onOpenChange={(v) => (!v ? setCancelando(null) : null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancelar a cirurgia de {cancelando?.patientName}</DialogTitle>
+            <DialogDescription>
+              A cirurgia sai da agenda da enfermagem e da fila daqui, e os avisos pendentes ao paciente são
+              cancelados. A venda fica registrada como cancelada, com o motivo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Motivo</Label>
+              <Input
+                value={motivo}
+                onChange={(e) => setMotivo(e.target.value)}
+                placeholder="Desistiu, condição de saúde, remarcou sem data…"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Estorno da entrada</Label>
+              <Input value={estorno} onChange={(e) => setEstorno(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCancelando(null)}>
+              Voltar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={enviando || !motivo.trim()}
+              onClick={() => void confirmarCancelamento()}
+            >
+              {enviando ? 'Cancelando…' : 'Cancelar cirurgia'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
