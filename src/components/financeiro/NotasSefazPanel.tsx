@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { CloudDownload, PackagePlus, RefreshCw, TriangleAlert } from 'lucide-react'
+import { ArrowUpRight, CloudDownload, PackagePlus, RefreshCw, TriangleAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -121,8 +122,9 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
               {resumo.comXmlGuardado} com XML guardado
             </p>
 
-            {/* A conferência do pagamento é a dívida que esta automação deixa em aberto. Ela vem
-                antes do estoque na tela porque distorce o financeiro enquanto ninguém olha. */}
+            {/* Nota que a SEFAZ trouxe e o extrato ainda não explicou. O casamento com o banco
+                roda sozinho de hora em hora; o que sobra aqui é o que ele não teve como
+                decidir — ou o que de fato não foi pago. */}
             {resumo.aConferirParcelas > 0 && (
               <div className="rounded border border-amber-500/40 bg-amber-500/[0.06] p-2">
                 <p className="flex items-start gap-1.5 font-medium">
@@ -130,9 +132,19 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
                   {resumo.aConferirParcelas} parcela(s) em aberto · {brl(resumo.aConferirValor)}
                 </p>
                 <p className="mt-1 text-muted-foreground">
-                  Nasceram em aberto porque nem a SEFAZ nem o XML dizem se a nota foi paga. Boa
-                  parte já saiu do banco: conferir contra o extrato antes de ler isso como dívida.
+                  Nasceram em aberto porque nem a SEFAZ nem o XML dizem se a nota foi paga. O que
+                  o extrato do banco prova já foi dado por pago sozinho
+                  {resumo.conciliadasAuto > 0
+                    ? ` (${resumo.conciliadasAuto} parcela(s), ${brl(resumo.conciliadoAutoValor)})`
+                    : ''}
+                  . Isto aqui é o que o extrato não explica.
                 </p>
+                <Link
+                  to="/conciliacao"
+                  className="mt-1.5 inline-flex items-center gap-1 font-medium text-amber-700 underline-offset-2 hover:underline dark:text-amber-400"
+                >
+                  Conferir na conciliação <ArrowUpRight className="size-3" />
+                </Link>
               </div>
             )}
 

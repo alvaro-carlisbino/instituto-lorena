@@ -40,6 +40,9 @@ export type ResumoSefaz = {
   /** Parcelas criadas por esta via que continuam em aberto e ninguém bateu contra o banco. */
   aConferirParcelas: number
   aConferirValor: number
+  /** Dessas, as que o extrato do banco já provou que saíram (migration 20260817190000). */
+  conciliadasAuto: number
+  conciliadoAutoValor: number
 }
 
 export async function resumoSefaz(): Promise<ResumoSefaz> {
@@ -71,6 +74,17 @@ export async function resumoSefaz(): Promise<ResumoSefaz> {
   if (pendErr) throw new Error(pendErr.message)
   const parcelas = (pend ?? []) as Array<{ amount_cents: number }>
 
+  // As que o casamento com o extrato já resolveu sozinho. Sem este número o painel só sabe
+  // reclamar do que falta e a automação parece não ter feito nada.
+  const { data: auto, error: autoErr } = await c
+    .from('payable_installments')
+    .select('amount_cents')
+    .not('auto_reconciled_at', 'is', null)
+    .like('import_key', 'sefaz:%')
+    .limit(2000)
+  if (autoErr) throw new Error(autoErr.message)
+  const conciliadas = (auto ?? []) as Array<{ amount_cents: number }>
+
   return {
     capturadas: linhas.length,
     lancadas: linhas.filter((l) => l.status === 'lancado').length,
@@ -82,6 +96,8 @@ export async function resumoSefaz(): Promise<ResumoSefaz> {
     janelaAte: dias[dias.length - 1] ?? null,
     aConferirParcelas: parcelas.length,
     aConferirValor: parcelas.reduce((s, p) => s + (p.amount_cents ?? 0), 0) / 100,
+    conciliadasAuto: conciliadas.length,
+    conciliadoAutoValor: conciliadas.reduce((s, p) => s + (p.amount_cents ?? 0), 0) / 100,
   }
 }
 

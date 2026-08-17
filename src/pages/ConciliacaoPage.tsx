@@ -5,6 +5,7 @@ import { PluggyConnect } from 'react-pluggy-connect'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { FinanceTabs } from '@/components/page/FinanceTabs'
+import { ConciliacaoAutoPanel } from '@/components/financeiro/ConciliacaoAutoPanel'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -13,7 +14,6 @@ import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useTenant } from '@/context/TenantContext'
-import { type Payable, listPayables } from '@/services/estoqueCompras'
 import {
   type FinAccount,
   type FinTransaction,
@@ -45,7 +45,6 @@ export function ConciliacaoPage() {
   const [accounts, setAccounts] = useState<FinAccount[]>([])
   const [accountId, setAccountId] = useState('')
   const [txns, setTxns] = useState<FinTransaction[]>([])
-  const [payables, setPayables] = useState<Payable[]>([])
   const [receivables, setReceivables] = useState<Receivable[]>([])
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -100,15 +99,13 @@ export function ConciliacaoPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [acc, t, p, r] = await Promise.all([
+      const [acc, t, r] = await Promise.all([
         listAccounts(),
         listTransactions({ onlyUnreconciled: true, limit: 500 }),
-        listPayables(),
         listReceivables(),
       ])
       setAccounts(acc)
       setTxns(t)
-      setPayables(p)
       setReceivables(r)
       if (!accountId && acc.length > 0) setAccountId(acc[0].id)
     } catch (e) {
@@ -124,12 +121,15 @@ export function ConciliacaoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const openPayables = useMemo(() => payables.filter((p) => p.status === 'aberto'), [payables])
   const openReceivables = useMemo(() => receivables.filter((r) => r.status === 'aberto'), [receivables])
 
+  // Só o lado da RECEITA. A conta a pagar passou a ser casada no servidor
+  // (`crm_conciliar_auto`, migration 20260817190000), com janela larga e desempate por nome
+  // do fornecedor. Deixar este motor palpitando sobre parcela também faria a tela sugerir com
+  // confiança justamente os empates que o servidor se recusou a decidir.
   const suggestions = useMemo(
-    () => suggestMatches(txns, openPayables, openReceivables).filter((s) => !dismissed.has(s.transaction.id)),
-    [txns, openPayables, openReceivables, dismissed],
+    () => suggestMatches(txns, [], openReceivables).filter((s) => !dismissed.has(s.transaction.id)),
+    [txns, openReceivables, dismissed],
   )
   const suggestedTxnIds = useMemo(() => new Set(suggestions.map((s) => s.transaction.id)), [suggestions])
   const unmatched = useMemo(
@@ -424,10 +424,12 @@ export function ConciliacaoPage() {
         </div>
 
         <div className="space-y-4">
+          <ConciliacaoAutoPanel onMudou={() => void load()} />
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-sm">
-                <Link2 className="size-4 text-primary" /> Sugestões de conciliação ({suggestions.length})
+                <Link2 className="size-4 text-primary" /> Sugestões de recebimento ({suggestions.length})
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1.5">
@@ -435,7 +437,7 @@ export function ConciliacaoPage() {
                 <EmptyState
                   icon={ArrowLeftRight}
                   title={loading ? 'Carregando…' : 'Sem sugestões'}
-                  description="Importe um extrato e as batidas com contas a pagar/receber aparecem aqui."
+                  description="Entradas do extrato que batem com uma conta a receber em aberto aparecem aqui. O lado das contas a pagar é conciliado sozinho, no painel acima."
                 />
               ) : (
                 suggestions.map((s) => (
