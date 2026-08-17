@@ -269,7 +269,12 @@ function App() {
   // Vem ANTES do onboarding: sem isto, o primeiro acesso caía na tela de configurar
   // a clínica e a atendente reconfiguraria nome e cor do consultório inteiro.
   if (dataMode === 'supabase' && crmState.session && precisaDefinirSenha() && !senhaDefinida) {
-    return <DefinirSenhaPage onPronto={() => setSenhaDefinida(true)} />
+    return (
+      <DefinirSenhaPage
+        email={crmState.session.user?.email}
+        onPronto={() => setSenhaDefinida(true)}
+      />
+    )
   }
 
   if (dataMode === 'supabase' && crmState.session && !crmState.onboardingDone) {

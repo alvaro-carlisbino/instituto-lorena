@@ -20,7 +20,7 @@ const MINIMO = 8
  * usuário manda o link do convite; a senha nasce aqui, com ela, e não passa por
  * WhatsApp nem pela cabeça de quem cadastrou.
  */
-export function DefinirSenhaPage({ onPronto }: { onPronto: () => void }) {
+export function DefinirSenhaPage({ email, onPronto }: { email?: string | null; onPronto: () => void }) {
   const [senha, setSenha] = useState('')
   const [confirmacao, setConfirmacao] = useState('')
   const [salvando, setSalvando] = useState(false)
@@ -81,10 +81,21 @@ export function DefinirSenhaPage({ onPronto }: { onPronto: () => void }) {
               </CardTitle>
             </div>
           </div>
-          <CardDescription className="text-base leading-relaxed text-muted-foreground">
-            {recuperacao
-              ? 'Escolha uma senha nova para voltar a entrar.'
-              : 'Este é o seu primeiro acesso. Escolha uma senha só sua: é com ela que você entra daqui pra frente.'}
+          <CardDescription className="space-y-2 text-base leading-relaxed text-muted-foreground">
+            <span className="block">
+              {recuperacao
+                ? 'Escolha uma senha nova para voltar a entrar.'
+                : 'Este é o seu primeiro acesso. Escolha uma senha só sua: é com ela que você entra daqui pra frente.'}
+            </span>
+            {/* De quem é a conta, em destaque. Sem isto, quem só quis conferir se o
+                link funciona acaba criando a senha da OUTRA pessoa sem perceber —
+                foi o que aconteceu no primeiro convite, em 17/08/2026. */}
+            {email && (
+              <span className="block rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-foreground">
+                Você está criando a senha da conta <strong className="font-semibold">{email}</strong>. Se esta
+                conta não é sua, feche esta página: quem vai usar esse acesso é quem precisa escolher a senha.
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
         <form
