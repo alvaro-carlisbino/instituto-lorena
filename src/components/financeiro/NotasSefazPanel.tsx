@@ -1,71 +1,98 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { CloudDownload, TriangleAlert } from 'lucide-react'
+import { CloudDownload, PackagePlus, RefreshCw, TriangleAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
-  importarLote,
-  listarNotasSefaz,
-  type ListaSefaz,
-  type ResultadoImport,
+  darEntradaLote,
+  listarEstoquePendente,
+  resumoSefaz,
+  sincronizarSefaz,
+  type ResultadoEntrada,
+  type ResumoSefaz,
 } from '@/services/nfeSefaz'
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const dia = (d: string | null) =>
+  d ? d.split('-').reverse().join('/') : '—'
 
 /**
- * Notas que a SEFAZ tem contra o CNPJ do polo e ainda não estão lançadas.
+ * Notas de fornecedor emitidas contra o CNPJ do polo.
  *
- * A tela separa em dois blocos porque a diferença é irreversível, não uma preferência:
- * nota COM XML completo entra inteira (itens no estoque, parcelas reais da duplicata); nota
- * em RESUMO entra só como documento + uma parcela, porque a SEFAZ já não tem mais os itens —
- * ciência da operação tem prazo de 10 dias da emissão e depois disso o XML não existe.
- *
- * Mostrar isso separado evita a leitura errada de "importei tudo, então o estoque está certo".
+ * A captura e o lançamento financeiro rodam sozinhos 2x/dia (`crm-sefaz-sync`). Esta tela não
+ * busca nota: mostra o que já entrou e as duas pendências que a automação de propósito não
+ * resolve sozinha — a entrada de estoque (precisa casar item com o catálogo) e a conferência
+ * do que já foi pago (só o extrato do banco sabe).
  */
 export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
-  const [lista, setLista] = useState<ListaSefaz | null>(null)
-  const [carregando, setCarregando] = useState(false)
+  const [resumo, setResumo] = useState<ResumoSefaz | null>(null)
+  const [carregando, setCarregando] = useState(true)
+  const [sincronizando, setSincronizando] = useState(false)
   const [progresso, setProgresso] = useState<{ feitas: number; total: number; atual: string } | null>(null)
-  const [resultado, setResultado] = useState<ResultadoImport[] | null>(null)
+  const [falhas, setFalhas] = useState<ResultadoEntrada[] | null>(null)
 
-  const consultar = async () => {
-    setCarregando(true)
-    setResultado(null)
+  // Sem `setCarregando(true)` aqui: além de ser setState síncrono dentro do efeito, recarregar
+  // mostrando o número antigo até o novo chegar é melhor do que piscar "carregando" a cada vez.
+  const carregar = useCallback(async () => {
     try {
-      setLista(await listarNotasSefaz())
+      const r = await resumoSefaz()
+      setResumo(r)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao consultar a SEFAZ')
+      toast.error(e instanceof Error ? e.message : 'Falha ao ler as notas da SEFAZ')
     } finally {
       setCarregando(false)
     }
+  }, [])
+
+  // A primeira carga não passa pelo `carregar` porque precisa da trava de desmontagem: quem sai
+  // de /contas-a-pagar antes da consulta voltar não deve tomar setState em componente morto.
+  useEffect(() => {
+    let vivo = true
+    void resumoSefaz()
+      .then((r) => { if (vivo) setResumo(r) })
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao ler as notas da SEFAZ'))
+      .finally(() => { if (vivo) setCarregando(false) })
+    return () => { vivo = false }
+  }, [])
+
+  const sincronizar = async () => {
+    setSincronizando(true)
+    try {
+      const r = await sincronizarSefaz()
+      const novas = Number(r.resumosLancados ?? 0) + Number(r.completasLancadas ?? 0)
+      toast.success(novas > 0 ? `${novas} nota(s) nova(s) lançada(s)` : 'Nada novo na SEFAZ')
+      await carregar()
+      if (novas > 0) onImportou?.()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao sincronizar')
+    } finally {
+      setSincronizando(false)
+    }
   }
 
-  const importar = async (somenteComXml: boolean) => {
-    if (!lista) return
-    const alvo = lista.notas.filter((n) => (somenteComXml ? n.xmlCompleto : true))
-    if (alvo.length === 0) return
-    setProgresso({ feitas: 0, total: alvo.length, atual: '' })
+  const darEntrada = async () => {
+    setFalhas(null)
     try {
-      const res = await importarLote(alvo, setProgresso)
-      setResultado(res)
+      const pendentes = await listarEstoquePendente()
+      if (pendentes.length === 0) return
+      setProgresso({ feitas: 0, total: pendentes.length, atual: '' })
+      const res = await darEntradaLote(pendentes, setProgresso)
       const ok = res.filter((r) => r.ok).length
-      const falhou = res.length - ok
-      toast[falhou ? 'warning' : 'success'](
-        `${ok} nota(s) lançada(s)${falhou ? `, ${falhou} com erro` : ''}`,
+      const ruins = res.filter((r) => !r.ok)
+      setFalhas(ruins.length > 0 ? ruins : null)
+      toast[ruins.length ? 'warning' : 'success'](
+        `${ok} nota(s) com entrada no estoque${ruins.length ? `, ${ruins.length} com erro` : ''}`,
       )
+      await carregar()
       onImportou?.()
-      await consultar()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha na carga')
+      toast.error(e instanceof Error ? e.message : 'Falha na entrada de estoque')
     } finally {
       setProgresso(null)
     }
   }
-
-  const comXml = lista?.notas.filter((n) => n.xmlCompleto).length ?? 0
-  const soResumo = (lista?.faltando ?? 0) - comXml
 
   return (
     <Card className="border-primary/40 bg-primary/[0.03]">
@@ -76,84 +103,90 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
-          Notas de fornecedor emitidas contra o CNPJ deste polo, direto da SEFAZ — sem depender de
-          ninguém mandar o XML.
+          Notas de fornecedor emitidas contra o CNPJ deste polo entram sozinhas, duas vezes por
+          dia, sem depender de ninguém mandar o XML.
         </p>
 
-        <Button size="sm" variant="outline" onClick={() => void consultar()} disabled={carregando || !!progresso}>
-          {carregando ? 'Consultando…' : 'Consultar SEFAZ'}
-        </Button>
+        {carregando && !resumo && <p className="text-xs text-muted-foreground">Carregando…</p>}
 
-        {lista && (
-          <div className="space-y-2 text-xs">
+        {resumo && (
+          <div className="space-y-3 text-xs">
             <div className="flex flex-wrap items-center gap-1.5">
-              <Badge variant="secondary">{lista.total} na SEFAZ</Badge>
-              <Badge variant="outline">{lista.jaNoSistema} já lançadas</Badge>
-              {lista.faltando > 0 && (
-                <Badge variant="destructive">
-                  {lista.faltando} faltando · {brl(lista.valorFaltando)}
-                </Badge>
-              )}
+              <Badge variant="secondary">{resumo.capturadas} na janela</Badge>
+              <Badge variant="outline">{resumo.lancadas} lançadas</Badge>
+              {resumo.comErro > 0 && <Badge variant="destructive">{resumo.comErro} com erro</Badge>}
             </div>
-
-            <p className="flex items-start gap-1.5 text-muted-foreground">
-              <TriangleAlert className="mt-0.5 size-3 shrink-0" />
-              <span>{lista.aviso}</span>
+            <p className="text-muted-foreground">
+              {brl(resumo.valorTotal)} · {dia(resumo.janelaDe)} a {dia(resumo.janelaAte)} ·{' '}
+              {resumo.comXmlGuardado} com XML guardado
             </p>
 
-            {lista.faltando > 0 && (
-              <div className="space-y-2 pt-1">
-                <div className="rounded border p-2">
-                  <p className="font-medium">{comXml} com XML completo</p>
-                  <p className="text-muted-foreground">
-                    Entram inteiras: fornecedor, parcelas e itens no estoque.
-                  </p>
-                </div>
-                <div className="rounded border p-2">
-                  <p className="font-medium">{soResumo} só com resumo</p>
-                  <p className="text-muted-foreground">
-                    A SEFAZ não tem mais os itens (ciência vence em 10 dias). Entram como documento
-                    + uma parcela EM ABERTO vencendo na emissão — conferir o que já foi pago.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-2 pt-1">
-                  <Button size="sm" onClick={() => void importar(true)} disabled={!!progresso || comXml === 0}>
-                    Importar as {comXml} completas
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void importar(false)}
-                    disabled={!!progresso}
-                  >
-                    Importar todas as {lista.faltando}
-                  </Button>
-                </div>
+            {/* A conferência do pagamento é a dívida que esta automação deixa em aberto. Ela vem
+                antes do estoque na tela porque distorce o financeiro enquanto ninguém olha. */}
+            {resumo.aConferirParcelas > 0 && (
+              <div className="rounded border border-amber-500/40 bg-amber-500/[0.06] p-2">
+                <p className="flex items-start gap-1.5 font-medium">
+                  <TriangleAlert className="mt-0.5 size-3 shrink-0 text-amber-600" />
+                  {resumo.aConferirParcelas} parcela(s) em aberto · {brl(resumo.aConferirValor)}
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  Nasceram em aberto porque nem a SEFAZ nem o XML dizem se a nota foi paga. Boa
+                  parte já saiu do banco: conferir contra o extrato antes de ler isso como dívida.
+                </p>
               </div>
             )}
+
+            {resumo.estoquePendente > 0 && (
+              <div className="rounded border p-2">
+                <p className="font-medium">
+                  {resumo.estoquePendente} nota(s) esperando entrada no estoque
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  O financeiro dessas já entrou. Falta casar os itens com o catálogo, que roda
+                  aqui no navegador. Produto que não casar nasce marcado como “a revisar”.
+                </p>
+                <Button
+                  size="sm"
+                  className="mt-2"
+                  onClick={() => void darEntrada()}
+                  disabled={!!progresso || sincronizando}
+                >
+                  <PackagePlus className="mr-1 size-3.5" />
+                  Dar entrada nas {resumo.estoquePendente}
+                </Button>
+              </div>
+            )}
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void sincronizar()}
+              disabled={sincronizando || !!progresso}
+            >
+              <RefreshCw className={`mr-1 size-3.5 ${sincronizando ? 'animate-spin' : ''}`} />
+              {sincronizando ? 'Sincronizando…' : 'Sincronizar agora'}
+            </Button>
+
+            <p className="text-muted-foreground">
+              A SEFAZ disponibiliza documentos por ~90 dias. Nota mais antiga não aparece aqui e
+              vem do XML do contador.
+            </p>
           </div>
         )}
 
         {progresso && (
           <p className="text-xs text-muted-foreground">
-            Importando {progresso.feitas}/{progresso.total}… {progresso.atual}
+            Dando entrada {progresso.feitas}/{progresso.total}… {progresso.atual}
           </p>
         )}
 
-        {resultado && (
+        {falhas && (
           <div className="max-h-52 space-y-0.5 overflow-y-auto rounded border p-2 text-xs">
-            {resultado.filter((r) => !r.ok).length === 0 ? (
-              <p className="text-muted-foreground">Todas entraram sem erro.</p>
-            ) : (
-              resultado
-                .filter((r) => !r.ok)
-                .map((r) => (
-                  <p key={r.chave} className="text-destructive">
-                    {r.chave.slice(-8)}: {r.detalhe}
-                  </p>
-                ))
-            )}
+            {falhas.map((r) => (
+              <p key={r.chave} className="text-destructive">
+                {r.chave.slice(-8)}: {r.detalhe}
+              </p>
+            ))}
           </div>
         )}
       </CardContent>

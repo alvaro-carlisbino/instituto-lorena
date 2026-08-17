@@ -432,6 +432,11 @@ verify_jwt = false
 [functions.crm-focus-webhook]
 verify_jwt = false
 
+# Cron da captura da SEFAZ: não existe usuário na chamada, a autorização é o x-cron-secret
+# conferido contra app_cron_secrets['sefaz'] dentro da função.
+[functions.crm-sefaz-sync]
+verify_jwt = false
+
 # Chamada interna Edge→Edge com x-crm-ai-internal-secret (sem Bearer de sessão).
 [functions.crm-ai-assistant]
 verify_jwt = false

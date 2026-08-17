@@ -139,6 +139,8 @@ export async function upsertStockItem(payload: {
   aliases?: string[]
   active?: boolean
   blingProductId?: string | null
+  /** Marca produto que nasceu de import automático e ninguém olhou ainda. */
+  needsReview?: boolean
 }): Promise<string> {
   const client = assertClient()
   const row: Record<string, unknown> = {
@@ -158,6 +160,7 @@ export async function upsertStockItem(payload: {
   }
   if (payload.source) row.source = payload.source
   if (payload.blingProductId !== undefined) row.bling_product_id = payload.blingProductId?.trim() || null
+  if (payload.needsReview !== undefined) row.needs_review = payload.needsReview
   const query = payload.id
     ? client.from('stock_items').update(row).eq('id', payload.id)
     : client.from('stock_items').insert(row)

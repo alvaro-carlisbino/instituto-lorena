@@ -1,223 +1,197 @@
 import { supabase } from '@/lib/supabaseClient'
 import { parseNfeXml } from '@/services/nfeXml'
-import { importNfe, suggestItemPlan } from '@/services/nfeImport'
-import { createPayablesExact, createPurchaseInvoice, listStockItems, listSuppliers, upsertSupplier } from '@/services/estoqueCompras'
-import type { StockItem, Supplier } from '@/services/estoqueCompras'
+import { darEntradaItensNfe, suggestItemPlan } from '@/services/nfeImport'
+import { listStockItems } from '@/services/estoqueCompras'
 
 /**
- * Notas que a SEFAZ tem contra o CNPJ do polo, e como trazê-las pra dentro.
+ * O que a SEFAZ tem contra o CNPJ do polo — e o que disso ainda depende de gente.
  *
- * Roda no NAVEGADOR de propósito, não numa rotina de servidor: `purchase_invoices`,
- * `payable_installments` e o estoque usam `tenant_id default current_tenant_id()` e RLS pra
- * separar clínica × Tricopill. Rodando por service_role o polo sai errado ou nulo. Quem
- * importa é o usuário logado, com o polo dele.
+ * A captura e o lançamento FINANCEIRO acontecem sozinhos, no servidor (`crm-sefaz-sync`, 2x/dia).
+ * Esta tela não busca mais nota nenhuma: ela lê o que já entrou e mostra as duas coisas que a
+ * automação de propósito NÃO decide sozinha.
  *
- * Duas classes de nota, e a diferença não é escolha nossa:
- *   - com XML completo  -> vai pelo `importNfe` normal: fornecedor + nota + parcelas + estoque;
- *   - só resumo         -> a SEFAZ perdeu o XML (ciência não foi dada nos 10 dias da emissão).
- *                          Sobra emitente, chave, valor e data. Vira fornecedor + nota + UMA
- *                          parcela. Estoque não dá: não existe item pra dar entrada.
+ * 1. ENTRADA DE ESTOQUE das notas com XML. O casamento de item (EAN → SKU → nome → alias) mora
+ *    no navegador, contra o catálogo do polo. Uma implementação só: ter duas foi o que criou
+ *    item duplicado nas cargas de julho e agosto. Produto criado aqui nasce marcado como
+ *    "a revisar" — metade do que a NF-e cria não é estoque clínico (whisky, Bíblia, Smart TV).
+ *
+ * 2. CONFERÊNCIA DO QUE JÁ FOI PAGO. Toda parcela nasce EM ABERTO porque nem o resumo da SEFAZ
+ *    nem o XML dizem se a nota foi paga — quem sabe isso é o extrato do banco. Em aberto e
+ *    visível, quem confere corrige; carimbado como paga, ninguém descobre.
  */
 
-export type NotaSefaz = {
-  chave: string
-  emitente: string | null
-  documentoEmitente: string | null
-  valor: number
-  dataEmissao: string | null
-  situacao: string | null
-  xmlCompleto: boolean
-}
-
-export type ListaSefaz = {
-  total: number
-  jaNoSistema: number
-  faltando: number
-  valorFaltando: number
-  faltandoSemXmlCompleto: number
-  aviso: string
-  notas: NotaSefaz[]
-}
-
-function client() {
+const client = () => {
   if (!supabase) throw new Error('Supabase não configurado')
   return supabase
 }
 
-export async function listarNotasSefaz(): Promise<ListaSefaz> {
-  const { data, error } = await client().functions.invoke('crm-focus-recebidas', { body: {} })
-  if (error) throw new Error('Falha ao consultar a SEFAZ')
-  const p = (data ?? {}) as Partial<ListaSefaz> & { ok?: boolean; error?: string }
-  if (!p.ok) throw new Error(String(p.error || 'Falha ao consultar a SEFAZ'))
+export type ResumoSefaz = {
+  /** Notas distintas na janela da SEFAZ (~90 dias). */
+  capturadas: number
+  lancadas: number
+  comErro: number
+  /** Já no financeiro, faltando dar entrada no estoque. */
+  estoquePendente: number
+  /** XML guardado — essas dão pra importar inteiras mesmo depois de saírem da janela. */
+  comXmlGuardado: number
+  valorTotal: number
+  janelaDe: string | null
+  janelaAte: string | null
+  /** Parcelas criadas por esta via que continuam em aberto e ninguém bateu contra o banco. */
+  aConferirParcelas: number
+  aConferirValor: number
+}
+
+export async function resumoSefaz(): Promise<ResumoSefaz> {
+  const c = client()
+  // RLS já prende ao polo do usuário: nenhuma consulta aqui filtra tenant à mão.
+  const { data, error } = await c
+    .from('sefaz_documentos')
+    .select('status, estoque_pendente, xml_completo, valor_cents, data_emissao, xml')
+    .limit(2000)
+  if (error) throw new Error(error.message)
+
+  type Linha = {
+    status: string
+    estoque_pendente: boolean
+    xml_completo: boolean
+    valor_cents: number
+    data_emissao: string | null
+    xml: string | null
+  }
+  const linhas = (data ?? []) as Linha[]
+  const dias = linhas.map((l) => l.data_emissao).filter((d): d is string => !!d).sort()
+
+  const { data: pend, error: pendErr } = await c
+    .from('payable_installments')
+    .select('amount_cents')
+    .eq('status', 'aberto')
+    .like('import_key', 'sefaz:%')
+    .limit(2000)
+  if (pendErr) throw new Error(pendErr.message)
+  const parcelas = (pend ?? []) as Array<{ amount_cents: number }>
+
   return {
-    total: p.total ?? 0,
-    jaNoSistema: p.jaNoSistema ?? 0,
-    faltando: p.faltando ?? 0,
-    valorFaltando: p.valorFaltando ?? 0,
-    faltandoSemXmlCompleto: p.faltandoSemXmlCompleto ?? 0,
-    aviso: p.aviso ?? '',
-    notas: Array.isArray(p.notas) ? p.notas : [],
+    capturadas: linhas.length,
+    lancadas: linhas.filter((l) => l.status === 'lancado').length,
+    comErro: linhas.filter((l) => l.status === 'erro').length,
+    estoquePendente: linhas.filter((l) => l.estoque_pendente).length,
+    comXmlGuardado: linhas.filter((l) => !!l.xml).length,
+    valorTotal: linhas.reduce((s, l) => s + (l.valor_cents ?? 0), 0) / 100,
+    janelaDe: dias[0] ?? null,
+    janelaAte: dias[dias.length - 1] ?? null,
+    aConferirParcelas: parcelas.length,
+    aConferirValor: parcelas.reduce((s, p) => s + (p.amount_cents ?? 0), 0) / 100,
   }
 }
 
-export async function baixarXmlSefaz(chave: string): Promise<string | null> {
-  const { data, error } = await client().functions.invoke('crm-focus-recebidas', {
-    body: { action: 'xml', chave },
-  })
-  if (error) return null
-  const p = (data ?? {}) as { ok?: boolean; xml?: string }
-  return p.ok && typeof p.xml === 'string' ? p.xml : null
+/** Dispara a captura agora, no polo do usuário logado. O cron já faz isso 2x/dia. */
+export async function sincronizarSefaz(): Promise<Record<string, unknown>> {
+  const { data, error } = await client().functions.invoke('crm-sefaz-sync', { body: {} })
+  if (error) throw new Error('Falha ao sincronizar com a SEFAZ')
+  const p = (data ?? {}) as { ok?: boolean; error?: string; polos?: Record<string, unknown>[] }
+  if (!p.ok) throw new Error(String(p.error || 'Falha ao sincronizar com a SEFAZ'))
+  return (p.polos ?? [])[0] ?? {}
 }
 
-/** Data local no formato aceito pelo banco, sem passar por fuso. */
-const diaDe = (iso: string | null): string | null => {
-  const d = (iso ?? '').slice(0, 10)
-  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null
+export type NotaEstoquePendente = {
+  id: string
+  chave: string
+  numero: string | null
+  emitente: string | null
+  valor: number
+  dataEmissao: string | null
+  invoiceId: string | null
 }
 
-/** Casa o fornecedor pelo CNPJ (só dígitos) — nome varia, CNPJ não. */
-function acharFornecedor(suppliers: Supplier[], cnpj: string | null): Supplier | null {
-  const d = (cnpj ?? '').replace(/\D/g, '')
-  if (!d) return null
-  return suppliers.find((s) => (s.cnpj ?? '').replace(/\D/g, '') === d) ?? null
+export async function listarEstoquePendente(): Promise<NotaEstoquePendente[]> {
+  const { data, error } = await client()
+    .from('sefaz_documentos')
+    .select('id, chave, numero, emitente, valor_cents, data_emissao, invoice_id')
+    .eq('estoque_pendente', true)
+    .order('data_emissao', { ascending: false })
+    .limit(500)
+  if (error) throw new Error(error.message)
+  type Linha = {
+    id: string; chave: string; numero: string | null; emitente: string | null
+    valor_cents: number; data_emissao: string | null; invoice_id: string | null
+  }
+  return ((data ?? []) as Linha[]).map((l) => ({
+    id: l.id,
+    chave: l.chave,
+    numero: l.numero,
+    emitente: l.emitente,
+    valor: (l.valor_cents ?? 0) / 100,
+    dataEmissao: l.data_emissao,
+    invoiceId: l.invoice_id,
+  }))
 }
 
-export type ResultadoImport = {
+export type ResultadoEntrada = {
   chave: string
   ok: boolean
-  modo: 'completa' | 'resumo'
-  /** Mensagem curta pra tela. Em erro, o motivo. */
   detalhe: string
-}
-
-/**
- * Importa UMA nota de resumo: fornecedor + nota de compra + parcela única.
- *
- * A parcela nasce EM ABERTO e vencendo na emissão. É o único par honesto de valores: o resumo
- * não traz duplicata nem informação de pagamento, e marcar como paga seria inventar. Já houve
- * o erro inverso aqui — dar um lote inteiro como vencido quando 15 parcelas venciam no futuro.
- * Em aberto e visível, quem confere corrige; carimbado errado, ninguém descobre.
- */
-export async function importarResumo(
-  nota: NotaSefaz,
-  suppliers: Supplier[],
-): Promise<ResultadoImport> {
-  const base = { chave: nota.chave, modo: 'resumo' as const }
-  try {
-    const cnpj = (nota.documentoEmitente ?? '').replace(/\D/g, '')
-    let fornecedor = acharFornecedor(suppliers, cnpj)
-    if (!fornecedor) {
-      fornecedor = await upsertSupplier({
-        name: nota.emitente?.trim() || `Fornecedor ${cnpj || nota.chave.slice(6, 20)}`,
-        cnpj: cnpj || null,
-      })
-      suppliers.push(fornecedor)
-    }
-
-    const emissao = diaDe(nota.dataEmissao)
-    const centavos = Math.round(nota.valor * 100)
-    // Número da nota sai da própria chave (posições 26-34), que é onde ele mora. Sem XML não
-    // há outro lugar de onde tirar.
-    const numero = String(Number(nota.chave.slice(25, 34) || '0')) || nota.chave.slice(-6)
-
-    const invoice = await createPurchaseInvoice({
-      number: numero,
-      supplierId: fornecedor.id,
-      issueDate: emissao,
-      totalCents: centavos,
-      nfeKey: nota.chave,
-      note: 'Importada da SEFAZ (resumo, sem XML completo) — sem itens de estoque.',
-    })
-
-    if (centavos > 0 && emissao) {
-      await createPayablesExact([{
-        description: `NF ${numero} — ${fornecedor.name}`,
-        supplierId: fornecedor.id,
-        invoiceId: invoice.id,
-        dueDate: emissao,
-        amountCents: centavos,
-        note: 'Vencimento = emissão: o resumo da SEFAZ não traz duplicata. Conferir.',
-      }])
-    }
-    return { ...base, ok: true, detalhe: `NF ${numero} lançada (sem itens)` }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    // Chave repetida = a nota já entrou por outro caminho. Não é falha, é dedup funcionando.
-    if (/duplicate|unique/i.test(msg)) return { ...base, ok: true, detalhe: 'já estava lançada' }
-    return { ...base, ok: false, detalhe: msg.slice(0, 120) }
-  }
-}
-
-/**
- * Importa UMA nota com XML completo pelo caminho normal (fornecedor + nota + parcelas + estoque).
- *
- * Recebe estoque e fornecedores de fora porque numa carga de dezenas de notas reler os dois a
- * cada nota são centenas de idas ao banco — e o catálogo muda DURANTE a carga, então quem
- * chama precisa recarregar entre as notas para o casamento de item enxergar o que acabou de
- * ser criado. Ver `importarLote`.
- */
-export async function importarCompleta(
-  nota: NotaSefaz,
-  stock: StockItem[],
-  suppliers: Supplier[],
-): Promise<ResultadoImport> {
-  const base = { chave: nota.chave, modo: 'completa' as const }
-  try {
-    const xml = await baixarXmlSefaz(nota.chave)
-    if (!xml) return { ...base, ok: false, detalhe: 'XML indisponível na Focus' }
-
-    const parsed = parseNfeXml(xml)
-    const fornecedor = acharFornecedor(suppliers, parsed.supplierCnpj)
-
-    const r = await importNfe(parsed, {
-      createSupplier: !fornecedor,
-      supplierId: fornecedor?.id ?? null,
-      createPayables: parsed.totalCents > 0,
-      // Sem duplicata na nota, a parcela única vence na emissão — mesma regra do upload manual.
-      singleDueDate: parsed.installments.length === 0 ? (parsed.issueDate ?? null) : null,
-      itemsPlan: suggestItemPlan(parsed, stock),
-    })
-    return {
-      ...base,
-      ok: true,
-      detalhe: `NF ${r.invoiceNumber}: ${r.itemsStocked} entrada(s) no estoque`,
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    if (/duplicate|unique/i.test(msg)) return { ...base, ok: true, detalhe: 'já estava lançada' }
-    return { ...base, ok: false, detalhe: msg.slice(0, 120) }
-  }
 }
 
 export type ProgressoLote = { feitas: number; total: number; atual: string }
 
 /**
- * Carga em lote. Sequencial de propósito: cada nota pode CRIAR item de estoque e fornecedor, e
- * a próxima precisa enxergar isso pra casar em vez de duplicar. Em paralelo, duas notas do
- * mesmo fornecedor com o mesmo produto criariam dois itens — que é exatamente a duplicata que
- * já custou caro nas cargas anteriores.
+ * Dá entrada no estoque das notas cujo financeiro já entrou.
  *
- * Erro numa nota NÃO derruba o lote: a nota entra na lista de falhas e a carga segue. Um lote
- * inteiro já caiu por rollback de uma única violação de índice, e o erro não apareceu no log.
+ * Sequencial de propósito: cada nota pode CRIAR item, e a próxima precisa enxergar isso pra
+ * casar em vez de duplicar. Em paralelo, duas notas do mesmo fornecedor com o mesmo produto
+ * criariam dois itens — a duplicata que já custou caro.
+ *
+ * Erro numa nota NÃO derruba o lote: entra na lista de falhas e a carga segue. Um lote inteiro
+ * já caiu por rollback de uma única violação de índice, e o erro não apareceu no log.
  */
-export async function importarLote(
-  notas: NotaSefaz[],
+export async function darEntradaLote(
+  notas: NotaEstoquePendente[],
   onProgresso?: (p: ProgressoLote) => void,
-): Promise<ResultadoImport[]> {
-  const resultados: ResultadoImport[] = []
+): Promise<ResultadoEntrada[]> {
+  const c = client()
+  const resultados: ResultadoEntrada[] = []
   let stock = await listStockItems(true)
-  let suppliers = await listSuppliers()
 
   for (const [i, nota] of notas.entries()) {
     onProgresso?.({ feitas: i, total: notas.length, atual: nota.emitente ?? nota.chave.slice(-8) })
-    const r = nota.xmlCompleto
-      ? await importarCompleta(nota, stock, suppliers)
-      : await importarResumo(nota, suppliers)
-    resultados.push(r)
-    // Só relê o catálogo quando a nota pode tê-lo mudado; resumo não cria item.
-    if (r.ok && nota.xmlCompleto) {
-      stock = await listStockItems(true)
-      suppliers = await listSuppliers()
+    try {
+      if (!nota.invoiceId) throw new Error('nota sem vínculo com a compra')
+
+      const { data: doc, error: docErr } = await c
+        .from('sefaz_documentos').select('xml').eq('id', nota.id).maybeSingle()
+      if (docErr) throw new Error(docErr.message)
+      const xml = (doc as { xml?: string } | null)?.xml
+      if (!xml) throw new Error('XML não está guardado')
+
+      const parsed = parseNfeXml(xml)
+      const r = await darEntradaItensNfe(
+        parsed,
+        nota.invoiceId,
+        suggestItemPlan(parsed, stock),
+        // Ninguém olhou a nota antes de ela entrar: o que virar produto novo fica marcado.
+        { needsReview: true },
+      )
+
+      const { error: updErr } = await c
+        .from('sefaz_documentos')
+        .update({ estoque_pendente: false, updated_at: new Date().toISOString() })
+        .eq('id', nota.id)
+      if (updErr) throw new Error(updErr.message)
+
+      resultados.push({
+        chave: nota.chave,
+        ok: true,
+        detalhe: `${r.itemsStocked} entrada(s), ${r.itemsCreated} produto(s) novo(s)`,
+      })
+      // Só relê o catálogo quando a nota pode tê-lo mudado.
+      if (r.itemsCreated > 0) stock = await listStockItems(true)
+    } catch (e) {
+      resultados.push({
+        chave: nota.chave,
+        ok: false,
+        detalhe: (e instanceof Error ? e.message : String(e)).slice(0, 140),
+      })
     }
   }
   onProgresso?.({ feitas: notas.length, total: notas.length, atual: '' })

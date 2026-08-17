@@ -133,6 +133,68 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
   })
 
   // 3) Itens → estoque (cria ou reusa, dá entrada, cria lote e loga controlado)
+  const est = await darEntradaItensNfe(nfe, invoice.id, plan.itemsPlan)
+
+  // 4) Parcelas → contas a pagar. Nota a prazo traz as duplicatas em cobr/dup; compra à vista
+  //    (papelaria, balcão) não traz cobr nenhum — e antes disso o gasto entrava no estoque e
+  //    nunca aparecia no financeiro. Sem duplicata, a parcela única é o total da nota.
+  let payables = 0
+  if (plan.createPayables) {
+    const rows =
+      nfe.installments.length > 0
+        ? nfe.installments.map((inst) => ({
+            description: `NF ${nfe.number} — parcela ${inst.number}`,
+            dueDate: inst.dueDate,
+            amountCents: inst.amountCents,
+            paymentMethod: 'boleto' as string | null,
+          }))
+        : plan.singleDueDate && nfe.totalCents > 0
+          ? [
+              {
+                description: `NF ${nfe.number} — à vista`,
+                dueDate: plan.singleDueDate,
+                amountCents: nfe.totalCents,
+                paymentMethod: null as string | null,
+              },
+            ]
+          : []
+    if (rows.length > 0) {
+      await createPayablesExact(
+        rows.map((r) => ({ ...r, supplierId, invoiceId: invoice.id })),
+      )
+      payables = rows.length
+    }
+  }
+
+  return {
+    invoiceNumber: nfe.number,
+    itemsStocked: est.itemsStocked,
+    itemsCreated: est.itemsCreated,
+    batches: est.batches,
+    payables,
+    blingPushed: est.blingPushed,
+  }
+}
+
+/**
+ * Dá entrada dos itens da NF-e numa nota de compra QUE JÁ EXISTE.
+ *
+ * Saiu de dentro do `importNfe` quando a captura da SEFAZ passou a lançar o financeiro no
+ * servidor: lá a nota e as parcelas já nasceram (as duplicatas reais vêm do mesmo XML), e o que
+ * falta é só o estoque. A alternativa seria um segundo casamento de item do lado do servidor —
+ * e é exatamente ter DUAS implementações dessa cascata que criou item duplicado nas cargas de
+ * julho e agosto. Uma só, aqui, usada pelos dois caminhos.
+ *
+ * `needsReview` marca o que for criado agora: no import automático ninguém olhou a nota, e o
+ * ensaio de 14/ago mostrou que metade do que a NF-e cria não é estoque clínico (whisky, Bíblia,
+ * Smart TV, frigideira — compra de obra e pessoal).
+ */
+export async function darEntradaItensNfe(
+  nfe: NfeParsed,
+  invoiceId: string,
+  itemsPlan: NfeItemPlan[],
+  opts?: { needsReview?: boolean },
+): Promise<{ itemsStocked: number; itemsCreated: number; batches: number; blingPushed: number }> {
   const currentStock = await listStockItems(true)
   const byId = new Map(currentStock.map((s) => [s.id, s] as const))
   // Catálogo do Bling (best-effort) p/ casar item da nota por EAN e espelhar a entrada.
@@ -151,7 +213,7 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
   let batches = 0
   let blingPushed = 0
 
-  for (const itemPlan of plan.itemsPlan) {
+  for (const itemPlan of itemsPlan) {
     if (itemPlan.action === 'ignorar') continue
     const nfeItem = nfe.items[itemPlan.index]
     if (!nfeItem || nfeItem.qty <= 0) continue
@@ -167,6 +229,7 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
         source: 'nfe',
         barcode: nfeItem.ean,
         aliases: temRastroNoNome(nfeItem.description) ? [nfeItem.description] : [],
+        needsReview: opts?.needsReview ?? false,
       })
       itemsCreated += 1
     } else {
@@ -206,7 +269,7 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
       reason: 'compra (NF-e)',
       note: `NF ${nfe.number}${nfeItem.lotCode ? ` · lote ${nfeItem.lotCode}` : ''}`,
       refType: 'purchase_invoice',
-      refId: invoice.id,
+      refId: invoiceId,
       batchId,
       unitCostCents: nfeItem.unitCostCents,
     })
@@ -242,43 +305,5 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
     }
   }
 
-  // 4) Parcelas → contas a pagar. Nota a prazo traz as duplicatas em cobr/dup; compra à vista
-  //    (papelaria, balcão) não traz cobr nenhum — e antes disso o gasto entrava no estoque e
-  //    nunca aparecia no financeiro. Sem duplicata, a parcela única é o total da nota.
-  let payables = 0
-  if (plan.createPayables) {
-    const rows =
-      nfe.installments.length > 0
-        ? nfe.installments.map((inst) => ({
-            description: `NF ${nfe.number} — parcela ${inst.number}`,
-            dueDate: inst.dueDate,
-            amountCents: inst.amountCents,
-            paymentMethod: 'boleto' as string | null,
-          }))
-        : plan.singleDueDate && nfe.totalCents > 0
-          ? [
-              {
-                description: `NF ${nfe.number} — à vista`,
-                dueDate: plan.singleDueDate,
-                amountCents: nfe.totalCents,
-                paymentMethod: null as string | null,
-              },
-            ]
-          : []
-    if (rows.length > 0) {
-      await createPayablesExact(
-        rows.map((r) => ({ ...r, supplierId, invoiceId: invoice.id })),
-      )
-      payables = rows.length
-    }
-  }
-
-  return {
-    invoiceNumber: nfe.number,
-    itemsStocked,
-    itemsCreated,
-    batches,
-    payables,
-    blingPushed,
-  }
+  return { itemsStocked, itemsCreated, batches, blingPushed }
 }
