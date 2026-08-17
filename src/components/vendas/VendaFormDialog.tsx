@@ -23,11 +23,13 @@ import {
   PAYMENT_METHODS,
   PROCEDURE_OPTIONS,
   PROTOCOL_OPTIONS,
+  type AnesthesiaProvider,
   type ClinicSale,
   type ClinicSaleKind,
   type DepositPayee,
   type StaffMember,
   createClinicSale,
+  listAnesthesiaProviders,
   listSellerNames,
   updateClinicSale,
 } from '@/services/clinicSales'
@@ -66,7 +68,9 @@ type Props = {
 export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }: Props) {
   const cirurgia = kind === 'cirurgia'
   const medicos = useMemo(() => staff.filter((s) => s.tipo === 'MEDICO'), [staff])
-  const anestesistas = useMemo(() => staff.filter((s) => s.tipo === 'ANESTESISTA'), [staff])
+  // A anestesia não sai do espelho da sala: ela tem empresa (Grupo Ingá, Loviderm),
+  // e o espelho guarda quem já não atende. Ver listAnesthesiaProviders().
+  const [anestesistas, setAnestesistas] = useState<AnesthesiaProvider[]>([])
 
   const [picked, setPicked] = useState<PatientPick | null>(null)
   const [nomeLivre, setNomeLivre] = useState('')
@@ -177,6 +181,9 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
     listSellerNames()
       .then(setSugestoesVendedora)
       .catch(() => setSugestoesVendedora([]))
+    listAnesthesiaProviders()
+      .then(setAnestesistas)
+      .catch(() => setAnestesistas([]))
   }, [open])
 
   // Sugere o mesmo médico para operar, que é o caso comum. Fica editável porque
@@ -509,6 +516,13 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
                         {a.nome}
                       </SelectItem>
                     ))}
+                    {/* O que já está gravado entra como opção mesmo que tenha saído
+                        da lista. Sem isto, abrir uma venda antiga mostraria o campo
+                        vazio enquanto o banco guarda o nome — e salvar por cima
+                        apagaria quem fez a anestesia. */}
+                    {anestesista && !anestesistas.some((a) => a.nome === anestesista) && (
+                      <SelectItem value={anestesista}>{anestesista} (fora da lista)</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

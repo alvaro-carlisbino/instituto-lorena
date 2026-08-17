@@ -683,6 +683,35 @@ export async function listSellerNames(): Promise<string[]> {
 
 export type StaffMember = { id: number; nome: string; tipo: string }
 
+export type AnesthesiaProvider = { id: string; nome: string; srgStaffId: number | null }
+
+/**
+ * Quem faz a anestesia: a lista da clínica, não a do centro cirúrgico.
+ *
+ * Vem de tabela própria porque o espelho da sala só cadastra PESSOA, e metade das
+ * opções que a clínica usa é empresa (Grupo Ingá, Clínica Loviderm — o Grupo Ingá
+ * já era caixa na conciliação do Shosp antes de existir aqui). O espelho também é
+ * recarregado a cada sync, então nome corrigido nele volta ao errado sozinho, e
+ * ele guarda quem não atende mais.
+ */
+export async function listAnesthesiaProviders(): Promise<AnesthesiaProvider[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('anesthesia_providers')
+    .select('id, name, srg_staff_id, position')
+    .eq('active', true)
+    .order('position', { ascending: true })
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>
+    return {
+      id: String(row.id),
+      nome: String(row.name ?? ''),
+      srgStaffId: row.srg_staff_id != null ? Number(row.srg_staff_id) : null,
+    }
+  })
+}
+
 /**
  * Médicos e anestesistas vêm do espelho do centro cirúrgico, não de uma lista
  * fixa aqui. Quem entra ou sai da equipe é cadastrado lá, e é o mesmo nome que
