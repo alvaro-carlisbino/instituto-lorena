@@ -799,7 +799,8 @@ export function WhatsappConnectionPage() {
                   autoComplete="off"
                 />
                 <p className="text-[0.7rem] text-muted-foreground">
-                  Vazio usa o secret global das Edge Functions. Preencha quando a linha estiver num app diferente.
+                  Vazio usa o secret do app que já recebe o Lead Ads (o mesmo app da Meta). Preencha só
+                  quando a linha estiver num app diferente.
                 </p>
               </div>
               <div className="space-y-1.5 sm:col-span-2">

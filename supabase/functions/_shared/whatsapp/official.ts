@@ -77,7 +77,14 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
   constructor(opts?: OfficialWhatsappProviderOptions) {
     this.phoneNumberId = (opts?.phoneNumberId ?? envTrim('WHATSAPP_CLOUD_PHONE_NUMBER_ID')).trim()
     this.accessToken = (opts?.accessToken ?? '').trim() || envTrim('WHATSAPP_CLOUD_ACCESS_TOKEN')
-    this.appSecret = (opts?.appSecret ?? '').trim() || envTrim('WHATSAPP_CLOUD_APP_SECRET')
+    // `META_APP_SECRET` como último recurso: o WhatsApp da clínica vai no MESMO app da Meta
+    // que já recebe o Lead Ads (1678238640137179), e um app tem um segredo só. Sem esta
+    // linha, alguém teria que copiar o mesmo valor para uma segunda variável, e esquecer
+    // disso não daria erro de configuração: daria webhook recusado com a Meta desistindo
+    // de reenviar. Ver [[crm_linha_whatsapp_oficial]].
+    this.appSecret = (opts?.appSecret ?? '').trim() ||
+      envTrim('WHATSAPP_CLOUD_APP_SECRET') ||
+      envTrim('META_APP_SECRET')
     this.wabaId = (opts?.wabaId ?? '').trim() || envTrim('WHATSAPP_CLOUD_WABA_ID')
     this.apiVersion = envTrim('WHATSAPP_CLOUD_API_VERSION') || 'v21.0'
   }
