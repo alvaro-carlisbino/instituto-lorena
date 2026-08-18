@@ -27,9 +27,12 @@ const TENANT = 'tricopill'
 const BUSCA_ID = '24041701832'
 const MARCA_ID = '24125006145'
 const PMAX_ID = '24022345891'
-// Campanha da LOJA (18/08/2026): gel de sobrancelha BrowSculpt + shampoo Ozoncare, os dois
-// produtos de marca própria que o Álvaro mandou priorizar junto do Tricopill. R$ 20/dia,
-// que é a folga entre o que a conta gasta (~R$ 87) e o ritmo que zera o saldo até 31/08.
+// Campanha do BROWSCULPT (18/08/2026). Nasceu com gel + shampoo, mas o Álvaro pausou o grupo
+// do shampoo no mesmo dia: Ozoncare é revenda, e anúncio só roda nos 100% HB, que são o
+// Tricopill e o gel. Orçamento IGUALADO ao do Tricopill (R$ 85) por decisão dele — orçamento
+// é teto, não compromisso, então o gel gasta o que o leilão de sobrancelha der.
+// Lance em maximizar CLIQUES: nasceu em maximizar conversões e ficou o dia em zero impressão,
+// porque smart bidding sem histórico de conversão não entra no leilão.
 const LOJA_ID = '24146028948'
 const GRUPO_ANTIGO_ID = '197790938385'
 // Reestruturação da Busca em 4 grupos + maximizar conversões. Acumulado começa aqui.
@@ -153,7 +156,7 @@ Deno.serve(async (req) => {
         if (c.biddingStrategyType !== 'MAXIMIZE_CONVERSIONS') alertas.push('Busca saiu de Maximizar Conversões.')
       }
       if (c.id === MARCA_ID && c.status !== 'ENABLED') alertas.push('Campanha de Marca não está ativa.')
-      if (c.id === LOJA_ID && c.status !== 'ENABLED') alertas.push('Campanha da Loja (gel/shampoo) não está ativa.')
+      if (c.id === LOJA_ID && c.status !== 'ENABLED') alertas.push('Campanha do BrowSculpt não está ativa.')
     }
 
     // ── Ontem e acumulado ──
@@ -232,8 +235,8 @@ Deno.serve(async (req) => {
         const st = r.adGroupAd?.policySummary?.approvalStatus
         return st === 'APPROVED' || st === 'APPROVED_LIMITED'
       }).length
-      linhas.push(`Loja (gel/shampoo): ${okLoja}/${adsLoja.length} anúncios aprovados` + (reprovadosLoja.length ? ` · ${reprovadosLoja.length} REPROVADO(S)` : ''))
-      for (const r of reprovadosLoja) alertas.push(`Anúncio reprovado no grupo "${r.adGroup?.name}" da Loja. Ajustar o texto no painel.`)
+      linhas.push(`BrowSculpt (gel): ${okLoja}/${adsLoja.length} anúncios aprovados` + (reprovadosLoja.length ? ` · ${reprovadosLoja.length} REPROVADO(S)` : ''))
+      for (const r of reprovadosLoja) alertas.push(`Anúncio reprovado no grupo "${r.adGroup?.name}" do BrowSculpt. Ajustar o texto no painel.`)
     }
 
     // ── Saldo da conta e ritmo ──
