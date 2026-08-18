@@ -1328,7 +1328,16 @@ export async function blingEmitNfe(
   // dataOperacao é OBRIGATÓRIA no Bling e a gente nunca mandava: toda emissão morria em
   // "Data de operação inválida" antes mesmo de chegar no SEFAZ. Formato aceito: YYYY-MM-DD
   // HH:mm:ss no fuso de Brasília.
-  const dt = args.dataOperacaoISO ? new Date(args.dataOperacaoISO) : new Date()
+  //
+  // TRAVA DA DATA DE SAÍDA: a data da venda é a intenção certa enquanto a nota sai no mesmo
+  // mês, mas a SEFAZ não aceita saída ANTERIOR à emissão. Emitindo hoje uma venda de julho,
+  // mandar julho aqui é garantir rejeição. Então a saída nunca retrocede: usa a data da
+  // venda quando ela ainda está no futuro/presente, e cai para agora quando já passou. A
+  // data real da venda continua no pedido do Bling e no CRM — quem emite atrasado precisa
+  // saber que a nota nasce com a saída de hoje, e isso é conversa de contador.
+  const agora = new Date()
+  const pedido = args.dataOperacaoISO ? new Date(args.dataOperacaoISO) : agora
+  const dt = Number.isFinite(pedido.getTime()) && pedido.getTime() > agora.getTime() ? pedido : agora
   const spDate = new Date(dt.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
   const pad = (n: number) => String(n).padStart(2, '0')
   const dataOperacao = `${spDate.getFullYear()}-${pad(spDate.getMonth() + 1)}-${pad(spDate.getDate())} ` +
