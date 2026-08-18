@@ -200,6 +200,31 @@ Deno.serve(async (req) => {
   const stateMap = new Map<string, StateRow>()
   for (const s of (statesRaw ?? []) as StateRow[]) stateMap.set(`${s.lead_id}:${s.track}`, s)
 
+  // QUEM JÁ COMPROU NÃO RECEBE "você sumiu". A view classifica por `tricopill_paid_leads`
+  // (linha em rede_payments), e venda fechada NA MÃO pela consultora não gera essa linha —
+  // o Bling recebe o pedido, o stage vai pra vd-pago, e a view continua achando que a pessoa
+  // nunca comprou. Resultado em 18/ago: 11 clientes pagantes na trilha de REATIVAÇÃO, a
+  // maioria já no step 4 ("ainda dá tempo de cuidar do seu cabelo" pra quem tinha acabado de
+  // pagar). O Rodrigo Masi entrou nessa lista no dia seguinte ao pedido dele.
+  //
+  // O stage é a fonte que a consultora move na mão, então é ele que sabe da venda manual.
+  // Mesma lista do crm-followup-scheduler. A trilha B (recompra) NÃO é barrada aqui: oferecer
+  // reposição pra quem comprou é justamente o trabalho dela.
+  const CONVERTED_STAGES = new Set(['fechado', 'consulta', 'tricopill__vd-pago'])
+  const convertedLeadIds = new Set<string>()
+  {
+    const ids = leads.map((l) => l.lead_id)
+    for (let i = 0; i < ids.length; i += 500) {
+      const { data: stageRows } = await admin
+        .from('leads')
+        .select('id, stage_id')
+        .in('id', ids.slice(i, i + 500))
+      for (const r of (stageRows ?? []) as Array<{ id: string; stage_id: string | null }>) {
+        if (CONVERTED_STAGES.has(String(r.stage_id ?? ''))) convertedLeadIds.add(String(r.id))
+      }
+    }
+  }
+
   const results: Array<Record<string, unknown>> = []
   let sent = 0
 
@@ -282,6 +307,11 @@ Deno.serve(async (req) => {
     }
 
     // ── TRILHA A: reativação (silencioso, sem compra) ─────────────────────────
+    if (l.situacao === 'silencioso' && convertedLeadIds.has(l.lead_id)) {
+      results.push({ lead: l.lead_id, skip: 'ja_comprou_stage' })
+      continue
+    }
+
     if (l.situacao === 'silencioso' && (qtrack === null || qtrack === 'A')) {
       const st = stateMap.get(`${l.lead_id}:reactivation`)
       if (st && (st.status === 'stopped' || st.status === 'converted')) { continue }
