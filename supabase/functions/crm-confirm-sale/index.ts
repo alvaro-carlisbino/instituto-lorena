@@ -200,7 +200,11 @@ Deno.serve(async (req) => {
       // Kit conhecido → pedido por kit (frascos). Venda AVULSA → pedido com 1 item descrito
       // (ex.: "Tricopill + Shampoo") pelo valor — assim TODA venda confirmada entra no Bling.
       const out = await blingCreateSaleOrder(admin, tenantId, {
-        kit: kitKey ?? '', amountCents: productCents,
+        // amountCents = TOTAL RECEBIDO (produto + frete); blingCreateSaleOrder separa o frete
+        // em transporte.frete e o produto vira total − frete. Mandar só o produto (como era
+        // até 18/ago) deixava o pedido e a CONTA A RECEBER do Bling curtos no valor do frete
+        // — caso Rodrigo Masi: cobrado R$ 595,81, pedido gravado R$ 567,15, frete R$ 28,66 sumia.
+        kit: kitKey ?? '', amountCents: totalCents, freightCents,
         // Carrinho → 1 linha por produto cadastrado no Bling; kit → produto do kit; senão avulso.
         items: cartItems.length ? cartItems : undefined,
         description: kitKey || cartItems.length ? undefined : label,

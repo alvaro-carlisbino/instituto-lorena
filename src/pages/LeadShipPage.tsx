@@ -35,10 +35,12 @@ import {
 import { saveLeadCadastro } from '@/services/crmOrders'
 
 // Prefill de produto por kit (valores Pix oficiais Tricopill).
-const KIT_PRESETS: Record<string, { name: string; qty: number; reais: string }> = {
-  '1_mes': { name: 'Tricopill 1 frasco', qty: 1, reais: '199,00' },
-  '3_meses': { name: 'Tricopill Kit 3+1 (4 frascos)', qty: 1, reais: '567,15' },
-  '5_meses': { name: 'Tricopill Kit 5+1 (6 frascos)', qty: 1, reais: '945,25' },
+// Caixa espelha KIT_BOXES de supabase/functions/_shared/melhorEnvio.ts — escolher o kit já
+// deixa peso/medidas certos, senão a tela cotava 4 frascos com a caixa de 1.
+const KIT_PRESETS: Record<string, { name: string; qty: number; reais: string; box: { kg: string; l: string; w: string; h: string } }> = {
+  '1_mes': { name: 'Tricopill 1 frasco', qty: 1, reais: '199,00', box: { kg: '0,3', l: '16', w: '11', h: '11' } },
+  '3_meses': { name: 'Tricopill Kit 3+1 (4 frascos)', qty: 1, reais: '567,15', box: { kg: '0,75', l: '20', w: '15', h: '12' } },
+  '5_meses': { name: 'Tricopill Kit 5+1 (6 frascos)', qty: 1, reais: '945,25', box: { kg: '0,95', l: '22', w: '16', h: '13' } },
 }
 
 const reaisToCents = (v: string) => Math.round(Number(String(v).replace(/\./g, '').replace(',', '.')) * 100)
@@ -256,6 +258,12 @@ export function LeadShipPage() {
     setProductName(preset.name)
     setProductQty(String(preset.qty))
     setProductReais(preset.reais)
+    setWeight(preset.box.kg)
+    setBoxL(preset.box.l)
+    setBoxW(preset.box.w)
+    setBoxH(preset.box.h)
+    // Peso e valor declarado mudam o preço: recota com os números novos.
+    void doQuote(preset.reais, preset.box)
   }
 
   const lookupCep = async () => {
@@ -282,18 +290,27 @@ export function LeadShipPage() {
   }
 
   // Cota o frete real do CEP+caixa atuais e popula só os serviços que ATENDEM o trecho.
-  const doQuote = async () => {
+  // `overrides` = valores que acabaram de ser escolhidos (o state ainda não atualizou).
+  const doQuote = async (
+    valorOverride?: string,
+    boxOverride?: { kg: string; l: string; w: string; h: string },
+  ) => {
     const digits = onlyDigits(cep)
     if (digits.length !== 8) return
     setQuoting(true)
     try {
+      const num = (v: string) => Number(String(v).replace(',', '.')) || undefined
       const q = await quoteFrete({
         toCep: digits,
         tenantId: 'tricopill',
-        weight: Number(weight.replace(',', '.')) || undefined,
-        length: Number(boxL) || undefined,
-        width: Number(boxW) || undefined,
-        height: Number(boxH) || undefined,
+        // VALOR DECLARADO (seguro): a etiqueta é comprada declarando o valor do produto e os
+        // Correios cobram isso como %. Sem mandar aqui, a tela mostrava o preço SEM seguro e o
+        // Melhor Envio debitava mais (Rodrigo Masi 18/ago: tela R$ 23,24 × ME R$ 28,66).
+        insuranceCents: reaisToCents(valorOverride ?? productReais) || undefined,
+        weight: num(boxOverride?.kg ?? weight),
+        length: num(boxOverride?.l ?? boxL),
+        width: num(boxOverride?.w ?? boxW),
+        height: num(boxOverride?.h ?? boxH),
       })
       const opts = q.options ?? []
       setQuoteOptions(opts)
@@ -636,7 +653,13 @@ export function LeadShipPage() {
               </div>
               <div className="space-y-1">
                 <Label htmlFor="sl-val">Valor declarado (R$)</Label>
-                <Input id="sl-val" inputMode="decimal" value={productReais} onChange={(e) => setProductReais(e.target.value)} />
+                <Input
+                  id="sl-val"
+                  inputMode="decimal"
+                  value={productReais}
+                  onChange={(e) => setProductReais(e.target.value)}
+                  onBlur={() => void doQuote()}
+                />
               </div>
               <div className="col-span-2 space-y-1">
                 <Label htmlFor="sl-pname">Descrição do produto</Label>

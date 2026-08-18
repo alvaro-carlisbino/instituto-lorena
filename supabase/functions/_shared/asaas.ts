@@ -1151,6 +1151,10 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
         const out = await blingCreateSaleOrder(admin, blingTenant, {
           kit,
           amountCents,
+          // Frete cobrado à parte vai em transporte.frete (o total do pedido não muda) — sem
+          // isto ele entrava embutido no valor do produto e a NF-e saía com frete tributado
+          // como mercadoria.
+          freightCents: Math.max(0, Math.round(Number(p.freight_cents ?? 0))) || undefined,
           // Venda avulsa/carrinho (sem kit): descrição livre p/ o pedido sair como 1 item pelo valor cheio.
           description: kit ? undefined : String(p.description ?? l.patient_name ?? 'Pedido Tricopill').trim(),
           customerName: String(cad.nomeCompleto || p.customer_name || l.patient_name || 'Cliente Tricopill').trim(),
