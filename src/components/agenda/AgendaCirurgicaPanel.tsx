@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { CalendarPlus, ChevronLeft, ChevronRight, Copy, Hotel, Scissors, Trash2 } from 'lucide-react'
+import {
+  CalendarClock,
+  CalendarPlus,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  Hotel,
+  Scissors,
+  Trash2,
+} from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,14 +22,16 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   type CirurgiaDoDia,
+  type CirurgiaSemData,
   type DataAberta,
   abrirData,
   agruparPorDia,
   fecharData,
   listarAgendaCirurgica,
+  listarCirurgiasSemData,
   listarDatasAbertas,
 } from '@/services/agendaCirurgica'
-import { getAgendaIcsUrl } from '@/services/clinicSales'
+import { getAgendaIcsUrl, rescheduleSale } from '@/services/clinicSales'
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -84,6 +95,12 @@ export function AgendaCirurgicaPanel() {
   const [novaData, setNovaData] = useState('')
   const [novasVagas, setNovasVagas] = useState('1')
   const [salvandoData, setSalvandoData] = useState(false)
+  const [semData, setSemData] = useState<CirurgiaSemData[]>([])
+  const [dataMarcar, setDataMarcar] = useState<Record<string, string>>({})
+  const [horaMarcar, setHoraMarcar] = useState<Record<string, string>>({})
+  const [marcando, setMarcando] = useState<string | null>(null)
+  /** Sobe a cada marcação para o calendário e a fila relerem o banco juntos. */
+  const [versao, setVersao] = useState(0)
 
   /** Grade completa: semanas inteiras, de domingo a sábado, cobrindo o mês. */
   const grade = useMemo(() => {
@@ -109,7 +126,7 @@ export function AgendaCirurgicaPanel() {
     return () => {
       cancelado = true
     }
-  }, [grade])
+  }, [grade, versao])
 
   useEffect(() => {
     getAgendaIcsUrl()
@@ -128,6 +145,54 @@ export function AgendaCirurgicaPanel() {
   useEffect(() => {
     void carregarDatas()
   }, [carregarDatas])
+
+  const carregarSemData = useCallback(async () => {
+    try {
+      setSemData(await listarCirurgiasSemData())
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao carregar quem fechou sem data')
+    }
+  }, [])
+
+  useEffect(() => {
+    void carregarSemData()
+  }, [carregarSemData, versao])
+
+  /**
+   * Marca o dia da cirurgia sem sair da agenda.
+   *
+   * A trava contra a data do fechamento é a mesma do cadastro de venda, e existe porque a
+   * planilha deixou passar cirurgia marcada três meses ANTES da venda: com o ano digitado
+   * errado o paciente cai para trás no calendário e ninguém repara.
+   *
+   * Depois de marcar, a tela pula para o mês escolhido em vez de ficar onde estava: o
+   * paciente saiu da fila e a única pergunta seguinte é como ficou o dia dele.
+   */
+  const marcarData = async (c: CirurgiaSemData) => {
+    const dia = dataMarcar[c.saleId]
+    if (!dia) return
+    // Só trava contra o fechamento quando o fechamento é crível. Venda datada no
+    // futuro é o campo ERRADO da linha, e travar por ela deixaria justamente o
+    // paciente de cadastro furado sem jeito de entrar no calendário.
+    if (c.fechouEm && c.diasEsperando > 0 && dia < c.fechouEm) {
+      toast.error('A data da cirurgia está antes do fechamento da venda. Confira o ano.')
+      return
+    }
+    setMarcando(c.saleId)
+    try {
+      const hora = horaMarcar[c.saleId] || '07:00'
+      await rescheduleSale(c.saleId, new Date(`${dia}T${hora}:00`).toISOString())
+      setDataMarcar((m) => ({ ...m, [c.saleId]: '' }))
+      setMes(dia.slice(0, 7))
+      setSelecionado(dia)
+      setVersao((v) => v + 1)
+      toast.success(`${c.paciente} marcado para ${diaCurto(dia)}.`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao marcar a data')
+    } finally {
+      setMarcando(null)
+    }
+  }
 
   /**
    * As datas que a clínica abriu e ainda não têm paciente.
@@ -290,6 +355,97 @@ export function AgendaCirurgicaPanel() {
             </>
           )}
         </p>
+      )}
+
+      {semData.length > 0 && (
+        // A faixa fica ACIMA do calendário e FORA do mês de propósito. Quem fechou em
+        // junho e segue sem data continua pendente em setembro: se a lista respeitasse o
+        // mês da tela, a pendência sumiria virando a página, que é exatamente o que
+        // acontecia antes — a venda já paga era a única invisível no calendário.
+        <Card className="border-amber-500/50 bg-amber-500/5">
+          <CardHeader>
+            <CardTitle className="flex flex-wrap items-center gap-2">
+              <CalendarClock className="size-4 text-amber-600" />
+              Fecharam e falta marcar
+              <Badge variant="outline" className="border-amber-500/50 text-amber-600">
+                {semData.length}
+              </Badge>
+            </CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Cirurgia vendida com a data "a definir": o paciente fechou, a clínica já recebeu e ele
+              não ocupa dia nenhum do calendário até alguém marcar. Escolha o dia aqui e ele cai
+              direto no mês certo.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            {semData.map((c) => (
+              <div
+                key={c.saleId}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {c.leadId ? (
+                    <Link to={`/leads/${c.leadId}`} className="font-medium hover:underline">
+                      {c.paciente}
+                    </Link>
+                  ) : (
+                    <span className="font-medium">{c.paciente}</span>
+                  )}
+                  <span className="text-muted-foreground">
+                    {[
+                      c.procedimento,
+                      c.medico,
+                      c.cidade,
+                      c.valorCents != null ? brl(c.valorCents) : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                  {c.precisaHotel && (
+                    <Badge variant="outline">
+                      <Hotel className="size-3" /> hotel
+                    </Badge>
+                  )}
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      (c.diasEsperando >= 30 || c.diasEsperando < 0) &&
+                        'border-destructive/50 text-destructive',
+                    )}
+                  >
+                    {c.diasEsperando < 0
+                      ? `fechamento em ${c.fechouEm.split('-').reverse().join('/')} — confira o ano`
+                      : c.diasEsperando === 0
+                        ? 'fechou hoje'
+                        : `fechou há ${c.diasEsperando} dia${c.diasEsperando > 1 ? 's' : ''}`}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    type="date"
+                    min={c.diasEsperando > 0 ? c.fechouEm || undefined : undefined}
+                    value={dataMarcar[c.saleId] ?? ''}
+                    onChange={(e) => setDataMarcar((m) => ({ ...m, [c.saleId]: e.target.value }))}
+                    className="h-8 w-40"
+                  />
+                  <Input
+                    type="time"
+                    value={horaMarcar[c.saleId] ?? '07:00'}
+                    onChange={(e) => setHoraMarcar((m) => ({ ...m, [c.saleId]: e.target.value }))}
+                    className="h-8 w-28"
+                  />
+                  <Button
+                    size="sm"
+                    disabled={!dataMarcar[c.saleId] || marcando === c.saleId}
+                    onClick={() => void marcarData(c)}
+                  >
+                    {marcando === c.saleId ? 'Marcando…' : 'Marcar'}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       )}
 
       <Card>

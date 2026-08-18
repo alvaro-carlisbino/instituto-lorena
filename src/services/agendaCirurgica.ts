@@ -1,4 +1,4 @@
-import { diaLocal } from '@/lib/diaLocal'
+import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { supabase } from '@/lib/supabaseClient'
 import { type ConfirmationStatus, listSurgicalStaff } from '@/services/clinicSales'
 
@@ -244,6 +244,85 @@ export async function listarAgendaCirurgica(deDia: string, ateDia: string): Prom
     nomePorStaffId,
   )
   return mesclado.filter((c) => c.dia >= deDia && c.dia <= ateDia)
+}
+
+/**
+ * Quem FECHOU a cirurgia e ainda não tem dia marcado.
+ *
+ * O paciente fecha na consulta e nem sempre a data sai na mesma conversa: escolhe o mês,
+ * pede para ver a agenda do trabalho, espera o acompanhante. O cadastro já resolve isso
+ * com o "a definir", mas até aqui esse paciente não existia nesta tela — `mesclarAgenda`
+ * exige `scheduled_at` e descarta quem está sem data. O resultado é que a venda mais
+ * frágil da clínica, a que já foi paga e ainda não tem lugar na sala, era justamente a
+ * única invisível no calendário.
+ *
+ * Não é recorte de mês de propósito: quem fechou em junho e segue sem data não pode
+ * desaparecer porque a tela está em setembro. A lista é curta por natureza — se crescer,
+ * é o próprio sintoma que a clínica precisa ver.
+ */
+export type CirurgiaSemData = {
+  saleId: string
+  leadId: string | null
+  paciente: string
+  procedimento: string | null
+  medico: string | null
+  valorCents: number | null
+  /** Dia do fechamento da venda (YYYY-MM-DD). */
+  fechouEm: string
+  cidade: string | null
+  precisaHotel: boolean
+  /**
+   * Dias corridos entre o fechamento e hoje. É a idade da pendência.
+   *
+   * Vem NEGATIVO quando a venda está datada no futuro, e isso é de propósito: existe
+   * linha em produção com sold_at 117 dias à frente, que é ano digitado errado. Zerar
+   * o número faria a tela dizer "fechou hoje" e enterrar o erro.
+   */
+  diasEsperando: number
+}
+
+export async function listarCirurgiasSemData(): Promise<CirurgiaSemData[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('clinic_sales')
+    .select(
+      'id, lead_id, patient_name, procedure_label, performing_doctor, attending_doctor, ' +
+        'seller_doctor, value_cents, sold_at, city, hotel_needed',
+    )
+    .eq('kind', 'cirurgia')
+    .neq('status', 'cancelada')
+    .is('scheduled_at', null)
+    .order('sold_at', { ascending: true })
+    .limit(200)
+  if (error) throw new Error(error.message)
+
+  const hoje = hojeLocal()
+  // Mesmo motivo do cast em listarAgendaCirurgica: com o select montado por
+  // concatenação o PostgREST não consegue inferir a linha e devolve GenericStringError.
+  const linhas = (data ?? []) as unknown as Record<string, unknown>[]
+  return linhas.map((row) => {
+    const str = (v: unknown) => (v == null || String(v).length === 0 ? null : String(v))
+    const fechouEm = String(row.sold_at ?? '').slice(0, 10)
+    return {
+      saleId: String(row.id),
+      leadId: str(row.lead_id),
+      paciente: str(row.patient_name) ?? '—',
+      procedimento: str(row.procedure_label),
+      medico: str(row.performing_doctor) ?? str(row.attending_doctor) ?? str(row.seller_doctor),
+      valorCents: row.value_cents == null ? null : Number(row.value_cents),
+      fechouEm,
+      cidade: str(row.city),
+      precisaHotel: row.hotel_needed === true,
+      diasEsperando: diasEntre(fechouEm, hoje),
+    }
+  })
+}
+
+/** Dias corridos entre dois YYYY-MM-DD, com sinal. Meio-dia UTC para não tropeçar em fuso. */
+function diasEntre(de: string, ate: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) return 0
+  const ms = new Date(`${ate}T12:00:00Z`).getTime() - new Date(`${de}T12:00:00Z`).getTime()
+  return Math.round(ms / 86_400_000)
 }
 
 /**
