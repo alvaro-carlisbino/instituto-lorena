@@ -55,8 +55,28 @@ export function isInternalPhone(phone: unknown): boolean {
   return Boolean(k) && INTERNAL_PHONE_KEYS.has(k)
 }
 
+// O dono testa o atendimento pelo próprio WhatsApp — e o próprio WhatsApp dele está na
+// lista de interno duas vezes (nome e telefone). Resultado: ele mandava "teste" na linha do
+// Tricopill e não voltava NADA, o que parece IA desligada e não é.
+//
+// A exceção vale SÓ para responder (`matchesInternalContact`, usada no auto-reply). No
+// reengajamento a lista continua inteira — `isBlockedContact` não passa por aqui —, então
+// o bot não volta a oferecer recompra pra equipe, que é o motivo de a lista existir.
+const TESTER_PHONE_KEYS = new Set(
+  [
+    '554497168329', // Álvaro Carlisbino — testa o bot pelo número dele
+  ].map(phoneKey),
+)
+
+/** Interno que MESMO ASSIM pode conversar com o bot (teste do dono). */
+export function isTesterPhone(phone: unknown): boolean {
+  const k = phoneKey(phone)
+  return Boolean(k) && TESTER_PHONE_KEYS.has(k)
+}
+
 /** Contato interno por nome OU por telefone. Use esta quando o telefone estiver à mão. */
 export function matchesInternalContact(name: unknown, phone?: unknown): boolean {
+  if (isTesterPhone(phone)) return false
   return matchesInternalTerm(name) || isInternalPhone(phone)
 }
 
