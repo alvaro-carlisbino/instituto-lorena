@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest'
 
 import {
   type ClinicSale,
+  type FiltroVendas,
   classificarProcedimento,
   diasAteFechar,
+  filtrarVendas,
   followUpStats,
   salesByDoctor,
   salesByProcedure,
+  vendasSemData,
+  vendasSemPaciente,
 } from './clinicSales'
 
 const venda = (over: Partial<ClinicSale> = {}): ClinicSale =>
@@ -222,5 +226,87 @@ describe('salesByProcedure', () => {
     expect(masculino?.rotulos).toEqual(['Tc Frontal/ Coroa (2)'])
     // A ordem é a do funil de preço, não a de quem apareceu primeiro na lista.
     expect(linhas.map((l) => l.grupo)).toEqual(['masculino', 'feminino', 'sobrancelha'])
+  })
+})
+
+describe('filtrarVendas', () => {
+  const padrao: FiltroVendas = {
+    recorte: 'mes',
+    mes: '2026-08',
+    status: 'ativas',
+    vendedora: 'todas',
+    termo: '',
+  }
+
+  const base = [
+    venda({ id: 'jan', soldAt: '2026-01-12', scheduledAt: null, leadId: 'l1', patientName: 'José Antônio' }),
+    venda({
+      id: 'ago-com-data',
+      soldAt: '2026-08-05',
+      scheduledAt: '2026-09-10T07:00:00Z',
+      leadId: 'l2',
+      patientName: 'Maria Souza',
+      sellerName: 'Aline Muniz',
+    }),
+    venda({ id: 'ago-sem-data', soldAt: '2026-08-07', scheduledAt: null, leadId: null, patientName: 'Ana Lima' }),
+    venda({ id: 'cancelada', soldAt: '2026-08-08', scheduledAt: null, leadId: 'l3', status: 'cancelada' }),
+  ]
+
+  it('o padrão é o mês, sem canceladas', () => {
+    const ids = filtrarVendas(base, padrao).map((s) => s.id)
+    expect(ids).toEqual(['ago-com-data', 'ago-sem-data'])
+  })
+
+  it('"sem data" atravessa o mês e não some com a venda de janeiro', () => {
+    const ids = filtrarVendas(base, { ...padrao, recorte: 'sem-data' }).map((s) => s.id)
+    expect(ids).toContain('jan')
+    expect(ids).toContain('ago-sem-data')
+    expect(ids).not.toContain('ago-com-data')
+  })
+
+  it('"sem data" põe a mais parada primeiro', () => {
+    const ids = filtrarVendas(base, { ...padrao, recorte: 'sem-data' }).map((s) => s.id)
+    expect(ids[0]).toBe('jan')
+  })
+
+  it('"sem data" não conta cancelada', () => {
+    const ids = filtrarVendas(base, { ...padrao, recorte: 'sem-data' }).map((s) => s.id)
+    expect(ids).not.toContain('cancelada')
+  })
+
+  it('"sem paciente" traz só quem não tem cadastro vinculado', () => {
+    const ids = filtrarVendas(base, { ...padrao, recorte: 'sem-paciente' }).map((s) => s.id)
+    expect(ids).toEqual(['ago-sem-data'])
+  })
+
+  it('cancelada só aparece quando o filtro pede', () => {
+    expect(filtrarVendas(base, { ...padrao, status: 'cancelada' }).map((s) => s.id)).toEqual(['cancelada'])
+    expect(filtrarVendas(base, { ...padrao, status: 'todas' }).map((s) => s.id)).toContain('cancelada')
+  })
+
+  it('a busca acha sem acento e em qualquer mês do recorte', () => {
+    const ids = filtrarVendas(base, { ...padrao, recorte: 'sem-data', termo: 'jose' }).map((s) => s.id)
+    expect(ids).toEqual(['jan'])
+  })
+
+  it('a vendedora filtra por nome exato', () => {
+    const ids = filtrarVendas(base, { ...padrao, vendedora: 'Aline Muniz' }).map((s) => s.id)
+    expect(ids).toEqual(['ago-com-data'])
+  })
+
+  it('busca e recorte se somam: termo que não bate esvazia a lista', () => {
+    expect(filtrarVendas(base, { ...padrao, termo: 'ninguém com esse nome' })).toEqual([])
+  })
+})
+
+describe('vendasSemData e vendasSemPaciente', () => {
+  it('ignoram cancelada nas duas contagens', () => {
+    const lista = [
+      venda({ id: 'a', scheduledAt: null, leadId: null }),
+      venda({ id: 'b', scheduledAt: null, leadId: null, status: 'cancelada' }),
+      venda({ id: 'c', scheduledAt: '2026-09-01T07:00:00Z', leadId: 'l1' }),
+    ]
+    expect(vendasSemData(lista).map((s) => s.id)).toEqual(['a'])
+    expect(vendasSemPaciente(lista).map((s) => s.id)).toEqual(['a'])
   })
 })

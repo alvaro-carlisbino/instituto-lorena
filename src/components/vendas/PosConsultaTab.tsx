@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   CalendarClock,
@@ -25,11 +25,13 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SearchField } from '@/components/ui/search-field'
 import { SearchPicker } from '@/components/ui/search-picker'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
+import { combinaBusca } from '@/lib/busca'
 import { diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
 import { type PacienteEncontrado, buscarPacientes } from '@/services/pacienteBusca'
 import {
@@ -92,6 +94,8 @@ export function PosConsultaTab() {
   const [confirmandoZerar, setConfirmandoZerar] = useState(false)
   const [motivo, setMotivo] = useState(MOTIVO_PADRAO)
   const [vendoFora, setVendoFora] = useState(false)
+  const [termo, setTermo] = useState('')
+  const buscaAdiada = useDeferredValue(termo)
 
   // Follow-up é o único destino que pergunta a data: a cirurgia e o protocolo
   // seguem em um clique, com contato para amanhã.
@@ -113,6 +117,24 @@ export function PosConsultaTab() {
   const [notaManual, setNotaManual] = useState('')
 
   /** Dono do card e autor da decisão: quem está com a tela aberta. */
+  // A fila cabe em uma tela na segunda de manhã e passa de trinta linhas depois de
+  // feriado. Buscar pelo nome é mais rápido do que rolar procurando quem ligou.
+  const visiveis = useMemo(
+    () =>
+      rows.filter((item) =>
+        combinaBusca(
+          buscaAdiada,
+          item.paciente,
+          item.telefone,
+          item.servico,
+          item.prestador,
+          item.prontuario,
+          item.origemLead,
+        ),
+      ),
+    [rows, buscaAdiada],
+  )
+
   const usuarioId = useMemo(
     () => crm.myAppUserId ?? crm.sdrMembers[0]?.id ?? null,
     [crm.myAppUserId, crm.sdrMembers],
@@ -246,28 +268,48 @@ export function PosConsultaTab() {
             </p>
           </div>
           <CardAction>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="outline" onClick={() => setAdicionando(true)}>
-                <UserPlus className="size-3.5" /> Adicionar paciente
+                <UserPlus className="size-3.5" aria-hidden /> Adicionar paciente
               </Button>
               {rows.length > 0 && (
                 <Button size="sm" variant="outline" onClick={() => setConfirmandoZerar(true)}>
-                  <Eraser className="size-3.5" /> Zerar a fila
+                  <Eraser className="size-3.5" aria-hidden /> Zerar a fila
                 </Button>
               )}
               <Badge variant={rows.length > 0 ? 'default' : 'secondary'}>{rows.length}</Badge>
             </div>
           </CardAction>
+          {rows.length > 0 && (
+            <div className="col-span-full border-t pt-3">
+              <SearchField
+                value={termo}
+                onChange={setTermo}
+                label="Buscar paciente na fila"
+                placeholder="Paciente, telefone, prontuário, serviço, médico…"
+                resultados={visiveis.length}
+                className="w-full sm:max-w-sm"
+              />
+            </div>
+          )}
         </CardHeader>
         <CardContent>
-          {rows.length === 0 ? (
+          {visiveis.length === 0 ? (
             <EmptyState
               icon={UserCheck}
-              title={loading ? 'Carregando…' : 'Ninguém esperando'}
+              title={
+                loading
+                  ? 'Carregando…'
+                  : termo.trim().length > 0
+                    ? `Ninguém na fila com "${termo.trim()}"`
+                    : 'Ninguém esperando'
+              }
               description={
                 loading
                   ? undefined
-                  : 'Quem passar em consulta hoje aparece aqui depois do horário. Consulta encaixada que a agenda não pegou entra por "Adicionar paciente".'
+                  : termo.trim().length > 0
+                    ? `A fila continua com ${rows.length} paciente${rows.length === 1 ? '' : 's'}. Limpe a busca para ver todos.`
+                    : 'Quem passar em consulta hoje aparece aqui depois do horário. Consulta encaixada que a agenda não pegou entra por "Adicionar paciente".'
               }
             />
           ) : (
@@ -275,14 +317,14 @@ export function PosConsultaTab() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Paciente</TableHead>
-                    <TableHead>Consulta</TableHead>
-                    <TableHead>Telefone</TableHead>
-                    <TableHead className="text-right">Encaminhar</TableHead>
+                    <TableHead scope="col">Paciente</TableHead>
+                    <TableHead scope="col">Consulta</TableHead>
+                    <TableHead scope="col" className="hidden sm:table-cell">Telefone</TableHead>
+                    <TableHead scope="col" className="text-right">Encaminhar</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((item) => (
+                  {visiveis.map((item) => (
                     <TableRow key={item.itemId}>
                       <TableCell>
                         <div className="font-medium">{item.paciente}</div>
@@ -294,6 +336,10 @@ export function PosConsultaTab() {
                             </Badge>
                           )}
                         </div>
+                        {/* No celular a coluna de telefone sai; o número não pode sair junto. */}
+                        {item.telefone && (
+                          <div className="text-xs text-muted-foreground sm:hidden">{item.telefone}</div>
+                        )}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         <div>
@@ -303,9 +349,11 @@ export function PosConsultaTab() {
                         </div>
                         {item.prestador && <div className="text-xs">{item.prestador}</div>}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{item.telefone ?? '—'}</TableCell>
+                      <TableCell className="hidden text-muted-foreground sm:table-cell">
+                        {item.telefone ?? '—'}
+                      </TableCell>
                       <TableCell>
-                        <div className="flex justify-end gap-2">
+                        <div className="flex flex-wrap justify-end gap-2">
                           <Button
                             size="sm"
                             variant="outline"

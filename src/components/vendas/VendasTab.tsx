@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Ban, FileSpreadsheet, Pencil, Plus, Target, UserX } from 'lucide-react'
+import { Ban, CalendarOff, FileSpreadsheet, Pencil, Plus, Target, UserX } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,8 +16,17 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SearchField } from '@/components/ui/search-field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
@@ -24,11 +34,14 @@ import {
   DEPOSIT_PAYEE_LABEL,
   type ClinicSale,
   type ClinicSaleKind,
+  type FiltroStatusVendas,
+  type RecorteVendas,
   type SalesTarget,
   type StaffMember,
   cancelClinicSale,
   deleteSalesTarget,
   diasAteFechar,
+  filtrarVendas,
   followUpStats,
   listClinicSales,
   listSalesTargets,
@@ -39,6 +52,8 @@ import {
   salesByProcedure,
   saveSalesTarget,
   tipoNegociacao,
+  vendasSemData,
+  vendasSemPaciente,
 } from '@/services/clinicSales'
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -73,6 +88,79 @@ function rotuloPrazo(dias: number | null): { texto: string; tom: string } {
   return { texto: `follow-up · ${dias} dias`, tom: 'text-sky-600' }
 }
 
+const FILTRO_STATUS: { valor: FiltroStatusVendas; rotulo: string }[] = [
+  { valor: 'ativas', rotulo: 'Ativas (sem canceladas)' },
+  { valor: 'vendida', rotulo: 'Só vendidas' },
+  { valor: 'agendada', rotulo: 'Só agendadas' },
+  { valor: 'realizada', rotulo: 'Só realizadas' },
+  { valor: 'cancelada', rotulo: 'Só canceladas' },
+  { valor: 'todas', rotulo: 'Todas, com canceladas' },
+]
+
+/** Há quantos dias a venda fechou. É o tempo que ela está parada sem data. */
+const diasDesde = (iso: string): number => {
+  const d = new Date(`${iso.slice(0, 10)}T12:00:00`)
+  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000))
+}
+
+/**
+ * Número do topo. Vira botão quando filtra: número que não leva a lugar nenhum é
+ * o que fazia "19 vendidas sem data" ser um enfeite — dava para ler e não dava
+ * para saber QUEM são as 19.
+ */
+function Kpi({
+  rotulo,
+  valor,
+  detalhe,
+  tom,
+  ativo,
+  onClick,
+  descricao,
+  icone: Icone,
+}: {
+  rotulo: string
+  valor: string | number
+  detalhe?: string
+  tom?: string
+  ativo?: boolean
+  onClick?: () => void
+  descricao?: string
+  icone?: typeof UserX
+}) {
+  const conteudo = (
+    <>
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {Icone && <Icone className="size-3.5 shrink-0" aria-hidden />}
+        {rotulo}
+      </p>
+      <p className={cn('font-heading text-xl break-words tabular-nums sm:text-2xl', tom)}>{valor}</p>
+      {detalhe && <p className="mt-0.5 text-xs text-muted-foreground">{detalhe}</p>}
+    </>
+  )
+
+  if (!onClick) {
+    return (
+      <Card>
+        <CardContent className="pt-4">{conteudo}</CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card className={cn('py-0 transition-colors', ativo && 'bg-primary/5 ring-2 ring-primary')}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={ativo}
+        title={descricao}
+        className="w-full cursor-pointer px-4 py-4 text-left outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
+      >
+        {conteudo}
+      </button>
+    </Card>
+  )
+}
+
 export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [sales, setSales] = useState<ClinicSale[]>([])
   const [staff, setStaff] = useState<StaffMember[]>([])
@@ -87,7 +175,11 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [motivo, setMotivo] = useState('')
   const [estorno, setEstorno] = useState('Em avaliação')
   const [obsCancel, setObsCancel] = useState('')
-  const [soSemPaciente, setSoSemPaciente] = useState(false)
+  const [recorte, setRecorte] = useState<RecorteVendas>('mes')
+  const [status, setStatus] = useState<FiltroStatusVendas>('ativas')
+  const [termo, setTermo] = useState('')
+  // A lista tem até 400 linhas: adiar o filtro mantém a digitação fluida.
+  const buscaAdiada = useDeferredValue(termo)
   /** "todas" = a clínica inteira; escolher uma dá a visão daquela consultora. */
   const [vendedora, setVendedora] = useState('todas')
   const [mes, setMes] = useState(() => {
@@ -128,7 +220,11 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   // Acontece quando o telefone da planilha bate com dois leads (parente, cadastro
   // duplicado) e casar por semelhança em saúde é mostrar a cirurgia de um
   // paciente para outro. Então o sistema não adivinha, ele mostra a lista.
-  const semPaciente = useMemo(() => sales.filter((s) => !s.leadId && s.status !== 'cancelada'), [sales])
+  const semPaciente = useMemo(() => vendasSemPaciente(sales), [sales])
+
+  // Venda fechada que nunca ganhou data. Atravessa o mês: a mais velha da lista
+  // fechou em janeiro e continua aqui. Por isso conta a base inteira, não o mês.
+  const semData = useMemo(() => vendasSemData(sales), [sales])
 
   /** Vendedoras que aparecem nos dados — a lista cresce sozinha conforme elas registram. */
   const vendedoras = useMemo(() => {
@@ -136,15 +232,17 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
     return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'))
   }, [sales])
 
+  /** Como a fatia atual se chama nos títulos, para nenhum rótulo mentir o recorte. */
+  const rotuloRecorte =
+    recorte === 'mes'
+      ? nomeDoMes(mes)
+      : recorte === 'sem-data'
+        ? 'vendas sem data marcada'
+        : 'vendas sem paciente vinculado'
+
   const doMes = useMemo(
-    () =>
-      sales.filter(
-        (s) =>
-          s.status !== 'cancelada' &&
-          (soSemPaciente ? !s.leadId : s.soldAt.startsWith(mes)) &&
-          (vendedora === 'todas' || s.sellerName === vendedora),
-      ),
-    [sales, mes, soSemPaciente, vendedora],
+    () => filtrarVendas(sales, { recorte, mes, status, vendedora, termo: buscaAdiada }),
+    [sales, mes, recorte, status, vendedora, buscaAdiada],
   )
 
   const resumo = useMemo(() => {
@@ -153,9 +251,10 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
       qtd: doMes.length,
       total,
       ticket: doMes.length > 0 ? Math.round(total / doMes.length) : 0,
-      semData: sales.filter((s) => s.status !== 'cancelada' && !s.scheduledAt).length,
+      semData: semData.length,
+      semDataCents: semData.reduce((acc, s) => acc + s.valueCents, 0),
     }
-  }, [doMes, sales])
+  }, [doMes, semData])
 
   // O "por médico" acompanha o mês escolhido: é o fechamento que ela digita hoje
   // no rodapé da planilha ("4 fechamentos, 37% de conversão").
@@ -177,8 +276,8 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
     [targets, mes, vendedora],
   )
   const progresso = useMemo(
-    () => progressoDaMeta(soSemPaciente ? [] : doMes, meta, mes),
-    [doMes, meta, mes, soSemPaciente],
+    () => progressoDaMeta(recorte === 'mes' ? doMes : [], meta, mes),
+    [doMes, meta, mes, recorte],
   )
   const resultado = useMemo(() => resultadoDasVendas(doMes), [doMes])
 
@@ -188,6 +287,10 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
     const base = prazo.noDia + prazo.followUp
     return base > 0 ? Math.round((prazo.followUp / base) * 100) : 0
   }, [prazo])
+
+  /** Clicar de novo no recorte ativo volta para o mês — o botão liga e desliga. */
+  const alternarRecorte = (alvo: Exclude<RecorteVendas, 'mes'>) =>
+    setRecorte((atual) => (atual === alvo ? 'mes' : alvo))
 
   const abrirMeta = () => {
     setMetaValor(meta && meta.targetCents > 0 ? String(meta.targetCents / 100).replace('.', ',') : '')
@@ -245,7 +348,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
 
   return (
     <div className="space-y-4">
-      {!soSemPaciente && (
+      {recorte === 'mes' && (
         <Card>
           <CardHeader>
             <CardTitle>
@@ -321,79 +424,70 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
         </Card>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Vendas no mês</p>
-            <p className="font-heading text-2xl">{resumo.qtd}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Faturamento do mês</p>
-            <p className="font-heading text-2xl">{brl(resumo.total)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Ticket médio</p>
-            <p className="font-heading text-2xl">{brl(resumo.ticket)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Lucro do mês</p>
-            <p
-              className={cn(
-                'font-heading text-2xl',
-                resultado.lucro < 0 && 'text-destructive',
-              )}
-            >
-              {brl(resultado.lucro)}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {resultado.custo > 0 ? `${resultado.margem}% de margem` : 'nenhum custo lançado'}
-              {resultado.semCusto > 0 && resultado.custo > 0 && ` · ${resultado.semCusto} sem custo`}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Fechou em follow-up</p>
-            <p className="font-heading text-2xl">
-              {prazo.followUp}
-              <span className="ml-1 text-sm text-muted-foreground">de {prazo.noDia + prazo.followUp}</span>
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {pctFollowUp}% · {brl(prazo.valorFollowUpCents)}
-              {prazo.medianaDias > 0 ? ` · mediana ${prazo.medianaDias} dias` : ''}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Vendidas sem data</p>
-            <p className="font-heading text-2xl">{resumo.semData}</p>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-6">
+        <Kpi rotulo={`Vendas · ${rotuloRecorte}`} valor={resumo.qtd} />
+        <Kpi rotulo="Faturamento" valor={brl(resumo.total)} />
+        <Kpi rotulo="Ticket médio" valor={brl(resumo.ticket)} />
+        <Kpi
+          rotulo="Lucro"
+          valor={brl(resultado.lucro)}
+          tom={resultado.lucro < 0 ? 'text-destructive' : undefined}
+          detalhe={
+            (resultado.custo > 0 ? `${resultado.margem}% de margem` : 'nenhum custo lançado') +
+            (resultado.semCusto > 0 && resultado.custo > 0 ? ` · ${resultado.semCusto} sem custo` : '')
+          }
+        />
+        <Kpi
+          rotulo="Fechou em follow-up"
+          valor={prazo.followUp}
+          detalhe={`de ${prazo.noDia + prazo.followUp} · ${pctFollowUp}% · ${brl(prazo.valorFollowUpCents)}${
+            prazo.medianaDias > 0 ? ` · mediana ${prazo.medianaDias} dias` : ''
+          }`}
+        />
+        <Kpi
+          rotulo="Vendidas sem data"
+          icone={CalendarOff}
+          valor={resumo.semData}
+          tom={resumo.semData > 0 ? 'text-amber-600' : undefined}
+          detalhe={
+            resumo.semData > 0
+              ? `${brl(resumo.semDataCents)} parados · clique para ver`
+              : 'toda venda tem data'
+          }
+          ativo={recorte === 'sem-data'}
+          onClick={resumo.semData > 0 ? () => alternarRecorte('sem-data') : undefined}
+          descricao="Mostrar as vendas fechadas que ainda não têm data marcada"
+        />
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="gap-3">
           <CardTitle>{kind === 'cirurgia' ? 'Vendas cirúrgicas' : 'Vendas de protocolo'}</CardTitle>
           <CardAction>
-            <div className="flex items-center gap-2">
-              {semPaciente.length > 0 && (
-                <Button
-                  size="sm"
-                  variant={soSemPaciente ? 'default' : 'outline'}
-                  onClick={() => setSoSemPaciente((v) => !v)}
-                >
-                  <UserX className="size-3.5" /> Sem paciente ({semPaciente.length})
-                </Button>
-              )}
-              <Select value={mes} disabled={soSemPaciente} onValueChange={(v) => setMes(String(v ?? mes))}>
-                <SelectTrigger className="h-8 w-40">
+            <Button size="sm" onClick={() => setForm({ open: true, editing: null })}>
+              <Plus className="size-3.5" aria-hidden /> Nova venda
+            </Button>
+          </CardAction>
+
+          {/* Filtros em linha própria: no celular eles não cabem ao lado do título,
+              e espremidos no CardAction viravam três selects de 40px ilegíveis. */}
+          <div className="col-span-full flex flex-col gap-2 border-t pt-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <SearchField
+              value={termo}
+              onChange={setTermo}
+              label="Buscar venda"
+              placeholder="Paciente, telefone, procedimento, cidade, médico…"
+              resultados={doMes.length}
+              className="w-full sm:max-w-xs"
+            />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Select
+                value={mes}
+                disabled={recorte !== 'mes'}
+                onValueChange={(v) => setMes(String(v ?? mes))}
+              >
+                <SelectTrigger className="h-8 w-40" aria-label="Mês da venda">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -404,9 +498,23 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                   ))}
                 </SelectContent>
               </Select>
+
+              <Select value={status} onValueChange={(v) => setStatus(String(v ?? 'ativas') as FiltroStatusVendas)}>
+                <SelectTrigger className="h-8 w-48" aria-label="Situação da venda">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FILTRO_STATUS.map((f) => (
+                    <SelectItem key={f.valor} value={f.valor}>
+                      {f.rotulo}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
               {vendedoras.length > 0 && (
                 <Select value={vendedora} onValueChange={(v) => setVendedora(String(v ?? 'todas'))}>
-                  <SelectTrigger className="h-8 w-40">
+                  <SelectTrigger className="h-8 w-40" aria-label="Vendedora">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -419,36 +527,88 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                   </SelectContent>
                 </Select>
               )}
-              <Button size="sm" onClick={() => setForm({ open: true, editing: null })}>
-                <Plus className="size-3.5" /> Nova venda
-              </Button>
+
+              {semData.length > 0 && (
+                <Button
+                  size="sm"
+                  variant={recorte === 'sem-data' ? 'default' : 'outline'}
+                  aria-pressed={recorte === 'sem-data'}
+                  onClick={() => alternarRecorte('sem-data')}
+                >
+                  <CalendarOff className="size-3.5" aria-hidden /> Sem data ({semData.length})
+                </Button>
+              )}
+              {semPaciente.length > 0 && (
+                <Button
+                  size="sm"
+                  variant={recorte === 'sem-paciente' ? 'default' : 'outline'}
+                  aria-pressed={recorte === 'sem-paciente'}
+                  onClick={() => alternarRecorte('sem-paciente')}
+                >
+                  <UserX className="size-3.5" aria-hidden /> Sem paciente ({semPaciente.length})
+                </Button>
+              )}
             </div>
-          </CardAction>
+          </div>
+
+          {recorte !== 'mes' && (
+            <p className="col-span-full text-xs text-muted-foreground">
+              {recorte === 'sem-data'
+                ? 'Vendas fechadas de todos os meses que ainda não têm data marcada, da mais parada para a mais recente. O filtro de mês fica de fora de propósito: venda parada não pertence a um mês só.'
+                : 'Vendas de todos os meses cujo paciente não foi vinculado a um cadastro. Sem vínculo, o card não anda no funil e o lembrete não sai.'}
+            </p>
+          )}
         </CardHeader>
         <CardContent>
           {doMes.length === 0 ? (
             <EmptyState
               icon={FileSpreadsheet}
-              title={loading ? 'Carregando…' : soSemPaciente ? 'Todas as vendas têm paciente' : `Nenhuma venda em ${nomeDoMes(mes)}`}
-              description={loading ? undefined : 'Escolha outro mês ou registre a primeira venda.'}
+              title={
+                loading
+                  ? 'Carregando…'
+                  : termo.trim().length > 0
+                    ? `Nenhuma venda para "${termo.trim()}"`
+                    : recorte === 'sem-paciente'
+                      ? 'Todas as vendas têm paciente'
+                      : recorte === 'sem-data'
+                        ? 'Toda venda já tem data marcada'
+                        : `Nenhuma venda em ${nomeDoMes(mes)}`
+              }
+              description={
+                loading
+                  ? undefined
+                  : termo.trim().length > 0
+                    ? 'A busca olha paciente, telefone, procedimento, cidade, vendedora e médico. Limpe o termo para ver a lista inteira.'
+                    : 'Escolha outro mês ou registre a primeira venda.'
+              }
             />
           ) : (
             <div className="overflow-x-auto">
               <Table>
+                <TableCaption className="sr-only">
+                  {`${doMes.length} venda${doMes.length === 1 ? '' : 's'} em ${rotuloRecorte}. `}
+                  No celular a tabela mostra paciente, valor, data e situação; as demais colunas
+                  aparecem em telas maiores e o conteúdo delas vai junto do nome do paciente.
+                </TableCaption>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Consulta</TableHead>
-                    <TableHead>Venda</TableHead>
-                    <TableHead>Paciente</TableHead>
-                    <TableHead>{kind === 'cirurgia' ? 'Procedimento' : 'Protocolo'}</TableHead>
-                    <TableHead>Vendedora</TableHead>
-                    <TableHead>Médico</TableHead>
-                    <TableHead className="text-right">Valor</TableHead>
-                    <TableHead className="text-right">Lucro</TableHead>
-                    <TableHead>{kind === 'cirurgia' ? 'Cirurgia' : 'Agendado'}</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">NF</TableHead>
-                    <TableHead />
+                    {/* Colunas somem por prioridade clínica, não por ordem: quem abre no
+                        celular precisa de paciente, valor, data e situação. O resto volta
+                        dentro da célula do paciente para nenhum dado sumir de verdade. */}
+                    <TableHead scope="col" className="hidden lg:table-cell">Consulta</TableHead>
+                    <TableHead scope="col" className="hidden md:table-cell">Venda</TableHead>
+                    <TableHead scope="col" className="min-w-36">Paciente</TableHead>
+                    <TableHead scope="col" className="hidden sm:table-cell">
+                      {kind === 'cirurgia' ? 'Procedimento' : 'Protocolo'}
+                    </TableHead>
+                    <TableHead scope="col" className="hidden xl:table-cell">Vendedora</TableHead>
+                    <TableHead scope="col" className="hidden xl:table-cell">Médico</TableHead>
+                    <TableHead scope="col" className="text-right">Valor</TableHead>
+                    <TableHead scope="col" className="hidden text-right lg:table-cell">Lucro</TableHead>
+                    <TableHead scope="col">{kind === 'cirurgia' ? 'Cirurgia' : 'Agendado'}</TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col" className="hidden text-right xl:table-cell">NF</TableHead>
+                    <TableHead scope="col"><span className="sr-only">Ações</span></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -456,26 +616,46 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                     const prazoVenda = rotuloPrazo(diasAteFechar(s))
                     return (
                     <TableRow key={s.id} className={s.status === 'cancelada' ? 'opacity-60' : undefined}>
-                      <TableCell className="whitespace-nowrap">
+                      <TableCell className="hidden whitespace-nowrap lg:table-cell">
                         <div>{dia(s.consultationAt)}</div>
                         <div className={`text-xs ${prazoVenda.tom}`}>{prazoVenda.texto}</div>
                         {s.consultationType && (
                           <div className="text-xs text-muted-foreground">{s.consultationType}</div>
                         )}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">{dia(s.soldAt)}</TableCell>
-                      <TableCell>
-                        <div className="font-medium">{s.patientName}</div>
+                      <TableCell className="hidden whitespace-nowrap md:table-cell">{dia(s.soldAt)}</TableCell>
+                      <TableCell className="min-w-36">
+                        {/* A ficha 360 é onde consulta do Shosp, cirurgia da sala,
+                            tricoscopia do HairMetrix e pagamento se encontram. Da venda
+                            até aqui era caminho de decorar URL. */}
+                        {s.leadId ? (
+                          <Link
+                            to={`/leads/${s.leadId}`}
+                            className="font-medium text-primary underline-offset-2 hover:underline"
+                          >
+                            {s.patientName}
+                          </Link>
+                        ) : (
+                          <span className="font-medium">{s.patientName}</span>
+                        )}
                         {s.city && <div className="text-xs text-muted-foreground">{s.city}</div>}
                         {!s.leadId && (
                           <div className="text-xs text-destructive">sem paciente vinculado</div>
                         )}
+                        {/* O que as colunas escondidas no celular diriam. */}
+                        <div className="text-xs text-muted-foreground sm:hidden">{s.procedureLabel}</div>
+                        <div className="text-xs text-muted-foreground md:hidden">
+                          vendida em {dia(s.soldAt)}
+                          {s.sellerName ? ` · ${s.sellerName}` : ''}
+                        </div>
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate">{s.procedureLabel}</TableCell>
-                      <TableCell className="whitespace-nowrap">
+                      <TableCell className="hidden max-w-[200px] truncate sm:table-cell">
+                        {s.procedureLabel}
+                      </TableCell>
+                      <TableCell className="hidden whitespace-nowrap xl:table-cell">
                         {s.sellerName ?? <span className="text-xs text-muted-foreground">a informar</span>}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
+                      <TableCell className="hidden whitespace-nowrap text-muted-foreground xl:table-cell">
                         {s.attendingDoctor ?? s.sellerDoctor ?? '—'}
                         {s.performingDoctor && s.performingDoctor !== (s.attendingDoctor ?? s.sellerDoctor) && (
                           <span className="block text-xs">opera: {s.performingDoctor}</span>
@@ -491,7 +671,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                           </div>
                         )}
                       </TableCell>
-                      <TableCell className="text-right whitespace-nowrap">
+                      <TableCell className="hidden text-right whitespace-nowrap lg:table-cell">
                         {s.costMaterialsCents + s.costDoctorCents + s.taxCents + s.costOtherCents === 0 ? (
                           <span className="text-xs text-muted-foreground">sem custo</span>
                         ) : (
@@ -509,7 +689,21 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                         {s.scheduledAt ? (
                           new Date(s.scheduledAt).toLocaleDateString('pt-BR')
                         ) : (
-                          <Badge variant="outline">a definir</Badge>
+                          <>
+                            <Badge variant="outline">a definir</Badge>
+                            {/* "A definir" há 7 meses e "a definir" desde ontem são
+                                problemas diferentes, e o selo sozinho não separava. */}
+                            {s.status !== 'cancelada' && (
+                              <div
+                                className={cn(
+                                  'mt-0.5 text-xs',
+                                  diasDesde(s.soldAt) >= 30 ? 'text-amber-600' : 'text-muted-foreground',
+                                )}
+                              >
+                                parada há {diasDesde(s.soldAt)} dias
+                              </div>
+                            )}
+                          </>
                         )}
                       </TableCell>
                       <TableCell>
@@ -525,15 +719,27 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                           {STATUS_LABEL[s.status]}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right text-muted-foreground">{s.invoiceIssued ? 'Sim' : 'Não'}</TableCell>
+                      <TableCell className="hidden text-right text-muted-foreground xl:table-cell">
+                        {s.invoiceIssued ? 'Sim' : 'Não'}
+                      </TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-1">
-                          <Button size="sm" variant="ghost" onClick={() => setForm({ open: true, editing: s })}>
-                            <Pencil className="size-3.5" />
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={`Editar a venda de ${s.patientName}`}
+                            onClick={() => setForm({ open: true, editing: s })}
+                          >
+                            <Pencil className="size-3.5" aria-hidden />
                           </Button>
                           {s.status !== 'cancelada' && (
-                            <Button size="sm" variant="ghost" onClick={() => setCancelando(s)}>
-                              <Ban className="size-3.5" />
+                            <Button
+                              size="icon-sm"
+                              variant="ghost"
+                              aria-label={`Cancelar a venda de ${s.patientName}`}
+                              onClick={() => setCancelando(s)}
+                            >
+                              <Ban className="size-3.5" aria-hidden />
                             </Button>
                           )}
                         </div>
@@ -551,7 +757,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
       {doMes.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Resultado de {soSemPaciente ? 'toda a base' : nomeDoMes(mes)}</CardTitle>
+            <CardTitle>Resultado de {rotuloRecorte}</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
               O que entrou menos o que a venda custou. Custo em branco entra como zero, então lucro só é
               lucro de verdade quando as {doMes.length} vendas do mês estiverem lançadas —
@@ -587,7 +793,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
       {porMedico.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Por médico em {soSemPaciente ? 'toda a base' : nomeDoMes(mes)}</CardTitle>
+            <CardTitle>Por médico em {rotuloRecorte}</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
               Quem vendeu, quanto vendeu e quantas executa. É o fechamento que hoje é digitado na mão no rodapé
               da planilha.
@@ -598,12 +804,12 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Médico</TableHead>
-                    <TableHead className="text-right">Vendeu</TableHead>
-                    <TableHead className="text-right">Em follow-up</TableHead>
-                    <TableHead className="text-right">Faturamento</TableHead>
-                    <TableHead className="text-right">Ticket médio</TableHead>
-                    <TableHead className="text-right">Executa</TableHead>
+                    <TableHead scope="col">Médico</TableHead>
+                    <TableHead scope="col" className="text-right">Vendeu</TableHead>
+                    <TableHead scope="col" className="text-right">Em follow-up</TableHead>
+                    <TableHead scope="col" className="text-right">Faturamento</TableHead>
+                    <TableHead scope="col" className="text-right">Ticket médio</TableHead>
+                    <TableHead scope="col" className="text-right">Executa</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -635,7 +841,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
         <Card>
           <CardHeader>
             <CardTitle>
-              Ticket por procedimento em {soSemPaciente ? 'toda a base' : nomeDoMes(mes)}
+              Ticket por procedimento em {rotuloRecorte}
             </CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
               Transplante masculino, feminino e de sobrancelha têm preços diferentes, e a média dos
@@ -648,10 +854,10 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Procedimento</TableHead>
-                    <TableHead className="text-right">Vendeu</TableHead>
-                    <TableHead className="text-right">Faturamento</TableHead>
-                    <TableHead className="text-right">Ticket médio</TableHead>
+                    <TableHead scope="col">Procedimento</TableHead>
+                    <TableHead scope="col" className="text-right">Vendeu</TableHead>
+                    <TableHead scope="col" className="text-right">Faturamento</TableHead>
+                    <TableHead scope="col" className="text-right">Ticket médio</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

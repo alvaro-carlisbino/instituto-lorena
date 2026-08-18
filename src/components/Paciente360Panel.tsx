@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Activity,
   CalendarDays,
@@ -42,16 +43,20 @@ const dia = (iso: string | null) => {
 const DOADORA = /occiput|occipital/i
 
 function Secao({
-  icone: Icone, titulo, contador, vazio, children,
+  icone: Icone, titulo, contador, vazio, acao, children,
 }: {
-  icone: typeof Activity; titulo: string; contador: number; vazio: string; children?: React.ReactNode
+  icone: typeof Activity; titulo: string; contador: number; vazio: string
+  /** Link para a tela dona daquele dado, à direita do título. */
+  acao?: React.ReactNode
+  children?: React.ReactNode
 }) {
   return (
     <div>
       <div className="mb-2 flex items-center gap-2">
-        <Icone className="size-4 opacity-70" />
+        <Icone className="size-4 opacity-70" aria-hidden />
         <h3 className="text-sm font-semibold">{titulo}</h3>
         <Badge variant="secondary" className="tabular-nums">{contador}</Badge>
+        {acao && <div className="ml-auto">{acao}</div>}
       </div>
       {contador === 0 ? (
         <p className="rounded-md border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">{vazio}</p>
@@ -212,8 +217,19 @@ export function Paciente360Panel({ tipo = 'lead', refId }: { tipo?: TipoPaciente
         </Card>
       ) : null}
 
+      {/* A ficha resume a última medida por região. O laudo inteiro — série no tempo,
+          histograma de espessura e as fotos — mora na tela de Tricoscopia, e sem esta
+          porta o caminho do HairMetrix até aqui era de mão única. */}
       <Secao icone={Activity} titulo="Tricoscopia" contador={dados.tricoscopia.length}
-        vazio="Nenhum exame vinculado. Se o paciente fez tricoscopia, o vínculo com a pasta do HairMetrix ainda está pendente na tela Tricoscopia.">
+        vazio="Nenhum exame vinculado. Se o paciente fez tricoscopia, o vínculo com a pasta do HairMetrix ainda está pendente na tela Tricoscopia."
+        acao={
+          <Link
+            to="/tricoscopia"
+            className="text-xs text-primary underline-offset-2 hover:underline"
+          >
+            {dados.tricoscopia.length > 0 ? 'Ver laudo completo' : 'Abrir Tricoscopia'}
+          </Link>
+        }>
         <Table>
           <TableHeader>
             <TableRow>

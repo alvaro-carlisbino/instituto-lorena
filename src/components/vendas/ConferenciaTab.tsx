@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { AlertTriangle, CalendarX2, CheckCircle2, CircleHelp, RefreshCw } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
+import { SearchField } from '@/components/ui/search-field'
+import { combinaBusca } from '@/lib/busca'
 import {
   type ConferenciaStatus,
   type LinhaConferencia,
@@ -48,6 +50,8 @@ export function ConferenciaTab() {
   const [linhas, setLinhas] = useState<LinhaConferencia[]>([])
   const [loading, setLoading] = useState(false)
   const [foco, setFoco] = useState<ConferenciaStatus | null>('realizada_sem_confirmacao')
+  const [termo, setTermo] = useState('')
+  const buscaAdiada = useDeferredValue(termo)
 
   const load = async () => {
     setLoading(true)
@@ -71,8 +75,14 @@ export function ConferenciaTab() {
   }, [linhas])
 
   const visiveis = useMemo(
-    () => (foco ? linhas.filter((l) => l.conferencia === foco) : linhas),
-    [linhas, foco],
+    () =>
+      linhas.filter((l) => {
+        if (foco && l.conferencia !== foco) return false
+        // Prontuário entra na busca porque é por ele que a conferência com a sala
+        // é feita na prática — nome bate errado, prontuário não.
+        return combinaBusca(buscaAdiada, l.pacienteNome, l.prontuario)
+      }),
+    [linhas, foco, buscaAdiada],
   )
 
   return (
@@ -100,8 +110,16 @@ export function ConferenciaTab() {
           )
         })}
         <Button size="sm" variant="ghost" onClick={() => void load()} disabled={loading}>
-          <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} /> Atualizar
+          <RefreshCw className={`size-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden /> Atualizar
         </Button>
+        <SearchField
+          value={termo}
+          onChange={setTermo}
+          label="Buscar paciente na conferência"
+          placeholder="Paciente ou prontuário…"
+          resultados={visiveis.length}
+          className="w-full sm:ml-auto sm:w-64"
+        />
       </div>
 
       {foco ? (
@@ -110,11 +128,19 @@ export function ConferenciaTab() {
 
       {visiveis.length === 0 ? (
         <EmptyState
-          title={loading ? 'Carregando…' : 'Nada nesta faixa'}
+          title={
+            loading
+              ? 'Carregando…'
+              : termo.trim().length > 0
+                ? `Ninguém com "${termo.trim()}" nesta faixa`
+                : 'Nada nesta faixa'
+          }
           description={
             loading
               ? 'Conferindo venda por venda contra o espelho da sala.'
-              : 'Escolha outra faixa acima para ver as vendas correspondentes.'
+              : termo.trim().length > 0
+                ? 'A busca vale dentro da faixa escolhida. Tire o foco da faixa acima para procurar na base inteira.'
+                : 'Escolha outra faixa acima para ver as vendas correspondentes.'
           }
         />
       ) : (
@@ -129,12 +155,16 @@ export function ConferenciaTab() {
               <table className="w-full text-sm">
                 <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium">Paciente</th>
-                    <th className="px-3 py-2 text-left font-medium">Prontuário</th>
-                    <th className="px-3 py-2 text-left font-medium">Data na venda</th>
-                    <th className="px-3 py-2 text-left font-medium">Data na sala</th>
-                    <th className="px-3 py-2 text-right font-medium">Folículos</th>
-                    <th className="px-3 py-2 text-left font-medium">Situação</th>
+                    <th scope="col" className="px-3 py-2 text-left font-medium">Paciente</th>
+                    <th scope="col" className="hidden px-3 py-2 text-left font-medium sm:table-cell">
+                      Prontuário
+                    </th>
+                    <th scope="col" className="px-3 py-2 text-left font-medium">Data na venda</th>
+                    <th scope="col" className="px-3 py-2 text-left font-medium">Data na sala</th>
+                    <th scope="col" className="hidden px-3 py-2 text-right font-medium md:table-cell">
+                      Folículos
+                    </th>
+                    <th scope="col" className="px-3 py-2 text-left font-medium">Situação</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -158,8 +188,15 @@ export function ConferenciaTab() {
                               sem card
                             </Badge>
                           ) : null}
+                          {/* No celular as colunas de prontuário e folículos saem daqui. */}
+                          <div className="text-xs text-muted-foreground sm:hidden">
+                            {l.prontuario ? `prontuário ${l.prontuario}` : 'sem prontuário'}
+                            {l.foliculosImplantados
+                              ? ` · ${l.foliculosImplantados.toLocaleString('pt-BR')} folículos`
+                              : ''}
+                          </div>
                         </td>
-                        <td className="px-3 py-2 tabular-nums text-muted-foreground">
+                        <td className="hidden px-3 py-2 tabular-nums text-muted-foreground sm:table-cell">
                           {l.prontuario ?? '—'}
                         </td>
                         <td className="px-3 py-2 tabular-nums">{diaBr(l.dataVendida)}</td>
@@ -172,7 +209,7 @@ export function ConferenciaTab() {
                             </span>
                           ) : null}
                         </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
+                        <td className="hidden px-3 py-2 text-right tabular-nums md:table-cell">
                           {l.foliculosImplantados ? l.foliculosImplantados.toLocaleString('pt-BR') : '—'}
                         </td>
                         <td className="px-3 py-2">

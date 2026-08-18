@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { CalendarClock, MessageCircle, PhoneCall, RotateCcw, Scissors, Sparkles } from 'lucide-react'
@@ -17,8 +17,10 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SearchField } from '@/components/ui/search-field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { combinaBusca } from '@/lib/busca'
 import { cn } from '@/lib/utils'
 import {
   FOLLOWUP_CHANNELS,
@@ -105,6 +107,8 @@ export function FollowUpTab() {
   // trabalhava no meio dos pacientes da outra.
   const [funil, setFunil] = useState<'cirurgia' | 'protocolo' | 'todos'>('cirurgia')
   const [movendo, setMovendo] = useState<string | null>(null)
+  const [termo, setTermo] = useState('')
+  const buscaAdiada = useDeferredValue(termo)
 
   const load = async () => {
     setLoading(true)
@@ -128,12 +132,21 @@ export function FollowUpTab() {
     const daClinica = cards.filter(
       (c) => c.pipelineId != null && FUNIS_DA_CLINICA.includes(c.pipelineId),
     )
-    if (funil === 'todos') return daClinica
-    const alvo = funil === 'cirurgia' ? FUNIL_CIRURGICO : FUNIL_PROTOCOLOS
-    // Paciente que ainda não foi triado (funil da recepção) aparece nas duas
-    // filas de propósito: se ele só aparecesse em "todos", ninguém o veria.
-    return daClinica.filter((c) => c.pipelineId === alvo || c.pipelineId === FUNIL_TRIAGEM)
-  }, [cards, funil])
+    const doFunil =
+      funil === 'todos'
+        ? daClinica
+        : // Paciente que ainda não foi triado (funil da recepção) aparece nas duas
+          // filas de propósito: se ele só aparecesse em "todos", ninguém o veria.
+          daClinica.filter(
+            (c) =>
+              c.pipelineId === (funil === 'cirurgia' ? FUNIL_CIRURGICO : FUNIL_PROTOCOLOS) ||
+              c.pipelineId === FUNIL_TRIAGEM,
+          )
+
+    // A busca atravessa as cinco colunas: quem procura um paciente não sabe (nem
+    // deveria precisar saber) em qual coluna do kanban ele está parado hoje.
+    return doFunil.filter((c) => combinaBusca(buscaAdiada, c.patientName, c.phone, c.note, c.outcome))
+  }, [cards, funil, buscaAdiada])
 
   const porColuna = useMemo(() => {
     const mapa = new Map<KanbanColuna, KanbanCard[]>()
@@ -330,12 +343,22 @@ export function FollowUpTab() {
             </Button>
           ))}
         </div>
-        {atrasados > 0 && (
-          <p className="text-sm text-muted-foreground">
-            <span className="font-medium text-destructive">{atrasados}</span> paciente
-            {atrasados > 1 ? 's' : ''} com contato atrasado.
-          </p>
-        )}
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+          <SearchField
+            value={termo}
+            onChange={setTermo}
+            label="Buscar paciente no follow-up"
+            placeholder="Paciente, telefone, anotação…"
+            resultados={visiveis.length}
+            className="w-full sm:w-72"
+          />
+          {atrasados > 0 && (
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium text-destructive">{atrasados}</span> paciente
+              {atrasados > 1 ? 's' : ''} com contato atrasado.
+            </p>
+          )}
+        </div>
       </div>
 
       {loading && cards.length === 0 ? (
@@ -356,7 +379,9 @@ export function FollowUpTab() {
                 </CardHeader>
                 <CardContent className="flex-1 space-y-2 pb-3">
                   {lista.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Ninguém aqui.</p>
+                    <p className="text-xs text-muted-foreground">
+                      {termo.trim().length > 0 ? 'Ninguém com esse termo.' : 'Ninguém aqui.'}
+                    </p>
                   ) : (
                     lista.map(cardDoPaciente)
                   )}

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { AlertTriangle, Ban, CalendarCheck2, CalendarPlus, CalendarSync, Copy } from 'lucide-react'
 
@@ -16,8 +17,18 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SearchField } from '@/components/ui/search-field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { combinaBusca } from '@/lib/busca'
 import { cn } from '@/lib/utils'
 import {
   CONFIRMATION_LABEL,
@@ -103,6 +114,10 @@ export function CirurgiasTab() {
   const [motivo, setMotivo] = useState('')
   const [estorno, setEstorno] = useState('Em avaliação')
   const [enviando, setEnviando] = useState(false)
+  const [termo, setTermo] = useState('')
+  const buscaAdiada = useDeferredValue(termo)
+  /** null = todas as faixas; escolher uma foca em quem ainda precisa de contato. */
+  const [foco, setFoco] = useState<ConfirmationStatus | null>(null)
   const [mes, setMes] = useState(() => {
     const d = new Date()
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -145,11 +160,32 @@ export function CirurgiasTab() {
     [sales, mesAtivo],
   )
 
+  // A contagem do topo é sempre do mês inteiro: se ela seguisse a busca, o número
+  // de "não confirmadas" mudaria a cada letra digitada e deixaria de ser a fila.
   const contagem = useMemo(() => {
     const base: Record<ConfirmationStatus, number> = { confirmada: 0, nao_confirmada: 0, remanejar: 0 }
     for (const s of doMes) base[s.confirmationStatus] += 1
     return base
   }, [doMes])
+
+  const visiveis = useMemo(
+    () =>
+      doMes.filter((s) => {
+        if (foco && s.confirmationStatus !== foco) return false
+        return combinaBusca(
+          buscaAdiada,
+          s.patientName,
+          s.phone,
+          s.city,
+          s.procedureLabel,
+          s.attendingDoctor,
+          s.performingDoctor,
+          s.anesthetist,
+          s.room,
+        )
+      }),
+    [doMes, foco, buscaAdiada],
+  )
 
   const marcar = async (sale: ClinicSale, status: ConfirmationStatus) => {
     if (sale.confirmationStatus === status) return
@@ -236,92 +272,143 @@ export function CirurgiasTab() {
             <p className="font-heading text-2xl">{doMes.length}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Confirmadas</p>
-            <p className="font-heading text-2xl text-emerald-600">{contagem.confirmada}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Não confirmadas</p>
-            <p className={cn('font-heading text-2xl', contagem.nao_confirmada > 0 && 'text-destructive')}>
-              {contagem.nao_confirmada}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground">Para remanejar</p>
-            <p className={cn('font-heading text-2xl', contagem.remanejar > 0 && 'text-amber-600')}>
-              {contagem.remanejar}
-            </p>
-          </CardContent>
-        </Card>
+        {/* Os três status viram filtro: a atendente lê "4 não confirmadas" e o que
+            ela quer em seguida é a lista dessas 4, não rolar o mês inteiro atrás. */}
+        {ORDEM.map((st) => {
+          const ativo = foco === st
+          const n = contagem[st]
+          return (
+            <Card
+              key={st}
+              className={cn('py-0 transition-colors', ativo && 'bg-primary/5 ring-2 ring-primary')}
+            >
+              <button
+                type="button"
+                aria-pressed={ativo}
+                onClick={() => setFoco(ativo ? null : st)}
+                title={`Mostrar só as cirurgias com status "${CONFIRMATION_LABEL[st]}"`}
+                className="w-full cursor-pointer px-4 py-4 text-left outline-none hover:bg-muted/40 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
+              >
+                <p className="text-xs text-muted-foreground">{CONFIRMATION_LABEL[st]}</p>
+                <p
+                  className={cn(
+                    'font-heading text-2xl',
+                    st === 'confirmada' && n > 0 && 'text-emerald-600',
+                    st === 'nao_confirmada' && n > 0 && 'text-destructive',
+                    st === 'remanejar' && n > 0 && 'text-amber-600',
+                  )}
+                >
+                  {n}
+                </p>
+              </button>
+            </Card>
+          )
+        })}
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="gap-3">
           <CardTitle>Pacientes de {nomeDoMes(mesAtivo)}</CardTitle>
           <CardAction>
-            <div className="flex items-center gap-2">
-              <Select value={mesAtivo} onValueChange={(v) => setMes(String(v ?? mesAtivo))}>
-                <SelectTrigger className="h-8 w-44">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {meses.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {nomeDoMes(m)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {icsUrl && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(icsUrl)
-                    toast.success('Endereço copiado. No Google Agenda: "Outras agendas" › "Da URL".')
-                  }}
-                >
-                  <Copy className="size-3.5" /> Assinar no Google
-                </Button>
-              )}
-            </div>
+            {icsUrl && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void navigator.clipboard.writeText(icsUrl)
+                  toast.success('Endereço copiado. No Google Agenda: "Outras agendas" › "Da URL".')
+                }}
+              >
+                <Copy className="size-3.5" aria-hidden /> Assinar no Google
+              </Button>
+            )}
           </CardAction>
+
+          <div className="col-span-full flex flex-col gap-2 border-t pt-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <SearchField
+              value={termo}
+              onChange={setTermo}
+              label="Buscar paciente da fila"
+              placeholder="Paciente, telefone, cidade, médico, sala…"
+              resultados={visiveis.length}
+              className="w-full sm:max-w-xs"
+            />
+            <Select value={mesAtivo} onValueChange={(v) => setMes(String(v ?? mesAtivo))}>
+              <SelectTrigger className="h-8 w-44" aria-label="Mês da cirurgia">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {meses.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {nomeDoMes(m)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {foco && (
+              <Button size="sm" variant="ghost" onClick={() => setFoco(null)}>
+                Limpar filtro de {CONFIRMATION_LABEL[foco].toLowerCase()}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
-          {doMes.length === 0 ? (
+          {visiveis.length === 0 ? (
             <EmptyState
               icon={CalendarCheck2}
-              title={`Nenhuma cirurgia em ${nomeDoMes(mesAtivo)}`}
+              title={
+                termo.trim().length > 0
+                  ? `Nenhum paciente para "${termo.trim()}"`
+                  : foco
+                    ? `Nenhuma cirurgia com status "${CONFIRMATION_LABEL[foco]}" em ${nomeDoMes(mesAtivo)}`
+                    : `Nenhuma cirurgia em ${nomeDoMes(mesAtivo)}`
+              }
+              description={
+                termo.trim().length > 0 || foco
+                  ? 'A fila do mês continua ali: limpe a busca ou o filtro de status.'
+                  : undefined
+              }
               className="py-6"
             />
           ) : (
             <div className="overflow-x-auto">
               <Table>
+                <TableCaption className="sr-only">
+                  {`${visiveis.length} cirurgia${visiveis.length === 1 ? '' : 's'} em ${nomeDoMes(mesAtivo)}. `}
+                  No celular a tabela mostra paciente, data e situação; procedimento, médico e
+                  valor aparecem junto do nome do paciente.
+                </TableCaption>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Paciente</TableHead>
-                    <TableHead>Data</TableHead>
-                    <TableHead>Procedimento</TableHead>
-                    <TableHead>Médico</TableHead>
-                    <TableHead className="text-right">Valor</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead />
+                    <TableHead scope="col" className="min-w-36">Paciente</TableHead>
+                    <TableHead scope="col">Data</TableHead>
+                    <TableHead scope="col" className="hidden md:table-cell">Procedimento</TableHead>
+                    <TableHead scope="col" className="hidden lg:table-cell">Médico</TableHead>
+                    <TableHead scope="col" className="hidden text-right sm:table-cell">Valor</TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col"><span className="sr-only">Ações</span></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {doMes.map((s) => {
+                  {visiveis.map((s) => {
                     const dias = s.scheduledAt ? diasAte(s.scheduledAt) : null
                     const falhou = (reminders.get(s.id) ?? []).some((a) => a.status === 'erro')
                     const link = googleCalendarLink(s)
                     return (
                       <TableRow key={s.id}>
-                        <TableCell>
-                          <div className="font-medium">{s.patientName}</div>
+                        <TableCell className="min-w-36">
+                          {/* Da fila até a ficha 360, onde estão consulta do Shosp,
+                              tricoscopia do HairMetrix e o histórico de pagamento. */}
+                          {s.leadId ? (
+                            <Link
+                              to={`/leads/${s.leadId}`}
+                              className="font-medium text-primary underline-offset-2 hover:underline"
+                            >
+                              {s.patientName}
+                            </Link>
+                          ) : (
+                            <span className="font-medium">{s.patientName}</span>
+                          )}
                           <div className="flex flex-wrap items-center gap-1.5">
                             {s.city && <span className="text-xs text-muted-foreground">{s.city}</span>}
                             {s.hotelNeeded && (
@@ -333,6 +420,16 @@ export function CirurgiasTab() {
                               </Badge>
                             )}
                           </div>
+                          {/* O que as colunas escondidas no celular diriam. */}
+                          <div className="text-xs text-muted-foreground md:hidden">
+                            {s.procedureLabel}
+                          </div>
+                          <div className="text-xs text-muted-foreground sm:hidden">
+                            {brl(s.valueCents)}
+                            {s.performingDoctor ?? s.attendingDoctor
+                              ? ` · ${s.performingDoctor ?? s.attendingDoctor}`
+                              : ''}
+                          </div>
                         </TableCell>
                         <TableCell className="whitespace-nowrap">
                           {s.scheduledAt ? new Date(s.scheduledAt).toLocaleString('pt-BR') : '—'}
@@ -343,23 +440,32 @@ export function CirurgiasTab() {
                           )}
                           {dias != null && dias < 0 && s.status === 'agendada' && (
                             <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <AlertTriangle className="size-3" /> a sala não confirmou
+                              <AlertTriangle className="size-3" aria-hidden /> a sala não confirmou
                             </div>
                           )}
                         </TableCell>
-                        <TableCell className="max-w-[200px] truncate">{s.procedureLabel}</TableCell>
-                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                        <TableCell className="hidden max-w-[200px] truncate md:table-cell">
+                          {s.procedureLabel}
+                        </TableCell>
+                        <TableCell className="hidden whitespace-nowrap text-muted-foreground lg:table-cell">
                           {s.performingDoctor ?? s.attendingDoctor ?? 'sem médico'}
                         </TableCell>
-                        <TableCell className="text-right whitespace-nowrap">{brl(s.valueCents)}</TableCell>
+                        <TableCell className="hidden text-right whitespace-nowrap sm:table-cell">
+                          {brl(s.valueCents)}
+                        </TableCell>
                         <TableCell>
-                          <div className="flex gap-1">
+                          <div
+                            role="group"
+                            aria-label={`Confirmação da cirurgia de ${s.patientName}`}
+                            className="flex flex-wrap gap-1 sm:flex-nowrap"
+                          >
                             {ORDEM.map((op) => (
                               <Button
                                 key={op}
                                 size="sm"
                                 variant={s.confirmationStatus === op ? 'default' : 'outline'}
                                 disabled={salvando === s.id}
+                                aria-pressed={s.confirmationStatus === op}
                                 className={cn('h-7 px-2 text-xs', s.confirmationStatus === op && TOM[op])}
                                 onClick={() => void marcar(s, op)}
                               >
@@ -371,34 +477,37 @@ export function CirurgiasTab() {
                         <TableCell>
                           <div className="flex justify-end gap-0.5">
                             <Button
-                              size="sm"
+                              size="icon-sm"
                               variant="ghost"
                               title="Mudar a data — atualiza a agenda da enfermagem"
+                              aria-label={`Remarcar a cirurgia de ${s.patientName}`}
                               onClick={() => abrirRemarcacao(s)}
                             >
-                              <CalendarSync className="size-3.5" />
+                              <CalendarSync className="size-3.5" aria-hidden />
                             </Button>
                             <Button
-                              size="sm"
+                              size="icon-sm"
                               variant="ghost"
                               title="Cancelar a cirurgia — tira da agenda da enfermagem"
+                              aria-label={`Cancelar a cirurgia de ${s.patientName}`}
                               onClick={() => {
                                 setMotivo('')
                                 setEstorno('Em avaliação')
                                 setCancelando(s)
                               }}
                             >
-                              <Ban className="size-3.5" />
+                              <Ban className="size-3.5" aria-hidden />
                             </Button>
                             {link && (
                               <Button
-                                size="sm"
+                                size="icon-sm"
                                 variant="ghost"
                                 title="Criar o evento no Google Agenda agora"
+                                aria-label={`Criar no Google Agenda o evento de ${s.patientName}`}
                                 nativeButton={false}
                                 render={<a href={link} target="_blank" rel="noreferrer noopener" />}
                               >
-                                <CalendarPlus className="size-3.5" />
+                                <CalendarPlus className="size-3.5" aria-hidden />
                               </Button>
                             )}
                           </div>

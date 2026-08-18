@@ -1,3 +1,4 @@
+import { combinaBusca } from '@/lib/busca'
 import { supabase } from '@/lib/supabaseClient'
 
 /**
@@ -1009,4 +1010,80 @@ export function googleCalendarLink(sale: ClinicSale): string | null {
     ctz: 'America/Sao_Paulo',
   })
   return `https://calendar.google.com/calendar/render?${params.toString()}`
+}
+
+/**
+ * Que fatia da base a Central de Vendas está mostrando.
+ *
+ * Não são filtros que se somam, é um recorte de cada vez, e de propósito: "sem
+ * data" e "sem paciente" atravessam os meses — a venda de janeiro que segue sem
+ * data continua parada em agosto. Cruzar os dois com o mês devolvia lista vazia
+ * e a impressão de que o problema tinha sumido.
+ */
+export type RecorteVendas = 'mes' | 'sem-data' | 'sem-paciente'
+
+/** 'ativas' é o padrão da tela: cancelada só aparece quando alguém pede. */
+export type FiltroStatusVendas = 'ativas' | 'todas' | ClinicSaleStatus
+
+export type FiltroVendas = {
+  recorte: RecorteVendas
+  /** 'YYYY-MM'. Só vale no recorte por mês. */
+  mes: string
+  status: FiltroStatusVendas
+  /** Nome exato da consultora, ou 'todas'. */
+  vendedora: string
+  /** Termo da barra de busca. Vazio não filtra. */
+  termo: string
+}
+
+/**
+ * A lista que a tabela mostra, com recorte, status, vendedora e busca aplicados.
+ *
+ * Mora aqui, e não dentro do componente, porque é a regra que decide se as 19
+ * vendas sem data aparecem ou não — e regra que decide o que a clínica enxerga
+ * precisa de teste, não de conferência no olho.
+ */
+export function filtrarVendas(sales: ClinicSale[], filtro: FiltroVendas): ClinicSale[] {
+  const { recorte, mes, status, vendedora, termo } = filtro
+
+  const lista = sales.filter((s) => {
+    if (recorte === 'mes' && !s.soldAt.startsWith(mes)) return false
+    if (recorte === 'sem-data' && s.scheduledAt) return false
+    if (recorte === 'sem-paciente' && s.leadId) return false
+
+    if (status === 'ativas' && s.status === 'cancelada') return false
+    if (status !== 'ativas' && status !== 'todas' && s.status !== status) return false
+
+    if (vendedora !== 'todas' && s.sellerName !== vendedora) return false
+
+    return combinaBusca(
+      termo,
+      s.patientName,
+      s.procedureLabel,
+      s.city,
+      s.phone,
+      s.sellerName,
+      s.attendingDoctor,
+      s.performingDoctor,
+      s.sellerDoctor,
+      s.origin,
+      s.note,
+    )
+  })
+
+  // Parada há mais tempo primeiro: a fila de "sem data" é fila de cobrança, e quem
+  // fechou em janeiro precisa aparecer antes de quem fechou ontem.
+  return recorte === 'sem-data'
+    ? [...lista].sort((a, b) => a.soldAt.localeCompare(b.soldAt))
+    : lista
+}
+
+/** Vendas fechadas que nunca ganharam data. Atravessa o mês de propósito. */
+export function vendasSemData(sales: ClinicSale[]): ClinicSale[] {
+  return sales.filter((s) => s.status !== 'cancelada' && !s.scheduledAt)
+}
+
+/** Vendas sem cadastro de paciente: o card não anda no funil e o lembrete não sai. */
+export function vendasSemPaciente(sales: ClinicSale[]): ClinicSale[] {
+  return sales.filter((s) => !s.leadId && s.status !== 'cancelada')
 }
