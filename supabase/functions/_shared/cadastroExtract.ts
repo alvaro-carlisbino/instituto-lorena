@@ -2,7 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { enrichEnderecoViaCep } from './cep.ts'
 import { maybeReshipAfterAddressComplete } from './melhorEnvio.ts'
 import { brPhoneVariants, isPlaceholderName } from './crm.ts'
-import { matchesInternalTerm } from './internalContacts.ts'
+import { isProviderPlaceholderName, matchesInternalTerm } from './internalContacts.ts'
 
 // LLM = mesma config do resto do CRM: Z.ai (GLM) por env, com fallback OpenAI.
 function normalizeApiRoot(raw: string): string {
@@ -154,12 +154,9 @@ const normNome = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '
 /** Nome sem letras de verdade (emoji, "~", "☺️"): não identifica ninguém, vale como vazio. */
 const semNomeReal = (s: string) => (s.match(/\p{L}/gu) ?? []).length < 2
 
-/**
- * Nomes default que os providers gravam quando o WhatsApp/ManyChat não manda push name.
- * `isPlaceholderName` (crm.ts) não os cobre, e "contato whatsapp" ainda por cima está na lista
- * de contato interno — sem esta exceção o paciente sem push name jamais ganharia nome.
- */
-const DEFAULTS_DE_PROVIDER = ['contato whatsapp', 'lead whatsapp']
+// Nome default de provider (WhatsApp/ManyChat sem push name): `isPlaceholderName` (crm.ts)
+// não o cobre, então quem chega sem push name precisa desta porta pra ganhar nome de verdade.
+// Fonte única em internalContacts.ts — a mesma que garante que esse nome NÃO é contato interno.
 
 /**
  * Apelido do mesmo primeiro nome ("gabi" → "Gabriela"). Não é prefixo (o "i" quebra), então
@@ -191,7 +188,7 @@ export function shouldPromoteName(atual: string, completo: string): boolean {
   const c = (completo ?? '').trim()
   if (c.split(/\s+/).length < 2) return false
   const aN = normNome(a)
-  if (!a || isPlaceholderName(a) || DEFAULTS_DE_PROVIDER.includes(aN)) return true
+  if (!a || isPlaceholderName(a) || isProviderPlaceholderName(aN)) return true
   // Contato INTERNO (recepção, financeiro, marketing, sócios) nunca vira nome de paciente.
   // Além de errado no quadro, o rename era pior que cosmético: o NOME é a chave de
   // `matchesInternalTerm`, então virar "Leonardo" desarmava a proteção que impede a IA e o

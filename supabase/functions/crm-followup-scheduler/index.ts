@@ -5,7 +5,8 @@ import {
   pushManychatWhatsappDmAfterReply,
   readManychatPushConfigForTenantChannel,
 } from '../_shared/manychatPublicApi.ts'
-import { insertInteraction } from '../_shared/crm.ts'
+import { insertInteraction, isPlaceholderName } from '../_shared/crm.ts'
+import { isProviderPlaceholderName } from '../_shared/internalContacts.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -40,7 +41,7 @@ const FOLLOWUP_HOURS = [1, 2, 4, 8, 16, 24]
 // Depois reforça em 1h e 4h. Cadência curta porque venda esfria rápido.
 const FOLLOWUP_HOURS_SALES = [0.25, 1, 4]
 const FOLLOWUP_MESSAGES_SALES = [
-  'Oi, {name}! 💚 Vi que ficou pendente aqui — posso te ajudar a finalizar o seu Tricopill? É só me chamar! 🌿',
+  'Oi, {name}! 💚 Vi que ficou pendente aqui. Posso te ajudar a finalizar o seu Tricopill? É só me chamar! 🌿',
   '{name}, ainda dá pra garantir o seu Tricopill 😊 Quer que eu te ajude a fechar agora? Qualquer dúvida (pagamento, frete, prazo) é só perguntar.',
   'Oi {name}! Última passadinha por aqui 💚 Quando quiser fechar o seu Tricopill, é só responder que eu cuido de tudo pra você!',
 ]
@@ -49,14 +50,43 @@ const FOLLOWUP_MESSAGES = [
   'Olá, {name}! 😊 Vi que você entrou em contato conosco. Ainda posso te ajudar? É só responder aqui!',
   'Oi, {name}! Estou aqui para te ajudar com qualquer dúvida sobre nossos serviços. Me conta o que você precisa? 💆',
   '{name}, sei que a vida é corrida! Quando tiver um tempinho, adoraria te apresentar as opções do Instituto Lorena Visentainer. 🌟',
-  'Olá! Ainda estou disponível para te ajudar, {name}. Temos ótimas opções de tratamento — qual é a sua maior necessidade hoje? ✨',
+  'Olá! Ainda estou disponível para te ajudar, {name}. Temos ótimas opções de tratamento: qual é a sua maior necessidade hoje? ✨',
   '{name}, última tentativa por hoje 😊 Se precisar de nós, estamos sempre aqui! Basta responder esta mensagem.',
   'Oi {name}! Este é nosso último contato por enquanto. Quando estiver pronto(a), pode nos chamar que respondemos rapidinho. Até logo! 👋',
 ]
 
+/**
+ * Primeiro nome utilizável, ou '' quando não temos nome de gente. Sem isto o follow-up
+ * saía "Oi, Contato WhatsApp! 💚" — o nome default do WhatsApp sem push name — e também
+ * "Oi, MARIA FERNANDA DA SILVA SOUZA!" pra quem tem o nome completo no cadastro.
+ */
+function firstNameOrEmpty(patientName: string): string {
+  const raw = (patientName ?? '').trim()
+  if (!raw || isProviderPlaceholderName(raw) || isPlaceholderName(raw)) return ''
+  const token = raw.split(/\s+/)[0] ?? ''
+  if ((token.match(/\p{L}/gu) ?? []).length < 2) return ''
+  return token === token.toUpperCase() || token === token.toLowerCase()
+    ? token.charAt(0).toUpperCase() + token.slice(1).toLowerCase()
+    : token
+}
+
+/**
+ * Aplica o nome no template. Sem nome, o vocativo SOME em vez de virar "Oi, você!":
+ * "Oi, {name}! 💚 Vi que..." → "Oi! 💚 Vi que...", "{name}, ainda dá..." → "Ainda dá...".
+ */
+function applyName(template: string, patientName: string): string {
+  const name = firstNameOrEmpty(patientName)
+  if (name) return template.replace(/\{name\}/g, name)
+  return template
+    .replace(/\{name\}\s*,\s*/g, '')
+    .replace(/\s*,?\s*\{name\}/g, '')
+    .replace(/^\s*(\p{Ll})/u, (_m, c: string) => c.toUpperCase())
+    .trim()
+}
+
 function getFollowupMessage(followupCount: number, patientName: string, messages: string[] = FOLLOWUP_MESSAGES): string {
   const idx = Math.min(followupCount, messages.length - 1)
-  return messages[idx].replace(/\{name\}/g, patientName || 'você')
+  return applyName(messages[idx], patientName)
 }
 
 /** Verifica se um lead precisa de follow-up agora. Retorna o índice do follow-up (0-based) ou null. */
@@ -215,7 +245,7 @@ Deno.serve(async (req) => {
 
     const { followupIndex } = check
     const leadId = String(row.lead_id)
-    const patientName = String(lead.patient_name || 'você')
+    const patientName = String(lead.patient_name || '')
     const followupText = getFollowupMessage(followupIndex, patientName, cadenceMsgs)
 
     // Determina o canal de envio
@@ -246,15 +276,10 @@ Deno.serve(async (req) => {
           continue
         }
 
-        await insertInteraction(admin, {
-          leadId,
-          patientName,
-          channel: 'whatsapp',
-          direction: 'out',
-          author: 'Assistente IA (follow-up)',
-          content: followupText,
-          happenedAt: nowIso(),
-        })
+        // NÃO grava interaction aqui: crm-send-message já gravou a linha do envio, com
+        // autor 'Assistente IA (follow-up)' (INTERNAL_SOURCE_AUTHORS, pela source acima).
+        // Gravar de novo duplicava a mensagem no chat — o cliente recebia uma, a equipe via
+        // duas, e a primeira ainda aparecia como se um "Operador" humano tivesse respondido.
       } else if (subscriberId) {
         // ManyChat (Instagram DM ou WhatsApp via ManyChat)
         const pushChannel = channel === 'whatsapp' ? 'whatsapp' : 'instagram'

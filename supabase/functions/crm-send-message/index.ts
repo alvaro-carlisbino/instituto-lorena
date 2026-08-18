@@ -28,6 +28,16 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+/**
+ * Autor da interaction quando quem chama é uma ROTINA (service_role), não uma pessoa.
+ * Sem isto o follow-up do cron era gravado como "Operador" e a rotina ainda inseria uma
+ * segunda linha com o autor certo — o mesmo texto aparecia duas vezes no chat, uma delas
+ * mentindo que um humano tinha respondido.
+ */
+const INTERNAL_SOURCE_AUTHORS: Record<string, string> = {
+  followup_scheduler: 'Assistente IA (follow-up)',
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -103,6 +113,10 @@ Deno.serve(async (req) => {
   } catch {
     return json({ error: 'invalid_json' }, 400)
   }
+
+  const sourceTag = String(body.source ?? '').trim()
+  /** Pessoa logada > rotina interna conhecida > fallback histórico. */
+  const outboundAuthor = user?.email || (isServiceRole ? INTERNAL_SOURCE_AUTHORS[sourceTag] : '') || 'Operador'
 
   const leadId = String(body.leadId ?? '').trim()
   const to = String(body.to ?? '').trim()
@@ -575,7 +589,7 @@ Deno.serve(async (req) => {
       patientName: String(lead.patient_name ?? 'Lead'),
       channel: 'whatsapp',
       direction: 'out',
-      author: user?.email ?? 'Operador',
+      author: outboundAuthor,
       content: outboundContent,
       externalMessageId,
     })

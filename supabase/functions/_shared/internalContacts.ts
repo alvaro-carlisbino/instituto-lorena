@@ -8,10 +8,27 @@
 const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 
 const BLOCK_TERMS = [
-  'recepc', 'marketing', 'comercial', 'contato whatsapp', 'spa capilar',
+  'recepc', 'marketing', 'comercial', 'spa capilar',
   'instituto lorena', 'lorena visentainer', 'alvaro carlisbino', 'financeiro',
   'atendimento', 'guegrorioda',
 ]
+
+// Nome que o PROVIDER grava quando o WhatsApp não manda push name. É o oposto de contato
+// interno: é exatamente assim que chega um desconhecido — inclusive lead pago do Ads.
+//
+// 'contato whatsapp' esteve em BLOCK_TERMS de 15/jul (46d1c9a) a 18/ago e calou a IA em 6
+// leads de venda: todos caíam em 'contato_interno', ninguém respondia, e 15 min depois o
+// follow-up disparava "Oi, Contato WhatsApp! Vi que ficou pendente aqui". Um deles veio do
+// Google Ads com gclid; outro mandou 19 mensagens sem receber uma resposta.
+//
+// NÃO devolver para BLOCK_TERMS: quem protege a equipe de verdade é INTERNAL_PHONES, que
+// não depende de como o card está nomeado.
+const PROVIDER_PLACEHOLDER_NAMES = ['contato whatsapp', 'lead whatsapp']
+
+/** Nome default de provider (WhatsApp sem push name), não identifica ninguém. */
+export function isProviderPlaceholderName(name: unknown): boolean {
+  return PROVIDER_PLACEHOLDER_NAMES.includes(norm(String(name ?? '')).trim())
+}
 
 // Nomes internos curtos demais para busca por substring: 'spa' casaria dentro de "espaco"
 // e barraria paciente de verdade. Estes só valem como nome INTEIRO da conversa.
@@ -84,6 +101,7 @@ export function matchesInternalContact(name: unknown, phone?: unknown): boolean 
  *  nome-de-emoji, senão travaria o atendimento de um cliente com nome esquisito. */
 export function matchesInternalTerm(name: unknown): boolean {
   const n = norm(String(name ?? '')).trim()
+  if (isProviderPlaceholderName(n)) return false
   if (EXACT_TERMS.includes(n)) return true
   return BLOCK_TERMS.some((t) => n.includes(t))
 }
