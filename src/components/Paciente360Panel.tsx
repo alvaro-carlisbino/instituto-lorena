@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { pastaDoLead } from '@/services/hairmetrix'
 import { carregarPaciente360, type Paciente360, type TipoPaciente } from '@/services/pacienteBusca'
 
 /**
@@ -84,13 +85,29 @@ export function Paciente360Panel({ tipo = 'lead', refId }: { tipo?: TipoPaciente
   const [dados, setDados] = useState<Paciente360 | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
+  /** Pasta do HairMetrix, para o link levar ao laudo DESTE paciente e não à lista. */
+  const [pastaTrico, setPastaTrico] = useState<string | null>(null)
 
   useEffect(() => {
     let vivo = true
     setCarregando(true)
     setErro(null)
+    setPastaTrico(null)
     carregarPaciente360(tipo, refId)
-      .then((d) => { if (vivo) setDados(d) })
+      .then((d) => {
+        if (!vivo) return
+        setDados(d)
+        // Abrindo pela pasta do Mirror, o próprio ref já é a pasta. Vindo pelo card ou
+        // pelo prontuário, procura pelo lead — e só quando existe exame para abrir,
+        // senão seria uma ida ao banco em toda ficha de paciente que nunca fez.
+        if (!d || d.tricoscopia.length === 0) return
+        if (tipo === 'mirror') { setPastaTrico(refId); return }
+        if (!d.paciente.lead_id) return
+        pastaDoLead(d.paciente.lead_id)
+          .then((id) => { if (vivo) setPastaTrico(id) })
+          // Falhar aqui não pode derrubar a ficha: o link só volta a apontar para a lista.
+          .catch(() => {})
+      })
       .catch((e) => { if (vivo) setErro(e instanceof Error ? e.message : 'Não deu para carregar o histórico.') })
       .finally(() => { if (vivo) setCarregando(false) })
     return () => { vivo = false }
@@ -224,10 +241,14 @@ export function Paciente360Panel({ tipo = 'lead', refId }: { tipo?: TipoPaciente
         vazio="Nenhum exame vinculado. Se o paciente fez tricoscopia, o vínculo com a pasta do HairMetrix ainda está pendente na tela Tricoscopia."
         acao={
           <Link
-            to="/tricoscopia"
+            to={pastaTrico ? `/tricoscopia/${pastaTrico}` : '/tricoscopia'}
             className="text-xs text-primary underline-offset-2 hover:underline"
           >
-            {dados.tricoscopia.length > 0 ? 'Ver laudo completo' : 'Abrir Tricoscopia'}
+            {pastaTrico
+              ? 'Ver laudo completo'
+              : dados.tricoscopia.length > 0
+                ? 'Abrir Tricoscopia'
+                : 'Vincular pasta do HairMetrix'}
           </Link>
         }>
         <Table>

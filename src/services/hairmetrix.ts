@@ -139,6 +139,32 @@ const mapPaciente = (r: LinhaPaciente): PacienteTricoscopia => ({
   leadId: r.lead_id,
 })
 
+/**
+ * A pasta do HairMetrix daquele paciente, para a ficha 360 abrir o laudo dele.
+ *
+ * Consulta miúda de propósito. A alternativa era devolver o id dentro de
+ * `crm_paciente_360_ref` — uma função `security definer` de 16 mil caracteres em
+ * produção. Trocar risco de cirurgia nela por um `select id` que a RLS já protege
+ * (`tenant_id = current_tenant_id()`, então polo continua não se misturando) é o
+ * negócio melhor. Só é chamada quando a ficha JÁ mostrou exame, então não é uma
+ * ida ao banco a mais no caminho comum.
+ *
+ * Devolve null quando o paciente não tem pasta vinculada — que é o caso normal de
+ * quem nunca fez tricoscopia, e não um erro.
+ */
+export async function pastaDoLead(leadId: string): Promise<string | null> {
+  const { data, error } = await assertClient()
+    .from('hairmetrix_pacientes')
+    .select('id')
+    .eq('lead_id', leadId)
+    .gt('total_exames', 0)
+    .order('ultimo_exame_em', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data?.id as string | undefined) ?? null
+}
+
 export async function listarPacientes(
   filtro: 'todos' | VinculoStatus = 'todos',
   busca = '',

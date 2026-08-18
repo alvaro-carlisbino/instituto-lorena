@@ -1,6 +1,14 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, CalendarX2, CheckCircle2, CircleHelp, RefreshCw } from 'lucide-react'
+import {
+  AlertTriangle,
+  CalendarCheck,
+  CalendarX2,
+  CheckCircle2,
+  CircleHelp,
+  RefreshCw,
+  ScissorsLineDashed,
+} from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
@@ -14,6 +22,7 @@ import {
   type LinhaConferencia,
   ORDEM_GRAVIDADE,
   ROTULO_CONFERENCIA,
+  aplicarDataDaSala,
   listarConferencia,
 } from '@/services/cirurgiaConferencia'
 
@@ -21,6 +30,8 @@ const diaBr = (iso: string | null) =>
   iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR') : '—'
 
 const ESTILO: Record<ConferenciaStatus, { cor: string; Icone: typeof AlertTriangle }> = {
+  sala_ja_operou: { cor: 'text-destructive', Icone: ScissorsLineDashed },
+  venda_sem_data: { cor: 'text-amber-600 dark:text-amber-500', Icone: CalendarCheck },
   realizada_sem_confirmacao: { cor: 'text-destructive', Icone: AlertTriangle },
   data_diverge: { cor: 'text-amber-600 dark:text-amber-500', Icone: CalendarX2 },
   sem_espelho: { cor: 'text-muted-foreground', Icone: CircleHelp },
@@ -28,7 +39,19 @@ const ESTILO: Record<ConferenciaStatus, { cor: string; Icone: typeof AlertTriang
   confirmada: { cor: 'text-emerald-600 dark:text-emerald-500', Icone: CheckCircle2 },
 }
 
+/**
+ * Onde o botão "aplicar data da sala" aparece.
+ *
+ * Só onde a sala TEM a resposta. Em "sem registro na sala" não há data para copiar, e
+ * um botão que não faz nada é pior do que botão nenhum.
+ */
+const PODE_APLICAR: ConferenciaStatus[] = ['sala_ja_operou', 'venda_sem_data', 'data_diverge']
+
 const EXPLICACAO: Record<ConferenciaStatus, string> = {
+  sala_ja_operou:
+    'O centro cirúrgico registrou a cirurgia como FINALIZADA e a venda ainda não diz "realizada". O procedimento aconteceu: falta o funil saber. Aplicar a data da sala corrige a data e marca a venda como realizada.',
+  venda_sem_data:
+    'A cirurgia existe na sala com data marcada e a venda está sem data nenhuma. Aplicar a data da sala resolve sem ninguém digitar.',
   realizada_sem_confirmacao:
     'A venda está marcada como realizada, mas não existe cirurgia correspondente no sistema da sala. Ou a cirurgia não aconteceu, ou o nome do paciente na sala não bate com o cadastro.',
   data_diverge:
@@ -49,9 +72,10 @@ const EXPLICACAO: Record<ConferenciaStatus, string> = {
 export function ConferenciaTab() {
   const [linhas, setLinhas] = useState<LinhaConferencia[]>([])
   const [loading, setLoading] = useState(false)
-  const [foco, setFoco] = useState<ConferenciaStatus | null>('realizada_sem_confirmacao')
+  const [foco, setFoco] = useState<ConferenciaStatus | null>(ORDEM_GRAVIDADE[0])
   const [termo, setTermo] = useState('')
   const buscaAdiada = useDeferredValue(termo)
+  const [aplicando, setAplicando] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -67,6 +91,28 @@ export function ConferenciaTab() {
   useEffect(() => {
     void load()
   }, [])
+
+  /**
+   * Traz a data da sala para dentro da venda. É a única correção desta tela que o
+   * sistema pode fazer sozinho com segurança: a sala é quem sabe o que aconteceu.
+   * As outras faixas ("sem registro na sala") dependem de alguém investigar.
+   */
+  const aplicar = async (l: LinhaConferencia) => {
+    setAplicando(l.saleId)
+    try {
+      const r = await aplicarDataDaSala(l.saleId)
+      toast.success(
+        r.virouRealizada
+          ? `${l.pacienteNome}: data da sala aplicada e venda marcada como realizada.`
+          : `${l.pacienteNome}: data da sala aplicada.`,
+      )
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao aplicar a data da sala')
+    } finally {
+      setAplicando(null)
+    }
+  }
 
   const contagem = useMemo(() => {
     const m = new Map<ConferenciaStatus, number>()
@@ -155,7 +201,7 @@ export function ConferenciaTab() {
               <table className="w-full text-sm">
                 <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
                   <tr>
-                    <th scope="col" className="px-3 py-2 text-left font-medium">Paciente</th>
+                    <th scope="col" className="min-w-36 px-3 py-2 text-left font-medium">Paciente</th>
                     <th scope="col" className="hidden px-3 py-2 text-left font-medium sm:table-cell">
                       Prontuário
                     </th>
@@ -165,6 +211,9 @@ export function ConferenciaTab() {
                       Folículos
                     </th>
                     <th scope="col" className="px-3 py-2 text-left font-medium">Situação</th>
+                    <th scope="col" className="px-3 py-2 text-right font-medium">
+                      <span className="sr-only">Ações</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -172,7 +221,7 @@ export function ConferenciaTab() {
                     const { cor, Icone } = ESTILO[l.conferencia]
                     return (
                       <tr key={l.saleId} className="border-b last:border-0 hover:bg-muted/30">
-                        <td className="px-3 py-2">
+                        <td className="min-w-36 px-3 py-2">
                           {l.leadId ? (
                             <Link
                               to={`/leads/${l.leadId}`}
@@ -214,9 +263,29 @@ export function ConferenciaTab() {
                         </td>
                         <td className="px-3 py-2">
                           <span className={`flex items-center gap-1.5 text-xs ${cor}`}>
-                            <Icone className="size-3.5 shrink-0" />
+                            <Icone className="size-3.5 shrink-0" aria-hidden />
                             {ROTULO_CONFERENCIA[l.conferencia]}
                           </span>
+                          {l.statusDaSala && l.conferencia !== 'sem_espelho' ? (
+                            <span className="text-xs text-muted-foreground">
+                              sala: {l.statusDaSala.toLowerCase().replace('_', ' ')}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {PODE_APLICAR.includes(l.conferencia) && l.dataDaSala ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={aplicando === l.saleId}
+                              onClick={() => void aplicar(l)}
+                              title={`Gravar ${diaBr(l.dataDaSala)} na venda${
+                                l.statusDaSala === 'FINALIZADA' ? ' e marcar como realizada' : ''
+                              }`}
+                            >
+                              {aplicando === l.saleId ? 'Aplicando…' : 'Aplicar data da sala'}
+                            </Button>
+                          ) : null}
                         </td>
                       </tr>
                     )
