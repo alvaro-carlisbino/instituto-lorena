@@ -101,6 +101,76 @@ export const AI_ADDONS: Record<string, {
 }
 
 /**
+ * Caixa PADRÃO de produto de CATÁLOGO (a revenda que o bot passou a vender sob demanda em
+ * 18/08/2026). O `catalog_cache` do Bling só guarda id/nome/preço/estoque/código — não traz peso
+ * nem dimensão —, então não há caixa medida pra esses 60+ itens.
+ *
+ * Os números aqui são os MESMOS que a loja do site já usa (DEF em tricopill-frete) pra despachar
+ * exatamente esses produtos. Copiar a régua da loja é de propósito: se o bot cotasse por outra
+ * conta, ele prometeria um frete que a loja não cobra, e a diferença sairia da margem.
+ *
+ * Marca própria NÃO usa isto — Tricopill, shampoo e gel têm caixa medida em AI_ADDONS.
+ */
+export const CATALOG_DEFAULT_BOX = { weightKg: 0.3, lengthCm: 16, widthCm: 16, heightCm: 11 }
+
+export type CatalogSaleItem = { id: string; nome: string; amountCents: number; qty: number }
+
+/**
+ * Resolve os produtos de CATÁLOGO que a IA pediu no op (`"catalogo":[{"id":"...","qty":1}]`).
+ *
+ * A IA manda só id e quantidade; QUEM DIZ O PREÇO É O SERVIDOR, lendo o mesmo `catalog_cache` que
+ * a loja lê. Isso é deliberado: enquanto o preço vinha do texto do prompt, o shampoo passou três
+ * semanas sendo vendido pelo bot mais barato que o site (ver SHAMPOO_ADDON).
+ *
+ * Recusa item que não existe, sem preço, sem estoque ou na lista de ocultos do dono
+ * (`bling.hidden_ids` — medicação, cadastro substituído, saldo fantasma). Devolve os recusados
+ * pra quem chamou poder dizer ao cliente o que não deu, em vez de cobrar errado calado.
+ */
+export async function collectCatalogItems(
+  admin: SupabaseClient,
+  tenantId: string,
+  op: Record<string, unknown>,
+): Promise<{ items: CatalogSaleItem[]; rejeitados: string[] }> {
+  const pedidos = Array.isArray(op.catalogo) ? (op.catalogo as Array<Record<string, unknown>>) : []
+  if (!pedidos.length) return { items: [], rejeitados: [] }
+
+  const { data } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', tenantId).maybeSingle()
+  const cfg = ((data as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
+  const cache = Array.isArray(cfg.catalog_cache) ? (cfg.catalog_cache as Array<Record<string, unknown>>) : []
+  const ocultos = new Set(
+    (Array.isArray(cfg.hidden_ids) ? cfg.hidden_ids : [])
+      .map((h) => (typeof h === 'string' ? h : String((h as { id?: unknown })?.id ?? '')))
+      .filter(Boolean),
+  )
+  const porId = new Map(cache.map((c) => [String(c.id ?? ''), c]))
+  // Os avulsos de marca própria têm caixa medida e preço próprio: se a IA mandar um deles aqui,
+  // deixa o caminho de AI_ADDONS cuidar, senão o item entraria duas vezes no pedido.
+  const daMarca = new Set(Object.values(AI_ADDONS).map((a) => a.blingProductId))
+
+  const items: CatalogSaleItem[] = []
+  const rejeitados: string[] = []
+  for (const pedido of pedidos) {
+    const id = String(pedido?.id ?? '').trim()
+    const qty = Math.max(0, Math.floor(Number(pedido?.qty) || 0))
+    if (!id || qty <= 0 || daMarca.has(id)) continue
+    const prod = porId.get(id)
+    const preco = Number(prod?.preco ?? 0)
+    const estoque = Number(prod?.estoque ?? 0)
+    if (!prod || ocultos.has(id) || !(preco > 0)) {
+      rejeitados.push(String(prod?.nome ?? id))
+      continue
+    }
+    // Estoque insuficiente: recusa em vez de vender o que não tem pra despachar.
+    if (!(estoque >= qty)) {
+      rejeitados.push(String(prod.nome ?? id))
+      continue
+    }
+    items.push({ id, nome: String(prod.nome ?? ''), amountCents: Math.round(preco * 100), qty })
+  }
+  return { items, rejeitados }
+}
+
+/**
  * Traduz os `items` de uma cobrança (kit + avulsos) nos volumes que o frete precisa somar.
  * Casa pelo id do produto no Bling — a linha do kit não tem id e é ignorada aqui (quem
  * dimensiona o kit é o boxForKit).
@@ -110,9 +180,14 @@ export function addonExtrasFromItems(items: Array<Record<string, unknown>> | nul
   const porId = new Map(Object.values(AI_ADDONS).map((a) => [a.blingProductId, a]))
   const out: FreteExtra[] = []
   for (const it of items) {
-    const addon = porId.get(String(it?.id ?? ''))
+    const id = String(it?.id ?? '')
+    const addon = porId.get(id)
     const qty = Math.max(0, Math.floor(Number(it?.qty) || 0))
-    if (addon && qty > 0) out.push({ qty, box: addon.box })
+    if (qty <= 0) continue
+    if (addon) out.push({ qty, box: addon.box })
+    // Produto de catálogo (revenda): tem id do Bling mas não é avulso de marca própria. Sem isto
+    // ele saía do cálculo do frete e o peso ia embora, cotando pelo kit sozinho.
+    else if (id) out.push({ qty, box: CATALOG_DEFAULT_BOX })
   }
   return out
 }

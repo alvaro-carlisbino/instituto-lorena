@@ -4,7 +4,7 @@ import { insertInteraction } from './crm.ts'
 import { notifyAgents } from './notifyAgents.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
-import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, collectAddons } from './rede.ts'
+import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, collectAddons, collectCatalogItems } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForOrder, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
@@ -808,13 +808,25 @@ export async function executeCrmAiOpsFromModel(
           pixDesc = pixDesc ? `${pixDesc} + ${qty}× ${addon.labelCurto}` : `${qty}× ${addon.labelCurto}`
           pixItems.push({ id: addon.blingProductId, nome: addon.nome, qty, precoCents: addon.amountCents })
         }
+        // Catálogo sob demanda: o cliente pediu um produto da loja pelo nome. O PREÇO vem do
+        // catalog_cache (mesma fonte da loja), nunca do texto da IA. Ver collectCatalogItems.
+        const pixCatalogo = await collectCatalogItems(admin, saleTenantId, op)
+        for (const item of pixCatalogo.items) {
+          pixAmount += item.qty * item.amountCents
+          pixDesc = pixDesc ? `${pixDesc} + ${item.qty}× ${item.nome}` : `${item.qty}× ${item.nome}`
+          pixItems.push({ id: item.id, nome: item.nome, qty: item.qty, precoCents: item.amountCents })
+        }
         if (pixItems.length === 0) {
-          // Sem kit e sem avulso: nada a vender.
-          results.push({ type: 'rede_pix', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o Pix pros kits do Tricopill (1 mês, 3+1 ou 5 meses), pro Shampoo Ozonizado e pro gel de sobrancelha BrowSculpt. O que você quer? 💚' })
+          // Sem kit, sem avulso e sem catálogo: nada a vender. Se o cliente pediu algo que foi
+          // recusado (esgotado/oculto), diz ISSO em vez do menu genérico.
+          const faltou = pixCatalogo.rejeitados.length
+            ? `Não consegui fechar ${pixCatalogo.rejeitados.join(', ')} agora (sem estoque no momento). Quer que eu veja uma opção parecida? 💚`
+            : 'Consigo gerar o Pix pros kits do Tricopill (1 mês, 3+1 ou 5 meses) e pra qualquer produto da nossa loja. O que você quer? 💚'
+          results.push({ type: 'rede_pix', ok: false, detail: 'kit_obrigatorio', customerNote: faltou })
           continue
         }
-        // Só manda "items" quando há avulso (carrinho misto/avulso); kit puro segue o caminho testado.
-        const pixUseItems = pixAddons.length > 0
+        // Só manda "items" quando há avulso/catálogo (carrinho misto); kit puro segue o caminho testado.
+        const pixUseItems = pixAddons.length > 0 || pixCatalogo.items.length > 0
         try {
           const out = await createRedePix(admin, {
             tenantId: saleTenantId,
@@ -883,12 +895,22 @@ export async function executeCrmAiOpsFromModel(
           description = description ? `${description} + ${qty}× ${addon.labelCurto}` : `${qty}× ${addon.labelCurto}`
           cardItems.push({ id: addon.blingProductId, nome: addon.nome, qty, precoCents: addon.amountCents })
         }
+        // Catálogo sob demanda — mesmo caminho do Pix. Preço do catálogo, nunca da IA.
+        const cardCatalogo = await collectCatalogItems(admin, saleTenantId, op)
+        for (const item of cardCatalogo.items) {
+          amountCents += item.qty * item.amountCents
+          description = description ? `${description} + ${item.qty}× ${item.nome}` : `${item.qty}× ${item.nome}`
+          cardItems.push({ id: item.id, nome: item.nome, qty: item.qty, precoCents: item.amountCents })
+        }
         if (cardItems.length === 0) {
-          // Sem kit e sem avulso: nada a vender.
-          results.push({ type: 'rede_link', ok: false, detail: 'kit_obrigatorio', customerNote: 'Consigo gerar o link pros kits do Tricopill (1 mês, 3+1 ou 5 meses), pro Shampoo Ozonizado e pro gel de sobrancelha BrowSculpt. O que você quer? 💚' })
+          // Sem kit, sem avulso e sem catálogo: nada a vender.
+          const faltouCard = cardCatalogo.rejeitados.length
+            ? `Não consegui fechar ${cardCatalogo.rejeitados.join(', ')} agora (sem estoque no momento). Quer que eu veja uma opção parecida? 💚`
+            : 'Consigo gerar o link pros kits do Tricopill (1 mês, 3+1 ou 5 meses) e pra qualquer produto da nossa loja. O que você quer? 💚'
+          results.push({ type: 'rede_link', ok: false, detail: 'kit_obrigatorio', customerNote: faltouCard })
           continue
         }
-        const cardUseItems = cardAddons.length > 0
+        const cardUseItems = cardAddons.length > 0 || cardCatalogo.items.length > 0
         // KIT: prioriza o que a IA mandou; se ela mandou amount_cents (sem kit), INFERE o kit
         // pelo valor do produto (match exato com REDE_KITS). Sem isso o kit ficava null no
         // rede_payments e a venda no cartão NÃO ia pro Bling automaticamente.

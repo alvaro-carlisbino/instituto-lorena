@@ -311,19 +311,28 @@ export async function buildBlingCatalog(
   admin: SupabaseClient,
   tenantId: string,
   opts?: { forceRefresh?: boolean; maxAgeMs?: number },
-): Promise<{ items: BlingCatalogItem[]; fetchedAt: string | null; fromCache: boolean }> {
+): Promise<{ items: BlingCatalogItem[]; fetchedAt: string | null; fromCache: boolean; hiddenIds: Set<string> }> {
   const maxAgeMs = opts?.maxAgeMs ?? 10 * 60 * 1000
   const { data } = await admin.from('tenant_integrations').select('bling').eq('tenant_id', tenantId).maybeSingle()
   const cfg = ((data as { bling?: Record<string, unknown> } | null)?.bling ?? {}) as Record<string, unknown>
   const cache = Array.isArray(cfg.catalog_cache) ? (cfg.catalog_cache as BlingCatalogItem[]) : []
   const fetchedAt = typeof cfg.catalog_fetched_at === 'string' ? cfg.catalog_fetched_at : null
   const fresh = fetchedAt && Date.now() - Date.parse(fetchedAt) < maxAgeMs
+  // Produtos que o DONO mandou NÃO ofertar (medicação, cadastro substituído, saldo fantasma,
+  // nome ruim de SEO). Mora em tenant_integrations.bling.hidden_ids para a loja do site e o bot
+  // lerem A MESMA lista. Enquanto isso era hardcode só no repo do site, o bot e a loja divergiam.
+  // Aceita ["id"] ou [{id, motivo}] — o motivo viaja junto do dado pra ninguém desfazer no escuro.
+  const hiddenIds = new Set(
+    (Array.isArray(cfg.hidden_ids) ? cfg.hidden_ids : [])
+      .map((h) => (typeof h === 'string' ? h : String((h as { id?: unknown })?.id ?? '')))
+      .filter(Boolean),
+  )
 
-  if (!opts?.forceRefresh && fresh) return { items: cache, fetchedAt, fromCache: true }
+  if (!opts?.forceRefresh && fresh) return { items: cache, fetchedAt, fromCache: true, hiddenIds }
 
   try {
     const token = await getValidBlingToken(admin, tenantId)
-    if (!token) return { items: cache, fetchedAt, fromCache: true }
+    if (!token) return { items: cache, fetchedAt, fromCache: true, hiddenIds }
     const { produtos: raw, truncado } = await blingListAllProducts(token)
     const ids = raw.map((p) => String(p.id ?? '')).filter(Boolean)
     const stock = await blingStockMap(token, ids)
@@ -369,9 +378,9 @@ export async function buildBlingCatalog(
       tenant_id: tenantId,
       bling: { ...cfg, catalog_cache: finais, catalog_fetched_at: nowIso },
     })
-    return { items: finais, fetchedAt: nowIso, fromCache: false }
+    return { items: finais, fetchedAt: nowIso, fromCache: false, hiddenIds }
   } catch {
-    return { items: cache, fetchedAt, fromCache: true }
+    return { items: cache, fetchedAt, fromCache: true, hiddenIds }
   }
 }
 
