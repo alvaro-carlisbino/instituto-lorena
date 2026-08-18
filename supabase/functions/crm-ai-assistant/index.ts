@@ -313,6 +313,24 @@ async function buildCrmSnapshot(
     ? Promise.resolve({ data: null, error: null })
     : userClient.from('app_profiles').select('email, display_name, role').maybeSingle()
 
+  /**
+   * A conversa do outro polo NÃO entra no contexto deste bot.
+   *
+   * No caminho do WhatsApp quem chama é service-role, então RLS não filtra nada aqui — e o
+   * mesmo lead pode ter as duas conversas dentro (paciente da clínica que compra Tricopill).
+   * Sem este filtro o bot de vendas lia as últimas 36 mensagens do lead INCLUINDO as da
+   * clínica e imitava o que via: prometia chamar a Dandara (consultora da clínica) e chegou a
+   * responder o menu de transplante capilar do Instituto para quem escreveu na linha do
+   * Tricopill. A separação de polo de 17/ago arrumou a tela; isto arruma o que a IA lê.
+   *
+   * `tenantId` vem de `resolveConversationTenantId` — o polo da LINHA, que é quem manda na
+   * conversa. Sem tenant resolvido, segue como antes (e aí quem filtra é a RLS da sessão).
+   */
+  const interacoesDoPolo = (colunas: string) => {
+    const q = userClient.from('interactions').select(colunas)
+    return opts?.tenantId ? q.eq('tenant_id', opts.tenantId) : q
+  }
+
   const [
     profileRes,
     metricsRes,
@@ -340,9 +358,7 @@ async function buildCrmSnapshot(
       .select('id, patient_name, phone, source, score, temperature, stage_id, pipeline_id, summary, created_at')
       .order('created_at', { ascending: false })
       .limit(30),
-    userClient
-      .from('interactions')
-      .select('id, lead_id, channel, direction, author, content, happened_at')
+    interacoesDoPolo('id, lead_id, channel, direction, author, content, happened_at')
       .gte('happened_at', interactionSince)
       .order('happened_at', { ascending: false })
       .limit(40),
@@ -427,9 +443,7 @@ async function buildCrmSnapshot(
         .order('starts_at', { ascending: true })
         .limit(12),
       userClient.from('rooms').select('id, name, active').eq('active', true).order('name', { ascending: true }).limit(24),
-      userClient
-        .from('interactions')
-        .select('id, channel, direction, author, content, happened_at')
+      interacoesDoPolo('id, channel, direction, author, content, happened_at')
         .eq('lead_id', ctx.leadId)
         .order('happened_at', { ascending: false })
         .limit(36),
