@@ -15,6 +15,12 @@ import { resolveTenantFromEvolutionInstance, DEFAULT_TENANT_ID } from '../_share
 import { applyOptOutToLead, isOptOutMessage } from '../_shared/optOutDetect.ts'
 import { getWhatsappProviderFromEnv } from '../_shared/whatsapp/provider.ts'
 import { getWhatsappProviderForEvent, resolveWhatsappInstanceRowForProvider } from '../_shared/whatsapp/evolutionConfig.ts'
+import { OfficialWhatsappProvider } from '../_shared/whatsapp/official.ts'
+import {
+  createOfficialProviderForRow,
+  loadOfficialLineByPhoneNumberId,
+  type OfficialLineRow,
+} from '../_shared/whatsapp/officialConfig.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -68,9 +74,30 @@ Deno.serve(async (req) => {
     return json({ error: 'invalid_json' }, 400)
   }
 
+  // Quem manda é o FORMATO do corpo, não `WHATSAPP_PROVIDER`. A env é um interruptor global:
+  // virar ela para 'official' por causa de uma linha migrada faria toda mensagem que ainda
+  // chega pelo Evolution ser normalizada pelo driver errado e sumir como "event_not_supported".
+  // Payload da Meta tem assinatura própria (`object: whatsapp_business_account`) e é
+  // reconhecido sozinho, o que deixa as duas linhas conviverem durante a migração.
+  const isMetaCloudPayload = String(payload.object ?? '').toLowerCase() === 'whatsapp_business_account'
+  const effectiveProvider = isMetaCloudPayload ? 'official' : envProvider
+
   let provider
+  let officialLine: OfficialLineRow | null = null
   try {
-    provider = getWhatsappProviderFromEnv()
+    if (isMetaCloudPayload) {
+      // A assinatura é validada com o app secret DA LINHA, e para saber a linha é preciso
+      // ler o `phone_number_id` do corpo antes. Ler não é confiar: nada é gravado até o
+      // HMAC bater logo abaixo.
+      const probe = new OfficialWhatsappProvider()
+      const peek = probe.normalizeInbound(payload, req.headers)
+      officialLine = peek?.metaPhoneNumberId
+        ? await loadOfficialLineByPhoneNumberId(admin, peek.metaPhoneNumberId)
+        : null
+      provider = officialLine ? createOfficialProviderForRow(officialLine) : probe
+    } else {
+      provider = getWhatsappProviderFromEnv()
+    }
   } catch (e) {
     return json({ error: 'provider_not_configured', message: e instanceof Error ? e.message : String(e) }, 500)
   }
@@ -90,7 +117,7 @@ Deno.serve(async (req) => {
   console.log(`[Webhook Process] ${normalized.direction.toUpperCase()} | From: ${normalized.fromPhone} | Text: ${normalized.text.slice(0, 50)}`)
 
   const wInstance = await resolveWhatsappInstanceRowForProvider(admin, {
-    provider: envProvider,
+    provider: effectiveProvider,
     evolutionInstanceName: normalized.evolutionInstanceName ?? '',
     metaPhoneNumberId: normalized.metaPhoneNumberId ?? '',
   })
@@ -102,7 +129,7 @@ Deno.serve(async (req) => {
     : await resolveTenantFromEvolutionInstance(admin, normalized.evolutionInstanceName ?? '')
 
   const instanceKey =
-    envProvider === 'official'
+    effectiveProvider === 'official'
       ? String(normalized.metaPhoneNumberId ?? wInstance?.meta_phone_number_id ?? 'default')
       : String(normalized.evolutionInstanceName ?? 'default')
 
@@ -355,7 +382,7 @@ Deno.serve(async (req) => {
       if (npsResult.captured) {
         const sendProvider = await getWhatsappProviderForEvent(admin, {
           evolutionInstanceName: normalized.evolutionInstanceName ?? '',
-          provider: envProvider,
+          provider: effectiveProvider,
           metaPhoneNumberId: normalized.metaPhoneNumberId ?? '',
         })
         try {
@@ -400,7 +427,7 @@ Deno.serve(async (req) => {
     if (gate.canAutoReply) {
       const sendProvider = await getWhatsappProviderForEvent(admin, {
         evolutionInstanceName: normalized.evolutionInstanceName ?? '',
-        provider: envProvider,
+        provider: effectiveProvider,
         metaPhoneNumberId: normalized.metaPhoneNumberId ?? '',
       })
       const { replied, burstPending, handoffSuggested } = await runWhatsappAiAutoReply(admin, {

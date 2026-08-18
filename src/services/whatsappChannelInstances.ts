@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabaseClient'
 
 export type WaOnLineChange = 'keep_stage' | 'use_entry'
 
-export type ChannelProvider = 'evolution' | 'manychat' | 'wapi'
+export type ChannelProvider = 'evolution' | 'manychat' | 'wapi' | 'official'
 
 export type BotKind = 'clinic' | 'sales'
 
@@ -23,6 +23,11 @@ export type WhatsappChannelInstance = {
   wapiToken: string | null
   wapiBaseUrl: string | null
   wapiWebhookSecret: string | null
+  /** API oficial da Meta (Cloud API). Credencial por linha — ver migration 20260818210000. */
+  metaPhoneNumberId: string | null
+  metaWabaId: string | null
+  metaAccessToken: string | null
+  metaAppSecret: string | null
   aiSystemPrompt: string
   phoneE164: string | null
   active: boolean
@@ -44,7 +49,7 @@ function mapRow(r: Record<string, unknown>): WhatsappChannelInstance {
   const onLine: WaOnLineChange = o === 'use_entry' ? 'use_entry' : 'keep_stage'
   const cp = String(r.channel_provider ?? 'evolution').toLowerCase()
   const channelProvider: ChannelProvider =
-    cp === 'manychat' ? 'manychat' : cp === 'wapi' ? 'wapi' : 'evolution'
+    cp === 'manychat' ? 'manychat' : cp === 'wapi' ? 'wapi' : cp === 'official' ? 'official' : 'evolution'
   const botKind: BotKind = String(r.bot_kind ?? 'clinic').toLowerCase() === 'sales' ? 'sales' : 'clinic'
   return {
     id: String(r.id),
@@ -58,6 +63,10 @@ function mapRow(r: Record<string, unknown>): WhatsappChannelInstance {
     wapiToken: strOrNull(r.wapi_token),
     wapiBaseUrl: strOrNull(r.wapi_base_url),
     wapiWebhookSecret: strOrNull(r.wapi_webhook_secret),
+    metaPhoneNumberId: strOrNull(r.meta_phone_number_id),
+    metaWabaId: strOrNull(r.meta_waba_id),
+    metaAccessToken: strOrNull(r.meta_access_token),
+    metaAppSecret: strOrNull(r.meta_app_secret),
     aiSystemPrompt: String(r.ai_system_prompt ?? ''),
     phoneE164: strOrNull(r.phone_e164),
     active: r.active !== false,
@@ -70,7 +79,7 @@ function mapRow(r: Record<string, unknown>): WhatsappChannelInstance {
 }
 
 const SELECT_COLS =
-  'id, tenant_id, label, channel_provider, bot_kind, evolution_instance_name, manychat_instance_key, wapi_instance_id, wapi_token, wapi_base_url, wapi_webhook_secret, ai_system_prompt, phone_e164, active, sort_order, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change'
+  'id, tenant_id, label, channel_provider, bot_kind, evolution_instance_name, manychat_instance_key, wapi_instance_id, wapi_token, wapi_base_url, wapi_webhook_secret, meta_phone_number_id, meta_waba_id, meta_access_token, meta_app_secret, ai_system_prompt, phone_e164, active, sort_order, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change'
 
 export async function fetchWhatsappChannelInstances(): Promise<WhatsappChannelInstance[]> {
   if (!supabase) return []
@@ -93,6 +102,10 @@ export async function upsertWhatsappChannelInstance(row: {
   wapiToken?: string | null
   wapiBaseUrl?: string | null
   wapiWebhookSecret?: string | null
+  metaPhoneNumberId?: string | null
+  metaWabaId?: string | null
+  metaAccessToken?: string | null
+  metaAppSecret?: string | null
   aiSystemPrompt?: string
   phoneE164?: string | null
   active?: boolean
@@ -132,6 +145,8 @@ export async function upsertWhatsappChannelInstance(row: {
     channelProvider === 'wapi' && row.wapiWebhookSecret != null && String(row.wapiWebhookSecret).trim()
       ? String(row.wapiWebhookSecret).trim()
       : null
+  const onlyOfficial = (v: string | null | undefined): string | null =>
+    channelProvider === 'official' && v != null && String(v).trim() ? String(v).trim() : null
   const { error } = await supabase.from('whatsapp_channel_instances').upsert({
     id: row.id,
     label: row.label,
@@ -143,6 +158,10 @@ export async function upsertWhatsappChannelInstance(row: {
     wapi_token: wapiToken,
     wapi_base_url: wapiBaseUrl,
     wapi_webhook_secret: wapiSecret,
+    meta_phone_number_id: onlyOfficial(row.metaPhoneNumberId),
+    meta_waba_id: onlyOfficial(row.metaWabaId),
+    meta_access_token: onlyOfficial(row.metaAccessToken),
+    meta_app_secret: onlyOfficial(row.metaAppSecret),
     ai_system_prompt: row.aiSystemPrompt ?? '',
     phone_e164: row.phoneE164 ?? null,
     active: row.active !== false,

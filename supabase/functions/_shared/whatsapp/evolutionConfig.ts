@@ -167,31 +167,6 @@ export async function getEvolutionProviderForLead(
   return createEvolutionProviderFromEnv()
 }
 
-export async function getOfficialProviderForLead(
-  admin: SupabaseClient,
-  leadWhatsappInstanceId: string | null,
-  tenantId?: string | null,
-): Promise<WhatsappProvider> {
-  const { OfficialWhatsappProvider } = await import('./official.ts')
-  if (leadWhatsappInstanceId) {
-    const { data } = await admin
-      .from('whatsapp_channel_instances')
-      .select('meta_phone_number_id, active')
-      .eq('id', leadWhatsappInstanceId)
-      .maybeSingle()
-    const row = data as { meta_phone_number_id?: string; active?: boolean } | null
-    if (row && row.active !== false) {
-      const pid = String(row.meta_phone_number_id ?? '').trim()
-      if (pid) return new OfficialWhatsappProvider({ phoneNumberId: pid })
-    }
-  }
-  const def = await loadDefaultWhatsappInstance(admin, tenantId)
-  if (def?.meta_phone_number_id && String(def.meta_phone_number_id).trim()) {
-    return new OfficialWhatsappProvider({ phoneNumberId: String(def.meta_phone_number_id).trim() })
-  }
-  return new OfficialWhatsappProvider()
-}
-
 export async function getWhatsappProviderForEvent(
   admin: SupabaseClient,
   options: { evolutionInstanceName: string; provider: string; metaPhoneNumberId?: string },
@@ -199,11 +174,14 @@ export async function getWhatsappProviderForEvent(
   const p = (options.provider || 'evolution').trim().toLowerCase()
   if (p === 'official') {
     const { OfficialWhatsappProvider } = await import('./official.ts')
+    const { createOfficialProviderForRow, loadOfficialLineByPhoneNumberId } = await import('./officialConfig.ts')
     const mid = (options.metaPhoneNumberId ?? '').trim()
     if (mid) {
-      const row = await loadWhatsappInstanceByMetaPhoneNumberId(admin, mid)
-      const pid = String(row?.meta_phone_number_id ?? mid).trim()
-      return new OfficialWhatsappProvider({ phoneNumberId: pid })
+      // Credencial da LINHA, não do env: a resposta tem que sair pela mesma WABA por onde
+      // a mensagem entrou. Com env global, um segundo polo responderia pela WABA do primeiro.
+      const line = await loadOfficialLineByPhoneNumberId(admin, mid)
+      if (line) return createOfficialProviderForRow(line)
+      return new OfficialWhatsappProvider({ phoneNumberId: mid })
     }
     return new OfficialWhatsappProvider()
   }

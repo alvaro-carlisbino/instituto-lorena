@@ -28,6 +28,7 @@ import {
 function statusLabel(status: string) {
   const normalized = status.toLowerCase()
   if (normalized === 'manychat') return 'ManyChat'
+  if (normalized === 'official') return 'Meta oficial'
   if (normalized.includes('open') || normalized.includes('connected')) return 'Conectado'
   if (normalized.includes('close') || normalized.includes('disconnected')) return 'Desconectado'
   if (normalized.includes('connecting') || normalized.includes('pair')) return 'Conectando'
@@ -38,6 +39,7 @@ function statusLabel(status: string) {
 function statusBadgeClass(status: string) {
   const normalized = status.toLowerCase()
   if (normalized === 'manychat') return 'border-sky-200 bg-sky-50 text-sky-950'
+  if (normalized === 'official') return 'border-emerald-200 bg-emerald-50 text-emerald-900'
   if (normalized.includes('open') || normalized.includes('connected')) return 'border-emerald-200 bg-emerald-50 text-emerald-900'
   if (normalized.includes('close') || normalized.includes('disconnected')) return 'border-red-200 bg-red-50 text-red-900'
   if (normalized.includes('connecting') || normalized.includes('pair')) return 'border-amber-200 bg-amber-50 text-amber-900'
@@ -96,6 +98,15 @@ export function WhatsappConnectionPage() {
   const [waPrompt, setWaPrompt] = useState('')
   const [waBotKind, setWaBotKind] = useState<BotKind>('clinic')
   const [waSecret, setWaSecret] = useState('')
+  // Linha na API oficial da Meta (Cloud API), app próprio no developers.facebook.com.
+  const [ofLabel, setOfLabel] = useState('')
+  const [ofPhone, setOfPhone] = useState('')
+  const [ofPhoneNumberId, setOfPhoneNumberId] = useState('')
+  const [ofWabaId, setOfWabaId] = useState('')
+  const [ofToken, setOfToken] = useState('')
+  const [ofAppSecret, setOfAppSecret] = useState('')
+  const [ofBotKind, setOfBotKind] = useState<BotKind>('clinic')
+  const [ofPrompt, setOfPrompt] = useState('')
   const [linkLabel, setLinkLabel] = useState('')
   const [linkEvoName, setLinkEvoName] = useState('')
   const [linkPhone, setLinkPhone] = useState('')
@@ -109,7 +120,7 @@ export function WhatsappConnectionPage() {
   const [savingRouteId, setSavingRouteId] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState({
     ok: false,
-    provider: 'evolution' as 'evolution' | 'manychat',
+    provider: 'evolution' as 'evolution' | 'manychat' | 'official',
     instance: '',
     status: 'unknown',
     connected: null as boolean | null,
@@ -192,6 +203,23 @@ export function WhatsappConnectionPage() {
         qrCode: '',
         error: '',
         message: 'Esta linha atende pelo ManyChat, não há código QR nem Evolution neste ecrã.',
+      })
+      setLoadingAction(null)
+      return
+    }
+    // Linha oficial não tem sessão para "conectar": quem mantém o número no ar é a Meta.
+    // Sem este atalho o ecrã ia bater no Evolution e mostrar "Com erro" numa linha saudável.
+    if (inst?.channelProvider === 'official') {
+      setSnapshot({
+        ok: true,
+        provider: 'official',
+        instance: inst.metaPhoneNumberId ?? '',
+        status: 'connected',
+        connected: true,
+        qrCode: '',
+        error: '',
+        message:
+          'Linha na API oficial da Meta. Não há código QR: a conexão vive no app da Meta, e o que prova que está no ar é mensagem entrando no chat.',
       })
       setLoadingAction(null)
       return
@@ -338,6 +366,57 @@ export function WhatsappConnectionPage() {
       toast.success(
         `Linha ManyChat criada. No External Request envie "crm_instance_key": "${key}" (ou o id ${id}).`,
       )
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar.')
+    } finally {
+      setSavingInstance(false)
+    }
+  }
+
+  const handleAddOfficialLine = async () => {
+    if (!ofLabel.trim()) {
+      toast.error('Indique o nome da linha (ex.: Sofia — Clínica).')
+      return
+    }
+    if (!ofPhoneNumberId.trim()) {
+      toast.error('Informe o Phone number ID (WhatsApp → Configuração da API no app da Meta).')
+      return
+    }
+    if (!ofToken.trim()) {
+      toast.error('Informe o token permanente do System User com acesso a esta WABA.')
+      return
+    }
+    setSavingInstance(true)
+    try {
+      const id = `wa-meta-${Date.now().toString(36)}`
+      await upsertWhatsappChannelInstance({
+        id,
+        label: ofLabel.trim(),
+        channelProvider: 'official',
+        botKind: ofBotKind,
+        metaPhoneNumberId: ofPhoneNumberId.trim(),
+        metaWabaId: ofWabaId.trim() || null,
+        metaAccessToken: ofToken.trim(),
+        metaAppSecret: ofAppSecret.trim() || null,
+        aiSystemPrompt: ofPrompt,
+        phoneE164: ofPhone.trim() || null,
+        sortOrder: instances.length,
+        entryPipelineId: null,
+        entryStageId: null,
+        defaultOwnerId: null,
+        onLineChange: 'keep_stage',
+      })
+      setOfLabel('')
+      setOfPhone('')
+      setOfPhoneNumberId('')
+      setOfWabaId('')
+      setOfToken('')
+      setOfAppSecret('')
+      setOfPrompt('')
+      setOfBotKind('clinic')
+      await loadInstances()
+      setSelectedInstanceId(id)
+      toast.success('Linha oficial criada. Agora aponte o webhook do app da Meta para a URL acima e assine o campo "messages".')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao salvar.')
     } finally {
@@ -633,6 +712,128 @@ export function WhatsappConnectionPage() {
           </div>
 
           <div className="space-y-3 border-t border-border/60 pt-4">
+            <h3 className="m-0 text-sm font-semibold">Linha na API oficial da Meta (app próprio)</h3>
+            <p className="m-0 text-xs text-muted-foreground">
+              Para números que vivem na Cloud API da Meta, com aplicativo nosso no{' '}
+              <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer" className="underline">
+                developers.facebook.com
+              </a>
+              . Copie o <span className="font-mono">Phone number ID</span> e o{' '}
+              <span className="font-mono">WhatsApp Business Account ID</span> em{' '}
+              <span className="font-mono">WhatsApp → Configuração da API</span>, e gere um token permanente de{' '}
+              <span className="font-mono">System User</span> com acesso à WABA (token temporário de 24h só serve para
+              teste). No app, aponte o webhook para a URL abaixo e assine o campo{' '}
+              <span className="font-mono">messages</span>.
+            </p>
+            <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 font-mono text-[0.7rem] break-all">
+              {(import.meta.env.VITE_SUPABASE_URL ?? '<SUPABASE_URL>').replace(/\/$/, '')}/functions/v1/crm-whatsapp-webhook
+            </div>
+            <p className="m-0 text-xs text-muted-foreground">
+              O <span className="font-mono">Verify token</span> do webhook é o secret{' '}
+              <span className="font-mono">WHATSAPP_CLOUD_VERIFY_TOKEN</span> das Edge Functions — tem que ser idêntico
+              nos dois lados, senão a Meta recusa a URL.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-meta-label">Nome no CRM</Label>
+                <Input
+                  id="wa-meta-label"
+                  value={ofLabel}
+                  onChange={(e) => setOfLabel(e.target.value)}
+                  placeholder="ex.: Sofia — Clínica (oficial)"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-meta-phone">Número (opcional)</Label>
+                <Input
+                  id="wa-meta-phone"
+                  value={ofPhone}
+                  onChange={(e) => setOfPhone(e.target.value)}
+                  placeholder="+55..."
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-meta-pnid">Phone number ID</Label>
+                <Input
+                  id="wa-meta-pnid"
+                  value={ofPhoneNumberId}
+                  onChange={(e) => setOfPhoneNumberId(e.target.value)}
+                  placeholder="só números, copie do painel da Meta"
+                  className="font-mono text-xs"
+                />
+                <p className="text-[0.7rem] text-muted-foreground">
+                  É por aqui que o CRM reconhece de qual linha a mensagem veio — o webhook da Meta não manda mais nada.
+                </p>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-meta-waba">WhatsApp Business Account ID</Label>
+                <Input
+                  id="wa-meta-waba"
+                  value={ofWabaId}
+                  onChange={(e) => setOfWabaId(e.target.value)}
+                  placeholder="necessário para os modelos aprovados"
+                  className="font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-meta-token">Token permanente (System User)</Label>
+                <Input
+                  id="wa-meta-token"
+                  type="password"
+                  value={ofToken}
+                  onChange={(e) => setOfToken(e.target.value)}
+                  placeholder="EAAG… (sensível)"
+                  className="font-mono text-xs"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-meta-secret">App secret (opcional)</Label>
+                <Input
+                  id="wa-meta-secret"
+                  type="password"
+                  value={ofAppSecret}
+                  onChange={(e) => setOfAppSecret(e.target.value)}
+                  placeholder="valida a assinatura do webhook desta linha"
+                  className="font-mono text-xs"
+                  autoComplete="off"
+                />
+                <p className="text-[0.7rem] text-muted-foreground">
+                  Vazio usa o secret global das Edge Functions. Preencha quando a linha estiver num app diferente.
+                </p>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="wa-meta-kind">Tipo de linha</Label>
+                <Select value={ofBotKind} onValueChange={(v) => setOfBotKind(v as BotKind)}>
+                  <SelectTrigger id="wa-meta-kind">
+                    <SelectValue placeholder="Tipo de linha" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="clinic">Clínica (Sofia, Instituto Lorena, agenda)</SelectItem>
+                    <SelectItem value="sales">Vendas (atendente comercial, ex.: Tricopill)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2 lg:col-span-4">
+                <Label htmlFor="wa-meta-prompt">Prompt de sistema desta linha</Label>
+                <Textarea
+                  id="wa-meta-prompt"
+                  value={ofPrompt}
+                  onChange={(e) => setOfPrompt(e.target.value)}
+                  placeholder="Instruções da IA para este número (persona, escopo, regras de handoff…)"
+                  rows={5}
+                  className="min-h-[120px] text-sm"
+                />
+              </div>
+              <div className="flex items-end sm:col-span-2">
+                <Button type="button" disabled={savingInstance} onClick={() => void handleAddOfficialLine()}>
+                  {savingInstance ? 'Salvando…' : 'Adicionar linha oficial'}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-border/60 pt-4">
             <h3 className="m-0 text-sm font-semibold">Linha W-API (recomendado para novas linhas)</h3>
             <p className="m-0 text-xs text-muted-foreground">
               Crie a instância primeiro no painel da{' '}
@@ -814,6 +1015,11 @@ export function WhatsappConnectionPage() {
                         <>
                           W-API ·{' '}
                           <span className="font-mono text-[0.65rem]">{row.wapiInstanceId ?? '—'}</span>
+                        </>
+                      ) : row.channelProvider === 'official' ? (
+                        <>
+                          Meta oficial ·{' '}
+                          <span className="font-mono text-[0.65rem]">{row.metaPhoneNumberId ?? '—'}</span>
                         </>
                       ) : (
                         <>

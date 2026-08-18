@@ -1,6 +1,7 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import type { WhatsappProvider } from './types.ts'
-import { getEvolutionProviderForLead, getOfficialProviderForLead } from './evolutionConfig.ts'
+import { getEvolutionProviderForLead } from './evolutionConfig.ts'
+import { getOfficialProviderForLead } from './officialConfig.ts'
 import { getWapiProviderForLead } from './wapiConfig.ts'
 
 export type OutboundLeadRef = {

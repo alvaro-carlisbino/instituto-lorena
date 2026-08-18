@@ -1,5 +1,6 @@
 import type {
   NormalizedInboundMessage,
+  SendWhatsappImageInput,
   SendWhatsappMessageInput,
   SendWhatsappMessageResult,
   WhatsappProvider,
@@ -55,6 +56,14 @@ function timingSafeEqualHex(a: string, b: string): boolean {
 
 export type OfficialWhatsappProviderOptions = {
   phoneNumberId?: string
+  /**
+   * Credenciais da LINHA (`whatsapp_channel_instances`). Quando vazias, cai no env global —
+   * que só serve enquanto existir uma WABA só. Com dois polos, o token do app da clínica
+   * mandaria pela WABA da clínica mesmo com a linha de vendas resolvida.
+   */
+  accessToken?: string
+  appSecret?: string
+  wabaId?: string
 }
 
 export class OfficialWhatsappProvider implements WhatsappProvider {
@@ -63,16 +72,25 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
   private readonly accessToken: string
   private readonly appSecret: string
   private readonly apiVersion: string
+  readonly wabaId: string
 
   constructor(opts?: OfficialWhatsappProviderOptions) {
     this.phoneNumberId = (opts?.phoneNumberId ?? envTrim('WHATSAPP_CLOUD_PHONE_NUMBER_ID')).trim()
-    this.accessToken = envTrim('WHATSAPP_CLOUD_ACCESS_TOKEN')
-    this.appSecret = envTrim('WHATSAPP_CLOUD_APP_SECRET')
+    this.accessToken = (opts?.accessToken ?? '').trim() || envTrim('WHATSAPP_CLOUD_ACCESS_TOKEN')
+    this.appSecret = (opts?.appSecret ?? '').trim() || envTrim('WHATSAPP_CLOUD_APP_SECRET')
+    this.wabaId = (opts?.wabaId ?? '').trim() || envTrim('WHATSAPP_CLOUD_WABA_ID')
     this.apiVersion = envTrim('WHATSAPP_CLOUD_API_VERSION') || 'v21.0'
   }
 
   async validateWebhookSignature(rawBody: string, headers: Headers): Promise<boolean> {
-    if (!this.appSecret) return true
+    // FALHA FECHADA. Antes, sem app secret configurado isto devolvia `true` — e o
+    // crm-whatsapp-webhook é público (verify_jwt = false). Qualquer um que soubesse a URL
+    // podia forjar uma mensagem de paciente, criar lead e fazer a Sofia responder. Sem
+    // segredo não há como distinguir a Meta de um estranho, então a resposta é não.
+    if (!this.appSecret) {
+      console.error('[official] app secret ausente: webhook recusado (configure meta_app_secret na linha ou WHATSAPP_CLOUD_APP_SECRET)')
+      return false
+    }
     const sigHeader = headers.get('x-hub-signature-256') ?? ''
     if (!sigHeader.startsWith('sha256=')) return false
     const expectedHex = sigHeader.slice(7)
@@ -120,9 +138,34 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
       const ir = asRecord(msg.interactive)
       const reply = asRecord(ir?.button_reply) ?? asRecord(ir?.list_reply)
       text = safeString(reply?.title) || safeString(reply?.id)
-    } else {
-      text = `[whatsapp ${type}]`
     }
+
+    // Mídia. A Cloud API não manda o ficheiro no webhook — manda um `id` que expira em 5
+    // dias e precisa ser trocado por URL autenticada (ver officialMediaDownload.ts). Sem
+    // registrar o id aqui a foto do laudo vira "[whatsapp image]" e some.
+    const mediaItems: NonNullable<NormalizedInboundMessage['mediaItems']> = []
+    const MEDIA_KINDS: Record<string, 'audio' | 'image' | 'video' | 'document' | 'other'> = {
+      audio: 'audio',
+      voice: 'audio',
+      image: 'image',
+      video: 'video',
+      document: 'document',
+      sticker: 'other',
+    }
+    const mediaKind = MEDIA_KINDS[type]
+    if (mediaKind) {
+      const m = asRecord(msg[type])
+      const caption = safeString(m?.caption).trim()
+      mediaItems.push({
+        type: mediaKind,
+        mimeType: safeString(m?.mime_type) || undefined,
+        externalMediaId: safeString(m?.id) || undefined,
+        caption: caption || undefined,
+      })
+      if (caption) text = caption
+    }
+
+    if (!text) text = `[whatsapp ${type}]`
     const finalText = text.trim() || `[whatsapp ${type || 'mensagem'}]`
 
     const tsRaw = Number(msg.timestamp ?? 0)
@@ -142,9 +185,32 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
       direction: 'in',
       happenedAt: happenedAtIso,
       metaPhoneNumberId: metaPhoneNumberId || undefined,
+      mediaItems: mediaItems.length ? mediaItems : undefined,
       attribution,
       raw: payload,
     }
+  }
+
+  /** Troca o `id` do webhook pelos bytes do ficheiro. A URL da Meta exige o Bearer. */
+  async fetchMediaBase64(mediaId: string): Promise<{ base64: string; mimeType: string } | null> {
+    const id = String(mediaId ?? '').trim()
+    if (!id || !this.accessToken) return null
+    const metaRes = await fetch(`https://graph.facebook.com/${this.apiVersion}/${id}`, {
+      headers: { Authorization: `Bearer ${this.accessToken}` },
+    })
+    if (!metaRes.ok) return null
+    const meta = (await metaRes.json()) as { url?: string; mime_type?: string }
+    const url = safeString(meta.url)
+    if (!url) return null
+    // O CDN da Meta devolve 401 sem o token — não é URL pública, apesar do domínio.
+    const binRes = await fetch(url, { headers: { Authorization: `Bearer ${this.accessToken}` } })
+    if (!binRes.ok) return null
+    const bytes = new Uint8Array(await binRes.arrayBuffer())
+    let bin = ''
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+    }
+    return { base64: btoa(bin), mimeType: safeString(meta.mime_type) || 'application/octet-stream' }
   }
 
   private stickerBase64ToBytes(b64: string): Uint8Array {
@@ -164,10 +230,14 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
     if (b64.length < 32) throw new Error('invalid_sticker')
     if (b64.length > 700_000) throw new Error('sticker_too_large')
     const bytes = this.stickerBase64ToBytes(b64)
+    // Cópia para um ArrayBuffer próprio: `Uint8Array` genérico não satisfaz `BlobPart`
+    // (pode estar sobre SharedArrayBuffer) e o type-check quebra.
+    const buf = new ArrayBuffer(bytes.byteLength)
+    new Uint8Array(buf).set(bytes)
     const form = new FormData()
     form.set('messaging_product', 'whatsapp')
     form.set('type', 'image/webp')
-    form.set('file', new Blob([bytes], { type: 'image/webp' }), 'sticker.webp')
+    form.set('file', new Blob([buf], { type: 'image/webp' }), 'sticker.webp')
 
     const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/media`
     const res = await fetch(url, {
@@ -192,55 +262,13 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
     return id
   }
 
-  async sendMessage(input: SendWhatsappMessageInput): Promise<SendWhatsappMessageResult> {
+  /** POST /{phone_number_id}/messages — o único caminho de saída da Cloud API. */
+  private async postMessage(
+    payload: Record<string, unknown>,
+    idPrefix: string,
+  ): Promise<SendWhatsappMessageResult> {
     if (!this.phoneNumberId) throw new Error('missing_WHATSAPP_CLOUD_PHONE_NUMBER_ID')
     if (!this.accessToken) throw new Error('missing_WHATSAPP_CLOUD_ACCESS_TOKEN')
-    const to = digitsOnly(input.to)
-    if (to.length < 10) throw new Error('invalid_phone')
-
-    const stickerRaw = String(input.stickerWebpBase64 ?? '').trim()
-    if (stickerRaw) {
-      const mediaId = await this.uploadStickerMedia(stickerRaw)
-      const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to,
-          type: 'sticker',
-          sticker: { id: mediaId },
-        }),
-      })
-      const responseText = await res.text()
-      let parsed: Record<string, unknown> = {}
-      try {
-        parsed = responseText ? (JSON.parse(responseText) as Record<string, unknown>) : {}
-      } catch {
-        parsed = { raw: responseText }
-      }
-      if (!res.ok) {
-        const errMsg = safeString((parsed.error as Record<string, unknown>)?.message ?? parsed.error ?? responseText)
-          .slice(0, 240)
-        throw new Error(`whatsapp_cloud_send_failed_${res.status}:${errMsg}`)
-      }
-      const messages = Array.isArray(parsed.messages) ? (parsed.messages as unknown[]) : []
-      const m0 = asRecord(messages[0])
-      const externalMessageId = safeString(m0?.id) || `wa-cloud-sticker-${crypto.randomUUID()}`
-      return {
-        provider: 'official',
-        externalMessageId,
-        status: 'sent',
-        raw: parsed,
-      }
-    }
-
-    const bodyText = input.text.trim()
-    if (!bodyText) throw new Error('empty_message')
 
     const url = `https://graph.facebook.com/${this.apiVersion}/${this.phoneNumberId}/messages`
     const res = await fetch(url, {
@@ -249,13 +277,7 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
         Authorization: `Bearer ${this.accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to,
-        type: 'text',
-        text: { preview_url: false, body: bodyText },
-      }),
+      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', ...payload }),
     })
     const responseText = await res.text()
     let parsed: Record<string, unknown> = {}
@@ -271,12 +293,99 @@ export class OfficialWhatsappProvider implements WhatsappProvider {
     }
     const messages = Array.isArray(parsed.messages) ? (parsed.messages as unknown[]) : []
     const m0 = asRecord(messages[0])
-    const externalMessageId = safeString(m0?.id) || `wa-cloud-${crypto.randomUUID()}`
     return {
       provider: 'official',
-      externalMessageId,
+      externalMessageId: safeString(m0?.id) || `${idPrefix}-${crypto.randomUUID()}`,
       status: 'sent',
       raw: parsed,
     }
+  }
+
+  async sendMessage(input: SendWhatsappMessageInput): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+
+    const stickerRaw = String(input.stickerWebpBase64 ?? '').trim()
+    if (stickerRaw) {
+      const mediaId = await this.uploadStickerMedia(stickerRaw)
+      return this.postMessage({ to, type: 'sticker', sticker: { id: mediaId } }, 'wa-cloud-sticker')
+    }
+
+    const bodyText = input.text.trim()
+    if (!bodyText) throw new Error('empty_message')
+    return this.postMessage(
+      { to, type: 'text', text: { preview_url: false, body: bodyText } },
+      'wa-cloud',
+    )
+  }
+
+  async sendImageMessage(input: SendWhatsappImageInput): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    const link = String(input.imageUrl ?? '').trim()
+    if (!link) throw new Error('missing_image_url')
+    const caption = String(input.caption ?? '').trim()
+    return this.postMessage(
+      { to, type: 'image', image: caption ? { link, caption } : { link } },
+      'wa-cloud-image',
+    )
+  }
+
+  /**
+   * Mensagem de MODELO aprovado — o único jeito de falar com alguém fora da janela de 24h.
+   * Follow-up, reengajamento, NPS e lembrete de cirurgia caem todos aqui: a Meta aceita e
+   * dropa em silêncio se mandarmos texto livre com a janela fechada.
+   */
+  async sendTemplateMessage(input: {
+    to: string
+    templateName: string
+    languageCode?: string
+    /** Variáveis {{1}}, {{2}}… do corpo, na ordem. */
+    bodyParams?: string[]
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    const name = String(input.templateName ?? '').trim()
+    if (!name) throw new Error('missing_template_name')
+
+    const components = (input.bodyParams ?? []).length
+      ? [{
+        type: 'body',
+        parameters: (input.bodyParams ?? []).map((t) => ({ type: 'text', text: String(t) })),
+      }]
+      : undefined
+
+    return this.postMessage(
+      {
+        to,
+        type: 'template',
+        template: {
+          name,
+          language: { code: (input.languageCode ?? 'pt_BR').trim() },
+          ...(components ? { components } : {}),
+        },
+      },
+      'wa-cloud-template',
+    )
+  }
+
+  /** Templates aprovados desta WABA — para o painel escolher em vez de adivinhar o nome. */
+  async listTemplates(): Promise<Array<{ name: string; language: string; status: string; category: string }>> {
+    if (!this.wabaId || !this.accessToken) return []
+    const url =
+      `https://graph.facebook.com/${this.apiVersion}/${this.wabaId}/message_templates?limit=200&fields=name,language,status,category`
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${this.accessToken}` } })
+    if (!res.ok) return []
+    const body = (await res.json()) as { data?: unknown }
+    const rows = Array.isArray(body.data) ? body.data : []
+    return rows.map((r) => {
+      const rec = asRecord(r) ?? {}
+      return {
+        name: safeString(rec.name),
+        language: safeString(rec.language),
+        status: safeString(rec.status),
+        category: safeString(rec.category),
+      }
+    }).filter((t) => t.name)
   }
 }
