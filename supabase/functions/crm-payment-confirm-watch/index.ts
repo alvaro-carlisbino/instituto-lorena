@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
+import { reshipLead } from '../_shared/melhorEnvio.ts'
 import { resendMissingSaleReceipts } from '../_shared/saleReceipt.ts'
 import { sendManychatFlow } from '../_shared/manychatPublicApi.ts'
 import { sendPostPurchaseEmail } from '../_shared/tricopillEmails.ts'
@@ -224,6 +225,120 @@ async function sendPostPurchaseEmails(admin: SupabaseClient): Promise<number> {
   return sent
 }
 
+// Rede de segurança da LOGÍSTICA: venda paga que ficou SEM instrução de entrega.
+//
+// O alarme antigo media todo mundo pela etiqueta do Melhor Envio, então entrega local e
+// retirada — que por definição não geram etiqueta — passavam batido. Foi por aí que dois
+// pedidos de Maringá sumiram da fila (13→14/ago e 17/ago): pagamento entrou, pedido nasceu
+// certo no Bling, comprovante caiu no grupo, e a única coisa que faltou foi justamente a
+// linha que a equipe lê pra separar. Nada acusava.
+//
+// Aqui a régua é o EVENTO na timeline, não a etiqueta: toda venda paga precisa ter algum
+// evento de envio/logística a partir do seu próprio pagamento. Não tendo, primeiro TENTA
+// CONSERTAR (reshipLead force = o mesmo caminho do fechamento, idempotente) e só chama a
+// equipe se nem isso resolveu.
+//
+// Janela de 15 min antes de olhar: o fechamento tem chamada externa (Bling, ViaCEP, W-API)
+// e merece terminar em paz. Evento anterior ao pagamento não conta, senão a nota da compra
+// passada cobre a compra nova — que é exatamente o buraco que isto existe pra fechar.
+async function repairMissingShipNotes(
+  admin: SupabaseClient,
+): Promise<{ checked: number; repaired: number; alerted: number }> {
+  const desde = new Date(Date.now() - 48 * 3_600_000).toISOString()
+  const ate = new Date(Date.now() - 15 * 60_000).toISOString()
+  const [{ data: rede }, { data: asaas }] = await Promise.all([
+    admin.from('rede_payments').select('id, lead_id, paid_at, amount_cents, customer_name')
+      .eq('tenant_id', 'tricopill').eq('status', 'paid')
+      .gte('paid_at', desde).lte('paid_at', ate).not('lead_id', 'is', null)
+      .order('paid_at', { ascending: false }).limit(60),
+    admin.from('asaas_payments').select('id, lead_id, paid_at, amount_cents, customer_name')
+      .eq('tenant_id', 'tricopill').in('status', ['paid', 'confirmed', 'received', 'approved'])
+      .gte('paid_at', desde).lte('paid_at', ate).not('lead_id', 'is', null).not('id', 'like', 'sub-%')
+      .order('paid_at', { ascending: false }).limit(60),
+  ])
+  type Pago = { id: string; lead_id: string; paid_at: string; amount_cents?: number; customer_name?: string | null }
+  const pagos = [...((rede ?? []) as Pago[]), ...((asaas ?? []) as Pago[])].filter((p) => p.lead_id && p.paid_at)
+  if (!pagos.length) return { checked: 0, repaired: 0, alerted: 0 }
+
+  // Um SELECT só pra todos os leads do lote; o casamento com cada pagamento é em memória.
+  const leadIds = [...new Set(pagos.map((p) => p.lead_id))]
+  const eventosPorLead = async (): Promise<Map<string, number[]>> => {
+    const mapa = new Map<string, number[]>()
+    for (let i = 0; i < leadIds.length; i += 100) {
+      const { data } = await admin.from('interactions').select('lead_id, created_at')
+        .in('lead_id', leadIds.slice(i, i + 100))
+        .in('author', ['Melhor Envio', 'Logística'])
+        .gte('created_at', desde)
+        .limit(1000)
+      for (const e of (data ?? []) as Array<{ lead_id: string; created_at: string }>) {
+        const t = Date.parse(e.created_at)
+        if (!Number.isFinite(t)) continue
+        mapa.set(e.lead_id, [...(mapa.get(e.lead_id) ?? []), t])
+      }
+    }
+    return mapa
+  }
+  let eventos = await eventosPorLead()
+  // Folga de 5 min: o evento de envio sai junto do pagamento, não depois dele no relógio.
+  const coberto = (p: Pago, m: Map<string, number[]>): boolean => {
+    const corte = Date.parse(p.paid_at) - 5 * 60_000
+    return (m.get(p.lead_id) ?? []).some((t) => t >= corte)
+  }
+
+  // Rastreio carimbado no lead pelo poller conta como prova, mesmo sem evento na timeline:
+  // senão um pedido já postado viraria alarme eterno (o reship não teria o que religar).
+  const suspeitos = pagos.filter((p) => !coberto(p, eventos))
+  if (!suspeitos.length) return { checked: pagos.length, repaired: 0, alerted: 0 }
+  const rastreioPorLead = new Map<string, number>()
+  {
+    const ids = [...new Set(suspeitos.map((p) => p.lead_id))]
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data } = await admin.from('leads').select('id, custom_fields').in('id', ids.slice(i, i + 100))
+      for (const l of (data ?? []) as Array<{ id: string; custom_fields?: Record<string, unknown> | null }>) {
+        const ent = ((l.custom_fields?.entrega ?? {}) as Record<string, unknown>)
+        if (!String(ent.tracking ?? '').trim()) continue
+        const t = Date.parse(String(ent.tracking_updated_at ?? ''))
+        if (Number.isFinite(t)) rastreioPorLead.set(l.id, t)
+      }
+    }
+  }
+  const temRastreioDoPedido = (p: Pago): boolean => {
+    const t = rastreioPorLead.get(p.lead_id)
+    return t !== undefined && t >= Date.parse(p.paid_at) - 5 * 60_000
+  }
+  const orfaos = suspeitos.filter((p) => !temRastreioDoPedido(p))
+  if (!orfaos.length) return { checked: pagos.length, repaired: 0, alerted: 0 }
+
+  // Conserto pelo caminho oficial. Um lead só é religado UMA vez por rodada, mesmo com
+  // dois pagamentos órfãos — reshipLead sempre trabalha sobre o pagamento mais recente.
+  for (const leadId of [...new Set(orfaos.map((p) => p.lead_id))]) {
+    await reshipLead(admin, leadId, { force: true })
+  }
+  eventos = await eventosPorLead()
+
+  let repaired = 0
+  let alerted = 0
+  for (const p of orfaos) {
+    if (coberto(p, eventos)) { repaired++; continue }
+    const nome = String(p.customer_name ?? '').trim() || 'Cliente'
+    const valor = 'R$ ' + ((Number(p.amount_cents) || 0) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+    const n = await notifyAgents(admin, {
+      leadId: p.lead_id,
+      tenantId: 'tricopill',
+      kind: 'urgent',
+      title: '📦 Venda paga sem instrução de entrega',
+      body: `${nome} pagou ${valor} e o pedido não tem etiqueta nem nota de entrega. Confira na ficha antes que a separação passe batido.`,
+      includeOwner: true,
+      // Por PAGAMENTO, não por lead: recompra do mesmo cliente é outro pedido e merece
+      // o próprio alerta.
+      dedupeKey: `sale_without_ship_note:${p.id}`,
+      dedupeWindowMinutes: 720,
+    })
+    if (n > 0) alerted++
+  }
+  return { checked: pagos.length, repaired, alerted }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
 
@@ -242,6 +357,10 @@ Deno.serve(async (req) => {
 
   // Pesquisa de satisfação da clínica: lead entrou em "Consulta agendada" → dispara o fluxo.
   const feedbackClinica = await dispatchClinicFeedbackOnStage(admin).catch(() => 0)
+
+  // Rede de segurança da logística: venda paga sem nenhum evento de envio → religa e,
+  // se nem assim nascer a instrução, chama a equipe. Best-effort.
+  const envioSemNota = await repairMissingShipNotes(admin).catch(() => ({ checked: 0, repaired: 0, alerted: 0 }))
 
   // E-mail pós-compra (Resend): confirmação + convite pro Clube + cupom da próxima.
   // Dedupe por post_purchase_email_at; e-mail vem do cadastro do lead (o checkout do site
@@ -267,7 +386,7 @@ Deno.serve(async (req) => {
   if (claimsErr) return json({ ok: false, error: claimsErr.message }, 500)
 
   const leadIds = [...new Set((claims ?? []).map((r) => String((r as { lead_id: unknown }).lead_id)).filter(Boolean))]
-  if (leadIds.length === 0) return json({ ok: true, candidates: 0, alerted: 0, receipts, promovidosPago, feedbackClinica, emailsPosCompra })
+  if (leadIds.length === 0) return json({ ok: true, candidates: 0, alerted: 0, receipts, promovidosPago, feedbackClinica, emailsPosCompra, envioSemNota })
 
   // Só leads dos tenants observados.
   const { data: leadsData } = await admin
@@ -299,5 +418,5 @@ Deno.serve(async (req) => {
     if (n > 0) alerted += 1
   }
 
-  return json({ ok: true, candidates: leads.length, alerted, skipped: skipped.length, receipts, promovidosPago, feedbackClinica, emailsPosCompra })
+  return json({ ok: true, candidates: leads.length, alerted, skipped: skipped.length, receipts, promovidosPago, feedbackClinica, emailsPosCompra, envioSemNota })
 })
