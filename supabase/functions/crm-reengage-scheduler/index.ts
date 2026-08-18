@@ -48,6 +48,14 @@ const TENANT = (Deno.env.get('REENGAGE_TENANT') ?? 'tricopill').trim()
 // Trava de volume: quantas mensagens REAIS no máximo por execução (aquece o número,
 // evita rajada de N msgs de um zap só = cara de spam/ban). Backlog escoa nos dias seguintes.
 const DAILY_CAP = Math.max(1, parseInt(Deno.env.get('REENGAGE_DAILY_CAP') ?? '25', 10) || 25)
+// Orçamento de TEMPO, além do teto de volume. A plataforma corta a requisição em 150s ociosos:
+// 25 envios com o jitter anti-spam não cabem, então a rodada morria no fim, perdia a resposta
+// HTTP e ninguém ficava sabendo quantos saíram (18/08: pedi 25, saíram 19, o retorno veio
+// IDLE_TIMEOUT). Parar sozinho antes do corte faz a função devolver um número verdadeiro, e o
+// que sobra fica na fila para a próxima rodada — o estado por lead já é idempotente.
+const TIME_BUDGET_MS = Math.max(30_000, parseInt(Deno.env.get('REENGAGE_TIME_BUDGET_MS') ?? '110000', 10) || 110_000)
+const T0 = Date.now()
+const semTempo = () => Date.now() - T0 > TIME_BUDGET_MS
 const DAY = 86400_000
 const MIN_GAP_MS = 20 * 3600_000 // 20h entre toques do mesmo lead
 
@@ -361,6 +369,8 @@ Deno.serve(async (req) => {
     if (isBlockedContact(l.patient_name)) { results.push({ lead: l.lead_id, skip: 'contato_interno' }); continue }
     // Atingiu o teto de envios reais nesta execução: para de mandar, mas registra o backlog.
     if (ENABLED && sent >= DAILY_CAP) { capped++; continue }
+    // Sem tempo para outro envio: para agora e devolve o que realmente saiu.
+    if (ENABLED && sent > 0 && semTempo()) { capped++; continue }
     const nome = String(l.patient_name ?? '')
 
     // Pedido explícito da trilha C: roda sozinha. Sem isto ela nunca executa em ?track=C,
@@ -461,5 +471,5 @@ Deno.serve(async (req) => {
     }
   }
 
-  return json({ ok: true, enabled: ENABLED, preview: soPreview, envEnabled: ENV_ENABLED, tenant: TENANT, dailyCap: DAILY_CAP, candidates: leads.length, sent, capped, results, at: new Date(now).toISOString() })
+  return json({ ok: true, enabled: ENABLED, preview: soPreview, tempoEsgotado: semTempo(), duracaoMs: Date.now() - T0, envEnabled: ENV_ENABLED, tenant: TENANT, dailyCap: DAILY_CAP, candidates: leads.length, sent, capped, results, at: new Date(now).toISOString() })
 })
