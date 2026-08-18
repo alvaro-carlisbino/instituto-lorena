@@ -27,6 +27,10 @@ const TENANT = 'tricopill'
 const BUSCA_ID = '24041701832'
 const MARCA_ID = '24125006145'
 const PMAX_ID = '24022345891'
+// Campanha da LOJA (18/08/2026): gel de sobrancelha BrowSculpt + shampoo Ozoncare, os dois
+// produtos de marca própria que o Álvaro mandou priorizar junto do Tricopill. R$ 20/dia,
+// que é a folga entre o que a conta gasta (~R$ 87) e o ritmo que zera o saldo até 31/08.
+const LOJA_ID = '24146028948'
 const GRUPO_ANTIGO_ID = '197790938385'
 // Reestruturação da Busca em 4 grupos + maximizar conversões. Acumulado começa aqui.
 const MARCO = '2026-08-17'
@@ -149,6 +153,7 @@ Deno.serve(async (req) => {
         if (c.biddingStrategyType !== 'MAXIMIZE_CONVERSIONS') alertas.push('Busca saiu de Maximizar Conversões.')
       }
       if (c.id === MARCA_ID && c.status !== 'ENABLED') alertas.push('Campanha de Marca não está ativa.')
+      if (c.id === LOJA_ID && c.status !== 'ENABLED') alertas.push('Campanha da Loja (gel/shampoo) não está ativa.')
     }
 
     // ── Ontem e acumulado ──
@@ -213,6 +218,22 @@ Deno.serve(async (req) => {
       linhas.push(r.ok ? 'Grupo antigo da Busca pausado agora (os 4 novos já estão aprovados).' : 'Tentei pausar o grupo antigo e o Google recusou; pausar no painel.')
     } else if (antigoLigado && novos && aprovados < novos) {
       linhas.push('Grupo antigo segue ligado até os novos aprovarem.')
+    }
+
+    // ── Loja (gel + shampoo): aprovação por grupo ──
+    // O bloco acima só enxerga a Busca. Sem isto, um anúncio da Loja reprovado ficaria invisível
+    // e a campanha rodaria sem entregar, gastando a verba que deveria zerar o saldo.
+    const adsLoja = await gaql(`
+      SELECT ad_group.name, ad_group_ad.policy_summary.approval_status
+      FROM ad_group_ad WHERE campaign.id = ${LOJA_ID} AND ad_group_ad.status != 'REMOVED' AND ad_group.status != 'REMOVED'`)
+    if (adsLoja.length) {
+      const reprovadosLoja = adsLoja.filter((r: Row) => r.adGroupAd?.policySummary?.approvalStatus === 'DISAPPROVED')
+      const okLoja = adsLoja.filter((r: Row) => {
+        const st = r.adGroupAd?.policySummary?.approvalStatus
+        return st === 'APPROVED' || st === 'APPROVED_LIMITED'
+      }).length
+      linhas.push(`Loja (gel/shampoo): ${okLoja}/${adsLoja.length} anúncios aprovados` + (reprovadosLoja.length ? ` · ${reprovadosLoja.length} REPROVADO(S)` : ''))
+      for (const r of reprovadosLoja) alertas.push(`Anúncio reprovado no grupo "${r.adGroup?.name}" da Loja. Ajustar o texto no painel.`)
     }
 
     // ── Saldo da conta e ritmo ──
