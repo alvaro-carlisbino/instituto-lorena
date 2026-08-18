@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { firstNameOrEmpty } from '../_shared/leadName.ts'
 import { insertInteraction } from '../_shared/crm.ts'
 import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
@@ -71,7 +72,8 @@ async function pickTemplate(admin: SupabaseClient, lead: LeadRow, requestedId: s
 }
 
 function buildNpsMessage(question: string, patientName: string): string {
-  const first = String(patientName ?? '').trim().split(/\s+/)[0] || ''
+  // '' pra placeholder do provider ("Contato WhatsApp") e nome sem letra de verdade.
+  const first = firstNameOrEmpty(patientName)
   const greeting = first ? `Olá, ${first}! ` : 'Olá! '
   return `${greeting}Aqui é a *Sofia*, do Instituto Lorena Visentainer. 💆
 

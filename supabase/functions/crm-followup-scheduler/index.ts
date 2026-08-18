@@ -5,8 +5,8 @@ import {
   pushManychatWhatsappDmAfterReply,
   readManychatPushConfigForTenantChannel,
 } from '../_shared/manychatPublicApi.ts'
-import { insertInteraction, isPlaceholderName } from '../_shared/crm.ts'
-import { isProviderPlaceholderName } from '../_shared/internalContacts.ts'
+import { insertInteraction } from '../_shared/crm.ts'
+import { applyLeadName } from '../_shared/leadName.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -40,10 +40,19 @@ const FOLLOWUP_HOURS = [1, 2, 4, 8, 16, 24]
 // VENDAS (Tricopill): 1º follow-up em 15 MIN (0,25h) — "atendimento sem resposta >15min".
 // Depois reforça em 1h e 4h. Cadência curta porque venda esfria rápido.
 const FOLLOWUP_HOURS_SALES = [0.25, 1, 4]
+
+// A COPY ASSUME O ATRASO, não cobra o cliente. `needsFollowup` só dispara quando o último
+// inbound é mais NOVO que qualquer outbound, ou seja: este cron nunca fala com quem sumiu,
+// só com quem está esperando a gente. O texto antigo ("vi que ficou pendente aqui") jogava
+// a culpa em quem tinha perguntado e ficado sem resposta — foi o que apareceu na tela do
+// Álvaro em 18/ago parecendo "a IA respondendo errado".
+//
+// "Você sumiu no meio da compra" continua sendo assunto de quem já cobre isso e mede a
+// própria janela: crm-cart-recovery (carrinho das últimas 72h) e crm-reengage-scheduler.
 const FOLLOWUP_MESSAGES_SALES = [
-  'Oi, {name}! 💚 Vi que ficou pendente aqui. Posso te ajudar a finalizar o seu Tricopill? É só me chamar! 🌿',
-  '{name}, ainda dá pra garantir o seu Tricopill 😊 Quer que eu te ajude a fechar agora? Qualquer dúvida (pagamento, frete, prazo) é só perguntar.',
-  'Oi {name}! Última passadinha por aqui 💚 Quando quiser fechar o seu Tricopill, é só responder que eu cuido de tudo pra você!',
+  'Oi, {name}! 💚 Desculpa a demora aqui. Já estou com a sua mensagem, me conta o que você precisa que eu te ajudo agora.',
+  '{name}, desculpa a espera! 😊 Ainda quero te ajudar com o seu Tricopill. Me diz a sua dúvida (preço, frete, prazo) que eu respondo na hora.',
+  'Oi {name}! Passando pra não te deixar sem resposta 💚 Quando puder, é só me chamar que eu resolvo o seu Tricopill rapidinho.',
 ]
 
 const FOLLOWUP_MESSAGES = [
@@ -55,38 +64,9 @@ const FOLLOWUP_MESSAGES = [
   'Oi {name}! Este é nosso último contato por enquanto. Quando estiver pronto(a), pode nos chamar que respondemos rapidinho. Até logo! 👋',
 ]
 
-/**
- * Primeiro nome utilizável, ou '' quando não temos nome de gente. Sem isto o follow-up
- * saía "Oi, Contato WhatsApp! 💚" — o nome default do WhatsApp sem push name — e também
- * "Oi, MARIA FERNANDA DA SILVA SOUZA!" pra quem tem o nome completo no cadastro.
- */
-function firstNameOrEmpty(patientName: string): string {
-  const raw = (patientName ?? '').trim()
-  if (!raw || isProviderPlaceholderName(raw) || isPlaceholderName(raw)) return ''
-  const token = raw.split(/\s+/)[0] ?? ''
-  if ((token.match(/\p{L}/gu) ?? []).length < 2) return ''
-  return token === token.toUpperCase() || token === token.toLowerCase()
-    ? token.charAt(0).toUpperCase() + token.slice(1).toLowerCase()
-    : token
-}
-
-/**
- * Aplica o nome no template. Sem nome, o vocativo SOME em vez de virar "Oi, você!":
- * "Oi, {name}! 💚 Vi que..." → "Oi! 💚 Vi que...", "{name}, ainda dá..." → "Ainda dá...".
- */
-function applyName(template: string, patientName: string): string {
-  const name = firstNameOrEmpty(patientName)
-  if (name) return template.replace(/\{name\}/g, name)
-  return template
-    .replace(/\{name\}\s*,\s*/g, '')
-    .replace(/\s*,?\s*\{name\}/g, '')
-    .replace(/^\s*(\p{Ll})/u, (_m, c: string) => c.toUpperCase())
-    .trim()
-}
-
 function getFollowupMessage(followupCount: number, patientName: string, messages: string[] = FOLLOWUP_MESSAGES): string {
   const idx = Math.min(followupCount, messages.length - 1)
-  return applyName(messages[idx], patientName)
+  return applyLeadName(messages[idx], patientName, 'name')
 }
 
 /** Verifica se um lead precisa de follow-up agora. Retorna o índice do follow-up (0-based) ou null. */

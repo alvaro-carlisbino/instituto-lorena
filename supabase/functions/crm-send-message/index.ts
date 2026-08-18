@@ -36,6 +36,9 @@ function nowIso(): string {
  */
 const INTERNAL_SOURCE_AUTHORS: Record<string, string> = {
   followup_scheduler: 'Assistente IA (follow-up)',
+  reengage_reativacao: 'Assistente IA (reengajamento)',
+  reengage_recompra: 'Assistente IA (recompra)',
+  cart_recovery: 'Assistente IA (carrinho)',
 }
 
 Deno.serve(async (req) => {

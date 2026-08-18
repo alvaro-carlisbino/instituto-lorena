@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { isBlockedContact } from '../_shared/internalContacts.ts'
+import { applyLeadName } from '../_shared/leadName.ts'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reengajamento "sem fim" do Tricopill — as duas trilhas que o followup-scheduler
@@ -47,10 +48,7 @@ const MIN_GAP_MS = 20 * 3600_000 // 20h entre toques do mesmo lead
 const REACT_MAX_STEPS = 24    // ~2+ anos de toques; trava de segurança, não é o "fim"
 const RECOMPRA_MAX_STEPS = 12
 
-const firstName = (s: unknown) => {
-  const first = String(s ?? '').trim().split(/\s+/)[0] || ''
-  return first.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '') || 'tudo bem' // tira emoji/símbolo das pontas
-}
+
 
 // ── Cadência Trilha A: dias a partir do 1º toque (anchor = 1º contato) ──────────
 function reactDueDay(step: number): number {
@@ -132,7 +130,7 @@ function reactMessage(step: number, nome: string): string {
   // senão a mensagem vira duas ofertas de uma vez.
   const hook = promoAgostoAtiva() && step !== 1 && step !== 3 ? '\n\n' + HOOK_AGOSTO_REATIVACAO : ''
   const foot = step >= 4 ? '\n\n(se preferir não receber mais, é só responder SAIR 💚)' : ''
-  return base.replace(/\{nome\}/g, nome) + hook + foot
+  return applyLeadName(base, nome) + hook + foot
 }
 function recompraMessage(step: number, nome: string): string {
   const base = step < RECOMPRA_MSGS.length
@@ -141,7 +139,7 @@ function recompraMessage(step: number, nome: string): string {
   // Step 2 é a oferta de assinatura; misturar frete do kit 3+1 ali confunde. Nos outros entra.
   const hook = promoAgostoAtiva() && step !== 2 ? '\n\n' + HOOK_AGOSTO_RECOMPRA : ''
   const foot = step >= 2 ? '\n\n(se preferir não receber mais, é só responder SAIR 💚)' : ''
-  return base.replace(/\{nome\}/g, nome) + hook + foot
+  return applyLeadName(base, nome) + hook + foot
 }
 
 const isSyntheticPhone = (phone: unknown): boolean => {
@@ -239,7 +237,7 @@ Deno.serve(async (req) => {
     if (isBlockedContact(l.patient_name)) { results.push({ lead: l.lead_id, skip: 'contato_interno' }); continue }
     // Atingiu o teto de envios reais nesta execução: para de mandar, mas registra o backlog.
     if (ENABLED && sent >= DAILY_CAP) { capped++; continue }
-    const nome = firstName(l.patient_name)
+    const nome = String(l.patient_name ?? '')
 
     // ── TRILHA B: recompra (comprou) ──────────────────────────────────────────
     if (l.situacao === 'comprou' && (qtrack === null || qtrack === 'B')) {

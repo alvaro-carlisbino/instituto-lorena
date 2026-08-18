@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { applyLeadName } from '../_shared/leadName.ts'
 import { sendCartRecoveryEmail } from '../_shared/tricopillEmails.ts'
 import { buildCheckoutUrl } from '../_shared/tenantBrand.ts'
 
@@ -37,7 +38,7 @@ const ENABLED = (Deno.env.get('CART_RECOVERY_ENABLED') ?? '').trim().toLowerCase
 const COUPON = (Deno.env.get('RECOVERY_COUPON_CODE') ?? '').trim()
 const COUPON_PCT = (Deno.env.get('RECOVERY_COUPON_PCT') ?? '5').trim()
 
-const firstName = (s: unknown) => String(s ?? '').trim().split(/\s+/)[0] || 'tudo bem'
+
 
 type Row = {
   id: string
@@ -124,16 +125,21 @@ Deno.serve(async (req) => {
       results.push({ id: r.id, lead: r.lead_id, tenant: r.tenant_id, skipped: e instanceof Error ? e.message : String(e) })
       continue
     }
-    const nome = firstName(r.customer_name)
+    const nome = String(r.customer_name ?? '')
     const desc = r.description ? ` (${r.description})` : ''
     let text: string
+    // O nome entra por {nome} (e não por interpolação) pra que `applyLeadName` possa APAGAR
+    // o vocativo quando o lead não tem nome de gente — senão sai "Oi, Contato!".
     if (target === 1) {
-      text =
-        `Oi, ${nome}! 😊 Vi aqui que você estava finalizando seu pedido${desc} mas o pagamento ainda não foi concluído. ` +
-        `Deu algum problema? Tô por aqui pra te ajudar 💚\n\nSe quiser finalizar, é rapidinho por este link:\n${link}`
+      text = applyLeadName(
+        `Oi, {nome}! 😊 Vi aqui que você estava finalizando seu pedido${desc} mas o pagamento ainda não foi concluído. ` +
+          `Deu algum problema? Tô por aqui pra te ajudar 💚`,
+        nome,
+      ) + `\n\nSe quiser finalizar, é rapidinho por este link:\n${link}`
     } else {
       const cupom = COUPON ? `\n\nE pra te ajudar a fechar hoje, responde aqui que eu garanto um *desconto de ${COUPON_PCT}%* no seu pedido 💚` : ''
-      text = `Oi, ${nome}! Ainda dá tempo de garantir seu pedido${desc} 💚 Seu link de pagamento continua ativo:\n${link}${cupom}`
+      text = applyLeadName(`Oi, {nome}! Ainda dá tempo de garantir seu pedido${desc} 💚 Seu link de pagamento continua ativo:`, nome) +
+        `\n${link}${cupom}`
     }
 
     if (!ENABLED) {
