@@ -158,6 +158,15 @@ async function loadWapiCreds(admin: SupabaseClient, tenantId: string): Promise<{
 }
 
 /**
+ * Teto por tentativa de envio ao W-API. SEM ele o fetch herda o timeout do sistema (~2 min de
+ * TCP connect): com 3 rodadas × 2 formatos de JID, um W-API fora do ar segurava a invocação por
+ * minutos e o runtime matava a função ANTES do resto do fechamento — a nota de logística e a
+ * confirmação ao cliente simplesmente não aconteciam, sem erro nenhum na timeline (caso Celso
+ * 17/ago: pagamento e pedido no Bling entraram, a instrução de entrega não).
+ */
+const WAPI_TIMEOUT_MS = 10_000
+
+/**
  * Envia texto para um GRUPO via W-API. Diferente do envio 1:1, o "phone" é o JID do
  * grupo (1203...@g.us) e NÃO pode passar pelo digitsOnly. Tenta o JID completo e, se a
  * API recusar, o id sem sufixo (variação aceita por alguns planos). Best-effort.
@@ -179,6 +188,7 @@ export async function sendWapiGroupText(admin: SupabaseClient, tenantId: string,
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + creds.token },
           body: JSON.stringify({ phone, message: text }),
+          signal: AbortSignal.timeout(WAPI_TIMEOUT_MS),
         })
         const body = await res.text()
         let parsed: Record<string, unknown> = {}
@@ -215,6 +225,7 @@ export async function sendWapiDirectText(admin: SupabaseClient, tenantId: string
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + creds.token },
         body: JSON.stringify({ phone: digits, message: text }),
+        signal: AbortSignal.timeout(WAPI_TIMEOUT_MS),
       })
       const body = await res.text()
       let parsed: Record<string, unknown> = {}

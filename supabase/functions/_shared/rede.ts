@@ -6,7 +6,7 @@ import { incrementCouponUse, quoteCoupon } from './coupons.ts'
 import { blingCreateSaleOrder, blingOrderLabel } from './bling.ts'
 import { sendEmail } from './resend.ts'
 import { internalSaleEmail, orderConfirmEmail, TEAM_EMAIL } from './emails.ts'
-import { autoShipToCart, type FreteExtra } from './melhorEnvio.ts'
+import { autoShipToCart, notaSemEtiqueta, type FreteExtra } from './melhorEnvio.ts'
 import { sendSaleReceiptToGroup } from './saleReceipt.ts'
 import { dispatchPurchaseConversions } from './conversions.ts'
 import { getCheckoutBaseUrl, getTenantBrand } from './tenantBrand.ts'
@@ -941,6 +941,52 @@ export async function finalizeRedePaid(
       }
     }
 
+    // Envio automático no Melhor Envio (CARRINHO; best-effort, nunca quebra o pagamento).
+    //
+    // ORDEM IMPORTA: a instrução operacional (etiqueta / nota de entrega) sai ANTES do
+    // comprovante no grupo. As duas são best-effort, mas só esta é escrita no banco — o
+    // comprovante depende do W-API, e um W-API pendurado consumia a invocação inteira e
+    // levava junto tudo que vinha depois (caso Celso 17/ago). O que a equipe precisa pra
+    // separar o pedido não pode ficar atrás de uma chamada externa.
+    try {
+      const ship = await autoShipToCart(admin, blingTenant, {
+        lead: { id: l.id, patient_name: l.patient_name, phone: l.phone, custom_fields: l.custom_fields },
+        kit: orderKit || null,
+        // Avulsos (shampoo, gel) somam peso na etiqueta — e, quando não há kit, são eles que
+        // definem a caixa. Sem isso a etiqueta saía com a caixa do kit (ou a padrão de 1 frasco).
+        extras: addonExtrasFromItems(intent.items),
+        productName: orderKit ? `Tricopill (${orderKit})` : 'Tricopill',
+        productValueCents: intent.amountCents,
+      })
+      if (ship.ok || ship.skipped || ship.reason) {
+        const ent = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>
+        const ster = (v: unknown) => String(v ?? '').trim()
+        const endLinha = [
+          [ster(ent.logradouro), ster(ent.numero)].filter(Boolean).join(', '),
+          ster(ent.complemento), ster(ent.bairro), [ster(ent.cidade), ster(ent.uf)].filter(Boolean).join('/'),
+        ].filter(Boolean).join(' - ')
+        let content: string
+        let author = 'Melhor Envio'
+        if (ship.ok) {
+          content = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
+        } else if (ship.reason === 'entrega_local_maringa' || ship.reason === 'retirada_clinica') {
+          // Mesmo texto do religamento (crm-reship), com o nº do pedido carimbado: duas compras
+          // pro mesmo endereço precisam gerar notas DIFERENTES, senão o guard de idempotência
+          // de lá engole a segunda e a equipe entrega só o primeiro pedido.
+          author = 'Logística'
+          content = notaSemEtiqueta(ship.reason, endLinha, receiptBlingId ? `#${receiptBlingId}` : '')
+        } else {
+          content = `📦 Envio NÃO gerado automaticamente (${ship.reason}). Gere pelo botão se for envio externo.`
+        }
+        await insertInteraction(admin, {
+          leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author,
+          content, tenantId: blingTenant,
+        })
+      }
+    } catch {
+      // best-effort: envio nunca derruba o pagamento
+    }
+
     // Comprovante da venda no grupo do financeiro (best-effort, nunca quebra o pagamento).
     {
       const cadR = ((l.custom_fields as Record<string, unknown> | undefined)?.cadastro ?? {}) as Record<string, string>
@@ -966,46 +1012,6 @@ export async function finalizeRedePaid(
           entrega: entR,
         },
       })
-    }
-
-    // Envio automático no Melhor Envio (CARRINHO; best-effort, nunca quebra o pagamento).
-    try {
-      const ship = await autoShipToCart(admin, blingTenant, {
-        lead: { id: l.id, patient_name: l.patient_name, phone: l.phone, custom_fields: l.custom_fields },
-        kit: orderKit || null,
-        // Avulsos (shampoo, gel) somam peso na etiqueta — e, quando não há kit, são eles que
-        // definem a caixa. Sem isso a etiqueta saía com a caixa do kit (ou a padrão de 1 frasco).
-        extras: addonExtrasFromItems(intent.items),
-        productName: orderKit ? `Tricopill (${orderKit})` : 'Tricopill',
-        productValueCents: intent.amountCents,
-      })
-      if (ship.ok || ship.skipped || ship.reason) {
-        const ent = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>
-        const ster = (v: unknown) => String(v ?? '').trim()
-        const endLinha = [
-          [ster(ent.logradouro), ster(ent.numero)].filter(Boolean).join(', '),
-          ster(ent.complemento), ster(ent.bairro), [ster(ent.cidade), ster(ent.uf)].filter(Boolean).join('/'),
-        ].filter(Boolean).join(' - ')
-        let content: string
-        let author = 'Melhor Envio'
-        if (ship.ok) {
-          content = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
-        } else if (ship.reason === 'entrega_local_maringa') {
-          author = 'Logística'
-          content = `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`
-        } else if (ship.reason === 'retirada_clinica') {
-          author = 'Logística'
-          content = `🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)`
-        } else {
-          content = `📦 Envio NÃO gerado automaticamente (${ship.reason}). Gere pelo botão se for envio externo.`
-        }
-        await insertInteraction(admin, {
-          leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author,
-          content, tenantId: blingTenant,
-        })
-      }
-    } catch {
-      // best-effort: envio nunca derruba o pagamento
     }
 
     // Marca do polo DONO da cobrança, resolvida UMA vez e usada na confirmação, no e-mail e

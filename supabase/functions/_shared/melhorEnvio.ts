@@ -1015,23 +1015,50 @@ export async function maybeReshipAfterAddressComplete(admin: SupabaseClient, lea
 }
 
 /**
- * Quando o lead pagou pela última vez (ms). É o marco que separa "envio deste pedido" de
- * "envio da compra anterior" — sem ele, recompra do mesmo cliente nunca gera etiqueta nova.
+ * Último pagamento pago do lead: QUANDO pagou (ms) e QUAL pedido é.
+ *
+ * `ms` é o marco que separa "envio deste pedido" de "envio da compra anterior" — sem ele,
+ * recompra do mesmo cliente nunca gera etiqueta nova.
+ *
+ * `ref` (nº do pedido no Bling, ou o id do pagamento quando o pedido ainda não saiu) vai
+ * carimbada na NOTA de logística. Sem ela, duas compras pro MESMO endereço geram uma string
+ * byte a byte idêntica, o guard de idempotência (`note !== lastContent`) engole a segunda e
+ * a equipe entrega só o primeiro pedido — sem etiqueta e sem alarme, porque entrega local
+ * nunca gera etiqueta (caso 13→14/ago: 4 frascos avisados, 12 pagos).
+ *
  * Ciclo de assinatura (`sub-…`) fica de fora pelo mesmo motivo do passo 3.
  */
-async function lastPaidAtMs(admin: SupabaseClient, leadId: string): Promise<number | null> {
-  const pick = (rows: Array<{ paid_at?: string | null }> | null): number => {
-    const t = Date.parse(String(rows?.[0]?.paid_at ?? ''))
-    return Number.isFinite(t) ? t : 0
-  }
+type PagoRow = { paid_at?: string | null; id?: string | null; bling_order_id?: string | null }
+async function lastPaidOrder(admin: SupabaseClient, leadId: string): Promise<{ ms: number | null; ref: string }> {
   const [{ data: rede }, { data: asaas }] = await Promise.all([
-    admin.from('rede_payments').select('paid_at').eq('lead_id', leadId).eq('status', 'paid')
+    admin.from('rede_payments').select('paid_at, id, bling_order_id').eq('lead_id', leadId).eq('status', 'paid')
       .order('paid_at', { ascending: false }).limit(1),
-    admin.from('asaas_payments').select('paid_at').eq('lead_id', leadId).eq('status', 'paid')
+    admin.from('asaas_payments').select('paid_at, id, bling_order_id').eq('lead_id', leadId).eq('status', 'paid')
       .not('id', 'like', 'sub-%').order('paid_at', { ascending: false }).limit(1),
   ])
-  const ms = Math.max(pick(rede as Array<{ paid_at?: string | null }> | null), pick(asaas as Array<{ paid_at?: string | null }> | null))
-  return ms > 0 ? ms : null
+  const at = (rows: unknown): number => {
+    const t = Date.parse(String((rows as PagoRow[] | null)?.[0]?.paid_at ?? ''))
+    return Number.isFinite(t) ? t : 0
+  }
+  const msRede = at(rede), msAsaas = at(asaas)
+  const ms = Math.max(msRede, msAsaas)
+  const row = (msRede >= msAsaas ? (rede as PagoRow[] | null)?.[0] : (asaas as PagoRow[] | null)?.[0]) ?? null
+  const pedido = String(row?.bling_order_id ?? '').trim()
+  const pagamento = String(row?.id ?? '').trim()
+  const ref = pedido ? `#${pedido}` : (pagamento ? `pagamento ${pagamento.slice(0, 12)}` : '')
+  return { ms: ms > 0 ? ms : null, ref }
+}
+
+/**
+ * Nota operacional da venda que NÃO passa pelos Correios (entrega da equipe / retirada).
+ * A referência do pedido entra no texto pra que a recompra produza uma nota DIFERENTE da
+ * anterior e sobreviva ao guard de idempotência.
+ */
+export function notaSemEtiqueta(modo: 'retirada_clinica' | 'entrega_local_maringa', endLinha: string, ref: string): string {
+  const pedido = ref ? ` (${ref})` : ''
+  return modo === 'retirada_clinica'
+    ? `🏥 RETIRADA NA CLÍNICA${pedido} — cliente vai buscar. (Sem envio.)`
+    : `🛵 ENTREGA LOCAL (equipe)${pedido} — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`
 }
 
 /**
@@ -1053,7 +1080,7 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
     //    nenhum evento na timeline ninguém percebia (caso Thais Ferrero 04/08 — comprou
     //    de novo pelo site 1 mês depois e o pedido ficou parado, sem etiqueta e sem nota).
     //    Agora só conta como prova o que aconteceu DEPOIS do último pagamento pago.
-    const orderSince = await lastPaidAtMs(admin, leadId)
+    const { ms: orderSince, ref: orderRef } = await lastPaidOrder(admin, leadId)
     const isFromCurrentOrder = (iso: unknown): boolean => {
       if (!orderSince) return true // lead sem pagamento datado: comportamento antigo
       const t = Date.parse(String(iso ?? ''))
@@ -1113,9 +1140,7 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
       // se DIFERE do último evento — assim substitui um skip velho ("sem CEP capturado") sem
       // repetir a mesma nota a cada execução.
       if (force) {
-        const note = mode === 'retirada_clinica'
-          ? '🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)'
-          : `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`
+        const note = notaSemEtiqueta(mode as 'retirada_clinica' | 'entrega_local_maringa', endLinha, orderRef)
         if (note !== lastContent) {
           await insertInteraction(admin, {
             leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system',
@@ -1239,9 +1264,7 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
       // substitui um skip velho sem repetir a mesma nota.
       if (force) {
         author = 'Logística'
-        content = ship.reason === 'retirada_clinica'
-          ? '🏥 RETIRADA NA CLÍNICA — cliente vai buscar. (Sem envio.)'
-          : `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}. (Sem etiqueta dos Correios.)`
+        content = notaSemEtiqueta(ship.reason as 'retirada_clinica' | 'entrega_local_maringa', endLinha, orderRef)
       }
     } else if (ship.reason && !RESHIPPABLE_REASONS.has(ship.reason)) {
       content = `📦 Envio ainda não gerado (${ship.reason}) mesmo com o endereço completo. Gere pelo botão.`
