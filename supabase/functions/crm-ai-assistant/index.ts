@@ -868,17 +868,23 @@ Deno.serve(async (req) => {
         if (tenantId === 'tricopill') {
           sellable = sellable.filter((i) => !cat.hiddenIds.has(String(i.id)))
         }
+        // UMA LINHA por produto, não objeto JSON indentado. Com 68 itens o formato antigo
+        // ocupava ~11 mil caracteres no fim do prompt, que é justamente a parte que o corte de
+        // MAX_SYSTEM_CHARS come primeiro — e catálogo que o modelo não lê é catálogo que não
+        // existe. Compacto ele cabe, e ainda é renderizado numa seção própria mais acima.
         if (sellable.length) {
-          (snapshot as Record<string, unknown>).bling_catalog = sellable.map((i) => ({
-            id: i.id,
-            nome: i.nome,
-            codigo: i.codigo,
-            preco: i.preco,
-            estoque: i.estoque,
-          }))
+          (snapshot as Record<string, unknown>).bling_catalog = sellable.map(
+            (i) => `${i.nome} | R$ ${i.preco.toFixed(2).replace('.', ',')} | estoque ${i.estoque ?? '?'} | id ${i.id}`,
+          )
+          console.log(`[ia] catálogo do bot: ${sellable.length} produtos vendáveis no contexto`)
+        } else {
+          console.warn('[ia] catálogo do bot VAZIO — ele vai achar que não temos nada')
         }
-      } catch {
-        // best-effort
+      } catch (e) {
+        // Best-effort de propósito: catálogo nunca pode derrubar a resposta. Mas antes isto era
+        // MUDO, e "bot sem catálogo" ficava indistinguível de "bot com catálogo" no log; foi
+        // preciso remontar conversa por conversa pra entender por que ele negava item em estoque.
+        console.warn(`[ia] catálogo do bot NÃO carregou (${e instanceof Error ? e.message : String(e)}); ele responderá sem saber o que existe`)
       }
     }
 
@@ -1062,8 +1068,8 @@ Deno.serve(async (req) => {
       'Use APENAS informações do PROMPT ADICIONAL e do snapshot. Se não souber algo (ex.: contraindicação médica específica), seja honesta e ofereça encaminhar para um especialista — não invente.',
       'STATUS DE PAGAMENTO (PROIBIDO AFIRMAR SEM PROVA — caso Lafaieti 20/07): você SÓ pode dizer que um pedido "está pago" / "consta pagamento no sistema" se o snapshot mostrar EXPLICITAMENTE uma cobrança com status PAGO desta conversa. Sem essa prova no snapshot, NUNCA afirme pagamento ("vi aqui no sistema que está pago" é PROIBIDO): trate como pedido NOVO — apresente os valores e conduza ao pagamento normalmente. Se o CLIENTE disser que já pagou e o snapshot não mostrar, não confirme nem negue: diga que vai verificar com a equipe e finalize com [PRONTO_PARA_CONSULTOR].',
       'COMPOSIÇÃO / INFORMAÇÃO NUTRICIONAL DO TRICOPILL (oficial — use ESTES valores ao falar de ingredientes/fórmula; NÃO invente outros nutrientes nem doses). Porção: 1,60 g = 2 cápsulas (30 porções por frasco; posologia 2 cápsulas/dia). Aminoácidos: Cisteína 42 mg, Lisina 315 mg. Vitaminas: A 2,6 mg, D 0,05 mg, E 15 mg (100% VD), C 100 mg (100%), B1 1,2 mg (100%), B2 1,2 mg (100%), B3 15 mg (100%), B5/ácido pantotênico 5 mg (100%), B6 1,3 mg (100%), Biotina 0,05 mg, Ácido fólico 1,3 mg. Minerais: Ferro 14 mg (100%), Manganês 1,7 mg (55%), Selênio 0,22 mg, Zinco 11 mg (100%). Ativos: Ácido hialurônico 158 mg, Curcumina 80 mg, Proantocianidinas de semente de uva 116 mg, Licopeno 8 mg, Silício 0,42 mg. É zero caloria, zero açúcar, zero gordura e zero sódio. Se o cliente perguntar por um nutriente que NÃO está nesta lista, diga que não consta na fórmula em vez de inventar. Continua valendo: não prometa cura/resultado, fale em benefício e uso contínuo.',
-      'snapshot.bling_catalog é o catálogo REAL do Bling JÁ FILTRADO (só produtos COM preço de venda): cada item tem nome, código, **preco** (preço de VENDA em reais) e estoque. É a fonte da verdade de produtos, preços e disponibilidade. Se o estoque for 0 ou negativo (ou null = não controlado), não prometa pronta-entrega — diga que confirma o prazo. Não ofereça item que não esteja no catálogo.',
-      'PREÇO: para os produtos do catálogo, você PODE e DEVE informar o "preco" (preço de venda) que está no bling_catalog. EXCEÇÃO IMPORTANTE — os KITS do Tricopill (1 mês, 3+1, 5 meses) seguem SEMPRE os valores e promoções do PROMPT ADICIONAL (ex.: Pix com 5% off), NUNCA o preço de linha do catálogo (que pode divergir). Se o cliente perguntar o valor de algo que NÃO está nem no bling_catalog nem no PROMPT ADICIONAL, NÃO invente — diga que confirma com a atendente. Cotar preço inventado é PROIBIDO; o frete é sempre cobrado à parte.',
+      'O catálogo à venda está na seção "CATÁLOGO À VENDA AGORA" deste prompt, UMA LINHA por produto no formato `nome | preço | estoque | id`. É a fonte da verdade de produto, preço e disponibilidade, e vale para TODAS as marcas que a HB revende, não só as nossas. ANTES de dizer que algo não existe, PROCURE nessa lista: se está lá, TEMOS e você vende. Marca diferente da nossa não é motivo de recusa. Se o estoque estiver baixo, não prometa pronta-entrega, diga que confirma o prazo. Se a seção não aparecer neste prompt, você NÃO sabe o que existe: nunca afirme que falta, diga que confirma com a equipe.',
+      'PREÇO: para os produtos do catálogo, use SEMPRE o preço que está na linha do produto na seção "CATÁLOGO À VENDA AGORA". EXCEÇÃO IMPORTANTE — os KITS do Tricopill (1 mês, 3+1, 5 meses) seguem SEMPRE os valores e promoções do PROMPT ADICIONAL (ex.: Pix com 5% off), NUNCA o preço de linha do catálogo (que pode divergir). Se o cliente perguntar o valor de algo que não está nem no catálogo nem no PROMPT ADICIONAL, NÃO invente — diga que confirma com a equipe. Cotar preço inventado é PROIBIDO; o frete é sempre cobrado à parte.',
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
       'MONJARO / EMAGRECEDORES (Monjaro, Mounjaro, Ozempic, Wegovy, tirzepatida, semaglutida, "canetas" de emagrecimento): NÃO seja defensiva nem responda "não posso indicar / contraindicar / fale com seu médico". A *Dra. Lorena RECOMENDA o Tricopill justamente para quem usa esses medicamentos* — eles costumam causar QUEDA CAPILAR, e o Tricopill é um ótimo complemento para nutrir e fortalecer os fios nessa fase. Responda de forma POSITIVA e acolhedora, reforçando que é um suplemento capilar indicado nesse caso e seguindo para a venda. O ÚNICO limite: não dê conselho médico sobre o emagrecedor em si (não ajuste dose, não mande parar/continuar o remédio) e não prometa resultado — fale em benefício e uso contínuo.',
       'VALORES, PAGAMENTO E FRETE: apresente os valores e as formas de pagamento/parcelas EXATAMENTE como no PROMPT ADICIONAL — nunca invente preço, parcela ou desconto. Ao passar QUALQUER preço, informe SEMPRE que o frete é cobrado à parte (não incluso no produto) e peça o CEP do cliente para COTAR o frete real.',
@@ -1158,6 +1164,24 @@ Deno.serve(async (req) => {
         : []),
       '',
       focusHint,
+      '',
+      // O catálogo sai do FIM do prompt e vem para cá, com a regra grudada nele. No fim ele
+      // ficava atrás de um JSON enorme, era o primeiro a ser cortado por tamanho, e mesmo
+      // quando cabia o modelo julgava por MARCA em vez de procurar na lista. Em 18/08 ele negou
+      // DUAS VEZES um shampoo Grandha com 18 em estoque para um cliente que a clínica mandou
+      // comprar aquele produto exato, e tentou empurrar outro no lugar.
+      ...(Array.isArray((snapshot as Record<string, unknown>).bling_catalog)
+        ? [
+            '',
+            '# CATÁLOGO À VENDA AGORA (fonte da verdade: procure AQUI antes de dizer que não temos)',
+            'Cada linha abaixo é um produto que a empresa TEM em estoque e VENDE hoje, de marca própria ou de marca que revendemos. Se o cliente pedir, mandar foto ou citar o nome de QUALQUER item desta lista, a resposta é SIM: venda, use o preço desta lista e feche. Ser de outra marca NÃO é motivo para recusar.',
+            ((snapshot as Record<string, unknown>).bling_catalog as string[]).join('\n'),
+          ]
+        : [
+            '',
+            '# CATÁLOGO INDISPONÍVEL NESTA RESPOSTA',
+            'A lista de produtos não carregou agora. NÃO afirme que um produto não existe e NÃO diga que não trabalhamos com ele: você não tem como saber. Diga que confirma a disponibilidade e o valor com a equipe, e siga a conversa.',
+          ]),
       '',
       '# REGRAS E VALORES DINÂMICOS (Configurado no CRM)',
       JSON.stringify(snapshot.crm_ai_configs?.business_rules || {}, null, 2),
