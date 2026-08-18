@@ -80,6 +80,21 @@ function recompraDueDay(step: number, supplyDays: number): number {
 // o lead. E dentro do grupo ele recebe promoção todo dia, sem custo e sem risco de ban.
 const CLUBE_LINK = 'https://chat.whatsapp.com/GlRBbbwhjELGZ4u93VGviT';
 
+// PROMOÇÃO DE AGOSTO/2026 (decisão do dono, 17/08): kit 3+1 com frete grátis até 31/08.
+// O gancho entra nas mensagens só enquanto a data vale e some sozinho depois — nada pra
+// reverter. Mesma regra que o servidor do site (FREE_FREIGHT_CENTS_PROMO) e o env
+// FRETE_GRATIS_KITS do bot (esse sim precisa voltar pra "5_meses" em 01/09).
+const PROMO_FRETE_KIT3_ATE = '2026-08-31'
+function diaLocalSP(d = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+}
+function promoAgostoAtiva(d = new Date()): boolean {
+  return diaLocalSP(d) <= PROMO_FRETE_KIT3_ATE
+}
+// Frase curta, uma só, pra não virar panfleto. Entra depois do texto normal.
+const HOOK_AGOSTO_REATIVACAO = 'Ah, e só em agosto o kit 3+1 (4 frascos) vai com *frete grátis* pra todo o Brasil 🚚'
+const HOOK_AGOSTO_RECOMPRA = 'E até o fim de agosto a reposição no kit 3+1 vai com *frete grátis* 🚚'
+
 const REACT_MSGS = [
   // step 0 (na hora): abordagem direta, ainda tentando a venda 1:1
   'Oi {nome}, tudo bem? 💚 Fiquei de te ajudar com o Tricopill e acho que ficou no ar. Quer que eu tire alguma dúvida ou já te mando as opções?',
@@ -113,15 +128,20 @@ function reactMessage(step: number, nome: string): string {
   const base = step < REACT_MSGS.length
     ? REACT_MSGS[step]
     : REACT_MSGS_LOOP[(step - REACT_MSGS.length) % REACT_MSGS_LOOP.length]
+  // Gancho de agosto só nos toques de venda (0, 2, 4 e no loop); nos convites pro Clube (1, 3) não,
+  // senão a mensagem vira duas ofertas de uma vez.
+  const hook = promoAgostoAtiva() && step !== 1 && step !== 3 ? '\n\n' + HOOK_AGOSTO_REATIVACAO : ''
   const foot = step >= 4 ? '\n\n(se preferir não receber mais, é só responder SAIR 💚)' : ''
-  return base.replace(/\{nome\}/g, nome) + foot
+  return base.replace(/\{nome\}/g, nome) + hook + foot
 }
 function recompraMessage(step: number, nome: string): string {
   const base = step < RECOMPRA_MSGS.length
     ? RECOMPRA_MSGS[step]
     : RECOMPRA_MSGS_LOOP[(step - RECOMPRA_MSGS.length) % RECOMPRA_MSGS_LOOP.length]
+  // Step 2 é a oferta de assinatura; misturar frete do kit 3+1 ali confunde. Nos outros entra.
+  const hook = promoAgostoAtiva() && step !== 2 ? '\n\n' + HOOK_AGOSTO_RECOMPRA : ''
   const foot = step >= 2 ? '\n\n(se preferir não receber mais, é só responder SAIR 💚)' : ''
-  return base.replace(/\{nome\}/g, nome) + foot
+  return base.replace(/\{nome\}/g, nome) + hook + foot
 }
 
 const isSyntheticPhone = (phone: unknown): boolean => {
