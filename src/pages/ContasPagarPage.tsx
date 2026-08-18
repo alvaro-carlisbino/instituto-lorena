@@ -6,6 +6,7 @@ import { CalendarClock, Check, ChevronDown, FileCode, FileText, Paperclip, Plus,
 import { AppLayout } from '@/layouts/AppLayout'
 import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { NotasSefazPanel } from '@/components/financeiro/NotasSefazPanel'
+import { ConciliacaoAutoPanel } from '@/components/financeiro/ConciliacaoAutoPanel'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -377,6 +378,12 @@ export function ContasPagarPage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,400px)_1fr]">
         <div className="space-y-4">
           <NotasSefazPanel onImportou={() => void load()} />
+
+          {/* Logo abaixo da SEFAZ de propósito: é ali que a parcela em aberto NASCE (a nota
+              entra sozinha e ninguém sabe se foi paga) e é aqui que ela morre. Deixar a
+              baixa só em /conciliacao obrigava a trocar de tela pra resolver o número que
+              esta mesma página acabou de mostrar em âmbar. */}
+          <ConciliacaoAutoPanel onMudou={() => void load()} />
 
           <Card className="border-primary/40 bg-primary/[0.03]">
             <CardHeader>

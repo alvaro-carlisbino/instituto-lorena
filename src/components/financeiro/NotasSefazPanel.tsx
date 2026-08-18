@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowUpRight, CloudDownload, PackagePlus, RefreshCw, TriangleAlert } from 'lucide-react'
+import { CloudDownload, PackagePlus, RefreshCw, TriangleAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -139,12 +138,9 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
                     : ''}
                   . Isto aqui é o que o extrato não explica.
                 </p>
-                <Link
-                  to="/conciliacao"
-                  className="mt-1.5 inline-flex items-center gap-1 font-medium text-amber-700 underline-offset-2 hover:underline dark:text-amber-400"
-                >
-                  Conferir na conciliação <ArrowUpRight className="size-3" />
-                </Link>
+                <p className="mt-1.5 text-muted-foreground">
+                  A conferência é o painel logo abaixo.
+                </p>
               </div>
             )}
 
