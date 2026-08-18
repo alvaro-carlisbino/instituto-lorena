@@ -119,8 +119,23 @@ Deno.serve(async (req)=>{
   // segurava os follow-ups no crm-send-message). Serve para rodar mutirão de NF-e em lote,
   // que pela tela sairia uma aba aberta por 4 minutos. A plataforma já validou o JWT; o
   // painel continua exigindo usuário real.
+  // Comparar o bearer com SUPABASE_SERVICE_ROLE_KEY não serve: a chave injetada na função
+  // nem sempre é a mesma que a API do projeto devolve (o projeto tem chave legada e chave
+  // nova convivendo), e a igualdade falha calada. Como esta função roda com verify_jwt=true,
+  // a plataforma JÁ validou a assinatura antes daqui — então dá para confiar na claim.
   const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
-  const isServiceRole = bearer.length > 0 && bearer === serviceRole;
+  const isServiceRole = (() => {
+    if (bearer.length > 0 && bearer === serviceRole) return true;
+    try {
+      const parte = bearer.split('.')[1];
+      if (!parte) return false;
+      const norm = parte.replace(/-/g, '+').replace(/_/g, '/');
+      const claims = JSON.parse(atob(norm.padEnd(norm.length + (4 - norm.length % 4) % 4, '=')));
+      return claims?.role === 'service_role';
+    } catch {
+      return false;
+    }
+  })();
   const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
     global: {
       headers: {
