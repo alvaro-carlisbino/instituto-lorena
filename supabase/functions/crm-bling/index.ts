@@ -642,6 +642,8 @@ Deno.serve(async (req)=>{
     // Itens + contato vêm do pedido já criado no Bling (mesmo caminho do sync_contato).
     let contatoId = '';
     let descontoReais = 0;
+    let freteReais = 0;
+    let fretePorConta = 1;
     let itens = [];
     try {
       const bh = {
@@ -659,6 +661,10 @@ Deno.serve(async (req)=>{
       // Desconto do pedido (Pix 5%, cupom): tem que ir pra nota, senão ela fecha no preço
       // de tabela e não bate com o cobrado.
       descontoReais = Number((o.desconto ?? {}).valor ?? 0) || 0;
+      // Frete do pedido: sem isto a nota fecha só nos produtos e sai MENOR do que o cliente
+      // pagou (27 das 51 notas de julho/2026 nasceram assim).
+      freteReais = Number((o.transporte ?? {}).frete ?? 0) || 0;
+      fretePorConta = Number((o.transporte ?? {}).fretePorConta ?? 1);
       itens = await buildNfeItens(Array.isArray(o.itens) ? o.itens : [], bh);
     } catch (e) {
       return json({
@@ -717,6 +723,8 @@ Deno.serve(async (req)=>{
         transmit,
         dataOperacaoISO: pay.paid_at || undefined,
         descontoReais,
+        freteReais,
+        fretePorConta,
         contatoNome: customerName || undefined
       });
       const status = out.error ? 'erro' : out.transmitted ? 'emitida' : 'rascunho';
@@ -1224,6 +1232,8 @@ Deno.serve(async (req)=>{
     // Pedido: contato, desconto, data e itens (mesmo caminho do nfe_emit por pagamento).
     let contatoId = '';
     let descontoReais = 0;
+    let freteReais = 0;
+    let fretePorConta = 1;
     let dataPedido = '';
     let itens = [];
     try {
@@ -1252,6 +1262,8 @@ Deno.serve(async (req)=>{
       }
       contatoId = String((o.contato ?? {}).id ?? '');
       descontoReais = Number((o.desconto ?? {}).valor ?? 0) || 0;
+      freteReais = Number((o.transporte ?? {}).frete ?? 0) || 0;
+      fretePorConta = Number((o.transporte ?? {}).fretePorConta ?? 1);
       dataPedido = String(o.data ?? '');
       itens = await buildNfeItens(Array.isArray(o.itens) ? o.itens : [], bh);
     } catch (e) {
@@ -1332,6 +1344,8 @@ Deno.serve(async (req)=>{
         transmit,
         dataOperacaoISO: dataPedido ? `${dataPedido}T12:00:00-03:00` : undefined,
         descontoReais,
+        freteReais,
+        fretePorConta,
         contatoNome: contatoNomeCrm || undefined
       });
       const status = out.error ? 'erro' : out.transmitted ? 'emitida' : 'rascunho';

@@ -1259,6 +1259,50 @@ async function blingContatoPayloadForNfe(
   return base
 }
 
+/**
+ * Relê a NF-e recém-criada e confere o total contra o esperado (itens + frete).
+ *
+ * Existe porque o Bling responde 201 e grava outra coisa — o histórico do projeto tem NCM
+ * sumindo e desconto ignorado, e o operador só descobria depois, com a nota na mão.
+ *
+ * Devolve a mensagem do problema, ou null quando está tudo certo. Se a releitura falhar,
+ * só reclama quando a intenção era TRANSMITIR: aí o ato é irreversível e não dá para
+ * apostar. Rascunho segue em frente — ele ainda pode ser conferido e apagado.
+ */
+async function conferirValorNfe(
+  token: string,
+  nfeId: string,
+  esperadoReais: number,
+  vaiTransmitir: boolean,
+): Promise<string | null> {
+  let nota: { valorNota?: number | string; itens?: Array<Record<string, unknown>> }
+  try {
+    const res = await blingFetchWithRetry(token, `/nfe/${nfeId}`)
+    if (!res.ok) {
+      return vaiTransmitir
+        ? `conferencia_indisponivel: não consegui reler a nota ${nfeId} no Bling (HTTP ${res.status}) para conferir o valor antes de transmitir. O rascunho existe; confira no Bling.`
+        : null
+    }
+    nota = (JSON.parse((await res.text()) || '{}')?.data ?? {}) as typeof nota
+  } catch (e) {
+    return vaiTransmitir
+      ? `conferencia_indisponivel: falha ao reler a nota ${nfeId} antes de transmitir (${e instanceof Error ? e.message : String(e)}).`
+      : null
+  }
+
+  const gravado = Number(nota.valorNota ?? NaN)
+  if (Number.isFinite(gravado) && Math.abs(gravado - esperadoReais) > 0.02) {
+    return `valor_divergente: o Bling gravou a nota em R$ ${gravado.toFixed(2)} e o esperado era R$ ${esperadoReais.toFixed(2)}. Nota NÃO transmitida — confira o rascunho no Bling.`
+  }
+
+  const semNcm = (nota.itens ?? []).filter((i) => !String(i.classificacaoFiscal ?? '').trim())
+  if (semNcm.length > 0) {
+    return `sem_ncm: ${semNcm.length} item(ns) da nota ficaram sem NCM e a SEFAZ recusa. Nota NÃO transmitida — complete a ficha fiscal do produto no Bling.`
+  }
+
+  return null
+}
+
 export async function blingEmitNfe(
   token: string,
   args: {
@@ -1272,6 +1316,11 @@ export async function blingEmitNfe(
     /** Desconto do pedido em REAIS (ex.: os 5% do Pix). Sem isto a nota sai com o preço
      *  de tabela e NÃO bate com o valor cobrado — erro fiscal. */
     descontoReais?: number
+    /** Frete do pedido em REAIS. Sem isto a nota fecha só nos produtos e fica MENOR do que
+     *  o cliente pagou — foi o que aconteceu com 27 das 51 notas de julho/2026. */
+    freteReais?: number
+    /** Modalidade do frete do pedido (0 emitente/CIF, 1 destinatário/FOB, 9 sem frete). */
+    fretePorConta?: number
     /** Nome do CRM se o cadastro Bling vier vazio (fallback). */
     contatoNome?: string
   },
@@ -1290,13 +1339,26 @@ export async function blingEmitNfe(
     throw new Error('contato_sem_nome: o destinatário da NF-e precisa de nome no Bling')
   }
 
+  const itensFinais = descontarItens(args.itens, args.descontoReais ?? 0)
+
+  // FRETE. O `desconto` a gente já ratava nos itens, mas o frete não ia de jeito nenhum: o
+  // payload não tinha bloco `transporte`, então a nota fechava só no valor dos produtos e
+  // saía MENOR do que o cliente pagou. Em julho/2026 isso pegou 27 das 51 notas (R$ 706,79
+  // de frete fora das notas). Testado contra a API em 18/ago/2026: `transporte.frete` cai
+  // no `valorFrete` da nota e entra no `valorNota` (567,15 + 33,00 = 600,15).
+  const freteReais = Number(args.freteReais ?? 0) || 0
+  const transporte = freteReais > 0
+    ? { fretePorConta: args.fretePorConta ?? 1, frete: Number(freteReais.toFixed(2)) }
+    : null
+
   const payload: Record<string, unknown> = {
     tipo: 1, // 1 = saída
     finalidade: 1, // 1 = NF-e normal
     dataOperacao,
     naturezaOperacao: { id: Number(args.naturezaOperacaoId) || args.naturezaOperacaoId },
     contato,
-    itens: descontarItens(args.itens, args.descontoReais ?? 0),
+    itens: itensFinais,
+    ...(transporte ? { transporte } : {}),
     ...(args.observacoes ? { observacoes: args.observacoes } : {}),
   }
   // Retry obrigatório: o Bling corta em 3 req/s e uma emissão gasta 4-6 chamadas (pedido +
@@ -1314,7 +1376,22 @@ export async function blingEmitNfe(
   const nfeId = parsed.data?.id != null ? String(parsed.data.id) : null
   const numero = parsed.data?.numero != null ? String(parsed.data.numero) : undefined
   const situacao = parsed.data?.situacao != null ? String(parsed.data.situacao) : undefined
-  if (!nfeId || !args.transmit) return { nfeId, numero, situacao, transmitted: false }
+  if (!nfeId) return { nfeId, numero, situacao, transmitted: false }
+
+  // CONFERÊNCIA OBRIGATÓRIA — o 201 do Bling não prova que a nota saiu certa. Já gravou NCM
+  // vazio (NCM na raiz em vez de `tributacao.ncm`) e já virou uma venda de R$ 949,05 em nota
+  // de R$ 999 (`desconto` no corpo). Relê a nota criada e compara com o total esperado;
+  // divergindo, devolve erro e NÃO transmite — o rascunho fica lá para ser corrigido.
+  const esperado = Number(
+    (itensFinais.reduce(
+      (soma, i) => soma + (Number(i.valor) || 0) * (Number(i.quantidade) || 1),
+      0,
+    ) + freteReais).toFixed(2),
+  )
+  const divergencia = await conferirValorNfe(token, nfeId, esperado, args.transmit === true)
+  if (divergencia) return { nfeId, numero, situacao, transmitted: false, error: divergencia }
+
+  if (!args.transmit) return { nfeId, numero, situacao, transmitted: false }
 
   // Transmissão ao SEFAZ (envio). Falha aqui não invalida a nota criada (rascunho).
   try {
