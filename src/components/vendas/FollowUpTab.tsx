@@ -61,22 +61,31 @@ const ATALHOS = [
   { label: '30 dias', dias: 30 },
 ]
 
-/** Cor da faixa de cada coluna. Só o topo: card colorido em cinco cores vira festa. */
+/** Cor da faixa de cada coluna. Só o topo: card colorido em seis cores vira festa. */
 const FAIXA: Record<KanbanColuna, string> = {
   contato_1: 'bg-sky-500',
   contato_2: 'bg-violet-500',
   contato_3: 'bg-amber-500',
+  em_acompanhamento: 'bg-teal-500',
   nao_convertido: 'bg-muted-foreground',
   encerrado: 'bg-emerald-500',
 }
 
-const ABERTAS: KanbanColuna[] = ['contato_1', 'contato_2', 'contato_3']
+/**
+ * As colunas de fila VIVA: têm data marcada, contam atraso e mostram "Registrar".
+ *
+ * "Em acompanhamento" entra aqui junto das três primeiras porque continua sendo
+ * contato agendado — o que muda é que o paciente já passou da sequência padrão. Se
+ * ficasse de fora, ele perderia o botão de registrar e o aviso de atraso, que é
+ * exatamente o acompanhamento que se quis preservar ao criar a coluna.
+ */
+const ABERTAS: KanbanColuna[] = ['contato_1', 'contato_2', 'contato_3', 'em_acompanhamento']
 
 /**
- * O follow-up em kanban, do desenho da gerente: 1º, 2º e 3º contato, não
- * convertido (potencial futuro) e encerrado.
+ * O follow-up em kanban: 1º, 2º e 3º contato, em acompanhamento, não convertido
+ * (potencial futuro) e encerrado.
  *
- * As três primeiras colunas são a fila viva, e o card anda sozinho quando o
+ * As quatro primeiras colunas são a fila viva, e o card anda sozinho quando o
  * contato é registrado — não tem arrastar. Arrastar seria repetir a planilha, em
  * que a coluna "2º contato" era preenchida sem que ligação nenhuma tivesse
  * acontecido, e ninguém sabia de qual das quatro colunas cobrar.
@@ -450,7 +459,8 @@ export function FollowUpTab() {
               {semProxima && (
                 <p className="text-xs text-muted-foreground">
                   O paciente sai da fila e vai para "não convertido" — ou para "encerrado", se já tiver
-                  venda registrada. Dá para trazer de volta depois.
+                  venda registrada. Dá para trazer de volta depois. Enquanto houver próxima data, ele
+                  segue na fila: do 3º contato em diante, em "Em acompanhamento".
                 </p>
               )}
             </div>

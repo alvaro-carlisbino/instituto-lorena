@@ -91,8 +91,8 @@ export async function listFollowupAgenda(): Promise<FollowupAgendaRow[]> {
 }
 
 /**
- * O follow-up em colunas, do jeito que a gerente desenhou: 1º, 2º e 3º contato,
- * não convertido e encerrado.
+ * O follow-up em colunas: 1º, 2º e 3º contato, em acompanhamento, não convertido
+ * e encerrado.
  *
  * A coluna é do PACIENTE, não da tentativa — por isso vem da view, que já reduz o
  * histórico a uma linha por lead. Ninguém arrasta card aqui: registrar o contato
@@ -100,12 +100,27 @@ export async function listFollowupAgenda(): Promise<FollowupAgendaRow[]> {
  * alguém arrastou é a planilha de novo, com o mesmo problema de 2022 (a coluna
  * "2º contato" preenchida sem que ligação nenhuma tenha acontecido).
  */
-export type KanbanColuna = 'contato_1' | 'contato_2' | 'contato_3' | 'nao_convertido' | 'encerrado'
+export type KanbanColuna =
+  | 'contato_1'
+  | 'contato_2'
+  | 'contato_3'
+  | 'em_acompanhamento'
+  | 'nao_convertido'
+  | 'encerrado'
 
 export const KANBAN_COLUNAS: Array<{ id: KanbanColuna; label: string; hint: string }> = [
   { id: 'contato_1', label: '1º contato', hint: 'Primeira tentativa marcada' },
   { id: 'contato_2', label: '2º contato', hint: 'Já teve uma tentativa' },
-  { id: 'contato_3', label: '3º contato', hint: 'Terceira tentativa ou mais' },
+  { id: 'contato_3', label: '3º contato', hint: 'Terceira tentativa' },
+  {
+    // Antes esta gente ficava dentro do "3º contato", que era "terceira tentativa
+    // OU MAIS": quem estava na sexta ligação e ainda negociando aparecia colado em
+    // quem tinha acabado de chegar na terceira. Empurrar para "não convertido"
+    // seria pior — não é perdido, tem proposta viva.
+    id: 'em_acompanhamento',
+    label: 'Em acompanhamento',
+    hint: 'Passou dos 3 contatos e segue em negociação',
+  },
   {
     id: 'nao_convertido',
     label: 'Não convertido · potencial futuro',
