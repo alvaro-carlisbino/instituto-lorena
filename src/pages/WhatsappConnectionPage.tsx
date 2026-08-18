@@ -375,7 +375,7 @@ export function WhatsappConnectionPage() {
 
   const handleAddOfficialLine = async () => {
     if (!ofLabel.trim()) {
-      toast.error('Indique o nome da linha (ex.: Sofia — Clínica).')
+      toast.error('Indique o nome da linha (ex.: Sofia, Clínica).')
       return
     }
     if (!ofPhoneNumberId.trim()) {
@@ -740,7 +740,7 @@ export function WhatsappConnectionPage() {
                   id="wa-meta-label"
                   value={ofLabel}
                   onChange={(e) => setOfLabel(e.target.value)}
-                  placeholder="ex.: Sofia — Clínica (oficial)"
+                  placeholder="ex.: Sofia, Clínica (oficial)"
                 />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
