@@ -11,6 +11,12 @@ import { applyLeadName } from '../_shared/leadName.ts'
 //     cadência (dias a partir do 1º toque): 0, 3, 10, 24, 45, depois mensal e,
 //     mais pra frente, trimestral. Sem fim (cap de segurança em REACT_MAX_STEPS).
 //
+//   TRILHA C — cross-sell da LOJA para quem já comprou (18/08/2026). A casa é a HB
+//     Cosméticos e vende 68 produtos, mas a base só conhece o Tricopill: dos 111 clientes
+//     pagantes, ZERO tinham levado o gel BrowSculpt e só 6 levaram o shampoo. Roda quando a
+//     trilha B não tem o que dizer (frasco ainda longe de acabar) — repor o que acabou vem
+//     antes de oferecer novidade, e nunca sai mais de uma mensagem pro mesmo lead no dia.
+//
 //   TRILHA B — recompra de quem JÁ COMPROU, ancorada no fim do frasco:
 //     frasco ~30 dias. Kit define os frascos (1_mes=1, 3_meses=4, 5_meses=5).
 //     toques: (fim-5d) acabando → (fim) reponha → (fim+10d) assinatura →
@@ -37,7 +43,7 @@ function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 }
 
-const ENABLED = (Deno.env.get('REENGAGE_ENABLED') ?? '').trim().toLowerCase() === 'true'
+const ENV_ENABLED = (Deno.env.get('REENGAGE_ENABLED') ?? '').trim().toLowerCase() === 'true'
 const TENANT = (Deno.env.get('REENGAGE_TENANT') ?? 'tricopill').trim()
 // Trava de volume: quantas mensagens REAIS no máximo por execução (aquece o número,
 // evita rajada de N msgs de um zap só = cara de spam/ban). Backlog escoa nos dias seguintes.
@@ -47,6 +53,24 @@ const MIN_GAP_MS = 20 * 3600_000 // 20h entre toques do mesmo lead
 
 const REACT_MAX_STEPS = 24    // ~2+ anos de toques; trava de segurança, não é o "fim"
 const RECOMPRA_MAX_STEPS = 12
+const LOJA_MAX_STEPS = 8
+// Id do BrowSculpt no Bling (ver AI_ADDONS em _shared/rede.ts).
+const BROWSCULPT_ID = '16691834812'
+
+// Cadência da Trilha C, em dias a partir do PRIMEIRO TOQUE da régua (não da compra).
+//
+// A recompra ancora na compra e faz fast-forward, o que está certo lá: não se diz "seu frasco
+// está acabando" para quem acabou faz dois meses. Aqui seria um desastre. Isto é LANÇAMENTO —
+// o gel nasceu em 13/08 e ninguém da base conhece — então ancorar na compra mandava metade da
+// base direto para o último passo: no primeiro teste, 50 de 96 pessoas receberiam o convite do
+// Clube e nunca ouviriam falar do produto. Todo mundo entra pelo passo 0 e anda a escada.
+function lojaDueDay(step: number): number {
+  const fixed = [0, 5, 12]
+  if (step < fixed.length) return fixed[step]
+  return 12 + (step - 2) * 30 // mensal daí em diante
+}
+// Carência mínima depois da compra: deixa o pedido chegar antes de oferecer outra coisa.
+const LOJA_CARENCIA_DIAS = 3
 
 
 
@@ -117,10 +141,29 @@ const RECOMPRA_MSGS = [
   '{nome}, seu frasco já acabou? Pra não perder o progresso do tratamento, garanto sua reposição agora. É só me dizer *quero* que eu cuido de tudo 💚',
   '{nome}, pra você nunca mais ficar sem (e ainda economizar), dá pra deixar no automático: seu Tricopill chega todo mês na sua casa sem precisar pedir. Quer que eu ative? 🌿',
 ]
+// Trilha C. Passo 0 é o gel: é marca 100% da casa, margem alta, categoria que ninguém da
+// base tem, e não compete com o Tricopill que a pessoa já usa. Passo 1 abre a loja inteira.
+const LOJA_MSGS = [
+  'Oi {nome}! 💚 Saiu uma novidade nossa que acho que combina com você: o *BrowSculpt*, nosso gel de sobrancelha de alta fixação (R$ 129,90). Ele penteia, alinha e segura o fio o dia todo, é transparente e não craquela nem deixa resíduo. Quer que eu já separe um pro seu próximo pedido?',
+  '{nome}, você sabia que além do Tricopill a gente tem a loja completa? 🌿 Shampoo, condicionador, máscara, óleo e finalizador das melhores linhas, com envio pra todo o Brasil. Me conta o que seu cabelo está pedindo agora que eu te indico o certo.',
+  `{nome}, se preferir só acompanhar as ofertas por enquanto, entra no nosso Clube 😊 São *10% em qualquer pedido* (cupom CLUBE10) e promoção relâmpago.\n\n${CLUBE_LINK}`,
+]
+const LOJA_MSGS_LOOP = [
+  'Oi {nome}, tudo bem? 😊 Chegou coisa nova na loja. Se quiser, te mando o que combina com o que você já usa 💚',
+  '{nome}, tô por aqui se quiser repor o shampoo ou experimentar algo novo da nossa linha 🌿',
+]
+
 const RECOMPRA_MSGS_LOOP = [
   '{nome}, faz um tempinho que a gente não se fala 💚 Como está seu cabelo? Se quiser retomar o Tricopill, tô aqui pra fechar rapidinho pra você.',
   'Oi {nome}! Passando pra saber se você quer dar continuidade no Tricopill 🌿 Tenho condição boa pra sua volta, é só chamar.',
 ]
+
+function lojaMessage(step: number, nome: string): string {
+  const base = step < LOJA_MSGS.length
+    ? LOJA_MSGS[step]
+    : LOJA_MSGS_LOOP[(step - LOJA_MSGS.length) % LOJA_MSGS_LOOP.length]
+  return base.replace(/\{nome\}/g, nome.split(' ')[0] || 'tudo bem')
+}
 
 function reactMessage(step: number, nome: string): string {
   const base = step < REACT_MSGS.length
@@ -184,6 +227,11 @@ Deno.serve(async (req) => {
 
   // Só a trilha pedida (?track=A|B) ou ambas.
   const qtrack = new URL(req.url).searchParams.get('track')
+  // ?dry=1 pré-visualiza SEM enviar, mesmo com REENGAGE_ENABLED='true'. Antes o modo seco só
+  // existia desligando o envio da operação inteira por variável de ambiente, o que na prática
+  // significava que ninguém conferia uma régua nova antes de ela sair para clientes reais.
+  const soPreview = ['1', 'true', 'yes'].includes((new URL(req.url).searchParams.get('dry') ?? '').toLowerCase())
+  const ENABLED = ENV_ENABLED && !soPreview
 
   // Carrega leads Tricopill classificados + estados de reengajamento (view + tabela).
   const { data: leadsRaw, error: leadsErr } = await admin
@@ -193,6 +241,21 @@ Deno.serve(async (req) => {
     .is('opted_out_at', null)
   if (leadsErr) return json({ error: 'query_failed', message: leadsErr.message }, 500)
   const leads = (leadsRaw ?? []) as LeadRow[]
+
+  // Quem JÁ comprou o gel não pode receber oferta do gel. Hoje são zero, mas a trilha existe
+  // justamente para mudar isso — sem esta trava a campanha começaria a oferecer o produto
+  // para quem acabou de comprar, que é o jeito mais rápido de queimar a confiança da base.
+  const jaTemGel = new Set<string>()
+  {
+    const { data: gelRows } = await admin
+      .from('rede_payments')
+      .select('lead_id, items')
+      .not('paid_at', 'is', null)
+      .limit(5000)
+    for (const r of (gelRows ?? []) as Array<Record<string, unknown>>) {
+      if (JSON.stringify(r.items ?? '').includes(BROWSCULPT_ID)) jaTemGel.add(String(r.lead_id))
+    }
+  }
 
   const { data: statesRaw } = await admin
     .from('crm_reengage_state')
@@ -256,6 +319,42 @@ Deno.serve(async (req) => {
     })
   }
 
+  // ── TRILHA C: cross-sell da loja ────────────────────────────────────────────
+  // Chamada pela trilha B quando a recompra não tem o que dizer hoje. Devolve true se enviou.
+  async function tentarLoja(l: LeadRow, nome: string): Promise<boolean> {
+    if (qtrack !== null && qtrack !== 'C') return false
+    if (jaTemGel.has(l.lead_id)) return false
+    const st = stateMap.get(`${l.lead_id}:loja`)
+    if (st && st.status === 'stopped') return false
+
+    const paidAt = l.last_paid_at ? new Date(l.last_paid_at).getTime() : 0
+    if (!paidAt) return false
+
+    // Ainda não entrou na régua: só entra depois da carência, e a âncora vira AGORA — a escada
+    // conta do primeiro toque, para todo mundo começar pela oferta e não pelo convite.
+    const diasDesdeCompra = (now - paidAt) / DAY
+    if (!st && diasDesdeCompra < LOJA_CARENCIA_DIAS) return false
+
+    const anchor = st ? new Date(st.anchor_at).getTime() : now
+    const step = st ? st.step : 0
+    if (step >= LOJA_MAX_STEPS) return false
+
+    // Sem fast-forward, de propósito: cada pessoa anda um passo por vez, na ordem.
+    const target = step
+    if (lojaDueDay(target) > (now - anchor) / DAY) return false
+    if (st?.last_sent_at && now - new Date(st.last_sent_at).getTime() < MIN_GAP_MS) return false
+
+    const text = lojaMessage(target, nome)
+    if (!ENABLED) { results.push({ lead: l.lead_id, track: 'C', step: target, dryRun: true, preview: text.slice(0, 80) }); return false }
+
+    const d = await deliver(l.lead_id, text, 'reengage_loja')
+    if (d.optOut) { await saveState(l.lead_id, 'loja', target, new Date(anchor).toISOString(), 'stopped'); results.push({ lead: l.lead_id, track: 'C', optOut: true }); return false }
+    if (!d.ok) { results.push({ lead: l.lead_id, track: 'C', sent: false, note: d.note.slice(0, 120) }); return false }
+    await saveState(l.lead_id, 'loja', target + 1, new Date(anchor).toISOString(), 'active')
+    results.push({ lead: l.lead_id, track: 'C', step: target, sent: true })
+    return true
+  }
+
   let capped = 0
   for (const l of leads) {
     if (isSyntheticPhone(l.phone)) { results.push({ lead: l.lead_id, skip: 'phone_sintetico' }); continue }
@@ -263,6 +362,13 @@ Deno.serve(async (req) => {
     // Atingiu o teto de envios reais nesta execução: para de mandar, mas registra o backlog.
     if (ENABLED && sent >= DAILY_CAP) { capped++; continue }
     const nome = String(l.patient_name ?? '')
+
+    // Pedido explícito da trilha C: roda sozinha. Sem isto ela nunca executa em ?track=C,
+    // porque a chamada dela mora dentro do bloco da recompra (que só roda em null|B).
+    if (l.situacao === 'comprou' && qtrack === 'C') {
+      if (await tentarLoja(l, nome)) sent++
+      continue
+    }
 
     // ── TRILHA B: recompra (comprou) ──────────────────────────────────────────
     if (l.situacao === 'comprou' && (qtrack === null || qtrack === 'B')) {
@@ -285,7 +391,12 @@ Deno.serve(async (req) => {
       for (let s = step; s < RECOMPRA_MAX_STEPS; s++) {
         if (recompraDueDay(s, supply) <= daysSince) target = s; else break
       }
-      if (target < 0) { continue } // frasco ainda longe de acabar
+      // Frasco ainda longe de acabar: a recompra não tem o que dizer hoje, então a vez é da
+      // trilha C. A ordem é proposital — repor o que acabou vem antes de oferecer novidade.
+      if (target < 0) {
+        if (await tentarLoja(l, nome)) sent++
+        continue
+      }
 
       // gap mínimo
       if (st?.last_sent_at && now - new Date(st.last_sent_at).getTime() < MIN_GAP_MS) { continue }
@@ -350,5 +461,5 @@ Deno.serve(async (req) => {
     }
   }
 
-  return json({ ok: true, enabled: ENABLED, tenant: TENANT, dailyCap: DAILY_CAP, candidates: leads.length, sent, capped, results, at: new Date(now).toISOString() })
+  return json({ ok: true, enabled: ENABLED, preview: soPreview, envEnabled: ENV_ENABLED, tenant: TENANT, dailyCap: DAILY_CAP, candidates: leads.length, sent, capped, results, at: new Date(now).toISOString() })
 })
