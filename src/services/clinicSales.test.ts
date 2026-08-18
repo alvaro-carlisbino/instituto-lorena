@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { type ClinicSale, diasAteFechar, followUpStats, salesByDoctor } from './clinicSales'
+import {
+  type ClinicSale,
+  classificarProcedimento,
+  diasAteFechar,
+  followUpStats,
+  salesByDoctor,
+  salesByProcedure,
+} from './clinicSales'
 
 const venda = (over: Partial<ClinicSale> = {}): ClinicSale =>
   ({
@@ -152,5 +159,68 @@ describe('salesByDoctor', () => {
     expect(matheus?.vendeu).toBe(0)
     expect(matheus?.executa).toBe(1)
     expect(matheus?.followUp).toBe(0)
+  })
+})
+
+/**
+ * As onze grafias que existem em produção hoje. O campo é texto livre, então o teste
+ * é a lista real e não exemplos inventados: é ela que diz se a regra classifica ou
+ * inventa. Contagens conferidas no banco em 18/ago/2026.
+ */
+describe('classificarProcedimento', () => {
+  it('manda cada grafia de produção para o transplante certo', () => {
+    expect(classificarProcedimento('Tc Frontal/ Coroa')).toBe('masculino')
+    expect(classificarProcedimento('Tc Frontal/ Coroa/Barba')).toBe('masculino')
+    expect(classificarProcedimento('Barba')).toBe('masculino')
+    expect(classificarProcedimento('Hairline')).toBe('masculino')
+
+    expect(classificarProcedimento('Tc Feminino')).toBe('feminino')
+    expect(classificarProcedimento('TC feminino + Nanofat')).toBe('feminino')
+    expect(classificarProcedimento('Tc Feminino + nanofat')).toBe('feminino')
+
+    expect(classificarProcedimento('Sobrancelha')).toBe('sobrancelha')
+    expect(classificarProcedimento('Sobrancelha + nanofat')).toBe('sobrancelha')
+  })
+
+  it('a combinada entra pelo transplante, não pelo acréscimo', () => {
+    // R$ 40 mil em média. Contada como sobrancelha, inflaria o procedimento mais
+    // barato da casa e faria o ticket de sobrancelha mentir para cima.
+    expect(classificarProcedimento('TC Feminino + Sobrancelhas')).toBe('feminino')
+  })
+
+  it('não força o que não é transplante para dentro de um grupo', () => {
+    expect(classificarProcedimento('Teste de remarcação')).toBe('outros')
+    expect(classificarProcedimento('')).toBe('outros')
+    expect(classificarProcedimento(null)).toBe('outros')
+  })
+
+  it('ignora acento e caixa', () => {
+    expect(classificarProcedimento('TRANSPLANTE FEMININO')).toBe('feminino')
+    expect(classificarProcedimento('sobrancelhas')).toBe('sobrancelha')
+  })
+})
+
+describe('salesByProcedure', () => {
+  it('separa o ticket e mostra as grafias que caíram em cada grupo', () => {
+    const linhas = salesByProcedure([
+      venda({ id: 'a', procedureLabel: 'Tc Frontal/ Coroa', valueCents: 3_000_000 }),
+      venda({ id: 'b', procedureLabel: 'Tc Frontal/ Coroa', valueCents: 4_000_000 }),
+      venda({ id: 'c', procedureLabel: 'Sobrancelha', valueCents: 2_400_000 }),
+      venda({ id: 'd', procedureLabel: 'Tc Feminino', valueCents: 3_500_000 }),
+      // Cancelada não entra: entraria como venda de R$ 0 e derrubaria a média.
+      venda({ id: 'e', procedureLabel: 'Sobrancelha', valueCents: 9_900_000, status: 'cancelada' }),
+    ])
+
+    const masculino = linhas.find((l) => l.grupo === 'masculino')
+    expect(masculino?.vendeu).toBe(2)
+    expect(masculino?.ticketCents).toBe(3_500_000)
+
+    const sobrancelha = linhas.find((l) => l.grupo === 'sobrancelha')
+    expect(sobrancelha?.vendeu).toBe(1)
+    expect(sobrancelha?.ticketCents).toBe(2_400_000)
+
+    expect(masculino?.rotulos).toEqual(['Tc Frontal/ Coroa (2)'])
+    // A ordem é a do funil de preço, não a de quem apareceu primeiro na lista.
+    expect(linhas.map((l) => l.grupo)).toEqual(['masculino', 'feminino', 'sobrancelha'])
   })
 })

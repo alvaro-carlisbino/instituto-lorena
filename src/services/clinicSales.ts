@@ -805,6 +805,97 @@ export function salesByDoctor(sales: ClinicSale[]) {
 }
 
 /**
+ * Os três transplantes que a clínica vende, separados do texto livre do cadastro.
+ *
+ * O ticket médio de um mês só mistura coisa que não se compara: no banco convivem
+ * "Tc Frontal/ Coroa" a ~R$ 34,6 mil (160 vendas) e "Sobrancelha" a ~R$ 23,9 mil
+ * (18 vendas). A média das duas não é o preço de nada — é um número que sobe e
+ * desce conforme a proporção do mês, e foi por isso que ele foi pedido separado.
+ *
+ * O campo é texto livre e sempre foi: existem onze grafias em produção, com
+ * acento, caixa e combinação variando ("TC Feminino + Sobrancelhas", "Tc Feminino
+ * + nanofat", "TC feminino + Nanofat"). Por isso a classificação é por palavra
+ * contida e não por igualdade, e a ORDEM das regras importa: a combinada entra
+ * pelo procedimento principal, que é o transplante, não pelo acréscimo.
+ */
+export type GrupoProcedimento = 'masculino' | 'feminino' | 'sobrancelha' | 'outros'
+
+export const ROTULO_GRUPO: Record<GrupoProcedimento, string> = {
+  masculino: 'Transplante Masculino',
+  feminino: 'Transplante Feminino',
+  sobrancelha: 'Transplante de Sobrancelha',
+  outros: 'Outros',
+}
+
+/** Sem acento e em caixa baixa: "remarcação" e "remarcacao" têm que bater igual. */
+const normalizar = (v: string) =>
+  v
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+
+export function classificarProcedimento(label: string | null | undefined): GrupoProcedimento {
+  const t = normalizar(label ?? '')
+  if (!t) return 'outros'
+  // Feminino primeiro: "TC Feminino + Sobrancelhas" é transplante feminino COM
+  // sobrancelha junto, e contá-lo como sobrancelha jogaria uma venda de R$ 40 mil
+  // na média do procedimento mais barato da casa.
+  if (t.includes('feminin')) return 'feminino'
+  if (t.includes('sobrancelh')) return 'sobrancelha'
+  if (/\btc\b|frontal|coroa|barba|hairline|masculin/.test(t)) return 'masculino'
+  return 'outros'
+}
+
+export type VendaPorProcedimento = {
+  grupo: GrupoProcedimento
+  label: string
+  vendeu: number
+  valorCents: number
+  ticketCents: number
+  /** As grafias reais que caíram no grupo, da mais comum para a menos. */
+  rotulos: string[]
+}
+
+/**
+ * Ticket por procedimento.
+ *
+ * Os rótulos de origem viajam junto de propósito: classificação de texto livre
+ * erra, e mostrar "Feminino inclui: Tc Feminino (14), TC Feminino + Sobrancelhas (7)"
+ * deixa o erro visível na hora em vez de escondê-lo dentro de uma média.
+ */
+export function salesByProcedure(sales: ClinicSale[]): VendaPorProcedimento[] {
+  const map = new Map<GrupoProcedimento, { vendeu: number; valorCents: number; rotulos: Map<string, number> }>()
+  for (const s of sales) {
+    if (s.status === 'cancelada') continue
+    const grupo = classificarProcedimento(s.procedureLabel)
+    const cur = map.get(grupo) ?? { vendeu: 0, valorCents: 0, rotulos: new Map<string, number>() }
+    cur.vendeu += 1
+    cur.valorCents += s.valueCents
+    const rotulo = s.procedureLabel?.trim() || 'sem procedimento'
+    cur.rotulos.set(rotulo, (cur.rotulos.get(rotulo) ?? 0) + 1)
+    map.set(grupo, cur)
+  }
+  const ordem: GrupoProcedimento[] = ['masculino', 'feminino', 'sobrancelha', 'outros']
+  const saida: VendaPorProcedimento[] = []
+  for (const grupo of ordem) {
+    const v = map.get(grupo)
+    if (!v) continue
+    saida.push({
+      grupo,
+      label: ROTULO_GRUPO[grupo],
+      vendeu: v.vendeu,
+      valorCents: v.valorCents,
+      ticketCents: v.vendeu > 0 ? Math.round(v.valorCents / v.vendeu) : 0,
+      rotulos: [...v.rotulos.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([rotulo, n]) => `${rotulo} (${n})`),
+    })
+  }
+  return saida
+}
+
+/**
  * Dias entre a consulta e a venda. Null quando não dá para saber.
  *
  * As duas colunas são `date` no banco, então a conta é de calendário e não passa

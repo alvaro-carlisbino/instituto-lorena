@@ -36,6 +36,7 @@ import {
   progressoDaMeta,
   resultadoDasVendas,
   salesByDoctor,
+  salesByProcedure,
   saveSalesTarget,
   tipoNegociacao,
 } from '@/services/clinicSales'
@@ -159,6 +160,11 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   // O "por médico" acompanha o mês escolhido: é o fechamento que ela digita hoje
   // no rodapé da planilha ("4 fechamentos, 37% de conversão").
   const porMedico = useMemo(() => salesByDoctor(doMes), [doMes])
+
+  // Ticket por procedimento. O ticket do mês inteiro mistura transplante de
+  // R$ 34 mil com sobrancelha de R$ 24 mil, e a média sobe ou desce só porque a
+  // proporção mudou — não porque o preço mudou.
+  const porProcedimento = useMemo(() => salesByProcedure(doMes), [doMes])
 
   // A meta segue o filtro da tela: escolhida uma vendedora, é a meta dela; em
   // "todas", é a da clínica. Meta de vendedora somada com a da clínica seria
@@ -616,6 +622,52 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                       <TableCell className="text-right">{brl(m.valorCents)}</TableCell>
                       <TableCell className="text-right">{brl(m.ticketCents)}</TableCell>
                       <TableCell className="text-right">{m.executa}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {kind === 'cirurgia' && porProcedimento.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Ticket por procedimento em {soSemPaciente ? 'toda a base' : nomeDoMes(mes)}
+            </CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Transplante masculino, feminino e de sobrancelha têm preços diferentes, e a média dos
+              três junta não é o preço de nenhum deles. O procedimento é texto livre no cadastro, então
+              cada linha mostra as grafias que caíram nela.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Procedimento</TableHead>
+                    <TableHead className="text-right">Vendeu</TableHead>
+                    <TableHead className="text-right">Faturamento</TableHead>
+                    <TableHead className="text-right">Ticket médio</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {porProcedimento.map((p) => (
+                    <TableRow key={p.grupo}>
+                      <TableCell>
+                        <span className="font-medium">{p.label}</span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          {p.rotulos.join(' · ')}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right align-top">{p.vendeu}</TableCell>
+                      <TableCell className="text-right align-top">{brl(p.valorCents)}</TableCell>
+                      <TableCell className="text-right align-top font-medium">
+                        {brl(p.ticketCents)}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
