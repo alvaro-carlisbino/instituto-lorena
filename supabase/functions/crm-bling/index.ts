@@ -114,6 +114,13 @@ Deno.serve(async (req)=>{
   if (!authHeader) return json({
     error: 'unauthorized'
   }, 401);
+  // Caminho de máquina: rotinas server-to-server chegam com a própria service_role key no
+  // Authorization, e auth.getUser() não devolve usuário para esse token (mesma pegadinha que
+  // segurava os follow-ups no crm-send-message). Serve para rodar mutirão de NF-e em lote,
+  // que pela tela sairia uma aba aberta por 4 minutos. A plataforma já validou o JWT; o
+  // painel continua exigindo usuário real.
+  const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
+  const isServiceRole = bearer.length > 0 && bearer === serviceRole;
   const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
     global: {
       headers: {
@@ -121,10 +128,12 @@ Deno.serve(async (req)=>{
       }
     }
   });
-  const { data: { user }, error: userErr } = await userClient.auth.getUser();
-  if (userErr || !user) return json({
-    error: 'unauthorized'
-  }, 401);
+  if (!isServiceRole) {
+    const { data: { user }, error: userErr } = await userClient.auth.getUser();
+    if (userErr || !user) return json({
+      error: 'unauthorized'
+    }, 401);
+  }
   let payload = {};
   try {
     const raw = await req.text();
@@ -134,8 +143,15 @@ Deno.serve(async (req)=>{
       error: 'invalid_json'
     }, 400);
   }
-  const { data: tid } = await userClient.rpc('current_tenant_id');
-  const tenantId = typeof tid === 'string' ? tid.trim() : '';
+  // current_tenant_id() lê o polo da SESSÃO; sem usuário ela não resolve, então a chamada
+  // de máquina informa o polo no payload.
+  let tenantId = '';
+  if (isServiceRole) {
+    tenantId = String(payload.tenantId ?? '').trim();
+  } else {
+    const { data: tid } = await userClient.rpc('current_tenant_id');
+    tenantId = typeof tid === 'string' ? tid.trim() : '';
+  }
   if (!tenantId) return json({
     error: 'tenant_not_resolved'
   }, 400);
