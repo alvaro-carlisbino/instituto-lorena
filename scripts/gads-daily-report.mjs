@@ -70,8 +70,11 @@ async function gaql(query) {
 
 /**
  * Quantos cliques de WhatsApp com gclid o CRM já mandou pro Google (últimos 30 dias).
- * Pergunta pro próprio crm-gads-lead-upload em modo dry: ele devolve `ja_subiu` sem enviar
+ * Pergunta pro próprio crm-gads-lead-upload em modo dry: ele devolve as contagens sem enviar
  * nada. Devolve null quando não dá pra consultar — o relatório segue sem essa linha.
+ *
+ * O que interessa é `gclids_unicos`, não a soma de eventos: a ação "Lead WhatsApp" é
+ * ONE_PER_CLICK, então repetição do mesmo gclid nunca vira conversão nova.
  */
 async function leadsEnviados() {
   try {
@@ -85,7 +88,11 @@ async function leadsEnviados() {
     })
     if (!res.ok) return null
     const j = await res.json()
-    return Number(j?.ja_subiu ?? 0) + Number(j?.enviados ?? 0)
+    return {
+      eventos: Number(j?.ja_subiu ?? 0) + Number(j?.enviados ?? 0),
+      unicos: Number(j?.gclids_unicos ?? 0),
+      semProtocolo: Number(j?.sem_protocolo ?? 0),
+    }
   } catch {
     return null
   }
@@ -259,14 +266,30 @@ async function main() {
     console.log('  enviados pelo CRM: não deu para consultar (confira VITE_SUPABASE_ANON_KEY no .env.local).')
   } else {
     const leadReg = registrado.get('Lead WhatsApp') ?? 0
-    console.log(`  enviados pelo CRM (30d): ${enviados} cliques de WhatsApp com gclid`)
-    if (enviados > 0 && leadReg === 0) {
-      console.log(`\n  ⚠ FURO DE TELEMETRIA: ${enviados} conversões enviadas, ZERO registradas pelo Google.`)
+    // Comparar com gclid ÚNICO, não com evento. A ação "Lead WhatsApp" é ONE_PER_CLICK: a
+    // mesma pessoa clicando 3x no botão do site vale 1 conversão. Em 18/08 a linha antiga
+    // dizia "31 enviadas não apareceram" comparando 47 eventos com 16 conversões, e as duas
+    // pontas estavam certas — o que estava errado era a régua.
+    const repetidos = Math.max(0, enviados.eventos - enviados.unicos)
+    console.log(`  enviados pelo CRM (30d): ${enviados.unicos} gclids únicos` +
+      (repetidos ? ` (${enviados.eventos} cliques, ${repetidos} são repetição do mesmo gclid)` : ''))
+    if (enviados.unicos > 0 && leadReg === 0) {
+      console.log(`\n  ⚠ FURO DE TELEMETRIA: ${enviados.unicos} conversões enviadas, ZERO registradas pelo Google.`)
       console.log('     A ingestão do Data Manager é assíncrona; até ~24h de atraso é normal.')
       console.log('     Passou disso, o Google está recusando calado — conferir o requestId gravado')
       console.log('     em storefront_events.meta.gads_lead_request_id e o escopo do OAuth.')
-    } else if (enviados > leadReg) {
-      console.log(`  ⚠ ${enviados - leadReg} enviadas ainda não apareceram no Google (atraso ou recusa).`)
+    } else if (enviados.unicos > leadReg) {
+      const falta = enviados.unicos - leadReg
+      console.log(`  ${falta} ainda não apareceram no Google. O Google data a conversão no dia do`)
+      console.log('     CLIQUE NO ANÚNCIO e a ingestão é assíncrona, então o do dia sempre fica em voo.')
+      console.log('     Só vira problema se o mesmo gclid seguir ausente depois de ~24h.')
+    }
+    if (enviados.semProtocolo > 0) {
+      console.log(`  ⚠ ${enviados.semProtocolo} evento(s) carimbado(s) como enviado SEM requestId.`)
+      console.log('     É a assinatura do lote de 29/07/2026, que subiu quando HTTP 200 era lido como')
+      console.log('     registro: fica marcado como enviado e o cron nunca retenta. Limpar')
+      console.log('     meta.gads_lead_uploaded_at desses eventos para reenfileirar (janela: 30 dias')
+      console.log('     do clique, passou disso o Google recusa).')
     }
   }
 

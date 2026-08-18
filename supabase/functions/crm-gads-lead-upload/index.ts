@@ -82,12 +82,30 @@ Deno.serve(async (req) => {
   if (error) return json({ error: 'consulta_falhou', detalhe: error.message }, 500)
 
   const eventos = (data ?? []) as Evento[]
-  const resultado = { total: eventos.length, sem_gclid: 0, ja_subiu: 0, enviados: 0, falhas: 0 as number, erros: [] as string[] }
+  // Conta gclid ÚNICO, não evento: a ação "Lead WhatsApp" é ONE_PER_CLICK, então a mesma
+  // pessoa clicando 3x no botão vale 1 conversão só. Comparar eventos enviados com conversões
+  // registradas no Google criava um gap fantasma (48 enviados x 16 registrados em 18/08) que
+  // fazia parecer telemetria quebrada quando era só repetição do mesmo clique de anúncio.
+  const gclidsUnicos = new Set<string>()
+  const resultado = {
+    total: eventos.length, sem_gclid: 0, ja_subiu: 0, enviados: 0, falhas: 0 as number,
+    gclids_unicos: 0, sem_protocolo: 0, erros: [] as string[],
+  }
 
   for (const ev of eventos) {
-    if (ev.meta?.gads_lead_uploaded_at) { resultado.ja_subiu++; continue }
-
     const gclid = acharGclid(ev.attribution)
+    if (gclid) gclidsUnicos.add(gclid)
+
+    if (ev.meta?.gads_lead_uploaded_at) {
+      resultado.ja_subiu++
+      // Carimbado como enviado mas SEM protocolo: é do lote que subiu em 29/07/2026, quando
+      // HTTP 200 ainda era lido como registro. Nenhum daqueles foi registrado e o carimbo
+      // bloqueava a retentativa (15 gclids presos, achados em 18/08). Ficam contados à parte:
+      // se o número voltar a subir, é buraco novo, não herança.
+      if (!ev.meta?.gads_lead_request_id) resultado.sem_protocolo++
+      continue
+    }
+
     if (!gclid) { resultado.sem_gclid++; continue }
 
     if (dry) { resultado.enviados++; continue }
@@ -129,5 +147,6 @@ Deno.serve(async (req) => {
       .eq('id', ev.id)
   }
 
+  resultado.gclids_unicos = gclidsUnicos.size
   return json({ ok: true, dry, dias, acao: LEAD_ACTION_ID, ...resultado })
 })
