@@ -48,6 +48,7 @@ import type {
   WorkflowFieldOption,
 } from '../mocks/crmMock'
 import { defaultVisibleInAll } from '../lib/leadFields'
+import { lembrarPoloDaTela, poloDaTela } from '../lib/poloDaTela'
 import { supabase } from '../lib/supabaseClient'
 
 /** Alinha papel do banco (ex.: casing) ao union usado no app. */
@@ -315,6 +316,32 @@ const fetchAllLeadsPaged = async (
   return { data: all, error: null }
 }
 
+const INTERACTION_SELECT =
+  'id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id' as const
+
+/**
+ * Mensagem é do polo da LINHA onde ela aconteceu, e a tela de um polo não mostra a do
+ * outro — nem para o dono.
+ *
+ * Uma pessoa pode ser paciente da clínica E cliente do Tricopill: é UM lead, com a
+ * conversa das duas linhas dentro dele (19 leads assim hoje). Quem separa é o `tenant_id`
+ * da mensagem, carimbado pela linha desde 14/ago, e a policy `tenant_isolation_read` lê
+ * por esse carimbo — sem exceção, desde 17/ago (a de super admin caiu; era ela que
+ * embaralhava a conversa justamente para as duas contas de dono).
+ *
+ * Então este filtro é o SEGUNDO cinto, não o primeiro. Ele existe porque essa mistura já
+ * voltou seis vezes por caminhos diferentes: basta uma policy nova nascer folgada para o
+ * histórico embaralhar de novo na tela. Aqui a tela pede só o polo dela, e pronto.
+ *
+ * Sem polo conhecido (dev local, boot ainda subindo) a consulta sai como sempre saiu e
+ * quem decide é a RLS.
+ */
+const consultaDeInteracoes = (client: ReturnType<typeof assertSupabase>) => {
+  const q = client.from('interactions').select(INTERACTION_SELECT)
+  const polo = poloDaTela()
+  return polo ? q.eq('tenant_id', polo) : q
+}
+
 /**
  * Os leads QUE MUDARAM, não os 2.680.
  *
@@ -394,9 +421,7 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
     client.from('pipeline_stages').select('id, pipeline_id, name, position').order('position', { ascending: true }),
     client.from('app_users').select('id, name, email, auth_user_id, active, role').order('name', { ascending: true }),
     fetchAllLeadsPaged(client),
-    client
-      .from('interactions')
-      .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
+    consultaDeInteracoes(client)
       .order('happened_at', { ascending: false })
       // Boot carrega só a janela recente; o histórico completo por lead chega via
       // `loadLeadInteractionsFromSupabase` ao abrir a conversa.
@@ -682,6 +707,10 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   // Linha do polo ativo; se a RPC falhar (ou a base ainda não for multi-polo), a primeira serve.
   const orgRows = (orgSettingsRes.error ? [] : (orgSettingsRes.data ?? [])) as Record<string, unknown>[]
   const tenantAtivo = typeof tenantAtivoRes.data === 'string' ? tenantAtivoRes.data.trim() : ''
+  // Confirma o polo desta tela para as consultas de conversa (ver `poloDaTela`). Até aqui
+  // valia o polo do endereço; a partir daqui vale o polo ativo do login, que é o mesmo
+  // que a RLS usa.
+  lembrarPoloDaTela(tenantAtivo)
   const orgRow =
     (tenantAtivo ? orgRows.find((r) => String(r.tenant_id ?? '') === tenantAtivo) : undefined) ??
     orgRows[0] ??
@@ -792,11 +821,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
   const client = assertSupabase()
   const [leadsRes, interactionsRes, tagAssignRes, mediaRes, followupRes] = await Promise.all([
     fetchAllLeadsPaged(client),
-    client
-      .from('interactions')
-      .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
-      .order('happened_at', { ascending: false })
-      .limit(3200),
+    consultaDeInteracoes(client).order('happened_at', { ascending: false }).limit(3200),
     client.from('lead_tag_assignments').select('lead_id, tag_id'),
     // Base64 SÓ das mídias recentes (48h): este refresh roda o tempo todo e baixava os
     // ~9MB de TODAS as mídias a cada ciclo. Mídia antiga chega por lead ao abrir a
@@ -887,11 +912,7 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
 export const loadInteractionsSliceFromSupabase = async (): Promise<Interaction[]> => {
   const client = assertSupabase()
   const [interactionsRes, mediaRes] = await Promise.all([
-    client
-      .from('interactions')
-      .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
-      .order('happened_at', { ascending: false })
-      .limit(1000),
+    consultaDeInteracoes(client).order('happened_at', { ascending: false }).limit(1000),
     client
       .from('crm_media_items')
       .select('id, interaction_id, media_type, mime_type, media_base64, storage_path, metadata')
@@ -941,9 +962,7 @@ export const loadInteractionsSliceFromSupabase = async (): Promise<Interaction[]
  */
 export const loadLeadInteractionsFromSupabase = async (leadId: string): Promise<Interaction[]> => {
   const client = assertSupabase()
-  const { data: rows, error } = await client
-    .from('interactions')
-    .select('id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id')
+  const { data: rows, error } = await consultaDeInteracoes(client)
     .eq('lead_id', leadId)
     .order('happened_at', { ascending: false })
     .limit(2000)
