@@ -1315,8 +1315,25 @@ export const persistLead = async (lead: Lead): Promise<void> => {
   if (error) throw error
 }
 
+/**
+ * Nota registrada na ficha nasce no polo de QUEM ESCREVEU, não no polo do cadastro.
+ *
+ * Sem o `tenant_id` explícito quem carimba é o trigger `_stamp_tenant_id_from_lead`, e ele
+ * segue a LINHA do lead — regra certa para mensagem de WhatsApp, errada para nota digitada
+ * aqui dentro. Duas maneiras de doer, as duas reais desde que o polo passou a enxergar
+ * quem conversou com ele (17/ago):
+ *
+ *   * Ingrid escreve uma nota no card de um cliente que é lead da CLÍNICA: a nota é
+ *     carimbada clínica, some da tela dela e aparece na do outro polo.
+ *   * Aline escreve no prontuário de um paciente fixado na linha do Tricopill: mesma
+ *     coisa, ao contrário.
+ *
+ * É a pegadinha que a migração de 14/ago já tinha anotado ("canal sem linha tem que passar
+ * o tenant na mão") — aqui é o caso do canal que não tem linha nenhuma: a mão da pessoa.
+ */
 export const insertInteraction = async (interaction: Omit<Interaction, 'id'>): Promise<void> => {
   const client = assertSupabase()
+  const polo = poloDaTela()
   const { error } = await client.from('interactions').insert({
     lead_id: interaction.leadId,
     patient_name: interaction.patientName,
@@ -1325,6 +1342,8 @@ export const insertInteraction = async (interaction: Omit<Interaction, 'id'>): P
     author: interaction.author,
     content: interaction.content,
     happened_at: interaction.happenedAt,
+    // Sem polo conhecido (dev local) segue valendo o trigger, como sempre valeu.
+    ...(polo ? { tenant_id: polo } : {}),
   })
   if (error) throw error
 }
