@@ -22,19 +22,28 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const FN = 'https://fgyfpmnvlkmyxtucbxbu.supabase.co/functions/v1/crm-gads-backfill'
 
 // Reestruturação da conta — antes disso os números não são comparáveis.
-const MARCO = '2026-07-27'
+// 27/07: PMax pausada, Busca religada em frase + maximizar cliques.
+// 17/08: Busca reestruturada de novo — 1 grupo com 43 palavras (QS 1-3) virou 4 grupos
+// temáticos com RSA própria, lance foi para MAXIMIZAR CONVERSÕES, orçamento R$100/dia.
+const MARCO = '2026-08-17'
 const PMAX_ID = '24022345891'
 const BUSCA_ID = '24041701832'
+const MARCA_ID = '24125006145'
+// Grupo antigo da Busca. Fica ENABLED só até os 4 anúncios novos serem aprovados;
+// depois deve ser PAUSADO (o relatório avisa quando chegar a hora).
+const GRUPO_ANTIGO_ID = '197790938385'
 
 // Ações de conversão. Só "Compras" é venda; "Lead WhatsApp" é sinal de volume.
 // Somar as duas num número só foi o erro do relatório de 29/07: mostrou "4 conversões,
 // CPA R$ 47" quando eram 4 cliques de WhatsApp e ZERO venda naquele recorte.
 const ACAO_VENDA = 'Compras'
 
-// Promoção do Google: gastar META até FIM devolve o mesmo valor em crédito.
-// Álvaro confirmou em 29/07/2026 que o código foi aplicado. INICIO é a data que
-// assumimos para a contagem — se o crédito não bater no fim, é aqui que está o erro.
-const PROMO = { inicio: '2026-07-27', fim: '2026-08-15', meta: 880 }
+// A conta tem um LIMITE DE GASTO no nível da conta (account_budget). Foi isso que matou
+// a veiculação de 02/08 a 16/08: o teto de ~R$880 esgotou e ninguém viu. Em 17/08 o
+// teto subiu para ~R$2.380 (sobraram ~R$1.500) e a meta do Álvaro é gastar tudo até
+// 31/08. O saldo vem da API, não de constante — se o Álvaro mexer no teto, o relatório
+// acompanha sozinho.
+const PRAZO_GASTO = '2026-08-31'
 
 function secret() {
   try {
@@ -113,15 +122,45 @@ async function main() {
     SELECT campaign.id, campaign.name, campaign.status, campaign.primary_status,
            campaign.primary_status_reasons, campaign.bidding_strategy_type,
            campaign.target_spend.cpc_bid_ceiling_micros, campaign_budget.amount_micros
-    FROM campaign`)
+    FROM campaign WHERE campaign.status != 'REMOVED'`)
   console.log('\n▸ CAMPANHAS')
+  let orcamentoDia = 0
   for (const r of camps) {
     const c = r.campaign, b = r.campaignBudget ?? {}
     const teto = micros(c.targetSpend?.cpcBidCeilingMicros)
+    if (c.status === 'ENABLED') orcamentoDia += micros(b.amountMicros)
     console.log(`  ${c.name} [${c.status}]`)
     console.log(`     ${c.primaryStatus ?? '-'} ${(c.primaryStatusReasons ?? []).join(', ')}`)
     console.log(`     ${c.biddingStrategyType} · orçamento ${brl(micros(b.amountMicros))}/dia` +
       (teto ? ` · teto CPC ${brl(teto)}` : ''))
+    if (c.id === PMAX_ID && c.status !== 'PAUSED') console.log('     ⚠ PMax fora de PAUSED — alguém religou.')
+    if (c.id === BUSCA_ID && c.biddingStrategyType !== 'MAXIMIZE_CONVERSIONS') {
+      console.log('     ⚠ Busca fora de MAXIMIZE_CONVERSIONS — a estratégia de 17/08 foi trocada.')
+    }
+  }
+
+  // ── 1b. Grupos da Busca: anúncios novos aprovados? grupo antigo ainda ligado? ──
+  const grupos = await gaql(`
+    SELECT ad_group.id, ad_group.name, ad_group.status, ad_group_ad.ad.id,
+           ad_group_ad.policy_summary.approval_status, ad_group_ad.policy_summary.review_status,
+           ad_group_ad.ad_strength
+    FROM ad_group_ad
+    WHERE campaign.id = ${BUSCA_ID} AND ad_group_ad.status != 'REMOVED' AND ad_group.status != 'REMOVED'`)
+  console.log('\n▸ GRUPOS DA BUSCA (anúncio · aprovação · força)')
+  let antigoLigado = false, novosAprovados = 0, novosTotal = 0
+  for (const r of grupos) {
+    const g = r.adGroup, a = r.adGroupAd, ps = a.policySummary ?? {}
+    const antigo = g.id === GRUPO_ANTIGO_ID
+    if (antigo) antigoLigado = g.status === 'ENABLED'
+    else { novosTotal++; if (ps.approvalStatus === 'APPROVED') novosAprovados++ }
+    console.log(`  ${antigo ? '(antigo) ' : ''}${g.name} [${g.status}] · ${ps.approvalStatus ?? '?'}/${ps.reviewStatus ?? '?'} · força ${a.adStrength ?? '?'}`)
+  }
+  if (antigoLigado && novosTotal && novosAprovados === novosTotal) {
+    console.log(`\n  ⚠ AÇÃO: os ${novosTotal} anúncios novos já estão APROVADOS e o grupo antigo (${GRUPO_ANTIGO_ID})`)
+    console.log('     segue ENABLED. Ele só ficou ligado para não apagar a campanha durante a revisão.')
+    console.log('     Pausar agora — as palavras dele duplicam as dos grupos novos e têm QS 1-3.')
+  } else if (antigoLigado) {
+    console.log(`\n  (grupo antigo segue ligado de propósito: ${novosAprovados}/${novosTotal} anúncios novos aprovados)`)
   }
 
   // ── 2. Desempenho no período ──
@@ -231,23 +270,42 @@ async function main() {
     }
   }
 
-  // ── 5. Ritmo da promoção ──
-  // Gastar de menos perde o crédito; gastar de mais só para bater a meta compra lixo.
+  // ── 4b. Desempenho por grupo da Busca no período ──
+  const porGrupo = await gaql(`
+    SELECT ad_group.name, ad_group.status, metrics.cost_micros, metrics.clicks, metrics.impressions,
+           metrics.ctr, metrics.average_cpc, metrics.all_conversions
+    FROM ad_group WHERE campaign.id = ${BUSCA_ID} AND segments.date BETWEEN '${desde}' AND '${ate}'
+    ORDER BY metrics.cost_micros DESC`)
+  if (porGrupo.length) {
+    console.log('\n▸ BUSCA POR GRUPO (o número de conversão aqui mistura lead e venda)')
+    for (const r of porGrupo) {
+      const m = r.metrics
+      console.log(`  ${brl(micros(m.costMicros)).padStart(11)} · ${String(m.clicks ?? 0).padStart(4)} cl · CTR ${(Number(m.ctr ?? 0) * 100).toFixed(1)}% · CPC ${brl(micros(m.averageCpc))} · ${m.allConversions ?? 0} conv · ${r.adGroup.name} [${r.adGroup.status}]`)
+    }
+  }
+
+  // ── 5. Saldo da conta e ritmo até o prazo ──
+  // A conta tem teto de gasto (account_budget). O que sobrar depois do prazo é dinheiro
+  // que o Álvaro quis gastar e ficou parado; gastar antes do prazo compra lixo mais rápido.
   const hoje = ymd(new Date())
-  if (hoje <= PROMO.fim) {
-    const gastoPromo = (await gaql(`
-      SELECT metrics.cost_micros FROM customer
-      WHERE segments.date BETWEEN '${PROMO.inicio}' AND '${hoje}'`))
-      .reduce((a, r) => a + micros(r.metrics.costMicros), 0)
-    const falta = Math.max(0, PROMO.meta - gastoPromo)
-    const diasRestantes = Math.max(1, Math.round((new Date(PROMO.fim) - new Date(hoje)) / 864e5))
-    const precisa = falta / diasRestantes
-    const ritmo = gastoPromo / Math.max(1, Math.round((new Date(hoje) - new Date(PROMO.inicio)) / 864e5) + 1)
-    console.log(`\n▸ PROMOÇÃO (${brl(PROMO.meta)} de crédito até ${PROMO.fim})`)
-    console.log(`  gasto desde ${PROMO.inicio}: ${brl(gastoPromo)} · falta ${brl(falta)} em ${diasRestantes} dia(s)`)
-    console.log(`  precisa ${brl(precisa)}/dia · ritmo atual ${brl(ritmo)}/dia` +
-      (ritmo >= precisa ? ' ✔ no ritmo' : ' ⚠ abaixo do necessário'))
-    if (falta === 0) console.log('  ✔ meta batida.')
+  const ab = (await gaql(`
+    SELECT account_budget.status, account_budget.adjusted_spending_limit_micros,
+           account_budget.approved_spending_limit_micros, account_budget.amount_served_micros
+    FROM account_budget WHERE account_budget.status = 'APPROVED'`))[0]?.accountBudget
+  if (ab) {
+    const teto = micros(ab.adjustedSpendingLimitMicros ?? ab.approvedSpendingLimitMicros)
+    const servido = micros(ab.amountServedMicros)
+    const saldo = Math.max(0, teto - servido)
+    const diasRestantes = Math.max(1, Math.round((new Date(PRAZO_GASTO) - new Date(hoje)) / 864e5) + 1)
+    const precisa = saldo / diasRestantes
+    console.log(`\n▸ SALDO DA CONTA (teto ${brl(teto)} · já servido ${brl(servido)})`)
+    console.log(`  saldo ${brl(saldo)} · ${diasRestantes} dia(s) até ${PRAZO_GASTO} · precisa gastar ${brl(precisa)}/dia`)
+    console.log(`  orçamento diário somado das campanhas ativas: ${brl(orcamentoDia)}/dia` +
+      (orcamentoDia >= precisa * 0.9 ? ' ✔' : ' ⚠ abaixo do necessário para zerar o saldo no prazo'))
+    if (saldo <= 0) console.log('  ⚠ SALDO ZERADO: a conta parou de veicular. Foi assim de 02/08 a 16/08. Subir o teto no painel (Faturamento).')
+    else if (hoje > PRAZO_GASTO) console.log(`  (prazo ${PRAZO_GASTO} passou; sobrou ${brl(saldo)})`)
+  } else {
+    console.log('\n▸ SALDO DA CONTA: não achei account_budget APPROVED — conferir Faturamento no painel.')
   }
 
   console.log('\n▸ LEMBRETE DE LEITURA')
