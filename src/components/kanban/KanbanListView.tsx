@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -35,6 +36,9 @@ function effectiveTemperature(lead: Lead): 'hot' | 'warm' | 'cold' {
   return 'cold'
 }
 
+/** Quantas linhas de cada etapa nascem montadas. O resto espera o "mostrar mais". */
+const TETO_INICIAL = 25
+
 export function KanbanListView({
   stages,
   leads,
@@ -46,6 +50,18 @@ export function KanbanListView({
   stageSlaMinutes,
   getLastAiSnippet,
 }: Props) {
+  /**
+   * Qual etapa está na tela.
+   *
+   * A lista empilhava TODAS as etapas com TODOS os leads: no funil da clínica são
+   * 2.269 leads, e como cada linha é desenhada duas vezes (cartão no celular,
+   * tabela no desktop), a última etapa ficava a dezenas de telas da primeira. Os
+   * atalhos em cima levam direto — e uma etapa por vez é o normal de quem
+   * trabalha uma fila.
+   */
+  const [foco, setFoco] = useState<string>('todas')
+  const [teto, setTeto] = useState<Record<string, number>>({})
+
   if (isLoading) {
     return (
       <div className="col-span-full rounded-2xl border border-border/70 bg-card/90 p-4 shadow-sm">
@@ -62,10 +78,41 @@ export function KanbanListView({
     )
   }
 
+  const etapasNaTela = foco === 'todas' ? stages : stages.filter((s) => s.id === foco)
+
   return (
-    <div className="col-span-full space-y-8 pb-10">
-      {stages.map((stage) => {
+    <div className="col-span-full space-y-4 pb-10">
+      <nav
+        aria-label="Etapas do funil"
+        className="flex flex-wrap gap-1.5 rounded-xl border border-border/40 bg-card/60 p-2"
+      >
+        <Button
+          size="sm"
+          variant={foco === 'todas' ? 'default' : 'ghost'}
+          className="h-7 px-2.5 text-xs"
+          onClick={() => setFoco('todas')}
+        >
+          Todas <span className="ml-1 tabular-nums opacity-70">{leads.length}</span>
+        </Button>
+        {stages.map((stage) => (
+          <Button
+            key={stage.id}
+            size="sm"
+            variant={foco === stage.id ? 'default' : 'ghost'}
+            className="h-7 px-2.5 text-xs"
+            onClick={() => setFoco(stage.id)}
+          >
+            {stage.name}
+            <span className="ml-1 tabular-nums opacity-70">{(byStage.get(stage.id) ?? []).length}</span>
+          </Button>
+        ))}
+      </nav>
+
+      {etapasNaTela.map((stage) => {
         const stageLeads = byStage.get(stage.id) ?? []
+        const limite = teto[stage.id] ?? TETO_INICIAL
+        const mostrados = stageLeads.slice(0, limite)
+        const restam = stageLeads.length - mostrados.length
         return (
           <section
             key={stage.id}
@@ -101,7 +148,7 @@ export function KanbanListView({
             ) : (
               <>
                 <ul className="m-0 flex list-none flex-col divide-y divide-border/20 md:hidden">
-                  {stageLeads.map((lead) => {
+                  {mostrados.map((lead) => {
                     const temp = effectiveTemperature(lead)
                     const selected = selectedLeadId === lead.id
                     return (
@@ -179,7 +226,7 @@ export function KanbanListView({
                       </TableRow>
                     </TableHeader>
                     <TableBody className="divide-y divide-border/10">
-                      {stageLeads.map((lead) => {
+                      {mostrados.map((lead) => {
                         const temp = effectiveTemperature(lead)
                         const selected = selectedLeadId === lead.id
                         return (
@@ -257,6 +304,24 @@ export function KanbanListView({
                     </TableBody>
                   </Table>
                 </div>
+
+                {restam > 0 ? (
+                  <div className="border-t border-border/20 p-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() =>
+                        setTeto((atual) => ({
+                          ...atual,
+                          [stage.id]: (atual[stage.id] ?? TETO_INICIAL) + 50,
+                        }))
+                      }
+                    >
+                      Mostrar mais 50 · faltam {restam} em {stage.name}
+                    </Button>
+                  </div>
+                ) : null}
               </>
             )}
           </section>

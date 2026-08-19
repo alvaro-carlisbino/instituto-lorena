@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Interaction } from '@/mocks/crmMock'
 import { Link, useNavigate } from 'react-router-dom'
-import { Bot, History, LayoutDashboard, LayoutGrid, List, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react'
+import { Bot, ChevronLeft, History, LayoutDashboard, LayoutGrid, List, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-react'
 
+import { ColunaFechada } from '@/components/board/BoardColumn'
+import { useColunasFechadas } from '@/components/board/useColunasFechadas'
 import { KanbanListView } from '@/components/kanban/KanbanListView'
 import { KanbanColumnDropZone, KanbanLeadCard } from '@/components/kanban/KanbanLeadCard'
 import { KanbanToolbar, type ConversationFilterOption, type SortOption } from '@/components/kanban/KanbanToolbar'
@@ -68,6 +70,27 @@ export function KanbanPage() {
   const [sortOrder, setSortOrder] = useState<SortOption>('position')
   const [conversationFilter, setConversationFilter] = useState<ConversationFilterOption>('all')
   const [deliveryFilter, setDeliveryFilter] = useState<'all' | DeliveryKind>('all')
+
+  /**
+   * Quantos cards de cada etapa estão montados.
+   *
+   * A etapa "fechado" do funil da clínica tem 863 leads e a "ligar formulário",
+   * 797. Montar a coluna inteira travava a tela ao abrir e fazia o arrastar
+   * engasgar — e ninguém lê 800 cards; procura um, e para isso existe a busca.
+   */
+  const [tetoPorEtapa, setTetoPorEtapa] = useState<Record<string, number>>({})
+  const TETO_INICIAL = 25
+
+  /**
+   * Etapas fechadas, por funil e por navegador.
+   *
+   * Nenhuma nasce fechada — quem decide o que é arquivo é quem trabalha o funil.
+   * Mas dez etapas de 320px são três metros de rolagem lateral, e as etapas de
+   * fim de linha ("Fechado", "Cancelou") são justamente as maiores.
+   */
+  const { fechadas, alternar } = useColunasFechadas(
+    `crm-kanban-etapas-fechadas:${crm.selectedPipelineId ?? 'sem-funil'}`,
+  )
 
   // Estados para captura de motivo de perda/cancelamento
   const [lossDialogOpen, setLossDialogOpen] = useState(false)
@@ -256,6 +279,8 @@ export function KanbanPage() {
   return (
     <AppLayout
       title="Quadro de leads"
+      fullHeight
+      mainClassName="min-h-0 gap-3 px-3 py-4 sm:px-6 sm:py-5 lg:px-8"
       actions={
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Link
@@ -316,58 +341,97 @@ export function KanbanPage() {
         </div>
       }
     >
-      <KanbanToolbar
-        pipelineId={crm.selectedPipelineId}
-        pipelineOptions={pipelineOptions}
-        onPipelineChange={crm.setSelectedPipelineId}
-        poloFilter={crm.tenantFilter}
-        onPoloChange={crm.setTenantFilter}
-        poloOptions={poloOptions}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
-        temperatureFilter={temperatureFilter}
-        onTemperatureChange={setTemperatureFilter}
-        ownerFilter={ownerFilter}
-        onOwnerChange={setOwnerFilter}
-        ownerOptions={crm.users.map((u) => ({ id: u.id, name: u.name }))}
-        tagFilter={tagFilter}
-        onTagFilterChange={setTagFilter}
-        tagOptions={crm.leadTagDefinitions.map((t) => ({ id: t.id, name: t.name }))}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-        sortOrder={sortOrder}
-        onSortOrderChange={setSortOrder}
-        conversationFilter={conversationFilter}
-        onConversationFilterChange={setConversationFilter}
-        deliveryFilter={deliveryFilter}
-        onDeliveryFilterChange={setDeliveryFilter}
-      />
+      <div className="shrink-0">
+        <KanbanToolbar
+          pipelineId={crm.selectedPipelineId}
+          pipelineOptions={pipelineOptions}
+          onPipelineChange={crm.setSelectedPipelineId}
+          poloFilter={crm.tenantFilter}
+          onPoloChange={crm.setTenantFilter}
+          poloOptions={poloOptions}
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          temperatureFilter={temperatureFilter}
+          onTemperatureChange={setTemperatureFilter}
+          ownerFilter={ownerFilter}
+          onOwnerChange={setOwnerFilter}
+          ownerOptions={crm.users.map((u) => ({ id: u.id, name: u.name }))}
+          tagFilter={tagFilter}
+          onTagFilterChange={setTagFilter}
+          tagOptions={crm.leadTagDefinitions.map((t) => ({ id: t.id, name: t.name }))}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          sortOrder={sortOrder}
+          onSortOrderChange={setSortOrder}
+          conversationFilter={conversationFilter}
+          onConversationFilterChange={setConversationFilter}
+          deliveryFilter={deliveryFilter}
+          onDeliveryFilterChange={setDeliveryFilter}
+        />
+      </div>
+
+      {/* Etapa fechada vira etiqueta aqui: fora da tela, à direita do quadro, ela
+          parecia ter sumido. */}
+      {viewMode === 'board' && fechadas.size > 0 && (
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <span>Etapas fechadas:</span>
+          {crm.selectedPipeline.stages
+            .filter((stage) => fechadas.has(stage.id))
+            .map((stage) => (
+              <button
+                key={stage.id}
+                type="button"
+                className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 transition-colors hover:bg-muted"
+                onClick={() => alternar(stage.id, false)}
+              >
+                {stage.name}
+                <span className="tabular-nums">
+                  {visibleLeads.filter((lead) => lead.stageId === stage.id).length}
+                </span>
+              </button>
+            ))}
+        </div>
+      )}
 
       {viewMode === 'list' ? (
-        <KanbanListView
-          stages={crm.selectedPipeline.stages}
-          leads={visibleLeads}
-          isLoading={crm.isLoading}
-          selectedLeadId={crm.selectedLeadId}
-          onSelectLead={(id) => {
-            crm.setSelectedLeadId(id)
-            navigate(`/leads/${id}`)
-          }}
-          getOwnerName={crm.getOwnerName}
-          tagPillsForLead={tagPillsForLead}
-          stageSlaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes}
-          getLastAiSnippet={(leadId) => lastAiSnippetByLeadId.get(leadId)}
-        />
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <KanbanListView
+            stages={crm.selectedPipeline.stages}
+            leads={visibleLeads}
+            isLoading={crm.isLoading}
+            selectedLeadId={crm.selectedLeadId}
+            onSelectLead={(id) => {
+              crm.setSelectedLeadId(id)
+              navigate(`/leads/${id}`)
+            }}
+            getOwnerName={crm.getOwnerName}
+            tagPillsForLead={tagPillsForLead}
+            stageSlaMinutes={crm.selectedPipeline.boardConfig?.stageSlaMinutes}
+            getLastAiSnippet={(leadId) => lastAiSnippetByLeadId.get(leadId)}
+          />
+        </div>
       ) : (
-        <div className="flex flex-1 gap-6 overflow-x-auto pb-6 scrollbar-thin scrollbar-thumb-border/30">
+        <div className="flex min-h-0 flex-1 gap-6 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-border/30">
           {crm.selectedPipeline.stages.map((stage) => {
             const stageLeads = visibleLeads.filter((lead) => lead.stageId === stage.id)
+            if (fechadas.has(stage.id)) {
+              return (
+                <ColunaFechada
+                  key={stage.id}
+                  title={stage.name}
+                  count={stageLeads.length}
+                  onOpen={() => alternar(stage.id, false)}
+                />
+              )
+            }
+            const montados = stageLeads.slice(0, tetoPorEtapa[stage.id] ?? TETO_INICIAL)
+            const restam = stageLeads.length - montados.length
             return (
               <article
                 key={stage.id}
-                className="flex flex-col w-[320px] shrink-0 overflow-hidden rounded-2xl border border-border/40 bg-muted/5 shadow-none transition-all duration-300 hover:bg-muted/10"
+                className="flex h-full flex-col w-[320px] shrink-0 overflow-hidden rounded-2xl border border-border/40 bg-muted/5 shadow-none transition-all duration-300 hover:bg-muted/10"
               >
-                <header className="flex items-center justify-between px-5 py-4 bg-background/50 border-b border-border/20">
+                <header className="flex shrink-0 items-center justify-between px-5 py-4 bg-background/50 border-b border-border/20">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <div className="size-2 rounded-full bg-primary" />
@@ -380,13 +444,23 @@ export function KanbanPage() {
                       </div>
                     ) : null}
                   </div>
-                  <span className="flex items-center justify-center min-w-[24px] h-6 rounded-full bg-primary/10 px-2 text-[11px] font-semibold text-primary">
-                    {stageLeads.length}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <span className="flex items-center justify-center min-w-[24px] h-6 rounded-full bg-primary/10 px-2 text-[11px] font-semibold text-primary">
+                      {stageLeads.length}
+                    </span>
+                    <button
+                      type="button"
+                      title={`Fechar ${stage.name}`}
+                      className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      onClick={() => alternar(stage.id, true)}
+                    >
+                      <ChevronLeft className="size-4" />
+                    </button>
+                  </div>
                 </header>
 
                 <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 scrollbar-none">
-                  {stageLeads.map((lead) => (
+                  {montados.map((lead) => (
                     <KanbanLeadCard
                       key={lead.id}
                       lead={lead}
@@ -419,6 +493,21 @@ export function KanbanPage() {
                       onDragEnterColumn={() => setDragOverStageId(stage.id)}
                     />
                   ))}
+
+                  {restam > 0 && (
+                    <button
+                      type="button"
+                      className="rounded-xl border border-dashed border-border/60 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
+                      onClick={() =>
+                        setTetoPorEtapa((atual) => ({
+                          ...atual,
+                          [stage.id]: (atual[stage.id] ?? TETO_INICIAL) + 25,
+                        }))
+                      }
+                    >
+                      Mostrar mais 25 · faltam {restam}
+                    </button>
+                  )}
 
                   {stageLeads.length === 0 && !crm.isLoading && (
                     <div className="flex flex-col items-center justify-center py-12 text-center opacity-40">

@@ -1,11 +1,26 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { CalendarClock, MessageCircle, PhoneCall, RotateCcw, Scissors, Sparkles } from 'lucide-react'
+import {
+  CalendarClock,
+  MessageCircle,
+  MoreHorizontal,
+  PhoneCall,
+  RotateCcw,
+  Scissors,
+  Sparkles,
+} from 'lucide-react'
 
+import { BoardColumn } from '@/components/board/BoardColumn'
+import { useColunasFechadas } from '@/components/board/useColunasFechadas'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button, buttonVariants } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogContent,
@@ -109,6 +124,17 @@ export function FollowUpTab() {
   const [movendo, setMovendo] = useState<string | null>(null)
   const [termo, setTermo] = useState('')
   const buscaAdiada = useDeferredValue(termo)
+  /** Liga a fila do dia: some quem tem contato marcado para depois de hoje. */
+  const [soPendentes, setSoPendentes] = useState(false)
+  /**
+   * "Não convertido" e "Encerrado" nascem FECHADAS. Elas guardam 114 dos 174
+   * pacientes da clínica e não têm ação diária nenhuma — abertas, empurravam as
+   * quatro colunas de contato para fora da tela.
+   */
+  const { fechadas, alternar } = useColunasFechadas('crm-followup-colunas-fechadas', [
+    'nao_convertido',
+    'encerrado',
+  ])
 
   const load = async () => {
     setLoading(true)
@@ -143,10 +169,16 @@ export function FollowUpTab() {
               c.pipelineId === FUNIL_TRIAGEM,
           )
 
-    // A busca atravessa as cinco colunas: quem procura um paciente não sabe (nem
+    // A fila do dia: só quem já venceu ou vence hoje. É o corte que transforma
+    // "todo mundo que existe" na lista do que ela precisa fazer agora.
+    const doDia = soPendentes
+      ? doFunil.filter((c) => ABERTAS.includes(c.coluna) && c.scheduledFor.slice(0, 10) <= hojeIso())
+      : doFunil
+
+    // A busca atravessa as seis colunas: quem procura um paciente não sabe (nem
     // deveria precisar saber) em qual coluna do kanban ele está parado hoje.
-    return doFunil.filter((c) => combinaBusca(buscaAdiada, c.patientName, c.phone, c.note, c.outcome))
-  }, [cards, funil, buscaAdiada])
+    return doDia.filter((c) => combinaBusca(buscaAdiada, c.patientName, c.phone, c.note, c.outcome))
+  }, [cards, funil, buscaAdiada, soPendentes])
 
   const porColuna = useMemo(() => {
     const mapa = new Map<KanbanColuna, KanbanCard[]>()
@@ -236,94 +268,108 @@ export function FollowUpTab() {
     }
   }
 
-  const cardDoPaciente = (c: KanbanCard) => (
-    <div
-      key={c.followupId}
-      className={cn(
-        'rounded-md border border-border bg-card p-2 text-sm',
-        c.diasAtraso > 0 && ABERTAS.includes(c.coluna) && 'border-destructive/50',
-      )}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <Link to={`/leads/${c.leadId}`} className="font-medium leading-tight hover:underline">
-          {c.patientName}
-        </Link>
-        {c.diasAtraso > 0 && ABERTAS.includes(c.coluna) && (
-          <Badge variant="destructive" className="shrink-0 text-[10px]">
-            {c.diasAtraso}d
-          </Badge>
+  /**
+   * O card do paciente, em duas linhas de texto e uma de ação.
+   *
+   * Trocar de funil saiu de botão para dentro do "⋯": eram até quatro botões por
+   * card, o card ficava com três linhas de botão e a coluna virava um rolo. Ligar
+   * é diário; mudar de funil acontece uma vez na vida do paciente.
+   */
+  const cardDoPaciente = (c: KanbanCard) => {
+    const atrasado = c.diasAtraso > 0 && ABERTAS.includes(c.coluna)
+    const fone = soDigitos(c.phone)
+    return (
+      <div
+        className={cn(
+          'rounded-md border border-border bg-card p-2 text-sm',
+          atrasado && 'border-destructive/50',
         )}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <Link to={`/leads/${c.leadId}`} className="font-medium leading-tight hover:underline">
+            {c.patientName}
+          </Link>
+          {atrasado && (
+            <Badge variant="destructive" className="shrink-0 text-[10px]">
+              {c.diasAtraso}d
+            </Badge>
+          )}
+        </div>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {ABERTAS.includes(c.coluna)
+            ? `contato em ${dia(c.scheduledFor)}`
+            : c.cirurgiaEm
+              ? `cirurgia em ${dia(c.cirurgiaEm)}`
+              : (c.outcome ?? 'sem desfecho registrado')}
+        </p>
+        {c.note && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{c.note}</p>}
+        <div className="mt-1.5 flex items-center gap-1">
+          {fone.length >= 10 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              nativeButton={false}
+              render={<a href={`https://wa.me/55${fone}`} target="_blank" rel="noreferrer noopener" />}
+            >
+              <MessageCircle className="size-3" /> WhatsApp
+            </Button>
+          )}
+          {ABERTAS.includes(c.coluna) ? (
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => abrir(c)}>
+              <PhoneCall className="size-3" /> Registrar
+            </Button>
+          ) : c.coluna === 'nao_convertido' ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={() => {
+                setProxima(emDias(30))
+                setReabrindo(c)
+              }}
+            >
+              <RotateCcw className="size-3" /> Voltar para a fila
+            </Button>
+          ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              title="Mais ações"
+              className={cn(
+                buttonVariants({ variant: 'ghost', size: 'sm' }),
+                'ml-auto h-7 px-1.5 text-muted-foreground',
+              )}
+            >
+              <MoreHorizontal className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {/* Consulta de transplante que termina em indicação de protocolo (e o
+                  contrário). O paciente troca de fila e o follow-up dele vai junto. */}
+              {c.pipelineId !== FUNIL_PROTOCOLOS && (
+                <DropdownMenuItem
+                  disabled={movendo === c.leadId}
+                  onClick={() => void trocarFunil(c, 'protocolo')}
+                >
+                  <Sparkles className="size-4" /> Passar para protocolos e spa
+                </DropdownMenuItem>
+              )}
+              {c.pipelineId !== FUNIL_CIRURGICO && (
+                <DropdownMenuItem
+                  disabled={movendo === c.leadId}
+                  onClick={() => void trocarFunil(c, 'cirurgia')}
+                >
+                  <Scissors className="size-4" /> Passar para transplante
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
-      <p className="mt-0.5 text-xs text-muted-foreground">
-        {ABERTAS.includes(c.coluna)
-          ? `contato em ${dia(c.scheduledFor)}`
-          : c.cirurgiaEm
-            ? `cirurgia em ${dia(c.cirurgiaEm)}`
-            : (c.outcome ?? 'sem desfecho registrado')}
-      </p>
-      {c.note && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{c.note}</p>}
-      <div className="mt-1.5 flex flex-wrap gap-1">
-        {soDigitos(c.phone).length >= 10 && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2 text-xs"
-            nativeButton={false}
-            render={<a href={`https://wa.me/55${soDigitos(c.phone)}`} target="_blank" rel="noreferrer noopener" />}
-          >
-            <MessageCircle className="size-3" /> WhatsApp
-          </Button>
-        )}
-        {ABERTAS.includes(c.coluna) ? (
-          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => abrir(c)}>
-            <PhoneCall className="size-3" /> Registrar
-          </Button>
-        ) : c.coluna === 'nao_convertido' ? (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 px-2 text-xs"
-            onClick={() => {
-              setProxima(emDias(30))
-              setReabrindo(c)
-            }}
-          >
-            <RotateCcw className="size-3" /> Voltar para a fila
-          </Button>
-        ) : null}
-        {/* Consulta de transplante que termina em indicação de protocolo (e o
-            contrário). O paciente troca de fila e o follow-up dele vai junto —
-            antes disto era pela ficha do paciente, em outra tela. */}
-        {c.pipelineId !== FUNIL_PROTOCOLOS && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2 text-xs"
-            disabled={movendo === c.leadId}
-            title="Passar para o funil de protocolos e spa"
-            onClick={() => void trocarFunil(c, 'protocolo')}
-          >
-            <Sparkles className="size-3" /> Protocolo
-          </Button>
-        )}
-        {c.pipelineId !== FUNIL_CIRURGICO && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2 text-xs"
-            disabled={movendo === c.leadId}
-            title="Passar para o funil de transplante"
-            onClick={() => void trocarFunil(c, 'cirurgia')}
-          >
-            <Scissors className="size-3" /> Transplante
-          </Button>
-        )}
-      </div>
-    </div>
-  )
+    )
+  }
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1">
           {(
@@ -344,51 +390,86 @@ export function FollowUpTab() {
           ))}
         </div>
         <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+          {/* A fila do dia em um clique. Sem isto, "quem eu tenho que ligar hoje"
+              exigia ler quatro colunas e comparar data por data. */}
+          <Button
+            size="sm"
+            variant={soPendentes ? 'default' : 'outline'}
+            onClick={() => setSoPendentes((v) => !v)}
+            title="Só quem tem contato marcado para hoje ou antes"
+          >
+            <CalendarClock className="size-4" />
+            Contato de hoje
+            {atrasados > 0 && !soPendentes ? ` (${atrasados} atrasado${atrasados > 1 ? 's' : ''})` : ''}
+          </Button>
           <SearchField
             value={termo}
             onChange={setTermo}
             label="Buscar paciente no follow-up"
             placeholder="Paciente, telefone, anotação…"
             resultados={visiveis.length}
-            className="w-full sm:w-72"
+            className="w-full sm:w-64"
           />
-          {atrasados > 0 && (
+          {atrasados > 0 && soPendentes && (
             <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-destructive">{atrasados}</span> paciente
-              {atrasados > 1 ? 's' : ''} com contato atrasado.
+              <span className="font-medium text-destructive">{atrasados}</span> atrasado
+              {atrasados > 1 ? 's' : ''}.
             </p>
           )}
         </div>
       </div>
 
+      {/* Coluna fechada vira etiqueta aqui em cima. Sem isto ela ficava fora da
+          tela, à direita do quadro, e a tela parecia ter perdido pacientes. */}
+      {fechadas.size > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <span>Colunas fechadas:</span>
+          {KANBAN_COLUNAS.filter((col) => fechadas.has(col.id)).map((col) => (
+            <Button
+              key={col.id}
+              size="sm"
+              variant="outline"
+              className="h-6 gap-1 px-2 text-xs"
+              onClick={() => alternar(col.id, false)}
+            >
+              {col.label}
+              <span className="tabular-nums text-muted-foreground">
+                {(porColuna.get(col.id) ?? []).length}
+              </span>
+            </Button>
+          ))}
+        </div>
+      )}
+
       {loading && cards.length === 0 ? (
         <EmptyState icon={CalendarClock} title="Carregando…" />
       ) : (
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
-          {KANBAN_COLUNAS.map((col) => {
-            const lista = porColuna.get(col.id) ?? []
-            return (
-              <Card key={col.id} className="flex flex-col gap-0 overflow-hidden pt-0">
-                <div className={cn('h-1 w-full', FAIXA[col.id])} />
-                <CardHeader className="pt-3 pb-2">
-                  <CardTitle className="text-sm leading-tight">
-                    {col.label}
-                    <span className="ml-1.5 text-muted-foreground">{lista.length}</span>
-                  </CardTitle>
-                  <p className="text-xs text-muted-foreground">{col.hint}</p>
-                </CardHeader>
-                <CardContent className="flex-1 space-y-2 pb-3">
-                  {lista.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      {termo.trim().length > 0 ? 'Ninguém com esse termo.' : 'Ninguém aqui.'}
-                    </p>
-                  ) : (
-                    lista.map(cardDoPaciente)
-                  )}
-                </CardContent>
-              </Card>
-            )
-          })}
+        // Quadro de verdade: rola para o lado, cada coluna com a altura da tela e
+        // rolagem própria. O grid antigo jogava a sexta coluna para baixo de todas
+        // as outras, e uma coluna de 58 cards esticava a linha inteira.
+        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto pb-2">
+          {KANBAN_COLUNAS.map((col) => (
+            <BoardColumn
+              key={col.id}
+              title={col.label}
+              hint={col.hint}
+              accentClass={FAIXA[col.id]}
+              items={porColuna.get(col.id) ?? []}
+              keyOf={(c) => c.followupId}
+              renderItem={cardDoPaciente}
+              emptyLabel={
+                termo.trim().length > 0
+                  ? 'Ninguém com esse termo.'
+                  : soPendentes
+                    ? ABERTAS.includes(col.id)
+                      ? 'Nada para hoje.'
+                      : 'Fora da fila de hoje.'
+                    : 'Ninguém aqui.'
+              }
+              collapsed={fechadas.has(col.id)}
+              onCollapsedChange={(v) => alternar(col.id, v)}
+            />
+          ))}
         </div>
       )}
 

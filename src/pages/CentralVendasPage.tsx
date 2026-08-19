@@ -51,11 +51,18 @@ const TITULO: Record<CentralVendasTab, { title: string; subtitle: string }> = {
 export function CentralVendasPage({ tab }: { tab: CentralVendasTab }) {
   const [kind, setKind] = useState<ClinicSaleKind>('cirurgia')
   const cabecalho = TITULO[tab]
+  // O follow-up é quadro: precisa da altura da tela para cada coluna rolar por
+  // dentro. As outras abas são tabela e rolam a página inteira, como sempre.
+  const quadro = tab === 'follow-up'
 
   return (
     <AppLayout
       title={cabecalho.title}
       subtitle={cabecalho.subtitle}
+      fullHeight={quadro}
+      mainClassName={
+        quadro ? 'min-h-0 px-3 py-4 sm:px-6 sm:py-5 lg:px-8' : undefined
+      }
       actions={
         tab === 'vendas' ? (
           <div className="flex gap-1">
@@ -77,7 +84,9 @@ export function CentralVendasPage({ tab }: { tab: CentralVendasTab }) {
         ) : undefined
       }
     >
-      <SubTabs tabs={centralVendasTabs} />
+      <div className="shrink-0">
+        <SubTabs tabs={centralVendasTabs} />
+      </div>
       {tab === 'vendas' && <VendasTab kind={kind} />}
       {tab === 'follow-up' && <FollowUpTab />}
       {tab === 'pos-consulta' && <PosConsultaTab />}
