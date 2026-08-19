@@ -696,7 +696,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
             <div className="col-span-full flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <p className="text-xs text-muted-foreground">
                 {verDispensadas
-                  ? 'Vendas que saíram da fila sem serem resolvidas: continuam sem data ou sem cadastro, a clínica só parou de ser cobrada por elas. Nada foi apagado — todas seguem na lista do mês, com valor e histórico.'
+                  ? 'Vendas que saíram da fila sem serem resolvidas: continuam sem data ou sem cadastro, a clínica só parou de ser cobrada por elas. Nada foi apagado: todas seguem na lista do mês, com valor e histórico.'
                   : recorte === 'sem-data'
                     ? 'Vendas fechadas de todos os meses que ainda não têm data marcada, da mais parada para a mais recente. O filtro de mês fica de fora de propósito: venda parada não pertence a um mês só.'
                     : recorte === 'sem-nota'
@@ -1167,7 +1167,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           <div className="space-y-3 text-sm">
             <p>
               As {naFila.length} vendas que estão na fila agora saem da cobrança de uma vez. Elas
-              continuam inteiras na lista do mês, com valor, data de fechamento, status e histórico —
+              continuam inteiras na lista do mês, com valor, data de fechamento, status e histórico,
               e fica registrado que a dispensa foi feita hoje.
             </p>
             <p className="text-muted-foreground">
@@ -1179,7 +1179,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
             </p>
             <p className="text-muted-foreground">
               Quem entrar na fila a partir de agora aparece aqui normalmente. Para rever o que saiu,
-              use &ldquo;Ver dispensadas&rdquo; — e dá para devolver qualquer uma para a fila.
+              use &ldquo;Ver dispensadas&rdquo;, e dá para devolver qualquer uma para a fila.
             </p>
             <div className="space-y-1.5">
               <Label>Motivo</Label>
