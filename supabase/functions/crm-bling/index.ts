@@ -1444,11 +1444,45 @@ Deno.serve(async (req)=>{
     // Sondagem: devolve o formato cru de /contas/receber pra conferir campo e situação
     // antes de escrever qualquer baixa. Read-only.
     if (args.probe === true) {
-      const r = await blingGet(`${'https://api.bling.com.br/Api/v3'}/contas/receber?pagina=1&limite=3`, bh);
+      // Parâmetros LIMITADOS de propósito: id de conta e id de pedido, nada de path livre.
+      // Um proxy de GET arbitrário pro Bling dentro de uma função autenticada é porta aberta.
+      const rid = String(args.probeReceivableId ?? '').replace(/\D/g, '');
+      const oid = String(args.probeOrderId ?? '').replace(/\D/g, '');
+      // Descobre QUAL parâmetro de data o Bling respeita: testa as variantes e devolve a
+      // primeira dataEmissao de cada uma. Sem isso é chute, e filtro ignorado devolve o
+      // histórico inteiro desde 2025.
+      if (args.probeFiltros === true) {
+        const de = String(args.probeFrom ?? '2026-07-01').slice(0, 10);
+        const ate = String(args.probeTo ?? '2026-08-19').slice(0, 10);
+        const variantes: Record<string, string> = {
+          nenhum: '',
+          dataEmissaoInicial: `&dataEmissaoInicial=${de}&dataEmissaoFinal=${ate}`,
+          dataInicial: `&dataInicial=${de}&dataFinal=${ate}`,
+          dataInicial_tipoE: `&dataInicial=${de}&dataFinal=${ate}&tipoFiltroData=E`,
+          dataVencimentoInicial: `&dataVencimentoInicial=${de}&dataVencimentoFinal=${ate}`,
+        };
+        const res: Record<string, unknown> = {};
+        for (const [nome, qs] of Object.entries(variantes)) {
+          const rr = await blingGet(`${'https://api.bling.com.br/Api/v3'}/contas/receber?pagina=1&limite=3${qs}`, bh);
+          const tt = await rr.text();
+          let dd: Array<Record<string, unknown>> = [];
+          try { dd = (JSON.parse(tt || '{}').data ?? []); } catch { /* ignora */ }
+          res[nome] = rr.ok
+            ? { n: dd.length, datas: dd.map((c) => c.dataEmissao ?? null) }
+            : { status: rr.status, erro: tt.slice(0, 120) };
+        }
+        return json({ ok: true, de, ate, variantes: res });
+      }
+      const url = rid
+        ? `${'https://api.bling.com.br/Api/v3'}/contas/receber/${rid}`
+        : oid
+          ? `${'https://api.bling.com.br/Api/v3'}/contas/receber?idOrigem=${oid}&limite=10`
+          : `${'https://api.bling.com.br/Api/v3'}/contas/receber?pagina=1&limite=3`;
+      const r = await blingGet(url, bh);
       const txt = await r.text();
       let parsed = null;
       try { parsed = JSON.parse(txt || '{}'); } catch { /* devolve cru */ }
-      return json({ ok: r.ok, status: r.status, sample: parsed ?? txt.slice(0, 800) });
+      return json({ ok: r.ok, status: r.status, url: url.replace('https://api.bling.com.br/Api/v3', ''), sample: parsed ?? txt.slice(0, 900) });
     }
 
     const { data: rows } = await admin
@@ -1460,10 +1494,48 @@ Deno.serve(async (req)=>{
       .order('paid_at', { ascending: true }).limit(limit);
 
     const pend = rows ?? [];
+
+    // Índice das contas a receber, carregado UMA vez.
+    //
+    // Conferido na API em 19/08, e o que NÃO dá pra usar:
+    //  · `numeroDocumento` (onde gravamos o nº do pedido) só vem no DETALHE, não na listagem;
+    //  · `idOrigem` vem 0 nas contas que criamos, porque o vínculo com o pedido é read-only.
+    // Sobra o que a listagem traz e identifica: contato + valor + data de emissão.
+    //
+    // O filtro de data é VERIFICADO, não suposto: se o Bling ignorar o parâmetro, a listagem
+    // volta do começo do histórico (2025) e indexar isso casaria conta de outra venda. Nesse
+    // caso o índice fica vazio e a resposta diz `filtro_de_data_ignorado`, em vez de baixar
+    // conta errada calado.
+    const chaveConta = (contatoId, valorReais, dataISO) => `${contatoId}|${Math.round(Number(valorReais) * 100)}|${dataISO}`;
+    const indice = new Map();
+    let filtroIgnorado = false;
+    const hoje = new Date().toISOString().slice(0, 10);
+    for (let pagina = 1; pagina <= 20; pagina++) {
+      // `dataInicial`/`dataFinal` com `tipoFiltroData=E` (emissão) é o que o Bling respeita.
+      // Conferido em 19/08 testando as variantes: `dataEmissaoInicial` e
+      // `dataVencimentoInicial` são ACEITOS e IGNORADOS — a listagem volta de 2025.
+      const url = `${'https://api.bling.com.br/Api/v3'}/contas/receber?pagina=${pagina}&limite=100`
+        + `&dataInicial=${since}&dataFinal=${hoje}&tipoFiltroData=E`;
+      const r = await blingGet(url, bh);
+      if (!r.ok) break;
+      const lista = (JSON.parse((await r.text()) || '{}').data ?? []);
+      if (!Array.isArray(lista) || lista.length === 0) break;
+      if (pagina === 1) {
+        const fora = lista.filter((c) => String(c.dataEmissao ?? '') < since).length;
+        if (fora > lista.length / 2) { filtroIgnorado = true; break; }
+      }
+      for (const c of lista) {
+        if (Number(c.situacao) !== 1) continue;
+        const k = chaveConta(String((c.contato ?? {}).id ?? ''), c.valor, String(c.dataEmissao ?? ''));
+        if (!indice.has(k)) indice.set(k, c);
+      }
+      if (lista.length < 100) break;
+    }
+
     const out: {
-      ok: boolean; dry: boolean; since: string; encontrados: number; baixados: number;
+      ok: boolean; dry: boolean; since: string; filtro_de_data_ignorado: boolean; contas_indexadas: number; encontrados: number; baixados: number;
       pulados: Array<Record<string, unknown>>; erros: Array<Record<string, unknown>>; total_taxa_cents: number;
-    } = { ok: true, dry, since, encontrados: pend.length, baixados: 0, pulados: [], erros: [], total_taxa_cents: 0 };
+    } = { ok: true, dry, since, filtro_de_data_ignorado: filtroIgnorado, contas_indexadas: indice.size, encontrados: pend.length, baixados: 0, pulados: [], erros: [], total_taxa_cents: 0 };
 
     for (const row of pend) {
       const fee = await quoteGatewayFee(admin, tenantId, 'rede', {
@@ -1471,8 +1543,13 @@ Deno.serve(async (req)=>{
       });
       if (!fee) { out.pulados.push({ id: row.id, motivo: 'sem_taxa_cadastrada', parcelas: row.installments }); continue; }
 
-      // Acha a conta: pelo id gravado, ou pelo nº do pedido (é o `numeroDocumento` que o
-      // blingEnsureReceivable grava). O caminho do SITE não gravava o id até 19/08.
+      // Acha a conta. O caminho do SITE só passou a gravar `bling_receivable_id` em 19/08,
+      // então a maioria do atrasado não tem o id e precisa ser caçada.
+      //
+      // Conferido na API em 19/08: a conta que o nosso código cria vem com `idOrigem: 0`
+      // (o vínculo com o pedido é read-only no Bling, por isso o `blingEnsureReceivable`
+      // grava o nº do pedido em `numeroDocumento`). Então o que casa é o numeroDocumento,
+      // e o "em aberto" se lê por `situacao === 1` com `saldo > 0`.
       let contaId = row.bling_receivable_id ? String(row.bling_receivable_id) : '';
       let numero = '';
       if (!contaId) {
@@ -1481,14 +1558,11 @@ Deno.serve(async (req)=>{
         const pd = (JSON.parse((await pr.text()) || '{}').data ?? {});
         numero = String(pd.numero ?? '');
         if (!numero) { out.erros.push({ id: row.id, etapa: 'pedido_sem_numero' }); continue; }
-        const cr = await blingGet(`${'https://api.bling.com.br/Api/v3'}/contas/receber?numeroDocumento=${encodeURIComponent(numero)}`, bh);
-        if (!cr.ok) { out.erros.push({ id: row.id, etapa: 'busca_conta', status: cr.status }); continue; }
-        const lista = (JSON.parse((await cr.text()) || '{}').data ?? []);
-        // A busca pode ignorar o filtro e devolver tudo: casa pelo numeroDocumento de novo.
-        const achou = (Array.isArray(lista) ? lista : []).find((c) => String(c.numeroDocumento ?? '') === numero);
-        if (!achou) { out.pulados.push({ id: row.id, motivo: 'conta_nao_encontrada', numero }); continue; }
+        const contatoId = String((pd.contato ?? {}).id ?? '');
+        const dataPedido = String(pd.data ?? '');
+        const achou = indice.get(chaveConta(contatoId, row.amount_cents / 100, dataPedido));
+        if (!achou) { out.pulados.push({ id: row.id, motivo: 'conta_nao_encontrada', numero, contatoId, dataPedido }); continue; }
         contaId = String(achou.id ?? '');
-        if (String(achou.situacao ?? '') === '2') { out.pulados.push({ id: row.id, motivo: 'ja_baixada', numero }); continue; }
       }
       if (!contaId) { out.pulados.push({ id: row.id, motivo: 'sem_conta' }); continue; }
 
