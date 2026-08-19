@@ -19,6 +19,22 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
  *
  * A alíquota do ISS NÃO vai no payload: o ambiente nacional aplica a do município (Maringá
  * devolveu 2,00% para o código 040101). A gente lê o que voltou, não manda o que quer.
+ *
+ * ── A receita do financeiro (Kauan, 19/ago/2026) ──────────────────────────────────────────
+ * É o passo a passo que ele segue no portal nacional (nfse.gov.br, "Emissão completa") para a
+ * clínica (lucro presumido), e é o que `buildDps()` reproduz campo a campo:
+ *
+ *   • Competência = dia da emissão. Nunca retroativa.
+ *   • Tomador no Brasil, SEMPRE PESSOA FÍSICA. Para CNPJ muda a retenção (PIS/COFINS/CSLL
+ *     retidos a partir de R$ 215,10; IRRF 1,5% a partir de R$ 666,67, "confirmar com a fonte
+ *     pagadora") — isso ele faz À MÃO. Aqui a emissão para PJ é RECUSADA, não adivinhada.
+ *   • Serviço: cTribNac 04.01.01 (Medicina), NBS 123012200 (Serviços médicos especializados),
+ *     operação tributável, ISS não retido, sem benefício/redução. Descrição vem de uma lista
+ *     fechada de 5 (`SERVICOS_CLINICA`), escolhida pelo tipo de atendimento.
+ *   • Valor = bruto. Tributação federal sobre o bruto: CST 01 (alíquota básica),
+ *     PIS 0,65% e COFINS 3,00% de apuração própria, "PIS/COFINS/CSLL Não Retidos" (tipo 0).
+ *   • Valor aproximado dos tributos (Lei 12.741): Federal 11,33% · Estadual 0,00% ·
+ *     Municipal 2,00%. Vai em `tenant_integrations.focus.tributos_aproximados`.
  */
 
 export type FocusAmbiente = 'homologacao' | 'producao'
@@ -49,6 +65,65 @@ export type FocusConfig = {
    * e a nota autorizada não volta atrás.
    */
   tributosAproximados: { federal: number; estadual: number; municipal: number } | null
+  /** Código NBS do serviço. Serviços médicos especializados: 123012200. */
+  codigoNbs: string
+  /**
+   * Tributação federal de apuração própria (lucro presumido, cumulativo). `cst` 01 = operação
+   * tributável com alíquota básica; alíquotas em %. Retenção NÃO entra aqui: para pessoa
+   * física é sempre "não retidos", e para PJ a gente não emite (ver `TomadorPjError`).
+   */
+  pisCofins: { cst: string; aliquotaPis: number; aliquotaCofins: number }
+}
+
+/**
+ * A lista fechada de descrições que o financeiro usa no portal — uma por tipo de atendimento.
+ * A descrição é sempre o texto fixo; o "quando" é só orientação para quem escolhe na tela.
+ * Texto livre na nota é o que deixava cada atendente escrever de um jeito.
+ */
+export const SERVICOS_CLINICA = [
+  {
+    key: 'cirurgia',
+    descricao: 'Procedimento cirúrgico dermatológico',
+    quando: 'Entrada ou restante do transplante capilar (TC). Não emitir para o que é transferência direta ao anestesista.',
+  },
+  {
+    key: 'protocolo',
+    descricao: 'Procedimento capilar dermatológico',
+    quando: 'Todos os tipos de protocolo.',
+  },
+  {
+    key: 'consulta',
+    descricao: 'Consulta médica dermatológica',
+    quando: 'Sinal e restante de consulta.',
+  },
+  {
+    key: 'biopsia',
+    descricao: 'Realização de biópsia',
+    quando: 'Quando realiza uma biópsia.',
+  },
+  {
+    key: 'vitaminas',
+    descricao: 'Aplicação de vitaminas',
+    quando: 'Quando realiza a aplicação de vitaminas.',
+  },
+] as const
+
+export type ServicoClinicaKey = (typeof SERVICOS_CLINICA)[number]['key']
+
+export function descricaoDoServico(key: string): string | null {
+  return SERVICOS_CLINICA.find((s) => s.key === key)?.descricao ?? null
+}
+
+/**
+ * Tomador pessoa jurídica: a nota muda de regra (retenções na fonte por faixa de valor, a
+ * confirmar com quem paga) e o financeiro emite à mão. O erro existe para a tela avisar o
+ * Kauan em vez de sair uma nota errada que não volta atrás.
+ */
+export class TomadorPjError extends Error {
+  constructor() {
+    super('Tomador CNPJ: a nota para pessoa jurídica tem retenção diferente e é emitida manualmente pelo financeiro (Kauan). Não emitir pelo CRM.')
+    this.name = 'TomadorPjError'
+  }
 }
 
 type FocusRaw = Record<string, unknown>
@@ -91,6 +166,14 @@ export async function readFocusConfig(
     federal != null && estadual != null && municipal != null &&
     Number.isFinite(federal) && Number.isFinite(estadual) && Number.isFinite(municipal)
 
+  // Defaults = o que o financeiro configura no portal hoje (lucro presumido). Banco sobrepõe
+  // sem deploy; um valor torto no banco (NaN, negativo) cai no default em vez de ir pra nota.
+  const pc = (cfg.pis_cofins ?? null) as FocusRaw | null
+  const pct = (v: unknown, fallback: number) => {
+    const n = num(v)
+    return n != null && Number.isFinite(n) && n >= 0 ? n : fallback
+  }
+
   return {
     ambiente,
     token,
@@ -102,6 +185,12 @@ export async function readFocusConfig(
     tributosAproximados: tributosOk
       ? { federal: federal!, estadual: estadual!, municipal: municipal! }
       : null,
+    codigoNbs: onlyDigits(cfg.codigo_nbs) || '123012200',
+    pisCofins: {
+      cst: str(pc?.cst, '01').padStart(2, '0'),
+      aliquotaPis: pct(pc?.aliquota_pis, 0.65),
+      aliquotaCofins: pct(pc?.aliquota_cofins, 3.0),
+    },
   }
 }
 
@@ -133,10 +222,8 @@ export type DpsInput = {
     codigoMunicipio?: string
     email?: string
   }
-  /** ISO. Default: agora. */
+  /** ISO. Default: agora. A competência é SEMPRE o dia da emissão (regra do financeiro: nunca retroativa). */
   dataEmissao?: string
-  /** AAAA-MM-DD. Default: o dia da emissão. */
-  dataCompetencia?: string
 }
 
 /**
@@ -155,13 +242,16 @@ function isoLocalSaoPaulo(d: Date): string {
 
 export function buildDps(cfg: FocusConfig, input: DpsInput): Record<string, unknown> {
   const emissao = input.dataEmissao ?? isoLocalSaoPaulo(new Date())
-  const competencia = input.dataCompetencia ?? emissao.slice(0, 10)
+  const competencia = emissao.slice(0, 10)
   const doc = onlyDigits(input.tomador.documento)
+  // Só pessoa física. CNPJ muda a retenção e é nota manual do financeiro.
+  if (doc.length !== 11) throw new TomadorPjError()
+
   const trib = cfg.tributosAproximados ?? { federal: 0, estadual: 0, municipal: 0 }
   const valorReais = Math.round(input.valorServicoCents) / 100
 
-  // Lei da Transparência: os percentuais viram valor sobre o serviço.
-  const tributoDe = (pct: number) => Math.round(valorReais * pct) / 100
+  // Percentual sobre o bruto, em reais com 2 casas (R$ 150 × 0,65% = 0,975 → 0,98, igual ao portal).
+  const pctDoBruto = (pct: number) => Math.round(valorReais * pct) / 100
 
   return {
     data_emissao: emissao,
@@ -173,7 +263,7 @@ export function buildDps(cfg: FocusConfig, input: DpsInput): Record<string, unkn
 
     // CPF e CNPJ são campos DIFERENTES: mandar CNPJ no campo de CPF passa na validação de
     // parâmetro e só quebra lá na frente, no XSD.
-    ...(doc.length > 11 ? { cnpj_tomador: doc } : { cpf_tomador: doc }),
+    cpf_tomador: doc,
     razao_social_tomador: input.tomador.nome,
     codigo_municipio_tomador: input.tomador.codigoMunicipio ?? cfg.codigoMunicipio,
     cep_tomador: onlyDigits(input.tomador.cep),
@@ -184,16 +274,26 @@ export function buildDps(cfg: FocusConfig, input: DpsInput): Record<string, unkn
 
     codigo_municipio_prestacao: cfg.codigoMunicipio,
     codigo_tributacao_nacional_iss: cfg.codigoTributacaoNacional,
+    codigo_nbs: cfg.codigoNbs,
     descricao_servico: input.descricaoServico,
     valor_servico: valorReais,
     tributacao_iss: '1',      // operação tributável
     tipo_retencao_iss: '1',   // não retido
 
+    // Tributação federal de apuração própria, sobre o bruto (tela "Valores" do portal).
+    situacao_tributaria_pis_cofins: cfg.pisCofins.cst,
+    base_calculo_pis_cofins: valorReais,
+    aliquota_pis: cfg.pisCofins.aliquotaPis,
+    aliquota_cofins: cfg.pisCofins.aliquotaCofins,
+    valor_pis: pctDoBruto(cfg.pisCofins.aliquotaPis),
+    valor_cofins: pctDoBruto(cfg.pisCofins.aliquotaCofins),
+    tipo_retencao_pis_cofins: '0',   // PIS/COFINS/CSLL NÃO retidos — vale para pessoa física
+
     // pegadinha 2 — indicador FALSE + os três valores separados
     indicador_total_tributacao: false,
-    valor_total_tributos_federais: tributoDe(trib.federal),
-    valor_total_tributos_estaduais: tributoDe(trib.estadual),
-    valor_total_tributos_municipais: tributoDe(trib.municipal),
+    valor_total_tributos_federais: pctDoBruto(trib.federal),
+    valor_total_tributos_estaduais: pctDoBruto(trib.estadual),
+    valor_total_tributos_municipais: pctDoBruto(trib.municipal),
   }
 }
 

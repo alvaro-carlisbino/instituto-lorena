@@ -2,14 +2,20 @@
  * crm-focus-nfse — emite, consulta e cancela NFS-e da clínica pela Focus NFe (ambiente nacional).
  *
  * Autenticado (painel): exige Authorization do usuário e resolve o polo por current_tenant_id.
+ * Rotina (service_role, p.ex. cron de reconciliação ou smoke test): manda `tenantId` no body.
  * Polo sem `tenant_integrations.focus` configurado não emite nada — é assim que o Tricopill
  * fica de fora sem precisar de CNPJ cravado no código.
  *
  * Ações (body.action):
- *   get_config -> { configured, ambiente, tributosPendentes }
- *   emitir     -> { ref?, leadId?, valorCents, descricao, tomador:{documento,nome,...} }
+ *   get_config -> { configured, ambiente, tributosPendentes, servicos[] }
+ *   emitir     -> { ref?, leadId?, valorCents, servico (key) | descricao, tomador:{documento(CPF),nome,...} }
  *   consultar  -> { ref }   relê a Focus e atualiza a linha (o webhook pode ter se perdido)
  *   cancelar   -> { ref, justificativa }
+ *   reconciliar-> { dias? }
+ *
+ * Regras do financeiro (Kauan, 19/ago/2026) que moram em `_shared/focusNfse.ts`: só tomador
+ * pessoa física (CNPJ devolve `tomador_pj_emissao_manual` e NÃO emite), descrição de uma lista
+ * fechada por tipo de atendimento, PIS/COFINS não retidos sobre o bruto, competência = hoje.
  *
  * A emissão é ASSÍNCRONA: o retorno normal é `processando_autorizacao`. Quem chama NÃO pode
  * dizer ao paciente que a nota saiu com base nesta resposta — só `autorizado` prova.
@@ -20,9 +26,12 @@ import {
   buildDps,
   cancelarNfse,
   consultarNfse,
+  descricaoDoServico,
   emitirNfse,
   lerValoresDoXml,
   readFocusConfig,
+  SERVICOS_CLINICA,
+  TomadorPjError,
   type FocusResposta,
 } from '../_shared/focusNfse.ts'
 
@@ -35,6 +44,31 @@ function json(body: Record<string, unknown>, status = 200): Response {
 }
 
 const str = (v: unknown, fallback = '') => (v == null ? fallback : String(v).trim())
+
+/**
+ * A chave service_role que chega no Authorization nem sempre é byte a byte a que o runtime tem
+ * em SUPABASE_SERVICE_ROLE_KEY (medido em 19/ago: a chave da CLI funciona no PostgREST e o
+ * digest do secret do runtime é outro). Então: lê o claim `role` do JWT e, se disser
+ * service_role, CONFIRMA a assinatura no PostgREST — um JWT forjado com esse claim toma 401 lá.
+ * Nunca confiar só no claim: verify_jwt já virou false por acidente em redeploy antes.
+ */
+async function ehServiceRoleAssinada(supabaseUrl: string, bearer: string): Promise<boolean> {
+  try {
+    const parts = bearer.split('.')
+    if (parts.length !== 3) return false
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const claims = JSON.parse(atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), '='))) as Record<string, unknown>
+    if (claims.role !== 'service_role') return false
+    // O que importa aqui é a ASSINATURA: PostgREST devolve 401 para JWT que não foi assinado
+    // pelo projeto, seja qual for o claim. Um 200 prova que é a service_role de verdade.
+    const res = await fetch(`${supabaseUrl}/rest/v1/tenant_integrations?select=tenant_id&limit=1`, {
+      headers: { apikey: bearer, Authorization: `Bearer ${bearer}` },
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
 
 /**
  * Campos da nota que a resposta da Focus atualiza. Um só lugar para não divergir.
@@ -69,11 +103,6 @@ Deno.serve(async (req) => {
 
   const authHeader = req.headers.get('Authorization')
   if (!authHeader) return json({ error: 'unauthorized' }, 401)
-  const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
-    global: { headers: { Authorization: authHeader } },
-  })
-  const { data: { user }, error: userErr } = await userClient.auth.getUser()
-  if (userErr || !user) return json({ error: 'unauthorized' }, 401)
 
   let p: Record<string, unknown> = {}
   try {
@@ -83,8 +112,25 @@ Deno.serve(async (req) => {
     return json({ error: 'invalid_json' }, 400)
   }
 
-  const { data: tid } = await userClient.rpc('current_tenant_id')
-  const tenantId = typeof tid === 'string' ? tid.trim() : ''
+  // Máquina (service_role) x pessoa (JWT de usuário). auth.getUser() não devolve usuário para a
+  // service_role key, então o caminho de rotina é reconhecido pela chave e recebe o polo no
+  // body; o painel continua exigindo usuário real e resolve o polo pelo RLS.
+  const bearer = authHeader.replace(/^Bearer\s+/i, '').trim()
+  const isServiceRole = bearer.length > 0 && (bearer === serviceRole || await ehServiceRoleAssinada(supabaseUrl, bearer))
+  let user: { id: string } | null = null
+  let tenantId = ''
+  if (isServiceRole) {
+    tenantId = str(p.tenantId)
+  } else {
+    const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+      global: { headers: { Authorization: authHeader } },
+    })
+    const { data: { user: u }, error: userErr } = await userClient.auth.getUser()
+    if (userErr || !u) return json({ error: 'unauthorized' }, 401)
+    user = { id: u.id }
+    const { data: tid } = await userClient.rpc('current_tenant_id')
+    tenantId = typeof tid === 'string' ? tid.trim() : ''
+  }
   if (!tenantId) return json({ error: 'tenant_not_resolved' }, 400)
 
   const cfg = await readFocusConfig(admin, tenantId)
@@ -97,6 +143,9 @@ Deno.serve(async (req) => {
       ambiente: cfg?.ambiente ?? null,
       // A tela precisa saber ANTES de o usuário digitar a nota inteira que produção está travada.
       tributosPendentes: !!cfg && cfg.ambiente === 'producao' && !cfg.tributosAproximados,
+      // A lista fechada de descrições: a tela oferece, não inventa.
+      servicos: SERVICOS_CLINICA,
+      apenasPessoaFisica: true,
     })
   }
 
@@ -114,14 +163,22 @@ Deno.serve(async (req) => {
     }
 
     const valorCents = Math.round(Number(p.valorCents ?? 0))
-    const descricao = str(p.descricao)
+    // `servico` (chave da lista fechada) é o caminho normal; `descricao` livre só como
+    // exceção explícita de quem chama — e nunca os dois misturados.
+    const servicoKey = str(p.servico)
+    const descricao = servicoKey ? (descricaoDoServico(servicoKey) ?? '') : str(p.descricao)
     const tomadorRaw = (p.tomador ?? {}) as Record<string, unknown>
     const documento = str(tomadorRaw.documento).replace(/\D/g, '')
     const nome = str(tomadorRaw.nome)
 
     if (!Number.isFinite(valorCents) || valorCents <= 0) return json({ error: 'valor_invalido' }, 400)
+    if (servicoKey && !descricao) return json({ error: 'servico_desconhecido', detail: `Use uma das chaves: ${SERVICOS_CLINICA.map((s) => s.key).join(', ')}.` }, 400)
     if (!descricao) return json({ error: 'descricao_obrigatoria' }, 400)
-    if (documento.length !== 11 && documento.length !== 14) return json({ error: 'documento_tomador_invalido' }, 400)
+    if (documento.length === 14) {
+      // Regra do financeiro: PJ tem retenção na fonte por faixa e é nota manual do Kauan.
+      return json({ error: 'tomador_pj_emissao_manual', detail: new TomadorPjError().message }, 400)
+    }
+    if (documento.length !== 11) return json({ error: 'documento_tomador_invalido' }, 400)
     if (!nome) return json({ error: 'nome_tomador_obrigatorio' }, 400)
 
     // `ref` estável quando quem chama sabe a origem (venda, atendimento). Reemitir com a mesma
@@ -129,20 +186,26 @@ Deno.serve(async (req) => {
     // duplo-clique e do retry. Sem origem, gera uma e o índice único cuida do resto.
     const ref = str(p.ref) || `nfse-${tenantId}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
 
-    const dps = buildDps(cfg, {
-      valorServicoCents: valorCents,
-      descricaoServico: descricao,
-      tomador: {
-        documento,
-        nome,
-        cep: str(tomadorRaw.cep),
-        logradouro: str(tomadorRaw.logradouro),
-        numero: str(tomadorRaw.numero),
-        bairro: str(tomadorRaw.bairro),
-        codigoMunicipio: str(tomadorRaw.codigoMunicipio) || undefined,
-        email: str(tomadorRaw.email) || undefined,
-      },
-    })
+    let dps: Record<string, unknown>
+    try {
+      dps = buildDps(cfg, {
+        valorServicoCents: valorCents,
+        descricaoServico: descricao,
+        tomador: {
+          documento,
+          nome,
+          cep: str(tomadorRaw.cep),
+          logradouro: str(tomadorRaw.logradouro),
+          numero: str(tomadorRaw.numero),
+          bairro: str(tomadorRaw.bairro),
+          codigoMunicipio: str(tomadorRaw.codigoMunicipio) || undefined,
+          email: str(tomadorRaw.email) || undefined,
+        },
+      })
+    } catch (e) {
+      if (e instanceof TomadorPjError) return json({ error: 'tomador_pj_emissao_manual', detail: e.message }, 400)
+      throw e
+    }
 
     // Grava ANTES de chamar a Focus. Se a rede cair depois do POST, a nota pode existir lá e
     // não aqui — e nota fiscal órfã é pior que linha pendente. Com a linha já criada, o
@@ -158,7 +221,7 @@ Deno.serve(async (req) => {
       payload: dps,
       ambiente: cfg.ambiente,
       lead_id: str(p.leadId) || null,
-      created_by: user.id,
+      created_by: user?.id ?? null,
     })
     if (insErr && !String(insErr.message ?? '').includes('duplicate')) {
       return json({ error: 'db_insert_failed', detail: String(insErr.message ?? '').slice(0, 200) }, 500)
