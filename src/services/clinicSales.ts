@@ -86,8 +86,11 @@ export type ClinicSale = {
    * A venda continua sem data marcada: o que foi dispensado é a cobrança.
    */
   noDateDismissedAt: string | null
+  /** Por que ela saiu da fila "sem data" — o que a lista de dispensadas mostra. */
+  noDateDismissedReason: string | null
   /** O mesmo para a fila "sem paciente". A venda continua sem cadastro vinculado. */
   noPatientDismissedAt: string | null
+  noPatientDismissedReason: string | null
   createdAt: string
 }
 
@@ -226,7 +229,9 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
     surgeryAccountId: str(r.surgery_account_id),
     srgSurgeryId: r.srg_surgery_id != null ? Number(r.srg_surgery_id) : null,
     noDateDismissedAt: str(r.no_date_dismissed_at),
+    noDateDismissedReason: str(r.no_date_dismissed_reason),
     noPatientDismissedAt: str(r.no_patient_dismissed_at),
+    noPatientDismissedReason: str(r.no_patient_dismissed_reason),
     createdAt: String(r.created_at ?? ''),
   }
 }
@@ -238,7 +243,8 @@ const SALE_COLS =
   'schedule_pending, duration_minutes, room, hotel_needed, contract_url, note, status, canceled_at, ' +
   'cancel_reason, refund_status, cancel_note, surgery_account_id, srg_surgery_id, created_at, ' +
   'confirmation_status, confirmation_at, confirmation_note, cost_materials_cents, cost_doctor_cents, ' +
-  'tax_cents, cost_other_cents, profit_cents, no_date_dismissed_at, no_patient_dismissed_at'
+  'tax_cents, cost_other_cents, profit_cents, no_date_dismissed_at, no_date_dismissed_reason, ' +
+  'no_patient_dismissed_at, no_patient_dismissed_reason'
 
 export async function listClinicSales(kind?: ClinicSaleKind, limit = 400): Promise<ClinicSale[]> {
   const client = assertClient()
@@ -416,15 +422,21 @@ export async function rescheduleSale(id: string, scheduledAt: string | null): Pr
 }
 
 /**
- * Colunas da dispensa. Dispensar carimba quem e quando; devolver limpa os dois,
- * para "dispensada" nunca virar um estado com dono e sem data.
+ * Colunas da dispensa. Dispensar carimba quem, quando e por quê; devolver limpa
+ * os três, para "dispensada" nunca virar um estado com dono e sem data.
  */
-function patchDaDispensa(fila: FilaPendenciaVenda, dispensar: boolean, quem: string | null) {
+function patchDaDispensa(
+  fila: FilaPendenciaVenda,
+  dispensar: boolean,
+  quem: string | null,
+  motivo?: string | null,
+) {
   const em = dispensar ? new Date().toISOString() : null
   const por = dispensar ? quem : null
+  const porque = dispensar ? (motivo ?? '').trim() || null : null
   return fila === 'sem-data'
-    ? { no_date_dismissed_at: em, no_date_dismissed_by: por }
-    : { no_patient_dismissed_at: em, no_patient_dismissed_by: por }
+    ? { no_date_dismissed_at: em, no_date_dismissed_by: por, no_date_dismissed_reason: porque }
+    : { no_patient_dismissed_at: em, no_patient_dismissed_by: por, no_patient_dismissed_reason: porque }
 }
 
 async function usuarioAtual(): Promise<string | null> {
@@ -444,11 +456,12 @@ export async function dispensarPendencia(
   id: string,
   fila: FilaPendenciaVenda,
   dispensar: boolean,
+  motivo?: string | null,
 ): Promise<void> {
   const client = assertClient()
   const { error } = await client
     .from('clinic_sales')
-    .update(patchDaDispensa(fila, dispensar, await usuarioAtual()))
+    .update(patchDaDispensa(fila, dispensar, await usuarioAtual(), motivo))
     .eq('id', id)
   if (error) throw new Error(error.message)
 }
@@ -463,11 +476,12 @@ export async function dispensarPendencia(
 export async function zerarFilaDePendencia(
   kind: ClinicSaleKind,
   fila: FilaPendenciaVenda,
+  motivo?: string | null,
 ): Promise<number> {
   const client = assertClient()
   let q = client
     .from('clinic_sales')
-    .update(patchDaDispensa(fila, true, await usuarioAtual()))
+    .update(patchDaDispensa(fila, true, await usuarioAtual(), motivo))
     .eq('kind', kind)
     .neq('status', 'cancelada')
 

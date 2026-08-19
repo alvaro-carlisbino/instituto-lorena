@@ -63,7 +63,9 @@ const venda = (over: Partial<ClinicSale> = {}): ClinicSale =>
     surgeryAccountId: null,
     srgSurgeryId: null,
     noDateDismissedAt: null,
+    noDateDismissedReason: null,
     noPatientDismissedAt: null,
+    noPatientDismissedReason: null,
     createdAt: '2026-08-05T12:00:00Z',
     ...over,
   }) satisfies ClinicSale

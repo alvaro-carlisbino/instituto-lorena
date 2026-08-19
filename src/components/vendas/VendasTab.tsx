@@ -5,6 +5,7 @@ import {
   Ban,
   BellOff,
   CalendarOff,
+  Eraser,
   FileSpreadsheet,
   FileWarning,
   Pencil,
@@ -80,6 +81,19 @@ const parseMoney = (v: string): number => {
   const n = Number(limpo)
   return Number.isFinite(n) ? Math.round(n * 100) : 0
 }
+
+/** O carimbo da dispensa, para a lista de dispensadas dizer quando e por quê. */
+const dispensaDaVenda = (s: ClinicSale, fila: FilaPendenciaVenda) =>
+  fila === 'sem-data'
+    ? { em: s.noDateDismissedAt, motivo: s.noDateDismissedReason }
+    : { em: s.noPatientDismissedAt, motivo: s.noPatientDismissedReason }
+
+/**
+ * Motivo que já vem escrito ao zerar, igual ao da fila de pós-consulta na aba ao
+ * lado: quase sempre é o mesmo caso — passivo antigo que ninguém vai resolver.
+ */
+const MOTIVO_PADRAO_FILA = 'Passivo antigo: a fila passa a contar de hoje'
+
 const dia = (iso: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR') : '—')
 
 const nomeDoMes = (m: string) => {
@@ -197,6 +211,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [verDispensadas, setVerDispensadas] = useState(false)
   const [zerando, setZerando] = useState<FilaPendenciaVenda | null>(null)
   const [zerandoAgora, setZerandoAgora] = useState(false)
+  const [motivoZerar, setMotivoZerar] = useState(MOTIVO_PADRAO_FILA)
   const [status, setStatus] = useState<FiltroStatusVendas>('ativas')
   const [termo, setTermo] = useState('')
   // A lista tem até 400 linhas: adiar o filtro mantém a digitação fluida.
@@ -352,8 +367,9 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
     if (!zerando) return
     setZerandoAgora(true)
     try {
-      const quantas = await zerarFilaDePendencia(kind, zerando)
+      const quantas = await zerarFilaDePendencia(kind, zerando, motivoZerar)
       setZerando(null)
+      setMotivoZerar(MOTIVO_PADRAO_FILA)
       setVerDispensadas(false)
       toast.success(
         quantas === 0
@@ -692,7 +708,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
                   {!verDispensadas && naFila.length > 0 && (
                     <Button size="sm" variant="outline" onClick={() => setZerando(fila)}>
-                      <BellOff className="size-3.5" aria-hidden /> Zerar a fila ({naFila.length})
+                      <Eraser className="size-3.5" aria-hidden /> Zerar a fila ({naFila.length})
                     </Button>
                   )}
                   {(dispensadasDaFila.length > 0 || verDispensadas) && (
@@ -804,6 +820,14 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                         {s.city && <div className="text-xs text-muted-foreground">{s.city}</div>}
                         {!s.leadId && (
                           <div className="text-xs text-destructive">sem paciente vinculado</div>
+                        )}
+                        {/* Na lista de dispensadas, quando e por quê — senão daqui a
+                            seis meses ninguém sabe por que a fila esvaziou de uma vez. */}
+                        {verDispensadas && fila && (
+                          <div className="text-xs text-muted-foreground">
+                            dispensada em {dia(dispensaDaVenda(s, fila).em)}
+                            {dispensaDaVenda(s, fila).motivo ? ` · ${dispensaDaVenda(s, fila).motivo}` : ''}
+                          </div>
                         )}
                         {/* O que as colunas escondidas no celular diriam. */}
                         <div className="text-xs text-muted-foreground sm:hidden">{s.procedureLabel}</div>
@@ -1157,6 +1181,13 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
               Quem entrar na fila a partir de agora aparece aqui normalmente. Para rever o que saiu,
               use &ldquo;Ver dispensadas&rdquo; — e dá para devolver qualquer uma para a fila.
             </p>
+            <div className="space-y-1.5">
+              <Label>Motivo</Label>
+              <Input value={motivoZerar} onChange={(e) => setMotivoZerar(e.target.value)} />
+              <p className="text-xs text-muted-foreground">
+                Fica registrado com a data e com quem zerou, e aparece na lista de dispensadas.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="ghost" disabled={zerandoAgora} onClick={() => setZerando(null)}>
