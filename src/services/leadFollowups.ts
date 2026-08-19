@@ -188,8 +188,31 @@ export const FUNIL_CIRURGICO = 'pipeline-processo-cirurgico'
 export const FUNIL_PROTOCOLOS = 'pipeline-protocolos'
 /** O funil da recepção, antes de a triagem decidir transplante ou protocolo. */
 export const FUNIL_TRIAGEM = 'pipeline-clinica'
-/** Os únicos funis que a Central de Vendas da clínica enxerga. */
-export const FUNIS_DA_CLINICA = [FUNIL_CIRURGICO, FUNIL_PROTOCOLOS, FUNIL_TRIAGEM]
+/**
+ * O funil velho do transplante. Não é lixo de migração: tem 183 pacientes e
+ * continua recebendo gente pela triagem antiga.
+ */
+export const FUNIL_TRANSPLANTE_ANTIGO = 'pipeline-tratamento-capilar'
+
+/** As duas filas de transplante: a nova e a que nunca foi migrada. */
+export const FUNIS_CIRURGICOS = [FUNIL_CIRURGICO, FUNIL_TRANSPLANTE_ANTIGO]
+
+/**
+ * Em qual das duas filas o card aparece.
+ *
+ * `ambas` é a regra que impede o quadro de comer paciente. Antes a tela partia de
+ * uma lista fixa de três funis e escondia o que não estivesse nela: em 19/08/2026
+ * o Paulo Cesar recebeu follow-up com data e nota ("Pediu 2 dias para fechar"),
+ * sumiu da fila de pós-consulta e não apareceu em lugar nenhum, porque o card
+ * dele mora no `pipeline-tratamento-capilar`. Funil que a tela não conhece agora
+ * aparece nas duas filas, como já era com a triagem — mostrar duas vezes é ruim,
+ * sumir é inaceitável.
+ */
+export function filaDoFunil(pipelineId: string | null): 'cirurgia' | 'protocolo' | 'ambas' {
+  if (pipelineId === FUNIL_PROTOCOLOS) return 'protocolo'
+  if (pipelineId != null && FUNIS_CIRURGICOS.includes(pipelineId)) return 'cirurgia'
+  return 'ambas'
+}
 
 /**
  * Troca o paciente de funil sem perder o follow-up.

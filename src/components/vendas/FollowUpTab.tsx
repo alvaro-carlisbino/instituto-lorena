@@ -38,6 +38,8 @@ import { Label } from '@/components/ui/label'
 import { SearchField } from '@/components/ui/search-field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { useCrm } from '@/context/CrmContext'
+import { useTenant } from '@/context/TenantContext'
 import { combinaBusca } from '@/lib/busca'
 import { cn } from '@/lib/utils'
 import {
@@ -45,8 +47,6 @@ import {
   FOLLOWUP_OUTCOMES,
   FUNIL_CIRURGICO,
   FUNIL_PROTOCOLOS,
-  FUNIL_TRIAGEM,
-  FUNIS_DA_CLINICA,
   KANBAN_COLUNAS,
   type FollowupDispensado,
   type KanbanCard,
@@ -56,6 +56,7 @@ import {
   dispensarFollowups,
   listFollowupKanban,
   listFollowupsDispensados,
+  filaDoFunil,
   moverLeadDeFunil,
   reabrirFollowup,
 } from '@/services/leadFollowups'
@@ -121,6 +122,8 @@ const ABERTAS: KanbanColuna[] = ['contato_1', 'contato_2', 'contato_3', 'em_acom
  * acontecido, e ninguém sabia de qual das quatro colunas cobrar.
  */
 export function FollowUpTab() {
+  const crm = useCrm()
+  const { tenant } = useTenant()
   const [cards, setCards] = useState<KanbanCard[]>([])
   const [loading, setLoading] = useState(false)
   const [alvo, setAlvo] = useState<KanbanCard | null>(null)
@@ -172,22 +175,25 @@ export function FollowUpTab() {
   }, [])
 
   const visiveis = useMemo(() => {
-    // Primeiro corte: só funil da CLÍNICA. Quem enxerga os dois polos via 3 leads
-    // do Tricopill no follow-up da clínica — a fila de vender cápsula no meio da
-    // fila de transplante. Polo não se mistura nem na tela.
-    const daClinica = cards.filter(
-      (c) => c.pipelineId != null && FUNIS_DA_CLINICA.includes(c.pipelineId),
-    )
+    // O quadro é da CLÍNICA porque o follow-up é da clínica: quem marca contato
+    // aqui é a Aline ou a Ingrid, e nenhuma outra tela do sistema escreve nesta
+    // tabela. O corte por funil que existia aqui prometia separar polo e na
+    // prática comia paciente — quatro pacientes de consulta, com proposta de
+    // R$ 5.800 anotada, ficaram invisíveis só porque o card deles foi parar no
+    // funil de vendas do Tricopill depois de comprarem cápsula.
+    //
+    // Filtrar é escolher qual fila mostrar primeiro, nunca esconder card com
+    // contato marcado.
     const doFunil =
       funil === 'todos'
-        ? daClinica
-        : // Paciente que ainda não foi triado (funil da recepção) aparece nas duas
-          // filas de propósito: se ele só aparecesse em "todos", ninguém o veria.
-          daClinica.filter(
-            (c) =>
-              c.pipelineId === (funil === 'cirurgia' ? FUNIL_CIRURGICO : FUNIL_PROTOCOLOS) ||
-              c.pipelineId === FUNIL_TRIAGEM,
-          )
+        ? cards
+        : // Paciente que ainda não foi triado (funil da recepção) — e qualquer um
+          // em funil que esta tela não conhece — aparece nas duas filas de
+          // propósito: se só aparecesse em "todos", ninguém o veria.
+          cards.filter((c) => {
+            const fila = filaDoFunil(c.pipelineId)
+            return fila === 'ambas' || fila === funil
+          })
 
     // A fila do dia: só quem já venceu ou vence hoje. É o corte que transforma
     // "todo mundo que existe" na lista do que ela precisa fazer agora.
@@ -215,6 +221,18 @@ export function FollowUpTab() {
     () => visiveis.filter((c) => ABERTAS.includes(c.coluna) && c.diasAtraso > 0).length,
     [visiveis],
   )
+
+  /**
+   * Card cujo funil é de OUTRO polo. Acontece com paciente de consulta que também
+   * compra cápsula: a venda leva o card para o funil do Tricopill e o follow-up
+   * da clínica continua sendo da clínica. O selo existe para ninguém achar que é
+   * lead de cápsula vazando na fila de transplante e "consertar" escondendo de
+   * novo — foi assim que quatro pacientes com proposta viva sumiram do quadro.
+   */
+  const funilDeOutroPolo = (c: KanbanCard) => {
+    const p = crm.pipelineCatalog.find((x) => x.id === c.pipelineId)
+    return p?.tenantId != null && p.tenantId !== tenant.id ? p.name : null
+  }
 
   /**
    * Troca o paciente de funil. É o caso da consulta de transplante que termina em
@@ -377,6 +395,15 @@ export function FollowUpTab() {
                 `${c.cirurgiaEm.slice(0, 10) < hojeIso() ? 'operou em' : 'cirurgia em'} ${dia(c.cirurgiaEm)}`
               : (c.outcome ?? 'sem desfecho registrado')}
         </p>
+        {funilDeOutroPolo(c) && (
+          <Badge
+            variant="outline"
+            className="mt-1 text-[10px] font-normal"
+            title={`O card do paciente está no funil "${funilDeOutroPolo(c)}", de outro polo. O follow-up é da clínica e continua aqui.`}
+          >
+            card no funil {funilDeOutroPolo(c)}
+          </Badge>
+        )}
         {c.note && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{c.note}</p>}
         <div className="mt-1.5 flex items-center gap-1">
           {fone.length >= 10 && (

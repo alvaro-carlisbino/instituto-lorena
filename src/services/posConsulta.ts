@@ -270,8 +270,15 @@ export async function encaminharItem(
   const leadId = item.leadId ?? (await criarCardDoPaciente(item, destino, ctx))
 
   // Card que já existia muda de funil; o que acabou de nascer já nasceu no lugar.
+  //
+  // O `.select('id')` não é enfeite: card de paciente que também compra cápsula
+  // mora no polo do Tricopill, e a RLS devolve ZERO LINHA sem erro nenhum. Em
+  // 18/08/2026 o Robson José saiu da fila com o toast "foi para o funil de
+  // protocolos" e o card dele continuou, intacto, no funil de vendas do outro
+  // polo. Sem linha de volta, o encaminhamento falha aqui — antes de criar
+  // follow-up e antes de tirar o paciente da fila.
   if (!cardCriado && alvo.pipeline && alvo.stage) {
-    const { error } = await client
+    const { data: movidos, error } = await client
       .from('leads')
       .update({
         pipeline_id: alvo.pipeline,
@@ -279,7 +286,14 @@ export async function encaminharItem(
         stage_entered_at: new Date().toISOString(),
       })
       .eq('id', leadId)
+      .select('id')
     if (error) throw new Error(error.message)
+    if ((movidos ?? []).length === 0) {
+      throw new Error(
+        `O card de ${item.paciente} não pôde ser movido para o ${DESTINO_LABEL[destino]}: ele está fora do alcance deste polo. ` +
+          'Marque o retorno pelo Follow-up ou fale com quem administra o card.',
+      )
+    }
   }
 
   await scheduleFollowup({
