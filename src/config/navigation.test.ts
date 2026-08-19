@@ -54,3 +54,38 @@ describe('navegação por polo', () => {
     expect(enxerga(vendas)).not.toContain('/agenda')
   })
 })
+
+/**
+ * Quem vende a cirurgia é da COBRANÇA dela, não do financeiro.
+ *
+ * A Aline (gestor da clínica, `can_view_finance = false`) trabalha inteiramente no
+ * sistema desde 19/08/2026 e precisa responder "essa cirurgia foi paga?". O resto do
+ * bloco — contas a pagar, extrato do banco, DRE, caixa — continua atrás do papel de
+ * financeiro. Este teste existe para a próxima tela de dinheiro não entrar de carona.
+ */
+describe('cobrança da venda sem papel de financeiro', () => {
+  const consultora: NavContext = {
+    permissions: { ...podeTudo, canManageUsers: false, canViewFinance: false },
+    isSalesPolo: false,
+  }
+
+  it('enxerga "Cirurgia foi paga?"', () => {
+    expect(enxerga(consultora)).toContain('/cirurgia-paga')
+  })
+
+  it('não enxerga o resto do financeiro', () => {
+    const vistas = enxerga(consultora)
+    for (const rota of [
+      '/extrato',
+      '/dre',
+      '/contas-a-pagar',
+      '/contas-a-receber',
+      '/caixa-dinheiro',
+      '/conciliacao',
+      '/fluxo-caixa',
+      '/alertas-pagamento',
+    ]) {
+      expect(vistas).not.toContain(rota)
+    }
+  })
+})

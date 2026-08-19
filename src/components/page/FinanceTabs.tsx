@@ -10,22 +10,26 @@
 
 import { NavLink, useLocation } from 'react-router-dom'
 
+import { useTenant } from '@/context/TenantContext'
 import { cn } from '@/lib/utils'
 import { FINANCE_GROUPS, abasVisiveis as visiveis, grupoDaRota } from '@/config/financeNav'
 
 export function FinanceTabs({ isSalesPolo }: { isSalesPolo: boolean }) {
   const { pathname } = useLocation()
+  // Quem entra só pela cobrança da cirurgia não é do financeiro: a régua mostra
+  // as abas que ela abre, e não dez atalhos para tela trancada.
+  const { canViewFinance } = useTenant()
   const grupo = grupoDaRota(pathname)
 
-  const grupos = FINANCE_GROUPS.filter((g) => visiveis(g.tabs, isSalesPolo).length > 0)
-  const abas = visiveis(grupo.tabs, isSalesPolo)
+  const grupos = FINANCE_GROUPS.filter((g) => visiveis(g.tabs, isSalesPolo, canViewFinance).length > 0)
+  const abas = visiveis(grupo.tabs, isSalesPolo, canViewFinance)
 
   return (
     <div className="mb-4 space-y-2">
       {/* Nível 1: a pergunta. Link vai pra primeira aba visível do grupo. */}
       <nav aria-label="Áreas do financeiro" className="flex gap-1 overflow-x-auto">
         {grupos.map((g) => {
-          const destino = visiveis(g.tabs, isSalesPolo)[0]?.to ?? '#'
+          const destino = visiveis(g.tabs, isSalesPolo, canViewFinance)[0]?.to ?? '#'
           const ativo = g.id === grupo.id
           return (
             <NavLink

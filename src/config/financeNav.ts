@@ -12,7 +12,19 @@
 // lista morava dentro de EstoquePage, e uma tela de ESTOQUE ser dona do menu do FINANCEIRO era
 // metade do motivo de ninguém achar nada.
 
-export type FinanceTab = { to: string; label: string; polo?: 'clinica' | 'vendas' }
+export type FinanceTab = {
+  to: string
+  label: string
+  polo?: 'clinica' | 'vendas'
+  /**
+   * Aba que quem NÃO é do financeiro também abre.
+   *
+   * É a cobrança da própria venda: quem vendeu a cirurgia precisa saber se ela
+   * foi paga. Lê por RPC, mostra semáforo e não abre valor de conta a pagar,
+   * extrato nem DRE — esses continuam só para o financeiro e a gerência.
+   */
+  semFinanceiro?: true
+}
 export type FinanceGroup = { id: string; label: string; tabs: FinanceTab[] }
 
 /**
@@ -27,7 +39,9 @@ export const FINANCE_GROUPS: FinanceGroup[] = [
       { to: '/contas-a-receber', label: 'Contas a receber' },
       { to: '/importar-vendas', label: 'Importar vendas', polo: 'clinica' },
       { to: '/recebimentos', label: 'Recebimentos', polo: 'vendas' },
-      { to: '/links-pagamento', label: 'Links de pagamento' },
+      // Já era de todo mundo no menu (rota sem cerca de financeiro); sem a marca,
+      // quem abrisse a tela via a régua sem a aba da própria tela.
+      { to: '/links-pagamento', label: 'Links de pagamento', semFinanceiro: true },
       { to: '/cupons', label: 'Cupons', polo: 'vendas' },
     ],
   },
@@ -55,7 +69,7 @@ export const FINANCE_GROUPS: FinanceGroup[] = [
     id: 'conferir',
     label: 'Conferir',
     tabs: [
-      { to: '/cirurgia-paga', label: 'Cirurgia foi paga?', polo: 'clinica' },
+      { to: '/cirurgia-paga', label: 'Cirurgia foi paga?', polo: 'clinica', semFinanceiro: true },
       { to: '/caixa-dinheiro', label: 'Caixa em dinheiro', polo: 'clinica' },
       { to: '/alertas-pagamento', label: 'Alertas de pagamento' },
     ],
@@ -80,6 +94,13 @@ export function grupoDaRota(pathname: string): FinanceGroup {
 }
 
 
-/** Abas que este polo enxerga. Aba sem `polo` aparece nos dois. */
-export const abasVisiveis = (tabs: FinanceTab[], isSalesPolo: boolean) =>
-  tabs.filter((t) => !t.polo || (t.polo === 'vendas') === isSalesPolo)
+/**
+ * Abas que esta pessoa enxerga neste polo. Aba sem `polo` aparece nos dois.
+ *
+ * `podeFinanceiro = false` deixa só as abas de cobrança da operação: sem isso, a
+ * régua do financeiro mostrava dez atalhos para telas que a pessoa não abre.
+ */
+export const abasVisiveis = (tabs: FinanceTab[], isSalesPolo: boolean, podeFinanceiro = true) =>
+  tabs.filter(
+    (t) => (!t.polo || (t.polo === 'vendas') === isSalesPolo) && (podeFinanceiro || t.semFinanceiro),
+  )

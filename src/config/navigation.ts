@@ -495,7 +495,10 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: HeartPulse,
     group: 'financeiro',
     keywords: ['cirurgia', 'transplante', 'pagou', 'pagamento', 'auditoria', 'sala'],
-    visible: (ctx) => canFinance(ctx) && isClinic(ctx) && canBoards(ctx),
+    // A única do bloco que não pede papel de financeiro: quem vendeu a cirurgia
+    // precisa saber se ela foi paga, e a tela responde por RPC, em semáforo.
+    // Contas a pagar, extrato e DRE seguem com o financeiro e a gerência.
+    visible: (ctx) => isClinic(ctx) && canBoards(ctx) && (canFinance(ctx) || canRoute(ctx)),
   },
   {
     id: 'conciliacao-shosp',

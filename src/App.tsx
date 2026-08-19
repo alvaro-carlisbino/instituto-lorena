@@ -10,7 +10,7 @@ import { OnboardingPage } from './pages/OnboardingPage'
 import { precisaDefinirSenha } from './lib/authLinkFlow'
 import { PwaInstallBanner } from './components/PwaInstallBanner'
 import { BillingGate } from './components/BillingGate'
-import { FinanceOnly } from './components/FinanceOnly'
+import { CobrancaDaVenda, FinanceOnly } from './components/FinanceOnly'
 import { CommandPalette } from './components/CommandPalette'
 import { PoloGate } from './components/PoloErrado'
 import { RouteTransition } from './components/RouteTransition'
@@ -163,7 +163,7 @@ function AppRoutes() {
         <Route path="/contas-caixa" element={<FinanceOnly><FinAccountsPage /></FinanceOnly>} />
         <Route path="/conciliacao" element={<FinanceOnly><ConciliacaoPage /></FinanceOnly>} />
         <Route path="/conciliacao-shosp" element={<FinanceOnly><ConciliacaoShospPage /></FinanceOnly>} />
-        <Route path="/cirurgia-paga" element={<FinanceOnly><CirurgiaPagamentoPage /></FinanceOnly>} />
+        <Route path="/cirurgia-paga" element={<CobrancaDaVenda><CirurgiaPagamentoPage /></CobrancaDaVenda>} />
         <Route path="/caixa-dinheiro" element={<FinanceOnly><CaixaDinheiroPage /></FinanceOnly>} />
         <Route path="/extrato" element={<FinanceOnly><ExtratoPage /></FinanceOnly>} />
         <Route path="/financeiro-config" element={<FinanceOnly><FinanceiroConfigPage /></FinanceOnly>} />
