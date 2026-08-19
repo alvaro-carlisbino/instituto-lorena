@@ -104,16 +104,29 @@ export async function quoteCoupon(
   }
 }
 
-/** Conta um uso do cupom (atómico via RPC). Best-effort: nunca lança. */
+/**
+ * Conta UM uso do cupom, uma vez por pagamento. Best-effort: nunca lança.
+ *
+ * `ref` é o id do pagamento que queimou o cupom. O RPC grava uma linha em `coupon_uses`
+ * com chave (tenant, code, ref) e só soma quando a linha é NOVA — sem isso, o poll do Pix
+ * (cron de 2 em 2 minutos), a reentrega de webhook e o retry do Bling contam de novo o
+ * mesmo cupom, e o `max_uses` fecha antes da hora.
+ *
+ * Sem `ref` cai na versão antiga, que soma cego. Só use assim onde não existe id de
+ * pagamento nenhum para amarrar.
+ */
 export async function incrementCouponUse(
   admin: SupabaseClient,
   tenantId: string,
   rawCode: string | null | undefined,
+  ref?: string | null,
 ): Promise<void> {
   const code = normalizeCouponCode(String(rawCode ?? ''))
   if (!code || !tenantId) return
+  const p_ref = String(ref ?? '').trim()
   try {
-    await admin.rpc('increment_coupon_use', { p_tenant: tenantId, p_code: code })
+    if (p_ref) await admin.rpc('increment_coupon_use', { p_tenant: tenantId, p_code: code, p_ref })
+    else await admin.rpc('increment_coupon_use', { p_tenant: tenantId, p_code: code })
   } catch {
     // best-effort — não bloqueia o fluxo de pagamento
   }

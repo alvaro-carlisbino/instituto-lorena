@@ -192,19 +192,53 @@ export function localDeliveryCents(cityInfo?: { localidade?: string; uf?: string
   return raw !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n) : 1500
 }
 
+/** Último dia da promoção de agosto/2026 (kit 3+1 com frete grátis). A data manda. */
+export const PROMO_FRETE_KIT3_ATE = '2026-08-31'
+
+/** Dia de hoje em São Paulo (YYYY-MM-DD). A promo vira pela data LOCAL, não pela UTC. */
+function diaLocalSP(d = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d)
+}
+
 /**
- * Kits com FRETE GRÁTIS (alavanca de ticket — incentiva subir pro kit maior). Default: só
- * o kit de 5 meses. Override por env `FRETE_GRATIS_KITS` = csv de chaves canônicas
- * (ex.: "5_meses,3_meses"; "none" desliga). O frete grátis vale em QUALQUER modalidade
- * (entrega local ou Correios) — o servidor zera tanto no que COBRA (resolveFreightCents)
- * quanto no que MOSTRA (snapshot.frete.por_kit).
+ * Kits com FRETE GRÁTIS HOJE, pela data (sem o override de env).
+ *
+ * O kit de 5 meses é PERMANENTE (alavanca de ticket — incentiva subir pro kit maior). O kit
+ * 3+1 é PROMOÇÃO DE AGOSTO/2026 (decisão do dono, 17/08) e vale só até 31/08: em 01/09 ele
+ * sai sozinho, sem ninguém precisar lembrar. É a MESMA regra do servidor do site
+ * (`PROMO_FRETE_KIT3_ATE` em `_shared/frete.ts` do repo do site) e do gancho de reengajamento
+ * (`crm-reengage-scheduler`) — os três param no mesmo dia.
  */
-export function isFreeShippingKit(kitRaw: unknown): boolean {
+export function freeShippingKits(d = new Date()): Set<string> {
+  const kits = new Set(['5_meses'])
+  if (diaLocalSP(d) <= PROMO_FRETE_KIT3_ATE) kits.add('3_meses')
+  return kits
+}
+
+/**
+ * O frete grátis vale em QUALQUER modalidade (entrega local ou Correios) — o servidor zera
+ * tanto no que COBRA (resolveFreightCents) quanto no que MOSTRA (snapshot.frete.por_kit).
+ *
+ * ⚠️ A promo do 3+1 já morou num env (`FRETE_GRATIS_KITS="5_meses,3_meses"`, setado na mão em
+ * 17/08 e APAGADO em 19/08). Env não conhece data: em 01/09 a IA pararia de anunciar (o texto
+ * do prompt e o gancho do reengajamento têm trava de data) e o servidor continuaria zerando o
+ * frete do 3+1 calado, dando o frete de graça sem ninguém ver. Por isso a promo virou código.
+ *
+ * `FRETE_GRATIS_KITS` segue existindo como override MANUAL (csv de chaves canônicas, ex.
+ * "5_meses,3_meses"; "none" desliga tudo). Quem setar assume o controle: a regra de data acima
+ * deixa de valer e a reversão volta a ser na mão.
+ */
+export function isFreeShippingKit(kitRaw: unknown, d = new Date()): boolean {
   const key = normalizeKitKeyLocal(kitRaw)
   if (!key) return false
   const raw = (Deno.env.get('FRETE_GRATIS_KITS') ?? '').trim().toLowerCase()
   if (raw === 'none') return false
-  const set = raw ? new Set(raw.split(',').map((s) => s.trim()).filter(Boolean)) : new Set(['5_meses'])
+  const set = raw ? new Set(raw.split(',').map((s) => s.trim()).filter(Boolean)) : freeShippingKits(d)
   return set.has(key)
 }
 
@@ -916,6 +950,10 @@ export async function autoShipToCart(
     extras?: FreteExtra[]
     productName: string
     productValueCents: number
+    /** Id do pagamento (ou nº do pedido) — liga o CUSTO da etiqueta à venda em `shipping_labels`. */
+    orderRef?: string | null
+    /** Frete que o cliente PAGOU nessa venda. 0 = frete grátis; a diferença para o custo é o que a promoção tirou da margem. */
+    chargedFreightCents?: number | null
   },
 ): Promise<AutoShipResult> {
   try {
@@ -987,6 +1025,29 @@ export async function autoShipToCart(
       nonCommercial: true,
     })
     if (!res.ok) return { ok: false, reason: 'shipment_failed', error: res.error, cartId: res.cartId }
+
+    // O CUSTO fica registrado. Antes ele morria aqui: o carrinho ia pro Melhor Envio e o
+    // sistema nunca soube quanto a etiqueta custou, então "frete grátis" não aparecia em
+    // relatório nenhum e a conferência acabava sendo feita na caneta em cima do pedido.
+    // Guardado ao lado do que o cliente PAGOU de frete, a conta da promoção vira um select:
+    // a etiqueta de São Paulo custa ~R$29 e a de Sinop ~R$65, na mesma venda de R$746.
+    // Best-effort: gravar o custo nunca pode derrubar o envio.
+    try {
+      await admin.from('shipping_labels').insert({
+        tenant_id: tenantId,
+        lead_id: opts.lead.id,
+        order_ref: opts.orderRef ?? null,
+        cart_id: res.cartId,
+        service: chosen.service ?? null,
+        company: chosen.company ?? null,
+        cost_cents: Number.isFinite(chosen.priceCents) ? Math.round(chosen.priceCents) : null,
+        charged_cents: opts.chargedFreightCents == null ? null : Math.max(0, Math.round(opts.chargedFreightCents)),
+        to_cep: cep,
+        to_city: cityInfo.localidade ?? null,
+        to_uf: cityInfo.uf ?? null,
+      })
+    } catch { /* best-effort: o envio já foi */ }
+
     return { ok: true, cartId: res.cartId }
   } catch (e) {
     return { ok: false, reason: 'exception', error: e instanceof Error ? e.message : String(e) }
@@ -1229,6 +1290,8 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
       kit: paid.kit ?? null,
       productName: paid.kit ? `Tricopill (${paid.kit})` : 'Tricopill',
       productValueCents,
+      orderRef: orderRef || null,
+      chargedFreightCents: Math.max(0, Math.round(Number(paid.freight_cents) || 0)),
     })
 
     // 5. Timeline: registra sucesso ou falha nova (nunca repete o mesmo evento — é o

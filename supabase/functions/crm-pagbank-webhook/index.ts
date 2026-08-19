@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
     paidAmountCents = Number((data as { amount_cents?: number }).amount_cents ?? 0)
     const code = (data as { coupon_code?: string }).coupon_code
     const tenant = paidTenantId
-    if (code) await incrementCouponUse(admin, tenant, code)
+    if (code) await incrementCouponUse(admin, tenant, code, paidCheckoutId)
   }
   if (referenceId) {
     const { data } = await admin

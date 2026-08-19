@@ -78,6 +78,16 @@ Deno.serve(async (req) => {
         note: `Relâmpago automática do Clube (${today}). Expira 22h; ${maxUses} pedidos pagos. Criada pelo crm-clube-promo.`,
       }, { onConflict: 'tenant_id,code' })
       if (cErr) return json({ ok: false, error: 'cupom_falhou', detail: cErr.message }, 500)
+
+      // Apaga a luz atrás de si: as relâmpago de dias anteriores ficavam `active: true` para
+      // sempre. Quem segurava era só a data, então funcionava — mas a lista de cupons ativos
+      // do painel só crescia e ninguém conseguia mais dizer, de bater o olho, o que está
+      // valendo hoje. Best-effort: falhar aqui não pode derrubar a promoção do dia.
+      await admin.from('coupons')
+        .update({ active: false })
+        .eq('tenant_id', 'tricopill').eq('active', true)
+        .like('code', 'RELAMPAGO%').neq('code', flashCoupon)
+        .lt('valid_until', new Date().toISOString())
     }
   } else {
     if (p.force !== true && cfg.last_sent_date === today) return json({ ok: true, skipped: 'ja_enviado_hoje' })

@@ -758,7 +758,7 @@ export async function finalizeRedePaid(
   }
 
   // Conta o uso do cupom só agora (no pago), não na geração do link.
-  await incrementCouponUse(admin, intent.tenantId, intent.couponCode)
+  await incrementCouponUse(admin, intent.tenantId, intent.couponCode, intent.id)
 
   // Comprovante AUTOMÁTICO (e.Rede): TID + código de retorno. Prova de recebimento sem
   // depender de a SDR anexar foto.
@@ -1032,6 +1032,8 @@ export async function finalizeRedePaid(
         extras: addonExtrasFromItems(intent.items),
         productName: orderKit ? `Tricopill (${orderKit})` : 'Tricopill',
         productValueCents: intent.amountCents,
+        orderRef: intent.id,
+        chargedFreightCents: intent.freightCents ?? 0,
       })
       if (ship.ok || ship.skipped || ship.reason) {
         const ent = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>

@@ -168,7 +168,7 @@ Deno.serve(async (req) => {
   } catch (e) {
     return json({ error: 'record_failed', message: e instanceof Error ? e.message : String(e) }, 500)
   }
-  if (coupon.applied) await incrementCouponUse(admin, tenantId, coupon.code)
+  if (coupon.applied) await incrementCouponUse(admin, tenantId, coupon.code, manualPayId)
 
   // 2) Move o lead para a etapa "Pago" (por nome, fallback do funil Tricopill).
   let pagoStageId = 'tricopill__vd-pago'
@@ -245,6 +245,8 @@ Deno.serve(async (req) => {
       kit: kitKey,
       productName: label,
       productValueCents: productCents,
+      orderRef: manualPayId,
+      chargedFreightCents: freightCents,
     })
     if (ship.ok) shipNote = `📦 Envio no carrinho do Melhor Envio (#${ship.cartId}). Finalize a compra no painel.`
     else if (ship.skipped) {

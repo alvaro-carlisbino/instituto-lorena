@@ -1038,7 +1038,7 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
   // Transição pending→paid: marca pago + conta cupom (UMA vez).
   if (!wasPaid) {
     await admin.from('asaas_payments').update({ status: 'paid', paid_at: new Date().toISOString() }).eq('id', localId)
-    if (p.coupon_code) await incrementCouponUse(admin, tenantId, String(p.coupon_code))
+    if (p.coupon_code) await incrementCouponUse(admin, tenantId, String(p.coupon_code), localId)
   }
 
   // Comprovante automático (idempotente pelo índice parcial — pode rodar em repetições).
@@ -1231,6 +1231,8 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
       kit: kit || null,
       productName: kit ? `Tricopill (${kit})` : 'Tricopill',
       productValueCents: amountCents,
+      orderRef: localId,
+      chargedFreightCents: Math.max(0, Math.round(Number(p.freight_cents ?? 0))),
     })
     if (ship.ok || ship.skipped || ship.reason) {
       const ent = ((l.custom_fields as Record<string, unknown> | undefined)?.entrega ?? {}) as Record<string, unknown>
