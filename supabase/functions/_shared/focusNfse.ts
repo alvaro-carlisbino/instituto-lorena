@@ -240,6 +240,21 @@ function isoLocalSaoPaulo(d: Date): string {
   return `${p.replace(' ', 'T')}-03:00`
 }
 
+function enderecoTomador(t: DpsInput['tomador'], municipioPadrao: string): Record<string, unknown> {
+  const cep = onlyDigits(t.cep)
+  const logradouro = str(t.logradouro)
+  const numero = str(t.numero)
+  const bairro = str(t.bairro)
+  if (!cep && !logradouro) return {}
+  return {
+    codigo_municipio_tomador: str(t.codigoMunicipio) || municipioPadrao,
+    ...(cep ? { cep_tomador: cep } : {}),
+    ...(logradouro ? { logradouro_tomador: logradouro } : {}),
+    ...(numero ? { numero_tomador: numero } : {}),
+    ...(bairro ? { bairro_tomador: bairro } : {}),
+  }
+}
+
 export function buildDps(cfg: FocusConfig, input: DpsInput): Record<string, unknown> {
   const emissao = input.dataEmissao ?? isoLocalSaoPaulo(new Date())
   const competencia = emissao.slice(0, 10)
@@ -265,11 +280,9 @@ export function buildDps(cfg: FocusConfig, input: DpsInput): Record<string, unkn
     // parâmetro e só quebra lá na frente, no XSD.
     cpf_tomador: doc,
     razao_social_tomador: input.tomador.nome,
-    codigo_municipio_tomador: input.tomador.codigoMunicipio ?? cfg.codigoMunicipio,
-    cep_tomador: onlyDigits(input.tomador.cep),
-    logradouro_tomador: input.tomador.logradouro ?? '',
-    numero_tomador: input.tomador.numero ?? '',
-    bairro_tomador: input.tomador.bairro ?? '',
+    // Endereço só quando existe: string vazia no campo é `erro_validacao_schema` na Focus
+    // (medido 19/ago). O bloco inteiro é opcional para tomador pessoa física.
+    ...enderecoTomador(input.tomador, cfg.codigoMunicipio),
     ...(input.tomador.email ? { email_tomador: input.tomador.email } : {}),
 
     codigo_municipio_prestacao: cfg.codigoMunicipio,
@@ -311,15 +324,25 @@ export type FocusResposta = {
 export function parseFocusResposta(raw: FocusRaw): FocusResposta {
   const caminhoXml = str(raw.caminho_xml_nota_fiscal)
   const erros = Array.isArray(raw.erros) ? (raw.erros as Array<{ codigo?: string; mensagem?: string }>) : null
+  const status = str(raw.status) || str(raw.codigo) || 'desconhecido'
+  // Falha antes de virar nota (schema, permissão, empresa não habilitada) vem como
+  // `codigo` + `mensagem`, sem array `erros`. Sem guardar a mensagem a tela só via
+  // "erro_validacao_schema" e ninguém sabia qual campo.
+  const mensagem = str(raw.mensagem)
+  const errosOuMensagem = erros && erros.length
+    ? erros
+    : mensagem && status !== 'autorizado' && status !== 'processando_autorizacao' && status !== 'cancelado'
+      ? [{ codigo: status, mensagem }]
+      : null
   return {
     // `codigo` aparece quando a chamada falhou antes de virar nota (schema, permissão).
-    status: str(raw.status) || str(raw.codigo) || 'desconhecido',
+    status,
     numero: str(raw.numero) || null,
     codigoVerificacao: str(raw.codigo_verificacao) || null,
     urlConsulta: str(raw.url) || null,
     urlXml: caminhoXml ? `${XML_BUCKET}${caminhoXml}` : null,
     urlPdf: str(raw.url_danfse) || null,
-    erros: erros && erros.length ? erros : null,
+    erros: errosOuMensagem,
     raw,
   }
 }

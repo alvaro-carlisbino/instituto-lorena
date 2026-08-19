@@ -20,7 +20,7 @@
  * A emissão é ASSÍNCRONA: o retorno normal é `processando_autorizacao`. Quem chama NÃO pode
  * dizer ao paciente que a nota saiu com base nesta resposta — só `autorizado` prova.
  */
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import {
   assertPodeEmitir,
   buildDps,
@@ -37,13 +37,14 @@ import {
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-cron-secret',
 }
 function json(body: Record<string, unknown>, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 }
 
 const str = (v: unknown, fallback = '') => (v == null ? fallback : String(v).trim())
+const onlyDigitsLocal = (v: unknown) => str(v).replace(/\D/g, '')
 
 /**
  * A chave service_role que chega no Authorization nem sempre é byte a byte a que o runtime tem
@@ -92,6 +93,46 @@ async function patchDaResposta(r: FocusResposta): Promise<Record<string, unknown
   }
 }
 
+async function ehCronAutorizado(admin: SupabaseClient, recebido: string | null): Promise<boolean> {
+  const got = (recebido ?? '').trim()
+  if (!got) return false
+  const { data } = await admin.from('app_cron_secrets').select('secret').eq('key', 'focus_nfse').maybeSingle()
+  const esperado = String((data as { secret?: string } | null)?.secret ?? '').trim()
+  return esperado.length > 0 && got === esperado
+}
+
+const FOCUS_PROD_BASE = 'https://api.focusnfe.com.br/v2'
+
+/**
+ * Chamada crua à API de PRODUÇÃO da Focus com o token de produção, independente do
+ * FOCUS_NFE_AMBIENTE. Só para as ações de preparação (sondar habilitação, gatilho), que
+ * precisam enxergar produção ANTES de a gente virar a chave.
+ */
+async function focusProd(method: string, path: string, body?: unknown): Promise<{ status: number; body: Record<string, unknown> | unknown[] }> {
+  const token = (Deno.env.get('FOCUS_NFE_TOKEN_PRODUCAO') ?? '').trim()
+  if (!token) throw new Error('FOCUS_NFE_TOKEN_PRODUCAO ausente')
+  const res = await fetch(`${FOCUS_PROD_BASE}${path}`, {
+    method,
+    headers: { Authorization: `Basic ${btoa(`${token}:`)}`, 'Content-Type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+  const text = await res.text()
+  let parsed: Record<string, unknown> | unknown[] = {}
+  try { parsed = text ? JSON.parse(text) : {} } catch { parsed = { codigo: 'resposta_nao_json', mensagem: text.slice(0, 300) } }
+  return { status: res.status, body: parsed }
+}
+
+/**
+ * A nota pertence ao ambiente em que NASCEU. Depois que a chave virou para produção, as notas
+ * de homologação continuam na tabela (com o selo), e consultar/cancelar uma delas na Focus de
+ * produção devolveria `nao_encontrado` por cima do status real. Rotina e painel só falam com
+ * a Focus do ambiente da própria linha.
+ */
+async function ambienteDaNota(admin: SupabaseClient, tenantId: string, ref: string): Promise<string | null> {
+  const { data } = await admin.from('nfse_notes').select('ambiente').eq('tenant_id', tenantId).eq('ref', ref).maybeSingle()
+  return (data as { ambiente?: string } | null)?.ambiente ?? null
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -117,9 +158,13 @@ Deno.serve(async (req) => {
   // body; o painel continua exigindo usuário real e resolve o polo pelo RLS.
   const bearer = authHeader.replace(/^Bearer\s+/i, '').trim()
   const isServiceRole = bearer.length > 0 && (bearer === serviceRole || await ehServiceRoleAssinada(supabaseUrl, bearer))
+  // pg_cron não tem service_role à mão (ver crm_cron_auth_gotcha): chega com o anon key no
+  // Bearer (passa o gateway) + x-cron-secret conferido contra app_cron_secrets['focus_nfse'].
+  const isCron = !isServiceRole && await ehCronAutorizado(admin, req.headers.get('x-cron-secret'))
+  const isRotina = isServiceRole || isCron
   let user: { id: string } | null = null
   let tenantId = ''
-  if (isServiceRole) {
+  if (isRotina) {
     tenantId = str(p.tenantId)
   } else {
     const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
@@ -135,6 +180,47 @@ Deno.serve(async (req) => {
 
   const cfg = await readFocusConfig(admin, tenantId)
   const action = str(p.action)
+
+  // ───────────────────── preparação de produção (só rotina) ─────────────────────
+  // Sondar habilitação: payload de propósito INCOMPLETO (só prestador + município). A Focus
+  // checa a habilitação da empresa antes dos campos e valida campos antes de assinar, então
+  // a resposta diz se produção está ligada sem nunca virar nota.
+  if (action === 'sondar_producao') {
+    if (!isRotina) return json({ error: 'forbidden' }, 403)
+    if (!cfg) return json({ error: 'focus_not_configured' }, 400)
+    const ref = `sonda-${tenantId}-${Date.now()}`
+    const r = await focusProd('POST', `/nfsen?ref=${encodeURIComponent(ref)}`, {
+      cnpj_prestador: cfg.cnpjPrestador,
+      codigo_municipio_emissora: cfg.codigoMunicipio,
+    })
+    const b = (Array.isArray(r.body) ? {} : r.body) as Record<string, unknown>
+    const codigo = str(b.codigo) || str(b.status)
+    const mensagem = str(b.mensagem)
+    const habilitada = codigo !== 'empresa_nao_habilitada' && !/habilita_nfsen_producao/i.test(mensagem)
+    return json({ ok: true, httpStatus: r.status, codigo, mensagem, habilitada })
+  }
+
+  // Gatilho de produção: a Focus avisa por POST quando a nota muda de estado. Hooks são por
+  // AMBIENTE, e o de homologação já existe; este garante o de produção (idempotente).
+  if (action === 'garantir_webhook') {
+    if (!isRotina) return json({ error: 'forbidden' }, 403)
+    if (!cfg) return json({ error: 'focus_not_configured' }, 400)
+    const secret = (Deno.env.get('FOCUS_NFE_WEBHOOK_SECRET') ?? '').trim()
+    if (!secret) return json({ error: 'webhook_secret_nao_configurado' }, 400)
+    const url = `${supabaseUrl}/functions/v1/crm-focus-webhook`
+    const lista = await focusProd('GET', '/hooks')
+    const hooks = (Array.isArray(lista.body) ? lista.body : []) as Array<Record<string, unknown>>
+    const existente = hooks.find((h) => str(h.url) === url && str(h.event) === 'nfsen' && onlyDigitsLocal(h.cnpj) === cfg.cnpjPrestador)
+    if (existente) return json({ ok: true, criado: false, hook: existente })
+    const criado = await focusProd('POST', '/hooks', {
+      cnpj: cfg.cnpjPrestador,
+      event: 'nfsen',
+      url,
+      authorization: secret,
+      authorization_header: 'x-focus-secret',
+    })
+    return json({ ok: criado.status >= 200 && criado.status < 300, criado: true, httpStatus: criado.status, hook: criado.body })
+  }
 
   if (action === 'get_config') {
     return json({
@@ -243,6 +329,10 @@ Deno.serve(async (req) => {
   if (action === 'consultar') {
     const ref = str(p.ref)
     if (!ref) return json({ error: 'ref_obrigatoria' }, 400)
+    const amb = await ambienteDaNota(admin, tenantId, ref)
+    if (amb && amb !== cfg.ambiente) {
+      return json({ error: 'ambiente_divergente', detail: `Esta nota é de ${amb}; o sistema está em ${cfg.ambiente}.` }, 400)
+    }
     const r = await consultarNfse(cfg, ref)
     await admin.from('nfse_notes').update(await patchDaResposta(r)).eq('tenant_id', tenantId).eq('ref', ref)
     return json({ ok: true, ref, status: r.status, numero: r.numero, urlPdf: r.urlPdf, urlXml: r.urlXml, erros: r.erros })
@@ -255,6 +345,10 @@ Deno.serve(async (req) => {
     if (!ref) return json({ error: 'ref_obrigatoria' }, 400)
     // A SEFIN exige justificativa com tamanho mínimo; recusar aqui evita queimar a tentativa.
     if (justificativa.length < 15) return json({ error: 'justificativa_curta', detail: 'Mínimo de 15 caracteres.' }, 400)
+    const amb = await ambienteDaNota(admin, tenantId, ref)
+    if (amb && amb !== cfg.ambiente) {
+      return json({ error: 'ambiente_divergente', detail: `Esta nota é de ${amb}; o sistema está em ${cfg.ambiente}.` }, 400)
+    }
 
     const r = await cancelarNfse(cfg, ref, justificativa)
     if (r.status === 'cancelado') {
@@ -277,6 +371,7 @@ Deno.serve(async (req) => {
       .from('nfse_notes')
       .select('ref, status')
       .eq('tenant_id', tenantId)
+      .eq('ambiente', cfg.ambiente)
       .in('status', ['autorizado', 'processando_autorizacao'])
       .gte('created_at', desde)
       .order('created_at', { ascending: false })

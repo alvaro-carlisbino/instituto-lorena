@@ -82,6 +82,7 @@ export const FINANCE_GROUPS: FinanceGroup[] = [
       { to: '/fluxo-caixa', label: 'Fluxo de caixa' },
       { to: '/financeiro-config', label: 'Configuração' },
       { to: '/nfe', label: 'Emissão de NF-e', polo: 'vendas' },
+      { to: '/nfse', label: 'Nota de serviço (NFS-e)', polo: 'clinica' },
       { to: '/tricopill-relatorios', label: 'Relatórios', polo: 'vendas' },
     ],
   },

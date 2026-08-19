@@ -96,6 +96,7 @@ const ConciliacaoPage = lazyPage(() => import('./pages/ConciliacaoPage'), 'Conci
 const ConciliacaoShospPage = lazyPage(() => import('./pages/ConciliacaoShospPage'), 'ConciliacaoShospPage')
 const CirurgiaPagamentoPage = lazyPage(() => import('./pages/CirurgiaPagamentoPage'), 'CirurgiaPagamentoPage')
 const CaixaDinheiroPage = lazyPage(() => import('./pages/CaixaDinheiroPage'), 'CaixaDinheiroPage')
+const NfsePage = lazyPage(() => import('./pages/NfsePage'), 'NfsePage')
 const ExtratoPage = lazyPage(() => import('./pages/ExtratoPage'), 'ExtratoPage')
 const FinanceiroConfigPage = lazyPage(() => import('./pages/FinanceiroConfigPage'), 'FinanceiroConfigPage')
 const DrePage = lazyPage(() => import('./pages/DrePage'), 'DrePage')
@@ -167,6 +168,7 @@ function AppRoutes() {
         <Route path="/conciliacao-shosp" element={<FinanceOnly><ConciliacaoShospPage /></FinanceOnly>} />
         <Route path="/cirurgia-paga" element={<CobrancaDaVenda><CirurgiaPagamentoPage /></CobrancaDaVenda>} />
         <Route path="/caixa-dinheiro" element={<FinanceOnly><CaixaDinheiroPage /></FinanceOnly>} />
+        <Route path="/nfse" element={<FinanceOnly><NfsePage /></FinanceOnly>} />
         <Route path="/extrato" element={<FinanceOnly><ExtratoPage /></FinanceOnly>} />
         <Route path="/financeiro-config" element={<FinanceOnly><FinanceiroConfigPage /></FinanceOnly>} />
         <Route path="/dre" element={<FinanceOnly><DrePage /></FinanceOnly>} />

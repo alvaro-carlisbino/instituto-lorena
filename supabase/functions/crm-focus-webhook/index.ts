@@ -51,14 +51,18 @@ Deno.serve(async (req) => {
   // solta — o CRM não é o registro de tudo que existe na conta da Focus.
   const { data: row } = await admin
     .from('nfse_notes')
-    .select('tenant_id, status')
+    .select('tenant_id, status, ambiente')
     .eq('ref', ref)
     .maybeSingle()
   if (!row) return json({ ok: true, skipped: 'nota_desconhecida' })
   const tenantId = String((row as { tenant_id?: string }).tenant_id ?? '')
+  const ambienteDaNota = String((row as { ambiente?: string }).ambiente ?? '')
 
   const cfg = await readFocusConfig(admin, tenantId)
   if (!cfg) return json({ ok: true, skipped: 'focus_not_configured' })
+  // Gatilho de homologação batendo depois que a chave virou para produção (ou vice-versa):
+  // consultar no ambiente errado devolve `nao_encontrado` por cima do status real. Ignora.
+  if (ambienteDaNota && ambienteDaNota !== cfg.ambiente) return json({ ok: true, skipped: 'ambiente_divergente' })
 
   const r = await consultarNfse(cfg, ref)
   const valores = r.status === 'autorizado' && r.urlXml

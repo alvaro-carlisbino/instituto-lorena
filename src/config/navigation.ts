@@ -502,6 +502,17 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: (ctx) => canFinance(ctx) && isClinic(ctx) && canBoards(ctx),
   },
   {
+    // NFS-e é da CLÍNICA (Focus NFe, ambiente nacional); NF-e de produto é do Tricopill
+    // (Bling, /nfe). São dois documentos, duas telas, dois polos — não juntar.
+    id: 'nfse',
+    path: '/nfse',
+    label: 'Nota de serviço (NFS-e)',
+    icon: FileText,
+    group: 'financeiro',
+    keywords: ['nfse', 'nota de serviço', 'nota fiscal', 'focus', 'iss', 'emissão', 'danfse', 'paciente'],
+    visible: (ctx) => canFinance(ctx) && isClinic(ctx) && canBoards(ctx),
+  },
+  {
     id: 'cirurgia-paga',
     path: '/cirurgia-paga',
     label: 'Cirurgia foi paga?',
