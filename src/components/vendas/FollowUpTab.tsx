@@ -3,12 +3,15 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   CalendarClock,
+  Eraser,
+  EyeOff,
   MessageCircle,
   MoreHorizontal,
   PhoneCall,
   RotateCcw,
   Scissors,
   Sparkles,
+  Undo2,
 } from 'lucide-react'
 
 import { BoardColumn } from '@/components/board/BoardColumn'
@@ -45,13 +48,23 @@ import {
   FUNIL_TRIAGEM,
   FUNIS_DA_CLINICA,
   KANBAN_COLUNAS,
+  type FollowupDispensado,
   type KanbanCard,
   type KanbanColuna,
   completeFollowup,
+  devolverFollowupAoQuadro,
+  dispensarFollowups,
   listFollowupKanban,
+  listFollowupsDispensados,
   moverLeadDeFunil,
   reabrirFollowup,
 } from '@/services/leadFollowups'
+
+/**
+ * Motivo que já vem escrito ao tirar do quadro, igual ao das filas da aba de
+ * vendas: quase sempre é o mesmo caso, atendimento que terminou faz tempo.
+ */
+const MOTIVO_PADRAO_QUADRO = 'Atendimento encerrado, fora do quadro'
 
 const hojeIso = () => {
   const d = new Date()
@@ -122,6 +135,11 @@ export function FollowUpTab() {
   // trabalhava no meio dos pacientes da outra.
   const [funil, setFunil] = useState<'cirurgia' | 'protocolo' | 'todos'>('cirurgia')
   const [movendo, setMovendo] = useState<string | null>(null)
+  /** Quem saiu do quadro: continua no histórico, e o diálogo devolve qualquer um. */
+  const [dispensados, setDispensados] = useState<FollowupDispensado[]>([])
+  const [verDispensados, setVerDispensados] = useState(false)
+  const [zerandoColuna, setZerandoColuna] = useState<KanbanColuna | null>(null)
+  const [motivoQuadro, setMotivoQuadro] = useState(MOTIVO_PADRAO_QUADRO)
   const [termo, setTermo] = useState('')
   const buscaAdiada = useDeferredValue(termo)
   /** Liga a fila do dia: some quem tem contato marcado para depois de hoje. */
@@ -139,7 +157,9 @@ export function FollowUpTab() {
   const load = async () => {
     setLoading(true)
     try {
-      setCards(await listFollowupKanban())
+      const [quadro, fora] = await Promise.all([listFollowupKanban(), listFollowupsDispensados()])
+      setCards(quadro)
+      setDispensados(fora)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar os follow-ups')
     } finally {
@@ -215,6 +235,59 @@ export function FollowUpTab() {
       toast.error(e instanceof Error ? e.message : 'Falha ao trocar de funil')
     } finally {
       setMovendo(null)
+    }
+  }
+
+  /**
+   * Tira o paciente do quadro.
+   *
+   * A coluna "Encerrado" enche de quem já operou: o atendimento acabou, não há
+   * contato para marcar, e o card fica ali para sempre porque a coluna é
+   * consequência de ter venda. Isto não fecha follow-up nem apaga histórico, e
+   * marcar um contato novo traz o paciente de volta sozinho.
+   */
+  const tirarDoQuadro = async (card: KanbanCard) => {
+    setMovendo(card.leadId)
+    try {
+      await dispensarFollowups([card.followupId], MOTIVO_PADRAO_QUADRO)
+      toast.success(`${card.patientName} saiu do quadro. O histórico continua na ficha dele.`)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao tirar do quadro')
+    } finally {
+      setMovendo(null)
+    }
+  }
+
+  /** Zera a coluna inteira: sai o que está visível nela, com o motivo registrado. */
+  const zerarColuna = async () => {
+    if (!zerandoColuna) return
+    const ids = (porColuna.get(zerandoColuna) ?? []).map((c) => c.followupId)
+    setSalvando(true)
+    try {
+      const quantos = await dispensarFollowups(ids, motivoQuadro)
+      setZerandoColuna(null)
+      setMotivoQuadro(MOTIVO_PADRAO_QUADRO)
+      toast.success(
+        quantos === 0
+          ? 'A coluna já estava vazia.'
+          : `${quantos} paciente${quantos === 1 ? '' : 's'} fora do quadro. Nada foi apagado.`,
+      )
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao zerar a coluna')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  const devolver = async (d: FollowupDispensado) => {
+    try {
+      await devolverFollowupAoQuadro(d.followupId)
+      toast.success(`${d.patientName} voltou para o quadro.`)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao devolver ao quadro')
     }
   }
 
@@ -299,7 +372,9 @@ export function FollowUpTab() {
           {ABERTAS.includes(c.coluna)
             ? `contato em ${dia(c.scheduledFor)}`
             : c.cirurgiaEm
-              ? `cirurgia em ${dia(c.cirurgiaEm)}`
+              ? // "cirurgia em 24/02" para quem já operou fazia a coluna parecer
+                // fila de gente esperando. Data que passou vira "operou em".
+                `${c.cirurgiaEm.slice(0, 10) < hojeIso() ? 'operou em' : 'cirurgia em'} ${dia(c.cirurgiaEm)}`
               : (c.outcome ?? 'sem desfecho registrado')}
         </p>
         {c.note && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{c.note}</p>}
@@ -361,6 +436,11 @@ export function FollowUpTab() {
                   <Scissors className="size-4" /> Passar para transplante
                 </DropdownMenuItem>
               )}
+              {/* Paciente que já operou não tem contato para marcar, e o card dele
+                  fica no quadro para sempre. Sai daqui sem perder histórico. */}
+              <DropdownMenuItem disabled={movendo === c.leadId} onClick={() => void tirarDoQuadro(c)}>
+                <EyeOff className="size-4" /> Tirar do quadro
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -410,6 +490,13 @@ export function FollowUpTab() {
             resultados={visiveis.length}
             className="w-full sm:w-64"
           />
+          {/* Porta de entrada do que saiu do quadro. Sem ela, "zerar a coluna" seria
+              um botão que some com paciente e não mostra para onde foi. */}
+          {dispensados.length > 0 && (
+            <Button size="sm" variant="ghost" onClick={() => setVerDispensados(true)}>
+              <EyeOff className="size-4" /> Fora do quadro ({dispensados.length})
+            </Button>
+          )}
           {atrasados > 0 && soPendentes && (
             <p className="text-sm text-muted-foreground">
               <span className="font-medium text-destructive">{atrasados}</span> atrasado
@@ -465,6 +552,20 @@ export function FollowUpTab() {
                       ? 'Nada para hoje.'
                       : 'Fora da fila de hoje.'
                     : 'Ninguém aqui.'
+              }
+              badge={
+                // Só em "Encerrado": as colunas de contato são a fila viva da Aline,
+                // e botão de zerar em cima da fila do dia é acidente esperando.
+                col.id === 'encerrado' && (porColuna.get(col.id) ?? []).length > 0 ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 gap-1 px-2 text-xs"
+                    onClick={() => setZerandoColuna('encerrado')}
+                  >
+                    <Eraser className="size-3" /> Zerar a coluna ({(porColuna.get(col.id) ?? []).length})
+                  </Button>
+                ) : undefined
               }
               collapsed={fechadas.has(col.id)}
               onCollapsedChange={(v) => alternar(col.id, v)}
@@ -578,6 +679,86 @@ export function FollowUpTab() {
             </Button>
             <Button disabled={salvando} onClick={() => void registrar()}>
               {salvando ? 'Salvando…' : 'Registrar contato'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={zerandoColuna != null} onOpenChange={(open) => (!open ? setZerandoColuna(null) : null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Zerar a coluna Encerrado</DialogTitle>
+            <DialogDescription>
+              {(porColuna.get('encerrado') ?? []).length}{' '}
+              {(porColuna.get('encerrado') ?? []).length === 1 ? 'paciente sai' : 'pacientes saem'} do
+              quadro. Ninguém é apagado: o follow-up continua fechado do jeito que está, o histórico
+              segue na ficha de cada um, e marcar um contato novo traz o paciente de volta.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Motivo</Label>
+            <Input value={motivoQuadro} onChange={(e) => setMotivoQuadro(e.target.value)} />
+            <p className="text-xs text-muted-foreground">
+              Fica registrado com a data e com quem tirou, e aparece em "Fora do quadro". Sai o que
+              está visível na coluna agora, ou seja, o filtro de funil e a busca valem aqui.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setZerandoColuna(null)}>
+              Cancelar
+            </Button>
+            <Button disabled={salvando} onClick={() => void zerarColuna()}>
+              {salvando ? 'Zerando…' : `Zerar ${(porColuna.get('encerrado') ?? []).length}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={verDispensados} onOpenChange={(open) => setVerDispensados(open)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Fora do quadro</DialogTitle>
+            <DialogDescription>
+              Pacientes tirados do quadro de follow-up. O histórico deles continua inteiro na ficha, e
+              qualquer um volta com um clique.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] space-y-2 overflow-y-auto">
+            {dispensados.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Ninguém fora do quadro.</p>
+            ) : (
+              dispensados.map((d) => (
+                <div
+                  key={d.followupId}
+                  className="flex items-start justify-between gap-2 rounded-md border border-border p-2"
+                >
+                  <div className="min-w-0">
+                    <Link
+                      to={`/leads/${d.leadId}`}
+                      className="text-sm font-medium leading-tight hover:underline"
+                    >
+                      {d.patientName}
+                    </Link>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      saiu em {dia(d.dismissedAt)}
+                      {d.dismissedReason ? ` · ${d.dismissedReason}` : ''}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 shrink-0 px-2 text-xs"
+                    onClick={() => void devolver(d)}
+                  >
+                    <Undo2 className="size-3" /> Devolver
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setVerDispensados(false)}>
+              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>

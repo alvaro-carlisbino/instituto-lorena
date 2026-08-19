@@ -233,6 +233,87 @@ export async function reabrirFollowup(leadId: string, scheduledFor: string, note
   await scheduleFollowup({ leadId, scheduledFor, note: note ?? 'Reaberto do potencial futuro' })
 }
 
+/** Um card que saiu do quadro: continua no histórico do paciente, só não aparece. */
+export type FollowupDispensado = {
+  followupId: string
+  leadId: string
+  patientName: string
+  dismissedAt: string
+  dismissedReason: string | null
+  outcome: string | null
+}
+
+/**
+ * Tira o paciente do quadro de follow-up.
+ *
+ * O caso que pediu isto: a coluna "Encerrado" acumula quem fechou, e fechar quase
+ * sempre quer dizer que a cirurgia já aconteceu. Em 19/08/2026 eram 28 cards, 24
+ * com a cirurgia feita: atendimento terminado, sem contato para marcar, e o card
+ * parado ali para sempre.
+ *
+ * Não fecha follow-up, não muda desfecho, não apaga nota. O histórico continua
+ * inteiro na ficha do paciente. Marcar um contato novo devolve o paciente ao
+ * quadro sozinho, porque a linha nova nasce sem dispensa.
+ */
+export async function dispensarFollowups(ids: string[], motivo: string): Promise<number> {
+  if (ids.length === 0) return 0
+  const client = assertClient()
+  const { data: user } = await client.auth.getUser()
+  const { data, error } = await client
+    .from('lead_followups')
+    .update({
+      dismissed_at: new Date().toISOString(),
+      dismissed_by: user.user?.id ?? null,
+      dismissed_reason: motivo.trim() || null,
+    })
+    .in('id', ids)
+    .is('dismissed_at', null)
+    .select('id')
+  if (error) throw new Error(error.message)
+  return (data ?? []).length
+}
+
+/** Devolve ao quadro quem foi tirado. A coluna volta a ser a que a regra disser. */
+export async function devolverFollowupAoQuadro(id: string): Promise<void> {
+  const client = assertClient()
+  const { error } = await client
+    .from('lead_followups')
+    .update({ dismissed_at: null, dismissed_by: null, dismissed_reason: null })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Quem está fora do quadro hoje.
+ *
+ * A view do kanban não devolve estes de propósito, então a lista vem da tabela
+ * com o nome do paciente junto: fila zerada sem lugar para conferir o que saiu é
+ * exatamente o que faz ninguém confiar no botão de zerar.
+ */
+export async function listFollowupsDispensados(): Promise<FollowupDispensado[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('lead_followups')
+    .select('id, lead_id, dismissed_at, dismissed_reason, outcome, leads!inner(patient_name)')
+    .not('dismissed_at', 'is', null)
+    .order('dismissed_at', { ascending: false })
+    .limit(500)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const row = r as unknown as Record<string, unknown>
+    const lead = (row.leads ?? {}) as Record<string, unknown>
+    const str = (v: unknown) => (v == null || String(v).length === 0 ? null : String(v))
+    return {
+      followupId: String(row.id),
+      leadId: String(row.lead_id),
+      patientName: String(lead.patient_name ?? ''),
+      dismissedAt: String(row.dismissed_at ?? ''),
+      dismissedReason: str(row.dismissed_reason),
+      outcome: str(row.outcome),
+    }
+  })
+}
+
 export async function listLeadFollowups(leadId: string): Promise<FollowupHistoryRow[]> {
   const client = assertClient()
   const { data, error } = await client
