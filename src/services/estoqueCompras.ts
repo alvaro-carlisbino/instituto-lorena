@@ -634,6 +634,36 @@ export type Payable = {
   importKey: string | null
 }
 
+const PAYABLE_COLS =
+  'id, invoice_id, supplier_id, category_id, account_id, description, due_date, amount_cents, status, paid_at, payment_method, barcode, storage_path, note, cost_center, counterparty, subcategory, import_key, stock_suppliers(name)'
+
+function mapPayable(r: Record<string, unknown>): Payable {
+  const supplier = r.stock_suppliers as { name?: unknown } | null
+  const status: PayableStatus =
+    r.status === 'pago' || r.status === 'cancelado' ? (r.status as PayableStatus) : 'aberto'
+  return {
+    id: String(r.id),
+    invoiceId: r.invoice_id != null ? String(r.invoice_id) : null,
+    supplierId: r.supplier_id != null ? String(r.supplier_id) : null,
+    supplierName: supplier?.name != null ? String(supplier.name) : null,
+    categoryId: r.category_id != null ? String(r.category_id) : null,
+    accountId: r.account_id != null ? String(r.account_id) : null,
+    description: String(r.description ?? ''),
+    dueDate: String(r.due_date ?? ''),
+    amountCents: Number(r.amount_cents ?? 0),
+    status,
+    paidAt: r.paid_at != null ? String(r.paid_at) : null,
+    paymentMethod: r.payment_method != null ? String(r.payment_method) : null,
+    barcode: r.barcode != null ? String(r.barcode) : null,
+    storagePath: r.storage_path != null ? String(r.storage_path) : null,
+    note: r.note != null ? String(r.note) : null,
+    costCenter: r.cost_center != null ? String(r.cost_center) : null,
+    counterparty: r.counterparty != null ? String(r.counterparty) : null,
+    subcategory: r.subcategory != null ? String(r.subcategory) : null,
+    importKey: r.import_key != null ? String(r.import_key) : null,
+  }
+}
+
 /**
  * Parcelas a pagar.
  *
@@ -647,39 +677,104 @@ export async function listPayables(): Promise<Payable[]> {
     () =>
       assertClient()
         .from('payable_installments')
-        .select('id, invoice_id, supplier_id, category_id, account_id, description, due_date, amount_cents, status, paid_at, payment_method, barcode, storage_path, note, cost_center, counterparty, subcategory, import_key, stock_suppliers(name)')
+        .select(PAYABLE_COLS)
         // `id` de desempate: sem ordem determinística o PostgREST não promete a mesma
         // linha na mesma página entre duas buscas.
         .order('due_date')
         .order('id'),
     { rotulo: 'payable_installments', maxPaginas: 20 },
   )
-  return rows.map((r: Record<string, unknown>) => {
-    const supplier = r.stock_suppliers as { name?: unknown } | null
-    const status: PayableStatus =
-      r.status === 'pago' || r.status === 'cancelado' ? (r.status as PayableStatus) : 'aberto'
-    return {
-      id: String(r.id),
-      invoiceId: r.invoice_id != null ? String(r.invoice_id) : null,
-      supplierId: r.supplier_id != null ? String(r.supplier_id) : null,
-      supplierName: supplier?.name != null ? String(supplier.name) : null,
-      categoryId: r.category_id != null ? String(r.category_id) : null,
-      accountId: r.account_id != null ? String(r.account_id) : null,
-      description: String(r.description ?? ''),
-      dueDate: String(r.due_date ?? ''),
-      amountCents: Number(r.amount_cents ?? 0),
-      status,
-      paidAt: r.paid_at != null ? String(r.paid_at) : null,
-      paymentMethod: r.payment_method != null ? String(r.payment_method) : null,
-      barcode: r.barcode != null ? String(r.barcode) : null,
-      storagePath: r.storage_path != null ? String(r.storage_path) : null,
-      note: r.note != null ? String(r.note) : null,
-      costCenter: r.cost_center != null ? String(r.cost_center) : null,
-      counterparty: r.counterparty != null ? String(r.counterparty) : null,
-      subcategory: r.subcategory != null ? String(r.subcategory) : null,
-      importKey: r.import_key != null ? String(r.import_key) : null,
+  return rows.map(mapPayable)
+}
+
+/** Uma parcela pelo id. A /gastos abre o editor a partir da linha da união de saídas. */
+export async function getPayable(id: string): Promise<Payable | null> {
+  const { data, error } = await assertClient()
+    .from('payable_installments')
+    .select(PAYABLE_COLS)
+    .eq('id', id)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return data ? mapPayable(data as Record<string, unknown>) : null
+}
+
+/**
+ * Edita uma parcela. VALOR e VENCIMENTO só se mexem enquanto ela está ABERTA, e a regra é a
+ * mesma do extrato por outro caminho: parcela aberta é previsão nossa e se corrige à vontade;
+ * parcela paga por uma conta já virou saída no caixa com aquele valor naquele dia, e mexer aqui
+ * deixaria as duas metades discordando sem ninguém saber qual é a certa. Em parcela paga só se
+ * corrige a LEITURA: descrição, razão social, centro, categoria, subcategoria e observação.
+ */
+export type PayablePatch = {
+  description?: string
+  counterparty?: string | null
+  dueDate?: string
+  amountCents?: number
+  costCenter?: string | null
+  categoryId?: string | null
+  subcategory?: string | null
+  paymentMethod?: string | null
+  note?: string | null
+}
+
+/**
+ * Monta a linha do update. Campo AUSENTE do patch fica fora da linha; campo presente e vazio
+ * vira null — os dois casos são diferentes de propósito: quem não abriu o formulário de valor
+ * não pode zerar o valor, e quem apagou a observação quer a observação apagada.
+ */
+export function montarPatchParcela(patch: PayablePatch): Record<string, unknown> {
+  const row: Record<string, unknown> = {}
+  if (patch.description !== undefined) {
+    const d = patch.description.trim()
+    if (!d) throw new Error('A descrição não pode ficar vazia.')
+    row.description = d
+  }
+  if (patch.counterparty !== undefined) row.counterparty = patch.counterparty?.trim() || null
+  if (patch.dueDate !== undefined) {
+    if (!patch.dueDate) throw new Error('Informe o vencimento.')
+    row.due_date = patch.dueDate
+  }
+  if (patch.amountCents !== undefined) {
+    if (!Number.isFinite(patch.amountCents) || patch.amountCents <= 0) {
+      throw new Error('O valor precisa ser maior que zero.')
     }
-  })
+    row.amount_cents = Math.round(patch.amountCents)
+  }
+  if (patch.costCenter !== undefined) row.cost_center = patch.costCenter || null
+  if (patch.categoryId !== undefined) row.category_id = patch.categoryId || null
+  if (patch.subcategory !== undefined) row.subcategory = patch.subcategory?.trim() || null
+  if (patch.paymentMethod !== undefined) row.payment_method = patch.paymentMethod?.trim() || null
+  if (patch.note !== undefined) row.note = patch.note?.trim() || null
+  return row
+}
+
+/** O que só se edita com a parcela em aberto. Ver o comentário de `updatePayable`. */
+export function mexeEmDinheiro(row: Record<string, unknown>): boolean {
+  return row.amount_cents !== undefined || row.due_date !== undefined
+}
+
+export async function updatePayable(id: string, patch: PayablePatch): Promise<void> {
+  const client = assertClient()
+  const row = montarPatchParcela(patch)
+  if (Object.keys(row).length === 0) return
+
+  // A guarda vale pelo status de AGORA, não pelo que a tela carregou: entre abrir o editor e
+  // salvar, alguém pode ter marcado a parcela como paga na outra ponta.
+  if (mexeEmDinheiro(row)) {
+    const { data, error } = await client
+      .from('payable_installments')
+      .select('status')
+      .eq('id', id)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    if ((data as { status?: unknown } | null)?.status === 'pago') {
+      throw new Error('Parcela já paga: valor e vencimento não se editam.')
+    }
+  }
+
+  row.updated_at = new Date().toISOString()
+  const { error } = await client.from('payable_installments').update(row).eq('id', id)
+  if (error) throw new Error(error.message)
 }
 
 export async function createPayables(payload: {

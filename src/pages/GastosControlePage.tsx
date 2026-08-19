@@ -1,5 +1,5 @@
 import { diaLocal, hojeLocal } from '@/lib/diaLocal'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { FileSpreadsheet, Plus, RefreshCw, Search, Upload } from 'lucide-react'
 
@@ -21,7 +21,15 @@ import {
 } from '@/components/ui/dialog'
 import { useTenant } from '@/context/TenantContext'
 import { createGastoManual, importGastosRows, parseGastosSpreadsheet } from '@/services/gastosControle'
-import { listCostCenters, listSaidasTudo, type CostCenter, type SaidaTudo } from '@/services/financeiro'
+import {
+  listCategories,
+  listCostCenters,
+  listSaidasTudo,
+  type CostCenter,
+  type FinCategory,
+  type SaidaTudo,
+} from '@/services/financeiro'
+import { SaidaEditor } from '@/components/financeiro/SaidaEditor'
 import { Badge } from '@/components/ui/badge'
 
 function formatBRL(cents: number): string {
@@ -62,6 +70,11 @@ export function GastosControlePage() {
   // Centro de custo vem do BANCO, não de um array no fonte: dá pra criar e renomear em
   // /financeiro-config sem deploy. Ver a migration 20260811250000.
   const [centros, setCentros] = useState<CostCenter[]>([])
+  // Categoria e centro moram no editor da linha; carregar aqui evita cada linha aberta ir
+  // buscar a mesma lista de novo.
+  const [categorias, setCategorias] = useState<FinCategory[]>([])
+  /** Linha aberta pra edição, na mesma chave da tabela: origem + id. */
+  const [abertoId, setAbertoId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
@@ -76,8 +89,13 @@ export function GastosControlePage() {
       const [y, m] = month.split('-').map(Number)
       const de = `${month}-01`
       const ate = diaLocal(new Date(y, m, 0))
-      const [todas, cc] = await Promise.all([listSaidasTudo(de, ate), listCostCenters()])
+      const [todas, cc, cats] = await Promise.all([
+        listSaidasTudo(de, ate),
+        listCostCenters(),
+        listCategories('despesa'),
+      ])
       setCentros(cc)
+      setCategorias(cats)
       const termo = q.trim().toLowerCase()
       setRows(
         todas.filter(
@@ -265,11 +283,21 @@ export function GastosControlePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((r) => (
-                        <tr key={`${r.origem}-${r.id}`} className="border-t border-border/60 hover:bg-muted/30">
+                      {rows.map((r) => {
+                        const chave = `${r.origem}-${r.id}`
+                        const aberto = abertoId === chave
+                        return (
+                          <Fragment key={chave}>
+                        <tr
+                          className="cursor-pointer border-t border-border/60 hover:bg-muted/30"
+                          onClick={() => setAbertoId(aberto ? null : chave)}
+                        >
                           <td className="px-3 py-2 whitespace-nowrap">{formatDay(r.data)}</td>
                           <td className="px-3 py-2 max-w-[240px] truncate" title={r.contraparte || r.descricao}>
                             {r.contraparte || r.descricao}
+                            <span className="ml-2 text-xs text-muted-foreground underline">
+                              {aberto ? 'fechar' : 'editar'}
+                            </span>
                           </td>
                           {/* De onde veio importa: "banco" já saiu da conta, "a pagar" é
                               compromisso que ainda não apareceu no extrato. */}
@@ -282,7 +310,26 @@ export function GastosControlePage() {
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums font-medium">{formatBRL(r.amountCents)}</td>
                         </tr>
-                      ))}
+                        {aberto && (
+                          <tr className="border-t border-border/60 bg-muted/10">
+                            <td colSpan={6} className="px-3 py-2">
+                              <SaidaEditor
+                                origem={r.origem}
+                                id={r.id}
+                                categorias={categorias}
+                                centros={centros}
+                                onSalvo={() => {
+                                  setAbertoId(null)
+                                  void load()
+                                }}
+                                onCancelar={() => setAbertoId(null)}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                          </Fragment>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>

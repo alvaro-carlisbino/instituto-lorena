@@ -1,7 +1,7 @@
 import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarClock, Check, ChevronDown, FileCode, FileText, Paperclip, Plus, Receipt } from 'lucide-react'
+import { CalendarClock, Check, ChevronDown, FileCode, FileText, Paperclip, Pencil, Plus, Receipt } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { FinanceTabs } from '@/components/page/FinanceTabs'
@@ -43,7 +43,15 @@ import {
 } from '@/services/estoqueCompras'
 import { type NfeParsed, parseNfeXml } from '@/services/nfeXml'
 import { type NfeItemPlan, importNfe, suggestItemPlan } from '@/services/nfeImport'
-import { type FinAccount, type FinCategory, listAccounts, listCategories } from '@/services/financeiro'
+import {
+  type CostCenter,
+  type FinAccount,
+  type FinCategory,
+  listAccounts,
+  listCategories,
+  listCostCenters,
+} from '@/services/financeiro'
+import { ParcelaEditor } from '@/components/financeiro/ParcelaEditor'
 
 function formatBRL(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -98,6 +106,10 @@ export function ContasPagarPage() {
   // Plano de contas + contas bancárias/caixa (para categorizar e dar baixa no caixa).
   const [accounts, setAccounts] = useState<FinAccount[]>([])
   const [categories, setCategories] = useState<FinCategory[]>([])
+  const [costCenters, setCostCenters] = useState<CostCenter[]>([])
+
+  /** Parcela aberta pra edição — o que /gastos mostra errado se corrige aqui. */
+  const [editingPayable, setEditingPayable] = useState<Payable | null>(null)
 
   // Diálogo de baixa: escolher conta (banco/caixa) e data — registra a saída no fluxo de caixa.
   const [payingPayable, setPayingPayable] = useState<Payable | null>(null)
@@ -125,13 +137,14 @@ export function ContasPagarPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [p, inv, sup, items, acc, cats] = await Promise.all([
+      const [p, inv, sup, items, acc, cats, cc] = await Promise.all([
         listPayables(),
         listPurchaseInvoices(),
         listSuppliers(),
         listStockItems(true),
         listAccounts(),
         listCategories('despesa'),
+        listCostCenters(),
       ])
       setPayables(p)
       setInvoices(inv)
@@ -139,6 +152,7 @@ export function ContasPagarPage() {
       setStockItems(items)
       setAccounts(acc)
       setCategories(cats)
+      setCostCenters(cc)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar contas a pagar')
     } finally {
@@ -751,6 +765,9 @@ export function ContasPagarPage() {
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
                             <span className="font-semibold">{formatBRL(p.amountCents)}</span>
+                            <Button size="sm" variant="ghost" onClick={() => setEditingPayable(p)}>
+                              <Pencil className="size-3.5" /> Editar
+                            </Button>
                             <Button size="sm" variant="outline" onClick={() => openPayDialog(p)}>
                               <Check className="size-3.5" /> Pago
                             </Button>
@@ -779,6 +796,9 @@ export function ContasPagarPage() {
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
                           <span>{formatBRL(p.amountCents)}</span>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingPayable(p)}>
+                            <Pencil className="size-3.5" /> Editar
+                          </Button>
                           <Badge variant="secondary" className="bg-emerald-500/15 text-emerald-600">
                             pago
                           </Badge>
@@ -979,6 +999,29 @@ export function ContasPagarPage() {
               {importing ? 'Importando…' : nfeJaImportada ? 'Já importada' : 'Confirmar importação'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editingPayable != null} onOpenChange={(open) => (!open ? setEditingPayable(null) : null)}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Editar parcela</DialogTitle>
+            <DialogDescription>
+              O que estiver errado aqui aparece errado em /gastos e no relatório por centro de custo.
+            </DialogDescription>
+          </DialogHeader>
+          {editingPayable && (
+            <ParcelaEditor
+              parcela={editingPayable}
+              categorias={categories}
+              centros={costCenters}
+              onSalvo={() => {
+                setEditingPayable(null)
+                void load()
+              }}
+              onCancelar={() => setEditingPayable(null)}
+            />
+          )}
         </DialogContent>
       </Dialog>
 

@@ -1078,6 +1078,14 @@ export async function entrouNaContaNoPeriodo(de: string, ate: string): Promise<n
 // de saída só em julho. Classificar o extrato É construir a despesa.
 
 /** Muda o que dá pra mudar num lançamento do banco. Valor e data vêm do extrato e não se editam. */
+/** Um lançamento pelo id. A /gastos abre o editor do extrato a partir da linha da união. */
+export async function getTransaction(id: string): Promise<FinTransaction | null> {
+  const client = assertClient()
+  const { data, error } = await client.from('fin_transactions').select(TXN_COLS).eq('id', id).maybeSingle()
+  if (error) throw new Error(error.message)
+  return data ? mapTxn(data as Record<string, unknown>) : null
+}
+
 export async function updateTransaction(
   id: string,
   patch: {
