@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
+import { ConversaoConsultaCard } from '@/components/vendas/ConversaoConsultaCard'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -530,6 +531,10 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           </CardContent>
         </Card>
       )}
+
+      {/* Conversão só faz sentido no recorte por mês: as filas de pendência
+          atravessam o mês de propósito e não têm safra de consulta para dividir. */}
+      {recorte === 'mes' && <ConversaoConsultaCard mes={mes} kind={kind} rotuloMes={nomeDoMes(mes)} />}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-6">
         <Kpi rotulo={`Vendas · ${rotuloRecorte}`} valor={resumo.qtd} />
