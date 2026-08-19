@@ -12,13 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
+import { resultadosTabs } from '@/config/subTabs'
 import { cn } from '@/lib/utils'
-
-const DADOS_TABS = [
-  { to: '/resultados', label: 'Resultados' },
-  { to: '/analytics', label: 'Análise do funil' },
-  { to: '/metricas', label: 'Metas' },
-]
 
 const UNIT_OPTIONS = [
   { value: 'count', label: 'Contagem' },
@@ -63,7 +58,7 @@ export function MetricsPage() {
       title="Metas"
       subtitle="Valores digitados à mão por você, não apurados pelo sistema. Para número medido, veja Resultados ou Análise do funil."
     >
-      <SubTabs tabs={DADOS_TABS} />
+      <SubTabs tabs={resultadosTabs} />
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={() => { crm.addMetric(); toast.success('Métrica criada.') }}>
           Nova métrica

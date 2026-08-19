@@ -1,4 +1,6 @@
 import { hojeLocal } from '@/lib/diaLocal'
+import { FiltroPeriodo } from '@/components/page/FiltroPeriodo'
+import { mesAtual, periodoDoMes, type Periodo } from '@/lib/periodo'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { CalendarClock, Check, HandCoins, Plus } from 'lucide-react'
@@ -78,8 +80,11 @@ export function ContasReceberPage() {
   const [recvDate, setRecvDate] = useState('')
 
   // Período das RECEBIDAS. Começa no mês corrente, que é o que os KPIs mostram.
-  const [de, setDe] = useState(`${hojeLocal().slice(0, 7)}-01`)
-  const [ate, setAte] = useState(hojeLocal())
+  // Filtro compartilhado: dava para chegar em "junho fechado" só digitando 01 e 30
+  // à mão, e um dígito errado mudava o total sem avisar.
+  const [periodo, setPeriodo] = useState<Periodo>(() => periodoDoMes(mesAtual()))
+  const de = periodo.de
+  const ate = periodo.ate
   const [adquirente, setAdquirente] = useState<AdquirenteMes[]>([])
   const [bankMonthCents, setBankMonthCents] = useState(0)
 
@@ -459,27 +464,12 @@ export function ContasReceberPage() {
             <HandCoins className="size-4 text-primary" /> Já recebidas
             <span className="font-normal text-muted-foreground">{formatBRL(totalRecebidas)}</span>
           </CardTitle>
-          <div className="flex items-end gap-2">
-            <div className="space-y-1">
-              <Label htmlFor="rec-de" className="text-xs">De</Label>
-              <Input
-                id="rec-de"
-                type="date"
-                value={de}
-                onChange={(e) => setDe(e.target.value)}
-                className="h-8 w-[145px]"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="rec-ate" className="text-xs">Até</Label>
-              <Input
-                id="rec-ate"
-                type="date"
-                value={ate}
-                onChange={(e) => setAte(e.target.value)}
-                className="h-8 w-[145px]"
-              />
-            </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <FiltroPeriodo
+              valor={periodo}
+              onChange={setPeriodo}
+              atalhos={['mes-atual', 'mes-passado', 'dias:30', 'dias:90']}
+            />
             <Button size="sm" variant="outline" disabled={loading} onClick={() => void load()}>
               Buscar
             </Button>

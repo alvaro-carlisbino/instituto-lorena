@@ -313,3 +313,67 @@ export const DEFAULT_LOST_REASONS = [
   'Equipe / fornecedor',
   'Outro',
 ] as const
+
+// ---- Conversão comercial: do lead ao dinheiro -------------------------------
+// A /resultados contava lead, resposta e SLA e parava aí — origem que traz 400
+// leads e vende zero aparecia como a melhor da tabela. Isto responde "quantos
+// viraram venda, por quanto, vindos de onde".
+//
+// Duas contagens diferentes, de propósito:
+//   • conversão de SAFRA (`convertidos`): dos leads criados na janela, quantos
+//     compraram alguma vez. É o número que avalia a ENTRADA de lead.
+//   • caixa da janela (`vendas_no_periodo`): vendas que aconteceram no período,
+//     de qualquer safra. É o número que casa com o financeiro.
+// Misturar os dois é o erro clássico ("vendas do mês / leads do mês"), que sobe
+// sozinho quando o mês tem pouca entrada.
+
+export type ConversaoResumo = {
+  leads: number
+  convertidos: number
+  taxa_conversao_pct: number | null
+  receita_cents: number
+  ticket_medio_cents: number | null
+  dias_ate_venda_mediana: number | null
+  /** Conversão no mesmo dia costuma ser cadastro criado pela própria venda. */
+  convertidos_mesmo_dia: number
+  convertidos_anterior: number
+  leads_anterior: number
+  vendas_no_periodo: number
+  receita_no_periodo_cents: number
+}
+
+export type ConversaoPorChave = {
+  leads: number
+  convertidos: number
+  conversao_pct: number | null
+  receita_cents: number
+}
+
+export type ConversaoComercial = {
+  range: { start: string; end: string; anterior_start: string }
+  resumo: ConversaoResumo
+  por_origem: Array<ConversaoPorChave & { origem: string }>
+  por_campanha: Array<ConversaoPorChave & { campanha: string }>
+  por_atendente: Array<ConversaoPorChave & { atendente: string }>
+  por_mes: Array<Omit<ConversaoPorChave, 'receita_cents'> & { mes: string; receita_cents: number }>
+  qualidade: {
+    /** Venda registrada sem lead: conversão que existiu e não credita origem nenhuma. */
+    vendas_sem_lead: number
+    pagamentos_sem_lead: number
+  }
+}
+
+export async function fetchConversaoComercial(params: {
+  start: Date
+  end: Date
+  tenant?: string | null
+}): Promise<ConversaoComercial | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('crm_conversao_comercial', {
+    p_start: params.start.toISOString(),
+    p_end: params.end.toISOString(),
+    p_tenant: params.tenant ?? null,
+  })
+  if (error) throw new Error(error.message)
+  return (data as ConversaoComercial) ?? null
+}

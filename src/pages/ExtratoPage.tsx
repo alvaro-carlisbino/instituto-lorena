@@ -35,11 +35,11 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useTenant } from '@/context/TenantContext'
-import { diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
+import { hojeLocal } from '@/lib/diaLocal'
+import { FiltroPeriodo } from '@/components/page/FiltroPeriodo'
+import { mesAtual, periodoDoMes, type Periodo } from '@/lib/periodo'
 import { sugerirPadrao } from '@/lib/extratoPadrao'
 import { LancamentoEditor } from '@/components/financeiro/LancamentoEditor'
 import { SugestaoIAPanel } from '@/components/financeiro/SugestaoIA'
@@ -69,17 +69,6 @@ const dia = (iso: string) => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateStri
 const diaCurto = (iso: string) =>
   iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : ''
 
-function inicioDoMes(): string {
-  return `${hojeLocal().slice(0, 7)}-01`
-}
-
-/** Aritmética de calendário puro sobre o dia local: sem `new Date()` cru pra não voltar o fuso. */
-const isoDia = (d: Date) => d.toISOString().slice(0, 10)
-function mesPassado(): { de: string; ate: string } {
-  const [ano, mes] = hojeLocal().split('-').map(Number)
-  const fim = new Date(Date.UTC(ano, mes - 1, 1) - 86_400_000)
-  return { de: isoDia(new Date(Date.UTC(fim.getUTCFullYear(), fim.getUTCMonth(), 1))), ate: isoDia(fim) }
-}
 function quantosDias(de: string, ate: string): number {
   if (!de || !ate) return 0
   const d = Date.parse(`${de}T12:00:00Z`)
@@ -90,8 +79,11 @@ function quantosDias(de: string, ate: string): number {
 
 export function ExtratoPage() {
   const { tenant } = useTenant()
-  const [de, setDe] = useState(inicioDoMes())
-  const [ate, setAte] = useState(hojeLocal())
+  // O período agora é um objeto só, do filtro compartilhado — que traz o seletor de
+  // mês fechado que faltava aqui (dava para chegar em "junho" só digitando 01 e 30).
+  const [periodo, setPeriodo] = useState<Periodo>(() => periodoDoMes(mesAtual()))
+  const de = periodo.de
+  const ate = periodo.ate
   const [dias, setDias] = useState<ExtratoDia[]>([])
   const [porCategoria, setPorCategoria] = useState<SaidaCategoria[]>([])
   const [lancamentos, setLancamentos] = useState<FinTransaction[]>([])
@@ -186,17 +178,6 @@ export function ExtratoPage() {
       .reduce((s, t) => s + t.amountCents, 0)
   }, [entradasBanco, categorias])
 
-  const atalhos = useMemo(() => {
-    const mp = mesPassado()
-    return [
-      { rotulo: 'Hoje', de: hoje, ate: hoje },
-      { rotulo: '7 dias', de: diaLocalComOffset(-6), ate: hoje },
-      { rotulo: 'Este mês', de: inicioDoMes(), ate: hoje },
-      { rotulo: 'Mês passado', de: mp.de, ate: mp.ate },
-      { rotulo: '90 dias', de: diaLocalComOffset(-89), ate: hoje },
-    ]
-  }, [hoje])
-
   const grafico = useMemo(
     () =>
       dias.map((d) => ({
@@ -254,32 +235,11 @@ export function ExtratoPage() {
       <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
       <div className="flex flex-wrap items-end gap-2">
-        <div className="space-y-1">
-          <Label htmlFor="de" className="text-xs">De</Label>
-          <Input id="de" type="date" value={de} onChange={(e) => setDe(e.target.value)} className="w-[150px]" />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="ate" className="text-xs">Até</Label>
-          <Input id="ate" type="date" value={ate} onChange={(e) => setAte(e.target.value)} className="w-[150px]" />
-        </div>
-        <div className="flex flex-wrap items-center gap-1">
-          {atalhos.map((a) => {
-            const ativo = a.de === de && a.ate === ate
-            return (
-              <Button
-                key={a.rotulo}
-                size="sm"
-                variant={ativo ? 'secondary' : 'ghost'}
-                onClick={() => {
-                  setDe(a.de)
-                  setAte(a.ate)
-                }}
-              >
-                {a.rotulo}
-              </Button>
-            )
-          })}
-        </div>
+        <FiltroPeriodo
+          valor={periodo}
+          onChange={setPeriodo}
+          atalhos={['dias:7', 'dias:30', 'mes-atual', 'mes-passado', 'dias:90']}
+        />
         <Button size="sm" variant="outline" disabled={busy} onClick={() => void carregar()}>
           <Landmark className="size-4" /> {busy ? 'Buscando…' : 'Atualizar'}
         </Button>

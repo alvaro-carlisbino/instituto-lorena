@@ -8,6 +8,7 @@ import { AnalyticsV2Panel } from '@/components/analytics/AnalyticsV2Panel'
 import { ShospAgendaMetricsPanel } from '@/components/analytics/ShospAgendaMetricsPanel'
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
+import { resultadosTabs } from '@/config/subTabs'
 import {
   fetchTenantAnalytics,
   type AnalyticsPayload,
@@ -89,13 +90,7 @@ export function AnalyticsPage() {
 
   return (
     <AppLayout title="Analytics">
-      <SubTabs
-        tabs={[
-          { to: '/resultados', label: 'Resultados' },
-          { to: '/analytics', label: 'Análise do funil' },
-          { to: '/metricas', label: 'Metas' },
-        ]}
-      />
+      <SubTabs tabs={resultadosTabs} />
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div>

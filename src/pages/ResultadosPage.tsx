@@ -1,22 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, Clock, MessageSquareOff, UsersIcon } from 'lucide-react'
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, Clock, MessageSquareOff, TrendingUp, UsersIcon, Wallet } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { FiltroPeriodo } from '@/components/page/FiltroPeriodo'
+import { mesAtual, periodoDoMes, periodoEmInstantes, type Periodo } from '@/lib/periodo'
 import { SubTabs } from '@/components/page/SubTabs'
+import { resultadosTabs } from '@/config/subTabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useTenant } from '@/context/TenantContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { cn } from '@/lib/utils'
-import { fetchFunilComercial, type FunilComercial } from '@/services/analytics'
+import {
+  fetchConversaoComercial,
+  fetchFunilComercial,
+  type ConversaoComercial,
+  type FunilComercial,
+} from '@/services/analytics'
 
-const RANGES = [
-  { label: '7 dias', days: 7 },
-  { label: '30 dias', days: 30 },
-  { label: '90 dias', days: 90 },
-]
+/** R$ inteiro — centavo em KPI de mês só polui a leitura. */
+const reais = (cents: number | null | undefined) =>
+  cents == null
+    ? '—'
+    : (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
 /** Minutos em texto curto ("42 min", "3 h 10", "2 d"). A mediana de resposta
  *  passa fácil de 24 h — mostrar "1440 min" não comunica nada. */
@@ -91,8 +98,11 @@ function KpiCard({
 
 export function ResultadosPage() {
   const { tenant } = useTenant()
-  const [days, setDays] = useState(30)
+  // Abre no mês corrente, não em "últimos 30 dias": a pergunta de quem abre esta
+  // tela é sobre o mês, e mês é o que fecha com o financeiro.
+  const [periodo, setPeriodo] = useState<Periodo>(() => periodoDoMes(mesAtual()))
   const [data, setData] = useState<FunilComercial | null>(null)
+  const [conv, setConv] = useState<ConversaoComercial | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -100,19 +110,51 @@ export function ResultadosPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
-    const end = new Date()
-    const start = new Date(end.getTime() - days * 86_400_000)
-    fetchFunilComercial({ start, end, tenant: tenant.id })
-      .then((r) => !cancelled && setData(r))
+    const { start, end } = periodoEmInstantes(periodo)
+    Promise.all([
+      fetchFunilComercial({ start, end, tenant: tenant.id }),
+      fetchConversaoComercial({ start, end, tenant: tenant.id }),
+    ])
+      .then(([funil, conversao]) => {
+        if (cancelled) return
+        setData(funil)
+        setConv(conversao)
+      })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : 'Falha ao carregar os resultados.'))
       .finally(() => !cancelled && setLoading(false))
     return () => {
       cancelled = true
     }
-  }, [days, tenant.id])
+  }, [periodo, tenant.id])
 
   const r = data?.resumo
   const q = data?.qualidade_dado
+  const cv = conv?.resumo
+
+  const diasNoPeriodo = r?.dias_no_periodo ?? 30
+
+  // Conversão por origem/campanha/atendente vem de outra RPC. Casar aqui pela
+  // chave evita duas tabelas contando a mesma coisa em cantos diferentes da tela.
+  const convPorOrigem = useMemo(
+    () => new Map((conv?.por_origem ?? []).map((o) => [o.origem, o])),
+    [conv],
+  )
+  const convPorCampanha = useMemo(
+    () => new Map((conv?.por_campanha ?? []).map((c) => [c.campanha, c])),
+    [conv],
+  )
+  const convPorAtendente = useMemo(
+    () => new Map((conv?.por_atendente ?? []).map((a) => [a.atendente, a])),
+    [conv],
+  )
+
+  const variacaoConversao = useMemo(() => {
+    if (!cv || !cv.leads_anterior) return null
+    const atual = cv.leads ? (100 * cv.convertidos) / cv.leads : 0
+    const antes = (100 * cv.convertidos_anterior) / cv.leads_anterior
+    if (!antes) return null
+    return ((atual - antes) / antes) * 100
+  }, [cv])
 
   const porDia = useMemo(
     () =>
@@ -133,35 +175,18 @@ export function ResultadosPage() {
 
   return (
     <AppLayout title="Resultados">
-      <SubTabs
-        tabs={[
-          { to: '/resultados', label: 'Resultados' },
-          { to: '/analytics', label: 'Análise do funil' },
-          { to: '/metricas', label: 'Metas' },
-        ]}
-      />
+      <SubTabs tabs={resultadosTabs} />
 
       <div className="flex flex-col gap-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="text-xl font-bold">Resultados comerciais</h1>
+            <h1 className="text-xl font-bold">Resultados comerciais · {periodo.rotulo}</h1>
             <p className="text-xs text-muted-foreground">
-              Quantos leads entraram, de onde vieram, quanto tempo levamos para responder e quem atendeu. Números do CRM
-              e do histórico de conversas, não dependem da Shosp.
+              Quantos leads entraram, de onde vieram, quantos viraram venda e por quanto. Números do CRM, do histórico de
+              conversas e das vendas registradas.
             </p>
           </div>
-          <div className="flex gap-1">
-            {RANGES.map((p) => (
-              <Button
-                key={p.days}
-                size="sm"
-                variant={days === p.days ? 'default' : 'outline'}
-                onClick={() => setDays(p.days)}
-              >
-                {p.label}
-              </Button>
-            ))}
-          </div>
+          <FiltroPeriodo valor={periodo} onChange={setPeriodo} />
         </div>
 
         {error && (
@@ -191,11 +216,41 @@ export function ResultadosPage() {
           <KpiCard
             label="Leads novos"
             value={r?.leads_novos ?? 0}
-            sub={`${r?.leads_novos_anterior ?? 0} nos ${days} dias anteriores`}
+            sub={`${r?.leads_novos_anterior ?? 0} nos ${diasNoPeriodo} dias anteriores`}
             variacao={r?.variacao_pct ?? null}
             icon={UsersIcon}
             loading={loading}
           />
+          <KpiCard
+            label="Taxa de conversão"
+            value={`${cv?.taxa_conversao_pct ?? 0}%`}
+            sub={`${cv?.convertidos ?? 0} dos ${cv?.leads ?? 0} leads do período compraram`}
+            variacao={variacaoConversao}
+            icon={TrendingUp}
+            loading={loading}
+            accent="text-emerald-600"
+          />
+          <KpiCard
+            label="Receita desses leads"
+            value={reais(cv?.receita_cents)}
+            sub={
+              cv?.ticket_medio_cents
+                ? `ticket médio ${reais(cv.ticket_medio_cents)}`
+                : 'nenhuma venda registrada para esta safra'
+            }
+            icon={Wallet}
+            loading={loading}
+          />
+          <KpiCard
+            label="Vendas no período"
+            value={cv?.vendas_no_periodo ?? 0}
+            sub={`${reais(cv?.receita_no_periodo_cents)} · inclui lead que entrou antes`}
+            icon={Wallet}
+            loading={loading}
+          />
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
             label="Taxa de resposta"
             value={`${r?.taxa_resposta_pct ?? 0}%`}
@@ -212,6 +267,13 @@ export function ResultadosPage() {
             loading={loading}
           />
           <KpiCard
+            label="Tempo até comprar"
+            value={cv?.dias_ate_venda_mediana == null ? '—' : `${cv.dias_ate_venda_mediana} d`}
+            sub="mediana entre a entrada do lead e a primeira compra"
+            icon={Clock}
+            loading={loading}
+          />
+          <KpiCard
             label="Perdidos"
             value={r?.perdidos ?? 0}
             sub={`${r?.ativos ?? 0} seguem ativos`}
@@ -220,6 +282,30 @@ export function ResultadosPage() {
             accent="text-destructive"
           />
         </div>
+
+        {/* A conversão de mesmo dia é quase toda cadastro criado pela própria venda
+            (importação de planilha, venda lançada na mão). Sem este aviso a taxa
+            acima parece desempenho de atendimento e não é. */}
+        {!loading && cv && cv.convertidos > 0 && cv.convertidos_mesmo_dia / cv.convertidos >= 0.3 ? (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600" />
+            <div className="text-sm">
+              <p className="font-semibold text-amber-700 dark:text-amber-500">
+                {cv.convertidos_mesmo_dia} das {cv.convertidos} conversões aconteceram no mesmo dia em que o lead entrou
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Isso costuma ser cadastro criado pela própria venda (planilha importada, venda lançada na mão), não lead
+                que a equipe trabalhou. Tirando esses, a conversão da entrada de lead é{' '}
+                <span className="font-semibold text-foreground">
+                  {cv.leads - cv.convertidos_mesmo_dia > 0
+                    ? `${((100 * (cv.convertidos - cv.convertidos_mesmo_dia)) / (cv.leads - cv.convertidos_mesmo_dia)).toFixed(1)}%`
+                    : '—'}
+                </span>
+                .
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         {/* Entrada de leads por dia */}
         <Card>
@@ -251,34 +337,66 @@ export function ResultadosPage() {
           {/* Origem */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-sm">De onde vieram os leads</CardTitle>
+              <CardTitle className="text-sm">De onde vieram — e o que vendeu</CardTitle>
             </CardHeader>
             <CardContent>
               {(data?.por_origem ?? []).length === 0 ? (
                 <p className="py-6 text-center text-xs text-muted-foreground">Sem dados no período.</p>
               ) : (
-                <Table className="w-full text-xs">
-                  <TableHeader>
-                    <TableRow className="text-left text-muted-foreground">
-                      <TableHead className="pb-2">Origem</TableHead>
-                      <TableHead className="pb-2 text-right">Leads</TableHead>
-                      <TableHead className="pb-2 text-right">Participação</TableHead>
-                      <TableHead className="pb-2 text-right">Perdidos</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(data?.por_origem ?? []).map((o) => (
-                      <TableRow key={o.origem} className="border-t border-border/20">
-                        <TableCell className="py-1.5">{o.origem}</TableCell>
-                        <TableCell className="py-1.5 text-right tabular-nums">{o.leads}</TableCell>
-                        <TableCell className="py-1.5 text-right tabular-nums text-muted-foreground">
-                          {pct(o.leads, r?.leads_novos ?? 0)}
-                        </TableCell>
-                        <TableCell className="py-1.5 text-right tabular-nums">{o.perdidos}</TableCell>
+                <div className="overflow-x-auto">
+                  <Table className="w-full text-xs">
+                    <TableHeader>
+                      <TableRow className="text-left text-muted-foreground">
+                        <TableHead className="pb-2">Origem</TableHead>
+                        <TableHead className="pb-2 text-right">Leads</TableHead>
+                        <TableHead className="pb-2 text-right">Vendas</TableHead>
+                        <TableHead className="pb-2 text-right">Conversão</TableHead>
+                        <TableHead className="pb-2 text-right">Receita</TableHead>
+                        <TableHead className="pb-2 text-right">Perdidos</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {(data?.por_origem ?? []).map((o) => {
+                        const c = convPorOrigem.get(o.origem)
+                        return (
+                          <TableRow key={o.origem} className="border-t border-border/20">
+                            <TableCell className="py-1.5">{o.origem}</TableCell>
+                            <TableCell className="py-1.5 text-right tabular-nums">{o.leads}</TableCell>
+                            <TableCell className="py-1.5 text-right tabular-nums">{c?.convertidos ?? 0}</TableCell>
+                            <TableCell
+                              className={cn(
+                                'py-1.5 text-right tabular-nums',
+                                // Origem que traz volume e não vende é o dinheiro
+                                // de anúncio indo embora — é o que a tela existe
+                                // para mostrar.
+                                o.leads >= 20 && (c?.convertidos ?? 0) === 0
+                                  ? 'font-semibold text-destructive'
+                                  : '',
+                              )}
+                            >
+                              {c?.conversao_pct == null ? '—' : `${c.conversao_pct}%`}
+                            </TableCell>
+                            <TableCell className="py-1.5 text-right tabular-nums">
+                              {c?.receita_cents ? reais(c.receita_cents) : '—'}
+                            </TableCell>
+                            <TableCell className="py-1.5 text-right tabular-nums text-muted-foreground">
+                              {o.perdidos}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                  <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                    Conversão é da safra: leads que entraram no período e compraram alguma vez, mesmo que a compra tenha
+                    saído depois. Participação de cada origem no total:{' '}
+                    {(data?.por_origem ?? [])
+                      .slice(0, 3)
+                      .map((o) => `${o.origem} ${pct(o.leads, r?.leads_novos ?? 0)}`)
+                      .join(' · ')}
+                    .
+                  </p>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -299,17 +417,26 @@ export function ResultadosPage() {
                     <TableRow className="text-left text-muted-foreground">
                       <TableHead className="pb-2">Campanha</TableHead>
                       <TableHead className="pb-2 text-right">Leads</TableHead>
+                      <TableHead className="pb-2 text-right">Vendas</TableHead>
+                      <TableHead className="pb-2 text-right">Receita</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(data?.por_campanha ?? []).map((c) => (
-                      <TableRow key={c.campanha} className="border-t border-border/20">
-                        <TableCell className="py-1.5 max-w-[240px] truncate" title={c.campanha}>
-                          {c.campanha}
-                        </TableCell>
-                        <TableCell className="py-1.5 text-right tabular-nums">{c.leads}</TableCell>
-                      </TableRow>
-                    ))}
+                    {(data?.por_campanha ?? []).map((c) => {
+                      const v = convPorCampanha.get(c.campanha)
+                      return (
+                        <TableRow key={c.campanha} className="border-t border-border/20">
+                          <TableCell className="py-1.5 max-w-[240px] truncate" title={c.campanha}>
+                            {c.campanha}
+                          </TableCell>
+                          <TableCell className="py-1.5 text-right tabular-nums">{c.leads}</TableCell>
+                          <TableCell className="py-1.5 text-right tabular-nums">{v?.convertidos ?? 0}</TableCell>
+                          <TableCell className="py-1.5 text-right tabular-nums">
+                            {v?.receita_cents ? reais(v.receita_cents) : '—'}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               )}
@@ -390,6 +517,8 @@ export function ResultadosPage() {
                     <TableRow className="text-left text-muted-foreground">
                       <TableHead className="pb-2">Atendente</TableHead>
                       <TableHead className="pb-2 text-right">Leads</TableHead>
+                      <TableHead className="pb-2 text-right">Vendas</TableHead>
+                      <TableHead className="pb-2 text-right">Conversão</TableHead>
                       <TableHead className="pb-2 text-right">Falou com a equipe</TableHead>
                       <TableHead className="pb-2 text-right">Sem nenhuma resposta</TableHead>
                       <TableHead className="pb-2 text-right">Respondeu em pessoa</TableHead>
@@ -402,6 +531,14 @@ export function ResultadosPage() {
                       <TableRow key={a.atendente} className="border-t border-border/20">
                         <TableCell className="py-1.5">{a.atendente}</TableCell>
                         <TableCell className="py-1.5 text-right tabular-nums">{a.leads}</TableCell>
+                        <TableCell className="py-1.5 text-right tabular-nums">
+                          {convPorAtendente.get(a.atendente)?.convertidos ?? 0}
+                        </TableCell>
+                        <TableCell className="py-1.5 text-right tabular-nums">
+                          {convPorAtendente.get(a.atendente)?.conversao_pct == null
+                            ? '—'
+                            : `${convPorAtendente.get(a.atendente)?.conversao_pct}%`}
+                        </TableCell>
                         <TableCell className="py-1.5 text-right tabular-nums">{a.atendidos_por_humano}</TableCell>
                         <TableCell
                           className={cn(
@@ -550,9 +687,16 @@ export function ResultadosPage() {
               </span>
               .
             </p>
+            <p>
+              <span className="font-semibold text-foreground">{conv?.qualidade.vendas_sem_lead ?? 0}</span> vendas do
+              período foram registradas sem lead vinculado, e{' '}
+              <span className="font-semibold text-foreground">{conv?.qualidade.pagamentos_sem_lead ?? 0}</span>{' '}
+              pagamentos idem. Enquanto esse número não for zero, toda taxa de conversão aqui é PISO: a venda aconteceu e
+              não dá para creditar a origem nenhuma.
+            </p>
             <p className="sm:col-span-2">
-              A clínica ainda não registra faturamento no sistema, então não há receita, ticket médio ou retorno por
-              campanha aqui.
+              Receita conta venda da clínica (Central de Vendas) e pagamento confirmado no gateway. Venda lançada só na
+              planilha, sem passar pelo sistema, não entra em lugar nenhum destes números.
             </p>
           </CardContent>
         </Card>

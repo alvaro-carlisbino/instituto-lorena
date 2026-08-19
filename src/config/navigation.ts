@@ -1,5 +1,6 @@
 import {
   type LucideIcon,
+  Activity,
   AlarmClock,
   ArrowLeftRight,
   Settings2,
@@ -257,6 +258,18 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     keywords: ['consultas', 'marcação', 'shosp', 'horários', 'sala'],
     visible: (ctx) => isClinic(ctx) && canRoute(ctx),
     mobilePriority: 4,
+  },
+  {
+    id: 'pos-operatorio',
+    path: '/pos-operatorio',
+    label: 'Pós-operatório',
+    icon: HeartPulse,
+    group: 'clinica',
+    keywords: [
+      'retorno', 'pós-cirúrgico', 'acompanhamento', 'curativo', 'lavagem',
+      'um ano', 'aniversário', 'recompra', 'tricopill', 'shampoo',
+    ],
+    visible: (ctx) => isClinic(ctx) && canRoute(ctx),
   },
   {
     id: 'agenda-cirurgica',
@@ -676,6 +689,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     group: 'relatorios',
     keywords: ['etapas', 'gargalo', 'origem', 'atribuição'],
     visible: isClinic,
+  },
+  {
+    id: 'cirurgia-producao',
+    path: '/cirurgias/producao',
+    label: 'Centro cirúrgico',
+    icon: Activity,
+    group: 'relatorios',
+    keywords: ['cirurgia', 'sala', 'tempo de sala', 'folículos', 'produção', 'enfermagem', 'hora', 'etapa'],
+    visible: (ctx) => isClinic(ctx) && canRoute(ctx),
   },
   {
     id: 'feedback',

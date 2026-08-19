@@ -35,6 +35,8 @@ const ChannelsPage = lazyPage(() => import('./pages/ChannelsPage'), 'ChannelsPag
 const MetricsPage = lazyPage(() => import('./pages/MetricsPage'), 'MetricsPage')
 const AnalyticsPage = lazyPage(() => import('./pages/AnalyticsPage'), 'AnalyticsPage')
 const ResultadosPage = lazyPage(() => import('./pages/ResultadosPage'), 'ResultadosPage')
+const CirurgiaProducaoPage = lazyPage(() => import('./pages/CirurgiaProducaoPage'), 'CirurgiaProducaoPage')
+const PosOperatorioPage = lazyPage(() => import('./pages/PosOperatorioPage'), 'PosOperatorioPage')
 const FeedbackDashboardPage = lazyPage(() => import('./pages/FeedbackDashboardPage'), 'FeedbackDashboardPage')
 const ClinicalNotesPage = lazyPage(() => import('./pages/ClinicalNotesPage'), 'ClinicalNotesPage')
 const ClientProfilePage = lazyPage(() => import('./pages/ClientProfilePage'), 'ClientProfilePage')
@@ -213,6 +215,8 @@ function AppRoutes() {
         <Route path="/metricas" element={<MetricsPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/resultados" element={<ResultadosPage />} />
+        <Route path="/cirurgias/producao" element={<CirurgiaProducaoPage />} />
+        <Route path="/pos-operatorio" element={<PosOperatorioPage />} />
         <Route path="/feedback" element={<FeedbackDashboardPage />} />
         <Route path="/notas-clinicas" element={<ClinicalNotesPage />} />
         <Route path="/perfil" element={<ClientProfilePage />} />
