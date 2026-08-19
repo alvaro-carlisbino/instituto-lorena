@@ -274,6 +274,11 @@ export function AgendaCirurgicaPanel() {
     () => new Map(datasAbertas.filter((d) => d.vagasLivres > 0).map((d) => [d.dia, d.vagasLivres] as const)),
     [datasAbertas],
   )
+  /** Dias que a vendedora marcou como preenchidos no calendário de vagas, sem venda no CRM. */
+  const preenchidasForaDoCrm = useMemo(
+    () => new Set(datasAbertas.filter((d) => d.preenchida).map((d) => d.dia)),
+    [datasAbertas],
+  )
 
   return (
     <div className="space-y-4">
@@ -528,6 +533,14 @@ export function AgendaCirurgicaPanel() {
                         {vagas} vaga{vagas > 1 ? 's' : ''}
                       </div>
                     )}
+                    {preenchidasForaDoCrm.has(dia) && cirurgias.length === 0 && (
+                      <div
+                        className="truncate rounded border border-emerald-600/50 bg-emerald-500/5 px-1 py-0.5 text-[11px] text-emerald-700"
+                        title="Marcada como preenchida no calendário de vagas, sem venda lançada no CRM"
+                      >
+                        preenchida fora do CRM
+                      </div>
+                    )}
                     {cirurgias.slice(0, 3).map((c) => (
                       <div
                         key={c.key}
@@ -626,6 +639,10 @@ export function AgendaCirurgicaPanel() {
                       ) : (
                         <Badge variant="outline">passou com {d.vagasLivres} vaga vazia</Badge>
                       )
+                    ) : d.preenchida ? (
+                      <Badge variant="outline" className="border-emerald-600/50 text-emerald-700">
+                        preenchida fora do CRM
+                      </Badge>
                     ) : (
                       <Badge variant="secondary">cheia</Badge>
                     )}

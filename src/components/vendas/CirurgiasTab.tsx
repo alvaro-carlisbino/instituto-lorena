@@ -28,7 +28,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { CalendarioVagas } from '@/components/vendas/CalendarioVagas'
 import { combinaBusca } from '@/lib/busca'
+import { mesAtual } from '@/lib/periodo'
 import { cn } from '@/lib/utils'
 import {
   CONFIRMATION_LABEL,
@@ -118,10 +120,8 @@ export function CirurgiasTab() {
   const buscaAdiada = useDeferredValue(termo)
   /** null = todas as faixas; escolher uma foca em quem ainda precisa de contato. */
   const [foco, setFoco] = useState<ConfirmationStatus | null>(null)
-  const [mes, setMes] = useState(() => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-  })
+  /** null = ninguém escolheu ainda; o mês ativo vem derivado da fila. */
+  const [mes, setMes] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -152,8 +152,16 @@ export function CirurgiasTab() {
 
   // Se o mês corrente não tem nenhuma cirurgia, abrir numa tela vazia esconderia a
   // fila inteira. Cai no primeiro mês que tem — derivado, e não um setMes dentro de
-  // efeito, que pisca a tela vazia antes de corrigir.
-  const mesAtivo = meses.length > 0 && !meses.includes(mes) ? meses[0] : mes
+  // efeito, que pisca a tela vazia antes de corrigir. Mês ESCOLHIDO (pelo seletor
+  // ou pelo calendário de vagas) vale mesmo sem cirurgia: é assim que se abre vaga
+  // em setembro antes de setembro ter paciente.
+  const mesAtivo = mes ?? (meses.length > 0 && !meses.includes(mesAtual()) ? meses[0] : mesAtual())
+
+  /** O seletor lista os meses com cirurgia e, se for outro, o que está em tela. */
+  const mesesDoSeletor = useMemo(
+    () => (meses.includes(mesAtivo) ? meses : [...meses, mesAtivo].sort()),
+    [meses, mesAtivo],
+  )
 
   const doMes = useMemo(
     () => sales.filter((s) => String(s.scheduledAt).slice(0, 7) === mesAtivo),
@@ -253,14 +261,10 @@ export function CirurgiasTab() {
     }
   }
 
-  if (sales.length === 0) {
-    return (
-      <EmptyState
-        icon={CalendarCheck2}
-        title={loading ? 'Carregando…' : 'Nenhuma cirurgia agendada'}
-        description={loading ? undefined : 'Cirurgia registrada na aba de vendas com data aparece aqui.'}
-      />
-    )
+  // Só o primeiro carregamento esconde a tela. Fila vazia não esconde o
+  // calendário de vagas: é justamente sem cirurgia marcada que ele mais importa.
+  if (loading && sales.length === 0) {
+    return <EmptyState icon={CalendarCheck2} title="Carregando…" />
   }
 
   return (
@@ -306,6 +310,8 @@ export function CirurgiasTab() {
         })}
       </div>
 
+      <CalendarioVagas mes={mesAtivo} onMes={setMes} sales={sales} />
+
       <Card>
         <CardHeader className="gap-3">
           <CardTitle>Pacientes de {nomeDoMes(mesAtivo)}</CardTitle>
@@ -338,7 +344,7 @@ export function CirurgiasTab() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {meses.map((m) => (
+                {mesesDoSeletor.map((m) => (
                   <SelectItem key={m} value={m}>
                     {nomeDoMes(m)}
                   </SelectItem>
@@ -361,12 +367,16 @@ export function CirurgiasTab() {
                   ? `Nenhum paciente para "${termo.trim()}"`
                   : foco
                     ? `Nenhuma cirurgia com status "${CONFIRMATION_LABEL[foco]}" em ${nomeDoMes(mesAtivo)}`
-                    : `Nenhuma cirurgia em ${nomeDoMes(mesAtivo)}`
+                    : sales.length === 0
+                      ? 'Nenhuma cirurgia agendada'
+                      : `Nenhuma cirurgia em ${nomeDoMes(mesAtivo)}`
               }
               description={
                 termo.trim().length > 0 || foco
                   ? 'A fila do mês continua ali: limpe a busca ou o filtro de status.'
-                  : undefined
+                  : sales.length === 0
+                    ? 'Cirurgia registrada na aba de vendas com data aparece aqui.'
+                    : undefined
               }
               className="py-6"
             />

@@ -1,5 +1,6 @@
 import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { supabase } from '@/lib/supabaseClient'
+import { type EstadoDaVaga, slotsAposClique } from '@/lib/vagasCirurgia'
 import { type ConfirmationStatus, listSurgicalStaff } from '@/services/clinicSales'
 
 /**
@@ -345,13 +346,15 @@ export type DataAberta = {
   doctor: string | null
   room: string | null
   note: string | null
+  /** Preenchida à mão: cirurgia fechada fora do CRM. vagasLivres já vem zerado. */
+  preenchida: boolean
 }
 
 export async function listarDatasAbertas(deDia: string, ateDia: string): Promise<DataAberta[]> {
   const client = assertClient()
   const { data, error } = await client
     .from('v_surgery_open_dates')
-    .select('id, dia, slots, marcadas, vagas_livres, doctor, room, note')
+    .select('id, dia, slots, marcadas, vagas_livres, doctor, room, note, filled')
     .gte('dia', deDia)
     .lte('dia', ateDia)
     .order('dia', { ascending: true })
@@ -369,6 +372,7 @@ export async function listarDatasAbertas(deDia: string, ateDia: string): Promise
       doctor: str(row.doctor),
       room: str(row.room),
       note: str(row.note),
+      preenchida: row.filled === true,
     }
   })
 }
@@ -411,5 +415,48 @@ export async function abrirData(payload: {
 export async function fecharData(id: string): Promise<void> {
   const client = assertClient()
   const { error } = await client.from('surgery_open_dates').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * O clique no quadradinho do dia, no calendário de vagas da Central de Vendas.
+ *
+ * É a mesma linha de `abrirData`, só que sem formulário: a vendedora clica no dia e
+ * ele vira vaga em aberto (vermelho), preenchida (verde) ou volta a ser dia comum.
+ * `marcadas` é quantas cirurgias o CRM já tem naquele dia — abrir vaga num dia
+ * que já tem cirurgia quer dizer "cabe MAIS UMA", então o número de vagas sobe
+ * para uma acima do que está marcado; abrir num dia vazio é uma vaga.
+ *
+ * Não mexe em médico, sala e observação: quem preencheu isso na Agenda Cirúrgica
+ * não perde por causa de um clique aqui. "Livre" apaga a linha, e aí não há o que
+ * preservar — é o mesmo `fecharData` da agenda.
+ */
+export async function definirVagaDoDia(dia: string, estado: EstadoDaVaga, marcadas = 0): Promise<void> {
+  const client = assertClient()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) throw new Error('Dia inválido.')
+  const { data: existente, error: buscaErr } = await client
+    .from('surgery_open_dates')
+    .select('id, slots')
+    .eq('dia', dia)
+    .maybeSingle()
+  if (buscaErr) throw new Error(buscaErr.message)
+  const atual = existente as { id: unknown; slots: unknown } | null
+
+  if (estado === 'livre') {
+    if (!atual) return
+    const { error } = await client.from('surgery_open_dates').delete().eq('id', String(atual.id))
+    if (error) throw new Error(error.message)
+    return
+  }
+
+  const slotsAtuais = atual ? Number(atual.slots ?? 0) : 0
+  const linha = { filled: estado === 'preenchida', slots: slotsAposClique(estado, slotsAtuais, marcadas) }
+
+  if (atual) {
+    const { error } = await client.from('surgery_open_dates').update(linha).eq('id', String(atual.id))
+    if (error) throw new Error(error.message)
+    return
+  }
+  const { error } = await client.from('surgery_open_dates').insert({ dia, ...linha })
   if (error) throw new Error(error.message)
 }
