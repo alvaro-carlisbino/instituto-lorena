@@ -4,6 +4,7 @@ import { resolveCepBrasil } from '../_shared/cep.ts';
 import { PAGBANK_KITS } from '../_shared/pagbank.ts';
 import { REDE_KITS, inferRedeKit } from '../_shared/rede.ts';
 import { insertInteraction } from '../_shared/crm.ts';
+import { quoteGatewayFee } from '../_shared/gatewayFees.ts';
 // Ações autenticadas do Bling para o frontend.
 //  list_products      -> catálogo (nome, código, preço, estoque) do polo ativo
 //  get_order_config   -> { default_contato_id, auto_order_enabled }
@@ -1416,6 +1417,114 @@ Deno.serve(async (req)=>{
       });
     }
   }
+  /**
+   * settle_open_receivables — baixa em LOTE as contas a receber que nasceram em aberto.
+   *
+   * Por que existe: `blingEnsureReceivable` cria a conta e, sem taxa da modalidade cadastrada
+   * em `tenant_integrations.<gateway>.fees`, deixa EM ABERTO de propósito (nunca chuta taxa,
+   * ver `_shared/gatewayFees.ts`). Como `credito_parcelado` nunca foi cadastrado, TODA venda
+   * parcelada ficou aberta: 45 vendas e R$ 30.116,70 entre 01/jul e 19/ago/2026.
+   *
+   * No dia que a taxa for cadastrada, isto liquida o atrasado de uma vez. Idempotente:
+   * pula quem já tem `bling_settled_at`, e a taxa continua vindo do `quoteGatewayFee` —
+   * modalidade sem taxa cadastrada é PULADA, não chutada.
+   *
+   * Params: { since?: 'YYYY-MM-DD', dry?: bool (default TRUE), limit?: int, probe?: bool }
+   * `dry` é o default de propósito: isto escreve em financeiro de produção.
+   */
+  if (action === 'settle_open_receivables') {
+    const token = await getValidBlingToken(admin, tenantId);
+    if (!token) return json({ ok: false, error: 'bling_sem_token' }, 400);
+    const bh = { Authorization: 'Bearer ' + token, Accept: 'application/json', 'Content-Type': 'application/json' };
+    const args = payload as Record<string, unknown>;
+    const since = String(args.since ?? '2026-07-01').slice(0, 10);
+    const dry = args.dry !== false;
+    const limit = Math.max(1, Math.min(200, Number(args.limit ?? 50)));
+
+    // Sondagem: devolve o formato cru de /contas/receber pra conferir campo e situação
+    // antes de escrever qualquer baixa. Read-only.
+    if (args.probe === true) {
+      const r = await blingGet(`${'https://api.bling.com.br/Api/v3'}/contas/receber?pagina=1&limite=3`, bh);
+      const txt = await r.text();
+      let parsed = null;
+      try { parsed = JSON.parse(txt || '{}'); } catch { /* devolve cru */ }
+      return json({ ok: r.ok, status: r.status, sample: parsed ?? txt.slice(0, 800) });
+    }
+
+    const { data: rows } = await admin
+      .from('rede_payments')
+      .select('id, amount_cents, installments, method, bling_order_id, bling_receivable_id, bling_settled_at, paid_at, customer_name')
+      .eq('tenant_id', tenantId).eq('status', 'paid').eq('method', 'card')
+      .is('bling_settled_at', null).not('bling_order_id', 'is', null)
+      .gte('paid_at', since + 'T00:00:00Z')
+      .order('paid_at', { ascending: true }).limit(limit);
+
+    const pend = rows ?? [];
+    const out: {
+      ok: boolean; dry: boolean; since: string; encontrados: number; baixados: number;
+      pulados: Array<Record<string, unknown>>; erros: Array<Record<string, unknown>>; total_taxa_cents: number;
+    } = { ok: true, dry, since, encontrados: pend.length, baixados: 0, pulados: [], erros: [], total_taxa_cents: 0 };
+
+    for (const row of pend) {
+      const fee = await quoteGatewayFee(admin, tenantId, 'rede', {
+        method: row.method, installments: row.installments ?? 1, amountCents: row.amount_cents,
+      });
+      if (!fee) { out.pulados.push({ id: row.id, motivo: 'sem_taxa_cadastrada', parcelas: row.installments }); continue; }
+
+      // Acha a conta: pelo id gravado, ou pelo nº do pedido (é o `numeroDocumento` que o
+      // blingEnsureReceivable grava). O caminho do SITE não gravava o id até 19/08.
+      let contaId = row.bling_receivable_id ? String(row.bling_receivable_id) : '';
+      let numero = '';
+      if (!contaId) {
+        const pr = await blingGet(`${'https://api.bling.com.br/Api/v3'}/pedidos/vendas/${row.bling_order_id}`, bh);
+        if (!pr.ok) { out.erros.push({ id: row.id, etapa: 'pedido', status: pr.status }); continue; }
+        const pd = (JSON.parse((await pr.text()) || '{}').data ?? {});
+        numero = String(pd.numero ?? '');
+        if (!numero) { out.erros.push({ id: row.id, etapa: 'pedido_sem_numero' }); continue; }
+        const cr = await blingGet(`${'https://api.bling.com.br/Api/v3'}/contas/receber?numeroDocumento=${encodeURIComponent(numero)}`, bh);
+        if (!cr.ok) { out.erros.push({ id: row.id, etapa: 'busca_conta', status: cr.status }); continue; }
+        const lista = (JSON.parse((await cr.text()) || '{}').data ?? []);
+        // A busca pode ignorar o filtro e devolver tudo: casa pelo numeroDocumento de novo.
+        const achou = (Array.isArray(lista) ? lista : []).find((c) => String(c.numeroDocumento ?? '') === numero);
+        if (!achou) { out.pulados.push({ id: row.id, motivo: 'conta_nao_encontrada', numero }); continue; }
+        contaId = String(achou.id ?? '');
+        if (String(achou.situacao ?? '') === '2') { out.pulados.push({ id: row.id, motivo: 'ja_baixada', numero }); continue; }
+      }
+      if (!contaId) { out.pulados.push({ id: row.id, motivo: 'sem_conta' }); continue; }
+
+      if (dry) {
+        out.baixados++;
+        out.total_taxa_cents += fee.feeCents;
+        out.pulados.push({ id: row.id, motivo: 'dry_run', contaId, taxa_cents: fee.feeCents, liquido_cents: fee.netCents, pct: fee.pct });
+        continue;
+      }
+
+      const dataISO = String(row.paid_at ?? '').slice(0, 10);
+      const br = await fetch(`${'https://api.bling.com.br/Api/v3'}/contas/receber/${contaId}/baixar`, {
+        method: 'POST', headers: bh,
+        body: JSON.stringify({
+          data: dataISO,
+          valorPago: Math.round(row.amount_cents - fee.feeCents) / 100,
+          juros: 0, desconto: 0, acrescimo: 0,
+          tarifa: fee.feeCents / 100,
+          historico: `Recebido líquido (taxa da adquirente ${fee.pct}% — ${fee.modality}) — baixa retroativa`.slice(0, 200),
+        }),
+      });
+      if (!br.ok) { out.erros.push({ id: row.id, etapa: 'baixa', status: br.status, detalhe: (await br.text()).slice(0, 200) }); continue; }
+
+      await admin.from('rede_payments').update({
+        bling_receivable_id: contaId,
+        bling_settled_at: new Date().toISOString(),
+        fee_cents: fee.feeCents,
+        net_cents: fee.netCents,
+        fee_source: 'tabela',
+      }).eq('id', row.id);
+      out.baixados++;
+      out.total_taxa_cents += fee.feeCents;
+    }
+    return json(out);
+  }
+
   return json({
     error: 'unknown_action'
   }, 400);
