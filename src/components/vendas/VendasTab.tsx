@@ -1,7 +1,18 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Ban, CalendarOff, FileSpreadsheet, Pencil, Plus, Target, UserX } from 'lucide-react'
+import {
+  Ban,
+  BellOff,
+  CalendarOff,
+  FileSpreadsheet,
+  FileWarning,
+  Pencil,
+  Plus,
+  Target,
+  Undo2,
+  UserX,
+} from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,15 +43,19 @@ import { cn } from '@/lib/utils'
 import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
 import {
   DEPOSIT_PAYEE_LABEL,
+  FILA_PENDENCIA_LABEL,
   type ClinicSale,
   type ClinicSaleKind,
+  type FilaPendenciaVenda,
   type FiltroStatusVendas,
   type RecorteVendas,
+  vendasSemNota,
   type SalesTarget,
   type StaffMember,
   cancelClinicSale,
   deleteSalesTarget,
   diasAteFechar,
+  dispensarPendencia,
   filtrarVendas,
   followUpStats,
   listClinicSales,
@@ -52,8 +67,10 @@ import {
   salesByProcedure,
   saveSalesTarget,
   tipoNegociacao,
+  vendasDispensadas,
   vendasSemData,
   vendasSemPaciente,
+  zerarFilaDePendencia,
 } from '@/services/clinicSales'
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -176,6 +193,10 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [estorno, setEstorno] = useState('Em avaliação')
   const [obsCancel, setObsCancel] = useState('')
   const [recorte, setRecorte] = useState<RecorteVendas>('mes')
+  /** Dentro de uma fila de pendência: ver o que foi dispensado em vez do que cobra. */
+  const [verDispensadas, setVerDispensadas] = useState(false)
+  const [zerando, setZerando] = useState<FilaPendenciaVenda | null>(null)
+  const [zerandoAgora, setZerandoAgora] = useState(false)
   const [status, setStatus] = useState<FiltroStatusVendas>('ativas')
   const [termo, setTermo] = useState('')
   // A lista tem até 400 linhas: adiar o filtro mantém a digitação fluida.
@@ -225,6 +246,23 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   // Venda fechada que nunca ganhou data. Atravessa o mês: a mais velha da lista
   // fechou em janeiro e continua aqui. Por isso conta a base inteira, não o mês.
   const semData = useMemo(() => vendasSemData(sales), [sales])
+  const semNota = useMemo(() => vendasSemNota(sales), [sales])
+
+  // O que a clínica dispensou: continua sem data ou sem cadastro, só parou de
+  // cobrar. Fica contado ao lado da fila para "zerado" nunca virar "resolvido".
+  const dispensadas = useMemo(
+    () => ({
+      'sem-data': vendasDispensadas(sales, 'sem-data'),
+      'sem-paciente': vendasDispensadas(sales, 'sem-paciente'),
+    }),
+    [sales],
+  )
+
+  /** A fila aberta na tela, quando o recorte é uma delas. */
+  const fila: FilaPendenciaVenda | null =
+    recorte === 'sem-data' || recorte === 'sem-paciente' ? recorte : null
+  const naFila = fila === 'sem-data' ? semData : fila === 'sem-paciente' ? semPaciente : []
+  const dispensadasDaFila = fila ? dispensadas[fila] : []
 
   /** Vendedoras que aparecem nos dados — a lista cresce sozinha conforme elas registram. */
   const vendedoras = useMemo(() => {
@@ -237,12 +275,18 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
     recorte === 'mes'
       ? nomeDoMes(mes)
       : recorte === 'sem-data'
-        ? 'vendas sem data marcada'
-        : 'vendas sem paciente vinculado'
+        ? verDispensadas
+          ? 'vendas sem data dispensadas da fila'
+          : 'vendas sem data marcada'
+        : recorte === 'sem-nota'
+          ? 'vendas sem nota fiscal'
+          : verDispensadas
+            ? 'vendas sem paciente dispensadas da fila'
+            : 'vendas sem paciente vinculado'
 
   const doMes = useMemo(
-    () => filtrarVendas(sales, { recorte, mes, status, vendedora, termo: buscaAdiada }),
-    [sales, mes, recorte, status, vendedora, buscaAdiada],
+    () => filtrarVendas(sales, { recorte, mes, status, vendedora, termo: buscaAdiada, verDispensadas }),
+    [sales, mes, recorte, status, vendedora, buscaAdiada, verDispensadas],
   )
 
   const resumo = useMemo(() => {
@@ -289,8 +333,55 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   }, [prazo])
 
   /** Clicar de novo no recorte ativo volta para o mês — o botão liga e desliga. */
-  const alternarRecorte = (alvo: Exclude<RecorteVendas, 'mes'>) =>
+  const alternarRecorte = (alvo: Exclude<RecorteVendas, 'mes'>) => {
+    // A tela abre pelo que cobra. A exceção é a fila já zerada: entrar nela e
+    // achar lista vazia não explica para onde foram as 71 — então entra direto
+    // nas dispensadas, que é o que sobrou para ver.
+    const zerada =
+      (alvo === 'sem-data' && semData.length === 0 && dispensadas['sem-data'].length > 0) ||
+      (alvo === 'sem-paciente' && semPaciente.length === 0 && dispensadas['sem-paciente'].length > 0)
+    setVerDispensadas(zerada)
     setRecorte((atual) => (atual === alvo ? 'mes' : alvo))
+  }
+
+  /**
+   * Zera a fila aberta. O que estiver pendente na hora do clique sai da cobrança
+   * de uma vez; a venda em si não muda em nada.
+   */
+  const zerarFila = async () => {
+    if (!zerando) return
+    setZerandoAgora(true)
+    try {
+      const quantas = await zerarFilaDePendencia(kind, zerando)
+      setZerando(null)
+      setVerDispensadas(false)
+      toast.success(
+        quantas === 0
+          ? 'A fila já estava zerada.'
+          : `${quantas} venda${quantas === 1 ? '' : 's'} fora da fila "${FILA_PENDENCIA_LABEL[zerando]}". Nada foi apagado: elas continuam na lista do mês.`,
+      )
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao zerar a fila')
+    } finally {
+      setZerandoAgora(false)
+    }
+  }
+
+  /** Dispensa uma venda sozinha, ou devolve para a fila. */
+  const alternarDispensa = async (s: ClinicSale, alvo: FilaPendenciaVenda, dispensar: boolean) => {
+    try {
+      await dispensarPendencia(s.id, alvo, dispensar)
+      toast.success(
+        dispensar
+          ? `${s.patientName} saiu da fila "${FILA_PENDENCIA_LABEL[alvo]}".`
+          : `${s.patientName} voltou para a fila "${FILA_PENDENCIA_LABEL[alvo]}".`,
+      )
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao mudar a fila da venda')
+    }
+  }
 
   const abrirMeta = () => {
     setMetaValor(meta && meta.targetCents > 0 ? String(meta.targetCents / 100).replace('.', ',') : '')
@@ -452,10 +543,18 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           detalhe={
             resumo.semData > 0
               ? `${brl(resumo.semDataCents)} parados · clique para ver`
-              : 'toda venda tem data'
+              : dispensadas['sem-data'].length > 0
+                ? // Fila zerada não é o mesmo que "toda venda tem data": essas
+                  // continuam sem data, só saíram da cobrança.
+                  `${dispensadas['sem-data'].length} dispensadas da fila`
+                : 'toda venda tem data'
           }
           ativo={recorte === 'sem-data'}
-          onClick={resumo.semData > 0 ? () => alternarRecorte('sem-data') : undefined}
+          onClick={
+            resumo.semData > 0 || dispensadas['sem-data'].length > 0
+              ? () => alternarRecorte('sem-data')
+              : undefined
+          }
           descricao="Mostrar as vendas fechadas que ainda não têm data marcada"
         />
       </div>
@@ -528,7 +627,9 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                 </Select>
               )}
 
-              {semData.length > 0 && (
+              {/* O chip fica enquanto houver o que cobrar OU o que foi dispensado:
+                  sumir de vez esconderia para onde foi a fila que a clínica zerou. */}
+              {(semData.length > 0 || dispensadas['sem-data'].length > 0) && (
                 <Button
                   size="sm"
                   variant={recorte === 'sem-data' ? 'default' : 'outline'}
@@ -536,9 +637,28 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                   onClick={() => alternarRecorte('sem-data')}
                 >
                   <CalendarOff className="size-3.5" aria-hidden /> Sem data ({semData.length})
+                  {dispensadas['sem-data'].length > 0 && (
+                    <span className="text-xs opacity-70">· {dispensadas['sem-data'].length} dispensadas</span>
+                  )}
                 </Button>
               )}
-              {semPaciente.length > 0 && (
+
+              {semNota.todas.length > 0 && (
+                <Button
+                  size="sm"
+                  variant={recorte === 'sem-nota' ? 'default' : 'outline'}
+                  aria-pressed={recorte === 'sem-nota'}
+                  onClick={() => alternarRecorte('sem-nota')}
+                  title={
+                    semNota.realizadas.length > 0
+                      ? `${semNota.realizadas.length} já realizadas, ${brl(semNota.realizadasCents)} sem nota`
+                      : 'Nenhuma cirurgia já realizada está sem nota'
+                  }
+                >
+                  <FileWarning className="size-3.5" aria-hidden /> Sem nota ({semNota.todas.length})
+                </Button>
+              )}
+              {(semPaciente.length > 0 || dispensadas['sem-paciente'].length > 0) && (
                 <Button
                   size="sm"
                   variant={recorte === 'sem-paciente' ? 'default' : 'outline'}
@@ -546,17 +666,50 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                   onClick={() => alternarRecorte('sem-paciente')}
                 >
                   <UserX className="size-3.5" aria-hidden /> Sem paciente ({semPaciente.length})
+                  {dispensadas['sem-paciente'].length > 0 && (
+                    <span className="text-xs opacity-70">
+                      · {dispensadas['sem-paciente'].length} dispensadas
+                    </span>
+                  )}
                 </Button>
               )}
             </div>
           </div>
 
           {recorte !== 'mes' && (
-            <p className="col-span-full text-xs text-muted-foreground">
-              {recorte === 'sem-data'
-                ? 'Vendas fechadas de todos os meses que ainda não têm data marcada, da mais parada para a mais recente. O filtro de mês fica de fora de propósito: venda parada não pertence a um mês só.'
-                : 'Vendas de todos os meses cujo paciente não foi vinculado a um cadastro. Sem vínculo, o card não anda no funil e o lembrete não sai.'}
-            </p>
+            <div className="col-span-full flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <p className="text-xs text-muted-foreground">
+                {verDispensadas
+                  ? 'Vendas que saíram da fila sem serem resolvidas: continuam sem data ou sem cadastro, a clínica só parou de ser cobrada por elas. Nada foi apagado — todas seguem na lista do mês, com valor e histórico.'
+                  : recorte === 'sem-data'
+                    ? 'Vendas fechadas de todos os meses que ainda não têm data marcada, da mais parada para a mais recente. O filtro de mês fica de fora de propósito: venda parada não pertence a um mês só.'
+                    : recorte === 'sem-nota'
+                      ? 'Vendas sem nota fiscal emitida, da mais antiga para a mais recente.'
+                      : 'Vendas de todos os meses cujo paciente não foi vinculado a um cadastro. Sem vínculo, o card não anda no funil e o lembrete não sai.'}
+              </p>
+
+              {fila && (
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  {!verDispensadas && naFila.length > 0 && (
+                    <Button size="sm" variant="outline" onClick={() => setZerando(fila)}>
+                      <BellOff className="size-3.5" aria-hidden /> Zerar a fila ({naFila.length})
+                    </Button>
+                  )}
+                  {(dispensadasDaFila.length > 0 || verDispensadas) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-pressed={verDispensadas}
+                      onClick={() => setVerDispensadas((v) => !v)}
+                    >
+                      {verDispensadas
+                        ? `Voltar para a fila (${naFila.length})`
+                        : `Ver dispensadas (${dispensadasDaFila.length})`}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </CardHeader>
         <CardContent>
@@ -568,18 +721,28 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                   ? 'Carregando…'
                   : termo.trim().length > 0
                     ? `Nenhuma venda para "${termo.trim()}"`
-                    : recorte === 'sem-paciente'
-                      ? 'Todas as vendas têm paciente'
-                      : recorte === 'sem-data'
-                        ? 'Toda venda já tem data marcada'
-                        : `Nenhuma venda em ${nomeDoMes(mes)}`
+                    : verDispensadas
+                      ? 'Nenhuma venda dispensada'
+                      : // Fila com dispensadas não é fila resolvida, e o texto não
+                        // pode dizer que está: elas continuam sem data e sem cadastro.
+                        fila && dispensadasDaFila.length > 0
+                        ? 'Fila zerada'
+                        : recorte === 'sem-paciente'
+                          ? 'Todas as vendas têm paciente'
+                          : recorte === 'sem-data'
+                            ? 'Toda venda já tem data marcada'
+                            : `Nenhuma venda em ${nomeDoMes(mes)}`
               }
               description={
                 loading
                   ? undefined
                   : termo.trim().length > 0
                     ? 'A busca olha paciente, telefone, procedimento, cidade, vendedora e médico. Limpe o termo para ver a lista inteira.'
-                    : 'Escolha outro mês ou registre a primeira venda.'
+                    : verDispensadas
+                      ? 'Nada foi tirado desta fila.'
+                      : fila && dispensadasDaFila.length > 0
+                        ? `Nada novo para cobrar. As ${dispensadasDaFila.length} dispensadas continuam registradas e aparecem em "Ver dispensadas".`
+                        : 'Escolha outro mês ou registre a primeira venda.'
               }
             />
           ) : (
@@ -719,11 +882,40 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                           {STATUS_LABEL[s.status]}
                         </Badge>
                       </TableCell>
-                      <TableCell className="hidden text-right text-muted-foreground xl:table-cell">
-                        {s.invoiceIssued ? 'Sim' : 'Não'}
+                      {/* Nota pendente é dívida com o fisco, não detalhe: some do
+                          olho em cinza claro e escondida só no XL. Vermelho, e já
+                          visível no notebook da recepção. */}
+                      <TableCell className="hidden text-right lg:table-cell">
+                        {s.invoiceIssued ? (
+                          <span className="text-muted-foreground">Emitida</span>
+                        ) : (
+                          <Badge variant="destructive">Sem nota</Badge>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-1">
+                          {/* Dentro da fila, cada linha também sai sozinha: nem toda
+                              pendência velha some no mesmo dia, e obrigar a zerar
+                              tudo para tirar uma seria trocar um exagero por outro. */}
+                          {fila && s.status !== 'cancelada' && (
+                            <Button
+                              size="icon-sm"
+                              variant="ghost"
+                              aria-label={
+                                verDispensadas
+                                  ? `Devolver a venda de ${s.patientName} para a fila ${FILA_PENDENCIA_LABEL[fila]}`
+                                  : `Dispensar a venda de ${s.patientName} da fila ${FILA_PENDENCIA_LABEL[fila]}`
+                              }
+                              title={verDispensadas ? 'Voltar para a fila' : 'Dispensar da fila'}
+                              onClick={() => void alternarDispensa(s, fila, !verDispensadas)}
+                            >
+                              {verDispensadas ? (
+                                <Undo2 className="size-3.5" aria-hidden />
+                              ) : (
+                                <BellOff className="size-3.5" aria-hidden />
+                              )}
+                            </Button>
+                          )}
                           <Button
                             size="icon-sm"
                             variant="ghost"
@@ -936,6 +1128,42 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
             </Button>
             <Button disabled={salvandoMeta} onClick={() => void salvarMeta()}>
               {salvandoMeta ? 'Salvando…' : 'Salvar meta'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={zerando != null} onOpenChange={(v) => (!v ? setZerando(null) : null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Zerar a fila &ldquo;{zerando ? FILA_PENDENCIA_LABEL[zerando] : ''}&rdquo;
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p>
+              As {naFila.length} vendas que estão na fila agora saem da cobrança de uma vez. Elas
+              continuam inteiras na lista do mês, com valor, data de fechamento, status e histórico —
+              e fica registrado que a dispensa foi feita hoje.
+            </p>
+            <p className="text-muted-foreground">
+              {zerando === 'sem-data'
+                ? `Zerar não marca data nenhuma: são ${brl(
+                    naFila.reduce((acc, s) => acc + s.valueCents, 0),
+                  )} em vendas fechadas que seguem sem data na agenda cirúrgica.`
+                : 'Zerar não vincula cadastro nenhum: sem vínculo, essas vendas seguem sem card no funil e sem lembrete automático.'}
+            </p>
+            <p className="text-muted-foreground">
+              Quem entrar na fila a partir de agora aparece aqui normalmente. Para rever o que saiu,
+              use &ldquo;Ver dispensadas&rdquo; — e dá para devolver qualquer uma para a fila.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" disabled={zerandoAgora} onClick={() => setZerando(null)}>
+              Voltar
+            </Button>
+            <Button disabled={zerandoAgora} onClick={() => void zerarFila()}>
+              {zerandoAgora ? 'Zerando…' : `Zerar a fila (${naFila.length})`}
             </Button>
           </DialogFooter>
         </DialogContent>

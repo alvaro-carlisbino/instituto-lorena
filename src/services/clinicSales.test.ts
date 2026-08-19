@@ -9,7 +9,9 @@ import {
   followUpStats,
   salesByDoctor,
   salesByProcedure,
+  vendasDispensadas,
   vendasSemData,
+  vendasSemNota,
   vendasSemPaciente,
 } from './clinicSales'
 
@@ -60,6 +62,8 @@ const venda = (over: Partial<ClinicSale> = {}): ClinicSale =>
     cancelNote: null,
     surgeryAccountId: null,
     srgSurgeryId: null,
+    noDateDismissedAt: null,
+    noPatientDismissedAt: null,
     createdAt: '2026-08-05T12:00:00Z',
     ...over,
   }) satisfies ClinicSale
@@ -308,5 +312,87 @@ describe('vendasSemData e vendasSemPaciente', () => {
     ]
     expect(vendasSemData(lista).map((s) => s.id)).toEqual(['a'])
     expect(vendasSemPaciente(lista).map((s) => s.id)).toEqual(['a'])
+  })
+})
+
+/**
+ * Nota fiscal pendente. Na base real de ago/2026 são 45 cirurgias JÁ REALIZADAS sem
+ * nota, R$ 575 mil — e 173 ainda por acontecer, que é fluxo normal. Somar tudo num
+ * número só transformaria a pendência fiscal em ruído.
+ */
+describe('vendasSemNota', () => {
+  const base = [
+    venda({ id: 'a', status: 'realizada', invoiceIssued: false, valueCents: 3_000_000, soldAt: '2026-03-02' }),
+    venda({ id: 'b', status: 'realizada', invoiceIssued: true, valueCents: 4_000_000 }),
+    venda({ id: 'c', status: 'vendida', invoiceIssued: false, valueCents: 500_000 }),
+    venda({ id: 'd', status: 'cancelada', invoiceIssued: false, valueCents: 900_000 }),
+  ]
+
+  it('separa a pendência fiscal do fluxo normal', () => {
+    const r = vendasSemNota(base)
+    expect(r.todas.map((s) => s.id)).toEqual(['a', 'c'])
+    expect(r.realizadas.map((s) => s.id)).toEqual(['a'])
+    expect(r.realizadasCents).toBe(3_000_000)
+  })
+
+  it('venda cancelada não cobra nota', () => {
+    expect(vendasSemNota(base).todas.some((s) => s.id === 'd')).toBe(false)
+  })
+
+  it('o recorte da tela lista as pendentes, mais antiga primeiro', () => {
+    const filtro: FiltroVendas = {
+      recorte: 'sem-nota',
+      mes: '2026-08',
+      status: 'ativas',
+      vendedora: 'todas',
+      termo: '',
+    }
+    // A de março atravessa o mês escolhido de propósito: nota que não saiu em março
+    // continua não tendo saído, e é a antiga que ninguém lembra.
+    expect(filtrarVendas(base, filtro).map((s) => s.id)).toEqual(['a', 'c'])
+  })
+})
+
+/**
+ * Zerar a fila de pendência. As duas filas nasceram com o passivo da planilha — 9 sem
+ * data e 71 sem paciente, 64 destas de cirurgia já realizada —, e fila que nunca chega
+ * a zero ninguém abre. Dispensar tira da cobrança sem apagar nada: a venda continua na
+ * lista do mês, sem data e sem cadastro, do jeito que está.
+ */
+describe('vendasDispensadas e a fila que cobra', () => {
+  const base = [
+    venda({ id: 'a', scheduledAt: null, leadId: null }),
+    venda({ id: 'b', scheduledAt: null, leadId: null, noDateDismissedAt: '2026-08-19T13:00:00Z' }),
+    venda({
+      id: 'c',
+      scheduledAt: '2026-09-01T07:00:00Z',
+      leadId: null,
+      noPatientDismissedAt: '2026-08-19T13:00:00Z',
+    }),
+  ]
+
+  it('dispensada sai da fila que cobra, e cada fila só responde pela sua dispensa', () => {
+    // 'b' foi dispensada de "sem data" e segue cobrando em "sem paciente": são
+    // pendências diferentes, e zerar uma não pode zerar a outra de carona.
+    expect(vendasSemData(base).map((s) => s.id)).toEqual(['a'])
+    expect(vendasSemPaciente(base).map((s) => s.id)).toEqual(['a', 'b'])
+  })
+
+  it('o que saiu continua contado, para "zerada" não virar "resolvida"', () => {
+    expect(vendasDispensadas(base, 'sem-data').map((s) => s.id)).toEqual(['b'])
+    expect(vendasDispensadas(base, 'sem-paciente').map((s) => s.id)).toEqual(['c'])
+  })
+
+  const filtro = { mes: '2026-08', status: 'ativas', vendedora: 'todas', termo: '' } as const
+
+  it('a tela mostra a fila ou as dispensadas, nunca as duas misturadas', () => {
+    expect(filtrarVendas(base, { ...filtro, recorte: 'sem-data' }).map((s) => s.id)).toEqual(['a'])
+    expect(
+      filtrarVendas(base, { ...filtro, recorte: 'sem-data', verDispensadas: true }).map((s) => s.id),
+    ).toEqual(['b'])
+  })
+
+  it('dispensar não tira a venda do mês: some da cobrança, não do sistema', () => {
+    expect(filtrarVendas(base, { ...filtro, recorte: 'mes' }).map((s) => s.id)).toEqual(['a', 'b', 'c'])
   })
 })

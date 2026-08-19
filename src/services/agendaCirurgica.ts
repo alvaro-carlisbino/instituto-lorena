@@ -292,6 +292,9 @@ export async function listarCirurgiasSemData(): Promise<CirurgiaSemData[]> {
     .eq('kind', 'cirurgia')
     .neq('status', 'cancelada')
     .is('scheduled_at', null)
+    // Dispensada na Central de Vendas some daqui também. Fila zerada num lugar e
+    // cheia no outro seria a mesma cobrança voltando por outra porta.
+    .is('no_date_dismissed_at', null)
     .order('sold_at', { ascending: true })
     .limit(200)
   if (error) throw new Error(error.message)

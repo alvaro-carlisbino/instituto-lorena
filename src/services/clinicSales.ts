@@ -81,7 +81,22 @@ export type ClinicSale = {
   cancelNote: string | null
   surgeryAccountId: string | null
   srgSurgeryId: number | null
+  /**
+   * Quando alguém dispensou esta venda da fila "sem data". Null = a fila cobra.
+   * A venda continua sem data marcada: o que foi dispensado é a cobrança.
+   */
+  noDateDismissedAt: string | null
+  /** O mesmo para a fila "sem paciente". A venda continua sem cadastro vinculado. */
+  noPatientDismissedAt: string | null
   createdAt: string
+}
+
+/** As duas filas de cobrança da Central de Vendas que dá para zerar. */
+export type FilaPendenciaVenda = 'sem-data' | 'sem-paciente'
+
+export const FILA_PENDENCIA_LABEL: Record<FilaPendenciaVenda, string> = {
+  'sem-data': 'sem data',
+  'sem-paciente': 'sem paciente',
 }
 
 export type ChecklistItem = {
@@ -210,6 +225,8 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
     cancelNote: str(r.cancel_note),
     surgeryAccountId: str(r.surgery_account_id),
     srgSurgeryId: r.srg_surgery_id != null ? Number(r.srg_surgery_id) : null,
+    noDateDismissedAt: str(r.no_date_dismissed_at),
+    noPatientDismissedAt: str(r.no_patient_dismissed_at),
     createdAt: String(r.created_at ?? ''),
   }
 }
@@ -221,7 +238,7 @@ const SALE_COLS =
   'schedule_pending, duration_minutes, room, hotel_needed, contract_url, note, status, canceled_at, ' +
   'cancel_reason, refund_status, cancel_note, surgery_account_id, srg_surgery_id, created_at, ' +
   'confirmation_status, confirmation_at, confirmation_note, cost_materials_cents, cost_doctor_cents, ' +
-  'tax_cents, cost_other_cents, profit_cents'
+  'tax_cents, cost_other_cents, profit_cents, no_date_dismissed_at, no_patient_dismissed_at'
 
 export async function listClinicSales(kind?: ClinicSaleKind, limit = 400): Promise<ClinicSale[]> {
   const client = assertClient()
@@ -396,6 +413,72 @@ export async function rescheduleSale(id: string, scheduledAt: string | null): Pr
     })
     .eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+/**
+ * Colunas da dispensa. Dispensar carimba quem e quando; devolver limpa os dois,
+ * para "dispensada" nunca virar um estado com dono e sem data.
+ */
+function patchDaDispensa(fila: FilaPendenciaVenda, dispensar: boolean, quem: string | null) {
+  const em = dispensar ? new Date().toISOString() : null
+  const por = dispensar ? quem : null
+  return fila === 'sem-data'
+    ? { no_date_dismissed_at: em, no_date_dismissed_by: por }
+    : { no_patient_dismissed_at: em, no_patient_dismissed_by: por }
+}
+
+async function usuarioAtual(): Promise<string | null> {
+  const { data } = await assertClient().auth.getUser()
+  return data.user?.id ?? null
+}
+
+/**
+ * Tira uma venda da fila de cobrança, ou devolve para ela.
+ *
+ * Não mexe em `scheduled_at` nem em `lead_id`: a pendência continua existindo e
+ * aparecendo na ficha da venda. O que muda é a clínica parar de ser cobrada por
+ * ela — cirurgia realizada em março sem cadastro vinculado não tem mais card
+ * para andar nem lembrete para sair, e cobrar isso todo dia só ensina a ignorar.
+ */
+export async function dispensarPendencia(
+  id: string,
+  fila: FilaPendenciaVenda,
+  dispensar: boolean,
+): Promise<void> {
+  const client = assertClient()
+  const { error } = await client
+    .from('clinic_sales')
+    .update(patchDaDispensa(fila, dispensar, await usuarioAtual()))
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Zera a fila inteira: dispensa de uma vez tudo o que está pendente hoje.
+ *
+ * É um UPDATE com filtro, não uma lista de ids montada na tela — assim o que
+ * entrou na fila entre a tela carregar e o clique não escapa nem é dispensado
+ * por engano. Devolve quantas linhas saíram da fila.
+ */
+export async function zerarFilaDePendencia(
+  kind: ClinicSaleKind,
+  fila: FilaPendenciaVenda,
+): Promise<number> {
+  const client = assertClient()
+  let q = client
+    .from('clinic_sales')
+    .update(patchDaDispensa(fila, true, await usuarioAtual()))
+    .eq('kind', kind)
+    .neq('status', 'cancelada')
+
+  q =
+    fila === 'sem-data'
+      ? q.is('scheduled_at', null).is('no_date_dismissed_at', null)
+      : q.is('lead_id', null).is('no_patient_dismissed_at', null)
+
+  const { data, error } = await q.select('id')
+  if (error) throw new Error(error.message)
+  return (data ?? []).length
 }
 
 export async function cancelClinicSale(
@@ -1020,7 +1103,7 @@ export function googleCalendarLink(sale: ClinicSale): string | null {
  * data continua parada em agosto. Cruzar os dois com o mês devolvia lista vazia
  * e a impressão de que o problema tinha sumido.
  */
-export type RecorteVendas = 'mes' | 'sem-data' | 'sem-paciente'
+export type RecorteVendas = 'mes' | 'sem-data' | 'sem-paciente' | 'sem-nota'
 
 /** 'ativas' é o padrão da tela: cancelada só aparece quando alguém pede. */
 export type FiltroStatusVendas = 'ativas' | 'todas' | ClinicSaleStatus
@@ -1034,6 +1117,12 @@ export type FiltroVendas = {
   vendedora: string
   /** Termo da barra de busca. Vazio não filtra. */
   termo: string
+  /**
+   * Nas filas de pendência, mostra o que foi dispensado no lugar do que ainda
+   * cobra. São duas listas separadas de propósito: misturada, a fila zerada
+   * continuaria parecendo cheia.
+   */
+  verDispensadas?: boolean
 }
 
 /**
@@ -1044,12 +1133,17 @@ export type FiltroVendas = {
  * precisa de teste, não de conferência no olho.
  */
 export function filtrarVendas(sales: ClinicSale[], filtro: FiltroVendas): ClinicSale[] {
-  const { recorte, mes, status, vendedora, termo } = filtro
+  const { recorte, mes, status, vendedora, termo, verDispensadas = false } = filtro
 
   const lista = sales.filter((s) => {
     if (recorte === 'mes' && !s.soldAt.startsWith(mes)) return false
     if (recorte === 'sem-data' && s.scheduledAt) return false
     if (recorte === 'sem-paciente' && s.leadId) return false
+    if (recorte === 'sem-nota' && s.invoiceIssued) return false
+
+    // Dispensada é o oposto de "está na fila": ou a tela mostra uma, ou a outra.
+    if (recorte === 'sem-data' && !!s.noDateDismissedAt !== verDispensadas) return false
+    if (recorte === 'sem-paciente' && !!s.noPatientDismissedAt !== verDispensadas) return false
 
     if (status === 'ativas' && s.status === 'cancelada') return false
     if (status !== 'ativas' && status !== 'todas' && s.status !== status) return false
@@ -1071,19 +1165,58 @@ export function filtrarVendas(sales: ClinicSale[], filtro: FiltroVendas): Clinic
     )
   })
 
-  // Parada há mais tempo primeiro: a fila de "sem data" é fila de cobrança, e quem
-  // fechou em janeiro precisa aparecer antes de quem fechou ontem.
-  return recorte === 'sem-data'
+  // Parada há mais tempo primeiro: as filas de "sem data" e "sem nota" são filas de
+  // cobrança, e quem fechou em janeiro precisa aparecer antes de quem fechou ontem.
+  return recorte === 'sem-data' || recorte === 'sem-nota'
     ? [...lista].sort((a, b) => a.soldAt.localeCompare(b.soldAt))
     : lista
 }
 
-/** Vendas fechadas que nunca ganharam data. Atravessa o mês de propósito. */
+/**
+ * Vendas fechadas que nunca ganharam data. Atravessa o mês de propósito.
+ *
+ * Fora da conta ficam as dispensadas: a venda continua sem data, mas alguém já
+ * decidiu que aquela não se cobra mais. Sem isso, a fila que começou com o passivo
+ * da planilha nunca chegaria a zero e ninguém abriria mais.
+ */
 export function vendasSemData(sales: ClinicSale[]): ClinicSale[] {
-  return sales.filter((s) => s.status !== 'cancelada' && !s.scheduledAt)
+  return sales.filter((s) => s.status !== 'cancelada' && !s.scheduledAt && !s.noDateDismissedAt)
+}
+
+/** O que saiu da fila sem ser resolvido — some da cobrança, não do sistema. */
+export function vendasDispensadas(sales: ClinicSale[], fila: FilaPendenciaVenda): ClinicSale[] {
+  return sales.filter(
+    (s) =>
+      s.status !== 'cancelada' &&
+      (fila === 'sem-data' ? !s.scheduledAt && !!s.noDateDismissedAt : !s.leadId && !!s.noPatientDismissedAt),
+  )
+}
+
+/**
+ * Vendas sem nota fiscal emitida.
+ *
+ * Atravessa o mês de propósito, como a fila de vendas sem data: nota que não saiu em
+ * janeiro continua não tendo saído hoje, e é justamente a antiga que ninguém lembra.
+ *
+ * `realizadas` é o recorte que dói: procedimento entregue e nota não emitida. Venda
+ * ainda por acontecer sem nota é normal — a nota sai depois. Por isso os dois números
+ * saem separados, e não um só que mistura pendência fiscal com fluxo normal.
+ */
+export function vendasSemNota(sales: ClinicSale[]): {
+  todas: ClinicSale[]
+  realizadas: ClinicSale[]
+  realizadasCents: number
+} {
+  const todas = sales.filter((s) => s.status !== 'cancelada' && !s.invoiceIssued)
+  const realizadas = todas.filter((s) => s.status === 'realizada')
+  return {
+    todas,
+    realizadas,
+    realizadasCents: realizadas.reduce((acc, s) => acc + s.valueCents, 0),
+  }
 }
 
 /** Vendas sem cadastro de paciente: o card não anda no funil e o lembrete não sai. */
 export function vendasSemPaciente(sales: ClinicSale[]): ClinicSale[] {
-  return sales.filter((s) => !s.leadId && s.status !== 'cancelada')
+  return sales.filter((s) => !s.leadId && s.status !== 'cancelada' && !s.noPatientDismissedAt)
 }
