@@ -368,6 +368,13 @@ export async function scheduleFollowup(payload: {
         channel: payload.channel || null,
         note: payload.note?.trim() || null,
         owner_id: payload.ownerId || null,
+        // Reaproveitar a linha em aberto é o que impede duas datas para o mesmo
+        // paciente, mas ela pode ter sido tirada do quadro. Marcar contato novo é
+        // decidir que ele voltou para a fila, então a dispensa cai aqui: sem isto,
+        // o paciente ficaria com data marcada e sem card nenhum na tela.
+        dismissed_at: null,
+        dismissed_by: null,
+        dismissed_reason: null,
       })
       .eq('id', String((aberto as { id: unknown }).id))
     if (error) throw new Error(error.message)
