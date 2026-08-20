@@ -7,7 +7,13 @@ import {
   type WhatsappProvider,
   digitsOnly,
 } from './types.ts'
-import { guardAndRecord, recordWhatsappOutbound, type GuardDecision, type OutboundKind } from './antiBan.ts'
+import {
+  guardAndRecord,
+  marcarEnvioFalhou,
+  recordWhatsappOutbound,
+  type GuardDecision,
+  type OutboundKind,
+} from './antiBan.ts'
 
 /**
  * Provider para a W-API (https://api.w-api.app). Diferente do Evolution/Official,
@@ -264,6 +270,9 @@ export class WapiProvider implements WhatsappProvider {
     // Este é o funil por onde passa tudo o que sai numa linha W-API: painel, IA,
     // reengajamento, carrinho, lembrete de cirurgia. O teto vive aqui, uma vez.
     let typing = input.typingDelaySeconds ?? 0
+    // Id da linha do livro-caixa: se o envio autorizado acabar não saindo, ela é
+    // reclassificada e para de gastar a cota do dia (ver marcarEnvioFalhou).
+    let logId: string | null = null
     if (this.antiBan) {
       const meta = (input.metadata ?? {}) as Record<string, unknown>
       const guardInput = {
@@ -278,6 +287,7 @@ export class WapiProvider implements WhatsappProvider {
         coldOverride: meta.antiBanColdOverride === true,
       }
       const decision = await guardAndRecord(this.antiBan.admin, guardInput)
+      logId = decision.logId
       if (!decision.allow) throw new WapiBlockedError(decision)
 
       // CONTATO NOVO: confirma que o número existe no WhatsApp antes de bater na porta.
@@ -309,20 +319,26 @@ export class WapiProvider implements WhatsappProvider {
 
     // W-API exige instanceId como query param e Bearer token no header.
     const url = `${this.baseUrl}/message/send-text?instanceId=${encodeURIComponent(this.instanceId)}`
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.token}`,
-      },
-      body: JSON.stringify({
-        phone: to,
-        message: text,
-        // "Digitando…" antes de a mensagem aparecer. O servidor da W-API segura, então não
-        // custa tempo de execução aqui. Quem calcula o valor é a guarda anti-ban.
-        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
-      }),
-    })
+    let res: Response
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.token}`,
+        },
+        body: JSON.stringify({
+          phone: to,
+          message: text,
+          // "Digitando…" antes de a mensagem aparecer. O servidor da W-API segura, então não
+          // custa tempo de execução aqui. Quem calcula o valor é a guarda anti-ban.
+          ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+        }),
+      })
+    } catch (e) {
+      await this.devolverCota(logId, e instanceof Error ? e.message : String(e))
+      throw e
+    }
 
     const responseText = await res.text()
     let parsed: Record<string, unknown> = {}
@@ -333,6 +349,7 @@ export class WapiProvider implements WhatsappProvider {
     }
 
     if (!res.ok) {
+      await this.devolverCota(logId, `http_${res.status}`)
       throw new Error(`wapi_send_failed_${res.status}: ${responseText.slice(0, 200)}`)
     }
 
@@ -352,6 +369,7 @@ export class WapiProvider implements WhatsappProvider {
     const successFlagFalse = successFlagRaw === false || String(successFlagRaw).toLowerCase() === 'false'
     if (apiError || apiStatusRaw === 'error' || apiStatusRaw === 'failed' || successFlagFalse) {
       const detail = apiError || apiStatusRaw || 'unknown_api_error'
+      await this.devolverCota(logId, detail)
       throw new Error(`wapi_send_failed_api: ${detail} | body=${responseText.slice(0, 200)}`)
     }
 
@@ -369,6 +387,16 @@ export class WapiProvider implements WhatsappProvider {
       status: 'queued',
       raw: parsed,
     }
+  }
+
+  /**
+   * Autorizado mas não saiu: devolve a cota do dia. A guarda decide ANTES do envio (é assim
+   * que ela segura duas rotinas ao mesmo tempo), então mensagem que morreu no caminho ficaria
+   * contando como entregue — e o teto puniria o dia por nada.
+   */
+  private async devolverCota(logId: string | null, motivo: string): Promise<void> {
+    if (!this.antiBan || !logId) return
+    await marcarEnvioFalhou(this.antiBan.admin, logId, motivo)
   }
 
   /** Envia uma IMAGEM por URL (W-API: /message/send-image). Usado p/ o QR do Pix. */

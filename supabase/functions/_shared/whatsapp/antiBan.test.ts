@@ -95,9 +95,9 @@ function fakeAdmin(cen: Cenario) {
         c._count = Boolean(opts?.count)
         return c
       },
-      eq: (col: string, _v: unknown) => {
+      eq: (col: string, v: unknown) => {
         if (col === 'lead_id') ehPorLead = true
-        if (col === 'kind') contaTipos = ['cold']
+        if (col === 'kind') contaTipos = [String(v)]
         return c
       },
       in: (_col: string, vals: string[]) => {
@@ -120,11 +120,13 @@ function fakeAdmin(cen: Cenario) {
         const ehHora = desdeMs > 0 && janelaMs <= 2 * 3_600_000
         const chave = ehPorLead
           ? 'por_lead'
-          : contaTipos.includes('cold') && contaTipos.length === 1
+          : contaTipos.length === 1 && contaTipos[0] === 'cold'
             ? 'frios'
-            : ehHora
-              ? 'proativos_hora'
-              : 'proativos'
+            : contaTipos.length === 1 && contaTipos[0] === 'optin'
+              ? 'optin'
+              : ehHora
+                ? 'proativos_hora'
+                : 'proativos'
         if (c._count) return Promise.resolve({ data: null, count: contagens[chave] ?? 0 }).then(r)
         // Consulta de texto repetido devolve linhas com lead_id.
         return Promise.resolve({ data: [] as unknown[] }).then(r)
@@ -310,6 +312,51 @@ Deno.test('linha oficial da Meta não é policiada por esta guarda', async () =>
   const d = await guardWhatsappOutbound(admin, BASE)
   assertEquals(d.allow, true)
   assertEquals(d.bypassed, true)
+})
+
+Deno.test('quem preencheu o formulário é chamado: passa mesmo com o teto semanal estourado', async () => {
+  await comRelogio(AGORA_UTIL(), async () => {
+    const admin = fakeAdmin({
+      ultimoInboundIso: null,
+      // 5 proativas para esta pessoa na semana barrariam um proativo comum; primeiro
+      // contato não olha esse teto, porque é a PRIMEIRA mensagem.
+      contagens: { optin: 3, proativos: 3, por_lead: 5 },
+    })
+    const d = await guardWhatsappOutbound(admin, { ...BASE, kind: 'optin' })
+    assertEquals(d.allow, true)
+    assertEquals(d.kind, 'optin')
+  })
+})
+
+Deno.test('primeiro contato tem teto próprio, mais folgado que o de contato frio', async () => {
+  await comRelogio(AGORA_UTIL(), async () => {
+    // 25 já enviados: passaria do teto de frio (20) e ainda cabe no de opt-in (40).
+    const cabe = await guardWhatsappOutbound(
+      fakeAdmin({ ultimoInboundIso: null, contagens: { optin: 25, proativos: 25, por_lead: 0 } }),
+      { ...BASE, kind: 'optin' },
+    )
+    assertEquals(cabe.allow, true)
+
+    const estourou = await guardWhatsappOutbound(
+      fakeAdmin({ ultimoInboundIso: null, contagens: { optin: 40, proativos: 40, por_lead: 0 } }),
+      { ...BASE, kind: 'optin' },
+    )
+    assertEquals(estourou.allow, false)
+    assertEquals(estourou.reason, 'cap_optin_dia')
+  })
+})
+
+Deno.test('a mensagem de apresentação não leva link', async () => {
+  await comRelogio(AGORA_UTIL(), async () => {
+    const admin = fakeAdmin({ ultimoInboundIso: null, contagens: { optin: 0, proativos: 0, por_lead: 0 } })
+    const d = await guardWhatsappOutbound(admin, {
+      ...BASE,
+      kind: 'optin',
+      text: 'Oi! Agende em institutolorena.com.br',
+    })
+    assertEquals(d.allow, false)
+    assertEquals(d.reason, 'link_primeiro_contato')
+  })
 })
 
 Deno.test('aquecimento sobe em rampa e depois entrega o teto cheio', () => {

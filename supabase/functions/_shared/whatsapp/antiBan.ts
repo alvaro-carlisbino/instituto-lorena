@@ -27,7 +27,15 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
  * guardaria o que foi recusado.
  */
 
-export type OutboundKind = 'reply' | 'proactive' | 'cold' | 'transactional'
+/**
+ * `optin` é o primeiro contato com quem PEDIU contato (formulário do Meta, site). Não é
+ * resposta — a pessoa não escreveu para o número — mas também não é abordagem a
+ * desconhecido: ela deixou o telefone minutos atrás esperando ser chamada. O risco de ban
+ * mora na taxa de denúncia, e quem preencheu o formulário não denuncia. Por isso tem teto
+ * próprio, mais folgado que o de contato frio, e continua sujeito a horário, ritmo e à
+ * confirmação de que o número existe no WhatsApp.
+ */
+export type OutboundKind = 'reply' | 'proactive' | 'cold' | 'optin' | 'transactional'
 
 export type GuardInput = {
   /** id da row em whatsapp_channel_instances (a LINHA), não o instanceId do painel. */
@@ -81,6 +89,8 @@ export type LinePolicy = {
   janela_fim: number
   permite_domingo: boolean
   cap_frio_dia: number
+  cap_optin_dia: number
+  optin_max_idade_horas: number
   cap_proativo_dia: number
   cap_proativo_hora: number
   gap_min_segundos: number
@@ -103,6 +113,8 @@ export const DEFAULT_LINE_POLICY: Omit<LinePolicy, 'instance_id' | 'tenant_id'> 
   janela_fim: 20,
   permite_domingo: false,
   cap_frio_dia: 20,
+  cap_optin_dia: 40,
+  optin_max_idade_horas: 48,
   cap_proativo_dia: 60,
   cap_proativo_hora: 12,
   gap_min_segundos: 45,
@@ -121,6 +133,13 @@ export const DEFAULT_LINE_POLICY: Omit<LinePolicy, 'instance_id' | 'tenant_id'> 
 
 /** Provedores em que a guarda vale: os que rodam numa sessão do aplicativo, não na API da Meta. */
 const GUARDED_PROVIDERS = new Set(['wapi', 'evolution'])
+
+/**
+ * Os três tipos de mensagem que a pessoa não pediu AGORA. Somam no mesmo teto de dia e de
+ * hora, e no mesmo intervalo entre envios — para a plataforma, o que conta é quanta saída
+ * partiu do número, não o nome que damos a ela.
+ */
+const NAO_PEDIDO = ['proactive', 'cold', 'optin']
 
 const SP_TZ = 'America/Sao_Paulo'
 
@@ -204,18 +223,43 @@ export async function loadLinePolicy(
   }
 }
 
+/** Rampa de aquecimento: sai de `capInicial` e chega ao `teto` ao longo de `dias`. */
+function rampa(teto: number, capInicial: number, dias: number, inicioIso: string | null, agora: Date): number {
+  const alvo = Math.max(0, teto)
+  if (!inicioIso) return alvo
+  const inicio = new Date(inicioIso).getTime()
+  if (!Number.isFinite(inicio)) return alvo
+  const passados = Math.floor((agora.getTime() - inicio) / 86_400_000)
+  if (passados < 0) return Math.min(alvo, capInicial)
+  if (passados >= Math.max(1, dias)) return alvo
+  const passo = (alvo - capInicial) / Math.max(1, dias)
+  return Math.max(1, Math.min(alvo, Math.floor(capInicial + passo * passados)))
+}
+
 /** Teto de frios de hoje considerando a rampa de aquecimento da linha. */
 export function capFrioComAquecimento(policy: LinePolicy, agora: Date = new Date()): number {
-  const teto = Math.max(0, policy.cap_frio_dia)
-  if (!policy.aquecimento_inicio) return teto
-  const inicio = new Date(policy.aquecimento_inicio).getTime()
-  if (!Number.isFinite(inicio)) return teto
-  const dias = Math.floor((agora.getTime() - inicio) / 86_400_000)
-  if (dias < 0) return Math.min(teto, policy.aquecimento_cap_inicial)
-  if (dias >= Math.max(1, policy.aquecimento_dias)) return teto
-  // Rampa linear do cap inicial até o teto ao longo de `aquecimento_dias`.
-  const passo = (teto - policy.aquecimento_cap_inicial) / Math.max(1, policy.aquecimento_dias)
-  return Math.max(1, Math.min(teto, Math.floor(policy.aquecimento_cap_inicial + passo * dias)))
+  return rampa(
+    policy.cap_frio_dia,
+    policy.aquecimento_cap_inicial,
+    policy.aquecimento_dias,
+    policy.aquecimento_inicio,
+    agora,
+  )
+}
+
+/**
+ * Teto de primeiros contatos de hoje. A rampa parte do DOBRO do cap inicial de contato
+ * frio: quem preencheu o formulário está à espera da mensagem, e segurar demais aqui é
+ * perder o lead — que é o outro jeito de o número não servir para nada.
+ */
+export function capOptinComAquecimento(policy: LinePolicy, agora: Date = new Date()): number {
+  return rampa(
+    policy.cap_optin_dia,
+    Math.max(policy.aquecimento_cap_inicial * 2, 10),
+    policy.aquecimento_dias,
+    policy.aquecimento_inicio,
+    agora,
+  )
 }
 
 type InstanceRow = {
@@ -390,7 +434,7 @@ export async function guardWhatsappOutbound(
         .select('id', { count: 'exact', head: true })
         .eq('instance_id', input.instanceId)
         .eq('decision', 'allowed')
-        .in('kind', ['proactive', 'cold'])
+        .in('kind', NAO_PEDIDO)
         .gte('created_at', desdeInicioDoDia)
       if ((proativosHoje ?? 0) >= policy.cap_proativo_dia) {
         return {
@@ -409,7 +453,7 @@ export async function guardWhatsappOutbound(
         .select('id', { count: 'exact', head: true })
         .eq('instance_id', input.instanceId)
         .eq('decision', 'allowed')
-        .in('kind', ['proactive', 'cold'])
+        .in('kind', NAO_PEDIDO)
         .gte('created_at', umaHoraAtras)
       if ((proativos1h ?? 0) >= policy.cap_proativo_hora) {
         return {
@@ -429,7 +473,7 @@ export async function guardWhatsappOutbound(
         .select('created_at')
         .eq('instance_id', input.instanceId)
         .eq('decision', 'allowed')
-        .in('kind', ['proactive', 'cold'])
+        .in('kind', NAO_PEDIDO)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -482,14 +526,16 @@ export async function guardWhatsappOutbound(
     }
 
     // ── 6. Frequência com a MESMA pessoa ───────────────────────────────────────
-    if (input.leadId && !input.humanOverride && policy.cap_proativo_semana_por_lead > 0) {
+    // Não vale para `optin`: ali é a PRIMEIRA mensagem, e quem preencheu o formulário está
+    // à espera dela. Quem evita mandar duas vezes é a trava única da fila, não este teto.
+    if (kind !== 'optin' && input.leadId && !input.humanOverride && policy.cap_proativo_semana_por_lead > 0) {
       const semanaAtras = new Date(agora.getTime() - 7 * 86_400_000).toISOString()
       const { count: proativosLead } = await admin
         .from('whatsapp_outbound_log')
         .select('id', { count: 'exact', head: true })
         .eq('lead_id', input.leadId)
         .eq('decision', 'allowed')
-        .in('kind', ['proactive', 'cold'])
+        .in('kind', NAO_PEDIDO)
         .gte('created_at', semanaAtras)
       if ((proativosLead ?? 0) >= policy.cap_proativo_semana_por_lead) {
         return {
@@ -504,7 +550,48 @@ export async function guardWhatsappOutbound(
       }
     }
 
-    // ── 7. Regras exclusivas de CONTATO NOVO ───────────────────────────────────
+    // ── 7. PRIMEIRO CONTATO de quem pediu contato (formulário, site) ───────────
+    if (kind === 'optin') {
+      const capOptin = capOptinComAquecimento(policy, agora)
+      if (!input.coldOverride) {
+        const { count: optinHoje } = await admin
+          .from('whatsapp_outbound_log')
+          .select('id', { count: 'exact', head: true })
+          .eq('instance_id', input.instanceId)
+          .eq('decision', 'allowed')
+          .eq('kind', 'optin')
+          .gte('created_at', desdeInicioDoDia)
+        if ((optinHoje ?? 0) >= capOptin) {
+          const emAquecimento = capOptin < policy.cap_optin_dia
+          return {
+            allow: false,
+            kind,
+            reason: 'cap_optin_dia',
+            message: emAquecimento
+              ? `Teto de primeiros contatos de hoje atingido (${capOptin}, linha em aquecimento). Quem ficou na fila sai amanhã.`
+              : `Teto de primeiros contatos de hoje atingido (${capOptin}). Quem ficou na fila sai amanhã.`,
+            retryAfterSeconds: 3600,
+            typingDelaySeconds: 0,
+            policy,
+          }
+        }
+      }
+
+      // Link na mensagem de apresentação vale a mesma regra do contato frio: a pessoa
+      // pediu contato, não pediu um link de alguém que ela ainda não sabe quem é.
+      if (!input.coldOverride && policy.bloqueia_link_primeiro_contato && LINK_RE.test(texto)) {
+        return {
+          allow: false,
+          kind,
+          reason: 'link_primeiro_contato',
+          message: 'A mensagem de apresentação não leva link. Mande o link depois que a pessoa responder.',
+          typingDelaySeconds: 0,
+          policy,
+        }
+      }
+    }
+
+    // ── 8. Regras exclusivas de CONTATO NOVO (ninguém pediu nada) ──────────────
     if (kind === 'cold') {
       const capFrio = capFrioComAquecimento(policy, agora)
       // Contato novo não abre exceção por ser humano a clicar: só o "assumo o risco" explícito.
@@ -645,13 +732,18 @@ export async function classifyOutbound(
   }
 }
 
-/** Grava no livro-caixa. Nunca lança: log não pode derrubar envio. */
+/**
+ * Grava no livro-caixa e devolve o id da linha. Nunca lança: log não pode derrubar envio.
+ *
+ * O id importa porque a decisão é tomada ANTES do envio (é assim que o teto segura duas
+ * rotinas ao mesmo tempo), e o envio ainda pode falhar depois. Ver `marcarEnvioFalhou`.
+ */
 export async function recordWhatsappOutbound(
   admin: SupabaseClient,
   input: GuardInput & { decision: GuardDecision },
-): Promise<void> {
+): Promise<string | null> {
   try {
-    await admin.from('whatsapp_outbound_log').insert({
+    const { data } = await admin.from('whatsapp_outbound_log').insert({
       tenant_id: input.tenantId ?? 'instituto-lorena',
       instance_id: input.instanceId,
       lead_id: input.leadId ?? null,
@@ -661,9 +753,36 @@ export async function recordWhatsappOutbound(
       reason: input.decision.reason ?? null,
       source: input.source?.slice(0, 60) ?? null,
       text_hash: hashTexto(input.text),
-    })
+    }).select('id').single()
+    return (data as { id?: string } | null)?.id ?? null
   } catch (e) {
     console.warn('[antiBan] falha ao gravar livro-caixa:', e instanceof Error ? e.message : String(e))
+    return null
+  }
+}
+
+/**
+ * O envio foi autorizado mas não saiu (instância inexistente, sessão fora do ar, 500 do
+ * provedor). Reclassifica a linha do livro-caixa para que ela pare de contar como mensagem
+ * entregue.
+ *
+ * Sem isto o teto punia o dia por mensagens que ninguém recebeu: em 20/08/2026 a fila de
+ * primeiro contato tentou uma linha cujo instanceId nem existia mais no provedor, e cada
+ * nova tentativa gastava cota do dia por nada.
+ */
+export async function marcarEnvioFalhou(
+  admin: SupabaseClient,
+  logId: string | null,
+  motivo: string,
+): Promise<void> {
+  if (!logId) return
+  try {
+    await admin
+      .from('whatsapp_outbound_log')
+      .update({ decision: 'blocked', reason: `envio_falhou: ${motivo}`.slice(0, 200) })
+      .eq('id', logId)
+  } catch {
+    /* best-effort */
   }
 }
 
@@ -677,7 +796,7 @@ export async function recordWhatsappOutbound(
 export async function guardAndRecord(
   admin: SupabaseClient,
   input: GuardInput,
-): Promise<GuardDecision> {
+): Promise<GuardDecision & { logId: string | null }> {
   let leadId = input.leadId ?? null
   if (!leadId && !input.kind) {
     const digitos = String(input.phone ?? '').replace(/[^0-9]/g, '')
@@ -697,8 +816,8 @@ export async function guardAndRecord(
   }
   const efetivo: GuardInput = { ...input, leadId }
   const decision = await guardWhatsappOutbound(admin, efetivo)
-  await recordWhatsappOutbound(admin, { ...efetivo, decision })
-  return decision
+  const logId = await recordWhatsappOutbound(admin, { ...efetivo, decision })
+  return { ...decision, logId }
 }
 
 /**

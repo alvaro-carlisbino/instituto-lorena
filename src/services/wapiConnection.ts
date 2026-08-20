@@ -78,6 +78,9 @@ export type WapiLinePolicy = {
   janela_fim: number
   permite_domingo: boolean
   cap_frio_dia: number
+  /** Teto de PRIMEIRO CONTATO com quem pediu contato (formulário, site). */
+  cap_optin_dia: number
+  optin_max_idade_horas: number
   cap_proativo_dia: number
   cap_proativo_hora: number
   gap_min_segundos: number
@@ -161,6 +164,65 @@ export type WapiOutboundLogRow = {
   reason: string | null
   source: string | null
   created_at: string
+}
+
+// ── Fila de primeiro contato ──────────────────────────────────────────────────
+
+export type OutreachFila = {
+  instance_id: string
+  na_fila: number
+  prontos_agora: number
+  enviados_hoje: number
+  recusados_hoje: number
+  proximo_em: string | null
+}
+
+export type LeadformOutreachConfig = {
+  enabled: boolean
+  message: string
+  max_age_hours: number
+}
+
+export async function fetchOutreachFila(instanceId: string): Promise<OutreachFila | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase
+    .from('v_whatsapp_outreach_fila')
+    .select('*')
+    .eq('instance_id', instanceId)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data as OutreachFila | null) ?? null
+}
+
+export async function fetchLeadformConfig(tenantId: string): Promise<LeadformOutreachConfig> {
+  const vazio: LeadformOutreachConfig = { enabled: false, message: '', max_age_hours: 48 }
+  if (!supabase) return vazio
+  const { data, error } = await supabase
+    .from('tenant_integrations')
+    .select('outreach')
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  const out = ((data as { outreach?: Record<string, unknown> } | null)?.outreach ?? {}) as Record<string, unknown>
+  const lf = (out.leadform ?? {}) as Partial<LeadformOutreachConfig>
+  return {
+    enabled: lf.enabled === true,
+    message: String(lf.message ?? ''),
+    max_age_hours: Number(lf.max_age_hours) > 0 ? Number(lf.max_age_hours) : 48,
+  }
+}
+
+export async function saveLeadformConfig(tenantId: string, cfg: LeadformOutreachConfig): Promise<void> {
+  if (!supabase) throw new Error('Sistema não configurado.')
+  // Lê o `outreach` inteiro antes de gravar: escrever a chave `leadform` sozinha apagaria
+  // qualquer outra automação guardada no mesmo objeto.
+  const { data } = await supabase.from('tenant_integrations').select('outreach').eq('tenant_id', tenantId).maybeSingle()
+  const atual = ((data as { outreach?: Record<string, unknown> } | null)?.outreach ?? {}) as Record<string, unknown>
+  const { error } = await supabase
+    .from('tenant_integrations')
+    .update({ outreach: { ...atual, leadform: cfg } })
+    .eq('tenant_id', tenantId)
+  if (error) throw new Error(error.message)
 }
 
 /** Últimos bloqueios da linha: é aqui que se vê a guarda a trabalhar. */

@@ -9,12 +9,18 @@ import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import type { WhatsappChannelInstance } from '@/services/whatsappChannelInstances'
+import { Textarea } from '@/components/ui/textarea'
 import {
   fetchBlockedRecent,
+  fetchLeadformConfig,
   fetchLineGuard,
   fetchLinePolicy,
+  fetchOutreachFila,
+  saveLeadformConfig,
   saveLinePolicy,
   wapiConnectionAction,
+  type LeadformOutreachConfig,
+  type OutreachFila,
   type WapiLineGuardRow,
   type WapiLinePolicy,
   type WapiOutboundLogRow,
@@ -78,6 +84,9 @@ export function WapiLinePanel({ instance }: { instance: WhatsappChannelInstance 
   const [guard, setGuard] = useState<WapiLineGuardRow | null>(null)
   const [policy, setPolicy] = useState<WapiLinePolicy | null>(null)
   const [bloqueios, setBloqueios] = useState<WapiOutboundLogRow[]>([])
+  const [fila, setFila] = useState<OutreachFila | null>(null)
+  const [leadform, setLeadform] = useState<LeadformOutreachConfig | null>(null)
+  const [salvandoLeadform, setSalvandoLeadform] = useState(false)
   const [carregando, setCarregando] = useState(false)
   const [acao, setAcao] = useState<string | null>(null)
   const [qr, setQr] = useState('')
@@ -93,14 +102,18 @@ export function WapiLinePanel({ instance }: { instance: WhatsappChannelInstance 
   const carregar = useCallback(async () => {
     setCarregando(true)
     try {
-      const [g, p, b] = await Promise.all([
+      const [g, p, b, f, lf] = await Promise.all([
         fetchLineGuard(instance.id),
         fetchLinePolicy(instance.id),
         fetchBlockedRecent(instance.id),
+        fetchOutreachFila(instance.id),
+        instance.tenantId ? fetchLeadformConfig(instance.tenantId) : Promise.resolve(null),
       ])
       setGuard(g)
       setPolicy(p)
       setBloqueios(b)
+      setFila(f)
+      setLeadform(lf)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao ler a guarda desta linha.')
     } finally {
@@ -112,7 +125,21 @@ export function WapiLinePanel({ instance }: { instance: WhatsappChannelInstance 
     setQr('')
     setPairCode('')
     void carregar()
-  }, [carregar])
+  }, [carregar, instance.tenantId])
+
+  const guardarLeadform = async () => {
+    if (!leadform || !instance.tenantId) return
+    setSalvandoLeadform(true)
+    try {
+      await saveLeadformConfig(instance.tenantId, leadform)
+      toast.success('Primeiro contato salvo. Vale para quem entrar na fila a partir de agora.')
+      await carregar()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar.')
+    } finally {
+      setSalvandoLeadform(false)
+    }
+  }
 
   const executar = async (
     nome: string,
@@ -546,6 +573,114 @@ export function WapiLinePanel({ instance }: { instance: WhatsappChannelInstance 
               </div>
             </>
           ) : null}
+        </CardContent>
+      </Card>
+
+      {/* ── Primeiro contato automático (o que o ManyChat fazia) ─────────────── */}
+      <Card>
+        <CardHeader className="space-y-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-base">Primeiro contato com quem preenche o formulário</CardTitle>
+            {leadform?.enabled ? (
+              <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-900">
+                Ligado
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="border-border bg-muted text-muted-foreground">
+                Desligado
+              </Badge>
+            )}
+          </div>
+          <p className="m-0 text-xs text-muted-foreground">
+            Todo lead de formulário entra na fila no instante em que preenche. Sair da fila é que depende da hora,
+            do intervalo e do teto do dia: assim ninguém fica sem contato, e o número não leva rajada.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2 sm:grid-cols-4">
+            <Numero rotulo="Na fila" valor={fila?.na_fila ?? 0} />
+            <Numero rotulo="Prontos agora" valor={fila?.prontos_agora ?? 0} />
+            <Numero rotulo="Chamados hoje" valor={fila?.enviados_hoje ?? 0} />
+            <Numero rotulo="Recusados hoje" valor={fila?.recusados_hoje ?? 0} alerta={(fila?.recusados_hoje ?? 0) > 0} />
+          </div>
+          {fila?.proximo_em ? (
+            <p className="m-0 text-xs text-muted-foreground">
+              Próximo sai por volta de {new Date(fila.proximo_em).toLocaleString('pt-BR')}.
+            </p>
+          ) : null}
+
+          {leadform ? (
+            <>
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-sm">
+                <span>
+                  Chamar automaticamente
+                  <span className="block text-xs text-muted-foreground">
+                    Desligado, o lead ainda entra no CRM e a equipe é avisada — só ninguém escreve sozinho.
+                  </span>
+                </span>
+                <Switch
+                  checked={leadform.enabled}
+                  onCheckedChange={(v) => setLeadform({ ...leadform, enabled: v })}
+                />
+              </label>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="lf-msg">Mensagem de apresentação</Label>
+                <Textarea
+                  id="lf-msg"
+                  rows={4}
+                  value={leadform.message}
+                  onChange={(e) => setLeadform({ ...leadform, message: e.target.value })}
+                  placeholder="Oi, {{primeiro_nome}}! Aqui é a Sofia…"
+                  className="min-h-[96px] text-sm"
+                />
+                <p className="m-0 text-[0.7rem] text-muted-foreground">
+                  <span className="font-mono">{'{{primeiro_nome}}'}</span> e{' '}
+                  <span className="font-mono">{'{{nome}}'}</span> são trocados pelo nome da pessoa. Sem link nesta
+                  mensagem: link para quem ainda não sabe quem você é é o sinal de spam mais caro e mais fácil de
+                  evitar. A resposta dela abre a conversa, e daí a Sofia segue normalmente.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="lf-idade">Vale por quantas horas</Label>
+                  <Input
+                    id="lf-idade"
+                    type="number"
+                    min={1}
+                    value={leadform.max_age_hours}
+                    onChange={(e) => setLeadform({ ...leadform, max_age_hours: Number(e.target.value) || 48 })}
+                  />
+                  <p className="m-0 text-[0.7rem] text-muted-foreground">
+                    Formulário mais velho que isto vira abordagem a estranho, e passa a valer a regra de contato novo.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="pol-optin">Primeiros contatos por dia</Label>
+                  <Input
+                    id="pol-optin"
+                    type="number"
+                    min={0}
+                    value={policy?.cap_optin_dia ?? 40}
+                    onChange={(e) => patch({ cap_optin_dia: Number(e.target.value) || 0 })}
+                  />
+                  <p className="m-0 text-[0.7rem] text-muted-foreground">
+                    Salvo no botão "Salvar limites", acima. O que passar do teto espera na fila até amanhã.
+                  </p>
+                </div>
+                <div className="flex items-end">
+                  <Button type="button" size="sm" disabled={salvandoLeadform} onClick={() => void guardarLeadform()}>
+                    {salvandoLeadform ? 'A salvar…' : 'Salvar primeiro contato'}
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <p className="m-0 text-xs text-muted-foreground">
+              {carregando ? 'A carregar…' : 'Sem polo definido nesta linha: não dá para configurar o primeiro contato.'}
+            </p>
+          )}
         </CardContent>
       </Card>
 

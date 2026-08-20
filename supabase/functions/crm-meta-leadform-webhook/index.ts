@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supa
 import { insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { createManychatWhatsappSubscriber, sendManychatFlow } from '../_shared/manychatPublicApi.ts'
+import { enqueueOutreach, loadLeadformOutreachConfig, renderMensagem } from '../_shared/whatsapp/outreach.ts'
 import type { LeadAttribution } from '../_shared/attribution.ts'
 
 // Frente B da atribuição Meta: LEAD ADS (formulário dentro do Facebook/Instagram).
@@ -153,6 +154,53 @@ type FirstTouchInput = {
   formId: string
 }
 
+/**
+ * Primeiro contato pela LINHA DA CASA (W-API), que substituiu o template do ManyChat.
+ *
+ * Não envia aqui: põe na fila. Formulário chega quando chega — inclusive de madrugada e
+ * inclusive oito de uma vez quando o anúncio pega — e disparar no ato é a rajada que mata
+ * uma linha não-oficial. A fila entrega no ritmo de gente, dentro da janela, respeitando o
+ * teto do dia; o `crm-outreach-worker` cuida disso de minuto em minuto.
+ *
+ * Devolve `true` quando a pessoa entra na fila (a notificação para a equipe muda de texto).
+ */
+async function enfileirarPrimeiroContato(admin: SupabaseClient, input: FirstTouchInput): Promise<boolean> {
+  try {
+    const cfg = await loadLeadformOutreachConfig(admin, input.tenantId)
+    if (!cfg.enabled) return false
+
+    // Formulário velho não vale como "pediu contato agora": a pessoa já esqueceu que
+    // preencheu, e a mensagem chega como abordagem de estranho.
+    const createdMs = Date.parse(input.formCreatedTime)
+    if (Number.isFinite(createdMs) && Date.now() - createdMs > cfg.maxAgeHours * 3_600_000) {
+      await logEvent(admin, {
+        leadgenId: input.leadgenId, pageId: input.pageId, formId: input.formId,
+        status: 'first_touch_skipped_old', leadId: input.leadId,
+      })
+      return false
+    }
+
+    const res = await enqueueOutreach(admin, {
+      tenantId: input.tenantId,
+      leadId: input.leadId,
+      phone: input.phone,
+      message: renderMensagem(cfg.message, input.nome),
+      source: 'leadform',
+    })
+    await logEvent(admin, {
+      leadgenId: input.leadgenId, pageId: input.pageId, formId: input.formId,
+      status: res.queued ? 'first_touch_queued' : 'first_touch_skipped',
+      leadId: input.leadId,
+      detail: res.queued ? `sai em ${res.scheduledAt}` : (res.reason ?? '-'),
+    })
+    return res.queued
+  } catch (e) {
+    console.error(`[meta-leadform] fila ${input.leadgenId}: ${e instanceof Error ? e.message : e}`)
+    return false
+  }
+}
+
+/** Caminho antigo, pelo ManyChat. Mantido para quem ainda tiver o flow configurado. */
 async function maybeSendLeadformFirstTouch(admin: SupabaseClient, input: FirstTouchInput): Promise<boolean> {
   try {
     const { data } = await admin
@@ -338,22 +386,26 @@ async function processLeadData(
     }).catch(() => {})
     await logEvent(admin, { leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw), status: `lead_${up.status}`, leadId: up.leadId, detail: `${nome} | campanha=${campaignName || '-'}` })
     // Primeiro contato automático da Sofia (só lead NOVO; existente pode já estar em conversa).
+    // Caminho de hoje: fila na linha da casa. O ManyChat só entra se a fila estiver desligada
+    // e o flow antigo ainda existir — desde 19/ago ele só devolve `first_touch_failed`.
+    const firstTouchInput = {
+      tenantId, leadId: up.leadId, phone, nome,
+      formCreatedTime: String(lead.created_time ?? ''),
+      leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw),
+    }
     const firstTouchSent = up.status === 'created'
-      ? await maybeSendLeadformFirstTouch(admin, {
-          tenantId, leadId: up.leadId, phone, nome,
-          formCreatedTime: String(lead.created_time ?? ''),
-          leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw),
-        })
+      ? (await enfileirarPrimeiroContato(admin, firstTouchInput)) ||
+        (await maybeSendLeadformFirstTouch(admin, firstTouchInput))
       : false
     // Sem primeiro contato automático, o time precisa chamar ATIVAMENTE.
     await notifyAgents(admin, {
       leadId: up.leadId,
       kind: 'info',
       title: firstTouchSent
-        ? '📋 Lead de formulário Meta — Sofia iniciou o contato'
+        ? '📋 Lead de formulário Meta — Sofia vai chamar'
         : '📋 Lead de formulário Meta — chamar AGORA',
       body: firstTouchSent
-        ? `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio; a Sofia já mandou a primeira mensagem — acompanhe a resposta.`
+        ? `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio; a Sofia já está com a primeira mensagem na fila — acompanhe a resposta.`
         : `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio — quanto antes o contato, maior a conversão.`,
       includeOwner: true,
       tenantId,
