@@ -70,6 +70,8 @@ console.log(`\n${alvos.length} números a consultar, ${PAUSA_MS}ms entre um e ou
 /** A consulta sai de dentro do banco para o token da linha não passar pelo terminal. */
 async function temWhatsapp(numero: string): Promise<boolean | null> {
   const [row] = await sql(`
+    set local statement_timeout = '30s';
+    select extensions.http_set_curlopt('CURLOPT_TIMEOUT_MS','20000');
     with linha as (
       select wapi_instance_id as iid, wapi_token as tok,
              coalesce(nullif(wapi_base_url,''),'https://api.w-api.app/v1') as base
@@ -92,11 +94,24 @@ async function temWhatsapp(numero: string): Promise<boolean | null> {
   }
 }
 
+/**
+ * A W-API as vezes passa dos 5s padrao do `http` do Postgres, e ai a query INTEIRA volta
+ * erro. Na primeira versao isso derrubava a varredura no meio (três vezes, no numero 227).
+ * Um numero lento nao pode custar os outros 600: engole, conta e segue.
+ */
+async function temWhatsappSeguro(numero: string): Promise<boolean | null> {
+  try {
+    return await temWhatsapp(numero)
+  } catch {
+    return null
+  }
+}
+
 let tem = 0, naoTem = 0, semResposta = 0
 const mortos: Row[] = []
 for (const [i, lead] of alvos.entries()) {
   if (i > 0) await dorme(PAUSA_MS)
-  const existe = await temWhatsapp(String(lead.phone))
+  const existe = await temWhatsappSeguro(String(lead.phone))
   if (existe === true) tem++
   else if (existe === false) { naoTem++; mortos.push(lead) }
   else { semResposta++; continue } // sem resposta não se grava: silêncio não é veredicto
