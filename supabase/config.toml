@@ -433,6 +433,12 @@ verify_jwt = true
 [functions.crm-outreach-worker]
 verify_jwt = false
 
+# Vigia do atendimento: a cada 5 min procura mensagem de entrada sem nenhuma saída depois.
+# Retoma a resposta da IA quando a função morreu no meio (job preso em `processing`) e cutuca
+# a equipe/o dono quando a conversa está com humano e ninguém assumiu. Cron, logo sem JWT.
+[functions.crm-atendimento-vigia]
+verify_jwt = false
+
 # Backstop de flush de rajada, disparado por pg_cron com x-cron-secret (auth própria no
 # handler, sem JWT de sessão). Pinado aqui senão um redeploy via CLI volta pro default
 # verify_jwt=true e o cron toma 401 no gateway antes de chegar no código.
