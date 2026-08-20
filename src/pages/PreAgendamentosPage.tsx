@@ -29,9 +29,12 @@ import {
   listarJanelas,
   listarPreAgendamentos,
   listarUnidadesAgenda,
+  listarPrestadoresAgenda,
+  salvarPrestadorAgenda,
   estadoDaAgendaShosp,
   reabrirDia,
   type EstadoAgendaShosp,
+  type PrestadorAgenda,
   type DiaFechado,
   type JanelaAgenda,
   type PreAgendamento,
@@ -224,17 +227,140 @@ function LinhaPreAgendamento({
   )
 }
 
+
+/**
+ * O turno de consulta de cada médico.
+ *
+ * Consulta não é o dia inteiro e cada um tem o seu horário: a Dra. Lorena atende
+ * de manhã, o Dr. Matheus e a Dra. Jaqueline à tarde. Em dia de cirurgia a janela
+ * encolhe, e a cirurgia NÃO está na Shosp (mora no sistema do centro cirúrgico),
+ * então é esta tabela que impede a landing de vender a manhã de quem vai operar.
+ */
+function PainelMedicos({
+  prestadores,
+  onRecarregar,
+}: {
+  prestadores: PrestadorAgenda[]
+  onRecarregar: () => void
+}) {
+  const [salvando, setSalvando] = useState('')
+
+  const salvar = (p: PrestadorAgenda, patch: Parameters<typeof salvarPrestadorAgenda>[1]) => {
+    setSalvando(p.id)
+    void salvarPrestadorAgenda(p.id, patch)
+      .then(onRecarregar)
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'Falhou'))
+      .finally(() => setSalvando(''))
+  }
+
+  // Um profissional pode servir mais de uma unidade com a mesma regra; mostra uma vez.
+  const unicos = useMemo(() => {
+    const vistos = new Set<string>()
+    return prestadores.filter((p) => {
+      if (vistos.has(p.codigoPrestador)) return false
+      vistos.add(p.codigoPrestador)
+      return true
+    })
+  }, [prestadores])
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Turno de consulta por profissional</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <p className="text-xs text-muted-foreground">
+          A landing só oferece horário dentro do turno de cada um. Em dia de cirurgia vale a janela reduzida, e deixar
+          a janela de cirurgia vazia significa que a pessoa não atende quando opera. O teto por dia segura pico de
+          anúncio.
+        </p>
+        {unicos.map((p) => (
+          <div key={p.id} className="flex flex-wrap items-end gap-3 rounded-lg border p-3">
+            <div className="min-w-[180px] flex-1">
+              <p className="text-sm font-medium">{p.rotuloPublico}</p>
+              <p className="text-xs text-muted-foreground">{p.objetivos.join(', ') || 'sem objetivo ligado'}</p>
+            </div>
+            <label className="text-xs text-muted-foreground">
+              Dia normal
+              <div className="mt-1 flex items-center gap-1">
+                <Input
+                  type="time"
+                  defaultValue={p.horaInicio}
+                  className="w-28"
+                  onBlur={(e) => e.target.value !== p.horaInicio && salvar(p, { hora_inicio: e.target.value })}
+                />
+                <Input
+                  type="time"
+                  defaultValue={p.horaFim}
+                  className="w-28"
+                  onBlur={(e) => e.target.value !== p.horaFim && salvar(p, { hora_fim: e.target.value })}
+                />
+              </div>
+            </label>
+            <label className="text-xs text-muted-foreground">
+              Dia de cirurgia
+              <div className="mt-1 flex items-center gap-1">
+                <Input
+                  type="time"
+                  defaultValue={p.horaInicioCirurgia ?? ''}
+                  className="w-28"
+                  onBlur={(e) =>
+                    e.target.value !== (p.horaInicioCirurgia ?? '') &&
+                    salvar(p, { hora_inicio_cirurgia: e.target.value || null })
+                  }
+                />
+                <Input
+                  type="time"
+                  defaultValue={p.horaFimCirurgia ?? ''}
+                  className="w-28"
+                  onBlur={(e) =>
+                    e.target.value !== (p.horaFimCirurgia ?? '') &&
+                    salvar(p, { hora_fim_cirurgia: e.target.value || null })
+                  }
+                />
+              </div>
+            </label>
+            <label className="text-xs text-muted-foreground">
+              Consultas por dia
+              <Input
+                type="number"
+                min={1}
+                max={12}
+                defaultValue={p.maxPorDia}
+                className="mt-1 w-20"
+                onBlur={(e) =>
+                  Number(e.target.value) !== p.maxPorDia && salvar(p, { max_por_dia: Number(e.target.value) })
+                }
+              />
+            </label>
+            <Button
+              size="sm"
+              variant={p.ativo ? 'outline' : 'default'}
+              disabled={salvando === p.id}
+              onClick={() => salvar(p, { active: !p.ativo })}
+            >
+              {p.ativo ? 'Tirar da landing' : 'Voltar para a landing'}
+            </Button>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
 function PainelAgenda({
   unidades,
   janelas,
   fechados,
   agenda,
+  prestadores,
   onRecarregar,
 }: {
   unidades: UnidadeAgenda[]
   janelas: JanelaAgenda[]
   fechados: DiaFechado[]
   agenda: EstadoAgendaShosp | null
+  prestadores: PrestadorAgenda[]
   onRecarregar: () => void
 }) {
   const [novoDia, setNovoDia] = useState('')
@@ -276,6 +402,8 @@ function PainelAgenda({
           </span>
         </CardContent>
       </Card>
+
+      <PainelMedicos prestadores={prestadores} onRecarregar={onRecarregar} />
 
       <Card>
         <CardHeader className="pb-2">
@@ -390,6 +518,7 @@ export function PreAgendamentosPage() {
   const [janelas, setJanelas] = useState<JanelaAgenda[]>([])
   const [fechados, setFechados] = useState<DiaFechado[]>([])
   const [agendaShosp, setAgendaShosp] = useState<EstadoAgendaShosp | null>(null)
+  const [prestadores, setPrestadores] = useState<PrestadorAgenda[]>([])
   const [carregando, setCarregando] = useState(true)
   const [ocupado, setOcupado] = useState(false)
   // Relógio carimbado na carga: sem isto cada render lia Date.now() e o resultado
@@ -404,14 +533,16 @@ export function PreAgendamentosPage() {
       listarJanelas(),
       listarDiasFechados(),
       estadoDaAgendaShosp(),
+      listarPrestadoresAgenda(),
     ])
-      .then(([pre, uni, jan, fec, ag]) => {
+      .then(([pre, uni, jan, fec, ag, med]) => {
         setAgora(Date.now())
         setLista(pre)
         setUnidades(uni)
         setJanelas(jan)
         setFechados(fec)
         setAgendaShosp(ag)
+        setPrestadores(med)
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao carregar'))
       .finally(() => setCarregando(false))
@@ -527,6 +658,7 @@ export function PreAgendamentosPage() {
             janelas={janelas}
             fechados={fechados}
             agenda={agendaShosp}
+            prestadores={prestadores}
             onRecarregar={recarregar}
           />
         ) : visiveis.length === 0 ? (

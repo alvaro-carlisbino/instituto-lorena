@@ -312,3 +312,84 @@ export async function estadoDaAgendaShosp(): Promise<EstadoAgendaShosp> {
     minutosDesde: ultima ? Math.round((Date.now() - new Date(ultima).getTime()) / 60000) : null,
   }
 }
+
+// ── Quem atende o quê, e em que turno ───────────────────────────────────────
+
+export type PrestadorAgenda = {
+  id: string
+  unidadeId: string
+  codigoPrestador: string
+  rotuloPublico: string
+  objetivos: string[]
+  horaInicio: string
+  horaFim: string
+  horaInicioCirurgia: string | null
+  horaFimCirurgia: string | null
+  maxPorDia: number
+  ativo: boolean
+}
+
+/**
+ * O turno de consulta de cada médico, e o que muda em dia de cirurgia.
+ *
+ * Existe porque a agenda da Shosp abre a grade inteira do profissional, mas
+ * consulta não é o dia todo: a Dra. Lorena atende de manhã, o Dr. Matheus e a
+ * Dra. Jaqueline à tarde, e em dia de cirurgia a janela encolhe. Cirurgia não
+ * aparece na Shosp (é o sistema do centro cirúrgico), então é aqui que a regra vive.
+ */
+export async function listarPrestadoresAgenda(): Promise<PrestadorAgenda[]> {
+  if (!supabase) return []
+  let q = supabase
+    .from('clinic_booking_prestadores')
+    .select('id, unidade_id, codigo_prestador, rotulo_publico, objetivos, hora_inicio, hora_fim, hora_inicio_cirurgia, hora_fim_cirurgia, max_por_dia, active')
+    .order('sort_order')
+  const polo = poloDaTela()
+  if (polo) q = q.eq('tenant_id', polo)
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((p) => ({
+    id: String(p.id),
+    unidadeId: String(p.unidade_id),
+    codigoPrestador: String(p.codigo_prestador),
+    rotuloPublico: String(p.rotulo_publico),
+    objetivos: (p.objetivos as string[]) ?? [],
+    horaInicio: String(p.hora_inicio ?? '').slice(0, 5),
+    horaFim: String(p.hora_fim ?? '').slice(0, 5),
+    horaInicioCirurgia: p.hora_inicio_cirurgia ? String(p.hora_inicio_cirurgia).slice(0, 5) : null,
+    horaFimCirurgia: p.hora_fim_cirurgia ? String(p.hora_fim_cirurgia).slice(0, 5) : null,
+    maxPorDia: Number(p.max_por_dia ?? 3),
+    ativo: p.active === true,
+  }))
+}
+
+export async function salvarPrestadorAgenda(
+  id: string,
+  patch: Partial<{
+    hora_inicio: string
+    hora_fim: string
+    hora_inicio_cirurgia: string | null
+    hora_fim_cirurgia: string | null
+    max_por_dia: number
+    active: boolean
+  }>,
+): Promise<void> {
+  if (!supabase) return
+  const { error } = await supabase.from('clinic_booking_prestadores').update(patch).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/** Dias em que algum médico está no centro cirúrgico, para a equipe ver o porquê da agenda curta. */
+export async function listarDiasDeCirurgia(dias = 30): Promise<Array<{ dia: string; medicoId: number }>> {
+  if (!supabase) return []
+  const hoje = new Date().toISOString().slice(0, 10)
+  const fim = new Date(Date.now() + dias * 86_400_000).toISOString().slice(0, 10)
+  const { data, error } = await supabase
+    .from('srg_surgeries')
+    .select('dia, medico_id, status, deleted_at')
+    .gte('dia', hoje)
+    .lte('dia', fim)
+    .in('status', ['AGUARDANDO', 'EM_PROCESSO'])
+    .is('deleted_at', null)
+  if (error) return []
+  return (data ?? []).map((s) => ({ dia: String(s.dia), medicoId: Number(s.medico_id) }))
+}
