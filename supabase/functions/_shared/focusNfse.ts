@@ -34,6 +34,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
  *     fechada de 5 (`SERVICOS_CLINICA`), escolhida pelo tipo de atendimento.
  *   • Valor = bruto. Tributação federal sobre o bruto: CST 01 (alíquota básica),
  *     PIS 0,65% e COFINS 3,00% de apuração própria, "PIS/COFINS/CSLL Não Retidos" (tipo 0).
+ *     Arredondamento meio-para-o-PAR, igual ao portal — ver `arredondaAbnt`.
  *   • Valor aproximado dos tributos (Lei 12.741): Federal 11,33% · Estadual 0,00% ·
  *     Municipal 2,00%. Vai em `tenant_integrations.focus.tributos_aproximados`.
  */
@@ -331,6 +332,26 @@ function isoLocalSaoPaulo(d: Date): string {
   return `${p.replace(' ', 'T')}-03:00`
 }
 
+/**
+ * Arredondamento meio-para-o-PAR (ABNT NBR 5891), que é o que o portal nacional usa.
+ *
+ * Só muda alguma coisa no empate exato, e o empate acontece: 0,65% de R$ 650 dá 4,225 e o
+ * portal grava **4,22**, enquanto `Math.round` grava 4,23. Já 0,65% de R$ 150 dá 0,975 e o
+ * portal grava **0,98** — as duas notas do Kauan, e as duas batem com "empate vai para o par",
+ * nenhuma bate com "empate vai para cima". Um centavo de PIS não muda imposto nenhum, mas sai
+ * IMPRESSO na nota que o financeiro compara lado a lado com a dele, e é o tipo de diferença que
+ * faz ele desconfiar do resto.
+ *
+ * Recebe o produto já em centavos (valor × percentual) e devolve centavos.
+ */
+function arredondaAbnt(centavos: number): number {
+  const piso = Math.floor(centavos)
+  const resto = centavos - piso
+  if (resto > 0.5) return piso + 1
+  if (resto < 0.5) return piso
+  return piso % 2 === 0 ? piso : piso + 1
+}
+
 function enderecoTomador(t: DpsInput['tomador'], municipioPadrao: string): Record<string, unknown> {
   const cep = onlyDigits(t.cep)
   const logradouro = str(t.logradouro)
@@ -356,8 +377,9 @@ export function buildDps(cfg: FocusConfig, input: DpsInput): Record<string, unkn
   const trib = cfg.tributosAproximados ?? { federal: 0, estadual: 0, municipal: 0 }
   const valorReais = Math.round(input.valorServicoCents) / 100
 
-  // Percentual sobre o bruto, em reais com 2 casas (R$ 150 × 0,65% = 0,975 → 0,98, igual ao portal).
-  const pctDoBruto = (pct: number) => Math.round(valorReais * pct) / 100
+  // Percentual sobre o bruto, em reais com 2 casas, arredondando IGUAL AO PORTAL — ver
+  // `arredondaAbnt`. `Math.round` acertava por sorte e errava por um centavo no empate.
+  const pctDoBruto = (pct: number) => arredondaAbnt(valorReais * pct) / 100
 
   return {
     data_emissao: emissao,
