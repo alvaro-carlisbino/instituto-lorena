@@ -18,7 +18,8 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
  *      informados". Não existe um campo `valor_total_tributos` único; são três.
  *
  * A alíquota do ISS NÃO vai no payload: o ambiente nacional aplica a do município (Maringá
- * devolveu 2,00% para o código 040101). A gente lê o que voltou, não manda o que quer.
+ * devolveu 2,00% tanto para 040101 quanto para 040303). A gente lê o que voltou, não manda o
+ * que quer.
  *
  * ── A receita do financeiro (Kauan, 19/ago/2026) ──────────────────────────────────────────
  * É o passo a passo que ele segue no portal nacional (nfse.gov.br, "Emissão completa") para a
@@ -28,7 +29,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
  *   • Tomador no Brasil, SEMPRE PESSOA FÍSICA. Para CNPJ muda a retenção (PIS/COFINS/CSLL
  *     retidos a partir de R$ 215,10; IRRF 1,5% a partir de R$ 666,67, "confirmar com a fonte
  *     pagadora") — isso ele faz À MÃO. Aqui a emissão para PJ é RECUSADA, não adivinhada.
- *   • Serviço: cTribNac 04.01.01 (Medicina), NBS 123012200 (Serviços médicos especializados),
+ *   • Serviço: cTribNac 04.03.03 (Clínicas ou congêneres) + cTribMun 003, NBS 123012200,
  *     operação tributável, ISS não retido, sem benefício/redução. Descrição vem de uma lista
  *     fechada de 5 (`SERVICOS_CLINICA`), escolhida pelo tipo de atendimento.
  *   • Valor = bruto. Tributação federal sobre o bruto: CST 01 (alíquota básica),
@@ -52,8 +53,18 @@ export type FocusConfig = {
   token: string
   cnpjPrestador: string
   codigoMunicipio: string
-  /** Código de tributação nacional do ISS. Consulta médica em Maringá: 040101. */
+  /**
+   * Código de tributação nacional do ISS (6 dígitos, lista nacional). Clínica em Maringá:
+   * `040303` — "Clínicas ou congêneres". NÃO é `040101` ("Medicina."), que foi o que saiu na
+   * nota 314 e o financeiro recusou: o manual do portal traz 04.01.01 no exemplo, mas a nota
+   * que o Kauan emitiu à mão no portal (nº 313, 19/ago) está com 04.03.03 / 003.
+   */
   codigoTributacaoNacional: string
+  /**
+   * Código de tributação MUNICIPAL (3 dígitos, lista da prefeitura). Opcional: a nota autoriza
+   * sem ele. Maringá casa `003` com o nacional `040303`. Vazio = não informa.
+   */
+  codigoTributacaoMunicipal: string
   /** 0 = nenhum. Obrigatório para não-optante do Simples. */
   regimeEspecialTributacao: string
   /** 1 = não optante | 2 = MEI | 3 = ME/EPP. */
@@ -67,6 +78,25 @@ export type FocusConfig = {
   tributosAproximados: { federal: number; estadual: number; municipal: number } | null
   /** Código NBS do serviço. Serviços médicos especializados: 123012200. */
   codigoNbs: string
+  /**
+   * Telefone e e-mail do PRESTADOR, que saem impressos no rosto da nota.
+   *
+   * Vazios, quem decide é o cadastro: a Focus usa o da empresa dela quando o campo é omitido, e
+   * o que sobrar a SEFIN completa pelo cadastro nacional do contribuinte. Foi assim que a nota
+   * 314 saiu com o e-mail do adm e um telefone antigo, enquanto a que o Kauan emitiu à mão pelo
+   * portal saiu com o do financeiro — o portal manda os dois na DPS. Preencher aqui é o único
+   * jeito de mandar o contato certo na nota sem depender de cadastro que a gente não controla.
+   */
+  telefonePrestador: string
+  emailPrestador: string
+  /**
+   * Grupo da reforma tributária (IBS/CBS), do leiaute 1.01 da DPS. Sem ele a SEFIN não monta o
+   * bloco IBS/CBS e a nota sai sem "Exclusões e Reduções da Base de Cálculo" — que é o valor
+   * que ELA calcula (ISS + PIS + COFINS) e que aparece na nota do portal. `null` = não manda,
+   * que é o estado provado em produção (a nota 314 autorizou assim). Só ligar depois de provar
+   * em homologação: CST/cClassTrib errados fazem a SEFIN rejeitar a nota inteira.
+   */
+  ibsCbs: { cst: string; classificacaoTributaria: string } | null
   /**
    * Tributação federal de apuração própria (lucro presumido, cumulativo). `cst` 01 = operação
    * tributável com alíquota básica; alíquotas em %. Retenção NÃO entra aqui: para pessoa
@@ -174,12 +204,21 @@ export async function readFocusConfig(
     return n != null && Number.isFinite(n) && n >= 0 ? n : fallback
   }
 
+  // Reforma tributária: os dois códigos andam juntos ou não vão. Meio grupo é rejeição certa.
+  const rt = (cfg.ibs_cbs ?? null) as FocusRaw | null
+  const rtCst = str(rt?.situacao_tributaria)
+  const rtClasse = str(rt?.classificacao_tributaria)
+
   return {
     ambiente,
     token,
     cnpjPrestador,
     codigoMunicipio: str(cfg.codigo_municipio, '4115200'),
-    codigoTributacaoNacional: str(cfg.codigo_tributacao_nacional, '040101'),
+    codigoTributacaoNacional: str(cfg.codigo_tributacao_nacional, '040303'),
+    codigoTributacaoMunicipal: str(cfg.codigo_tributacao_municipal),
+    telefonePrestador: onlyDigits(cfg.telefone_prestador),
+    emailPrestador: str(cfg.email_prestador),
+    ibsCbs: rtCst && rtClasse ? { cst: rtCst, classificacaoTributaria: rtClasse } : null,
     regimeEspecialTributacao: str(cfg.regime_especial_tributacao, '0'),
     opcaoSimplesNacional: str(cfg.opcao_simples_nacional, '1'),
     tributosAproximados: tributosOk
@@ -273,6 +312,9 @@ export function buildDps(cfg: FocusConfig, input: DpsInput): Record<string, unkn
     data_competencia: competencia,
     codigo_municipio_emissora: cfg.codigoMunicipio,
     cnpj_prestador: cfg.cnpjPrestador,
+    // Sem estes dois a nota sai com o contato do cadastro nacional, não com o nosso.
+    ...(cfg.telefonePrestador ? { telefone_prestador: cfg.telefonePrestador } : {}),
+    ...(cfg.emailPrestador ? { email_prestador: cfg.emailPrestador } : {}),
     codigo_opcao_simples_nacional: cfg.opcaoSimplesNacional,
     regime_especial_tributacao: cfg.regimeEspecialTributacao,   // pegadinha 1
 
@@ -287,6 +329,7 @@ export function buildDps(cfg: FocusConfig, input: DpsInput): Record<string, unkn
 
     codigo_municipio_prestacao: cfg.codigoMunicipio,
     codigo_tributacao_nacional_iss: cfg.codigoTributacaoNacional,
+    ...(cfg.codigoTributacaoMunicipal ? { codigo_tributacao_municipal_iss: cfg.codigoTributacaoMunicipal } : {}),
     codigo_nbs: cfg.codigoNbs,
     descricao_servico: input.descricaoServico,
     valor_servico: valorReais,
@@ -307,6 +350,14 @@ export function buildDps(cfg: FocusConfig, input: DpsInput): Record<string, unkn
     valor_total_tributos_federais: pctDoBruto(trib.federal),
     valor_total_tributos_estaduais: pctDoBruto(trib.estadual),
     valor_total_tributos_municipais: pctDoBruto(trib.municipal),
+
+    // Reforma tributária. Só sai quando o polo configurou os DOIS códigos — ver `ibsCbs`.
+    ...(cfg.ibsCbs
+      ? {
+          ibs_cbs_situacao_tributaria: cfg.ibsCbs.cst,
+          ibs_cbs_classificacao_tributaria: cfg.ibsCbs.classificacaoTributaria,
+        }
+      : {}),
   }
 }
 
