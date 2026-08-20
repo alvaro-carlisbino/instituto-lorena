@@ -294,12 +294,19 @@ export class WapiProvider implements WhatsappProvider {
       // Disparar para número sem WhatsApp é uma das assinaturas mais caras que existem
       // numa sessão não-oficial — é o que denuncia lista comprada. Sem resposta da API,
       // não enviamos: o padrão aqui é o silêncio, não o palpite.
-      if (decision.kind === 'cold' && !guardInput.coldOverride) {
+      //
+      // `optin` entra junto desde 20/ago/2026, e isso importa mais do que `cold`: o primeiro
+      // contato de formulário Meta é classificado como optin, e é justamente ele que carrega
+      // número torto — a pessoa DIGITA o telefone e a Meta não valida contra o WhatsApp.
+      // Com a checagem só em `cold`, a fila de leadform mandava para número morto sem nunca
+      // perguntar. `reply`/`proactive`/`transactional` ficam de fora de propósito: ali a
+      // pessoa já escreveu de volta, o número está provado, e a chamada extra só custa.
+      if ((decision.kind === 'cold' || decision.kind === 'optin') && !guardInput.coldOverride) {
         const existe = await this.phoneExists(to)
         if (existe !== true) {
           const recusa: GuardDecision = {
             allow: false,
-            kind: 'cold',
+            kind: decision.kind,
             reason: existe === false ? 'numero_sem_whatsapp' : 'numero_nao_verificado',
             message:
               existe === false
