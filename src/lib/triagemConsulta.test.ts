@@ -79,8 +79,8 @@ describe('agrupar horários por dia', () => {
   it('usa o dia de Maringá e não o do fuso do navegador', () => {
     // 21/08 às 21:30 em Brasília já é 22/08 em UTC. O dia da agenda é o da clínica.
     const dias = agruparPorDia([
-      { unidadeId: 'maringa', slotAt: '2026-08-22T00:30:00.000Z' },
-      { unidadeId: 'maringa', slotAt: '2026-08-21T12:00:00.000Z' },
+      { unidadeId: 'maringa', codigoPrestador: '2', profissional: 'Dra. Lorena Visentainer', slotAt: '2026-08-22T00:30:00.000Z' },
+      { unidadeId: 'maringa', codigoPrestador: '2', profissional: 'Dra. Lorena Visentainer', slotAt: '2026-08-21T12:00:00.000Z' },
     ])
     expect(dias.map((d) => d.dia)).toEqual(['2026-08-21'])
     expect(dias[0].horarios).toHaveLength(2)
@@ -88,9 +88,9 @@ describe('agrupar horários por dia', () => {
 
   it('ordena dias e horários', () => {
     const dias = agruparPorDia([
-      { unidadeId: 'maringa', slotAt: '2026-08-24T13:30:00.000Z' },
-      { unidadeId: 'maringa', slotAt: '2026-08-21T15:00:00.000Z' },
-      { unidadeId: 'maringa', slotAt: '2026-08-21T12:00:00.000Z' },
+      { unidadeId: 'maringa', codigoPrestador: '2', profissional: 'Dra. Lorena Visentainer', slotAt: '2026-08-24T13:30:00.000Z' },
+      { unidadeId: 'maringa', codigoPrestador: '2', profissional: 'Dra. Lorena Visentainer', slotAt: '2026-08-21T15:00:00.000Z' },
+      { unidadeId: 'maringa', codigoPrestador: '2', profissional: 'Dra. Lorena Visentainer', slotAt: '2026-08-21T12:00:00.000Z' },
     ])
     expect(dias.map((d) => d.dia)).toEqual(['2026-08-21', '2026-08-24'])
     expect(dias[0].horarios[0].slotAt).toBe('2026-08-21T12:00:00.000Z')

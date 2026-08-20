@@ -51,6 +51,7 @@ export type RespostaPreAgendamento = {
   prebookingId: string | null
   protocolo: string
   slotAt: string | null
+  profissional: string | null
   whatsappUrl: string
   estimativa: EstimativaPublica | null
 }
@@ -78,13 +79,27 @@ export async function carregarUnidades(): Promise<UnidadePublica[]> {
   }))
 }
 
-export async function carregarHorarios(unidade: string, dias = 21): Promise<Horario[]> {
+/**
+ * Horários que a clínica pode vender AGORA.
+ *
+ * A origem é a agenda da Shosp (espelho `shosp_agenda_slots`, atualizado de 30 em
+ * 30 minutos), filtrada pelo expediente, pelo feriado e pelo que já foi reservado
+ * aqui. O objetivo da triagem entra na conta porque nem todo profissional atende
+ * todo caso: sobrancelha, por exemplo, é só com a Dra. Lorena.
+ */
+export async function carregarHorarios(unidade: string, objetivo?: string, dias = 21): Promise<Horario[]> {
   if (!supabase) return []
-  const { data, error } = await supabase.rpc('clinica_agenda_publica', { p_unidade: unidade, p_dias: dias })
+  const { data, error } = await supabase.rpc('clinica_agenda_publica', {
+    p_unidade: unidade,
+    p_dias: dias,
+    p_objetivo: objetivo || null,
+  })
   if (error) throw new ErroAgenda('agenda', error.message)
   return (data ?? []).map((h: Record<string, unknown>) => ({
     unidadeId: String(h.unidade_id),
     slotAt: new Date(String(h.slot_at)).toISOString(),
+    codigoPrestador: h.codigo_prestador ? String(h.codigo_prestador) : '',
+    profissional: h.profissional ? String(h.profissional) : '',
   }))
 }
 
@@ -161,6 +176,7 @@ export async function enviarPreAgendamento(envio: EnvioPreAgendamento): Promise<
     prebookingId: p.prebookingId ? String(p.prebookingId) : null,
     protocolo: String(p.protocolo ?? ''),
     slotAt: p.slotAt ? String(p.slotAt) : null,
+    profissional: p.profissional ? String(p.profissional) : null,
     whatsappUrl: String(p.whatsappUrl ?? ''),
     estimativa: (p.estimativa as EstimativaPublica | null) ?? null,
   }

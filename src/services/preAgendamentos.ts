@@ -20,6 +20,7 @@ export type StatusPreAgendamento = 'pendente' | 'confirmado' | 'cancelado' | 'co
 export type PreAgendamento = {
   id: string
   protocolo: string
+  prestador: string
   leadId: string | null
   nome: string
   telefone: string
@@ -91,6 +92,7 @@ function linha(row: Record<string, unknown>): PreAgendamento {
   return {
     id: String(row.id),
     protocolo: String(row.protocolo ?? ''),
+    prestador: String(row.prestador ?? ''),
     leadId: row.lead_id ? String(row.lead_id) : null,
     nome: String(row.nome ?? ''),
     telefone: String(row.telefone ?? ''),
@@ -276,4 +278,37 @@ export async function reabrirDia(id: string): Promise<void> {
   if (!supabase) return
   const { error } = await supabase.from('clinic_booking_blackouts').delete().eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+// ── Saúde do espelho da agenda ──────────────────────────────────────────────
+
+export type EstadoAgendaShosp = {
+  horariosLivres: number
+  ultimaSincronia: string | null
+  minutosDesde: number | null
+}
+
+/**
+ * Quando a landing leu a agenda da Shosp pela última vez.
+ *
+ * Existe porque "no ar" não é o mesmo que "vivo": se o cron parar, a página segue
+ * bonita oferecendo horário de duas semanas atrás. Aqui a equipe vê o relógio.
+ */
+export async function estadoDaAgendaShosp(): Promise<EstadoAgendaShosp> {
+  if (!supabase) return { horariosLivres: 0, ultimaSincronia: null, minutosDesde: null }
+  const { count } = await supabase
+    .from('shosp_agenda_slots')
+    .select('dia', { count: 'exact', head: true })
+    .gte('dia', new Date().toISOString().slice(0, 10))
+  const { data } = await supabase
+    .from('shosp_agenda_slots')
+    .select('synced_at')
+    .order('synced_at', { ascending: false })
+    .limit(1)
+  const ultima = data?.[0]?.synced_at ? String(data[0].synced_at) : null
+  return {
+    horariosLivres: count ?? 0,
+    ultimaSincronia: ultima,
+    minutosDesde: ultima ? Math.round((Date.now() - new Date(ultima).getTime()) / 60000) : null,
+  }
 }

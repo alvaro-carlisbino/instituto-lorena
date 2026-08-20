@@ -29,7 +29,9 @@ import {
   listarJanelas,
   listarPreAgendamentos,
   listarUnidadesAgenda,
+  estadoDaAgendaShosp,
   reabrirDia,
+  type EstadoAgendaShosp,
   type DiaFechado,
   type JanelaAgenda,
   type PreAgendamento,
@@ -136,6 +138,11 @@ function LinhaPreAgendamento({
             <Badge variant="outline" className="font-normal">
               {pre.unidadeId}
             </Badge>
+            {pre.prestador ? (
+              <Badge variant="outline" className="font-normal">
+                {pre.prestador}
+              </Badge>
+            ) : null}
             <span
               className={cn(
                 'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold',
@@ -172,6 +179,10 @@ function LinhaPreAgendamento({
           <div className="mt-2">
             <Triagem pre={pre} />
           </div>
+
+          {pre.observacao ? (
+            <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400">{pre.observacao}</p>
+          ) : null}
 
           {pre.canceladoMotivo ? (
             <p className="mt-2 text-xs text-muted-foreground">Cancelado: {pre.canceladoMotivo}</p>
@@ -217,11 +228,13 @@ function PainelAgenda({
   unidades,
   janelas,
   fechados,
+  agenda,
   onRecarregar,
 }: {
   unidades: UnidadeAgenda[]
   janelas: JanelaAgenda[]
   fechados: DiaFechado[]
+  agenda: EstadoAgendaShosp | null
   onRecarregar: () => void
 }) {
   const [novoDia, setNovoDia] = useState('')
@@ -237,16 +250,41 @@ function PainelAgenda({
     return mapa
   }, [janelas])
 
+  const atrasada = agenda?.minutosDesde != null && agenda.minutosDesde > 90
+
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      <Card className="lg:col-span-2">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Ligação com a agenda da Shosp</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+          <span>
+            <strong className="tabular-nums">{agenda?.horariosLivres?.toLocaleString('pt-BR') ?? '—'}</strong>{' '}
+            horários livres espelhados
+          </span>
+          <span className={cn(atrasada && 'font-semibold text-destructive')}>
+            {agenda?.minutosDesde == null
+              ? 'Nunca sincronizado'
+              : agenda.minutosDesde < 2
+                ? 'Sincronizado agora'
+                : `Sincronizado há ${agenda.minutosDesde} min`}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            A landing só oferece horário que a Shosp diz estar livre, e confere de novo na hora da reserva. O espelho
+            atualiza de 30 em 30 minutos.
+          </span>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Grade que a landing oferece</CardTitle>
+          <CardTitle className="text-sm">Expediente que a landing pode vender</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-xs text-muted-foreground">
-            Desligar uma faixa some com aqueles horários da página no mesmo instante. O que já foi reservado continua
-            valendo.
+            Isto não cria horário: só limita o que veio da Shosp. Desligar uma faixa some com aqueles horários da
+            página no mesmo instante, e o que já foi reservado continua valendo.
           </p>
           {unidades
             .filter((u) => porUnidade.has(u.id))
@@ -351,6 +389,7 @@ export function PreAgendamentosPage() {
   const [unidades, setUnidades] = useState<UnidadeAgenda[]>([])
   const [janelas, setJanelas] = useState<JanelaAgenda[]>([])
   const [fechados, setFechados] = useState<DiaFechado[]>([])
+  const [agendaShosp, setAgendaShosp] = useState<EstadoAgendaShosp | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [ocupado, setOcupado] = useState(false)
   // Relógio carimbado na carga: sem isto cada render lia Date.now() e o resultado
@@ -359,13 +398,20 @@ export function PreAgendamentosPage() {
 
   const recarregar = () => {
     setCarregando(true)
-    void Promise.all([listarPreAgendamentos(), listarUnidadesAgenda(), listarJanelas(), listarDiasFechados()])
-      .then(([pre, uni, jan, fec]) => {
+    void Promise.all([
+      listarPreAgendamentos(),
+      listarUnidadesAgenda(),
+      listarJanelas(),
+      listarDiasFechados(),
+      estadoDaAgendaShosp(),
+    ])
+      .then(([pre, uni, jan, fec, ag]) => {
         setAgora(Date.now())
         setLista(pre)
         setUnidades(uni)
         setJanelas(jan)
         setFechados(fec)
+        setAgendaShosp(ag)
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao carregar'))
       .finally(() => setCarregando(false))
@@ -476,7 +522,13 @@ export function PreAgendamentosPage() {
             <Skeleton className="h-24 w-full" />
           </div>
         ) : aba === 'agenda' ? (
-          <PainelAgenda unidades={unidades} janelas={janelas} fechados={fechados} onRecarregar={recarregar} />
+          <PainelAgenda
+            unidades={unidades}
+            janelas={janelas}
+            fechados={fechados}
+            agenda={agendaShosp}
+            onRecarregar={recarregar}
+          />
         ) : visiveis.length === 0 ? (
           <Card>
             <CardContent className="py-10 text-center text-sm text-muted-foreground">

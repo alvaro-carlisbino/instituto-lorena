@@ -605,6 +605,127 @@ export async function syncFullAgenda(
   return { appts, prestadores: presList.length, unidades: unidades.length }
 }
 
+/**
+ * Espelho dos horários LIVRES da agenda da Shosp, que é o que a landing /consulta
+ * oferece ao paciente.
+ *
+ * `syncFullAgenda` (acima) guarda o que está OCUPADO, porque nasceu para medir
+ * ocupação por médico. Aqui é o contrário: a linha que interessa é a que tem
+ * `codigoHorario` e NÃO tem `codigoAgendamento`. A resposta da Shosp traz os três
+ * tipos no mesmo array:
+ *   { codigoHorario, horario }                    → livre
+ *   { codigoAgendamento, paciente, status, ... }  → ocupado
+ *   { horario, restricao: "AGENDA FECHADA" }      → dia/turno fechado
+ *
+ * Varre só os profissionais cadastrados em `clinic_booking_prestadores`, que hoje
+ * são três. Varrer os oito prestadores (spa incluso) seria queimar cota para
+ * mostrar horário de lavagem pós-cirúrgica como se fosse avaliação.
+ *
+ * A janela inteira é apagada e reescrita: horário que a clínica preencheu na Shosp
+ * some daqui na próxima rodada, que é exatamente o comportamento que se espera de
+ * um espelho.
+ */
+export async function syncAgendaLivre(
+  admin: SupabaseClient,
+  opts: { dias?: number } = {},
+): Promise<{ livres: number; prestadores: number; dias: number; rate_limited: boolean }> {
+  const dias = Math.min(31, Math.max(1, opts.dias ?? 21))
+
+  const { data: prestadores } = await admin
+    .from('clinic_booking_prestadores')
+    .select('codigo_prestador, nome, unidade_id, active')
+    .eq('active', true)
+  const { data: unidades } = await admin
+    .from('clinic_booking_units')
+    .select('id, shosp_codigo_unidade')
+    .eq('active', true)
+    .not('shosp_codigo_unidade', 'is', null)
+
+  // Um profissional pode servir duas unidades (Maringá e online usam a mesma
+  // agenda da Shosp). A chamada é por CÓDIGO DE UNIDADE da Shosp, então dedupa.
+  const codigosUnidade = new Set<string>()
+  for (const u of (unidades ?? []) as Array<{ shosp_codigo_unidade: string | null }>) {
+    if (u.shosp_codigo_unidade) codigosUnidade.add(String(u.shosp_codigo_unidade))
+  }
+  const codigosPrestador = new Map<string, string>()
+  for (const p of (prestadores ?? []) as Array<{ codigo_prestador: string; nome: string }>) {
+    codigosPrestador.set(String(p.codigo_prestador), String(p.nome ?? ''))
+  }
+
+  const hoje = new Date().toISOString().slice(0, 10)
+  const fim = new Date(Date.now() + dias * 86400000).toISOString().slice(0, 10)
+  let livres = 0
+
+  for (const codigoUnidade of codigosUnidade) {
+    for (const [codigoPrestador, nome] of codigosPrestador) {
+      if (shospIsRateLimited()) break
+      let agenda: unknown = null
+      try {
+        agenda = (
+          await shospGetAgenda({
+            codigoUnidade,
+            dataInicial: hoje,
+            diasMostrar: dias,
+            codigoPrestador: Number(codigoPrestador),
+          })
+        ).data
+      } catch {
+        continue
+      }
+
+      const blocos: Record<string, unknown>[] = []
+      const walk = (x: unknown) => {
+        if (Array.isArray(x)) x.forEach(walk)
+        else if (x && typeof x === 'object') blocos.push(x as Record<string, unknown>)
+      }
+      walk((agenda as { dados?: unknown })?.dados ?? null)
+
+      const linhas: Array<Record<string, unknown>> = []
+      for (const bloco of blocos.filter((o) => 'horarios' in o)) {
+        const horarios = (bloco.horarios ?? {}) as Record<string, { horario?: Record<string, unknown>[] }>
+        for (const [dia, info] of Object.entries(horarios)) {
+          for (const h of info.horario ?? []) {
+            if (h.codigoAgendamento) continue        // ocupado
+            if (h.restricao) continue                // AGENDA FECHADA
+            const codigoHorario = h.codigoHorario
+            if (codigoHorario === undefined || codigoHorario === null) continue
+            const hora = String(h.horario ?? '').slice(0, 5)
+            if (!/^\d{2}:\d{2}$/.test(hora)) continue
+            linhas.push({
+              codigo_unidade: String(codigoUnidade),
+              codigo_prestador: String(codigoPrestador),
+              prestador: String((bloco.nomePrestador as string | undefined) ?? nome),
+              dia,
+              horario: hora,
+              codigo_horario: String(codigoHorario),
+              synced_at: nowIso(),
+            })
+          }
+        }
+      }
+
+      // Só apaga a janela depois de a Shosp ter respondido: se a chamada falhar, o
+      // espelho antigo continua de pé em vez de a landing ficar sem agenda nenhuma.
+      await admin
+        .from('shosp_agenda_slots')
+        .delete()
+        .eq('codigo_unidade', String(codigoUnidade))
+        .eq('codigo_prestador', String(codigoPrestador))
+        .gte('dia', hoje)
+        .lte('dia', fim)
+
+      if (linhas.length) {
+        await admin
+          .from('shosp_agenda_slots')
+          .upsert(linhas, { onConflict: 'codigo_unidade,codigo_prestador,dia,horario' })
+        livres += linhas.length
+      }
+    }
+  }
+
+  return { livres, prestadores: codigosPrestador.size, dias, rate_limited: shospIsRateLimited() }
+}
+
 export async function runShospSync(
   admin: SupabaseClient,
   opts: { matchLimit?: number; apptLimit?: number; diasTotal?: number; steps?: string[]; agendaLimit?: number } = {},
@@ -617,6 +738,7 @@ export async function runShospSync(
   if (steps.includes('match')) result.match = await matchLeadsToPatients(admin, opts.matchLimit ?? 15, opts.agendaLimit ?? 20)
   if (steps.includes('appointments')) result.appointments = await syncAppointments(admin, opts.apptLimit ?? 25)
   if (steps.includes('full_agenda')) result.full_agenda = await syncFullAgenda(admin, { diasTotal: opts.diasTotal })
+  if (steps.includes('agenda_livre')) result.agenda_livre = await syncAgendaLivre(admin, { dias: opts.diasTotal })
 
   // Consumo e saúde da rodada vão na resposta E no estado — é o que faltava para
   // alguém perceber que a integração estava morta. `notes` é lido no painel.

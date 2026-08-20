@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { upsertLeadByPhone, insertInteraction } from '../_shared/crm.ts'
 import type { LeadAttribution } from '../_shared/attribution.ts'
+import { shospConfigured, shospGetAgenda } from '../_shared/shosp.ts'
 
 /**
  * Porta de entrada da landing /consulta.
@@ -181,6 +182,74 @@ function dataLegivel(iso: string): string {
   }).format(new Date(iso))
 }
 
+/** Dia e hora civis do horário, no fuso da clínica (é assim que a Shosp fala). */
+function diaEHoraLocal(iso: string): { dia: string; hora: string } {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(iso))
+  const g = (t: string) => partes.find((p) => p.type === t)?.value ?? ''
+  return { dia: `${g('year')}-${g('month')}-${g('day')}`, hora: `${g('hour')}:${g('minute')}` }
+}
+
+/**
+ * Pergunta à Shosp, no instante da reserva, se aquele horário ainda está livre.
+ *
+ * O espelho é atualizado de 30 em 30 minutos, e meia hora é tempo de sobra para a
+ * recepção encaixar alguém por telefone. Esta é a última conferência antes de
+ * prometer o horário para o paciente: 'ocupado' significa que a agenda da clínica
+ * já tem alguém ali, e aí a landing manda escolher outro em vez de criar um
+ * conflito que só apareceria na hora da consulta.
+ *
+ * Devolve 'livre' | 'ocupado' | 'desconhecido'. 'desconhecido' (Shosp fora do ar,
+ * cota estourada) NÃO derruba a reserva: isto é PRÉ-agendamento e a equipe
+ * confirma, então a resposta certa é gravar com um aviso, não perder o paciente.
+ */
+async function conferirNaShosp(
+  codigoUnidade: string,
+  codigoPrestador: string,
+  slotIso: string,
+): Promise<'livre' | 'ocupado' | 'desconhecido'> {
+  if (!shospConfigured() || !codigoUnidade || !codigoPrestador) return 'desconhecido'
+  const { dia, hora } = diaEHoraLocal(slotIso)
+  try {
+    const r = await shospGetAgenda({
+      codigoUnidade,
+      dataInicial: dia,
+      diasMostrar: 1,
+      codigoPrestador: Number(codigoPrestador),
+    })
+    if (!r.ok) return 'desconhecido'
+    const blocos: Record<string, unknown>[] = []
+    const walk = (x: unknown) => {
+      if (Array.isArray(x)) x.forEach(walk)
+      else if (x && typeof x === 'object') blocos.push(x as Record<string, unknown>)
+    }
+    walk((r.data as { dados?: unknown })?.dados ?? null)
+    let achouLivre = false
+    for (const bloco of blocos.filter((o) => 'horarios' in o)) {
+      const horarios = (bloco.horarios ?? {}) as Record<string, { horario?: Record<string, unknown>[] }>
+      for (const [d, info] of Object.entries(horarios)) {
+        if (d !== dia) continue
+        for (const h of info.horario ?? []) {
+          if (String(h.horario ?? '').slice(0, 5) !== hora) continue
+          if (h.codigoAgendamento) return 'ocupado'   // alguém já está nesse horário
+          if (h.restricao) return 'ocupado'           // agenda fechada
+          if (h.codigoHorario !== undefined && h.codigoHorario !== null) achouLivre = true
+        }
+      }
+    }
+    return achouLivre ? 'livre' : 'ocupado'
+  } catch {
+    return 'desconhecido'
+  }
+}
+
 /** Atribuição da landing: gclid vira Google, fbclid vira Meta, o resto é utm/direto. */
 function atribuicaoDaLanding(bruto: Record<string, unknown>): LeadAttribution | null {
   const gclid = texto(bruto.gclid, 120)
@@ -315,20 +384,28 @@ Deno.serve(async (req) => {
     }
   }
 
-  // O horário tem de existir na agenda pública AGORA (grade + antecedência +
-  // feriado + o que a Shosp já ocupou). Sem esta conferência, um POST à mão
-  // marcava consulta às 3 da manhã.
+  // O horário tem de existir na agenda pública AGORA (Shosp + expediente +
+  // antecedência + feriado). Sem esta conferência, um POST à mão marcava consulta
+  // às 3 da manhã. E é daqui que sai o PROFISSIONAL: quem escolhe o médico é a
+  // regra da casa, não o navegador do paciente.
+  let codigoPrestador = ''
+  let profissional = ''
+  let avisoShosp = ''
   if (querHorario) {
     const { data: livres, error: erroAgenda } = await admin.rpc('clinica_agenda_publica', {
       p_unidade: unidade,
       p_dias: null,
+      p_objetivo: triagem.objetivo || null,
     })
     if (erroAgenda) return json({ error: 'agenda_indisponivel', message: 'Não consegui ler a agenda agora.' }, 503)
     const alvo = new Date(slotAt).getTime()
-    const existe = (livres ?? []).some(
+    const achado = (livres ?? []).find(
       (l: { unidade_id: string; slot_at: string }) =>
         l.unidade_id === unidade && new Date(l.slot_at).getTime() === alvo,
-    )
+    ) as { codigo_prestador?: string; profissional?: string } | undefined
+    codigoPrestador = String(achado?.codigo_prestador ?? '')
+    profissional = String(achado?.profissional ?? '')
+    const existe = Boolean(achado)
     if (!existe) {
       // Ocupado e "não existe" são coisas diferentes: dizer "acabou de ser reservado"
       // para um horário que nunca existiu manda a pessoa esperar uma vaga que não vem.
@@ -349,6 +426,28 @@ Deno.serve(async (req) => {
         409,
       )
     }
+
+    // Última conferência antes de prometer: a agenda da clínica pode ter mudado
+    // nos minutos desde o último espelho.
+    const { data: uni } = await admin
+      .from('clinic_booking_units')
+      .select('shosp_codigo_unidade')
+      .eq('id', unidade)
+      .maybeSingle()
+    const codigoUnidade = String(uni?.shosp_codigo_unidade ?? '')
+    const naShosp = await conferirNaShosp(codigoUnidade, codigoPrestador, slotAt)
+    if (naShosp === 'ocupado') {
+      return json(
+        {
+          error: 'horario_indisponivel',
+          message: 'Esse horário acabou de ser preenchido na agenda da clínica. Escolha outro, por favor.',
+        },
+        409,
+      )
+    }
+    if (naShosp === 'desconhecido') {
+      avisoShosp = 'A Shosp não respondeu na hora da reserva: conferir a agenda antes de confirmar.'
+    }
   }
 
   const atribuicao = atribuicaoDaLanding((payload.atribuicao ?? {}) as Record<string, unknown>)
@@ -364,6 +463,8 @@ Deno.serve(async (req) => {
     ROTULO[triagem.urgencia] ? `Intenção: ${ROTULO[triagem.urgencia]}` : '',
     triagem.cidade ? `Cidade: ${triagem.cidade}` : '',
     `Unidade: ${ROTULO[unidade] ?? unidade}`,
+    profissional ? `Profissional: ${profissional}` : '',
+    avisoShosp,
   ].filter(Boolean)
 
   const customFields: Record<string, unknown> = {
@@ -413,6 +514,8 @@ Deno.serve(async (req) => {
         telefone,
         unidade_id: unidade,
         slot_at: slotAt,
+        codigo_prestador: codigoPrestador || null,
+        prestador: profissional,
         objetivo: triagem.objetivo,
         grau: triagem.grau,
         urgencia: triagem.urgencia,
@@ -424,6 +527,7 @@ Deno.serve(async (req) => {
         respostas: { ...respostas, estimativa },
         atribuicao: atribuicao ? (atribuicao as unknown as Record<string, unknown>) : null,
         user_agent: texto(req.headers.get('user-agent'), 300),
+        observacao: avisoShosp,
       })
       .select('id')
       .single()
@@ -446,7 +550,7 @@ Deno.serve(async (req) => {
 
   // ── Rastro no CRM: interação + tarefa ─────────────────────────────────────
   const cabecalho = querHorario
-    ? `Pré-agendou consulta ${protocolo} · ${dataLegivel(slotAt)} · ${ROTULO[unidade] ?? unidade}`
+    ? `Pré-agendou consulta ${protocolo} · ${dataLegivel(slotAt)} · ${ROTULO[unidade] ?? unidade}${profissional ? ` · ${profissional}` : ''}`
     : 'Preencheu a triagem da landing e NÃO escolheu horário'
   try {
     await insertInteraction(admin, {
@@ -516,6 +620,7 @@ Deno.serve(async (req) => {
     temperatura,
     estimativa,
     slotAt: slotAt || null,
+    profissional: profissional || null,
     whatsappUrl: `https://wa.me/${whats}?text=${encodeURIComponent(msg)}`,
   })
 })

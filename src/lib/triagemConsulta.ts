@@ -150,7 +150,13 @@ export function escalaDoGrau(grau: string): { escala: 'norwood' | 'ludwig'; grau
   return { escala: 'norwood', grau }
 }
 
-export type Horario = { unidadeId: string; slotAt: string }
+export type Horario = {
+  unidadeId: string
+  slotAt: string
+  /** Profissional da Shosp dono daquele horário. A regra da casa escolhe, não o paciente. */
+  codigoPrestador: string
+  profissional: string
+}
 export type DiaComHorarios = { dia: string; horarios: Horario[] }
 
 /** Agrupa os horários por dia do calendário de Maringá, não do fuso do navegador. */

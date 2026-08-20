@@ -66,6 +66,13 @@ function rotuloDoDia(dia: string): { semana: string; data: string } {
   return { semana: semana.charAt(0).toUpperCase() + semana.slice(1), data }
 }
 
+/** "Dra. Lorena Visentainer" vira "Dra. Lorena": cabe no botão e a pessoa reconhece. */
+function primeiroNome(nome: string): string {
+  const partes = nome.trim().split(/\s+/)
+  if (partes.length <= 2) return nome
+  return `${partes[0]} ${partes[1]}`
+}
+
 function horaDoSlot(iso: string): string {
   return new Intl.DateTimeFormat('pt-BR', {
     hour: '2-digit',
@@ -262,7 +269,7 @@ export function ConsultaLandingPage() {
     if (!querAgenda) return
     let vivo = true
     setCarregandoHorarios(true)
-    carregarHorarios(unidadeId)
+    carregarHorarios(unidadeId, respostas.objetivo)
       .then((lista) => {
         if (!vivo) return
         setHorarios(lista)
@@ -280,10 +287,11 @@ export function ConsultaLandingPage() {
     return () => {
       vivo = false
     }
-  }, [etapa, unidadeId, querAgenda])
+  }, [etapa, unidadeId, querAgenda, respostas.objetivo])
 
   const dias: DiaComHorarios[] = useMemo(() => agruparPorDia(horarios), [horarios])
   const horariosDoDia = dias.find((d) => d.dia === diaEscolhido)?.horarios ?? []
+  const horarioEscolhido = horarios.find((h) => h.slotAt === slotEscolhido) ?? null
   // Escassez verdadeira: quantas vagas existem na primeira semana que tem vaga. Sai
   // do próprio primeiro horário disponível, não de "hoje", para não prometer número
   // de uma semana em que a agenda está fechada.
@@ -382,7 +390,7 @@ export function ConsultaLandingPage() {
       if (e instanceof ErroAgenda && e.codigo === 'horario_indisponivel') {
         setSlotEscolhido('')
         setEtapa('resultado')
-        void carregarHorarios(unidadeId).then(setHorarios)
+        void carregarHorarios(unidadeId, respostas.objetivo).then(setHorarios)
       }
     } finally {
       setEnviando(false)
@@ -554,7 +562,7 @@ export function ConsultaLandingPage() {
                       {carregandoHorarios
                         ? 'Consultando a agenda...'
                         : vagasNaSemana > 0
-                          ? `${vagasNaSemana} ${vagasNaSemana === 1 ? 'horário livre' : 'horários livres'} na primeira semana com vaga. A agenda é da clínica e muda ao longo do dia.`
+                          ? `${vagasNaSemana} ${vagasNaSemana === 1 ? 'horário livre' : 'horários livres'} na primeira semana com vaga. Os horários vêm da agenda da clínica e mudam ao longo do dia.`
                           : 'Os próximos horários abertos estão logo abaixo.'}
                     </p>
 
@@ -633,13 +641,18 @@ export function ConsultaLandingPage() {
                                 key={h.slotAt}
                                 type="button"
                                 onClick={() => setSlotEscolhido(h.slotAt)}
-                                className={`rounded-xl border py-3 text-sm font-semibold transition ${
+                                className={`rounded-xl border px-2 py-2.5 text-center transition ${
                                   marcado
                                     ? 'border-[#252A33] bg-[#252A33] text-white'
                                     : 'border-[#252A33]/15 hover:border-[#252A33]/50'
                                 }`}
                               >
-                                {horaDoSlot(h.slotAt)}
+                                <span className="block text-sm font-semibold">{horaDoSlot(h.slotAt)}</span>
+                                {h.profissional ? (
+                                  <span className={`block text-[11px] leading-tight ${marcado ? 'text-white/70' : 'text-[#252A33]/55'}`}>
+                                    {primeiroNome(h.profissional)}
+                                  </span>
+                                ) : null}
                               </button>
                             )
                           })}
@@ -694,6 +707,9 @@ export function ConsultaLandingPage() {
                 {querAgenda && slotEscolhido ? (
                   <p className="mt-2 rounded-xl bg-[#DCDBD1]/50 px-4 py-3 text-sm font-semibold">
                     {dataPorExtenso(slotEscolhido)} · {unidade?.rotulo ?? 'Maringá'}
+                    {horarioEscolhido?.profissional ? (
+                      <span className="block font-normal text-[#252A33]/70">com {horarioEscolhido.profissional}</span>
+                    ) : null}
                   </p>
                 ) : null}
 
@@ -775,6 +791,9 @@ export function ConsultaLandingPage() {
                 {resultado.slotAt ? (
                   <p className="mx-auto mt-3 max-w-md text-[#252A33]/75">
                     {dataPorExtenso(resultado.slotAt)} · {unidade?.rotulo ?? 'Maringá'}
+                    {resultado.profissional ? (
+                      <span className="block font-medium text-[#252A33]">com {resultado.profissional}</span>
+                    ) : null}
                     <span className="mt-1 block text-sm">
                       Protocolo <strong className="font-heading">{resultado.protocolo}</strong>. A equipe confirma com
                       você pelo WhatsApp e passa as orientações da consulta.
