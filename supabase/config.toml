@@ -416,6 +416,18 @@ verify_jwt = false
 [functions.crm-wapi-webhook]
 verify_jwt = false
 
+# Webhook de EVENTOS da W-API (conectou/desconectou/status de mensagem). Mesma razão do
+# de cima: a W-API faz POST sem JWT. O handler resolve a linha pelo instanceId, confere o
+# x-webhook-secret quando existe, e CONFIRMA a queda na API antes de parar a linha — evento
+# sozinho não derruba a operação da clínica.
+[functions.crm-wapi-events]
+verify_jwt = false
+
+# Painel de conexão da W-API (QR, webhooks, blindagens, pausa). verify_jwt=TRUE: só gente
+# logada mexe na sessão do número. O token da instância nunca sai do servidor.
+[functions.crm-wapi-connection]
+verify_jwt = true
+
 # Backstop de flush de rajada, disparado por pg_cron com x-cron-secret (auth própria no
 # handler, sem JWT de sessão). Pinado aqui senão um redeploy via CLI volta pro default
 # verify_jwt=true e o cron toma 401 no gateway antes de chegar no código.
@@ -423,6 +435,12 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.crm-ingest-webhook]
+verify_jwt = false
+
+# Landing pública /consulta: quem preenche a triagem não tem login nenhum. A função
+# valida telefone, honeypot, limite por número e confere o horário contra
+# `clinica_agenda_publica` antes de gravar — a autorização é essa, não um JWT.
+[functions.crm-agendar-publico]
 verify_jwt = false
 
 # Aviso de mudança de estado da NFS-e, disparado pela Focus NFe. Autentica pelo header

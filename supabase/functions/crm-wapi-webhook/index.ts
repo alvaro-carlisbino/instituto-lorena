@@ -104,7 +104,9 @@ Deno.serve(async (req) => {
     return json({ ok: true, skipped: 'instance_not_registered', wapi_instance_id: payloadInstanceId }, 202)
   }
 
-  const provider = createWapiProviderForRow(instanceRow)
+  // Com guarda anti-ban: a resposta ao paciente passa sempre (conversa aberta), mas entra
+  // no livro-caixa — e para de sair se a linha cair ou for pausada. Ver antiBan.ts.
+  const provider = createWapiProviderForRow(instanceRow, admin, 'wapi_webhook')
 
   const sigOk = provider.validateWebhookSignature(rawBody, req.headers)
   if (!(await Promise.resolve(sigOk))) {

@@ -1,3 +1,4 @@
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import {
   type NormalizedInboundMessage,
   type SendWhatsappImageInput,
@@ -6,6 +7,7 @@ import {
   type WhatsappProvider,
   digitsOnly,
 } from './types.ts'
+import { guardAndRecord, recordWhatsappOutbound, type GuardDecision, type OutboundKind } from './antiBan.ts'
 
 /**
  * Provider para a W-API (https://api.w-api.app). Diferente do Evolution/Official,
@@ -55,12 +57,40 @@ function firstString(obj: Record<string, unknown>, paths: string[]): string {
 
 const DEFAULT_WAPI_BASE_URL = 'https://api.w-api.app/v1'
 
+/**
+ * Erro de envio RECUSADO pela guarda anti-ban — não é falha de rede nem da W-API. Quem
+ * chama deve tratar como "não mandou de propósito": a rotina pula e tenta na próxima volta,
+ * a tela mostra o motivo em português. `reason` é o código curto ('cap_frio_dia', 'ritmo'…).
+ */
+export class WapiBlockedError extends Error {
+  readonly reason: string
+  readonly kind: OutboundKind
+  readonly retryAfterSeconds?: number
+  constructor(decision: GuardDecision) {
+    super(decision.message ?? `envio bloqueado pela guarda anti-ban (${decision.reason ?? 'sem motivo'})`)
+    this.name = 'WapiBlockedError'
+    this.reason = decision.reason ?? 'bloqueado'
+    this.kind = decision.kind
+    this.retryAfterSeconds = decision.retryAfterSeconds
+  }
+}
+
+/** Contexto que liga a guarda anti-ban a este provider (ver attachAntiBanGuard). */
+type AntiBanContext = {
+  admin: SupabaseClient
+  /** id da row em whatsapp_channel_instances — a LINHA no CRM, não o instanceId do painel. */
+  instanceRowId: string
+  tenantId: string | null
+  defaultSource: string
+}
+
 export class WapiProvider implements WhatsappProvider {
   readonly name = 'wapi' as const
   private readonly baseUrl: string
   private readonly token: string
   private readonly instanceId: string
   private readonly webhookSecret: string
+  private antiBan: AntiBanContext | null = null
 
   constructor(config: WapiProviderConfig) {
     this.baseUrl = (config.baseUrl?.trim() || DEFAULT_WAPI_BASE_URL).replace(/\/$/, '')
@@ -69,6 +99,19 @@ export class WapiProvider implements WhatsappProvider {
     this.webhookSecret = config.webhookSecret.trim()
     if (!this.token) throw new Error('missing_wapi_token')
     if (!this.instanceId) throw new Error('missing_wapi_instance_id')
+  }
+
+  /**
+   * Liga a guarda anti-ban a este provider. A partir daqui, TODA mensagem de texto que sair
+   * por ele passa pela guarda e entra no livro-caixa — inclusive as respostas da IA, que a
+   * guarda deixa passar sempre, mas conta (é o que torna o painel do dia verdadeiro).
+   *
+   * Fica na própria classe, e não num invólucro, porque o `crm-wapi-webhook` faz
+   * `provider instanceof WapiProvider` para baixar mídia: embrulhar o objeto quebraria isso.
+   */
+  attachAntiBanGuard(admin: SupabaseClient, instanceRowId: string, tenantId: string | null, defaultSource = 'wapi'): this {
+    this.antiBan = { admin, instanceRowId, tenantId, defaultSource }
+    return this
   }
 
   validateWebhookSignature(_rawBody: string, headers: Headers): boolean | Promise<boolean> {
@@ -217,6 +260,53 @@ export class WapiProvider implements WhatsappProvider {
     const text = input.text.trim()
     if (!text) throw new Error('empty_message')
 
+    // ── Guarda anti-ban ────────────────────────────────────────────────────────
+    // Este é o funil por onde passa tudo o que sai numa linha W-API: painel, IA,
+    // reengajamento, carrinho, lembrete de cirurgia. O teto vive aqui, uma vez.
+    let typing = input.typingDelaySeconds ?? 0
+    if (this.antiBan) {
+      const meta = (input.metadata ?? {}) as Record<string, unknown>
+      const guardInput = {
+        instanceId: this.antiBan.instanceRowId,
+        tenantId: this.antiBan.tenantId,
+        leadId: input.leadId ?? null,
+        phone: to,
+        text,
+        source: String(meta.antiBanSource ?? this.antiBan.defaultSource),
+        kind: (meta.antiBanKind as OutboundKind | undefined) ?? undefined,
+        humanOverride: meta.antiBanHumanOverride === true,
+        coldOverride: meta.antiBanColdOverride === true,
+      }
+      const decision = await guardAndRecord(this.antiBan.admin, guardInput)
+      if (!decision.allow) throw new WapiBlockedError(decision)
+
+      // CONTATO NOVO: confirma que o número existe no WhatsApp antes de bater na porta.
+      // Disparar para número sem WhatsApp é uma das assinaturas mais caras que existem
+      // numa sessão não-oficial — é o que denuncia lista comprada. Sem resposta da API,
+      // não enviamos: o padrão aqui é o silêncio, não o palpite.
+      if (decision.kind === 'cold' && !guardInput.coldOverride) {
+        const existe = await this.phoneExists(to)
+        if (existe !== true) {
+          const recusa: GuardDecision = {
+            allow: false,
+            kind: 'cold',
+            reason: existe === false ? 'numero_sem_whatsapp' : 'numero_nao_verificado',
+            message:
+              existe === false
+                ? 'Este número não tem WhatsApp. Enviar para ele é exatamente o que queima a linha.'
+                : 'Não deu para confirmar se o número tem WhatsApp. Em contato novo, na dúvida não se envia.',
+            typingDelaySeconds: 0,
+          }
+          await recordWhatsappOutbound(this.antiBan.admin, { ...guardInput, decision: recusa })
+          throw new WapiBlockedError(recusa)
+        }
+      }
+
+      typing = input.typingDelaySeconds ?? decision.typingDelaySeconds
+      // "digitando…" no chat antes de a mensagem cair. Best-effort e sem custo de tempo.
+      if (typing > 0) void this.sendPresence(to, 'composing', Math.min(typing, 8) * 1000)
+    }
+
     // W-API exige instanceId como query param e Bearer token no header.
     const url = `${this.baseUrl}/message/send-text?instanceId=${encodeURIComponent(this.instanceId)}`
     const res = await fetch(url, {
@@ -228,6 +318,9 @@ export class WapiProvider implements WhatsappProvider {
       body: JSON.stringify({
         phone: to,
         message: text,
+        // "Digitando…" antes de a mensagem aparecer. O servidor da W-API segura, então não
+        // custa tempo de execução aqui. Quem calcula o valor é a guarda anti-ban.
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
       }),
     })
 
@@ -337,6 +430,116 @@ export class WapiProvider implements WhatsappProvider {
       externalMessageId,
       status: 'queued',
       raw: parsed,
+    }
+  }
+
+  /** Chamada crua na W-API, com o instanceId e o Bearer da linha já embutidos. */
+  async call(
+    path: string,
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+    body?: Record<string, unknown>,
+    extraQuery?: Record<string, string>,
+  ): Promise<{ ok: boolean; status: number; data: Record<string, unknown>; raw: string }> {
+    const qs = new URLSearchParams({ instanceId: this.instanceId, ...(extraQuery ?? {}) })
+    const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}?${qs.toString()}`
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(25_000),
+      })
+      const raw = await res.text()
+      let parsed: Record<string, unknown> = {}
+      try {
+        parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+      } catch {
+        parsed = { raw }
+      }
+      return { ok: res.ok, status: res.status, data: parsed, raw }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return { ok: false, status: 0, data: { error: msg }, raw: msg }
+    }
+  }
+
+  /**
+   * A sessão está de pé? É a diferença entre "a função respondeu 200" e "o número existe".
+   * `connected` null significa que a W-API respondeu algo que não sabemos ler — e nesse caso
+   * NÃO afirmamos que está no ar.
+   */
+  async instanceStatus(): Promise<{ ok: boolean; connected: boolean | null; status: string; data: Record<string, unknown> }> {
+    const res = await this.call('/instance/status-instance', 'GET')
+    const d = res.data
+    const flag =
+      (getByPath(d, 'connected') ?? getByPath(d, 'data.connected') ?? getByPath(d, 'status.connected')) as
+        | boolean
+        | undefined
+    const statusStr = (
+      safeString(getByPath(d, 'status')) ||
+      safeString(getByPath(d, 'data.status')) ||
+      safeString(getByPath(d, 'connectionStatus')) ||
+      ''
+    ).toLowerCase()
+    let connected: boolean | null = null
+    if (typeof flag === 'boolean') connected = flag
+    else if (/^(connected|open|online|conectado)$/.test(statusStr)) connected = true
+    else if (/(disconnect|close|offline|desconect|banned|banido)/.test(statusStr)) connected = false
+    return { ok: res.ok, connected, status: statusStr || (res.ok ? 'unknown' : `http_${res.status}`), data: d }
+  }
+
+  /**
+   * O número tem WhatsApp? Antes de falar com CONTATO NOVO isto não é luxo: bater em número
+   * que não existe é um dos sinais que derruba sessão não-oficial (a lista "comprada" clássica).
+   * Devolve null quando a API não respondeu — nesse caso quem chama decide, e o padrão é NÃO enviar.
+   */
+  async phoneExists(phone: string): Promise<boolean | null> {
+    const to = digitsOnly(phone)
+    if (to.length < 10) return false
+    // A coleção da W-API não documenta o nome do parâmetro do número neste GET (só o
+    // instanceId aparece). Mandamos os dois nomes usados na doc deles: o que sobrar é ignorado.
+    const res = await this.call('/contacts/contacts/phone-exists', 'GET', undefined, {
+      phoneNumber: to,
+      phone: to,
+    })
+    if (!res.ok) return null
+    const d = res.data
+    const v =
+      getByPath(d, 'exists') ??
+      getByPath(d, 'data.exists') ??
+      getByPath(d, 'isInWhatsapp') ??
+      getByPath(d, 'data.isInWhatsapp') ??
+      getByPath(d, 'numberExists')
+    if (typeof v === 'boolean') return v
+    const s = safeString(v).toLowerCase()
+    if (s === 'true') return true
+    if (s === 'false') return false
+    return null
+  }
+
+  /** "digitando…" / "gravando áudio…" no chat. Best-effort: falhar aqui nunca impede o envio. */
+  async sendPresence(phone: string, presence: 'composing' | 'recording' | 'available' | 'unavailable', delayMs = 0): Promise<void> {
+    try {
+      await this.call('/chats/send-presence', 'POST', {
+        instanceId: this.instanceId,
+        phone: digitsOnly(phone),
+        presence,
+        delay: Math.max(0, Math.round(delayMs)),
+      })
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /** Marca a mensagem como lida (dois tiques azuis). Comportamento de gente, não de robô mudo. */
+  async markRead(phone: string, messageId: string): Promise<void> {
+    try {
+      await this.call('/message/read-message', 'POST', { phone: digitsOnly(phone), messageId })
+    } catch {
+      /* best-effort */
     }
   }
 

@@ -8,6 +8,13 @@ export type SendWhatsappMessageInput = {
   leadId?: string
   /** Base64 do ficheiro WebP (com ou sem prefixo data:image/webp;base64,). Só WhatsApp (Evolution / Cloud). */
   stickerWebpBase64?: string
+  /**
+   * Segundos de "digitando…" antes da mensagem aparecer. Na W-API vira `delayMessage`, que o
+   * servidor deles segura — não custa tempo de execução da Edge Function. Quem calcula é a
+   * guarda anti-ban (`typingDelaySeconds` em _shared/whatsapp/antiBan.ts): mensagem longa que
+   * aparece instantânea é assinatura de robô. Ignorado por Evolution/Cloud.
+   */
+  typingDelaySeconds?: number
   metadata?: Record<string, unknown>
 }
 

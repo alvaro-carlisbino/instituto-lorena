@@ -567,11 +567,22 @@ Deno.serve(async (req) => {
       )
     }
 
+    // Contexto da guarda anti-ban (só tem efeito em linha W-API/Evolution):
+    //  • `antiBanHumanOverride` — pessoa na tela: fura teto de volume e janela de horário,
+    //    porque quem está a olhar a conversa sabe o que está a fazer. NÃO fura contato novo.
+    //  • `antiBanColdOverride` — o "assumo o risco" explícito, que também libera contato novo.
+    const antiBanMeta = {
+      antiBanSource: sourceTag || (isServiceRole ? 'rotina' : 'painel'),
+      antiBanHumanOverride: !isServiceRole,
+      antiBanColdOverride: body.manualOverride === true,
+    }
+
     let sent = await provider.sendMessage({
       to: effectiveTo,
       text,
       leadId,
       stickerWebpBase64: stickerWebpBase64 || undefined,
+      metadata: antiBanMeta,
     })
     let externalMessageId = sent.externalMessageId
     if (stickerWebpBase64 && text.trim()) {
@@ -579,6 +590,7 @@ Deno.serve(async (req) => {
         to: effectiveTo,
         text,
         leadId,
+        metadata: antiBanMeta,
       })
       externalMessageId = `${sent.externalMessageId}|${textSent.externalMessageId}`.slice(0, 240)
     }
@@ -672,6 +684,28 @@ Deno.serve(async (req) => {
       status: sent.status,
     })
   } catch (e) {
+    // Recusa da guarda anti-ban NÃO é falha de envio: foi decisão nossa. Devolvemos 429 com
+    // o motivo em português, para a tela mostrar o porquê e a rotina apenas pular a vez —
+    // um 502 aqui faria o cron tentar de novo, que é exatamente o que não se quer.
+    const isBlocked = e instanceof Error && e.name === 'WapiBlockedError'
+    if (isBlocked) {
+      const err = e as Error & { reason?: string; kind?: string; retryAfterSeconds?: number }
+      await admin.from('webhook_jobs').insert({
+        source: 'whatsapp-webhook',
+        status: 'done',
+        note: `outbound_blocked:${err.reason ?? 'antiban'}:${leadId}`.slice(0, 500),
+      })
+      return json(
+        {
+          error: 'blocked_antiban',
+          reason: err.reason ?? 'antiban',
+          kind: err.kind ?? null,
+          retryAfterSeconds: err.retryAfterSeconds ?? null,
+          message: err.message,
+        },
+        429,
+      )
+    }
     await admin.from('webhook_jobs').insert({
       source: 'whatsapp-webhook',
       status: 'retry',

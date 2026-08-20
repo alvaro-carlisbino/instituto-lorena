@@ -72,13 +72,24 @@ export async function loadWapiInstanceByRowId(
   return rowToWapi(data as Record<string, unknown>)
 }
 
-export function createWapiProviderForRow(row: WapiInstanceRow): WhatsappProvider {
-  return new WapiProvider({
+/**
+ * Provider da linha. Passe o `admin` (service_role) para ligar a guarda anti-ban: com ele,
+ * todo envio de texto por esta linha passa pelos tetos e entra no livro-caixa. Sem ele, o
+ * provider é cru — só para leitura (normalizar webhook, baixar mídia, consultar estado).
+ */
+export function createWapiProviderForRow(
+  row: WapiInstanceRow,
+  admin?: SupabaseClient,
+  source?: string,
+): WhatsappProvider {
+  const provider = new WapiProvider({
     baseUrl: (row.wapi_base_url ?? '').trim(),
     token: row.wapi_token,
     instanceId: row.wapi_instance_id,
     webhookSecret: (row.wapi_webhook_secret ?? '').trim(),
   })
+  if (admin) provider.attachAntiBanGuard(admin, row.id, row.tenant_id ?? null, source ?? 'wapi')
+  return provider
 }
 
 /**
@@ -93,5 +104,6 @@ export async function getWapiProviderForLead(
   if (!leadWhatsappInstanceId) throw new Error('wapi_requires_instance_id')
   const row = await loadWapiInstanceByRowId(admin, leadWhatsappInstanceId)
   if (!row) throw new Error('wapi_instance_not_found_or_inactive')
-  return createWapiProviderForRow(row)
+  // Com guarda: este é o caminho de ENVIO (painel, IA, crons). Ver _shared/whatsapp/antiBan.ts.
+  return createWapiProviderForRow(row, admin)
 }

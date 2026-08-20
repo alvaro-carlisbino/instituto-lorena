@@ -10,6 +10,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PageHelp } from '@/components/page/PageHelp'
+import { WapiLinePanel } from '@/components/whatsapp/WapiLinePanel'
+import { saveLinePolicy } from '@/services/wapiConnection'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -463,9 +465,17 @@ export function WhatsappConnectionPage() {
       setWaPrompt('')
       setWaBotKind('clinic')
       setWaSecret('')
+      // Linha nova nasce EM AQUECIMENTO: mesmo um número velho de casa vira um desconhecido
+      // para a plataforma quando a sessão passa a sair de outro provedor. A rampa sobe sozinha
+      // e pode ser desligada no painel da linha.
+      try {
+        await saveLinePolicy({ instance_id: id, aquecimento_inicio: new Date().toISOString() })
+      } catch {
+        /* a guarda funciona com os valores padrão mesmo sem esta linha */
+      }
       await loadInstances()
       setSelectedInstanceId(id)
-      toast.success('Linha W-API criada. Agora cole o webhook URL no painel da W-API (instruções abaixo).')
+      toast.success('Linha W-API criada e em aquecimento. Agora use "Apontar webhooks para o CRM" no painel da linha.')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao salvar.')
     } finally {
@@ -477,7 +487,10 @@ export function WhatsappConnectionPage() {
     const target = instances.find((i) => i.id === id)
     setRemovingInstance(true)
     try {
-      if (target?.channelProvider !== 'manychat') {
+      // Só a Evolution tem instância nossa para apagar no servidor. ManyChat, W-API e Meta
+      // vivem no painel do fornecedor: pedir "apagar" ao Evolution devolvia erro e travava a
+      // remoção do registo aqui, deixando a linha morta na lista.
+      if (target?.channelProvider === 'evolution') {
         const res = await evolutionInstanceLifecycle('delete_instance', { instanceId: id })
         if (!res.ok) {
           toast.error(res.message || res.error || 'Não foi possível apagar no servidor. Tente de novo; o registro do CRM foi mantido.')
@@ -584,6 +597,10 @@ export function WhatsappConnectionPage() {
                     <Badge variant="outline" className="ml-2 border-sky-300 text-sky-900">
                       ManyChat
                     </Badge>
+                  ) : selectedInstance.channelProvider === 'wapi' ? (
+                    <Badge variant="outline" className="ml-2 border-violet-300 text-violet-900">
+                      W-API
+                    </Badge>
                   ) : null}
                 </p>
                 <p className="m-0 mt-1 text-xs text-muted-foreground">
@@ -594,6 +611,12 @@ export function WhatsappConnectionPage() {
                         {selectedInstance.manychatInstanceKey ?? '—'}
                       </span>
                       , id <span className="font-mono text-[0.7rem]">{selectedInstance.id}</span>
+                    </>
+                  ) : selectedInstance.channelProvider === 'wapi' ? (
+                    <>
+                      instanceId{' '}
+                      <span className="font-mono text-[0.7rem]">{selectedInstance.wapiInstanceId ?? '—'}</span>, W-API
+                      (API não-oficial)
                     </>
                   ) : (
                     <>
@@ -1184,6 +1207,11 @@ export function WhatsappConnectionPage() {
             </p>
           </CardContent>
         </Card>
+      ) : selectedInstance?.channelProvider === 'wapi' ? (
+        // Linha W-API tem ecrã próprio: QR, webhooks num clique e a guarda que protege o
+        // número. O bloco Evolution abaixo não sabe falar com a W-API e mostraria "Com erro"
+        // numa linha saudável.
+        <WapiLinePanel instance={selectedInstance} />
       ) : (
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className={cn('lg:col-span-2', pageQuietCardClass)}>

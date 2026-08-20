@@ -230,7 +230,8 @@ Deno.serve(async (req) => {
               { id: pac.lead_id ?? '', whatsapp_instance_id: rede.id, tenant_id: TENANT },
               { bindDefault: false },   // login não pode reamarrar a linha do lead
             )
-            await provider.sendMessage({ to, text: texto })
+            // Código pedido pelo próprio paciente: transacional, fora dos tetos de proativo.
+            await provider.sendMessage({ to, text: texto, metadata: { antiBanKind: 'transactional' } })
             delivered = true
             anota('wapi_ok')
           }

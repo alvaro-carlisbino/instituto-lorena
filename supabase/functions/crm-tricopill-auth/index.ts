@@ -89,7 +89,9 @@ Deno.serve(async (req) => {
       const { provider } = await resolveOutboundProviderForLead(
         admin, { id: '', whatsapp_instance_id: null, tenant_id: TENANT }, { bindDefault: false },
       )
-      await provider.sendMessage({ to: phone, text: texto })
+      // Código que a própria pessoa acabou de pedir: transacional. Não entra em teto de
+      // proativo (senão o login quebraria no dia movimentado), mas fica no livro-caixa.
+      await provider.sendMessage({ to: phone, text: texto, metadata: { antiBanKind: 'transactional' } })
       delivered = true
     } catch (e) {
       console.error('[tricopill-auth] whatsapp falhou:', e instanceof Error ? e.message : String(e))

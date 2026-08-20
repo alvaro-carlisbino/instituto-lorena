@@ -57,7 +57,7 @@ async function deliverAiReply(
 ): Promise<{ replied: boolean }> {
   const instRow = await loadWapiInstanceByRowId(admin, String(lead.whatsapp_instance_id))
   if (!instRow) throw new Error('instance_not_found')
-  const provider = createWapiProviderForRow(instRow)
+  const provider = createWapiProviderForRow(instRow, admin, 'ai_burst_flush')
   const isSalesBot = String((instRow as { bot_kind?: string }).bot_kind ?? '').toLowerCase() === 'sales'
   const tenantId = String(lead.tenant_id ?? '').trim()
 
