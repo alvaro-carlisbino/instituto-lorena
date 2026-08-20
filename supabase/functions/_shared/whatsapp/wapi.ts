@@ -527,9 +527,14 @@ export class WapiProvider implements WhatsappProvider {
   async phoneExists(phone: string): Promise<boolean | null> {
     const to = digitsOnly(phone)
     if (to.length < 10) return false
-    // A coleção da W-API não documenta o nome do parâmetro do número neste GET (só o
-    // instanceId aparece). Mandamos os dois nomes usados na doc deles: o que sobrar é ignorado.
-    const res = await this.call('/contacts/contacts/phone-exists', 'GET', undefined, {
+    // O caminho é `/contacts/phone-exists`. Estava escrito `/contacts/contacts/...` e a W-API
+    // devolvia 404 em TODA chamada, então `phoneExists` só sabia responder `null` — o botão
+    // "checar número" da tela /whatsapp nunca deu resposta desde que existe (provado em
+    // 20/ago/2026 batendo nos dois caminhos com a linha da clínica).
+    // A coleção deles não documenta o nome do parâmetro do número (só o instanceId aparece).
+    // Mandamos os dois nomes usados na doc: o que sobrar é ignorado. A resposta ecoa o número
+    // já sem o 9º dígito — isso é como o WhatsApp representa, não é recusa.
+    const res = await this.call('/contacts/phone-exists', 'GET', undefined, {
       phoneNumber: to,
       phone: to,
     })
