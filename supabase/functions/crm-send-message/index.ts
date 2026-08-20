@@ -218,22 +218,57 @@ Deno.serve(async (req) => {
     customFieldsProvider === 'wapi' ||
     customFieldsProvider === 'evolution' ||
     customFieldsProvider === 'official'
+
+  // O POLO tem linha própria de WhatsApp? Depois que a clínica saiu do ManyChat (20/ago),
+  // o vínculo por lead deixou de bastar: os 2.732 leads da clínica têm
+  // `whatsapp_instance_id` NULO (quem conversava era o ManyChat), e sem esta pergunta cada
+  // um deles continuava sendo empurrado para uma conta que não atende mais WhatsApp — o
+  // toast dizia "configure MANYCHAT_SEND_FLOW_MESSAGE_TAG" para uma linha W-API no ar.
+  // A linha resolvida é a mesma que `resolveOutboundProviderForLead` usaria como padrão.
+  let poloTemLinhaPropria = hasDirectWhatsappLine
+  if (!poloTemLinhaPropria && row.tenant_id) {
+    const { data: linhaDoPolo } = await admin
+      .from('whatsapp_channel_instances')
+      .select('id')
+      .eq('tenant_id', row.tenant_id)
+      .eq('active', true)
+      .neq('channel_provider', 'manychat')
+      .limit(1)
+      .maybeSingle()
+    poloTemLinhaPropria = Boolean(linhaDoPolo)
+  }
+  // Telefone de verdade (não o sintético 888001… que o ManyChat inventava para quem só
+  // existia no Instagram). Sem telefone real não há linha para onde mandar.
+  const telefoneReal = /^\d{12,}$/.test(effectiveTo) && !effectiveTo.startsWith('888')
   // O polo do ASSUNTO manda na linha, não o polo da pessoa. Quando a rotina declara
   // senderTenantId diferente do tenant do lead, ignoramos a linha vinculada (ela é do
   // polo da pessoa) e resolvemos pela linha do assunto, sem reescrever o vínculo. O
   // ManyChat também fica de fora: ele é a conta do polo da pessoa.
   const senderTenantId = String(body.senderTenantId ?? '').trim()
   const assuntoDeOutroPolo = Boolean(senderTenantId) && senderTenantId !== row.tenant_id
-  // Detecta envio via ManyChat: telefone sintético, canal explícito Instagram,
-  // source meta_instagram/meta_whatsapp ou custom_fields.channel sinalizando ManyChat.
+  // Detecta envio via ManyChat. Desde 20/ago/2026 o ManyChat atende SÓ o Instagram: o
+  // WhatsApp da clínica vive numa linha W-API. Por isso o WhatsApp só cai aqui quando não
+  // há para onde mais ir — sem telefone real, ou o polo sem linha própria ativa.
+  //
+  // Era esta linha que quebrava: `row.source === 'meta_whatsapp'` mandava para o ManyChat
+  // sozinho, sem perguntar se ainda existia ManyChat. Como 655 leads da clínica têm essa
+  // origem, responder a qualquer um deles pelo painel devolvia o erro de janela de 24h da
+  // Meta — de uma conta que já não entrega WhatsApp nenhum.
+  // Instagram continua no ManyChat e este comportamento fica EXATAMENTE como estava — com
+  // uma ressalva: `source = meta_instagram` só decide enquanto a pessoa não tiver falado na
+  // linha direta. Quem veio do Instagram e depois escreveu no WhatsApp é atendido onde está
+  // conversando agora (mesma regra de [[crm_conversa_segue_a_linha]]).
+  const alvoInstagram =
+    bodyChannel !== 'whatsapp' &&
+    (bodyChannel === 'instagram' ||
+      customFieldsChannel === 'instagram' ||
+      (row.source === 'meta_instagram' && !hasDirectWhatsappLine))
   const isManychat =
     !assuntoDeOutroPolo &&
     (effectiveTo.startsWith('888001') ||
-    bodyChannel === 'instagram' ||
-    row.source === 'meta_instagram' ||
-    row.source === 'meta_whatsapp' ||
-    customFieldsChannel === 'instagram' ||
-    (customFieldsChannel === 'whatsapp' && !hasDirectWhatsappLine))
+      !telefoneReal ||
+      alvoInstagram ||
+      !poloTemLinhaPropria)
 
   if (isManychat) {
     // Automação de stage + ManyChat: bloqueia fora da janela 24h da Meta.

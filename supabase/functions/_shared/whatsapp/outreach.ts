@@ -249,15 +249,14 @@ export async function drainOutreachQueue(
         continue
       }
 
-      const { provider } = await resolveOutboundProviderForLead(
-        admin,
-        {
-          id: item.lead_id ?? '',
-          whatsapp_instance_id: item.instance_id,
-          tenant_id: item.tenant_id,
-        },
-        { bindDefault: false },
-      )
+      // Sem `bindDefault: false` de propósito: depois desta mensagem a conversa passa a
+      // viver nesta linha, e amarrar o lead a ela é o que faz a resposta da pessoa (e a
+      // resposta da equipe pelo painel) cair no lugar certo.
+      const { provider } = await resolveOutboundProviderForLead(admin, {
+        id: item.lead_id ?? '',
+        whatsapp_instance_id: item.instance_id,
+        tenant_id: item.tenant_id,
+      })
 
       const sent = await provider.sendMessage({
         to: item.phone,
