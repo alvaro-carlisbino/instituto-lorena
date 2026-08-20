@@ -466,6 +466,12 @@ verify_jwt = false
 [functions.crm-sefaz-sync]
 verify_jwt = false
 
+# Varredura que lança a conta a receber do pedido de marketplace (o Bling só gera financeiro
+# para pedido nascido na tela dele). Chamada por pg_cron, sem usuário: autoriza pelo
+# x-cron-secret conferido contra app_cron_secrets['bling_marketplace_fin'].
+[functions.crm-bling-marketplace-fin]
+verify_jwt = false
+
 # Chamada interna Edge→Edge com x-crm-ai-internal-secret (sem Bearer de sessão).
 [functions.crm-ai-assistant]
 verify_jwt = false
