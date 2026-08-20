@@ -110,11 +110,11 @@ function recompraDueDay(step: number, supplyDays: number): number {
 // o lead. E dentro do grupo ele recebe promoção todo dia, sem custo e sem risco de ban.
 const CLUBE_LINK = 'https://chat.whatsapp.com/GlRBbbwhjELGZ4u93VGviT';
 
-// PROMOÇÃO DE AGOSTO/2026 (decisão do dono, 17/08): kit 3+1 com frete grátis até 31/08.
-// O gancho entra nas mensagens só enquanto a data vale e some sozinho depois — nada pra
-// reverter. Mesma regra que o servidor do site (FREE_FREIGHT_CENTS_PROMO) e o env
-// FRETE_GRATIS_KITS do bot (esse sim precisa voltar pra "5_meses" em 01/09).
-const PROMO_FRETE_KIT3_ATE = '2026-08-31'
+// Promoção do kit 3+1 com frete grátis (decisão do dono, 17/08), ENCERRADA em 20/08 antes do
+// fim de agosto: o envio externo do 3+1 saía com etiqueta de ~R$ 29 tirada da margem. Com a
+// data no passado o gancho some sozinho das mensagens. Mesma data em `_shared/melhorEnvio.ts`
+// (o servidor que zera o frete) e no `_shared/frete.ts` do repo do site.
+const PROMO_FRETE_KIT3_ATE = '2026-08-19'
 function diaLocalSP(d = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
 }

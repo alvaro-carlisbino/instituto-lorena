@@ -192,8 +192,15 @@ export function localDeliveryCents(cityInfo?: { localidade?: string; uf?: string
   return raw !== '' && Number.isFinite(n) && n >= 0 ? Math.round(n) : 1500
 }
 
-/** Último dia da promoção de agosto/2026 (kit 3+1 com frete grátis). A data manda. */
-export const PROMO_FRETE_KIT3_ATE = '2026-08-31'
+/**
+ * Último dia da promoção do kit 3+1 com frete grátis. A data manda.
+ *
+ * Ela nasceu para agosto/2026 inteiro (decisão do dono, 17/08) e foi ENCERRADA ANTES, em
+ * 20/08: cada envio externo do 3+1 saía com etiqueta de ~R$ 29 tirada da margem, e a conta
+ * só apareceu quando o custo passou a ser registrado. Data no passado = promo desligada,
+ * sem depender de env — a mesma chave que ligou desliga.
+ */
+export const PROMO_FRETE_KIT3_ATE = '2026-08-19'
 
 /** Dia de hoje em São Paulo (YYYY-MM-DD). A promo vira pela data LOCAL, não pela UTC. */
 function diaLocalSP(d = new Date()): string {
@@ -209,10 +216,10 @@ function diaLocalSP(d = new Date()): string {
  * Kits com FRETE GRÁTIS HOJE, pela data (sem o override de env).
  *
  * O kit de 5 meses é PERMANENTE (alavanca de ticket — incentiva subir pro kit maior). O kit
- * 3+1 é PROMOÇÃO DE AGOSTO/2026 (decisão do dono, 17/08) e vale só até 31/08: em 01/09 ele
- * sai sozinho, sem ninguém precisar lembrar. É a MESMA regra do servidor do site
- * (`PROMO_FRETE_KIT3_ATE` em `_shared/frete.ts` do repo do site) e do gancho de reengajamento
- * (`crm-reengage-scheduler`) — os três param no mesmo dia.
+ * 3+1 foi promoção de agosto/2026 e ESTÁ ENCERRADA desde 20/08 (`PROMO_FRETE_KIT3_ATE` já
+ * está no passado): a partir daí ele volta a pagar frete normalmente. É a MESMA regra do
+ * servidor do site (`PROMO_FRETE_KIT3_ATE` em `_shared/frete.ts` do repo do site) e do gancho
+ * de reengajamento (`crm-reengage-scheduler`) — os três param no mesmo dia.
  */
 export function freeShippingKits(d = new Date()): Set<string> {
   const kits = new Set(['5_meses'])
@@ -1009,7 +1016,13 @@ export async function autoShipToCart(
     // batendo. Sem serviço escolhido (ou que não atende o trecho), cai na mais barata. options[0]
     // já vem ordenado do mais barato pelo Melhor Envio.
     const box = boxForOrder(opts.kit, opts.extras ?? []) ?? undefined
-    const q = await quoteFreteMelhorEnvio(admin, tenantId, cep, { box, cityInfo })
+    // SEGURO na cotação = o mesmo que a compra declara logo abaixo. Sem isso a cotação vinha
+    // barata (Cianorte 0,75 kg: PAC R$ 23,24) e o Melhor Envio debitava o valor com seguro
+    // (R$ 28,66) — o serviço podia até ser escolhido por um ranking que não é o real, e o
+    // custo gravado em `shipping_labels` (a conta de quanto o frete grátis tira da margem)
+    // saía ~R$ 5 menor por pedido. Quem cota manda o mesmo insuranceCents de quem compra.
+    const insuranceCents = Math.max(0, opts.productValueCents)
+    const q = await quoteFreteMelhorEnvio(admin, tenantId, cep, { box, cityInfo, insuranceCents })
     if (!q.ok || q.options.length === 0) return { ok: false, skipped: true, reason: 'sem_servico_atende' }
     const chosenService = String(entrega.service ?? '').trim()
     const chosen = (chosenService ? pickFreteOption(q, chosenService) : null) ?? q.options[0]
@@ -1020,7 +1033,7 @@ export async function autoShipToCart(
       serviceId,
       products: [{ name: opts.productName.slice(0, 120), quantity: 1, unitaryValueCents: Math.max(100, opts.productValueCents) }],
       box,
-      insuranceCents: Math.max(0, opts.productValueCents),
+      insuranceCents,
       finalize: false, // só carrinho — o operador compra no painel
       nonCommercial: true,
     })
