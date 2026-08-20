@@ -21,6 +21,7 @@ export type PreAgendamento = {
   id: string
   protocolo: string
   prestador: string
+  codigoPrestador: string
   leadId: string | null
   nome: string
   telefone: string
@@ -93,6 +94,7 @@ function linha(row: Record<string, unknown>): PreAgendamento {
     id: String(row.id),
     protocolo: String(row.protocolo ?? ''),
     prestador: String(row.prestador ?? ''),
+    codigoPrestador: String(row.codigo_prestador ?? ''),
     leadId: row.lead_id ? String(row.lead_id) : null,
     nome: String(row.nome ?? ''),
     telefone: String(row.telefone ?? ''),
@@ -319,6 +321,7 @@ export type PrestadorAgenda = {
   id: string
   unidadeId: string
   codigoPrestador: string
+  srgMedicoId: number | null
   rotuloPublico: string
   objetivos: string[]
   horaInicio: string
@@ -341,7 +344,7 @@ export async function listarPrestadoresAgenda(): Promise<PrestadorAgenda[]> {
   if (!supabase) return []
   let q = supabase
     .from('clinic_booking_prestadores')
-    .select('id, unidade_id, codigo_prestador, rotulo_publico, objetivos, hora_inicio, hora_fim, hora_inicio_cirurgia, hora_fim_cirurgia, max_por_dia, active')
+    .select('id, unidade_id, codigo_prestador, srg_medico_id, rotulo_publico, objetivos, hora_inicio, hora_fim, hora_inicio_cirurgia, hora_fim_cirurgia, max_por_dia, active')
     .order('sort_order')
   const polo = poloDaTela()
   if (polo) q = q.eq('tenant_id', polo)
@@ -351,6 +354,7 @@ export async function listarPrestadoresAgenda(): Promise<PrestadorAgenda[]> {
     id: String(p.id),
     unidadeId: String(p.unidade_id),
     codigoPrestador: String(p.codigo_prestador),
+    srgMedicoId: p.srg_medico_id == null ? null : Number(p.srg_medico_id),
     rotuloPublico: String(p.rotulo_publico),
     objetivos: (p.objetivos as string[]) ?? [],
     horaInicio: String(p.hora_inicio ?? '').slice(0, 5),

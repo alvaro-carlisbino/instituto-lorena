@@ -29,6 +29,7 @@ import {
   listarJanelas,
   listarPreAgendamentos,
   listarUnidadesAgenda,
+  listarDiasDeCirurgia,
   listarPrestadoresAgenda,
   salvarPrestadorAgenda,
   estadoDaAgendaShosp,
@@ -117,6 +118,7 @@ function Triagem({ pre }: { pre: PreAgendamento }) {
 function LinhaPreAgendamento({
   pre,
   agora,
+  viraDiaDeCirurgia,
   onConfirmar,
   onCancelar,
   onCarimbar,
@@ -125,6 +127,8 @@ function LinhaPreAgendamento({
   pre: PreAgendamento
   /** Instante da última carga. Vem de fora para a linha não ler o relógio no render. */
   agora: number
+  /** O médico dessa reserva passou a ter cirurgia nesse dia DEPOIS que o paciente marcou. */
+  viraDiaDeCirurgia: boolean
   onConfirmar: (p: PreAgendamento) => void
   onCancelar: (p: PreAgendamento) => void
   onCarimbar: (p: PreAgendamento, veio: boolean) => void
@@ -182,6 +186,12 @@ function LinhaPreAgendamento({
           <div className="mt-2">
             <Triagem pre={pre} />
           </div>
+
+          {viraDiaDeCirurgia ? (
+            <p className="mt-2 text-xs font-semibold text-destructive">
+              Esse dia virou dia de cirurgia do profissional. Confira a agenda antes de confirmar.
+            </p>
+          ) : null}
 
           {pre.observacao ? (
             <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400">{pre.observacao}</p>
@@ -519,6 +529,7 @@ export function PreAgendamentosPage() {
   const [fechados, setFechados] = useState<DiaFechado[]>([])
   const [agendaShosp, setAgendaShosp] = useState<EstadoAgendaShosp | null>(null)
   const [prestadores, setPrestadores] = useState<PrestadorAgenda[]>([])
+  const [diasDeCirurgia, setDiasDeCirurgia] = useState<Array<{ dia: string; medicoId: number }>>([])
   const [carregando, setCarregando] = useState(true)
   const [ocupado, setOcupado] = useState(false)
   // Relógio carimbado na carga: sem isto cada render lia Date.now() e o resultado
@@ -534,8 +545,9 @@ export function PreAgendamentosPage() {
       listarDiasFechados(),
       estadoDaAgendaShosp(),
       listarPrestadoresAgenda(),
+      listarDiasDeCirurgia(60),
     ])
-      .then(([pre, uni, jan, fec, ag, med]) => {
+      .then(([pre, uni, jan, fec, ag, med, cir]) => {
         setAgora(Date.now())
         setLista(pre)
         setUnidades(uni)
@@ -543,6 +555,7 @@ export function PreAgendamentosPage() {
         setFechados(fec)
         setAgendaShosp(ag)
         setPrestadores(med)
+        setDiasDeCirurgia(cir)
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao carregar'))
       .finally(() => setCarregando(false))
@@ -581,6 +594,18 @@ export function PreAgendamentosPage() {
       )
     return lista
   }, [lista, aba, hoje, amanha])
+
+  /**
+   * A reserva foi feita num dia limpo e, depois, o centro cirúrgico marcou cirurgia
+   * para aquele médico. A landing não tinha como saber na hora, mas a equipe precisa
+   * ver antes de ligar confirmando.
+   */
+  const marcadaEmDiaDeCirurgia = (pre: PreAgendamento): boolean => {
+    const medico = prestadores.find((p) => p.codigoPrestador === pre.codigoPrestador)?.srgMedicoId
+    if (!medico) return false
+    const dia = diaLocal(pre.slotAt)
+    return diasDeCirurgia.some((c) => c.dia === dia && c.medicoId === medico)
+  }
 
   const comAcao = async (acao: () => Promise<void>, mensagem: string) => {
     setOcupado(true)
@@ -675,6 +700,7 @@ export function PreAgendamentosPage() {
                 key={pre.id}
                 pre={pre}
                 agora={agora}
+                viraDiaDeCirurgia={marcadaEmDiaDeCirurgia(pre)}
                 ocupado={ocupado}
                 onConfirmar={(p) =>
                   void comAcao(() => confirmarPreAgendamento(p), `Consulta de ${p.nome} confirmada.`)
