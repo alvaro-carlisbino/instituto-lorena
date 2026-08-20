@@ -77,6 +77,7 @@ const AdminOperationsPage = lazyPage(() => import('./pages/AdminOperationsPage')
 const TenantsAdminPage = lazyPage(() => import('./pages/TenantsAdminPage'), 'TenantsAdminPage')
 const WhatsappConnectionPage = lazyPage(() => import('./pages/WhatsappConnectionPage'), 'WhatsappConnectionPage')
 const AgendaPage = lazyPage(() => import('./pages/AgendaPage'), 'AgendaPage')
+const PreAgendamentosPage = lazyPage(() => import('./pages/PreAgendamentosPage'), 'PreAgendamentosPage')
 const AgendaCirurgicaPage = lazyPage(() => import('./pages/AgendaPage'), 'AgendaCirurgicaPage')
 // Central de Vendas: as 5 abas moram no mesmo chunk, cada uma com a sua porta porque
 // lazyPage() só sabe montar componente sem prop.
@@ -148,6 +149,7 @@ function AppRoutes() {
         <Route path="/tarefas" element={<TasksPage />} />
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/agenda/cirurgica" element={<AgendaCirurgicaPage />} />
+        <Route path="/pre-agendamentos" element={<PreAgendamentosPage />} />
         <Route path="/central-vendas" element={<CentralVendasVendasPage />} />
         <Route path="/central-vendas/follow-up" element={<CentralVendasFollowUpPage />} />
         <Route path="/central-vendas/pos-consulta" element={<CentralVendasPosConsultaPage />} />

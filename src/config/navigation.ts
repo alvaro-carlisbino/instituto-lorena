@@ -250,6 +250,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: (ctx) => isClinic(ctx) && canRoute(ctx),
   },
   {
+    id: 'pre-agendamentos',
+    path: '/pre-agendamentos',
+    label: 'Pré-agendamentos',
+    icon: CalendarClock,
+    group: 'clinica',
+    keywords: ['landing', 'consulta', 'triagem', 'reserva', 'site', 'lead qualificado', 'agendamento online'],
+    visible: (ctx) => isClinic(ctx) && canRoute(ctx),
+  },
+  {
     id: 'agenda',
     path: '/agenda',
     label: 'Agenda',

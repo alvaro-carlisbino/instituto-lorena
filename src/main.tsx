@@ -7,9 +7,11 @@ import './lib/authLinkFlow'
 import { APP_DOCUMENT_TITLE } from './config/branding'
 import { instalarRecuperacaoDeChunk } from './lib/chunkReload'
 import './index.css'
-import App from './App.tsx'
+import { RootApp } from './RootApp'
+import { ehLandingDaClinica } from './lib/rotaPublica'
 
-document.title = APP_DOCUMENT_TITLE
+// A landing pública troca o título por conta própria; o do CRM diria "INTERNO".
+if (!ehLandingDaClinica()) document.title = APP_DOCUMENT_TITLE
 
 // Antes de montar: deploy no meio da sessão deixa o index.html apontando para chunks
 // que não existem mais, e a tela abre em branco. Isto recarrega uma vez e resolve.
@@ -36,7 +38,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter basename={BASE || undefined}>
-      <App />
+      <RootApp />
     </BrowserRouter>
   </StrictMode>,
 )
