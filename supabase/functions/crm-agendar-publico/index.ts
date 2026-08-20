@@ -392,16 +392,23 @@ Deno.serve(async (req) => {
   let profissional = ''
   let avisoShosp = ''
   if (querHorario) {
+    // O profissional escolhido na tela vem no payload, mas quem manda é a agenda:
+    // se aquele horário não é dele, a reserva não acontece. Dois médicos podem estar
+    // livres às 13:00, e marcar com o outro seria trocar o médico do paciente sem avisar.
+    const preferido = texto(payload.codigoPrestador, 20)
     const { data: livres, error: erroAgenda } = await admin.rpc('clinica_agenda_publica', {
       p_unidade: unidade,
       p_dias: null,
       p_objetivo: triagem.objetivo || null,
+      p_prestador: preferido || null,
     })
     if (erroAgenda) return json({ error: 'agenda_indisponivel', message: 'Não consegui ler a agenda agora.' }, 503)
     const alvo = new Date(slotAt).getTime()
     const achado = (livres ?? []).find(
-      (l: { unidade_id: string; slot_at: string }) =>
-        l.unidade_id === unidade && new Date(l.slot_at).getTime() === alvo,
+      (l: { unidade_id: string; slot_at: string; codigo_prestador?: string }) =>
+        l.unidade_id === unidade &&
+        new Date(l.slot_at).getTime() === alvo &&
+        (!preferido || String(l.codigo_prestador ?? '') === preferido),
     ) as { codigo_prestador?: string; profissional?: string } | undefined
     codigoPrestador = String(achado?.codigo_prestador ?? '')
     profissional = String(achado?.profissional ?? '')

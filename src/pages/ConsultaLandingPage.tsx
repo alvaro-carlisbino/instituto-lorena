@@ -23,11 +23,13 @@ import {
   carregarEstimativa,
   carregarHorarios,
   carregarNumerosPublicos,
+  carregarProfissionais,
   carregarUnidades,
   enviarPreAgendamento,
   registrarEventoLanding,
   type EstimativaPublica,
   type NumerosPublicos,
+  type ProfissionalPublico,
   type RespostaPreAgendamento,
   type UnidadePublica,
 } from '@/services/agendaPublica'
@@ -71,6 +73,23 @@ function primeiroNome(nome: string): string {
   const partes = nome.trim().split(/\s+/)
   if (partes.length <= 2) return nome
   return `${partes[0]} ${partes[1]}`
+}
+
+/** "amanhã" ou "seg, 25/08": a pessoa precisa saber quando, não o dia da semana por extenso. */
+function quandoCurto(iso: string | null): string {
+  if (!iso) return ''
+  const dia = diaLocal(iso)
+  const hoje = diaLocal(new Date())
+  const amanha = diaLocal(new Date(Date.now() + 86_400_000))
+  const hora = new Intl.DateTimeFormat('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  }).format(new Date(iso))
+  if (dia === hoje) return `hoje ${hora}`
+  if (dia === amanha) return `amanhã ${hora}`
+  const { semana, data } = rotuloDoDia(dia)
+  return `${semana} ${data}`
 }
 
 function horaDoSlot(iso: string): string {
@@ -213,6 +232,10 @@ export function ConsultaLandingPage() {
   const [carregandoHorarios, setCarregandoHorarios] = useState(false)
   const [diaEscolhido, setDiaEscolhido] = useState('')
   const [slotEscolhido, setSlotEscolhido] = useState('')
+  const [profissionais, setProfissionais] = useState<ProfissionalPublico[]>([])
+  // '' = primeira vaga com qualquer profissional. É o padrão porque o que a pessoa
+  // quer, antes de escolher médico, é ser atendida cedo.
+  const [prestadorEscolhido, setPrestadorEscolhido] = useState('')
 
   const [estimativa, setEstimativa] = useState<EstimativaPublica | null>(null)
   const [nome, setNome] = useState('')
@@ -269,6 +292,9 @@ export function ConsultaLandingPage() {
     if (!querAgenda) return
     let vivo = true
     setCarregandoHorarios(true)
+    void carregarProfissionais(unidadeId, respostas.objetivo)
+      .then((lista) => { if (vivo) setProfissionais(lista) })
+      .catch(() => undefined)
     carregarHorarios(unidadeId, respostas.objetivo)
       .then((lista) => {
         if (!vivo) return
@@ -289,9 +315,30 @@ export function ConsultaLandingPage() {
     }
   }, [etapa, unidadeId, querAgenda, respostas.objetivo])
 
-  const dias: DiaComHorarios[] = useMemo(() => agruparPorDia(horarios), [horarios])
+  /**
+   * Em "primeira vaga" um horário aparece uma vez só, com quem estiver na frente da
+   * ordem. Com profissional escolhido, mostra a agenda dele inteira. Sem isto, o
+   * mesmo 13:00 apareceria três vezes, uma por médico.
+   */
+  const horariosVisiveis = useMemo(() => {
+    if (prestadorEscolhido) return horarios.filter((h) => h.codigoPrestador === prestadorEscolhido)
+    const vistos = new Set<string>()
+    return horarios.filter((h) => {
+      if (vistos.has(h.slotAt)) return false
+      vistos.add(h.slotAt)
+      return true
+    })
+  }, [horarios, prestadorEscolhido])
+
+  const dias: DiaComHorarios[] = useMemo(() => agruparPorDia(horariosVisiveis), [horariosVisiveis])
   const horariosDoDia = dias.find((d) => d.dia === diaEscolhido)?.horarios ?? []
-  const horarioEscolhido = horarios.find((h) => h.slotAt === slotEscolhido) ?? null
+  const horarioEscolhido = horariosVisiveis.find((h) => h.slotAt === slotEscolhido) ?? null
+  const profissionalEscolhido = profissionais.find((p) => p.codigoPrestador === prestadorEscolhido) ?? null
+  /** Quem tem a vaga mais próxima entre os outros: é o que se oferece a quem ficou sem. */
+  const alternativa = useMemo(() => {
+    const outros = profissionais.filter((p) => p.codigoPrestador !== prestadorEscolhido && p.vagas > 0 && p.proxima)
+    return outros.sort((a, b) => String(a.proxima).localeCompare(String(b.proxima)))[0] ?? null
+  }, [profissionais, prestadorEscolhido])
   // Escassez verdadeira: quantas vagas existem na primeira semana que tem vaga. Sai
   // do próprio primeiro horário disponível, não de "hoje", para não prometer número
   // de uma semana em que a agenda está fechada.
@@ -301,6 +348,13 @@ export function ConsultaLandingPage() {
     const limite = diaLocal(new Date(`${primeiro}T12:00:00-03:00`).getTime() + 7 * 86_400_000)
     return dias.filter((d) => d.dia <= limite).reduce((soma, d) => soma + d.horarios.length, 0)
   }, [dias])
+
+  useEffect(() => {
+    if (!dias.length) return
+    if (dias.some((d) => d.dia === diaEscolhido)) return
+    setDiaEscolhido(dias[0].dia)
+    setSlotEscolhido('')
+  }, [dias, diaEscolhido])
 
   const rolarParaPainel = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -375,6 +429,7 @@ export function ConsultaLandingPage() {
         telefone,
         unidade: unidadeId,
         slotAt: querAgenda && slotEscolhido ? slotEscolhido : null,
+        codigoPrestador: horarioEscolhido?.codigoPrestador ?? null,
         respostas: respostas as Record<string, string>,
         atribuicao: rastro.current.atribuicao,
         sessionId: rastro.current.sessao,
@@ -585,12 +640,88 @@ export function ConsultaLandingPage() {
                       </div>
                     ) : null}
 
+                    {profissionais.length > 1 ? (
+                      <div className="mt-5">
+                        <p className="mb-2 text-sm font-semibold">Com quem você quer ser atendido?</p>
+                        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPrestadorEscolhido('')
+                              setSlotEscolhido('')
+                            }}
+                            className={`min-w-[132px] shrink-0 rounded-2xl border px-3 py-2 text-left transition ${
+                              prestadorEscolhido === ''
+                                ? 'border-[#252A33] bg-[#252A33] text-white'
+                                : 'border-[#252A33]/15 hover:border-[#252A33]/50'
+                            }`}
+                          >
+                            <span className="block text-sm font-semibold">Primeira vaga</span>
+                            <span className="block text-[11px] opacity-70">com qualquer profissional</span>
+                          </button>
+                          {profissionais.map((p) => {
+                            const marcado = p.codigoPrestador === prestadorEscolhido
+                            return (
+                              <button
+                                key={p.codigoPrestador}
+                                type="button"
+                                onClick={() => {
+                                  setPrestadorEscolhido(p.codigoPrestador)
+                                  setSlotEscolhido('')
+                                }}
+                                className={`min-w-[150px] shrink-0 rounded-2xl border px-3 py-2 text-left transition ${
+                                  marcado
+                                    ? 'border-[#252A33] bg-[#252A33] text-white'
+                                    : 'border-[#252A33]/15 hover:border-[#252A33]/50'
+                                } ${p.vagas === 0 ? 'opacity-60' : ''}`}
+                              >
+                                <span className="block text-sm font-semibold">{primeiroNome(p.nome)}</span>
+                                <span className="block text-[11px] opacity-70">
+                                  {p.vagas === 0 ? 'sem vaga nas próximas semanas' : `a partir de ${quandoCurto(p.proxima)}`}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                        {profissionalEscolhido ? (
+                          <p className="rounded-xl bg-[#DCDBD1]/40 px-4 py-3 text-sm">
+                            <strong>{profissionalEscolhido.nome}</strong>
+                            {profissionalEscolhido.credencial ? (
+                              <span className="text-[#252A33]/70"> · {profissionalEscolhido.credencial}</span>
+                            ) : null}
+                            {profissionalEscolhido.descricao ? (
+                              <span className="mt-1 block text-[#252A33]/70">{profissionalEscolhido.descricao}</span>
+                            ) : null}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
                     {dias.length === 0 && !carregandoHorarios ? (
                       <div className="mt-5 rounded-2xl border border-[#252A33]/15 p-5">
-                        <p className="text-[#252A33]/75">
-                          A agenda desta unidade está fechada no momento. Fale com a equipe pelo WhatsApp que a gente
-                          encaixa você na próxima abertura.
-                        </p>
+                        {prestadorEscolhido && alternativa ? (
+                          <>
+                            <p className="text-[#252A33]/75">
+                              {profissionalEscolhido?.nome ?? 'Esse profissional'} não tem horário aberto nas próximas
+                              semanas. {alternativa.nome} atende o mesmo caso e tem vaga {quandoCurto(alternativa.proxima)}.
+                            </p>
+                            <Botao
+                              variante="contorno"
+                              className="mt-4 w-full sm:w-auto"
+                              onClick={() => {
+                                setPrestadorEscolhido(alternativa.codigoPrestador)
+                                setSlotEscolhido('')
+                              }}
+                            >
+                              Ver a agenda de {primeiroNome(alternativa.nome)}
+                            </Botao>
+                          </>
+                        ) : (
+                          <p className="text-[#252A33]/75">
+                            A agenda desta unidade está fechada no momento. Fale com a equipe pelo WhatsApp que a gente
+                            encaixa você na próxima abertura.
+                          </p>
+                        )}
                         <a
                           href={`https://wa.me/${WHATSAPP_CLINICA}`}
                           target="_blank"

@@ -26,6 +26,15 @@ export type NumerosPublicos = {
   desdeAno: number
 }
 
+export type ProfissionalPublico = {
+  codigoPrestador: string
+  nome: string
+  credencial: string
+  descricao: string
+  vagas: number
+  proxima: string | null
+}
+
 export type EstimativaPublica = {
   esperado: number
   minimo: number
@@ -38,6 +47,7 @@ export type EnvioPreAgendamento = {
   telefone: string
   unidade: string
   slotAt: string | null
+  codigoPrestador: string | null
   respostas: Record<string, string>
   atribuicao: AtribuicaoLanding
   sessionId: string
@@ -93,6 +103,7 @@ export async function carregarHorarios(unidade: string, objetivo?: string, dias 
     p_unidade: unidade,
     p_dias: dias,
     p_objetivo: objetivo || null,
+    p_prestador: null,
   })
   if (error) throw new ErroAgenda('agenda', error.message)
   return (data ?? []).map((h: Record<string, unknown>) => ({
@@ -100,6 +111,32 @@ export async function carregarHorarios(unidade: string, objetivo?: string, dias 
     slotAt: new Date(String(h.slot_at)).toISOString(),
     codigoPrestador: h.codigo_prestador ? String(h.codigo_prestador) : '',
     profissional: h.profissional ? String(h.profissional) : '',
+  }))
+}
+
+/**
+ * Quem atende, e quando cada um tem a próxima vaga.
+ *
+ * Todo mundo pede a Dra. Lorena, que é quem tem menos horário livre (opera quase
+ * todo dia). Mostrar os três com a próxima data de cada um transforma "ela não tem
+ * vaga" em "com o Dr. Matheus dá amanhã", que é a diferença entre agendar e sumir.
+ * Profissional sem vaga aparece assim mesmo: esconder seria mentir por omissão.
+ */
+export async function carregarProfissionais(unidade: string, objetivo?: string, dias = 21): Promise<ProfissionalPublico[]> {
+  if (!supabase) return []
+  const { data, error } = await supabase.rpc('clinica_profissionais_publicos', {
+    p_unidade: unidade,
+    p_objetivo: objetivo || null,
+    p_dias: dias,
+  })
+  if (error) throw new ErroAgenda('profissionais', error.message)
+  return (data ?? []).map((p: Record<string, unknown>) => ({
+    codigoPrestador: String(p.codigo_prestador),
+    nome: String(p.profissional),
+    credencial: String(p.credencial ?? ''),
+    descricao: String(p.descricao ?? ''),
+    vagas: Number(p.vagas ?? 0),
+    proxima: p.proxima ? new Date(String(p.proxima)).toISOString() : null,
   }))
 }
 
@@ -164,6 +201,7 @@ export async function enviarPreAgendamento(envio: EnvioPreAgendamento): Promise<
     telefone: envio.telefone,
     unidade: envio.unidade,
     slotAt: envio.slotAt,
+    codigoPrestador: envio.codigoPrestador,
     respostas: envio.respostas,
     atribuicao: envio.atribuicao,
     sessionId: envio.sessionId,
