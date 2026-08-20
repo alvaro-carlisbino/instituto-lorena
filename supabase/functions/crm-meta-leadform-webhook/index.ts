@@ -3,6 +3,7 @@ import { insertInteraction, upsertLeadByPhone } from '../_shared/crm.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { createManychatWhatsappSubscriber, sendManychatFlow } from '../_shared/manychatPublicApi.ts'
 import { enqueueOutreach, loadLeadformOutreachConfig, renderMensagem } from '../_shared/whatsapp/outreach.ts'
+import { normalizeBrPhone } from '../_shared/brPhone.ts'
 import type { LeadAttribution } from '../_shared/attribution.ts'
 
 // Frente B da atribuição Meta: LEAD ADS (formulário dentro do Facebook/Instagram).
@@ -42,14 +43,6 @@ async function signatureValid(rawBody: string, header: string | null, appSecret:
   const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody))
   const hex = Array.from(new Uint8Array(mac)).map((b) => b.toString(16).padStart(2, '0')).join('')
   return header.slice('sha256='.length) === hex
-}
-
-/** Telefone BR do formulário → dígitos com DDI 55 (formulários mandam +55..., 55... ou só DDD+número). */
-function normalizeBrPhone(raw: string): string {
-  let d = String(raw ?? '').replace(/\D/g, '')
-  if (d.startsWith('0')) d = d.replace(/^0+/, '')
-  if ((d.length === 10 || d.length === 11) && !d.startsWith('55')) d = `55${d}`
-  return d
 }
 
 type FieldData = { name?: string; values?: unknown[] }
@@ -330,7 +323,12 @@ async function processLeadData(
   const nome = pickField(fields, 'full_name', 'nome') || 'Lead Meta (formulário)'
   const phoneRaw = pickField(fields, 'phone', 'telefone', 'whatsapp', 'celular')
   const email = pickField(fields, 'email', 'e-mail')
-  const phone = normalizeBrPhone(phoneRaw)
+  // O campo do formulário é TEXTO LIVRE: a Meta pré-preenche pelo perfil e deixa editar,
+  // e não valida contra o WhatsApp. 14% chegam tortos. O que dá para consertar (9º dígito,
+  // zero do DDD, DDI faltando) sai consertado; o resto vira lead carimbado e MUDO.
+  const tel = normalizeBrPhone(phoneRaw)
+  const phone = tel.phone
+  const telefoneInvalido = !tel.ok
 
   if (phone.length < 10) {
     console.error(`[meta-leadform] lead ${leadgenId} sem telefone utilizável ("${phoneRaw}") — não criado`)
@@ -376,12 +374,22 @@ async function processLeadData(
       // Lead de formulário entra na fila de contato ATIVO (etapa "📞 Ligar — Formulário",
       // SLA 15min no board_config) — só na criação; lead existente não muda de etapa.
       ...(tenantId === 'instituto-lorena' ? { pipelineId: 'pipeline-clinica', stageId: 'ligar-formulario' } : {}),
-      customFields: { lead_form: { leadgen_id: leadgenId, form_id: String(lead.form_id ?? ''), ...(email ? { email } : {}), respostas: answers } },
+      customFields: {
+        lead_form: {
+          leadgen_id: leadgenId, form_id: String(lead.form_id ?? ''),
+          ...(email ? { email } : {}),
+          ...(telefoneInvalido ? { telefone_invalido: tel.motivo, telefone_digitado: phoneRaw } : {}),
+          respostas: answers,
+        },
+      },
     })
     const resumo = Object.entries(answers).map(([k, v]) => `• ${k}: ${v}`).join('\n')
+    const aviso = telefoneInvalido
+      ? `\n⚠️ Telefone fora do padrão brasileiro (${tel.motivo}). Não dá para chamar no WhatsApp${email ? ` — o contato possível é o e-mail ${email}` : ''}.`
+      : ''
     await insertInteraction(admin, {
       leadId: up.leadId, patientName: nome, channel: 'system', direction: 'in', author: 'Meta Lead Ads',
-      content: `📋 Formulário recebido${campaignName ? ` (campanha: ${campaignName}` : ''}${adName ? ` · anúncio: ${adName}` : ''}${campaignName ? ')' : ''}\n${resumo}`.slice(0, 1500),
+      content: `📋 Formulário recebido${campaignName ? ` (campanha: ${campaignName}` : ''}${adName ? ` · anúncio: ${adName}` : ''}${campaignName ? ')' : ''}\n${resumo}${aviso}`.slice(0, 1500),
       tenantId,
     }).catch(() => {})
     await logEvent(admin, { leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw), status: `lead_${up.status}`, leadId: up.leadId, detail: `${nome} | campanha=${campaignName || '-'}` })
@@ -393,20 +401,32 @@ async function processLeadData(
       formCreatedTime: String(lead.created_time ?? ''),
       leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw),
     }
-    const firstTouchSent = up.status === 'created'
+    // Telefone impossível não entra na fila: gastaria volta da linha e, se o número por
+    // acaso existir, a apresentação chega para um estranho.
+    const firstTouchSent = up.status === 'created' && !telefoneInvalido
       ? (await enfileirarPrimeiroContato(admin, firstTouchInput)) ||
         (await maybeSendLeadformFirstTouch(admin, firstTouchInput))
       : false
+    if (telefoneInvalido) {
+      await logEvent(admin, {
+        leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw),
+        status: 'telefone_invalido', leadId: up.leadId, detail: `"${phoneRaw}" → ${tel.motivo}`,
+      })
+    }
     // Sem primeiro contato automático, o time precisa chamar ATIVAMENTE.
     await notifyAgents(admin, {
       leadId: up.leadId,
       kind: 'info',
-      title: firstTouchSent
-        ? '📋 Lead de formulário Meta — Sofia vai chamar'
-        : '📋 Lead de formulário Meta — chamar AGORA',
-      body: firstTouchSent
-        ? `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio; a Sofia já está com a primeira mensagem na fila — acompanhe a resposta.`
-        : `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio — quanto antes o contato, maior a conversão.`,
+      title: telefoneInvalido
+        ? '📋 Lead de formulário Meta — TELEFONE INVÁLIDO'
+        : firstTouchSent
+          ? '📋 Lead de formulário Meta — Sofia vai chamar'
+          : '📋 Lead de formulário Meta — chamar AGORA',
+      body: telefoneInvalido
+        ? `${nome}${campaignName ? ` · ${campaignName}` : ''}. Digitou "${phoneRaw}" no formulário e isso não é telefone brasileiro (${tel.motivo}). ${email ? `Tente pelo e-mail ${email}.` : 'Não deixou e-mail — só resta o anúncio.'}`
+        : firstTouchSent
+          ? `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio; a Sofia já está com a primeira mensagem na fila — acompanhe a resposta.`
+          : `${nome} · WhatsApp ${phone}${campaignName ? ` · ${campaignName}` : ''}. Preencheu formulário no anúncio — quanto antes o contato, maior a conversão.`,
       includeOwner: true,
       tenantId,
       metadata: { dedupeKey: `leadform-${leadgenId}` },
