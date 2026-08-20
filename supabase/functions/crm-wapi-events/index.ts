@@ -55,11 +55,15 @@ async function avisarDono(admin: SupabaseClient, tenantAfetado: string, texto: s
       .select('notifications')
       .eq('tenant_id', tenantAfetado)
       .maybeSingle()
-    const cfg = ((data as { notifications?: { sales_receipt_owner_phones?: string[] } } | null)?.notifications) ?? {}
+    const cfg = ((data as { notifications?: { sales_receipt_owner_phones?: string[]; owner_dm_kinds?: string[] } } | null)?.notifications) ?? {}
+    // Linha fora do ar é `sistema_parado`: se o polo filtrou os assuntos e não pediu este,
+    // respeitamos o silêncio — mas o alerta in-app continua saindo em quem chama.
+    const permitidos = Array.isArray(cfg.owner_dm_kinds) ? cfg.owner_dm_kinds : null
+    if (permitidos && !permitidos.includes('sistema_parado')) return
     const phones = (cfg.sales_receipt_owner_phones ?? []).filter(Boolean)
     for (const p of phones) {
+      // Pela linha do OUTRO polo: a caída não consegue avisar que caiu.
       const ok = await sendWapiDirectText(admin, tenantMensageiro, String(p), texto)
-      // Se a outra linha também não estiver de pé, tenta pela própria (pode ser só o evento).
       if (!ok) await sendWapiDirectText(admin, tenantAfetado, String(p), texto)
     }
   } catch (e) {

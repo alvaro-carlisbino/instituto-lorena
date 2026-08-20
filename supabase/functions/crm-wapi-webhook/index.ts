@@ -11,7 +11,7 @@ import { linkSiteAttributionToLead } from '../_shared/siteAttributionBridge.ts'
 import { checkPendingRedePixForLead } from '../_shared/rede.ts'
 import { captureCadastroForLead } from '../_shared/cadastroExtract.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
-import { sendWapiDirectText } from '../_shared/saleReceipt.ts'
+import { notifyOwnerWhatsapp, sendWapiDirectText } from '../_shared/saleReceipt.ts'
 import { handleOwnerMessage, isOwnerPhone } from '../_shared/ownerAssistant.ts'
 import { captureNpsInboundResponse } from '../_shared/npsCapture.ts'
 import { applyOptOutToLead, isOptOutMessage } from '../_shared/optOutDetect.ts'
@@ -432,10 +432,8 @@ Deno.serve(async (req) => {
           includeOwner: true, tenantId, metadata: { dedupeKey: `feedback-low-${lead.leadId}` },
         }).catch(() => {})
         try {
-          const { data: ti } = await admin.from('tenant_integrations').select('notifications').eq('tenant_id', 'tricopill').maybeSingle()
-          const phones = (((ti as { notifications?: { sales_receipt_owner_phones?: string[] } } | null)?.notifications?.sales_receipt_owner_phones) ?? []).filter(Boolean)
           const dm = `⚠️ *Avaliação baixa*\n${normalized.fromName || 'Cliente'} deu nota *${npsResult.score}*. Vale um contato pra reverter.`
-          for (const p of phones) await sendWapiDirectText(admin, 'tricopill', p, dm)
+          await notifyOwnerWhatsapp(admin, 'tricopill', 'nps_baixo', dm)
         } catch { /* best-effort */ }
       }
       await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', String(jobRow.id))

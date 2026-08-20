@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supa
 import { evaluateCrmAiAutoReplyGate, runWhatsappAiAutoReply } from '../_shared/crmAiAutoReply.ts'
 import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
 import { notifyAgents } from '../_shared/notifyAgents.ts'
-import { sendWapiDirectText } from '../_shared/saleReceipt.ts'
+import { notifyOwnerWhatsapp } from '../_shared/saleReceipt.ts'
 
 /**
  * Vigia do atendimento: ninguém fica no vácuo.
@@ -193,19 +193,9 @@ Deno.serve(async (req) => {
           `⏰ *${p.patient_name}* está sem resposta há ${Math.floor(p.minutos / 60)}h${String(p.minutos % 60).padStart(2, '0')}.\n` +
           `Última mensagem: "${p.content.slice(0, 90)}"\n` +
           `WhatsApp: ${p.phone}`
-        try {
-          const { data: ti } = await admin
-            .from('tenant_integrations')
-            .select('notifications')
-            .eq('tenant_id', p.tenant_id)
-            .maybeSingle()
-          const phones =
-            (((ti as { notifications?: { sales_receipt_owner_phones?: string[] } } | null)?.notifications
-              ?.sales_receipt_owner_phones) ?? []).filter(Boolean)
-          for (const ph of phones) await sendWapiDirectText(admin, p.tenant_id, String(ph), texto)
-        } catch {
-          /* aviso nunca derruba o vigia */
-        }
+        // Passa pelo filtro de assuntos do polo: quem só quer venda e Ads não recebe isto
+        // no WhatsApp — mas o alerta in-app abaixo sai de qualquer jeito, para a equipe.
+        await notifyOwnerWhatsapp(admin, p.tenant_id, 'cliente_esperando', texto)
         await notifyAgents(admin, {
           leadId: p.lead_id,
           kind: 'urgent',

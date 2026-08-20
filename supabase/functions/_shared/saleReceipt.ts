@@ -209,6 +209,53 @@ type NotifCfg = {
   sales_receipt_enabled?: boolean
   /** Números (dígitos, DDI 55…) que recebem uma CÓPIA 1:1 de cada venda (dono/gestor). */
   sales_receipt_owner_phones?: string[]
+  /** Assuntos que PODEM virar DM no WhatsApp do dono. Ausente = todos (como sempre foi). */
+  owner_dm_kinds?: OwnerDmKind[]
+}
+
+/**
+ * Assuntos de DM para o dono. Existiam seis lugares no código mandando mensagem para o
+ * mesmo número, cada um por conta própria e sem ninguém perguntando se aquilo interessava
+ * — o Álvaro cuida do Tricopill e recebia avaliação baixa de paciente da clínica.
+ *
+ *  • `venda`             — cópia 1:1 de cada venda fechada
+ *  • `ads`               — relatório diário do Google Ads
+ *  • `sistema_parado`    — a linha caiu/foi banida, ou a IA está sem saldo. Raro por
+ *                          natureza, e é o aviso que impede o canal de morrer calado.
+ *  • `nps_baixo`         — cliente deu nota ≤6
+ *  • `cliente_esperando` — alguém sem resposta há muito tempo (vigia do atendimento)
+ */
+export type OwnerDmKind = 'venda' | 'ads' | 'sistema_parado' | 'nps_baixo' | 'cliente_esperando'
+
+/**
+ * Manda DM para o dono SE aquele assunto estiver liberado para o polo. Sem
+ * `owner_dm_kinds` configurado, tudo passa — nenhum tenant perde aviso por causa desta
+ * mudança; quem quiser filtrar, escreve a lista.
+ */
+export async function notifyOwnerWhatsapp(
+  admin: SupabaseClient,
+  tenantId: string,
+  kind: OwnerDmKind,
+  text: string,
+): Promise<boolean> {
+  const tid = String(tenantId ?? '').trim()
+  if (!tid || !text.trim()) return false
+  try {
+    const cfg = await readNotifCfg(admin, tid)
+    const permitidos = Array.isArray(cfg.owner_dm_kinds) ? cfg.owner_dm_kinds : null
+    if (permitidos && !permitidos.includes(kind)) return false
+    const phones = Array.isArray(cfg.sales_receipt_owner_phones)
+      ? cfg.sales_receipt_owner_phones.filter(Boolean)
+      : []
+    let algumOk = false
+    for (const p of phones) {
+      if (await sendWapiDirectText(admin, tid, String(p), text)) algumOk = true
+    }
+    return algumOk
+  } catch (e) {
+    console.warn('[notifyOwnerWhatsapp] falhou:', e instanceof Error ? e.message : String(e))
+    return false
+  }
 }
 
 /** Envia texto 1:1 (DM) via W-API. `phone` = só dígitos (DDI+DDD+número). Retry 3×. */
@@ -264,10 +311,7 @@ export async function alertOwnerAiOutOfBalance(admin: SupabaseClient, tenantId: 
     const text =
       '🚨 Bot fora do ar: a conta do modelo de IA (z.ai) está SEM SALDO (erro 1113). ' +
       'Os clientes estão sem resposta automática. Recarregue a conta para o bot voltar a responder.'
-    const phones = Array.isArray(cfg.sales_receipt_owner_phones) ? cfg.sales_receipt_owner_phones.filter(Boolean) : []
-    for (const ph of phones) {
-      try { await sendWapiDirectText(admin, tid, String(ph), text) } catch { /* best-effort */ }
-    }
+    await notifyOwnerWhatsapp(admin, tid, 'sistema_parado', text)
     const jid = String(cfg.sales_receipt_group_jid ?? '').trim()
     if (jid) { try { await sendWapiGroupText(admin, tid, jid, text) } catch { /* best-effort */ } }
   } catch { /* alerta nunca derruba o bot */ }
@@ -337,11 +381,7 @@ async function deliverOwnerCopy(admin: SupabaseClient, d: SaleReceiptInput): Pro
     } catch { /* segue com o id interno */ }
   }
   const text = buildSaleReceiptText(d)
-  let anyOk = false
-  for (const p of phones) {
-    if (await sendWapiDirectText(admin, d.tenantId, p, text)) anyOk = true
-  }
-  return anyOk
+  return await notifyOwnerWhatsapp(admin, d.tenantId, 'venda', text)
 }
 
 type RedeRow = {
