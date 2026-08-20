@@ -263,15 +263,6 @@ export function WapiLinePanel({ instance }: { instance: WhatsappChannelInstance 
             >
               Reiniciar
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={acao !== null}
-              onClick={() => void executar('queue', () => wapiConnectionAction('queue', { instanceId: instance.id }), 'Fila lida.')}
-            >
-              Ver fila
-            </Button>
           </div>
 
           {qr ? (

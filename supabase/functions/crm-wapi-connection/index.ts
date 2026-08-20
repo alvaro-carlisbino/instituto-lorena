@@ -41,7 +41,6 @@ type Action =
   | 'configure_webhooks'
   | 'apply_settings'
   | 'webhook_logs'
-  | 'queue'
   | 'check_number'
   | 'pause'
   | 'resume'
@@ -266,12 +265,6 @@ Deno.serve(async (req) => {
       case 'webhook_logs': {
         const res = await provider.call('/webhook/fetch-webhook-logs', 'GET')
         return json({ ok: res.ok, action, data: res.data })
-      }
-
-      case 'queue': {
-        const res = await provider.call('/instance/quere/quere', 'GET')
-        const lista = Array.isArray(res.data) ? res.data : (res.data?.data as unknown[] | undefined) ?? []
-        return json({ ok: res.ok, action, pendentes: Array.isArray(lista) ? lista.length : null, data: res.data })
       }
 
       case 'check_number': {

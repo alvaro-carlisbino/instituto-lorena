@@ -15,7 +15,6 @@ export type WapiAction =
   | 'configure_webhooks'
   | 'apply_settings'
   | 'webhook_logs'
-  | 'queue'
   | 'check_number'
   | 'pause'
   | 'resume'
@@ -29,7 +28,6 @@ export type WapiActionResult = {
   qrCode?: string
   code?: string
   exists?: boolean | null
-  pendentes?: number | null
   message?: string
   error?: string
   urls?: { recebidas: string; eventos: string }
