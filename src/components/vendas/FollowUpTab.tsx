@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
@@ -8,6 +8,7 @@ import {
   MessageCircle,
   MoreHorizontal,
   PhoneCall,
+  Receipt,
   RotateCcw,
   Scissors,
   Sparkles,
@@ -38,10 +39,12 @@ import { Label } from '@/components/ui/label'
 import { SearchField } from '@/components/ui/search-field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { combinaBusca } from '@/lib/busca'
 import { cn } from '@/lib/utils'
+import { type ClinicSaleKind, type StaffMember, listSurgicalStaff } from '@/services/clinicSales'
 import {
   FOLLOWUP_CHANNELS,
   FOLLOWUP_OUTCOMES,
@@ -134,6 +137,17 @@ export function FollowUpTab() {
   const [proxima, setProxima] = useState(emDias(7))
   const [semProxima, setSemProxima] = useState(false)
   const [salvando, setSalvando] = useState(false)
+  /**
+   * Fechou na ligação: a venda é cadastrada daqui mesmo, com o paciente já
+   * escolhido. Antes ela registrava o contato, ia para a aba de Vendas, procurava
+   * o paciente de novo e preenchia tudo — e o card ficava na fila de contato até
+   * alguém lembrar de voltar aqui para encerrar.
+   */
+  const [vendendo, setVendendo] = useState<KanbanCard | null>(null)
+  const [vendaKind, setVendaKind] = useState<ClinicSaleKind>('cirurgia')
+  const [staff, setStaff] = useState<StaffMember[]>([])
+  /** Salvou a venda: fechar o formulário não deve reabrir o registro do contato. */
+  const vendaSalva = useRef(false)
   // A fila da Aline é transplante; a da Ingrid é protocolo. Sem separar, cada uma
   // trabalhava no meio dos pacientes da outra.
   const [funil, setFunil] = useState<'cirurgia' | 'protocolo' | 'todos'>('cirurgia')
@@ -173,6 +187,15 @@ export function FollowUpTab() {
   useEffect(() => {
     void load()
   }, [])
+
+  // Médicos só quando ela for cadastrar a venda: o quadro é aberto o dia inteiro e
+  // não precisa da lista do centro cirúrgico para mostrar card.
+  useEffect(() => {
+    if (!vendendo || staff.length > 0) return
+    listSurgicalStaff()
+      .then(setStaff)
+      .catch(() => setStaff([]))
+  }, [vendendo, staff.length])
 
   const visiveis = useMemo(() => {
     // O quadro é da CLÍNICA porque o follow-up é da clínica: quem marca contato
@@ -342,6 +365,59 @@ export function FollowUpTab() {
     } finally {
       setSalvando(false)
     }
+  }
+
+  /**
+   * Do registro do contato direto para o cadastro da venda.
+   *
+   * O tipo vem do funil do paciente. Quando o funil não diz (a triagem serve para
+   * as duas filas), vale a fila que ela está olhando — e o formulário mostra o
+   * seletor, porque chutar errado joga a venda na lista da outra consultora.
+   */
+  const abrirVenda = (card: KanbanCard) => {
+    const fila = filaDoFunil(card.pipelineId)
+    setVendaKind(fila === 'ambas' ? (funil === 'protocolo' ? 'protocolo' : 'cirurgia') : fila)
+    vendaSalva.current = false
+    setAlvo(null)
+    setVendendo(card)
+  }
+
+  /** Desistiu do cadastro: volta para o registro do contato como ela deixou. */
+  const fecharVenda = () => {
+    const card = vendendo
+    setVendendo(null)
+    if (!vendaSalva.current && card) setAlvo(card)
+  }
+
+  /**
+   * Venda salva: o contato fecha junto, com desfecho "Fechou" e sem próxima data.
+   * Sem isto o paciente continuaria na fila de ligação depois de ter comprado —
+   * exatamente o que a planilha fazia.
+   */
+  const vendaRegistrada = () => {
+    vendaSalva.current = true
+    const card = vendendo
+    if (!card) return
+    void (async () => {
+      try {
+        await completeFollowup({
+          id: card.followupId,
+          leadId: card.leadId,
+          outcome: 'Fechou',
+          note: nota,
+          channel: canal,
+          nextDate: null,
+        })
+        toast.success(`Venda registrada. ${card.patientName} foi para "Encerrado".`)
+      } catch (e) {
+        toast.error(
+          `A venda foi salva, mas o follow-up continuou aberto: ${
+            e instanceof Error ? e.message : 'falha ao encerrar'
+          }`,
+        )
+      }
+      await load()
+    })()
   }
 
   const reabrir = async () => {
@@ -701,6 +777,15 @@ export function FollowUpTab() {
           </div>
 
           <DialogFooter>
+            {/* Fechou na hora da ligação: cadastra a venda sem sair daqui. Fica em
+                destaque quando ela marca "Fechou", que é quando o botão importa. */}
+            <Button
+              variant={outcome === 'Fechou' ? 'default' : 'outline'}
+              className="sm:mr-auto"
+              onClick={() => (alvo ? abrirVenda(alvo) : null)}
+            >
+              <Receipt className="size-4" /> Fechou: cadastrar a venda
+            </Button>
             <Button variant="ghost" onClick={() => setAlvo(null)}>
               Cancelar
             </Button>
@@ -710,6 +795,21 @@ export function FollowUpTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <VendaFormDialog
+        open={vendendo != null}
+        kind={vendaKind}
+        onKindChange={setVendaKind}
+        staff={staff}
+        editing={null}
+        prefill={
+          vendendo
+            ? { leadId: vendendo.leadId, patientName: vendendo.patientName, phone: vendendo.phone }
+            : null
+        }
+        onSaved={vendaRegistrada}
+        onClose={fecharVenda}
+      />
 
       <Dialog open={zerandoColuna != null} onOpenChange={(open) => (!open ? setZerandoColuna(null) : null)}>
         <DialogContent className="sm:max-w-lg">

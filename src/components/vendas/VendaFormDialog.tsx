@@ -53,6 +53,19 @@ type Props = {
   kind: ClinicSaleKind
   staff: StaffMember[]
   editing: ClinicSale | null
+  /**
+   * Paciente que já veio escolhido pela tela que abriu o formulário. É o caso do
+   * follow-up: ela acabou de falar com o paciente, fechou ali, e digitar o nome
+   * de novo (e correr o risco de escolher o homônimo errado) é trabalho que a
+   * tela já tinha feito.
+   */
+  prefill?: { leadId: string; patientName: string; phone: string | null } | null
+  /**
+   * Quando quem abre não sabe se é transplante ou protocolo, passa isto e o
+   * formulário mostra o seletor. No follow-up acontece de verdade: o paciente
+   * ainda pode estar no funil da triagem, que não diz o que ele comprou.
+   */
+  onKindChange?: (kind: ClinicSaleKind) => void
   onClose: () => void
   onSaved: () => void
 }
@@ -65,7 +78,7 @@ type Props = {
  * lista), e a checagem de data do procedimento anterior à venda, que produziu
  * pelo menos uma cirurgia registrada três meses no passado.
  */
-export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }: Props) {
+export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindChange, onClose, onSaved }: Props) {
   const cirurgia = kind === 'cirurgia'
   const medicos = useMemo(() => staff.filter((s) => s.tipo === 'MEDICO'), [staff])
   // A anestesia não sai do espelho da sala: ela tem empresa (Grupo Ingá, Loviderm),
@@ -145,7 +158,7 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
       setObs(editing.note ?? '')
       return
     }
-    setPicked(null)
+    setPicked(prefill ? { id: prefill.leadId, name: prefill.patientName, phone: prefill.phone ?? '' } : null)
     setNomeLivre('')
     setCidade('')
     setOrigem('')
@@ -174,7 +187,11 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
     setHotel(false)
     setContrato('')
     setObs('')
-  }, [open, editing])
+    // O prefill entra pelo id do paciente, não pelo objeto: a tela que abre monta
+    // um literal novo a cada render, e o efeito limparia o formulário no meio da
+    // digitação.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing, prefill?.leadId])
 
   useEffect(() => {
     if (!open) return
@@ -262,6 +279,26 @@ export function VendaFormDialog({ open, kind, staff, editing, onClose, onSaved }
               ? 'Ao salvar com data, o paciente entra na fila de cirurgias e os lembretes de exame são armados sozinhos.'
               : 'Registro da venda de protocolo, com data de agendamento.'}
           </DialogDescription>
+          {onKindChange && !editing && (
+            <div className="flex gap-1 pt-1">
+              {(
+                [
+                  { id: 'cirurgia', label: 'Transplante' },
+                  { id: 'protocolo', label: 'Protocolos e spa' },
+                ] as const
+              ).map((op) => (
+                <Button
+                  key={op.id}
+                  type="button"
+                  size="sm"
+                  variant={kind === op.id ? 'default' : 'outline'}
+                  onClick={() => onKindChange(op.id)}
+                >
+                  {op.label}
+                </Button>
+              ))}
+            </div>
+          )}
         </DialogHeader>
 
         <div className="space-y-4">
