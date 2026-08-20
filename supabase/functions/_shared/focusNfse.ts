@@ -76,16 +76,25 @@ export type FocusConfig = {
    * e a nota autorizada não volta atrás.
    */
   tributosAproximados: { federal: number; estadual: number; municipal: number } | null
+  /**
+   * Como a Lei da Transparência sai IMPRESSA. O leiaute aceita as duas formas e o número é o
+   * mesmo: `valor` imprime "Federais: R$ 73,65" (o provado em produção) e `percentual` imprime
+   * "Federais: 11,33 %", que é como sai a nota do portal. Cosmético, não muda tributo.
+   */
+  formatoTotalTributos: 'valor' | 'percentual'
   /** Código NBS do serviço. Serviços médicos especializados: 123012200. */
   codigoNbs: string
   /**
-   * Telefone e e-mail do PRESTADOR, que saem impressos no rosto da nota.
+   * Telefone e e-mail do prestador na DPS (`prest/fone` e `prest/email`).
    *
-   * Vazios, quem decide é o cadastro: a Focus usa o da empresa dela quando o campo é omitido, e
-   * o que sobrar a SEFIN completa pelo cadastro nacional do contribuinte. Foi assim que a nota
-   * 314 saiu com o e-mail do adm e um telefone antigo, enquanto a que o Kauan emitiu à mão pelo
-   * portal saiu com o do financeiro — o portal manda os dois na DPS. Preencher aqui é o único
-   * jeito de mandar o contato certo na nota sem depender de cadastro que a gente não controla.
+   * **NÃO é isto que sai impresso na nota.** O rosto do DANFSe vem do `<emit>`, que a SEFIN
+   * monta pelo CADASTRO NACIONAL DO CONTRIBUINTE e não pelo que a gente manda. Medido na nota 8
+   * de homologação (20/ago/2026): mandamos `financeiro@` + `44991493656` aqui e o PDF saiu com
+   * o e-mail do adm e o telefone antigo do cadastro, igual à nota 314 de produção. Trocar o
+   * contato impresso é serviço no portal (nfse.gov.br), não no payload.
+   *
+   * Ficam vazios de propósito: preencher só faz a nota carregar DOIS contatos diferentes, um no
+   * `<prest>` e outro no `<emit>`, o que é pior que carregar um contato velho.
    */
   telefonePrestador: string
   emailPrestador: string
@@ -95,8 +104,29 @@ export type FocusConfig = {
    * que ELA calcula (ISS + PIS + COFINS) e que aparece na nota do portal. `null` = não manda,
    * que é o estado provado em produção (a nota 314 autorizou assim). Só ligar depois de provar
    * em homologação: CST/cClassTrib errados fazem a SEFIN rejeitar a nota inteira.
+   *
+   * O grupo é indivisível e tem CINCO campos obrigatórios, não dois. Mandar só CST/cClassTrib
+   * troca o XSD para o 1.01 e a DPS morre em `erro_validacao_schema` reclamando de `finNFSe`
+   * — medido em homologação, 20/ago. Os três de contexto têm default porque só existe uma
+   * resposta certa para a clínica: nota regular, paciente consumindo para si, sem terceiro.
    */
-  ibsCbs: { cst: string; classificacaoTributaria: string } | null
+  ibsCbs: {
+    cst: string
+    classificacaoTributaria: string
+    /** `finNFSe`. 0 = NFS-e regular (único valor da tabela hoje). */
+    finalidadeEmissao: string
+    /** `indFinal`. 1 = uso ou consumo pessoal. Paciente pagando consulta é isso. */
+    consumidorFinal: string
+    /** `indDest`. 0 = o destinatário é o próprio tomador da nota. */
+    indicadorDestinatario: string
+    /**
+     * `cIndOp`, 6 dígitos do Anexo VII ("código indicador de operação"). É o que diz ao IBS/CBS
+     * QUE tipo de fornecimento é e ONDE incide. Serviço feito no corpo do paciente cai no grupo
+     * `0301xx` ("serviços executados fisicamente sobre pessoas"), mas QUAL dos quatro é decisão
+     * do contador, não palpite daqui — sem ele o XSD 1.01 recusa a DPS.
+     */
+    indicadorOperacao: string
+  } | null
   /**
    * Tributação federal de apuração própria (lucro presumido, cumulativo). `cst` 01 = operação
    * tributável com alíquota básica; alíquotas em %. Retenção NÃO entra aqui: para pessoa
@@ -168,16 +198,28 @@ const onlyDigits = (v: unknown) => str(v).replace(/\D/g, '')
 export async function readFocusConfig(
   admin: SupabaseClient,
   tenantId: string,
+  opts: {
+    /** Força o ambiente, ignorando `FOCUS_NFE_AMBIENTE`. Só o caminho de rotina passa isso. */
+    ambiente?: FocusAmbiente
+    /**
+     * Sobrepõe campos do `tenant_integrations.focus` SÓ nesta chamada, sem gravar. É como se
+     * prova um payload novo em homologação sem mexer na config que a produção está usando —
+     * a alternativa (gravar, testar, destravar) deixa uma janela em que a nota real do
+     * financeiro sai com campo não provado.
+     */
+    overrides?: FocusRaw
+  } = {},
 ): Promise<FocusConfig | null> {
   const { data } = await admin
     .from('tenant_integrations')
     .select('focus')
     .eq('tenant_id', tenantId)
     .maybeSingle()
-  const cfg = ((data as { focus?: FocusRaw } | null)?.focus ?? {}) as FocusRaw
+  const doBanco = ((data as { focus?: FocusRaw } | null)?.focus ?? {}) as FocusRaw
+  const cfg = { ...doBanco, ...(opts.overrides ?? {}) } as FocusRaw
 
-  const ambiente: FocusAmbiente =
-    str(Deno.env.get('FOCUS_NFE_AMBIENTE'), 'homologacao') === 'producao' ? 'producao' : 'homologacao'
+  const ambiente: FocusAmbiente = opts.ambiente
+    ?? (str(Deno.env.get('FOCUS_NFE_AMBIENTE'), 'homologacao') === 'producao' ? 'producao' : 'homologacao')
 
   const token = str(
     ambiente === 'producao'
@@ -218,7 +260,17 @@ export async function readFocusConfig(
     codigoTributacaoMunicipal: str(cfg.codigo_tributacao_municipal),
     telefonePrestador: onlyDigits(cfg.telefone_prestador),
     emailPrestador: str(cfg.email_prestador),
-    ibsCbs: rtCst && rtClasse ? { cst: rtCst, classificacaoTributaria: rtClasse } : null,
+    ibsCbs: rtCst && rtClasse
+      ? {
+          cst: rtCst,
+          classificacaoTributaria: rtClasse,
+          finalidadeEmissao: str(rt?.finalidade_emissao, '0'),
+          consumidorFinal: str(rt?.consumidor_final, '1'),
+          indicadorDestinatario: str(rt?.indicador_destinatario, '0'),
+          indicadorOperacao: str(rt?.indicador_operacao),
+        }
+      : null,
+    formatoTotalTributos: str(cfg.formato_total_tributos) === 'percentual' ? 'percentual' : 'valor',
     regimeEspecialTributacao: str(cfg.regime_especial_tributacao, '0'),
     opcaoSimplesNacional: str(cfg.opcao_simples_nacional, '1'),
     tributosAproximados: tributosOk
@@ -345,15 +397,28 @@ export function buildDps(cfg: FocusConfig, input: DpsInput): Record<string, unkn
     valor_cofins: pctDoBruto(cfg.pisCofins.aliquotaCofins),
     tipo_retencao_pis_cofins: '0',   // PIS/COFINS/CSLL NÃO retidos — vale para pessoa física
 
-    // pegadinha 2 — indicador FALSE + os três valores separados
+    // pegadinha 2 — indicador FALSE + os três campos separados. `valor` é o formato provado
+    // em produção; `percentual` é o que o portal imprime. Nunca os dois: o leiaute escolhe um.
     indicador_total_tributacao: false,
-    valor_total_tributos_federais: pctDoBruto(trib.federal),
-    valor_total_tributos_estaduais: pctDoBruto(trib.estadual),
-    valor_total_tributos_municipais: pctDoBruto(trib.municipal),
+    ...(cfg.formatoTotalTributos === 'percentual'
+      ? {
+          percentual_total_tributos_federais: trib.federal,
+          percentual_total_tributos_estaduais: trib.estadual,
+          percentual_total_tributos_municipais: trib.municipal,
+        }
+      : {
+          valor_total_tributos_federais: pctDoBruto(trib.federal),
+          valor_total_tributos_estaduais: pctDoBruto(trib.estadual),
+          valor_total_tributos_municipais: pctDoBruto(trib.municipal),
+        }),
 
-    // Reforma tributária. Só sai quando o polo configurou os DOIS códigos — ver `ibsCbs`.
+    // Reforma tributária. Grupo indivisível: os cinco campos ou nenhum — ver `ibsCbs`.
     ...(cfg.ibsCbs
       ? {
+          finalidade_emissao: cfg.ibsCbs.finalidadeEmissao,
+          consumidor_final: cfg.ibsCbs.consumidorFinal,
+          ...(cfg.ibsCbs.indicadorOperacao ? { codigo_indicador_operacao: cfg.ibsCbs.indicadorOperacao } : {}),
+          indicador_destinatario: cfg.ibsCbs.indicadorDestinatario,
           ibs_cbs_situacao_tributaria: cfg.ibsCbs.cst,
           ibs_cbs_classificacao_tributaria: cfg.ibsCbs.classificacaoTributaria,
         }

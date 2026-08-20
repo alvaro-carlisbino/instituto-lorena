@@ -178,7 +178,17 @@ Deno.serve(async (req) => {
   }
   if (!tenantId) return json({ error: 'tenant_not_resolved' }, 400)
 
-  const cfg = await readFocusConfig(admin, tenantId)
+  // Prova de payload (só rotina): `ambiente` força homologação sem virar o secret global, e
+  // `configOverride` sobrepõe campos do polo só nesta chamada. É assim que um campo fiscal novo
+  // (grupo IBS/CBS, formato da Lei 12.741) sai numa nota de homologação ANTES de a produção
+  // passar a mandar ele. Pessoa logada não alcança nenhum dos dois.
+  const ambientePedido = isRotina && str(p.ambiente) === 'homologacao' ? 'homologacao' as const
+    : isRotina && str(p.ambiente) === 'producao' ? 'producao' as const
+    : undefined
+  const overrides = isRotina && p.configOverride && typeof p.configOverride === 'object'
+    ? (p.configOverride as Record<string, unknown>)
+    : undefined
+  const cfg = await readFocusConfig(admin, tenantId, { ambiente: ambientePedido, overrides })
   const action = str(p.action)
 
   // ───────────────────── preparação de produção (só rotina) ─────────────────────
