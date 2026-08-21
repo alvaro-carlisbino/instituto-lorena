@@ -73,12 +73,14 @@ async function ehServiceRoleAssinada(supabaseUrl: string, bearer: string): Promi
 
 /**
  * Campos da nota que a resposta da Focus atualiza. Um só lugar para não divergir.
- * O ISS mora no XML, não no JSON — só vale a pena buscar quando a nota autorizou.
+ * ISS, PIS e COFINS moram no XML, não no JSON — só vale a pena buscar quando a nota autorizou.
+ * PIS e COFINS entram porque somados ao ISS são as "Exclusões e Reduções da Base de Cálculo"
+ * que o financeiro precisa lançar na planilha e que o PDF da Focus não desenha.
  */
 async function patchDaResposta(r: FocusResposta): Promise<Record<string, unknown>> {
   const valores = r.status === 'autorizado' && r.urlXml
     ? await lerValoresDoXml(r.urlXml)
-    : { aliquota: null, issCents: null }
+    : { aliquota: null, issCents: null, pisCents: null, cofinsCents: null }
   return {
     status: r.status,
     numero: r.numero,
@@ -87,6 +89,8 @@ async function patchDaResposta(r: FocusResposta): Promise<Record<string, unknown
     url_xml: r.urlXml,
     url_pdf: r.urlPdf,
     ...(valores.issCents != null ? { valor_iss_cents: valores.issCents } : {}),
+    ...(valores.pisCents != null ? { valor_pis_cents: valores.pisCents } : {}),
+    ...(valores.cofinsCents != null ? { valor_cofins_cents: valores.cofinsCents } : {}),
     ...(valores.aliquota != null ? { aliquota_aplicada: valores.aliquota } : {}),
     erros: r.erros,
     updated_at: new Date().toISOString(),

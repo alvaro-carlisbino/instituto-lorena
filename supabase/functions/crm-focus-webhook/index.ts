@@ -65,9 +65,13 @@ Deno.serve(async (req) => {
   if (ambienteDaNota && ambienteDaNota !== cfg.ambiente) return json({ ok: true, skipped: 'ambiente_divergente' })
 
   const r = await consultarNfse(cfg, ref)
+  // ISS, PIS e COFINS só existem no XML. PIS e COFINS entram porque somados ao ISS são as
+  // "Exclusões e Reduções da Base de Cálculo" do IBS/CBS, que o financeiro lança na planilha e
+  // que o PDF da Focus não desenha. Este é o caminho normal de autorização — sem eles aqui, só
+  // nota consultada à mão teria o número.
   const valores = r.status === 'autorizado' && r.urlXml
     ? await lerValoresDoXml(r.urlXml)
-    : { aliquota: null, issCents: null }
+    : { aliquota: null, issCents: null, pisCents: null, cofinsCents: null }
 
   await admin
     .from('nfse_notes')
@@ -79,6 +83,8 @@ Deno.serve(async (req) => {
       url_xml: r.urlXml,
       url_pdf: r.urlPdf,
       ...(valores.issCents != null ? { valor_iss_cents: valores.issCents } : {}),
+      ...(valores.pisCents != null ? { valor_pis_cents: valores.pisCents } : {}),
+      ...(valores.cofinsCents != null ? { valor_cofins_cents: valores.cofinsCents } : {}),
       ...(valores.aliquota != null ? { aliquota_aplicada: valores.aliquota } : {}),
       erros: r.erros,
       updated_at: new Date().toISOString(),

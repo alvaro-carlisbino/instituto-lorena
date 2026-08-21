@@ -36,6 +36,8 @@ export type NfseNote = {
   urlPdf: string | null
   valorServicoCents: number
   valorIssCents: number | null
+  valorPisCents: number | null
+  valorCofinsCents: number | null
   aliquotaAplicada: number | null
   tomadorDocumento: string | null
   tomadorNome: string | null
@@ -45,6 +47,26 @@ export type NfseNote = {
   leadId: string | null
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * "Exclusões e Reduções da Base de Cálculo" — o campo do bloco IBS/CBS que sai em branco no
+ * PDF da Focus e o financeiro cobra.
+ *
+ * É a soma de **ISS + PIS + COFINS** (contador, 21/ago/2026): o que sai da base do IBS/CBS
+ * para o cálculo efetivo. Base fixa, o bruto da nota; alíquotas fixas, 2% + 0,65% + 3%.
+ *
+ * Não é campo de emissão e não existe no XML de nota nenhuma — nem na do portal nacional, nem
+ * na nossa, conferidas campo a campo. O portal CALCULA a soma na hora de imprimir o DANFSe; a
+ * Focus não calcula e imprime "-". Por isso a conta é feita aqui, com o PIS e o COFINS que a
+ * SEFIN registrou no XML da nota (e não com os que a gente pediu).
+ *
+ * `null` quando a nota ainda não autorizou: os três valores vêm juntos ou não vêm — somar dois
+ * de três daria um número errado com cara de certo.
+ */
+export function exclusoesIbsCbsCents(n: Pick<NfseNote, 'valorIssCents' | 'valorPisCents' | 'valorCofinsCents'>): number | null {
+  if (n.valorIssCents == null || n.valorPisCents == null || n.valorCofinsCents == null) return null
+  return n.valorIssCents + n.valorPisCents + n.valorCofinsCents
 }
 
 export type NfseTomador = {
@@ -151,7 +173,7 @@ export async function nfseReconciliar(dias = 30): Promise<{ conferidas: number; 
 export async function nfseListar(args: { de: string; ate: string; status?: string | null; limite?: number }): Promise<NfseNote[]> {
   let q = assertClient()
     .from('nfse_notes')
-    .select('id, ref, status, numero, codigo_verificacao, url_consulta, url_xml, url_pdf, valor_servico_cents, valor_iss_cents, aliquota_aplicada, tomador_documento, tomador_nome, descricao_servico, erros, ambiente, lead_id, created_at, updated_at')
+    .select('id, ref, status, numero, codigo_verificacao, url_consulta, url_xml, url_pdf, valor_servico_cents, valor_iss_cents, valor_pis_cents, valor_cofins_cents, aliquota_aplicada, tomador_documento, tomador_nome, descricao_servico, erros, ambiente, lead_id, created_at, updated_at')
     .gte('created_at', `${args.de}T00:00:00-03:00`)
     .lte('created_at', `${args.ate}T23:59:59-03:00`)
     .order('created_at', { ascending: false })
@@ -170,6 +192,8 @@ export async function nfseListar(args: { de: string; ate: string; status?: strin
     urlPdf: (r.url_pdf as string) ?? null,
     valorServicoCents: Number(r.valor_servico_cents ?? 0),
     valorIssCents: r.valor_iss_cents == null ? null : Number(r.valor_iss_cents),
+    valorPisCents: r.valor_pis_cents == null ? null : Number(r.valor_pis_cents),
+    valorCofinsCents: r.valor_cofins_cents == null ? null : Number(r.valor_cofins_cents),
     aliquotaAplicada: r.aliquota_aplicada == null ? null : Number(r.aliquota_aplicada),
     tomadorDocumento: (r.tomador_documento as string) ?? null,
     tomadorNome: (r.tomador_nome as string) ?? null,

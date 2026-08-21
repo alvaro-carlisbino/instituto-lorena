@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Ban,
   CheckCircle2,
+  Download,
   ExternalLink,
   FileText,
   Loader2,
@@ -45,10 +46,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { useTenant } from '@/context/TenantContext'
+import { downloadCsv } from '@/lib/csvExport'
 import { hojeLocal } from '@/lib/diaLocal'
 import { cn } from '@/lib/utils'
 import { buscarPacientes, carregarPaciente360, type PacienteEncontrado } from '@/services/pacienteBusca'
 import {
+  exclusoesIbsCbsCents,
   nfseCancelar,
   nfseConsultar,
   nfseEmitir,
@@ -61,6 +64,21 @@ import {
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dataHora = (iso: string) =>
   iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
+/** Número puro para o CSV: sem "R$" e com vírgula, que é o que o Excel em português soma. */
+const numeroCsv = (c: number | null | undefined) => (c == null ? '' : (c / 100).toFixed(2).replace('.', ','))
+
+const ROTULO_STATUS: Record<string, string> = {
+  autorizado: 'Autorizada',
+  cancelado: 'Cancelada',
+  processando_autorizacao: 'Processando',
+}
+
+/**
+ * ISS + PIS + COFINS sobre o bruto — o que a nota vai mostrar como "Exclusões e Reduções da
+ * Base de Cálculo" depois de autorizar. Só para a PRÉVIA do formulário: na lista e no CSV vale
+ * o que a SEFIN registrou no XML, nunca esta estimativa. Ver `exclusoesIbsCbsCents`.
+ */
+const PCT_EXCLUSOES = 0.0565
 
 /** "1.250,00" → centavos. */
 function paraCentavos(v: string): number {
@@ -281,6 +299,60 @@ export function NfsePage() {
     [notas],
   )
 
+  /**
+   * CSV do período para a planilha de controle do financeiro — que continua existindo até o
+   * CRM substituir as planilhas. Traz o que ele lança à mão hoje lendo nota por nota, inclusive
+   * as **exclusões da base do IBS/CBS** (ISS + PIS + COFINS), que o PDF da Focus deixa em branco.
+   *
+   * Nota de HOMOLOGAÇÃO fica de fora: não é documento fiscal, e uma linha dessas numa planilha
+   * de controle vira receita que não existe. Fora significa fora — mas dito em voz alta, senão
+   * o arquivo curto passa por completo.
+   */
+  const exportar = () => {
+    const reais = numeroCsv
+    const linhas = notas.filter((n) => n.ambiente === 'producao')
+    const fora = notas.length - linhas.length
+    if (linhas.length === 0) {
+      toast.error(fora > 0
+        ? 'Só há nota de homologação no período. Homologação não é documento fiscal e não entra na planilha.'
+        : 'Nenhuma nota no período para exportar.')
+      return
+    }
+    const header = [
+      'Data', 'Hora', 'Número', 'Código de verificação', 'Tomador', 'CPF', 'Serviço',
+      'Valor bruto', 'Alíquota ISS (%)', 'ISS', 'PIS', 'COFINS',
+      'Exclusões (ISS+PIS+COFINS)', 'BC após exclusões', 'Status', 'PDF', 'XML', 'Referência',
+    ]
+    const body = linhas.map((n) => {
+      const excl = exclusoesIbsCbsCents(n)
+      const d = new Date(n.createdAt)
+      return [
+        d.toLocaleDateString('pt-BR'),
+        d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        n.numero ?? '',
+        n.codigoVerificacao ?? '',
+        n.tomadorNome ?? '',
+        n.tomadorDocumento ? formatCpf(n.tomadorDocumento) : '',
+        n.descricaoServico ?? '',
+        reais(n.valorServicoCents),
+        n.aliquotaAplicada != null ? String(n.aliquotaAplicada).replace('.', ',') : '',
+        reais(n.valorIssCents),
+        reais(n.valorPisCents),
+        reais(n.valorCofinsCents),
+        reais(excl),
+        excl != null ? reais(n.valorServicoCents - excl) : '',
+        ROTULO_STATUS[n.status] ?? `Erro (${n.status})`,
+        n.urlPdf ?? '',
+        n.urlXml ?? '',
+        n.ref,
+      ]
+    })
+    downloadCsv(`nfse-clinica-${de}-a-${ate}.csv`, [header, ...body])
+    toast.success(fora > 0
+      ? `${linhas.length} nota(s) no arquivo. ${fora} de homologação ${fora === 1 ? 'ficou' : 'ficaram'} de fora: homologação não é documento fiscal.`
+      : `${linhas.length} nota(s) no arquivo.`)
+  }
+
   return (
     <AppLayout
       title="Nota de serviço (NFS-e)"
@@ -391,6 +463,8 @@ export function NfsePage() {
               {valorCents > 0 && (
                 <p className="text-[11px] text-muted-foreground">
                   ISS 2% ≈ {brl(Math.round(valorCents * 0.02))} · PIS 0,65% + COFINS 3% ≈ {brl(Math.round(valorCents * 0.0365))} (apuração própria, não retidos). A nota sai pelo bruto.
+                  <br />
+                  Exclusões da base do IBS/CBS ≈ {brl(Math.round(valorCents * PCT_EXCLUSOES))} (os três somados).
                 </p>
               )}
             </div>
@@ -463,6 +537,15 @@ export function NfsePage() {
             <Button size="sm" variant="outline" disabled={carregando} onClick={() => void carregar()}>
               <RefreshCw className={cn('size-4', carregando && 'animate-spin')} /> Atualizar
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={notas.length === 0}
+              onClick={exportar}
+              title="Baixa o período em CSV para lançar na planilha de controle, com ISS, PIS, COFINS e as exclusões da base do IBS/CBS."
+            >
+              <Download className="size-4" aria-hidden /> Exportar CSV
+            </Button>
             <div className="flex-1" />
             <div className="text-right text-xs text-muted-foreground">
               {notas.filter((n) => n.status === 'autorizado').length} autorizada(s) · {brl(totalAutorizado)}
@@ -493,6 +576,7 @@ export function NfsePage() {
                 <TableBody>
                   {notas.map((n) => {
                     const erro = n.erros?.map((e) => e.mensagem || e.codigo).filter(Boolean).join(' · ')
+                    const exclusao = exclusoesIbsCbsCents(n)
                     return (
                       <TableRow key={n.id}>
                         <TableCell className="whitespace-nowrap text-xs">{dataHora(n.createdAt)}</TableCell>
@@ -506,7 +590,15 @@ export function NfsePage() {
                         <TableCell className="max-w-[200px] truncate text-xs">{n.descricaoServico ?? '—'}</TableCell>
                         <TableCell className="whitespace-nowrap text-right text-sm">{brl(n.valorServicoCents)}</TableCell>
                         <TableCell className="whitespace-nowrap text-right text-xs text-muted-foreground">
-                          {n.valorIssCents != null ? `${brl(n.valorIssCents)}${n.aliquotaAplicada != null ? ` (${n.aliquotaAplicada}%)` : ''}` : '—'}
+                          <div>{n.valorIssCents != null ? `${brl(n.valorIssCents)}${n.aliquotaAplicada != null ? ` (${n.aliquotaAplicada}%)` : ''}` : '—'}</div>
+                          {exclusao != null && (
+                            <div
+                              className="text-[11px] text-muted-foreground/80"
+                              title={`Exclusões e Reduções da Base de Cálculo do IBS/CBS: ISS ${brl(n.valorIssCents ?? 0)} + PIS ${brl(n.valorPisCents ?? 0)} + COFINS ${brl(n.valorCofinsCents ?? 0)}. O PDF da Focus deixa este campo em branco.`}
+                            >
+                              excl. {brl(exclusao)}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col gap-1">
@@ -550,6 +642,16 @@ export function NfsePage() {
               </Table>
             </div>
           )}
+
+          {/* O campo em branco no PDF que o financeiro cobrou. Fica escrito na tela porque a
+              pergunta volta toda vez que alguém compara a nossa nota com a do portal. */}
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            <strong>"Exclusões e Reduções da Base de Cálculo"</strong>, o campo que sai em branco no PDF, é
+            ISS + PIS + COFINS, 5,65% do bruto: o que sai da base do IBS/CBS para o cálculo efetivo. Não é opção de
+            emissão e não existe no XML de nota nenhuma, nem na do portal nacional: quem calcula é o desenhista do PDF,
+            e o do portal calcula enquanto o da Focus deixa em branco. O valor está aqui, na linha "excl.", e no CSV.
+            Em 2026 o IBS/CBS apurado é zero, ano de teste.
+          </p>
         </div>
       </div>
 

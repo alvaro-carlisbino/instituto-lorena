@@ -100,11 +100,20 @@ export type FocusConfig = {
   telefonePrestador: string
   emailPrestador: string
   /**
-   * Grupo da reforma tributária (IBS/CBS), do leiaute 1.01 da DPS. Sem ele a SEFIN não monta o
-   * bloco IBS/CBS e a nota sai sem "Exclusões e Reduções da Base de Cálculo" — que é o valor
-   * que ELA calcula (ISS + PIS + COFINS) e que aparece na nota do portal. `null` = não manda,
-   * que é o estado provado em produção (a nota 314 autorizou assim). Só ligar depois de provar
-   * em homologação: CST/cClassTrib errados fazem a SEFIN rejeitar a nota inteira.
+   * Grupo da reforma tributária (IBS/CBS), do leiaute 1.01 da DPS. `null` = não manda, que é o
+   * estado provado em produção (as notas 314 a 320 autorizaram assim) e o que a nota do portal
+   * nacional também faz. Só ligar depois de provar em homologação: CST/cClassTrib errados
+   * fazem a SEFIN rejeitar a nota inteira.
+   *
+   * **Não é isto que falta para "Exclusões e Reduções da Base de Cálculo".** Esse campo é a
+   * soma de ISS + PIS + COFINS (confirmado pelo contador em 21/ago/2026) e não existe no XML
+   * de nota nenhuma — nem na 272 do portal, nem na nossa 320: quem calcula é o desenhista do
+   * PDF, e o do portal calcula enquanto o da Focus deixa em branco. Ligar o grupo aqui não
+   * traz só a linha: traz também IBS e CBS apurados (R$ 6,13 sobre R$ 650, medido na nota 10
+   * de homologação), que a nota do portal NÃO tem — deixaria as duas MAIS diferentes, não
+   * menos. O CRM mostra a soma por conta própria; ver `lerValoresDoXml`.
+   *
+   * Em 2027 o IBS/CBS deixa de ser ano de teste e aí o grupo passa a valer de verdade.
    *
    * O grupo é indivisível e tem CINCO campos obrigatórios, não dois. Mandar só CST/cClassTrib
    * troca o XSD para o 1.01 e a DPS morre em `erro_validacao_schema` reclamando de `finNFSe`
@@ -485,28 +494,52 @@ export function parseFocusResposta(raw: FocusRaw): FocusResposta {
   }
 }
 
+export type ValoresDaNota = {
+  aliquota: number | null
+  issCents: number | null
+  pisCents: number | null
+  cofinsCents: number | null
+}
+
+const VALORES_VAZIOS: ValoresDaNota = { aliquota: null, issCents: null, pisCents: null, cofinsCents: null }
+
 /**
- * O ISS não vem no JSON da Focus — só no XML da nota. E é o número que o financeiro precisa,
- * porque a alíquota é decidida pelo MUNICÍPIO e não por nós: conferir o que foi cobrado é a
- * única forma de saber que continua 2%. Falha aqui não invalida a nota, por isso devolve null
- * em vez de estourar.
+ * Os valores apurados não vêm no JSON da Focus — só no XML da nota. E são os números que o
+ * financeiro precisa:
+ *
+ *   • ISS, porque a alíquota é decidida pelo MUNICÍPIO e não por nós: conferir o que foi
+ *     cobrado é a única forma de saber que continua 2%.
+ *   • PIS e COFINS, porque somados ao ISS são as **"Exclusões e Reduções da Base de Cálculo"**
+ *     do IBS/CBS — o campo que o contador cobrou (Alex, 21/ago/2026) e que o PDF da Focus
+ *     deixa em branco. Ele não existe no XML de ninguém: o portal nacional CALCULA a soma na
+ *     hora de imprimir, e a Focus não calcula. Lendo daqui, o CRM mostra o número sem
+ *     depender do desenhista do PDF.
+ *
+ * Tags conferidas no XML da nota 320 (produção, R$ 650): `pAliqAplic` 2.00, `vISSQN` 13.00,
+ * `vPis` 4.22, `vCofins` 19.50 — e 13,00 + 4,22 + 19,50 = 36,72, que é o valor que o portal
+ * imprime. Falha aqui não invalida a nota, por isso devolve null em vez de estourar.
  */
-export async function lerValoresDoXml(
-  urlXml: string,
-): Promise<{ aliquota: number | null; issCents: number | null }> {
+export async function lerValoresDoXml(urlXml: string): Promise<ValoresDaNota> {
   try {
     const res = await fetch(urlXml)
-    if (!res.ok) return { aliquota: null, issCents: null }
+    if (!res.ok) return VALORES_VAZIOS
     const xml = await res.text()
     const tag = (t: string) => xml.match(new RegExp(`<${t}>([^<]*)</${t}>`))?.[1]?.trim() ?? null
+    const cents = (t: string) => {
+      const v = tag(t)
+      if (v == null || v === '') return null
+      const n = Number(v)
+      return Number.isFinite(n) ? Math.round(n * 100) : null
+    }
     const aliq = tag('pAliqAplic')
-    const iss = tag('vISSQN')
     return {
       aliquota: aliq != null && aliq !== '' ? Number(aliq) : null,
-      issCents: iss != null && iss !== '' ? Math.round(Number(iss) * 100) : null,
+      issCents: cents('vISSQN'),
+      pisCents: cents('vPis'),
+      cofinsCents: cents('vCofins'),
     }
   } catch {
-    return { aliquota: null, issCents: null }
+    return VALORES_VAZIOS
   }
 }
 
