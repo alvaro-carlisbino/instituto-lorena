@@ -54,6 +54,8 @@ type Pendencia = {
   minutos: number
   owner_mode: string
   ai_enabled: boolean
+  /** Polo da CONVERSA (carimbo da última mensagem recebida). Pode diferir do cadastro. */
+  conversa_tenant_id?: string | null
 }
 
 /**
@@ -106,21 +108,32 @@ Deno.serve(async (req) => {
         resultado.detalhes.push({ lead: p.lead_id, nome: p.patient_name, minutos: p.minutos, acao, motivo })
 
       // ── 1. A IA devia ter respondido? ────────────────────────────────────────
-      // A linha CERTA vem do resolvedor, não de `leads.whatsapp_instance_id`. O vínculo do
-      // lead pode apontar para o outro polo (paciente da clínica que também comprou no
-      // Tricopill fica amarrado na linha de vendas — hoje há 13 assim), e perguntar ao gate
-      // por essa linha é perguntar pela conversa errada: como não existe estado de
-      // atendimento ali, ele responderia "pode falar" para alguém que foi escalado para
-      // humano nesta linha. O resolvedor já descarta linha de outro polo e devolve a do
-      // tenant do lead. `bindDefault: false` porque vigia não reescreve vínculo de conversa.
+      // RETOMAR é continuar a conversa parada, então quem manda é o polo DELA, não o do
+      // cadastro da pessoa. `conversa_tenant_id` é o carimbo da última mensagem recebida,
+      // que segue a linha por onde ela entrou (trigger de 14/ago).
+      //
+      // Passando o tenant do CADASTRO, como era até 21/ago/26, o resolvedor descartava a
+      // linha de vendas como "de outro polo" e o vigia respondia pelo número da CLÍNICA:
+      // Hugo Bongiorno recebeu às 08:51 a conferência do comprovante do shampoo pelo
+      // WhatsApp do Instituto. São 13 leads da clínica vivendo na linha de vendas.
+      //
+      // `bindDefault: false` porque vigia não reescreve vínculo de conversa.
+      const poloDaConversa = String(p.conversa_tenant_id ?? '').trim() || p.tenant_id
       let linhaDaConversa: string | null = null
       let provider
       try {
         const resolvido = await resolveOutboundProviderForLead(
           admin,
-          { id: p.lead_id, whatsapp_instance_id: p.whatsapp_instance_id, tenant_id: p.tenant_id },
+          { id: p.lead_id, whatsapp_instance_id: p.whatsapp_instance_id, tenant_id: poloDaConversa },
           { bindDefault: false },
         )
+        // Trava final: se nem assim a linha for do polo da conversa, o vigia cala. Deixar a
+        // pessoa esperando é menos pior do que responder pelo número do outro negócio (a
+        // etapa 2, de avisar a equipe, continua rodando logo abaixo).
+        if (resolvido.lineTenantId && resolvido.lineTenantId !== poloDaConversa) {
+          registrar('sem_linha', `conversa é ${poloDaConversa} e a linha resolvida é ${resolvido.lineTenantId}`)
+          continue
+        }
         provider = resolvido.provider
         linhaDaConversa = resolvido.instanceId
       } catch (e) {
@@ -144,11 +157,13 @@ Deno.serve(async (req) => {
             .select('prompt_override')
             .eq('lead_id', p.lead_id)
             .maybeSingle()
+          // Prompt do polo da CONVERSA. Com o do cadastro, a pessoa que fala de pedido na
+          // linha de vendas era atendida com o prompt da clínica (Sofia, agenda, triagem).
           const { data: cfg } = await admin
             .from('crm_ai_configs')
             .select('system_prompt')
             .eq('id', 'default')
-            .eq('tenant_id', p.tenant_id)
+            .eq('tenant_id', poloDaConversa)
             .maybeSingle()
 
           const { replied } = await runWhatsappAiAutoReply(admin, {
