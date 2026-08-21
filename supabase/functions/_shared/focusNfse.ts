@@ -105,13 +105,18 @@ export type FocusConfig = {
    * nacional também faz. Só ligar depois de provar em homologação: CST/cClassTrib errados
    * fazem a SEFIN rejeitar a nota inteira.
    *
-   * **Não é isto que falta para "Exclusões e Reduções da Base de Cálculo".** Esse campo é a
-   * soma de ISS + PIS + COFINS (confirmado pelo contador em 21/ago/2026) e não existe no XML
-   * de nota nenhuma — nem na 272 do portal, nem na nossa 320: quem calcula é o desenhista do
-   * PDF, e o do portal calcula enquanto o da Focus deixa em branco. Ligar o grupo aqui não
-   * traz só a linha: traz também IBS e CBS apurados (R$ 6,13 sobre R$ 650, medido na nota 10
-   * de homologação), que a nota do portal NÃO tem — deixaria as duas MAIS diferentes, não
-   * menos. O CRM mostra a soma por conta própria; ver `lerValoresDoXml`.
+   * **É ISTO que acende "Exclusões e Reduções da Base de Cálculo" no PDF da Focus.** O campo é
+   * a soma de ISS + PIS + COFINS (confirmado pelo contador em 21/ago/2026) e não existe no XML
+   * de nota nenhuma — nem na 272 do portal, nem na nossa 321: quem calcula é o desenhista do
+   * PDF. O do portal calcula sempre; o da Focus só calcula quando a DPS leva este grupo, medido
+   * na nota 10 de homologação: saiu "Exclusões R$ 36,72" e "Base após exclusões R$ 613,28",
+   * exatamente ISS 13,00 + PIS 4,22 + COFINS 19,50.
+   *
+   * O preço é que o bloco é desenhado INTEIRO: junto vêm IBS R$ 0,61 e CBS R$ 5,52 (R$ 6,13
+   * sobre R$ 650), que a nota do portal NÃO tem. Não existe meio-termo — o financeiro pediu só
+   * a linha das exclusões (Kauan, 21/ago) e isso não é um botão que a gente tenha. Por isso o
+   * grupo segue desligado até o contador decidir se a nota pode sair com IBS/CBS impresso.
+   * O CRM mostra a soma por conta própria; ver `lerValoresDoXml`.
    *
    * Em 2027 o IBS/CBS deixa de ser ano de teste e aí o grupo passa a valer de verdade.
    *

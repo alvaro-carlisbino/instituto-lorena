@@ -623,6 +623,15 @@ export function NfsePage() {
                                 XML
                               </Button>
                             )}
+                            {/* A MESMA nota, desenhada pela SEFIN. O DANFSe do portal traz o bloco do
+                                IBS/CBS que o PDF da Focus deixa em branco, e é o papel que o financeiro
+                                compara. A consulta pública pede captcha; quem tem o portal do emitente
+                                acha a nota pela lista de emitidas. */}
+                            {n.urlConsulta && (
+                              <Button size="sm" variant="ghost" nativeButton={false} render={<a href={n.urlConsulta} target="_blank" rel="noreferrer" />} title="Abrir esta nota no portal nacional (consulta pública, pede captcha)">
+                                Portal
+                              </Button>
+                            )}
                             {n.status === 'processando_autorizacao' && (
                               <Button size="sm" variant="ghost" disabled={relendo === n.ref} onClick={() => void reler(n.ref)} title="Consultar a Focus agora">
                                 <RefreshCw className={cn('size-3.5', relendo === n.ref && 'animate-spin')} />
@@ -646,11 +655,13 @@ export function NfsePage() {
           {/* O campo em branco no PDF que o financeiro cobrou. Fica escrito na tela porque a
               pergunta volta toda vez que alguém compara a nossa nota com a do portal. */}
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            <strong>"Exclusões e Reduções da Base de Cálculo"</strong>, o campo que sai em branco no PDF, é
-            ISS + PIS + COFINS, 5,65% do bruto: o que sai da base do IBS/CBS para o cálculo efetivo. Não é opção de
-            emissão e não existe no XML de nota nenhuma, nem na do portal nacional: quem calcula é o desenhista do PDF,
-            e o do portal calcula enquanto o da Focus deixa em branco. O valor está aqui, na linha "excl.", e no CSV.
-            Em 2026 o IBS/CBS apurado é zero, ano de teste.
+            <strong>"Exclusões e Reduções da Base de Cálculo"</strong> é ISS + PIS + COFINS, 5,65% do bruto: o que sai
+            da base do IBS/CBS para o cálculo efetivo. O valor não existe no XML de nota nenhuma, nem na do portal
+            nacional: quem calcula é o desenhista do PDF. O da Focus só desenha o campo quando a DPS leva o grupo
+            IBS/CBS, que hoje vai desligado de propósito, porque junto com a linha vêm IBS e CBS apurados (R$ 6,13
+            sobre R$ 650, medido na nota 10 de homologação) que a nota do portal não traz. O PDF do portal é outro
+            desenho e sai pelo botão <strong>Portal</strong>. Aqui o número está na linha "excl." e no CSV.
+            Em 2026 o IBS/CBS apurado é ano de teste.
           </p>
         </div>
       </div>
