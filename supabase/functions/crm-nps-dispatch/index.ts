@@ -45,7 +45,7 @@ async function pickTemplate(admin: SupabaseClient, lead: LeadRow, requestedId: s
   if (requestedId) {
     const { data } = await admin
       .from('survey_templates')
-      .select('id, name, nps_question, enabled')
+      .select('id, name, nps_question, enabled, tenant_id')
       .eq('id', requestedId)
       .maybeSingle()
     if (data && data.enabled) return data
@@ -54,7 +54,7 @@ async function pickTemplate(admin: SupabaseClient, lead: LeadRow, requestedId: s
   if (preferredId) {
     const { data } = await admin
       .from('survey_templates')
-      .select('id, name, nps_question, enabled')
+      .select('id, name, nps_question, enabled, tenant_id')
       .eq('id', preferredId)
       .eq('enabled', true)
       .maybeSingle()
@@ -63,7 +63,7 @@ async function pickTemplate(admin: SupabaseClient, lead: LeadRow, requestedId: s
   // Fallback ESCOPADO por tenant — um lead do Tricopill nunca pega template da clínica.
   const { data } = await admin
     .from('survey_templates')
-    .select('id, name, nps_question, enabled')
+    .select('id, name, nps_question, enabled, tenant_id')
     .eq('enabled', true)
     .eq('tenant_id', lead.tenant_id)
     .limit(1)
@@ -174,6 +174,14 @@ Deno.serve(async (req) => {
 
   const npsText = buildNpsMessage(String(template.nps_question), String(lead.patient_name ?? ''))
 
+  // O polo do ASSUNTO é o dono da PESQUISA, não o cadastro da pessoa. `nps-tricopill` é
+  // pós-venda da loja; `nps-capilar`/`nps-cirurgico` são da clínica. Quem é paciente aqui e
+  // cliente lá tem as duas coisas, e o template certo pode ser o do outro polo do cadastro:
+  // sem isto o NPS da loja saía pelo número da clínica (e vice-versa). Mesma regra da
+  // confirmação de pagamento, [[crm_confirmacao_pagamento_saiu_pela_clinica]].
+  const surveyTenantId = String((template as { tenant_id?: string }).tenant_id ?? '') || lead.tenant_id
+  const outroPolo = surveyTenantId !== lead.tenant_id
+
   // Detecta canal de envio (mesma heurística do crm-send-message)
   const phoneDigits = String(lead.phone ?? '').replace(/[^0-9]/g, '')
   const isSyntheticPhone = phoneDigits.startsWith('888001')
@@ -186,8 +194,18 @@ Deno.serve(async (req) => {
 
   let dispatchChannel: 'whatsapp' | 'meta' = 'whatsapp'
   let sentVia = ''
+  /** Polo da linha que realmente enviou (null no caminho ManyChat, que é o polo da pessoa). */
+  let lineTenantId: string | null = null
 
   if (isManychat && subscriberId) {
+    // ManyChat é a CONTA do polo da pessoa. Mandar a pesquisa da loja pela conta da clínica
+    // (ou o contrário) é exatamente o cruzamento que estamos fechando: recusa alto.
+    if (outroPolo) {
+      return json({
+        error: 'polo_sem_canal',
+        message: `A pesquisa «${template.id}» é do polo ${surveyTenantId} e este lead só tem ManyChat do polo ${lead.tenant_id}. Não enviado.`,
+      }, 409)
+    }
     const pushChannel: 'whatsapp' | 'instagram' =
       customChannel === 'whatsapp' || lead.source === 'meta_whatsapp' ? 'whatsapp' : 'instagram'
     const mcCfg = await readManychatPushConfigForTenantChannel(admin, lead.tenant_id, pushChannel)
@@ -221,13 +239,28 @@ Deno.serve(async (req) => {
     // nunca o default global 'evolution' (que mandava o Tricopill pela linha errada).
     let provider: WhatsappProvider
     try {
-      ;({ provider } = await resolveOutboundProviderForLead(admin, {
-        id: lead.id,
-        whatsapp_instance_id: lead.whatsapp_instance_id,
-        tenant_id: lead.tenant_id,
-      }))
+      ;({ provider, lineTenantId } = await resolveOutboundProviderForLead(
+        admin,
+        {
+          id: lead.id,
+          // Pesquisa do outro polo ignora a linha vinculada (ela é do polo da PESSOA) e
+          // resolve pela linha do polo da pesquisa, sem reescrever o vínculo: onde a
+          // pessoa conversa continua sendo dela.
+          whatsapp_instance_id: outroPolo ? null : lead.whatsapp_instance_id,
+          tenant_id: surveyTenantId,
+        },
+        outroPolo ? { bindDefault: false } : undefined,
+      ))
     } catch (e) {
       return json({ error: 'no_provider', message: e instanceof Error ? e.message : String(e) }, 500)
+    }
+    // Trava final: linha resolvida de outro polo não envia. Falhar aqui é melhor do que o
+    // paciente receber a pesquisa da loja pelo número da clínica.
+    if (lineTenantId && lineTenantId !== surveyTenantId) {
+      return json({
+        error: 'wrong_line_tenant',
+        message: `Envio bloqueado: pesquisa do polo ${surveyTenantId} resolveu para linha do polo ${lineTenantId}.`,
+      }, 409)
     }
     const sent = await provider.sendMessage({ to: phoneDigits, text: npsText, leadId: lead.id })
     dispatchChannel = 'whatsapp'
@@ -242,7 +275,8 @@ Deno.serve(async (req) => {
     direction: 'out',
     author: 'NPS (Sofia)',
     content: npsText,
-    tenantId: lead.tenant_id,
+    // Carimbo pelo polo que MANDOU: pesquisa da loja não aparece no CRM da clínica.
+    tenantId: lineTenantId || surveyTenantId,
   })
 
   // Cria o survey_dispatch real

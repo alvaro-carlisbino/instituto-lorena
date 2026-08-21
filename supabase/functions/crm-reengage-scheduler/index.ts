@@ -309,7 +309,13 @@ Deno.serve(async (req) => {
       const res = await fetch(`${url}/functions/v1/crm-send-message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceRole}` },
-        body: JSON.stringify({ leadId, text, source }),
+        // Polo do ASSUNTO declarado, mesmo a view já filtrando `tenant_id = 'tricopill'`:
+        // reativação e recompra são conversa de LOJA e não podem sair pelo número da
+        // clínica em hipótese nenhuma. Hoje o guard de polo do resolver acerta por
+        // consequência (a linha da clínica é descartada por ser de outro polo); isto deixa
+        // de depender disso, e um lead da clínica que entre na lista por mudança na view
+        // vira 409 registrado em vez de mensagem no número errado.
+        body: JSON.stringify({ leadId, text, source, senderTenantId: TENANT, requireBotKind: 'sales' }),
       })
       const b = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string }
       const note = b?.error || b?.message || ''
