@@ -172,6 +172,18 @@ Deno.serve(async (req) => {
   }
 
   const rows = candidates ?? []
+
+  // Polo de cada LINHA, lido uma vez: a lista de instâncias tem 3 registros e o loop abaixo
+  // pode varrer centenas de leads. Mesma leitura de `resolveConversationTenantId`, sem uma
+  // query por lead.
+  const poloDaLinha = new Map<string, string>()
+  {
+    const { data: linhas } = await admin.from('whatsapp_channel_instances').select('id, tenant_id')
+    for (const w of (linhas ?? []) as Array<{ id?: string; tenant_id?: string }>) {
+      if (w.id && w.tenant_id) poloDaLinha.set(String(w.id), String(w.tenant_id))
+    }
+  }
+
   let sent = 0
   let skipped = 0
   const results: Array<{ leadId: string; status: string; followupIndex?: number }> = []
@@ -216,7 +228,16 @@ Deno.serve(async (req) => {
     }
 
     // VENDAS (Tricopill): cadência curta (1º em 15min) + mensagens de venda. Clínica: padrão.
-    const isSales = String(lead.tenant_id ?? '') === 'tricopill'
+    //
+    // Quem decide é a LINHA da conversa, não o cadastro da pessoa. Paciente da clínica que
+    // está negociando um kit na linha de vendas recebia a cadência e a COPY da clínica, e o
+    // envio saía pela linha da clínica (o guard de polo do resolver descarta a linha de
+    // vendas quando ninguém declara o assunto). São 14 leads cross-polo hoje. Mesma regra
+    // de [[crm_venda_segue_a_linha_nao_a_pessoa]], aqui aplicada ao follow-up.
+    const linhaTenant = String(
+      (lead.whatsapp_instance_id && poloDaLinha.get(lead.whatsapp_instance_id)) || lead.tenant_id || '',
+    )
+    const isSales = linhaTenant === 'tricopill'
     const cadenceHours = isSales ? FOLLOWUP_HOURS_SALES : FOLLOWUP_HOURS
     const cadenceMsgs = isSales ? FOLLOWUP_MESSAGES_SALES : FOLLOWUP_MESSAGES
 
@@ -247,6 +268,11 @@ Deno.serve(async (req) => {
             text: followupText,
             channel: 'whatsapp',
             source: 'followup_scheduler',
+            // O follow-up é a continuação DESTA conversa: declara o polo da linha onde ela
+            // vive e trava com requireBotKind. Sem isso, copy de venda saía pelo número da
+            // clínica (e copy da clínica pelo número de vendas) para quem vive nos dois.
+            senderTenantId: linhaTenant,
+            requireBotKind: isSales ? 'sales' : 'clinic',
           },
         })
 
