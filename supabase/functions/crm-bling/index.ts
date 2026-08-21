@@ -271,7 +271,7 @@ Deno.serve(async (req)=>{
       error: 'lead_not_found'
     }, 404);
     // Pagamento pago mais recente SEM pedido Bling (cartão tem a coluna bling_order_id; Pix não).
-    const { data: rede } = await admin.from('rede_payments').select('id, kit, amount_cents, installments, method, bling_order_id, freight_cents, paid_at, created_at').eq('lead_id', leadId).eq('status', 'paid').is('bling_order_id', null).order('paid_at', {
+    const { data: rede } = await admin.from('rede_payments').select('id, kit, items, description, customer_doc, amount_cents, installments, method, bling_order_id, freight_cents, paid_at, created_at').eq('lead_id', leadId).eq('status', 'paid').is('bling_order_id', null).order('paid_at', {
       ascending: false
     }).limit(1).maybeSingle();
     const { data: pb } = await admin.from('pagbank_checkouts').select('checkout_id, kit, amount_cents').eq('lead_id', leadId).eq('status', 'paid').order('paid_at', {
@@ -286,11 +286,20 @@ Deno.serve(async (req)=>{
       ok: false,
       error: 'nenhuma_venda_paga_sem_bling'
     }, 404);
-    // kit: payload > kit salvo > inferido pelo valor pago (cobre o caso do total com frete embutido).
-    const kit = payload.kit != null ? String(payload.kit) : pay.kit ?? inferRedeKit(Number(pay.amount_cents ?? 0)) ?? '';
+    // CARRINHO da loja: o pagamento já traz os itens com o id de cada produto no Bling. O
+    // pedido tem que sair item a item — senão o relançamento vira UMA linha genérica pelo
+    // valor cheio, baixa o estoque do produto errado e a NF-e sai com a mercadoria errada.
+    const cartItems = Array.isArray(rede?.items) && rede.items.length ? rede.items : null;
+    // kit: payload > kit salvo > inferido pelo valor pago (cobre o caso do total com frete
+    // embutido). Com carrinho NUNCA infere: o valor é a soma dos itens e bateria num kit por
+    // coincidência.
+    const kit = payload.kit != null ? String(payload.kit) : pay.kit ?? (cartItems ? '' : inferRedeKit(Number(pay.amount_cents ?? 0))) ?? '';
     // AVULSO (sem kit): puxa a descrição da última "Venda confirmada" (ex.: "Tricopill + Shampoo").
     let description;
-    if (!kit) {
+    if (!kit && cartItems) {
+      // O próprio pagamento já descreve o carrinho ("1× Shampoo + 1× Condicionador").
+      description = String(payload.description != null ? payload.description : rede?.description ?? '').trim() || 'Venda avulsa Tricopill';
+    } else if (!kit) {
       const { data: conf } = await admin.from('interactions').select('content').eq('lead_id', leadId).ilike('content', '%Venda confirmada%').order('happened_at', {
         ascending: false
       }).limit(1).maybeSingle();
@@ -308,6 +317,7 @@ Deno.serve(async (req)=>{
       const out = await blingCreateSaleOrder(admin, 'tricopill', {
         kit,
         amountCents: productCents,
+        items: cartItems ?? undefined,
         description,
         freightCents: Number(redeRow?.freight_cents ?? 0) || undefined,
         saleDateISO: redeRow?.paid_at || redeRow?.created_at || undefined,
@@ -317,7 +327,9 @@ Deno.serve(async (req)=>{
         installments: redeRow?.installments,
         customerName: String(cad.nomeCompleto || lead.patient_name || 'Cliente Tricopill').trim(),
         phone: lead.phone ? String(lead.phone) : undefined,
-        cpf: cad.cpf,
+        // Checkout do site não grava CPF no cadastro do lead, mas ele vem no pagamento. Sem
+        // este fallback o relançamento caía no contato GENÉRICO e a NF-e ficava sem tomador.
+        cpf: cad.cpf || (redeRow?.customer_doc ? String(redeRow.customer_doc) : undefined),
         email: cad.email,
         dataNascimento: cad.dataNascimento,
         sexo: cad.sexo,

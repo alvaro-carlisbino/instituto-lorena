@@ -1115,7 +1115,7 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
   if (wasPaid) return
 
   // Mesma regra do `rede.ts`: a NOTA da venda segue a linha (tenant do pagamento), não o
-  // cadastro do lead. `blingTenant` (abaixo) continua decidindo onde o PEDIDO é criado.
+  // cadastro do lead — e `blingTenant` (abaixo) segue a mesma linha para o PEDIDO.
   const saleTenantId = String(kit ? 'tricopill' : (tenantId || l.tenant_id || ''))
   await insertInteraction(admin, {
     leadId: l.id,
@@ -1139,8 +1139,11 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
     cpf: p.customer_doc != null ? String(p.customer_doc) : null,
   })
 
-  // KIT = produto Tricopill → Bling/ME vivem no tenant 'tricopill'.
-  const blingTenant = kit ? 'tricopill' : String(l.tenant_id ?? tenantId)
+  // KIT = produto Tricopill → Bling/ME vivem no tenant 'tricopill'. Sem kit, o PEDIDO segue
+  // a LINHA da venda (tenant do pagamento), igual à nota — não o cadastro do lead. Ver o
+  // mesmo trecho no `rede.ts`: com a ordem invertida, venda avulsa para lead da clínica
+  // resolvia 'instituto-lorena' e não ia pro Bling nenhum.
+  const blingTenant = kit ? 'tricopill' : String(tenantId || l.tenant_id || '')
   // Cria pedido no Bling para KITS Tricopill E para vendas avulsas/carrinho do tenant 'tricopill'.
   // (Antes só criava quando havia `kit`; compras pelo carrinho salvam kit=null e nunca iam pro Bling.)
   const shouldCreateBlingOrder = !!kit || blingTenant === 'tricopill'

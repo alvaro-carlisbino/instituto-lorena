@@ -1276,7 +1276,7 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
     //    'tricopill'. Rede (site) OU Asaas — o mais recente pago.
     const { data: rede } = await admin
       .from('rede_payments')
-      .select('kit, amount_cents, freight_cents, created_at')
+      .select('tenant_id, kit, amount_cents, freight_cents, created_at')
       .eq('lead_id', leadId).eq('status', 'paid')
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
     // Ciclo de ASSINATURA (`sub-…`) fica de fora: ele é mensalidade, não pedido. O envio da
@@ -1285,18 +1285,21 @@ export async function reshipLead(admin: SupabaseClient, leadId: string, opts: { 
     // e um ciclo que nem envia produto (trimestral, meses 2 e 3) geraria envio do nada.
     const { data: asaas } = await admin
       .from('asaas_payments')
-      .select('kit, amount_cents, freight_cents, created_at')
+      .select('tenant_id, kit, amount_cents, freight_cents, created_at')
       .eq('lead_id', leadId).eq('status', 'paid')
       .not('id', 'like', 'sub-%')
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
     const paid = [rede, asaas]
       .filter(Boolean)
       .sort((a, b) => String((b as { created_at?: string }).created_at ?? '').localeCompare(String((a as { created_at?: string }).created_at ?? '')))[0] as
-        { kit?: string | null; amount_cents?: number; freight_cents?: number } | undefined
+        { tenant_id?: string | null; kit?: string | null; amount_cents?: number; freight_cents?: number } | undefined
     if (!paid) return // sem pagamento pago — não gera envio
 
     // 4. Religa o envio (mesmo caminho do fechamento). Valor do produto = pago − frete.
-    const blingTenant = paid.kit ? 'tricopill' : String(l.tenant_id ?? 'tricopill')
+    //    A etiqueta segue a LINHA da venda (tenant do pagamento), não o cadastro do lead:
+    //    paciente da clínica comprando na loja saía pela conta do Melhor Envio da clínica.
+    //    [[crm_melhorenvio_remetente_polo]]
+    const blingTenant = paid.kit ? 'tricopill' : String(paid.tenant_id || l.tenant_id || 'tricopill')
     const productValueCents = Math.max(0, Math.round(Number(paid.amount_cents) || 0) - Math.max(0, Math.round(Number(paid.freight_cents) || 0)))
     const ship = await autoShipToCart(admin, blingTenant, {
       lead: { id: l.id, patient_name: l.patient_name, phone: l.phone, custom_fields: l.custom_fields },

@@ -922,8 +922,9 @@ export async function finalizeRedePaid(
     // invertida (`l.tenant_id ?? intent.tenantId`), confirmação de Pix do Tricopill em
     // paciente da clínica ia parar na timeline da CLÍNICA: 8 notas assim até 21/ago/26,
     // enquanto o pedido do mesmo pagamento ia certo pro Bling da loja.
-    // Só carimba a NOTA. `blingTenant` (abaixo) decide onde o PEDIDO é criado e continua
-    // como estava: mexer nele muda estoque e nota fiscal, é outra conversa.
+    // Carimba a NOTA. `blingTenant` (abaixo) decide onde o PEDIDO é criado e hoje segue a
+    // MESMA regra — a linha da venda —, porque o carrinho de um lead da clínica não ia pro
+    // Bling nenhum enquanto ele seguia o cadastro do lead.
     const saleTenantId = String(intent.kit ? 'tricopill' : (intent.tenantId || l.tenant_id || ''))
     await insertInteraction(admin, {
       leadId: l.id,
@@ -942,7 +943,14 @@ export async function finalizeRedePaid(
     // KIT = produto Tricopill → Bling/ME vivem no tenant 'tricopill', NÃO no tenant do
     // lead. Sem isto, um lead que veio pelo canal da CLÍNICA comprando Tricopill tentava
     // criar o pedido no Bling da clínica (inexistente) e não ia pro Bling (bug Fabricio).
-    const blingTenant = intent.kit ? 'tricopill' : String(l.tenant_id ?? intent.tenantId)
+    // O PEDIDO SEGUE A LINHA DA VENDA, igual à nota: `intent.tenantId` é o tenant do
+    // pagamento (a linha que vendeu), e só cai no cadastro do lead quando a venda nasceu
+    // sem linha. Com a ordem invertida (`l.tenant_id ?? intent.tenantId`) o kit estava
+    // coberto, mas o CARRINHO (kit null) de um paciente cadastrado na clínica resolvia
+    // 'instituto-lorena', `shouldCreateBlingOrder` virava false e a venda NÃO ia pro Bling
+    // — sem pedido, sem baixa de estoque e sem conta a receber (caso Hugo Bongiorno,
+    // R$361,60 em 20/ago/26). [[crm_venda_segue_a_linha_nao_a_pessoa]]
+    const blingTenant = intent.kit ? 'tricopill' : String(intent.tenantId || l.tenant_id || '')
     // Cria pedido no Bling para KITS Tricopill E para vendas avulsas/carrinho do tenant 'tricopill'.
     // (Antes só criava quando havia `kit`; o carrinho do site salva kit=null e nunca ia pro Bling —
     //  o gateway do site é a e.Rede e o Pix é finalizado por aqui via cron. Espelha finalizeAsaasPaid.)
