@@ -446,6 +446,13 @@ function rowToReceipt(row: RedeRow, gateway: string, transactionId?: string | nu
     produto: (row.description && row.description.trim()) || (row.kit ? `Tricopill (${row.kit})` : 'Tricopill'),
     blingOrderId: row.bling_order_id ?? undefined,
     transactionId: transactionId ?? row.tid ?? undefined,
+    // DATA/HORA = quando o cliente PAGOU, não quando o vigia reenviou. Sem isto o
+    // comprovante caía em `new Date()` e carimbava a hora do cron: o Pix do Hugo entrou
+    // 20/ago 22:56 e o comprovante do grupo dizia 23:02. A janela do reenvio é de 24h, então
+    // venda do fim da noite chegava ao financeiro com a data do DIA SEGUINTE — e é por data
+    // que a conferência do caixa fecha. 28 comprovantes vieram por este caminho desde junho,
+    // o mais atrasado 16h44 depois do pagamento.
+    paidAtIso: row.paid_at ?? undefined,
     buyer: { name: row.customer_name, cpf: row.customer_doc, phone: row.phone },
     origem: 'Rede de segurança (reenvio automático)',
   }
