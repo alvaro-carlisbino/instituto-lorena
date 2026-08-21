@@ -1114,6 +1114,9 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
   // Confirmações repetidas do Asaas (PAYMENT_CONFIRMED depois PAYMENT_RECEIVED) não duplicam.
   if (wasPaid) return
 
+  // Mesma regra do `rede.ts`: a NOTA da venda segue a linha (tenant do pagamento), não o
+  // cadastro do lead. `blingTenant` (abaixo) continua decidindo onde o PEDIDO é criado.
+  const saleTenantId = String(kit ? 'tricopill' : (tenantId || l.tenant_id || ''))
   await insertInteraction(admin, {
     leadId: l.id,
     patientName: String(l.patient_name ?? 'Cliente'),
@@ -1121,7 +1124,7 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
     direction: 'system',
     author: 'Asaas',
     content: `💳 Pagamento ${method === 'pix' ? 'Pix' : 'no cartão'} confirmado (Asaas). ${(amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}.`,
-    tenantId: String(l.tenant_id ?? tenantId),
+    tenantId: saleTenantId,
   })
 
   // Conversão de COMPRA server-side (funil interno + GA4 + Meta). Captura 100%, PIX incluso.
@@ -1251,7 +1254,7 @@ export async function finalizeAsaasPaid(admin: SupabaseClient, localId: string):
       else if (ship.reason === 'entrega_local_maringa') { author = 'Logística'; content = `🛵 ENTREGA LOCAL (equipe) — entregar em: ${endLinha || 'endereço a confirmar'}.` }
       else if (ship.reason === 'retirada_clinica') { author = 'Logística'; content = `🏥 RETIRADA NA CLÍNICA — cliente vai buscar.` }
       else content = `📦 Envio NÃO gerado automaticamente (${ship.reason}).`
-      await insertInteraction(admin, { leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author, content, tenantId: blingTenant })
+      await insertInteraction(admin, { leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author, content, tenantId: saleTenantId })
     }
   } catch {
     // best-effort

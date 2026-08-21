@@ -916,6 +916,15 @@ export async function finalizeRedePaid(
     if (pagoStageId) leadUpdate.stage_id = pagoStageId
     await admin.from('leads').update(leadUpdate).eq('id', l.id)
     const valorBrl = (intent.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    // O CARIMBO DA NOTA SEGUE A VENDA, não o cadastro do lead. `intent.tenantId` já nasce
+    // com o tenant da LINHA (o `saleTenantId` do executor) e só cai no tenant do lead
+    // quando não há linha — que é exatamente o caso do ManyChat da clínica. Com a ordem
+    // invertida (`l.tenant_id ?? intent.tenantId`), confirmação de Pix do Tricopill em
+    // paciente da clínica ia parar na timeline da CLÍNICA: 8 notas assim até 21/ago/26,
+    // enquanto o pedido do mesmo pagamento ia certo pro Bling da loja.
+    // Só carimba a NOTA. `blingTenant` (abaixo) decide onde o PEDIDO é criado e continua
+    // como estava: mexer nele muda estoque e nota fiscal, é outra conversa.
+    const saleTenantId = String(intent.kit ? 'tricopill' : (intent.tenantId || l.tenant_id || ''))
     await insertInteraction(admin, {
       leadId: l.id,
       patientName: String(l.patient_name ?? 'Cliente'),
@@ -925,7 +934,7 @@ export async function finalizeRedePaid(
       content: isPix
         ? `✅ Pagamento via Pix confirmado (Rede). ${valorBrl}.`
         : `💳 Pagamento no cartão confirmado (Rede). ${valorBrl}.`,
-      tenantId: String(l.tenant_id ?? intent.tenantId),
+      tenantId: saleTenantId,
     })
 
     // Pedido automático no Bling (best-effort): só se auto_order_enabled, o pagamento
@@ -1057,7 +1066,7 @@ export async function finalizeRedePaid(
         }
         await insertInteraction(admin, {
           leadId: l.id, patientName: String(l.patient_name ?? 'Cliente'), channel: 'system', direction: 'system', author,
-          content, tenantId: blingTenant,
+          content, tenantId: saleTenantId,
         })
       }
     } catch {
