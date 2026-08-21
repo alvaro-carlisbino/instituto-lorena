@@ -40,8 +40,56 @@ function json(body: Record<string, unknown>, status = 200): Response {
 const MIN_RETOMAR_IA = 6 // a IA demora até ~2min; 6 já é anomalia
 const MIN_AVISAR_EQUIPE = 30
 const MIN_AVISAR_DONO = 90
-/** Não mexe em conversa velha: o que passou de 12h é assunto de follow-up, não de vigia. */
+/**
+ * Janela QUENTE: aqui a IA ainda pode retomar a conversa. Passadas 12h, responder um "oi"
+ * de ontem como se fosse agora é pior do que não responder, então a IA cala e o caso vira
+ * cobrança da equipe (bloco 3 abaixo).
+ */
 const HORAS_JANELA = 12
+
+// ── Zona morta (21/ago/2026) ────────────────────────────────────────────────
+// Este arquivo dizia "o que passou de 12h é assunto de follow-up". O sino dizia o mesmo
+// ("viram lead frio: vão para follow-up", usePendingHandoff.ts). E o follow-up não podia
+// pegar nenhum dos dois: `crm-followup-scheduler` exige ai_enabled=true E owner_mode
+// diferente de 'human', que é exatamente o que `disableAiOnHandoff` desfaz quando a Sofia
+// entrega o lead para a atendente. E esse handoff não expira.
+//
+// Resultado: no instante em que o lead vira oportunidade de verdade, ele saía de todas as
+// redes ao mesmo tempo. Medição do dia: 190 conversas na clínica e 44 no Tricopill com a
+// última mensagem do cliente e nenhuma resposta; pior caso esperando 88 dias.
+//
+// A saída aqui é COBRAR A EQUIPE, não falar com o paciente: handoff desliga a IA e essa
+// regra continua de pé. Nada é enviado para o cliente por este bloco.
+/** Abaixo disto ainda é a janela quente acima. */
+const HORAS_ABANDONO_MIN = HORAS_JANELA
+/** Acima disto a conversa é arqueologia, não fila de trabalho. */
+const DIAS_ABANDONO_MAX = 90
+/** Fronteira entre "esfriou ontem" (cobra sempre) e passivo acumulado (entra com teto). */
+const HORAS_PASSIVO = 48
+/**
+ * Quantos leads do PASSIVO estreiam na cobrança por dia. Sem teto, o conserto despejaria
+ * 224 alertas de uma vez e enterraria justamente quem está esperando hoje, que é o medo
+ * escrito na fila do sino. A 25/dia o acumulado escoa em ~9 dias.
+ */
+const TETO_PASSIVO_DIA = 25
+/** Teto por volta (o cron roda de 5 em 5 min); o teto do dia é quem manda de verdade. */
+const MAX_ABANDONO_POR_VOLTA = 5
+
+/**
+ * Cadência decrescente: quem esfriou ontem é cobrado todo dia, quem esfriou na semana
+ * passada de 3 em 3 dias, e o resto uma vez por semana. Cobrar o de 60 dias com a mesma
+ * insistência do de ontem treina a equipe a ignorar o alerta inteiro.
+ */
+function intervaloCobrancaMin(horas: number): number {
+  if (horas <= HORAS_PASSIVO) return 24 * 60
+  if (horas <= 7 * 24) return 72 * 60
+  return 7 * 24 * 60
+}
+
+function humanizarEspera(horas: number): string {
+  if (horas < 48) return `${horas}h`
+  return `${Math.floor(horas / 24)} dias`
+}
 
 type Pendencia = {
   lead_id: string
@@ -70,6 +118,69 @@ async function pendenciasSemResposta(admin: SupabaseClient): Promise<Pendencia[]
   })
   if (error) throw new Error(`rpc_falhou: ${error.message}`)
   return ((data ?? []) as Pendencia[]).filter((p) => p.phone && !p.phone.startsWith('888'))
+}
+
+type Abandonada = Omit<Pendencia, 'minutos'> & { horas: number }
+
+/**
+ * A zona morta: cliente falou por último, ninguém respondeu, e já passou da janela quente.
+ *
+ * Sem o filtro de telefone sintético que a fila de cima usa: aqui ninguém envia nada, só
+ * se cobra a equipe, e um lead de Instagram sem WhatsApp de verdade é respondido no chat
+ * do CRM como qualquer outro. Excluí-lo só o esconderia.
+ */
+async function pendenciasAbandonadas(admin: SupabaseClient): Promise<Abandonada[]> {
+  const { data, error } = await admin.rpc('crm_pendencias_abandonadas', {
+    p_min_horas: HORAS_ABANDONO_MIN,
+    p_max_dias: DIAS_ABANDONO_MAX,
+  })
+  if (error) throw new Error(`rpc_abandono_falhou: ${error.message}`)
+  return (data ?? []) as Abandonada[]
+}
+
+/**
+ * Quando cada lead foi cobrado pela última vez, por trilha.
+ *
+ * Existe porque o dedupe do `notifyAgents` é tarde demais para esta decisão: ele impede a
+ * notificação repetida, mas o lead já gastou a vaga da volta. Com 10 conversas frescas e
+ * 5 vagas por volta, as mesmas 10 ocupariam todas as vagas de 5 em 5 minutos durante 24h
+ * e o passivo NUNCA sairia do lugar. Quem já foi cobrado tem de sair da fila antes do
+ * corte, não depois.
+ *
+ * Conta LEAD distinto, não linha: `notifyAgents` grava uma linha por destinatário.
+ */
+async function ultimaCobrancaPorLead(admin: SupabaseClient): Promise<Map<string, number>> {
+  const desde = new Date(Date.now() - 8 * 24 * 3_600_000).toISOString() // maior cadência + folga
+  const mapa = new Map<string, number>()
+  for (const lane of ['vigia-fresco', 'vigia-passivo']) {
+    const { data } = await admin
+      .from('app_inbox_notifications')
+      .select('metadata, created_at')
+      .gte('created_at', desde)
+      .contains('metadata', { dedupeKey: lane })
+      .limit(5000)
+    for (const row of (data ?? []) as Array<{ metadata?: { leadId?: string }; created_at: string }>) {
+      const id = row.metadata?.leadId
+      if (!id) continue
+      const quando = new Date(row.created_at).getTime()
+      const atual = mapa.get(String(id)) ?? 0
+      if (quando > atual) mapa.set(String(id), quando)
+    }
+  }
+  return mapa
+}
+
+/** Leads distintos do passivo que estrearam na cobrança desde a virada do dia. */
+function passivoCobradoHoje(ultima: Map<string, number>, passivo: Abandonada[]): number {
+  const inicioDoDia = new Date()
+  inicioDoDia.setUTCHours(0, 0, 0, 0)
+  const corte = inicioDoDia.getTime()
+  let n = 0
+  for (const a of passivo) {
+    const quando = ultima.get(a.lead_id)
+    if (quando && quando >= corte) n++
+  }
+  return n
 }
 
 Deno.serve(async (req) => {
@@ -249,7 +360,86 @@ Deno.serve(async (req) => {
       registrar('aguardando', `IA calada (${p.owner_mode}), ${p.minutos}min`)
     }
 
-    return json({ ok: true, dry: body.dry === true, ...resultado })
+    // ── 3. Esfriou e ninguém voltou ──────────────────────────────────────────
+    // Ninguém fala com o paciente aqui. O bloco só empurra o caso de volta para a mesa de
+    // quem pode resolver, com cadência decrescente para não virar ruído.
+    const abandono = { olhados: 0, frescos_cobrados: 0, passivo_cobrado: 0, teto_batido: false }
+    try {
+      const abandonadas = await pendenciasAbandonadas(admin)
+      abandono.olhados = abandonadas.length
+
+      const ultima = await ultimaCobrancaPorLead(admin)
+      // Fora quem ainda está dentro da própria cadência. Sem este corte a fila nunca anda.
+      const devido = (a: Abandonada) => {
+        const quando = ultima.get(a.lead_id)
+        if (!quando) return true
+        return Date.now() - quando >= intervaloCobrancaMin(a.horas) * 60_000
+      }
+
+      const frescas = abandonadas.filter((a) => a.horas <= HORAS_PASSIVO)
+      // Passivo entra do MAIS RECENTE para o mais antigo, ao contrário da fila quente.
+      // Ali "quem esperou mais vai primeiro" é justo porque todo mundo ainda é recuperável.
+      // Aqui não: o teto é de 25 por dia e quem escreveu anteontem tem chance real, enquanto
+      // o de 88 dias já resolveu a vida em outro lugar. Estrear a cobrança pelos mais velhos
+      // gastaria a primeira semana em arqueologia e ensinaria a equipe a ignorar o alerta.
+      const passivo = abandonadas
+        .filter((a) => a.horas > HORAS_PASSIVO)
+        .sort((a, b) => a.horas - b.horas)
+
+      // O passivo tem teto do dia; quem esfriou ontem não espera na fila do passivo.
+      const sobraDoDia = Math.max(0, TETO_PASSIVO_DIA - passivoCobradoHoje(ultima, passivo))
+      abandono.teto_batido = passivo.length > 0 && sobraDoDia === 0
+
+      // Orçamento por trilha, não compartilhado: dez conversas de ontem não podem consumir
+      // as vagas do passivo, nem o contrário.
+      const fila = [
+        ...frescas.filter(devido).slice(0, MAX_ABANDONO_POR_VOLTA)
+          .map((a) => ({ item: a, lane: 'fresco' as const })),
+        ...passivo.filter(devido).slice(0, Math.min(sobraDoDia, MAX_ABANDONO_POR_VOLTA))
+          .map((a) => ({ item: a, lane: 'passivo' as const })),
+      ]
+
+      for (const { item, lane } of fila) {
+        if (body.dry === true) {
+          resultado.detalhes.push({
+            lead: item.lead_id,
+            nome: item.patient_name,
+            minutos: item.horas * 60,
+            acao: `cobraria_${lane}`,
+          })
+          continue
+        }
+        const espera = humanizarEspera(item.horas)
+        const criadas = await notifyAgents(admin, {
+          leadId: item.lead_id,
+          kind: 'urgent',
+          title: `Sem resposta há ${espera}`,
+          body: `${item.patient_name} escreveu "${item.content.slice(0, 70)}" e ninguém respondeu.`,
+          includeOwner: true,
+          // Polo da CONVERSA: quem cobra é o time da linha por onde a pessoa falou, não o
+          // do cadastro. Mesma regra do bloco 1.
+          tenantId: String(item.conversa_tenant_id ?? '').trim() || item.tenant_id,
+          dedupeKey: `vigia-${lane}`,
+          dedupeWindowMinutes: intervaloCobrancaMin(item.horas),
+        }).catch(() => 0)
+        if (criadas > 0) {
+          if (lane === 'fresco') abandono.frescos_cobrados++
+          else abandono.passivo_cobrado++
+        }
+        resultado.detalhes.push({
+          lead: item.lead_id,
+          nome: item.patient_name,
+          minutos: item.horas * 60,
+          acao: criadas > 0 ? `cobrado_${lane}` : 'ja_cobrado',
+        })
+      }
+    } catch (e) {
+      // O bloco novo não pode derrubar o vigia quente: quem espera há 40 minutos importa
+      // mais do que quem espera há 40 dias.
+      console.warn('[vigia] abandono falhou:', e instanceof Error ? e.message : String(e))
+    }
+
+    return json({ ok: true, dry: body.dry === true, ...resultado, abandono })
   } catch (e) {
     return json({ ok: false, error: 'vigia_falhou', message: e instanceof Error ? e.message : String(e) }, 500)
   }

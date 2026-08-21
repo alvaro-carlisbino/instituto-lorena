@@ -23,6 +23,13 @@ function json(body: Record<string, unknown>, status = 200): Response {
 /**
  * Schedule de follow-ups automáticos (janela de 24h após último inbound sem resposta).
  *
+ * ATENÇÃO ao alcance real desta rotina, porque dois outros lugares já assumiram errado que
+ * ela cobre mais do que cobre: ela só toca conversa que a IA ainda governa (ai_enabled=true
+ * E owner_mode<>'human') e só nas primeiras 24h. Lead entregue à atendente pelo
+ * `disableAiOnHandoff` sai daqui para sempre — de propósito, handoff desliga a IA.
+ * Quem cobra esses é o `crm-atendimento-vigia` (trilhas vigia-fresco/vigia-passivo), e ele
+ * cobra a EQUIPE, não o paciente.
+ *
  * Intervalos (em horas após o último inbound sem resposta):
  *   1h  → follow-up 1
  *   2h  → follow-up 2

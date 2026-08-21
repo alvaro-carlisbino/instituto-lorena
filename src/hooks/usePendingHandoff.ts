@@ -4,7 +4,14 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 
-/** Handoffs mais antigos que isto viram lead frio: vão para follow-up, não para o alerta. */
+/**
+ * Handoffs mais antigos que isto saem do card e viram cobrança do vigia
+ * (`crm-atendimento-vigia`, trilhas `vigia-fresco`/`vigia-passivo`, que chegam pelo Inbox).
+ *
+ * Até 21/ago/2026 este comentário dizia "vão para follow-up", e era mentira: o
+ * `crm-followup-scheduler` exige ai_enabled=true E owner_mode<>'human', que é exatamente o
+ * que o handoff desfaz. Quem saía daqui não ia para lugar nenhum.
+ */
 export const HANDOFF_WINDOW_HOURS = 48
 /**
  * Janela da fila "ninguém respondeu". Maior que a do handoff porque aqui não houve promessa
