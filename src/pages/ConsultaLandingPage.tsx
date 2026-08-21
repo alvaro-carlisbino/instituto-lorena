@@ -1132,7 +1132,7 @@ export function ConsultaLandingPage() {
             <img src="/marca/lorena.svg" alt="Instituto Lorena Visentainer" className="h-10 w-auto" />
             <p className="mt-4 text-sm leading-relaxed text-[#252A33]/70">
               Av. Nóbrega, 814 · Zona 4 · Maringá/PR · 87014-180
-              <span className="block">Unidade em Londrina/PR</span>
+              <span className="block">Atendimento em Londrina/PR uma vez por mês</span>
             </p>
           </div>
           <div className="text-sm text-[#252A33]/70">
