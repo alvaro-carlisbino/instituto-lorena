@@ -391,6 +391,13 @@ export async function matchLeadsToPatients(
  * Move o lead para a etapa certa conforme o status real da agenda Shosp (só
  * AVANÇA, nunca volta). Substitui o gatilho da agenda interna — Shosp é a fonte
  * da verdade. Casa a etapa pelo NOME dentro do pipeline do lead (sem hardcode de id).
+ *
+ * A nota de sistema é carimbada com o tenant do FUNIL onde o card se moveu, nunca
+ * pela linha de WhatsApp. Sem o carimbo explícito, o trigger `_stamp_tenant_id_from_lead`
+ * aplica a regra "a conversa segue a linha", que vale para mensagem e não para evento
+ * de funil: em 21/ago/26 o João (paciente da clínica, prontuário 7044) tinha falado de
+ * manhã na linha do Tricopill, e o aviso de "movido para Agendado" no funil PROTOCOLOS
+ * E SPA foi parar na timeline da loja. Evento de funil pertence ao polo do funil.
  */
 async function advanceLeadStageFromShosp(
   admin: SupabaseClient,
@@ -406,6 +413,12 @@ async function advanceLeadStageFromShosp(
     .maybeSingle()
   const l = lead as { pipeline_id?: string; stage_id?: string; patient_name?: string } | null
   if (!l?.pipeline_id) return false
+  const { data: pipe } = await admin
+    .from('pipelines')
+    .select('tenant_id')
+    .eq('id', l.pipeline_id)
+    .maybeSingle()
+  const pipelineTenant = (pipe as { tenant_id?: string } | null)?.tenant_id ?? null
   const { data: stages } = await admin
     .from('pipeline_stages')
     .select('id, name, position')
@@ -432,6 +445,7 @@ async function advanceLeadStageFromShosp(
       author: 'Sincronização Shosp',
       content: `Lead movido para "${target.name}" pela agenda Shosp (${hasComparecido ? 'paciente compareceu' : 'consulta agendada'}).`,
       happenedAt: nowIso(),
+      tenantId: pipelineTenant ?? undefined,
     })
   } catch {
     // log best-effort
