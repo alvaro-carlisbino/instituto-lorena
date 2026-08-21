@@ -59,6 +59,7 @@ async function resolverLinha(lead: { id: string; whatsapp_instance_id: string | 
   return {
     instanceId: r.instanceId,
     botKind: r.botKind,
+    lineTenantId: r.lineTenantId,
     ignorada: r.crossTenantInstanceIgnored,
     inativaIgnorada: r.inactiveInstanceIgnored,
     updates,
@@ -109,4 +110,41 @@ Deno.test('lead sem linha cai no padrão do próprio tenant e fica amarrado', as
   assertEquals(r.instanceId, 'tricopill-wapi')
   assertEquals(r.botKind, 'sales')
   assertEquals(r.updates, [{ whatsapp_instance_id: 'tricopill-wapi' }])
+})
+
+// ── Carimbo: quem gravou a interação precisa saber por QUAL linha o envio saiu ────────
+//
+// 21/ago/26: a confirmação de pagamento do Tricopill do Antonio Martucci saiu pela linha
+// da CLÍNICA. O trigger carimba pelo vínculo do lead, então mesmo corrigindo a linha o
+// registro cairia no polo errado. `lineTenantId` é o polo de quem REALMENTE enviou.
+
+Deno.test('lineTenantId é o polo da linha que enviou, não o do cadastro do lead', async () => {
+  // Lead da clínica amarrado na linha de vendas: o envio cai na linha da clínica...
+  const descartada = await resolverLinha({
+    id: 'lead-c7de3839-9fe',
+    whatsapp_instance_id: 'tricopill-wapi',
+    tenant_id: 'instituto-lorena',
+  })
+  assertEquals(descartada.instanceId, 'wa-clinica')
+  assertEquals(descartada.lineTenantId, 'instituto-lorena')
+
+  // ...e o inverso, que é o caso da venda: o chamador declara o polo do ASSUNTO
+  // (senderTenantId) e a linha resolvida — e o carimbo — são do Tricopill.
+  const assuntoDaVenda = await resolverLinha({
+    id: 'lead-c7de3839-9fe',
+    whatsapp_instance_id: null,
+    tenant_id: 'tricopill',
+  })
+  assertEquals(assuntoDaVenda.instanceId, 'tricopill-wapi')
+  assertEquals(assuntoDaVenda.lineTenantId, 'tricopill')
+})
+
+Deno.test('linha do próprio polo devolve o tenant dela no carimbo', async () => {
+  const r = await resolverLinha({
+    id: 'lead-1',
+    whatsapp_instance_id: 'tricopill-wapi',
+    tenant_id: 'tricopill',
+  })
+  assertEquals(r.instanceId, 'tricopill-wapi')
+  assertEquals(r.lineTenantId, 'tricopill')
 })

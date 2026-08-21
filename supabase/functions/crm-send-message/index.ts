@@ -39,6 +39,9 @@ const INTERNAL_SOURCE_AUTHORS: Record<string, string> = {
   reengage_reativacao: 'Assistente IA (reengajamento)',
   reengage_recompra: 'Assistente IA (recompra)',
   cart_recovery: 'Assistente IA (carrinho)',
+  // Confirmação de pagamento (rede.ts/finalizeRedePaid). Sem entrada aqui o autor sairia
+  // como 'Operador' e a equipe leria como se alguém tivesse digitado a mensagem.
+  confirmacao_pagamento: 'Confirmação de pagamento',
 }
 
 Deno.serve(async (req) => {
@@ -110,6 +113,14 @@ Deno.serve(async (req) => {
      * a janela do lado dele). Demais valores tratados como envio humano.
      */
     source?: string
+    /**
+     * Classificação anti-ban forçada. Só 'transactional' é aceito, e só de rotina interna
+     * (service role): é a confirmação que a PRÓPRIA pessoa acabou de provocar — pagou, e
+     * precisa conferir nome/CPF/endereço. Sem isto o guard classificaria a confirmação de
+     * uma compra do site como contato novo ('cold') e a seguraria, porque o cliente nunca
+     * escreveu naquela linha. Não fura opt-out (a checagem de opt-out é acima e continua).
+     */
+    antiBanKind?: string
   }
   try {
     body = (await req.json()) as typeof body
@@ -390,6 +401,9 @@ Deno.serve(async (req) => {
             author: user?.email || 'Consultor',
             content: text || mediaUrls.map((m) => m.url).join('\n'),
             happenedAt: nowIso(),
+            // ManyChat é a conta do polo da PESSOA. Sem tenant explícito o trigger
+            // carimbaria pela linha vinculada, que pode ser a do outro polo.
+            tenantId: row.tenant_id,
           })
           try {
             await admin.from('crm_media_items').insert(
@@ -474,6 +488,8 @@ Deno.serve(async (req) => {
         author: user?.email || 'Consultor',
         content: replyText,
         happenedAt: nowIso(),
+        // Idem: ManyChat carimba com o polo da pessoa.
+        tenantId: row.tenant_id,
       })
 
       if (mediaUrls.length > 0) {
@@ -512,8 +528,14 @@ Deno.serve(async (req) => {
   let provider: WhatsappProvider
   let resolvedBotKind: string | null = null
   let resolvedInstanceId: string | null = null
+  let resolvedLineTenantId: string | null = null
   try {
-    ;({ provider, botKind: resolvedBotKind, instanceId: resolvedInstanceId } =
+    ;({
+      provider,
+      botKind: resolvedBotKind,
+      instanceId: resolvedInstanceId,
+      lineTenantId: resolvedLineTenantId,
+    } =
       await resolveOutboundProviderForLead(
         admin,
         {
@@ -606,10 +628,15 @@ Deno.serve(async (req) => {
     //  • `antiBanHumanOverride` — pessoa na tela: fura teto de volume e janela de horário,
     //    porque quem está a olhar a conversa sabe o que está a fazer. NÃO fura contato novo.
     //  • `antiBanColdOverride` — o "assumo o risco" explícito, que também libera contato novo.
+    const antiBanKind =
+      isServiceRole && String(body.antiBanKind ?? '').trim() === 'transactional'
+        ? 'transactional'
+        : undefined
     const antiBanMeta = {
       antiBanSource: sourceTag || (isServiceRole ? 'rotina' : 'painel'),
       antiBanHumanOverride: !isServiceRole,
       antiBanColdOverride: body.manualOverride === true,
+      ...(antiBanKind ? { antiBanKind } : {}),
     }
 
     let sent = await provider.sendMessage({
@@ -642,6 +669,12 @@ Deno.serve(async (req) => {
       author: outboundAuthor,
       content: outboundContent,
       externalMessageId,
+      // Carimbo pela linha que REALMENTE enviou, não pelo vínculo do lead. Sem isto o
+      // trigger `_stamp_tenant_id_from_lead` lê `leads.whatsapp_instance_id` — que é onde
+      // a pessoa conversa, não por onde este envio saiu — e a mensagem cai no CRM do polo
+      // errado nos dois sentidos: confirmação de venda do Tricopill dentro da clínica
+      // (21/ago/26, caso Antonio) e lembrete de cirurgia dentro do Tricopill.
+      tenantId: resolvedLineTenantId || row.tenant_id,
     })
     const mediaRows: Array<{
       lead_id: string

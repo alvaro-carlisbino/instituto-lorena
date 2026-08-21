@@ -663,24 +663,60 @@ export type RedeCard = {
 
 export type RedePayResult = { status: 'paid' | 'failed'; returnCode: string; message: string; tid: string | null }
 
-// Envia um texto pelo WhatsApp (w-api) usando a linha ATIVA do tenant. Best-effort (false em falha).
-async function sendWapiText(admin: SupabaseClient, tenantId: string, phone: string, text: string): Promise<boolean> {
-  const to = String(phone || '').replace(/\D/g, '')
-  if (to.length < 10) return false
+/**
+ * Confirmação de venda ao cliente — sai pela linha do polo da VENDA.
+ *
+ * O que havia aqui até 21/ago/26 era um POST direto na W-API escolhendo "a linha ativa do
+ * tenant do LEAD". Para quem é paciente da clínica E cliente do Tricopill isso mandava a
+ * confirmação do pedido da loja pelo WhatsApp da CLÍNICA (+554491493656): o cliente
+ * respondia lá, a conversa migrava de linha e o bot da clínica passava a falar de entrega
+ * de suplemento. Caso Antonio Martucci, 21/ago 10:57 — e mais 10 vendas antes dele.
+ *
+ * Agora vai pelo `crm-send-message`, que já sabe a regra: `senderTenantId` = polo do
+ * ASSUNTO (a venda), a linha do lead é ignorada sem apagar o vínculo, `requireBotKind`
+ * derruba com 409 se ainda assim resolver para o polo errado, e o envio fica GRAVADO na
+ * timeline (o POST cru não gravava nada — a confirmação era invisível no CRM).
+ *
+ * Falha fechada: polo da venda sem linha ativa não cai na linha do outro polo, não manda.
+ */
+async function sendSaleConfirmation(
+  admin: SupabaseClient,
+  args: { leadId: string; saleTenantId: string; text: string },
+): Promise<{ ok: boolean; note: string }> {
+  const url = (Deno.env.get('SUPABASE_URL') ?? '').trim().replace(/\/$/, '')
+  const serviceRole = (Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '').trim()
+  const tenantId = String(args.saleTenantId || '').trim()
+  if (!url || !serviceRole) return { ok: false, note: 'sem credencial de serviço' }
+  if (!tenantId) return { ok: false, note: 'venda sem polo resolvido' }
+  // O bot_kind esperado é o da linha do polo da VENDA — não um literal 'sales', senão uma
+  // cobrança da clínica (cirurgia, protocolo) nunca conseguiria confirmar.
+  const { data: linha } = await admin.from('whatsapp_channel_instances')
+    .select('bot_kind')
+    .eq('tenant_id', tenantId).eq('active', true)
+    .order('sort_order', { ascending: true }).limit(1).maybeSingle()
+  const requireBotKind = String((linha as { bot_kind?: string } | null)?.bot_kind ?? '').trim().toLowerCase()
+  if (!requireBotKind) return { ok: false, note: `polo ${tenantId} sem linha de WhatsApp ativa` }
   try {
-    const { data } = await admin.from('whatsapp_channel_instances')
-      .select('wapi_instance_id, wapi_token, wapi_base_url')
-      .eq('tenant_id', tenantId).eq('channel_provider', 'wapi').eq('active', true).limit(1).maybeSingle()
-    const row = data as { wapi_instance_id?: string; wapi_token?: string; wapi_base_url?: string | null } | null
-    const instanceId = row?.wapi_instance_id ? String(row.wapi_instance_id).trim() : ''
-    const token = row?.wapi_token ? String(row.wapi_token).trim() : ''
-    if (!instanceId || !token) return false
-    const baseUrl = ((row?.wapi_base_url ? String(row.wapi_base_url) : '').trim() || 'https://api.w-api.app/v1').replace(/\/$/, '')
-    const res = await fetch(`${baseUrl}/message/send-text?instanceId=${encodeURIComponent(instanceId)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ phone: to, message: text }),
+    const res = await fetch(`${url}/functions/v1/crm-send-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceRole}` },
+      body: JSON.stringify({
+        leadId: args.leadId,
+        text: args.text,
+        source: 'confirmacao_pagamento',
+        senderTenantId: tenantId,
+        requireBotKind,
+        // A pessoa acabou de pagar e precisa conferir nome/CPF/endereço: é transacional,
+        // não abordagem. Sem isto, a compra vinda do SITE (cliente que nunca escreveu na
+        // linha) seria classificada como contato novo e a confirmação ficaria retida.
+        antiBanKind: 'transactional',
+      }),
     })
-    return res.ok
-  } catch { return false }
+    if (res.ok) return { ok: true, note: '' }
+    return { ok: false, note: (await res.text().catch(() => '')).slice(0, 200) || `http ${res.status}` }
+  } catch (e) {
+    return { ok: false, note: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 // Mensagem de confirmação ao cliente: confere nome/CPF/endereço e PEDE o que faltar.
@@ -1112,7 +1148,11 @@ export async function finalizeRedePaid(
     // na conversão. O fallback antigo era o literal "Tricopill", então uma venda da clínica
     // sem descrição virava "Tricopill" na mensagem que o paciente recebia.
     // Se a leitura falhar, cai no id do próprio polo — nunca no nome do outro negócio.
-    const brandTenantId = String(l.tenant_id ?? intent.tenantId ?? '')
+    // Mesma regra do pedido e da nota: a marca é a do polo da VENDA. Invertido
+    // (`l.tenant_id` primeiro), a confirmação de uma venda do Tricopill para paciente da
+    // clínica era assinada com a marca da clínica — e o e-mail ao cliente saía (ou deixava
+    // de sair) pelo remetente do polo errado.
+    const brandTenantId = saleTenantId || String(intent.tenantId ?? l.tenant_id ?? '')
     const marca = await getTenantBrand(admin, brandTenantId).catch(() => ({
       tenantId: brandTenantId, appName: brandTenantId, checkoutBaseUrl: '', siteUrl: '', emailFrom: '', supportPhone: '',
     }))
@@ -1128,7 +1168,20 @@ export async function finalizeRedePaid(
         nome: intent.customerName ?? opts.cardholderName ?? undefined,
         cad: cadMsg, ent: entMsg, cpfPayment: intent.customerDoc ?? undefined, pedidoDesc, valorBRL,
       })
-      await sendWapiText(admin, String(l.tenant_id ?? intent.tenantId), String(l.phone ?? ''), msg)
+      const envio = await sendSaleConfirmation(admin, { leadId: l.id, saleTenantId: brandTenantId, text: msg })
+      if (!envio.ok) {
+        // Falhar CALADO aqui é o que fazia a confirmação sumir: o POST cru devolvia false e
+        // ninguém ficava sabendo. Agora a equipe vê na timeline do polo da venda e manda na mão.
+        await insertInteraction(admin, {
+          leadId: l.id,
+          patientName: String(l.patient_name ?? 'Cliente'),
+          channel: 'system',
+          direction: 'system',
+          author: 'CRM',
+          content: `⚠️ Confirmação de pagamento NÃO enviada ao cliente (${envio.note}). Mande pela conversa da linha deste polo.`,
+          tenantId: brandTenantId,
+        }).catch(() => {})
+      }
       // E-mails (Resend): confirmação ao cliente (se houver e-mail) + aviso interno de venda. Best-effort.
       try {
         const nomeEmail = intent.customerName ?? opts.cardholderName ?? undefined

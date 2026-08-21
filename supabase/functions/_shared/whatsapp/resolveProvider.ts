@@ -17,6 +17,13 @@ export type ResolvedOutboundProvider = {
   channelProvider: string
   /** 'clinic' | 'sales' — o polo da linha que vai sair. */
   botKind: string | null
+  /**
+   * Tenant da linha que REALMENTE vai sair. Não é o tenant do lead: quando a linha
+   * vinculada é descartada (outro polo/desativada) ou quando o chamador resolve pelo
+   * polo do ASSUNTO, quem envia é outra linha. Quem grava a interação carimba com
+   * ISTO — senão a mensagem aparece no CRM do polo errado.
+   */
+  lineTenantId: string | null
   /** Linha do outro polo foi ignorada; o id descartado fica aqui para auditoria. */
   crossTenantInstanceIgnored: string | null
   /** Linha desativada no painel foi ignorada; o id descartado fica aqui para auditoria. */
@@ -58,6 +65,7 @@ export async function resolveOutboundProviderForLead(
   let botKind: string | null = null
   let crossTenantInstanceIgnored: string | null = null
   let inactiveInstanceIgnored: string | null = null
+  let lineTenantId: string | null = null
 
   if (effectiveInstanceId) {
     const { data: instRow } = await admin
@@ -87,6 +95,7 @@ export async function resolveOutboundProviderForLead(
     } else {
       channelProvider = String(inst?.channel_provider ?? '').toLowerCase() || null
       botKind = String(inst?.bot_kind ?? '').toLowerCase() || null
+      lineTenantId = String(inst?.tenant_id ?? '') || null
     }
   }
 
@@ -105,6 +114,10 @@ export async function resolveOutboundProviderForLead(
         (defRow as { channel_provider?: string }).channel_provider ?? '',
       ).toLowerCase() || null
       botKind = String((defRow as { bot_kind?: string }).bot_kind ?? '').toLowerCase() || null
+      // A busca do padrão é filtrada por `tenant_id = lead.tenant_id`, então a linha
+      // escolhida aqui é sempre desse polo. (O chamador que envia por assunto de outro
+      // polo passa o tenant do ASSUNTO neste campo — ver crm-send-message.)
+      lineTenantId = lead.tenant_id || null
       // Só amarra a linha no lead quando ela foi escolhida por ausência de vínculo.
       // Se descartamos a linha (outro polo ou desativada), o vínculo original fica de pé:
       // ele conta onde a pessoa conversa, e sobrescrever aqui apagaria essa informação.
@@ -138,6 +151,7 @@ export async function resolveOutboundProviderForLead(
     instanceId: effectiveInstanceId,
     channelProvider: waProvider,
     botKind,
+    lineTenantId,
     crossTenantInstanceIgnored,
     inactiveInstanceIgnored,
   }
