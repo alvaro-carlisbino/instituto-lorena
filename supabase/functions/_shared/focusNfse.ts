@@ -100,10 +100,10 @@ export type FocusConfig = {
   telefonePrestador: string
   emailPrestador: string
   /**
-   * Grupo da reforma tributária (IBS/CBS), do leiaute 1.01 da DPS. `null` = não manda, que é o
-   * estado provado em produção (as notas 314 a 320 autorizaram assim) e o que a nota do portal
-   * nacional também faz. Só ligar depois de provar em homologação: CST/cClassTrib errados
-   * fazem a SEFIN rejeitar a nota inteira.
+   * Grupo da reforma tributária (IBS/CBS), do leiaute 1.01 da DPS. `null` = não manda, que foi o
+   * estado das notas 314 a 320. **LIGADO em produção desde 21/ago/2026** (`focus.ibs_cbs` no
+   * polo): CST 000 · cClassTrib 000001 · cIndOp 030101. Só ligar depois de provar em
+   * homologação: CST/cClassTrib errados fazem a SEFIN rejeitar a nota inteira.
    *
    * **É ISTO que acende "Exclusões e Reduções da Base de Cálculo" no PDF da Focus.** O campo é
    * a soma de ISS + PIS + COFINS (confirmado pelo contador em 21/ago/2026) e não existe no XML
@@ -113,10 +113,24 @@ export type FocusConfig = {
    * exatamente ISS 13,00 + PIS 4,22 + COFINS 19,50.
    *
    * O preço é que o bloco é desenhado INTEIRO: junto vêm IBS R$ 0,61 e CBS R$ 5,52 (R$ 6,13
-   * sobre R$ 650), que a nota do portal NÃO tem. Não existe meio-termo — o financeiro pediu só
-   * a linha das exclusões (Kauan, 21/ago) e isso não é um botão que a gente tenha. Por isso o
-   * grupo segue desligado até o contador decidir se a nota pode sair com IBS/CBS impresso.
-   * O CRM mostra a soma por conta própria; ver `lerValoresDoXml`.
+   * sobre R$ 650). Não existe meio-termo — o financeiro pediu só a linha das exclusões (Kauan,
+   * 21/ago) e isso não é um botão que a gente tenha; a escolha era bloco inteiro ou nada, e o
+   * financeiro escolheu o bloco. O CRM mostra a soma por conta própria de qualquer jeito, e é
+   * o que salva as notas antigas; ver `lerValoresDoXml`.
+   *
+   * **`cIndOp` não é detalhe de preenchimento: ele decide duas coisas.** (1) Se o endereço do
+   * tomador é obrigatório: 100301 ("domicílio do adquirente") faz a SEFIN recusar a DPS sem
+   * endereço com **E0234**, e a tela emite sem endereço todo dia. (2) O município de incidência
+   * do IBS/CBS: com 100301 a nota aponta a cidade do PACIENTE (medido em homologação, nota 12:
+   * endereço em Londrina → "030101/4113700/Londrina"). O **Anexo VIII da Receita** (planilha de
+   * correlação item × NBS × cIndOp × cClassTrib, em gov.br/nfse) manda **030101, "local da
+   * prestação"**, para todos os itens 04.0x — clínica e serviço médico inclusive. 100301 é o
+   * residual de "demais serviços", e foi o que o financeiro tinha lido de uma nota do portal.
+   *
+   * Pendente do contador: para o item 04.01 a mesma planilha traz cClassTrib **200029**
+   * ("serviços de saúde humana", Anexo III), que exige **CST 200** (E0959 com CST 000) e imprime
+   * redução de 60% — IBS/CBS cai de R$ 6,13 para R$ 2,46 (nota 13 de homologação). Trocar é
+   * config, não deploy. Em 2026 nenhuma das duas cobra nada.
    *
    * Em 2027 o IBS/CBS deixa de ser ano de teste e aí o grupo passa a valer de verdade.
    *
