@@ -205,6 +205,10 @@ Deno.serve(async (req) => {
       case 'configure_webhooks': {
         // Um clique aponta os cinco ganchos. Mensagem recebida vai para o webhook que já
         // trata conversa; sessão e entrega vão para o de eventos, que é quem trava a linha.
+        // O de eventos também é por onde chega o que a EQUIPE manda pelo celular ou pelo
+        // WhatsApp Web: quando o payload é mensagem de verdade (e não recibo de entrega),
+        // ele repassa para o crm-wapi-webhook, que grava como saída da equipe. Sem isso o
+        // atendimento feito fora da plataforma fica invisível no CRM.
         const alvos: Array<{ nome: string; path: string; url: string }> = [
           { nome: 'recebidas', path: '/webhook/update-webhook-received', url: urlRecebidas },
           { nome: 'conectou', path: '/webhook/update-webhook-connected', url: urlEventos },

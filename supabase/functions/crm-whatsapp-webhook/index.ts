@@ -187,7 +187,9 @@ Deno.serve(async (req) => {
           patientName: outboundPatientLabel,
           channel: 'whatsapp',
           direction: 'out',
-          author: normalized.fromName || 'WhatsApp',
+          // Equipe falando de FORA do CRM. Mesmo autor do ramo da W-API, para as duas
+          // linhas contarem igual em analytics.
+          author: 'Equipe (WhatsApp)',
           content: normalized.text,
           happenedAt: normalized.happenedAt,
           externalMessageId: normalized.externalMessageId,

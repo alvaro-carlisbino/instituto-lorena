@@ -157,8 +157,12 @@ export class WapiProvider implements WhatsappProvider {
     ])
     if (!messageId) return null
 
+    const fromMe = Boolean(
+      payload.fromme ?? getByPath(payload, 'fromMe') ?? getByPath(payload, 'data.fromMe') ?? getByPath(payload, 'data.key.fromMe'),
+    )
+
     // Remetente: sender.id (formato real) ou variações. Pode vir com @c.us / @s.whatsapp.net.
-    const fromRaw = firstString(payload, [
+    const remetenteRaw = firstString(payload, [
       'sender.id',
       'sender.phone',
       'phone',
@@ -167,6 +171,18 @@ export class WapiProvider implements WhatsappProvider {
       'data.from',
       'data.key.remoteJid',
     ])
+    // Em mensagem que a EQUIPE mandou (`fromMe`), `sender` é a própria clínica: seguir por ele
+    // criaria um lead com o número do próprio consultório. Quem interessa aí é o `chat`, que em
+    // conversa 1:1 é sempre a paciente. Para entrada nada muda, o caminho continua o `sender`.
+    const contraparteRaw = firstString(payload, [
+      'chat.id',
+      'chatId',
+      'chat_id',
+      'data.chat.id',
+      'key.remoteJid',
+      'data.key.remoteJid',
+    ])
+    const fromRaw = fromMe ? (contraparteRaw || remetenteRaw) : remetenteRaw
     if (fromRaw.toLowerCase().includes('@g.us')) return null
     const fromPhone = digitsOnly(fromRaw)
     if (fromPhone.length < 10) return null
@@ -180,7 +196,9 @@ export class WapiProvider implements WhatsappProvider {
       'data.pushName',
       'contact.name',
     ])
-    const fromName = pushName || 'Contato WhatsApp'
+    // Em `fromMe` o pushName é o da própria clínica; não serve como nome de paciente.
+    // O `upsertLeadByPhone` preserva nome bom que já exista, então o placeholder é seguro.
+    const fromName = fromMe ? 'Contato WhatsApp' : (pushName || 'Contato WhatsApp')
 
     // Texto: msgcontent.conversation | extendedTextMessage.text | legenda de mídia.
     let text = firstString(payload, [
@@ -216,10 +234,6 @@ export class WapiProvider implements WhatsappProvider {
       else if (mc.contactMessage || mc.contactsArrayMessage) text = '👤 Contato'
     }
     if (!text) return null
-
-    const fromMe = Boolean(
-      payload.fromme ?? getByPath(payload, 'fromMe') ?? getByPath(payload, 'data.fromMe') ?? getByPath(payload, 'data.key.fromMe'),
-    )
 
     const tsRaw =
       Number(

@@ -220,7 +220,11 @@ Deno.serve(async (req) => {
           patientName: normalized.fromName,
           channel: 'whatsapp',
           direction: 'out',
-          author: normalized.fromName || 'WhatsApp',
+          // Autor fixo e reconhecível: é a equipe falando de FORA do CRM (celular ou
+          // WhatsApp Web). Sem isso o autor viria com o nome da paciente e a mensagem
+          // apareceria como se ela tivesse escrito para si mesma. Este autor também é o
+          // que permite medir quanto do atendimento acontece fora da plataforma.
+          author: 'Equipe (WhatsApp)',
           content: normalized.text,
           happenedAt: normalized.happenedAt,
           externalMessageId: normalized.externalMessageId,

@@ -107,6 +107,49 @@ Deno.serve(async (req) => {
   const provider = createWapiProviderForRow(row) as WapiProvider
 
   try {
+    // ── Mensagem que a EQUIPE mandou pelo celular ou pelo WhatsApp Web ─────────
+    // O gancho de conversa (`update-webhook-received`) só traz o que CHEGA. O que a equipe
+    // digita FORA do CRM chega pelos ganchos de entrega/status, que apontam para cá — e aqui
+    // o assunto sempre foi a saúde da linha, então a mensagem morria neste ponto. O ramo
+    // `outbound_device` do crm-wapi-webhook existe desde sempre e nunca disparou por isso.
+    //
+    // Sem essa saída registada o CRM acredita que ninguém respondeu: o tempo de resposta
+    // infla (pegamos uma mensagem posterior do painel) e a conversa cai na fila de "sem
+    // resposta" mesmo tendo sido atendida. Metade das conversas que a análise das sextas
+    // marcou como "nunca falou com um humano" tem a paciente seguindo a conversa sozinha,
+    // que é a assinatura exata desse buraco.
+    //
+    // ACK puro não vira mensagem: `normalizeInbound` devolve null quando não há texto nem
+    // marcador de mídia, então recibo de entrega não cria lead nem interação.
+    const comoMensagem = provider.normalizeInbound(payload, req.headers)
+    if (comoMensagem?.direction === 'out') {
+      // Repassa cru para quem já sabe tratar. Lá existem o dedupe por `external_message_id`
+      // (que descarta o eco do que o próprio CRM enviou), o upsert do lead no polo certo e o
+      // carimbo de `last_human_reply_at`. Duplicar essa lógica aqui criaria uma segunda
+      // verdade sobre o que é uma conversa.
+      try {
+        const res = await fetch(`${supabaseUrl}/functions/v1/crm-wapi-webhook`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: serviceRole,
+            Authorization: `Bearer ${serviceRole}`,
+          },
+          body: rawBody,
+        })
+        console.log('[wapi-events] saida-do-aparelho repassada', {
+          instancia: row.id,
+          evento,
+          messageId: comoMensagem.externalMessageId,
+          status: res.status,
+        })
+        return json({ ok: true, event: evento, forwarded: 'outbound_device', status: res.status })
+      } catch (e) {
+        // Nunca deixar o repasse derrubar a saúde da linha: se falhar, segue o fluxo normal.
+        console.warn('[wapi-events] repasse da saida falhou:', e instanceof Error ? e.message : String(e))
+      }
+    }
+
     // ── Sessão conectou ────────────────────────────────────────────────────────
     if (/connect/.test(evento) && !/disconnect/.test(evento)) {
       await registrarSaudeDaLinha(admin, row.id, {
