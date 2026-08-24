@@ -1,5 +1,6 @@
 import { toast } from 'sonner'
 
+import { poloDaTela } from '@/lib/poloDaTela'
 import { supabase } from '@/lib/supabaseClient'
 
 export type SendWhatsappPayload = {
@@ -24,6 +25,11 @@ export type SendWhatsappPayload = {
    * como envio humano.
    */
   source?: string
+  /**
+   * Polo de QUEM ENVIA. Normalmente não precisa ser passado: `sendWhatsappMessage`
+   * preenche com o polo da tela. Só declare à mão para forçar outro polo.
+   */
+  senderTenantId?: string
 }
 
 export type SendWhatsappResult =
@@ -55,6 +61,7 @@ export type SendWhatsappResult =
         | 'send_failed'
         | 'lead_opted_out'
         | 'out_of_window'
+        | 'wrong_sender_tenant'
         | 'unknown'
     }
 
@@ -104,6 +111,7 @@ const KNOWN_ERROR_KINDS = new Set([
   'send_failed',
   'lead_opted_out',
   'out_of_window',
+  'wrong_sender_tenant',
 ])
 
 function classifyError(raw: string): SendWhatsappResult extends infer R
@@ -118,8 +126,17 @@ function classifyError(raw: string): SendWhatsappResult extends infer R
 export async function sendWhatsappMessage(payload: SendWhatsappPayload): Promise<SendWhatsappResult> {
   if (!supabase) return { ok: false, error: 'Sistema não configurado.', kind: 'unknown' }
 
+  // O polo de QUEM ENVIA decide por qual linha a mensagem sai. Sem declarar isto, a edge
+  // caía no tenant do CADASTRO do lead — e paciente da clínica que compra na linha do
+  // Tricopill tem cadastro `instituto-lorena`. Resultado medido em 24/ago/2026: a Ingrid
+  // (Tricopill) respondeu o João Pedro pelo painel e a mensagem saiu pelo número da
+  // CLÍNICA; o cliente respondeu lá, o inbound foi carimbado `instituto-lorena` e ela não
+  // podia nem LER a própria conversa. A venda segue a linha, inclusive quando quem digita
+  // é uma pessoa.
+  const senderTenantId = payload.senderTenantId ?? poloDaTela() ?? undefined
+
   const { data, error } = await supabase.functions.invoke('crm-send-message', {
-    body: payload,
+    body: senderTenantId ? { ...payload, senderTenantId } : payload,
   })
 
   if (error) {

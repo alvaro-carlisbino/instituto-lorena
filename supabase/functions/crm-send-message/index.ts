@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
   // mantemos a exigência de usuário real para os envios vindos do painel.
   const bearer = authHeader.replace(/^Bearer\s+/i, '').trim()
   const isServiceRole = bearer.length > 0 && bearer === serviceRole
-  let user: { email?: string | null } | null = null
+  let user: { id?: string; email?: string | null } | null = null
   if (!isServiceRole) {
     const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
       global: { headers: { Authorization: authHeader } },
@@ -256,6 +256,32 @@ Deno.serve(async (req) => {
   // polo da pessoa) e resolvemos pela linha do assunto, sem reescrever o vínculo. O
   // ManyChat também fica de fora: ele é a conta do polo da pessoa.
   const senderTenantId = String(body.senderTenantId ?? '').trim()
+  // Desde 24/ago/2026 quem declara o polo também é o PAINEL, não só a rotina interna: sem
+  // isso o resolvedor caía no tenant do CADASTRO, e paciente da clínica que compra na linha
+  // do Tricopill (cadastro `instituto-lorena`) fazia a resposta da vendedora sair pelo
+  // número da CLÍNICA — o cliente respondia lá e ela não podia nem ler a própria conversa.
+  //
+  // Como o campo agora chega de uma PESSOA, ele deixa de ser aceito no escuro: sem esta
+  // conferência, quem atende só um polo poderia declarar o outro e falar pelo número dele.
+  // Rotina interna (service role) continua confiável — é ela que sabe de que polo é o
+  // assunto (lembrete de cirurgia, confirmação de pagamento, NPS).
+  if (senderTenantId && !isServiceRole) {
+    const { data: membro } = await admin
+      .from('tenant_members')
+      .select('tenant_id')
+      .eq('auth_user_id', String(user?.id ?? ''))
+      .eq('tenant_id', senderTenantId)
+      .maybeSingle()
+    if (!membro) {
+      return json(
+        {
+          error: 'wrong_sender_tenant',
+          message: `Envio bloqueado: ${user?.email ?? 'este login'} não atende o polo '${senderTenantId}'.`,
+        },
+        403,
+      )
+    }
+  }
   const assuntoDeOutroPolo = Boolean(senderTenantId) && senderTenantId !== row.tenant_id
   // Detecta envio via ManyChat. Desde 20/ago/2026 o ManyChat atende SÓ o Instagram: o
   // WhatsApp da clínica vive numa linha W-API. Por isso o WhatsApp só cai aqui quando não
