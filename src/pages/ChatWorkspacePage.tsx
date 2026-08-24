@@ -22,7 +22,7 @@ import { formatDurationFromMinutes } from '@/lib/formatDuration'
 import { cn } from '@/lib/utils'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { labelForIdName } from '@/lib/selectDisplay'
-import { businessHoursFromAiConfig } from '@/lib/aiTypingIndicator'
+import { teamHoursGateFromAiConfig, type AiConversationGate } from '@/lib/aiTypingIndicator'
 import {
   getAiConfig,
   getConversationState,
@@ -74,12 +74,7 @@ export function ChatWorkspacePage({
   const [restrictInstanceIds, setRestrictInstanceIds] = useState<Set<string> | null>(null)
   // Ids das linhas do POLO ATIVO. null = ainda carregando.
   const [tenantInstanceIds, setTenantInstanceIds] = useState<Set<string> | null>(null)
-  const [aiConversationBase, setAiConversationBase] = useState<{
-    ownerMode: ConversationOwnerMode
-    aiEnabled: boolean
-    businessHoursStartHour: number
-    businessHoursEndHour: number
-  } | null>(null)
+  const [aiConversationBase, setAiConversationBase] = useState<AiConversationGate | null>(null)
 
   const ownerSelectLabel = useMemo(
     () =>
@@ -283,12 +278,12 @@ export function ChatWorkspacePage({
     void Promise.all([getConversationState(activeLead.id), getAiConfig()])
       .then(([state, cfg]) => {
         setLeadMode((state.owner_mode as ConversationOwnerMode) ?? 'auto')
-        const bh = cfg ? businessHoursFromAiConfig(cfg) : { startHour: 8, endHour: 20 }
+        const turno = teamHoursGateFromAiConfig(cfg ?? {})
         setAiConversationBase({
           ownerMode: (state.owner_mode as ConversationOwnerMode) ?? 'auto',
           aiEnabled: state.ai_enabled !== false,
-          businessHoursStartHour: bh.startHour,
-          businessHoursEndHour: bh.endHour,
+          offHoursOnly: turno.offHoursOnly,
+          teamHours: turno.teamHours,
         })
       })
       .catch(() => {
@@ -326,8 +321,9 @@ export function ChatWorkspacePage({
             setAiConversationBase((prev) => ({
               ownerMode: (state.owner_mode as ConversationOwnerMode) ?? 'auto',
               aiEnabled: state.ai_enabled !== false,
-              businessHoursStartHour: prev?.businessHoursStartHour ?? 8,
-              businessHoursEndHour: prev?.businessHoursEndHour ?? 20,
+              // Turno vem da config da IA, não do estado da conversa: preserva o que já foi lido.
+              offHoursOnly: prev?.offHoursOnly,
+              teamHours: prev?.teamHours,
             }))
           })
         }

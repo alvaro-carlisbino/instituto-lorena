@@ -45,6 +45,16 @@ import {
 import { slugifyLabel } from '@/lib/utils'
 import type { FieldVisibilityContext, WorkflowField, Room } from '@/mocks/crmMock'
 import { getAiConfig, saveAiConfig, type ConversationOwnerMode } from '@/services/conversationControl'
+import {
+  DEFAULT_TEAM_HOURS,
+  describeTeamHours,
+  hhmmToMinutes,
+  minutesToHhmm,
+  parseTeamHours,
+  serializeTeamHours,
+  WEEKDAY_LABELS_PT,
+  type TeamHoursSchedule,
+} from '@/lib/teamHours'
 import { AutoSchedulingToggle } from '@/components/settings/AutoSchedulingToggle'
 
 const FIELD_TYPE_OPTIONS = [
@@ -153,6 +163,8 @@ export function SettingsPage() {
   const [aiCooldownSeconds, setAiCooldownSeconds] = useState(10)
   const [aiBurstDebounceSeconds, setAiBurstDebounceSeconds] = useState(4)
   const [aiBusinessRules, setAiBusinessRules] = useState<Record<string, unknown>>({})
+  const [aiOffhoursOnly, setAiOffhoursOnly] = useState(false)
+  const [aiTeamHours, setAiTeamHours] = useState<TeamHoursSchedule>(DEFAULT_TEAM_HOURS)
   const [aiLoading, setAiLoading] = useState(false)
 
   const sensors = useSensors(
@@ -193,6 +205,8 @@ export function SettingsPage() {
         setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 10))
         setAiBurstDebounceSeconds(Math.round(Number(cfg.inbound_burst_debounce_ms ?? 4000) / 1000))
         setAiBusinessRules(cfg.business_rules || {})
+        setAiOffhoursOnly(cfg.ai_offhours_only === true)
+        setAiTeamHours(parseTeamHours(cfg.ai_team_hours))
       })
       .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao carregar configuração da IA.'))
       .finally(() => setAiLoading(false))
@@ -212,6 +226,8 @@ export function SettingsPage() {
         setAiCooldownSeconds(Number(cfg.min_seconds_between_ai_replies ?? 10))
         setAiBurstDebounceSeconds(Math.round(Number(cfg.inbound_burst_debounce_ms ?? 4000) / 1000))
         setAiBusinessRules(cfg.business_rules || {})
+        setAiOffhoursOnly(cfg.ai_offhours_only === true)
+        setAiTeamHours(parseTeamHours(cfg.ai_team_hours))
       } catch (e) {
         console.error('[ai-config] failed to load', e)
       } finally {
@@ -263,6 +279,91 @@ export function SettingsPage() {
               </div>
             </div>
             <AutoSchedulingToggle />
+            <div className="flex flex-col gap-4 rounded-2xl border border-border/60 p-4">
+              <div className="min-w-0 space-y-1">
+                <Label className="cursor-pointer select-none">
+                  <Switch checked={aiOffhoursOnly} onCheckedChange={setAiOffhoursOnly} className="shrink-0" />
+                  <span className="text-sm font-medium sm:text-base">IA só fora do horário da equipe</span>
+                </Label>
+                <p className="m-0 text-xs text-muted-foreground sm:text-sm">
+                  Ligado: dentro do turno abaixo quem responde é a equipe — a IA cala mesmo em modo{' '}
+                  <strong>IA</strong> ou <strong>Misto</strong>, e a conversa entra na fila de quem atende. Fora do
+                  turno (noite, madrugada, domingo) a IA assume sozinha. O botão “responder com a IA” na ficha
+                  continua funcionando a qualquer hora.
+                </p>
+              </div>
+              {aiOffhoursOnly ? (
+                <div className="grid gap-2">
+                  {WEEKDAY_LABELS_PT.map((nome, dia) => {
+                    const ranges = aiTeamHours[dia]
+                    const atende = Boolean(ranges?.length)
+                    const inicio = atende ? minutesToHhmm(ranges[0][0]) : '08:00'
+                    const fim = atende ? minutesToHhmm(ranges[0][1]) : '18:00'
+                    const extras = atende ? ranges.length - 1 : 0
+                    const setRange = (indice: 0 | 1, valor: string) => {
+                      const minutos = hhmmToMinutes(valor)
+                      if (minutos == null) return
+                      setAiTeamHours((prev) => {
+                        const atuais = prev[dia]?.length
+                          ? prev[dia].map((r) => [...r] as [number, number])
+                          : ([[8 * 60, 18 * 60]] as Array<[number, number]>)
+                        atuais[0][indice] = minutos
+                        return { ...prev, [dia]: atuais }
+                      })
+                    }
+                    return (
+                      <div key={nome} className="flex flex-wrap items-center gap-3 text-sm">
+                        <Label className="cursor-pointer select-none w-40 shrink-0">
+                          <Switch
+                            checked={atende}
+                            className="shrink-0"
+                            onCheckedChange={(on) =>
+                              setAiTeamHours((prev) => {
+                                const next = { ...prev }
+                                if (on) next[dia] = prev[dia]?.length ? prev[dia] : [[8 * 60, 18 * 60]]
+                                else delete next[dia]
+                                return next
+                              })
+                            }
+                          />
+                          <span>{nome}</span>
+                        </Label>
+                        {atende ? (
+                          <>
+                            <Input
+                              type="time"
+                              className="w-32"
+                              value={inicio}
+                              onChange={(e) => setRange(0, e.target.value)}
+                              aria-label={`${nome}: início do turno da equipe`}
+                            />
+                            <span className="text-muted-foreground">até</span>
+                            <Input
+                              type="time"
+                              className="w-32"
+                              value={fim}
+                              onChange={(e) => setRange(1, e.target.value)}
+                              aria-label={`${nome}: fim do turno da equipe`}
+                            />
+                            {extras > 0 ? (
+                              <span className="text-xs text-muted-foreground">
+                                +{extras} intervalo(s) configurado(s) fora desta tela
+                              </span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">A IA atende o dia todo.</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                  <p className="m-0 text-xs text-muted-foreground">
+                    Turno atual: {describeTeamHours(aiTeamHours) || 'nenhum dia — ninguém da equipe atende'}. Horário
+                    de Maringá; o fim é exclusivo (18:00 já é da IA).
+                  </p>
+                </div>
+              ) : null}
+            </div>
             <div className="min-w-0 max-w-2xl">
               <ConversationModeSwitch
                 title="Modo padrão de novas conversas"
@@ -353,6 +454,22 @@ export function SettingsPage() {
                 disabled={aiLoading}
                 onClick={() => {
                   setAiLoading(true)
+                  const turno = serializeTeamHours(aiTeamHours)
+                  // Grade vazia com a trava ligada calaria... nada: o servidor recusa o payload e
+                  // a config ficaria por atualizar sem ninguém perceber. Avisa aqui.
+                  if (aiOffhoursOnly && Object.keys(turno).length === 0) {
+                    setAiLoading(false)
+                    toast.error('Marque pelo menos um dia de turno da equipe, ou desligue "IA só fora do horário da equipe".')
+                    return
+                  }
+                  const diaInvertido = Object.entries(aiTeamHours).find(([, ranges]) =>
+                    ranges?.some(([inicio, fim]) => fim <= inicio),
+                  )
+                  if (aiOffhoursOnly && diaInvertido) {
+                    setAiLoading(false)
+                    toast.error(`${WEEKDAY_LABELS_PT[Number(diaInvertido[0])]}: o fim do turno tem de ser depois do início.`)
+                    return
+                  }
                   void saveAiConfig({
                     enabled: aiEnabled,
                     defaultOwnerMode: aiDefaultMode,
@@ -361,6 +478,8 @@ export function SettingsPage() {
                     minSecondsBetweenAiReplies: aiCooldownSeconds,
                     businessRules: aiBusinessRules,
                     inboundBurstDebounceMs: aiBurstDebounceSeconds * 1000,
+                    aiOffhoursOnly,
+                    aiTeamHours: turno,
                   })
                     .then(() => toast.success('Configuração da IA salva com sucesso.'))
                     .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao salvar configuração da IA.'))

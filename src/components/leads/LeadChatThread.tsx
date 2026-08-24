@@ -63,7 +63,7 @@ import { getChannelShortLabel, getChannelStyle } from '@/lib/channelStyles'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
 import type { Interaction } from '@/mocks/crmMock'
-import { forceAiReply, type ConversationOwnerMode } from '@/services/conversationControl'
+import { forceAiReply } from '@/services/conversationControl'
 
 /** Emojis frequentes para inserir no rascunho (UTF-8). */
 // Valor cheio do cartão por kit Tricopill (mesma tabela do PaymentLinksPage). Cartão+Pix = e.Rede
@@ -121,13 +121,8 @@ type Props = {
   whatsappOnly?: boolean
   canCompose?: boolean
   readOnlyInstagramHint?: boolean
-  /** Modo + IA activa + horário (Supabase). Sem isto o indicador de “IA a responder” não aparece. */
-  aiConversationBase?: {
-    ownerMode: ConversationOwnerMode
-    aiEnabled: boolean
-    businessHoursStartHour: number
-    businessHoursEndHour: number
-  } | null
+  /** Modo + IA activa + turno da equipe (Supabase). Sem isto o indicador de “IA a responder” não aparece. */
+  aiConversationBase?: AiConversationGate | null
 }
 
 // --- Mídia inline (áudio/vídeo) ---------------------------------------------
@@ -421,15 +416,7 @@ export function LeadChatThread({
     )
   }, [quickMessages, quickFilter])
 
-  const aiGate: AiConversationGate | null = useMemo(() => {
-    if (!aiConversationBase) return null
-    return {
-      ownerMode: aiConversationBase.ownerMode,
-      aiEnabled: aiConversationBase.aiEnabled,
-      businessHoursStartHour: aiConversationBase.businessHoursStartHour,
-      businessHoursEndHour: aiConversationBase.businessHoursEndHour,
-    }
-  }, [aiConversationBase])
+  const aiGate: AiConversationGate | null = aiConversationBase ?? null
 
   const showAiResponding = useMemo(() => {
     void aiUiTick

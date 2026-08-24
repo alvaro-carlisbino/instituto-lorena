@@ -3,6 +3,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { insertInteraction, resolveConversationTenantId } from './crm.ts'
 import { loadLineConversationMode, setLineConversationMode } from './conversationLineState.ts'
 import { matchesInternalContact } from './internalContacts.ts'
+import { describeTeamHours, isWithinTeamHours, parseTeamHours } from './teamHours.ts'
 import { alertOwnerAiOutOfBalance } from './saleReceipt.ts'
 import type { WhatsappProvider } from './whatsapp/types.ts'
 
@@ -603,6 +604,13 @@ export async function evaluateCrmAiAutoReplyGate(
     directionIsInbound: boolean
     /** Linha por onde a mensagem entrou. Quem decide se o bot responde é o par (lead, linha). */
     whatsappInstanceId?: string | null
+    /**
+     * Salta a trava de horário da equipe (`ai_offhours_only`). Dois usos, os dois legítimos:
+     * a re-checagem anti-atropelo feita ANTES do envio (a decisão de horário já foi tomada na
+     * entrada; abortar aqui seria deitar fora uma resposta que a IA tinha direito de dar) e o
+     * botão "responder com a IA" do painel, que é ordem humana explícita.
+     */
+    ignoreTeamHours?: boolean
   },
 ): Promise<CrmAiAutoReplyGate> {
   const { data: state } = await admin
@@ -687,10 +695,18 @@ export async function evaluateCrmAiAutoReplyGate(
   const latestAiReplyAt = state?.last_ai_reply_at ? new Date(String(state.last_ai_reply_at)).getTime() : 0
   const elapsedSinceAi = latestAiReplyAt ? (Date.now() - latestAiReplyAt) / 1000 : Number.POSITIVE_INFINITY
 
-  // owner_mode 'auto' e 'ai' → IA responde 24h. 'human' → só atendimento humano.
-  // crm_ai_configs.business_hours_* não bloqueia mais o auto-reply; continua a ser
-  // usado por find_first_appointment_slot para sugerir horários de consulta válidos.
+  // owner_mode 'auto' e 'ai' → IA responde. 'human' → só atendimento humano.
+  // crm_ai_configs.business_hours_* não bloqueia o auto-reply e não é o turno da equipe:
+  // continua a ser usado por find_first_appointment_slot para sugerir horários de consulta.
   const shouldAiByMode = ownerMode === 'ai' || ownerMode === 'auto'
+
+  // TRAVA DE HORÁRIO (24/ago/2026). Com `ai_offhours_only`, a IA é plantonista: só fala fora
+  // do turno da equipe. Dentro do turno ela cala mesmo em modo 'ai' — quem atende é gente, e
+  // o vigia cobra quem não atendeu. Fora do turno (noite, madrugada, sábado à tarde, domingo)
+  // ela assume sozinha. Ligado só na clínica; o bot de vendas do Tricopill segue 24h.
+  const teamHoursSchedule = parseTeamHours(config?.ai_team_hours)
+  const offHoursOnly = Boolean(config?.ai_offhours_only) && !options.ignoreTeamHours
+  const withinTeamHours = offHoursOnly && isWithinTeamHours(new Date(), teamHoursSchedule)
 
   const skipReasons: string[] = []
   if (leadOptedOut) skipReasons.push('lead_opted_out')
@@ -704,6 +720,7 @@ export async function evaluateCrmAiAutoReplyGate(
   if (minSecondsBetween > 0 && elapsedSinceAi < minSecondsBetween) {
     skipReasons.push('min_seconds_between_ai_replies')
   }
+  if (withinTeamHours) skipReasons.push('horario_da_equipe')
 
   // max_ai_replies_per_hour em crm_ai_configs mantém-se para métricas/UI; não bloqueia mais o auto-reply
   // (limite global fazia a IA “parar” em conversas com várias mensagens).
@@ -714,6 +731,7 @@ export async function evaluateCrmAiAutoReplyGate(
     aiEnabled &&
     shouldAiByMode &&
     options.directionIsInbound &&
+    !withinTeamHours &&
     (minSecondsBetween === 0 || elapsedSinceAi >= minSecondsBetween)
 
   const hintParts: string[] = []
@@ -725,6 +743,11 @@ export async function evaluateCrmAiAutoReplyGate(
   }
   if (skipReasons.includes('owner_mode_human')) {
     hintParts.push('Modo de atendimento = humano: só a equipa responde.')
+  }
+  if (skipReasons.includes('horario_da_equipe')) {
+    hintParts.push(
+      `Horário da equipe (${describeTeamHours(teamHoursSchedule)}): quem atende agora é gente. A IA volta a responder fora deste turno.`,
+    )
   }
   if (skipReasons.includes('min_seconds_between_ai_replies')) {
     hintParts.push(
@@ -1188,9 +1211,14 @@ export async function runWhatsappAiAutoReply(
   // ANTI-ATROPELO: o z.ai leva ~30-120s. Se durante esse tempo o HUMANO assumiu a conversa
   // (owner_mode=human ou ai_enabled=false), NÃO enviamos mais nada — a equipa é dona do
   // atendimento agora. Re-checa o gate imediatamente antes de QUALQUER envio.
+  // `ignoreTeamHours`: esta re-checagem existe para o caso de o HUMANO ter assumido durante a
+  // geração, não para reavaliar horário. A mensagem que chegou 07:58 tem direito à resposta
+  // ainda que o modelo só devolva às 08:01 — e é por aqui que passa o "responder com a IA"
+  // pedido à mão no painel, que é ordem humana e não pode esbarrar no turno da equipe.
   const postGate = await evaluateCrmAiAutoReplyGate(admin, options.leadId, {
     directionIsInbound: true,
     whatsappInstanceId: options.whatsappInstanceId,
+    ignoreTeamHours: true,
   })
   if (!postGate.canAutoReply) {
     console.warn('runWhatsappAiAutoReply: humano assumiu durante a geração — envio abortado', {
@@ -1537,7 +1565,11 @@ export async function runManychatAiAutoReply(
 
   // ANTI-ATROPELO (igual ao WhatsApp): se o humano assumiu durante a geração do z.ai,
   // não envia mais nada. Re-checa o gate antes de qualquer commit/envio ao ManyChat.
-  const postGateMc = await evaluateCrmAiAutoReplyGate(admin, options.leadId, { directionIsInbound: true })
+  const postGateMc = await evaluateCrmAiAutoReplyGate(admin, options.leadId, {
+    directionIsInbound: true,
+    // Mesma razão do WhatsApp: aqui só se pergunta se um humano assumiu, não que horas são.
+    ignoreTeamHours: true,
+  })
   if (!postGateMc.canAutoReply) {
     console.warn('runManychatAiAutoReply: humano assumiu durante a geração — envio abortado', {
       leadId: options.leadId,

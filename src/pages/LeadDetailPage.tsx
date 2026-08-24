@@ -37,7 +37,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useCrm } from '@/context/CrmContext'
 import { sourceLabel } from '@/hooks/useCrmState'
 import { AppLayout } from '@/layouts/AppLayout'
-import { businessHoursFromAiConfig } from '@/lib/aiTypingIndicator'
+import { teamHoursGateFromAiConfig, type AiConversationGate } from '@/lib/aiTypingIndicator'
 import { getSourceStyle } from '@/lib/channelStyles'
 import { needsShippingAddress } from '@/lib/deliveryType'
 import { getLeadPhoneDisplay, isLeadWhatsappComposeBlocked, workflowFieldsForContext } from '@/lib/leadFields'
@@ -94,12 +94,7 @@ export function LeadDetailPage() {
   const [waLineEvents, setWaLineEvents] = useState<LeadWaLineEvent[]>([])
   const [waInstanceLabels, setWaInstanceLabels] = useState<Record<string, string>>({})
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [leadAiGate, setLeadAiGate] = useState<{
-    ownerMode: ConversationOwnerMode
-    aiEnabled: boolean
-    businessHoursStartHour: number
-    businessHoursEndHour: number
-  } | null>(null)
+  const [leadAiGate, setLeadAiGate] = useState<AiConversationGate | null>(null)
 
   const loadLeadAiGate = useCallback(
     async (id: string) => {
@@ -109,12 +104,12 @@ export function LeadDetailPage() {
       }
       try {
         const [state, cfg] = await Promise.all([getConversationState(id), getAiConfig()])
-        const bh = cfg ? businessHoursFromAiConfig(cfg) : { startHour: 8, endHour: 20 }
+        const turno = teamHoursGateFromAiConfig(cfg ?? {})
         setLeadAiGate({
           ownerMode: (state.owner_mode as ConversationOwnerMode) ?? 'auto',
           aiEnabled: state.ai_enabled !== false,
-          businessHoursStartHour: bh.startHour,
-          businessHoursEndHour: bh.endHour,
+          offHoursOnly: turno.offHoursOnly,
+          teamHours: turno.teamHours,
         })
       } catch {
         setLeadAiGate(null)

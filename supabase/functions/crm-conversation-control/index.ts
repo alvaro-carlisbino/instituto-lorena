@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { coercePgBoolean } from '../_shared/coercePgBoolean.ts'
 import { disableAiOnHandoff, runManychatAiAutoReply, runWhatsappAiAutoReply } from '../_shared/crmAiAutoReply.ts'
 import { setLineConversationMode } from '../_shared/conversationLineState.ts'
+import { DEFAULT_TEAM_HOURS, parseTeamHours, serializeTeamHours } from '../_shared/teamHours.ts'
 import { pushManychatInstagramDmAfterReply, readManychatPushConfigFromEnv } from '../_shared/manychatPublicApi.ts'
 import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
@@ -19,6 +20,20 @@ function json(body: Record<string, unknown>, status = 200): Response {
 }
 
 type Action = 'get_state' | 'set_mode' | 'get_config' | 'set_config' | 'force_ai_reply'
+
+/**
+ * Normaliza o turno da equipe vindo da tela para o formato de `crm_ai_configs.ai_team_hours`.
+ * `null` = payload que não dá para aproveitar — melhor devolver 400 do que gravar em silêncio
+ * uma grade que não é a que a pessoa viu no ecrã. Grade vazia também é recusada: quem não quer
+ * turno nenhum desliga a trava, em vez de a deixar ligada sem nenhuma hora dentro dela.
+ */
+function sanitizeTeamHours(raw: unknown): Record<string, string[][]> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const parsed = parseTeamHours(raw)
+  if (parsed === DEFAULT_TEAM_HOURS) return null
+  const out = serializeTeamHours(parsed)
+  return Object.keys(out).length ? out : null
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
@@ -160,6 +175,8 @@ Deno.serve(async (req) => {
     const minSecondsBetweenAiReplies = Number(body.minSecondsBetweenAiReplies ?? 10)
     const hasInboundBurst = Object.prototype.hasOwnProperty.call(body, 'inboundBurstDebounceMs')
     const inboundBurstDebounceMs = hasInboundBurst ? Number(body.inboundBurstDebounceMs) : NaN
+    const hasOffhoursOnly = Object.prototype.hasOwnProperty.call(body, 'aiOffhoursOnly')
+    const hasTeamHours = Object.prototype.hasOwnProperty.call(body, 'aiTeamHours')
 
     const payload: Record<string, unknown> = {
       id: 'default',
@@ -181,6 +198,14 @@ Deno.serve(async (req) => {
       payload.inbound_burst_debounce_ms = Number.isFinite(inboundBurstDebounceMs)
         ? Math.max(0, Math.min(30000, inboundBurstDebounceMs))
         : 4000
+    }
+    // Turno da equipe: só entra no upsert quando a tela mandou. Coluna omitida não é
+    // sobrescrita, e é assim que um "salvar" vindo de outro ecrã não apaga a grade.
+    if (hasOffhoursOnly) payload.ai_offhours_only = coercePgBoolean(body.aiOffhoursOnly, false)
+    if (hasTeamHours) {
+      const parsed = sanitizeTeamHours(body.aiTeamHours)
+      if (!parsed) return json({ error: 'invalid_team_hours' }, 400)
+      payload.ai_team_hours = parsed
     }
     const { data, error } = await admin
       .from('crm_ai_configs')

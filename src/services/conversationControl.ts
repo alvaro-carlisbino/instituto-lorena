@@ -25,6 +25,13 @@ export type AiConfig = {
   /** `HH:mm` ou `HH:mm:ss` — opcional; vindo de `crm_ai_configs` */
   business_hours_start?: string | null
   business_hours_end?: string | null
+  /**
+   * true = a IA só responde FORA do turno da equipe (`ai_team_hours`). Dentro dele quem
+   * atende é gente, mesmo com a conversa em modo IA. Ver `src/lib/teamHours.ts`.
+   */
+  ai_offhours_only?: boolean | null
+  /** `{"1":[["08:00","18:00"]], …}` — dia 0=domingo..6=sábado, fim exclusivo. */
+  ai_team_hours?: Record<string, unknown> | null
 }
 
 async function invokeControl(body: Record<string, unknown>) {
@@ -76,6 +83,8 @@ export async function saveAiConfig(payload: {
   minSecondsBetweenAiReplies: number
   businessRules: Record<string, unknown>
   inboundBurstDebounceMs?: number
+  aiOffhoursOnly?: boolean
+  aiTeamHours?: Record<string, string[][]>
 }): Promise<AiConfig> {
   const body: Record<string, unknown> = {
     action: 'set_config',
@@ -89,6 +98,11 @@ export async function saveAiConfig(payload: {
   if (typeof payload.inboundBurstDebounceMs === 'number') {
     body.inboundBurstDebounceMs = payload.inboundBurstDebounceMs
   }
+  // Só vão no corpo quando a tela realmente os editou: o upsert do PostgREST não sobrescreve
+  // coluna ausente do payload, e é isso que impede um "salvar" vindo de outro ecrã de apagar
+  // a grade de horários de quem configurou.
+  if (typeof payload.aiOffhoursOnly === 'boolean') body.aiOffhoursOnly = payload.aiOffhoursOnly
+  if (payload.aiTeamHours) body.aiTeamHours = payload.aiTeamHours
   const parsed = await invokeControl(body)
   return parsed.config as AiConfig
 }

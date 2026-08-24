@@ -1,34 +1,30 @@
 import type { Interaction } from '@/mocks/crmMock'
 import type { ConversationOwnerMode } from '@/services/conversationControl'
+import { isWithinTeamHours, parseTeamHours, type TeamHoursSchedule } from '@/lib/teamHours'
 
 export type AiConversationGate = {
   ownerMode: ConversationOwnerMode
   aiEnabled: boolean
-  /** Hora local 0–23 início da janela em modo `auto` (omissão 8) */
-  businessHoursStartHour?: number
-  /** Hora local exclusiva fim (omissão 20 → activo até 19:59) */
-  businessHoursEndHour?: number
+  /** `crm_ai_configs.ai_offhours_only`: a IA só responde fora do turno da equipe. */
+  offHoursOnly?: boolean
+  /** Turno da equipe já lido de `crm_ai_configs.ai_team_hours`. */
+  teamHours?: TeamHoursSchedule
 }
 
-function parseHourFromConfig(value: string | null | undefined, fallback: number): number {
-  if (!value || typeof value !== 'string') return fallback
-  const h = Number.parseInt(value.split(':')[0] ?? '', 10)
-  return Number.isFinite(h) && h >= 0 && h <= 23 ? h : fallback
-}
-
-export function businessHoursFromAiConfig(cfg: {
-  business_hours_start?: string | null
-  business_hours_end?: string | null
-}): { startHour: number; endHour: number } {
+/**
+ * Lê da config da IA o que a tela precisa para não prometer resposta que não vem.
+ *
+ * Substituiu `businessHoursFromAiConfig`, que lia `business_hours_*` — essa janela é a de
+ * SUGERIR horário de consulta (na clínica está 08:00–23:59) e nunca foi o turno de ninguém.
+ */
+export function teamHoursGateFromAiConfig(cfg: {
+  ai_offhours_only?: boolean | null
+  ai_team_hours?: unknown
+}): { offHoursOnly: boolean; teamHours: TeamHoursSchedule } {
   return {
-    startHour: parseHourFromConfig(cfg.business_hours_start, 8),
-    endHour: parseHourFromConfig(cfg.business_hours_end, 20),
+    offHoursOnly: cfg.ai_offhours_only === true,
+    teamHours: parseTeamHours(cfg.ai_team_hours),
   }
-}
-
-function isWithinBusinessHoursLocal(now: Date, startHour: number, endHour: number): boolean {
-  const h = now.getHours()
-  return h >= startHour && h < endHour
 }
 
 function isFromAiAssistant(author: string): boolean {
@@ -52,9 +48,10 @@ export function isAiReplyLikelyPending(args: {
   if (!args.gate.aiEnabled) return false
   if (args.gate.ownerMode === 'human') return false
 
-  const startH = args.gate.businessHoursStartHour ?? 8
-  const endH = args.gate.businessHoursEndHour ?? 20
-  if (args.gate.ownerMode === 'auto' && !isWithinBusinessHoursLocal(now, startH, endH)) {
+  // Turno da equipe: dentro dele a IA cala (é gente que atende), então o indicador não pode
+  // aparecer — antes desta trava ele mentia ao contrário, sumindo à noite, que é justamente
+  // quando a IA responde. Vale para 'ai' e 'auto', tal como o gate do servidor.
+  if (args.gate.offHoursOnly && isWithinTeamHours(now, args.gate.teamHours)) {
     return false
   }
 
