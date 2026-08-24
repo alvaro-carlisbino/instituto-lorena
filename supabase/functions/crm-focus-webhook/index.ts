@@ -10,7 +10,7 @@
  * qualquer um pode forjar contra uma URL pública.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { consultarNfse, lerValoresDoXml, readFocusConfig } from '../_shared/focusNfse.ts'
+import { consultarNfse, FocusIndisponivelError, patchDaResposta, readFocusConfig } from '../_shared/focusNfse.ts'
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' }
 function json(body: Record<string, unknown>, status = 200): Response {
@@ -64,33 +64,24 @@ Deno.serve(async (req) => {
   // consultar no ambiente errado devolve `nao_encontrado` por cima do status real. Ignora.
   if (ambienteDaNota && ambienteDaNota !== cfg.ambiente) return json({ ok: true, skipped: 'ambiente_divergente' })
 
-  const r = await consultarNfse(cfg, ref)
-  // ISS, PIS e COFINS só existem no XML. PIS e COFINS entram porque somados ao ISS são as
-  // "Exclusões e Reduções da Base de Cálculo" do IBS/CBS, que o financeiro lança na planilha e
-  // que o PDF da Focus não desenha. Este é o caminho normal de autorização — sem eles aqui, só
-  // nota consultada à mão teria o número.
-  const valores = r.status === 'autorizado' && r.urlXml
-    ? await lerValoresDoXml(r.urlXml)
-    : { aliquota: null, issCents: null, pisCents: null, cofinsCents: null }
+  const statusAtual = String((row as { status?: string }).status ?? '')
 
-  await admin
-    .from('nfse_notes')
-    .update({
-      status: r.status,
-      numero: r.numero,
-      codigo_verificacao: r.codigoVerificacao,
-      url_consulta: r.urlConsulta,
-      url_xml: r.urlXml,
-      url_pdf: r.urlPdf,
-      ...(valores.issCents != null ? { valor_iss_cents: valores.issCents } : {}),
-      ...(valores.pisCents != null ? { valor_pis_cents: valores.pisCents } : {}),
-      ...(valores.cofinsCents != null ? { valor_cofins_cents: valores.cofinsCents } : {}),
-      ...(valores.aliquota != null ? { aliquota_aplicada: valores.aliquota } : {}),
-      erros: r.erros,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('tenant_id', tenantId)
-    .eq('ref', ref)
+  let r
+  try {
+    r = await consultarNfse(cfg, ref)
+  } catch (e) {
+    if (!(e instanceof FocusIndisponivelError)) throw e
+    // Teto de requisições batido no meio do gatilho. 503 faz a Focus reenviar o aviso depois —
+    // e é MUITO melhor que gravar "limite_excedido" por cima de uma nota que acabou de autorizar.
+    return json({ error: 'focus_indisponivel', ref, detail: e.message }, 503)
+  }
 
-  return json({ ok: true, ref, status: r.status })
+  // ISS, PIS e COFINS só existem no XML, e o patch compartilhado é quem os lê. Este é o caminho
+  // normal de autorização — sem ele aqui, só nota consultada à mão teria o número.
+  const patch = await patchDaResposta(r, statusAtual)
+  if (patch) {
+    await admin.from('nfse_notes').update(patch).eq('tenant_id', tenantId).eq('ref', ref)
+  }
+
+  return json({ ok: true, ref, status: r.status, gravado: patch != null })
 })

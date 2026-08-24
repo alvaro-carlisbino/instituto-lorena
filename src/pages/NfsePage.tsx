@@ -71,6 +71,9 @@ const ROTULO_STATUS: Record<string, string> = {
   autorizado: 'Autorizada',
   cancelado: 'Cancelada',
   processando_autorizacao: 'Processando',
+  // A Focus não conhece a ref: a emissão nunca chegou lá. Não é recusa da SEFIN — é nota que
+  // falta emitir, e a tela precisa dizer isso com todas as letras para o financeiro reemitir.
+  nao_encontrado: 'Não emitida',
 }
 
 /**
@@ -114,6 +117,11 @@ function StatusBadge({ status }: { status: string }) {
   }
   if (status === 'processando_autorizacao') {
     return <Badge variant="outline"><Loader2 className="animate-spin" /> Processando</Badge>
+  }
+  // A Focus não tem essa ref: a nota NÃO existe lá. Chamar isso de "Erro" mandava o financeiro
+  // caçar recusa da SEFIN quando o que falta é emitir de novo.
+  if (status === 'nao_encontrado') {
+    return <Badge variant="outline" className="border-amber-600/40 text-amber-700 dark:text-amber-400"><AlertTriangle /> Não emitida</Badge>
   }
   return <Badge variant="destructive"><XCircle /> Erro</Badge>
 }
@@ -177,7 +185,10 @@ export function NfsePage() {
   useEffect(() => {
     if (pendentes.length === 0) return
     const t = window.setInterval(async () => {
-      await Promise.all(pendentes.slice(0, 10).map((ref) => nfseConsultar(ref).catch(() => null)))
+      // Quatro por vez, e não dez: a conta da Focus aceita 100 requisições por minuto e o
+      // reconciliador de hora em hora divide esse teto com a tela. Duas abas abertas com dez
+      // pendentes cada já comiam 40 por minuto do orçamento de quem está emitindo.
+      await Promise.all(pendentes.slice(0, 4).map((ref) => nfseConsultar(ref).catch(() => null)))
       await carregar()
     }, 30_000)
     return () => window.clearInterval(t)

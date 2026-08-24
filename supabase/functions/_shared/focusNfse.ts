@@ -562,29 +562,178 @@ export async function lerValoresDoXml(urlXml: string): Promise<ValoresDaNota> {
   }
 }
 
+/** Estado que a SEFIN já carimbou e que resposta ruim nenhuma tem o direito de desmentir. */
+const ESTADOS_FINAIS = new Set(['autorizado', 'cancelado'])
+
+/**
+ * Os campos que a resposta da Focus escreve na linha. Um só lugar: o gatilho e o painel
+ * gravavam isto em dois códigos iguais, e por isso o mesmo defeito existia duas vezes.
+ *
+ * Duas regras que a versão anterior não tinha, e que são o resto do estrago de 22/ago:
+ *
+ *  1. **Não apaga o que a nota já provou.** O patch antigo fazia `numero: r.numero` sempre — e
+ *     `r.numero` vem null em toda resposta que não seja a nota (429, 404, ambiente trocado).
+ *     Nota autorizada perdia número, link do PDF e do XML por causa de um segundo ruim. Agora
+ *     número e URLs só são escritos quando vêm preenchidos.
+ *  2. **`nao_encontrado` não derruba nota autorizada.** Para linha pendente é a resposta que
+ *     importa ("a emissão nunca chegou lá"); para linha com número seria apagar o que a SEFIN
+ *     autorizou.
+ *
+ * Devolve `null` quando não há nada confiável a escrever — e `null` aqui significa NÃO TOQUE
+ * NA LINHA, não "grave vazio".
+ */
+export async function patchDaResposta(
+  r: FocusResposta,
+  statusAtual?: string | null,
+): Promise<Record<string, unknown> | null> {
+  if (r.status === 'desconhecido') return null
+  if (r.status === 'nao_encontrado' && ESTADOS_FINAIS.has(str(statusAtual))) return null
+
+  // ISS, PIS e COFINS moram no XML, não no JSON — só vale buscar quando a nota autorizou.
+  // Somados, são as "Exclusões e Reduções da Base de Cálculo" que o financeiro lança.
+  const valores = r.status === 'autorizado' && r.urlXml ? await lerValoresDoXml(r.urlXml) : VALORES_VAZIOS
+
+  return {
+    status: r.status,
+    ...(r.numero ? { numero: r.numero } : {}),
+    ...(r.codigoVerificacao ? { codigo_verificacao: r.codigoVerificacao } : {}),
+    ...(r.urlConsulta ? { url_consulta: r.urlConsulta } : {}),
+    ...(r.urlXml ? { url_xml: r.urlXml } : {}),
+    ...(r.urlPdf ? { url_pdf: r.urlPdf } : {}),
+    ...(valores.issCents != null ? { valor_iss_cents: valores.issCents } : {}),
+    ...(valores.pisCents != null ? { valor_pis_cents: valores.pisCents } : {}),
+    ...(valores.cofinsCents != null ? { valor_cofins_cents: valores.cofinsCents } : {}),
+    ...(valores.aliquota != null ? { aliquota_aplicada: valores.aliquota } : {}),
+    erros: r.erros,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+/**
+ * A CHAMADA falhou — a NOTA não disse nada.
+ *
+ * É a distinção que faltava e que custou 31 notas em 22/ago/2026. A Focus limita a conta em
+ * **100 requisições por minuto** e responde 429 com `{"codigo":"limite_excedido"}`. Isso passava
+ * pelo `parseFocusResposta` como se fosse um estado da nota, e o chamador gravava
+ * `status = "limite_excedido"` por cima do que a SEFIN tinha dito — apagando número e PDF de
+ * nota autorizada, e tirando a linha do conjunto do reconciliador (que só relê
+ * `autorizado`/`processando_autorizacao`). Um engarrafamento virava erro fiscal eterno.
+ *
+ * Quem recebe este erro tem UMA obrigação: não escrever status nenhum. A nota continua com o
+ * estado que tinha; a resposta vem na próxima passada.
+ */
+export class FocusIndisponivelError extends Error {
+  constructor(
+    readonly httpStatus: number,
+    readonly codigo: string,
+    /** Quantos segundos a Focus pediu para esperar. 0 = não disse. */
+    readonly esperarSegundos: number,
+    mensagem: string,
+  ) {
+    super(mensagem)
+    this.name = 'FocusIndisponivelError'
+  }
+}
+
+/**
+ * Estados que NÃO são resposta da SEFIN e que vazaram para a coluna `status` antes de
+ * `FocusIndisponivelError` existir. O reconciliador relê estas linhas de propósito: é assim
+ * que as 31 notas carimbadas em 22/ago voltam a ter o estado de verdade sem SQL na mão.
+ */
+export const STATUS_TRANSITORIOS = ['limite_excedido', 'resposta_nao_json'] as const
+
+/** "Tente novamente em 17 segundos" → 17. A Focus não manda `Retry-After`; o número vem na frase. */
+function segundosDeEspera(raw: FocusRaw, header: string | null): number {
+  const doHeader = Number(header ?? '')
+  if (Number.isFinite(doHeader) && doHeader > 0) return Math.min(doHeader, 60)
+  const m = str(raw.mensagem).match(/em\s+(\d+)\s*segundo/i)
+  const n = m ? Number(m[1]) : 0
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 60) : 0
+}
+
+/**
+ * Passo mínimo entre duas chamadas à Focus DENTRO da mesma instância da função.
+ *
+ * O teto da conta é 100/min. O laço do reconciliador rodava a ~2,2 por segundo (132/min, medido
+ * na passada de 24/ago: 104 notas em 47s) — ou seja, estourava o teto sozinho por volta da
+ * centésima nota, e tudo dali para frente tomava 429. 1 por segundo é 60/min e deixa a folga
+ * para o painel e para o gatilho, que dividem a mesma conta.
+ */
+const PASSO_MINIMO_MS = 1000
+let proximaVaga = 0
+
+/** Reserva a vaga antes de bater na Focus. Chamadas concorrentes pegam vagas em fila, não juntas. */
+async function aguardarVaga(): Promise<void> {
+  const agora = Date.now()
+  const alvo = Math.max(agora, proximaVaga)
+  proximaVaga = alvo + PASSO_MINIMO_MS
+  const espera = alvo - agora
+  if (espera > 0) await new Promise((r) => setTimeout(r, espera))
+}
+
+/** Quantas vezes insistir quando a Focus diz "espera". Emitir é mais importante que ser rápido. */
+const TENTATIVAS = 3
+
 async function focusFetch(
   cfg: FocusConfig,
   method: string,
   path: string,
   body?: unknown,
 ): Promise<{ status: number; body: FocusRaw }> {
-  const res = await fetch(`${BASES[cfg.ambiente]}${path}`, {
-    method,
-    headers: {
-      Authorization: `Basic ${btoa(`${cfg.token}:`)}`,
-      'Content-Type': 'application/json',
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  })
-  const text = await res.text()
-  let parsed: FocusRaw = {}
-  try {
-    parsed = text ? (JSON.parse(text) as FocusRaw) : {}
-  } catch {
-    // A Focus responde JSON em tudo que importa; corpo não-JSON é erro de borda (proxy, 502).
-    parsed = { codigo: 'resposta_nao_json', mensagem: text.slice(0, 300) }
+  let ultimo: FocusIndisponivelError | null = null
+
+  for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
+    await aguardarVaga()
+
+    let res: Response
+    try {
+      res = await fetch(`${BASES[cfg.ambiente]}${path}`, {
+        method,
+        headers: {
+          Authorization: `Basic ${btoa(`${cfg.token}:`)}`,
+          'Content-Type': 'application/json',
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+    } catch (e) {
+      // Rede caiu antes de a Focus responder. Não dá para afirmar nada sobre a nota.
+      ultimo = new FocusIndisponivelError(0, 'rede', 2, `Falha de rede ao falar com a Focus: ${e instanceof Error ? e.message : String(e)}`)
+      continue
+    }
+
+    const text = await res.text()
+    let parsed: FocusRaw = {}
+    try {
+      parsed = text ? (JSON.parse(text) as FocusRaw) : {}
+    } catch {
+      // A Focus responde JSON em tudo que importa; corpo não-JSON é erro de borda (proxy, 502).
+      parsed = { codigo: 'resposta_nao_json', mensagem: text.slice(0, 300) }
+    }
+
+    // 429 (teto de requisições) e 5xx são a INFRAESTRUTURA falando, nunca a nota. O 429 é o caso
+    // conhecido: a Focus rejeita a requisição inteira, então um POST que toma 429 NÃO virou nota
+    // lá — e um GET que toma 429 não desmente a nota que existe aqui.
+    const limite = res.status === 429 || str(parsed.codigo) === 'limite_excedido'
+    if (limite || res.status >= 500 || str(parsed.codigo) === 'resposta_nao_json') {
+      const espera = segundosDeEspera(parsed, res.headers.get('retry-after'))
+      ultimo = new FocusIndisponivelError(
+        res.status,
+        limite ? 'limite_excedido' : str(parsed.codigo) || `http_${res.status}`,
+        espera,
+        str(parsed.mensagem) || `A Focus respondeu ${res.status}.`,
+      )
+      // Só vale esperar se ela disse quanto, e se ainda há tentativa depois da espera.
+      if (tentativa < TENTATIVAS) {
+        await new Promise((r) => setTimeout(r, (espera || 2) * 1000))
+        continue
+      }
+      break
+    }
+
+    return { status: res.status, body: parsed }
   }
-  return { status: res.status, body: parsed }
+
+  throw ultimo ?? new FocusIndisponivelError(0, 'desconhecido', 0, 'A Focus não respondeu.')
 }
 
 /**

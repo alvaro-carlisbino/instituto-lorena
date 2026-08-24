@@ -28,11 +28,12 @@ import {
   consultarNfse,
   descricaoDoServico,
   emitirNfse,
-  lerValoresDoXml,
+  FocusIndisponivelError,
+  patchDaResposta,
   readFocusConfig,
   SERVICOS_CLINICA,
+  STATUS_TRANSITORIOS,
   TomadorPjError,
-  type FocusResposta,
 } from '../_shared/focusNfse.ts'
 
 const cors = {
@@ -72,29 +73,15 @@ async function ehServiceRoleAssinada(supabaseUrl: string, bearer: string): Promi
 }
 
 /**
- * Campos da nota que a resposta da Focus atualiza. Um só lugar para não divergir.
- * ISS, PIS e COFINS moram no XML, não no JSON — só vale a pena buscar quando a nota autorizou.
- * PIS e COFINS entram porque somados ao ISS são as "Exclusões e Reduções da Base de Cálculo"
- * que o financeiro precisa lançar na planilha e que o PDF da Focus não desenha.
+ * A Focus ficou fora do ar / bateu no teto de requisições — e isso NÃO é um estado da nota.
+ * O painel recebe 503 e a frase pronta; a linha não é tocada. Ver `FocusIndisponivelError`.
  */
-async function patchDaResposta(r: FocusResposta): Promise<Record<string, unknown>> {
-  const valores = r.status === 'autorizado' && r.urlXml
-    ? await lerValoresDoXml(r.urlXml)
-    : { aliquota: null, issCents: null, pisCents: null, cofinsCents: null }
-  return {
-    status: r.status,
-    numero: r.numero,
-    codigo_verificacao: r.codigoVerificacao,
-    url_consulta: r.urlConsulta,
-    url_xml: r.urlXml,
-    url_pdf: r.urlPdf,
-    ...(valores.issCents != null ? { valor_iss_cents: valores.issCents } : {}),
-    ...(valores.pisCents != null ? { valor_pis_cents: valores.pisCents } : {}),
-    ...(valores.cofinsCents != null ? { valor_cofins_cents: valores.cofinsCents } : {}),
-    ...(valores.aliquota != null ? { aliquota_aplicada: valores.aliquota } : {}),
-    erros: r.erros,
-    updated_at: new Date().toISOString(),
-  }
+function respostaIndisponivel(e: FocusIndisponivelError, oQueNaoDeu: string): Response {
+  const espera = e.esperarSegundos > 0 ? ` Tente de novo em ${e.esperarSegundos} segundos.` : ''
+  const teto = e.codigo === 'limite_excedido'
+    ? 'A Focus aceita 100 requisições por minuto na conta e o teto foi batido agora.'
+    : 'A Focus não respondeu.'
+  return json({ error: 'focus_indisponivel', codigo: e.codigo, esperarSegundos: e.esperarSegundos, detail: `${teto} ${oQueNaoDeu}${espera}`.trim() }, 503)
 }
 
 async function ehCronAutorizado(admin: SupabaseClient, recebido: string | null): Promise<boolean> {
@@ -327,8 +314,24 @@ Deno.serve(async (req) => {
       return json({ error: 'db_insert_failed', detail: String(insErr.message ?? '').slice(0, 200) }, 500)
     }
 
-    const r = await emitirNfse(cfg, ref, dps)
-    await admin.from('nfse_notes').update(await patchDaResposta(r)).eq('tenant_id', tenantId).eq('ref', ref)
+    let r
+    try {
+      r = await emitirNfse(cfg, ref, dps)
+    } catch (e) {
+      if (!(e instanceof FocusIndisponivelError)) throw e
+      // 429 é a Focus RECUSANDO a requisição: a DPS não chegou lá e nota nenhuma nasceu. A linha
+      // que acabamos de criar não representa nada, e deixá-la vira "erro" eterno na tela do
+      // financeiro — foi o que aconteceu com 31 notas em 22/ago. Some com ela e mande a pessoa
+      // tentar de novo. Falha de REDE é outra história: aí a nota pode existir lá, e a linha
+      // fica pendente de propósito para o reconciliador descobrir.
+      if (e.httpStatus === 429) {
+        await admin.from('nfse_notes').delete().eq('tenant_id', tenantId).eq('ref', ref).eq('status', 'processando_autorizacao')
+      }
+      return respostaIndisponivel(e, 'A nota NÃO foi enviada.')
+    }
+
+    const patch = await patchDaResposta(r, 'processando_autorizacao')
+    if (patch) await admin.from('nfse_notes').update(patch).eq('tenant_id', tenantId).eq('ref', ref)
 
     return json({
       ok: r.status === 'processando_autorizacao' || r.status === 'autorizado',
@@ -347,8 +350,16 @@ Deno.serve(async (req) => {
     if (amb && amb !== cfg.ambiente) {
       return json({ error: 'ambiente_divergente', detail: `Esta nota é de ${amb}; o sistema está em ${cfg.ambiente}.` }, 400)
     }
-    const r = await consultarNfse(cfg, ref)
-    await admin.from('nfse_notes').update(await patchDaResposta(r)).eq('tenant_id', tenantId).eq('ref', ref)
+    const { data: atual } = await admin.from('nfse_notes').select('status').eq('tenant_id', tenantId).eq('ref', ref).maybeSingle()
+    let r
+    try {
+      r = await consultarNfse(cfg, ref)
+    } catch (e) {
+      if (!(e instanceof FocusIndisponivelError)) throw e
+      return respostaIndisponivel(e, 'A nota continua com o estado que já tinha.')
+    }
+    const patch = await patchDaResposta(r, (atual as { status?: string } | null)?.status)
+    if (patch) await admin.from('nfse_notes').update(patch).eq('tenant_id', tenantId).eq('ref', ref)
     return json({ ok: true, ref, status: r.status, numero: r.numero, urlPdf: r.urlPdf, urlXml: r.urlXml, erros: r.erros })
   }
 
@@ -364,7 +375,13 @@ Deno.serve(async (req) => {
       return json({ error: 'ambiente_divergente', detail: `Esta nota é de ${amb}; o sistema está em ${cfg.ambiente}.` }, 400)
     }
 
-    const r = await cancelarNfse(cfg, ref, justificativa)
+    let r
+    try {
+      r = await cancelarNfse(cfg, ref, justificativa)
+    } catch (e) {
+      if (!(e instanceof FocusIndisponivelError)) throw e
+      return respostaIndisponivel(e, 'A nota NÃO foi cancelada.')
+    }
     if (r.status === 'cancelado') {
       await admin.from('nfse_notes')
         .update({ status: 'cancelado', updated_at: new Date().toISOString() })
@@ -381,24 +398,61 @@ Deno.serve(async (req) => {
   if (action === 'reconciliar') {
     const dias = Math.min(Math.max(Number(p.dias ?? 90), 1), 365)
     const desde = new Date(Date.now() - dias * 86400000).toISOString()
-    const { data: rows } = await admin
-      .from('nfse_notes')
-      .select('ref, status')
-      .eq('tenant_id', tenantId)
-      .eq('ambiente', cfg.ambiente)
-      .in('status', ['autorizado', 'processando_autorizacao'])
-      .gte('created_at', desde)
-      .order('created_at', { ascending: false })
-      .limit(500)
+
+    // ORÇAMENTO, não "todas". A versão anterior lia 500 notas e consultava uma atrás da outra
+    // sem pausa: ~2,2 por segundo, 132 por minuto, contra um teto de 100 por minuto na conta da
+    // Focus. Ela estourava o próprio teto por volta da centésima nota e carimbava `limite_excedido`
+    // em tudo que vinha depois. Com o passo de 1s de `focusFetch`, 80 notas cabem em ~80s — dentro
+    // do timeout de 120s do cron e abaixo do teto, com folga para o painel e o gatilho.
+    const teto = Math.min(Math.max(Number(p.limite ?? 0) || 80, 1), 200)
+    const prazo = Date.now() + 95_000
+
+    const alvo = async (statuses: string[], limite: number) => {
+      if (limite <= 0) return []
+      const { data } = await admin
+        .from('nfse_notes')
+        .select('ref, status')
+        .eq('tenant_id', tenantId)
+        .eq('ambiente', cfg.ambiente)
+        .in('status', statuses)
+        // Da menos conferida para a mais conferida: o rodízio garante que toda nota da janela
+        // seja relida em algumas passadas, em vez de reler sempre as mesmas 80 mais novas.
+        .order('updated_at', { ascending: true })
+        .gte('created_at', desde)
+        .limit(limite)
+      return (data ?? []) as Array<{ ref: string; status: string }>
+    }
+
+    // Primeiro quem está sem resposta — inclusive as linhas carimbadas por FALHA DE CHAMADA
+    // (`limite_excedido` e afins). É por aqui que uma nota marcada errado volta ao estado real
+    // sozinha; sem isso ela ficava fora do conjunto do reconciliador para sempre.
+    const pendentes = await alvo(['processando_autorizacao', ...STATUS_TRANSITORIOS], teto)
+    // Depois as autorizadas, que é como cancelamento feito no portal da Focus chega aqui.
+    const autorizadas = await alvo(['autorizado'], teto - pendentes.length)
+    const rows = [...pendentes, ...autorizadas]
 
     const mudou: Array<{ ref: string; de: string; para: string }> = []
-    for (const row of (rows ?? []) as Array<{ ref: string; status: string }>) {
-      const r = await consultarNfse(cfg, row.ref)
-      if (r.status === 'desconhecido') continue
+    let conferidas = 0
+    let interrompida: string | null = null
+    for (const row of rows) {
+      if (Date.now() > prazo) { interrompida = 'prazo'; break }
+      let r
+      try {
+        r = await consultarNfse(cfg, row.ref)
+      } catch (e) {
+        if (!(e instanceof FocusIndisponivelError)) throw e
+        // A conta bateu no teto (o painel também consome). Parar é a resposta certa: insistir
+        // gasta requisição e carimbar o que não foi respondido é justamente o defeito antigo.
+        interrompida = e.codigo
+        break
+      }
+      conferidas += 1
+      const patch = await patchDaResposta(r, row.status)
+      if (!patch) continue
       if (r.status !== row.status) mudou.push({ ref: row.ref, de: row.status, para: r.status })
-      await admin.from('nfse_notes').update(await patchDaResposta(r)).eq('tenant_id', tenantId).eq('ref', row.ref)
+      await admin.from('nfse_notes').update(patch).eq('tenant_id', tenantId).eq('ref', row.ref)
     }
-    return json({ ok: true, conferidas: (rows ?? []).length, mudou })
+    return json({ ok: true, conferidas, naFila: rows.length, mudou, interrompida })
   }
 
   return json({ error: 'unknown_action' }, 400)

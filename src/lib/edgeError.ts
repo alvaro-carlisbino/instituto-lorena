@@ -16,7 +16,10 @@ export async function edgeErrorMessage(error: unknown, fallback: string): Promis
     try {
       const txt = await ctx.clone().text() // clone: o corpo só pode ser lido uma vez
       try {
-        const p = JSON.parse(txt) as { message?: unknown; error?: unknown }
+        const p = JSON.parse(txt) as { message?: unknown; error?: unknown; detail?: unknown }
+        // `detail` primeiro: as functions mandam `error` (código, p.ex. "focus_indisponivel") e
+        // `detail` (a frase que a pessoa lê). Sem esta linha a tela mostrava o código.
+        if (p.detail) return String(p.detail)
         if (p.message) return String(p.message)
         if (p.error) return String(p.error)
       } catch {
