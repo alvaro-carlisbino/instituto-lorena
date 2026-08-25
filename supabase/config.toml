@@ -465,6 +465,11 @@ verify_jwt = false
 # conferido contra app_cron_secrets['sefaz'] dentro da função.
 # Devolve para a Meta o que o anuncio nao sabe: quem respondeu, agendou e comprou. Chamada
 # so por pg_cron com x-cron-secret, sem JWT do Supabase.
+# Vigia da conta de anuncio: confere de hora em hora se a conta saiu do combinado e avisa
+# o dono. Chamada so por pg_cron com x-cron-secret.
+[functions.crm-meta-ads-vigia]
+verify_jwt = false
+
 [functions.crm-meta-ads-sync]
 verify_jwt = false
 
