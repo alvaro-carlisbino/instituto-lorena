@@ -47,6 +47,7 @@ import {
   Store,
   Target,
   Ticket,
+  Timer,
   Scissors,
   TrendingUp,
   Tv,
@@ -717,6 +718,17 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: Activity,
     group: 'relatorios',
     keywords: ['cirurgia', 'sala', 'tempo de sala', 'folículos', 'produção', 'enfermagem', 'hora', 'etapa'],
+    visible: (ctx) => isClinic(ctx) && canRoute(ctx),
+  },
+  {
+    id: 'cirurgia-equipe',
+    path: '/cirurgias/equipe',
+    label: 'Equipe da sala',
+    icon: Timer,
+    group: 'relatorios',
+    // "horas" e "meta" entram na busca porque é assim que o pedido chega:
+    // "tira um relatório de horas e folículos, está abaixo da meta".
+    keywords: ['cirurgia', 'implantador', 'horas', 'folículos', 'meta', 'produtividade', 'equipe', 'sala', 'bloco'],
     visible: (ctx) => isClinic(ctx) && canRoute(ctx),
   },
   {

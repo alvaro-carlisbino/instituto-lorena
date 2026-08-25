@@ -14,5 +14,6 @@ export const resultadosTabs = [
   { to: '/resultados', label: 'Resultados' },
   { to: '/analytics', label: 'Análise do funil' },
   { to: '/cirurgias/producao', label: 'Centro cirúrgico' },
+  { to: '/cirurgias/equipe', label: 'Equipe da sala' },
   { to: '/metricas', label: 'Metas' },
 ]

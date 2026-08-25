@@ -36,6 +36,8 @@ const MetricsPage = lazyPage(() => import('./pages/MetricsPage'), 'MetricsPage')
 const AnalyticsPage = lazyPage(() => import('./pages/AnalyticsPage'), 'AnalyticsPage')
 const ResultadosPage = lazyPage(() => import('./pages/ResultadosPage'), 'ResultadosPage')
 const CirurgiaProducaoPage = lazyPage(() => import('./pages/CirurgiaProducaoPage'), 'CirurgiaProducaoPage')
+const CirurgiaEquipePage = lazyPage(() => import('./pages/CirurgiaEquipePage'), 'CirurgiaEquipePage')
+const CirurgiaDetalhePage = lazyPage(() => import('./pages/CirurgiaDetalhePage'), 'CirurgiaDetalhePage')
 const PosOperatorioPage = lazyPage(() => import('./pages/PosOperatorioPage'), 'PosOperatorioPage')
 const FeedbackDashboardPage = lazyPage(() => import('./pages/FeedbackDashboardPage'), 'FeedbackDashboardPage')
 const ClinicalNotesPage = lazyPage(() => import('./pages/ClinicalNotesPage'), 'ClinicalNotesPage')
@@ -220,6 +222,9 @@ function AppRoutes() {
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/resultados" element={<ResultadosPage />} />
         <Route path="/cirurgias/producao" element={<CirurgiaProducaoPage />} />
+        <Route path="/cirurgias/equipe" element={<CirurgiaEquipePage />} />
+        {/* Rota com parâmetro por último: "/cirurgias/equipe" não pode cair no :id. */}
+        <Route path="/cirurgias/:id" element={<CirurgiaDetalhePage />} />
         <Route path="/pos-operatorio" element={<PosOperatorioPage />} />
         <Route path="/feedback" element={<FeedbackDashboardPage />} />
         <Route path="/notas-clinicas" element={<ClinicalNotesPage />} />

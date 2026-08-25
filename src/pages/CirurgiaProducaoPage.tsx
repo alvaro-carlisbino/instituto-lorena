@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, AlertTriangle, Clock, DoorOpen, Sparkles, Target, TrendingUp, Wallet } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Activity, AlertTriangle, Clock, DoorOpen, Sparkles, Target, Timer, TrendingUp, Wallet } from 'lucide-react'
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -371,6 +372,29 @@ export function CirurgiaProducaoPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* O tempo de sala é a cirurgia inteira. Quem responde "e a hora do
+            implantador?" é o bloco de hora, que mora na tela da equipe. */}
+        <Card className="border-dashed">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Timer className="size-4 text-muted-foreground" />
+              Dentro da cirurgia, hora a hora
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+            <p className="max-w-2xl leading-relaxed">
+              Esta tela mede a cirurgia inteira. Para saber se a hora do implantador foi de 60 ou de 35 minutos, e
+              quantos folículos cada pessoa fez em cada lado, abra o relatório da equipe e clique na cirurgia.
+            </p>
+            <Link
+              to="/cirurgias/equipe"
+              className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 font-medium text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+            >
+              Equipe da sala
+            </Link>
+          </CardContent>
+        </Card>
 
         {/* O que ficou de fora das contas, e por quê. */}
         <Card className="border-dashed">

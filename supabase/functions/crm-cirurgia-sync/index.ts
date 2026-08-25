@@ -206,6 +206,13 @@ Deno.serve(async (req) => {
              date_format(inicioD,'%Y-%m-%dT%H:%i:%s')     iniD,
              date_format(inicioE,'%Y-%m-%dT%H:%i:%s')     iniE,
              date_format(inicioC,'%Y-%m-%dT%H:%i:%s')     iniC,
+             -- dtCriacao do BLOCO é o início dele, não "criado em": a tela da sala
+             -- grava e edita essa ponta em "salvar hora início", e é dela que sai a
+             -- duração no relatório de horas (TIMESTAMPDIFF(dtCriacao, dtFim)).
+             -- inicioD/E/C não serve: vem igual nas três e carimba quando a LINHA
+             -- foi salva — nos blocos de implante, preenchidos no fim do dia, cai
+             -- depois do fim e a janela fica negativa.
+             date_format(dtCriacao,'%Y-%m-%dT%H:%i:%s')   ini,
              date_format(dtFim,'%Y-%m-%dT%H:%i:%s')       fim,
              date_format(excluido,'%Y-%m-%dT%H:%i:%s')    exc,
              date_format(dtAlteracao,'%Y-%m-%dT%H:%i:%s') alt
@@ -216,6 +223,7 @@ Deno.serve(async (req) => {
       implantador_d: fkStaff(r.implantadorD), auxiliar_d: fkStaff(r.auxiliarD), auxiliar_d2: fkStaff(r.auxiliarD2),
       implantador_e: fkStaff(r.implantadorE), auxiliar_e: fkStaff(r.auxiliarE), auxiliar_e2: fkStaff(r.auxiliarE2),
       implantador_c: fkStaff(r.implantadorC), auxiliar_c: fkStaff(r.auxiliarC), auxiliar_c2: fkStaff(r.auxiliarC2),
+      inicio: ts(r.ini),
       inicio_d: ts(r.iniD), inicio_e: ts(r.iniE), inicio_c: ts(r.iniC), dt_fim: ts(r.fim),
       deleted_at: ts(r.exc), source_updated_at: ts(r.alt), synced_at: new Date().toISOString(),
     })))
