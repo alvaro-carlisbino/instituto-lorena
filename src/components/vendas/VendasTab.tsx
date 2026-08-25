@@ -560,13 +560,26 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
         <Kpi rotulo={`Vendas · ${rotuloRecorte}`} valor={resumo.qtd} />
         <Kpi rotulo="Faturamento" valor={brl(resumo.total)} />
         <Kpi rotulo="Ticket médio" valor={brl(resumo.ticket)} />
+        {/* Sem NENHUM custo lançado, `lucro` é o faturamento inteiro — e o card anunciava
+            "Lucro R$ 403.211,92" com um "nenhum custo lançado" miúdo embaixo. Quem bate o olho
+            lê a manchete, não a nota de rodapé, e sai achando que o mês deu meio milhão de
+            lucro. Número que não existe não vira manchete: some, e o rótulo explica o que
+            falta. Mesmo vício de o DRE ser teto e ser lido como lucro. */}
         <Kpi
           rotulo="Lucro"
-          valor={brl(resultado.lucro)}
-          tom={resultado.lucro < 0 ? 'text-destructive' : undefined}
+          valor={resultado.custo > 0 ? brl(resultado.lucro) : '—'}
+          tom={
+            resultado.custo === 0
+              ? 'text-muted-foreground'
+              : resultado.lucro < 0
+                ? 'text-destructive'
+                : undefined
+          }
           detalhe={
-            (resultado.custo > 0 ? `${resultado.margem}% de margem` : 'nenhum custo lançado') +
-            (resultado.semCusto > 0 && resultado.custo > 0 ? ` · ${resultado.semCusto} sem custo` : '')
+            resultado.custo > 0
+              ? `${resultado.margem}% de margem` +
+                (resultado.semCusto > 0 ? ` · ${resultado.semCusto} sem custo` : '')
+              : `sem custo lançado · ${brl(resultado.receita)} de faturamento`
           }
         />
         <Kpi
