@@ -99,6 +99,12 @@ type DbInteraction = {
   content: string
   happened_at: string
   external_message_id?: string | null
+  reply_to_external_id?: string | null
+  edited_at?: string | null
+  deleted_at?: string | null
+  deleted_by?: string | null
+  deleted_scope?: 'crm' | 'everyone' | null
+  forwarded_from_id?: string | null
 }
 
 export type CrmDataSnapshot = {
@@ -316,8 +322,53 @@ const fetchAllLeadsPaged = async (
   return { data: all, error: null }
 }
 
+/**
+ * Uma linha de `interactions` vira uma bolha do chat. Quatro consultas diferentes
+ * carregavam interações (boot, refresh, por lead, histórico completo) e cada uma
+ * montava o objeto à mão — bastava esquecer um campo numa delas para a mesma
+ * mensagem aparecer citando a pergunta numa tela e solta noutra. Agora é aqui, uma vez.
+ */
+function mapDbInteraction(
+  interaction: DbInteraction,
+  media: Interaction['media'] | undefined,
+  reactions?: Interaction['reactions'],
+): Interaction {
+  return {
+    id: interaction.id,
+    leadId: interaction.lead_id,
+    patientName: interaction.patient_name,
+    channel: interaction.channel,
+    direction: interaction.direction,
+    author: interaction.author,
+    content: interaction.content,
+    happenedAt: interaction.happened_at,
+    externalMessageId: interaction.external_message_id || undefined,
+    replyToExternalId: interaction.reply_to_external_id || undefined,
+    editedAt: interaction.edited_at || undefined,
+    deletedAt: interaction.deleted_at || undefined,
+    deletedScope: interaction.deleted_scope || undefined,
+    deletedBy: interaction.deleted_by || undefined,
+    forwardedFromId: interaction.forwarded_from_id || undefined,
+    media,
+    reactions,
+  }
+}
+
+/**
+ * `crm_media_items.storage_path` carrega duas coisas diferentes: link público (mídia
+ * antiga, que vinha do S3 do ManyChat) e caminho dentro do bucket privado
+ * `crm-lead-attachments` (mídia nova, que sai pelo CRM). Um caminho de bucket posto num
+ * `<img src>` só dá imagem quebrada, então quem sabe distinguir é aqui.
+ */
+function splitStoragePath(valor: string | null | undefined): { url?: string; storagePath?: string } {
+  const v = String(valor ?? '').trim()
+  if (!v) return {}
+  if (/^https?:\/\//i.test(v) || v.startsWith('data:')) return { url: v }
+  return { storagePath: v }
+}
+
 const INTERACTION_SELECT =
-  'id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id' as const
+  'id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id, reply_to_external_id, edited_at, deleted_at, deleted_by, deleted_scope, forwarded_from_id' as const
 
 /**
  * Mensagem é do polo da LINHA onde ela aconteceu, e a tela de um polo não mostra a do
@@ -584,7 +635,11 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
         // Boot não traz base64 (9MB); quem tem storage_path renderiza pela URL e o
         // base64 chega ao abrir a conversa (loadLeadInteractionsFromSupabase).
         base64: undefined,
-        url: (row as { storage_path?: string | null }).storage_path ?? undefined,
+        // `storage_path` guarda duas coisas por herança: URL pública (mídia antiga do
+        // ManyChat) e caminho do bucket privado (mídia nova que sai pelo CRM). Caminho de
+        // bucket num `src` de <img> dá imagem quebrada — separamos aqui, e quem renderiza
+        // pede o link assinado só quando a bolha aparece.
+        ...splitStoragePath((row as { storage_path?: string | null }).storage_path),
         caption: (row.metadata as any)?.caption,
       })
       mediaByInteraction.set(iid, list)
@@ -592,18 +647,9 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   }
 
   const builtInteractions: Interaction[] = interactionRows.length
-    ? interactionRows.map((interaction) => ({
-        id: interaction.id,
-        leadId: interaction.lead_id,
-        patientName: interaction.patient_name,
-        channel: interaction.channel,
-        direction: interaction.direction,
-        author: interaction.author,
-        content: interaction.content,
-        happenedAt: interaction.happened_at,
-        externalMessageId: interaction.external_message_id || undefined,
-        media: mediaByInteraction.get(interaction.id),
-      }))
+    ? interactionRows.map((interaction) =>
+        mapDbInteraction(interaction, mediaByInteraction.get(interaction.id)),
+      )
     : initialInteractions
 
   const builtChannels: ChannelConfig[] = (channelsRes.data ?? []).length
@@ -873,25 +919,20 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
         type: row.media_type as any,
         mimeType: row.mime_type,
         base64: row.media_base64,
-        url: (row as { storage_path?: string | null }).storage_path ?? undefined,
+        // `storage_path` guarda duas coisas por herança: URL pública (mídia antiga do
+        // ManyChat) e caminho do bucket privado (mídia nova que sai pelo CRM). Caminho de
+        // bucket num `src` de <img> dá imagem quebrada — separamos aqui, e quem renderiza
+        // pede o link assinado só quando a bolha aparece.
+        ...splitStoragePath((row as { storage_path?: string | null }).storage_path),
         caption: (row.metadata as any)?.caption,
       })
       mediaByInteraction.set(iid, list)
     }
   }
 
-  const builtInteractions: Interaction[] = interactionRows.map((interaction) => ({
-    id: interaction.id,
-    leadId: interaction.lead_id,
-    patientName: interaction.patient_name,
-    channel: interaction.channel,
-    direction: interaction.direction,
-    author: interaction.author,
-    content: interaction.content,
-    happenedAt: interaction.happened_at,
-    externalMessageId: interaction.external_message_id || undefined,
-    media: mediaByInteraction.get(interaction.id),
-  }))
+  const builtInteractions: Interaction[] = interactionRows.map((interaction) =>
+    mapDbInteraction(interaction, mediaByInteraction.get(interaction.id)),
+  )
 
   return { leads: builtLeads, interactions: builtInteractions }
 }
@@ -933,25 +974,20 @@ export const loadInteractionsSliceFromSupabase = async (): Promise<Interaction[]
         type: row.media_type as any,
         mimeType: row.mime_type,
         base64: row.media_base64,
-        url: (row as { storage_path?: string | null }).storage_path ?? undefined,
+        // `storage_path` guarda duas coisas por herança: URL pública (mídia antiga do
+        // ManyChat) e caminho do bucket privado (mídia nova que sai pelo CRM). Caminho de
+        // bucket num `src` de <img> dá imagem quebrada — separamos aqui, e quem renderiza
+        // pede o link assinado só quando a bolha aparece.
+        ...splitStoragePath((row as { storage_path?: string | null }).storage_path),
         caption: (row.metadata as any)?.caption,
       })
       mediaByInteraction.set(iid, list)
     }
   }
 
-  return ((interactionsRes.data ?? []) as DbInteraction[]).map((interaction) => ({
-    id: interaction.id,
-    leadId: interaction.lead_id,
-    patientName: interaction.patient_name,
-    channel: interaction.channel,
-    direction: interaction.direction,
-    author: interaction.author,
-    content: interaction.content,
-    happenedAt: interaction.happened_at,
-    externalMessageId: interaction.external_message_id || undefined,
-    media: mediaByInteraction.get(interaction.id),
-  }))
+  return ((interactionsRes.data ?? []) as DbInteraction[]).map((interaction) =>
+    mapDbInteraction(interaction, mediaByInteraction.get(interaction.id)),
+  )
 }
 
 /**
@@ -985,25 +1021,20 @@ export const loadLeadInteractionsFromSupabase = async (leadId: string): Promise<
         type: row.media_type as any,
         mimeType: row.mime_type,
         base64: row.media_base64,
-        url: (row as { storage_path?: string | null }).storage_path ?? undefined,
+        // `storage_path` guarda duas coisas por herança: URL pública (mídia antiga do
+        // ManyChat) e caminho do bucket privado (mídia nova que sai pelo CRM). Caminho de
+        // bucket num `src` de <img> dá imagem quebrada — separamos aqui, e quem renderiza
+        // pede o link assinado só quando a bolha aparece.
+        ...splitStoragePath((row as { storage_path?: string | null }).storage_path),
         caption: (row.metadata as any)?.caption,
       })
       mediaByInteraction.set(iid, list)
     }
   }
 
-  return interactionRows.map((interaction) => ({
-    id: interaction.id,
-    leadId: interaction.lead_id,
-    patientName: interaction.patient_name,
-    channel: interaction.channel,
-    direction: interaction.direction,
-    author: interaction.author,
-    content: interaction.content,
-    happenedAt: interaction.happened_at,
-    externalMessageId: interaction.external_message_id || undefined,
-    media: mediaByInteraction.get(interaction.id),
-  }))
+  return interactionRows.map((interaction) =>
+    mapDbInteraction(interaction, mediaByInteraction.get(interaction.id)),
+  )
 }
 
 export type RoomsAndAppointmentsSlice = {

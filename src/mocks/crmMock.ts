@@ -111,8 +111,26 @@ export type Interaction = {
     base64?: string
     /** URL pública (ex.: S3 do ManyChat — manybot-files.s3.eu-central-1.amazonaws.com). */
     url?: string
+    /** Caminho no bucket privado `crm-lead-attachments` — vira link assinado na hora de ver. */
+    storagePath?: string
     caption?: string
   }>
+  /** Id externo da mensagem CITADA por esta (o "responder" do WhatsApp). */
+  replyToExternalId?: string
+  /** Quando foi editada depois de enviada. */
+  editedAt?: string
+  /**
+   * Apagada. `everyone` saiu do telemóvel da pessoa; `crm` só sumiu da nossa tela. A linha
+   * fica no banco de propósito: vira lápide ("Esta mensagem foi apagada"), como no WhatsApp.
+   * Apagar a linha faria o histórico mentir por omissão numa auditoria.
+   */
+  deletedAt?: string
+  deletedScope?: 'crm' | 'everyone'
+  deletedBy?: string
+  /** Encaminhada a partir desta interaction. */
+  forwardedFromId?: string
+  /** Emojis na bolha. `mine` = fui eu que reagi (o CRM), então dá para tirar. */
+  reactions?: Array<{ emoji: string; direction: 'in' | 'out'; author: string; mine: boolean }>
 }
 
 export type TriageResult = {

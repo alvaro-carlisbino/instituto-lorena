@@ -24,6 +24,13 @@ import {
   FileText,
   FileSpreadsheet,
   FileType,
+  Reply,
+  Forward,
+  Copy,
+  SmilePlus,
+  CheckSquare,
+  X,
+  Ban,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -48,6 +55,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ScheduleAppointmentDialog } from '@/components/leads/ScheduleAppointmentDialog'
+import { EmojiPicker } from '@/components/leads/chat/EmojiPicker'
+import { AttachmentTray, type PendingMedia } from '@/components/leads/chat/AttachmentTray'
+import { AudioRecorder } from '@/components/leads/chat/AudioRecorder'
+import { ForwardDialog, type ForwardTarget } from '@/components/leads/chat/ForwardDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
@@ -64,54 +75,22 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
 import type { Interaction } from '@/mocks/crmMock'
 import { forceAiReply } from '@/services/conversationControl'
+import {
+  deleteMessage as apagarMensagem,
+  discardChatMedia,
+  loadReactionsForLead,
+  reactToMessage,
+  removeMessageReaction,
+  signedMediaUrl,
+  uploadChatMedia,
+  type ReactionRow,
+} from '@/services/crmChat'
+import { sendWhatsappMessage, notifySendError } from '@/services/crmWhatsapp'
 
-/** Emojis frequentes para inserir no rascunho (UTF-8). */
 // Valor cheio do cartão por kit Tricopill (mesma tabela do PaymentLinksPage). Cartão+Pix = e.Rede
 // (Asaas é SÓ assinatura); o link /pagar deixa o cliente escolher Pix (5% off) ou cartão até 3x.
 const REDE_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99500 }
 
-const CHAT_QUICK_EMOJIS = [
-  '😀',
-  '😃',
-  '😄',
-  '😁',
-  '😅',
-  '😂',
-  '🤣',
-  '😊',
-  '🙂',
-  '😉',
-  '😍',
-  '🥰',
-  '😘',
-  '😇',
-  '🤔',
-  '😮',
-  '😢',
-  '😭',
-  '🙏',
-  '👍',
-  '👎',
-  '👏',
-  '🙌',
-  '💪',
-  '❤️',
-  '💙',
-  '✨',
-  '🔥',
-  '⭐',
-  '✅',
-  '❌',
-  '⚠️',
-  '📅',
-  '⏰',
-  '💬',
-  '📞',
-  '🏥',
-  '💊',
-  '🦷',
-  '✍️',
-]
 
 type ChatFilter = 'all' | 'whatsapp' | 'meta'
 
@@ -226,6 +205,19 @@ function encodeWav(audioBuffer: AudioBuffer): Blob {
   return new Blob([view], { type: 'audio/wav' })
 }
 
+/**
+ * O texto da bolha é só o marcador que pusemos porque a mídia veio sem legenda
+ * ("📷 Foto", "🎤 Áudio"). Ao encaminhar, isso não pode virar uma mensagem de texto
+ * sozinha do outro lado — a foto já vai, e "📷 Foto" solto não quer dizer nada.
+ */
+/** Fila de reação rápida do menu da bolha — as mesmas seis do WhatsApp. */
+const REACOES_RAPIDAS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
+
+function isMediaOnlyLabel(content: string): boolean {
+  const t = (content ?? '').trim()
+  return /^(📷|🎬|🎥|🎤|📎|🎭|🎞️|🌟|📍|👤)\s*\S*$/u.test(t)
+}
+
 function triggerDownload(url: string, filename: string): void {
   const a = document.createElement('a')
   a.href = url
@@ -305,17 +297,51 @@ export function LeadChatThread({
   const [draftAttachments, setDraftAttachments] = useState<
     Array<{ name: string; mimeType: string; base64: string }>
   >([])
+  /** Mídia já subida ao Storage, à espera do envio (com legenda por peça). */
+  const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([])
+  /** A mensagem que o compositor está a RESPONDER (citação), se houver. */
+  const [replyTarget, setReplyTarget] = useState<Interaction | null>(null)
+  const [sending, setSending] = useState(false)
 
   const handleSend = async () => {
-    if (!draftMessage.trim()) return
+    if (sending) return
+    const prontas = pendingMedia.filter((m) => !m.uploading)
+    if (!draftMessage.trim() && prontas.length === 0) return
+    if (pendingMedia.some((m) => m.uploading)) {
+      toast.info('Aguarde os anexos terminarem de subir.')
+      return
+    }
     const text = draftMessage
     const atts = draftAttachments
+    const midia = prontas.map((m) => ({
+      kind: m.kind,
+      storagePath: m.storagePath,
+      fileName: m.fileName,
+      mimeType: m.mimeType,
+      caption: m.caption || undefined,
+    }))
+    const citada = replyTarget?.externalMessageId
     setDraftMessage('')
     setDraftAttachments([])
-    const res = await crm.sendMessage(text, atts)
-    if (res?.restore) {
-      setDraftMessage(text)
-      setDraftAttachments(atts)
+    setPendingMedia([])
+    setReplyTarget(null)
+    setSending(true)
+    try {
+      const res = await crm.sendMessage(text, atts, {
+        media: midia.length ? midia : undefined,
+        replyToMessageId: citada,
+      })
+      if (res?.restore) {
+        // O operador cancelou o envio a um opt-out: devolve o rascunho INTEIRO, inclusive
+        // os anexos. Perder três fotos já subidas por causa de um "cancelar" é o tipo de
+        // coisa que faz a pessoa desistir da tela e ir para o telemóvel.
+        setDraftMessage(text)
+        setDraftAttachments(atts)
+        setPendingMedia(prontas)
+        setReplyTarget(replyTarget)
+      }
+    } finally {
+      setSending(false)
     }
   }
 
@@ -377,6 +403,31 @@ export function LeadChatThread({
   const [editSaving, setEditSaving] = useState(false)
   const [deleteMsgOpen, setDeleteMsgOpen] = useState(false)
   const [deleteMsgTarget, setDeleteMsgTarget] = useState<Interaction | null>(null)
+  /** 'everyone' apaga no WhatsApp da pessoa; 'crm' só some da nossa tela. */
+  const [deleteMsgScope, setDeleteMsgScope] = useState<'crm' | 'everyone'>('everyone')
+
+  // ── Seleção de mensagens (o "selecionar" do WhatsApp) ─────────────────────
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [forwardOpen, setForwardOpen] = useState(false)
+  const [forwarding, setForwarding] = useState(false)
+  /** Encaminhar UMA mensagem sem entrar no modo de seleção. */
+  const [forwardTarget, setForwardTarget] = useState<Interaction | null>(null)
+  /**
+   * Links assinados da mídia guardada no bucket privado, por id do item. Sem isto, a foto
+   * que NÓS enviámos aparecia quebrada na bolha: o que está gravado é o caminho no bucket,
+   * e caminho de bucket dentro de um `<img src>` não é imagem nenhuma.
+   */
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({})
+  /** Reações (emoji na bolha) da conversa aberta, indexadas pelo id externo. */
+  const [reactions, setReactions] = useState<ReactionRow[]>([])
+  const [reactingId, setReactingId] = useState<string | null>(null)
+
+  /** As mensagens marcadas no modo de seleção, na ordem em que estão no histórico. */
+  const mensagensSelecionadas = useMemo(
+    () => history.filter((m) => selectedIds.includes(m.id)),
+    [history, selectedIds],
+  )
 
   // Quick Messages
   const [quickMessages, setQuickMessages] = useState<Array<{ id: string; title: string; content: string }>>([])
@@ -502,17 +553,83 @@ export function LeadChatThread({
     }
   }
 
+  const pedirApagar = (msg: Interaction, scope: 'crm' | 'everyone') => {
+    setDeleteMsgTarget(msg)
+    setDeleteMsgScope(scope)
+    setDeleteMsgOpen(true)
+  }
+
+  /**
+   * Duas ações com o mesmo botão seriam mentira, então são duas.
+   *  • `everyone` chama a W-API: a mensagem some do telemóvel da pessoa. O WhatsApp só
+   *    permite por um tempo depois do envio; passado isso, a recusa vem com o motivo.
+   *  • `crm` marca a linha como apagada AQUI. A bolha vira lápide em vez de sumir: apagar
+   *    a linha faria o histórico mentir por omissão para quem auditasse a conversa depois.
+   */
   const runDeleteMessage = async () => {
     if (!deleteMsgTarget) return
+    const alvo = deleteMsgTarget
     try {
-      await crm.deleteInteractionMessage(deleteMsgTarget.id)
-      toast.success('Mensagem removida do histórico do CRM.')
+      const res = await apagarMensagem(alvo.id, deleteMsgScope)
+      if (!res.ok) {
+        toast.error(res.error)
+        return
+      }
+      toast.success(
+        deleteMsgScope === 'everyone'
+          ? 'Mensagem apagada no WhatsApp.'
+          : 'Mensagem escondida do histórico do CRM.',
+      )
       setDeleteMsgOpen(false)
       setDeleteMsgTarget(null)
+      await crm.refreshChatFromSupabase?.()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Não foi possível apagar.')
     }
   }
+
+  const apagarSelecionadas = async () => {
+    if (mensagensSelecionadas.length === 0) return
+    let feitas = 0
+    for (const msg of mensagensSelecionadas) {
+      const res = await apagarMensagem(msg.id, 'crm')
+      if (res.ok) feitas += 1
+    }
+    toast.success(
+      feitas === 1 ? 'Mensagem escondida do CRM.' : `${feitas} mensagens escondidas do CRM.`,
+      { description: 'Apagar no WhatsApp da pessoa é uma mensagem de cada vez, pelo menu da bolha.' },
+    )
+    sairDaSelecao()
+    await crm.refreshChatFromSupabase?.()
+  }
+
+  /**
+   * Índice id-do-WhatsApp → mensagem, para achar a CITADA em O(1). Sem isto, cada bolha
+   * varreria o histórico inteiro à procura da que ela responde — numa conversa de 800
+   * mensagens isso é 800 varreduras por render.
+   */
+  const porIdExterno = useMemo(() => {
+    const mapa = new Map<string, Interaction>()
+    for (const m of history) {
+      if (m.externalMessageId) mapa.set(m.externalMessageId, m)
+    }
+    return mapa
+  }, [history])
+
+  /**
+   * Para onde dá para encaminhar. Fora: a conversa atual (encaminhar para si próprio) e
+   * quem não tem WhatsApp real — o telefone sintético 888001… é de quem só falou por DM e
+   * nunca teve número, então a mensagem morreria com erro do outro lado.
+   */
+  const destinosDeEncaminhamento = useMemo<ForwardTarget[]>(
+    () =>
+      crm.leads
+        .filter((l) => l.id !== leadId)
+        .filter((l) => l.phone && !l.phone.replace(/\D/g, '').startsWith('888001'))
+        .map((l) => ({ id: l.id, name: l.patientName, phone: l.phone }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+    [crm.leads, leadId],
+  )
 
   const items = useMemo(() => {
     const list = [...history].sort(
@@ -599,22 +716,240 @@ export function LeadChatThread({
     }
   }, [history])
 
+  /**
+   * Anexar = SUBIR agora, enviar depois. O ficheiro vai para o bucket assim que é escolhido
+   * e o compositor guarda só o caminho; na hora de enviar, a edge assina um link e a W-API
+   * vai lá buscar. Fazer o contrário (guardar base64 e mandar tudo no envio) estoura a
+   * memória da função num vídeo de 12 MB — e era por isso que o anexo "enviava" e não saía.
+   */
   const handleAttachFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return
-    const next: Array<{ name: string; mimeType: string; base64: string }> = []
-    for (const file of Array.from(files)) {
-      const raw = await file.arrayBuffer()
-      const bytes = new Uint8Array(raw)
-      let binary = ''
-      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i] as number)
-      const base64 = btoa(binary)
-      next.push({
-        name: file.name,
+    const escolhidos = Array.from(files)
+    // Cada ficheiro entra na bandeja imediatamente, marcado como "enviando", para a pessoa
+    // ver que ele foi aceite enquanto sobe.
+    for (const file of escolhidos) {
+      const provisorio: PendingMedia = {
+        storagePath: `subindo:${crypto.randomUUID()}`,
+        fileName: file.name,
         mimeType: file.type || 'application/octet-stream',
-        base64,
-      })
+        kind: 'document',
+        previewUrl: URL.createObjectURL(file),
+        sizeBytes: file.size,
+        caption: '',
+        uploading: true,
+      }
+      setPendingMedia((atuais) => [...atuais, provisorio])
+      try {
+        const subido = await uploadChatMedia(leadId, file)
+        setPendingMedia((atuais) =>
+          atuais.map((m) =>
+            m.storagePath === provisorio.storagePath ? { ...subido, caption: '', uploading: false } : m,
+          ),
+        )
+        URL.revokeObjectURL(provisorio.previewUrl)
+      } catch (e) {
+        setPendingMedia((atuais) => atuais.filter((m) => m.storagePath !== provisorio.storagePath))
+        URL.revokeObjectURL(provisorio.previewUrl)
+        toast.error(e instanceof Error ? e.message : `Falha ao anexar ${file.name}.`)
+      }
     }
-    setDraftAttachments([...(draftAttachments ?? []), ...next])
+  }
+
+  const removerAnexo = (storagePath: string) => {
+    setPendingMedia((atuais) => atuais.filter((m) => m.storagePath !== storagePath))
+    // Ficheiro que não vai ser enviado não fica ocupando o bucket.
+    if (!storagePath.startsWith('subindo:')) void discardChatMedia(storagePath)
+  }
+
+  const definirLegenda = (storagePath: string, caption: string) => {
+    setPendingMedia((atuais) =>
+      atuais.map((m) => (m.storagePath === storagePath ? { ...m, caption } : m)),
+    )
+  }
+
+  /** Áudio gravado no próprio CRM entra na bandeja como qualquer outro anexo. */
+  const anexarAudioGravado = async (file: File) => {
+    try {
+      const subido = await uploadChatMedia(leadId, file)
+      setPendingMedia((atuais) => [...atuais, { ...subido, kind: 'audio', caption: '', uploading: false }])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao anexar o áudio gravado.')
+    }
+  }
+
+  // ── Reações ────────────────────────────────────────────────────────────────
+  const recarregarReacoes = async () => {
+    if (!isSupabaseConfigured) return
+    setReactions(await loadReactionsForLead(leadId))
+  }
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !leadId) return
+    let vivo = true
+    void loadReactionsForLead(leadId).then((linhas) => {
+      if (vivo) setReactions(linhas)
+    })
+    return () => {
+      vivo = false
+    }
+  }, [leadId, history.length])
+
+  useEffect(() => {
+    const pendentes = history
+      .flatMap((m) => m.media ?? [])
+      .filter((m) => m.storagePath && !m.url && !signedUrls[m.id])
+    if (pendentes.length === 0) return
+    let vivo = true
+    void (async () => {
+      const novos: Record<string, string> = {}
+      for (const item of pendentes) {
+        const url = await signedMediaUrl(item.storagePath as string)
+        if (url) novos[item.id] = url
+      }
+      if (vivo && Object.keys(novos).length) setSignedUrls((atuais) => ({ ...atuais, ...novos }))
+    })()
+    return () => {
+      vivo = false
+    }
+  }, [history, signedUrls])
+
+  /** As reações de UMA mensagem, agrupadas por emoji (como no WhatsApp). */
+  const reacoesDe = (msg: Interaction) => {
+    const chave = msg.externalMessageId
+    if (!chave) return []
+    const minhas = reactions.filter((r) => r.externalMessageId === chave)
+    const porEmoji = new Map<string, { emoji: string; total: number; minha: boolean }>()
+    for (const r of minhas) {
+      const atual = porEmoji.get(r.emoji) ?? { emoji: r.emoji, total: 0, minha: false }
+      atual.total += 1
+      if (r.direction === 'out') atual.minha = true
+      porEmoji.set(r.emoji, atual)
+    }
+    return [...porEmoji.values()]
+  }
+
+  const alternarReacao = async (msg: Interaction, emoji: string) => {
+    if (!msg.externalMessageId) {
+      toast.error('Esta mensagem não tem id do WhatsApp — não dá para reagir a ela.')
+      return
+    }
+    const jaMinha = reacoesDe(msg).find((r) => r.minha && r.emoji === emoji)
+    setReactingId(msg.id)
+    try {
+      const res = jaMinha ? await removeMessageReaction(msg.id) : await reactToMessage(msg.id, emoji)
+      if (!res.ok) {
+        toast.error(res.error)
+        return
+      }
+      await recarregarReacoes()
+    } finally {
+      setReactingId(null)
+    }
+  }
+
+  // ── Seleção de várias mensagens ────────────────────────────────────────────
+  const alternarSelecao = (id: string) => {
+    setSelectedIds((atuais) =>
+      atuais.includes(id) ? atuais.filter((x) => x !== id) : [...atuais, id],
+    )
+  }
+
+  const sairDaSelecao = () => {
+    setSelectionMode(false)
+    setSelectedIds([])
+  }
+
+  const entrarNaSelecao = (msg: Interaction) => {
+    setSelectionMode(true)
+    setSelectedIds([msg.id])
+  }
+
+  const copiarSelecionadas = async () => {
+    const texto = (mensagensSelecionadas.length ? mensagensSelecionadas : [])
+      .slice()
+      .sort((a, b) => new Date(a.happenedAt).getTime() - new Date(b.happenedAt).getTime())
+      .map((m) => {
+        const quem = resolveAuthorLabel(m.author, crm.users).nome
+        const hora = format(new Date(m.happenedAt), 'dd/MM HH:mm', { locale: ptBR })
+        return `[${hora}] ${quem}: ${m.content}`
+      })
+      .join('\n')
+    try {
+      await navigator.clipboard.writeText(texto)
+      toast.success(
+        mensagensSelecionadas.length === 1 ? 'Mensagem copiada.' : `${mensagensSelecionadas.length} mensagens copiadas.`,
+      )
+    } catch {
+      toast.error('O navegador não deixou copiar. Selecione o texto à mão.')
+    }
+  }
+
+  const copiarUma = async (msg: Interaction) => {
+    try {
+      await navigator.clipboard.writeText(msg.content)
+      toast.success('Mensagem copiada.')
+    } catch {
+      toast.error('O navegador não deixou copiar.')
+    }
+  }
+
+  // ── Encaminhar ─────────────────────────────────────────────────────────────
+  /**
+   * Reenvia o conteúdo para outras conversas. A W-API não tem rota de encaminhar, então o
+   * que sai é uma mensagem nova com o mesmo conteúdo — mídia pelo `mediaItemId`, para os
+   * bytes não irem e voltarem pelo browser.
+   */
+  const encaminhar = async (destinos: string[]) => {
+    if (destinos.length === 0) return
+    const mensagens = mensagensSelecionadas.length
+      ? mensagensSelecionadas
+      : forwardTarget
+        ? [forwardTarget]
+        : []
+    if (mensagens.length === 0) return
+    setForwarding(true)
+    let enviadas = 0
+    let falhas = 0
+    try {
+      for (const destinoId of destinos) {
+        const destino = crm.leads.find((l) => l.id === destinoId)
+        if (!destino) continue
+        // Ordem cronológica: encaminhar três mensagens fora de ordem conta outra história.
+        const ordenadas = mensagens
+          .slice()
+          .sort((a, b) => new Date(a.happenedAt).getTime() - new Date(b.happenedAt).getTime())
+        for (const msg of ordenadas) {
+          const midia = (msg.media ?? []).map((m) => ({ mediaItemId: m.id, caption: m.caption || undefined }))
+          // Texto de bolha que era só marcador de mídia ("📷 Foto") não se reenvia como
+          // texto — a mídia já vai, e o marcador viraria uma mensagem estranha sozinha.
+          const soMarcador = midia.length > 0 && isMediaOnlyLabel(msg.content)
+          const res = await sendWhatsappMessage({
+            leadId: destino.id,
+            to: destino.phone,
+            text: soMarcador ? '' : msg.content,
+            media: midia.length ? midia : undefined,
+            forwardedFromId: msg.id,
+          })
+          if (res.ok) enviadas += 1
+          else {
+            falhas += 1
+            notifySendError(res, 'manual')
+          }
+        }
+      }
+      if (enviadas > 0) {
+        toast.success(
+          enviadas === 1 ? 'Mensagem encaminhada.' : `${enviadas} mensagens encaminhadas.`,
+          falhas > 0 ? { description: `${falhas} não saíram.` } : undefined,
+        )
+      }
+      setForwardOpen(false)
+      setForwardTarget(null)
+      sairDaSelecao()
+      await crm.refreshChatFromSupabase?.()
+    } finally {
+      setForwarding(false)
+    }
   }
 
   const insertEmojiIntoDraft = (emoji: string) => {
@@ -709,6 +1044,9 @@ export function LeadChatThread({
       // resolveSrc usa qualquer um — assim o mesmo renderer atende os dois canais.
       const resolveSrc = (item: NonNullable<Interaction['media']>[number], fallbackMime: string): string | null => {
         if (item.url && item.url.trim()) return item.url
+        // Mídia que saiu pelo CRM vive no bucket privado: o link assinado é resolvido no
+        // efeito acima e chega aqui pelo id.
+        if (item.storagePath && signedUrls[item.id]) return signedUrls[item.id]
         if (item.base64 && item.base64.trim()) return `data:${item.mimeType || fallbackMime};base64,${item.base64}`
         return null
       }
@@ -723,7 +1061,7 @@ export function LeadChatThread({
                   <Button
                     type="button"
                     variant="ghost"
-                    onClick={() => openMedia(item, 'image/jpeg')}
+                    onClick={() => openMedia({ ...item, url: src }, 'image/jpeg')}
                     aria-label={item.caption ? `Abrir imagem: ${item.caption}` : 'Abrir imagem em nova aba'}
                     className="block h-auto w-full rounded-none border-0 p-0 hover:bg-transparent"
                   >
@@ -751,7 +1089,7 @@ export function LeadChatThread({
                   key={item.id}
                   type="button"
                   variant="ghost"
-                  onClick={() => openMedia(item, 'application/octet-stream')}
+                  onClick={() => openMedia({ ...item, url: src }, 'application/octet-stream')}
                   className="h-auto w-full justify-start gap-3 whitespace-normal rounded-lg bg-black/5 p-2 text-left font-normal transition-colors hover:bg-black/10 hover:text-inherit dark:bg-white/5 dark:hover:bg-white/10"
                 >
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/20 text-blue-500">
@@ -906,6 +1244,67 @@ export function LeadChatThread({
         </div>
       </div>
 
+      {/* Barra do modo de seleção: substitui a régua de ações enquanto há mensagens
+          marcadas, como no WhatsApp. Fora do modo, não ocupa espaço nenhum. */}
+      {selectionMode ? (
+        <div className="flex shrink-0 items-center justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-2 py-1.5">
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={sairDaSelecao}
+              title="Sair da seleção"
+            >
+              <X className="size-4" aria-hidden />
+              <span className="sr-only">Sair da seleção</span>
+            </Button>
+            <span className="text-xs font-medium tabular-nums">
+              {selectedIds.length} selecionada{selectedIds.length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              disabled={selectedIds.length === 0}
+              onClick={() => void copiarSelecionadas()}
+            >
+              <Copy className="size-3.5" aria-hidden />
+              <span className="hidden sm:inline">Copiar</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              disabled={selectedIds.length === 0}
+              onClick={() => {
+                setForwardTarget(null)
+                setForwardOpen(true)
+              }}
+            >
+              <Forward className="size-3.5" aria-hidden />
+              <span className="hidden sm:inline">Encaminhar</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-[11px] text-destructive hover:text-destructive"
+              disabled={selectedIds.length === 0}
+              onClick={() => void apagarSelecionadas()}
+            >
+              <Trash2 className="size-3.5" aria-hidden />
+              <span className="hidden sm:inline">Esconder do CRM</span>
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Message History */}
       <div
         ref={scrollRef}
@@ -941,21 +1340,47 @@ export function LeadChatThread({
                       out ? 'items-end' : 'items-start',
                     )}
                   >
-                  <div className="flex w-full max-w-[min(92%,28rem)] flex-col gap-1.5 sm:max-w-[min(85%,32rem)] lg:max-w-[75%]">
-                    {group.map((msg, mIdx) => (
+                  <div className="flex w-full max-w-[min(92%,28rem)] flex-col gap-2.5 sm:max-w-[min(85%,32rem)] lg:max-w-[75%]">
+                    {group.map((msg, mIdx) => {
+                      const apagada = Boolean(msg.deletedAt)
+                      const citada = msg.replyToExternalId ? porIdExterno.get(msg.replyToExternalId) : undefined
+                      const minhasReacoes = reacoesDe(msg)
+                      const selecionada = selectedIds.includes(msg.id)
+                      return (
                       <div
                         key={msg.id}
+                        onClick={selectionMode ? () => alternarSelecao(msg.id) : undefined}
                         className={cn(
                           'group/msg relative rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed shadow-sm transition-all',
                           out
                             ? 'bg-primary text-primary-foreground'
                             : 'bg-card text-foreground border border-border/50 dark:bg-[#202c33] dark:text-white/95 dark:border-white/5',
                           out ? (mIdx === 0 ? 'rounded-tr-none' : '') : (mIdx === 0 ? 'rounded-tl-none' : ''),
-                          canCompose && out && 'pr-9',
-                          canCompose && !out && 'pl-9',
+                          canCompose && !selectionMode && out && 'pr-9',
+                          canCompose && !selectionMode && !out && 'pl-9',
+                          selectionMode && 'cursor-pointer',
+                          selecionada && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
+                          apagada && 'opacity-70',
                         )}
                       >
-                        {canCompose ? (
+                        {selectionMode ? (
+                          <span
+                            aria-hidden
+                            className={cn(
+                              'absolute top-2 flex size-4 items-center justify-center rounded-[4px] border',
+                              out ? 'right-1.5 border-primary-foreground/60' : 'left-1.5 border-muted-foreground/60',
+                              selecionada && (out ? 'bg-primary-foreground/90' : 'bg-primary'),
+                            )}
+                          >
+                            {selecionada ? (
+                              <CheckCircle2
+                                className={cn('size-3', out ? 'text-primary' : 'text-primary-foreground')}
+                              />
+                            ) : null}
+                          </span>
+                        ) : null}
+
+                        {canCompose && !selectionMode ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger
                               type="button"
@@ -970,34 +1395,194 @@ export function LeadChatThread({
                             >
                               <MoreVertical className="h-4 w-4" aria-hidden />
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align={out ? 'end' : 'start'} className="min-w-44">
-                              {canEditOutboundText(msg) ? (
+                            <DropdownMenuContent align={out ? 'end' : 'start'} className="min-w-52">
+                              {/* Reação rápida: a fila de emojis que o WhatsApp põe no topo
+                                  do menu. Reagir com o mesmo emoji de novo tira a reação. */}
+                              {!apagada && msg.externalMessageId ? (
+                                <div className="flex items-center gap-0.5 px-1 pb-1">
+                                  {REACOES_RAPIDAS.map((em) => (
+                                    <Button
+                                      key={em}
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      disabled={reactingId === msg.id}
+                                      className={cn(
+                                        'size-8 rounded-full text-base font-normal leading-none hover:bg-muted',
+                                        minhasReacoes.some((r) => r.minha && r.emoji === em) && 'bg-primary/15',
+                                      )}
+                                      onClick={() => void alternarReacao(msg, em)}
+                                      title={`Reagir com ${em}`}
+                                    >
+                                      {em}
+                                    </Button>
+                                  ))}
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger
+                                      type="button"
+                                      className={cn(
+                                        buttonVariants({ variant: 'ghost', size: 'icon' }),
+                                        'size-8 rounded-full',
+                                      )}
+                                      title="Outro emoji"
+                                    >
+                                      <SmilePlus className="size-4" aria-hidden />
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align={out ? 'end' : 'start'} className="p-2">
+                                      <EmojiPicker onPick={(em) => void alternarReacao(msg, em)} />
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
+                              ) : null}
+                              {!apagada && msg.externalMessageId ? <DropdownMenuSeparator /> : null}
+
+                              {!apagada && msg.externalMessageId ? (
+                                <DropdownMenuItem onClick={() => setReplyTarget(msg)}>
+                                  <Reply className="size-4" aria-hidden />
+                                  Responder
+                                </DropdownMenuItem>
+                              ) : null}
+                              {!apagada ? (
                                 <DropdownMenuItem
                                   onClick={() => {
-                                    openEditDialog(msg)
+                                    setForwardTarget(msg)
+                                    setSelectedIds([])
+                                    setForwardOpen(true)
                                   }}
                                 >
+                                  <Forward className="size-4" aria-hidden />
+                                  Encaminhar
+                                </DropdownMenuItem>
+                              ) : null}
+                              <DropdownMenuItem onClick={() => entrarNaSelecao(msg)}>
+                                <CheckSquare className="size-4" aria-hidden />
+                                Selecionar
+                              </DropdownMenuItem>
+                              {!apagada && msg.content ? (
+                                <DropdownMenuItem onClick={() => void copiarUma(msg)}>
+                                  <Copy className="size-4" aria-hidden />
+                                  Copiar texto
+                                </DropdownMenuItem>
+                              ) : null}
+                              {canEditOutboundText(msg) && !apagada ? (
+                                <DropdownMenuItem onClick={() => openEditDialog(msg)}>
                                   <Pencil className="size-4" aria-hidden />
                                   Editar texto
                                 </DropdownMenuItem>
                               ) : null}
-                              {canEditOutboundText(msg) ? <DropdownMenuSeparator /> : null}
+                              <DropdownMenuSeparator />
+                              {!apagada && msg.externalMessageId ? (
+                                <DropdownMenuItem
+                                  variant="destructive"
+                                  onClick={() => pedirApagar(msg, 'everyone')}
+                                >
+                                  <Ban className="size-4" aria-hidden />
+                                  Apagar no WhatsApp
+                                </DropdownMenuItem>
+                              ) : null}
                               <DropdownMenuItem
                                 variant="destructive"
-                                onClick={() => {
-                                  setDeleteMsgTarget(msg)
-                                  setDeleteMsgOpen(true)
-                                }}
+                                onClick={() => pedirApagar(msg, 'crm')}
                               >
                                 <Trash2 className="size-4" aria-hidden />
-                                Apagar do CRM
+                                Esconder do CRM
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         ) : null}
-                        {renderContent(msg)}
+
+                        {/* Encaminhada: sem este selo, daqui a um mês ninguém sabe que
+                            aquele texto não foi escrito nesta conversa. */}
+                        {msg.forwardedFromId && !apagada ? (
+                          <span
+                            className={cn(
+                              'mb-1 flex items-center gap-1 text-[10px] italic',
+                              out ? 'text-primary-foreground/70' : 'text-muted-foreground',
+                            )}
+                          >
+                            <Forward className="size-3" aria-hidden />
+                            Encaminhada
+                          </span>
+                        ) : null}
+
+                        {/* A mensagem CITADA, dentro da bolha — é o que faz um "pode ser"
+                            continuar a fazer sentido três dias depois. */}
+                        {citada && !apagada ? (
+                          <div
+                            className={cn(
+                              'mb-1.5 flex flex-col gap-0.5 rounded-md border-l-2 px-2 py-1 text-[11px]',
+                              out
+                                ? 'border-primary-foreground/50 bg-primary-foreground/10 text-primary-foreground/85'
+                                : 'border-primary/50 bg-muted/60 text-muted-foreground dark:bg-white/5',
+                            )}
+                          >
+                            <span className="font-semibold">
+                              {resolveAuthorLabel(citada.author, crm.users).nome}
+                            </span>
+                            <span className="line-clamp-2">{citada.content}</span>
+                          </div>
+                        ) : null}
+
+                        {apagada ? (
+                          <span
+                            className={cn(
+                              'flex items-center gap-1.5 italic',
+                              out ? 'text-primary-foreground/70' : 'text-muted-foreground',
+                            )}
+                          >
+                            <Ban className="size-3.5" aria-hidden />
+                            {msg.deletedScope === 'everyone'
+                              ? 'Esta mensagem foi apagada'
+                              : 'Mensagem escondida do CRM'}
+                          </span>
+                        ) : (
+                          renderContent(msg)
+                        )}
+
+                        {msg.editedAt && !apagada ? (
+                          <span
+                            className={cn(
+                              'mt-0.5 block text-[10px] italic',
+                              out ? 'text-primary-foreground/60' : 'text-muted-foreground/70',
+                            )}
+                          >
+                            editada
+                          </span>
+                        ) : null}
+
+                        {/* Reações: ficam POR FORA da bolha, agarradas ao canto de baixo,
+                            como no WhatsApp — dentro, empurrariam o texto. */}
+                        {minhasReacoes.length > 0 ? (
+                          <div
+                            className={cn(
+                              'absolute -bottom-3 flex items-center gap-0.5',
+                              out ? 'right-2' : 'left-2',
+                            )}
+                          >
+                            {minhasReacoes.map((r) => (
+                              <button
+                                key={r.emoji}
+                                type="button"
+                                disabled={!canCompose || reactingId === msg.id}
+                                onClick={() => void alternarReacao(msg, r.emoji)}
+                                title={r.minha ? 'Tirar a sua reação' : 'Reagir também'}
+                                className={cn(
+                                  'flex items-center gap-0.5 rounded-full border bg-background px-1.5 py-0.5 text-[11px] leading-none shadow-sm transition-colors',
+                                  r.minha ? 'border-primary/60' : 'border-border',
+                                  canCompose && 'hover:bg-muted',
+                                )}
+                              >
+                                <span>{r.emoji}</span>
+                                {r.total > 1 ? (
+                                  <span className="text-[9px] text-muted-foreground">{r.total}</span>
+                                ) : null}
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                   
                   <div className={cn(
@@ -1082,6 +1667,37 @@ export function LeadChatThread({
 
         {canCompose && isActiveLead ? (
           <div className="flex shrink-0 flex-col gap-2 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
+            {/* A quem esta mensagem responde. Fica acima da caixa, com o X para desistir —
+                é o único sítio onde a citação é visível ANTES de a mensagem sair. */}
+            {replyTarget ? (
+              <div className="flex items-start gap-2 rounded-xl border-l-2 border-primary bg-muted/50 px-3 py-2">
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-[11px] font-semibold text-primary">
+                    Respondendo a {resolveAuthorLabel(replyTarget.author, crm.users).nome}
+                  </span>
+                  <span className="line-clamp-2 text-xs text-muted-foreground">{replyTarget.content}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-6 shrink-0"
+                  onClick={() => setReplyTarget(null)}
+                  title="Cancelar resposta"
+                >
+                  <X className="size-4" aria-hidden />
+                  <span className="sr-only">Cancelar resposta</span>
+                </Button>
+              </div>
+            ) : null}
+
+            <AttachmentTray
+              itens={pendingMedia}
+              onRemove={removerAnexo}
+              onCaption={definirLegenda}
+              disabled={sending}
+            />
+
             <Textarea
               id={`lead-chat-draft-${leadId}`}
               ref={draftTextareaRef}
@@ -1204,16 +1820,21 @@ export function LeadChatThread({
                   <input
                     type="file"
                     multiple
-                    accept="audio/*,image/*,.pdf,.doc,.docx,.txt"
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
                     className="sr-only"
-                    onChange={(e) => void handleAttachFiles(e.target.files)}
+                    onChange={(e) => {
+                      void handleAttachFiles(e.target.files)
+                      // Limpa o input: sem isto, escolher o MESMO ficheiro duas vezes
+                      // seguidas não dispara o onChange e o anexo não entra.
+                      e.target.value = ''
+                    }}
                   />
                   <Paperclip className="size-4 shrink-0 sm:hidden" aria-hidden />
-                  {draftAttachments.length > 0 ? (
-                    <span className="tabular-nums">{draftAttachments.length}</span>
+                  {pendingMedia.length > 0 ? (
+                    <span className="tabular-nums">{pendingMedia.length}</span>
                   ) : null}
                   <span className="hidden sm:inline">
-                    {draftAttachments.length > 0 ? 'arquivos' : 'Anexar'}
+                    {pendingMedia.length > 0 ? 'arquivos' : 'Anexar'}
                   </span>
                   <span className="sr-only sm:hidden">Anexar arquivo</span>
                 </label>
@@ -1237,6 +1858,7 @@ export function LeadChatThread({
                   <Sticker className="h-4 w-4" aria-hidden />
                   <span className="sr-only">Enviar figurinha WebP</span>
                 </Button>
+                <AudioRecorder onRecorded={(f) => void anexarAudioGravado(f)} disabled={showAiResponding || sending} />
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     type="button"
@@ -1250,21 +1872,8 @@ export function LeadChatThread({
                     <Smile className="h-4 w-4" aria-hidden />
                     <span className="sr-only">Emojis</span>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="max-h-56 w-[min(100vw-2rem,15rem)] overflow-y-auto p-2">
-                    <div className="grid grid-cols-8 gap-0.5">
-                      {CHAT_QUICK_EMOJIS.map((em) => (
-                        <Button
-                          key={em}
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="rounded-md text-base font-normal leading-none hover:bg-muted"
-                          onClick={() => insertEmojiIntoDraft(em)}
-                        >
-                          {em}
-                        </Button>
-                      ))}
-                    </div>
+                  <DropdownMenuContent align="start" className="p-2">
+                    <EmojiPicker onPick={insertEmojiIntoDraft} />
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <DropdownMenu>
@@ -1389,7 +1998,12 @@ export function LeadChatThread({
                 size="sm"
                 className="h-8 rounded-xl px-5"
                 disabled={
-                  showAiResponding || (!draftMessage.trim() && draftAttachments.length === 0)
+                  showAiResponding ||
+                  sending ||
+                  pendingMedia.some((m) => m.uploading) ||
+                  // Mídia sozinha é mensagem. Exigir texto era o que obrigava a escrever
+                  // "segue a foto" só para poder mandar a foto.
+                  (!draftMessage.trim() && draftAttachments.length === 0 && pendingMedia.length === 0)
                 }
                 onClick={() => void handleSend()}
               >
@@ -1441,16 +2055,28 @@ export function LeadChatThread({
           setDeleteMsgOpen(o)
           if (!o) setDeleteMsgTarget(null)
         }}
-        title="Apagar mensagem do CRM?"
+        title={deleteMsgScope === 'everyone' ? 'Apagar no WhatsApp da pessoa?' : 'Esconder do histórico do CRM?'}
         description={
-          deleteMsgTarget?.direction === 'in'
-            ? 'Esta linha deixa de aparecer no CRM. A mensagem continua no telemóvel ou na app do cliente.'
-            : 'Esta linha deixa de aparecer no CRM. Se a mensagem já tiver sido entregue, o cliente mantém a cópia no dispositivo.'
+          deleteMsgScope === 'everyone'
+            ? 'A mensagem some do WhatsApp dos dois lados, como o "apagar para todos" do telemóvel. O WhatsApp só permite por um tempo depois do envio; passado esse prazo, ele recusa e a mensagem fica. No CRM a bolha vira "esta mensagem foi apagada".'
+            : 'A bolha passa a aparecer como escondida aqui no CRM, e mais nada: a mensagem continua no aparelho da pessoa. Para tirá-la de lá, use "Apagar no WhatsApp".'
         }
-        confirmLabel="Apagar"
+        confirmLabel={deleteMsgScope === 'everyone' ? 'Apagar no WhatsApp' : 'Esconder'}
         cancelLabel="Cancelar"
         variant="destructive"
         onConfirm={() => void runDeleteMessage()}
+      />
+
+      <ForwardDialog
+        open={forwardOpen}
+        onOpenChange={(aberto) => {
+          setForwardOpen(aberto)
+          if (!aberto) setForwardTarget(null)
+        }}
+        quantidade={forwardTarget ? 1 : selectedIds.length}
+        destinos={destinosDeEncaminhamento}
+        enviando={forwarding}
+        onConfirm={(ids) => void encaminhar(ids)}
       />
 
       <ScheduleAppointmentDialog

@@ -123,7 +123,7 @@ import { isWorkloadExcludedStageId, pickNpsTemplateForPipeline, shouldDispatchNp
 import { mergeKanbanFieldOrder, isLeadWhatsappComposeBlocked, calculateLeadScore } from '../lib/leadFields'
 import { getDataProviderMode } from '../services/dataMode'
 import { fetchLeadPaymentSummaries, type LeadPaymentSummary } from '../services/crmLeadPayments'
-import { notifySendError, sendWhatsappMessage } from '../services/crmWhatsapp'
+import { notifySendError, sendWhatsappMessage, type SendWhatsappPayload } from '../services/crmWhatsapp'
 import { dispatchNps } from '../services/npsDispatch'
 import type { WebhookJob, AuditLogEntry } from '../services/crmSupabase'
 import { signupCreateTenant } from '../services/tenant'
@@ -686,8 +686,19 @@ export const useCrmState = () => {
   const sendMessage = async (
     text: string,
     attachments: Array<{ name: string; mimeType: string; base64: string }> = [],
+    opts: {
+      /** Mídia já subida ao Storage — cada item vira uma mensagem no WhatsApp. */
+      media?: SendWhatsappPayload['media']
+      /** Id externo da mensagem citada: a resposta sai colada na pergunta. */
+      replyToMessageId?: string
+      /** Interaction de origem, quando isto é um encaminhamento. */
+      forwardedFromId?: string
+    } = {},
   ): Promise<{ ok: boolean; restore?: boolean }> => {
-    if (!selectedLead || !text.trim()) return { ok: false }
+    const temMidia = (opts.media?.length ?? 0) > 0 || attachments.length > 0
+    // Mídia sozinha é mensagem: exigir texto era o que obrigava a escrever "segue foto"
+    // para poder mandar a foto.
+    if (!selectedLead || (!text.trim() && !temMidia)) return { ok: false }
 
     if (isLeadWhatsappComposeBlocked(selectedLead)) {
       toast.error(
@@ -706,6 +717,9 @@ export const useCrmState = () => {
         to: selectedLead.phone,
         text: outbound,
         attachments: atts,
+        media: opts.media,
+        replyToMessageId: opts.replyToMessageId,
+        forwardedFromId: opts.forwardedFromId,
       })
 
       if (!result.ok && result.kind === 'lead_opted_out') {
@@ -723,6 +737,9 @@ export const useCrmState = () => {
           to: selectedLead.phone,
           text: outbound,
           attachments: atts,
+          media: opts.media,
+          replyToMessageId: opts.replyToMessageId,
+          forwardedFromId: opts.forwardedFromId,
           manualOverride: true,
         })
       }

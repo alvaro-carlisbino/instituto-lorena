@@ -15,6 +15,29 @@ export type SendWhatsappPayload = {
     base64: string
   }>
   /**
+   * Mídia DE VERDADE — cada item vira uma mensagem própria no WhatsApp (foto, vídeo, áudio,
+   * documento, figurinha). O caminho normal é `storagePath`: o painel sobe o ficheiro para o
+   * bucket e manda só o caminho; a edge assina um link de 24h e a W-API vai lá buscar. Isso
+   * evita passar os bytes do vídeo por dentro do JSON da função.
+   *
+   * `mediaItemId` é o caminho do ENCAMINHAR: a mídia já está guardada, e reenviar pelo id
+   * poupa descarregá-la para o browser e voltar a subir.
+   */
+  media?: Array<{
+    kind?: 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'gif' | 'ptv'
+    storagePath?: string
+    url?: string
+    base64?: string
+    mediaItemId?: string
+    fileName?: string
+    mimeType?: string
+    caption?: string
+  }>
+  /** Id externo da mensagem CITADA — a resposta sai colada na pergunta. */
+  replyToMessageId?: string
+  /** Interaction de origem, quando isto é um encaminhamento. */
+  forwardedFromId?: string
+  /**
    * Override humano explícito após opt-out. Só usar depois de confirmar no diálogo
    * "assumo risco de ban". Backend registra interaction `system` de auditoria.
    */

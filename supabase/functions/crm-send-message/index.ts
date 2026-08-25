@@ -323,10 +323,6 @@ Deno.serve(async (req) => {
   }
 
   const effectiveTo = to || String(row.phone ?? '').trim()
-  const _customFieldsChannel = String(
-    (row.custom_fields as Record<string, unknown> | null)?.channel ?? '',
-  ).toLowerCase()
-  const _bodyChannel = String(body.channel ?? '').toLowerCase()
   const customFieldsProvider = String(
     (row.custom_fields as Record<string, unknown> | null)?.provider ?? '',
   ).toLowerCase()
