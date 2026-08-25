@@ -950,31 +950,46 @@ export async function blingCreateSaleOrder(
   // Itens do pedido: CARRINHO multi-itens (loja) → cada produto cadastrado no Bling vira 1 linha
   // (kit → produto do kit; bump/avulso → individual 00001; catálogo → id do próprio item). Senão,
   // 1 item (kit ou individual). Nunca "venda avulsa" / produto fora do catálogo.
+  /**
+   * Quantos frascos de Tricopill a linha representa — que quase nunca é a quantidade dela.
+   *
+   * Kit sai no produto próprio do Bling: a linha vale `quantidade: 1` e quem abate os 4 ou 6
+   * frascos é a composição do cadastro. Item de catálogo que não é Tricopill fica em 0.
+   */
+  const kitFrascos = (k: string): number => Number(bottlesMap[k] ?? DEFAULT_KIT_BOTTLES[k] ?? 0) || 0
+
+  // `frascos` viaja JUNTO da linha, na mesma volta que a monta, porque o `.filter` abaixo
+  // descarta item sem produto — duas listas paralelas sairiam desalinhadas justo no pedido
+  // que tem item ruim, e a linha herdaria a contagem da vizinha.
   const cartItens = (Array.isArray(args.items) ? args.items : []).map((it) => {
     const kitKey = typeof it.kit === 'string' ? it.kit : (String(it.id ?? '').startsWith('kit:') ? String(it.id).slice(4) : '')
     let prodId: string
     if (kitKey === 'bump_frasco') prodId = individualProductId
     else if (kitKey) prodId = String(kitProductIds[kitKey] ?? DEFAULT_KIT_PRODUCT_IDS[kitKey] ?? individualProductId).trim()
     else prodId = String(Number(it.id) || it.id || '')
-    return { produto: { id: Number(prodId) || prodId }, descricao: String(it.nome ?? 'Produto').slice(0, 120), quantidade: Number(it.qty) || 1, valor: Math.round(Number(it.precoCents) || 0) / 100 }
+    const quantidade = Number(it.qty) || 1
+    return {
+      produto: { id: Number(prodId) || prodId },
+      descricao: String(it.nome ?? 'Produto').slice(0, 120),
+      quantidade,
+      valor: Math.round(Number(it.precoCents) || 0) / 100,
+      frascos: kitKey === 'bump_frasco' ? quantidade : kitFrascos(kitKey) * quantidade,
+    }
   }).filter((x) => x.produto.id)
   const itens = cartItens.length
     ? cartItens
-    : [{ produto: { id: Number(productId) || productId }, descricao: itemDescricao, quantidade: bottles, valor: valorUnit }]
+    : [{
+      produto: { id: Number(productId) || productId },
+      descricao: itemDescricao,
+      quantidade: bottles,
+      valor: valorUnit,
+      frascos: overrideBottles || (hasKit ? (kitFrascos(args.kit) || 1) : 1),
+    }]
 
   // Frascos REAIS da venda (o que o cliente leva), separado de `bottles` (linha do pedido).
-  // Quando o pedido sai no produto próprio do kit, a linha é 1 e quem abate os 4/6 frascos é a
-  // composição do Bling — usar `bottles` na mensagem fazia o 3+1 aparecer como "1 frascos"
-  // (caso Carla Regina, 10/ago). Item de catálogo que não é Tricopill não conta frasco.
-  const kitFrascos = (k: string): number => Number(bottlesMap[k] ?? DEFAULT_KIT_BOTTLES[k] ?? 0) || 0
-  const frascos = cartItens.length
-    ? (Array.isArray(args.items) ? args.items : []).reduce((soma, it) => {
-      const kitKey = typeof it.kit === 'string' ? it.kit : (String(it.id ?? '').startsWith('kit:') ? String(it.id).slice(4) : '')
-      const qty = Number(it.qty) || 1
-      if (kitKey === 'bump_frasco') return soma + qty
-      return soma + kitFrascos(kitKey) * qty
-    }, 0)
-    : (overrideBottles || (hasKit ? (kitFrascos(args.kit) || 1) : 1))
+  // Usar `bottles` na mensagem fazia o 3+1 aparecer como "1 frascos" (caso Carla Regina,
+  // 10/ago). Soma pelas linhas que sobraram do filtro, não pelo `args.items` cru.
+  const frascos = itens.reduce((soma, x) => soma + (Number(x.frascos) || 0), 0)
 
   // ACRÉSCIMO (pago MAIOR que os itens): juros do parcelado no cartão. O total cobrado do
   // cliente (produtoReais) fica ACIMA do preço de tabela dos itens. Antes a diferença era
@@ -1037,14 +1052,64 @@ export async function blingCreateSaleOrder(
       if (linha) obsParts.push(`Entregar em: ${linha}`)
     }
   }
+  /**
+   * O QUE FOI VENDIDO, em uma linha. Pedido do Fabricio (25/ago): no Bling ele via o valor e o
+   * cliente, mas para saber o produto tinha que abrir o pedido — e no financeiro nem abrindo,
+   * porque a conta a receber nascia com "Venda 3744 — automática (CRM)" e mais nada.
+   *
+   * Sai dos ITENS já montados, nunca de `args.description`: é o que de fato foi para o Bling
+   * depois do filtro de produto sem id. Resumo que não bate com a linha do pedido é pior que
+   * resumo nenhum.
+   *
+   * A contagem de frascos só entra quando ACRESCENTA: precisa contradizer a quantidade da
+   * linha (kit vai como 1 UN e leva 4) E não estar já dita no nome. O rótulo do kit é
+   * "Tricopill 3 meses (3+1 = 4 frascos)" — grudar "= 4 frascos" nele daria
+   * "(3+1 = 4 frascos) = 4 frascos".
+   */
+  const contagemDeFrascos = (descricao: string, quantidade: number, frascos: number): string =>
+    frascos > 0 && frascos !== quantidade && !/frasco/i.test(descricao)
+      ? `${frascos} ${frascos === 1 ? 'frasco' : 'frascos'}`
+      : ''
+
+  const resumoItens = itens
+    .map((it) => {
+      const q = Number(it.quantidade) || 1
+      const detalhe = contagemDeFrascos(it.descricao, q, Number(it.frascos) || 0)
+      return `${q > 1 ? `${q}× ` : ''}${it.descricao}${detalhe ? ` = ${detalhe}` : ''}`
+    })
+    .join(' + ')
+
+  if (resumoItens) obsParts.push(`Itens: ${resumoItens}`)
   const obs = obsParts.length ? obsParts.join(' | ') : undefined
+
+  /**
+   * `descricaoDetalhada` da linha — o único campo do item que é NOSSO.
+   *
+   * O `descricao` que mandamos o Bling sobrescreve pelo nome do cadastro do produto: pedimos
+   * "Tricopill 3 meses (3+1 = 4 frascos)" e ele gravou "Tricopill Suplemento Capilar - 3 Meses
+   * (3+1 = 4 frascos)". Então é aqui que fica o que o CRM sabe da venda, incluindo a contagem
+   * de frascos quando a quantidade da linha a esconde (kit vai como 1 UN e leva 4).
+   *
+   * **Fica fora da NF-e de propósito** (ver `nfeItens` abaixo). No Bling este campo desce para
+   * as informações adicionais do item na nota, e mexer no que sai impresso para o cliente não
+   * é o que foi pedido — é ação fiscal, e ação fiscal não se faz de carona.
+   */
+  const itensPedido = itens.map((it) => {
+    const { frascos: fr, ...linha } = it
+    const detalhe = contagemDeFrascos(linha.descricao, Number(linha.quantidade) || 1, Number(fr) || 0)
+    return {
+      ...linha,
+      descricaoDetalhada: `${linha.descricao}${detalhe ? ` — ${detalhe}` : ''}`.slice(0, 120),
+    }
+  })
+
   const payload = {
     contato: { id: Number(contatoId) || contatoId },
     data: dataPedido,
     ...(obs ? { observacoes: obs } : {}),
     ...(freightCents > 0 ? { transporte: { frete: Math.round(freightCents) / 100, fretePorConta: 1 } } : {}),
     ...(descontoReais > 0.05 ? { desconto: { valor: descontoReais, unidade: 'REAL' } } : {}),
-    itens,
+    itens: itensPedido,
   }
   const orderId = await blingCreateOrder(token, payload)
 
@@ -1125,7 +1190,12 @@ export async function blingCreateSaleOrder(
           formaPagamentoId: parc.length
             ? String(((parc[0].formaPagamento ?? {}) as Record<string, unknown>).id ?? '') || null
             : null,
-          historico: args.receivableHistorico,
+          // Sem isto o financeiro do Bling só dizia "Venda 3744 — automática (CRM)": valor e
+          // cliente, nunca o produto. Quem passa o caixa não tem por que abrir pedido por
+          // pedido para saber o que foi vendido. Caller com histórico próprio manda (a
+          // assinatura já nomeia o ciclo).
+          historico: args.receivableHistorico
+            || (resumoItens ? `Venda ${od.numero ?? ''} — ${resumoItens}`.slice(0, 200) : undefined),
         })
       }
     } catch (e) {
@@ -1144,7 +1214,13 @@ export async function blingCreateSaleOrder(
     // (Pix 5% do site, cupom), prorrateia nos valores unitários pra nota fechar no valor
     // REALMENTE RECEBIDO — nota acima do recebido é passivo fiscal. O último item absorve
     // o resíduo do arredondamento.
-    let nfeItens = payload.itens as Array<{ produto: { id: number | string }; descricao: string; quantidade: number; valor: number }>
+    // `descricaoDetalhada` FICA DE FORA da nota: no Bling ele desce para as informações
+    // adicionais do item, e mudar o que sai impresso para o cliente é decisão fiscal, não
+    // efeito colateral de um pedido de visibilidade interna no Bling.
+    let nfeItens = (payload.itens as Array<Record<string, unknown>>)
+      .map(({ descricaoDetalhada: _fora, ...resto }) => resto) as Array<
+        { produto: { id: number | string }; descricao: string; quantidade: number; valor: number }
+      >
     if (descontoReais > 0.05 && itensTotalReais > 0) {
       const fator = produtoReais / itensTotalReais
       let acumulado = 0
