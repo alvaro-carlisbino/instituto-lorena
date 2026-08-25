@@ -34,6 +34,7 @@ const HistoryPage = lazyPage(() => import('./pages/HistoryPage'), 'HistoryPage')
 const ChannelsPage = lazyPage(() => import('./pages/ChannelsPage'), 'ChannelsPage')
 const MetricsPage = lazyPage(() => import('./pages/MetricsPage'), 'MetricsPage')
 const AnalyticsPage = lazyPage(() => import('./pages/AnalyticsPage'), 'AnalyticsPage')
+const AdsPage = lazyPage(() => import('./pages/AdsPage'), 'AdsPage')
 const ResultadosPage = lazyPage(() => import('./pages/ResultadosPage'), 'ResultadosPage')
 const CirurgiaProducaoPage = lazyPage(() => import('./pages/CirurgiaProducaoPage'), 'CirurgiaProducaoPage')
 const CirurgiaEquipePage = lazyPage(() => import('./pages/CirurgiaEquipePage'), 'CirurgiaEquipePage')
@@ -220,6 +221,7 @@ function AppRoutes() {
         <Route path="/canais" element={<ChannelsPage />} />
         <Route path="/metricas" element={<MetricsPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/ads" element={<AdsPage />} />
         <Route path="/resultados" element={<ResultadosPage />} />
         <Route path="/cirurgias/producao" element={<CirurgiaProducaoPage />} />
         <Route path="/cirurgias/equipe" element={<CirurgiaEquipePage />} />

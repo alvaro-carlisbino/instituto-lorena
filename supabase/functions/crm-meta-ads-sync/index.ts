@@ -163,6 +163,99 @@ async function refazerPublico(admin: SupabaseClient, token: string) {
   }
 }
 
+/**
+ * Puxa gasto e entrega da conta e grava em `meta_ads_insights`.
+ *
+ * Dois níveis na mesma rodada: campanha (o que a tela mostra por padrão) e
+ * anúncio (o que responde "qual criativo está pagando"). A janela volta alguns
+ * dias de propósito: a Meta reprocessa número de ontem e de anteontem, e o
+ * upsert por (dia, nível, chave) faz a correção entrar sem duplicar linha.
+ */
+async function puxarInsights(admin: SupabaseClient, token: string, dias: number) {
+  const ate = new Date()
+  const desde = new Date(ate.getTime() - Math.max(dias, 1) * 86400_000)
+  const janela = JSON.stringify({
+    since: desde.toISOString().slice(0, 10),
+    until: ate.toISOString().slice(0, 10),
+  })
+
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  const niveis: Array<['campanha' | 'anuncio', string]> = [['campanha', 'campaign'], ['anuncio', 'ad']]
+  const linhas: Array<Record<string, unknown>> = []
+  const erros: string[] = []
+
+  for (const [nivel, level] of niveis) {
+    const qs = new URLSearchParams({
+      level,
+      time_range: janela,
+      time_increment: '1',
+      // `reach` sai no nível de anúncio: com time_increment diário ele pesa e é
+      // o primeiro campo que a Meta derruba sob cota.
+      fields: 'campaign_id,campaign_name,adset_name,ad_id,ad_name,spend,impressions,clicks,actions'
+        + (nivel === 'campanha' ? ',reach' : ''),
+      limit: '500',
+      access_token: token,
+    })
+    // A Meta responde "Service temporarily unavailable" quando as duas chamadas
+    // saem coladas: o nível de campanha e o de anúncio disputam a mesma cota.
+    // Não é erro de parâmetro, é ritmo. Três tentativas com espera crescente
+    // resolvem; sem isso o nível de anúncio simplesmente não entrava.
+    let j: { data?: Array<Record<string, unknown>>; error?: { message?: string } } = {}
+    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+      const res = await fetch(`${GRAPH}/${conta}/insights?${qs}`)
+      j = await res.json()
+      if (!j.error) break
+      const transitorio = /temporarily unavailable|rate limit|try again|reduce the amount/i
+        .test(String(j.error.message ?? ''))
+      if (!transitorio || tentativa === 3) break
+      await new Promise((r) => setTimeout(r, tentativa * 4000))
+    }
+    try {
+      if (j.error) { erros.push(`${nivel}: ${j.error.message}`); continue }
+      for (const r of j.data ?? []) {
+        const acoes = (r.actions ?? []) as Array<{ action_type: string; value: string }>
+        const m = new Map(acoes.map((a) => [a.action_type, Number(a.value)]))
+        const leads = (m.get('lead') ?? 0) + (m.get('leadgen.other') ?? 0) +
+          (m.get('offsite_conversion.fb_pixel_lead') ?? 0)
+        const conversas = m.get('onsite_conversion.messaging_conversation_started_7d') ?? 0
+        const chave = nivel === 'anuncio' ? String(r.ad_id ?? '') : String(r.campaign_id ?? '')
+        if (!chave) continue
+        linhas.push({
+          dia: r.date_start,
+          nivel,
+          chave,
+          campaign_id: r.campaign_id ?? null,
+          campaign_name: r.campaign_name ?? null,
+          adset_name: r.adset_name ?? null,
+          ad_id: r.ad_id ?? null,
+          ad_name: r.ad_name ?? null,
+          // Centavo, para casar com clinic_sales.value_cents e nunca somar float.
+          spend_cents: Math.round(Number(r.spend ?? 0) * 100),
+          impressions: Number(r.impressions ?? 0),
+          clicks: Number(r.clicks ?? 0),
+          reach: Number(r.reach ?? 0),
+          leads,
+          conversas,
+          synced_at: new Date().toISOString(),
+        })
+      }
+    } catch (e) {
+      erros.push(`${nivel}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  let gravadas = 0
+  for (let i = 0; i < linhas.length; i += 500) {
+    const { error } = await admin
+      .from('meta_ads_insights')
+      .upsert(linhas.slice(i, i + 500), { onConflict: 'dia,nivel,chave' })
+    if (error) erros.push(`upsert: ${error.message}`)
+    else gravadas += Math.min(500, linhas.length - i)
+  }
+
+  return { ok: erros.length === 0, dias, linhas: linhas.length, gravadas, erros: erros.slice(0, 3) }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -188,8 +281,9 @@ Deno.serve(async (req) => {
 
   try {
     if (action === 'audience') return json(await refazerPublico(admin, token))
+    if (action === 'insights') return json(await puxarInsights(admin, token, Number(corpo.dias ?? 7)))
     if (action === 'capi') return json(await enviarCapi(admin, token, Number(corpo.dias ?? 6)))
-    return json({ error: 'action_invalida', aceitas: ['capi', 'audience'] }, 400)
+    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights'] }, 400)
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
