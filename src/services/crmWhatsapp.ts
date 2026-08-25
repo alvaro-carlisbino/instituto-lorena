@@ -3,6 +3,20 @@ import { toast } from 'sonner'
 import { poloDaTela } from '@/lib/poloDaTela'
 import { supabase } from '@/lib/supabaseClient'
 
+export type SpecialWhatsappMessage =
+  | { type: 'location'; latitude: string; longitude: string; name?: string; address?: string }
+  | { type: 'contact'; contacts: Array<{ name: string; phone: string; description?: string }> }
+  | { type: 'poll'; message: string; options: string[]; maxOptions?: number }
+  | {
+      type: 'pix'
+      merchantName: string
+      pixKey: string
+      keyType: 'cpf' | 'cnpj' | 'phone' | 'email' | 'random'
+      /** Em CENTAVOS, como em todo o resto do CRM. */
+      amount?: number
+    }
+  | { type: 'link'; message: string; linkUrl: string; title?: string; description?: string; image?: string }
+
 export type SendWhatsappPayload = {
   leadId: string
   to: string
@@ -37,6 +51,12 @@ export type SendWhatsappPayload = {
   replyToMessageId?: string
   /** Interaction de origem, quando isto é um encaminhamento. */
   forwardedFromId?: string
+  /**
+   * Mensagem especial do WhatsApp: o mapinha, o cartão de contato, a enquete, o botão de
+   * Pix nativo, o link com prévia. Cada uma tem rota própria na W-API — mandar o endereço
+   * escrito no texto não abre o mapa no telemóvel de quem recebe.
+   */
+  special?: SpecialWhatsappMessage
   /**
    * Override humano explícito após opt-out. Só usar depois de confirmar no diálogo
    * "assumo risco de ban". Backend registra interaction `system` de auditoria.

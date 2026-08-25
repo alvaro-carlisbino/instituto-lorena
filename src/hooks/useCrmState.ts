@@ -693,9 +693,11 @@ export const useCrmState = () => {
       replyToMessageId?: string
       /** Interaction de origem, quando isto é um encaminhamento. */
       forwardedFromId?: string
+      /** Localização, contato, enquete, Pix ou link com prévia. */
+      special?: SendWhatsappPayload['special']
     } = {},
   ): Promise<{ ok: boolean; restore?: boolean }> => {
-    const temMidia = (opts.media?.length ?? 0) > 0 || attachments.length > 0
+    const temMidia = (opts.media?.length ?? 0) > 0 || attachments.length > 0 || Boolean(opts.special)
     // Mídia sozinha é mensagem: exigir texto era o que obrigava a escrever "segue foto"
     // para poder mandar a foto.
     if (!selectedLead || (!text.trim() && !temMidia)) return { ok: false }
@@ -720,6 +722,7 @@ export const useCrmState = () => {
         media: opts.media,
         replyToMessageId: opts.replyToMessageId,
         forwardedFromId: opts.forwardedFromId,
+        special: opts.special,
       })
 
       if (!result.ok && result.kind === 'lead_opted_out') {
@@ -740,6 +743,7 @@ export const useCrmState = () => {
           media: opts.media,
           replyToMessageId: opts.replyToMessageId,
           forwardedFromId: opts.forwardedFromId,
+          special: opts.special,
           manualOverride: true,
         })
       }

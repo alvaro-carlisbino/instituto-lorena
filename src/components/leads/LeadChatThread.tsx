@@ -12,6 +12,12 @@ import {
   MessageCircle,
   RefreshCw,
   MoreVertical,
+  MapPin,
+  Contact,
+  BarChart3,
+  Link2,
+  QrCode,
+  Plus,
   Pencil,
   Trash2,
   Paperclip,
@@ -59,6 +65,7 @@ import { EmojiPicker } from '@/components/leads/chat/EmojiPicker'
 import { AttachmentTray, type PendingMedia } from '@/components/leads/chat/AttachmentTray'
 import { AudioRecorder } from '@/components/leads/chat/AudioRecorder'
 import { ForwardDialog, type ForwardTarget } from '@/components/leads/chat/ForwardDialog'
+import { SpecialMessageDialog, type SpecialKind } from '@/components/leads/chat/SpecialMessageDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
@@ -404,6 +411,8 @@ export function LeadChatThread({
   const [forwarding, setForwarding] = useState(false)
   /** Encaminhar UMA mensagem sem entrar no modo de seleção. */
   const [forwardTarget, setForwardTarget] = useState<Interaction | null>(null)
+  /** Qual mensagem especial está a ser montada (localização, contato, enquete, Pix, link). */
+  const [specialKind, setSpecialKind] = useState<SpecialKind | null>(null)
   /**
    * Links assinados da mídia guardada no bucket privado, por id do item. Sem isto, a foto
    * que NÓS enviámos aparecia quebrada na bolha: o que está gravado é o caminho no bucket,
@@ -756,6 +765,25 @@ export function LeadChatThread({
     setPendingMedia((atuais) =>
       atuais.map((m) => (m.storagePath === storagePath ? { ...m, caption } : m)),
     )
+  }
+
+  /**
+   * Localização, contato, enquete, Pix e link com prévia. Vão sozinhas: cada uma é uma
+   * mensagem inteira no WhatsApp, e misturá-las com o rascunho de texto faria a bolha
+   * chegar com um comentário grudado que a pessoa não pediu.
+   */
+  const enviarEspecial = async (mensagem: NonNullable<Parameters<typeof crm.sendMessage>[2]>['special']) => {
+    if (sending) return
+    setSending(true)
+    try {
+      const res = await crm.sendMessage('', [], { special: mensagem })
+      if (res?.ok) {
+        setSpecialKind(null)
+        toast.success('Enviado.')
+      }
+    } finally {
+      setSending(false)
+    }
   }
 
   /** Áudio gravado no próprio CRM entra na bandeja como qualquer outro anexo. */
@@ -1869,6 +1897,45 @@ export function LeadChatThread({
                   <span className="sr-only">Enviar figurinha WebP</span>
                 </Button>
                 <AudioRecorder onRecorded={(f) => void anexarAudioGravado(f)} disabled={showAiResponding || sending} />
+                {/* O "+" do WhatsApp: as mensagens que não são texto nem ficheiro. Cada
+                    uma tem rota própria na W-API — o endereço escrito no texto não abre
+                    o mapa no telemóvel de quem recebe, e é isso que a paciente precisa. */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    type="button"
+                    disabled={showAiResponding || sending}
+                    title="Localização, contato, enquete, Pix, link"
+                    className={cn(
+                      buttonVariants({ variant: 'ghost', size: 'sm' }),
+                      'h-8 rounded-lg px-2 text-[10px]',
+                    )}
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                    <span className="sr-only">Enviar localização, contato, enquete, Pix ou link</span>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-auto min-w-48">
+                    <DropdownMenuItem onClick={() => setSpecialKind('location')}>
+                      <MapPin className="size-4" aria-hidden />
+                      Localização
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSpecialKind('contact')}>
+                      <Contact className="size-4" aria-hidden />
+                      Contato
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSpecialKind('poll')}>
+                      <BarChart3 className="size-4" aria-hidden />
+                      Enquete
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSpecialKind('pix')}>
+                      <QrCode className="size-4" aria-hidden />
+                      Chave Pix
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setSpecialKind('link')}>
+                      <Link2 className="size-4" aria-hidden />
+                      Link com prévia
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     type="button"
@@ -2078,6 +2145,15 @@ export function LeadChatThread({
         cancelLabel="Cancelar"
         variant="destructive"
         onConfirm={() => void runDeleteMessage()}
+      />
+
+      <SpecialMessageDialog
+        key={specialKind ?? 'nenhum'}
+        kind={specialKind}
+        onClose={() => setSpecialKind(null)}
+        onSend={(m) => void enviarEspecial(m)}
+        enviando={sending}
+        nomeDoPolo={tenant.name}
       />
 
       <ForwardDialog

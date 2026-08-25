@@ -201,6 +201,27 @@ Deno.serve(async (req) => {
     replyToMessageId?: string
     /** Interaction de origem, quando esta mensagem é um ENCAMINHAMENTO. */
     forwardedFromId?: string
+    /**
+     * Mensagem ESPECIAL do WhatsApp — as que não são texto nem ficheiro: o mapinha da
+     * localização, o cartão de contato, a enquete, o botão de Pix nativo e o link com
+     * pré-visualização montada por nós.
+     *
+     * Cada uma tem rota própria na W-API e nenhuma cabia no `text`: mandar o endereço
+     * escrito não abre o mapa no telemóvel de quem recebe, e é justamente isso que a
+     * paciente precisa na véspera da consulta.
+     */
+    special?:
+      | { type: 'location'; latitude: string | number; longitude: string | number; name?: string; address?: string }
+      | { type: 'contact'; contacts: Array<{ name: string; phone: string; description?: string }> }
+      | { type: 'poll'; message: string; options: string[]; maxOptions?: number }
+      | {
+          type: 'pix'
+          merchantName: string
+          pixKey: string
+          keyType: 'cpf' | 'cnpj' | 'phone' | 'email' | 'random'
+          amount?: number
+        }
+      | { type: 'link'; message: string; linkUrl: string; title?: string; description?: string; image?: string }
   }
   try {
     body = (await req.json()) as typeof body
@@ -512,7 +533,8 @@ Deno.serve(async (req) => {
       )
     }
 
-    if (!stickerWebpBase64 && !text.trim() && mediaItems.length === 0) {
+    const especial = body.special
+    if (!stickerWebpBase64 && !text.trim() && mediaItems.length === 0 && !especial) {
       return json({ error: 'missing_fields', message: 'Envie texto, mídia ou figurinha.' }, 400)
     }
 
@@ -538,6 +560,15 @@ Deno.serve(async (req) => {
     // um id por bolha dá para responder citando, reagir, editar ou apagar aquela e não
     // outra. Enquanto foi tudo uma interaction só, o chat era um registo, não um chat.
     const podeMidia = provider instanceof WapiProvider
+    if (especial && !podeMidia) {
+      return json(
+        {
+          error: 'special_not_supported',
+          message: `A linha resolvida (${provider.name}) não envia localização, contato, enquete ou Pix por API.`,
+        },
+        400,
+      )
+    }
     if (mediaItems.length > 0 && !podeMidia) {
       return json(
         {
@@ -747,6 +778,112 @@ Deno.serve(async (req) => {
         external_media_id: res.externalMessageId,
         media_base64: stickerWebpBase64,
         metadata: { source: 'crm-send-message', kind: 'sticker', outbound_mode: 'sticker_webp' },
+      })
+    }
+
+    // ── Mensagens especiais ────────────────────────────────────────────────────
+    // Localização, contato, enquete, Pix e link com prévia. Saem ANTES do texto avulso
+    // porque, quando as duas coisas vão juntas, o texto é o comentário do que foi mandado
+    // ("o endereço é esse aqui, ó") — e comentário vem depois, não antes.
+    if (especial) {
+      let res: SendWhatsappMessageResult
+      let resumo: string
+      switch (especial.type) {
+        case 'location': {
+          res = await wapi!.sendLocation({
+            to: effectiveTo,
+            latitude: especial.latitude,
+            longitude: especial.longitude,
+            name: especial.name,
+            address: especial.address,
+            leadId,
+            metadata: antiBanMeta,
+          })
+          resumo = `📍 ${especial.name || 'Localização'}${especial.address ? ` — ${especial.address}` : ''}`
+          break
+        }
+        case 'contact': {
+          const contatos = (especial.contacts ?? []).filter((c) => c?.name && c?.phone)
+          if (contatos.length === 0) {
+            return json({ error: 'missing_fields', message: 'Informe nome e telefone do contato.' }, 400)
+          }
+          res =
+            contatos.length === 1
+              ? await wapi!.sendContact({
+                  to: effectiveTo,
+                  contactName: contatos[0].name,
+                  contactPhone: contatos[0].phone,
+                  contactBusinessDescription: contatos[0].description,
+                  leadId,
+                  metadata: antiBanMeta,
+                })
+              : await wapi!.sendContacts({
+                  to: effectiveTo,
+                  contacts: contatos.map((c) => ({
+                    contactName: c.name,
+                    contactPhone: c.phone,
+                    contactBusinessDescription: c.description,
+                  })),
+                  leadId,
+                  metadata: antiBanMeta,
+                })
+          resumo = `👤 Contato: ${contatos.map((c) => c.name).join(', ')}`
+          break
+        }
+        case 'poll': {
+          res = await wapi!.sendPoll({
+            to: effectiveTo,
+            message: especial.message,
+            poll: especial.options ?? [],
+            pollMaxOptions: especial.maxOptions,
+            leadId,
+            metadata: antiBanMeta,
+          })
+          resumo = `📊 Enquete: ${especial.message}\n${(especial.options ?? []).map((o) => `• ${o}`).join('\n')}`
+          break
+        }
+        case 'pix': {
+          res = await wapi!.sendPix({
+            to: effectiveTo,
+            merchantName: especial.merchantName,
+            pixKey: especial.pixKey,
+            type: especial.keyType,
+            amount: especial.amount,
+            leadId,
+            metadata: antiBanMeta,
+          })
+          resumo = `💠 Pix ${especial.merchantName}${especial.amount ? ` — R$ ${(especial.amount / 100).toFixed(2)}` : ''}`
+          break
+        }
+        default: {
+          res = await wapi!.sendLink({
+            to: effectiveTo,
+            message: especial.message,
+            linkUrl: especial.linkUrl,
+            title: especial.title,
+            linkDescription: especial.description,
+            image: especial.image,
+            leadId,
+            metadata: antiBanMeta,
+            replyToMessageId: citar,
+          })
+          resumo = especial.message ? `${especial.message}\n${especial.linkUrl}` : especial.linkUrl
+          break
+        }
+      }
+      citar = undefined
+      idsEnviados.push(res.externalMessageId)
+      ultimoStatus = res.status
+      await insertInteraction(admin, {
+        leadId: String(lead.id),
+        patientName: String(lead.patient_name ?? 'Lead'),
+        channel: 'whatsapp',
+        direction: 'out',
+        author: outboundAuthor,
+        content: resumo,
+        externalMessageId: res.externalMessageId,
+        forwardedFromId,
+        tenantId: resolvedLineTenantId || row.tenant_id,
       })
     }
 
