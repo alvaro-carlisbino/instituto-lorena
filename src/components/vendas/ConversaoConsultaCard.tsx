@@ -198,7 +198,7 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
                   Este número é sobre <span className="font-semibold text-foreground">todas as consultas</span>, não só
                   as de transplante: a agenda da Shosp só diz o tipo em {pct(semTipo)} delas neste mês (a grade não
                   devolve o serviço, só a busca por paciente). O CRM está preenchendo o que falta de duas em duas horas;
-                  passando de 80%, este card passa a medir só consulta de transplante sozinho.
+                  chegando a 60%, este card passa a medir só consulta de transplante sozinho.
                 </p>
               </div>
             ) : null}

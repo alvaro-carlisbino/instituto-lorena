@@ -766,23 +766,38 @@ export async function enriquecerServicoDeConsultas(
 
   // Só o passado: agendamento futuro ainda pode mudar de serviço, e o que a conversão precisa
   // é da consulta que já aconteceu.
-  const { data: faltando } = await admin
-    .from('shosp_appointments')
-    .select('prontuario')
-    .is('servico', null)
-    .not('prontuario', 'is', null)
-    .gte('data', desde)
-    .lte('data', hoje)
-    .order('data', { ascending: false })
-    .limit(600)
+  // Quem entra na fila são as CONSULTAS sem tipo, não qualquer agendamento. Cada chamada traz a
+  // agenda inteira do paciente, então mirar num bloqueio ou numa lavagem gasta a mesma cota e não
+  // move a conversão: com a fila geral, uma rodada de 12 pacientes acrescentava 2 consultas
+  // tipadas em agosto.
+  const { data: consultas } = await admin.rpc('crm_consultas_realizadas_tipadas', {
+    p_de: desde,
+    p_ate: hoje,
+  })
+  const semTipo = ((consultas ?? []) as Array<{ prontuario: string; codigo: string; tipo: string }>).filter(
+    (c) => c.tipo === 'sem_tipo' && c.prontuario,
+  )
 
+  // Ordena pelo MENOS tentado. Nem toda consulta tem serviço na Shosp (encaixe, agendamento
+  // antigo): sem esta ordem, os mesmos pacientes voltavam ao topo para sempre e a fila não andava
+  // — quatro rodadas seguidas gastaram 48 chamadas e preencheram 3 agendamentos.
+  const codigos = semTipo.map((c) => String(c.codigo)).filter(Boolean).slice(0, 300)
   const prontuarios: string[] = []
-  for (const r of (faltando ?? []) as Array<{ prontuario: string }>) {
-    const p = String(r.prontuario)
-    if (!prontuarios.includes(p)) prontuarios.push(p)
-    if (prontuarios.length >= limite) break
+  if (codigos.length) {
+    const { data: ordenados } = await admin
+      .from('shosp_appointments')
+      .select('prontuario, synced_at')
+      .in('codigo_agendamento', codigos)
+      .is('servico', null)
+      .order('synced_at', { ascending: true, nullsFirst: true })
+      .limit(300)
+    for (const r of (ordenados ?? []) as Array<{ prontuario: string }>) {
+      const p = String(r.prontuario)
+      if (p && !prontuarios.includes(p)) prontuarios.push(p)
+      if (prontuarios.length >= limite) break
+    }
   }
-  const pendentes = new Set((faltando ?? []).map((r) => String((r as { prontuario: string }).prontuario))).size
+  const pendentes = new Set(semTipo.map((c) => String(c.prontuario))).size
 
   let agendamentos = 0
   let pacientes = 0
@@ -801,14 +816,26 @@ export async function enriquecerServicoDeConsultas(
         const servico = a.servico != null ? String(a.servico).trim() : ''
         if (!codigo || !servico) continue
         // `.is('servico', null)` na condição: nunca sobrescreve serviço já gravado.
-        const { error } = await admin
+        // O `.select()` faz o PostgREST devolver o que mudou — sem ele o contador somava
+        // tentativa, não gravação, e a rodada dizia "207 agendamentos" tendo escrito 3.
+        const { data: mudou } = await admin
           .from('shosp_appointments')
           .update({ servico, synced_at: nowIso() })
           .eq('codigo_agendamento', codigo)
           .is('servico', null)
-        if (!error) agendamentos++
+          .select('codigo_agendamento')
+        agendamentos += (mudou ?? []).length
       }
     }
+    // Carimbo de TENTATIVA: o que continuou sem serviço vai para o fim da fila. Sem isto o
+    // paciente cuja agenda a Shosp devolve sem serviço é sorteado para sempre.
+    await admin
+      .from('shosp_appointments')
+      .update({ synced_at: nowIso() })
+      .eq('prontuario', pront)
+      .is('servico', null)
+      .gte('data', desde)
+      .lte('data', hoje)
   }
   return { pacientes, agendamentos, pendentes }
 }

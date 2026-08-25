@@ -36,7 +36,7 @@ export type ConversaoConsulta = {
    * Que régua o denominador está usando. `tc` = só consulta de transplante, que é o que a
    * gerência mede; `todas` = qualquer consulta, o fallback enquanto a agenda não diz o tipo.
    * A grade da Shosp não devolve o serviço (só o endpoint por paciente), então o CRM preenche
-   * isso aos poucos — e a RPC vira sozinha para `tc` quando a cobertura passa de 80%.
+   * isso aos poucos — e a RPC vira sozinha para `tc` quando a cobertura chega a 60%.
    */
   denominador: {
     tipo_usado: 'tc' | 'todas'

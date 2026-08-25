@@ -6,9 +6,14 @@
 -- paciente). O passo `servicos` do sync passou a preencher isso; enquanto o backfill não cobre o
 -- mês inteiro, medir só TC daria um denominador ridículo e uma taxa inflada.
 --
--- Daí o modo 'auto': usa TC quando a cobertura de tipo do mês passa de 80%, senão segue com toda
+-- Daí o modo 'auto': usa TC quando a cobertura de tipo do mês chega a 60%, senão segue com toda
 -- consulta e DIZ na resposta qual régua usou e qual é a cobertura. A tela vira sozinha quando o
 -- dado chegar, sem ninguém precisar lembrar de trocar.
+--
+-- Por que 60 e não 80: medido em 25/08, de cada 3 consultas que o backfill tenta, 2 voltam com
+-- serviço e 1 a Shosp não tem mesmo (encaixe, agendamento antigo). O teto realista de cobertura
+-- fica perto de 2/3, então um gatilho em 80% nunca viraria — e conversão de TC sobre 2/3 das
+-- consultas, com o resto declarado na tela, é melhor leitura do que conversão de tudo.
 create or replace function public.crm_consultas_realizadas_tipadas(p_de date, p_ate date)
 returns table(prontuario text, data date, codigo text, servico text, tipo text)
 language sql
@@ -59,7 +64,7 @@ regua as (
   select case
            when p_tipo_consulta = 'tc' then 'tc'
            when p_tipo_consulta = 'todas' then 'todas'
-           when p_kind = 'cirurgia' and coalesce((select pct from cobertura), 0) > 80 then 'tc'
+           when p_kind = 'cirurgia' and coalesce((select pct from cobertura), 0) >= 60 then 'tc'
            else 'todas'
          end as tipo_usado
 ),
