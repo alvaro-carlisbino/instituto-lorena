@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { CloudDownload, PackagePlus, RefreshCw, TriangleAlert } from 'lucide-react'
 
@@ -18,13 +18,33 @@ const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', curren
 const dia = (d: string | null) =>
   d ? d.split('-').reverse().join('/') : '—'
 
+/** "há 12 min" diz mais que um horário: a pergunta é se rodou, não quando exatamente. */
+function desde(iso: string | null): string {
+  if (!iso) return 'ainda não rodou'
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+  if (min < 1) return 'agora'
+  if (min < 60) return `há ${min} min`
+  const h = Math.round(min / 60)
+  if (h < 24) return `há ${h}h`
+  return `há ${Math.round(h / 24)} dia(s)`
+}
+
 /**
  * Notas de fornecedor emitidas contra o CNPJ do polo.
  *
- * A captura e o lançamento financeiro rodam sozinhos 2x/dia (`crm-sefaz-sync`). Esta tela não
- * busca nota: mostra o que já entrou e as duas pendências que a automação de propósito não
- * resolve sozinha — a entrada de estoque (precisa casar item com o catálogo) e a conferência
- * do que já foi pago (só o extrato do banco sabe).
+ * A captura e o lançamento financeiro rodam sozinhos de hora em hora (`crm-sefaz-sync`), e o
+ * casamento com o extrato roda dois minutos depois. Esta tela não busca nota: mostra o que já
+ * entrou.
+ *
+ * **A entrada de estoque também não espera mais clique.** Ela continua rodando no NAVEGADOR
+ * por obrigação — o casamento de item (EAN → SKU → nome → alias) vive em `nfeImport.ts` contra
+ * o catálogo do polo, e ter duas implementações daquela cascata foi o que criou item duplicado
+ * nas cargas de julho e agosto. O que mudou é que abrir a tela basta: se há nota esperando,
+ * ela entra sozinha. Produto que não casar nasce marcado como "a revisar", que é a rede de
+ * segurança de sempre — metade do que a NF-e cria não é estoque clínico.
+ *
+ * O que continua sendo decisão de gente é só a conferência do que já foi pago: nem a SEFAZ nem
+ * o XML dizem isso, e o que o extrato não explica ninguém pode carimbar por dedução.
  */
 export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
   const [resumo, setResumo] = useState<ResumoSefaz | null>(null)
@@ -57,22 +77,12 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
     return () => { vivo = false }
   }, [])
 
-  const sincronizar = async () => {
-    setSincronizando(true)
-    try {
-      const r = await sincronizarSefaz()
-      const novas = Number(r.resumosLancados ?? 0) + Number(r.completasLancadas ?? 0)
-      toast.success(novas > 0 ? `${novas} nota(s) nova(s) lançada(s)` : 'Nada novo na SEFAZ')
-      await carregar()
-      if (novas > 0) onImportou?.()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao sincronizar')
-    } finally {
-      setSincronizando(false)
-    }
-  }
-
-  const darEntrada = async () => {
+  /**
+   * `silencioso` é a rodada automática ao abrir a tela: ela não avisa quando não fez nada, mas
+   * AVISA quando fez. Entrada de estoque mexe no catálogo e cria produto — acontecer sem
+   * ninguém saber é como o financeiro perde a noção de onde o item apareceu.
+   */
+  const darEntrada = async ({ silencioso = false } = {}) => {
     setFalhas(null)
     try {
       const pendentes = await listarEstoquePendente()
@@ -82,17 +92,60 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
       const ok = res.filter((r) => r.ok).length
       const ruins = res.filter((r) => !r.ok)
       setFalhas(ruins.length > 0 ? ruins : null)
-      toast[ruins.length ? 'warning' : 'success'](
-        `${ok} nota(s) com entrada no estoque${ruins.length ? `, ${ruins.length} com erro` : ''}`,
-      )
+      if (ok > 0 || ruins.length > 0) {
+        toast[ruins.length ? 'warning' : 'success'](
+          `${ok} nota(s) com entrada no estoque${ruins.length ? `, ${ruins.length} com erro` : ''}`,
+        )
+      }
       await carregar()
       onImportou?.()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha na entrada de estoque')
+      if (!silencioso) toast.error(e instanceof Error ? e.message : 'Falha na entrada de estoque')
     } finally {
       setProgresso(null)
     }
   }
+
+  const sincronizar = async () => {
+    setSincronizando(true)
+    try {
+      const r = await sincronizarSefaz()
+      const novas = Number(r.resumosLancados ?? 0) + Number(r.completasLancadas ?? 0)
+      toast.success(novas > 0 ? `${novas} nota(s) nova(s) lançada(s)` : 'Nada novo na SEFAZ')
+      await carregar()
+      if (novas > 0) {
+        onImportou?.()
+        // A que acabou de chegar com XML também entra no estoque agora. Sem isto ela ficaria
+        // parada até a próxima vez que alguém abrisse a tela — e a automação de mount não a
+        // pega, porque já rodou nesta montagem.
+        await darEntrada({ silencioso: true })
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao sincronizar')
+    } finally {
+      setSincronizando(false)
+    }
+  }
+
+  /**
+   * A entrada de estoque não espera mais clique: se há nota pendente quando a tela abre, ela
+   * roda. Era o único passo que ainda dependia de alguém lembrar de apertar um botão, e nota
+   * ficava semanas parada esperando isso.
+   *
+   * Uma vez por montagem, e é de propósito. Nota que falha continua pendente; sem a trava, o
+   * `resumo` recarregado dispararia a mesma tentativa de novo, em laço, contra a mesma nota
+   * quebrada. A falha aparece na lista e o botão continua ali para tentar de novo com gente
+   * olhando.
+   */
+  const jaRodouEntrada = useRef(false)
+  useEffect(() => {
+    if (!resumo || resumo.estoquePendente === 0 || jaRodouEntrada.current) return
+    jaRodouEntrada.current = true
+    void darEntrada({ silencioso: true })
+    // `darEntrada` é estável o bastante: só lê serviços e setState. Depender dele aqui exigiria
+    // useCallback com o mesmo efeito prático e mais ruído.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumo])
 
   return (
     <Card className="border-primary/40 bg-primary/[0.03]">
@@ -103,8 +156,8 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
-          Notas de fornecedor emitidas contra o CNPJ deste polo entram sozinhas, duas vezes por
-          dia, sem depender de ninguém mandar o XML.
+          Notas de fornecedor emitidas contra o CNPJ deste polo entram sozinhas, de hora em hora,
+          sem depender de ninguém mandar o XML. A entrada no estoque roda ao abrir esta tela.
         </p>
 
         {carregando && !resumo && <p className="text-xs text-muted-foreground">Carregando…</p>}
@@ -119,6 +172,12 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
             <p className="text-muted-foreground">
               {brl(resumo.valorTotal)} · {dia(resumo.janelaDe)} a {dia(resumo.janelaAte)} ·{' '}
               {resumo.comXmlGuardado} com XML guardado
+            </p>
+            {/* Sem esta linha, painel parado por falta de nota nova e painel parado por cron
+                quebrado são a mesma tela — e a conclusão de quem olha é sempre a segunda. */}
+            <p className={resumo.ultimaRodadaErro ? 'text-destructive' : 'text-muted-foreground'}>
+              Servidor olhou a SEFAZ {desde(resumo.ultimaRodada)}
+              {resumo.ultimaRodadaErro ? ` · falhou: ${resumo.ultimaRodadaErro}` : ''}
             </p>
 
             {/* Nota que a SEFAZ trouxe e o extrato ainda não explicou. O casamento com o banco
@@ -151,7 +210,9 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
                 </p>
                 <p className="mt-1 text-muted-foreground">
                   O financeiro dessas já entrou. Falta casar os itens com o catálogo, que roda
-                  aqui no navegador. Produto que não casar nasce marcado como “a revisar”.
+                  aqui no navegador — e roda sozinho quando esta tela abre. O que sobra aqui
+                  ou acabou de chegar, ou falhou na primeira tentativa. Produto que não casar
+                  nasce marcado como “a revisar”.
                 </p>
                 <Button
                   size="sm"

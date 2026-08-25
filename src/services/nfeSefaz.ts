@@ -43,6 +43,9 @@ export type ResumoSefaz = {
   /** Dessas, as que o extrato do banco já provou que saíram (migration 20260817190000). */
   conciliadasAuto: number
   conciliadoAutoValor: number
+  /** Quando o servidor olhou a SEFAZ pela última vez, e o que ele achou. */
+  ultimaRodada: string | null
+  ultimaRodadaErro: string | null
 }
 
 export async function resumoSefaz(): Promise<ResumoSefaz> {
@@ -85,6 +88,16 @@ export async function resumoSefaz(): Promise<ResumoSefaz> {
   if (autoErr) throw new Error(autoErr.message)
   const conciliadas = (auto ?? []) as Array<{ amount_cents: number }>
 
+  // "Não sincroniza" era uma suspeita sem como conferir: o painel mostrava quantas notas
+  // existem, nunca a HORA em que o servidor olhou. Sem isso, painel parado por falta de nota
+  // nova e painel parado por cron quebrado são a mesma tela.
+  const { data: estado } = await c
+    .from('sefaz_sync_state')
+    .select('ultima_rodada_em, ultimo_resultado')
+    .maybeSingle()
+  const linhaEstado = estado as
+    { ultima_rodada_em?: string | null; ultimo_resultado?: { erro?: string } | null } | null
+
   return {
     capturadas: linhas.length,
     lancadas: linhas.filter((l) => l.status === 'lancado').length,
@@ -98,12 +111,23 @@ export async function resumoSefaz(): Promise<ResumoSefaz> {
     aConferirValor: parcelas.reduce((s, p) => s + (p.amount_cents ?? 0), 0) / 100,
     conciliadasAuto: conciliadas.length,
     conciliadoAutoValor: conciliadas.reduce((s, p) => s + (p.amount_cents ?? 0), 0) / 100,
+    ultimaRodada: linhaEstado?.ultima_rodada_em ?? null,
+    ultimaRodadaErro: linhaEstado?.ultimo_resultado?.erro ?? null,
   }
 }
 
-/** Dispara a captura agora, no polo do usuário logado. O cron já faz isso 2x/dia. */
+/**
+ * Dispara a captura agora, no polo do usuário logado — o cron já faz isso de hora em hora.
+ *
+ * Orçamento curto de propósito. O padrão do servidor (110s) é para o cron, que roda sem
+ * ninguém esperando; no navegador ele virava um botão girando por até dois minutos, que é
+ * como "demora muito" virou "não sincroniza". Rodada incremental resolve em segundos, e o
+ * que não couber fica para a próxima hora — nada se perde, a captura vem primeiro.
+ */
 export async function sincronizarSefaz(): Promise<Record<string, unknown>> {
-  const { data, error } = await client().functions.invoke('crm-sefaz-sync', { body: {} })
+  const { data, error } = await client().functions.invoke('crm-sefaz-sync', {
+    body: { orcamentoMs: 25_000 },
+  })
   if (error) throw new Error('Falha ao sincronizar com a SEFAZ')
   const p = (data ?? {}) as { ok?: boolean; error?: string; polos?: Record<string, unknown>[] }
   if (!p.ok) throw new Error(String(p.error || 'Falha ao sincronizar com a SEFAZ'))
@@ -171,6 +195,23 @@ export async function darEntradaLote(
 
   for (const [i, nota] of notas.entries()) {
     onProgresso?.({ feitas: i, total: notas.length, atual: nota.emitente ?? nota.chave.slice(-8) })
+
+    // TOMA a nota antes de trabalhar nela, e é o próprio `estoque_pendente` que serve de trava:
+    // o UPDATE condicional só devolve linha para quem chegou primeiro. Desde que a entrada
+    // passou a rodar sozinha ao abrir a tela, duas abas do financeiro abertas ao mesmo tempo
+    // deixaram de ser hipótese — e as duas dando entrada na mesma nota é o item duplicado de
+    // volta, que é exatamente o que este caminho existe para evitar.
+    const { data: tomada, error: tomaErr } = await c
+      .from('sefaz_documentos')
+      .update({ estoque_pendente: false, updated_at: new Date().toISOString() })
+      .eq('id', nota.id).eq('estoque_pendente', true)
+      .select('id')
+    if (tomaErr) {
+      resultados.push({ chave: nota.chave, ok: false, detalhe: tomaErr.message.slice(0, 140) })
+      continue
+    }
+    if ((tomada ?? []).length === 0) continue // outra aba já está com ela
+
     try {
       if (!nota.invoiceId) throw new Error('nota sem vínculo com a compra')
 
@@ -189,12 +230,6 @@ export async function darEntradaLote(
         { needsReview: true },
       )
 
-      const { error: updErr } = await c
-        .from('sefaz_documentos')
-        .update({ estoque_pendente: false, updated_at: new Date().toISOString() })
-        .eq('id', nota.id)
-      if (updErr) throw new Error(updErr.message)
-
       resultados.push({
         chave: nota.chave,
         ok: true,
@@ -203,11 +238,13 @@ export async function darEntradaLote(
       // Só relê o catálogo quando a nota pode tê-lo mudado.
       if (r.itemsCreated > 0) stock = await listStockItems(true)
     } catch (e) {
-      resultados.push({
-        chave: nota.chave,
-        ok: false,
-        detalhe: (e instanceof Error ? e.message : String(e)).slice(0, 140),
-      })
+      const detalhe = (e instanceof Error ? e.message : String(e)).slice(0, 140)
+      // Devolve a nota para a fila: falhar e ficar com `estoque_pendente = false` é a nota
+      // sumir da pendência sem nunca ter entrado no estoque — pior que o erro em si.
+      await c.from('sefaz_documentos')
+        .update({ estoque_pendente: true, erro: detalhe, updated_at: new Date().toISOString() })
+        .eq('id', nota.id)
+      resultados.push({ chave: nota.chave, ok: false, detalhe })
     }
   }
   onProgresso?.({ feitas: notas.length, total: notas.length, atual: '' })

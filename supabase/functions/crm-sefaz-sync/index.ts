@@ -141,23 +141,88 @@ function parseNfeFinanceiro(xml: string): {
   }
 }
 
-/** Paginação por `versao`: a Focus devolve 100 por vez e o X-Max-Version diz onde continuar.
- *  Sem seguir isso, uma clínica com muita nota lê só as 100 primeiras e acha que acabou. */
-async function listarRecebidas(cnpj: string, basic: string): Promise<Recebida[]> {
-  const todas: Recebida[] = []
-  let versao = 0
+/**
+ * Captura: lê a Focus página por página e grava cada página antes de pedir a próxima.
+ *
+ * Paginação por `versao`: a Focus devolve 100 por vez e o `X-Max-Version` diz onde continuar.
+ * Sem seguir isso, uma clínica com muita nota lê só as 100 primeiras e acha que acabou.
+ *
+ * **A partir de `versaoInicial` a leitura é incremental**, e é isso que tira 25 segundos da
+ * rodada rotineira: com a base em dia a Focus devolve zero linha na primeira página e acabou.
+ * Reler a janela inteira toda hora relia 374 linhas para descobrir que as 284 distintas já
+ * estavam todas capturadas desde agosto.
+ *
+ * "Mudou de versão" inclui a nota que ganhou XML completo — o caso que a captura mais precisa
+ * enxergar. Então incremental não perde XML: ele chega justamente como versão nova.
+ *
+ * **Gravar antes de avançar** é o que torna a marca d'água honesta. A rodada que morre na
+ * página 3 deixa a marca no fim da página 2; a seguinte recomeça dali. Se a ordem fosse a
+ * inversa, uma rodada interrompida abriria um buraco permanente no staging.
+ */
+async function capturar(
+  admin: SupabaseClient,
+  tenantId: string,
+  cnpj: string,
+  basic: string,
+  versaoInicial: number,
+  deadline: number,
+): Promise<{ vistas: number; gravadas: number; versao: number; paginas: number }> {
+  let versao = versaoInicial
+  let vistas = 0
+  let gravadas = 0
+  let paginas = 0
+
   for (let pagina = 0; pagina < 30; pagina++) {
+    if (Date.now() > deadline) break
     const url = `https://api.focusnfe.com.br/v2/nfes_recebidas?cnpj=${cnpj}${versao ? `&versao=${versao}` : ''}`
     const res = await fetch(url, { headers: { Authorization: basic } })
     if (!res.ok) throw new Error(`focus ${res.status}: ${(await res.text()).slice(0, 200)}`)
     const lote = (await res.json()) as Recebida[]
     if (!Array.isArray(lote) || lote.length === 0) break
-    todas.push(...lote)
+    paginas += 1
+    vistas += lote.length
+
+    // Dedup DENTRO da página. A mesma chave volta em versões diferentes, e o Postgres recusa o
+    // lote inteiro com "ON CONFLICT DO UPDATE command cannot affect row a second time". Entre
+    // páginas não precisa: chave repetida vira um segundo upsert, que é inofensivo. Fica a
+    // versão mais recente, que é a que traz `nfe_completa` já ligado.
+    const porChave = new Map<string, Recebida>()
+    for (const n of lote) {
+      const chave = soDigitos(n.chave_nfe)
+      if (chave.length === 44) porChave.set(chave, n)
+    }
+
+    const linhas = [...porChave.values()].map((n) => ({
+      tenant_id: tenantId,
+      chave: soDigitos(n.chave_nfe),
+      numero: numeroDaChave(soDigitos(n.chave_nfe)),
+      emitente: n.nome_emitente ?? null,
+      cnpj_emitente: soDigitos(n.documento_emitente) || null,
+      valor_cents: emCentavos(n.valor_total),
+      data_emissao: diaDe(n.data_emissao),
+      situacao: n.situacao ?? null,
+      manifestacao: n.manifestacao_destinatario ?? null,
+      xml_completo: !!n.nfe_completa,
+      updated_at: new Date().toISOString(),
+    }))
+
+    // `ignoreDuplicates: false` para o upsert refrescar situação/manifestação/xml_completo,
+    // que mudam com o tempo. `xml` e `status` não estão na lista, então não são tocados —
+    // no PostgREST, coluna omitida no upsert NÃO vira null, fica como está.
+    for (let i = 0; i < linhas.length; i += 200) {
+      const { error } = await admin
+        .from('sefaz_documentos')
+        .upsert(linhas.slice(i, i + 200), { onConflict: 'tenant_id,chave', ignoreDuplicates: false })
+      if (error) throw new Error(`staging: ${error.message}`)
+    }
+    gravadas += linhas.length
+
     const max = Number(res.headers.get('x-max-version') ?? 0)
     if (!max || max <= versao) break
     versao = max
   }
-  return todas
+
+  return { vistas, gravadas, versao, paginas }
 }
 
 /** O sufixo é `.xml`, não `/xml` — o segundo devolve 404 e parece "nota sem XML". */
@@ -384,63 +449,50 @@ Deno.serve(async (req) => {
     const conta: Record<string, unknown> = { tenant: tenantId, cnpj }
     try {
       // ── 1. captura ────────────────────────────────────────────────────────────────────
-      const notas = await listarRecebidas(cnpj, basic)
-      conta.naSefaz = notas.length
+      //
+      // De onde continuar a leitura. A releitura completa da janela roda uma vez por dia (e
+      // sob `{"completo":true}`) para se curar de qualquer buraco que a marca d'água tenha
+      // deixado; nas outras 23 rodadas a Focus só devolve o que mudou desde a última.
+      const { data: estadoRaw } = await admin
+        .from('sefaz_sync_state').select('versao, varredura_completa_em')
+        .eq('tenant_id', tenantId).maybeSingle()
+      const estado = estadoRaw as { versao?: number; varredura_completa_em?: string | null } | null
 
-      // Dedup por chave ANTES de gravar. A paginação por `versao` devolve a mesma nota mais de
-      // uma vez quando ela mudou de versão na SEFAZ, e o Postgres recusa o lote inteiro com
-      // "ON CONFLICT DO UPDATE command cannot affect row a second time". Fica a última versão,
-      // que é a mais recente — é ela que traz `nfe_completa` já ligado.
-      const porChave = new Map<string, Recebida>()
-      for (const n of notas) {
-        const chave = soDigitos(n.chave_nfe)
-        if (chave.length === 44) porChave.set(chave, n)
-      }
+      const ultimaVarredura = estado?.varredura_completa_em ? Date.parse(estado.varredura_completa_em) : 0
+      const completo = corpo.completo === true || !ultimaVarredura
+        || (Date.now() - ultimaVarredura) > 20 * 60 * 60 * 1000
+      const versaoInicial = completo ? 0 : Number(estado?.versao ?? 0)
 
-      const linhas = [...porChave.values()]
-        .map((n) => ({
-          tenant_id: tenantId,
-          chave: soDigitos(n.chave_nfe),
-          numero: numeroDaChave(soDigitos(n.chave_nfe)),
-          emitente: n.nome_emitente ?? null,
-          cnpj_emitente: soDigitos(n.documento_emitente) || null,
-          valor_cents: emCentavos(n.valor_total),
-          data_emissao: diaDe(n.data_emissao),
-          situacao: n.situacao ?? null,
-          manifestacao: n.manifestacao_destinatario ?? null,
-          xml_completo: !!n.nfe_completa,
-          updated_at: new Date().toISOString(),
-        }))
+      const cap = await capturar(admin, tenantId, cnpj, basic, versaoInicial, deadline)
+      conta.varreduraCompleta = completo
+      conta.desdeVersao = versaoInicial
+      conta.naSefaz = cap.vistas
+      conta.capturadas = cap.gravadas
+      conta.paginas = cap.paginas
 
-      // `ignoreDuplicates: false` para o upsert refrescar situação/manifestação/xml_completo,
-      // que mudam com o tempo. `xml` e `status` não estão na lista, então não são tocados —
-      // no PostgREST, coluna omitida no upsert NÃO vira null, fica como está.
-      for (let i = 0; i < linhas.length; i += 200) {
-        const { error } = await admin
-          .from('sefaz_documentos')
-          .upsert(linhas.slice(i, i + 200), { onConflict: 'tenant_id,chave', ignoreDuplicates: false })
-        if (error) throw new Error(`staging: ${error.message}`)
-      }
-      conta.capturadas = linhas.length
+      // Só avança a marca quando a leitura de fato progrediu. Página vazia devolve a mesma
+      // versão, e regravar não muda nada — mas `varredura_completa_em` precisa ser carimbado
+      // na varredura completa, senão ela se repete de hora em hora e o ganho evapora.
+      await admin.from('sefaz_sync_state').upsert({
+        tenant_id: tenantId,
+        versao: Math.max(cap.versao, versaoInicial),
+        ...(completo ? { varredura_completa_em: new Date().toISOString() } : {}),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'tenant_id' })
 
       // ── 1b. adota o que já entrou por fora ────────────────────────────────────────────
       // O painel, o upload manual de XML e o ZIP do contador lançam nota sem passar por aqui.
       // Sem esta conferência o staging continuaria marcando como pendente o que já está na
       // conta a pagar — e a rodada seguinte tentaria lançar de novo, tomando erro de chave
       // duplicada em vez de simplesmente reconhecer o serviço feito.
-      const { data: jaLancadas } = await admin
-        .from('purchase_invoices').select('id, nfe_key')
-        .eq('tenant_id', tenantId).not('nfe_key', 'is', null)
-      let adotadas = 0
-      for (const inv of (jaLancadas ?? []) as Array<{ id: string; nfe_key: string }>) {
-        const { data: upd } = await admin
-          .from('sefaz_documentos')
-          .update({ status: 'lancado', invoice_id: inv.id, updated_at: new Date().toISOString() })
-          .eq('tenant_id', tenantId).eq('chave', inv.nfe_key).eq('status', 'novo')
-          .select('id')
-        adotadas += (upd ?? []).length
-      }
-      conta.adotadasDeOutroCaminho = adotadas
+      //
+      // Isto era um laço de um UPDATE por nota lançada: 340 idas e voltas ao PostgREST toda
+      // rodada, sem teto de tempo, crescendo junto com o histórico. Virou um `UPDATE ... FROM`
+      // dentro do banco (`crm_sefaz_adotar_lancadas`) — um join, que é o que sempre foi.
+      const { data: adotadas, error: adotarErr } = await admin
+        .rpc('crm_sefaz_adotar_lancadas', { p_tenant: tenantId })
+      if (adotarErr) throw new Error(`adocao: ${adotarErr.message}`)
+      conta.adotadasDeOutroCaminho = Number(adotadas ?? 0)
 
       // ── 2. o XML, enquanto existe ─────────────────────────────────────────────────────
       const { data: semXml } = await admin
@@ -567,6 +619,17 @@ Deno.serve(async (req) => {
     } catch (e) {
       conta.erro = (e instanceof Error ? e.message : String(e)).slice(0, 300)
     }
+
+    // Carimba a rodada mesmo quando ela deu errado. "Não sincroniza" era uma suspeita sem como
+    // conferir: o painel mostrava número de nota, nunca a HORA em que aquilo foi olhado pela
+    // última vez. Erro guardado aqui aparece na tela em vez de morrer no log da função.
+    await admin.from('sefaz_sync_state').upsert({
+      tenant_id: tenantId,
+      ultima_rodada_em: new Date().toISOString(),
+      ultimo_resultado: conta,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'tenant_id' })
+
     relatorio.push(conta)
   }
 
