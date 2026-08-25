@@ -463,6 +463,11 @@ verify_jwt = false
 
 # Cron da captura da SEFAZ: não existe usuário na chamada, a autorização é o x-cron-secret
 # conferido contra app_cron_secrets['sefaz'] dentro da função.
+# Devolve para a Meta o que o anuncio nao sabe: quem respondeu, agendou e comprou. Chamada
+# so por pg_cron com x-cron-secret, sem JWT do Supabase.
+[functions.crm-meta-ads-sync]
+verify_jwt = false
+
 [functions.crm-sefaz-sync]
 verify_jwt = false
 
