@@ -41,11 +41,13 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { CepInput, CpfInput, formatCpf } from '@/components/ui/masked-input'
+import { SearchField } from '@/components/ui/search-field'
 import { SearchPicker, type PickerItem } from '@/components/ui/search-picker'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { useTenant } from '@/context/TenantContext'
+import { combinaBusca } from '@/lib/busca'
 import { downloadCsv } from '@/lib/csvExport'
 import { hojeLocal } from '@/lib/diaLocal'
 import { cn } from '@/lib/utils'
@@ -148,6 +150,7 @@ export function NfsePage() {
   const [de, setDe] = useState(diasAtras(30))
   const [ate, setAte] = useState(hojeLocal())
   const [filtroStatus, setFiltroStatus] = useState<string>('todos')
+  const [busca, setBusca] = useState('')
   const [notas, setNotas] = useState<NfseNote[]>([])
   const [carregando, setCarregando] = useState(false)
   const [relendo, setRelendo] = useState<string | null>(null)
@@ -305,9 +308,23 @@ export function NfsePage() {
     }
   }
 
+  /**
+   * Busca do financeiro: nome do paciente, CPF ou número da nota.
+   *
+   * O filtro é local, sobre o período já carregado — quem procura "Janaine" quer achar a nota
+   * que ela está vendo na tela, não disparar consulta nova. CPF entra do jeito que a pessoa
+   * digita (com ou sem ponto): `combinaBusca` compara os dígitos, e o banco grava sem máscara.
+   */
+  const notasFiltradas = useMemo(
+    () => (busca.trim() ? notas.filter((n) => combinaBusca(busca, n.tomadorNome, n.tomadorDocumento, n.numero)) : notas),
+    [notas, busca],
+  )
+
+  // Contador e total falam do que está na tela: com busca ativa, somar o período inteiro
+  // mostraria um valor que não corresponde a nenhuma linha visível.
   const totalAutorizado = useMemo(
-    () => notas.filter((n) => n.status === 'autorizado').reduce((s, n) => s + n.valorServicoCents, 0),
-    [notas],
+    () => notasFiltradas.filter((n) => n.status === 'autorizado').reduce((s, n) => s + n.valorServicoCents, 0),
+    [notasFiltradas],
   )
 
   /**
@@ -321,12 +338,16 @@ export function NfsePage() {
    */
   const exportar = () => {
     const reais = numeroCsv
-    const linhas = notas.filter((n) => n.ambiente === 'producao')
-    const fora = notas.length - linhas.length
+    // O arquivo sai igual à tela: se há busca ativa, exporta o que a busca deixou visível.
+    // Baixar o período inteiro depois de filtrar entrega planilha que ninguém pediu.
+    const linhas = notasFiltradas.filter((n) => n.ambiente === 'producao')
+    const fora = notasFiltradas.length - linhas.length
     if (linhas.length === 0) {
       toast.error(fora > 0
-        ? 'Só há nota de homologação no período. Homologação não é documento fiscal e não entra na planilha.'
-        : 'Nenhuma nota no período para exportar.')
+        ? 'Só há nota de homologação aqui. Homologação não é documento fiscal e não entra na planilha.'
+        : busca.trim()
+          ? 'Nenhuma nota nesta busca para exportar.'
+          : 'Nenhuma nota no período para exportar.')
       return
     }
     const header = [
@@ -545,29 +566,53 @@ export function NfsePage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="min-w-[220px] flex-1 space-y-1">
+              <Label className="text-xs">Buscar</Label>
+              <SearchField
+                value={busca}
+                onChange={setBusca}
+                label="Buscar nota por paciente, CPF ou número"
+                placeholder="Paciente, CPF ou nº da nota"
+                resultados={notasFiltradas.length}
+              />
+            </div>
             <Button size="sm" variant="outline" disabled={carregando} onClick={() => void carregar()}>
               <RefreshCw className={cn('size-4', carregando && 'animate-spin')} /> Atualizar
             </Button>
             <Button
               size="sm"
               variant="outline"
-              disabled={notas.length === 0}
+              disabled={notasFiltradas.length === 0}
               onClick={exportar}
               title="Baixa o período em CSV para lançar na planilha de controle, com ISS, PIS, COFINS e as exclusões da base do IBS/CBS."
             >
               <Download className="size-4" aria-hidden /> Exportar CSV
             </Button>
-            <div className="flex-1" />
             <div className="text-right text-xs text-muted-foreground">
-              {notas.filter((n) => n.status === 'autorizado').length} autorizada(s) · {brl(totalAutorizado)}
+              {notasFiltradas.filter((n) => n.status === 'autorizado').length} autorizada(s) · {brl(totalAutorizado)}
+              {busca.trim() && notasFiltradas.length !== notas.length && (
+                <span className="ml-1">· {notasFiltradas.length} de {notas.length} no período</span>
+              )}
             </div>
           </div>
 
-          {notas.length === 0 ? (
+          {notasFiltradas.length === 0 ? (
+            // Lista vazia por busca não é "não tem nota": é termo que não achou. Dizer a mesma
+            // frase nos dois casos faz o financeiro concluir que a nota sumiu do período.
             <EmptyState
               icon={FileText}
-              title={carregando ? 'Carregando…' : 'Nenhuma nota no período'}
-              description="As notas emitidas aqui aparecem nesta lista com status, PDF e o motivo quando a SEFIN recusa."
+              title={
+                carregando
+                  ? 'Carregando…'
+                  : busca.trim()
+                    ? `Nenhuma nota para "${busca.trim()}"`
+                    : 'Nenhuma nota no período'
+              }
+              description={
+                !carregando && busca.trim()
+                  ? `Nada com esse paciente, CPF ou número entre as ${notas.length} nota(s) do período. Confira o termo, o período ou o filtro de status.`
+                  : 'As notas emitidas aqui aparecem nesta lista com status, PDF e o motivo quando a SEFIN recusa.'
+              }
             />
           ) : (
             <div className="overflow-x-auto rounded-md border">
@@ -585,7 +630,7 @@ export function NfsePage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {notas.map((n) => {
+                  {notasFiltradas.map((n) => {
                     const erro = n.erros?.map((e) => e.mensagem || e.codigo).filter(Boolean).join(' · ')
                     const exclusao = exclusoesIbsCbsCents(n)
                     return (
