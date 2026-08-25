@@ -8,6 +8,7 @@ import {
   atrasoDeLancamento,
   fetchConversaoConsulta,
   ganhoDoFollowUp,
+  vendasForaDaConta,
   type ConversaoConsulta,
 } from '@/services/conversaoConsulta'
 
@@ -90,6 +91,7 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
   }, [mes, kind])
 
   const ganho = ganhoDoFollowUp(dados)
+  const fora = vendasForaDaConta(dados)
   const atraso = atrasoDeLancamento(dados)
   const semConsulta = !carregando && dados != null && dados.pacientes === 0
 
@@ -123,8 +125,8 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
           <>
             <div className="grid gap-3 sm:grid-cols-2">
               <Cenario
-                titulo="No mês"
-                explicacao="Consulta e venda dentro do mesmo mês. É o que casa com a meta e com o fechamento."
+                titulo="Das consultas do mês"
+                explicacao="Consulta gerada no mês que virou venda ainda no mês. É a safra: casa com a meta e com o fechamento."
                 valor={dados?.cenario_mes.pct ?? null}
                 vendas={dados?.cenario_mes.vendas ?? 0}
                 pacientes={dados?.pacientes ?? 0}
@@ -132,8 +134,8 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
                 icone={TrendingUp}
               />
               <Cenario
-                titulo="Com follow-up"
-                explicacao="As mesmas consultas, contando também o que fechou depois do mês. Mede a recuperação."
+                titulo="Fechado no mês (com follow-up)"
+                explicacao="Tudo o que fechou dentro do mês, inclusive de consulta de meses atrás. É o caixa do mês."
                 valor={dados?.cenario_followup.pct ?? null}
                 vendas={dados?.cenario_followup.vendas ?? 0}
                 pacientes={dados?.pacientes ?? 0}
@@ -145,25 +147,44 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
 
             {ganho.vendas > 0 ? (
               <p className="text-xs text-muted-foreground">
-                O follow-up acrescentou{' '}
+                Do que fechou neste mês,{' '}
                 <span className="font-semibold text-foreground">
-                  {ganho.vendas} venda{ganho.vendas > 1 ? 's' : ''}
+                  {ganho.vendas} venda{ganho.vendas > 1 ? 's' : ''} ({brl(ganho.receitaCents)})
                 </span>{' '}
-                a esta safra, {brl(ganho.receitaCents)}
-                {ganho.pontos ? ` e ${pct(ganho.pontos).replace('%', '')} pontos de conversão` : ''}. Sem ligar de volta, a conversão do mês
-                teria parado nos {pct(dados?.cenario_mes.pct)}.
-              </p>
-            ) : dados?.em_curso ? (
-              <p className="text-xs text-muted-foreground">
-                O follow-up ainda não acrescentou nada a esta safra, o que é normal num mês em curso: a consulta de hoje
-                pode fechar em setembro e só então os dois números se separam.
+                veio de consulta de mês anterior — é o follow-up trabalhando. Sem ele, o mês teria parado nos{' '}
+                {pct(dados?.cenario_mes.pct)}.
               </p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Nesta safra os dois cenários são iguais: tudo o que fechou, fechou dentro do mês. Nenhuma venda veio de
-                follow-up de consulta deste mês.
+                Neste mês nenhuma venda veio de consulta de mês anterior: tudo o que fechou nasceu de consulta do
+                próprio mês. Quando o follow-up resgatar uma consulta antiga, ela aparece aqui.
               </p>
             )}
+
+            {/* O denominador é o mesmo para os dois tipos de venda: uma consulta pode virar
+                cirurgia OU protocolo, e medir cada uma contra o bolo inteiro esconde isso. */}
+            {dados && dados.outro_kind?.pacientes > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Das mesmas consultas,{' '}
+                <span className="font-semibold text-foreground">
+                  {dados.outro_kind.pacientes} paciente{dados.outro_kind.pacientes > 1 ? 's' : ''}
+                </span>{' '}
+                fechou {dados.outro_kind.kind === 'protocolo' ? 'protocolo' : 'cirurgia'} em vez de{' '}
+                {dados.kind === 'cirurgia' ? 'cirurgia' : 'protocolo'}. O denominador é compartilhado: não é tudo
+                perda.
+              </p>
+            ) : null}
+
+            {/* Venda que não casa com consulta nenhuma: fora da conta, mas na tela. */}
+            {fora.vendas > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">
+                  {fora.vendas} venda{fora.vendas > 1 ? 's' : ''} ({brl(fora.receitaCents)})
+                </span>{' '}
+                da safra do mês não entrou nesta conta: não há prontuário na venda nem no lead que ligue o paciente a
+                uma consulta da agenda. Enquanto isso não é preenchido, a taxa é PISO.
+              </p>
+            ) : null}
 
             {/* O furo que faria o card mentir: a agenda entra sozinha e vai até
                 hoje, a venda é digitada e atrasa. */}
@@ -185,7 +206,9 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
         <p className="border-t border-border/40 pt-2 text-[11px] leading-relaxed text-muted-foreground">
           Conta paciente, não agendamento: quem passa duas vezes no mês decide uma vez. Consulta é a mesma leitura da
           fila de pós-consulta (hora passada, sem desmarcação nem falta, fora do spa, e retorno/lavagem/protocolo não
-          entram). O denominador é da clínica inteira e não muda com o filtro de consultora.
+          entram). A venda só entra quando dá para ligá-la a um paciente que consultou, pelo prontuário da venda ou do
+          lead. O denominador é da clínica inteira, ainda sem separar consulta de transplante das demais, e não muda
+          com o filtro de consultora.
         </p>
       </CardContent>
     </Card>
