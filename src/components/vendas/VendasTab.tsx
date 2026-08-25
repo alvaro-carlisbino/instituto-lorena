@@ -527,19 +527,39 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                       {progresso.diasDecorridos < progresso.diasNoMes && (
                         <p className="text-xs text-muted-foreground">
                           No ritmo dos {progresso.diasDecorridos} primeiros dias, o mês fecha em{' '}
-                          <span
-                            className={
-                              // Sem meta de valor não há contra o que comparar: número neutro,
-                              // não verde de "bateu" nem âmbar de "vai faltar".
-                              !progresso.porValor
-                                ? 'text-foreground'
-                                : progresso.projecaoCents >= progresso.metaCents
-                                  ? 'text-emerald-600'
-                                  : 'text-amber-600'
-                            }
-                          >
-                            {brl(progresso.projecaoCents)}
-                          </span>
+                          {/* A projeção fala na moeda da META: contagem quando a meta é de
+                              quantidade, dinheiro quando é de valor. Projetar R$ contra uma meta
+                              de 30 cirurgias comparava coisas diferentes, e o mês parecia no
+                              rumo quando o ritmo dava metade das vendas combinadas. */}
+                          {!progresso.porValor && progresso.metaQtd > 0 ? (
+                            <>
+                              <span
+                                className={
+                                  progresso.projecaoQtd >= progresso.metaQtd
+                                    ? 'text-emerald-600'
+                                    : 'text-amber-600'
+                                }
+                              >
+                                {progresso.projecaoQtd} de {progresso.metaQtd} venda
+                                {progresso.metaQtd > 1 ? 's' : ''}
+                              </span>{' '}
+                              ({brl(progresso.projecaoCents)})
+                            </>
+                          ) : (
+                            <span
+                              className={
+                                // Sem meta nenhuma não há contra o que comparar: número neutro,
+                                // não verde de "bateu" nem âmbar de "vai faltar".
+                                !progresso.porValor
+                                  ? 'text-foreground'
+                                  : progresso.projecaoCents >= progresso.metaCents
+                                    ? 'text-emerald-600'
+                                    : 'text-amber-600'
+                              }
+                            >
+                              {brl(progresso.projecaoCents)}
+                            </span>
+                          )}
                           . Projeção é régua de três, não promessa.
                         </p>
                       )}

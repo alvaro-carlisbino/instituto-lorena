@@ -7,6 +7,7 @@ import {
   diasAteFechar,
   filtrarVendas,
   followUpStats,
+  progressoDaMeta,
   salesByDoctor,
   salesByProcedure,
   vendasDispensadas,
@@ -396,5 +397,37 @@ describe('vendasDispensadas e a fila que cobra', () => {
 
   it('dispensar não tira a venda do mês: some da cobrança, não do sistema', () => {
     expect(filtrarVendas(base, { ...filtro, recorte: 'mes' }).map((s) => s.id)).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('progressoDaMeta', () => {
+  // Agosto/2026 é o caso real: meta de 30 CIRURGIAS, sem valor combinado.
+  const metaSoQtd = {
+    id: 't1', month: '2026-08', kind: 'cirurgia' as const, sellerName: null,
+    targetCents: 0, targetCount: 30, note: null,
+  }
+  // 13 vendas nos 25 primeiros dias -> ritmo de 16 no mês, metade da meta.
+  const treze = Array.from({ length: 13 }, (_, i) =>
+    venda({ id: `v${i}`, valueCents: 3_800_000, soldAt: '2026-08-05' }),
+  )
+  const hoje25 = new Date(2026, 7, 25)
+
+  it('projeta em QUANTIDADE quando a meta é de quantidade', () => {
+    const p = progressoDaMeta(treze, metaSoQtd, '2026-08', hoje25)
+    expect(p.porValor).toBe(false)
+    expect(p.projecaoQtd).toBe(16)
+    expect(p.faltaQtd).toBe(17)
+  })
+
+  it('mês fechado não projeta ritmo: usa o mês inteiro', () => {
+    const p = progressoDaMeta(treze, metaSoQtd, '2026-07', new Date(2026, 7, 25))
+    expect(p.diasDecorridos).toBe(31)
+    expect(p.projecaoQtd).toBe(13)
+  })
+
+  it('meta de valor segue medindo em dinheiro', () => {
+    const p = progressoDaMeta(treze, { ...metaSoQtd, targetCents: 50_000_000 }, '2026-08', hoje25)
+    expect(p.porValor).toBe(true)
+    expect(p.projecaoCents).toBe(Math.round((13 * 3_800_000 / 25) * 31))
   })
 })

@@ -659,6 +659,8 @@ export type MetaProgresso = {
   faltaQtd: number
   /** Projeção linear pelo ritmo do mês até aqui. Só faz sentido no mês corrente. */
   projecaoCents: number
+  /** A mesma régua de três, em QUANTIDADE — é o que a meta de contagem cobra. */
+  projecaoQtd: number
   diasDecorridos: number
   diasNoMes: number
 }
@@ -699,6 +701,10 @@ export function progressoDaMeta(
     faltaQtd: Math.max(metaQtd - realizadoQtd, 0),
     projecaoCents:
       diasDecorridos > 0 ? Math.round((realizadoCents / diasDecorridos) * diasNoMes) : realizadoCents,
+    // Meta de quantidade projetada em quantidade: projetar só o valor deixava "fecha em
+    // R$ 499.982,78" ao lado de uma meta de 30 CIRURGIAS, dois números que não se comparam.
+    projecaoQtd:
+      diasDecorridos > 0 ? Math.round((realizadoQtd / diasDecorridos) * diasNoMes) : realizadoQtd,
     diasDecorridos,
     diasNoMes,
   }
