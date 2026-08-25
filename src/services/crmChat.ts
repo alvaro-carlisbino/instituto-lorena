@@ -1,4 +1,7 @@
 import { supabase } from '@/lib/supabaseClient'
+import { kindFromMime, nomeSeguroDeArquivo } from '@/lib/chatMedia'
+
+export { kindFromMime } from '@/lib/chatMedia'
 
 /**
  * O que o chat sabe fazer numa mensagem depois de ela existir: reagir, apagar, editar,
@@ -31,27 +34,6 @@ const LIMITES: Record<UploadedChatMedia['kind'], number> = {
   document: 50 * 1024 * 1024,
 }
 
-export function kindFromMime(mimeType: string, fileName = ''): UploadedChatMedia['kind'] {
-  const mime = (mimeType || '').toLowerCase()
-  if (mime.startsWith('image/')) return 'image'
-  if (mime.startsWith('video/')) return 'video'
-  if (mime.startsWith('audio/')) return 'audio'
-  const ext = fileName.toLowerCase().match(/\.([a-z0-9]{1,8})$/)?.[1] ?? ''
-  if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) return 'image'
-  if (['mp4', 'mov', 'm4v', '3gp'].includes(ext)) return 'video'
-  if (['ogg', 'opus', 'mp3', 'm4a', 'wav'].includes(ext)) return 'audio'
-  return 'document'
-}
-
-/** Nome de ficheiro seguro para o Storage (que recusa acento, espaço e barra). */
-function nomeSeguro(nome: string): string {
-  const limpo = nome
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9._-]/g, '-')
-    .replace(/-+/g, '-')
-  return limpo.slice(-80) || 'arquivo'
-}
 
 export async function uploadChatMedia(leadId: string, file: File): Promise<UploadedChatMedia> {
   if (!supabase) throw new Error('Sistema não configurado.')
@@ -62,7 +44,7 @@ export async function uploadChatMedia(leadId: string, file: File): Promise<Uploa
       `O WhatsApp não aceita ${kind === 'document' ? 'documento' : kind === 'image' ? 'imagem' : kind} acima de ${Math.round(teto / 1024 / 1024)} MB (este tem ${(file.size / 1024 / 1024).toFixed(1)} MB).`,
     )
   }
-  const path = `whatsapp/${leadId}/${crypto.randomUUID()}-${nomeSeguro(file.name)}`
+  const path = `whatsapp/${leadId}/${crypto.randomUUID()}-${nomeSeguroDeArquivo(file.name)}`
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
     contentType: file.type || 'application/octet-stream',
     upsert: false,

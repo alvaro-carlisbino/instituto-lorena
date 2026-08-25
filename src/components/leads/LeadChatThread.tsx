@@ -73,6 +73,7 @@ import { isAiReplyLikelyPending, type AiConversationGate } from '@/lib/aiTypingI
 import { getChannelShortLabel, getChannelStyle } from '@/lib/channelStyles'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
+import { isMediaOnlyLabel } from '@/lib/chatMedia'
 import type { Interaction } from '@/mocks/crmMock'
 import { forceAiReply } from '@/services/conversationControl'
 import {
@@ -205,18 +206,8 @@ function encodeWav(audioBuffer: AudioBuffer): Blob {
   return new Blob([view], { type: 'audio/wav' })
 }
 
-/**
- * O texto da bolha é só o marcador que pusemos porque a mídia veio sem legenda
- * ("📷 Foto", "🎤 Áudio"). Ao encaminhar, isso não pode virar uma mensagem de texto
- * sozinha do outro lado — a foto já vai, e "📷 Foto" solto não quer dizer nada.
- */
 /** Fila de reação rápida do menu da bolha — as mesmas seis do WhatsApp. */
 const REACOES_RAPIDAS = ['👍', '❤️', '😂', '😮', '😢', '🙏']
-
-function isMediaOnlyLabel(content: string): boolean {
-  const t = (content ?? '').trim()
-  return /^(📷|🎬|🎥|🎤|📎|🎭|🎞️|🌟|📍|👤)\s*\S*$/u.test(t)
-}
 
 function triggerDownload(url: string, filename: string): void {
   const a = document.createElement('a')
@@ -817,9 +808,25 @@ export function LeadChatThread({
   const reacoesDe = (msg: Interaction) => {
     const chave = msg.externalMessageId
     if (!chave) return []
-    const minhas = reactions.filter((r) => r.externalMessageId === chave)
+    // Duas fontes: as que vieram junto com a interaction e as carregadas à parte. Ler só
+    // uma delas fazia a reação aparecer numa tela e não noutra.
+    const lista = [
+      ...reactions.filter((r) => r.externalMessageId === chave),
+      ...(msg.reactions ?? []).map((r) => ({
+        externalMessageId: chave,
+        emoji: r.emoji,
+        direction: r.direction,
+        author: r.author,
+        interactionId: msg.id,
+      })),
+    ]
     const porEmoji = new Map<string, { emoji: string; total: number; minha: boolean }>()
-    for (const r of minhas) {
+    const vistos = new Set<string>()
+    for (const r of lista) {
+      // Mesma pessoa + mesmo emoji conta uma vez, venha de onde vier.
+      const id = `${r.direction}:${r.author}:${r.emoji}`
+      if (vistos.has(id)) continue
+      vistos.add(id)
       const atual = porEmoji.get(r.emoji) ?? { emoji: r.emoji, total: 0, minha: false }
       atual.total += 1
       if (r.direction === 'out') atual.minha = true
@@ -1428,7 +1435,10 @@ export function LeadChatThread({
                                     >
                                       <SmilePlus className="size-4" aria-hidden />
                                     </DropdownMenuTrigger>
-                                    <DropdownMenuContent align={out ? 'end' : 'start'} className="p-2">
+                                    <DropdownMenuContent
+                                      align={out ? 'end' : 'start'}
+                                      className="w-auto max-w-[min(100vw-2rem,22rem)] p-2"
+                                    >
                                       <EmojiPicker onPick={(em) => void alternarReacao(msg, em)} />
                                     </DropdownMenuContent>
                                   </DropdownMenu>
@@ -1512,7 +1522,7 @@ export function LeadChatThread({
                             className={cn(
                               'mb-1.5 flex flex-col gap-0.5 rounded-md border-l-2 px-2 py-1 text-[11px]',
                               out
-                                ? 'border-primary-foreground/50 bg-primary-foreground/10 text-primary-foreground/85'
+                                ? 'border-primary-foreground/70 bg-primary-foreground/20 text-primary-foreground'
                                 : 'border-primary/50 bg-muted/60 text-muted-foreground dark:bg-white/5',
                             )}
                           >
@@ -1872,7 +1882,10 @@ export function LeadChatThread({
                     <Smile className="h-4 w-4" aria-hidden />
                     <span className="sr-only">Emojis</span>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="p-2">
+                  {/* `w-auto` é obrigatório: o DropdownMenuContent nasce com
+                      `w-(--anchor-width)` e, ancorado num botão de 32px, o seletor abria
+                      com 32px de largura — tecnicamente aberto, visualmente invisível. */}
+                  <DropdownMenuContent align="start" className="w-auto max-w-[min(100vw-2rem,22rem)] p-2">
                     <EmojiPicker onPick={insertEmojiIntoDraft} />
                   </DropdownMenuContent>
                 </DropdownMenu>

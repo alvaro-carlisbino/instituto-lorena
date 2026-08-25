@@ -753,15 +753,40 @@ export const useCrmState = () => {
       return { ok: true }
     }
 
-    addInteraction({
-      leadId: selectedLead.id,
-      patientName: selectedLead.patientName,
-      channel: 'whatsapp',
-      direction: 'out',
-      author: senderName,
-      content: outbound,
-      happenedAt: new Date().toISOString(),
-    })
+    // Modo demonstração: cada peça de mídia vira a sua própria bolha, como no envio real —
+    // uma bolha só com "3 arquivos adicionados" dava a impressão errada de como a coisa
+    // aparece para a paciente.
+    const rotulo: Record<string, string> = {
+      image: '📷 Foto',
+      video: '🎬 Vídeo',
+      audio: '🎤 Áudio',
+      document: '📎 Documento',
+      sticker: '🎭 Figurinha',
+      gif: '🎞️ GIF',
+      ptv: '🎥 Vídeo redondo',
+    }
+    for (const peca of opts.media ?? []) {
+      addInteraction({
+        leadId: selectedLead.id,
+        patientName: selectedLead.patientName,
+        channel: 'whatsapp',
+        direction: 'out',
+        author: senderName,
+        content: peca.caption || rotulo[peca.kind ?? 'document'] || '📎 Arquivo',
+        happenedAt: new Date().toISOString(),
+      })
+    }
+    if (outbound) {
+      addInteraction({
+        leadId: selectedLead.id,
+        patientName: selectedLead.patientName,
+        channel: 'whatsapp',
+        direction: 'out',
+        author: senderName,
+        content: outbound,
+        happenedAt: new Date().toISOString(),
+      })
+    }
     if (atts.length > 0) {
       addInteraction({
         leadId: selectedLead.id,
