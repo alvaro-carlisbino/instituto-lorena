@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   atrasoDeLancamento,
+  faltaTipoDeConsulta,
   ganhoDoFollowUp,
   vendasForaDaConta,
   type ConversaoConsulta,
@@ -16,6 +17,13 @@ const conv = (over: Partial<ConversaoConsulta> = {}): ConversaoConsulta => ({
   pacientes: 96,
   cenario_mes: { vendas: 6, receita_cents: 21_420_000, pct: 6.3 },
   cenario_followup: { vendas: 6, receita_cents: 21_420_000, pct: 6.3 },
+  denominador: {
+    tipo_usado: 'todas',
+    cobertura_pct: 16.2,
+    consultas_com_tipo: 28,
+    consultas_no_mes: 173,
+    pacientes_tc: 10,
+  },
   de_safra_anterior: { vendas: 0, receita_cents: 0 },
   sem_vinculo: { vendas: 0, receita_cents: 0 },
   outro_kind: { kind: 'protocolo', pacientes: 0 },
@@ -74,5 +82,28 @@ describe('vendasForaDaConta', () => {
 
   it('não quebra sem dado', () => {
     expect(vendasForaDaConta(null)).toEqual({ vendas: 0, receitaCents: 0 })
+  })
+})
+
+describe('faltaTipoDeConsulta', () => {
+  it('avisa que o denominador ainda é toda consulta, e o quanto falta', () => {
+    // 25/08/2026: a grade da Shosp não traz o serviço, só 16,2% das consultas do mês têm tipo.
+    expect(faltaTipoDeConsulta(conv())).toBe(16.2)
+  })
+
+  it('cala a boca quando o card já mede só transplante', () => {
+    expect(
+      faltaTipoDeConsulta(
+        conv({
+          denominador: {
+            tipo_usado: 'tc',
+            cobertura_pct: 92.4,
+            consultas_com_tipo: 160,
+            consultas_no_mes: 173,
+            pacientes_tc: 41,
+          },
+        }),
+      ),
+    ).toBeNull()
   })
 })

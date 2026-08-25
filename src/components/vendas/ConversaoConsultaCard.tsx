@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import {
   atrasoDeLancamento,
   fetchConversaoConsulta,
+  faltaTipoDeConsulta,
   ganhoDoFollowUp,
   vendasForaDaConta,
   type ConversaoConsulta,
@@ -92,6 +93,7 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
 
   const ganho = ganhoDoFollowUp(dados)
   const fora = vendasForaDaConta(dados)
+  const semTipo = faltaTipoDeConsulta(dados)
   const atraso = atrasoDeLancamento(dados)
   const semConsulta = !carregando && dados != null && dados.pacientes === 0
 
@@ -101,7 +103,8 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
         <CardTitle className="flex flex-wrap items-baseline gap-2">
           Conversão da consulta
           <span className="text-xs font-normal text-muted-foreground">
-            {rotuloMes} · {dados?.pacientes ?? 0} {dados?.pacientes === 1 ? 'paciente em consulta' : 'pacientes em consulta'}
+            {rotuloMes} · {dados?.pacientes ?? 0} {dados?.pacientes === 1 ? 'paciente' : 'pacientes'} em{' '}
+            {dados?.denominador?.tipo_usado === 'tc' ? 'consulta de transplante' : 'consulta'}
             {dados && dados.agendamentos !== dados.pacientes ? ` (${dados.agendamentos} agendamentos)` : ''}
           </span>
         </CardTitle>
@@ -184,6 +187,20 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
                 da safra do mês não entrou nesta conta: não há prontuário na venda nem no lead que ligue o paciente a
                 uma consulta da agenda. Enquanto isso não é preenchido, a taxa é PISO.
               </p>
+            ) : null}
+
+            {/* Enquanto a agenda não disser o tipo, o denominador é TODA consulta — e quem lê
+                precisa saber, senão toma conversão de tudo por conversão de transplante. */}
+            {semTipo != null ? (
+              <div className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-muted/30 p-3">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Este número é sobre <span className="font-semibold text-foreground">todas as consultas</span>, não só
+                  as de transplante: a agenda da Shosp só diz o tipo em {pct(semTipo)} delas neste mês (a grade não
+                  devolve o serviço, só a busca por paciente). O CRM está preenchendo o que falta de duas em duas horas;
+                  passando de 80%, este card passa a medir só consulta de transplante sozinho.
+                </p>
+              </div>
             ) : null}
 
             {/* O furo que faria o card mentir: a agenda entra sozinha e vai até

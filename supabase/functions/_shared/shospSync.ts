@@ -740,9 +740,90 @@ export async function syncAgendaLivre(
   return { livres, prestadores: codigosPrestador.size, dias, rate_limited: shospIsRateLimited() }
 }
 
+/**
+ * Preenche o SERVIÇO das consultas que a grade geral trouxe sem ele.
+ *
+ * A grade por prestador (`syncFullAgenda`) devolve paciente, status e plano, mas NÃO o serviço —
+ * esse só vem na agenda POR PACIENTE. Resultado: em agosto/2026, 1.023 dos 1.117 agendamentos
+ * estavam sem tipo, e a conversão da consulta não conseguia separar consulta de transplante de
+ * consulta clínica, que é o que a gerência mede ("conversão sobre as consultas de TC geradas").
+ *
+ * Roda por PRONTUÁRIO, não por lead: 45% dos pacientes que consultam não têm lead casado, e são
+ * consultas iguais às outras. Escreve com UPDATE (nunca upsert) e só onde o serviço está vazio —
+ * assim não apaga nada que a agenda já tinha e pode rodar quantas vezes for preciso.
+ *
+ * Cota: uma chamada por paciente, com o mesmo freio de 429 do resto do sync.
+ */
+export async function enriquecerServicoDeConsultas(
+  admin: SupabaseClient,
+  opts: { limit?: number; dias?: number } = {},
+): Promise<{ pacientes: number; agendamentos: number; pendentes: number }> {
+  if (shospIsRateLimited()) return { pacientes: 0, agendamentos: 0, pendentes: 0 }
+  const limite = Math.min(40, Math.max(1, opts.limit ?? 15))
+  const dias = Math.min(180, Math.max(1, opts.dias ?? 90))
+  const desde = ymdOffset(-dias)
+  const hoje = ymdOffset(0)
+
+  // Só o passado: agendamento futuro ainda pode mudar de serviço, e o que a conversão precisa
+  // é da consulta que já aconteceu.
+  const { data: faltando } = await admin
+    .from('shosp_appointments')
+    .select('prontuario')
+    .is('servico', null)
+    .not('prontuario', 'is', null)
+    .gte('data', desde)
+    .lte('data', hoje)
+    .order('data', { ascending: false })
+    .limit(600)
+
+  const prontuarios: string[] = []
+  for (const r of (faltando ?? []) as Array<{ prontuario: string }>) {
+    const p = String(r.prontuario)
+    if (!prontuarios.includes(p)) prontuarios.push(p)
+    if (prontuarios.length >= limite) break
+  }
+  const pendentes = new Set((faltando ?? []).map((r) => String((r as { prontuario: string }).prontuario))).size
+
+  let agendamentos = 0
+  let pacientes = 0
+  for (const pront of prontuarios) {
+    if (shospIsRateLimited()) break
+    let byDate: Record<string, Record<string, unknown>[]> = {}
+    try {
+      byDate = agendaByDate((await shospAgendaPorPaciente(pront)).data)
+    } catch {
+      continue
+    }
+    pacientes++
+    for (const list of Object.values(byDate)) {
+      for (const a of list) {
+        const codigo = String(a.codigoAgendamento ?? '').trim()
+        const servico = a.servico != null ? String(a.servico).trim() : ''
+        if (!codigo || !servico) continue
+        // `.is('servico', null)` na condição: nunca sobrescreve serviço já gravado.
+        const { error } = await admin
+          .from('shosp_appointments')
+          .update({ servico, synced_at: nowIso() })
+          .eq('codigo_agendamento', codigo)
+          .is('servico', null)
+        if (!error) agendamentos++
+      }
+    }
+  }
+  return { pacientes, agendamentos, pendentes }
+}
+
 export async function runShospSync(
   admin: SupabaseClient,
-  opts: { matchLimit?: number; apptLimit?: number; diasTotal?: number; steps?: string[]; agendaLimit?: number } = {},
+  opts: {
+    matchLimit?: number
+    apptLimit?: number
+    diasTotal?: number
+    steps?: string[]
+    agendaLimit?: number
+    servicoLimit?: number
+    servicoDias?: number
+  } = {},
 ): Promise<Record<string, unknown>> {
   const steps = opts.steps ?? ['references', 'match', 'appointments']
   const result: Record<string, unknown> = {}
@@ -753,6 +834,9 @@ export async function runShospSync(
   if (steps.includes('appointments')) result.appointments = await syncAppointments(admin, opts.apptLimit ?? 25)
   if (steps.includes('full_agenda')) result.full_agenda = await syncFullAgenda(admin, { diasTotal: opts.diasTotal })
   if (steps.includes('agenda_livre')) result.agenda_livre = await syncAgendaLivre(admin, { dias: opts.diasTotal })
+  if (steps.includes('servicos')) {
+    result.servicos = await enriquecerServicoDeConsultas(admin, { limit: opts.servicoLimit, dias: opts.servicoDias })
+  }
 
   // Consumo e saúde da rodada vão na resposta E no estado — é o que faltava para
   // alguém perceber que a integração estava morta. `notes` é lido no painel.

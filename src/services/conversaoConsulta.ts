@@ -32,6 +32,19 @@ export type ConversaoConsulta = {
   ate_dia: string
   agendamentos: number
   pacientes: number
+  /**
+   * Que régua o denominador está usando. `tc` = só consulta de transplante, que é o que a
+   * gerência mede; `todas` = qualquer consulta, o fallback enquanto a agenda não diz o tipo.
+   * A grade da Shosp não devolve o serviço (só o endpoint por paciente), então o CRM preenche
+   * isso aos poucos — e a RPC vira sozinha para `tc` quando a cobertura passa de 80%.
+   */
+  denominador: {
+    tipo_usado: 'tc' | 'todas'
+    cobertura_pct: number
+    consultas_com_tipo: number
+    consultas_no_mes: number
+    pacientes_tc: number
+  }
   cenario_mes: CenarioConversao
   cenario_followup: CenarioConversao
   /**
@@ -102,4 +115,16 @@ export function atrasoDeLancamento(c: ConversaoConsulta | null): number | null {
 export function vendasForaDaConta(c: ConversaoConsulta | null): { vendas: number; receitaCents: number } {
   if (!c?.sem_vinculo) return { vendas: 0, receitaCents: 0 }
   return { vendas: c.sem_vinculo.vendas, receitaCents: c.sem_vinculo.receita_cents }
+}
+
+/**
+ * O denominador ainda é "toda consulta" só porque falta o tipo na agenda?
+ *
+ * Devolve a cobertura quando a resposta é sim — é o que a tela precisa dizer para o número não
+ * ser lido como conversão de transplante quando ainda é conversão de tudo.
+ */
+export function faltaTipoDeConsulta(c: ConversaoConsulta | null): number | null {
+  if (!c?.denominador) return null
+  if (c.denominador.tipo_usado === 'tc') return null
+  return c.denominador.cobertura_pct
 }
