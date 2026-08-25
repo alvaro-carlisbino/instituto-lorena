@@ -648,12 +648,15 @@ export async function deleteSalesTarget(id: string): Promise<void> {
 
 export type MetaProgresso = {
   metaCents: number
+  /** Há meta de VALOR? Falso quando só a quantidade foi definida — o card muda de régua. */
+  porValor: boolean
   metaQtd: number
   realizadoCents: number
   realizadoQtd: number
   pctValor: number
   pctQtd: number
   faltaCents: number
+  faltaQtd: number
   /** Projeção linear pelo ritmo do mês até aqui. Só faz sentido no mês corrente. */
   projecaoCents: number
   diasDecorridos: number
@@ -686,9 +689,14 @@ export function progressoDaMeta(
     metaQtd,
     realizadoCents,
     realizadoQtd,
+    // Meta só de QUANTIDADE é meta válida (agosto/2026: 30 vendas, valor zerado). Sem esta
+    // distinção o card lia meta-zero como meta-cumprida e escrevia "R$ 529.241,92 de R$ 0,00 ·
+    // meta batida · 0%" — três informações contraditórias na mesma linha.
+    porValor: metaCents > 0,
     pctValor: metaCents > 0 ? Math.round((realizadoCents / metaCents) * 100) : 0,
     pctQtd: metaQtd > 0 ? Math.round((realizadoQtd / metaQtd) * 100) : 0,
     faltaCents: Math.max(metaCents - realizadoCents, 0),
+    faltaQtd: Math.max(metaQtd - realizadoQtd, 0),
     projecaoCents:
       diasDecorridos > 0 ? Math.round((realizadoCents / diasDecorridos) * diasNoMes) : realizadoCents,
     diasDecorridos,

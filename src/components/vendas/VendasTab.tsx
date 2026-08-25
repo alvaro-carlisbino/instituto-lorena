@@ -477,55 +477,75 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
               </p>
             ) : (
               <div className="space-y-3">
-                <div className="flex flex-wrap items-end justify-between gap-2">
-                  <div>
-                    <p className="font-heading text-2xl">
-                      {brl(progresso.realizadoCents)}
-                      <span className="ml-1 text-sm text-muted-foreground">de {brl(progresso.metaCents)}</span>
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {progresso.faltaCents > 0
-                        ? `faltam ${brl(progresso.faltaCents)}`
-                        : 'meta batida'}
-                      {progresso.metaQtd > 0 &&
-                        ` · ${progresso.realizadoQtd} de ${progresso.metaQtd} venda${progresso.metaQtd > 1 ? 's' : ''}`}
-                    </p>
-                  </div>
-                  <p
-                    className={cn(
-                      'font-heading text-2xl',
-                      progresso.pctValor >= 100
-                        ? 'text-emerald-600'
-                        : progresso.pctValor >= 60
-                          ? 'text-foreground'
-                          : 'text-amber-600',
-                    )}
-                  >
-                    {progresso.pctValor}%
-                  </p>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                  <div
-                    className={cn(
-                      'h-full rounded-full transition-[width]',
-                      progresso.pctValor >= 100 ? 'bg-emerald-600' : 'bg-primary',
-                    )}
-                    style={{ width: `${Math.min(progresso.pctValor, 100)}%` }}
-                  />
-                </div>
-                {progresso.diasDecorridos < progresso.diasNoMes && (
-                  <p className="text-xs text-muted-foreground">
-                    No ritmo dos {progresso.diasDecorridos} primeiros dias, o mês fecha em{' '}
-                    <span
-                      className={
-                        progresso.projecaoCents >= progresso.metaCents ? 'text-emerald-600' : 'text-amber-600'
-                      }
-                    >
-                      {brl(progresso.projecaoCents)}
-                    </span>
-                    . Projeção é régua de três, não promessa.
-                  </p>
-                )}
+                {/* A régua é o que foi COMBINADO. Meta só de quantidade (agosto/2026: 30 vendas,
+                    valor zerado) media contra R$ 0,00 e escrevia "meta batida · 0%" ao lado de
+                    meio milhão realizado. Quando não há meta de valor, quem manda é a contagem. */}
+                {(() => {
+                  const pct = progresso.porValor ? progresso.pctValor : progresso.pctQtd
+                  const falta = progresso.porValor
+                    ? (progresso.faltaCents > 0 ? `faltam ${brl(progresso.faltaCents)}` : 'meta batida')
+                    : (progresso.faltaQtd > 0
+                      ? `faltam ${progresso.faltaQtd} venda${progresso.faltaQtd > 1 ? 's' : ''}`
+                      : 'meta batida')
+                  return (
+                    <>
+                      <div className="flex flex-wrap items-end justify-between gap-2">
+                        <div>
+                          <p className="font-heading text-2xl">
+                            {brl(progresso.realizadoCents)}
+                            {progresso.porValor && (
+                              <span className="ml-1 text-sm text-muted-foreground">
+                                de {brl(progresso.metaCents)}
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {falta}
+                            {progresso.metaQtd > 0 &&
+                              ` · ${progresso.realizadoQtd} de ${progresso.metaQtd} venda${progresso.metaQtd > 1 ? 's' : ''}`}
+                            {!progresso.porValor && ' · meta é de quantidade, sem valor definido'}
+                          </p>
+                        </div>
+                        <p
+                          className={cn(
+                            'font-heading text-2xl',
+                            pct >= 100 ? 'text-emerald-600' : pct >= 60 ? 'text-foreground' : 'text-amber-600',
+                          )}
+                        >
+                          {pct}%
+                        </p>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={cn(
+                            'h-full rounded-full transition-[width]',
+                            pct >= 100 ? 'bg-emerald-600' : 'bg-primary',
+                          )}
+                          style={{ width: `${Math.min(pct, 100)}%` }}
+                        />
+                      </div>
+                      {progresso.diasDecorridos < progresso.diasNoMes && (
+                        <p className="text-xs text-muted-foreground">
+                          No ritmo dos {progresso.diasDecorridos} primeiros dias, o mês fecha em{' '}
+                          <span
+                            className={
+                              // Sem meta de valor não há contra o que comparar: número neutro,
+                              // não verde de "bateu" nem âmbar de "vai faltar".
+                              !progresso.porValor
+                                ? 'text-foreground'
+                                : progresso.projecaoCents >= progresso.metaCents
+                                  ? 'text-emerald-600'
+                                  : 'text-amber-600'
+                            }
+                          >
+                            {brl(progresso.projecaoCents)}
+                          </span>
+                          . Projeção é régua de três, não promessa.
+                        </p>
+                      )}
+                    </>
+                  )
+                })()}
               </div>
             )}
           </CardContent>
