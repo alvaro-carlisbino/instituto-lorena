@@ -649,6 +649,10 @@ export async function insertInteraction(
      * devem sempre passar este campo para garantir isolamento correto.
      */
     tenantId?: string
+    /** Id externo da mensagem CITADA — a bolha sai colada na pergunta, como no telemóvel. */
+    replyToExternalId?: string
+    /** Encaminhada a partir desta interaction (a W-API não tem rota de encaminhar). */
+    forwardedFromId?: string
   },
 ): Promise<string> {
   const row: Record<string, unknown> = {
@@ -662,6 +666,8 @@ export async function insertInteraction(
     external_message_id: input.externalMessageId || null,
   }
   if (input.tenantId) row.tenant_id = input.tenantId
+  if (input.replyToExternalId) row.reply_to_external_id = input.replyToExternalId
+  if (input.forwardedFromId) row.forwarded_from_id = input.forwardedFromId
   const { data, error } = await admin.from('interactions').insert(row).select('id').single()
   if (error) throw new Error(error.message)
   if (!data?.id) throw new Error('insert_interaction_no_id')

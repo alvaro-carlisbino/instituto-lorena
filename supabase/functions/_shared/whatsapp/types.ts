@@ -15,6 +15,13 @@ export type SendWhatsappMessageInput = {
    * aparece instantânea é assinatura de robô. Ignorado por Evolution/Cloud.
    */
   typingDelaySeconds?: number
+  /**
+   * Id (externo) da mensagem que esta responde. Na W-API vai no campo `messageId` e faz a
+   * resposta sair CITANDO a original, como no telemóvel. Sem isto toda resposta chega solta
+   * no fim da conversa e, numa conversa longa, ninguém sabe do que se está a falar.
+   * Ignorado por Evolution/Cloud.
+   */
+  replyToMessageId?: string
   metadata?: Record<string, unknown>
 }
 

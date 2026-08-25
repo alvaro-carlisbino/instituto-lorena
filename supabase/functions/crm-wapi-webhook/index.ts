@@ -19,7 +19,14 @@ import {
   createWapiProviderForRow,
   loadWhatsappInstanceByWapiId,
 } from '../_shared/whatsapp/wapiConfig.ts'
-import { extractInboundMedia, isMediaOnlyMarker, WapiProvider } from '../_shared/whatsapp/wapi.ts'
+import {
+  extractInboundMedia,
+  extractInboundReaction,
+  extractInboundReplyTo,
+  extractInboundRevoke,
+  isMediaOnlyMarker,
+  WapiProvider,
+} from '../_shared/whatsapp/wapi.ts'
 import { enrichMediaRowsFromBase64 } from '../_shared/manychatMediaEnrich.ts'
 import { registerSalesReceiptGroup, sendWapiGroupText } from '../_shared/saleReceipt.ts'
 
@@ -137,6 +144,62 @@ Deno.serve(async (req) => {
         }
         return json({ ok: true, receipts_group_registered: groupJid }, 200)
       }
+    }
+  }
+
+  // ── Reação e apagamento vindos de fora ──────────────────────────────────────
+  // Nenhum dos dois é mensagem, então `normalizeInbound` devolve null e ambos morriam aqui
+  // em silêncio: a paciente punha um ❤️ na nossa mensagem e no CRM não acontecia nada
+  // (parecia que ela tinha ficado calada), ou apagava uma mensagem e o CRM continuava a
+  // exibir um texto que já não existia do lado dela. Tratados ANTES do caminho normal.
+  {
+    const cru = payload as Record<string, unknown>
+    const reacao = extractInboundReaction(cru)
+    if (reacao) {
+      const { data: alvo } = await admin
+        .from('interactions')
+        .select('id, lead_id, tenant_id')
+        .eq('external_message_id', reacao.targetMessageId)
+        .maybeSingle()
+      if (alvo) {
+        if (reacao.removed) {
+          await admin
+            .from('crm_message_reactions')
+            .delete()
+            .eq('external_message_id', reacao.targetMessageId)
+            .eq('direction', 'in')
+        } else {
+          await admin.from('crm_message_reactions').upsert(
+            {
+              tenant_id: alvo.tenant_id ?? instanceRow.tenant_id ?? null,
+              lead_id: alvo.lead_id,
+              interaction_id: alvo.id,
+              external_message_id: reacao.targetMessageId,
+              emoji: reacao.emoji,
+              direction: 'in',
+              author: 'contato',
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'external_message_id,direction,author' },
+          )
+        }
+        // Cutuca o realtime de `leads` para a reação aparecer na bolha sem esperar o poll.
+        await admin.from('leads').update({ updated_at: new Date().toISOString() }).eq('id', alvo.lead_id)
+      }
+      return json({ ok: true, event: 'reaction', target: reacao.targetMessageId, emoji: reacao.emoji }, 202)
+    }
+
+    const revogada = extractInboundRevoke(cru)
+    if (revogada) {
+      await admin
+        .from('interactions')
+        .update({
+          deleted_at: new Date().toISOString(),
+          deleted_by: 'contato',
+          deleted_scope: 'everyone',
+        })
+        .eq('external_message_id', revogada.targetMessageId)
+      return json({ ok: true, event: 'revoke', target: revogada.targetMessageId }, 202)
     }
   }
 
@@ -287,6 +350,10 @@ Deno.serve(async (req) => {
       content: normalized.text,
       happenedAt: normalized.happenedAt,
       externalMessageId: normalized.externalMessageId,
+      // A paciente respondeu CITANDO uma mensagem. Sem guardar isto, um "sim, pode ser"
+      // chega solto no fim da conversa e ninguém sabe a que pergunta ele responde — o
+      // problema é maior quanto mais a conversa demora entre uma resposta e outra.
+      replyToExternalId: extractInboundReplyTo(normalized.raw as Record<string, unknown>) || undefined,
       tenantId,
     })
 

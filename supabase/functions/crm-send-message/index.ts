@@ -1,16 +1,9 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { insertInteraction } from '../_shared/crm.ts'
 import { setLineConversationMode } from '../_shared/conversationLineState.ts'
 import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
-import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
-import {
-  pushManychatInstagramContent,
-  pushManychatInstagramDmAfterReply,
-  pushManychatWhatsappContent,
-  pushManychatWhatsappDmAfterReply,
-  readManychatPushConfigForTenantChannel,
-  type ManychatContentBlock,
-} from '../_shared/manychatPublicApi.ts'
+import type { SendWhatsappMessageResult, WhatsappProvider } from '../_shared/whatsapp/types.ts'
+import { WapiProvider } from '../_shared/whatsapp/wapi.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -42,6 +35,60 @@ const INTERNAL_SOURCE_AUTHORS: Record<string, string> = {
   // Confirmação de pagamento (rede.ts/finalizeRedePaid). Sem entrada aqui o autor sairia
   // como 'Operador' e a equipe leria como se alguém tivesse digitado a mensagem.
   confirmacao_pagamento: 'Confirmação de pagamento',
+}
+
+/** Bucket onde o painel sobe o que vai por anexo. Já existia (tarefas, comprovantes). */
+const MEDIA_BUCKET = 'crm-lead-attachments'
+
+type MediaKind = 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'gif' | 'ptv'
+
+/**
+ * Que rota da W-API atende este ficheiro. O tipo manda mais do que parece: mandar um áudio
+ * pela rota de documento faz a paciente receber um ficheiro que ela tem de baixar em vez da
+ * bolha de voz que ela sabe tocar. Quando o painel declara `kind`, mandamos o que ele pediu.
+ */
+function inferMediaKind(mimeType: string, fileName: string, declared?: string): MediaKind {
+  if (declared && ['image', 'video', 'audio', 'document', 'sticker', 'gif', 'ptv'].includes(declared)) {
+    return declared as MediaKind
+  }
+  const mime = mimeType.toLowerCase()
+  if (mime.startsWith('image/')) return 'image'
+  if (mime.startsWith('video/')) return 'video'
+  if (mime.startsWith('audio/')) return 'audio'
+  if (!mime) {
+    const ext = fileName.toLowerCase().match(/\.([a-z0-9]{1,8})$/)?.[1] ?? ''
+    if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'image'
+    if (['mp4', 'mov', 'm4v', '3gp'].includes(ext)) return 'video'
+    if (['ogg', 'opus', 'mp3', 'm4a', 'wav'].includes(ext)) return 'audio'
+  }
+  return 'document'
+}
+
+/** Marcador da bolha no histórico, quando a mídia vai sem legenda. */
+const MEDIA_LABEL: Record<MediaKind, string> = {
+  image: '📷 Foto',
+  video: '🎬 Vídeo',
+  audio: '🎤 Áudio',
+  document: '📎 Documento',
+  sticker: '🎭 Figurinha',
+  gif: '🎞️ GIF',
+  ptv: '🎥 Vídeo redondo',
+}
+
+/**
+ * Link temporário para a W-API ir buscar o ficheiro. O bucket é privado, então URL pública
+ * não existe: o link assinado é o que permite ao servidor deles baixar. 24h porque a
+ * mensagem pode ficar na fila da instância antes de sair — link de 1h expirava no meio.
+ */
+async function signedUrlFor(
+  admin: SupabaseClient,
+  storagePath: string,
+): Promise<string> {
+  const { data, error } = await admin.storage.from(MEDIA_BUCKET).createSignedUrl(storagePath, 86_400)
+  if (error || !data?.signedUrl) {
+    throw new Error(`media_signed_url_failed: ${error?.message ?? 'sem url'} (${storagePath})`)
+  }
+  return data.signedUrl
 }
 
 Deno.serve(async (req) => {
@@ -121,6 +168,39 @@ Deno.serve(async (req) => {
      * escreveu naquela linha. Não fura opt-out (a checagem de opt-out é acima e continua).
      */
     antiBanKind?: string
+    /**
+     * MÍDIA DE VERDADE. Até 25/ago/2026 o compositor do CRM aceitava anexo, mostrava o
+     * contador de ficheiros, dava toast verde — e não enviava nada: `attachments` só
+     * virava linha em `crm_media_items` e a paciente nunca recebia. Agora cada item aqui
+     * vira uma mensagem na rota certa da W-API (send-image/video/audio/document/sticker).
+     *
+     * Origem do ficheiro, por ordem de preferência:
+     *  • `storagePath` — caminho no bucket `crm-lead-attachments` (o painel sobe o ficheiro
+     *    e manda só o caminho). É o caminho normal: base64 de um vídeo de 12MB não passa
+     *    pelo JSON de uma Edge Function.
+     *  • `url` — link público já pronto (ex.: QR do Pix, etiqueta, imagem do catálogo).
+     *  • `base64` — só para coisa pequena (figurinha). Precisa do prefixo `data:<mime>;base64,`.
+     */
+    media?: Array<{
+      kind?: 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'gif' | 'ptv'
+      storagePath?: string
+      url?: string
+      base64?: string
+      fileName?: string
+      mimeType?: string
+      caption?: string
+      /**
+       * Id de uma linha de `crm_media_items` que já existe — é assim que ENCAMINHAR
+       * funciona. A W-API não tem rota de encaminhar: o CRM reenvia o conteúdo. Passando o
+       * id, o ficheiro nunca sai do servidor (a foto que a paciente mandou está guardada em
+       * base64; mandá-la ao browser e de volta seria pagar duas vezes pelos mesmos bytes).
+       */
+      mediaItemId?: string
+    }>
+    /** Id W-API da mensagem CITADA: faz a resposta sair colada na pergunta. */
+    replyToMessageId?: string
+    /** Interaction de origem, quando esta mensagem é um ENCAMINHAMENTO. */
+    forwardedFromId?: string
   }
   try {
     body = (await req.json()) as typeof body
@@ -136,14 +216,44 @@ Deno.serve(async (req) => {
   const to = String(body.to ?? '').trim()
   const text = String(body.text ?? '').trim()
   const stickerWebpBase64 = typeof body.stickerWebpBase64 === 'string' ? body.stickerWebpBase64.trim() : ''
-  const attachments = Array.isArray(body.attachments) ? body.attachments : []
-  const mediaUrls = (Array.isArray(body.mediaUrls) ? body.mediaUrls : [])
-    .map((m) => ({
+  const replyToMessageId = String(body.replyToMessageId ?? '').trim() || undefined
+  // Compatibilidade com quem já chamava por `attachments` (base64) e `mediaUrls` (link):
+  // ambos existiam, nenhum enviava nada. Agora entram na mesma fila da mídia nova, então
+  // quem já mandava anexo passa a ver o anexo CHEGAR, sem mudar uma linha do lado de lá.
+  const midiaLegada = [
+    ...(Array.isArray(body.attachments) ? body.attachments : []).map((a) => ({
+      kind: undefined as undefined,
+      storagePath: '',
+      url: '',
+      base64: String(a?.base64 ?? '').trim(),
+      fileName: String(a?.name ?? '').trim(),
+      mimeType: String(a?.mimeType ?? '').trim(),
+      caption: '',
+    })),
+    ...(Array.isArray(body.mediaUrls) ? body.mediaUrls : []).map((m) => ({
+      kind: m?.type,
+      storagePath: '',
       url: String(m?.url ?? '').trim(),
-      type: m?.type ?? undefined,
-      caption: typeof m?.caption === 'string' ? m.caption : undefined,
+      base64: '',
+      fileName: '',
+      mimeType: '',
+      caption: typeof m?.caption === 'string' ? m.caption.trim() : '',
+    })),
+  ].filter((m) => m.base64 || m.url)
+  const forwardedFromId = String(body.forwardedFromId ?? '').trim() || undefined
+  const mediaItems = (Array.isArray(body.media) ? body.media : [])
+    .map((m) => ({
+      kind: m?.kind,
+      storagePath: String(m?.storagePath ?? '').trim(),
+      url: String(m?.url ?? '').trim(),
+      base64: String(m?.base64 ?? '').trim(),
+      fileName: String(m?.fileName ?? '').trim(),
+      mimeType: String(m?.mimeType ?? '').trim(),
+      caption: typeof m?.caption === 'string' ? m.caption.trim() : '',
+      mediaItemId: String(m?.mediaItemId ?? '').trim(),
     }))
-    .filter((m) => m.url.length > 0)
+    .filter((m) => m.storagePath || m.url || m.base64 || m.mediaItemId)
+    .concat(midiaLegada.map((m) => ({ ...m, mediaItemId: '' })))
 
   if (!leadId) return json({ error: 'missing_fields', message: 'leadId obrigatório' }, 400)
 
@@ -213,10 +323,10 @@ Deno.serve(async (req) => {
   }
 
   const effectiveTo = to || String(row.phone ?? '').trim()
-  const customFieldsChannel = String(
+  const _customFieldsChannel = String(
     (row.custom_fields as Record<string, unknown> | null)?.channel ?? '',
   ).toLowerCase()
-  const bodyChannel = String(body.channel ?? '').toLowerCase()
+  const _bodyChannel = String(body.channel ?? '').toLowerCase()
   const customFieldsProvider = String(
     (row.custom_fields as Record<string, unknown> | null)?.provider ?? '',
   ).toLowerCase()
@@ -283,268 +393,34 @@ Deno.serve(async (req) => {
     }
   }
   const assuntoDeOutroPolo = Boolean(senderTenantId) && senderTenantId !== row.tenant_id
-  // Detecta envio via ManyChat. Desde 20/ago/2026 o ManyChat atende SÓ o Instagram: o
-  // WhatsApp da clínica vive numa linha W-API. Por isso o WhatsApp só cai aqui quando não
-  // há para onde mais ir — sem telefone real, ou o polo sem linha própria ativa.
+  // ManyChat MORREU (25/ago/2026, decisão do negócio: "não usamos mais ManyChat, nunca
+  // mais"). O ramo saiu daqui inteiro. Enquanto viveu, ele era o destino de todo lead sem
+  // linha própria — e devolvia "Meta bloqueia DM sem janela de 24h aberta", o erro de uma
+  // integração que já não existia, escrito no chat como se fosse o motivo real de a
+  // mensagem não ter saído. Hoje só existe um caminho: a linha de WhatsApp do polo.
   //
-  // Era esta linha que quebrava: `row.source === 'meta_whatsapp'` mandava para o ManyChat
-  // sozinho, sem perguntar se ainda existia ManyChat. Como 655 leads da clínica têm essa
-  // origem, responder a qualquer um deles pelo painel devolvia o erro de janela de 24h da
-  // Meta — de uma conta que já não entrega WhatsApp nenhum.
-  // Instagram continua no ManyChat e este comportamento fica EXATAMENTE como estava — com
-  // uma ressalva: `source = meta_instagram` só decide enquanto a pessoa não tiver falado na
-  // linha direta. Quem veio do Instagram e depois escreveu no WhatsApp é atendido onde está
-  // conversando agora (mesma regra de [[crm_conversa_segue_a_linha]]).
-  const alvoInstagram =
-    bodyChannel !== 'whatsapp' &&
-    (bodyChannel === 'instagram' ||
-      customFieldsChannel === 'instagram' ||
-      (row.source === 'meta_instagram' && !hasDirectWhatsappLine))
-  const isManychat =
-    !assuntoDeOutroPolo &&
-    (effectiveTo.startsWith('888001') ||
-      !telefoneReal ||
-      alvoInstagram ||
-      !poloTemLinhaPropria)
-
-  if (isManychat) {
-    // Automação de stage + ManyChat: bloqueia fora da janela 24h da Meta.
-    // ManyChat retorna `status:success` no sendFlow mesmo quando a Meta dropa a entrega
-    // silenciosamente — frontend mostraria toast verde e paciente não receberia. Esse
-    // bloqueio espelha a regra do `crm-followup-scheduler` (24h após last_inbound_at).
-    if (String(body.source ?? '').trim() === 'stage_automation') {
-      const { data: convState } = await admin
-        .from('crm_conversation_states')
-        .select('last_inbound_at')
-        .eq('lead_id', leadId)
-        .maybeSingle()
-      const lastInboundIso = convState?.last_inbound_at ? String(convState.last_inbound_at) : null
-      const lastInboundMs = lastInboundIso ? new Date(lastInboundIso).getTime() : 0
-      const outOfWindow = !lastInboundMs || (Date.now() - lastInboundMs) > 24 * 3600 * 1000
-      if (outOfWindow) {
-        try {
-          await insertInteraction(admin, {
-            leadId: row.id,
-            patientName: row.patient_name,
-            channel: 'system',
-            direction: 'system',
-            author: 'Automação de etapa',
-            content: lastInboundIso
-              ? `Automação não enviada: paciente sem responder desde ${new Date(lastInboundIso).toISOString()} (>24h). Meta bloqueia DM fora da janela e o ManyChat entrega "ok" mentiroso. Reativar exige resposta do paciente ou template aprovado pela Meta.`
-              : 'Automação não enviada: paciente nunca respondeu via ManyChat. Meta bloqueia DM sem janela 24h aberta.',
-            tenantId: row.tenant_id,
-          })
-        } catch (e) {
-          console.warn('[crm-send-message] out_of_window audit interaction failed:', e instanceof Error ? e.message : String(e))
-        }
-        return json(
-          {
-            error: 'out_of_window',
-            message:
-              'Paciente sem responder há mais de 24h — Meta bloqueia DM fora da janela. Automação de etapa não foi disparada para evitar entrega silenciosamente perdida.',
-            last_inbound_at: lastInboundIso,
-          },
-          403,
-        )
-      }
-    }
-
-    const subscriberId = String(
-      (row.custom_fields as Record<string, unknown> | null)?.manychat_subscriber_id ?? '',
-    ).trim()
-    if (!subscriberId) {
-      // Sem subscriber ManyChat: se o telefone é sintético, não há canal alternativo.
-      if (!row.phone || row.phone.startsWith('888001')) {
-        return json({ error: 'manychat_id_missing', message: 'Lead ManyChat sem subscriber ID' }, 400)
-      }
-    } else {
-      // Decide o canal ManyChat (whatsapp vs instagram). Prioridade:
-      // 1) body.channel explícito, 2) custom_fields.channel, 3) source do lead.
-      const pushChannel =
-        bodyChannel === 'whatsapp' || bodyChannel === 'instagram'
-          ? bodyChannel
-          : customFieldsChannel === 'whatsapp' || customFieldsChannel === 'instagram'
-            ? customFieldsChannel
-            : row.source === 'meta_whatsapp'
-              ? 'whatsapp'
-              : 'instagram'
-
-      if (stickerWebpBase64) {
-        return json(
-          {
-            error: 'sticker_not_supported',
-            message: 'Figurinhas WebP só pelo WhatsApp direto. No ManyChat use texto ou fluxo.',
-          },
-          400,
-        )
-      }
-      // Estratégia:
-      // • Se há mídia → tenta /fb/sending/sendContent (blocos nativos image/audio/video/file).
-      //   Requer plano Pro do ManyChat; se falhar (plano, janela, payload), caímos para o
-      //   fluxo legado (URL concatenada no texto + setCustomField+sendFlow).
-      // • Sem mídia → segue direto pelo fluxo legado de texto.
-      const mediaUrlsBlock = mediaUrls.length > 0 ? mediaUrls.map((m) => m.url).join('\n') : ''
-      const replyText = text && mediaUrlsBlock
-        ? `${text}\n\n${mediaUrlsBlock}`
-        : text || mediaUrlsBlock
-      if (!replyText) {
-        return json(
-          {
-            error: 'missing_fields',
-            message: 'Envie texto ou pelo menos uma URL em mediaUrls para envios via ManyChat.',
-          },
-          400,
-        )
-      }
-      const mcCfg = await readManychatPushConfigForTenantChannel(admin, row.tenant_id, pushChannel)
-      if (!mcCfg) return json({ error: 'manychat_not_configured' }, 500)
-
-      if (mediaUrls.length > 0) {
-        const blocks: ManychatContentBlock[] = mediaUrls.map((m) => ({
-          type: (m.type === 'document' ? 'file' : (m.type ?? 'image')) as 'image' | 'audio' | 'video' | 'file',
-          url: m.url,
-          caption: m.caption,
-        }))
-        if (text) blocks.unshift({ type: 'text', text })
-
-        const contentArgs = {
-          apiKey: mcCfg.apiKey,
-          subscriberId,
-          blocks,
-          messageTag: mcCfg.messageTag || undefined,
-        }
-        const contentRes =
-          pushChannel === 'whatsapp'
-            ? await pushManychatWhatsappContent(contentArgs)
-            : await pushManychatInstagramContent(contentArgs)
-
-        if (contentRes.ok) {
-          const outboundInteractionId = await insertInteraction(admin, {
-            leadId: row.id,
-            patientName: row.patient_name,
-            channel: pushChannel === 'whatsapp' ? 'whatsapp' : 'meta',
-            direction: 'out',
-            author: user?.email || 'Consultor',
-            content: text || mediaUrls.map((m) => m.url).join('\n'),
-            happenedAt: nowIso(),
-            // ManyChat é a conta do polo da PESSOA. Sem tenant explícito o trigger
-            // carimbaria pela linha vinculada, que pode ser a do outro polo.
-            tenantId: row.tenant_id,
-          })
-          try {
-            await admin.from('crm_media_items').insert(
-              mediaUrls.map((m) => ({
-                lead_id: row.id,
-                interaction_id: outboundInteractionId,
-                direction: 'out',
-                media_type: m.type ?? 'document',
-                storage_path: m.url,
-                metadata: {
-                  source: 'crm_send_message_manychat_send_content',
-                  caption: m.caption ?? null,
-                },
-              })),
-            )
-          } catch (e) {
-            console.warn('[crm-send-message] manychat sendContent media insert failed:', e instanceof Error ? e.message : String(e))
-          }
-          return json({
-            ok: true,
-            provider: `manychat_${pushChannel}`,
-            mode: 'send_content',
-            interaction_id: outboundInteractionId,
-          })
-        }
-        console.warn('[crm-send-message] manychat sendContent failed, falling back to text+url', JSON.stringify({
-          leadId: row.id,
-          pushChannel,
-          error: contentRes.error,
-        }))
-      }
-
-      const pushArgs = {
-        apiKey: mcCfg.apiKey,
-        subscriberId,
-        replyText,
-        fieldId: mcCfg.fieldId,
-        flowNs: mcCfg.flowNs,
-        messageTag: mcCfg.messageTag || undefined,
-      }
-      const push =
-        pushChannel === 'whatsapp'
-          ? await pushManychatWhatsappDmAfterReply(pushArgs)
-          : await pushManychatInstagramDmAfterReply(pushArgs)
-
-      if (!push.ok) {
-        console.warn('[crm-send-message] manychat_push_failed', JSON.stringify({
-          leadId: row.id,
-          pushChannel,
-          subscriberId,
-          set_field_ok: push.set_field_ok,
-          send_flow_ok: push.send_flow_ok,
-          send_flow_status: push.send_flow_status,
-          error: push.error,
-        }))
-        const errMsg = String(push.error ?? '')
-        const failedAfterFallback = push.send_flow_status === 'failed_after_humanagent_fallback'
-        const friendly = failedAfterFallback
-          ? `Paciente fora da janela de 7 dias do ${pushChannel === 'whatsapp' ? 'WhatsApp' : 'Instagram'} (Meta). Tentamos enviar com HUMAN_AGENT e também falhou — só dá pra responder depois que a paciente voltar a escrever.`
-          : /Validation|24|window|policy|human_agent|HUMAN_AGENT/i.test(errMsg)
-            ? `Paciente fora da janela de 24h da Meta. A mensagem ficou pendente; ela precisa responder qualquer coisa para reabrir a janela. (Detalhe técnico: ${errMsg})`
-            : errMsg
-        return json(
-          {
-            error: 'manychat_push_failed',
-            message: friendly,
-            push_channel: pushChannel,
-            set_field_ok: push.set_field_ok,
-            send_flow_ok: push.send_flow_ok,
-            send_flow_status: push.send_flow_status,
-            raw_error: errMsg,
-          },
-          500,
-        )
-      }
-
-      const outboundInteractionId = await insertInteraction(admin, {
-        leadId: row.id,
-        patientName: row.patient_name,
-        channel: pushChannel === 'whatsapp' ? 'whatsapp' : 'meta',
-        direction: 'out',
-        author: user?.email || 'Consultor',
-        content: replyText,
-        happenedAt: nowIso(),
-        // Idem: ManyChat carimba com o polo da pessoa.
-        tenantId: row.tenant_id,
-      })
-
-      if (mediaUrls.length > 0) {
-        try {
-          await admin.from('crm_media_items').insert(
-            mediaUrls.map((m) => ({
-              lead_id: row.id,
-              interaction_id: outboundInteractionId,
-              direction: 'out',
-              media_type: m.type ?? 'document',
-              storage_path: m.url,
-              metadata: {
-                source: 'crm_send_message_manychat',
-                caption: m.caption ?? null,
-              },
-            })),
-          )
-        } catch (e) {
-          console.warn('[crm-send-message] manychat outbound media insert failed:', e instanceof Error ? e.message : String(e))
-        }
-      }
-
-      return json({
-        ok: true,
-        provider: `manychat_${pushChannel}`,
-        status: 'delivered',
-        media_count: mediaUrls.length,
-      })
-    }
+  // Sem esse plano B, telefone sintético (888001…, inventado para quem só falou por DM)
+  // não tem para onde ir. Falha AQUI, dizendo porquê, em vez de tentar entregar a um
+  // número que não existe — o que é exatamente a assinatura que queima a linha.
+  if (effectiveTo.startsWith('888001') || !telefoneReal) {
+    return json(
+      {
+        error: 'no_real_phone',
+        message:
+          'Este lead não tem WhatsApp real (número sintético de Instagram/formulário). Responda pelo Instagram ou corrija o telefone no cadastro.',
+        phone: effectiveTo,
+      },
+      400,
+    )
+  }
+  if (!poloTemLinhaPropria) {
+    return json(
+      {
+        error: 'provider_not_configured',
+        message: `O polo '${senderTenantId || row.tenant_id}' não tem linha de WhatsApp ativa. Conecte uma instância em /whatsapp antes de enviar.`,
+      },
+      400,
+    )
   }
 
   // --- WhatsApp Path ---
@@ -640,14 +516,8 @@ Deno.serve(async (req) => {
       )
     }
 
-    if (!stickerWebpBase64 && !text.trim()) {
-      if (attachments.length === 0) {
-        return json({ error: 'missing_fields', message: 'Envie texto ou figurinha WebP.' }, 400)
-      }
-      return json(
-        { error: 'missing_fields', message: 'Texto obrigatório ao enviar anexos (figurinha não conta como anexo).' },
-        400,
-      )
+    if (!stickerWebpBase64 && !text.trim() && mediaItems.length === 0) {
+      return json({ error: 'missing_fields', message: 'Envie texto, mídia ou figurinha.' }, 400)
     }
 
     // Contexto da guarda anti-ban (só tem efeito em linha W-API/Evolution):
@@ -665,85 +535,251 @@ Deno.serve(async (req) => {
       ...(antiBanKind ? { antiBanKind } : {}),
     }
 
-    let sent = await provider.sendMessage({
-      to: effectiveTo,
-      text,
-      leadId,
-      stickerWebpBase64: stickerWebpBase64 || undefined,
-      metadata: antiBanMeta,
-    })
-    let externalMessageId = sent.externalMessageId
-    if (stickerWebpBase64 && text.trim()) {
-      const textSent = await provider.sendMessage({
-        to: effectiveTo,
-        text,
-        leadId,
-        metadata: antiBanMeta,
-      })
-      externalMessageId = `${sent.externalMessageId}|${textSent.externalMessageId}`.slice(0, 240)
+    // ── O que sai, e em que ordem ───────────────────────────────────────────────
+    // Mídia primeiro, texto depois — a ordem do telemóvel: a foto chega e o comentário
+    // vem a seguir. Cada peça é uma MENSAGEM própria na W-API, com o seu próprio id, e
+    // cada uma vira uma linha em `interactions`. Isso é o que torna a bolha "viva": só com
+    // um id por bolha dá para responder citando, reagir, editar ou apagar aquela e não
+    // outra. Enquanto foi tudo uma interaction só, o chat era um registo, não um chat.
+    const podeMidia = provider instanceof WapiProvider
+    if (mediaItems.length > 0 && !podeMidia) {
+      return json(
+        {
+          error: 'media_not_supported',
+          message: `A linha resolvida (${provider.name}) não envia mídia por API. Só linhas W-API suportam foto, áudio, vídeo e documento.`,
+        },
+        400,
+      )
     }
-    const outboundContent = stickerWebpBase64
-      ? text
-        ? `${text}\n🎭 Figurinha enviada`
-        : '🎭 Figurinha enviada'
-      : text
-    await insertInteraction(admin, {
-      leadId: String(lead.id),
-      patientName: String(lead.patient_name ?? 'Lead'),
-      channel: 'whatsapp',
-      direction: 'out',
-      author: outboundAuthor,
-      content: outboundContent,
-      externalMessageId,
-      // Carimbo pela linha que REALMENTE enviou, não pelo vínculo do lead. Sem isto o
-      // trigger `_stamp_tenant_id_from_lead` lê `leads.whatsapp_instance_id` — que é onde
-      // a pessoa conversa, não por onde este envio saiu — e a mensagem cai no CRM do polo
-      // errado nos dois sentidos: confirmação de venda do Tricopill dentro da clínica
-      // (21/ago/26, caso Antonio) e lembrete de cirurgia dentro do Tricopill.
-      tenantId: resolvedLineTenantId || row.tenant_id,
-    })
-    const mediaRows: Array<{
-      lead_id: string
-      direction: 'out'
-      media_type: string
-      mime_type: string
-      metadata: Record<string, unknown>
-    }> = []
-    if (stickerWebpBase64) {
-      mediaRows.push({
-        lead_id: leadId,
+
+    type Peca = {
+      kind: MediaKind
+      media: string
+      caption: string
+      fileName: string
+      mimeType: string
+      storagePath: string
+    }
+    const pecas: Peca[] = []
+    for (const item of mediaItems) {
+      let storagePath = item.storagePath
+      let base64 = item.base64
+      let mimeType = item.mimeType
+      let fileName = item.fileName
+      let declarado: MediaKind | undefined = item.kind as MediaKind | undefined
+
+      // ENCAMINHAR: o ficheiro já está guardado, só precisamos de o buscar. A mídia que a
+      // paciente mandou vive em `media_base64` (o webhook desencripta e guarda ali); a que
+      // nós mandámos vive no Storage. Os dois caminhos servem, e nenhum passa pelo browser.
+      if (item.mediaItemId) {
+        const { data: origem } = await admin
+          .from('crm_media_items')
+          .select('media_type, mime_type, storage_path, media_base64, metadata')
+          .eq('id', item.mediaItemId)
+          .maybeSingle()
+        if (!origem) {
+          return json({ error: 'media_not_found', message: `Mídia ${item.mediaItemId} não encontrada.` }, 404)
+        }
+        storagePath = String(origem.storage_path ?? '')
+        base64 = storagePath ? '' : String(origem.media_base64 ?? '')
+        mimeType = mimeType || String(origem.mime_type ?? '')
+        const meta = (origem.metadata ?? {}) as Record<string, unknown>
+        fileName = fileName || String(meta.name ?? '')
+        const kindGuardado = String(meta.kind ?? '').trim()
+        if (!declarado && kindGuardado) declarado = kindGuardado as MediaKind
+        if (!storagePath && !base64) {
+          return json(
+            {
+              error: 'media_unavailable',
+              message: 'Esta mídia não está guardada no CRM (só o registo dela). Baixe do WhatsApp e anexe à mão.',
+            },
+            400,
+          )
+        }
+      }
+
+      const kind = inferMediaKind(mimeType, fileName, declarado)
+      // Link assinado só na hora do envio: o bucket é privado e o link vive 24h. Guardamos
+      // o CAMINHO (não o link) em crm_media_items, senão o chat mostraria mídia quebrada
+      // depois de o link expirar.
+      const media = storagePath
+        ? await signedUrlFor(admin, storagePath)
+        : item.url ||
+          // Base64 vindo do banco chega cru; a W-API exige o prefixo data: para saber o que é.
+          (base64.startsWith('data:') ? base64 : `data:${mimeType || 'application/octet-stream'};base64,${base64}`)
+      pecas.push({
+        kind,
+        media,
+        caption: item.caption,
+        fileName,
+        mimeType,
+        storagePath,
+      })
+    }
+
+    // Texto digitado junto com UMA foto é legenda dela — é o que a pessoa espera ao
+    // escrever na caixa com a foto anexada. Com várias peças, a legenda cola na primeira
+    // que ainda não tem uma; se todas tiverem, o texto sai como mensagem à parte.
+    let textoAvulso = text
+    if (textoAvulso && pecas.length > 0) {
+      const alvo = pecas.find((p) => !p.caption && p.kind !== 'audio' && p.kind !== 'sticker' && p.kind !== 'ptv')
+      if (alvo) {
+        alvo.caption = textoAvulso
+        textoAvulso = ''
+      }
+    }
+
+    const wapi = podeMidia ? (provider as WapiProvider) : null
+    const idsEnviados: string[] = []
+    let ultimoStatus: SendWhatsappMessageResult['status'] = 'queued'
+    // A citação vale para a PRIMEIRA peça que sai. Responder uma pergunta com três fotos
+    // citando a pergunta três vezes seria ruído.
+    let citar = replyToMessageId
+
+    for (const peca of pecas) {
+      const comum = {
+        to: effectiveTo,
+        media: peca.media,
+        caption: peca.caption || undefined,
+        fileName: peca.fileName || undefined,
+        mimeType: peca.mimeType || undefined,
+        leadId,
+        replyToMessageId: citar,
+        metadata: antiBanMeta,
+      }
+      let res: SendWhatsappMessageResult
+      switch (peca.kind) {
+        case 'image':
+          res = await wapi!.sendImage(comum)
+          break
+        case 'video':
+          res = await wapi!.sendVideo(comum)
+          break
+        case 'audio':
+          res = await wapi!.sendAudio(comum)
+          break
+        case 'sticker':
+          res = await wapi!.sendSticker({ ...comum, sticker: peca.media })
+          break
+        case 'gif':
+          res = await wapi!.sendGif(comum)
+          break
+        case 'ptv':
+          res = await wapi!.sendPtv(comum)
+          break
+        default:
+          res = await wapi!.sendDocument(comum)
+      }
+      citar = undefined
+      idsEnviados.push(res.externalMessageId)
+      ultimoStatus = res.status
+
+      const interactionId = await insertInteraction(admin, {
+        leadId: String(lead.id),
+        patientName: String(lead.patient_name ?? 'Lead'),
+        channel: 'whatsapp',
         direction: 'out',
-        media_type: 'image',
-        mime_type: 'image/webp',
+        author: outboundAuthor,
+        content: peca.caption || MEDIA_LABEL[peca.kind],
+        externalMessageId: res.externalMessageId,
+        replyToExternalId: replyToMessageId && idsEnviados.length === 1 ? replyToMessageId : undefined,
+        forwardedFromId,
+        // Carimbo pela linha que REALMENTE enviou, não pelo vínculo do lead. Sem isto o
+        // trigger `_stamp_tenant_id_from_lead` lê `leads.whatsapp_instance_id` — que é onde
+        // a pessoa conversa, não por onde este envio saiu — e a mensagem cai no CRM do polo
+        // errado nos dois sentidos: confirmação de venda do Tricopill dentro da clínica
+        // (21/ago/26, caso Antonio) e lembrete de cirurgia dentro do Tricopill.
+        tenantId: resolvedLineTenantId || row.tenant_id,
+      })
+
+      await admin.from('crm_media_items').insert({
+        lead_id: leadId,
+        interaction_id: interactionId,
+        tenant_id: resolvedLineTenantId || row.tenant_id,
+        direction: 'out',
+        // crm_media_items só conhece cinco tipos; figurinha/gif são imagem e ptv é vídeo.
+        media_type:
+          peca.kind === 'sticker' || peca.kind === 'gif'
+            ? 'image'
+            : peca.kind === 'ptv'
+              ? 'video'
+              : peca.kind,
+        mime_type: peca.mimeType || null,
+        external_media_id: res.externalMessageId,
+        storage_path: peca.storagePath || (peca.media.startsWith('http') ? peca.media : null),
         metadata: {
-          name: 'figurinha.webp',
-          size_base64: stickerWebpBase64.length,
-          outbound_mode: 'sticker_webp',
+          source: 'crm-send-message',
+          kind: peca.kind,
+          name: peca.fileName || null,
+          caption: peca.caption || null,
+          outbound_mode: peca.storagePath ? 'storage' : peca.media.startsWith('http') ? 'url' : 'base64',
         },
       })
     }
-    if (attachments.length > 0) {
-      mediaRows.push(
-        ...attachments.map((file) => ({
-          lead_id: leadId,
-          direction: 'out' as const,
-          media_type: String(file.mimeType ?? '').startsWith('audio/')
-            ? 'audio'
-            : String(file.mimeType ?? '').startsWith('image/')
-              ? 'image'
-              : 'document',
-          mime_type: String(file.mimeType ?? ''),
-          metadata: {
-            name: String(file.name ?? 'arquivo'),
-            size_base64: String(file.base64 ?? '').length,
-            outbound_mode: 'manual_attachment',
-          },
-        })),
-      )
+
+    // Figurinha pelo campo antigo (`stickerWebpBase64`) continua a funcionar: agora vai
+    // pela rota própria da W-API em vez de morrer em `wapi_sticker_not_implemented`.
+    if (stickerWebpBase64) {
+      const res = await provider.sendMessage({
+        to: effectiveTo,
+        text: '',
+        leadId,
+        stickerWebpBase64,
+        replyToMessageId: citar,
+        metadata: antiBanMeta,
+      })
+      citar = undefined
+      idsEnviados.push(res.externalMessageId)
+      ultimoStatus = res.status
+      const interactionId = await insertInteraction(admin, {
+        leadId: String(lead.id),
+        patientName: String(lead.patient_name ?? 'Lead'),
+        channel: 'whatsapp',
+        direction: 'out',
+        author: outboundAuthor,
+        content: MEDIA_LABEL.sticker,
+        externalMessageId: res.externalMessageId,
+        tenantId: resolvedLineTenantId || row.tenant_id,
+      })
+      await admin.from('crm_media_items').insert({
+        lead_id: leadId,
+        interaction_id: interactionId,
+        tenant_id: resolvedLineTenantId || row.tenant_id,
+        direction: 'out',
+        media_type: 'image',
+        mime_type: 'image/webp',
+        external_media_id: res.externalMessageId,
+        media_base64: stickerWebpBase64,
+        metadata: { source: 'crm-send-message', kind: 'sticker', outbound_mode: 'sticker_webp' },
+      })
     }
-    if (mediaRows.length > 0) {
-      await admin.from('crm_media_items').insert(mediaRows)
+
+    if (textoAvulso.trim()) {
+      const res = await provider.sendMessage({
+        to: effectiveTo,
+        text: textoAvulso,
+        leadId,
+        replyToMessageId: citar,
+        metadata: antiBanMeta,
+      })
+      idsEnviados.push(res.externalMessageId)
+      ultimoStatus = res.status
+      await insertInteraction(admin, {
+        leadId: String(lead.id),
+        patientName: String(lead.patient_name ?? 'Lead'),
+        channel: 'whatsapp',
+        direction: 'out',
+        author: outboundAuthor,
+        content: textoAvulso,
+        externalMessageId: res.externalMessageId,
+        replyToExternalId: citar ? replyToMessageId : undefined,
+        forwardedFromId,
+        tenantId: resolvedLineTenantId || row.tenant_id,
+      })
     }
+
+    const externalMessageId = idsEnviados.join('|').slice(0, 240)
+    const sent = { status: ultimoStatus }
 
     await admin.from('webhook_jobs').insert({
       source: 'whatsapp-webhook',

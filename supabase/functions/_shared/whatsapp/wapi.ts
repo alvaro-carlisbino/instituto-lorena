@@ -64,6 +64,74 @@ function firstString(obj: Record<string, unknown>, paths: string[]): string {
 const DEFAULT_WAPI_BASE_URL = 'https://api.w-api.app/v1'
 
 /**
+ * Id da mensagem na resposta da W-API. Cada rota devolve num sítio diferente (`messageId`,
+ * `data.messageId`, `key.id`…), e o id é o que permite depois RESPONDER citando, REAGIR,
+ * EDITAR ou APAGAR aquela mensagem. Sem ele, a bolha nasce muda: aparece no chat e nenhuma
+ * ação funciona nela. Só inventamos um id local quando a W-API não deu nenhum.
+ */
+function extractMessageId(parsed: Record<string, unknown>): string {
+  return (
+    safeString(getByPath(parsed, 'messageId')) ||
+    safeString(getByPath(parsed, 'data.messageId')) ||
+    safeString(getByPath(parsed, 'id')) ||
+    safeString(getByPath(parsed, 'data.id')) ||
+    safeString(getByPath(parsed, 'key.id')) ||
+    safeString(getByPath(parsed, 'data.key.id')) ||
+    `wapi-${crypto.randomUUID()}`
+  )
+}
+
+/** Os tipos de mídia que a W-API envia, cada um na sua rota e com o seu nome de campo. */
+export type WapiMediaKind = 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'gif' | 'ptv'
+
+const WAPI_MEDIA_ROUTES: Record<WapiMediaKind, { endpoint: string; field: string; caption: boolean }> = {
+  image: { endpoint: '/message/send-image', field: 'image', caption: true },
+  video: { endpoint: '/message/send-video', field: 'video', caption: true },
+  // Áudio não leva legenda: no WhatsApp a mensagem de voz é sozinha.
+  audio: { endpoint: '/message/send-audio', field: 'audio', caption: false },
+  document: { endpoint: '/message/send-document', field: 'document', caption: true },
+  sticker: { endpoint: '/message/send-sticker', field: 'sticker', caption: false },
+  gif: { endpoint: '/message/send-gif', field: 'gif', caption: true },
+  ptv: { endpoint: '/message/send-ptv', field: 'ptv', caption: false },
+}
+
+export type SendWapiMediaInput = {
+  to: string
+  /** URL pública (link assinado do Storage) ou base64 com prefixo `data:<mime>;base64,`. */
+  media: string
+  caption?: string
+  /** Só documento: extensão sem ponto. Se faltar, deduzimos do nome/mime. */
+  extension?: string
+  fileName?: string
+  mimeType?: string
+  leadId?: string
+  /** Id W-API da mensagem CITADA — faz a resposta sair colada na pergunta. */
+  replyToMessageId?: string
+  typingDelaySeconds?: number
+  metadata?: Record<string, unknown>
+}
+
+/** Extensão do documento a partir do nome do ficheiro ou, em último caso, do mime. */
+function guessExtension(fileName?: string, mimeType?: string): string | null {
+  const doNome = String(fileName ?? '').match(/\.([a-z0-9]{1,8})$/i)?.[1]
+  if (doNome) return doNome.toLowerCase()
+  const mime = String(mimeType ?? '').toLowerCase()
+  const mapa: Record<string, string> = {
+    'application/pdf': 'pdf',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+    'application/zip': 'zip',
+  }
+  return mapa[mime] ?? null
+}
+
+/**
  * Erro de envio RECUSADO pela guarda anti-ban — não é falha de rede nem da W-API. Quem
  * chama deve tratar como "não mandou de propósito": a rotina pula e tenta na próxima volta,
  * a tela mostra o motivo em português. `reason` é o código curto ('cap_frio_dia', 'ritmo'…).
@@ -268,78 +336,100 @@ export class WapiProvider implements WhatsappProvider {
     }
   }
 
-  async sendMessage(input: SendWhatsappMessageInput): Promise<SendWhatsappMessageResult> {
-    const to = digitsOnly(input.to)
-    if (to.length < 10) throw new Error('invalid_phone')
-
-    if (input.stickerWebpBase64) {
-      // W-API tem endpoint próprio pra sticker; por enquanto não suportado por aqui.
-      throw new Error('wapi_sticker_not_implemented')
-    }
-
-    const text = input.text.trim()
-    if (!text) throw new Error('empty_message')
-
-    // ── Guarda anti-ban ────────────────────────────────────────────────────────
-    // Este é o funil por onde passa tudo o que sai numa linha W-API: painel, IA,
-    // reengajamento, carrinho, lembrete de cirurgia. O teto vive aqui, uma vez.
+  /**
+   * A guarda anti-ban, uma vez só, para TUDO o que sai desta linha — texto, imagem, áudio,
+   * documento, figurinha. Antes vivia dentro de `sendMessage`, e por isso a imagem do QR do
+   * Pix saía por fora do teto: o livro-caixa do dia contava menos mensagens do que a linha
+   * realmente mandou, que é exatamente o número que o WhatsApp usa para decidir um ban.
+   *
+   * Devolve o `logId` (para devolver a cota se o envio morrer no caminho) e o `typing`
+   * calculado. Lança `WapiBlockedError` quando a guarda recusa.
+   */
+  private async runGuard(input: {
+    to: string
+    /** Texto que a guarda usa para hash de repetição. Em mídia, use a legenda + marcador. */
+    guardText: string
+    leadId?: string
+    metadata?: Record<string, unknown>
+    typingDelaySeconds?: number
+    /** 'composing' para texto, 'recording' para áudio/PTT. */
+    presence?: 'composing' | 'recording'
+  }): Promise<{ logId: string | null; typing: number }> {
     let typing = input.typingDelaySeconds ?? 0
-    // Id da linha do livro-caixa: se o envio autorizado acabar não saindo, ela é
-    // reclassificada e para de gastar a cota do dia (ver marcarEnvioFalhou).
-    let logId: string | null = null
-    if (this.antiBan) {
-      const meta = (input.metadata ?? {}) as Record<string, unknown>
-      const guardInput = {
-        instanceId: this.antiBan.instanceRowId,
-        tenantId: this.antiBan.tenantId,
-        leadId: input.leadId ?? null,
-        phone: to,
-        text,
-        source: String(meta.antiBanSource ?? this.antiBan.defaultSource),
-        kind: (meta.antiBanKind as OutboundKind | undefined) ?? undefined,
-        humanOverride: meta.antiBanHumanOverride === true,
-        coldOverride: meta.antiBanColdOverride === true,
-      }
-      const decision = await guardAndRecord(this.antiBan.admin, guardInput)
-      logId = decision.logId
-      if (!decision.allow) throw new WapiBlockedError(decision)
+    if (!this.antiBan) return { logId: null, typing }
 
-      // CONTATO NOVO: confirma que o número existe no WhatsApp antes de bater na porta.
-      // Disparar para número sem WhatsApp é uma das assinaturas mais caras que existem
-      // numa sessão não-oficial — é o que denuncia lista comprada. Sem resposta da API,
-      // não enviamos: o padrão aqui é o silêncio, não o palpite.
-      //
-      // `optin` entra junto desde 20/ago/2026, e isso importa mais do que `cold`: o primeiro
-      // contato de formulário Meta é classificado como optin, e é justamente ele que carrega
-      // número torto — a pessoa DIGITA o telefone e a Meta não valida contra o WhatsApp.
-      // Com a checagem só em `cold`, a fila de leadform mandava para número morto sem nunca
-      // perguntar. `reply`/`proactive`/`transactional` ficam de fora de propósito: ali a
-      // pessoa já escreveu de volta, o número está provado, e a chamada extra só custa.
-      if ((decision.kind === 'cold' || decision.kind === 'optin') && !guardInput.coldOverride) {
-        const existe = await this.phoneExists(to)
-        if (existe !== true) {
-          const recusa: GuardDecision = {
-            allow: false,
-            kind: decision.kind,
-            reason: existe === false ? 'numero_sem_whatsapp' : 'numero_nao_verificado',
-            message:
-              existe === false
-                ? 'Este número não tem WhatsApp. Enviar para ele é exatamente o que queima a linha.'
-                : 'Não deu para confirmar se o número tem WhatsApp. Em contato novo, na dúvida não se envia.',
-            typingDelaySeconds: 0,
-          }
-          await recordWhatsappOutbound(this.antiBan.admin, { ...guardInput, decision: recusa })
-          throw new WapiBlockedError(recusa)
+    const meta = (input.metadata ?? {}) as Record<string, unknown>
+    const guardInput = {
+      instanceId: this.antiBan.instanceRowId,
+      tenantId: this.antiBan.tenantId,
+      leadId: input.leadId ?? null,
+      phone: input.to,
+      text: input.guardText,
+      source: String(meta.antiBanSource ?? this.antiBan.defaultSource),
+      kind: (meta.antiBanKind as OutboundKind | undefined) ?? undefined,
+      humanOverride: meta.antiBanHumanOverride === true,
+      coldOverride: meta.antiBanColdOverride === true,
+    }
+    const decision = await guardAndRecord(this.antiBan.admin, guardInput)
+    const logId = decision.logId
+    if (!decision.allow) throw new WapiBlockedError(decision)
+
+    // CONTATO NOVO: confirma que o número existe no WhatsApp antes de bater na porta.
+    // Disparar para número sem WhatsApp é uma das assinaturas mais caras que existem
+    // numa sessão não-oficial — é o que denuncia lista comprada. Sem resposta da API,
+    // não enviamos: o padrão aqui é o silêncio, não o palpite.
+    //
+    // `optin` entra junto desde 20/ago/2026, e isso importa mais do que `cold`: o primeiro
+    // contato de formulário Meta é classificado como optin, e é justamente ele que carrega
+    // número torto — a pessoa DIGITA o telefone e a Meta não valida contra o WhatsApp.
+    // Com a checagem só em `cold`, a fila de leadform mandava para número morto sem nunca
+    // perguntar. `reply`/`proactive`/`transactional` ficam de fora de propósito: ali a
+    // pessoa já escreveu de volta, o número está provado, e a chamada extra só custa.
+    if ((decision.kind === 'cold' || decision.kind === 'optin') && !guardInput.coldOverride) {
+      const existe = await this.phoneExists(input.to)
+      if (existe !== true) {
+        const recusa: GuardDecision = {
+          allow: false,
+          kind: decision.kind,
+          reason: existe === false ? 'numero_sem_whatsapp' : 'numero_nao_verificado',
+          message:
+            existe === false
+              ? 'Este número não tem WhatsApp. Enviar para ele é exatamente o que queima a linha.'
+              : 'Não deu para confirmar se o número tem WhatsApp. Em contato novo, na dúvida não se envia.',
+          typingDelaySeconds: 0,
         }
+        await recordWhatsappOutbound(this.antiBan.admin, { ...guardInput, decision: recusa })
+        throw new WapiBlockedError(recusa)
       }
-
-      typing = input.typingDelaySeconds ?? decision.typingDelaySeconds
-      // "digitando…" no chat antes de a mensagem cair. Best-effort e sem custo de tempo.
-      if (typing > 0) void this.sendPresence(to, 'composing', Math.min(typing, 8) * 1000)
     }
 
-    // W-API exige instanceId como query param e Bearer token no header.
-    const url = `${this.baseUrl}/message/send-text?instanceId=${encodeURIComponent(this.instanceId)}`
+    typing = input.typingDelaySeconds ?? decision.typingDelaySeconds
+    // "digitando…"/"a gravar áudio…" no chat antes de a mensagem cair. Best-effort e sem
+    // custo de tempo: quem segura o relógio é o servidor da W-API (`delayMessage`).
+    if (typing > 0) void this.sendPresence(input.to, input.presence ?? 'composing', Math.min(typing, 8) * 1000)
+    return { logId, typing }
+  }
+
+  /**
+   * POST numa rota de envio da W-API + leitura HONESTA da resposta.
+   *
+   * A W-API às vezes devolve HTTP 200 com corpo de erro (instância desconectada, número
+   * fora do WhatsApp, sessão expirada). Sem checar o body, o CRM marcava como enviado,
+   * mostrava toast verde, e a paciente nunca recebia — sintoma "a Aline mandou e ela não
+   * recebeu". Toda rota de envio passa por aqui para não repetir esse buraco em cada uma.
+   */
+  private async postAndParse(
+    endpoint: string,
+    body: Record<string, unknown>,
+    logId: string | null,
+  ): Promise<SendWhatsappMessageResult> {
+    const url = `${this.baseUrl}${endpoint}?instanceId=${encodeURIComponent(this.instanceId)}`
+    const limpo: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(body)) {
+      if (v === undefined || v === null || v === '') continue
+      limpo[k] = v
+    }
+
     let res: Response
     try {
       res = await fetch(url, {
@@ -348,13 +438,8 @@ export class WapiProvider implements WhatsappProvider {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.token}`,
         },
-        body: JSON.stringify({
-          phone: to,
-          message: text,
-          // "Digitando…" antes de a mensagem aparecer. O servidor da W-API segura, então não
-          // custa tempo de execução aqui. Quem calcula o valor é a guarda anti-ban.
-          ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
-        }),
+        body: JSON.stringify(limpo),
+        signal: AbortSignal.timeout(60_000),
       })
     } catch (e) {
       await this.devolverCota(logId, e instanceof Error ? e.message : String(e))
@@ -369,15 +454,12 @@ export class WapiProvider implements WhatsappProvider {
       parsed = { raw: responseText }
     }
 
+    const rota = endpoint.replace(/^\/message\//, '')
     if (!res.ok) {
       await this.devolverCota(logId, `http_${res.status}`)
-      throw new Error(`wapi_send_failed_${res.status}: ${responseText.slice(0, 200)}`)
+      throw new Error(`wapi_${rota}_failed_${res.status}: ${responseText.slice(0, 200)}`)
     }
 
-    // W-API às vezes retorna HTTP 200 com corpo de erro (instância desconectada,
-    // número inválido/não está no WhatsApp, sessão expirada). Se a gente não checar
-    // o body, o CRM marca como enviado, exibe toast verde, e a paciente nunca recebe.
-    // Sintomas como "Aline mandou e a paciente não recebeu" caíam aqui em silêncio.
     const apiError =
       safeString(getByPath(parsed, 'error')) ||
       safeString(getByPath(parsed, 'errorMessage')) ||
@@ -391,23 +473,60 @@ export class WapiProvider implements WhatsappProvider {
     if (apiError || apiStatusRaw === 'error' || apiStatusRaw === 'failed' || successFlagFalse) {
       const detail = apiError || apiStatusRaw || 'unknown_api_error'
       await this.devolverCota(logId, detail)
-      throw new Error(`wapi_send_failed_api: ${detail} | body=${responseText.slice(0, 200)}`)
+      throw new Error(`wapi_${rota}_failed_api: ${detail} | body=${responseText.slice(0, 200)}`)
     }
-
-    const externalMessageId =
-      safeString(getByPath(parsed, 'messageId')) ||
-      safeString(getByPath(parsed, 'data.messageId')) ||
-      safeString(getByPath(parsed, 'id')) ||
-      safeString(getByPath(parsed, 'data.id')) ||
-      safeString(getByPath(parsed, 'key.id')) ||
-      `wapi-${crypto.randomUUID()}`
 
     return {
       provider: this.name,
-      externalMessageId,
+      externalMessageId: extractMessageId(parsed),
       status: 'queued',
       raw: parsed,
     }
+  }
+
+  async sendMessage(input: SendWhatsappMessageInput): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+
+    // Figurinha tem rota própria na W-API (/message/send-sticker) e agora é atendida lá.
+    if (input.stickerWebpBase64) {
+      return await this.sendSticker({
+        to,
+        sticker: input.stickerWebpBase64,
+        leadId: input.leadId,
+        metadata: input.metadata,
+        replyToMessageId: input.replyToMessageId,
+      })
+    }
+
+    const text = input.text.trim()
+    if (!text) throw new Error('empty_message')
+
+    // ── Guarda anti-ban ────────────────────────────────────────────────────────
+    // Este é o funil por onde passa tudo o que sai numa linha W-API: painel, IA,
+    // reengajamento, carrinho, lembrete de cirurgia. O teto vive aqui, uma vez.
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: text,
+      leadId: input.leadId,
+      metadata: input.metadata,
+      typingDelaySeconds: input.typingDelaySeconds,
+    })
+
+    return await this.postAndParse(
+      '/message/send-text',
+      {
+        phone: to,
+        message: text,
+        // `messageId` na W-API é a mensagem CITADA: é assim que a resposta sai colada na
+        // pergunta, como no telemóvel. Vazio = mensagem solta no fim da conversa.
+        messageId: input.replyToMessageId,
+        // "Digitando…" antes de a mensagem aparecer. O servidor da W-API segura, então não
+        // custa tempo de execução aqui. Quem calcula o valor é a guarda anti-ban.
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
   }
 
   /**
@@ -420,66 +539,597 @@ export class WapiProvider implements WhatsappProvider {
     await marcarEnvioFalhou(this.antiBan.admin, logId, motivo)
   }
 
-  /** Envia uma IMAGEM por URL (W-API: /message/send-image). Usado p/ o QR do Pix. */
-  async sendImageMessage(input: SendWhatsappImageInput): Promise<SendWhatsappMessageResult> {
+  /**
+   * TODA mídia sai por aqui: uma rota da W-API por tipo, o mesmo corpo, a mesma guarda.
+   *
+   * `media` aceita link público OU base64 com prefixo data: — a W-API resolve os dois. O CRM
+   * manda link assinado do Storage (o base64 de um vídeo de 12MB não cabe num JSON de Edge
+   * Function sem estourar memória), e base64 só no que é pequeno, como figurinha.
+   */
+  private async sendMediaMessage(
+    kind: WapiMediaKind,
+    input: SendWapiMediaInput,
+  ): Promise<SendWhatsappMessageResult> {
     const to = digitsOnly(input.to)
     if (to.length < 10) throw new Error('invalid_phone')
-    const image = String(input.imageUrl ?? '').trim()
-    if (!image) throw new Error('empty_image')
+    const media = String(input.media ?? '').trim()
+    if (!media) throw new Error(`empty_${kind}`)
 
-    const url = `${this.baseUrl}/message/send-image?instanceId=${encodeURIComponent(this.instanceId)}`
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.token}`,
-      },
-      body: JSON.stringify({
-        phone: to,
-        image,
-        caption: (input.caption ?? '').trim() || undefined,
-      }),
+    const spec = WAPI_MEDIA_ROUTES[kind]
+    const caption = (input.caption ?? '').trim()
+    // A guarda mede repetição por texto. Mídia sem legenda entraria como string vazia e
+    // duas fotos diferentes pareceriam a MESMA mensagem repetida — o teto de repetição
+    // seguraria a segunda por engano. O marcador de tipo desempata.
+    const guardText = caption || `[${kind}]`
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText,
+      leadId: input.leadId,
+      metadata: input.metadata,
+      typingDelaySeconds: input.typingDelaySeconds,
+      presence: kind === 'audio' ? 'recording' : 'composing',
     })
 
-    const responseText = await res.text()
-    let parsed: Record<string, unknown> = {}
-    try {
-      parsed = responseText ? (JSON.parse(responseText) as Record<string, unknown>) : {}
-    } catch {
-      parsed = { raw: responseText }
+    const body: Record<string, unknown> = {
+      phone: to,
+      [spec.field]: media,
+      messageId: input.replyToMessageId,
+      ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
     }
-    if (!res.ok) {
-      throw new Error(`wapi_send_image_failed_${res.status}: ${responseText.slice(0, 200)}`)
+    if (spec.caption && caption) body.caption = caption
+    if (kind === 'document') {
+      // A W-API exige a extensão à parte; sem ela o ficheiro chega sem ícone nem nome e o
+      // WhatsApp mostra "documento" cru, que ninguém abre.
+      body.extension = (input.extension ?? guessExtension(input.fileName, input.mimeType) ?? 'pdf')
+        .replace(/^\./, '')
+        .toLowerCase()
+      body.fileName = input.fileName || `arquivo.${body.extension}`
     }
-    const apiError =
-      safeString(getByPath(parsed, 'error')) ||
-      safeString(getByPath(parsed, 'errorMessage')) ||
-      safeString(getByPath(parsed, 'data.error')) ||
-      safeString(getByPath(parsed, 'message_error'))
-    const apiStatusRaw = safeString(
-      getByPath(parsed, 'status') ?? getByPath(parsed, 'data.status') ?? '',
-    ).toLowerCase()
-    const successFlagRaw = getByPath(parsed, 'success') ?? getByPath(parsed, 'data.success')
-    const successFlagFalse = successFlagRaw === false || String(successFlagRaw).toLowerCase() === 'false'
-    if (apiError || apiStatusRaw === 'error' || apiStatusRaw === 'failed' || successFlagFalse) {
-      const detail = apiError || apiStatusRaw || 'unknown_api_error'
-      throw new Error(`wapi_send_image_failed_api: ${detail} | body=${responseText.slice(0, 200)}`)
-    }
+    return await this.postAndParse(spec.endpoint, body, logId)
+  }
 
-    const externalMessageId =
-      safeString(getByPath(parsed, 'messageId')) ||
-      safeString(getByPath(parsed, 'data.messageId')) ||
-      safeString(getByPath(parsed, 'id')) ||
-      safeString(getByPath(parsed, 'data.id')) ||
-      safeString(getByPath(parsed, 'key.id')) ||
-      `wapi-${crypto.randomUUID()}`
+  /** Imagem (jpg/png/webp). `media` = URL pública ou data:image/...;base64,… */
+  sendImage(input: SendWapiMediaInput): Promise<SendWhatsappMessageResult> {
+    return this.sendMediaMessage('image', input)
+  }
+  /** Vídeo (mp4). Cai como vídeo normal, com pré-visualização. */
+  sendVideo(input: SendWapiMediaInput): Promise<SendWhatsappMessageResult> {
+    return this.sendMediaMessage('video', input)
+  }
+  /** Áudio. Chega como MENSAGEM DE VOZ (a bolha de microfone), não como ficheiro. */
+  sendAudio(input: SendWapiMediaInput): Promise<SendWhatsappMessageResult> {
+    return this.sendMediaMessage('audio', input)
+  }
+  /** Documento — qualquer ficheiro. Precisa de `extension` (a W-API não adivinha). */
+  sendDocument(input: SendWapiMediaInput): Promise<SendWhatsappMessageResult> {
+    return this.sendMediaMessage('document', input)
+  }
+  /** Figurinha estática ou animada (webp). */
+  sendSticker(input: { to: string; sticker: string } & Omit<SendWapiMediaInput, 'media'>): Promise<SendWhatsappMessageResult> {
+    return this.sendMediaMessage('sticker', { ...input, media: input.sticker })
+  }
+  /** GIF — no WhatsApp é um mp4 curto em loop, não um .gif. */
+  sendGif(input: SendWapiMediaInput): Promise<SendWhatsappMessageResult> {
+    return this.sendMediaMessage('gif', input)
+  }
+  /** Vídeo redondo (PTV), o "recado em vídeo" do WhatsApp. */
+  sendPtv(input: SendWapiMediaInput): Promise<SendWhatsappMessageResult> {
+    return this.sendMediaMessage('ptv', input)
+  }
 
+  /** Envia uma IMAGEM por URL (W-API: /message/send-image). Usado p/ o QR do Pix. */
+  async sendImageMessage(input: SendWhatsappImageInput): Promise<SendWhatsappMessageResult> {
+    return await this.sendImage({
+      to: input.to,
+      media: input.imageUrl,
+      caption: input.caption,
+      leadId: input.leadId,
+      // QR de Pix é resposta a quem acabou de pedir para pagar: a guarda trata como
+      // transacional para não cair no teto de proativo e a pessoa ficar sem o código.
+      metadata: { antiBanKind: 'transactional', antiBanSource: 'pix_qr' },
+    })
+  }
+
+  /**
+   * Link com pré-visualização (título, descrição e miniatura). Diferente de colar a URL no
+   * texto: aqui o card vem montado por nós, e não pelo que o WhatsApp conseguir raspar.
+   */
+  async sendLink(input: {
+    to: string
+    message: string
+    linkUrl: string
+    title?: string
+    linkDescription?: string
+    image?: string
+    leadId?: string
+    metadata?: Record<string, unknown>
+    replyToMessageId?: string
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: `${input.message}\n${input.linkUrl}`.trim(),
+      leadId: input.leadId,
+      metadata: input.metadata,
+    })
+    return await this.postAndParse(
+      '/message/send-link',
+      {
+        phone: to,
+        message: input.message,
+        linkUrl: input.linkUrl,
+        title: input.title,
+        linkDescription: input.linkDescription,
+        image: input.image,
+        messageId: input.replyToMessageId,
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  /** Localização (o mapinha). Usado para mandar o endereço da clínica. */
+  async sendLocation(input: {
+    to: string
+    latitude: string | number
+    longitude: string | number
+    name?: string
+    address?: string
+    leadId?: string
+    metadata?: Record<string, unknown>
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: `[localizacao] ${input.name ?? ''} ${input.address ?? ''}`.trim(),
+      leadId: input.leadId,
+      metadata: input.metadata,
+    })
+    return await this.postAndParse(
+      '/message/send-location',
+      {
+        phone: to,
+        latitude: String(input.latitude),
+        longitude: String(input.longitude),
+        name: input.name,
+        address: input.address,
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  /** Cartão de contato (vCard). Um contato. */
+  async sendContact(input: {
+    to: string
+    contactName: string
+    contactPhone: string
+    contactBusinessDescription?: string
+    leadId?: string
+    metadata?: Record<string, unknown>
+    replyToMessageId?: string
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: `[contato] ${input.contactName}`,
+      leadId: input.leadId,
+      metadata: input.metadata,
+    })
+    return await this.postAndParse(
+      '/message/send-contact',
+      {
+        phone: to,
+        contactName: input.contactName,
+        contactPhone: digitsOnly(input.contactPhone),
+        contactBusinessDescription: input.contactBusinessDescription,
+        messageId: input.replyToMessageId,
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  /** Vários cartões de contato de uma vez. */
+  async sendContacts(input: {
+    to: string
+    contacts: Array<{ contactName: string; contactPhone: string; contactBusinessDescription?: string }>
+    leadId?: string
+    metadata?: Record<string, unknown>
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    if (!input.contacts?.length) throw new Error('empty_contacts')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: `[contatos] ${input.contacts.map((c) => c.contactName).join(', ')}`,
+      leadId: input.leadId,
+      metadata: input.metadata,
+    })
+    return await this.postAndParse(
+      '/message/send-contacts',
+      {
+        phone: to,
+        contacts: input.contacts.map((c) => ({
+          contactName: c.contactName,
+          contactPhone: digitsOnly(c.contactPhone),
+          contactBusinessDescription: c.contactBusinessDescription,
+        })),
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  /** Enquete. `poll` é a lista de opções em texto. */
+  async sendPoll(input: {
+    to: string
+    message: string
+    poll: string[]
+    pollMaxOptions?: number
+    leadId?: string
+    metadata?: Record<string, unknown>
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    const opcoes = (input.poll ?? []).map((o) => String(o).trim()).filter(Boolean)
+    if (opcoes.length < 2) throw new Error('poll_needs_two_options')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: `[enquete] ${input.message}`,
+      leadId: input.leadId,
+      metadata: input.metadata,
+    })
+    return await this.postAndParse(
+      '/message/send-poll',
+      {
+        phone: to,
+        message: input.message,
+        poll: opcoes,
+        pollMaxOptions: Math.min(Math.max(1, input.pollMaxOptions ?? 1), opcoes.length),
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  /**
+   * Botão de Pix nativo do WhatsApp: a pessoa toca e o app dela abre o pagamento com a
+   * chave já preenchida. Não substitui o link do gateway (não confirma nada de volta) —
+   * serve para quem só quer a chave sem copiar e colar.
+   */
+  async sendPix(input: {
+    to: string
+    merchantName: string
+    pixKey: string
+    type: 'cpf' | 'cnpj' | 'phone' | 'email' | 'random'
+    amount?: number
+    leadId?: string
+    metadata?: Record<string, unknown>
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: `[pix] ${input.merchantName} ${input.amount ?? ''}`.trim(),
+      leadId: input.leadId,
+      metadata: { antiBanKind: 'transactional', ...(input.metadata ?? {}) },
+    })
+    return await this.postAndParse(
+      '/message/send-pix',
+      {
+        phone: to,
+        merchantName: input.merchantName,
+        pixKey: input.pixKey,
+        type: input.type,
+        amount: input.amount,
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  /** Código de verificação com botão "copiar". */
+  async sendOtp(input: {
+    to: string
+    message: string
+    code: string
+    buttonText?: string
+    leadId?: string
+    metadata?: Record<string, unknown>
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: `[otp] ${input.message}`,
+      leadId: input.leadId,
+      metadata: { antiBanKind: 'transactional', ...(input.metadata ?? {}) },
+    })
+    return await this.postAndParse(
+      '/message/send-otp',
+      {
+        phone: to,
+        message: input.message,
+        code: input.code,
+        buttonText: input.buttonText || 'Copiar código',
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  /** Botões de resposta rápida (buttonId + label). */
+  async sendButtonList(input: {
+    to: string
+    message: string
+    buttons: Array<{ buttonId: string; label: string }>
+    leadId?: string
+    metadata?: Record<string, unknown>
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    if (!input.buttons?.length) throw new Error('empty_buttons')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: input.message,
+      leadId: input.leadId,
+      metadata: input.metadata,
+    })
+    return await this.postAndParse(
+      '/message/send-button-list',
+      {
+        phone: to,
+        message: input.message,
+        buttons: input.buttons,
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  /** Botões de AÇÃO: abrir link, ligar, copiar. */
+  async sendButtonsAction(input: {
+    to: string
+    message: string
+    buttonActions: Array<{ type: string; buttonText: string; url?: string }>
+    leadId?: string
+    metadata?: Record<string, unknown>
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    if (!input.buttonActions?.length) throw new Error('empty_button_actions')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: input.message,
+      leadId: input.leadId,
+      metadata: input.metadata,
+    })
+    return await this.postAndParse(
+      '/message/send-buttons-action',
+      {
+        phone: to,
+        message: input.message,
+        buttonActions: input.buttonActions,
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  /** Menu em lista (o "ver opções" com seções). */
+  async sendList(input: {
+    to: string
+    title: string
+    description: string
+    buttonText: string
+    footerText?: string
+    sections: Array<{ title?: string; options: Array<{ title?: string; description?: string; rowId?: string }> }>
+    leadId?: string
+    metadata?: Record<string, unknown>
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: `${input.title}\n${input.description}`,
+      leadId: input.leadId,
+      metadata: input.metadata,
+    })
+    return await this.postAndParse(
+      '/message/send-list',
+      {
+        phone: to,
+        title: input.title,
+        description: input.description,
+        buttonText: input.buttonText,
+        footerText: input.footerText,
+        sections: input.sections,
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  /** Carrossel de cards com imagem e botões. */
+  async sendCarousel(input: {
+    to: string
+    message: string
+    cards: Array<{
+      text?: string
+      image?: string
+      buttonActions?: Array<{ type: string; buttonText: string; url?: string }>
+    }>
+    leadId?: string
+    metadata?: Record<string, unknown>
+  }): Promise<SendWhatsappMessageResult> {
+    const to = digitsOnly(input.to)
+    if (to.length < 10) throw new Error('invalid_phone')
+    if (!input.cards?.length) throw new Error('empty_cards')
+    const { logId, typing } = await this.runGuard({
+      to,
+      guardText: input.message,
+      leadId: input.leadId,
+      metadata: input.metadata,
+    })
+    return await this.postAndParse(
+      '/message/send-carousel',
+      {
+        phone: to,
+        message: input.message,
+        cards: input.cards,
+        ...(typing > 0 ? { delayMessage: Math.round(typing) } : {}),
+      },
+      logId,
+    )
+  }
+
+  // ── Ações sobre mensagens que JÁ existem ────────────────────────────────────
+  // Nenhuma passa pela guarda anti-ban: reagir, apagar e editar não são mensagem nova
+  // saindo para o número — não gastam cota nem contam para o teto do dia.
+
+  /** Emoji na bolha. Reagir de novo com outro emoji TROCA (é assim no WhatsApp). */
+  async sendReaction(phone: string, messageId: string, reaction: string): Promise<boolean> {
+    const res = await this.call('/message/send-reaction', 'POST', {
+      phone: digitsOnly(phone),
+      messageId,
+      reaction,
+    })
+    return res.ok && !safeString(getByPath(res.data, 'error'))
+  }
+
+  /** Tira a reação. */
+  async removeReaction(phone: string, messageId: string): Promise<boolean> {
+    const res = await this.call('/message/remove-reaction', 'POST', {
+      phone: digitsOnly(phone),
+      messageId,
+    })
+    return res.ok && !safeString(getByPath(res.data, 'error'))
+  }
+
+  /**
+   * Apaga a mensagem NO CHAT — some do telemóvel da pessoa, não só da nossa tela.
+   *
+   * A coleção da W-API não documenta onde vão `phone`/`messageId` num DELETE. Mandamos nos
+   * dois sítios (query string e corpo): o que sobrar é ignorado, e assim não dependemos de
+   * adivinhar. Devolve o corpo cru para quem chamar poder mostrar o motivo real da recusa
+   * (o WhatsApp só deixa apagar para todos dentro de ~2 dias).
+   */
+  async deleteMessage(
+    phone: string,
+    messageId: string,
+  ): Promise<{ ok: boolean; status: number; detail: string }> {
+    const to = digitsOnly(phone)
+    const res = await this.call('/message/delete-message', 'DELETE', { phone: to, messageId }, {
+      phone: to,
+      messageId,
+    })
+    const erro =
+      safeString(getByPath(res.data, 'error')) ||
+      safeString(getByPath(res.data, 'message_error')) ||
+      safeString(getByPath(res.data, 'data.error'))
+    const errorFlag = getByPath(res.data, 'error') === true
+    const ok = res.ok && !errorFlag && !(erro && erro !== 'false')
     return {
-      provider: this.name,
-      externalMessageId,
-      status: 'queued',
-      raw: parsed,
+      ok,
+      status: res.status,
+      detail: ok ? '' : erro || safeString(getByPath(res.data, 'message')) || res.raw.slice(0, 200) || `http_${res.status}`,
     }
+  }
+
+  /** Edita uma mensagem já enviada (janela curta do WhatsApp: ~15 min). */
+  async editMessage(
+    phone: string,
+    messageId: string,
+    text: string,
+  ): Promise<{ ok: boolean; status: number; detail: string }> {
+    const res = await this.call('/message/edit-message', 'POST', {
+      phone: digitsOnly(phone),
+      messageId,
+      text,
+    })
+    const erro =
+      safeString(getByPath(res.data, 'error')) ||
+      safeString(getByPath(res.data, 'message_error')) ||
+      safeString(getByPath(res.data, 'data.error'))
+    const errorFlag = getByPath(res.data, 'error') === true
+    const ok = res.ok && !errorFlag && !(erro && erro !== 'false')
+    return {
+      ok,
+      status: res.status,
+      detail: ok ? '' : erro || safeString(getByPath(res.data, 'message')) || res.raw.slice(0, 200) || `http_${res.status}`,
+    }
+  }
+
+  /** Foto de perfil do contato (para o avatar no cabeçalho da conversa). */
+  async contactProfilePicture(phone: string): Promise<string | null> {
+    const res = await this.call('/contacts/profile-picture', 'GET', undefined, {
+      phoneNumber: digitsOnly(phone),
+      phone: digitsOnly(phone),
+    })
+    if (!res.ok) return null
+    const url =
+      safeString(getByPath(res.data, 'profilePicture')) ||
+      safeString(getByPath(res.data, 'data.profilePicture')) ||
+      safeString(getByPath(res.data, 'url')) ||
+      safeString(getByPath(res.data, 'data.url')) ||
+      safeString(getByPath(res.data, 'imgUrl'))
+    return url || null
+  }
+
+  /** Bloqueia (ou desbloqueia) o contato na linha. */
+  async blockContact(phone: string, block = true): Promise<boolean> {
+    const res = await this.call('/contacts/block-contact', 'POST', {
+      phone: digitsOnly(phone),
+      block,
+      action: block ? 'block' : 'unblock',
+    })
+    return res.ok
+  }
+
+  /** Confere vários números de uma vez (mais barato que um phoneExists por número). */
+  async checkNumbers(phones: string[]): Promise<Record<string, boolean | null>> {
+    const lista = phones.map((p) => digitsOnly(p)).filter((p) => p.length >= 10)
+    if (!lista.length) return {}
+    const res = await this.call('/contacts/check-numbers', 'POST', { phones: lista, numbers: lista })
+    const out: Record<string, boolean | null> = {}
+    for (const p of lista) out[p] = null
+    if (!res.ok) return out
+    const arr =
+      (getByPath(res.data, 'data') as unknown[]) ??
+      (getByPath(res.data, 'numbers') as unknown[]) ??
+      (Array.isArray(res.data) ? (res.data as unknown[]) : [])
+    if (Array.isArray(arr)) {
+      for (const item of arr) {
+        if (!item || typeof item !== 'object') continue
+        const rec = item as Record<string, unknown>
+        const num = digitsOnly(safeString(rec.phone ?? rec.number ?? rec.phoneNumber))
+        const exists = rec.exists ?? rec.isInWhatsapp ?? rec.numberExists
+        if (num) out[num] = typeof exists === 'boolean' ? exists : null
+      }
+    }
+    return out
+  }
+
+  /** Fila de envio da instância (o que ainda não saiu). */
+  async fetchQueue(): Promise<{ ok: boolean; data: Record<string, unknown> }> {
+    const res = await this.call('/instance/quere/quere', 'GET')
+    return { ok: res.ok, data: res.data }
+  }
+
+  /** Cancela UMA mensagem que ainda está na fila (antes de sair). */
+  async deleteQueuedMessage(messageId: string): Promise<boolean> {
+    const res = await this.call('/instance/quere/delete-message', 'DELETE', { messageId }, { messageId })
+    return res.ok
+  }
+
+  /** Esvazia a fila inteira — o freio de mão quando uma rotina disparou o que não devia. */
+  async clearQueue(): Promise<boolean> {
+    const res = await this.call('/instance/quere/delete-quere', 'DELETE')
+    return res.ok
   }
 
   /** Chamada crua na W-API, com o instanceId e o Bearer da linha já embutidos. */
@@ -754,4 +1404,64 @@ const WAPI_MEDIA_ONLY_MARKERS = new Set([
 ])
 export function isMediaOnlyMarker(text: string): boolean {
   return WAPI_MEDIA_ONLY_MARKERS.has(String(text ?? '').trim())
+}
+
+/**
+ * REAÇÃO que chegou de fora (a paciente pôs um ❤️ numa mensagem nossa).
+ *
+ * Não é mensagem: `normalizeInbound` devolve `null` para ela, e é por isso que até aqui a
+ * reação simplesmente desaparecia — a paciente respondia com um 👍 e no CRM não acontecia
+ * nada, dando a impressão de que ela tinha ficado calada. Devolve o id da mensagem
+ * REAGIDA (não o desta), o emoji, e se foi para tirar a reação (emoji vazio = tirou).
+ */
+export function extractInboundReaction(
+  payload: Record<string, unknown>,
+): { targetMessageId: string; emoji: string; removed: boolean } | null {
+  const mc = (payload?.msgContent ?? payload?.msgcontent ?? payload?.message ?? {}) as Record<string, unknown>
+  const reaction = (mc.reactionMessage ?? mc.reaction) as Record<string, unknown> | undefined
+  if (!reaction || typeof reaction !== 'object') return null
+  const targetMessageId =
+    safeString(getByPath(reaction, 'key.id')) ||
+    safeString(getByPath(reaction, 'messageId')) ||
+    safeString(getByPath(reaction, 'id'))
+  if (!targetMessageId) return null
+  const emoji = safeString(reaction.text ?? reaction.emoji ?? '').trim()
+  return { targetMessageId, emoji, removed: emoji.length === 0 }
+}
+
+/**
+ * A pessoa APAGOU uma mensagem no telemóvel dela ("apagar para todos"). Chega como
+ * protocolMessage REVOKE citando o id da mensagem que sumiu. Sem tratar isto, o CRM
+ * continuava a mostrar um texto que já não existe do outro lado — e a equipe respondia a
+ * uma mensagem que a paciente já tinha retirado.
+ */
+export function extractInboundRevoke(payload: Record<string, unknown>): { targetMessageId: string } | null {
+  const mc = (payload?.msgContent ?? payload?.msgcontent ?? payload?.message ?? {}) as Record<string, unknown>
+  const proto = mc.protocolMessage as Record<string, unknown> | undefined
+  if (!proto || typeof proto !== 'object') return null
+  const tipo = safeString(proto.type ?? proto.protocolType).toUpperCase()
+  if (tipo && !tipo.includes('REVOKE')) return null
+  const targetMessageId = safeString(getByPath(proto, 'key.id')) || safeString(proto.messageId)
+  return targetMessageId ? { targetMessageId } : null
+}
+
+/**
+ * Mensagem CITADA numa resposta que chegou. É o `contextInfo.stanzaId` do WhatsApp: sem
+ * ele, a resposta "sim, pode ser" aparece solta e ninguém sabe a que pergunta responde.
+ */
+export function extractInboundReplyTo(payload: Record<string, unknown>): string {
+  const mc = (payload?.msgContent ?? payload?.msgcontent ?? payload?.message ?? {}) as Record<string, unknown>
+  for (const chave of Object.keys(mc)) {
+    const bloco = mc[chave]
+    if (!bloco || typeof bloco !== 'object') continue
+    const id =
+      safeString(getByPath(bloco as Record<string, unknown>, 'contextInfo.stanzaId')) ||
+      safeString(getByPath(bloco as Record<string, unknown>, 'contextInfo.quotedMessageId'))
+    if (id) return id
+  }
+  return (
+    safeString(getByPath(payload, 'contextInfo.stanzaId')) ||
+    safeString(getByPath(payload, 'quotedMsgId')) ||
+    ''
+  )
 }
