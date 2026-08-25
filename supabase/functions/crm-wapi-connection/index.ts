@@ -44,6 +44,16 @@ type Action =
   | 'check_number'
   | 'pause'
   | 'resume'
+  | 'profile'
+  | 'device'
+  | 'queue'
+  | 'queue_delete'
+  | 'queue_clear'
+  | 'block_contact'
+  | 'check_numbers'
+  | 'contact_picture'
+  | 'groups'
+  | 'proxy'
 
 function pick(obj: Record<string, unknown>, ...paths: string[]): string {
   for (const p of paths) {
@@ -80,7 +90,24 @@ Deno.serve(async (req) => {
 
   const admin = createClient(supabaseUrl, serviceKey)
 
-  let body: { action?: Action; instanceId?: string; phone?: string; settings?: Record<string, unknown>; minutes?: number; reason?: string }
+  let body: {
+    action?: Action
+    instanceId?: string
+    phone?: string
+    settings?: Record<string, unknown>
+    minutes?: number
+    reason?: string
+    /** Perfil da linha: nome, recado, foto (URL ou base64) e nome da instância no painel. */
+    profile?: Record<string, unknown>
+    /** Endereço do proxy. Vazio DESLIGA. */
+    proxy?: string
+    /** Id da mensagem na fila de envio (para cancelar antes de sair). */
+    messageId?: string
+    /** `false` desbloqueia. */
+    block?: boolean
+    /** Lista para conferência em lote (máx. 200). */
+    phones?: unknown[]
+  }
   try {
     body = (await req.json()) as typeof body
   } catch {
@@ -286,6 +313,128 @@ Deno.serve(async (req) => {
               : existe === false
                 ? 'Este número NÃO tem WhatsApp — enviar para ele é justamente o que queima a sessão.'
                 : 'A W-API não respondeu se o número existe. Na dúvida, não envie.',
+        })
+      }
+
+      // ── Perfil da LINHA (o que a paciente vê no topo da conversa) ────────────
+      // Nome, recado e foto do número. Vale mais do que parece: linha de atendimento sem
+      // nome e sem foto tem cara de número desconhecido, e é o primeiro motivo pelo qual
+      // alguém marca uma conversa como spam.
+      case 'profile': {
+        const p = (body.profile ?? {}) as Record<string, unknown>
+        const feitos: Array<{ nome: string; ok: boolean; detail?: string }> = []
+        const aplicar = async (nome: string, path: string, payload: Record<string, unknown>) => {
+          const res = await provider.call(path, 'PUT', payload)
+          feitos.push({ nome, ok: res.ok, detail: res.ok ? undefined : res.raw.slice(0, 160) })
+        }
+        if (typeof p.nome === 'string' && p.nome.trim()) {
+          await aplicar('nome', '/instance/profile-name', { value: String(p.nome).trim() })
+        }
+        if (typeof p.recado === 'string') {
+          await aplicar('recado', '/instance/profile-description', { value: String(p.recado).trim() })
+        }
+        if (typeof p.foto === 'string' && p.foto.trim()) {
+          await aplicar('foto', '/instance/profile-picture', { value: String(p.foto).trim() })
+        }
+        if (typeof p.nomeDaInstancia === 'string' && p.nomeDaInstancia.trim()) {
+          await aplicar('nome_instancia', '/instance/update-instance-name', {
+            value: String(p.nomeDaInstancia).trim(),
+          })
+        }
+        if (feitos.length === 0) {
+          return json({ ok: false, error: 'nothing_to_apply', message: 'Nenhum campo foi enviado.' }, 400)
+        }
+        return json({ ok: feitos.every((f) => f.ok), action, resultados: feitos })
+      }
+
+      /** Qual APARELHO está com a sessão. É o que responde "quem está com este número". */
+      case 'device': {
+        const res = await provider.call('/instance/device', 'GET')
+        const d = res.data
+        return json({
+          ok: res.ok,
+          action,
+          phone: pick(d, 'connectedPhone', 'data.connectedPhone', 'phone', 'data.phone') || null,
+          nome: pick(d, 'name', 'data.name') || null,
+          plataforma: pick(d, 'platform', 'data.platform') || null,
+          isBusiness: d.isBusiness ?? (d.data as Record<string, unknown> | undefined)?.isBusiness ?? null,
+          data: d,
+        })
+      }
+
+      // ── Fila de envio da instância ───────────────────────────────────────────
+      // O freio de mão: quando uma rotina disparou o que não devia, dá para ver o que
+      // ainda não saiu e cancelar ANTES de chegar na paciente. Sem isto, a única saída
+      // era desconectar a linha e perder a sessão.
+      case 'queue': {
+        const res = await provider.fetchQueue()
+        return json({ ok: res.ok, action, data: res.data })
+      }
+
+      case 'queue_delete': {
+        const messageId = String(body.messageId ?? '').trim()
+        if (!messageId) return json({ ok: false, error: 'missing_message_id' }, 400)
+        const ok = await provider.deleteQueuedMessage(messageId)
+        return json({ ok, action, messageId })
+      }
+
+      case 'queue_clear': {
+        const ok = await provider.clearQueue()
+        return json({
+          ok,
+          action,
+          message: ok
+            ? 'Fila esvaziada. O que ainda não tinha saído não sai mais.'
+            : 'A W-API recusou esvaziar a fila.',
+        })
+      }
+
+      /** Bloqueia/desbloqueia um contato NA LINHA (para quem passou dos limites). */
+      case 'block_contact': {
+        const phone = String(body.phone ?? '').replace(/[^0-9]/g, '')
+        if (phone.length < 10) return json({ ok: false, error: 'invalid_phone' }, 400)
+        const bloquear = body.block !== false
+        const ok = await provider.blockContact(phone, bloquear)
+        return json({ ok, action, phone, blocked: bloquear })
+      }
+
+      /** Confere uma LISTA de números de uma vez — mais barato que um por um. */
+      case 'check_numbers': {
+        const lista = Array.isArray(body.phones) ? body.phones.map((p: unknown) => String(p)) : []
+        if (lista.length === 0) return json({ ok: false, error: 'missing_phones' }, 400)
+        if (lista.length > 200) {
+          return json({ ok: false, error: 'too_many', message: 'Máximo de 200 números por vez.' }, 400)
+        }
+        const resultado = await provider.checkNumbers(lista)
+        return json({ ok: true, action, resultado })
+      }
+
+      /** Foto de perfil de um contato (avatar do paciente no CRM). */
+      case 'contact_picture': {
+        const phone = String(body.phone ?? '').replace(/[^0-9]/g, '')
+        if (phone.length < 10) return json({ ok: false, error: 'invalid_phone' }, 400)
+        const url = await provider.contactProfilePicture(phone)
+        return json({ ok: Boolean(url), action, phone, url })
+      }
+
+      /**
+       * Grupos em que esta linha está. Serve para descobrir o id do grupo de comprovantes
+       * sem ir caçar no telemóvel (ver registerSalesReceiptGroup).
+       */
+      case 'groups': {
+        const res = await provider.call('/group/get-all-groups', 'GET')
+        return json({ ok: res.ok, action, data: res.data })
+      }
+
+      /** Proxy da instância. Vazio DESLIGA. */
+      case 'proxy': {
+        const value = String(body.proxy ?? '').trim()
+        const res = await provider.call('/instance/update-proxy', 'PUT', { value })
+        return json({
+          ok: res.ok,
+          action,
+          proxy: value || null,
+          message: value ? 'Proxy aplicado.' : 'Proxy removido: a linha volta a sair pelo IP da W-API.',
         })
       }
 

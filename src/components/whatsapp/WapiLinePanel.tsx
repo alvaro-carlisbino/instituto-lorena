@@ -19,6 +19,7 @@ import {
   saveLeadformConfig,
   saveLinePolicy,
   wapiConnectionAction,
+  type WapiActionResult,
   type LeadformOutreachConfig,
   type OutreachFila,
   type WapiLineGuardRow,
@@ -93,6 +94,13 @@ export function WapiLinePanel({ instance }: { instance: WhatsappChannelInstance 
   const [pairPhone, setPairPhone] = useState(instance.phoneE164?.replace(/\D/g, '') ?? '')
   const [pairCode, setPairCode] = useState('')
   const [testePhone, setTestePhone] = useState('')
+  const [perfilNome, setPerfilNome] = useState('')
+  const [perfilRecado, setPerfilRecado] = useState('')
+  const [perfilFoto, setPerfilFoto] = useState('')
+  const [proxy, setProxy] = useState('')
+  const [aparelho, setAparelho] = useState<{ phone: string | null; nome: string | null; plataforma: string | null; isBusiness: boolean | null } | null>(null)
+  const [filaEnvio, setFilaEnvio] = useState<unknown>(null)
+  const [bloqueioPhone, setBloqueioPhone] = useState('')
   const [salvandoPolitica, setSalvandoPolitica] = useState(false)
 
   const webhookBase = (import.meta.env.VITE_SUPABASE_URL ?? '<SUPABASE_URL>').replace(/\/$/, '')
@@ -141,11 +149,16 @@ export function WapiLinePanel({ instance }: { instance: WhatsappChannelInstance 
     }
   }
 
+  /**
+   * Roda uma ação da linha, avisa o resultado e recarrega. O retorno é o `WapiActionResult`
+   * inteiro (e não só `{ok}`): quem chama precisa do corpo — o aparelho conectado, a fila,
+   * a foto do contato. Com a assinatura estreita, esses campos eram descartados no caminho.
+   */
   const executar = async (
     nome: string,
-    fn: () => Promise<{ ok: boolean; message?: string; error?: string }>,
+    fn: () => Promise<WapiActionResult>,
     sucesso?: string,
-  ) => {
+  ): Promise<WapiActionResult> => {
     setAcao(nome)
     try {
       const res = await fn()
@@ -774,6 +787,243 @@ export function WapiLinePanel({ instance }: { instance: WhatsappChannelInstance 
                 }
               >
                 Conferir
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      {/* ── Perfil da linha, aparelho e proxy ─────────────────────────────────── */}
+      <Card>
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-base">Perfil da linha</CardTitle>
+          <p className="m-0 text-xs text-muted-foreground">
+            É o que a paciente vê no topo da conversa. Linha de atendimento sem nome e sem foto tem cara de número
+            desconhecido — e é o primeiro motivo pelo qual alguém marca uma conversa como spam.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="wapi-perfil-nome">Nome que aparece</Label>
+              <Input
+                id="wapi-perfil-nome"
+                value={perfilNome}
+                onChange={(e) => setPerfilNome(e.target.value)}
+                placeholder="Instituto Lorena · Atendimento"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="wapi-perfil-recado">Recado</Label>
+              <Input
+                id="wapi-perfil-recado"
+                value={perfilRecado}
+                onChange={(e) => setPerfilRecado(e.target.value)}
+                placeholder="Seg a sex, 8h às 18h"
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="wapi-perfil-foto">Foto (URL pública)</Label>
+            <Input
+              id="wapi-perfil-foto"
+              value={perfilFoto}
+              onChange={(e) => setPerfilFoto(e.target.value)}
+              placeholder="https://…/logo.png"
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={acao !== null || (!perfilNome.trim() && !perfilRecado.trim() && !perfilFoto.trim())}
+              onClick={() =>
+                void executar(
+                  'perfil',
+                  () =>
+                    wapiConnectionAction('profile', {
+                      instanceId: instance.id,
+                      profile: {
+                        ...(perfilNome.trim() ? { nome: perfilNome.trim() } : {}),
+                        ...(perfilRecado.trim() ? { recado: perfilRecado.trim() } : {}),
+                        ...(perfilFoto.trim() ? { foto: perfilFoto.trim() } : {}),
+                      },
+                    }),
+                  'Perfil atualizado no WhatsApp.',
+                )
+              }
+            >
+              Salvar perfil
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={acao !== null}
+              onClick={async () => {
+                const res = await executar('device', () =>
+                  wapiConnectionAction('device', { instanceId: instance.id }),
+                )
+                if (res.ok) {
+                  setAparelho({
+                    phone: res.phone ?? null,
+                    nome: res.nome ?? null,
+                    plataforma: res.plataforma ?? null,
+                    isBusiness: res.isBusiness ?? null,
+                  })
+                }
+              }}
+            >
+              Ver aparelho conectado
+            </Button>
+          </div>
+
+          {aparelho ? (
+            <div className="rounded-lg border border-border bg-muted/30 p-2 text-xs">
+              <p className="m-0">
+                <span className="font-medium">{aparelho.nome || 'sem nome'}</span>
+                {aparelho.phone ? <span className="font-mono"> · {aparelho.phone}</span> : null}
+              </p>
+              <p className="m-0 text-muted-foreground">
+                {aparelho.plataforma ?? 'plataforma desconhecida'}
+                {aparelho.isBusiness === true ? ' · WhatsApp Business' : aparelho.isBusiness === false ? ' · WhatsApp comum' : ''}
+              </p>
+            </div>
+          ) : null}
+
+          <Separator />
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="wapi-proxy">Proxy da instância</Label>
+              <Input
+                id="wapi-proxy"
+                value={proxy}
+                onChange={(e) => setProxy(e.target.value)}
+                placeholder="http://usuario:senha@ip:porta"
+                className="font-mono text-xs"
+              />
+              <p className="m-0 text-[0.7rem] text-muted-foreground">
+                Deixe vazio e salve para DESLIGAR — aí a linha volta a sair pelo IP da W-API.
+              </p>
+            </div>
+            <div className="flex items-start pt-6">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={acao !== null}
+                onClick={() =>
+                  void executar('proxy', () => wapiConnectionAction('proxy', { instanceId: instance.id, proxy }))
+                }
+              >
+                Aplicar
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Fila de envio e bloqueio ──────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-base">Fila de envio</CardTitle>
+          <p className="m-0 text-xs text-muted-foreground">
+            O freio de mão. Quando uma rotina disparou o que não devia, aqui dá para ver o que ainda NÃO saiu e
+            cancelar antes de chegar na paciente — sem desconectar a linha e perder a sessão.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={acao !== null}
+              onClick={async () => {
+                const res = await executar('fila', () => wapiConnectionAction('queue', { instanceId: instance.id }))
+                if (res.ok) setFilaEnvio(res.data ?? null)
+              }}
+            >
+              Ver fila
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              disabled={acao !== null}
+              onClick={() => {
+                if (!window.confirm('Esvaziar a fila? O que ainda não saiu não sai mais.')) return
+                void executar('fila_limpar', () => wapiConnectionAction('queue_clear', { instanceId: instance.id }))
+              }}
+            >
+              Esvaziar fila
+            </Button>
+          </div>
+
+          {filaEnvio ? (
+            <pre className="max-h-48 overflow-auto rounded-lg border border-border bg-muted/30 p-2 text-[0.7rem]">
+              {JSON.stringify(filaEnvio, null, 2)}
+            </pre>
+          ) : null}
+
+          <Separator />
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="wapi-bloqueio">Bloquear contato nesta linha</Label>
+              <Input
+                id="wapi-bloqueio"
+                value={bloqueioPhone}
+                onChange={(e) => setBloqueioPhone(e.target.value)}
+                placeholder="5544999999999"
+                className="font-mono text-xs"
+              />
+              <p className="m-0 text-[0.7rem] text-muted-foreground">
+                Último recurso. Bloquear é diferente de opt-out: o opt-out para de ENVIAR, o bloqueio impede a pessoa
+                de escrever — e ela não recebe aviso nenhum de que foi bloqueada.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5 pt-6">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={acao !== null || bloqueioPhone.replace(/\D/g, '').length < 10}
+                onClick={() =>
+                  void executar(
+                    'bloquear',
+                    () =>
+                      wapiConnectionAction('block_contact', {
+                        instanceId: instance.id,
+                        phone: bloqueioPhone,
+                        block: true,
+                      }),
+                    'Contato bloqueado.',
+                  )
+                }
+              >
+                Bloquear
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={acao !== null || bloqueioPhone.replace(/\D/g, '').length < 10}
+                onClick={() =>
+                  void executar(
+                    'desbloquear',
+                    () =>
+                      wapiConnectionAction('block_contact', {
+                        instanceId: instance.id,
+                        phone: bloqueioPhone,
+                        block: false,
+                      }),
+                    'Contato desbloqueado.',
+                  )
+                }
+              >
+                Desbloquear
               </Button>
             </div>
           </div>

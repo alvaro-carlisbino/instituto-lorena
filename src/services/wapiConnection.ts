@@ -18,6 +18,16 @@ export type WapiAction =
   | 'check_number'
   | 'pause'
   | 'resume'
+  | 'profile'
+  | 'device'
+  | 'queue'
+  | 'queue_delete'
+  | 'queue_clear'
+  | 'block_contact'
+  | 'check_numbers'
+  | 'contact_picture'
+  | 'groups'
+  | 'proxy'
 
 export type WapiActionResult = {
   ok: boolean
@@ -32,6 +42,16 @@ export type WapiActionResult = {
   error?: string
   urls?: { recebidas: string; eventos: string }
   resultados?: Array<{ nome: string; ok: boolean; status?: number; detail?: string }>
+  /** device: aparelho que está com a sessão. */
+  nome?: string | null
+  plataforma?: string | null
+  isBusiness?: boolean | null
+  /** check_numbers: número → tem WhatsApp (null = a W-API não respondeu). */
+  resultado?: Record<string, boolean | null>
+  /** contact_picture: URL do avatar. */
+  url?: string | null
+  blocked?: boolean
+  proxy?: string | null
   data?: unknown
 }
 
@@ -43,6 +63,11 @@ export async function wapiConnectionAction(
     settings?: Record<string, unknown>
     minutes?: number
     reason?: string
+    profile?: Record<string, unknown>
+    proxy?: string
+    messageId?: string
+    block?: boolean
+    phones?: string[]
   },
 ): Promise<WapiActionResult> {
   if (!supabase) return { ok: false, error: 'not_configured', message: 'Sistema não configurado.' }
