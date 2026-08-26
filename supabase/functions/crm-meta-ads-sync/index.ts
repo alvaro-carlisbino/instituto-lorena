@@ -256,6 +256,69 @@ async function puxarInsights(admin: SupabaseClient, token: string, dias: number)
   return { ok: erros.length === 0, dias, linhas: linhas.length, gravadas, erros: erros.slice(0, 3) }
 }
 
+/**
+ * Lista os anúncios que podem entregar e diz QUAL FORMULÁRIO cada um usa.
+ *
+ * Nasceu em 25/08/2026: um anúncio renomeado para "form qualificado" continuou
+ * mandando lead para o formulário antigo, e o teste do formulário novo ficou
+ * parecendo que existia sem existir. O id do formulário mora no call_to_action
+ * do criativo, não no anúncio nem no conjunto, então olhar a tela não resolve.
+ * Só lê, não muda nada.
+ */
+async function inspecionarAnuncios(token: string, cru = '') {
+  if (cru === 'imagens') {
+    // Imagens já enviadas para a conta: é delas que sai o `image_hash` de um
+    // criativo novo. Sem isso, anúncio novo só nasce reaproveitando post
+    // existente, e post existente carrega o formulário ANTIGO junto.
+    const qs = new URLSearchParams({
+      fields: 'hash,name,created_time,permalink_url',
+      limit: '40',
+      access_token: token,
+    })
+    const conta0 = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+    const r = await fetch(`${GRAPH}/${conta0}/adimages?${qs}`)
+    return { ok: r.ok, imagens: await r.json() }
+  }
+  if (cru) {
+    // Modo cru: um anúncio só, criativo inteiro. Serve para achar onde a Meta
+    // escondeu o formulário quando o criativo veio de post existente.
+    const qs = new URLSearchParams({
+      fields: 'id,name,effective_status,creative{id,name,object_story_id,effective_object_story_id,object_story_spec,asset_feed_spec,object_type,link_url,url_tags}',
+      access_token: token,
+    })
+    const r = await fetch(`${GRAPH}/${cru}?${qs}`)
+    return { ok: r.ok, cru: await r.json() }
+  }
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  const qs = new URLSearchParams({
+    fields: 'id,name,effective_status,adset{name},creative{id,object_story_spec,asset_feed_spec}',
+    effective_status: JSON.stringify(['ACTIVE', 'PENDING_REVIEW', 'IN_PROCESS']),
+    limit: '200',
+    access_token: token,
+  })
+  const res = await fetch(`${GRAPH}/${conta}/ads?${qs}`)
+  const body = await res.json() as Record<string, unknown>
+  if (!res.ok) return { ok: false, erro: body }
+  const anuncios = ((body.data ?? []) as Array<Record<string, unknown>>).map((a) => {
+    const cr = (a.creative ?? {}) as Record<string, unknown>
+    const oss = (cr.object_story_spec ?? {}) as Record<string, Record<string, unknown>>
+    const afs = (cr.asset_feed_spec ?? {}) as Record<string, unknown>
+    // O formulário pode estar em qualquer um destes três lugares, conforme o
+    // anúncio tenha sido montado por link, por vídeo ou por criativo dinâmico.
+    const cta = (oss.link_data?.call_to_action ?? oss.video_data?.call_to_action ?? {}) as Record<string, Record<string, string>>
+    const dinamico = ((afs.call_to_actions ?? []) as Array<Record<string, Record<string, string>>>)[0] ?? {}
+    const form = cta.value?.lead_gen_form_id ?? dinamico.value?.lead_gen_form_id ?? null
+    return {
+      id: String(a.id ?? ''),
+      nome: String(a.name ?? ''),
+      status: String(a.effective_status ?? ''),
+      conjunto: String((a.adset as Record<string, string> | undefined)?.name ?? ''),
+      formulario: form,
+    }
+  })
+  return { ok: true, total: anuncios.length, anuncios }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -283,7 +346,8 @@ Deno.serve(async (req) => {
     if (action === 'audience') return json(await refazerPublico(admin, token))
     if (action === 'insights') return json(await puxarInsights(admin, token, Number(corpo.dias ?? 7)))
     if (action === 'capi') return json(await enviarCapi(admin, token, Number(corpo.dias ?? 6)))
-    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights'] }, 400)
+    if (action === 'anuncios') return json(await inspecionarAnuncios(token, String((corpo as Record<string, unknown>).ad_id ?? '')))
+    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios'] }, 400)
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

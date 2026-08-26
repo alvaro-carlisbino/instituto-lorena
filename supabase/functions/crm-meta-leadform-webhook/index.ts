@@ -511,6 +511,49 @@ async function runSweep(
     // 444444444444 é o leadgen de teste da Meta — não é um formulário real
     if (f && f !== '444444444444') forms.set(f, String(r.page_id ?? ''))
   }
+  const doEvento = forms.size
+
+  // O evento é a fonte histórica, e ela tem um problema de ovo e galinha: um
+  // formulário NOVO nunca foi visto pelo webhook, então a varredura, que existe
+  // justamente para pegar o que o webhook não entrega, nasce cega bem no
+  // formulário mais frágil, o recém-subido. Caso real de 25/08/2026: o
+  // formulário qualificado 1763517741442051 subiu à tarde e não estava na lista.
+  // Por isso pergunta-se à PÁGINA quais formulários existem.
+  const pageIds = new Set<string>([...Object.keys(tenantMap ?? {}), ...forms.values()])
+  for (const pageId of pageIds) {
+    if (!pageId) continue
+    try {
+      // PEGADINHA: /{form_id}/leads aceita o token de usuário, mas
+      // /{page_id}/leadgen_forms responde "(#190) This method must be called
+      // with a Page Access Token". O token da página sai do próprio token de
+      // usuário, então busca-se aqui em vez de exigir um segredo novo.
+      let tokenDaPagina = pageToken
+      const tk = await fetch(
+        `${GRAPH}/${pageId}?fields=access_token&access_token=${encodeURIComponent(pageToken)}`,
+      )
+      const tkBody = (await tk.json()) as Record<string, unknown>
+      if (tk.ok && typeof tkBody.access_token === 'string' && tkBody.access_token) {
+        tokenDaPagina = tkBody.access_token
+      }
+      const res = await fetch(
+        `${GRAPH}/${pageId}/leadgen_forms?fields=id,status&limit=100&access_token=${encodeURIComponent(tokenDaPagina)}`,
+      )
+      const data = (await res.json()) as Record<string, unknown>
+      if (!res.ok) {
+        console.error(`[meta-leadform] sweep leadgen_forms ${pageId}: ${JSON.stringify(data).slice(0, 200)}`)
+        continue
+      }
+      for (const f of (Array.isArray(data.data) ? data.data : []) as Array<Record<string, unknown>>) {
+        const id = String(f.id ?? '')
+        const st = String(f.status ?? '').toUpperCase()
+        // Arquivado e apagado não recebem lead novo: varrer seria gastar cota à toa.
+        if (!id || st === 'ARCHIVED' || st === 'DELETED') continue
+        if (!forms.has(id)) forms.set(id, pageId)
+      }
+    } catch (e) {
+      console.error(`[meta-leadform] sweep leadgen_forms ${pageId} fetch: ${e instanceof Error ? e.message : e}`)
+    }
+  }
 
   // Já resolvidos: viraram lead, foram pulados de propósito ou ignorados.
   const { data: doneRows, error: doneErr } = await admin
@@ -566,6 +609,8 @@ async function runSweep(
     ok: true,
     action: 'sweep_forms',
     formularios: forms.size,
+    formularios_do_evento: doEvento,
+    formularios_da_pagina: forms.size - doEvento,
     examinados: scanned,
     novos: created,
     falhas: results.filter((r) => !r.ok).length,
@@ -625,6 +670,7 @@ Deno.serve(async (req) => {
         }
         const formId = String(maybe.form_id ?? '')
         const leadgenId = String(maybe.leadgen_id ?? '')
+        const adId = String(maybe.ad_id ?? '')
         return json({
           me: await g('me?fields=id,name'),
           permissions: await g('me/permissions'),
@@ -634,6 +680,17 @@ Deno.serve(async (req) => {
             ? { form_leads: await g(`${formId}/leads?limit=1&fields=${String(maybe.fields ?? 'id,created_time')}`) }
             : {}),
           ...(leadgenId ? { leadgen: await g(`${leadgenId}?fields=${LEAD_FIELDS}`) } : {}),
+          // "Qual formulário este anúncio usa?" é pergunta que apareceu em 25/08/2026,
+          // quando um anúncio renomeado para "form qualificado" continuou entregando
+          // lead no formulário antigo. O id do formulário mora no call_to_action do
+          // criativo, não no anúncio nem no conjunto.
+          ...(adId
+            ? {
+              ad: await g(
+                `${adId}?fields=name,status,effective_status,creative{id,name,object_story_spec}`,
+              ),
+            }
+            : {}),
         })
       }
       if (maybe.action === 'sweep_forms') {
