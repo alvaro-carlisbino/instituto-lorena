@@ -189,9 +189,10 @@ async function enfileirarPrimeiroContato(
       phone: input.phone,
       message: renderMensagem(cfg.message, input.nome),
       source: 'leadform',
-      // Conversa das últimas duas semanas é assunto do atendimento. Mais velha
-      // que isso, a conversa morreu e o formulário de hoje é um pedido novo.
-      conversaRecenteDias: 14,
+      // Formulário preenchido é PEDIDO de contato, e pedido não fica sem
+      // resposta porque a pessoa falou com a casa semana passada. Quem impede
+      // repetição é o índice único (lead, kind): a apresentação sai uma vez só.
+      ignorarConversaAberta: true,
     })
     await logEvent(admin, {
       leadgenId: input.leadgenId, pageId: input.pageId, formId: input.formId,

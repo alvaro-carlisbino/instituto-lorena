@@ -29,6 +29,7 @@ export type OutreachItem = {
   status: string
   scheduled_at: string
   attempts: number
+  created_at: string
 }
 
 export type LeadformOutreachConfig = {
@@ -123,12 +124,17 @@ export async function enqueueOutreach(
     instanceId?: string | null
     /**
      * Janela, em dias, que define "conversa aberta". Sem ela, QUALQUER mensagem
-     * que a pessoa já tenha mandado um dia bloqueia o contato para sempre — o
-     * que é certo para carrinho e reengajamento, e errado para formulário: quem
-     * escreveu "oi" há três meses e agora preenche um formulário levantou a mão
-     * de novo.
+     * que a pessoa já tenha mandado um dia bloqueia o contato para sempre.
      */
     conversaRecenteDias?: number
+    /**
+     * Manda mesmo com conversa aberta. Decisão do Álvaro em 26/08/2026 para o
+     * formulário: preencher formulário é PEDIR contato, e o pedido não pode
+     * ficar sem resposta porque a pessoa falou com a casa outro dia. O que
+     * impede repetição não é esta guarda, é o índice único (lead, kind): cada
+     * lead recebe a apresentação UMA vez na vida. Opt-out continua valendo.
+     */
+    ignorarConversaAberta?: boolean
   },
 ): Promise<{ ok: boolean; queued: boolean; reason?: string; scheduledAt?: string }> {
   const phone = String(input.phone ?? '').replace(/[^0-9]/g, '')
@@ -148,7 +154,7 @@ export async function enqueueOutreach(
       const desde = new Date(Date.now() - Number(input.conversaRecenteDias) * 864e5).toISOString()
       q = q.gte('created_at', desde)
     }
-    const { data: jaEscreveu } = await q.limit(1).maybeSingle()
+    const { data: jaEscreveu } = input.ignorarConversaAberta ? { data: null } : await q.limit(1).maybeSingle()
     if (jaEscreveu) return { ok: true, queued: false, reason: 'ja_conversa' }
 
     const { data: lead } = await admin
@@ -242,17 +248,28 @@ export async function drainOutreachQueue(
     }
 
     try {
-      // A pessoa pode ter escrito enquanto esperava na fila. Aí a apresentação perdeu o
+      // A pessoa pode ter escrito ENQUANTO ESPERAVA na fila. Aí a apresentação perdeu o
       // sentido: quem fala com ela é o atendimento, e mandar o texto pronto por cima é o
       // robô atropelando a conversa.
-      const { data: entrou } = await admin
+      //
+      // O CORTE MUDA CONFORME A ORIGEM, e a diferença é deliberada:
+      //
+      // - formulário recém-preenchido: só cancela se a pessoa escreveu DEPOIS de entrar
+      //   na fila. Preencher formulário é pedir contato, e o pedido não pode morrer
+      //   porque a pessoa mandou uma mensagem meses atrás (decisão do Álvaro, 26/08/2026);
+      // - todo o resto (backlog, carrinho, reengajamento): qualquer mensagem que a pessoa
+      //   já mandou cancela, como sempre foi. São 516 mensagens de backlog de 20/08
+      //   esperando outubro nesta fila: afrouxar a regra delas por tabela mandaria
+      //   apresentação para quem já conversou, e ninguém pediu isso.
+      const ehFormularioFresco = item.source === 'leadform' || item.source === 'sweep_leadform'
+      let qEntrou = admin
         .from('interactions')
         .select('id')
         .eq('lead_id', item.lead_id ?? '')
         .eq('direction', 'in')
         .eq('channel', 'whatsapp')
-        .limit(1)
-        .maybeSingle()
+      if (ehFormularioFresco) qEntrou = qEntrou.gte('created_at', item.created_at ?? item.scheduled_at)
+      const { data: entrou } = await qEntrou.limit(1).maybeSingle()
       if (entrou) {
         await marcar({ status: 'canceled', last_reason: 'a pessoa escreveu antes' })
         out.recusados++
