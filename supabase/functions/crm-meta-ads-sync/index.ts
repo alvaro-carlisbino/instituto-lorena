@@ -675,6 +675,141 @@ async function extratoDaConta(token: string, dias: number) {
   }
 }
 
+/** Estados do Nordeste e do Norte. A clínica opera em Maringá e Londrina; a
+ * cirurgia é presencial em Maringá de qualquer jeito. Em 60 dias, 104 leads
+ * vieram destes DDDs e deram ZERO venda e ZERO agendamento (o Norte teve 2
+ * agendamentos, nenhum virou cirurgia), contra 78 vendas em 927 leads do Paraná. */
+const ESTADOS_BARRADOS = [
+  'Maranhão', 'Piauí', 'Ceará', 'Rio Grande do Norte', 'Paraíba', 'Pernambuco',
+  'Alagoas', 'Sergipe', 'Bahia',
+  'Acre', 'Amapá', 'Amazonas', 'Pará', 'Rondônia', 'Roraima', 'Tocantins',
+]
+
+const semAcento = (s: string) =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+
+/** Resolve o `key` numérico que a Meta usa para cada estado. */
+async function chavesDosEstados(token: string): Promise<Array<{ key: string; nome: string }>> {
+  const achados: Array<{ key: string; nome: string }> = []
+  for (const nome of ESTADOS_BARRADOS) {
+    const qs = new URLSearchParams({
+      type: 'adgeolocation',
+      location_types: JSON.stringify(['region']),
+      country_code: 'BR',
+      q: nome,
+      limit: '10',
+      access_token: token,
+    })
+    const r = await fetch(`${GRAPH}/search?${qs}`)
+    const b = await r.json() as { data?: Array<Record<string, string>> }
+    const hit = (b.data ?? []).find((x) =>
+      String(x.country_code ?? '') === 'BR' && semAcento(String(x.name ?? '')) === semAcento(nome)
+    )
+    if (hit) achados.push({ key: String(hit.key), nome })
+    await new Promise((r) => setTimeout(r, 60))
+  }
+  return achados
+}
+
+/**
+ * geo — para de pagar por lead que a clínica não consegue atender.
+ *
+ * Os conjuntos de remarketing miram o BRASIL inteiro. Excluir região é melhor
+ * que trocar para "só Paraná": São Paulo deu 7 vendas em 201 leads e não pode
+ * cair junto. Então a mudança é cirúrgica — entra `excluded_geo_locations`, o
+ * resto do targeting volta INTEIRO como estava.
+ *
+ * PEGADINHA (mordeu em 25/08): ao reescrever `targeting` pela API, dropar
+ * `targeting_automation` derruba o conjunto em HARD_ERROR "Invalid Optimization
+ * Goal". Por isso aqui o objeto é lido, recebe uma chave a mais, e volta como
+ * veio. Depois de todo POST confere `effective_status` e `issues_info`.
+ */
+async function barrarGeo(token: string, barrar: boolean, dry: boolean) {
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  const qs = new URLSearchParams({
+    fields: 'id,name,effective_status,campaign{id,name},targeting',
+    effective_status: JSON.stringify(['ACTIVE', 'PENDING_REVIEW', 'IN_PROCESS']),
+    limit: '100',
+    access_token: token,
+  })
+  const res = await fetch(`${GRAPH}/${conta}/adsets?${qs}`)
+  const body = await res.json() as Record<string, unknown>
+  if (!res.ok) return { ok: false, erro: body }
+
+  const conjuntos = (body.data ?? []) as Array<Record<string, unknown>>
+  const leitura = conjuntos.map((c) => {
+    const t = (c.targeting ?? {}) as Record<string, unknown>
+    const geo = (t.geo_locations ?? {}) as Record<string, unknown>
+    const ex = (t.excluded_geo_locations ?? {}) as Record<string, unknown>
+    return {
+      id: String(c.id ?? ''),
+      nome: String(c.name ?? ''),
+      campanha: String((c.campaign as Record<string, string> | undefined)?.name ?? ''),
+      status: String(c.effective_status ?? ''),
+      paises: (geo.countries ?? []) as string[],
+      regioes: ((geo.regions ?? []) as Array<Record<string, string>>).map((r) => r.name ?? r.key),
+      cidades: ((geo.cities ?? []) as Array<Record<string, string>>).map((r) => r.name ?? r.key),
+      ja_excluidas: ((ex.regions ?? []) as Array<Record<string, string>>).map((r) => r.name ?? r.key),
+    }
+  })
+  if (!barrar) return { ok: true, conjuntos: leitura }
+
+  const estados = await chavesDosEstados(token)
+  if (estados.length < ESTADOS_BARRADOS.length) {
+    return { ok: false, erro: 'nem todo estado resolveu chave', achados: estados.map((e) => e.nome) }
+  }
+
+  // Só mexe em conjunto que mira o Brasil inteiro. Conjunto por raio (Maringá e
+  // Londrina 50km) já não alcança o Nordeste, e editar à toa reinicia aprendizado.
+  const alvos = conjuntos.filter((c) => {
+    const t = (c.targeting ?? {}) as Record<string, unknown>
+    const geo = (t.geo_locations ?? {}) as Record<string, unknown>
+    return ((geo.countries ?? []) as string[]).includes('BR')
+  })
+
+  if (dry) {
+    return {
+      ok: true, dry: true,
+      estados: estados.map((e) => e.nome),
+      alvos: alvos.map((c) => ({ id: String(c.id), nome: String(c.name) })),
+      intactos: conjuntos.filter((c) => !alvos.includes(c)).map((c) => String(c.name)),
+    }
+  }
+
+  const feitos: Array<Record<string, unknown>> = []
+  for (const c of alvos) {
+    const id = String(c.id ?? '')
+    const t = { ...(c.targeting ?? {}) as Record<string, unknown> }
+    const exAtual = { ...(t.excluded_geo_locations ?? {}) as Record<string, unknown> }
+    const jaTem = new Set(((exAtual.regions ?? []) as Array<Record<string, string>>).map((r) => String(r.key)))
+    exAtual.regions = [
+      ...((exAtual.regions ?? []) as Array<Record<string, string>>),
+      ...estados.filter((e) => !jaTem.has(e.key)).map((e) => ({ key: e.key })),
+    ]
+    t.excluded_geo_locations = exAtual
+
+    const post = await fetch(`${GRAPH}/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targeting: t, access_token: token }),
+    })
+    const pb = await post.json() as Record<string, unknown>
+    if (!post.ok) { feitos.push({ id, nome: String(c.name), ok: false, erro: pb }); continue }
+
+    // Conjunto que volta ACTIVE mas com issues_info é conjunto quebrado calado.
+    const conf = await fetch(
+      `${GRAPH}/${id}?fields=name,effective_status,issues_info&access_token=${encodeURIComponent(token)}`,
+    )
+    const cb = await conf.json() as Record<string, unknown>
+    feitos.push({
+      id, nome: String(c.name), ok: true,
+      status: cb.effective_status ?? '?',
+      issues: cb.issues_info ?? null,
+    })
+  }
+  return { ok: true, estados_barrados: estados.length, conjuntos: feitos }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -704,6 +839,10 @@ Deno.serve(async (req) => {
     if (action === 'capi') return json(await enviarCapi(admin, token, Number(corpo.dias ?? 6)))
     if (action === 'anuncios') return json(await inspecionarAnuncios(token, String((corpo as Record<string, unknown>).ad_id ?? '')))
     if (action === 'extrato') return json(await extratoDaConta(token, Number(corpo.dias ?? 7)))
+    if (action === 'geo') {
+      const c = corpo as Record<string, unknown>
+      return json(await barrarGeo(token, c.barrar === true, c.dry !== false))
+    }
     if (action === 'atribuir') {
       const c = corpo as Record<string, unknown>
       return json(await atribuirLeadform(admin, token, Number(corpo.dias ?? 30), c.dry === true))
