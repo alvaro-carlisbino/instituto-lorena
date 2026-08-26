@@ -526,6 +526,32 @@ async function atribuirLeadform(
 }
 
 /**
+ * Leitura crua da Graph, com a disciplina que o extrato já usava: a Meta
+ * responde "temporarily unavailable" quando as chamadas saem coladas, e isso
+ * não é erro de parâmetro. Erro que sobra vai para `erros`, não derruba.
+ */
+async function graphLer(
+  token: string,
+  caminho: string,
+  params: Record<string, string>,
+  erros: string[],
+) {
+  const qs = new URLSearchParams({ ...params, access_token: token })
+  let j: { data?: Array<Record<string, unknown>>; error?: { message?: string } } = {}
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    const res = await fetch(`${GRAPH}/${caminho}?${qs}`)
+    j = await res.json()
+    if (!j.error) break
+    const transitorio = /temporarily unavailable|rate limit|try again|reduce the amount/i
+      .test(String(j.error.message ?? ''))
+    if (!transitorio || tentativa === 3) break
+    await new Promise((r) => setTimeout(r, tentativa * 4000))
+  }
+  if (j.error) { erros.push(`${caminho}: ${j.error.message}`); return [] }
+  return (j.data ?? []) as Array<Record<string, unknown>>
+}
+
+/**
  * Leitura de extrato: a conta inteira numa resposta só, do jeito que a equipe
  * pergunta — "quais campanhas estão ativas, quanto está indo por dia, e para
  * quem". Só lê.
@@ -542,21 +568,7 @@ async function extratoDaConta(token: string, dias: number) {
   // Mesma disciplina do puxarInsights: a Meta responde "temporarily
   // unavailable" quando as chamadas saem coladas. Não é erro de parâmetro.
   const erros: string[] = []
-  async function g(caminho: string, params: Record<string, string>) {
-    const qs = new URLSearchParams({ ...params, access_token: token })
-    let j: { data?: Array<Record<string, unknown>>; error?: { message?: string } } = {}
-    for (let tentativa = 1; tentativa <= 3; tentativa++) {
-      const res = await fetch(`${GRAPH}/${caminho}?${qs}`)
-      j = await res.json()
-      if (!j.error) break
-      const transitorio = /temporarily unavailable|rate limit|try again|reduce the amount/i
-        .test(String(j.error.message ?? ''))
-      if (!transitorio || tentativa === 3) break
-      await new Promise((r) => setTimeout(r, tentativa * 4000))
-    }
-    if (j.error) { erros.push(`${caminho}: ${j.error.message}`); return [] }
-    return (j.data ?? []) as Array<Record<string, unknown>>
-  }
+  const g = (caminho: string, params: Record<string, string>) => graphLer(token, caminho, params, erros)
 
   const reais = (centavos: unknown) => Math.round(Number(centavos ?? 0)) / 100
   function contar(r: Record<string, unknown>) {
@@ -675,6 +687,116 @@ async function extratoDaConta(token: string, dias: number) {
   }
 }
 
+const semAcento = (s: string) =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+
+/** Estado -> macrorregião. PEGADINHA: a Meta devolve o nome COM acento e às
+ * vezes com sufixo ("São Paulo (state)", "Acre (state)"), e o Distrito Federal
+ * vem em inglês. Por isso a chave é o nome normalizado, não o cru. */
+const MACRO: Record<string, string> = Object.fromEntries([
+  ...['maranhao', 'piaui', 'ceara', 'rio grande do norte', 'paraiba', 'pernambuco',
+    'alagoas', 'sergipe', 'bahia'].map((e) => [e, 'NORDESTE']),
+  ...['acre', 'amapa', 'amazonas', 'para', 'rondonia', 'roraima', 'tocantins']
+    .map((e) => [e, 'NORTE']),
+  ...['parana'].map((e) => [e, 'PARANA']),
+  ...['santa catarina', 'rio grande do sul'].map((e) => [e, 'SUL (SC/RS)']),
+  ...['sao paulo'].map((e) => [e, 'SAO PAULO']),
+  ...['rio de janeiro', 'minas gerais', 'espirito santo'].map((e) => [e, 'SUDESTE (RJ/MG/ES)']),
+  ...['goias', 'distrito federal', 'federal district', 'mato grosso', 'mato grosso do sul']
+    .map((e) => [e, 'CENTRO-OESTE']),
+])
+
+/** "São Paulo (state)" -> "sao paulo". */
+const chaveDoEstado = (nome: string) =>
+  semAcento(String(nome).replace(/\s*\(state\)\s*$/i, ''))
+
+/** Fora do Brasil não é macrorregião nenhuma — é verba vazando. */
+const macroDe = (pais: string, estado: string) =>
+  pais && pais !== 'BR' ? `EXTERIOR (${pais})` : (MACRO[chaveDoEstado(estado)] ?? 'BR - OUTRO')
+
+/**
+ * entrega — a conta responde ONDE o dinheiro caiu, por região.
+ *
+ * `geo` lê o targeting, que é a intenção. Esta lê a entrega, que é o fato: o
+ * conjunto pode mirar "Brasil menos 16 estados" e ainda assim gastar 40% em
+ * praça que nunca comprou. Sem esta quebra, "nosso tráfego pega onde?" só tem
+ * resposta de palpite. Só lê.
+ */
+async function entregaPorRegiao(token: string, dias: number) {
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  const ate = new Date()
+  const desde = new Date(ate.getTime() - Math.max(dias, 1) * 86400_000)
+  const janela = { since: desde.toISOString().slice(0, 10), until: ate.toISOString().slice(0, 10) }
+  const erros: string[] = []
+
+  const num = (r: Record<string, unknown>) => {
+    const acoes = (r.actions ?? []) as Array<{ action_type: string; value: string }>
+    const m = new Map(acoes.map((a) => [a.action_type, Number(a.value)]))
+    return {
+      gasto: Number(Number(r.spend ?? 0).toFixed(2)),
+      impressoes: Number(r.impressions ?? 0),
+      cliques: Number(r.clicks ?? 0),
+      leads: (m.get('lead') ?? 0) + (m.get('leadgen.other') ?? 0) +
+        (m.get('offsite_conversion.fb_pixel_lead') ?? 0),
+      conversas: m.get('onsite_conversion.messaging_conversation_started_7d') ?? 0,
+    }
+  }
+
+  const campos = 'spend,impressions,clicks,actions'
+  const base = { time_range: JSON.stringify(janela), fields: campos, limit: '500' }
+
+  const porRegiao = await graphLer(token, `${conta}/insights`,
+    { ...base, level: 'account', breakdowns: 'country,region' }, erros)
+  const porPais = await graphLer(token, `${conta}/insights`,
+    { ...base, level: 'account', breakdowns: 'country' }, erros)
+  const porCampanha = await graphLer(token, `${conta}/insights`,
+    { ...base, level: 'campaign', fields: `campaign_name,${campos}`, breakdowns: 'country,region' }, erros)
+
+  const estados = porRegiao.map((r) => ({
+    estado: String(r.region ?? '?'),
+    pais: String(r.country ?? '?'),
+    macro: macroDe(String(r.country ?? ''), String(r.region ?? '')),
+    ...num(r),
+  })).sort((a, b) => b.gasto - a.gasto)
+
+  const macro = new Map<string, { gasto: number; impressoes: number; cliques: number; leads: number; conversas: number }>()
+  for (const e of estados) {
+    const t = macro.get(e.macro) ?? { gasto: 0, impressoes: 0, cliques: 0, leads: 0, conversas: 0 }
+    macro.set(e.macro, {
+      gasto: t.gasto + e.gasto, impressoes: t.impressoes + e.impressoes,
+      cliques: t.cliques + e.cliques, leads: t.leads + e.leads, conversas: t.conversas + e.conversas,
+    })
+  }
+  const total = [...macro.values()].reduce((t, m) => t + m.gasto, 0)
+
+  return {
+    ok: true,
+    conta,
+    janela,
+    gasto_total: Number(total.toFixed(2)),
+    por_macrorregiao: [...macro.entries()]
+      .map(([regiao, m]) => ({
+        regiao,
+        gasto: Number(m.gasto.toFixed(2)),
+        fatia: total ? `${((m.gasto / total) * 100).toFixed(1)}%` : '0%',
+        impressoes: m.impressoes, cliques: m.cliques, leads: m.leads, conversas: m.conversas,
+      }))
+      .sort((a, b) => b.gasto - a.gasto),
+    por_estado: estados,
+    // Sobrou verba fora do Brasil? Lisboa, Miami, Orlando, Paris e Dubai saíram
+    // do targeting em 25/08; aqui é a conferência de que saíram mesmo.
+    por_pais: porPais.map((r) => ({ pais: String(r.country ?? '?'), ...num(r) }))
+      .sort((a, b) => b.gasto - a.gasto),
+    por_campanha_e_estado: porCampanha.map((r) => ({
+      campanha: String(r.campaign_name ?? ''),
+      estado: String(r.region ?? '?'),
+      macro: macroDe(String(r.country ?? ''), String(r.region ?? '')),
+      ...num(r),
+    })).filter((r) => r.gasto > 0).sort((a, b) => b.gasto - a.gasto),
+    erros,
+  }
+}
+
 /** Estados do Nordeste e do Norte. A clínica opera em Maringá e Londrina; a
  * cirurgia é presencial em Maringá de qualquer jeito. Em 60 dias, 104 leads
  * vieram destes DDDs e deram ZERO venda e ZERO agendamento (o Norte teve 2
@@ -684,9 +806,6 @@ const ESTADOS_BARRADOS = [
   'Alagoas', 'Sergipe', 'Bahia',
   'Acre', 'Amapá', 'Amazonas', 'Pará', 'Rondônia', 'Roraima', 'Tocantins',
 ]
-
-const semAcento = (s: string) =>
-  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
 
 /** Resolve o `key` numérico que a Meta usa para cada estado. */
 async function chavesDosEstados(token: string): Promise<Array<{ key: string; nome: string }>> {
@@ -748,7 +867,10 @@ async function barrarGeo(token: string, barrar: boolean, dry: boolean) {
       status: String(c.effective_status ?? ''),
       paises: (geo.countries ?? []) as string[],
       regioes: ((geo.regions ?? []) as Array<Record<string, string>>).map((r) => r.name ?? r.key),
-      cidades: ((geo.cities ?? []) as Array<Record<string, string>>).map((r) => r.name ?? r.key),
+      // Cidade sem raio não responde a pergunta: "Maringá" pode ser 17km ou 80km.
+      cidades: ((geo.cities ?? []) as Array<Record<string, unknown>>).map((r) =>
+        `${r.name ?? r.key}${r.radius ? ` ${r.radius}${r.distance_unit ?? 'km'}` : ''}`
+      ),
       ja_excluidas: ((ex.regions ?? []) as Array<Record<string, string>>).map((r) => r.name ?? r.key),
     }
   })
@@ -839,6 +961,7 @@ Deno.serve(async (req) => {
     if (action === 'capi') return json(await enviarCapi(admin, token, Number(corpo.dias ?? 6)))
     if (action === 'anuncios') return json(await inspecionarAnuncios(token, String((corpo as Record<string, unknown>).ad_id ?? '')))
     if (action === 'extrato') return json(await extratoDaConta(token, Number(corpo.dias ?? 7)))
+    if (action === 'entrega') return json(await entregaPorRegiao(token, Number(corpo.dias ?? 30)))
     if (action === 'geo') {
       const c = corpo as Record<string, unknown>
       return json(await barrarGeo(token, c.barrar === true, c.dry !== false))
@@ -857,7 +980,7 @@ Deno.serve(async (req) => {
         mensagem: String(c.mensagem ?? ''),
       }))
     }
-    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'extrato', 'atribuir', 'reamarrar_form'] }, 400)
+    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'extrato', 'entrega', 'geo', 'atribuir', 'reamarrar_form'] }, 400)
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
