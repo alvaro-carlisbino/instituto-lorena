@@ -422,6 +422,109 @@ async function reamarrarFormulario(
   return { ok: true, anuncio: opts.adId, criativo_novo: criativoBody.id, image_hash: hash, formulario: opts.formId }
 }
 
+/**
+ * atribuir — o formulário SABE de qual anúncio veio; quem não conseguia
+ * perguntar era o webhook.
+ *
+ * `GET /{leadgen_id}?fields=ad_id,adset_id,campaign_id` devolve **200 e omite os
+ * três campos** quando quem pergunta é o token de PÁGINA (que só tem
+ * `leads_retrieval`). Não dá erro, não avisa: o campo simplesmente some da
+ * resposta. Conferido em 26/08/2026 no leadgen 1044515165234922, que voltou com
+ * `is_organic:false` — veio de anúncio — e nenhum id de anúncio junto.
+ *
+ * O estrago: `v_ads_campanha_ate_venda` casa gasto com resultado por
+ * `attribution_campaign`. Com esse campo nulo, TODO lead de formulário ficava
+ * fora da conta — 105 leads pagos em 14 dias que o painel de ROI não enxergava.
+ *
+ * Aqui quem pergunta é o token de ANÚNCIOS (system user, `ads_read`), que
+ * enxerga os três. Roda pelo cron e é idempotente: só olha lead que ainda está
+ * sem campanha, então passar duas vezes não reescreve nada.
+ */
+async function atribuirLeadform(
+  admin: SupabaseClient,
+  token: string,
+  dias: number,
+  dry: boolean,
+) {
+  const desde = new Date(Date.now() - Math.max(1, dias) * 86_400_000).toISOString()
+
+  // PostgREST corta em 1.000 linhas e não avisa (já mordeu na carga de público).
+  // Paginar de 500 em 500 e dizer no fim se sobrou fila.
+  const pendentes: Array<{ id: string; leadgenId: string; atr: Record<string, unknown> }> = []
+  for (let pagina = 0; pagina < 8; pagina++) {
+    const de = pagina * 500
+    const { data, error } = await admin
+      .from('leads')
+      .select('id, attribution')
+      .eq('tenant_id', 'instituto-lorena')
+      .is('deleted_at', null)
+      .is('attribution_campaign', null)
+      .not('attribution', 'is', null)
+      .gte('created_at', desde)
+      .order('created_at', { ascending: false })
+      .range(de, de + 499)
+    if (error) throw new Error(error.message)
+    const linhas = (data ?? []) as Array<Record<string, unknown>>
+    for (const l of linhas) {
+      const atr = (l.attribution ?? {}) as Record<string, unknown>
+      const lg = String(atr.leadgen_id ?? '').trim()
+      if (lg) pendentes.push({ id: String(l.id), leadgenId: lg, atr })
+    }
+    if (linhas.length < 500) break
+  }
+
+  if (dry) return { ok: true, dry: true, pendentes: pendentes.length, amostra: pendentes.slice(0, 5) }
+
+  let carimbados = 0
+  let semAnuncio = 0
+  const erros: string[] = []
+
+  for (const p of pendentes) {
+    try {
+      const qs = new URLSearchParams({
+        fields: 'ad_id,adset_id,campaign_id,is_organic',
+        access_token: token,
+      })
+      const res = await fetch(`${GRAPH}/${p.leadgenId}?${qs}`)
+      const body = await res.json() as Record<string, unknown>
+      if (!res.ok) {
+        if (erros.length < 5) erros.push(`${p.leadgenId}: ${JSON.stringify(body).slice(0, 200)}`)
+        continue
+      }
+      const campanha = String(body.campaign_id ?? '').trim()
+      const anuncio = String(body.ad_id ?? '').trim()
+      // Lead orgânico (formulário aberto por um post, não por anúncio) não tem
+      // campanha e não é erro: contar à parte para não virar "falhou".
+      if (!campanha && !anuncio) { semAnuncio++; continue }
+
+      const conjunto = String(body.adset_id ?? '').trim()
+      const { error } = await admin
+        .from('leads')
+        .update({
+          attribution_campaign: campanha || null,
+          attribution_ad_id: anuncio || null,
+          attribution: {
+            ...p.atr,
+            campaign_id: campanha || null,
+            ad_id: anuncio || null,
+            adset_id: conjunto || null,
+            campanha_recuperada_em: new Date().toISOString(),
+          },
+        })
+        .eq('id', p.id)
+      if (error) { if (erros.length < 5) erros.push(`${p.id}: ${error.message}`); continue }
+      carimbados++
+    } catch (e) {
+      if (erros.length < 5) erros.push(`${p.leadgenId}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    // A Graph aguenta bem mais que isso, mas o teto de 100 req/min já queimou
+    // a Focus antes; 80ms deixa a rotina em ~12 req/s e ninguém reclama.
+    await new Promise((r) => setTimeout(r, 80))
+  }
+
+  return { ok: true, pendentes: pendentes.length, carimbados, sem_anuncio: semAnuncio, erros }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -450,6 +553,10 @@ Deno.serve(async (req) => {
     if (action === 'insights') return json(await puxarInsights(admin, token, Number(corpo.dias ?? 7)))
     if (action === 'capi') return json(await enviarCapi(admin, token, Number(corpo.dias ?? 6)))
     if (action === 'anuncios') return json(await inspecionarAnuncios(token, String((corpo as Record<string, unknown>).ad_id ?? '')))
+    if (action === 'atribuir') {
+      const c = corpo as Record<string, unknown>
+      return json(await atribuirLeadform(admin, token, Number(corpo.dias ?? 30), c.dry === true))
+    }
     if (action === 'reamarrar_form') {
       const c = corpo as Record<string, unknown>
       return json(await reamarrarFormulario(token, {
@@ -460,7 +567,7 @@ Deno.serve(async (req) => {
         mensagem: String(c.mensagem ?? ''),
       }))
     }
-    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'reamarrar_form'] }, 400)
+    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'atribuir', 'reamarrar_form'] }, 400)
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

@@ -26,7 +26,10 @@ import { fetchAnalyticsV2, type AnalyticsV2 } from '@/services/analytics'
 
 const SOURCE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: 'Todas as origens' },
-  { value: 'meta_whatsapp', label: 'WhatsApp (ManyChat)' },
+  // O ManyChat saiu do caminho em 19/08/2026: de lá para cá todo lead de
+  // WhatsApp nasce como 'whatsapp'. 'meta_whatsapp' só existe no histórico, e
+  // o rótulo precisa dizer isso — senão a origem parece ter morrido.
+  { value: 'meta_whatsapp', label: 'WhatsApp via Meta (histórico, até 19/08)' },
   { value: 'whatsapp', label: 'WhatsApp (W-API)' },
   { value: 'meta_instagram', label: 'Instagram' },
   { value: 'meta_facebook', label: 'Facebook' },
