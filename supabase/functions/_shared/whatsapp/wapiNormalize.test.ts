@@ -12,7 +12,7 @@
 // caminho quente das duas linhas em produção e não pode mudar de comportamento.
 
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { WapiProvider } from './wapi.ts'
+import { extractInboundEdit, extractInboundRevoke, WapiProvider } from './wapi.ts'
 
 const provider = new WapiProvider({
   baseUrl: '',
@@ -115,4 +115,67 @@ Deno.test('saída só com mídia: marcador entra, mensagem não se perde', () =>
   assertEquals(n?.direction, 'out')
   assertEquals(n?.fromPhone, PACIENTE)
   assertEquals(n?.text, '📷 Imagem')
+})
+
+// ── Edição vinda de fora (26/ago/26) ─────────────────────────────────────────
+// A pessoa corrige a própria mensagem no telemóvel e o CRM continuava a mostrar a frase
+// antiga: o evento não tem texto no sítio do costume, `normalizeInbound` devolvia null e
+// ele morria no "event skipped". Quem responde lê o texto errado sem saber que é errado.
+// O embrulho muda conforme quem serializa, por isso o extrator aceita mais de um formato.
+
+Deno.test('edição: protocolMessage direto no msgContent', () => {
+  const evento = {
+    msgContent: {
+      protocolMessage: {
+        key: { id: 'ALVO123' },
+        type: 'MESSAGE_EDIT',
+        editedMessage: { conversation: 'por pombo correio' },
+      },
+    },
+  }
+  assertEquals(extractInboundEdit(evento), { targetMessageId: 'ALVO123', text: 'por pombo correio' })
+})
+
+Deno.test('edição: embrulhada em editedMessage.message', () => {
+  const evento = {
+    msgcontent: {
+      editedMessage: {
+        message: {
+          protocolMessage: {
+            key: { id: 'ALVO456' },
+            type: 14,
+            editedMessage: { message: { conversation: 'texto corrigido' } },
+          },
+        },
+      },
+    },
+  }
+  assertEquals(extractInboundEdit(evento), { targetMessageId: 'ALVO456', text: 'texto corrigido' })
+})
+
+Deno.test('edição: texto longo chega por extendedTextMessage', () => {
+  const evento = {
+    msgContent: {
+      protocolMessage: {
+        key: { id: 'ALVO789' },
+        editedMessage: { extendedTextMessage: { text: 'agora com link https://a.b' } },
+      },
+    },
+  }
+  assertEquals(extractInboundEdit(evento), {
+    targetMessageId: 'ALVO789',
+    text: 'agora com link https://a.b',
+  })
+})
+
+Deno.test('apagar para todos não é confundido com edição', () => {
+  const revoke = {
+    msgContent: { protocolMessage: { key: { id: 'ALVO000' }, type: 'REVOKE' } },
+  }
+  assertEquals(extractInboundEdit(revoke), null)
+  assertEquals(extractInboundRevoke(revoke), { targetMessageId: 'ALVO000' })
+})
+
+Deno.test('mensagem normal não vira edição', () => {
+  assertEquals(extractInboundEdit(payload({ msgContent: { conversation: 'oi' } })), null)
 })

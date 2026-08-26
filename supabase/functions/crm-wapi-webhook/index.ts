@@ -23,6 +23,7 @@ import {
   extractInboundMedia,
   extractInboundReaction,
   extractInboundReplyTo,
+  extractInboundEdit,
   extractInboundRevoke,
   isMediaOnlyMarker,
   WapiProvider,
@@ -189,6 +190,28 @@ Deno.serve(async (req) => {
       return json({ ok: true, event: 'reaction', target: reacao.targetMessageId, emoji: reacao.emoji }, 202)
     }
 
+    // Antes do revoke: uma edição também é `protocolMessage`, e quem chegar primeiro decide.
+    const editada = extractInboundEdit(cru)
+    if (editada) {
+      const { data: alvo } = await admin
+        .from('interactions')
+        .select('id, lead_id')
+        .eq('external_message_id', editada.targetMessageId)
+        .maybeSingle()
+      if (alvo) {
+        await admin
+          .from('interactions')
+          .update({ content: editada.text, edited_at: new Date().toISOString() })
+          .eq('id', alvo.id)
+        // Cutuca o realtime de `leads` para o texto novo aparecer sem esperar o poll.
+        await admin.from('leads').update({ updated_at: new Date().toISOString() }).eq('id', alvo.lead_id)
+      }
+      return json(
+        { ok: true, event: 'edit', target: editada.targetMessageId, applied: Boolean(alvo) },
+        202,
+      )
+    }
+
     const revogada = extractInboundRevoke(cru)
     if (revogada) {
       await admin
@@ -205,7 +228,9 @@ Deno.serve(async (req) => {
 
   const normalized = provider.normalizeInbound(payload, req.headers)
   if (!normalized) {
-    console.log('[wapi-webhook] event skipped:', String(payload.event ?? 'unknown'), JSON.stringify(payload).slice(0, 200))
+    // 200 caracteres escondiam justamente o miolo do evento que ainda não sabemos tratar
+    // (foi assim com a edição, 26/ago/26): o que não cabe aqui vira adivinhação depois.
+    console.log('[wapi-webhook] event skipped:', String(payload.event ?? 'unknown'), JSON.stringify(payload).slice(0, 2000))
     return json({ ok: true, skipped: 'event_not_supported' }, 202)
   }
 

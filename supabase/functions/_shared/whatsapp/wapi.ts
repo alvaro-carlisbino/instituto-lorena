@@ -43,6 +43,40 @@ function safeString(value: unknown): string {
   return String(value)
 }
 
+/**
+ * Leitura HONESTA do campo `error` de uma resposta da W-API. Ele vem de duas formas:
+ *  • TEXTO com o motivo — `{"error":"instância desconectada"}`
+ *  • BANDEIRA booleana com o motivo noutro campo — `{"error":true,"message":"…"}`
+ *
+ * Tratar a bandeira como texto custou duas vezes no mesmo dia (26/ago/26): ao apagar uma
+ * mensagem o CRM mostrava **"true"** no lugar do motivo (`String(true)`), e um `error:false`
+ * de sucesso viraria a string "false", que é TRUTHY — ou seja, uma ação que funcionou seria
+ * reportada como falha. Quem lê a resposta chama isto, e nunca `safeString(...error)`.
+ */
+function leituraDeErroWapi(
+  dataCru: unknown,
+  raw = '',
+  status = 0,
+): { falhou: boolean; motivo: string } {
+  const data = (dataCru ?? {}) as Record<string, unknown>
+  const bruto = getByPath(data, 'error') ?? getByPath(data, 'data.error')
+  const comoTexto = typeof bruto === 'string' ? bruto.trim() : ''
+  const ehBandeira = bruto === true || comoTexto.toLowerCase() === 'true'
+  const negativa = bruto === false || comoTexto.toLowerCase() === 'false'
+  // Texto que não seja só a bandeira escrita por extenso já é o motivo.
+  const motivoDireto = negativa || ehBandeira ? '' : comoTexto
+  const falhou = ehBandeira || Boolean(motivoDireto)
+  if (!falhou) return { falhou: false, motivo: '' }
+  const motivo =
+    motivoDireto ||
+    safeString(getByPath(data, 'message')) ||
+    safeString(getByPath(data, 'message_error')) ||
+    safeString(getByPath(data, 'errorMessage')) ||
+    raw.slice(0, 200) ||
+    (status ? `http_${status}` : 'erro sem motivo')
+  return { falhou: true, motivo }
+}
+
 function getByPath(obj: Record<string, unknown>, path: string): unknown {
   const parts = path.split('.').filter(Boolean)
   let cur: unknown = obj
@@ -460,18 +494,14 @@ export class WapiProvider implements WhatsappProvider {
       throw new Error(`wapi_${rota}_failed_${res.status}: ${responseText.slice(0, 200)}`)
     }
 
-    const apiError =
-      safeString(getByPath(parsed, 'error')) ||
-      safeString(getByPath(parsed, 'errorMessage')) ||
-      safeString(getByPath(parsed, 'data.error')) ||
-      safeString(getByPath(parsed, 'message_error'))
+    const leitura = leituraDeErroWapi(parsed, responseText, res.status)
     const apiStatusRaw = safeString(
       getByPath(parsed, 'status') ?? getByPath(parsed, 'data.status') ?? '',
     ).toLowerCase()
     const successFlagRaw = getByPath(parsed, 'success') ?? getByPath(parsed, 'data.success')
     const successFlagFalse = successFlagRaw === false || String(successFlagRaw).toLowerCase() === 'false'
-    if (apiError || apiStatusRaw === 'error' || apiStatusRaw === 'failed' || successFlagFalse) {
-      const detail = apiError || apiStatusRaw || 'unknown_api_error'
+    if (leitura.falhou || apiStatusRaw === 'error' || apiStatusRaw === 'failed' || successFlagFalse) {
+      const detail = leitura.motivo || apiStatusRaw || 'unknown_api_error'
       await this.devolverCota(logId, detail)
       throw new Error(`wapi_${rota}_failed_api: ${detail} | body=${responseText.slice(0, 200)}`)
     }
@@ -990,6 +1020,8 @@ export class WapiProvider implements WhatsappProvider {
   // ── Ações sobre mensagens que JÁ existem ────────────────────────────────────
   // Nenhuma passa pela guarda anti-ban: reagir, apagar e editar não são mensagem nova
   // saindo para o número — não gastam cota nem contam para o teto do dia.
+  //
+  // Todas leem a resposta por `leituraDeErroWapi`, e não à mão: ver o comentário de lá.
 
   /** Emoji na bolha. Reagir de novo com outro emoji TROCA (é assim no WhatsApp). */
   async sendReaction(phone: string, messageId: string, reaction: string): Promise<boolean> {
@@ -998,7 +1030,7 @@ export class WapiProvider implements WhatsappProvider {
       messageId,
       reaction,
     })
-    return res.ok && !safeString(getByPath(res.data, 'error'))
+    return res.ok && !leituraDeErroWapi(res.data).falhou
   }
 
   /** Tira a reação. */
@@ -1007,7 +1039,7 @@ export class WapiProvider implements WhatsappProvider {
       phone: digitsOnly(phone),
       messageId,
     })
-    return res.ok && !safeString(getByPath(res.data, 'error'))
+    return res.ok && !leituraDeErroWapi(res.data).falhou
   }
 
   /**
@@ -1027,16 +1059,12 @@ export class WapiProvider implements WhatsappProvider {
       phone: to,
       messageId,
     })
-    const erro =
-      safeString(getByPath(res.data, 'error')) ||
-      safeString(getByPath(res.data, 'message_error')) ||
-      safeString(getByPath(res.data, 'data.error'))
-    const errorFlag = getByPath(res.data, 'error') === true
-    const ok = res.ok && !errorFlag && !(erro && erro !== 'false')
+    const leitura = leituraDeErroWapi(res.data, res.raw, res.status)
+    const ok = res.ok && !leitura.falhou
     return {
       ok,
       status: res.status,
-      detail: ok ? '' : erro || safeString(getByPath(res.data, 'message')) || res.raw.slice(0, 200) || `http_${res.status}`,
+      detail: ok ? '' : leitura.motivo || res.raw.slice(0, 200) || `http_${res.status}`,
     }
   }
 
@@ -1051,16 +1079,12 @@ export class WapiProvider implements WhatsappProvider {
       messageId,
       text,
     })
-    const erro =
-      safeString(getByPath(res.data, 'error')) ||
-      safeString(getByPath(res.data, 'message_error')) ||
-      safeString(getByPath(res.data, 'data.error'))
-    const errorFlag = getByPath(res.data, 'error') === true
-    const ok = res.ok && !errorFlag && !(erro && erro !== 'false')
+    const leitura = leituraDeErroWapi(res.data, res.raw, res.status)
+    const ok = res.ok && !leitura.falhou
     return {
       ok,
       status: res.status,
-      detail: ok ? '' : erro || safeString(getByPath(res.data, 'message')) || res.raw.slice(0, 200) || `http_${res.status}`,
+      detail: ok ? '' : leitura.motivo || res.raw.slice(0, 200) || `http_${res.status}`,
     }
   }
 
@@ -1435,6 +1459,48 @@ export function extractInboundReaction(
  * continuava a mostrar um texto que já não existe do outro lado — e a equipe respondia a
  * uma mensagem que a paciente já tinha retirado.
  */
+/**
+ * Mensagem EDITADA pelo contato no telemóvel dele. Não é mensagem nova: o WhatsApp manda um
+ * `protocolMessage` a apontar para a mensagem antiga com o texto novo dentro. Sem tratar
+ * isto, `normalizeInbound` devolve null (não há texto no sítio do costume), o evento é
+ * descartado e o CRM segue a mostrar a frase que a pessoa já corrigiu — o atendimento
+ * responde ao texto errado sem saber. Mesma família do buraco da reação e do apagar.
+ *
+ * O embrulho muda conforme quem serializa o evento, por isso procuramos o `protocolMessage`
+ * em vários sítios em vez de fixar um caminho.
+ */
+export function extractInboundEdit(
+  payload: Record<string, unknown>,
+): { targetMessageId: string; text: string } | null {
+  const mc = (payload?.msgContent ?? payload?.msgcontent ?? payload?.message ?? {}) as Record<string, unknown>
+  const candidatos: unknown[] = [
+    mc.protocolMessage,
+    getByPath(mc, 'editedMessage.message.protocolMessage'),
+    getByPath(mc, 'editedMessage.protocolMessage'),
+    getByPath(payload, 'message.protocolMessage'),
+    getByPath(payload, 'data.message.protocolMessage'),
+  ]
+  for (const candidato of candidatos) {
+    if (!candidato || typeof candidato !== 'object') continue
+    const proto = candidato as Record<string, unknown>
+    // MESSAGE_EDIT, ou o 14 do enum quando vem como número.
+    const tipo = safeString(proto.type ?? proto.protocolType).toUpperCase()
+    if (tipo && !tipo.includes('EDIT') && tipo !== '14') continue
+    const editada = proto.editedMessage as Record<string, unknown> | undefined
+    if (!editada || typeof editada !== 'object') continue
+    const texto = safeString(
+      getByPath(editada, 'conversation') ??
+        getByPath(editada, 'message.conversation') ??
+        getByPath(editada, 'extendedTextMessage.text') ??
+        getByPath(editada, 'message.extendedTextMessage.text') ??
+        '',
+    ).trim()
+    const targetMessageId = safeString(getByPath(proto, 'key.id')) || safeString(proto.messageId)
+    if (targetMessageId && texto) return { targetMessageId, text: texto }
+  }
+  return null
+}
+
 export function extractInboundRevoke(payload: Record<string, unknown>): { targetMessageId: string } | null {
   const mc = (payload?.msgContent ?? payload?.msgcontent ?? payload?.message ?? {}) as Record<string, unknown>
   const proto = mc.protocolMessage as Record<string, unknown> | undefined
