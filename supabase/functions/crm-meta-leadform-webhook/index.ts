@@ -671,6 +671,7 @@ Deno.serve(async (req) => {
         const formId = String(maybe.form_id ?? '')
         const leadgenId = String(maybe.leadgen_id ?? '')
         const adId = String(maybe.ad_id ?? '')
+        const postId = String(maybe.post_id ?? '')
         return json({
           me: await g('me?fields=id,name'),
           permissions: await g('me/permissions'),
@@ -684,6 +685,11 @@ Deno.serve(async (req) => {
           // quando um anúncio renomeado para "form qualificado" continuou entregando
           // lead no formulário antigo. O id do formulário mora no call_to_action do
           // criativo, não no anúncio nem no conjunto.
+          // O token de ANÚNCIO não lê post de página ("(#10) requires
+          // pages_read_engagement"), e o de página não lê anúncio. Quem precisa
+          // da imagem e do texto de um post é o lado de anúncios, então a leitura
+          // do post sai daqui, que é onde o token de página mora.
+          ...(postId ? { post: await g(`${postId}?fields=message,full_picture,permalink_url`) } : {}),
           ...(adId
             ? {
               ad: await g(

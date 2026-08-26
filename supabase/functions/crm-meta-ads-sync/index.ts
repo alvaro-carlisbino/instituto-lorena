@@ -283,7 +283,7 @@ async function inspecionarAnuncios(token: string, cru = '') {
     // Modo cru: um anúncio só, criativo inteiro. Serve para achar onde a Meta
     // escondeu o formulário quando o criativo veio de post existente.
     const qs = new URLSearchParams({
-      fields: 'id,name,effective_status,creative{id,name,object_story_id,effective_object_story_id,object_story_spec,asset_feed_spec,object_type,link_url,url_tags}',
+      fields: 'id,name,effective_status,creative{id,name,object_story_id,effective_object_story_id,object_story_spec,asset_feed_spec,object_type,link_url,url_tags,image_hash,image_url,thumbnail_url,body,title}',
       access_token: token,
     })
     const r = await fetch(`${GRAPH}/${cru}?${qs}`)
@@ -319,6 +319,109 @@ async function inspecionarAnuncios(token: string, cru = '') {
   return { ok: true, total: anuncios.length, anuncios }
 }
 
+/**
+ * Reamarra um anúncio de lead a OUTRO formulário.
+ *
+ * Existe por causa de 25/08/2026: o anúncio "form qualificado" continuava
+ * entregando no formulário de 3 campos porque ele é SHARE de um post, e o
+ * formulário de um post mora no botão do POST. Trocar o nome do anúncio, ou
+ * escolher o formulário na criação, não muda nada enquanto o criativo vier de
+ * post existente.
+ *
+ * O caminho que funciona é nascer criativo próprio: pega a imagem do post que
+ * o anúncio já usa (não adianta escolher no escuro entre as 40 imagens sem
+ * nome da conta), sobe como imagem de anúncio, monta o criativo com
+ * `lead_gen_form_id` e troca o criativo do anúncio.
+ *
+ * `dry: true` faz só a leitura e devolve o que achou, sem escrever nada.
+ */
+async function reamarrarFormulario(
+  token: string,
+  opts: { adId: string; formId: string; dry: boolean; imagemUrl?: string; mensagem?: string },
+) {
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  const g = async (path: string, params: Record<string, string> = {}) => {
+    const qs = new URLSearchParams({ ...params, access_token: token })
+    const r = await fetch(`${GRAPH}/${path}?${qs}`)
+    return { ok: r.ok, body: await r.json() as Record<string, unknown> }
+  }
+
+  const ad = await g(opts.adId, {
+    fields: 'id,name,adset_id,creative{id,effective_object_story_id,image_hash,body}',
+  })
+  if (!ad.ok) return { ok: false, passo: 'ler_anuncio', erro: ad.body }
+  const cr = (ad.body.creative ?? {}) as Record<string, string>
+
+  // ATALHO QUE RESOLVEU: mesmo em criativo do tipo SHARE, que não devolve
+  // `object_story_spec`, a Meta devolve `image_hash` e `body`. Ou seja, a
+  // imagem JÁ está na conta e o texto está à mão: não precisa ler o post (o
+  // token de anúncio não tem `pages_read_engagement`) nem escolher no escuro
+  // entre as 40 imagens sem nome da conta.
+  let hash = String(cr.image_hash ?? '')
+  const mensagem = String(opts.mensagem || cr.body || '')
+
+  if (opts.dry) {
+    return {
+      ok: true,
+      dry: true,
+      anuncio: { id: ad.body.id, nome: ad.body.name, adset_id: ad.body.adset_id },
+      image_hash: hash || null,
+      tem_texto: mensagem.length,
+      formulario_destino: opts.formId,
+    }
+  }
+  if (!hash) {
+    // Sem hash: cai para a imagem informada de fora, subindo os bytes na conta.
+    const imagemUrl = String(opts.imagemUrl ?? '')
+    if (!imagemUrl) return { ok: false, passo: 'imagem', erro: 'criativo sem image_hash e sem imagem_url' }
+    const img = await fetch(imagemUrl)
+    if (!img.ok) return { ok: false, passo: 'baixar_imagem', erro: `HTTP ${img.status}` }
+    const fd = new FormData()
+    fd.append('access_token', token)
+    fd.append('imagem.jpg', new Blob([new Uint8Array(await img.arrayBuffer())]), 'imagem.jpg')
+    const up = await fetch(`${GRAPH}/${conta}/adimages`, { method: 'POST', body: fd })
+    const upBody = await up.json() as Record<string, unknown>
+    const imagens = (upBody.images ?? {}) as Record<string, Record<string, string>>
+    hash = imagens[Object.keys(imagens)[0]]?.hash ?? ''
+    if (!hash) return { ok: false, passo: 'subir_imagem', erro: upBody }
+  }
+
+  const pageId = Deno.env.get('META_PAGE_ID') ?? '100416712888754'
+  const criativo = await fetch(`${GRAPH}/${conta}/adcreatives`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: `${String(ad.body.name ?? 'anúncio')} · form ${opts.formId}`,
+      object_story_spec: {
+        page_id: pageId,
+        link_data: {
+          image_hash: hash,
+          // PEGADINHA: anúncio de lead EXIGE link externo. Apontar para a página
+          // do Facebook devolve "Lead Ad Creative Does Not Use External URL"
+          // (subcode 1815316). Quem abre o formulário nem chega a ver este link,
+          // mas ele precisa existir e ser de fora da Meta.
+          link: Deno.env.get('META_ADS_LINK_EXTERNO') ?? 'https://institutolorenavisentainer.com.br',
+          message: mensagem,
+          call_to_action: { type: 'SIGN_UP', value: { lead_gen_form_id: opts.formId } },
+        },
+      },
+      access_token: token,
+    }),
+  })
+  const criativoBody = await criativo.json() as Record<string, unknown>
+  if (!criativo.ok) return { ok: false, passo: 'criar_criativo', erro: criativoBody, hash }
+
+  const troca = await fetch(`${GRAPH}/${opts.adId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ creative: { creative_id: criativoBody.id }, access_token: token }),
+  })
+  const trocaBody = await troca.json() as Record<string, unknown>
+  if (!troca.ok) return { ok: false, passo: 'trocar_criativo', erro: trocaBody, criativo_id: criativoBody.id }
+
+  return { ok: true, anuncio: opts.adId, criativo_novo: criativoBody.id, image_hash: hash, formulario: opts.formId }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -347,7 +450,17 @@ Deno.serve(async (req) => {
     if (action === 'insights') return json(await puxarInsights(admin, token, Number(corpo.dias ?? 7)))
     if (action === 'capi') return json(await enviarCapi(admin, token, Number(corpo.dias ?? 6)))
     if (action === 'anuncios') return json(await inspecionarAnuncios(token, String((corpo as Record<string, unknown>).ad_id ?? '')))
-    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios'] }, 400)
+    if (action === 'reamarrar_form') {
+      const c = corpo as Record<string, unknown>
+      return json(await reamarrarFormulario(token, {
+        adId: String(c.ad_id ?? ''),
+        formId: String(c.form_id ?? ''),
+        dry: c.dry !== false,
+        imagemUrl: String(c.imagem_url ?? ''),
+        mensagem: String(c.mensagem ?? ''),
+      }))
+    }
+    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'reamarrar_form'] }, 400)
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
