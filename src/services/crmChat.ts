@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient'
+import { prepararAudioParaWhatsApp } from '@/lib/audioOpus'
 import { kindFromMime, nomeSeguroDeArquivo } from '@/lib/chatMedia'
 
 export { kindFromMime } from '@/lib/chatMedia'
@@ -44,19 +45,23 @@ export async function uploadChatMedia(leadId: string, file: File): Promise<Uploa
       `O WhatsApp não aceita ${kind === 'document' ? 'documento' : kind === 'image' ? 'imagem' : kind} acima de ${Math.round(teto / 1024 / 1024)} MB (este tem ${(file.size / 1024 / 1024).toFixed(1)} MB).`,
     )
   }
-  const path = `whatsapp/${leadId}/${crypto.randomUUID()}-${nomeSeguroDeArquivo(file.name)}`
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    contentType: file.type || 'application/octet-stream',
+  // O que SOBE tem de ser o formato do WhatsApp (.ogg/opus): a W-API recusa .webm na porta
+  // ("A URL do áudio deve ser nos formatos .mp3 ou .ogg") e o áudio nunca chega. A
+  // pré-visualização continua no ficheiro ORIGINAL, que é o que este browser sabe tocar.
+  const paraSubir = kind === 'audio' ? await prepararAudioParaWhatsApp(file) : file
+  const path = `whatsapp/${leadId}/${crypto.randomUUID()}-${nomeSeguroDeArquivo(paraSubir.name)}`
+  const { error } = await supabase.storage.from(BUCKET).upload(path, paraSubir, {
+    contentType: paraSubir.type || 'application/octet-stream',
     upsert: false,
   })
   if (error) throw new Error(`Falha ao subir "${file.name}": ${error.message}`)
   return {
     storagePath: path,
-    fileName: file.name,
-    mimeType: file.type || 'application/octet-stream',
+    fileName: paraSubir.name,
+    mimeType: paraSubir.type || 'application/octet-stream',
     kind,
     previewUrl: URL.createObjectURL(file),
-    sizeBytes: file.size,
+    sizeBytes: paraSubir.size,
   }
 }
 

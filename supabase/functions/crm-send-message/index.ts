@@ -83,12 +83,50 @@ const MEDIA_LABEL: Record<MediaKind, string> = {
 async function signedUrlFor(
   admin: SupabaseClient,
   storagePath: string,
+  baixarComoNome?: string,
 ): Promise<string> {
-  const { data, error } = await admin.storage.from(MEDIA_BUCKET).createSignedUrl(storagePath, 86_400)
+  const { data, error } = await admin.storage
+    .from(MEDIA_BUCKET)
+    // `download` põe o nome do ficheiro no FIM da URL (…&download=audio.ogg). A W-API lê a
+    // extensão da URL para decidir se aceita o áudio, e o link assinado termina em
+    // `?token=<jwt>` — quem confere com um `endsWith('.ogg')` cru reprovaria um ogg legítimo.
+    .createSignedUrl(storagePath, 86_400, baixarComoNome ? { download: baixarComoNome } : undefined)
   if (error || !data?.signedUrl) {
     throw new Error(`media_signed_url_failed: ${error?.message ?? 'sem url'} (${storagePath})`)
   }
   return data.signedUrl
+}
+
+/**
+ * A W-API só aceita áudio em `.ogg` ou `.mp3` — e reprova pela URL, antes de tentar
+ * entregar. Quando o ficheiro não serve, dizer isso aqui vale mais do que repassar o 500
+ * dela ("wapi_send-audio_failed_500"), que não diz a ninguém o que fazer a seguir.
+ */
+function audioServeParaWapi(media: string): boolean {
+  return /\.(ogg|mp3)$/.test(media.split('?')[0].toLowerCase())
+}
+
+/**
+ * Áudio que só existe em base64 (a voz que a paciente mandou vive assim, e é o que sai ao
+ * ENCAMINHAR) vira ficheiro no bucket antes de sair. A W-API decide pela URL: um
+ * `data:audio/ogg;base64,…` não tem extensão nenhuma e é recusado igual ao .webm foi.
+ */
+async function guardarAudioNoBucket(
+  admin: SupabaseClient,
+  leadId: string,
+  base64: string,
+  mimeType: string,
+): Promise<string> {
+  const cru = base64.includes(',') ? base64.slice(base64.indexOf(',') + 1) : base64
+  const binario = Uint8Array.from(atob(cru), (c) => c.charCodeAt(0))
+  const mp3 = /mpeg|mp3/i.test(mimeType)
+  const caminho = `whatsapp/${leadId}/${crypto.randomUUID()}-audio.${mp3 ? 'mp3' : 'ogg'}`
+  const { error } = await admin.storage.from(MEDIA_BUCKET).upload(caminho, binario, {
+    contentType: mp3 ? 'audio/mpeg' : 'audio/ogg',
+    upsert: false,
+  })
+  if (error) throw new Error(`audio_upload_failed: ${error.message}`)
+  return caminho
 }
 
 Deno.serve(async (req) => {
@@ -626,14 +664,29 @@ Deno.serve(async (req) => {
       }
 
       const kind = inferMediaKind(mimeType, fileName, declarado)
+      if (kind === 'audio' && !storagePath && base64) {
+        storagePath = await guardarAudioNoBucket(admin, leadId, base64, mimeType)
+        base64 = ''
+      }
       // Link assinado só na hora do envio: o bucket é privado e o link vive 24h. Guardamos
       // o CAMINHO (não o link) em crm_media_items, senão o chat mostraria mídia quebrada
       // depois de o link expirar.
+      const nomeNoBucket = storagePath.split('/').pop() ?? ''
       const media = storagePath
-        ? await signedUrlFor(admin, storagePath)
+        ? await signedUrlFor(admin, storagePath, kind === 'audio' ? nomeNoBucket : undefined)
         : item.url ||
           // Base64 vindo do banco chega cru; a W-API exige o prefixo data: para saber o que é.
           (base64.startsWith('data:') ? base64 : `data:${mimeType || 'application/octet-stream'};base64,${base64}`)
+      if (kind === 'audio' && !audioServeParaWapi(media)) {
+        return json(
+          {
+            error: 'audio_format_not_supported',
+            message:
+              'Mensagem de voz só sai em .ogg ou .mp3, e este áudio está noutro formato. Grave pelo microfone do chat (o CRM converte sozinho) ou anexe um .ogg/.mp3.',
+          },
+          400,
+        )
+      }
       pecas.push({
         kind,
         media,
