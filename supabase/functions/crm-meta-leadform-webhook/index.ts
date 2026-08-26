@@ -5,6 +5,7 @@ import { createManychatWhatsappSubscriber, sendManychatFlow } from '../_shared/m
 import { enqueueOutreach, loadLeadformOutreachConfig, renderMensagem } from '../_shared/whatsapp/outreach.ts'
 import { normalizeBrPhone } from '../_shared/brPhone.ts'
 import type { LeadAttribution } from '../_shared/attribution.ts'
+import { qualificar } from './qualificacao.ts'
 
 // Frente B da atribuição Meta: LEAD ADS (formulário dentro do Facebook/Instagram).
 // A Meta chama este webhook a cada formulário enviado (objeto "page", campo "leadgen"),
@@ -157,10 +158,19 @@ type FirstTouchInput = {
  *
  * Devolve `true` quando a pessoa entra na fila (a notificação para a equipe muda de texto).
  */
-async function enfileirarPrimeiroContato(admin: SupabaseClient, input: FirstTouchInput): Promise<boolean> {
+/**
+ * Devolve 'off' (fila desligada), 'skipped' (a fila decidiu não mandar) ou
+ * 'queued'. A diferença importa: 'skipped' é decisão, e cair no ManyChat depois
+ * dela desmente a decisão e ainda registra um `first_touch_failed` que parece
+ * defeito quando alguém lê o histórico meses depois.
+ */
+async function enfileirarPrimeiroContato(
+  admin: SupabaseClient,
+  input: FirstTouchInput,
+): Promise<'queued' | 'skipped' | 'off'> {
   try {
     const cfg = await loadLeadformOutreachConfig(admin, input.tenantId)
-    if (!cfg.enabled) return false
+    if (!cfg.enabled) return 'off'
 
     // Formulário velho não vale como "pediu contato agora": a pessoa já esqueceu que
     // preencheu, e a mensagem chega como abordagem de estranho.
@@ -170,7 +180,7 @@ async function enfileirarPrimeiroContato(admin: SupabaseClient, input: FirstTouc
         leadgenId: input.leadgenId, pageId: input.pageId, formId: input.formId,
         status: 'first_touch_skipped_old', leadId: input.leadId,
       })
-      return false
+      return 'skipped'
     }
 
     const res = await enqueueOutreach(admin, {
@@ -179,6 +189,9 @@ async function enfileirarPrimeiroContato(admin: SupabaseClient, input: FirstTouc
       phone: input.phone,
       message: renderMensagem(cfg.message, input.nome),
       source: 'leadform',
+      // Conversa das últimas duas semanas é assunto do atendimento. Mais velha
+      // que isso, a conversa morreu e o formulário de hoje é um pedido novo.
+      conversaRecenteDias: 14,
     })
     await logEvent(admin, {
       leadgenId: input.leadgenId, pageId: input.pageId, formId: input.formId,
@@ -186,10 +199,10 @@ async function enfileirarPrimeiroContato(admin: SupabaseClient, input: FirstTouc
       leadId: input.leadId,
       detail: res.queued ? `sai em ${res.scheduledAt}` : (res.reason ?? '-'),
     })
-    return res.queued
+    return res.queued ? 'queued' : 'skipped'
   } catch (e) {
     console.error(`[meta-leadform] fila ${input.leadgenId}: ${e instanceof Error ? e.message : e}`)
-    return false
+    return 'skipped'
   }
 }
 
@@ -308,6 +321,43 @@ async function processLeadgen(
 }
 
 /**
+ * As respostas chegam em CÓDIGO ("prazo: 1a3meses"), não em texto. O texto mora
+ * na definição do formulário, então é ela que traduz. Cache por formulário
+ * porque a definição não muda entre um lead e outro.
+ */
+type Pergunta = { label: string; opcoes: Record<string, string> }
+const perguntasPorForm = new Map<string, Record<string, Pergunta>>()
+
+async function carregarPerguntas(formId: string): Promise<Record<string, Pergunta>> {
+  if (!formId) return {}
+  const cache = perguntasPorForm.get(formId)
+  if (cache) return cache
+  const token = (Deno.env.get('META_PAGE_TOKEN') ?? '').trim()
+  if (!token) return {}
+  try {
+    const res = await fetch(
+      `${GRAPH}/${formId}?fields=questions{key,label,options}&access_token=${encodeURIComponent(token)}`,
+    )
+    const body = await res.json() as Record<string, unknown>
+    if (!res.ok) return {}
+    const out: Record<string, Pergunta> = {}
+    for (const q of (body.questions ?? []) as Array<Record<string, unknown>>) {
+      const key = String(q.key ?? '')
+      if (!key) continue
+      const opcoes: Record<string, string> = {}
+      for (const o of (q.options ?? []) as Array<Record<string, string>>) {
+        if (o.key) opcoes[o.key] = String(o.value ?? o.key)
+      }
+      out[key] = { label: String(q.label ?? key), opcoes }
+    }
+    perguntasPorForm.set(formId, out)
+    return out
+  } catch {
+    return {}
+  }
+}
+
+/**
  * Miolo compartilhado: recebe o objeto do lead JÁ lido da Graph e cria/atualiza
  * no CRM com atribuição. Usado pelo webhook/recuperação (via processLeadgen) e
  * pela VARREDURA (sweep_forms), que lê os leads em lote pelo edge do formulário.
@@ -359,6 +409,16 @@ async function processLeadData(
     if (k && v != null) answers[k] = String(v).slice(0, 300)
   }
 
+  const perguntas = await carregarPerguntas(String(lead.form_id ?? formIdRaw))
+  const legiveis: Record<string, string> = {}
+  for (const [k, v] of Object.entries(answers)) {
+    // Nome e telefone já são o card; repetir só polui a anotação.
+    if (k === 'full_name' || k === 'whatsapp_number' || k === 'phone_number') continue
+    const q = perguntas[k]
+    legiveis[q?.label ?? k] = q?.opcoes?.[v] ?? v
+  }
+  const qual = qualificar(answers)
+
   const tenantId = tenantMap[pageId] || 'instituto-lorena'
   const surface = tenantId === 'tricopill' ? 'meta_facebook' : 'meta_instagram'
   try {
@@ -367,8 +427,8 @@ async function processLeadData(
       phone,
       summary: `Formulário Meta (Lead Ads)${campaignName ? ` — campanha ${campaignName}` : ''}`,
       source: surface,
-      temperature: 'hot',
-      score: 70,
+      temperature: qual?.temperatura ?? 'hot',
+      score: qual?.score ?? 70,
       attribution,
       tenantId,
       // Lead de formulário entra na fila de contato ATIVO (etapa "📞 Ligar — Formulário",
@@ -380,16 +440,60 @@ async function processLeadData(
           ...(email ? { email } : {}),
           ...(telefoneInvalido ? { telefone_invalido: tel.motivo, telefone_digitado: phoneRaw } : {}),
           respostas: answers,
+          ...(Object.keys(legiveis).length ? { respostas_legiveis: legiveis } : {}),
+          ...(qual ? { qualificacao: qual } : {}),
         },
       },
     })
-    const resumo = Object.entries(answers).map(([k, v]) => `• ${k}: ${v}`).join('\n')
+    // Lead que JÁ existia não muda de etapa no upsert, e isso é certo na maioria
+    // dos casos. Só que preencher formulário é levantar a mão DE NOVO: quem
+    // estava parado em follow-up ou encerrado precisa voltar para a fila de
+    // ligação, e a qualificação nova precisa valer no card. Duas guardas:
+    // consulta agendada e consulta realizada ficam onde estão, porque ali já tem
+    // alguém cuidando; e card que está em OUTRO funil não é puxado para cá, que
+    // foi o erro de [crm_card_roubado_pelo_funil_protocolo].
+    const ETAPAS_INTOCAVEIS = ['consulta', 'stage-1777902160674']
+    if (up.status === 'updated' && tenantId === 'instituto-lorena') {
+      const { data: atual } = await admin
+        .from('leads').select('stage_id, pipeline_id').eq('id', up.leadId).maybeSingle()
+      const etapa = String((atual as Record<string, string> | null)?.stage_id ?? '')
+      const funil = String((atual as Record<string, string> | null)?.pipeline_id ?? '')
+      const patch: Record<string, unknown> = {}
+      const podeMover = (!funil || funil === 'pipeline-clinica') &&
+        etapa && etapa !== 'ligar-formulario' && !ETAPAS_INTOCAVEIS.includes(etapa)
+      if (podeMover) {
+        patch.pipeline_id = 'pipeline-clinica'
+        patch.stage_id = 'ligar-formulario'
+      }
+      if (qual) {
+        patch.score = qual.score
+        patch.temperature = qual.temperatura
+      }
+      if (Object.keys(patch).length) {
+        const { error: upErr } = await admin.from('leads').update(patch).eq('id', up.leadId)
+        if (upErr) console.error(`[meta-leadform] requalificar ${up.leadId}: ${upErr.message}`)
+        else if (podeMover) {
+          await insertInteraction(admin, {
+            leadId: up.leadId, patientName: nome, channel: 'system', direction: 'in',
+            author: 'Meta Lead Ads',
+            content: `↩️ Voltou para «📞 Ligar — Formulário»: preencheu o formulário de novo (estava em «${etapa}»).`,
+            tenantId,
+          }).catch(() => {})
+        }
+      }
+    }
+
+    const linhas = Object.keys(legiveis).length ? legiveis : answers
+    const resumo = Object.entries(linhas).map(([k, v]) => `• ${k}: ${v}`).join('\n')
+    const cabecalho = qual
+      ? `\n🎯 ${qual.nivel}${qual.foraDePraca ? ' · FORA DA PRAÇA (outro estado e não quer online)' : ''}`
+      : ''
     const aviso = telefoneInvalido
       ? `\n⚠️ Telefone fora do padrão brasileiro (${tel.motivo}). Não dá para chamar no WhatsApp${email ? ` — o contato possível é o e-mail ${email}` : ''}.`
       : ''
     await insertInteraction(admin, {
       leadId: up.leadId, patientName: nome, channel: 'system', direction: 'in', author: 'Meta Lead Ads',
-      content: `📋 Formulário recebido${campaignName ? ` (campanha: ${campaignName}` : ''}${adName ? ` · anúncio: ${adName}` : ''}${campaignName ? ')' : ''}\n${resumo}${aviso}`.slice(0, 1500),
+      content: `📋 Formulário recebido${campaignName ? ` (campanha: ${campaignName}` : ''}${adName ? ` · anúncio: ${adName}` : ''}${campaignName ? ')' : ''}${cabecalho}\n${resumo}${aviso}`.slice(0, 1500),
       tenantId,
     }).catch(() => {})
     await logEvent(admin, { leadgenId, pageId, formId: String(lead.form_id ?? formIdRaw), status: `lead_${up.status}`, leadId: up.leadId, detail: `${nome} | campanha=${campaignName || '-'}` })
@@ -403,9 +507,17 @@ async function processLeadData(
     }
     // Telefone impossível não entra na fila: gastaria volta da linha e, se o número por
     // acaso existir, a apresentação chega para um estranho.
-    const firstTouchSent = up.status === 'created' && !telefoneInvalido
-      ? (await enfileirarPrimeiroContato(admin, firstTouchInput)) ||
-        (await maybeSendLeadformFirstTouch(admin, firstTouchInput))
+    // Antes só lead NOVO recebia o primeiro contato, e quem já estava na base
+    // preenchia o formulário e não recebia nada. Agora tenta sempre: quem decide
+    // é o `enqueueOutreach`, que já pula quem JÁ ESCREVEU para a gente (conversa
+    // aberta é assunto do atendimento, não da fila) e quem pediu para sair.
+    const fila = !telefoneInvalido ? await enfileirarPrimeiroContato(admin, firstTouchInput) : 'skipped'
+    const firstTouchSent = fila === 'queued'
+      ? true
+      // ManyChat é caminho ANTIGO: só entra se a fila estiver desligada. Quando a
+      // fila decide não mandar (conversa aberta, opt-out), essa decisão vale.
+      : fila === 'off'
+      ? await maybeSendLeadformFirstTouch(admin, firstTouchInput)
       : false
     if (telefoneInvalido) {
       await logEvent(admin, {

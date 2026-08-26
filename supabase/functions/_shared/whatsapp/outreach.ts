@@ -121,6 +121,14 @@ export async function enqueueOutreach(
     kind?: string
     source?: string
     instanceId?: string | null
+    /**
+     * Janela, em dias, que define "conversa aberta". Sem ela, QUALQUER mensagem
+     * que a pessoa já tenha mandado um dia bloqueia o contato para sempre — o
+     * que é certo para carrinho e reengajamento, e errado para formulário: quem
+     * escreveu "oi" há três meses e agora preenche um formulário levantou a mão
+     * de novo.
+     */
+    conversaRecenteDias?: number
   },
 ): Promise<{ ok: boolean; queued: boolean; reason?: string; scheduledAt?: string }> {
   const phone = String(input.phone ?? '').replace(/[^0-9]/g, '')
@@ -130,14 +138,17 @@ export async function enqueueOutreach(
   try {
     // Já falou com a gente? Então não é primeiro contato: a conversa está aberta e quem
     // responde é o atendimento (ou a IA), não a fila.
-    const { data: jaEscreveu } = await admin
+    let q = admin
       .from('interactions')
       .select('id')
       .eq('lead_id', input.leadId)
       .eq('direction', 'in')
       .eq('channel', 'whatsapp')
-      .limit(1)
-      .maybeSingle()
+    if (Number(input.conversaRecenteDias) > 0) {
+      const desde = new Date(Date.now() - Number(input.conversaRecenteDias) * 864e5).toISOString()
+      q = q.gte('created_at', desde)
+    }
+    const { data: jaEscreveu } = await q.limit(1).maybeSingle()
     if (jaEscreveu) return { ok: true, queued: false, reason: 'ja_conversa' }
 
     const { data: lead } = await admin
