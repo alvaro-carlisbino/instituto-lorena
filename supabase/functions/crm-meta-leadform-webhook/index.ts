@@ -676,7 +676,7 @@ Deno.serve(async (req) => {
           me: await g('me?fields=id,name'),
           permissions: await g('me/permissions'),
           token_debug: await g(`debug_token?input_token=${encodeURIComponent(pageToken)}`),
-          ...(formId ? { form: await g(`${formId}?fields=id,name,status,leads_count`) } : {}),
+          ...(formId ? { form: await g(`${formId}?fields=id,name,status,leads_count,questions{key,label,type,options}`) } : {}),
           ...(formId
             ? { form_leads: await g(`${formId}/leads?limit=1&fields=${String(maybe.fields ?? 'id,created_time')}`) }
             : {}),

@@ -283,7 +283,7 @@ async function inspecionarAnuncios(token: string, cru = '') {
     // Modo cru: um anúncio só, criativo inteiro. Serve para achar onde a Meta
     // escondeu o formulário quando o criativo veio de post existente.
     const qs = new URLSearchParams({
-      fields: 'id,name,effective_status,creative{id,name,object_story_id,effective_object_story_id,object_story_spec,asset_feed_spec,object_type,link_url,url_tags,image_hash,image_url,thumbnail_url,body,title}',
+      fields: 'id,name,effective_status,preview_shareable_link,creative{id,name,object_story_id,effective_object_story_id,object_story_spec,asset_feed_spec,object_type,link_url,url_tags,image_hash,image_url,thumbnail_url,body,title}',
       access_token: token,
     })
     const r = await fetch(`${GRAPH}/${cru}?${qs}`)
