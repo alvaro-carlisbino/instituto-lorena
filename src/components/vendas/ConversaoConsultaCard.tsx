@@ -6,9 +6,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import {
   atrasoDeLancamento,
+  denominadorIncompleto,
+  entraramPorVenda,
   fetchConversaoConsulta,
-  faltaTipoDeConsulta,
   ganhoDoFollowUp,
+  taxaProjetada,
   vendasForaDaConta,
   type ConversaoConsulta,
 } from '@/services/conversaoConsulta'
@@ -40,6 +42,7 @@ function Cenario({
   vendas,
   pacientes,
   receitaCents,
+  piso,
   destaque,
   icone: Icone,
 }: {
@@ -50,6 +53,11 @@ function Cenario({
   vendas: number
   pacientes: number
   receitaCents: number
+  /**
+   * Onde a taxa cai se as consultas que a agenda não classifica entrarem no denominador. Vai
+   * colado no número grande de propósito: é esse que sai da tela e vira meta na reunião.
+   */
+  piso?: number | null
   destaque?: boolean
   icone: typeof TrendingUp
 }) {
@@ -64,7 +72,14 @@ function Cenario({
         <Icone className="size-12" />
       </div>
       <p className="text-xs font-medium text-muted-foreground">{titulo}</p>
-      <p className="mt-1 font-heading text-3xl tabular-nums">{pct(valor)}</p>
+      <p className="mt-1 font-heading text-3xl tabular-nums">
+        {pct(valor)}
+        {piso != null ? (
+          <span className="ml-1.5 font-sans text-xs font-medium text-amber-700 dark:text-amber-500">
+            piso {pct(piso)}
+          </span>
+        ) : null}
+      </p>
       <p className="mt-0.5 text-xs text-muted-foreground">
         {vendas} de {pacientes} {pacientes === 1 ? 'paciente' : 'pacientes'} · {brl(receitaCents)}
       </p>
@@ -93,8 +108,12 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
 
   const ganho = ganhoDoFollowUp(dados)
   const fora = vendasForaDaConta(dados)
-  const semTipo = faltaTipoDeConsulta(dados)
+  const incompleto = denominadorIncompleto(dados)
+  const porVenda = entraramPorVenda(dados)
+  const projetada = taxaProjetada(dados)
   const atraso = atrasoDeLancamento(dados)
+  const soTc = dados?.denominador?.tipo_usado === 'tc'
+  const clinicaInteira = dados?.outra_regua?.tipo_usado === 'todas' ? dados.outra_regua : null
   const semConsulta = !carregando && dados != null && dados.pacientes === 0
 
   return (
@@ -134,6 +153,7 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
                 vendas={dados?.cenario_mes.vendas ?? 0}
                 pacientes={dados?.pacientes ?? 0}
                 receitaCents={dados?.cenario_mes.receita_cents ?? 0}
+                piso={projetada?.pctSafra}
                 icone={TrendingUp}
               />
               <Cenario
@@ -143,10 +163,23 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
                 vendas={dados?.cenario_followup.vendas ?? 0}
                 pacientes={dados?.pacientes ?? 0}
                 receitaCents={dados?.cenario_followup.receita_cents ?? 0}
+                piso={projetada?.pctCaixa}
                 destaque
                 icone={PhoneCall}
               />
             </div>
+
+            {/* A gerência pediu a conversão de TC, mas a leitura da clínica inteira não pode
+                sumir: é ela que diz se o mês foi ruim de transplante ou ruim de movimento. */}
+            {soTc && clinicaInteira ? (
+              <p className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                Só de transplante. Contando <span className="font-semibold text-foreground">toda consulta</span> da
+                clínica ({clinicaInteira.pacientes} pacientes), a mesma conta dá{' '}
+                <span className="font-semibold text-foreground">{pct(clinicaInteira.cenario_mes.pct)}</span> na safra e{' '}
+                <span className="font-semibold text-foreground">{pct(clinicaInteira.cenario_followup.pct)}</span> no
+                caixa do mês.
+              </p>
+            ) : null}
 
             {ganho.vendas > 0 ? (
               <p className="text-xs text-muted-foreground">
@@ -184,22 +217,67 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
                 <span className="font-semibold text-foreground">
                   {fora.vendas} venda{fora.vendas > 1 ? 's' : ''} ({brl(fora.receitaCents)})
                 </span>{' '}
-                da safra do mês não entrou nesta conta: não há prontuário na venda nem no lead que ligue o paciente a
-                uma consulta da agenda. Enquanto isso não é preenchido, a taxa é PISO.
+                não entrou nesta conta: não há prontuário na venda nem no lead que ligue o paciente a uma consulta{' '}
+                {soTc ? 'de transplante' : ''} da agenda. Fica fora da taxa de propósito, porque numerador sem
+                denominador foi o que já fez este card mentir. Enquanto não é preenchido, a taxa é PISO.
               </p>
             ) : null}
 
-            {/* Enquanto a agenda não disser o tipo, o denominador é TODA consulta — e quem lê
-                precisa saber, senão toma conversão de tudo por conversão de transplante. */}
-            {semTipo != null ? (
-              <div className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-muted/30 p-3">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Este número é sobre <span className="font-semibold text-foreground">todas as consultas</span>, não só
-                  as de transplante: a agenda da Shosp só diz o tipo em {pct(semTipo)} delas neste mês (a grade não
-                  devolve o serviço, só a busca por paciente). O CRM está preenchendo o que falta de duas em duas horas;
-                  chegando a 60%, este card passa a medir só consulta de transplante sozinho.
-                </p>
+            {/* Quem entrou no denominador por ter fechado, não por ter consulta de TC na agenda.
+                Só entra convertido, então sobe a taxa: some calado seria enganação. */}
+            {porVenda > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">
+                  {porVenda} paciente{porVenda > 1 ? 's' : ''}
+                </span>{' '}
+                entrou nesta conta por ter fechado cirurgia numa consulta que a agenda não classifica como
+                transplante (consulta clínica, ou consulta ainda sem tipo). A venda é real e não podia sumir de um
+                painel de cirurgia, mas quem entra assim já entra convertido: sem{' '}
+                {porVenda > 1 ? 'esses' : 'esse'}, a safra seria{' '}
+                {pct(
+                  dados && dados.pacientes - porVenda > 0
+                    ? Number(
+                        (
+                          (100 * (dados.cenario_mes.vendas - porVenda)) /
+                          (dados.pacientes - porVenda)
+                        ).toFixed(1),
+                      )
+                    : null,
+                )}
+                .
+              </p>
+            ) : null}
+
+            {/* A régua de TC entrou em campo antes de a agenda terminar de dizer o tipo, e em
+                26/08 descobrimos que ela nunca vai terminar: das 56 consultas sem serviço em
+                agosto, 53 foram buscadas paciente por paciente e a Shosp devolveu sem o campo.
+                Mostrar só o número medido seria vender uma conversão que o denominador não
+                sustenta, então a tela mostra a faixa. */}
+            {incompleto != null ? (
+              <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <div className="space-y-1.5 text-xs leading-relaxed">
+                  {projetada ? (
+                    <p>
+                      <span className="font-semibold text-amber-700 dark:text-amber-500">
+                        A conversão real está entre {pct(projetada.pctSafra)} e {pct(dados?.cenario_mes.pct)} na
+                        safra
+                      </span>{' '}
+                      ({pct(projetada.pctCaixa)} a {pct(dados?.cenario_followup.pct)} no caixa). O card mede{' '}
+                      {dados?.pacientes} pacientes de transplante; aplicando às consultas sem tipo a mesma proporção
+                      de transplante das que têm tipo, o denominador seria perto de {projetada.pacientes}.
+                    </p>
+                  ) : null}
+                  <p className="text-muted-foreground">
+                    Por que falta: a grade da Shosp não devolve o serviço, só a busca por paciente, e{' '}
+                    <span className="font-semibold text-foreground">
+                      {incompleto.consultasSemTipo} consulta{incompleto.consultasSemTipo > 1 ? 's' : ''}
+                    </span>{' '}
+                    deste mês continua sem classificação mesmo depois de consultada uma a uma (cobertura em{' '}
+                    {pct(incompleto.coberturaPct)}). Isso não se resolve sozinho: depende de a Shosp preencher o
+                    serviço no agendamento.
+                  </p>
+                </div>
               </div>
             ) : null}
 
@@ -224,8 +302,8 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
           Conta paciente, não agendamento: quem passa duas vezes no mês decide uma vez. Consulta é a mesma leitura da
           fila de pós-consulta (hora passada, sem desmarcação nem falta, fora do spa, e retorno/lavagem/protocolo não
           entram). A venda só entra quando dá para ligá-la a um paciente que consultou, pelo prontuário da venda ou do
-          lead. O denominador é da clínica inteira, ainda sem separar consulta de transplante das demais, e não muda
-          com o filtro de consultora.
+          lead. Em cirurgia o denominador é só consulta de transplante, que é o que esta central mede, e não muda com
+          o filtro de consultora.
         </p>
       </CardContent>
     </Card>

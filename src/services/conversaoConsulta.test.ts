@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 
 import {
   atrasoDeLancamento,
-  faltaTipoDeConsulta,
+  denominadorIncompleto,
+  entraramPorVenda,
+  taxaProjetada,
   ganhoDoFollowUp,
   vendasForaDaConta,
   type ConversaoConsulta,
@@ -22,11 +24,19 @@ const conv = (over: Partial<ConversaoConsulta> = {}): ConversaoConsulta => ({
     cobertura_pct: 16.2,
     consultas_com_tipo: 28,
     consultas_no_mes: 173,
+    consultas_tc: 12,
     pacientes_tc: 10,
+    entraram_por_venda: 0,
   },
   de_safra_anterior: { vendas: 0, receita_cents: 0 },
   sem_vinculo: { vendas: 0, receita_cents: 0 },
   outro_kind: { kind: 'protocolo', pacientes: 0 },
+  outra_regua: {
+    tipo_usado: 'tc',
+    pacientes: 10,
+    cenario_mes: { vendas: 6, receita_cents: 21_420_000, pct: 60 },
+    cenario_followup: { vendas: 6, receita_cents: 21_420_000, pct: 60 },
+  },
   ultima_venda_registrada: '2026-08-11',
   dias_sem_registro: 8,
   ...over,
@@ -85,25 +95,123 @@ describe('vendasForaDaConta', () => {
   })
 })
 
-describe('faltaTipoDeConsulta', () => {
-  it('avisa que o denominador ainda é toda consulta, e o quanto falta', () => {
-    // 25/08/2026: a grade da Shosp não traz o serviço, só 16,2% das consultas do mês têm tipo.
-    expect(faltaTipoDeConsulta(conv())).toBe(16.2)
+describe('denominadorIncompleto', () => {
+  it('acusa TETO enquanto a agenda não terminou de dizer o tipo', () => {
+    // 26/08/2026: régua de TC ligada com 55,8% de cobertura. As 53 consultas sem tipo podem ser
+    // de transplante e ainda não estão embaixo da conta.
+    const d = denominadorIncompleto(
+      conv({
+        denominador: {
+          tipo_usado: 'tc',
+          cobertura_pct: 55.8,
+          consultas_com_tipo: 67,
+          consultas_no_mes: 120,
+          consultas_tc: 24,
+          pacientes_tc: 21,
+          entraram_por_venda: 1,
+        },
+      }),
+    )
+    expect(d).toEqual({ coberturaPct: 55.8, consultasSemTipo: 53 })
   })
 
-  it('cala a boca quando o card já mede só transplante', () => {
+  it('cala a boca quando a agenda respondeu tudo', () => {
     expect(
-      faltaTipoDeConsulta(
+      denominadorIncompleto(
         conv({
           denominador: {
             tipo_usado: 'tc',
-            cobertura_pct: 92.4,
-            consultas_com_tipo: 160,
-            consultas_no_mes: 173,
-            pacientes_tc: 41,
+            cobertura_pct: 100,
+            consultas_com_tipo: 120,
+            consultas_no_mes: 120,
+            consultas_tc: 30,
+            pacientes_tc: 26,
+            entraram_por_venda: 0,
           },
         }),
       ),
     ).toBeNull()
+  })
+
+  it('não fala de denominador de transplante quando a régua é a clínica inteira', () => {
+    // Protocolo continua medindo toda consulta: aviso de cobertura ali não quer dizer nada.
+    expect(denominadorIncompleto(conv())).toBeNull()
+  })
+})
+
+describe('entraramPorVenda', () => {
+  it('conta quem entrou por ter fechado, não por ter consulta de transplante', () => {
+    // Agosto/2026: R$ 49.500 fechados em 25/08 sobre "CONSULTA CLÍNICA FEMININA".
+    expect(
+      entraramPorVenda(
+        conv({
+          denominador: {
+            tipo_usado: 'tc',
+            cobertura_pct: 55.8,
+            consultas_com_tipo: 67,
+            consultas_no_mes: 120,
+            consultas_tc: 24,
+            pacientes_tc: 21,
+            entraram_por_venda: 1,
+          },
+        }),
+      ),
+    ).toBe(1)
+  })
+
+  it('não quebra sem dado', () => {
+    expect(entraramPorVenda(null)).toBe(0)
+  })
+})
+
+describe('taxaProjetada', () => {
+  const agosto = () =>
+    conv({
+      agendamentos: 26,
+      pacientes: 21,
+      cenario_mes: { vendas: 10, receita_cents: 39_427_192, pct: 47.6 },
+      cenario_followup: { vendas: 11, receita_cents: 43_311_192, pct: 52.4 },
+      denominador: {
+        tipo_usado: 'tc',
+        cobertura_pct: 55.8,
+        consultas_com_tipo: 67,
+        consultas_no_mes: 120,
+        consultas_tc: 24,
+        pacientes_tc: 21,
+        entraram_por_venda: 1,
+      },
+    })
+
+  it('mostra onde a taxa cai se as consultas sem tipo se parecerem com as conhecidas', () => {
+    // Agosto/2026: 53 consultas sem serviço, 35,8% das tipadas são de transplante. O denominador
+    // de 21 pacientes viraria ~36, e os 47,6% que a tela mede viram ~27,5%.
+    const p = taxaProjetada(agosto())
+    expect(p).toEqual({ pacientes: 36, pctSafra: 27.5, pctCaixa: 30.3 })
+  })
+
+  it('cala a boca quando a agenda classificou tudo: não há o que projetar', () => {
+    expect(
+      taxaProjetada(
+        conv({
+          denominador: {
+            tipo_usado: 'tc',
+            cobertura_pct: 100,
+            consultas_com_tipo: 120,
+            consultas_no_mes: 120,
+            consultas_tc: 26,
+            pacientes_tc: 21,
+            entraram_por_venda: 0,
+          },
+        }),
+      ),
+    ).toBeNull()
+  })
+
+  it('não projeta na régua da clínica inteira, onde consulta sem tipo já está no denominador', () => {
+    expect(taxaProjetada(conv())).toBeNull()
+  })
+
+  it('não quebra sem dado', () => {
+    expect(taxaProjetada(null)).toBeNull()
   })
 })
