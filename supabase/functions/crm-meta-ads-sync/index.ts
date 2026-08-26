@@ -525,6 +525,156 @@ async function atribuirLeadform(
   return { ok: true, pendentes: pendentes.length, carimbados, sem_anuncio: semAnuncio, erros }
 }
 
+/**
+ * Leitura de extrato: a conta inteira numa resposta só, do jeito que a equipe
+ * pergunta — "quais campanhas estão ativas, quanto está indo por dia, e para
+ * quem". Só lê.
+ *
+ * A pergunta que motivou: "80% do nosso público é homem de 35 a 55" — sem a
+ * quebra por idade e sexo, isso é palpite. Ela vem em `demografia`.
+ */
+async function extratoDaConta(token: string, dias: number) {
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  const ate = new Date()
+  const desde = new Date(ate.getTime() - Math.max(dias, 1) * 86400_000)
+  const janela = { since: desde.toISOString().slice(0, 10), until: ate.toISOString().slice(0, 10) }
+
+  // Mesma disciplina do puxarInsights: a Meta responde "temporarily
+  // unavailable" quando as chamadas saem coladas. Não é erro de parâmetro.
+  const erros: string[] = []
+  async function g(caminho: string, params: Record<string, string>) {
+    const qs = new URLSearchParams({ ...params, access_token: token })
+    let j: { data?: Array<Record<string, unknown>>; error?: { message?: string } } = {}
+    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+      const res = await fetch(`${GRAPH}/${caminho}?${qs}`)
+      j = await res.json()
+      if (!j.error) break
+      const transitorio = /temporarily unavailable|rate limit|try again|reduce the amount/i
+        .test(String(j.error.message ?? ''))
+      if (!transitorio || tentativa === 3) break
+      await new Promise((r) => setTimeout(r, tentativa * 4000))
+    }
+    if (j.error) { erros.push(`${caminho}: ${j.error.message}`); return [] }
+    return (j.data ?? []) as Array<Record<string, unknown>>
+  }
+
+  const reais = (centavos: unknown) => Math.round(Number(centavos ?? 0)) / 100
+  function contar(r: Record<string, unknown>) {
+    const acoes = (r.actions ?? []) as Array<{ action_type: string; value: string }>
+    const m = new Map(acoes.map((a) => [a.action_type, Number(a.value)]))
+    return {
+      gasto: Number(r.spend ?? 0),
+      impressoes: Number(r.impressions ?? 0),
+      cliques: Number(r.clicks ?? 0),
+      alcance: Number(r.reach ?? 0),
+      leads: (m.get('lead') ?? 0) + (m.get('leadgen.other') ?? 0) +
+        (m.get('offsite_conversion.fb_pixel_lead') ?? 0),
+      conversas: m.get('onsite_conversion.messaging_conversation_started_7d') ?? 0,
+    }
+  }
+
+  const campanhas = await g(`${conta}/campaigns`, {
+    fields: 'id,name,effective_status,objective,daily_budget,lifetime_budget,start_time,created_time',
+    limit: '200',
+  })
+  const conjuntos = await g(`${conta}/adsets`, {
+    fields: 'id,name,campaign_id,effective_status,daily_budget,optimization_goal,destination_type,targeting',
+    limit: '200',
+  })
+  const anuncios = await g(`${conta}/ads`, {
+    fields: 'id,name,adset_id,campaign_id,effective_status,creative{body,title}',
+    limit: '300',
+  })
+  const insights = await g(`${conta}/insights`, {
+    level: 'campaign',
+    time_range: JSON.stringify(janela),
+    fields: 'campaign_id,spend,impressions,clicks,reach,actions',
+    limit: '200',
+  })
+  const demo = await g(`${conta}/insights`, {
+    level: 'account',
+    time_range: JSON.stringify(janela),
+    breakdowns: 'age,gender',
+    fields: 'spend,impressions,clicks,actions',
+    limit: '200',
+  })
+
+  const porCampanha = new Map(insights.map((r) => [String(r.campaign_id ?? ''), contar(r)]))
+  const vivo = (s: unknown) => s === 'ACTIVE' || s === 'IN_PROCESS' || s === 'PENDING_REVIEW'
+
+  const linhas = campanhas.map((c) => {
+    const id = String(c.id ?? '')
+    const meus = conjuntos.filter((s) => String(s.campaign_id ?? '') === id)
+    const n = porCampanha.get(id) ?? { gasto: 0, impressoes: 0, cliques: 0, alcance: 0, leads: 0, conversas: 0 }
+    return {
+      id,
+      nome: String(c.name ?? ''),
+      status: String(c.effective_status ?? ''),
+      objetivo: String(c.objective ?? ''),
+      // Verba pode morar na campanha (CBO) ou nos conjuntos. Somar os dois
+      // lugares e dizer QUAL deles é o que manda.
+      verba_dia: reais(c.daily_budget) ||
+        meus.filter((s) => vivo(s.effective_status)).reduce((t, s) => t + reais(s.daily_budget), 0),
+      verba_onde: Number(c.daily_budget ?? 0) > 0 ? 'campanha' : 'conjunto',
+      ...n,
+      custo_por_conversa: n.conversas ? Number((n.gasto / n.conversas).toFixed(2)) : null,
+      custo_por_lead: n.leads ? Number((n.gasto / n.leads).toFixed(2)) : null,
+      conjuntos: meus.map((s) => {
+        const t = (s.targeting ?? {}) as Record<string, unknown>
+        const geo = (t.geo_locations ?? {}) as Record<string, unknown>
+        const nomeDe = (v: unknown) => ((v ?? []) as Array<Record<string, string>>).map((x) => x.name ?? x.key)
+        const gen = (t.genders ?? []) as number[]
+        return {
+          id: String(s.id ?? ''),
+          nome: String(s.name ?? ''),
+          status: String(s.effective_status ?? ''),
+          verba_dia: reais(s.daily_budget),
+          otimiza: String(s.optimization_goal ?? ''),
+          destino: String(s.destination_type ?? ''),
+          idade: `${t.age_min ?? '?'}-${t.age_max ?? '?'}`,
+          // A Meta manda [] quando é "todos", 1 = homens, 2 = mulheres.
+          sexo: !gen.length ? 'todos' : gen.map((x) => (x === 1 ? 'homens' : 'mulheres')).join('+'),
+          onde: [
+            ...((geo.countries ?? []) as string[]),
+            ...nomeDe(geo.regions), ...nomeDe(geo.cities),
+          ].slice(0, 8),
+          publicos: nomeDe(t.custom_audiences),
+          exclui: nomeDe(t.excluded_custom_audiences),
+          interesses: (((t.flexible_spec ?? []) as Array<Record<string, unknown>>)
+            .flatMap((f) => nomeDe(f.interests))).slice(0, 10),
+          anuncios: anuncios.filter((a) => String(a.adset_id ?? '') === String(s.id ?? ''))
+            .map((a) => ({
+              id: String(a.id ?? ''),
+              nome: String(a.name ?? ''),
+              status: String(a.effective_status ?? ''),
+              texto: String(((a.creative ?? {}) as Record<string, string>).body ?? '').slice(0, 300),
+            })),
+        }
+      }),
+    }
+  })
+
+  const ativas = linhas.filter((l) => vivo(l.status))
+  const demografia = demo.map((r) => ({
+    faixa: String(r.age ?? ''),
+    sexo: String(r.gender ?? ''),
+    ...contar(r),
+  })).sort((a, b) => b.gasto - a.gasto)
+
+  return {
+    ok: true,
+    conta,
+    janela,
+    verba_dia_ativa: Number(ativas.reduce((t, l) => t + l.verba_dia, 0).toFixed(2)),
+    gasto_janela: Number(linhas.reduce((t, l) => t + l.gasto, 0).toFixed(2)),
+    ativas: ativas.sort((a, b) => b.verba_dia - a.verba_dia),
+    pausadas_com_gasto: linhas.filter((l) => !vivo(l.status) && l.gasto > 0)
+      .map((l) => ({ nome: l.nome, status: l.status, gasto: l.gasto })),
+    demografia,
+    erros,
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -553,6 +703,7 @@ Deno.serve(async (req) => {
     if (action === 'insights') return json(await puxarInsights(admin, token, Number(corpo.dias ?? 7)))
     if (action === 'capi') return json(await enviarCapi(admin, token, Number(corpo.dias ?? 6)))
     if (action === 'anuncios') return json(await inspecionarAnuncios(token, String((corpo as Record<string, unknown>).ad_id ?? '')))
+    if (action === 'extrato') return json(await extratoDaConta(token, Number(corpo.dias ?? 7)))
     if (action === 'atribuir') {
       const c = corpo as Record<string, unknown>
       return json(await atribuirLeadform(admin, token, Number(corpo.dias ?? 30), c.dry === true))
@@ -567,7 +718,7 @@ Deno.serve(async (req) => {
         mensagem: String(c.mensagem ?? ''),
       }))
     }
-    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'atribuir', 'reamarrar_form'] }, 400)
+    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'extrato', 'atribuir', 'reamarrar_form'] }, 400)
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
