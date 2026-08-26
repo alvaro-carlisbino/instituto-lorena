@@ -1466,7 +1466,29 @@ Deno.serve(async (req) => {
       const paySucceeded = Boolean(pixQr) || Boolean(redeLink) || Boolean(pagbankLink)
       if (payFailed && !paySucceeded) {
         const failDetail = typeof payFailed.detail === 'string' ? payFailed.detail : ''
-        if (failDetail.startsWith('cadastro_incompleto') && payFailed.customerNote) {
+        // POR QUE FALHOU fica registrado. Antes o motivo real (returnCode da e.Rede, item que
+        // não resolveu, exceção) morria aqui: era trocado pelo texto genérico e nunca logado, então
+        // depois não dava pra saber se o gateway recusou ou se a IA mandou um op sem produto
+        // (caso José Fernando 26/08 — shampoo avulso no Pix, indiagnosticável no dia seguinte).
+        console.error('crm-ai-assistant pagamento_falhou', {
+          leadId: context.leadId ?? null,
+          type: payFailed.type,
+          detail: failDetail.slice(0, 300),
+          hasCustomerNote: Boolean(payFailed.customerNote),
+        })
+        try {
+          await dbClient.from('webhook_jobs').insert({
+            source: 'crm-ai-assistant',
+            status: 'error',
+            note: `pagamento_falhou:${payFailed.type}:lead=${context.leadId ?? 'unknown'}:${failDetail}`.slice(0, 500),
+          })
+        } catch { /* ignore */ }
+        // Falha que TEM recado pro cliente (cadastro incompleto, item sem estoque/não vendível)
+        // é uma pergunta que a própria IA consegue resolver na conversa — manda o recado e segue
+        // atendendo. Só a falha SEM recado (gateway fora, exceção) vira aviso técnico + handoff.
+        // Antes só `cadastro_incompleto` era respeitado: `kit_obrigatorio` tinha um recado bom
+        // ("não consegui fechar X, sem estoque") e mesmo assim o cliente ouvia "problema técnico".
+        if (payFailed.customerNote) {
           reply = payFailed.customerNote.trim()
         } else {
           reply = `Tive um probleminha técnico para gerar seu pagamento agora 🙏 Já vou chamar um atendente pra finalizar o seu pedido com você certinho, tá? 💚\n${MANYCHAT_HANDOFF_MARKER}`

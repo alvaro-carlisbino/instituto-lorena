@@ -859,17 +859,35 @@ export async function executeCrmAiOpsFromModel(
           // VENDA QUENTE: o cliente recebeu o Pix — avisa o consultor pra acompanhar o fechamento.
           // É só um FYI (sininho), NÃO desliga a IA nem marca "aguardando consultor" (o cliente
           // ainda paga sozinho). Dedupe por lead p/ não repetir a cada Pix dentro de 6h.
-          await notifyAgents(admin, {
-            leadId: opts.allowedLeadId,
-            kind: 'urgent',
-            title: 'Venda quente — acompanhe',
-            body: `${String(snapPix.cadastro.nomeCompleto ?? 'Cliente').trim()} recebeu o Pix (${pixDesc}). Pronto pra fechar!`,
-            includeOwner: true,
-            tenantId: saleTenantId,
-            dedupeKey: 'venda_quente',
-            dedupeWindowMinutes: 360,
-          })
+          // Try PRÓPRIO: o Pix já está gerado e já foi para `results`. Se o aviso ao consultor
+          // falhar, ele NÃO pode cair no catch de baixo — isso empurrava um segundo chunk
+          // `ok:false` para uma cobrança que existe, bagunçando quem lê o resultado.
+          try {
+            await notifyAgents(admin, {
+              leadId: opts.allowedLeadId,
+              kind: 'urgent',
+              title: 'Venda quente — acompanhe',
+              body: `${String(snapPix.cadastro.nomeCompleto ?? 'Cliente').trim()} recebeu o Pix (${pixDesc}). Pronto pra fechar!`,
+              includeOwner: true,
+              tenantId: saleTenantId,
+              dedupeKey: 'venda_quente',
+              dedupeWindowMinutes: 360,
+            })
+          } catch (e) {
+            console.error('crmAiOps notifyAgents (venda quente) falhou', {
+              leadId: opts.allowedLeadId,
+              error: e instanceof Error ? e.message : String(e),
+            })
+          }
         } catch (e) {
+          // LOGA antes de engolir: o texto que chega ao cliente é genérico ("problema técnico"),
+          // então sem isto o motivo real some e a falha vira indiagnosticável depois.
+          console.error('crmAiOps rede_pix falhou', {
+            leadId: opts.allowedLeadId,
+            amountCents: pixAmount,
+            desc: pixDesc,
+            error: e instanceof Error ? e.message : String(e),
+          })
           results.push({ type: 'rede_pix', ok: false, detail: (e instanceof Error ? e.message : String(e)).slice(0, 200) })
         }
         continue
@@ -961,6 +979,12 @@ export async function executeCrmAiOpsFromModel(
             `Link cartão e.Rede gerado (${description}, até ${effInstallments}x${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`,
           )
         } catch (e) {
+          console.error('crmAiOps rede_link falhou', {
+            leadId: opts.allowedLeadId,
+            amountCents,
+            desc: description,
+            error: e instanceof Error ? e.message : String(e),
+          })
           results.push({
             type: 'rede_link',
             ok: false,
@@ -1066,6 +1090,11 @@ export async function executeCrmAiOpsFromModel(
 
       results.push({ type: type || 'unknown', ok: false, detail: 'unsupported_op' })
     } catch (e) {
+      console.error('crmAiOps op falhou', {
+        leadId: opts.allowedLeadId,
+        type,
+        error: e instanceof Error ? e.message : String(e),
+      })
       results.push({
         type,
         ok: false,
