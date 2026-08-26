@@ -24,6 +24,8 @@ type Cenario = {
   /** Última entrada da pessoa. null = nunca escreveu (contato novo). */
   ultimoInboundIso?: string | null
   optedOutAt?: string | null
+  /** Quando o lead entrou no CRM. Decide se ele tem direito à reserva do dia. */
+  leadCriadoEm?: string | null
   /** Quantas linhas o livro-caixa devolve para as contagens (count exact). */
   contagens?: Record<string, number>
   ultimoProativoIso?: string | null
@@ -56,7 +58,9 @@ function fakeAdmin(cen: Cenario) {
         return chain({ data: cen.ultimoInboundIso ? { happened_at: cen.ultimoInboundIso } : null })
       }
       if (table === 'leads') {
-        return chain({ data: { opted_out_at: cen.optedOutAt ?? null, id: 'lead-1' } })
+        return chain({
+          data: { opted_out_at: cen.optedOutAt ?? null, id: 'lead-1', created_at: cen.leadCriadoEm ?? null },
+        })
       }
       if (table === 'whatsapp_outbound_log') {
         return logChain()
@@ -343,6 +347,61 @@ Deno.test('primeiro contato tem teto próprio, mais folgado que o de contato fri
     )
     assertEquals(estourou.allow, false)
     assertEquals(estourou.reason, 'cap_optin_dia')
+  })
+})
+
+Deno.test('as últimas vagas do teto de 1.º contato são de quem preencheu hoje', async () => {
+  await comRelogio(AGORA_UTIL(), async () => {
+    // Teto 40, reserva 30% = 12. Com 30 gastos, restam 10: já é zona de reserva.
+    const hoje = new Date(AGORA_UTIL().getTime() - 2 * 3_600_000).toISOString()
+    const anteontem = new Date(AGORA_UTIL().getTime() - 3 * 86_400_000).toISOString()
+
+    const doDia = await guardWhatsappOutbound(
+      fakeAdmin({
+        ultimoInboundIso: null,
+        leadCriadoEm: hoje,
+        contagens: { optin: 30, proativos: 30, por_lead: 0 },
+      }),
+      { ...BASE, kind: 'optin' },
+    )
+    assertEquals(doDia.allow, true)
+
+    const doBacklog = await guardWhatsappOutbound(
+      fakeAdmin({
+        ultimoInboundIso: null,
+        leadCriadoEm: anteontem,
+        contagens: { optin: 30, proativos: 30, por_lead: 0 },
+      }),
+      { ...BASE, kind: 'optin' },
+    )
+    assertEquals(doBacklog.allow, false)
+    assertEquals(doBacklog.reason, 'cap_optin_reserva')
+
+    // Fora da zona de reserva (28 é o limite do backlog), o lead antigo passa como sempre.
+    const backlogCedo = await guardWhatsappOutbound(
+      fakeAdmin({
+        ultimoInboundIso: null,
+        leadCriadoEm: anteontem,
+        contagens: { optin: 27, proativos: 27, por_lead: 0 },
+      }),
+      { ...BASE, kind: 'optin' },
+    )
+    assertEquals(backlogCedo.allow, true)
+  })
+})
+
+Deno.test('reserva em 0 devolve o teto inteiro ao backlog', async () => {
+  await comRelogio(AGORA_UTIL(), async () => {
+    const d = await guardWhatsappOutbound(
+      fakeAdmin({
+        ultimoInboundIso: null,
+        policy: { optin_reserva_pct: 0 },
+        leadCriadoEm: new Date(AGORA_UTIL().getTime() - 10 * 86_400_000).toISOString(),
+        contagens: { optin: 39, proativos: 39, por_lead: 0 },
+      }),
+      { ...BASE, kind: 'optin' },
+    )
+    assertEquals(d.allow, true)
   })
 })
 

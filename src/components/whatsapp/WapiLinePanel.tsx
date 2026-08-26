@@ -50,6 +50,8 @@ const MOTIVOS_PT: Record<string, string> = {
   texto_repetido: 'texto repetido',
   cap_semana_por_lead: 'já recebeu esta semana',
   cap_frio_dia: 'teto de contatos novos',
+  cap_optin_dia: 'teto de 1.º contato',
+  cap_optin_reserva: 'vagas guardadas para hoje',
   link_primeiro_contato: 'link no 1.º contato',
   frio_max_tentativas: 'já tentámos demais',
   frio_espera: 'tentativa recente',
@@ -183,6 +185,25 @@ export function WapiLinePanel({ instance }: { instance: WhatsappChannelInstance 
     if (dias >= (guard.aquecimento_dias ?? 14)) return null
     return { dia: dias + 1, total: guard.aquecimento_dias ?? 14 }
   }, [guard])
+
+  // Espelho de `capOptinComAquecimento` / `reservaOptinLeadDoDia` (antiBan.ts). Aqui é só
+  // para a tela dizer o número real de hoje em vez do teto cheio: quem decide é a Edge.
+  const tetoOptinDeHoje = useMemo(() => {
+    const teto = Math.max(0, policy?.cap_optin_dia ?? 40)
+    const inicio = policy?.aquecimento_inicio ? new Date(policy.aquecimento_inicio).getTime() : NaN
+    if (!Number.isFinite(inicio)) return teto
+    const dias = Math.max(1, policy?.aquecimento_dias ?? 14)
+    const passados = Math.floor((Date.now() - inicio) / 86_400_000)
+    const capInicial = Math.max((policy?.aquecimento_cap_inicial ?? 5) * 2, 10)
+    if (passados < 0) return Math.min(teto, capInicial)
+    if (passados >= dias) return teto
+    return Math.max(1, Math.min(teto, Math.floor(capInicial + ((teto - capInicial) / dias) * passados)))
+  }, [policy])
+
+  const reservaDeHoje = useMemo(() => {
+    const pct = Math.max(0, Math.min(90, policy?.optin_reserva_pct ?? 0))
+    return pct ? Math.floor((tetoOptinDeHoje * pct) / 100) : 0
+  }, [policy, tetoOptinDeHoje])
 
   const patch = (p: Partial<WapiLinePolicy>) => setPolicy((cur) => (cur ? { ...cur, ...p } : cur))
 
@@ -671,6 +692,24 @@ export function WapiLinePanel({ instance }: { instance: WhatsappChannelInstance 
                   />
                   <p className="m-0 text-[0.7rem] text-muted-foreground">
                     Salvo no botão "Salvar limites", acima. O que passar do teto espera na fila até amanhã.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="pol-reserva">Reserva para o lead de hoje (%)</Label>
+                  <Input
+                    id="pol-reserva"
+                    type="number"
+                    min={0}
+                    max={90}
+                    value={policy?.optin_reserva_pct ?? 30}
+                    onChange={(e) =>
+                      patch({ optin_reserva_pct: Math.max(0, Math.min(90, Number(e.target.value) || 0)) })
+                    }
+                  />
+                  <p className="m-0 text-[0.7rem] text-muted-foreground">
+                    {reservaDeHoje > 0
+                      ? `As últimas ${reservaDeHoje} de ${tetoOptinDeHoje} vagas de hoje são de quem preencher o formulário hoje. O backlog usa as outras ${tetoOptinDeHoje - reservaDeHoje}.`
+                      : 'Sem reserva: quem está encalhado há dias pode consumir o teto inteiro antes de o lead de hoje chegar.'}
                   </p>
                 </div>
                 <div className="flex items-end">

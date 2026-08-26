@@ -1,7 +1,11 @@
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 
 import { insertInteraction, resolveConversationTenantId } from './crm.ts'
-import { loadLineConversationMode, setLineConversationMode } from './conversationLineState.ts'
+import {
+  loadLineConversationMode,
+  setLineConversationMode,
+  type LineConversationMode,
+} from './conversationLineState.ts'
 import { matchesInternalContact } from './internalContacts.ts'
 import { describeTeamHours, isWithinTeamHours, parseTeamHours } from './teamHours.ts'
 import { alertOwnerAiOutOfBalance } from './saleReceipt.ts'
@@ -597,6 +601,31 @@ export type CrmAiAutoReplyGate = {
   skipHint?: string
 }
 
+/** jsonb `["a","b"]` (ou uma string solta) → Set. Valor torto vira conjunto vazio, nunca erro. */
+function asStringSet(raw: unknown): Set<string> {
+  const out = new Set<string>()
+  if (typeof raw === 'string') {
+    const t = raw.trim()
+    if (!t) return out
+    if (t.startsWith('[')) {
+      try {
+        return asStringSet(JSON.parse(t))
+      } catch {
+        return out
+      }
+    }
+    out.add(t)
+    return out
+  }
+  if (Array.isArray(raw)) {
+    for (const v of raw) {
+      const s = String(v ?? '').trim()
+      if (s) out.add(s)
+    }
+  }
+  return out
+}
+
 export async function evaluateCrmAiAutoReplyGate(
   admin: SupabaseClient,
   leadId: string,
@@ -620,7 +649,7 @@ export async function evaluateCrmAiAutoReplyGate(
     .maybeSingle()
   const { data: leadRowGate } = await admin
     .from('leads')
-    .select('opted_out_at, tenant_id, patient_name, phone')
+    .select('opted_out_at, tenant_id, patient_name, phone, stage_id, pipeline_id')
     .eq('id', leadId)
     .maybeSingle()
   const leadOptedOut = Boolean(
@@ -651,9 +680,45 @@ export async function evaluateCrmAiAutoReplyGate(
   // Canal sem linha (ManyChat/Instagram) continua caindo no estado por lead, como antes.
   const lineId = String(options.whatsappInstanceId ?? '').trim()
   const lineMode = lineId ? await loadLineConversationMode(admin, leadId, lineId) : null
-  const stateOwnerMode = lineId ? lineMode?.ownerMode : String(state?.owner_mode ?? '').toLowerCase() || undefined
-  const stateAiEnabled = lineId ? lineMode?.aiEnabled : (state?.ai_enabled as boolean | undefined)
-  const stateLastHumanReplyAt = lineId ? lineMode?.lastHumanReplyAt : (state?.last_human_reply_at as string | null | undefined)
+
+  // SEM REGISTO NESTA LINHA, HERDA O QUE FOI DECIDIDO PARA O LEAD (25/ago/2026).
+  //
+  // "Ninguém decidiu nada nesta linha" caía direto no default da config, e o default da
+  // clínica é 'ai'. Só que 599 conversas da clínica estão com o toggle "Humano" ligado
+  // (owner_mode='human' + ai_enabled=false, desligamento explícito da equipe) e sem linha
+  // amarrada, porque vêm do tempo do ManyChat. Bastava uma delas escrever para a linha da
+  // casa: o gate não achava registo de linha, lia o default 'ai', e a IA respondia alguém
+  // que o painel mostrava como Humano. A tela dizia uma coisa e o bot fazia outra.
+  //
+  // A herança vale só DENTRO DO MESMO POLO, que é a razão de o estado ser por linha: a
+  // atendente da clínica assumir na mão não pode calar o bot de vendas do Tricopill.
+  // Entre polos diferentes continua valendo o default da config da linha.
+  let heranca: LineConversationMode | null = null
+  if (lineId && !lineMode && state) {
+    const leadTenantId = String((leadRowGate as { tenant_id?: string | null } | null)?.tenant_id ?? '').trim()
+    if (leadTenantId) {
+      const { data: instRow } = await admin
+        .from('whatsapp_channel_instances')
+        .select('tenant_id')
+        .eq('id', lineId)
+        .maybeSingle()
+      const lineTenantId = String((instRow as { tenant_id?: string | null } | null)?.tenant_id ?? '').trim()
+      if (lineTenantId && lineTenantId === leadTenantId) {
+        heranca = {
+          ownerMode: String(state.owner_mode ?? '').toLowerCase() || 'auto',
+          aiEnabled: state.ai_enabled === null || state.ai_enabled === undefined ? true : Boolean(state.ai_enabled),
+          lastHumanReplyAt: state.last_human_reply_at ? String(state.last_human_reply_at) : null,
+        }
+      }
+    }
+  }
+  const modoDaConversa = lineMode ?? heranca
+
+  const stateOwnerMode = lineId ? modoDaConversa?.ownerMode : String(state?.owner_mode ?? '').toLowerCase() || undefined
+  const stateAiEnabled = lineId ? modoDaConversa?.aiEnabled : (state?.ai_enabled as boolean | undefined)
+  const stateLastHumanReplyAt = lineId
+    ? modoDaConversa?.lastHumanReplyAt
+    : (state?.last_human_reply_at as string | null | undefined)
 
   const rawOwnerMode = String(stateOwnerMode ?? config?.default_owner_mode ?? 'auto').toLowerCase()
   const aiEnabled = Boolean((stateAiEnabled ?? true) && (config?.enabled ?? true))
@@ -670,7 +735,27 @@ export async function evaluateCrmAiAutoReplyGate(
   // Só expira o handoff da EQUIPE (owner_mode=human COM ai_enabled=true). Escalonamento de
   // verdade (escalateLeadToHuman) desliga ai_enabled e continua respeitado pra sempre —
   // é a regra crítica do fluxo [[feedback_handoff_desliga_ia]] e não é tocada aqui.
-  const handoffDays = Math.max(0, Number(config?.handoff_expires_days ?? 7))
+  //
+  // ETAPA DE PACIENTE NÃO EXPIRA (25/ago/2026). A expiração vale para LEAD esquecido no topo
+  // do funil, que é para o que ela foi feita. Quem já consultou, agendou ou comprou não é lead:
+  // a conversa dele é da atendente, e a IA voltando semanas depois fala por cima de um
+  // atendimento em curso. Foi assim que a Roberta (etapa Encerrado, último humano em 09/jul)
+  // levou uma resposta da IA às 18h02 de 25/ago sobre documentos que ela tinha acabado de
+  // mandar. Eram 195 conversas na mesma situação, 19 delas de paciente pagante ou agendado.
+  //
+  // O recorte fica em `crm_ai_configs`: as esteiras de paciente inteiras
+  // (`ai_handoff_keep_pipelines`) e, dentro do funil da clínica, da consulta agendada em
+  // diante (`ai_handoff_keep_stages`). Config e não código porque quem mexe em etapa é a
+  // equipe, na tela, sem deploy.
+  const leadStageId = String((leadRowGate as { stage_id?: string | null } | null)?.stage_id ?? '').trim()
+  const leadPipelineId = String((leadRowGate as { pipeline_id?: string | null } | null)?.pipeline_id ?? '').trim()
+  const keepPipelines = asStringSet(config?.ai_handoff_keep_pipelines)
+  const keepStages = asStringSet(config?.ai_handoff_keep_stages)
+  const handoffNuncaExpira =
+    (leadPipelineId !== '' && keepPipelines.has(leadPipelineId)) ||
+    (leadStageId !== '' && keepStages.has(leadStageId))
+
+  const handoffDays = handoffNuncaExpira ? 0 : Math.max(0, Number(config?.handoff_expires_days ?? 7))
   let ownerMode = rawOwnerMode
   let handoffExpired = false
   if (rawOwnerMode === 'human' && aiEnabled && handoffDays > 0) {
@@ -743,6 +828,11 @@ export async function evaluateCrmAiAutoReplyGate(
   }
   if (skipReasons.includes('owner_mode_human')) {
     hintParts.push('Modo de atendimento = humano: só a equipa responde.')
+    if (handoffNuncaExpira) {
+      hintParts.push(
+        'Esta etapa é de paciente, então o atendimento não volta para a IA com o tempo: quem assumiu na mão continua dono da conversa.',
+      )
+    }
   }
   if (skipReasons.includes('horario_da_equipe')) {
     hintParts.push(

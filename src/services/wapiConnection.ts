@@ -104,6 +104,8 @@ export type WapiLinePolicy = {
   /** Teto de PRIMEIRO CONTATO com quem pediu contato (formulário, site). */
   cap_optin_dia: number
   optin_max_idade_horas: number
+  /** % do teto acima guardada só para leads criados hoje. 0 desliga a reserva. */
+  optin_reserva_pct: number
   cap_proativo_dia: number
   cap_proativo_hora: number
   gap_min_segundos: number

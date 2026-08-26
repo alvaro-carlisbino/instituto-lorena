@@ -91,6 +91,8 @@ export type LinePolicy = {
   cap_frio_dia: number
   cap_optin_dia: number
   optin_max_idade_horas: number
+  /** % do teto de primeiros contatos guardada para quem preencheu HOJE. 0 = sem reserva. */
+  optin_reserva_pct: number
   cap_proativo_dia: number
   cap_proativo_hora: number
   gap_min_segundos: number
@@ -115,6 +117,7 @@ export const DEFAULT_LINE_POLICY: Omit<LinePolicy, 'instance_id' | 'tenant_id'> 
   cap_frio_dia: 20,
   cap_optin_dia: 40,
   optin_max_idade_horas: 48,
+  optin_reserva_pct: 30,
   cap_proativo_dia: 60,
   cap_proativo_hora: 12,
   gap_min_segundos: 45,
@@ -260,6 +263,24 @@ export function capOptinComAquecimento(policy: LinePolicy, agora: Date = new Dat
     policy.aquecimento_inicio,
     agora,
   )
+}
+
+/**
+ * Fatia do teto de primeiros contatos guardada para quem preencheu o formulário HOJE.
+ *
+ * 25/ago/2026: o teto do dia (20, linha em aquecimento) foi consumido inteiro até às 11h27
+ * da manhã por leads represados da varredura. O formulário das 19h04 bateu em `cap_optin_dia`
+ * quatro segundos depois de entrar, foi reagendado, e na segunda tentativa a janela já tinha
+ * fechado — ficou para as 08h do dia seguinte, atrás de dois leads presos há 10 e 11 voltas.
+ *
+ * O teto existe para proteger a linha e não muda. O que muda é a ORDEM: quem acabou de pedir
+ * contato tem uma fatia só dele, porque a resposta em minutos é o único momento em que aquele
+ * lead ainda lembra que preencheu. O backlog usa o resto e espera, que é o que backlog faz.
+ */
+export function reservaOptinLeadDoDia(policy: LinePolicy, agora: Date = new Date()): number {
+  const pct = Math.max(0, Math.min(90, Number(policy.optin_reserva_pct ?? 0)))
+  if (!pct) return 0
+  return Math.floor((capOptinComAquecimento(policy, agora) * pct) / 100)
 }
 
 type InstanceRow = {
@@ -561,7 +582,8 @@ export async function guardWhatsappOutbound(
           .eq('decision', 'allowed')
           .eq('kind', 'optin')
           .gte('created_at', desdeInicioDoDia)
-        if ((optinHoje ?? 0) >= capOptin) {
+        const usadoHoje = optinHoje ?? 0
+        if (usadoHoje >= capOptin) {
           const emAquecimento = capOptin < policy.cap_optin_dia
           return {
             allow: false,
@@ -573,6 +595,41 @@ export async function guardWhatsappOutbound(
             retryAfterSeconds: 3600,
             typingDelaySeconds: 0,
             policy,
+          }
+        }
+
+        // RESERVA DO DIA. As últimas vagas do teto são de quem preencheu hoje. Só se consulta
+        // a idade do lead aqui dentro, quando a reserva já está em jogo: no resto do dia a
+        // guarda continua com as mesmas queries de antes.
+        const reserva = reservaOptinLeadDoDia(policy, agora)
+        if (reserva > 0 && usadoHoje >= capOptin - reserva) {
+          let leadDoDia = false
+          if (input.leadId) {
+            const { data: leadRow } = await admin
+              .from('leads')
+              .select('created_at')
+              .eq('id', input.leadId)
+              .maybeSingle()
+            // Por timestamp e não por comparação de texto: o Postgres devolve
+            // "2026-08-25 22:04:58+00" e o PostgREST devolve "2026-08-25T22:04:58+00:00",
+            // e ordenar essas duas formas como string dá resultado diferente.
+            const nasceuEm = Date.parse(
+              String((leadRow as { created_at?: string | null } | null)?.created_at ?? ''),
+            )
+            leadDoDia = Number.isFinite(nasceuEm) && nasceuEm >= Date.parse(desdeInicioDoDia)
+          }
+          if (!leadDoDia) {
+            return {
+              allow: false,
+              kind,
+              reason: 'cap_optin_reserva',
+              message:
+                `Restam ${capOptin - usadoHoje} de ${capOptin} vagas de primeiro contato e elas estão ` +
+                'guardadas para quem preencher o formulário hoje. Este lead é de outro dia e volta amanhã cedo.',
+              retryAfterSeconds: 3600,
+              typingDelaySeconds: 0,
+              policy,
+            }
           }
         }
       }
