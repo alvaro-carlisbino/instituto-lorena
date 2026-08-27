@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { EscalaCapilar } from '@/components/landing/EscalaCapilar'
 import { capturarAtribuicaoDoNavegador, type AtribuicaoLanding } from '@/lib/atribuicaoLanding'
+import { iniciarPixelMeta, pixelLead, pixelTriagemCompleta } from '@/lib/pixelMeta'
 import {
   escalaDoGrau,
   mascararTelefone,
@@ -202,7 +203,10 @@ export function ConsultaLandingPage() {
     )
     rastro.current = capturarAtribuicaoDoNavegador()
     registrarEventoLanding('landing_view', rastro.current)
+    // O pixel só existe nesta tela. Ver o comentário em lib/pixelMeta.ts.
+    const pararPixel = iniciarPixelMeta()
     return () => {
+      pararPixel()
       document.title = anterior
       if (meta && descricaoAnterior) meta.setAttribute('content', descricaoAnterior)
     }
@@ -235,6 +239,7 @@ export function ConsultaLandingPage() {
       // Chegar aqui é ver a estimativa E o formulário: 'landing_triagem' passou a ser
       // o passo do meio inteiro. Não há mais tela de contato para medir à parte.
       registrarEventoLanding('landing_triagem', { ...rastro.current, passo: novas.urgencia ?? '' })
+      pixelTriagemCompleta(novas.objetivo)
       const escala = temEstimativa(novas) ? escalaDoGrau(novas.grau ?? '') : null
       if (escala) void carregarEstimativa(escala.escala, escala.grau).then(setEstimativa)
       rolarParaPainel()
@@ -279,6 +284,9 @@ export function ConsultaLandingPage() {
       })
       setResultado(r)
       setEtapa('pronto')
+      // É este evento que o anúncio compra. Vai depois do POST dar certo: disparar
+      // no clique contaria tentativa, e a Meta otimizaria para quem clica em enviar.
+      pixelLead(r.protocolo)
       rolarParaPainel()
     } catch (e) {
       const msg = e instanceof ErroAgenda ? e.message : 'Não consegui concluir agora. Tente de novo.'
