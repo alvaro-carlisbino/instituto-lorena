@@ -163,9 +163,23 @@ export function agruparPorDia(horarios: Horario[]): DiaComHorarios[] {
     .sort((a, b) => a.dia.localeCompare(b.dia))
 }
 
-/** (44) 99149-3656 enquanto a pessoa digita. Guarda só dígito, mostra formatado. */
+/**
+ * (44) 99149-3656 enquanto a pessoa digita. Guarda só dígito, mostra formatado.
+ *
+ * O 55 do país sai ANTES do corte, e isto não é detalhe: o preenchimento automático
+ * do celular entrega `+5544997168329`, e cortar em 11 dígitos primeiro produzia
+ * `(55) 44997-1683`. Um número que não existe, que passa em `telefoneValido` (tem 11
+ * dígitos) e que só o servidor recusava. Quem preenchesse com um toque levava erro
+ * sem entender por quê.
+ *
+ * 12 ou 13 dígitos só existem com o país junto (o brasileiro tem no máximo 11), então
+ * ali o 55 da frente é país. Com 11 ou menos, `55` na frente é o DDD de Santa Maria e
+ * fica onde está. Mesma regra do `telefoneBr` da edge function.
+ */
 export function mascararTelefone(valor: string): string {
-  const d = valor.replace(/\D/g, '').slice(0, 11)
+  let bruto = valor.replace(/\D/g, '')
+  if (bruto.startsWith('55') && bruto.length >= 12) bruto = bruto.slice(2)
+  const d = bruto.slice(0, 11)
   if (d.length <= 2) return d
   if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`
   if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`
@@ -174,7 +188,8 @@ export function mascararTelefone(valor: string): string {
 
 /** Celular brasileiro utilizável: DDD + 8 ou 9 dígitos. */
 export function telefoneValido(valor: string): boolean {
-  const d = valor.replace(/\D/g, '')
+  let d = valor.replace(/\D/g, '')
+  if (d.startsWith('55') && d.length >= 12) d = d.slice(2)
   return d.length === 10 || d.length === 11
 }
 

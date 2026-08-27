@@ -108,6 +108,25 @@ describe('telefone', () => {
     expect(mascararTelefone('4499149365699')).toBe('(44) 99149-3656')
   })
 
+  // O preenchimento automático do celular entrega o número com o país junto. Cortar
+  // em 11 antes de tirar o 55 produzia (55) 44997-1683: um número inexistente que
+  // passava na validação do navegador e só o servidor recusava.
+  it('tira o 55 do país que o preenchimento automático traz', () => {
+    expect(mascararTelefone('+5544997168329')).toBe('(44) 99716-8329')
+    expect(mascararTelefone('+55 44 99716-8329')).toBe('(44) 99716-8329')
+    expect(mascararTelefone('554432255000')).toBe('(44) 3225-5000')
+    expect(telefoneValido('+5544997168329')).toBe(true)
+  })
+
+  // 55 é DDD de Santa Maria. Com 11 dígitos ou menos ele fica onde está, senão
+  // quem mora lá perde o próprio DDD ao digitar.
+  it('não confunde o DDD 55 com o código do país', () => {
+    expect(mascararTelefone('55997168329')).toBe('(55) 99716-8329')
+    expect(mascararTelefone('5532255000')).toBe('(55) 3225-5000')
+    // Com o país na frente do DDD 55 são 13 dígitos, e aí o primeiro par é país.
+    expect(mascararTelefone('5555997168329')).toBe('(55) 99716-8329')
+  })
+
   it('recusa número curto', () => {
     expect(telefoneValido('(44) 9914')).toBe(false)
     expect(telefoneValido('(44) 99149-3656')).toBe(true)
