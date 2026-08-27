@@ -181,6 +181,48 @@ export async function fetchFunilComercial(params: {
   return (data as FunilComercial) ?? null
 }
 
+// ---- Porta de entrada do lead -----------------------------------------------
+
+/**
+ * Uma linha por porta pela qual a pessoa entrou, com os quatro degraus de qualidade.
+ * Não é o `por_origem` do funil: aquele agrupa por `leads.source`, que mistura
+ * formulário do Meta com quem escreveu no WhatsApp (810 dos 881 `meta_instagram` da
+ * clínica são formulário). Aqui a porta sai de evidência no próprio lead.
+ */
+export type PortaDeEntrada = {
+  porta: 'landing' | 'formulario' | 'whatsapp' | 'importacao' | 'presencial' | 'outro'
+  leads: number
+  falamos: number
+  responderam: number
+  agendaram: number
+  compraram: number
+  valor_cents: number
+  perdidos: number
+  mediana_resposta_min: number | null
+  score_medio: number | null
+}
+
+export type LeadsPorPorta = {
+  periodo: { start: string; end: string }
+  total_leads: number
+  portas: PortaDeEntrada[]
+}
+
+export async function fetchLeadsPorPorta(params: {
+  start: Date
+  end: Date
+  tenant?: string | null
+}): Promise<LeadsPorPorta | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase.rpc('crm_leads_por_porta', {
+    p_start: params.start.toISOString(),
+    p_end: params.end.toISOString(),
+    p_tenant: params.tenant ?? null,
+  })
+  if (error) throw new Error(error.message)
+  return (data as LeadsPorPorta) ?? null
+}
+
 // ---- Métricas da agenda Shosp (clínica inteira) -----------------------------
 
 export type ShospAgendaMetrics = {

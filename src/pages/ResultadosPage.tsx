@@ -15,8 +15,10 @@ import { cn } from '@/lib/utils'
 import {
   fetchConversaoComercial,
   fetchFunilComercial,
+  fetchLeadsPorPorta,
   type ConversaoComercial,
   type FunilComercial,
+  type LeadsPorPorta,
 } from '@/services/analytics'
 
 /** R$ inteiro — centavo em KPI de mês só polui a leitura. */
@@ -43,6 +45,29 @@ function duracao(min: number | null | undefined): string {
 function pct(n: number, total: number): string {
   if (!total) return '0%'
   return `${Math.round((n / total) * 100)}%`
+}
+
+/**
+ * Como cada porta se chama na tela e em que ordem aparece.
+ *
+ * Aquisição primeiro. `importacao` e `presencial` vêm por último e com aviso: são
+ * planilhas de gente que JÁ comprou, carregadas depois, então aparecem com taxa de
+ * compra altíssima por viés de seleção. Lidas na mesma coluna que as outras, fariam
+ * qualquer um concluir que "planilha converte 68%", que é o contrário da verdade.
+ */
+const PORTAS: Record<string, { rotulo: string; ordem: number; aquisicao: boolean }> = {
+  landing: { rotulo: 'Landing /consulta', ordem: 1, aquisicao: true },
+  formulario: { rotulo: 'Formulário do anúncio', ordem: 2, aquisicao: true },
+  whatsapp: { rotulo: 'Direto no WhatsApp', ordem: 3, aquisicao: true },
+  outro: { rotulo: 'Outro', ordem: 4, aquisicao: false },
+  presencial: { rotulo: 'Cadastro na recepção', ordem: 5, aquisicao: false },
+  importacao: { rotulo: 'Importação de planilha', ordem: 6, aquisicao: false },
+}
+
+/** "285 · 36%" — o número absoluto sem a proporção esconde o tamanho da amostra. */
+function contagem(n: number, total: number): string {
+  if (!total) return '0'
+  return `${n} · ${Math.round((n / total) * 100)}%`
 }
 
 function KpiCard({
@@ -103,6 +128,7 @@ export function ResultadosPage() {
   const [periodo, setPeriodo] = useState<Periodo>(() => periodoDoMes(mesAtual()))
   const [data, setData] = useState<FunilComercial | null>(null)
   const [conv, setConv] = useState<ConversaoComercial | null>(null)
+  const [portas, setPortas] = useState<LeadsPorPorta | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -114,11 +140,13 @@ export function ResultadosPage() {
     Promise.all([
       fetchFunilComercial({ start, end, tenant: tenant.id }),
       fetchConversaoComercial({ start, end, tenant: tenant.id }),
+      fetchLeadsPorPorta({ start, end, tenant: tenant.id }),
     ])
-      .then(([funil, conversao]) => {
+      .then(([funil, conversao, porPorta]) => {
         if (cancelled) return
         setData(funil)
         setConv(conversao)
+        setPortas(porPorta)
       })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : 'Falha ao carregar os resultados.'))
       .finally(() => !cancelled && setLoading(false))
@@ -163,6 +191,14 @@ export function ResultadosPage() {
         leads: d.leads,
       })),
     [data],
+  )
+
+  const portasOrdenadas = useMemo(
+    () =>
+      [...(portas?.portas ?? [])].sort(
+        (a, b) => (PORTAS[a.porta]?.ordem ?? 99) - (PORTAS[b.porta]?.ordem ?? 99),
+      ),
+    [portas],
   )
 
   const faixas = useMemo(() => data?.sla.faixas_humano ?? [], [data])
@@ -329,6 +365,96 @@ export function ResultadosPage() {
                   <Bar dataKey="leads" fill="oklch(0.638 0.12 250)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Porta de entrada: a comparação que o `por_origem` abaixo não consegue
+            fazer, porque lá o agrupamento é por `leads.source` e 810 dos 881
+            `meta_instagram` da clínica são, na verdade, formulário do Meta. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Por onde a pessoa entrou, e até onde ela chegou</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <Skeleton className="h-40 w-full" />
+            ) : portasOrdenadas.length === 0 ? (
+              <p className="py-6 text-center text-xs text-muted-foreground">Sem leads no período.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table className="w-full text-xs">
+                  <TableHeader>
+                    <TableRow className="text-left text-muted-foreground">
+                      <TableHead className="pb-2">Porta</TableHead>
+                      <TableHead className="pb-2 text-right">Leads</TableHead>
+                      <TableHead className="pb-2 text-right">Falamos</TableHead>
+                      <TableHead className="pb-2 text-right">Responderam</TableHead>
+                      <TableHead className="pb-2 text-right">Agendaram</TableHead>
+                      <TableHead className="pb-2 text-right">Compraram</TableHead>
+                      <TableHead className="pb-2 text-right">Receita</TableHead>
+                      <TableHead className="pb-2 text-right">1ª fala</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {portasOrdenadas.map((p) => {
+                      const meta = PORTAS[p.porta] ?? { rotulo: p.porta, ordem: 99, aquisicao: false }
+                      return (
+                        <TableRow
+                          key={p.porta}
+                          className={cn('border-t border-border/20', meta.aquisicao ? '' : 'text-muted-foreground')}
+                        >
+                          <TableCell className="py-1.5 font-medium">
+                            {meta.rotulo}
+                            {p.score_medio != null ? (
+                              <span className="ml-2 font-normal text-muted-foreground">
+                                score {p.score_medio}
+                              </span>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="py-1.5 text-right tabular-nums">{p.leads}</TableCell>
+                          <TableCell
+                            className={cn(
+                              'py-1.5 text-right tabular-nums',
+                              // Lead que ninguém chamou é dinheiro de anúncio no lixo,
+                              // e é a diferença mais cara entre as portas hoje.
+                              meta.aquisicao && p.leads >= 20 && p.falamos / p.leads < 0.7
+                                ? 'font-semibold text-destructive'
+                                : '',
+                            )}
+                          >
+                            {contagem(p.falamos, p.leads)}
+                          </TableCell>
+                          <TableCell className="py-1.5 text-right tabular-nums">
+                            {contagem(p.responderam, p.leads)}
+                          </TableCell>
+                          <TableCell className="py-1.5 text-right tabular-nums">
+                            {contagem(p.agendaram, p.leads)}
+                          </TableCell>
+                          <TableCell className="py-1.5 text-right tabular-nums">
+                            {contagem(p.compraram, p.leads)}
+                          </TableCell>
+                          <TableCell className="py-1.5 text-right tabular-nums">
+                            {p.valor_cents ? reais(p.valor_cents) : '—'}
+                          </TableCell>
+                          <TableCell className="py-1.5 text-right tabular-nums">
+                            {duracao(p.mediana_resposta_min)}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Os quatro degraus só descem: falamos com a pessoa, ela respondeu, agendou, comprou. "Falamos" ignora
+                  interação de sistema (sync, automação de etapa), senão lead abandonado aparece como atendido.
+                  <span className="mt-1 block">
+                    As duas últimas linhas não são canal de aquisição: importação de planilha e cadastro na recepção
+                    são listas de quem já é paciente, carregadas depois. A taxa de compra alta ali é viés de seleção,
+                    não desempenho de canal.
+                  </span>
+                </p>
+              </div>
             )}
           </CardContent>
         </Card>
