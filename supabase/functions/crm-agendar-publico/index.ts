@@ -2,6 +2,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { upsertLeadByPhone, insertInteraction } from '../_shared/crm.ts'
 import type { LeadAttribution } from '../_shared/attribution.ts'
 import { shospConfigured, shospGetAgenda } from '../_shared/shosp.ts'
+import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
+import { enqueueOutreach } from '../_shared/whatsapp/outreach.ts'
+import { WapiProvider } from '../_shared/whatsapp/wapi.ts'
 
 /**
  * Porta de entrada da landing /consulta.
@@ -135,9 +138,18 @@ function calcularScore(t: Triagem): number {
   return Math.max(0, Math.min(100, Math.round(soma)))
 }
 
-function temperaturaDoScore(score: number): 'cold' | 'warm' | 'hot' {
-  if (score >= 70) return 'hot'
-  if (score >= 45) return 'warm'
+/**
+ * Quente/morno/frio pela FRAÇÃO do que o lead podia somar, não pelo número cru.
+ *
+ * Sem agenda na landing (ago/2026) ninguém mais ganha os 15 pontos de "escolheu
+ * horário", e com o corte fixo em 70 a fila inteira teria escorregado um degrau
+ * para baixo — a mesma pessoa, mesma resposta, virava morna da noite para o dia.
+ * O teto acompanha o que estava em jogo.
+ */
+function temperaturaDoScore(score: number, teto = 100): 'cold' | 'warm' | 'hot' {
+  const fracao = score / Math.max(1, teto)
+  if (fracao >= 0.7) return 'hot'
+  if (fracao >= 0.45) return 'warm'
   return 'cold'
 }
 
@@ -164,11 +176,85 @@ const ROTULO: Record<string, string> = {
   online: 'Consulta online',
 }
 
+/**
+ * Os rótulos de `ROTULO` são escritos para a atendente ler no CRM ("quer resolver
+ * ESTE MÊS", "perde cabelo há mais de 3 anos"). Mandar isso de volta para a própria
+ * pessoa soa como ficha policial. Estes aqui falam com ela.
+ */
+const ALVO_PACIENTE: Record<string, string> = {
+  transplante_masculino: 'transplante capilar',
+  transplante_feminino: 'transplante capilar feminino',
+  sobrancelha: 'transplante de sobrancelhas',
+  barba: 'transplante de barba',
+  tratamento: 'tratamento para a queda, sem cirurgia',
+  nao_sei: 'entender o que o seu caso pede',
+}
+
+const INTENCAO_PACIENTE: Record<string, string> = {
+  este_mes: 'quer resolver ainda este mês',
+  ate_3_meses: 'quer resolver nos próximos 3 meses',
+  esse_ano: 'quer resolver ainda este ano',
+  pesquisando: 'está pesquisando por enquanto',
+}
+
 function grauLegivel(grau: string): string {
   if (grau.startsWith('ludwig_')) return `Ludwig ${grau.replace('ludwig_', '')}`
   if (!grau) return ''
   if (grau === '3v') return 'Norwood III vertex'
   return `Norwood ${grau}`
+}
+
+/**
+ * O texto que cai no WhatsApp da pessoa segundos depois de ela clicar em enviar.
+ *
+ * Ele existe para uma coisa só: quando ela abrir a conversa (o botão seguinte na
+ * página faz exatamente isso), a clínica JÁ TER FALADO. Chat vazio é onde o lead
+ * pago morre — a pessoa não sabe o que escrever, fecha e some.
+ *
+ * Três decisões de texto:
+ *  - devolve o que ela respondeu, com as palavras dela. Prova que alguém leu.
+ *  - a estimativa entra aqui de novo, porque é a única informação que ela não
+ *    consegue em nenhum outro lugar, e é o que faz valer a pena responder.
+ *  - termina em PERGUNTA. Resposta dela transforma isto em conversa aberta, e
+ *    conversa aberta não gasta cota nenhuma da guarda anti-ban.
+ *
+ * Sem link, de propósito: link na primeira mensagem de um contato novo é uma das
+ * assinaturas que queimam sessão não-oficial (ver crm_wapi_guarda_antiban).
+ */
+function mensagemDaSofia(input: {
+  nome: string
+  protocolo: string
+  triagem: Triagem
+  estimativa: { esperado: number } | null
+}): string {
+  const primeiro = input.nome.trim().split(/\s+/)[0] || 'tudo bem'
+  const alvo = ALVO_PACIENTE[input.triagem.objetivo] ?? ''
+  const grau = grauLegivel(input.triagem.grau)
+  const intencao = INTENCAO_PACIENTE[input.triagem.urgencia] ?? ''
+  const pesquisando = input.triagem.urgencia === 'pesquisando'
+
+  const resumo = [
+    alvo ? `Você me contou que procura ${alvo}` : 'Você acabou de responder a avaliação',
+    grau ? ` (marcou ${grau})` : '',
+    intencao ? ` e que ${intencao}` : '',
+    '.',
+  ].join('')
+
+  const numero = input.estimativa
+    ? `\n\nPela nossa base de cirurgias, um caso parecido costuma pedir algo em torno de ` +
+      `${input.estimativa.esperado.toLocaleString('pt-BR')} unidades foliculares. O número final quem define é a ` +
+      `avaliação da Dra., olhando a sua área doadora de perto.`
+    : ''
+
+  const fecho = pesquisando
+    ? '\n\nSem compromisso nenhum: quer que eu te explique como funciona o tratamento no seu caso?'
+    : '\n\nPosso te explicar como funciona a avaliação e o que a Dra. analisa nela?'
+
+  return (
+    `Oi, ${primeiro}! Aqui é a Sofia, do Instituto Lorena Visentainer.` +
+    `\n\nAcabei de receber a sua avaliação pelo site, protocolo ${input.protocolo}.` +
+    `\n\n${resumo}${numero}${fecho}`
+  )
 }
 
 function dataLegivel(iso: string): string {
@@ -297,7 +383,16 @@ Deno.serve(async (req) => {
   // lista fechada de tipos — sem isso não dá para saber se a página perde gente no
   // passo 2 ou no horário, que é a única pergunta que importa depois de publicar.
   if (texto(payload.action) === 'evento') {
-    const tipos = new Set(['landing_view', 'landing_triagem', 'landing_horarios', 'landing_abandono'])
+    // `landing_horarios` continua na lista por causa do histórico gravado antes de a
+    // agenda sair da página; o funil de hoje é view → triagem → contato → whatsapp.
+    const tipos = new Set([
+      'landing_view',
+      'landing_triagem',
+      'landing_contato',
+      'landing_whatsapp',
+      'landing_horarios',
+      'landing_abandono',
+    ])
     const tipo = texto(payload.tipo, 40)
     if (!tipos.has(tipo)) return json({ ok: true, ignorado: true })
     const atr = (payload.atribuicao ?? {}) as Record<string, unknown>
@@ -344,7 +439,7 @@ Deno.serve(async (req) => {
   }
 
   const score = calcularScore(triagem)
-  const temperatura = temperaturaDoScore(score)
+  const temperatura = temperaturaDoScore(score, querHorario ? 100 : 85)
 
   // Estimativa pela referência da casa. Falha aqui não derruba o agendamento.
   let estimativa: { esperado: number; minimo: number; maximo: number; amostra: number } | null = null
@@ -607,6 +702,83 @@ Deno.serve(async (req) => {
     // métrica não bloqueia venda
   }
 
+  // ── A clínica fala PRIMEIRO ────────────────────────────────────────────────
+  //
+  // Sai agora, direto, e não pela fila de primeiro contato. A pessoa está PARADA na
+  // página, acabou de digitar o próprio número e o botão seguinte abre a conversa: se
+  // a mensagem viesse pela fila (ritmo de 45-90s, teto do dia, janela 08h-20h), ela
+  // abriria um chat vazio e teria de puxar assunto sozinha. É exatamente o atrito que
+  // esta landing existe para tirar.
+  //
+  // Classificada como `transactional` de propósito: é a confirmação de um ato que a
+  // pessoa acabou de praticar, como o código que se pede na tela — não é abordagem que
+  // ninguém pediu. O que a guarda protegeria aqui, bater em número morto, é feito à mão
+  // logo abaixo com o `phone-exists`, porque `transactional` não confere isso.
+  //
+  // Se qualquer coisa falhar (linha caída, número sem WhatsApp, erro de rede), o lead
+  // cai na FILA em vez de sumir: ninguém fica sem contato por causa de um envio ruim.
+  const textoSofia = mensagemDaSofia({ nome, protocolo, triagem, estimativa })
+
+  // Mesma pessoa preenchendo de novo (recarregou, mandou duas vezes, voltou no dia
+  // seguinte): a conversa já está aberta e mandar a apresentação por cima é o robô se
+  // repetindo. `transactional` não tem teto nenhum, então esta é a única trava daqui.
+  const { data: jaFalou } = await admin
+    .from('interactions')
+    .select('id')
+    .eq('lead_id', leadId)
+    .eq('channel', 'whatsapp')
+    .eq('direction', 'out')
+    .gte('created_at', new Date(Date.now() - 30 * 60 * 1000).toISOString())
+    .limit(1)
+    .maybeSingle()
+
+  let mensagemEnviada = Boolean(jaFalou)
+  if (!mensagemEnviada) {
+    try {
+      const { provider, lineTenantId } = await resolveOutboundProviderForLead(admin, {
+        id: leadId,
+        whatsapp_instance_id: null,
+        tenant_id: TENANT,
+      })
+
+      // Número torto é o maior risco desta porta: a pessoa DIGITA o telefone, e ninguém
+      // valida contra o WhatsApp antes daqui.
+      const existe = provider instanceof WapiProvider ? await provider.phoneExists(telefone) : true
+      if (existe !== true) throw new Error(existe === false ? 'numero_sem_whatsapp' : 'numero_nao_verificado')
+
+      const enviado = await provider.sendMessage({
+        to: telefone,
+        text: textoSofia,
+        leadId,
+        metadata: { antiBanKind: 'transactional', antiBanSource: 'landing_consulta' },
+      })
+      mensagemEnviada = true
+
+      await insertInteraction(admin, {
+        leadId,
+        patientName: nome,
+        channel: 'whatsapp',
+        direction: 'out',
+        author: 'Sofia (IA)',
+        content: textoSofia,
+        externalMessageId: enviado.externalMessageId,
+        tenantId: lineTenantId ?? TENANT,
+      }).catch(() => {})
+    } catch {
+      // A fila tem trava única por (lead, kind): mesmo se o lead voltar por outro
+      // caminho, ele não recebe a mesma apresentação duas vezes.
+      await enqueueOutreach(admin, {
+        tenantId: TENANT,
+        leadId,
+        phone: telefone,
+        message: textoSofia,
+        kind: 'optin',
+        source: 'landing_consulta',
+        ignorarConversaAberta: true,
+      })
+    }
+  }
+
   // ── Resposta ──────────────────────────────────────────────────────────────
   const { data: cfg } = await admin
     .from('clinic_booking_settings')
@@ -628,6 +800,12 @@ Deno.serve(async (req) => {
     estimativa,
     slotAt: slotAt || null,
     profissional: profissional || null,
-    whatsappUrl: `https://wa.me/${whats}?text=${encodeURIComponent(msg)}`,
+    mensagemEnviada,
+    // Com a mensagem já entregue, o link abre a conversa LIMPA: a pessoa lê o que a
+    // Sofia escreveu e responde. Texto pronto ali em cima faria ela mandar um "Olá,
+    // sou fulano" por cima de uma mensagem que já a chamou pelo nome.
+    whatsappUrl: mensagemEnviada
+      ? `https://wa.me/${whats}`
+      : `https://wa.me/${whats}?text=${encodeURIComponent(msg)}`,
   })
 })

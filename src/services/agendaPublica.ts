@@ -62,6 +62,12 @@ export type RespostaPreAgendamento = {
   protocolo: string
   slotAt: string | null
   profissional: string | null
+  /**
+   * A Sofia conseguiu mandar a primeira mensagem AGORA. Quando é `true`, o botão do
+   * fim abre a conversa limpa (o texto dela já está lá); quando é `false`, o envio caiu
+   * na fila e o `whatsappUrl` vem com texto pronto, para a pessoa puxar assunto.
+   */
+  mensagemEnviada: boolean
   whatsappUrl: string
   estimativa: EstimativaPublica | null
 }
@@ -215,6 +221,7 @@ export async function enviarPreAgendamento(envio: EnvioPreAgendamento): Promise<
     protocolo: String(p.protocolo ?? ''),
     slotAt: p.slotAt ? String(p.slotAt) : null,
     profissional: p.profissional ? String(p.profissional) : null,
+    mensagemEnviada: p.mensagemEnviada === true,
     whatsappUrl: String(p.whatsappUrl ?? ''),
     estimativa: (p.estimativa as EstimativaPublica | null) ?? null,
   }
@@ -226,7 +233,7 @@ export async function enviarPreAgendamento(envio: EnvioPreAgendamento): Promise<
  * que está tudo bem porque ninguém reclamou).
  */
 export function registrarEventoLanding(
-  tipo: 'landing_view' | 'landing_triagem' | 'landing_horarios' | 'landing_abandono',
+  tipo: 'landing_view' | 'landing_triagem' | 'landing_contato' | 'landing_whatsapp' | 'landing_abandono',
   dados: { sessao: string; atribuicao: AtribuicaoLanding; passo?: string },
 ): void {
   if (!supabase) return

@@ -2,9 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { EscalaCapilar } from '@/components/landing/EscalaCapilar'
 import { capturarAtribuicaoDoNavegador, type AtribuicaoLanding } from '@/lib/atribuicaoLanding'
-import { diaLocal } from '@/lib/diaLocal'
 import {
-  agruparPorDia,
   escalaDoGrau,
   mascararTelefone,
   nomeValido,
@@ -13,42 +11,41 @@ import {
   telefoneValido,
   temEstimativa,
   triagemCompleta,
-  type DiaComHorarios,
-  type Horario,
   type PerguntaTriagem,
   type RespostasTriagem,
 } from '@/lib/triagemConsulta'
 import {
   ErroAgenda,
   carregarEstimativa,
-  carregarHorarios,
   carregarNumerosPublicos,
-  carregarProfissionais,
-  carregarUnidades,
   enviarPreAgendamento,
   registrarEventoLanding,
   type EstimativaPublica,
   type NumerosPublicos,
-  type ProfissionalPublico,
   type RespostaPreAgendamento,
-  type UnidadePublica,
 } from '@/services/agendaPublica'
 
 /**
- * Landing /consulta: triagem + pré-agendamento.
+ * Landing /consulta: qualifica e entrega a pessoa no WhatsApp, já com a clínica falando.
  *
  * Por que ela existe: a clínica fecha 0,4% dos leads. Todo mundo entra pela mesma
  * porta do WhatsApp e a atendente descobre a mão, uma pergunta por vez, quem tem
  * indicação e quem está passeando. Aqui a pessoa se qualifica sozinha, vê uma
- * estimativa feita com as cirurgias REAIS da casa e escolhe um horário. A atendente
- * recebe a fila já pontuada, e quem responde "só estou pesquisando" não ocupa agenda.
+ * estimativa feita com as cirurgias REAIS da casa, e a atendente recebe a fila já
+ * pontuada.
  *
  * Três decisões de conversão que valem mais que o layout:
  *  1. Nenhuma digitação até o fim. Cinco perguntas de um toque, com desenho.
  *  2. A recompensa vem antes do pedido: o número de folículos aparece ANTES de pedir
  *     nome e telefone. O quiz do Tricopill morreu por fazer o contrário.
- *  3. Escassez verdadeira: os horários vêm da agenda, com feriado e Shosp descontados.
- *     Nada de "últimas vagas" inventado.
+ *  3. A conversa começa SOZINHA. Ao enviar o formulário, a Sofia manda a primeira
+ *     mensagem no WhatsApp da pessoa (`crm-agendar-publico`), e o botão desta tela
+ *     abre a conversa já com o texto lá dentro. Chat vazio é onde o lead pago morre:
+ *     a pessoa não sabe o que escrever, fecha e some.
+ *
+ * NÃO se marca horário aqui (decisão do Álvaro, 27/ago/2026). A landing qualifica e
+ * passa a bola; quem marca é a equipe, no WhatsApp. O backend continua sabendo
+ * reservar slot — o payload aceita `slotAt` —, só que esta tela não oferece mais.
  *
  * A página é da CLÍNICA e roda deslogada. Nada aqui pode encostar no Tricopill.
  */
@@ -57,77 +54,6 @@ const WHATSAPP_CLINICA = '5544991493656'
 const TELEFONE_VISIVEL = '(44) 99149-3656'
 
 const numeroBr = (n: number) => n.toLocaleString('pt-BR')
-
-function rotuloDoDia(dia: string): { semana: string; data: string } {
-  const d = new Date(`${dia}T12:00:00-03:00`)
-  const semana = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', timeZone: 'America/Sao_Paulo' })
-    .format(d)
-    .replace('.', '')
-  const data = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' })
-    .format(d)
-  return { semana: semana.charAt(0).toUpperCase() + semana.slice(1), data }
-}
-
-/** "Dra. Lorena Visentainer" vira "Dra. Lorena": cabe no botão e a pessoa reconhece. */
-function primeiroNome(nome: string): string {
-  const partes = nome.trim().split(/\s+/)
-  if (partes.length <= 2) return nome
-  return `${partes[0]} ${partes[1]}`
-}
-
-/** "amanhã" ou "seg, 25/08": a pessoa precisa saber quando, não o dia da semana por extenso. */
-function quandoCurto(iso: string | null): string {
-  if (!iso) return ''
-  const dia = diaLocal(iso)
-  const hoje = diaLocal(new Date())
-  const amanha = diaLocal(new Date(Date.now() + 86_400_000))
-  const hora = new Intl.DateTimeFormat('pt-BR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'America/Sao_Paulo',
-  }).format(new Date(iso))
-  if (dia === hoje) return `hoje ${hora}`
-  if (dia === amanha) return `amanhã ${hora}`
-  const { semana, data } = rotuloDoDia(dia)
-  return `${semana} ${data}`
-}
-
-function horaDoSlot(iso: string): string {
-  return new Intl.DateTimeFormat('pt-BR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'America/Sao_Paulo',
-  }).format(new Date(iso))
-}
-
-function dataPorExtenso(iso: string): string {
-  const texto = new Intl.DateTimeFormat('pt-BR', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'long',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'America/Sao_Paulo',
-  }).format(new Date(iso))
-  return texto.charAt(0).toUpperCase() + texto.slice(1)
-}
-
-/** Link de calendário que funciona em qualquer celular, sem baixar arquivo. */
-function linkGoogleAgenda(slotAt: string, unidade: UnidadePublica | undefined): string {
-  const inicio = new Date(slotAt)
-  const fim = new Date(inicio.getTime() + 60 * 60 * 1000)
-  const fmt = (d: Date) => d.toISOString().replace(/[-:]|\.\d{3}/g, '')
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: 'Avaliação capilar · Instituto Lorena Visentainer',
-    dates: `${fmt(inicio)}/${fmt(fim)}`,
-    details: `Avaliação no Instituto Lorena Visentainer. Dúvidas pelo WhatsApp ${TELEFONE_VISIVEL}.`,
-    location: unidade?.endereco || 'Instituto Lorena Visentainer',
-  })
-  return `https://calendar.google.com/calendar/render?${params.toString()}`
-}
-
-// ── Peças visuais ────────────────────────────────────────────────────────────
 
 function Botao({
   children,
@@ -226,17 +152,6 @@ export function ConsultaLandingPage() {
   const [respostas, setRespostas] = useState<RespostasTriagem>({})
 
   const [numeros, setNumeros] = useState<NumerosPublicos | null>(null)
-  const [unidades, setUnidades] = useState<UnidadePublica[]>([])
-  const [unidadeId, setUnidadeId] = useState('maringa')
-  const [horarios, setHorarios] = useState<Horario[]>([])
-  const [carregandoHorarios, setCarregandoHorarios] = useState(false)
-  const [diaEscolhido, setDiaEscolhido] = useState('')
-  const [slotEscolhido, setSlotEscolhido] = useState('')
-  const [profissionais, setProfissionais] = useState<ProfissionalPublico[]>([])
-  // '' = primeira vaga com qualquer profissional. É o padrão porque o que a pessoa
-  // quer, antes de escolher médico, é ser atendida cedo.
-  const [prestadorEscolhido, setPrestadorEscolhido] = useState('')
-
   const [estimativa, setEstimativa] = useState<EstimativaPublica | null>(null)
   const [nome, setNome] = useState('')
   const [telefone, setTelefone] = useState('')
@@ -251,8 +166,8 @@ export function ConsultaLandingPage() {
 
   const visiveis = useMemo(() => perguntasVisiveis(respostas), [respostas])
   const pergunta: PerguntaTriagem | undefined = visiveis[indice]
-  const querAgenda = podeReservarHorario(respostas)
-  const unidade = unidades.find((u) => u.id === unidadeId)
+  /** Quem NÃO respondeu "só pesquisando". Muda o texto, não o caminho: todo mundo termina no WhatsApp. */
+  const querResolver = podeReservarHorario(respostas)
 
   // Título, descrição e rastro da campanha. O index.html é do CRM interno, e sem isto
   // a aba de quem vem do anúncio diz "Instituto Lorena CRM · INTERNO".
@@ -263,7 +178,7 @@ export function ConsultaLandingPage() {
     const descricaoAnterior = meta?.getAttribute('content') ?? ''
     meta?.setAttribute(
       'content',
-      'Descubra em 2 minutos quantas unidades foliculares o seu caso pede e reserve a sua avaliação no Instituto Lorena Visentainer.',
+      'Descubra em 2 minutos quantas unidades foliculares o seu caso pede e fale com a equipe do Instituto Lorena Visentainer no WhatsApp.',
     )
     rastro.current = capturarAtribuicaoDoNavegador()
     registrarEventoLanding('landing_view', rastro.current)
@@ -275,86 +190,7 @@ export function ConsultaLandingPage() {
 
   useEffect(() => {
     void carregarNumerosPublicos().then(setNumeros)
-    void carregarUnidades()
-      .then((lista) => {
-        setUnidades(lista)
-        if (lista.length && !lista.some((u) => u.id === 'maringa')) setUnidadeId(lista[0].id)
-      })
-      .catch(() => setUnidades([]))
   }, [])
-
-  // Agenda: só busca quando a pessoa está no resultado (é lá que o seletor aparece) e
-  // refaz ao trocar de unidade. NÃO refaz ao ir para o formulário: fazia isso antes e
-  // a busca voltava limpando o horário escolhido, então o botão do fim virava
-  // "quero receber orientação" e a reserva sumia entre uma tela e outra.
-  useEffect(() => {
-    if (etapa !== 'resultado') return
-    if (!querAgenda) return
-    let vivo = true
-    setCarregandoHorarios(true)
-    void carregarProfissionais(unidadeId, respostas.objetivo)
-      .then((lista) => { if (vivo) setProfissionais(lista) })
-      .catch(() => undefined)
-    carregarHorarios(unidadeId, respostas.objetivo)
-      .then((lista) => {
-        if (!vivo) return
-        setHorarios(lista)
-        const dias = agruparPorDia(lista)
-        setDiaEscolhido((atual) => (dias.some((d) => d.dia === atual) ? atual : (dias[0]?.dia ?? '')))
-        // Só perde a escolha quem perdeu o horário de verdade (alguém reservou antes).
-        setSlotEscolhido((atual) => (lista.some((h) => h.slotAt === atual) ? atual : ''))
-      })
-      .catch(() => {
-        if (vivo) setHorarios([])
-      })
-      .finally(() => {
-        if (vivo) setCarregandoHorarios(false)
-      })
-    return () => {
-      vivo = false
-    }
-  }, [etapa, unidadeId, querAgenda, respostas.objetivo])
-
-  /**
-   * Em "primeira vaga" um horário aparece uma vez só, com quem estiver na frente da
-   * ordem. Com profissional escolhido, mostra a agenda dele inteira. Sem isto, o
-   * mesmo 13:00 apareceria três vezes, uma por médico.
-   */
-  const horariosVisiveis = useMemo(() => {
-    if (prestadorEscolhido) return horarios.filter((h) => h.codigoPrestador === prestadorEscolhido)
-    const vistos = new Set<string>()
-    return horarios.filter((h) => {
-      if (vistos.has(h.slotAt)) return false
-      vistos.add(h.slotAt)
-      return true
-    })
-  }, [horarios, prestadorEscolhido])
-
-  const dias: DiaComHorarios[] = useMemo(() => agruparPorDia(horariosVisiveis), [horariosVisiveis])
-  const horariosDoDia = dias.find((d) => d.dia === diaEscolhido)?.horarios ?? []
-  const horarioEscolhido = horariosVisiveis.find((h) => h.slotAt === slotEscolhido) ?? null
-  const profissionalEscolhido = profissionais.find((p) => p.codigoPrestador === prestadorEscolhido) ?? null
-  /** Quem tem a vaga mais próxima entre os outros: é o que se oferece a quem ficou sem. */
-  const alternativa = useMemo(() => {
-    const outros = profissionais.filter((p) => p.codigoPrestador !== prestadorEscolhido && p.vagas > 0 && p.proxima)
-    return outros.sort((a, b) => String(a.proxima).localeCompare(String(b.proxima)))[0] ?? null
-  }, [profissionais, prestadorEscolhido])
-  // Escassez verdadeira: quantas vagas existem na primeira semana que tem vaga. Sai
-  // do próprio primeiro horário disponível, não de "hoje", para não prometer número
-  // de uma semana em que a agenda está fechada.
-  const vagasNaSemana = useMemo(() => {
-    const primeiro = dias[0]?.dia
-    if (!primeiro) return 0
-    const limite = diaLocal(new Date(`${primeiro}T12:00:00-03:00`).getTime() + 7 * 86_400_000)
-    return dias.filter((d) => d.dia <= limite).reduce((soma, d) => soma + d.horarios.length, 0)
-  }, [dias])
-
-  useEffect(() => {
-    if (!dias.length) return
-    if (dias.some((d) => d.dia === diaEscolhido)) return
-    setDiaEscolhido(dias[0].dia)
-    setSlotEscolhido('')
-  }, [dias, diaEscolhido])
 
   const rolarParaPainel = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -404,7 +240,7 @@ export function ConsultaLandingPage() {
 
   const irParaContato = () => {
     setEtapa('contato')
-    if (querAgenda) registrarEventoLanding('landing_horarios', { ...rastro.current, passo: slotEscolhido })
+    registrarEventoLanding('landing_contato', { ...rastro.current, passo: respostas.urgencia ?? '' })
     rolarParaPainel()
   }
 
@@ -427,9 +263,9 @@ export function ConsultaLandingPage() {
       const r = await enviarPreAgendamento({
         nome: nome.trim(),
         telefone,
-        unidade: unidadeId,
-        slotAt: querAgenda && slotEscolhido ? slotEscolhido : null,
-        codigoPrestador: horarioEscolhido?.codigoPrestador ?? null,
+        unidade: 'maringa',
+        slotAt: null,
+        codigoPrestador: null,
         respostas: respostas as Record<string, string>,
         atribuicao: rastro.current.atribuicao,
         sessionId: rastro.current.sessao,
@@ -441,12 +277,6 @@ export function ConsultaLandingPage() {
     } catch (e) {
       const msg = e instanceof ErroAgenda ? e.message : 'Não consegui concluir agora. Tente de novo.'
       setErro(msg)
-      // Horário tomado no meio do caminho: recarrega a agenda para a pessoa escolher outro.
-      if (e instanceof ErroAgenda && e.codigo === 'horario_indisponivel') {
-        setSlotEscolhido('')
-        setEtapa('resultado')
-        void carregarHorarios(unidadeId, respostas.objetivo).then(setHorarios)
-      }
     } finally {
       setEnviando(false)
     }
@@ -464,11 +294,12 @@ export function ConsultaLandingPage() {
               Transplante Capilar Regenerativo®
             </p>
             <h1 className="font-heading text-3xl font-semibold leading-[1.1] sm:text-5xl">
-              Descubra o que o seu caso pede e reserve a sua avaliação em 2 minutos.
+              Descubra o que o seu caso pede em 2 minutos, e receba a orientação no seu WhatsApp.
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-[#252A33]/75">
               São 5 perguntas de um toque. No fim você vê a estimativa de unidades foliculares calculada com as
-              cirurgias já realizadas aqui dentro e escolhe o horário da sua avaliação.
+              cirurgias já realizadas aqui dentro — e a nossa equipe te chama no WhatsApp com a orientação do seu
+              caso, na hora.
             </p>
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               <Botao onClick={comecar} className="w-full sm:w-auto">
@@ -485,7 +316,8 @@ export function ConsultaLandingPage() {
               </a>
             </div>
             <p className="mt-4 text-sm text-[#252A33]/60">
-              Sem cadastro, sem custo para responder. Você escolhe o horário no fim.
+              Sem cadastro e sem custo para responder. Você não marca nada agora: quem combina o dia é a equipe,
+              com você, no WhatsApp.
             </p>
           </div>
           <div className="rounded-3xl border border-[#252A33]/10 bg-white p-6 shadow-sm">
@@ -508,7 +340,7 @@ export function ConsultaLandingPage() {
                 <h2 className="font-heading text-2xl font-semibold sm:text-3xl">Vamos entender o seu caso</h2>
                 <p className="mx-auto mt-3 max-w-lg text-[#252A33]/70">
                   Cinco perguntas rápidas. Nenhuma delas pede documento, e você só digita nome e WhatsApp no final,
-                  para a equipe segurar o seu horário.
+                  para a orientação chegar até você.
                 </p>
                 <Botao onClick={comecar} className="mt-6 w-full sm:w-auto">
                   Começar agora
@@ -610,210 +442,22 @@ export function ConsultaLandingPage() {
                   </div>
                 )}
 
-                {querAgenda ? (
-                  <div className="mt-8">
-                    <h3 className="font-heading text-xl font-semibold">Escolha o horário da sua avaliação</h3>
-                    <p className="mt-1 text-sm text-[#252A33]/65">
-                      {carregandoHorarios
-                        ? 'Consultando a agenda...'
-                        : vagasNaSemana > 0
-                          ? `${vagasNaSemana} ${vagasNaSemana === 1 ? 'horário livre' : 'horários livres'} na primeira semana com vaga. Os horários vêm da agenda da clínica e mudam ao longo do dia.`
-                          : 'Os próximos horários abertos estão logo abaixo.'}
-                    </p>
-
-                    {unidades.length > 1 ? (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {unidades.map((u) => (
-                          <button
-                            key={u.id}
-                            type="button"
-                            onClick={() => setUnidadeId(u.id)}
-                            className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
-                              u.id === unidadeId
-                                ? 'border-[#252A33] bg-[#252A33] text-white'
-                                : 'border-[#252A33]/20 hover:border-[#252A33]/60'
-                            }`}
-                          >
-                            {u.rotulo}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {profissionais.length > 1 ? (
-                      <div className="mt-5">
-                        <p className="mb-2 text-sm font-semibold">Com quem você quer ser atendido?</p>
-                        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPrestadorEscolhido('')
-                              setSlotEscolhido('')
-                            }}
-                            className={`min-w-[132px] shrink-0 rounded-2xl border px-3 py-2 text-left transition ${
-                              prestadorEscolhido === ''
-                                ? 'border-[#252A33] bg-[#252A33] text-white'
-                                : 'border-[#252A33]/15 hover:border-[#252A33]/50'
-                            }`}
-                          >
-                            <span className="block text-sm font-semibold">Primeira vaga</span>
-                            <span className="block text-[11px] opacity-70">com qualquer profissional</span>
-                          </button>
-                          {profissionais.map((p) => {
-                            const marcado = p.codigoPrestador === prestadorEscolhido
-                            return (
-                              <button
-                                key={p.codigoPrestador}
-                                type="button"
-                                onClick={() => {
-                                  setPrestadorEscolhido(p.codigoPrestador)
-                                  setSlotEscolhido('')
-                                }}
-                                className={`min-w-[150px] shrink-0 rounded-2xl border px-3 py-2 text-left transition ${
-                                  marcado
-                                    ? 'border-[#252A33] bg-[#252A33] text-white'
-                                    : 'border-[#252A33]/15 hover:border-[#252A33]/50'
-                                } ${p.vagas === 0 ? 'opacity-60' : ''}`}
-                              >
-                                <span className="block text-sm font-semibold">{primeiroNome(p.nome)}</span>
-                                <span className="block text-[11px] opacity-70">
-                                  {p.vagas === 0 ? 'sem vaga nas próximas semanas' : `a partir de ${quandoCurto(p.proxima)}`}
-                                </span>
-                              </button>
-                            )
-                          })}
-                        </div>
-                        {profissionalEscolhido ? (
-                          <p className="rounded-xl bg-[#DCDBD1]/40 px-4 py-3 text-sm">
-                            <strong>{profissionalEscolhido.nome}</strong>
-                            {profissionalEscolhido.credencial ? (
-                              <span className="text-[#252A33]/70"> · {profissionalEscolhido.credencial}</span>
-                            ) : null}
-                            {profissionalEscolhido.descricao ? (
-                              <span className="mt-1 block text-[#252A33]/70">{profissionalEscolhido.descricao}</span>
-                            ) : null}
-                          </p>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    {dias.length === 0 && !carregandoHorarios ? (
-                      <div className="mt-5 rounded-2xl border border-[#252A33]/15 p-5">
-                        {prestadorEscolhido && alternativa ? (
-                          <>
-                            <p className="text-[#252A33]/75">
-                              {profissionalEscolhido?.nome ?? 'Esse profissional'} não tem horário aberto nas próximas
-                              semanas. {alternativa.nome} atende o mesmo caso e tem vaga {quandoCurto(alternativa.proxima)}.
-                            </p>
-                            <Botao
-                              variante="contorno"
-                              className="mt-4 w-full sm:w-auto"
-                              onClick={() => {
-                                setPrestadorEscolhido(alternativa.codigoPrestador)
-                                setSlotEscolhido('')
-                              }}
-                            >
-                              Ver a agenda de {primeiroNome(alternativa.nome)}
-                            </Botao>
-                          </>
-                        ) : (
-                          <p className="text-[#252A33]/75">
-                            A agenda desta unidade está fechada no momento. Fale com a equipe pelo WhatsApp que a gente
-                            encaixa você na próxima abertura.
-                          </p>
-                        )}
-                        <a
-                          href={`https://wa.me/${WHATSAPP_CLINICA}`}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          className="mt-4 inline-flex items-center gap-2 rounded-full bg-[#128C4A] px-5 py-3 text-sm font-semibold text-white"
-                        >
-                          <IconeWhatsapp className="h-4 w-4" />
-                          Falar com a equipe
-                        </a>
-                      </div>
-                    ) : null}
-
-                    {dias.length > 0 ? (
-                      <>
-                        <div className="mt-4 -mx-1 flex gap-2 overflow-x-auto px-1 pb-2">
-                          {dias.map((d) => {
-                            const { semana, data } = rotuloDoDia(d.dia)
-                            const marcado = d.dia === diaEscolhido
-                            return (
-                              <button
-                                key={d.dia}
-                                type="button"
-                                onClick={() => {
-                                  setDiaEscolhido(d.dia)
-                                  setSlotEscolhido('')
-                                }}
-                                className={`min-w-[74px] shrink-0 rounded-2xl border px-3 py-2 text-center transition ${
-                                  marcado
-                                    ? 'border-[#252A33] bg-[#252A33] text-white'
-                                    : 'border-[#252A33]/15 hover:border-[#252A33]/50'
-                                }`}
-                              >
-                                <span className="block text-xs uppercase tracking-wide opacity-70">{semana}</span>
-                                <span className="block font-heading text-lg font-semibold">{data}</span>
-                                <span className="block text-[11px] opacity-70">
-                                  {d.horarios.length} {d.horarios.length === 1 ? 'vaga' : 'vagas'}
-                                </span>
-                              </button>
-                            )
-                          })}
-                        </div>
-
-                        <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
-                          {horariosDoDia.map((h) => {
-                            const marcado = h.slotAt === slotEscolhido
-                            return (
-                              <button
-                                key={h.slotAt}
-                                type="button"
-                                onClick={() => setSlotEscolhido(h.slotAt)}
-                                className={`rounded-xl border px-2 py-2.5 text-center transition ${
-                                  marcado
-                                    ? 'border-[#252A33] bg-[#252A33] text-white'
-                                    : 'border-[#252A33]/15 hover:border-[#252A33]/50'
-                                }`}
-                              >
-                                <span className="block text-sm font-semibold">{horaDoSlot(h.slotAt)}</span>
-                                {h.profissional ? (
-                                  <span className={`block text-[11px] leading-tight ${marcado ? 'text-white/70' : 'text-[#252A33]/55'}`}>
-                                    {primeiroNome(h.profissional)}
-                                  </span>
-                                ) : null}
-                              </button>
-                            )
-                          })}
-                        </div>
-
-                        {unidade?.endereco ? (
-                          <p className="mt-3 text-sm text-[#252A33]/60">{unidade.endereco}</p>
-                        ) : null}
-
-                        <Botao onClick={irParaContato} desabilitado={!slotEscolhido} className="mt-6 w-full">
-                          {slotEscolhido
-                            ? `Reservar ${horaDoSlot(slotEscolhido)} de ${rotuloDoDia(diaEscolhido).data}`
-                            : 'Escolha um horário acima'}
-                        </Botao>
-                      </>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="mt-8 rounded-2xl border border-[#252A33]/15 p-6">
-                    <h3 className="font-heading text-xl font-semibold">Sem pressa, e sem compromisso</h3>
-                    <p className="mt-2 text-[#252A33]/75">
-                      Você disse que ainda está pesquisando, então não vamos ocupar um horário da agenda médica agora.
-                      Deixe o seu contato que a nossa equipe te manda a orientação do seu caso pelo WhatsApp, e quando
-                      você quiser marcar, a gente marca.
-                    </p>
-                    <Botao onClick={irParaContato} variante="contorno" className="mt-5 w-full sm:w-auto">
-                      Receber orientação no WhatsApp
-                    </Botao>
-                  </div>
-                )}
+                <div className="mt-8 rounded-2xl border border-[#252A33]/15 p-6">
+                  <h3 className="font-heading text-xl font-semibold">
+                    {querResolver ? 'O próximo passo é falar com a equipe' : 'Sem pressa, e sem compromisso'}
+                  </h3>
+                  <p className="mt-2 text-[#252A33]/75">
+                    {querResolver
+                      ? 'Deixe o seu nome e WhatsApp. A gente te manda a orientação do seu caso na hora, por lá, e a equipe combina com você o dia da avaliação.'
+                      : 'Você disse que ainda está pesquisando, então não vamos empurrar consulta nenhuma. Deixe o seu contato que a gente te manda a orientação do seu caso pelo WhatsApp, e quando você quiser marcar, a gente marca.'}
+                  </p>
+                  <Botao onClick={irParaContato} className="mt-5 w-full sm:w-auto">
+                    {querResolver ? 'Receber a minha orientação no WhatsApp' : 'Quero só a orientação, por enquanto'}
+                  </Botao>
+                  <p className="mt-3 text-sm text-[#252A33]/60">
+                    Leva um toque. Nada é cobrado e você não fica preso a horário nenhum.
+                  </p>
+                </div>
               </div>
             ) : null}
 
@@ -832,17 +476,10 @@ export function ConsultaLandingPage() {
                   Voltar
                 </button>
 
-                <h2 className="font-heading text-2xl font-semibold sm:text-3xl">
-                  {querAgenda && slotEscolhido ? 'Falta só segurar o seu horário' : 'Para onde mandamos a orientação?'}
-                </h2>
-                {querAgenda && slotEscolhido ? (
-                  <p className="mt-2 rounded-xl bg-[#DCDBD1]/50 px-4 py-3 text-sm font-semibold">
-                    {dataPorExtenso(slotEscolhido)} · {unidade?.rotulo ?? 'Maringá'}
-                    {horarioEscolhido?.profissional ? (
-                      <span className="block font-normal text-[#252A33]/70">com {horarioEscolhido.profissional}</span>
-                    ) : null}
-                  </p>
-                ) : null}
+                <h2 className="font-heading text-2xl font-semibold sm:text-3xl">Para onde mandamos a orientação?</h2>
+                <p className="mt-2 text-[#252A33]/70">
+                  Assim que você enviar, a mensagem com o seu caso já cai no seu WhatsApp. É só abrir e responder.
+                </p>
 
                 <div className="mt-6 grid gap-4">
                   <label className="block">
@@ -896,11 +533,7 @@ export function ConsultaLandingPage() {
                 ) : null}
 
                 <Botao tipo="submit" desabilitado={enviando} className="mt-6 w-full">
-                  {enviando
-                    ? 'Enviando...'
-                    : querAgenda && slotEscolhido
-                      ? 'Confirmar meu pré-agendamento'
-                      : 'Quero receber a orientação'}
+                  {enviando ? 'Mandando no seu WhatsApp...' : 'Receber agora no meu WhatsApp'}
                 </Botao>
                 <p className="mt-3 text-center text-xs text-[#252A33]/55">
                   Seus dados ficam com a clínica e não são vendidos nem compartilhados.
@@ -911,56 +544,45 @@ export function ConsultaLandingPage() {
             {etapa === 'pronto' && resultado ? (
               <div className="text-center">
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#128C4A]/12">
-                  <svg viewBox="0 0 24 24" className="h-7 w-7 text-[#128C4A]" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="M4 12.5 9.5 18 20 7" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <IconeWhatsapp className="h-7 w-7 text-[#128C4A]" />
                 </div>
                 <h2 className="mt-4 font-heading text-2xl font-semibold sm:text-3xl">
-                  {resultado.slotAt ? 'Horário reservado no seu nome' : 'Recebemos o seu contato'}
+                  {resultado.mensagemEnviada
+                    ? 'A mensagem já está no seu WhatsApp'
+                    : 'Recebemos o seu contato'}
                 </h2>
 
-                {resultado.slotAt ? (
-                  <p className="mx-auto mt-3 max-w-md text-[#252A33]/75">
-                    {dataPorExtenso(resultado.slotAt)} · {unidade?.rotulo ?? 'Maringá'}
-                    {resultado.profissional ? (
-                      <span className="block font-medium text-[#252A33]">com {resultado.profissional}</span>
-                    ) : null}
-                    <span className="mt-1 block text-sm">
-                      Protocolo <strong className="font-heading">{resultado.protocolo}</strong>. A equipe confirma com
-                      você pelo WhatsApp e passa as orientações da consulta.
-                    </span>
-                  </p>
-                ) : (
-                  <p className="mx-auto mt-3 max-w-md text-[#252A33]/75">
-                    A nossa equipe vai te chamar no WhatsApp com a orientação do seu caso. Protocolo{' '}
-                    <strong className="font-heading">{resultado.protocolo}</strong>.
-                  </p>
-                )}
+                <p className="mx-auto mt-3 max-w-md text-[#252A33]/75">
+                  {resultado.mensagemEnviada ? (
+                    <>
+                      A Sofia acabou de te mandar a orientação do seu caso, com a sua estimativa. Abra a conversa e
+                      responda por lá — a equipe continua contigo.
+                    </>
+                  ) : (
+                    <>A nossa equipe vai te chamar no WhatsApp com a orientação do seu caso.</>
+                  )}
+                  <span className="mt-1 block text-sm">
+                    Protocolo <strong className="font-heading">{resultado.protocolo}</strong>.
+                  </span>
+                </p>
 
-                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+                <div className="mt-6 flex justify-center">
                   <a
                     href={resultado.whatsappUrl}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="inline-flex items-center justify-center gap-2 rounded-full bg-[#128C4A] px-6 py-4 text-base font-semibold text-white hover:bg-[#0f7a40]"
+                    onClick={() => registrarEventoLanding('landing_whatsapp', rastro.current)}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#128C4A] px-6 py-4 text-base font-semibold text-white hover:bg-[#0f7a40] sm:w-auto"
                   >
                     <IconeWhatsapp />
-                    Falar agora no WhatsApp
+                    {resultado.mensagemEnviada ? 'Abrir a minha conversa' : 'Falar agora no WhatsApp'}
                   </a>
-                  {resultado.slotAt ? (
-                    <a
-                      href={linkGoogleAgenda(resultado.slotAt, unidade)}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="inline-flex items-center justify-center rounded-full border border-[#252A33]/25 px-6 py-4 text-base font-semibold hover:border-[#252A33]/60"
-                    >
-                      Salvar no meu calendário
-                    </a>
-                  ) : null}
                 </div>
 
-                {resultado.slotAt && unidade?.endereco ? (
-                  <p className="mt-6 text-sm text-[#252A33]/65">{unidade.endereco}</p>
+                {resultado.mensagemEnviada ? (
+                  <p className="mt-4 text-sm text-[#252A33]/60">
+                    Não chegou em um minuto? Toque no botão mesmo assim: a conversa abre no {TELEFONE_VISIVEL}.
+                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -975,15 +597,15 @@ export function ConsultaLandingPage() {
           <ol className="mt-6 grid gap-4 sm:grid-cols-3">
             {[
               {
-                titulo: '1. Você reserva o horário',
-                texto: 'A vaga fica no seu nome assim que você confirma aqui na página.',
+                titulo: '1. Você responde 5 perguntas',
+                texto: 'Um toque em cada. No fim aparece a estimativa do seu caso, calculada com as cirurgias da casa.',
               },
               {
-                titulo: '2. A equipe confirma',
-                texto: 'Falamos com você pelo WhatsApp para confirmar a data e explicar como é a consulta.',
+                titulo: '2. A conversa começa sozinha',
+                texto: 'Ao enviar o contato, a orientação já cai no seu WhatsApp. Você abre e responde, sem ter de puxar assunto.',
               },
               {
-                titulo: '3. Avaliação com exame',
+                titulo: '3. A equipe marca a avaliação',
                 texto:
                   'Análise do couro cabeludo, contagem de área doadora e o plano do seu caso, com valores na mesa.',
               },
@@ -1089,8 +711,8 @@ export function ConsultaLandingPage() {
           <div className="mt-6 divide-y divide-[#252A33]/10">
             {[
               {
-                p: 'O que acontece depois que eu reservo o horário?',
-                r: 'A vaga fica bloqueada no seu nome e a nossa equipe confirma com você pelo WhatsApp. Enquanto ninguém confirma, ninguém mais consegue marcar aquele horário.',
+                p: 'O que acontece depois que eu mando o meu contato?',
+                r: 'A orientação do seu caso cai no seu WhatsApp em segundos, e a equipe continua a conversa por lá — inclusive para marcar a avaliação, no dia que for melhor para você. Nada é cobrado nessa etapa.',
               },
               {
                 p: 'Quanto custa a avaliação?',
@@ -1124,6 +746,42 @@ export function ConsultaLandingPage() {
           </div>
         </div>
       </section>
+
+      {/* ── Convite de fechamento ───────────────────────────────────────── */}
+      {etapa !== 'pronto' ? (
+        <section className="border-t border-[#252A33]/10 bg-[#252A33] py-12 text-white sm:py-16">
+          <div className="mx-auto max-w-3xl px-4 text-center">
+            <h2 className="font-heading text-2xl font-semibold sm:text-4xl">
+              Descobrir o que o seu caso pede leva 2 minutos.
+            </h2>
+            <p className="mx-auto mt-4 max-w-xl leading-relaxed text-white/75">
+              Cinco perguntas, a sua estimativa na tela e a orientação no seu WhatsApp. Sem custo, sem cadastro e sem
+              marcar nada agora.
+            </p>
+            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => {
+                  if (etapa === 'inicio') comecar()
+                  else rolarParaPainel()
+                }}
+                className="inline-flex w-full items-center justify-center rounded-full bg-white px-6 py-4 text-base font-semibold text-[#252A33] hover:bg-[#DCDBD1] sm:w-auto"
+              >
+                {etapa === 'inicio' ? 'Começar a minha avaliação' : 'Voltar para a minha avaliação'}
+              </button>
+              <a
+                href={`https://wa.me/${WHATSAPP_CLINICA}?text=${encodeURIComponent('Olá! Vim pelo site e quero falar sobre a avaliação capilar.')}`}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/30 px-6 py-4 text-base font-semibold text-white hover:border-white sm:w-auto"
+              >
+                <IconeWhatsapp />
+                Prefiro falar no WhatsApp
+              </a>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {/* ── Rodapé ──────────────────────────────────────────────────────── */}
       <footer className="border-t border-[#252A33]/10 bg-white py-10 pb-28 sm:pb-10">
