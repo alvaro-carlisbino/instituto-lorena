@@ -12,7 +12,7 @@ import { fetchClientProfile, type ClientProfile } from '@/services/clientProfile
 const STAGE_LABEL: Record<string, string> = {
   novo: 'Novo lead', triagem: 'Triagem', contato: 'Contato', consulta: 'Consulta agendada',
   'stage-1777902160674': 'Consulta realizada', fechado: 'Encerrado', 'ligar-formulario': 'Ligar · Formulário',
-  'sem-whatsapp': 'Sem WhatsApp · e-mail',
+  'sem-whatsapp': 'Sem WhatsApp · e-mail', 'nao-se-aplica': 'Fornecedor · não se aplica',
 }
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const isPaid = (s: string) => ['paid', 'confirmed', 'received', 'approved'].includes(s)

@@ -8,11 +8,11 @@ import { sourceLabel } from '@/mocks/crmMock'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
+  fetchAgendaPorDia,
   fetchLeadIdsWithAppointment,
   fetchLeadIdsWithShospLink,
-  fetchShospAppointmentsBetween,
   fetchShospFrescor,
-  type ShospApptRow,
+  type AgendaDiaRow,
   type ShospFrescor,
 } from '@/services/analytics'
 import { cn } from '@/lib/utils'
@@ -59,16 +59,21 @@ function windowFor(key: RangeKey): { start: Date; end: Date; prevStart: Date; pr
   return { start, end: now, prevStart, prevEnd }
 }
 
-type ApptBucket = { agendadas: number; faltas: number; desmarcadas: number }
+type ApptBucket = { agendadas: number; faltas: number; desmarcadas: number; outros: number }
 
-function bucketAppts(rows: ShospApptRow[], startYmd: string, endYmd: string): ApptBucket {
-  const b: ApptBucket = { agendadas: 0, faltas: 0, desmarcadas: 0 }
+/**
+ * Soma os dias da janela. Quem separa consulta de sessão do Spa é a RPC
+ * `crm_agenda_por_dia` — aqui só se escolhe o intervalo, porque a janela é do
+ * navegador (fuso local) e a data da agenda é `date` puro.
+ */
+function bucketAppts(rows: AgendaDiaRow[], startYmd: string, endYmd: string): ApptBucket {
+  const b: ApptBucket = { agendadas: 0, faltas: 0, desmarcadas: 0, outros: 0 }
   for (const r of rows) {
     if (r.data < startYmd || r.data > endYmd) continue
-    const s = (r.status ?? '').toLowerCase()
-    if (s.startsWith('agendad') || s.startsWith('confirmad')) b.agendadas += 1
-    else if (s.startsWith('falt')) b.faltas += 1
-    else if (s.startsWith('cancelad') || s.startsWith('desmarc')) b.desmarcadas += 1
+    b.agendadas += r.consultas
+    b.faltas += r.consultas_faltas
+    b.desmarcadas += r.consultas_desmarcadas
+    b.outros += r.outros
   }
   return b
 }
@@ -147,7 +152,7 @@ export function DashboardKpiSection() {
   const crm = useCrm()
   const { tenant } = useTenant()
   const [range, setRange] = useState<RangeKey>('7d')
-  const [appts, setAppts] = useState<ShospApptRow[]>([])
+  const [appts, setAppts] = useState<AgendaDiaRow[]>([])
   const [linkedLeadIds, setLinkedLeadIds] = useState<Set<string>>(new Set())
   const [shospLinkedIds, setShospLinkedIds] = useState<Set<string>>(new Set())
   // Frescor do espelho da agenda. Sem isto, o Painel mostrava a foto de 09/07 como se
@@ -175,7 +180,7 @@ export function DashboardKpiSection() {
     setLoading(true)
     setError(null)
     Promise.all([
-      fetchShospAppointmentsBetween(ymd(win.prevStart), ymd(win.end)),
+      fetchAgendaPorDia(ymd(win.prevStart), ymd(win.end)),
       fetchLeadIdsWithAppointment(),
       fetchLeadIdsWithShospLink(),
       fetchShospFrescor(),
@@ -327,6 +332,20 @@ export function DashboardKpiSection() {
   }, [novosCurr, linkedLeadIds])
   const maxMidia = Math.max(1, ...midia.rows.map((r) => r.total))
 
+  // O card conta CONSULTA, e a clínica precisa saber que o resto da agenda não sumiu —
+  // é a maior parte dela. Em 27/08 eram 15 consultas e 51 sessões do Spa Capilar,
+  // finalizações e retornos: somar tudo dava os 66 que ninguém reconhecia.
+  const subConsultas = useMemo(() => {
+    const partes: string[] = []
+    if (apptCurr.faltas + apptCurr.desmarcadas > 0) {
+      partes.push(`${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} desmarcadas`)
+    } else {
+      partes.push('consultas com data no período')
+    }
+    if (apptCurr.outros > 0) partes.push(`+${apptCurr.outros} sessões e retornos`)
+    return partes.join(' · ')
+  }, [apptCurr])
+
   // 1 dia já basta: a agenda muda todo dia, então um espelho de ontem já engana.
   const agendaVelha = !isSalesPolo && (frescor.diasAtras ?? 0) >= 1
   const ultimoSyncLabel = frescor.ultimoSync
@@ -381,13 +400,7 @@ export function DashboardKpiSection() {
           <KpiCard
             label="Consultas agendadas"
             value={agendaVelha ? '—' : apptCurr.agendadas}
-            sub={
-              agendaVelha
-                ? `sem dado desde ${ultimoSyncLabel ?? 'o último sync'}`
-                : apptCurr.faltas + apptCurr.desmarcadas > 0
-                  ? `${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} desmarcadas`
-                  : 'agenda da clínica (Shosp)'
-            }
+            sub={agendaVelha ? `sem dado desde ${ultimoSyncLabel ?? 'o último sync'}` : subConsultas}
             icon={CalendarCheck2}
             loading={loading}
           />
@@ -434,7 +447,7 @@ export function DashboardKpiSection() {
             sub={
               agendaVelha
                 ? `sem dado desde ${ultimoSyncLabel ?? 'o último sync'}`
-                : `${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} desmarcadas no período`
+                : `${apptCurr.faltas} faltas • ${apptCurr.desmarcadas} consultas desmarcadas no período`
             }
             trend={agendaVelha ? null : perdaTrend}
             icon={CalendarX2}

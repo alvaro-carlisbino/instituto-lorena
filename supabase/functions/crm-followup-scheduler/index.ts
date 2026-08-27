@@ -220,7 +220,12 @@ Deno.serve(async (req) => {
     // contato certo é o fluxo de FEEDBACK (pós-consulta) ou a recompra (pós-frasco),
     // nunca "e aí, vamos fechar?" — soa robô e queima a relação.
     const CONVERTED_STAGES = new Set(['fechado', 'consulta', 'tricopill__vd-pago'])
-    if (CONVERTED_STAGES.has(String((lead as { stage_id?: string }).stage_id ?? ''))) {
+    // «Fornecedor / não se aplica» entra na mesma porta de saída por outro motivo: não
+    // converteu, nunca ia converter. Cinco fornecedores estavam em Follow UP 3 levando
+    // "e aí, vamos fechar?" a cada rodada até 27/ago.
+    const NAO_ABORDAR_STAGES = new Set(['nao-se-aplica'])
+    const stageAtual = String((lead as { stage_id?: string }).stage_id ?? '')
+    if (CONVERTED_STAGES.has(stageAtual) || NAO_ABORDAR_STAGES.has(stageAtual)) {
       skipped++
       continue
     }

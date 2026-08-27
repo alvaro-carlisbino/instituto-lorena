@@ -282,7 +282,12 @@ Deno.serve(async (req) => {
   // Mesma lista do crm-followup-scheduler. A trilha B (recompra) NÃO é barrada aqui: oferecer
   // reposição pra quem comprou é justamente o trabalho dela.
   const CONVERTED_STAGES = new Set(['fechado', 'consulta', 'tricopill__vd-pago'])
+  // Quem está na coluna «Fornecedor / não se aplica» não é cliente adormecido nem
+  // comprador: é o representante de laboratório, o número trocado. Barra as TRÊS
+  // trilhas, ao contrário da lista de convertidos, que só barra a reativação.
+  const NAO_ABORDAR_STAGES = new Set(['nao-se-aplica'])
   const convertedLeadIds = new Set<string>()
+  const naoAbordarLeadIds = new Set<string>()
   {
     const ids = leads.map((l) => l.lead_id)
     for (let i = 0; i < ids.length; i += 500) {
@@ -292,6 +297,7 @@ Deno.serve(async (req) => {
         .in('id', ids.slice(i, i + 500))
       for (const r of (stageRows ?? []) as Array<{ id: string; stage_id: string | null }>) {
         if (CONVERTED_STAGES.has(String(r.stage_id ?? ''))) convertedLeadIds.add(String(r.id))
+        if (NAO_ABORDAR_STAGES.has(String(r.stage_id ?? ''))) naoAbordarLeadIds.add(String(r.id))
       }
     }
   }
@@ -373,6 +379,7 @@ Deno.serve(async (req) => {
   for (const l of leads) {
     if (isSyntheticPhone(l.phone)) { results.push({ lead: l.lead_id, skip: 'phone_sintetico' }); continue }
     if (isBlockedContact(l.patient_name)) { results.push({ lead: l.lead_id, skip: 'contato_interno' }); continue }
+    if (naoAbordarLeadIds.has(l.lead_id)) { results.push({ lead: l.lead_id, skip: 'nao_se_aplica' }); continue }
     // Atingiu o teto de envios reais nesta execução: para de mandar, mas registra o backlog.
     if (ENABLED && sent >= DAILY_CAP) { capped++; continue }
     // Sem tempo para outro envio: para agora e devolve o que realmente saiu.

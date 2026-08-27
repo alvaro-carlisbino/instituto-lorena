@@ -23,7 +23,9 @@ export function shouldDispatchNpsForStage(stageId: string): boolean {
  * Não contar carga de trabalho SDR em etapas encerradas/concluídas.
  */
 export function isWorkloadExcludedStageId(stageId: string): boolean {
-  if (stageId === 'fechado' || stageId === 'tc-concluido' || stageId === 'cx-alta') {
+  // `nao-se-aplica` guarda fornecedor, representante e número trocado: não é fila de
+  // ninguém, então não pesa na carga da equipe.
+  if (stageId === 'fechado' || stageId === 'tc-concluido' || stageId === 'cx-alta' || stageId === 'nao-se-aplica') {
     return true
   }
   if (stageId.includes('fechado') || stageId.includes('encerrado') || stageId.includes('cancel')) {

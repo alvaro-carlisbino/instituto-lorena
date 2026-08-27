@@ -207,20 +207,36 @@ export async function fetchShospAgendaMetrics(days = 30): Promise<ShospAgendaMet
 // clínica agenda ~280/mês) e não o funil vinculado a lead (que trava em ~9 pelo
 // gargalo de vínculo lead↔Shosp). Ver [[crm_metricas_consultas_agendadas]].
 
-export type ShospApptRow = { status: string; data: string; lead_id: string | null }
+export type AgendaDiaRow = {
+  data: string
+  consultas: number
+  consultas_faltas: number
+  consultas_desmarcadas: number
+  outros: number
+}
 
-/** Agendamentos com DATA da consulta dentro de [startYmd, endYmd] (inclusive). */
-export async function fetchShospAppointmentsBetween(startYmd: string, endYmd: string): Promise<ShospApptRow[]> {
+/**
+ * A agenda por dia, com consulta separada do resto.
+ *
+ * Contar linha de agenda não é contar consulta: em 27/08 a clínica tinha 69 horários,
+ * dos quais 46 eram Spa Capilar (terapia, lavagem, execução de protocolo) e vários
+ * outros eram finalização e retorno. Consulta médica mesmo: 15. Quem decide é a RPC,
+ * que usa `crm_e_consulta` — a MESMA regra da Conversão da Consulta. Enquanto a conta
+ * morava aqui no navegador, o painel dizia 66 e o relatório dizia outra coisa.
+ */
+export async function fetchAgendaPorDia(startYmd: string, endYmd: string): Promise<AgendaDiaRow[]> {
   if (!supabase) return []
-  return buscarTudo<ShospApptRow>(() =>
-    supabase!
-      .from('shosp_appointments')
-      .select('status, data, lead_id')
-      .gte('data', startYmd)
-      .lte('data', endYmd)
-      .order('codigo_agendamento', { ascending: true }),
-    { rotulo: 'shosp_appointments (janela)' },
-  )
+  const { data, error } = await supabase.rpc('crm_agenda_por_dia', { p_de: startYmd, p_ate: endYmd })
+  if (error) {
+    // Sessão ainda não montou (boot) ou usuário sem acesso à clínica: ler a TABELA
+    // nessa situação devolve zero linha em silêncio, pela RLS. A RPC devolve
+    // `permission denied` (42501), e o painel inteiro pintava uma faixa vermelha onde
+    // antes havia um zero. Só este código é engolido — qualquer outro erro continua
+    // aparecendo, senão o painel volta a mentir quando a agenda quebrar de verdade.
+    if (error.code === '42501') return []
+    throw new Error(error.message)
+  }
+  return (data as AgendaDiaRow[]) ?? []
 }
 
 export type ShospFrescor = { ultimoSync: string | null; diasAtras: number | null }

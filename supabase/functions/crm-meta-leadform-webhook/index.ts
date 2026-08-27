@@ -453,7 +453,10 @@ async function processLeadData(
     // consulta agendada e consulta realizada ficam onde estão, porque ali já tem
     // alguém cuidando; e card que está em OUTRO funil não é puxado para cá, que
     // foi o erro de [crm_card_roubado_pelo_funil_protocolo].
-    const ETAPAS_INTOCAVEIS = ['consulta', 'stage-1777902160674']
+    // `nao-se-aplica` entra aqui porque a coluna só serve se ela SEGURAR: fornecedor
+    // que preenche formulário de novo (e eles preenchem, testando o anúncio) voltaria
+    // para a fila de ligação e a equipe arquivaria o mesmo card toda semana.
+    const ETAPAS_INTOCAVEIS = ['consulta', 'stage-1777902160674', 'nao-se-aplica']
     if (up.status === 'updated' && tenantId === 'instituto-lorena') {
       const { data: atual } = await admin
         .from('leads').select('stage_id, pipeline_id').eq('id', up.leadId).maybeSingle()
