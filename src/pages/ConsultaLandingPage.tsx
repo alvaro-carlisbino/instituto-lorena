@@ -26,26 +26,31 @@ import {
 } from '@/services/agendaPublica'
 
 /**
- * Landing /consulta: qualifica e entrega a pessoa no WhatsApp, já com a clínica falando.
+ * Landing /consulta: qualifica em três toques e entrega a pessoa no WhatsApp já
+ * aquecida, com a clínica tendo falado primeiro.
  *
  * Por que ela existe: a clínica fecha 0,4% dos leads. Todo mundo entra pela mesma
  * porta do WhatsApp e a atendente descobre a mão, uma pergunta por vez, quem tem
- * indicação e quem está passeando. Aqui a pessoa se qualifica sozinha, vê uma
- * estimativa feita com as cirurgias REAIS da casa, e a atendente recebe a fila já
- * pontuada.
+ * indicação e quem está passeando. Aqui a pessoa se qualifica sozinha e a atendente
+ * pega a conversa sabendo do que falar.
  *
- * Três decisões de conversão que valem mais que o layout:
- *  1. Nenhuma digitação até o fim. Cinco perguntas de um toque, com desenho.
- *  2. A recompensa vem antes do pedido: o número de folículos aparece ANTES de pedir
- *     nome e telefone. O quiz do Tricopill morreu por fazer o contrário.
- *  3. A conversa começa SOZINHA. Ao enviar o formulário, a Sofia manda a primeira
- *     mensagem no WhatsApp da pessoa (`crm-agendar-publico`), e o botão desta tela
- *     abre a conversa já com o texto lá dentro. Chat vazio é onde o lead pago morre:
- *     a pessoa não sabe o que escrever, fecha e some.
+ * Quatro decisões de conversão que valem mais que o layout:
+ *  1. A primeira pergunta está NA DOBRA. Não há tela de boas-vindas, não há botão
+ *     "começar": quem chega do anúncio já responde.
+ *  2. Nenhuma digitação até o fim. Três perguntas de um toque, com desenho (duas para
+ *     sobrancelha e barba). Eram cinco até 27/ago/2026.
+ *  3. A recompensa vem antes do pedido: o número de folículos aparece ACIMA dos campos
+ *     de nome e WhatsApp, na mesma tela. O quiz do Tricopill morreu por fazer o
+ *     contrário, e uma tela só para o formulário era um clique que não perguntava nada.
+ *  4. A conversa começa SOZINHA. Ao enviar, a Sofia manda a primeira mensagem no
+ *     WhatsApp da pessoa (`crm-agendar-publico`), e o botão desta tela abre a conversa
+ *     já com o texto lá dentro. Chat vazio é onde o lead pago morre: a pessoa não sabe
+ *     o que escrever, fecha e some.
  *
- * NÃO se marca horário aqui (decisão do Álvaro, 27/ago/2026). A landing qualifica e
- * passa a bola; quem marca é a equipe, no WhatsApp. O backend continua sabendo
- * reservar slot — o payload aceita `slotAt` —, só que esta tela não oferece mais.
+ * NÃO se marca horário aqui, e a página não vende: sem "como funciona", sem biografia
+ * longa, sem FAQ. Quem convence é a conversa no WhatsApp (decisões do Álvaro e do
+ * Fabricio, 27/ago/2026). O backend continua sabendo reservar slot, o payload aceita
+ * `slotAt`, só que esta tela não oferece mais.
  *
  * A página é da CLÍNICA e roda deslogada. Nada aqui pode encostar no Tricopill.
  */
@@ -144,10 +149,18 @@ function Prova({ numeros }: { numeros: NumerosPublicos | null }) {
 
 // ── Página ───────────────────────────────────────────────────────────────────
 
-type Etapa = 'inicio' | 'triagem' | 'resultado' | 'contato' | 'pronto'
+/**
+ * Três telas, e a primeira já está na dobra.
+ *
+ * 'inicio' (um botão "começar" antes da 1ª pergunta) e 'contato' (o formulário numa
+ * tela só dele) foram removidos em 27/ago/2026: eram dois cliques que não perguntavam
+ * nada. A estimativa e os campos de nome/WhatsApp agora dividem a tela 'resultado',
+ * com o número em cima e o pedido embaixo, que é a ordem que importa.
+ */
+type Etapa = 'triagem' | 'resultado' | 'pronto'
 
 export function ConsultaLandingPage() {
-  const [etapa, setEtapa] = useState<Etapa>('inicio')
+  const [etapa, setEtapa] = useState<Etapa>('triagem')
   const [indice, setIndice] = useState(0)
   const [respostas, setRespostas] = useState<RespostasTriagem>({})
 
@@ -166,6 +179,13 @@ export function ConsultaLandingPage() {
 
   const visiveis = useMemo(() => perguntasVisiveis(respostas), [respostas])
   const pergunta: PerguntaTriagem | undefined = visiveis[indice]
+  /**
+   * Quantas perguntas a pessoa vai responder. Antes de o objetivo estar escolhido,
+   * `perguntasVisiveis` devolve 2 (o grau depende do objetivo) e a barra saltava de
+   * 1/2 para 2/3 no primeiro toque, que é o contador andando para trás na cara dela.
+   * Até lá vale o pior caso, 3.
+   */
+  const totalPassos = respostas.objetivo ? visiveis.length : 3
   /** Quem NÃO respondeu "só pesquisando". Muda o texto, não o caminho: todo mundo termina no WhatsApp. */
   const querResolver = podeReservarHorario(respostas)
 
@@ -198,12 +218,6 @@ export function ConsultaLandingPage() {
     })
   }, [])
 
-  const comecar = () => {
-    setEtapa('triagem')
-    setIndice(0)
-    rolarParaPainel()
-  }
-
   const responder = (id: keyof RespostasTriagem, valor: string) => {
     const novas = { ...respostas, [id]: valor }
     // Trocar de objetivo invalida o grau: Norwood não serve para sobrancelha.
@@ -218,6 +232,8 @@ export function ConsultaLandingPage() {
     }
     if (triagemCompleta(novas)) {
       setEtapa('resultado')
+      // Chegar aqui é ver a estimativa E o formulário: 'landing_triagem' passou a ser
+      // o passo do meio inteiro. Não há mais tela de contato para medir à parte.
       registrarEventoLanding('landing_triagem', { ...rastro.current, passo: novas.urgencia ?? '' })
       const escala = temEstimativa(novas) ? escalaDoGrau(novas.grau ?? '') : null
       if (escala) void carregarEstimativa(escala.escala, escala.grau).then(setEstimativa)
@@ -231,17 +247,7 @@ export function ConsultaLandingPage() {
       setIndice(Math.max(0, visiveis.length - 1))
       return
     }
-    if (indice === 0) {
-      setEtapa('inicio')
-      return
-    }
-    setIndice(indice - 1)
-  }
-
-  const irParaContato = () => {
-    setEtapa('contato')
-    registrarEventoLanding('landing_contato', { ...rastro.current, passo: respostas.urgencia ?? '' })
-    rolarParaPainel()
+    if (indice > 0) setIndice(indice - 1)
   }
 
   const enviar = async () => {
@@ -286,99 +292,67 @@ export function ConsultaLandingPage() {
     <div className="min-h-dvh bg-white text-[#252A33] antialiased">
       <Cabecalho />
 
-      {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section className="border-b border-[#252A33]/10 bg-gradient-to-b from-white to-[#DCDBD1]/40">
-        <div className="mx-auto grid max-w-5xl gap-10 px-4 py-10 sm:py-16 lg:grid-cols-[1.15fr_1fr] lg:items-center">
-          <div>
-            <p className="mb-4 inline-flex rounded-full bg-[#252A33]/5 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-[#252A33]/70">
+      {/* ── Dobra: a primeira pergunta já está aqui ──────────────────────── */}
+      <section
+        ref={painel}
+        className="scroll-mt-16 border-b border-[#252A33]/10 bg-gradient-to-b from-white to-[#DCDBD1]/40"
+      >
+        <div className="mx-auto grid max-w-5xl gap-8 px-4 py-8 sm:py-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-start lg:gap-12">
+          {/* No celular fica só título e uma linha acima do cartão: a primeira
+              pergunta tem de aparecer sem rolar. O resto desce para depois dele. */}
+          <div className="lg:sticky lg:top-24">
+            <p className="mb-3 inline-flex rounded-full bg-[#252A33]/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-[#252A33]/70">
               Transplante Capilar Regenerativo®
             </p>
-            <h1 className="font-heading text-3xl font-semibold leading-[1.1] sm:text-5xl">
-              Descubra o que o seu caso pede em 2 minutos, e receba a orientação no seu WhatsApp.
+            <h1 className="font-heading text-[28px] font-semibold leading-[1.1] sm:text-4xl lg:text-5xl">
+              Descubra o que o seu caso pede em 3 perguntas.
             </h1>
-            <p className="mt-5 max-w-xl text-lg leading-relaxed text-[#252A33]/75">
-              São 5 perguntas de um toque. No fim você vê a estimativa de unidades foliculares calculada com as
-              cirurgias já realizadas aqui dentro, e a nossa equipe te chama no WhatsApp com a orientação do seu
-              caso, na hora.
+            <p className="mt-3 leading-relaxed text-[#252A33]/75 lg:mt-4 lg:text-lg">
+              A estimativa sai das cirurgias feitas aqui dentro, e a equipe te chama no WhatsApp na hora.
             </p>
-            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-              <Botao onClick={comecar} className="w-full sm:w-auto">
-                Começar a minha avaliação
-              </Botao>
+            <div className="mt-5 hidden lg:block">
+              <p className="text-sm text-[#252A33]/60">Sem cadastro e sem custo. Você só digita nome e WhatsApp no fim.</p>
               <a
                 href={`https://wa.me/${WHATSAPP_CLINICA}?text=${encodeURIComponent('Olá! Vim pelo site e quero falar sobre a avaliação capilar.')}`}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-[#252A33]/25 px-6 py-4 text-base font-semibold hover:border-[#252A33]/60 sm:w-auto"
+                className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#128C4A] hover:underline"
               >
-                <IconeWhatsapp />
-                Prefiro falar no WhatsApp
+                <IconeWhatsapp className="h-4 w-4" />
+                Prefiro ir direto para o WhatsApp
               </a>
             </div>
-            <p className="mt-4 text-sm text-[#252A33]/60">
-              Sem cadastro e sem custo para responder. Você não marca nada agora: quem combina o dia é a equipe,
-              com você, no WhatsApp.
-            </p>
           </div>
-          <div className="rounded-3xl border border-[#252A33]/10 bg-white p-6 shadow-sm">
-            <Prova numeros={numeros} />
-            <p className="mt-5 border-t border-[#252A33]/10 pt-5 text-sm leading-relaxed text-[#252A33]/70">
-              Números do próprio centro cirúrgico do Instituto, contados a partir das cirurgias finalizadas
-              {numeros?.desdeAno ? ` desde ${numeros.desdeAno}` : ''}. A estimativa que você vai receber sai daí, não
-              de tabela de internet.
-            </p>
-          </div>
-        </div>
-      </section>
 
-      {/* ── Painel da triagem ────────────────────────────────────────────── */}
-      <section ref={painel} className="scroll-mt-20 bg-white">
-        <div className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
-          <div className="rounded-3xl border border-[#252A33]/12 bg-white p-5 shadow-[0_18px_60px_-30px_rgba(37,42,51,0.45)] sm:p-8">
-            {etapa === 'inicio' ? (
-              <div className="text-center">
-                <h2 className="font-heading text-2xl font-semibold sm:text-3xl">Vamos entender o seu caso</h2>
-                <p className="mx-auto mt-3 max-w-lg text-[#252A33]/70">
-                  Cinco perguntas rápidas. Nenhuma delas pede documento, e você só digita nome e WhatsApp no final,
-                  para a orientação chegar até você.
-                </p>
-                <Botao onClick={comecar} className="mt-6 w-full sm:w-auto">
-                  Começar agora
-                </Botao>
-              </div>
-            ) : null}
-
+          {/* ── Painel: pergunta, resultado ou confirmação ──────────────── */}
+          <div className="rounded-3xl border border-[#252A33]/12 bg-white p-5 shadow-[0_18px_60px_-30px_rgba(37,42,51,0.45)] sm:p-7">
             {etapa === 'triagem' && pergunta ? (
               <div>
-                <div className="mb-6 flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={voltar}
-                    className="rounded-full border border-[#252A33]/15 px-3 py-1 text-sm text-[#252A33]/70 hover:border-[#252A33]/50"
-                  >
-                    Voltar
-                  </button>
+                <div className="mb-5 flex items-center gap-3">
+                  {indice > 0 ? (
+                    <button
+                      type="button"
+                      onClick={voltar}
+                      className="rounded-full border border-[#252A33]/15 px-3 py-1 text-sm text-[#252A33]/70 hover:border-[#252A33]/50"
+                    >
+                      Voltar
+                    </button>
+                  ) : null}
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#252A33]/10">
                     <div
                       className="h-full rounded-full bg-[#252A33] transition-all"
-                      style={{ width: `${Math.round(((indice + 1) / Math.max(visiveis.length, 1)) * 100)}%` }}
+                      style={{ width: `${Math.round(((indice + 1) / Math.max(totalPassos, 1)) * 100)}%` }}
                     />
                   </div>
                   <span className="text-sm tabular-nums text-[#252A33]/60">
-                    {indice + 1}/{visiveis.length}
+                    {indice + 1}/{totalPassos}
                   </span>
                 </div>
 
                 <h2 className="font-heading text-2xl font-semibold leading-tight sm:text-3xl">{pergunta.titulo}</h2>
                 {pergunta.ajuda ? <p className="mt-2 text-[#252A33]/65">{pergunta.ajuda}</p> : null}
 
-                <div
-                  className={
-                    pergunta.visual
-                      ? 'mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4'
-                      : 'mt-6 grid gap-3'
-                  }
-                >
+                <div className={pergunta.visual ? 'mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4' : 'mt-5 grid gap-3'}>
                   {pergunta.opcoes.map((opcao) => {
                     const marcada = respostas[pergunta.id] === opcao.valor
                     return (
@@ -408,60 +382,9 @@ export function ConsultaLandingPage() {
               </div>
             ) : null}
 
+            {/* Estimativa e formulário na MESMA tela: o número em cima é a recompensa,
+                e pedir o contato numa tela separada custava um clique sem perguntar nada. */}
             {etapa === 'resultado' ? (
-              <div>
-                <button
-                  type="button"
-                  onClick={voltar}
-                  className="mb-6 rounded-full border border-[#252A33]/15 px-3 py-1 text-sm text-[#252A33]/70 hover:border-[#252A33]/50"
-                >
-                  Voltar
-                </button>
-
-                {estimativa ? (
-                  <div className="rounded-2xl bg-[#252A33] p-6 text-white sm:p-8">
-                    <p className="text-xs uppercase tracking-[0.2em] text-white/60">Sua estimativa</p>
-                    <p className="mt-3 font-heading text-5xl font-semibold leading-none">
-                      {numeroBr(estimativa.esperado)}
-                    </p>
-                    <p className="mt-1 text-base font-normal text-white/70">unidades foliculares</p>
-                    <p className="mt-3 text-sm leading-relaxed text-white/75">
-                      Faixa de {numeroBr(Math.min(estimativa.minimo, estimativa.esperado))} a{' '}
-                      {numeroBr(Math.max(estimativa.maximo, estimativa.esperado))}, calculada sobre{' '}
-                      {numeroBr(estimativa.amostra)} cirurgias já realizadas no Instituto. O número final depende do que
-                      a sua área doadora comporta, e isso só a avaliação médica define.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl bg-[#DCDBD1]/50 p-6">
-                    <h2 className="font-heading text-2xl font-semibold">Seu caso pede uma avaliação presencial</h2>
-                    <p className="mt-2 text-[#252A33]/75">
-                      Pelo que você respondeu, o caminho é examinar o seu couro cabeludo antes de falar em número de
-                      fios ou em técnica.
-                    </p>
-                  </div>
-                )}
-
-                <div className="mt-8 rounded-2xl border border-[#252A33]/15 p-6">
-                  <h3 className="font-heading text-xl font-semibold">
-                    {querResolver ? 'O próximo passo é falar com a equipe' : 'Sem pressa, e sem compromisso'}
-                  </h3>
-                  <p className="mt-2 text-[#252A33]/75">
-                    {querResolver
-                      ? 'Deixe o seu nome e WhatsApp. A gente te manda a orientação do seu caso na hora, por lá, e a equipe combina com você o dia da avaliação.'
-                      : 'Você disse que ainda está pesquisando, então não vamos empurrar consulta nenhuma. Deixe o seu contato que a gente te manda a orientação do seu caso pelo WhatsApp, e quando você quiser marcar, a gente marca.'}
-                  </p>
-                  <Botao onClick={irParaContato} className="mt-5 w-full sm:w-auto">
-                    {querResolver ? 'Receber a minha orientação no WhatsApp' : 'Quero só a orientação, por enquanto'}
-                  </Botao>
-                  <p className="mt-3 text-sm text-[#252A33]/60">
-                    Leva um toque. Nada é cobrado e você não fica preso a horário nenhum.
-                  </p>
-                </div>
-              </div>
-            ) : null}
-
-            {etapa === 'contato' ? (
               <form
                 onSubmit={(e) => {
                   e.preventDefault()
@@ -470,18 +393,44 @@ export function ConsultaLandingPage() {
               >
                 <button
                   type="button"
-                  onClick={() => setEtapa('resultado')}
-                  className="mb-6 rounded-full border border-[#252A33]/15 px-3 py-1 text-sm text-[#252A33]/70 hover:border-[#252A33]/50"
+                  onClick={voltar}
+                  className="mb-5 rounded-full border border-[#252A33]/15 px-3 py-1 text-sm text-[#252A33]/70 hover:border-[#252A33]/50"
                 >
                   Voltar
                 </button>
 
-                <h2 className="font-heading text-2xl font-semibold sm:text-3xl">Para onde mandamos a orientação?</h2>
-                <p className="mt-2 text-[#252A33]/70">
-                  Assim que você enviar, a mensagem com o seu caso já cai no seu WhatsApp. É só abrir e responder.
+                {estimativa ? (
+                  <div className="rounded-2xl bg-[#252A33] p-5 text-white sm:p-6">
+                    <p className="text-xs uppercase tracking-[0.2em] text-white/60">Sua estimativa</p>
+                    <p className="mt-2 font-heading text-4xl font-semibold leading-none sm:text-5xl">
+                      {numeroBr(estimativa.esperado)}
+                    </p>
+                    <p className="mt-1 text-base font-normal text-white/70">unidades foliculares</p>
+                    <p className="mt-3 text-sm leading-relaxed text-white/75">
+                      Faixa de {numeroBr(Math.min(estimativa.minimo, estimativa.esperado))} a{' '}
+                      {numeroBr(Math.max(estimativa.maximo, estimativa.esperado))}, calculada sobre{' '}
+                      {numeroBr(estimativa.amostra)} cirurgias já realizadas no Instituto. O número final depende da
+                      sua área doadora, e isso só a avaliação médica define.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl bg-[#DCDBD1]/50 p-5">
+                    <h2 className="font-heading text-xl font-semibold">Seu caso pede uma avaliação presencial</h2>
+                    <p className="mt-2 text-sm text-[#252A33]/75">
+                      Pelo que você respondeu, o caminho é examinar de perto antes de falar em número de fios ou em
+                      técnica.
+                    </p>
+                  </div>
+                )}
+
+                <h2 className="mt-6 font-heading text-xl font-semibold sm:text-2xl">
+                  {querResolver ? 'Para onde mandamos a sua orientação?' : 'Quer receber a orientação, sem compromisso?'}
+                </h2>
+                <p className="mt-1 text-sm text-[#252A33]/70">
+                  Assim que você enviar, a mensagem com o seu caso cai no seu WhatsApp. É só abrir e responder.
                 </p>
 
-                <div className="mt-6 grid gap-4">
+                <div className="mt-4 grid gap-3">
                   <label className="block">
                     <span className="mb-1 block text-sm font-semibold">Nome completo</span>
                     <input
@@ -532,7 +481,7 @@ export function ConsultaLandingPage() {
                   <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{erro}</p>
                 ) : null}
 
-                <Botao tipo="submit" desabilitado={enviando} className="mt-6 w-full">
+                <Botao tipo="submit" variante="whatsapp" desabilitado={enviando} className="mt-5 w-full">
                   {enviando ? 'Mandando no seu WhatsApp...' : 'Receber agora no meu WhatsApp'}
                 </Botao>
                 <p className="mt-3 text-center text-xs text-[#252A33]/55">
@@ -547,9 +496,7 @@ export function ConsultaLandingPage() {
                   <IconeWhatsapp className="h-7 w-7 text-[#128C4A]" />
                 </div>
                 <h2 className="mt-4 font-heading text-2xl font-semibold sm:text-3xl">
-                  {resultado.mensagemEnviada
-                    ? 'A mensagem já está no seu WhatsApp'
-                    : 'Recebemos o seu contato'}
+                  {resultado.mensagemEnviada ? 'A mensagem já está no seu WhatsApp' : 'Recebemos o seu contato'}
                 </h2>
 
                 <p className="mx-auto mt-3 max-w-md text-[#252A33]/75">
@@ -566,18 +513,16 @@ export function ConsultaLandingPage() {
                   </span>
                 </p>
 
-                <div className="mt-6 flex justify-center">
-                  <a
-                    href={resultado.whatsappUrl}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    onClick={() => registrarEventoLanding('landing_whatsapp', rastro.current)}
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#128C4A] px-6 py-4 text-base font-semibold text-white hover:bg-[#0f7a40] sm:w-auto"
-                  >
-                    <IconeWhatsapp />
-                    {resultado.mensagemEnviada ? 'Abrir a minha conversa' : 'Falar agora no WhatsApp'}
-                  </a>
-                </div>
+                <a
+                  href={resultado.whatsappUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  onClick={() => registrarEventoLanding('landing_whatsapp', rastro.current)}
+                  className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#128C4A] px-6 py-4 text-base font-semibold text-white hover:bg-[#0f7a40]"
+                >
+                  <IconeWhatsapp />
+                  {resultado.mensagemEnviada ? 'Abrir a minha conversa' : 'Falar agora no WhatsApp'}
+                </a>
 
                 {resultado.mensagemEnviada ? (
                   <p className="mt-4 text-sm text-[#252A33]/60">
@@ -587,99 +532,48 @@ export function ConsultaLandingPage() {
               </div>
             ) : null}
           </div>
+
+          <div className="lg:hidden">
+            <p className="text-sm text-[#252A33]/60">Sem cadastro e sem custo. Você só digita nome e WhatsApp no fim.</p>
+            <a
+              href={`https://wa.me/${WHATSAPP_CLINICA}?text=${encodeURIComponent('Olá! Vim pelo site e quero falar sobre a avaliação capilar.')}`}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-[#128C4A] hover:underline"
+            >
+              <IconeWhatsapp className="h-4 w-4" />
+              Prefiro ir direto para o WhatsApp
+            </a>
+          </div>
         </div>
       </section>
 
-      {/* ── O que acontece depois ────────────────────────────────────────── */}
-      <section className="bg-[#DCDBD1]/40 py-12">
+      {/* ── Prova, em uma faixa só ──────────────────────────────────────── */}
+      <section className="bg-white py-10">
         <div className="mx-auto max-w-5xl px-4">
-          <h2 className="font-heading text-2xl font-semibold sm:text-3xl">Como funciona daqui em diante</h2>
-          <ol className="mt-6 grid gap-4 sm:grid-cols-3">
-            {[
-              {
-                titulo: '1. Você responde 5 perguntas',
-                texto: 'Um toque em cada. No fim aparece a estimativa do seu caso, calculada com as cirurgias da casa.',
-              },
-              {
-                titulo: '2. A conversa começa sozinha',
-                texto: 'Ao enviar o contato, a orientação já cai no seu WhatsApp. Você abre e responde, sem ter de puxar assunto.',
-              },
-              {
-                titulo: '3. A equipe marca a avaliação',
-                texto:
-                  'Análise do couro cabeludo, contagem de área doadora e o plano do seu caso, com valores na mesa.',
-              },
-            ].map((passo) => (
-              <li key={passo.titulo} className="rounded-2xl bg-white p-5">
-                <h3 className="font-heading text-lg font-semibold">{passo.titulo}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-[#252A33]/70">{passo.texto}</p>
-              </li>
-            ))}
-          </ol>
-        </div>
-      </section>
-
-      {/* ── Método ───────────────────────────────────────────────────────── */}
-      <section className="py-12 sm:py-16">
-        <div className="mx-auto grid max-w-5xl gap-8 px-4 lg:grid-cols-2">
-          <div>
-            <h2 className="font-heading text-2xl font-semibold sm:text-3xl">
-              Transplante Capilar Regenerativo®
-            </h2>
-            <p className="mt-4 leading-relaxed text-[#252A33]/75">
-              É a técnica FUE somada, ainda no intraoperatório, a um tratamento com células autólogas. Além dos fios
-              transplantados, os fios nativos passam por regeneração. O método é marca registrada da Dra. Lorena
-              Visentainer e é o que a clínica faz de diferente.
-            </p>
-            <ul className="mt-6 grid gap-3 text-[#252A33]/80">
-              {[
-                'Transplante masculino e feminino, este último sem raspar a cabeça',
-                'Sobrancelhas com a técnica Brow FUE Long Hair',
-                'Barba, para preencher falhas e fechar o desenho',
-                'Tratamentos sem cirurgia: terapia regenerativa, eletroporação sem agulhas e laser',
-              ].map((item) => (
-                <li key={item} className="flex gap-3">
-                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#252A33]" />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-          <div className="rounded-3xl bg-[#252A33] p-6 text-white sm:p-8">
-            <h3 className="font-heading text-xl font-semibold">Dra. Lorena Visentainer</h3>
-            <p className="mt-1 text-sm text-white/60">CRM 33717 | RQE 27798 · dermatologista</p>
-            <ul className="mt-5 grid gap-3 text-sm leading-relaxed text-white/80">
-              {[
-                'Medicina pela UEL, residência em dermatologia e mestrado na UNICAMP, tricologia pela USP',
-                'Membro titular da SBD e membro da ISHRS e da ABCRC',
-                'Fundadora do Hair Academy, pós-graduação para médicos, e palestrante internacional',
-                'Autora do primeiro livro de transplante FUE do Brasil e do primeiro livro de transplante de sobrancelhas do mundo',
-              ].map((item) => (
-                <li key={item} className="flex gap-3">
-                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#DCDBD1]" />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <Prova numeros={numeros} />
+          <p className="mt-5 text-sm leading-relaxed text-[#252A33]/70">
+            Números do próprio centro cirúrgico do Instituto, contados a partir das cirurgias finalizadas
+            {numeros?.desdeAno ? ` desde ${numeros.desdeAno}` : ''}. A Dra. Lorena é membro da SBD e da ISHRS, criou o
+            Transplante Capilar Regenerativo® e escreveu o primeiro livro de transplante FUE do Brasil.
+          </p>
         </div>
       </section>
 
       {/* ── Depoimentos ─────────────────────────────────────────────────── */}
-      <section className="border-y border-[#252A33]/10 bg-[#DCDBD1]/30 py-12">
+      <section className="border-y border-[#252A33]/10 bg-[#DCDBD1]/30 py-10">
         <div className="mx-auto max-w-5xl px-4">
-          <h2 className="font-heading text-2xl font-semibold sm:text-3xl">Quem já passou por aqui</h2>
-          <div className="mt-6 grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-3">
             {[
               {
                 texto:
-                  'Excelente atendimento, aconchegante e acolhedor. Fiz meu procedimento há uma semana e a recuperação está ótima. Agradeço a todos os profissionais envolvidos.',
+                  'Excelente atendimento, aconchegante e acolhedor. Fiz meu procedimento há uma semana e a recuperação está ótima.',
                 autor: 'Eneida Peixoto',
                 nota: 'Paciente',
               },
               {
                 texto:
-                  'A Dra. Lorena figura entre os grandes nomes do transplante capilar no país, aliando competência técnica e senso estético. Sair do país é desnecessário quando se tem esse nível tão perto.',
+                  'A Dra. Lorena figura entre os grandes nomes do transplante capilar no país. Sair do país é desnecessário quando se tem esse nível tão perto.',
                 autor: 'Rafael Januário Rocha',
                 nota: 'Acompanhante de paciente',
               },
@@ -704,91 +598,12 @@ export function ConsultaLandingPage() {
         </div>
       </section>
 
-      {/* ── Perguntas ───────────────────────────────────────────────────── */}
-      <section className="py-12 sm:py-16">
-        <div className="mx-auto max-w-3xl px-4">
-          <h2 className="font-heading text-2xl font-semibold sm:text-3xl">Perguntas que todo mundo faz</h2>
-          <div className="mt-6 divide-y divide-[#252A33]/10">
-            {[
-              {
-                p: 'O que acontece depois que eu mando o meu contato?',
-                r: 'A orientação do seu caso cai no seu WhatsApp em segundos, e a equipe continua a conversa por lá, inclusive para marcar a avaliação no dia que for melhor para você. Nada é cobrado nessa etapa.',
-              },
-              {
-                p: 'Quanto custa a avaliação?',
-                r: 'A avaliação é uma consulta médica particular, com exame do couro cabeludo. A equipe informa o valor no contato de confirmação, junto com as formas de pagamento.',
-              },
-              {
-                p: 'Preciso raspar a cabeça?',
-                r: 'No caso feminino, não. O Instituto faz transplante feminino sem raspagem. No masculino, a conduta é definida na avaliação.',
-              },
-              {
-                p: 'Dói?',
-                r: 'O procedimento é feito com anestesia local, e o desconforto maior costuma ser nas primeiras horas. Todo o cuidado do pós é explicado antes de você decidir.',
-              },
-              {
-                p: 'Sou de outra cidade. Como funciona?',
-                r: 'Boa parte dos nossos pacientes vem de fora. Dá para fazer a primeira conversa por consulta online e concentrar exame e procedimento na mesma viagem.',
-              },
-              {
-                p: 'Em quanto tempo aparece resultado?',
-                r: 'Os fios transplantados crescem ao longo dos meses seguintes, e o resultado se consolida por volta de um ano. O acompanhamento faz parte do tratamento.',
-              },
-            ].map((item) => (
-              <details key={item.p} className="group py-4">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-semibold">
-                  {item.p}
-                  <span className="text-2xl leading-none text-[#252A33]/40 group-open:rotate-45 transition">+</span>
-                </summary>
-                <p className="mt-3 leading-relaxed text-[#252A33]/75">{item.r}</p>
-              </details>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Convite de fechamento ───────────────────────────────────────── */}
-      {etapa !== 'pronto' ? (
-        <section className="border-t border-[#252A33]/10 bg-[#252A33] py-12 text-white sm:py-16">
-          <div className="mx-auto max-w-3xl px-4 text-center">
-            <h2 className="font-heading text-2xl font-semibold sm:text-4xl">
-              Descobrir o que o seu caso pede leva 2 minutos.
-            </h2>
-            <p className="mx-auto mt-4 max-w-xl leading-relaxed text-white/75">
-              Cinco perguntas, a sua estimativa na tela e a orientação no seu WhatsApp. Sem custo, sem cadastro e sem
-              marcar nada agora.
-            </p>
-            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => {
-                  if (etapa === 'inicio') comecar()
-                  else rolarParaPainel()
-                }}
-                className="inline-flex w-full items-center justify-center rounded-full bg-white px-6 py-4 text-base font-semibold text-[#252A33] hover:bg-[#DCDBD1] sm:w-auto"
-              >
-                {etapa === 'inicio' ? 'Começar a minha avaliação' : 'Voltar para a minha avaliação'}
-              </button>
-              <a
-                href={`https://wa.me/${WHATSAPP_CLINICA}?text=${encodeURIComponent('Olá! Vim pelo site e quero falar sobre a avaliação capilar.')}`}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/30 px-6 py-4 text-base font-semibold text-white hover:border-white sm:w-auto"
-              >
-                <IconeWhatsapp />
-                Prefiro falar no WhatsApp
-              </a>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
       {/* ── Rodapé ──────────────────────────────────────────────────────── */}
-      <footer className="border-t border-[#252A33]/10 bg-white py-10 pb-28 sm:pb-10">
-        <div className="mx-auto grid max-w-5xl gap-6 px-4 sm:grid-cols-2">
+      <footer className="bg-white py-8 pb-28 sm:pb-8">
+        <div className="mx-auto grid max-w-5xl gap-5 px-4 sm:grid-cols-2">
           <div>
-            <img src="/marca/lorena.svg" alt="Instituto Lorena Visentainer" className="h-10 w-auto" />
-            <p className="mt-4 text-sm leading-relaxed text-[#252A33]/70">
+            <img src="/marca/lorena.svg" alt="Instituto Lorena Visentainer" className="h-9 w-auto" />
+            <p className="mt-3 text-sm leading-relaxed text-[#252A33]/70">
               Av. Nóbrega, 814 · Zona 4 · Maringá/PR · 87014-180
               <span className="block">Atendimento em Londrina/PR uma vez por mês</span>
             </p>
@@ -800,13 +615,7 @@ export function ConsultaLandingPage() {
                 {TELEFONE_VISIVEL}
               </a>
             </p>
-            <p className="mt-1">
-              E-mail:{' '}
-              <a className="font-semibold text-[#252A33]" href="mailto:atendimento@lorenavisentainer.com.br">
-                atendimento@lorenavisentainer.com.br
-              </a>
-            </p>
-            <p className="mt-4 text-xs leading-relaxed text-[#252A33]/55">
+            <p className="mt-3 text-xs leading-relaxed text-[#252A33]/55">
               Responsável técnica: Dra. Lorena Visentainer, CRM 33717 | RQE 27798. Esta página é informativa e não
               substitui a consulta médica. Resultados variam conforme o caso.
             </p>
@@ -817,14 +626,8 @@ export function ConsultaLandingPage() {
       {/* ── Barra fixa no celular ───────────────────────────────────────── */}
       {etapa !== 'pronto' ? (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#252A33]/10 bg-white/95 p-3 backdrop-blur sm:hidden">
-          <Botao
-            onClick={() => {
-              if (etapa === 'inicio') comecar()
-              else rolarParaPainel()
-            }}
-            className="w-full"
-          >
-            {etapa === 'inicio' ? 'Começar a minha avaliação' : 'Voltar para a minha avaliação'}
+          <Botao onClick={rolarParaPainel} className="w-full">
+            {etapa === 'resultado' ? 'Voltar para o meu resultado' : `Responder as ${totalPassos} perguntas`}
           </Botao>
         </div>
       ) : null}

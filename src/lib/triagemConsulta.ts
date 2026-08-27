@@ -3,23 +3,27 @@ import { diaLocal } from '@/lib/diaLocal'
 /**
  * A triagem da landing /consulta.
  *
- * Cinco perguntas, uma resposta por toque, nenhuma digitação até o fim. Cada uma
- * existe por um motivo comercial ou clínico, e a ordem é intencional: começa pelo
- * que a pessoa quer (fácil de responder, mostra que a página entendeu o problema) e
- * termina em "quando você quer resolver", que é o filtro que realmente separa quem
- * paga a hora da atendente de quem está passeando.
+ * TRÊS perguntas, uma resposta por toque, nenhuma digitação até o fim (duas, para
+ * sobrancelha e barba, que não têm escala). Eram cinco até 27/ago/2026: "há quanto
+ * tempo você percebe a perda" e "já fez transplante" saíram porque somavam 16 pontos
+ * de 85 no score e custavam dois toques cada, e o que a landing precisa entregar não
+ * é ficha clínica, é uma conversa de WhatsApp já aquecida. O resto a atendente
+ * pergunta falando com a pessoa, que é o trabalho dela.
+ *
+ * Cada uma das três que ficaram tem função própria e nenhuma é dispensável:
+ *  - objetivo: define o assunto e o texto que a pessoa recebe;
+ *  - grau: é o que produz a estimativa de folículos, a recompensa da página;
+ *  - urgência: é o filtro. Vale 35 dos pontos e separa quem compra de quem passeia.
  *
  * A NOTA não mora aqui. O score é calculado na edge function `crm-agendar-publico`,
  * porque nota vinda do navegador é nota que qualquer um edita. O que mora aqui é a
- * regra de tela: quem responde "só pesquisando" não vê agenda, vira lead frio e
- * conversa no WhatsApp. A agenda da Dra. é o recurso escasso que isto protege.
+ * regra de tela: quem responde "só pesquisando" recebe um texto mais macio, sem
+ * empurrar consulta.
  */
 
 export type RespostasTriagem = {
   objetivo?: string
   grau?: string
-  tempoQueda?: string
-  jaFez?: string
   urgencia?: string
 }
 
@@ -90,28 +94,9 @@ export const PERGUNTAS: PerguntaTriagem[] = [
     visivel: (r) => r.objetivo === 'transplante_feminino',
   },
   {
-    id: 'tempoQueda',
-    titulo: 'Há quanto tempo você percebe a perda?',
-    opcoes: [
-      { valor: 'menos_1_ano', rotulo: 'Menos de 1 ano' },
-      { valor: 'de_1_a_3_anos', rotulo: 'De 1 a 3 anos' },
-      { valor: 'mais_3_anos', rotulo: 'Mais de 3 anos' },
-    ],
-    visivel: (r) => r.objetivo !== 'sobrancelha' && r.objetivo !== 'barba',
-  },
-  {
-    id: 'jaFez',
-    titulo: 'Você já fez transplante alguma vez?',
-    opcoes: [
-      { valor: 'nao', rotulo: 'Nunca fiz' },
-      { valor: 'sim_outro_lugar', rotulo: 'Já fiz, em outro lugar' },
-      { valor: 'sim_aqui', rotulo: 'Já fiz aqui no Instituto' },
-    ],
-  },
-  {
     id: 'urgencia',
     titulo: 'Quando você quer resolver isso?',
-    ajuda: 'Responda de verdade. É isso que define se a gente reserva um horário agora.',
+    ajuda: 'Responda de verdade. É por isso que a equipe já chega sabendo do que falar com você.',
     opcoes: [
       { valor: 'este_mes', rotulo: 'Este mês', detalhe: 'Quero avaliar e definir o quanto antes' },
       { valor: 'ate_3_meses', rotulo: 'Nos próximos 3 meses' },
@@ -132,8 +117,9 @@ export function triagemCompleta(r: RespostasTriagem): boolean {
 }
 
 /**
- * Quem vê agenda. "Só pesquisando" não vê: é o filtro inteiro da página. Sem isso a
- * agenda enche de gente que não aparece e a consulta cara vira buraco no dia.
+ * Quem está pronto para marcar. Desde que a agenda saiu da página (27/ago/2026) isto
+ * não abre nem fecha tela nenhuma: muda o TEXTO, aqui e na mensagem que a Sofia manda.
+ * Quem respondeu "só pesquisando" não leva empurrão de consulta.
  */
 export function podeReservarHorario(r: RespostasTriagem): boolean {
   return Boolean(r.urgencia) && r.urgencia !== 'pesquisando'

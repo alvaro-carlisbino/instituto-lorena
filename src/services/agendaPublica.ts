@@ -233,7 +233,7 @@ export async function enviarPreAgendamento(envio: EnvioPreAgendamento): Promise<
  * que está tudo bem porque ninguém reclamou).
  */
 export function registrarEventoLanding(
-  tipo: 'landing_view' | 'landing_triagem' | 'landing_contato' | 'landing_whatsapp' | 'landing_abandono',
+  tipo: 'landing_view' | 'landing_triagem' | 'landing_whatsapp' | 'landing_abandono',
   dados: { sessao: string; atribuicao: AtribuicaoLanding; passo?: string },
 ): void {
   if (!supabase) return

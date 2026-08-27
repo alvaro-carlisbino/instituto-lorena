@@ -22,28 +22,29 @@ describe('perguntas visíveis', () => {
     expect(perguntasVisiveis({ objetivo: 'transplante_feminino' }).find((p) => p.id === 'grau')?.visual).toBe('ludwig')
   })
 
-  it('não pergunta grau nem tempo de queda para sobrancelha', () => {
+  it('não pergunta grau para sobrancelha', () => {
     const ids = perguntasVisiveis({ objetivo: 'sobrancelha' }).map((p) => p.id)
     expect(ids).not.toContain('grau')
-    expect(ids).not.toContain('tempoQueda')
+  })
+
+  it('são três toques no caso de cabelo e dois nos outros', () => {
+    expect(perguntasVisiveis({ objetivo: 'transplante_masculino' })).toHaveLength(3)
+    expect(perguntasVisiveis({ objetivo: 'transplante_feminino' })).toHaveLength(3)
+    expect(perguntasVisiveis({ objetivo: 'barba' })).toHaveLength(2)
   })
 })
 
 describe('triagem completa', () => {
   it('exige resposta em toda pergunta visível', () => {
     expect(triagemCompleta({ objetivo: 'sobrancelha' })).toBe(false)
-    expect(triagemCompleta({ objetivo: 'sobrancelha', jaFez: 'nao', urgencia: 'este_mes' })).toBe(true)
+    expect(triagemCompleta({ objetivo: 'sobrancelha', urgencia: 'este_mes' })).toBe(true)
   })
 
   it('não considera completa sem o grau quando o grau é perguntado', () => {
+    expect(triagemCompleta({ objetivo: 'transplante_masculino', urgencia: 'este_mes' })).toBe(false)
     expect(
-      triagemCompleta({
-        objetivo: 'transplante_masculino',
-        tempoQueda: 'mais_3_anos',
-        jaFez: 'nao',
-        urgencia: 'este_mes',
-      }),
-    ).toBe(false)
+      triagemCompleta({ objetivo: 'transplante_masculino', grau: '4', urgencia: 'este_mes' }),
+    ).toBe(true)
   })
 })
 

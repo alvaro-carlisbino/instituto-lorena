@@ -139,14 +139,28 @@ function calcularScore(t: Triagem): number {
 }
 
 /**
- * Quente/morno/frio pela FRAÇÃO do que o lead podia somar, não pelo número cru.
+ * O máximo que ESTE lead podia somar, dado o que a página perguntou a ele.
  *
- * Sem agenda na landing (ago/2026) ninguém mais ganha os 15 pontos de "escolheu
- * horário", e com o corte fixo em 70 a fila inteira teria escorregado um degrau
- * para baixo — a mesma pessoa, mesma resposta, virava morna da noite para o dia.
- * O teto acompanha o que estava em jogo.
+ * Sem isto, toda vez que uma pergunta sai da triagem a fila inteira escorrega um
+ * degrau para baixo sem ninguém ter mudado de resposta: em ago/2026 saíram os 15
+ * pontos de "escolheu horário" e depois os 16 de tempo de queda e histórico, e com
+ * corte fixo em 70 o mesmo paciente Norwood 4 de "este mês" viraria morno.
+ * Quem não foi perguntado não é penalizado.
  */
-function temperaturaDoScore(score: number, teto = 100): 'cold' | 'warm' | 'hot' {
+function tetoDoScore(t: Triagem): number {
+  return (
+    35 + // urgência
+    15 + // objetivo
+    12 + // unidade
+    (t.grau ? 15 : 0) +
+    (t.tempoQueda ? 8 : 0) +
+    (t.jaFez ? 8 : 0) +
+    (t.temHorario ? 15 : 0)
+  )
+}
+
+/** Quente/morno/frio pela FRAÇÃO do teto, não pelo número cru. */
+function temperaturaDoScore(score: number, teto: number): 'cold' | 'warm' | 'hot' {
   const fracao = score / Math.max(1, teto)
   if (fracao >= 0.7) return 'hot'
   if (fracao >= 0.45) return 'warm'
@@ -439,7 +453,7 @@ Deno.serve(async (req) => {
   }
 
   const score = calcularScore(triagem)
-  const temperatura = temperaturaDoScore(score, querHorario ? 100 : 85)
+  const temperatura = temperaturaDoScore(score, tetoDoScore(triagem))
 
   // Estimativa pela referência da casa. Falha aqui não derruba o agendamento.
   let estimativa: { esperado: number; minimo: number; maximo: number; amostra: number } | null = null
