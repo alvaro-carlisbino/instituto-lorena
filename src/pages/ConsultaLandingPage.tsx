@@ -298,7 +298,7 @@ export function ConsultaLandingPage() {
             </h1>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-[#252A33]/75">
               São 5 perguntas de um toque. No fim você vê a estimativa de unidades foliculares calculada com as
-              cirurgias já realizadas aqui dentro — e a nossa equipe te chama no WhatsApp com a orientação do seu
+              cirurgias já realizadas aqui dentro, e a nossa equipe te chama no WhatsApp com a orientação do seu
               caso, na hora.
             </p>
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
@@ -556,7 +556,7 @@ export function ConsultaLandingPage() {
                   {resultado.mensagemEnviada ? (
                     <>
                       A Sofia acabou de te mandar a orientação do seu caso, com a sua estimativa. Abra a conversa e
-                      responda por lá — a equipe continua contigo.
+                      responda por lá. A equipe continua contigo.
                     </>
                   ) : (
                     <>A nossa equipe vai te chamar no WhatsApp com a orientação do seu caso.</>
@@ -712,7 +712,7 @@ export function ConsultaLandingPage() {
             {[
               {
                 p: 'O que acontece depois que eu mando o meu contato?',
-                r: 'A orientação do seu caso cai no seu WhatsApp em segundos, e a equipe continua a conversa por lá — inclusive para marcar a avaliação, no dia que for melhor para você. Nada é cobrado nessa etapa.',
+                r: 'A orientação do seu caso cai no seu WhatsApp em segundos, e a equipe continua a conversa por lá, inclusive para marcar a avaliação no dia que for melhor para você. Nada é cobrado nessa etapa.',
               },
               {
                 p: 'Quanto custa a avaliação?',
