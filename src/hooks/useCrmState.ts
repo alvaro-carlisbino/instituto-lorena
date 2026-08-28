@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { mensagemDeErro } from '../lib/mensagemDeErro'
 import type { Session } from '@supabase/supabase-js'
 import {
   ensureAppProfile,
@@ -234,6 +235,7 @@ export const useCrmState = () => {
   const [onboardingClinicName, setOnboardingClinicName] = useState<string>('')
   const [onboardingPrimaryColor, setOnboardingPrimaryColor] = useState<string>('#0ea5e9')
   const [onboardingDone, setOnboardingDone] = useState<boolean>(false)
+  const [profileLoadFailed, setProfileLoadFailed] = useState<boolean>(false)
   const [auditRows, setAuditRows] = useState<AuditLogEntry[]>([])
   const [auditTotal, setAuditTotal] = useState<number>(0)
   const [triageByLead] = useState<Record<string, TriageResult>>({
@@ -1516,7 +1518,7 @@ export const useCrmState = () => {
 
     if (dataMode === 'supabase' && isSupabaseConfigured) {
       void deleteAppUser(userId, fallbackOwnerId).catch((error) => {
-        setAuthNotice(`Falha ao remover o usuário: ${error instanceof Error ? error.message : String(error)}`)
+        setAuthNotice(`Falha ao remover o usuário: ${mensagemDeErro(error)}`)
       })
     }
     setUsers(remaining)
@@ -2188,7 +2190,7 @@ export const useCrmState = () => {
         await syncForcedAdminRole(currentSession, parseForceAdminEmails())
         setProfileReloadTick((t) => t + 1)
       } catch (error) {
-        setAuthNotice(`Perfil: ${error instanceof Error ? error.message : String(error)}`)
+        setAuthNotice(`Perfil: ${mensagemDeErro(error)}`)
       }
     })
 
@@ -2210,7 +2212,7 @@ export const useCrmState = () => {
           await syncForcedAdminRole(updatedSession, parseForceAdminEmails())
           setProfileReloadTick((t) => t + 1)
         } catch (error) {
-          setAuthNotice(`Perfil: ${error instanceof Error ? error.message : String(error)}`)
+          setAuthNotice(`Perfil: ${mensagemDeErro(error)}`)
         }
       })()
     })
@@ -2224,6 +2226,7 @@ export const useCrmState = () => {
     if (!session) return
     void getMyProfile()
       .then((profile) => {
+        setProfileLoadFailed(false)
         if (profile) {
           const email = session.user.email?.toLowerCase() ?? ''
           const forced = parseForceAdminEmails()
@@ -2234,8 +2237,13 @@ export const useCrmState = () => {
           setOnboardingDone(profile.displayName.trim().length > 1)
         }
       })
-      .catch(() => {
-        setAuthNotice('Não foi possível carregar o perfil. Tente sair e entrar de novo; se continuar, fale com o suporte.')
+      .catch((error) => {
+        // "Perfil vazio" e "perfil não carregou" são coisas diferentes, e tratá-las igual
+        // mandava quem já tem conta para o onboarding de clínica nova. Foi o que a equipe viu
+        // em 28/08/2026, quando o Postgres reiniciou às 17:46 e a API ficou ~13 min fora:
+        // a tela pediu "Nome da clínica — ETAPA 1 DE 3" para quem usa o CRM há meses.
+        setProfileLoadFailed(true)
+        setAuthNotice(`Não foi possível carregar o perfil: ${mensagemDeErro(error)}`)
       })
   }, [session, users, profileReloadTick])
 
@@ -2577,6 +2585,8 @@ export const useCrmState = () => {
     syncNotice,
     session,
     onboardingDone,
+    profileLoadFailed,
+    recarregarPerfil: () => setProfileReloadTick((t) => t + 1),
     displayNameDraft,
     setDisplayNameDraft,
     onboardingClinicName,

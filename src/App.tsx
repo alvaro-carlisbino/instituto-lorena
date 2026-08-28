@@ -18,6 +18,7 @@ import { SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { AppSidebar } from '@/layouts/AppSidebar'
+import { Button } from './components/ui/button'
 
 // ── Code-splitting: cada página vira um chunk próprio, baixado só quando a rota abre.
 // (Antes: 57 páginas num bundle único de 2,2MB — o painel inteiro carregava no login,
@@ -289,6 +290,34 @@ function App() {
         email={crmState.session.user?.email}
         onPronto={() => setSenhaDefinida(true)}
       />
+    )
+  }
+
+  // O perfil NÃO carregou (API fora, RLS, rede). Isso não é clínica nova: mandar quem já usa
+  // o CRM para "ETAPA 1 DE 3 — Nome da clínica" é a tela mentindo sobre o que houve, e foi
+  // exatamente o que a equipe viu quando o Postgres reiniciou em 28/08/2026. Vem ANTES do
+  // onboarding, porque só se sabe que o cadastro está vazio depois de conseguir lê-lo.
+  if (dataMode === 'supabase' && crmState.session && crmState.profileLoadFailed) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <h1 className="text-lg font-semibold text-foreground">Não consegui carregar seu perfil</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Seus dados estão salvos. Isto costuma ser instabilidade momentânea do servidor.
+          </p>
+          {crmState.authNotice ? (
+            <p className="mt-3 rounded-lg bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
+              {crmState.authNotice}
+            </p>
+          ) : null}
+          <div className="mt-5 flex gap-2">
+            <Button onClick={() => crmState.recarregarPerfil()}>Tentar de novo</Button>
+            <Button variant="ghost" onClick={() => void crmState.runSignOut()}>
+              Sair
+            </Button>
+          </div>
+        </div>
+      </div>
     )
   }
 

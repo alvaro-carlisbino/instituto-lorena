@@ -932,6 +932,95 @@ async function barrarGeo(token: string, barrar: boolean, dry: boolean) {
   return { ok: true, estados_barrados: estados.length, conjuntos: feitos }
 }
 
+/**
+ * cercar — põe um conjunto na praça que a clínica atende, copiando a cerca de um conjunto que
+ * já está certo.
+ *
+ * Existe por causa do conjunto `remarketing` (120249690540870061): apesar do nome, ele estava
+ * SEM público salvo, SEM interesse, mirando o BRASIL inteiro e 18-65, otimizando por conversa
+ * mais barata. Era o maior volume da conta (41 conversas em 4 dias a R$ 8,24) e a fonte do
+ * lead frio de 28/08: só 29% dos leads de clique-no-anúncio tinham DDD 43-46, e 42,6% da verba
+ * caía fora do Paraná. Conversa barata em rede nacional não é conversa boa quando a consulta
+ * custa R$ 800 e a cirurgia é presencial em Maringá.
+ *
+ * A cerca vem COPIADA de `modelo` em vez de montada aqui: os outros conjuntos já usam
+ * "Maringá 50km + Londrina 50km" com chaves de cidade que a Graph resolveu, e reproduzir isso
+ * à mão erraria o raio ou a chave. Idade idem — a base diz homem 30-60 e mulher 35-60, então
+ * 18 não vende.
+ *
+ * PEGADINHA (a mesma do barrarGeo, mordeu em 25/08): ao reescrever `targeting` pela API,
+ * dropar `targeting_automation` derruba o conjunto em HARD_ERROR. Aqui o objeto do ALVO é lido
+ * e volta inteiro, com duas chaves trocadas. `excluded_geo_locations` fica como está de
+ * propósito: dentro de um raio de 50km a exclusão de estado é inofensiva, e remover chave é
+ * justamente o que quebra.
+ */
+async function cercarConjunto(
+  token: string,
+  p: { adset: string; modelo: string; idadeMin: number; idadeMax: number; dry: boolean },
+) {
+  if (!p.adset || !p.modelo) return { ok: false, erro: 'informe adset e modelo' }
+
+  const ler = async (id: string) => {
+    const r = await fetch(
+      `${GRAPH}/${id}?fields=id,name,effective_status,targeting&access_token=${encodeURIComponent(token)}`,
+    )
+    return { ok: r.ok, body: await r.json() as Record<string, unknown> }
+  }
+
+  const [alvo, modelo] = await Promise.all([ler(p.adset), ler(p.modelo)])
+  if (!alvo.ok) return { ok: false, erro: 'alvo', detalhe: alvo.body }
+  if (!modelo.ok) return { ok: false, erro: 'modelo', detalhe: modelo.body }
+
+  const tModelo = (modelo.body.targeting ?? {}) as Record<string, unknown>
+  const geoModelo = tModelo.geo_locations as Record<string, unknown> | undefined
+  const cidades = (geoModelo?.cities ?? []) as Array<Record<string, unknown>>
+  // Cerca sem cidade não é cerca: seguir daqui deixaria o conjunto no Brasil inteiro achando
+  // que foi cercado, que é pior do que falhar.
+  if (!cidades.length) return { ok: false, erro: 'modelo_sem_cidades', modelo: String(modelo.body.name ?? '') }
+
+  const antes = (alvo.body.targeting ?? {}) as Record<string, unknown>
+  const geoAntes = (antes.geo_locations ?? {}) as Record<string, unknown>
+  const depois = { ...antes, geo_locations: geoModelo, age_min: p.idadeMin, age_max: p.idadeMax }
+
+  const resumo = {
+    conjunto: String(alvo.body.name ?? ''),
+    de: {
+      paises: (geoAntes.countries ?? []) as string[],
+      cidades: ((geoAntes.cities ?? []) as Array<Record<string, unknown>>).map((c) =>
+        `${c.name ?? c.key}${c.radius ? ` ${c.radius}${c.distance_unit ?? 'km'}` : ''}`
+      ),
+      idade: `${antes.age_min ?? '?'}-${antes.age_max ?? '?'}`,
+    },
+    para: {
+      cidades: cidades.map((c) => `${c.name ?? c.key}${c.radius ? ` ${c.radius}${c.distance_unit ?? 'km'}` : ''}`),
+      idade: `${p.idadeMin}-${p.idadeMax}`,
+      copiado_de: String(modelo.body.name ?? ''),
+    },
+  }
+  if (p.dry) return { ok: true, dry: true, ...resumo }
+
+  const post = await fetch(`${GRAPH}/${p.adset}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targeting: depois, access_token: token }),
+  })
+  const pb = await post.json() as Record<string, unknown>
+  if (!post.ok) return { ok: false, erro: pb, ...resumo }
+
+  // Conjunto que volta ACTIVE mas com issues_info é conjunto quebrado calado.
+  const conf = await fetch(
+    `${GRAPH}/${p.adset}?fields=name,effective_status,issues_info,targeting{geo_locations,age_min,age_max}&access_token=${encodeURIComponent(token)}`,
+  )
+  const cb = await conf.json() as Record<string, unknown>
+  return {
+    ok: true,
+    ...resumo,
+    status: cb.effective_status ?? '?',
+    issues: cb.issues_info ?? null,
+    conferido: cb.targeting ?? null,
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -966,6 +1055,16 @@ Deno.serve(async (req) => {
       const c = corpo as Record<string, unknown>
       return json(await barrarGeo(token, c.barrar === true, c.dry !== false))
     }
+    if (action === 'cercar') {
+      const c = corpo as Record<string, unknown>
+      return json(await cercarConjunto(token, {
+        adset: String(c.adset ?? ''),
+        modelo: String(c.modelo ?? ''),
+        idadeMin: Number(c.idade_min ?? 30),
+        idadeMax: Number(c.idade_max ?? 60),
+        dry: c.dry !== false,
+      }))
+    }
     if (action === 'atribuir') {
       const c = corpo as Record<string, unknown>
       return json(await atribuirLeadform(admin, token, Number(corpo.dias ?? 30), c.dry === true))
@@ -980,7 +1079,7 @@ Deno.serve(async (req) => {
         mensagem: String(c.mensagem ?? ''),
       }))
     }
-    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'extrato', 'entrega', 'geo', 'atribuir', 'reamarrar_form'] }, 400)
+    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'extrato', 'entrega', 'geo', 'cercar', 'atribuir', 'reamarrar_form'] }, 400)
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
