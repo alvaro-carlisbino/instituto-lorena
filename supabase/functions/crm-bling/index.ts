@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8';
-import { buildBlingCatalog, blingCreateSaleOrder, blingEmitNfe, blingFindOrCreateContato, blingOrderLabel, getValidBlingToken } from '../_shared/bling.ts';
+import { buildBlingCatalog, blingCreateSaleOrder, blingEmitNfe, blingErrorMessage, blingFindOrCreateContato, blingOrderLabel, getValidBlingToken } from '../_shared/bling.ts';
 import { resolveCepBrasil } from '../_shared/cep.ts';
 import { PAGBANK_KITS } from '../_shared/pagbank.ts';
 import { REDE_KITS, inferRedeKit } from '../_shared/rede.ts';
@@ -802,6 +802,185 @@ Deno.serve(async (req)=>{
         error: 'nfe_falhou',
         message: msg
       });
+    }
+  }
+  // product_create: cria no Bling o cadastro de um produto NOVO e já lança a entrada de
+  // estoque. Sem isto, "cadastrar produto na loja" era trabalho de mão no Bling — e a
+  // vitrine só mostra quem tem preço > 0 E estoque > 0, então cadastro sem entrada nasce
+  // invisível.
+  //
+  // Duas travas que a mão não tem:
+  // 1) RECUSA código repetido. A linha Grandha já foi cadastrada duas vezes no Bling (SKU do
+  //    fabricante por cima do cadastro antigo) e a loja passou meses mostrando o cadastro
+  //    morto, com preço e saldo congelados. Um produto = um código.
+  // 2) ESPELHA a tributação (NCM/CEST/origem) de um produto irmão quando `espelhoId` vem no
+  //    payload. Produto sem NCM cadastra bem e só quebra semanas depois, na emissão da NF-e.
+  if (action === 'product_create') {
+    const nome = String(payload.nome ?? '').trim().slice(0, 120);
+    const codigo = String(payload.codigo ?? '').trim().slice(0, 30);
+    const preco = Number(payload.preco ?? NaN);
+    const qty = Number(payload.qty ?? 0);
+    const gtin = String(payload.gtin ?? '').trim();
+    const espelhoId = String(payload.espelhoId ?? '').trim();
+    const custoUnit = Number(payload.custo ?? NaN);
+    const descricaoCurta = String(payload.descricaoCurta ?? '').trim().slice(0, 255);
+    if (!nome || !codigo || !Number.isFinite(preco) || preco <= 0) return json({
+      ok: false,
+      error: 'dados_invalidos'
+    }, 400);
+    const token = await getValidBlingToken(admin, 'tricopill');
+    if (!token) return json({
+      ok: false,
+      error: 'bling_indisponivel'
+    }, 502);
+    const bh = {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    };
+    try {
+      // Trava 1: código já em uso => devolve o id existente em vez de criar o gêmeo.
+      const dupRes = await fetch(`https://api.bling.com.br/Api/v3/produtos?codigo=${encodeURIComponent(codigo)}&limite=100`, {
+        headers: bh
+      });
+      if (dupRes.ok) {
+        const lista = JSON.parse(await dupRes.text() || '{}')?.data ?? [];
+        const igual = lista.find((p)=>String(p?.codigo ?? '').trim() === codigo);
+        if (igual) return json({
+          ok: false,
+          error: 'codigo_ja_existe',
+          productId: String(igual.id ?? ''),
+          nome: String(igual.nome ?? '')
+        }, 409);
+      }
+      // Trava 2: tributação do irmão (NCM/CEST/origem), senão a NF-e quebra lá na frente.
+      let tributacao = undefined;
+      let unidade = String(payload.unidade ?? '').trim().slice(0, 6) || 'UN';
+      if (espelhoId) {
+        const er = await fetch(`https://api.bling.com.br/Api/v3/produtos/${espelhoId}`, {
+          headers: bh
+        });
+        if (er.ok) {
+          const irmao = JSON.parse(await er.text() || '{}')?.data ?? {};
+          const t = irmao?.tributacao ?? {};
+          if (String(t.ncm ?? '').trim()) {
+            tributacao = {
+              ncm: String(t.ncm).trim(),
+              ...String(t.cest ?? '').trim() ? {
+                cest: String(t.cest).trim()
+              } : {},
+              origem: Number(t.origem ?? 0) || 0
+            };
+          }
+          if (!String(payload.unidade ?? '').trim() && String(irmao?.unidade ?? '').trim()) {
+            unidade = String(irmao.unidade).trim().slice(0, 6);
+          }
+        }
+      }
+      const body = {
+        nome,
+        codigo,
+        preco,
+        tipo: 'P',
+        situacao: 'A',
+        formato: 'S',
+        unidade,
+        ...Number.isFinite(custoUnit) && custoUnit > 0 ? {
+          precoCusto: custoUnit
+        } : {},
+        ...gtin ? {
+          gtin
+        } : {},
+        ...descricaoCurta ? {
+          descricaoCurta
+        } : {},
+        ...tributacao ? {
+          tributacao
+        } : {}
+      };
+      const cr = await fetch('https://api.bling.com.br/Api/v3/produtos', {
+        method: 'POST',
+        headers: bh,
+        body: JSON.stringify(body)
+      });
+      const ctxt = await cr.text();
+      if (!cr.ok) return json({
+        ok: false,
+        error: 'bling_produto_falhou',
+        status: cr.status,
+        message: blingErrorMessage(cr.status, ctxt)
+      }, 502);
+      const productId = String(JSON.parse(ctxt || '{}')?.data?.id ?? '');
+      if (!productId) return json({
+        ok: false,
+        error: 'produto_sem_id',
+        message: ctxt.slice(0, 300)
+      }, 502);
+      // Entrada de estoque: mesmo caminho do stock_entry (o Bling exige depósito).
+      let movementId = null;
+      let estoqueErro = null;
+      if (qty > 0) {
+        let depositoId = '';
+        const dr = await fetch('https://api.bling.com.br/Api/v3/depositos', {
+          headers: bh
+        });
+        if (dr.ok) {
+          const deps = JSON.parse(await dr.text() || '{}')?.data ?? [];
+          depositoId = String((deps.find((d)=>d.padrao === true) ?? deps[0] ?? {}).id ?? '');
+        }
+        if (!depositoId) {
+          estoqueErro = 'deposito_nao_encontrado';
+        } else {
+          const mr = await fetch('https://api.bling.com.br/Api/v3/estoques', {
+            method: 'POST',
+            headers: bh,
+            body: JSON.stringify({
+              produto: {
+                id: Number(productId) || productId
+              },
+              deposito: {
+                id: Number(depositoId) || depositoId
+              },
+              operacao: 'E',
+              quantidade: qty,
+              observacoes: String(payload.note ?? 'Cadastro inicial (CRM)').slice(0, 200),
+              ...Number.isFinite(custoUnit) && custoUnit > 0 ? {
+                preco: custoUnit,
+                custo: custoUnit
+              } : {}
+            })
+          });
+          const mtxt = await mr.text();
+          if (mr.ok) {
+            movementId = JSON.parse(mtxt || '{}')?.data?.id ?? null;
+          } else {
+            estoqueErro = blingErrorMessage(mr.status, mtxt);
+          }
+        }
+      }
+      // O cache é o que a loja e o bot leem; sem derrubar, o produto novo só apareceria na
+      // próxima rodada do keepalive.
+      try {
+        await buildBlingCatalog(admin, 'tricopill', {
+          forceRefresh: true
+        });
+      } catch  {}
+      return json({
+        ok: true,
+        productId,
+        codigo,
+        preco,
+        qty: qty > 0 ? qty : 0,
+        movementId: movementId != null ? String(movementId) : null,
+        ncm: tributacao?.ncm ?? null,
+        estoqueErro
+      });
+    } catch (e) {
+      return json({
+        ok: false,
+        error: 'bling_produto_erro',
+        message: e instanceof Error ? e.message : String(e)
+      }, 502);
     }
   }
   // product_update_price: grava preço novo de UM produto no Bling (GET completo + PUT, o
