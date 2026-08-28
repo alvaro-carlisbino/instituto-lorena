@@ -1113,7 +1113,11 @@ async function inspecionarConjuntos(token: string) {
         ((t.targeting_automation ?? {}) as Record<string, unknown>).advantage_audience ?? null,
     }
   })
-  return { ok: erros.length === 0, total: conjuntos.length, conjuntos, erros }
+  // A lista inteira de públicos vai junto de propósito: um semelhante recém
+  // criado não aparece em conjunto nenhum, e é justamente o `delivery_status`
+  // dele que diz se a semente passou do mínimo da Meta ou ficou "too small".
+  const todosOsPublicos = [...publicos.entries()].map(([id, nome]) => ({ id, nome }))
+  return { ok: erros.length === 0, total: conjuntos.length, conjuntos, publicos: todosOsPublicos, erros }
 }
 
 /**
