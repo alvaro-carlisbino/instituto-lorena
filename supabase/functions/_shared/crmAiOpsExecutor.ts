@@ -4,10 +4,54 @@ import { insertInteraction } from './crm.ts'
 import { notifyAgents } from './notifyAgents.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
-import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, collectAddons, collectCatalogItems } from './rede.ts'
+import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, collectAddons, collectCatalogItems, type CatalogRejeitado } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForOrder, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
+
+/**
+ * Recado ao cliente quando ALGUM item do carrinho não entrou — vale pro Pix e pro cartão.
+ *
+ * Antes isto só era dito quando o carrinho ficava 100% vazio; recusa PARCIAL saía muda e a
+ * cobrança ia embora curta. Foi o segundo furo do caso Rosana (28/08/2026): a IA anunciou
+ * R$ 505,00, o gel não resolveu, e a mesma mensagem levou o texto de R$ 505,00 com um link de
+ * R$ 253,00. Cobrança que não bate com o que foi combinado na conversa NÃO sai — o cliente
+ * ouve o que faltou e a equipe é avisada, porque item recusado quase sempre é a IA confusa.
+ */
+function notaItensRecusados(rejeitados: CatalogRejeitado[]): string {
+  const lista = rejeitados.map((r) => r.rotulo).filter(Boolean)
+  const itens = lista.length ? lista.join(', ') : 'um dos itens'
+  return (
+    `Opa, antes de gerar o pagamento preciso acertar uma coisa 🙏 Não consegui incluir ${itens} no seu pedido agora. ` +
+    'Já confirmo aqui com a equipe pra não fechar nada errado com você, tá? 💚'
+  )
+}
+
+async function avisaCarrinhoRecusado(
+  admin: SupabaseClient,
+  params: { leadId: string; tenantId: string; rejeitados: CatalogRejeitado[]; gateway: string },
+): Promise<void> {
+  try {
+    await notifyAgents(admin, {
+      leadId: params.leadId,
+      kind: 'urgent',
+      title: 'Carrinho da IA não fechou',
+      body:
+        `A IA tentou gerar ${params.gateway} mas estes itens não entraram: ` +
+        `${params.rejeitados.map((r) => `${r.rotulo} (${r.motivo})`).join('; ')}. ` +
+        'O pagamento NÃO foi gerado — confira o pedido com o cliente.',
+      includeOwner: true,
+      tenantId: params.tenantId,
+      dedupeKey: 'carrinho_recusado',
+      dedupeWindowMinutes: 30,
+    })
+  } catch (e) {
+    console.error('crmAiOps avisaCarrinhoRecusado falhou', {
+      leadId: params.leadId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+  }
+}
 
 /** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
 const DELIVERY_MODES = ['retirada_clinica', 'entrega_local_maringa', 'envio_externo'] as const
@@ -816,12 +860,31 @@ export async function executeCrmAiOpsFromModel(
           pixDesc = pixDesc ? `${pixDesc} + ${item.qty}× ${item.nome}` : `${item.qty}× ${item.nome}`
           pixItems.push({ id: item.id, nome: item.nome, qty: item.qty, precoCents: item.amountCents })
         }
+        // QUALQUER item recusado aborta a cobrança — mesmo que o resto tenha resolvido. Um Pix
+        // parcial cobra um valor que não é o que o cliente ouviu na conversa.
+        if (pixCatalogo.rejeitados.length) {
+          console.error('crmAiOps rede_pix abortado por item recusado', {
+            leadId: opts.allowedLeadId,
+            rejeitados: pixCatalogo.rejeitados,
+          })
+          await avisaCarrinhoRecusado(admin, {
+            leadId: opts.allowedLeadId,
+            tenantId: saleTenantId,
+            rejeitados: pixCatalogo.rejeitados,
+            gateway: 'o Pix',
+          })
+          results.push({
+            type: 'rede_pix',
+            ok: false,
+            detail: `catalogo_recusado: ${pixCatalogo.rejeitados.map((r) => `${r.rotulo}=${r.motivo}`).join('; ')}`,
+            customerNote: notaItensRecusados(pixCatalogo.rejeitados),
+          })
+          continue
+        }
         if (pixItems.length === 0) {
-          // Sem kit, sem avulso e sem catálogo: nada a vender. Se o cliente pediu algo que foi
-          // recusado (esgotado/oculto), diz ISSO em vez do menu genérico.
-          const faltou = pixCatalogo.rejeitados.length
-            ? `Não consegui fechar ${pixCatalogo.rejeitados.join(', ')} agora (sem estoque no momento). Quer que eu veja uma opção parecida? 💚`
-            : 'Consigo gerar o Pix pros kits do Tricopill (1 mês, 3+1 ou 5 meses) e pra qualquer produto da nossa loja. O que você quer? 💚'
+          // Sem kit, sem avulso e sem catálogo: nada a vender.
+          const faltou =
+            'Consigo gerar o Pix pros kits do Tricopill (1 mês, 3+1 ou 5 meses) e pra qualquer produto da nossa loja. O que você quer? 💚'
           results.push({ type: 'rede_pix', ok: false, detail: 'kit_obrigatorio', customerNote: faltou })
           continue
         }
@@ -920,11 +983,31 @@ export async function executeCrmAiOpsFromModel(
           description = description ? `${description} + ${item.qty}× ${item.nome}` : `${item.qty}× ${item.nome}`
           cardItems.push({ id: item.id, nome: item.nome, qty: item.qty, precoCents: item.amountCents })
         }
+        // Mesma trava do Pix: item recusado aborta o link inteiro em vez de cobrar um valor
+        // menor que o combinado (ou, com id trocado, um produto que o cliente nunca pediu).
+        if (cardCatalogo.rejeitados.length) {
+          console.error('crmAiOps rede_link abortado por item recusado', {
+            leadId: opts.allowedLeadId,
+            rejeitados: cardCatalogo.rejeitados,
+          })
+          await avisaCarrinhoRecusado(admin, {
+            leadId: opts.allowedLeadId,
+            tenantId: saleTenantId,
+            rejeitados: cardCatalogo.rejeitados,
+            gateway: 'o link de cartão',
+          })
+          results.push({
+            type: 'rede_link',
+            ok: false,
+            detail: `catalogo_recusado: ${cardCatalogo.rejeitados.map((r) => `${r.rotulo}=${r.motivo}`).join('; ')}`,
+            customerNote: notaItensRecusados(cardCatalogo.rejeitados),
+          })
+          continue
+        }
         if (cardItems.length === 0) {
           // Sem kit, sem avulso e sem catálogo: nada a vender.
-          const faltouCard = cardCatalogo.rejeitados.length
-            ? `Não consegui fechar ${cardCatalogo.rejeitados.join(', ')} agora (sem estoque no momento). Quer que eu veja uma opção parecida? 💚`
-            : 'Consigo gerar o link pros kits do Tricopill (1 mês, 3+1 ou 5 meses) e pra qualquer produto da nossa loja. O que você quer? 💚'
+          const faltouCard =
+            'Consigo gerar o link pros kits do Tricopill (1 mês, 3+1 ou 5 meses) e pra qualquer produto da nossa loja. O que você quer? 💚'
           results.push({ type: 'rede_link', ok: false, detail: 'kit_obrigatorio', customerNote: faltouCard })
           continue
         }

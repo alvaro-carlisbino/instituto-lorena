@@ -114,15 +114,93 @@ export const AI_ADDONS: Record<string, {
 export const CATALOG_DEFAULT_BOX = { weightKg: 0.3, lengthCm: 16, widthCm: 16, heightCm: 11 }
 
 export type CatalogSaleItem = { id: string; nome: string; amountCents: number; qty: number }
+/** Item que não entrou na cobrança. `rotulo` é o que o cliente reconhece; `motivo` é pra log. */
+export type CatalogRejeitado = { rotulo: string; motivo: string }
+
+/** minúsculas, sem acento, só letras/números/espaço — pra comparar nome do Bling com o da IA. */
+function normNome(s: unknown): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
 
 /**
- * Resolve os produtos de CATÁLOGO que a IA pediu no op (`"catalogo":[{"id":"...","qty":1}]`).
+ * FORMA do produto (shampoo, condicionador, gel...). Duas formas conhecidas e DIFERENTES no
+ * mesmo par nome-da-IA × nome-do-Bling significam produto trocado, por mais que o resto do
+ * nome bata: "Shampoo Dry Confort" e "DRY CONFORT CONDICIONADOR" compartilham duas palavras
+ * de três e são coisas distintas na prateleira.
+ */
+const FORMAS: ReadonlyArray<readonly [string, RegExp]> = [
+  ['shampoo', /\b(shampoo|shampo)\b/],
+  ['condicionador', /\b(condicionador|conditioner)\b/],
+  ['mascara', /\b(mascara|mask)\b/],
+  ['gel', /\bgel\b/],
+  ['oleo', /\b(oleo|oil)\b/],
+  ['leavein', /\b(leave in|leavein)\b/],
+  ['tonico', /\b(tonico|tonic)\b/],
+  ['serum', /\bserum\b/],
+  ['sabonete', /\bsabonete\b/],
+  ['suplemento', /\b(suplemento|capsula|capsulas)\b/],
+  ['pomada', /\b(pomada|cera|pasta)\b/],
+  ['protetor', /\b(protetor|fps)\b/],
+  ['spray', /\bspray\b/],
+]
+
+function formasDe(n: string): Set<string> {
+  const out = new Set<string>()
+  for (const [chave, re] of FORMAS) if (re.test(n)) out.add(chave)
+  return out
+}
+
+/**
+ * O nome que a IA prometeu ao cliente descreve o mesmo produto do cadastro do Bling?
  *
- * A IA manda só id e quantidade; QUEM DIZ O PREÇO É O SERVIDOR, lendo o mesmo `catalog_cache` que
- * a loja lê. Isso é deliberado: enquanto o preço vinha do texto do prompt, o shampoo passou três
- * semanas sendo vendido pelo bot mais barato que o site (ver SHAMPOO_ADDON).
+ * A IA abrevia ("Gel Maxi Bonder" para "MAXI BONDER STYLING GEL - 100g"), então não dá pra
+ * exigir igualdade. A régua é: a maioria das palavras da IA aparece no nome do Bling E as
+ * formas não se contradizem. Frouxo o bastante pra não recusar venda boa, apertado o bastante
+ * pra barrar "Gel Maxi Bonder" virando "GRANDHA STRAIGHT SHAMPOO".
+ */
+export function nomeConfere(nomeIa: string, nomeBling: string): boolean {
+  const a = normNome(nomeIa)
+  const b = normNome(nomeBling)
+  if (!a || !b) return false
+  if (a === b || b.includes(a) || a.includes(b)) return true
+
+  const formasA = formasDe(a)
+  const formasB = formasDe(b)
+  // Ambos declaram forma e nenhuma coincide → produto trocado, não importa o resto.
+  if (formasA.size && formasB.size) {
+    let cruza = false
+    for (const f of formasA) if (formasB.has(f)) cruza = true
+    if (!cruza) return false
+  }
+
+  const tokensA = a.split(' ').filter((t) => t.length >= 3)
+  if (!tokensA.length) return false
+  const tokensB = new Set(b.split(' ').filter(Boolean))
+  const batem = tokensA.filter((t) => tokensB.has(t)).length
+  return batem >= 2 ? batem / tokensA.length >= 0.6 : tokensA.length === 1 && batem === 1
+}
+
+/**
+ * Resolve os produtos de CATÁLOGO que a IA pediu no op
+ * (`"catalogo":[{"id":"...","nome":"...","qty":1}]`).
  *
- * Recusa item que não existe, sem preço, sem estoque ou na lista de ocultos do dono
+ * QUEM DIZ O PREÇO É O SERVIDOR, lendo o mesmo `catalog_cache` que a loja lê. Isso é
+ * deliberado: enquanto o preço vinha do texto do prompt, o shampoo passou três semanas sendo
+ * vendido pelo bot mais barato que o site (ver SHAMPOO_ADDON).
+ *
+ * E QUEM DIZ QUE O PRODUTO É AQUELE também é o servidor. O `id` sozinho não bastava: em
+ * 28/08/2026 a IA prometeu à Rosana "3 Gels Maxi Bonder (R$ 84,00)" e mandou no op o id do
+ * GRANDHA STRAIGHT SHAMPOO (R$ 160,00). O id existia, tinha preço e tinha estoque, então
+ * passou nas três travas e o link saiu R$ 733,00 contra os R$ 505,00 combinados na conversa.
+ * Agora o op carrega também o NOME que a IA falou, e ele tem que descrever o mesmo produto do
+ * cadastro — id trocado vira recusa, não cobrança calada.
+ *
+ * Recusa também item que não existe, sem preço, sem estoque ou na lista de ocultos do dono
  * (`bling.hidden_ids` — medicação, cadastro substituído, saldo fantasma). Devolve os recusados
  * pra quem chamou poder dizer ao cliente o que não deu, em vez de cobrar errado calado.
  */
@@ -130,7 +208,7 @@ export async function collectCatalogItems(
   admin: SupabaseClient,
   tenantId: string,
   op: Record<string, unknown>,
-): Promise<{ items: CatalogSaleItem[]; rejeitados: string[] }> {
+): Promise<{ items: CatalogSaleItem[]; rejeitados: CatalogRejeitado[] }> {
   const pedidos = Array.isArray(op.catalogo) ? (op.catalogo as Array<Record<string, unknown>>) : []
   if (!pedidos.length) return { items: [], rejeitados: [] }
 
@@ -148,21 +226,37 @@ export async function collectCatalogItems(
   const daMarca = new Set(Object.values(AI_ADDONS).map((a) => a.blingProductId))
 
   const items: CatalogSaleItem[] = []
-  const rejeitados: string[] = []
+  const rejeitados: CatalogRejeitado[] = []
   for (const pedido of pedidos) {
     const id = String(pedido?.id ?? '').trim()
     const qty = Math.max(0, Math.floor(Number(pedido?.qty) || 0))
+    const nomeIa = String(pedido?.nome ?? pedido?.name ?? '').trim()
     if (!id || qty <= 0 || daMarca.has(id)) continue
     const prod = porId.get(id)
     const preco = Number(prod?.preco ?? 0)
     const estoque = Number(prod?.estoque ?? 0)
+    // Rótulo do recado: o que o CLIENTE ouviu. Cair no nome do Bling aqui contaria a ele um
+    // produto que nunca foi citado na conversa — que é justamente o erro que estamos barrando.
+    const rotulo = nomeIa || String(prod?.nome ?? id)
     if (!prod || ocultos.has(id) || !(preco > 0)) {
-      rejeitados.push(String(prod?.nome ?? id))
+      rejeitados.push({ rotulo, motivo: !prod ? 'id fora do catálogo' : ocultos.has(id) ? 'produto oculto' : 'sem preço' })
+      continue
+    }
+    // O nome que a IA prometeu tem que ser o do cadastro. Sem nome não há como conferir, e
+    // seguir sem conferir é exatamente o buraco do caso Rosana — então recusa.
+    if (!nomeConfere(nomeIa, String(prod.nome ?? ''))) {
+      console.error('[rede] catálogo: nome da IA não bate com o id', {
+        tenantId,
+        id,
+        nomeIa: nomeIa || '(vazio)',
+        nomeBling: String(prod.nome ?? ''),
+      })
+      rejeitados.push({ rotulo, motivo: nomeIa ? `id aponta para "${String(prod.nome ?? '')}"` : 'op sem nome para conferir' })
       continue
     }
     // Estoque insuficiente: recusa em vez de vender o que não tem pra despachar.
     if (!(estoque >= qty)) {
-      rejeitados.push(String(prod.nome ?? id))
+      rejeitados.push({ rotulo, motivo: `estoque ${estoque} para ${qty}` })
       continue
     }
     items.push({ id, nome: String(prod.nome ?? ''), amountCents: Math.round(preco * 100), qty })

@@ -491,6 +491,35 @@ async function acquireAiReplyLock(admin: SupabaseClient, leadId: string): Promis
   }
 }
 
+/**
+ * Quando o cliente falou pela última vez, lido DA TABELA DE INTERAÇÕES.
+ *
+ * De propósito não usa `crm_conversation_states.last_inbound_at`: essa coluna é reescrita
+ * pelos próprios upserts do fluxo (e já ficou congelada por bug), então não serve de relógio
+ * para decidir se a conversa andou durante a geração. `interactions` é o registo bruto.
+ *
+ * Devolve null quando não há inbound ou quando a leitura falha — e null desliga a comparação,
+ * que é o lado seguro: na dúvida, envia (o comportamento antigo) em vez de calar.
+ */
+async function latestInboundAt(admin: SupabaseClient, leadId: string): Promise<string | null> {
+  try {
+    const { data, error } = await admin
+      .from('interactions')
+      .select('happened_at')
+      .eq('lead_id', leadId)
+      .eq('direction', 'in')
+      .order('happened_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) throw error
+    const at = (data as { happened_at?: string } | null)?.happened_at
+    return typeof at === 'string' && at ? at : null
+  } catch (e) {
+    console.error('latestInboundAt:', e instanceof Error ? e.message : String(e))
+    return null
+  }
+}
+
 /** Libera a trava por-lead (não regrava outras colunas; upserts de conclusão preservam o resto). */
 async function releaseAiReplyLock(admin: SupabaseClient, leadId: string): Promise<void> {
   await admin.from('crm_conversation_states')
@@ -1267,6 +1296,10 @@ export async function runWhatsappAiAutoReply(
     return { replied: false }
   }
   try {
+  // Marca d'água do que o cliente JÁ tinha dito quando a geração começou. Comparada de novo
+  // antes do envio: se ele falou no meio, a resposta pronta responde a uma pergunta que já
+  // não é a última. Ver a re-checagem ANTI-OBSOLETA logo abaixo do invoke.
+  const inboundAntes = await latestInboundAt(admin, options.leadId)
   let aiReplyRaw = ''
   let pixQrUrl = ''
   let aiFailKind: 'transient' | 'balance' | 'other' | undefined
@@ -1314,6 +1347,34 @@ export async function runWhatsappAiAutoReply(
     console.warn('runWhatsappAiAutoReply: humano assumiu durante a geração — envio abortado', {
       leadId: options.leadId,
       skipReasons: postGate.skipReasons,
+    })
+    return { replied: false }
+  }
+
+  // ANTI-OBSOLETA: o anti-atropelo acima só olha se o HUMANO assumiu. Faltava olhar o próprio
+  // CLIENTE. Como a geração leva 30-120s, uma mensagem que chega no meio deixa a resposta
+  // pronta desatualizada — e ela saía assim mesmo, perguntando o que a pessoa acabou de
+  // responder. Foi o caso Lisandra (27/08/2026, clínica): às 07:48:37 ela escreveu "Lorena", e
+  // às 07:49:30 a Sofia perguntou "Qual das opções você escolheu?". Para quem lê, isso é a IA
+  // alucinando; é só uma resposta velha.
+  //
+  // Descartar aqui NÃO cria silêncio: a última mensagem da conversa continua sendo a do
+  // cliente, então a rede de segurança do cron (que só retenta nesse caso) e o burst-flush
+  // reprocessam com o histórico completo — e aí a resposta considera o que ele disse.
+  const inboundDepois = await latestInboundAt(admin, options.leadId)
+  const msAntes = inboundAntes ? Date.parse(inboundAntes) : NaN
+  const msDepois = inboundDepois ? Date.parse(inboundDepois) : NaN
+  if (Number.isFinite(msAntes) && Number.isFinite(msDepois) && msDepois > msAntes) {
+    console.warn('runWhatsappAiAutoReply: cliente falou durante a geração — resposta obsoleta descartada', {
+      leadId: options.leadId,
+      inboundAntes,
+      inboundDepois,
+    })
+    await upsertConversationStateInboundOnly(admin, {
+      leadId: options.leadId,
+      ownerMode: options.ownerMode,
+      aiEnabled: options.aiEnabled,
+      inboundHappenedAt: options.inboundHappenedAt,
     })
     return { replied: false }
   }
