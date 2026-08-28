@@ -113,14 +113,22 @@ async function enviarCapi(admin: SupabaseClient, token: string, dias: number) {
   return { ok: falhas === 0, pendentes: pend.length, enviados, falhas, detalhes: detalhes.slice(0, 3) }
 }
 
-async function refazerPublico(admin: SupabaseClient, token: string) {
+async function refazerPublico(
+  admin: SupabaseClient,
+  token: string,
+  // O cron continua chamando sem argumento e cai no público de conversa. A
+  // chamada à mão escolhe a camada, que foi o que permitiu subir a semente de
+  // COMPRADORES sem tocar no público que já roda.
+  opts: { camada: string; publico: string } = { camada: AUDIENCE_LAYER, publico: AUDIENCE_ID },
+) {
+  const { camada: CAMADA, publico: PUBLICO } = opts
   // PostgREST corta em 1.000 linhas e NÃO avisa: a primeira carga subiu 1.000
   // de 1.600 e respondeu ok. Por isso a semente vem paginada, e o total vem
   // por fora para conferir se subiu tudo.
   const hashes: string[] = []
   for (let off = 0; ; off += AUDIENCE_BATCH) {
     const { data, error } = await admin.rpc('crm_meta_audience_seed', {
-      camada: AUDIENCE_LAYER, lote: AUDIENCE_BATCH, deslocamento: off,
+      camada: CAMADA, lote: AUDIENCE_BATCH, deslocamento: off,
     })
     if (error) return { ok: false, erro: `rpc: ${error.message}` }
     const pagina = ((data ?? []) as Array<{ hash: string }>).map((r) => r.hash).filter(Boolean)
@@ -130,7 +138,7 @@ async function refazerPublico(admin: SupabaseClient, token: string) {
   }
   if (!hashes.length) return { ok: false, erro: 'semente vazia' }
 
-  const { data: totalRow } = await admin.rpc('crm_meta_audience_seed_total', { camada: AUDIENCE_LAYER })
+  const { data: totalRow } = await admin.rpc('crm_meta_audience_seed_total', { camada: CAMADA })
   const total = Number(totalRow ?? hashes.length)
 
   let recebidos = 0
@@ -142,7 +150,7 @@ async function refazerPublico(admin: SupabaseClient, token: string) {
     const payload = { schema: ['PHONE'], data: lote.map((h) => [h]) }
     try {
       const body = new URLSearchParams({ payload: JSON.stringify(payload), access_token: token })
-      const res = await fetch(`${GRAPH}/${AUDIENCE_ID}/users`, { method: 'POST', body })
+      const res = await fetch(`${GRAPH}/${PUBLICO}/users`, { method: 'POST', body })
       const txt = await res.text()
       const j = JSON.parse(txt) as { num_received?: number; num_invalid_entries?: number; error?: unknown }
       if (j.error) erros.push(txt.slice(0, 200))
@@ -158,7 +166,7 @@ async function refazerPublico(admin: SupabaseClient, token: string) {
   const completo = hashes.length === total && recebidos === hashes.length
   return {
     ok: erros.length === 0 && completo,
-    camada: AUDIENCE_LAYER, total, semente: hashes.length, recebidos, invalidos,
+    camada: CAMADA, publico: PUBLICO, total, semente: hashes.length, recebidos, invalidos,
     completo, erros: erros.slice(0, 2),
   }
 }
@@ -808,9 +816,12 @@ const ESTADOS_BARRADOS = [
 ]
 
 /** Resolve o `key` numérico que a Meta usa para cada estado. */
-async function chavesDosEstados(token: string): Promise<Array<{ key: string; nome: string }>> {
+async function chavesDosEstados(
+  token: string,
+  nomes: string[] = ESTADOS_BARRADOS,
+): Promise<Array<{ key: string; nome: string }>> {
   const achados: Array<{ key: string; nome: string }> = []
-  for (const nome of ESTADOS_BARRADOS) {
+  for (const nome of nomes) {
     const qs = new URLSearchParams({
       type: 'adgeolocation',
       location_types: JSON.stringify(['region']),
@@ -1021,6 +1032,225 @@ async function cercarConjunto(
   }
 }
 
+/**
+ * conjuntos — lê TUDO que decide quem vê o anúncio, sem mudar nada.
+ *
+ * Nasceu em 28/08/2026. A leitura de `geo` mostrava a praça de cada conjunto e
+ * só isso, então duas alavancas de qualidade ficavam invisíveis: se o conjunto
+ * ainda exclui quem já é paciente, e se o Audience Network está ligado. As duas
+ * filtram o lead sem tocar em criativo, que é o que o Álvaro pediu.
+ *
+ * O id de público não diz nada para humano, então os públicos da conta são
+ * lidos uma vez e o id vira nome na resposta.
+ */
+async function inspecionarConjuntos(token: string) {
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  const erros: string[] = []
+
+  const publicos = new Map<string, string>()
+  {
+    const qs = new URLSearchParams({
+      fields: 'id,name,approximate_count_lower_bound,delivery_status',
+      limit: '200',
+      access_token: token,
+    })
+    const r = await fetch(`${GRAPH}/${conta}/customaudiences?${qs}`)
+    const b = await r.json() as { data?: Array<Record<string, unknown>>; error?: { message?: string } }
+    if (b.error) erros.push(`publicos: ${b.error.message}`)
+    for (const p of b.data ?? []) {
+      const n = Number((p.approximate_count_lower_bound ?? -1) as number)
+      const estado = ((p.delivery_status ?? {}) as Record<string, unknown>).description
+      publicos.set(String(p.id), `${p.name}${n >= 0 ? ` (~${n})` : ''}${estado ? ` [${estado}]` : ''}`)
+    }
+  }
+  const nomeDoPublico = (v: unknown) =>
+    ((v ?? []) as Array<Record<string, string>>).map((a) =>
+      publicos.get(String(a.id)) ?? `id ${a.id}`
+    )
+
+  const qs = new URLSearchParams({
+    fields: 'id,name,effective_status,daily_budget,optimization_goal,destination_type,'
+      + 'billing_event,campaign{name},targeting',
+    effective_status: JSON.stringify(['ACTIVE', 'PENDING_REVIEW', 'IN_PROCESS']),
+    limit: '100',
+    access_token: token,
+  })
+  const res = await fetch(`${GRAPH}/${conta}/adsets?${qs}`)
+  const body = await res.json() as Record<string, unknown>
+  if (!res.ok) return { ok: false, erro: body }
+
+  const conjuntos = ((body.data ?? []) as Array<Record<string, unknown>>).map((c) => {
+    const t = (c.targeting ?? {}) as Record<string, unknown>
+    const geo = (t.geo_locations ?? {}) as Record<string, unknown>
+    const nomeDe = (v: unknown) => ((v ?? []) as Array<Record<string, string>>).map((x) => x.name ?? x.key)
+    // `publisher_platforms` ausente NÃO quer dizer desligado: quer dizer que a
+    // Meta escolhe sozinha, e aí o Audience Network entra por padrão. Por isso
+    // a resposta diz "automático (inclui Audience Network)" em vez de vazio.
+    const plataformas = (t.publisher_platforms ?? null) as string[] | null
+    return {
+      id: String(c.id ?? ''),
+      nome: String(c.name ?? ''),
+      campanha: String((c.campaign as Record<string, string> | undefined)?.name ?? ''),
+      status: String(c.effective_status ?? ''),
+      verba_dia: Math.round(Number(c.daily_budget ?? 0)) / 100,
+      meta: String(c.optimization_goal ?? ''),
+      destino: String(c.destination_type ?? ''),
+      idade: `${t.age_min ?? '?'}-${t.age_max ?? '?'}`,
+      genero: (t.genders as number[] | undefined)?.map((g) => (g === 1 ? 'homens' : 'mulheres')) ?? ['todos'],
+      praca: {
+        paises: (geo.countries ?? []) as string[],
+        regioes: nomeDe(geo.regions),
+        cidades: ((geo.cities ?? []) as Array<Record<string, unknown>>).map((r) =>
+          `${r.name ?? r.key}${r.radius ? ` ${r.radius}${r.distance_unit ?? 'km'}` : ''}`
+        ),
+        excluidas: nomeDe((t.excluded_geo_locations as Record<string, unknown> | undefined)?.regions),
+      },
+      publicos_incluidos: nomeDoPublico(t.custom_audiences),
+      publicos_excluidos: nomeDoPublico(t.excluded_custom_audiences),
+      plataformas: plataformas ?? ['automático (inclui Audience Network)'],
+      posicionamentos: (t.facebook_positions as string[] | undefined) ?? 'automático',
+      expansao_de_publico:
+        ((t.targeting_automation ?? {}) as Record<string, unknown>).advantage_audience ?? null,
+    }
+  })
+  return { ok: erros.length === 0, total: conjuntos.length, conjuntos, erros }
+}
+
+/**
+ * praca — troca a praça de UM conjunto, sem encostar no resto do targeting.
+ *
+ * Existe porque o conjunto de remarketing de R$105/dia (32% da verba) mirava o
+ * Brasil inteiro enquanto 85% de quem compra transplante mora em Maringá e
+ * Londrina, e 96% em PR + SP. Restringir por ESTADO, e não por raio, é de
+ * propósito: raio de 50km sobre uma base que já é nacional pode zerar a
+ * entrega, e São Paulo sozinho responde por 7% dos compradores.
+ *
+ * PEGADINHA de 25/08, que continua valendo: `targeting` volta INTEIRO no POST,
+ * com `targeting_automation` junto. Dropar esse campo derruba o conjunto em
+ * HARD_ERROR "Invalid Optimization Goal". Aqui o objeto é lido, tem só
+ * `geo_locations` trocado, e volta como veio.
+ */
+async function restringirPraca(
+  token: string,
+  opts: { conjunto: string; estados: string[]; dry: boolean },
+) {
+  const { conjunto, estados, dry } = opts
+  if (!conjunto) return { ok: false, erro: 'informe o id do conjunto' }
+  if (!estados.length) return { ok: false, erro: 'informe os estados' }
+
+  const chaves = await chavesDosEstados(token, estados)
+  if (chaves.length !== estados.length) {
+    return { ok: false, erro: 'nem todo estado resolveu chave', achados: chaves.map((c) => c.nome) }
+  }
+
+  const lerQs = new URLSearchParams({
+    fields: 'id,name,effective_status,targeting',
+    access_token: token,
+  })
+  const lido = await fetch(`${GRAPH}/${conjunto}?${lerQs}`)
+  const atual = await lido.json() as Record<string, unknown>
+  if (!lido.ok) return { ok: false, erro: atual }
+
+  const t = { ...(atual.targeting ?? {}) as Record<string, unknown> }
+  const geoAntes = { ...(t.geo_locations ?? {}) as Record<string, unknown> }
+  const geoDepois: Record<string, unknown> = { ...geoAntes }
+  delete geoDepois.countries
+  geoDepois.regions = chaves.map((c) => ({ key: c.key }))
+  t.geo_locations = geoDepois
+
+  const antes = {
+    paises: (geoAntes.countries ?? []) as string[],
+    regioes: ((geoAntes.regions ?? []) as Array<Record<string, string>>).map((r) => r.name ?? r.key),
+  }
+  if (dry) {
+    return {
+      ok: true, dry: true, conjunto, nome: String(atual.name ?? ''),
+      antes, depois: chaves.map((c) => c.nome),
+    }
+  }
+
+  const post = await fetch(`${GRAPH}/${conjunto}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targeting: t, access_token: token }),
+  })
+  const pb = await post.json() as Record<string, unknown>
+  if (!post.ok) return { ok: false, erro: pb }
+
+  // Conjunto que volta ACTIVE mas com issues_info é conjunto quebrado calado.
+  const conf = await fetch(
+    `${GRAPH}/${conjunto}?fields=name,effective_status,issues_info,targeting{geo_locations}`
+      + `&access_token=${encodeURIComponent(token)}`,
+  )
+  const cb = await conf.json() as Record<string, unknown>
+  const geoFinal = ((cb.targeting as Record<string, unknown> | undefined)?.geo_locations ?? {}) as Record<string, unknown>
+  return {
+    ok: true, conjunto, nome: String(cb.name ?? ''), antes,
+    status: cb.effective_status ?? '?',
+    issues: cb.issues_info ?? null,
+    praca_agora: {
+      paises: (geoFinal.countries ?? []) as string[],
+      regioes: ((geoFinal.regions ?? []) as Array<Record<string, string>>).map((r) => r.name ?? r.key),
+    },
+  }
+}
+
+/**
+ * criar_publico / criar_lal — a semente do lookalike passa a ser quem PAGOU.
+ *
+ * Em 28/08/2026 a leitura de `conjuntos` mostrou que 3 dos 5 conjuntos ativos
+ * rodam no "Semelhante (BR, 1%) - FORMULÁRIO PREENCHIDO TC CONSULTA". Ou seja,
+ * o pedido à Meta é "ache gente parecida com quem preenche formulário" — e
+ * formulário rendeu 1 venda em 801 leads. O algoritmo está entregando
+ * exatamente o que foi pedido.
+ *
+ * `customer_file_source: PARTNER_PROVIDED_ONLY` é o que descreve a origem real:
+ * a lista sai do CRM e do Shosp, não de um formulário que a pessoa preencheu
+ * para a Meta.
+ */
+async function criarPublico(token: string, nome: string, descricao: string) {
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  if (!nome) return { ok: false, erro: 'informe o nome' }
+  const body = new URLSearchParams({
+    name: nome,
+    description: descricao,
+    subtype: 'CUSTOM',
+    customer_file_source: 'PARTNER_PROVIDED_ONLY',
+    access_token: token,
+  })
+  const r = await fetch(`${GRAPH}/${conta}/customaudiences`, { method: 'POST', body })
+  const b = await r.json() as Record<string, unknown>
+  return r.ok ? { ok: true, publico: String(b.id ?? ''), nome } : { ok: false, erro: b }
+}
+
+/**
+ * O semelhante só nasce se a semente for grande o bastante DEPOIS do casamento
+ * com contas reais. Uma semente de 520 já voltou "too small" nesta conta, e uma
+ * de 1.600 passou. Por isso a resposta devolve `delivery_status` cru: é ele que
+ * diz se o público vai entregar ou se ficou parado esperando gente.
+ */
+async function criarLookalike(token: string, origem: string, razao: number, nome: string) {
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  if (!origem) return { ok: false, erro: 'informe o público de origem' }
+  const body = new URLSearchParams({
+    name: nome,
+    subtype: 'LOOKALIKE',
+    origin_audience_id: origem,
+    lookalike_spec: JSON.stringify({ ratio: razao, country: 'BR', type: 'similarity' }),
+    access_token: token,
+  })
+  const r = await fetch(`${GRAPH}/${conta}/customaudiences`, { method: 'POST', body })
+  const b = await r.json() as Record<string, unknown>
+  if (!r.ok) return { ok: false, erro: b }
+
+  const id = String(b.id ?? '')
+  const conf = await fetch(
+    `${GRAPH}/${id}?fields=id,name,delivery_status,operation_status,approximate_count_lower_bound`
+      + `&access_token=${encodeURIComponent(token)}`,
+  )
+  return { ok: true, publico: id, detalhe: await conf.json() }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -1045,7 +1275,32 @@ Deno.serve(async (req) => {
   const action = (corpo.action ?? 'capi').toLowerCase()
 
   try {
-    if (action === 'audience') return json(await refazerPublico(admin, token))
+    if (action === 'audience') {
+      const c = corpo as Record<string, unknown>
+      return json(await refazerPublico(admin, token, {
+        camada: c.camada ? String(c.camada) : AUDIENCE_LAYER,
+        publico: c.publico ? String(c.publico) : AUDIENCE_ID,
+      }))
+    }
+    if (action === 'conjuntos') return json(await inspecionarConjuntos(token))
+    if (action === 'criar_publico') {
+      const c = corpo as Record<string, unknown>
+      return json(await criarPublico(token, String(c.nome ?? ''), String(c.descricao ?? '')))
+    }
+    if (action === 'criar_lal') {
+      const c = corpo as Record<string, unknown>
+      return json(await criarLookalike(
+        token, String(c.origem ?? ''), Number(c.razao ?? 0.01), String(c.nome ?? ''),
+      ))
+    }
+    if (action === 'praca') {
+      const c = corpo as Record<string, unknown>
+      return json(await restringirPraca(token, {
+        conjunto: String(c.conjunto ?? ''),
+        estados: (c.estados ?? []) as string[],
+        dry: c.dry !== false,
+      }))
+    }
     if (action === 'insights') return json(await puxarInsights(admin, token, Number(corpo.dias ?? 7)))
     if (action === 'capi') return json(await enviarCapi(admin, token, Number(corpo.dias ?? 6)))
     if (action === 'anuncios') return json(await inspecionarAnuncios(token, String((corpo as Record<string, unknown>).ad_id ?? '')))
