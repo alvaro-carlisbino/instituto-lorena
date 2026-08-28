@@ -211,6 +211,20 @@ type NotifCfg = {
   sales_receipt_owner_phones?: string[]
   /** Assuntos que PODEM virar DM no WhatsApp do dono. Ausente = todos (como sempre foi). */
   owner_dm_kinds?: OwnerDmKind[]
+  /** Kill switch só do comprovante de marketplace. Ausente = ligado. */
+  marketplace_receipt_enabled?: boolean
+  /**
+   * Data (YYYY-MM-DD) a partir da qual pedido de marketplace vira comprovante. Existe para a
+   * PRIMEIRA rodada não despejar no grupo a semana inteira de vendas antigas que a varredura
+   * enxerga. Ausente = hoje, ou seja: nada retroativo, nunca.
+   */
+  marketplace_receipt_since?: string
+  /**
+   * Nome do canal por `loja.id` do Bling — `{ "206142894": "Shopee" }`. O Bling não tem
+   * endpoint que traduza esse id (`/canais-de-venda` responde 404), então o nome bonito vem
+   * daqui; o CNPJ do intermediador é o plano B. Editável sem deploy quando abrir canal novo.
+   */
+  marketplace_channel_names?: Record<string, string>
 }
 
 /**
@@ -504,4 +518,226 @@ export async function resendMissingSaleReceipts(
     console.warn('[saleReceipt] resendMissing exception:', e instanceof Error ? e.message : String(e))
   }
   return { checked, groupSent, ownerSent }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────────────────────
+ * COMPROVANTE DE VENDA DE MARKETPLACE (Shopee, Mercado Livre, TikTok Shop…)
+ *
+ * A venda do site, do bot e do balcão passa por um gateway nosso, e é o gateway que dispara o
+ * comprovante. **Venda de marketplace não passa por gateway nenhum**: ela nasce pronta dentro do
+ * Bling pela integração do canal. Resultado até 28/ago/2026: Shopee, Mercado Livre e TikTok Shop
+ * vendiam e o grupo do financeiro não ficava sabendo — a conferência do dia só via o que tinha
+ * passado por e.Rede/Asaas, e o pedido do marketplace só aparecia se alguém abrisse o Bling.
+ *
+ * Quem chama isto é a varredura `crm-bling-marketplace-fin`, que já lê esses pedidos para lançar
+ * a conta a receber que o Bling não gera.
+ *
+ * ── Duas diferenças que mudam o TEXTO, não só os dados ──────────────────────────────────────
+ *
+ * **Não tem hora.** O Bling devolve `data` (YYYY-MM-DD) e mais nada. Carimbar `new Date()` seria
+ * repetir o bug que o comprovante normal já levou uma vez: a mensagem diria a hora do cron, e é
+ * por data/hora que o caixa fecha. Então aqui não existe linha de hora — existe a data do pedido
+ * no canal, e o "detectado em" no rodapé, que é o que de fato aconteceu naquele instante.
+ *
+ * **Não é dinheiro em caixa.** O marketplace repassa depois (o ML solta ~30 dias). Um comprovante
+ * idêntico ao da venda no Pix faria o financeiro somar no caixa do dia um valor que ainda não
+ * existe na conta. Por isso o título diz MARKETPLACE, e a data do repasse vem escrita.
+ */
+
+/** `transporte.etiqueta` do pedido do Bling — é o único endereço que o marketplace entrega. */
+export type MarketplaceEtiqueta = {
+  endereco?: string | null
+  numero?: string | null
+  complemento?: string | null
+  bairro?: string | null
+  municipio?: string | null
+  uf?: string | null
+  cep?: string | null
+}
+
+export type MarketplaceSaleReceiptInput = {
+  tenantId: string
+  /** Id interno do pedido no Bling — é a CHAVE de dedupe em `marketplace_sale_receipts`. */
+  blingOrderId: string
+  /** Número VISÍVEL do pedido (3734). É o que a busca do Bling acha; o id interno não. */
+  numero?: string | null
+  /** Nome do canal já resolvido ('Shopee', 'Mercado Livre', 'TikTok Shop'…). */
+  canal: string
+  /** `loja.id` do Bling — vai no rodapé quando o canal não pôde ser nomeado. */
+  canalLojaId?: string | null
+  /** `numeroLoja`: o código do pedido DENTRO do marketplace, que é por onde o suporte procura. */
+  pedidoDoCanal?: string | null
+  amountCents: number
+  /** `taxas.taxaComissao` — comissão que o canal já debitou. */
+  commissionCents?: number | null
+  /** `taxas.custoFrete` — frete pago por nós, não cobrado do cliente. */
+  freightCostCents?: number | null
+  /** Data do pedido no canal (YYYY-MM-DD). */
+  orderDate?: string | null
+  /** `parcelas[0].dataVencimento` — quando o canal libera o dinheiro (YYYY-MM-DD). */
+  repasseDate?: string | null
+  itens?: Array<{ descricao: string; quantidade: number }>
+  buyer: { name?: string | null; cpf?: string | null; etiqueta?: MarketplaceEtiqueta | null }
+  rastreio?: string | null
+}
+
+/**
+ * YYYY-MM-DD → DD/MM/YYYY na unha. `new Date('2026-08-21')` é meia-noite UTC, que em Brasília
+ * ainda é dia 20 — a data do pedido voltaria um dia inteiro em todo comprovante.
+ */
+function fmtDiaBr(ymd?: string | null): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd ?? ''))
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : ''
+}
+
+function etiquetaLinha(e?: MarketplaceEtiqueta | null): string {
+  const s = (v: unknown) => String(v ?? '').trim()
+  const cep = s(e?.cep).replace(/\D/g, '')
+  return [
+    [s(e?.endereco), s(e?.numero)].filter(Boolean).join(', '),
+    s(e?.complemento),
+    s(e?.bairro),
+    [s(e?.municipio), s(e?.uf)].filter(Boolean).join('/'),
+    cep ? `CEP ${cep.replace(/(\d{5})(\d{3})/, '$1-$2')}` : '',
+  ].filter(Boolean).join(' — ')
+}
+
+export function buildMarketplaceReceiptText(d: MarketplaceSaleReceiptInput): string {
+  const { data: hojeData, hora: agoraHora } = brasiliaDateTime()
+
+  const comissao = Number(d.commissionCents ?? 0)
+  const freteCusto = Number(d.freightCostCents ?? 0)
+  const recebimento: string[] = []
+  if (comissao > 0) recebimento.push(`• Comissão do canal: ${fmtBRL(comissao)}`)
+  if (freteCusto > 0) recebimento.push(`• Frete (custo nosso): ${fmtBRL(freteCusto)}`)
+  if (comissao + freteCusto > 0) {
+    recebimento.push(`• Líquido estimado: ${fmtBRL(d.amountCents - comissao - freteCusto)}`)
+  }
+  const repasse = fmtDiaBr(d.repasseDate)
+  recebimento.push(
+    repasse
+      ? `• Repasse previsto: ${repasse} — *não entra no caixa de hoje*`
+      : '• O dinheiro só cai no repasse do canal — *não entra no caixa de hoje*',
+  )
+
+  const b = d.buyer ?? {}
+  const comprador: string[] = []
+  if (b.name?.trim()) comprador.push(`• Nome: ${b.name.trim()}`)
+  const cpf = fmtCpf(b.cpf)
+  if (cpf) comprador.push(`• CPF: ${cpf}`)
+  const end = etiquetaLinha(b.etiqueta)
+  if (end) comprador.push(`• Endereço: ${end}`)
+  if (!comprador.length) comprador.push('• (o canal não devolveu os dados do comprador)')
+
+  const pedido: string[] = []
+  const itens = (d.itens ?? []).filter((i) => String(i?.descricao ?? '').trim())
+  if (itens.length) {
+    pedido.push(`• Itens: ${itens.map((i) => `${i.quantidade}× ${i.descricao.trim()}`).join(' | ').slice(0, 240)}`)
+  }
+  if (d.pedidoDoCanal) pedido.push(`• Pedido no canal: ${d.pedidoDoCanal}`)
+  if (d.numero) pedido.push(`• Pedido Bling: nº ${d.numero}`)
+  else pedido.push(`• Pedido Bling: id ${d.blingOrderId} (interno — na tela do Bling, busque pelo nome do cliente)`)
+  if (d.rastreio) pedido.push(`• Rastreio: ${d.rastreio}`)
+  pedido.push(`• Detectado em: ${hojeData} ${agoraHora} (Brasília)`)
+  pedido.push(`• Ref: bling:${d.blingOrderId}${d.canalLojaId ? ` · loja ${d.canalLojaId}` : ''}`)
+
+  return [
+    '🧾 *COMPROVANTE DE VENDA (MARKETPLACE)*',
+    '',
+    `🛒 Canal: *${d.canal}*`,
+    `📅 Data do pedido: ${fmtDiaBr(d.orderDate) || '—'}`,
+    `💰 Valor: *${fmtBRL(d.amountCents)}*`,
+    '',
+    '*💳 Recebimento*',
+    ...recebimento,
+    '',
+    '*👤 Comprador*',
+    ...comprador,
+    '',
+    '*📦 Pedido*',
+    ...pedido,
+  ].join('\n')
+}
+
+type MarketplaceReceiptRow = { group_sent_at?: string | null; owner_sent_at?: string | null }
+
+/**
+ * Entrega o comprovante do pedido de marketplace no grupo do financeiro e na DM do dono, e
+ * carimba as marcas em `marketplace_sale_receipts`.
+ *
+ * **A marca é o dedupe** — mesmo desenho do comprovante de gateway: quem já foi não vai de novo,
+ * e o que falhou é retentado na rodada seguinte da varredura sem ninguém precisar mandar. Grupo
+ * e dono têm marca própria porque falham separado (W-API fora do ar no meio dos dois envios
+ * mandaria a venda duas vezes para quem já tinha recebido).
+ *
+ * Leitura-antes-de-escrever em vez de upsert: no upsert do PostgREST a coluna ausente do payload
+ * não entra no DO UPDATE, e mandar `null` APAGA — com dois carimbos independentes na mesma linha
+ * isso é jeito fácil de apagar a marca do grupo ao gravar a do dono.
+ */
+export async function sendMarketplaceSaleReceipt(
+  admin: SupabaseClient,
+  d: MarketplaceSaleReceiptInput,
+): Promise<{ grupo: boolean; dono: boolean; jaEnviado: boolean; erro?: string }> {
+  const tid = String(d.tenantId ?? '').trim()
+  const orderId = String(d.blingOrderId ?? '').trim()
+  if (!tid || !orderId) return { grupo: false, dono: false, jaEnviado: false, erro: 'input_incompleto' }
+
+  try {
+    const { data: existente } = await admin.from('marketplace_sale_receipts')
+      .select('group_sent_at, owner_sent_at')
+      .eq('tenant_id', tid).eq('bling_order_id', orderId).maybeSingle()
+    const linha = existente as MarketplaceReceiptRow | null
+    const jaGrupo = Boolean(linha?.group_sent_at)
+    const jaDono = Boolean(linha?.owner_sent_at)
+    if (jaGrupo && jaDono) return { grupo: false, dono: false, jaEnviado: true }
+
+    const cfg = await readNotifCfg(admin, tid)
+    if (cfg.marketplace_receipt_enabled === false) {
+      return { grupo: false, dono: false, jaEnviado: false, erro: 'desligado' }
+    }
+
+    const texto = buildMarketplaceReceiptText(d)
+
+    const jid = String(cfg.sales_receipt_group_jid ?? '').trim()
+    const grupoLigado = Boolean(jid) && cfg.sales_receipt_enabled !== false
+    const grupo = !jaGrupo && grupoLigado ? await sendWapiGroupText(admin, tid, jid, texto) : false
+
+    // Sem telefone de dono configurado não há o que entregar: carimba assim mesmo, senão a
+    // varredura fica reprocessando a mesma venda para sempre (mesma decisão do comprovante 1:1).
+    const temDono = Array.isArray(cfg.sales_receipt_owner_phones) && cfg.sales_receipt_owner_phones.filter(Boolean).length > 0
+    const dono = !jaDono && (!temDono || await notifyOwnerWhatsapp(admin, tid, 'venda', texto))
+
+    const agora = new Date().toISOString()
+    const marcas = {
+      ...(grupo ? { group_sent_at: agora } : {}),
+      ...(dono ? { owner_sent_at: agora } : {}),
+    }
+    if (linha) {
+      if (Object.keys(marcas).length) {
+        await admin.from('marketplace_sale_receipts').update(marcas)
+          .eq('tenant_id', tid).eq('bling_order_id', orderId)
+      }
+    } else {
+      await admin.from('marketplace_sale_receipts').insert({
+        tenant_id: tid,
+        bling_order_id: orderId,
+        numero: d.numero ?? null,
+        canal: d.canal,
+        canal_loja_id: d.canalLojaId ?? null,
+        pedido_do_canal: d.pedidoDoCanal ?? null,
+        amount_cents: d.amountCents,
+        order_date: d.orderDate ?? null,
+        ...marcas,
+      })
+    }
+
+    if (!grupo && !jaGrupo && grupoLigado) {
+      console.warn(`[saleReceipt] comprovante de marketplace NÃO entregue (tenant=${tid}, pedido=${orderId})`)
+    }
+    return { grupo, dono: dono && !jaDono, jaEnviado: false }
+  } catch (e) {
+    const erro = e instanceof Error ? e.message : String(e)
+    console.warn('[saleReceipt] marketplace exception:', erro)
+    return { grupo: false, dono: false, jaEnviado: false, erro }
+  }
 }

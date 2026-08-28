@@ -1,5 +1,23 @@
 /**
- * crm-bling-marketplace-fin — cria a CONTA A RECEBER que o pedido de marketplace não gera.
+ * crm-bling-marketplace-fin — o que a varredura faz com o pedido de marketplace:
+ *   1. manda o COMPROVANTE da venda para o grupo do WhatsApp do financeiro;
+ *   2. cria a CONTA A RECEBER que o Bling não gera.
+ *
+ * ── 1. O comprovante (28/ago/2026) ──────────────────────────────────────────────────────────
+ *
+ * O comprovante no grupo nasceu preso ao GATEWAY: quem dispara é o fechamento do pagamento na
+ * e.Rede, no Asaas, no ciclo da assinatura ou na confirmação manual. Venda de marketplace não
+ * passa por gateway nenhum — ela nasce pronta dentro do Bling, pela integração do canal. Então
+ * a venda do site e do bot chegava ao grupo no mesmo minuto, e a venda da Shopee, do Mercado
+ * Livre e do TikTok Shop só existia para quem abrisse o Bling.
+ *
+ * O passo do comprovante roda ANTES do financeiro **de propósito**: o lançamento da conta aborta
+ * quando o Bling ignora o filtro de data (ver abaixo), e avisar a venda não pode depender disso.
+ *
+ * Dedupe e retentativa vivem em `marketplace_sale_receipts`: enquanto a marca estiver nula, a
+ * rodada seguinte tenta de novo; com a marca, nunca repete.
+ *
+ * ── 2. A conta a receber ────────────────────────────────────────────────────────────────────
  *
  * O Bling só monta o financeiro sozinho quando o pedido nasce na TELA dele. Pedido que chega
  * por integração não gera nada: já sabíamos disso para o pedido criado pela nossa API
@@ -19,8 +37,13 @@
  * **Não baixa a conta.** O valor lançado é o BRUTO, que é o que o cliente pagou e o que sai na
  * NF-e. A comissão do marketplace é despesa financeira e entra como `tarifa` na baixa — mesma
  * decisão do Álvaro em 29/jul para a taxa da adquirente. Baixar pelo líquido faria a nota sair
- * por menos que o vendido. E a comissão do ML **não vem na API do pedido**: sem o número real,
- * a conta fica EM ABERTO para o financeiro baixar, nunca baixada com taxa chutada.
+ * por menos que o vendido, então a conta fica EM ABERTO para o financeiro baixar.
+ *
+ * (Correção de 28/ago: a comissão **vem sim** na API, em `taxas.taxaComissao` — no DETALHE do
+ * pedido, não na listagem, que é o que deu a impressão contrária em 20/ago. O comprovante já
+ * mostra o número. A baixa automática continua não acontecendo, porque o valor que fecha é o do
+ * extrato de repasse do canal, e baixar aqui pelo número do pedido criaria diferença silenciosa
+ * na conciliação.)
  *
  * **Não lança pedido cancelado, em digitação ou em devolução.** Não há o que receber.
  *
@@ -40,11 +63,47 @@
  */
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { getValidBlingToken } from '../_shared/bling.ts'
+import {
+  buildMarketplaceReceiptText,
+  type MarketplaceSaleReceiptInput,
+  sendMarketplaceSaleReceipt,
+} from '../_shared/saleReceipt.ts'
 
 const API = 'https://api.bling.com.br/Api/v3'
 
 /** Cancelado, Em digitação, Em devolução: não há o que receber. */
 const SITUACOES_SEM_RECEBER = new Set([12, 21, 814971])
+
+/**
+ * CNPJ do intermediador → nome do marketplace. É o plano B do nome do canal: o pedido do Bling
+ * identifica o canal por `loja.id` (206142894…) e NÃO existe endpoint que traduza esse número
+ * (`/canais-de-venda` responde 404), então o nome vem de `notifications.marketplace_channel_names`
+ * e, quando a loja não está lá, deste mapa. Os dois primeiros saíram de pedidos reais.
+ */
+const CANAL_POR_CNPJ: Record<string, string> = {
+  '35635824000112': 'Shopee',
+  '03007331000141': 'Mercado Livre', // EBAZAR.COM.BR — é o que vem nos pedidos do ML
+  '10573521000191': 'Mercado Livre', // MercadoLivre.com Atividades de Internet
+}
+
+/**
+ * Canal desconhecido NÃO segura o comprovante: ele sai com a loja e o CNPJ escritos, que é o
+ * suficiente para alguém dizer de quem é e acrescentar uma linha na config. Comprovante que não
+ * chega é pior do que comprovante com o nome feio.
+ */
+function nomeDoCanal(lojaId: string, cnpjIntermediador: string, mapa: Record<string, string>): string {
+  const porConfig = String(mapa?.[lojaId] ?? '').trim()
+  if (porConfig) return porConfig
+  const cnpj = cnpjIntermediador.replace(/\D/g, '')
+  if (CANAL_POR_CNPJ[cnpj]) return CANAL_POR_CNPJ[cnpj]
+  return `Marketplace (loja ${lojaId}${cnpjIntermediador ? `, CNPJ ${cnpjIntermediador}` : ''})`
+}
+
+type NotificacoesDoPolo = {
+  marketplace_receipt_enabled?: boolean
+  marketplace_receipt_since?: string
+  marketplace_channel_names?: Record<string, string>
+}
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -72,6 +131,17 @@ type Criada = {
   vencimento: string
   contaId: string | null
   erro?: string
+}
+
+type ComprovanteEnviado = {
+  pedido: string
+  canal: string
+  valor: number
+  grupo: boolean
+  dono: boolean
+  erro?: string
+  /** Só no dry-run: a mensagem que teria ido para o grupo. */
+  texto?: string
 }
 
 /**
@@ -108,12 +178,135 @@ async function blingGet(url: string, bh: Record<string, string>): Promise<Record
   }
 }
 
+/**
+ * Manda para o grupo do financeiro (e para a DM do dono) a venda de marketplace que ainda não
+ * foi avisada. Nunca lança: comprovante que falha não pode derrubar o lançamento da conta a
+ * receber, que é o passo seguinte.
+ *
+ * **Janela própria, mais curta que a do financeiro.** A varredura enxerga 7 dias de pedidos
+ * porque conta a receber atrasada ainda vale a pena lançar; comprovante de venda de 6 dias atrás
+ * não é aviso, é ruído no grupo. E `marketplace_receipt_since` (config) é o piso absoluto: sem
+ * ele, o dia em que a função subisse despejaria a janela inteira de uma vez no grupo.
+ */
+async function avisarVendas(
+  admin: SupabaseClient,
+  tenantId: string,
+  alvo: Array<Record<string, unknown>>,
+  detalheDoPedido: (id: string) => Promise<Record<string, unknown> | null>,
+  hoje: string,
+  diasComprovante: number,
+  dry: boolean,
+): Promise<Record<string, unknown>> {
+  const { data: ti } = await admin.from('tenant_integrations').select('notifications').eq('tenant_id', tenantId).maybeSingle()
+  const notif = (((ti as { notifications?: NotificacoesDoPolo } | null)?.notifications) ?? {}) as NotificacoesDoPolo
+  if (notif.marketplace_receipt_enabled === false) return { desligado: true, enviados: [] }
+
+  // Sem `since` gravado, o corte é HOJE: nada retroativo, nunca. Quem quiser mandar uma venda
+  // antiga edita a data na config (ou zera a marca em marketplace_sale_receipts).
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(str(notif.marketplace_receipt_since)) ? str(notif.marketplace_receipt_since) : hoje
+  const janela = diaSP(new Date(Date.now() - diasComprovante * 86400000))
+  const corte = janela > since ? janela : since
+
+  const candidatos = alvo.filter((p) => str(p.id) && str(p.data) >= corte)
+  if (!candidatos.length) return { corte, candidatos: 0, enviados: [] }
+
+  // Uma consulta só para saber o que já foi: sem isto, cada pedido antigo custaria uma leitura
+  // de DETALHE no Bling (3 req/s) para nada.
+  const { data: marcados } = await admin.from('marketplace_sale_receipts')
+    .select('bling_order_id, group_sent_at, owner_sent_at')
+    .eq('tenant_id', tenantId)
+    .in('bling_order_id', candidatos.map((p) => str(p.id)))
+  const prontos = new Set(
+    ((marcados ?? []) as Array<{ bling_order_id: string; group_sent_at: string | null; owner_sent_at: string | null }>)
+      .filter((r) => r.group_sent_at && r.owner_sent_at)
+      .map((r) => r.bling_order_id),
+  )
+
+  const enviados: ComprovanteEnviado[] = []
+  let jaAvisados = 0
+  for (const p of candidatos) {
+    const orderId = str(p.id)
+    if (prontos.has(orderId)) { jaAvisados++; continue }
+
+    // O detalhe traz itens, endereço de entrega, comissão e o CNPJ que nomeia o canal. Se ele
+    // falhar, o comprovante sai MAIS MAGRO com o que veio na listagem — venda avisada de menos
+    // ainda é melhor do que venda não avisada.
+    const det = await detalheDoPedido(orderId)
+    const base = det ?? p
+    const loja = (base.loja ?? {}) as Record<string, unknown>
+    const inter = (base.intermediador ?? {}) as Record<string, unknown>
+    const taxas = (base.taxas ?? {}) as Record<string, unknown>
+    const transporte = (base.transporte ?? {}) as Record<string, unknown>
+    const volumes = (transporte.volumes ?? []) as Array<Record<string, unknown>>
+    const etiqueta = (transporte.etiqueta ?? {}) as Record<string, unknown>
+    const contato = (base.contato ?? {}) as Record<string, unknown>
+    const parcelas = (base.parcelas ?? []) as Array<Record<string, unknown>>
+    const lojaId = str(loja.id)
+    const canal = nomeDoCanal(lojaId, str(inter.cnpj), notif.marketplace_channel_names ?? {})
+    const valor = Number(base.total ?? p.total ?? 0)
+
+    const entrada: MarketplaceSaleReceiptInput = {
+      tenantId,
+      blingOrderId: orderId,
+      numero: str(base.numero) || null,
+      canal,
+      canalLojaId: lojaId || null,
+      pedidoDoCanal: str(base.numeroLoja) || null,
+      amountCents: cents(valor),
+      commissionCents: cents(taxas.taxaComissao) || null,
+      freightCostCents: cents(taxas.custoFrete) || null,
+      orderDate: str(base.data) || null,
+      repasseDate: str(parcelas[0]?.dataVencimento) || null,
+      itens: ((base.itens ?? []) as Array<Record<string, unknown>>).map((i) => ({
+        descricao: str(i.descricao),
+        quantidade: Number(i.quantidade ?? 1),
+      })),
+      buyer: {
+        name: str(contato.nome) || null,
+        cpf: str(contato.numeroDocumento) || null,
+        etiqueta: {
+          endereco: str(etiqueta.endereco) || null,
+          numero: str(etiqueta.numero) || null,
+          complemento: str(etiqueta.complemento) || null,
+          bairro: str(etiqueta.bairro) || null,
+          municipio: str(etiqueta.municipio) || null,
+          uf: str(etiqueta.uf) || null,
+          cep: str(etiqueta.cep) || null,
+        },
+      },
+      rastreio: str(volumes[0]?.codigoRastreamento) || null,
+    }
+
+    if (dry) {
+      // O dry devolve a MENSAGEM montada, não só "ia mandar". É o único jeito de conferir o
+      // texto que cairia no grupo (canal nomeado certo, valor, endereço) sem escrever nele.
+      enviados.push({
+        pedido: str(base.numero) || orderId,
+        canal,
+        valor,
+        grupo: false,
+        dono: false,
+        erro: 'dry_run',
+        texto: buildMarketplaceReceiptText(entrada),
+      })
+      continue
+    }
+
+    const r = await sendMarketplaceSaleReceipt(admin, entrada)
+    if (r.jaEnviado) { jaAvisados++; continue }
+    enviados.push({ pedido: str(base.numero) || orderId, canal, valor, grupo: r.grupo, dono: r.dono, ...(r.erro ? { erro: r.erro } : {}) })
+  }
+
+  return { corte, candidatos: candidatos.length, jaAvisados, enviados }
+}
+
 async function varrerPolo(
   admin: SupabaseClient,
   tenantId: string,
   dias: number,
   dry: boolean,
   limite: number,
+  diasComprovante: number,
 ): Promise<Record<string, unknown>> {
   const token = await getValidBlingToken(admin, tenantId)
   if (!token) return { tenantId, erro: 'bling_sem_token' }
@@ -121,6 +314,20 @@ async function varrerPolo(
 
   const hoje = diaSP(new Date())
   const desde = diaSP(new Date(Date.now() - dias * 86400000))
+
+  /**
+   * O DETALHE do pedido é pedido pelos dois passos (o comprovante quer itens/endereço/comissão,
+   * o financeiro quer a parcela) e o Bling corta em 3 requisições por segundo. Uma leitura por
+   * pedido, no máximo.
+   */
+  const detalhes = new Map<string, Record<string, unknown> | null>()
+  const detalheDoPedido = async (id: string): Promise<Record<string, unknown> | null> => {
+    if (detalhes.has(id)) return detalhes.get(id) ?? null
+    const d = await blingGet(`${API}/pedidos/vendas/${id}`, bh)
+    const data = ((d?.data ?? null) as Record<string, unknown> | null)
+    detalhes.set(id, data)
+    return data
+  }
 
   // ── 1. Pedidos da janela ────────────────────────────────────────────────────────────────
   const pedidos: Array<Record<string, unknown>> = []
@@ -139,10 +346,13 @@ async function varrerPolo(
   })
 
   if (!alvo.length) {
-    return { tenantId, janela: { desde, ate: hoje }, pedidos: pedidos.length, marketplace: 0, criadas: [] }
+    return { tenantId, janela: { desde, ate: hoje }, pedidos: pedidos.length, marketplace: 0, comprovantes: [], criadas: [] }
   }
 
-  // ── 2. Índice das contas a receber da janela ────────────────────────────────────────────
+  // ── 2. Comprovante da venda no grupo do WhatsApp ────────────────────────────────────────
+  const comprovantes = await avisarVendas(admin, tenantId, alvo, detalheDoPedido, hoje, diasComprovante, dry)
+
+  // ── 3. Índice das contas a receber da janela ────────────────────────────────────────────
   // Chave: contato | valor em centavos | data de emissão. Ver o cabeçalho para o porquê de não
   // dar pra usar `idOrigem` nem `numeroDocumento` aqui.
   const indice = new Set<string>()
@@ -170,13 +380,14 @@ async function varrerPolo(
       janela: { desde, ate: hoje },
       pedidos: pedidos.length,
       marketplace: alvo.length,
+      comprovantes,
       erro: 'filtro_de_data_ignorado',
       detalhe: 'A listagem de contas a receber voltou emissão anterior à janela. Sem índice confiável não se lança nada, senão duplica.',
       criadas: [],
     }
   }
 
-  // ── 3. Lança o que ficou sem conta ──────────────────────────────────────────────────────
+  // ── 4. Lança o que ficou sem conta ──────────────────────────────────────────────────────
   const criadas: Criada[] = []
   const jaTem: string[] = []
   for (const p of alvo) {
@@ -192,8 +403,8 @@ async function varrerPolo(
 
     // Vencimento real = a data em que o marketplace libera o dinheiro, que vem na parcela do
     // pedido (o ML solta ~30 dias depois). Só o DETALHE traz as parcelas.
-    const det = await blingGet(`${API}/pedidos/vendas/${str(p.id)}`, bh)
-    const parcelas = ((det?.data as Record<string, unknown> | undefined)?.parcelas ?? []) as Array<Record<string, unknown>>
+    const det = await detalheDoPedido(str(p.id))
+    const parcelas = ((det?.parcelas ?? []) as Array<Record<string, unknown>>)
     const parcela = parcelas[0] ?? null
     const vencimento = str(parcela?.dataVencimento) || dataPedido
     const formaPagamentoId = str((parcela?.formaPagamento as Record<string, unknown> | undefined)?.id)
@@ -237,7 +448,7 @@ async function varrerPolo(
     })
   }
 
-  return { tenantId, janela: { desde, ate: hoje }, pedidos: pedidos.length, marketplace: alvo.length, jaTem, criadas }
+  return { tenantId, janela: { desde, ate: hoje }, pedidos: pedidos.length, marketplace: alvo.length, comprovantes, jaTem, criadas }
 }
 
 Deno.serve(async (req) => {
@@ -270,6 +481,9 @@ Deno.serve(async (req) => {
   const dias = Math.min(Math.max(Number(p.dias ?? 7), 1), 60)
   const dry = p.dry === true
   const limite = Math.min(Math.max(Number(p.limite ?? 50), 1), 200)
+  // Janela do comprovante: curta de propósito (ver `avisarVendas`), e nunca maior que a da
+  // varredura, porque só é possível avisar pedido que a listagem trouxe.
+  const diasComprovante = Math.min(Math.max(Number(p.diasComprovante ?? 3), 1), dias)
 
   // Sem polo no corpo, varre todo mundo que tem Bling ligado.
   let tenants = [str(p.tenantId)].filter(Boolean)
@@ -281,7 +495,7 @@ Deno.serve(async (req) => {
   }
 
   const resultados: Array<Record<string, unknown>> = []
-  for (const t of tenants) resultados.push(await varrerPolo(admin, t, dias, dry, limite))
+  for (const t of tenants) resultados.push(await varrerPolo(admin, t, dias, dry, limite, diasComprovante))
 
-  return json({ ok: true, dry, dias, resultados })
+  return json({ ok: true, dry, dias, diasComprovante, resultados })
 })
