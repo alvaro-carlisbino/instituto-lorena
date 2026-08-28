@@ -121,6 +121,7 @@ import type {
 } from '../mocks/crmMock'
 import { isWorkloadExcludedStageId, pickNpsTemplateForPipeline, shouldDispatchNpsForStage } from '../lib/followUpNps'
 import { mergeKanbanFieldOrder, isLeadWhatsappComposeBlocked, calculateLeadScore } from '../lib/leadFields'
+import { slotBetween } from '../lib/leadOrdering'
 import { getDataProviderMode } from '../services/dataMode'
 import { fetchLeadPaymentSummaries, type LeadPaymentSummary } from '../services/crmLeadPayments'
 import { notifySendError, sendWhatsappMessage, type SendWhatsappPayload } from '../services/crmWhatsapp'
@@ -318,12 +319,6 @@ export const useCrmState = () => {
     }
   }
 
-  const normalizeStagePositions = (items: Lead[]) => {
-    return items
-      .sort((a, b) => a.position - b.position)
-      .map((lead, index) => ({ ...lead, position: index + 1 }))
-  }
-
   const reorderLeadCard = (
     leadId: string,
     target: { stageId: string; index: number },
@@ -332,39 +327,45 @@ export const useCrmState = () => {
     if (!leadToMove) return
 
     const sameStage = leadToMove.stageId === target.stageId
-    const originStageLeads = leads.filter((lead) => lead.stageId === leadToMove.stageId && lead.id !== leadId)
-    const targetStageLeads = sameStage
-      ? originStageLeads
-      : leads.filter((lead) => lead.stageId === target.stageId)
+    const targetStageLeads = leads
+      .filter((lead) => lead.stageId === target.stageId && lead.id !== leadId)
+      .sort((a, b) => a.position - b.position)
 
     const boundedIndex = Math.max(0, Math.min(target.index, targetStageLeads.length))
 
-    const movedLead: Lead = {
-      ...leadToMove,
-      stageId: target.stageId,
-      position: boundedIndex + 1,
+    // A posição sai dos vizinhos, não de renumerar a coluna. Antes cada movimentação regravava
+    // TODO lead das duas etapas: uma coluna de 939 cards virava 939 PATCHes, e em 27/ago isso
+    // levou o banco a statement timeout. Buraco na numeração é inofensivo — todo consumidor só
+    // ordena por `position`, ninguém exige que ela seja contígua.
+    const slot = slotBetween(targetStageLeads[boundedIndex - 1], targetStageLeads[boundedIndex])
+
+    let movedLead: Lead
+    let renumbered: Lead[] = []
+
+    if (slot !== null) {
+      movedLead = { ...leadToMove, stageId: target.stageId, position: slot }
+    } else {
+      // Vizinhos colados (posições repetidas ou consecutivas): renumera só a etapa de destino,
+      // com folga, pra que as próximas movimentações voltem a caber sem reescrever ninguém.
+      const positionBefore = new Map(targetStageLeads.map((lead) => [lead.id, lead.position]))
+      const withMoved = [...targetStageLeads]
+      withMoved.splice(boundedIndex, 0, { ...leadToMove, stageId: target.stageId })
+      const spaced = withMoved.map((lead, index) => ({ ...lead, position: (index + 1) * 100 }))
+      movedLead = spaced[boundedIndex]
+      renumbered = spaced.filter(
+        (lead) => lead.id !== leadId && positionBefore.get(lead.id) !== lead.position,
+      )
     }
 
-    const nextTargetStage = [...targetStageLeads]
-    nextTargetStage.splice(boundedIndex, 0, movedLead)
-
-    const normalizedTarget = normalizeStagePositions(nextTargetStage)
-    const normalizedOrigin = sameStage ? [] : normalizeStagePositions(originStageLeads)
-
-    setLeads((previous) => {
-      const untouched = previous.filter(
-        (lead) => lead.stageId !== leadToMove.stageId && lead.stageId !== target.stageId && lead.id !== leadId,
-      )
-      return [...untouched, ...normalizedOrigin, ...normalizedTarget]
-    })
+    const touched = new Map(renumbered.map((lead) => [lead.id, lead]))
+    setLeads((previous) =>
+      previous.map((lead) => (lead.id === leadId ? movedLead : touched.get(lead.id) ?? lead)),
+    )
 
     if (dataMode === 'supabase' && isSupabaseConfigured) {
-      normalizedTarget.forEach((lead) => {
+      for (const lead of [movedLead, ...renumbered]) {
         void saveLeadOrdering(lead.id, { stageId: lead.stageId, position: lead.position })
-      })
-      normalizedOrigin.forEach((lead) => {
-        void saveLeadOrdering(lead.id, { stageId: lead.stageId, position: lead.position })
-      })
+      }
     }
 
     const leadPipeline =
