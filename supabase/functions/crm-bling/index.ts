@@ -985,9 +985,14 @@ Deno.serve(async (req)=>{
   }
   // product_update_price: grava preço novo de UM produto no Bling (GET completo + PUT, o
   // Bling não tem PATCH) e derruba o cache do catálogo pra loja/bot verem o preço na hora.
+  //
+  // Aceita `custo` junto porque preço de revenda quase nunca chega sozinho: quem passa o preço
+  // passa o custo da mesma linha da planilha do fornecedor. Guardar só a revenda deixa a margem
+  // do relatório saindo de um custo velho, ou de nenhum.
   if (action === 'product_update_price') {
     const productId = String(payload.productId ?? '').trim();
     const precoReais = Number(payload.preco ?? NaN);
+    const custoReais = Number(payload.custo ?? NaN);
     if (!productId || !Number.isFinite(precoReais) || precoReais < 0) {
       return json({
         ok: false,
@@ -1015,7 +1020,25 @@ Deno.serve(async (req)=>{
       }, 502);
       const full = JSON.parse(await gr.text() || '{}')?.data ?? {};
       const precoAntigo = Number(full.preco ?? 0);
+      // O custo NÃO fica na raiz do produto: no Bling v3 ele mora em `fornecedor.precoCusto`.
+      // Um PUT com `precoCusto` no topo responde 200 e o campo simplesmente não gruda (testado
+      // em 28/08/2026 no produto 1121: preço mudou, custo continuou vazio). A listagem
+      // /produtos devolve `precoCusto` no topo, o que engana; o GET individual não devolve.
+      const custoAntigo = Number(full.fornecedor?.precoCusto ?? 0);
       full.preco = precoReais;
+      // O custo depende de FORNECEDOR ligado: sem `fornecedor.id`, o Bling aceita o PUT com 200
+      // e descarta o valor. Em vez de mentir que gravou, devolve o motivo.
+      const querCusto = Number.isFinite(custoReais) && custoReais >= 0;
+      const temFornecedor = Number(full.fornecedor?.id ?? 0) > 0;
+      let custoIgnorado = null;
+      if (querCusto && !temFornecedor) {
+        custoIgnorado = 'produto_sem_fornecedor';
+      } else if (querCusto) {
+        full.fornecedor = {
+          ...full.fornecedor ?? {},
+          precoCusto: custoReais
+        };
+      }
       const pr = await fetch(`https://api.bling.com.br/Api/v3/produtos/${productId}`, {
         method: 'PUT',
         headers: bh,
@@ -1036,7 +1059,10 @@ Deno.serve(async (req)=>{
       return json({
         ok: true,
         precoAntigo,
-        preco: precoReais
+        preco: precoReais,
+        custoAntigo,
+        custo: custoIgnorado ? custoAntigo : querCusto ? custoReais : custoAntigo,
+        custoIgnorado
       });
     } catch (e) {
       return json({
