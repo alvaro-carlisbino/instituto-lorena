@@ -1255,6 +1255,73 @@ async function criarLookalike(token: string, origem: string, razao: number, nome
   return { ok: true, publico: id, detalhe: await conf.json() }
 }
 
+/**
+ * trocar_publico — troca o público INCLUÍDO de um conjunto, e só ele.
+ *
+ * Existe por causa de 29/08/2026: três conjuntos ativos rodavam no
+ * `Semelhante (BR, 1%) - FORMULÁRIO PREENCHIDO TC CONSULTA`, e formulário deu
+ * 1 venda em 801 leads. O pedido à Meta era "ache mais gente que preenche
+ * formulário", e ela obedeceu.
+ *
+ * As exclusões NÃO são tocadas: elas já estavam certas (paciente, cirurgia e
+ * consulta agendada saem de todos os conjuntos) e mexer nelas à toa reinicia
+ * aprendizado por nada.
+ *
+ * Mesma pegadinha de 25/08 que vale para todo POST de targeting: o objeto volta
+ * INTEIRO, com `targeting_automation` junto. Dropar esse campo derruba o
+ * conjunto em HARD_ERROR "Invalid Optimization Goal".
+ */
+async function trocarPublico(
+  token: string,
+  // `nome` existe porque nome que mente já custou caro nesta conta: um anúncio
+  // renomeado para "form qualificado" seguiu entregando no formulário antigo
+  // por um dia inteiro. Conjunto chamado "LAL formulário" rodando no semelhante
+  // de compradores é a mesma armadilha esperando a próxima pessoa.
+  opts: { conjunto: string; publico: string; dry: boolean; nome?: string },
+) {
+  const { conjunto, publico, dry } = opts
+  if (!conjunto || !publico) return { ok: false, erro: 'informe conjunto e publico' }
+
+  const lido = await fetch(
+    `${GRAPH}/${conjunto}?fields=id,name,effective_status,targeting`
+      + `&access_token=${encodeURIComponent(token)}`,
+  )
+  const atual = await lido.json() as Record<string, unknown>
+  if (!lido.ok) return { ok: false, erro: atual }
+
+  const t = { ...(atual.targeting ?? {}) as Record<string, unknown> }
+  const antes = ((t.custom_audiences ?? []) as Array<Record<string, string>>)
+    .map((a) => `${a.name ?? a.id}`)
+  t.custom_audiences = [{ id: publico }]
+
+  if (dry) return { ok: true, dry: true, conjunto, nome: String(atual.name ?? ''), antes, depois: publico }
+
+  const mudanca: Record<string, unknown> = { targeting: t, access_token: token }
+  if (opts.nome) mudanca.name = opts.nome
+  const post = await fetch(`${GRAPH}/${conjunto}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mudanca),
+  })
+  const pb = await post.json() as Record<string, unknown>
+  if (!post.ok) return { ok: false, conjunto, erro: pb }
+
+  // 200 não prova nada: conjunto volta ACTIVE e quebrado se o público não
+  // servir para a meta de otimização. `issues_info` é quem conta.
+  const conf = await fetch(
+    `${GRAPH}/${conjunto}?fields=name,effective_status,issues_info,targeting{custom_audiences}`
+      + `&access_token=${encodeURIComponent(token)}`,
+  )
+  const cb = await conf.json() as Record<string, unknown>
+  const alvo = ((cb.targeting as Record<string, unknown> | undefined)?.custom_audiences ?? []) as Array<Record<string, string>>
+  return {
+    ok: true, conjunto, nome: String(cb.name ?? ''), antes,
+    agora: alvo.map((a) => `${a.name ?? a.id}`),
+    status: cb.effective_status ?? '?',
+    issues: cb.issues_info ?? null,
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -1287,6 +1354,15 @@ Deno.serve(async (req) => {
       }))
     }
     if (action === 'conjuntos') return json(await inspecionarConjuntos(token))
+    if (action === 'trocar_publico') {
+      const c = corpo as Record<string, unknown>
+      return json(await trocarPublico(token, {
+        conjunto: String(c.conjunto ?? ''),
+        publico: String(c.publico ?? ''),
+        nome: c.nome ? String(c.nome) : undefined,
+        dry: c.dry !== false,
+      }))
+    }
     if (action === 'criar_publico') {
       const c = corpo as Record<string, unknown>
       return json(await criarPublico(token, String(c.nome ?? ''), String(c.descricao ?? '')))
