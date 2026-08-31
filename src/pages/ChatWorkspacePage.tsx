@@ -17,6 +17,7 @@ import { WorkspaceLeadSidebar } from '@/components/leads/WorkspaceLeadSidebar'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { AppLayout } from '@/layouts/AppLayout'
+import { ehMensagemDeConversa, ehRecebidaDoPaciente } from '@/lib/mensagemDeConversa'
 import { getSourceStyle } from '@/lib/channelStyles'
 import { formatDurationFromMinutes } from '@/lib/formatDuration'
 import { cn } from '@/lib/utils'
@@ -98,7 +99,10 @@ export function ChatWorkspacePage({
     for (const i of crm.interactions) {
       const t = new Date(i.happenedAt).getTime()
       if (Number.isNaN(t)) continue
-      if (i.direction === 'in') {
+      // Nota de sistema não é o paciente esperando resposta: se contasse, mover card no
+      // quadro jogaria a conversa para o topo de "Longa espera".
+      if (!ehMensagemDeConversa(i)) continue
+      if (ehRecebidaDoPaciente(i)) {
         if (!lastIn.has(i.leadId) || t > (lastIn.get(i.leadId) ?? 0)) lastIn.set(i.leadId, t)
       } else if (i.direction === 'out') {
         if (!lastOut.has(i.leadId) || t > (lastOut.get(i.leadId) ?? 0)) lastOut.set(i.leadId, t)
@@ -178,8 +182,12 @@ export function ChatWorkspacePage({
     //
     // `interactions` já vem ordenada por happened_at DESC, então o PRIMEIRO registro de
     // cada lead é o mais recente: um passe só monta o mapa inteiro.
+    // Só mensagem de verdade define a recência. Em 31/08 a reorganização do Kanban
+    // gravou nota em 175 cards e todos pularam para o topo da lista, soterrando quem
+    // tinha acabado de escrever — ver `ehMensagemDeConversa`.
     const ultimaMsgPorLead = new Map<string, number>()
     for (const i of crm.interactions) {
+      if (!ehMensagemDeConversa(i)) continue
       if (!ultimaMsgPorLead.has(i.leadId)) {
         ultimaMsgPorLead.set(i.leadId, new Date(i.happenedAt).getTime())
       }

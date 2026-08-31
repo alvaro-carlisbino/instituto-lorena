@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+import { ehRecebidaDoPaciente } from '@/lib/mensagemDeConversa'
 import type { Interaction } from '@/mocks/crmMock'
 
 /**
@@ -65,11 +66,16 @@ export function useUnreadConversations(interactions: Interaction[]): UnreadConve
   const [seen, setSeen] = useState<SeenMap>(() => loadSeen())
   const [forced, setForced] = useState<ForcedMap>(() => loadForced())
 
-  /** Última mensagem RECEBIDA (direction 'in') por lead. */
+  /**
+   * Última mensagem RECEBIDA DO PACIENTE por lead.
+   *
+   * Nota de sistema não conta — ver `ehRecebidaDoPaciente`. Sem isso, mexer no quadro
+   * marca a conversa como não lida para todo mundo.
+   */
   const lastInboundByLead = useMemo(() => {
     const map = new Map<string, number>()
     for (const i of interactions) {
-      if (i.direction !== 'in') continue
+      if (!ehRecebidaDoPaciente(i)) continue
       const t = new Date(i.happenedAt).getTime()
       if (Number.isNaN(t)) continue
       if (t > (map.get(i.leadId) ?? 0)) map.set(i.leadId, t)
