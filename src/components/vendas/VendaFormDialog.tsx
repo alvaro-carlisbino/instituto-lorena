@@ -20,6 +20,7 @@ import {
   CONSULTATION_TYPES,
   DEPOSIT_PAYEE_LABEL,
   ORIGIN_OPTIONS,
+  ORIGIN_OTHER_PREFIX,
   PAYMENT_METHODS,
   PROCEDURE_OPTIONS,
   PROTOCOL_OPTIONS,
@@ -89,6 +90,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
   const [nomeLivre, setNomeLivre] = useState('')
   const [cidade, setCidade] = useState('')
   const [origem, setOrigem] = useState('')
+  const [origemOutro, setOrigemOutro] = useState('')
   const [dataVenda, setDataVenda] = useState(hojeIso())
   const [dataConsulta, setDataConsulta] = useState('')
   const [tipoConsulta, setTipoConsulta] = useState('')
@@ -123,7 +125,12 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       setPicked(editing.leadId ? { id: editing.leadId, name: editing.patientName, phone: editing.phone ?? '' } : null)
       setNomeLivre(editing.leadId ? '' : editing.patientName)
       setCidade(editing.city ?? '')
-      setOrigem(editing.origin ?? '')
+      // Venda antiga pode ter origem em texto livre ("Indicação", "Instagram"),
+      // de quando o campo era aberto. Ela entra como opção extra na lista para
+      // não sumir da tela nem virar edição forçada.
+      const orig = editing.origin ?? ''
+      setOrigem(orig.startsWith(ORIGIN_OTHER_PREFIX) ? 'Outro' : orig)
+      setOrigemOutro(orig.startsWith(ORIGIN_OTHER_PREFIX) ? orig.slice(ORIGIN_OTHER_PREFIX.length) : '')
       setDataVenda(editing.soldAt)
       setDataConsulta(editing.consultationAt ?? '')
       setTipoConsulta(editing.consultationType ?? '')
@@ -162,6 +169,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     setNomeLivre('')
     setCidade('')
     setOrigem('')
+    setOrigemOutro('')
     setDataVenda(hojeIso())
     setDataConsulta('')
     setTipoConsulta('')
@@ -217,7 +225,24 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     parseMoney(custoMaterial) + parseMoney(custoMedico) + parseMoney(imposto) + parseMoney(custoOutros)
   const lucroCents = valorCents - custoCents
 
+  // Venda antiga com origem escrita à mão continua aparecendo na lista, senão
+  // editar o valor de uma venda de meses atrás obrigaria a reclassificar a origem
+  // de memória.
+  const opcoesOrigem = useMemo(
+    () => (origem && !ORIGIN_OPTIONS.includes(origem) ? [origem, ...ORIGIN_OPTIONS] : ORIGIN_OPTIONS),
+    [origem],
+  )
+
   const salvar = async () => {
+    if (!origem) {
+      toast.error('Escolha como o paciente chegou até nós. Se não deu para perguntar, marque "Não perguntei".')
+      return
+    }
+    if (origem === 'Outro' && !origemOutro.trim()) {
+      toast.error('Descreva a origem no campo ao lado de "Outro".')
+      return
+    }
+    const origemFinal = origem === 'Outro' ? `${ORIGIN_OTHER_PREFIX}${origemOutro.trim()}` : origem
     const nome = picked?.name ?? nomeLivre
     const scheduledAt = !aDefinir && dataProc ? new Date(`${dataProc}T${horaProc || '07:00'}:00`).toISOString() : null
     const payload = {
@@ -226,7 +251,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       patientName: nome,
       phone: picked?.phone ?? null,
       city: cidade,
-      origin: origem,
+      origin: origemFinal,
       soldAt: dataVenda,
       consultationAt: dataConsulta || null,
       consultationType: tipoConsulta || null,
@@ -350,18 +375,34 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
               </datalist>
             </div>
             <div className="space-y-1.5">
-              <Label>Origem</Label>
-              <Input
-                list="origens-sugeridas"
-                value={origem}
-                onChange={(e) => setOrigem(e.target.value)}
-                placeholder="Indicação"
-              />
-              <datalist id="origens-sugeridas">
-                {ORIGIN_OPTIONS.map((o) => (
-                  <option key={o} value={o} />
-                ))}
-              </datalist>
+              <Label>
+                Como chegou até nós <span className="text-destructive">*</span>
+              </Label>
+              <Select value={origem} onValueChange={(v) => setOrigem(String(v ?? ''))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Escolher" />
+                </SelectTrigger>
+                {/* O rótulo é uma frase, não uma palavra: sem largura própria o
+                    menu herda a do gatilho e corta "Indicação de outro médico". */}
+                <SelectContent className="min-w-[17rem]">
+                  {opcoesOrigem.map((o) => (
+                    <SelectItem key={o} value={o}>
+                      {o}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {origem === 'Outro' && (
+                <Input
+                  value={origemOutro}
+                  onChange={(e) => setOrigemOutro(e.target.value)}
+                  placeholder="De onde veio?"
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                O anúncio não conta isso sozinho: só 2 das 428 vendas do ano têm anúncio identificado.
+                Quem fecha é quem sabe.
+              </p>
             </div>
           </div>
 

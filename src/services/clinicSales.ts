@@ -161,16 +161,31 @@ export const PAYMENT_METHODS = [
   'Misto',
 ]
 
-/** Origens que a Aline escreve na coluna de indicação. */
+/**
+ * Vocabulário fechado de origem da venda. É escolha, não texto livre: com o campo
+ * aberto, 415 das 428 vendas do último ano ficaram vazias e as 13 preenchidas
+ * vieram em três grafias diferentes, que não agrupam.
+ *
+ * A divisão é a que o Ads não consegue responder sozinho. Só 2 das 428 vendas têm
+ * anúncio identificado, então quem fecha a venda é a única fonte que sabe se o
+ * paciente veio de anúncio, de indicação ou já era da casa.
+ *
+ * "Não perguntei" existe de propósito: campo obrigatório sem saída honesta vira
+ * chute, e chute contamina o dado pior do que ausência declarada.
+ */
 export const ORIGIN_OPTIONS = [
-  'Indicação',
-  'Instagram',
-  'Google',
-  'Já é paciente',
-  'Tráfego pago',
-  'Site',
-  'Indicação médica',
+  'Indicação de paciente ou conhecido',
+  'Indicação de outro médico',
+  'Já era paciente da casa',
+  'Viu anúncio no Instagram ou Facebook',
+  'Achou o Instagram sem ser anúncio',
+  'Google, site ou busca',
+  'Outro',
+  'Não perguntei',
 ]
+
+/** Prefixo de `origin` quando a vendedora escolhe "Outro" e descreve à mão. */
+export const ORIGIN_OTHER_PREFIX = 'Outro: '
 
 function mapSale(r: Record<string, unknown>): ClinicSale {
   const num = (v: unknown) => (v == null ? null : Number(v))
