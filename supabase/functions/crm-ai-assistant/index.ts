@@ -1250,13 +1250,17 @@ Deno.serve(async (req) => {
       systemContent = `${promptOverride}\n\n---\n\n${systemContent}`
     }
 
+    // BREADCRUMB: o corte por tamanho era SILENCIOSO — o modelo simplesmente deixava de ver o
+    // fim do prompt e ninguém ficava sabendo. Foi assim que o frete sumiu por dias sem deixar
+    // rasto. Agora o tamanho aparece em TODA chamada, e o corte aparece como warn.
+    console.log(
+      `[ia] prompt ${systemContent.length}/${MAX_SYSTEM_CHARS} chars lead=${context.leadId ?? '?'} ` +
+        `tenant=${tenantId || '?'} frete=${freteParaPrompt ? 'sim' : 'nao'}`,
+    )
     if (systemContent.length > MAX_SYSTEM_CHARS) {
-      // BREADCRUMB: o corte é SILENCIOSO — o modelo simplesmente deixa de ver o fim do prompt
-      // e ninguém fica sabendo. Foi assim que o frete sumiu por dias. Se voltar a estourar,
-      // aparece nos logs com o tamanho e o que estava em jogo.
       console.warn(
-        `crm-ai-assistant: prompt truncado ${systemContent.length}/${MAX_SYSTEM_CHARS} chars ` +
-          `lead=${context.leadId ?? '?'} tenant=${tenantId || '?'} frete=${freteParaPrompt ? 'sim' : 'nao'}`,
+        `[ia] PROMPT TRUNCADO em ${systemContent.length - MAX_SYSTEM_CHARS} chars — o fim do ` +
+          `snapshot (leadFocus/cep_info) não chegou ao modelo. lead=${context.leadId ?? '?'}`,
       )
       systemContent = systemContent.slice(0, MAX_SYSTEM_CHARS) + '\n…[snapshot truncado por tamanho máximo]'
     }
