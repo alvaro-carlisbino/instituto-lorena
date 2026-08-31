@@ -120,13 +120,40 @@ export function LeadsPage() {
   const crm = useCrm()
   const { availableTenants } = useTenant()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [searchTerm, setSearchTerm] = useState('')
   const [pipelineFilter, setPipelineFilter] = useState<string>('all')
   const [stageFilter, setStageFilter] = useState<string>('all')
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [sourceFilter, setSourceFilter] = useState<string>('all')
-  const [portaFilter, setPortaFilter] = useState<string>('all')
+  // Porta vem da URL para que `/leads?porta=landing` seja um link que se manda no
+  // WhatsApp e já abre a lista pronta — sem isso, "me vê quem veio da landing" volta a
+  // ser três cliques a cada vez. Só aceita porta conhecida: `?porta=qualquercoisa`
+  // silenciosamente mostrando a lista inteira mente sobre o que está na tela.
+  const [portaFilter, setPortaFilter] = useState<string>(() => {
+    const p = searchParams.get('porta')
+    return p && p in PORTA_LABEL ? p : 'all'
+  })
+
+  /** Troca o filtro e espelha na URL, para o link continuar valendo depois de mexer
+   *  na barra. `replace` porque escolher filtro não é navegação: com push, o Voltar do
+   *  navegador desfaria um filtro de cada vez em vez de sair da tela. */
+  const aplicarPorta = useCallback(
+    (value: string) => {
+      setPortaFilter(value)
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          if (value === 'all') next.delete('porta')
+          else next.set('porta', value)
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
   const csvInputRef = useRef<HTMLInputElement>(null)
   const jsonInputRef = useRef<HTMLInputElement>(null)
   const [csvFileLabel, setCsvFileLabel] = useState<string | null>(null)
@@ -255,7 +282,7 @@ export function LeadsPage() {
         id: 'porta',
         label: 'Porta de entrada',
         value: portaFilter,
-        onChange: setPortaFilter,
+        onChange: aplicarPorta,
         options: [
           { value: 'all', label: 'Todas' },
           ...PORTA_ORDEM.map((id) => ({ value: id as string, label: PORTA_LABEL[id] })),
@@ -281,6 +308,7 @@ export function LeadsPage() {
     ownerFilter,
     sourceFilter,
     portaFilter,
+    aplicarPorta,
   ])
 
   const bulkOwnerLabel = useMemo(
