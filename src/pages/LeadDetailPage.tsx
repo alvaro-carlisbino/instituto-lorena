@@ -9,6 +9,7 @@ import { LeadChatThread } from '@/components/leads/LeadChatThread'
 import { LeadTaskPanel } from '@/components/leads/LeadTaskPanel'
 import { LeadCadastroCard } from '@/components/leads/LeadCadastroCard'
 import { LeadProtocolsSection } from '@/components/leads/LeadProtocolsSection'
+import { LeadTriagemCard } from '@/components/leads/LeadTriagemCard'
 import { LeadStockCostsSection } from '@/components/leads/LeadStockCostsSection'
 import { ShospLinkSection } from '@/components/leads/ShospLinkSection'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -470,6 +471,8 @@ export function LeadDetailPage() {
                 </div>
               </div>
             </section>
+
+            <LeadTriagemCard lead={lead} />
 
             {(() => {
               const attr = lead.customFields?.attribution

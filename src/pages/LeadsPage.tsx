@@ -52,6 +52,7 @@ import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { sourceLabel } from '@/hooks/useCrmState'
+import { PORTA_LABEL, PORTA_ORDEM, portaDoLead } from '@/lib/portaDeEntrada'
 import { useVirtualRows } from '@/hooks/useVirtualRows'
 import { AppLayout } from '@/layouts/AppLayout'
 import { columnLabel } from '@/lib/leadColumnLabels'
@@ -125,6 +126,7 @@ export function LeadsPage() {
   const [stageFilter, setStageFilter] = useState<string>('all')
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [sourceFilter, setSourceFilter] = useState<string>('all')
+  const [portaFilter, setPortaFilter] = useState<string>('all')
   const csvInputRef = useRef<HTMLInputElement>(null)
   const jsonInputRef = useRef<HTMLInputElement>(null)
   const [csvFileLabel, setCsvFileLabel] = useState<string | null>(null)
@@ -244,6 +246,21 @@ export function LeadsPage() {
         onChange: setSourceFilter,
         options: [{ value: 'all', label: 'Todas' }, ...sourceOptions],
       },
+      // Porta de entrada NÃO é a mesma coisa que Origem, e por isso são dois filtros.
+      // "Origem" é o `source` do lead, que diz o CANAL e é regravado pela conversa: o
+      // lead da landing /consulta nasce `manual` e vira `whatsapp` no primeiro "oi".
+      // A porta sai do carimbo em `custom_fields`, que sobrevive (o upsert faz merge),
+      // e é a mesma regra do relatório de `/resultados` — ver `portaDoLead`.
+      {
+        id: 'porta',
+        label: 'Porta de entrada',
+        value: portaFilter,
+        onChange: setPortaFilter,
+        options: [
+          { value: 'all', label: 'Todas' },
+          ...PORTA_ORDEM.map((id) => ({ value: id as string, label: PORTA_LABEL[id] })),
+        ],
+      },
     )
 
     return defs
@@ -263,6 +280,7 @@ export function LeadsPage() {
     stagesInFilterPipeline,
     ownerFilter,
     sourceFilter,
+    portaFilter,
   ])
 
   const bulkOwnerLabel = useMemo(
@@ -299,10 +317,11 @@ export function LeadsPage() {
         const matches = lead.source === sourceFilter || (wa(sourceFilter) && wa(lead.source))
         if (!matches) return false
       }
+      if (portaFilter !== 'all' && portaDoLead(lead) !== portaFilter) return false
       if (!n) return true
       return leadHaystack(lead).includes(n)
     })
-  }, [crm.leads, crm.tenantFilter, deferredSearch, pipelineFilter, stageFilter, ownerFilter, sourceFilter])
+  }, [crm.leads, crm.tenantFilter, deferredSearch, pipelineFilter, stageFilter, ownerFilter, sourceFilter, portaFilter])
 
   /**
    * Nome do funil e da etapa por id, de uma vez. Cada linha fazia
@@ -360,6 +379,7 @@ export function LeadsPage() {
       'Nome',
       'Telefone',
       'Origem',
+      'Porta de entrada',
       'Funil',
       'Etapa',
       'Responsável',
@@ -377,6 +397,7 @@ export function LeadsPage() {
         lead.patientName,
         getLeadPhoneDisplay(lead).label,
         sourceLabel[lead.source] ?? lead.source,
+        PORTA_LABEL[portaDoLead(lead)],
         pipe?.name ?? lead.pipelineId,
         stage?.name ?? lead.stageId,
         crm.getOwnerName(lead.ownerId),
@@ -712,6 +733,7 @@ export function LeadsPage() {
                 stageFilter === 'all' &&
                 ownerFilter === 'all' &&
                 sourceFilter === 'all' &&
+                portaFilter === 'all' &&
                 !searchTerm.trim()
                   ? 'Ainda não há leads na base. Importe um CSV abaixo, conecte canais que criem leads ou, se for administrador, use Laboratório para dados de demonstração.'
                   : 'Tente ajustar filtros ou o termo de busca.'
