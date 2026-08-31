@@ -1101,6 +1101,45 @@ Deno.serve(async (req) => {
       'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do cliente, trate como um único contexto — responda de forma completa sem pedir de novo o que já foi dito.',
     ].join('\n')
 
+    // Frete cotado nesta chamada (se o cliente mandou CEP). Sai numa secção própria, ACIMA
+    // do JSON gigante — ver o comentário no ponto onde é impresso.
+    const freteParaPrompt = (snapshot as Record<string, unknown>).frete
+      ? {
+          cep_info: (snapshot as Record<string, unknown>).cep_info ?? null,
+          frete: (snapshot as Record<string, unknown>).frete,
+        }
+      : null
+
+    // O snapshot que vai no prompt NÃO é o snapshot inteiro. Na conversa com o cliente
+    // (auto-reply) os blocos de ANALYTICS não servem para nada e custavam ~65 mil caracteres:
+    // 200 leads da amostra, os 30 leads recentes e as 40 últimas interações DE OUTRAS
+    // conversas. Com eles o prompt passava de 95k (MAX_SYSTEM_CHARS) e o corte comia o FIM do
+    // JSON — que é justamente onde ficam leadFocus (o cadastro de quem já comprou), cep_info,
+    // frete e a cópia do catálogo. Catálogo, business_rules e system_prompt já têm secção
+    // própria acima; repetir tudo dentro do JSON era pagar o dobro pelo mesmo texto.
+    const snapshotForPrompt = isInternal
+      ? (() => {
+          const rest = { ...(snapshot as Record<string, unknown>) }
+          for (
+            const k of [
+              'metrics',
+              'channels',
+              'pipelines',
+              'pipelineStages',
+              'leadsAggregateSampleSize',
+              'leadCountsByStageId',
+              'leadCountsByTemperature',
+              'recentLeads',
+              'recentInteractions',
+              'teamUsers',
+              'crm_ai_configs',
+              'bling_catalog',
+            ]
+          ) delete rest[k]
+          return rest
+        })()
+      : snapshot
+
     let systemContent = [
       isInternal
         ? (isSalesBot
@@ -1182,6 +1221,20 @@ Deno.serve(async (req) => {
             '# CATÁLOGO INDISPONÍVEL NESTA RESPOSTA',
             'A lista de produtos não carregou agora. NÃO afirme que um produto não existe e NÃO diga que não trabalhamos com ele: você não tem como saber. Diga que confirma a disponibilidade e o valor com a equipe, e siga a conversa.',
           ]),
+      // O FRETE sobe para cá pelo MESMO motivo do catálogo. `cep_info` e `frete` são as
+      // ÚLTIMAS chaves inseridas no snapshot, então eram as PRIMEIRAS a cair no corte por
+      // MAX_SYSTEM_CHARS — o servidor cotava o Melhor Envio certinho (3 kits, ~900ms) e o
+      // modelo nunca via os valores. Resultado no WhatsApp: a IA pedia o CEP e depois
+      // respondia "vou calcular o frete e passo para a Ingrid", exatamente o handoff que a
+      // regra manda fazer quando snapshot.frete não vem (31/08, reclamação da Ingrid).
+      ...(freteParaPrompt
+        ? [
+            '',
+            '# FRETE REAL PARA O CEP DO CLIENTE (é o snapshot.frete/cep_info — use ESTES valores)',
+            'Já cotado no servidor para o CEP que o cliente mandou. Apresente a linha do kit que ele escolheu e siga o fechamento — NUNCA passe a venda para um humano "para calcular o frete" quando este bloco existir.',
+            JSON.stringify(freteParaPrompt, null, 2),
+          ]
+        : []),
       '',
       '# REGRAS E VALORES DINÂMICOS (Configurado no CRM)',
       JSON.stringify(snapshot.crm_ai_configs?.business_rules || {}, null, 2),
@@ -1190,7 +1243,7 @@ Deno.serve(async (req) => {
       snapshot.crm_ai_configs?.system_prompt || '',
       '',
       '# CONTEXTO DO CRM (SNAPSHOT)',
-      JSON.stringify(snapshot, null, 2),
+      JSON.stringify(snapshotForPrompt, null, 2),
     ].join('\n')
 
     if (promptOverride) {
@@ -1198,6 +1251,13 @@ Deno.serve(async (req) => {
     }
 
     if (systemContent.length > MAX_SYSTEM_CHARS) {
+      // BREADCRUMB: o corte é SILENCIOSO — o modelo simplesmente deixa de ver o fim do prompt
+      // e ninguém fica sabendo. Foi assim que o frete sumiu por dias. Se voltar a estourar,
+      // aparece nos logs com o tamanho e o que estava em jogo.
+      console.warn(
+        `crm-ai-assistant: prompt truncado ${systemContent.length}/${MAX_SYSTEM_CHARS} chars ` +
+          `lead=${context.leadId ?? '?'} tenant=${tenantId || '?'} frete=${freteParaPrompt ? 'sim' : 'nao'}`,
+      )
       systemContent = systemContent.slice(0, MAX_SYSTEM_CHARS) + '\n…[snapshot truncado por tamanho máximo]'
     }
 
