@@ -32,6 +32,16 @@ function isFromAiAssistant(author: string): boolean {
 }
 
 /**
+ * Mensagem de GENTE, não de robô. Mesmo critério do servidor: e-mail da equipe ou "Operador".
+ * Filtrar só por "não é Assistente IA" deixaria passar `Sofia (IA)`, `NPS (Sofia)` e o
+ * follow-up automático, e a conversa pareceria atendida por humano sem nunca ter sido.
+ */
+function isFromHuman(author: string): boolean {
+  const a = author.trim()
+  return a.includes('@') || a === 'Operador'
+}
+
+/**
  * Indica se é provável que a IA automática esteja a gerar/enviar resposta ao paciente.
  * Evita que a equipa responda em duplicado nos segundos após uma entrada WhatsApp/Meta.
  */
@@ -51,7 +61,13 @@ export function isAiReplyLikelyPending(args: {
   // Turno da equipe: dentro dele a IA cala (é gente que atende), então o indicador não pode
   // aparecer — antes desta trava ele mentia ao contrário, sumindo à noite, que é justamente
   // quando a IA responde. Vale para 'ai' e 'auto', tal como o gate do servidor.
-  if (args.gate.offHoursOnly && isWithinTeamHours(now, args.gate.teamHours)) {
+  //
+  // A exceção do PRIMEIRO ATENDIMENTO (31/08/2026) precisa valer aqui também: enquanto
+  // ninguém da equipe tiver falado, a Sofia responde mesmo dentro do turno. Sem esta linha
+  // o indicador sumiria exatamente quando ela está digitando, e a atendente responderia por
+  // cima — que é o duplo atendimento que este indicador existe para evitar.
+  const humanoJaFalou = args.history.some((i) => i.direction === 'out' && isFromHuman(i.author))
+  if (args.gate.offHoursOnly && humanoJaFalou && isWithinTeamHours(now, args.gate.teamHours)) {
     return false
   }
 

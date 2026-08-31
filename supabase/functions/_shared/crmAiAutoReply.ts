@@ -7,7 +7,7 @@ import {
   type LineConversationMode,
 } from './conversationLineState.ts'
 import { matchesInternalContact } from './internalContacts.ts'
-import { describeTeamHours, isWithinTeamHours, parseTeamHours } from './teamHours.ts'
+import { describeTeamHours, deveCalarPeloTurno, parseTeamHours } from './teamHours.ts'
 import { alertOwnerAiOutOfBalance } from './saleReceipt.ts'
 import type { WhatsappProvider } from './whatsapp/types.ts'
 
@@ -820,7 +820,32 @@ export async function evaluateCrmAiAutoReplyGate(
   // ela assume sozinha. Ligado só na clínica; o bot de vendas do Tricopill segue 24h.
   const teamHoursSchedule = parseTeamHours(config?.ai_team_hours)
   const offHoursOnly = Boolean(config?.ai_offhours_only) && !options.ignoreTeamHours
-  const withinTeamHours = offHoursOnly && isWithinTeamHours(new Date(), teamHoursSchedule)
+
+  // PRIMEIRO ATENDIMENTO PASSA PELA TRAVA (31/ago/2026).
+  //
+  // A trava de horário resolveu o problema certo (a IA era 100% da saída fora do turno e a
+  // equipe relaxava dentro dele), mas cobrava um preço alto: 54% dos leads chegam DENTRO do
+  // turno, e chegavam crus na Aline, sem triagem e sem qualificação nenhuma.
+  //
+  // Agora a Sofia faz a PRIMEIRA passagem mesmo no horário da equipe: ela acolhe, identifica
+  // o procedimento, direciona o médico, pergunta cidade e prazo e entrega o lead pontuado.
+  // Assim que QUALQUER pessoa da equipe fala na conversa, ela cala e não volta mais dentro do
+  // turno — a sequência é da Aline, e é isso que o Álvaro pediu: "filtrado via IA e dando
+  // sequência a Aline".
+  //
+  // O critério é "nenhum humano falou ainda", não "é a primeira mensagem": a triagem leva
+  // várias trocas (menu → direcionamento → as duas perguntas), e cortar na primeira deixaria
+  // a Sofia mandando o menu e emudecendo antes de qualificar, que é o oposto do objetivo.
+  //
+  // O teste de 21/08 avisa do risco: com a IA ligada, 30% das conversas nunca falaram com um
+  // humano em 7 dias. É por isso que isto vem junto com o vigia cobrando lead QUENTE parado.
+  // Ver [[crm_ia_fora_horario_comercial]] e [[crm_experimento_ia_tarde_2026_08_21]].
+  const withinTeamHours = deveCalarPeloTurno({
+    offHoursOnly,
+    humanoJaFalou: Boolean(stateLastHumanReplyAt),
+    agora: new Date(),
+    schedule: teamHoursSchedule,
+  })
 
   const skipReasons: string[] = []
   if (leadOptedOut) skipReasons.push('lead_opted_out')
@@ -865,7 +890,7 @@ export async function evaluateCrmAiAutoReplyGate(
   }
   if (skipReasons.includes('horario_da_equipe')) {
     hintParts.push(
-      `Horário da equipe (${describeTeamHours(teamHoursSchedule)}): quem atende agora é gente. A IA volta a responder fora deste turno.`,
+      `Horário da equipe (${describeTeamHours(teamHoursSchedule)}): a equipe já falou nesta conversa, então a sequência é dela. A IA volta a responder fora deste turno.`,
     )
   }
   if (skipReasons.includes('min_seconds_between_ai_replies')) {

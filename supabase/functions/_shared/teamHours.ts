@@ -158,3 +158,29 @@ export function serializeTeamHours(schedule: TeamHoursSchedule): Record<string, 
   }
   return out
 }
+
+/**
+ * A IA deve calar AGORA por causa do turno da equipe?
+ *
+ * A trava de 24/08/2026 fazia a IA calar em todo o horário comercial, e isso deixava 54% dos
+ * leads (16,4 por dia) chegando na atendente sem triagem e sem qualificação nenhuma.
+ *
+ * Desde 31/08/2026 o PRIMEIRO ATENDIMENTO passa: enquanto ninguém da equipe tiver falado na
+ * conversa, a IA acolhe, direciona o médico e faz as duas perguntas de qualificação, mesmo
+ * dentro do turno. No instante em que um humano fala, ela cala e a sequência é da equipe.
+ *
+ * `humanoJaFalou` vem de `crm_conversation_states.last_human_reply_at`, que já está em mãos no
+ * gate — de propósito, para a regra não custar uma consulta por mensagem.
+ */
+export function deveCalarPeloTurno(params: {
+  offHoursOnly: boolean
+  humanoJaFalou: boolean
+  agora: Date
+  schedule: TeamHoursSchedule
+  timeZone?: string
+}): boolean {
+  if (!params.offHoursOnly) return false
+  // Primeiro atendimento fura a trava: é justamente o que queremos que a IA filtre.
+  if (!params.humanoJaFalou) return false
+  return isWithinTeamHours(params.agora, params.schedule, params.timeZone)
+}

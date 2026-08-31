@@ -40,6 +40,19 @@ function json(body: Record<string, unknown>, status = 200): Response {
 const MIN_RETOMAR_IA = 6 // a IA demora até ~2min; 6 já é anomalia
 const MIN_AVISAR_EQUIPE = 30
 const MIN_AVISAR_DONO = 90
+
+/**
+ * Lead que a Sofia qualificou e marcou QUENTE tem meia-vida mais curta: 15 minutos, não 30.
+ *
+ * Desde 31/08/2026 a IA faz o primeiro atendimento também no horário comercial e entrega o
+ * lead pontuado. Isso resolve a triagem e cria um risco novo, que o teste de 21/08 já tinha
+ * mostrado: com a IA respondendo rápido, 30% das conversas nunca falaram com um humano em
+ * 7 dias. A equipe relaxa porque "alguém já respondeu".
+ *
+ * Quente qualificado é exatamente quem não pode esperar: disse que quer operar nas próximas
+ * 4 semanas e está na praça. Ver [[crm_qualificacao_na_conversa]].
+ */
+const MIN_AVISAR_QUENTE = 15
 /**
  * Janela QUENTE: aqui a IA ainda pode retomar a conversa. Passadas 12h, responder um "oi"
  * de ontem como se fosse agora é pior do que não responder, então a IA cala e o caso vira
@@ -183,6 +196,40 @@ function passivoCobradoHoje(ultima: Map<string, number>, passivo: Abandonada[]):
   return n
 }
 
+/**
+ * Quais destes leads a Sofia qualificou E marcou quente. Uma consulta só, com os ids que já
+ * estão em mãos: o vigia roda de 5 em 5 minutos e não pode virar N consultas por volta.
+ *
+ * Devolve o resumo pronto ("QUENTE (90) · Maringá · quer nas próximas 4 semanas") para o
+ * aviso dizer POR QUE aquele lead é urgente. Alerta sem motivo vira ruído e a equipe
+ * aprende a ignorar.
+ */
+async function quentesQualificados(admin: SupabaseClient, leadIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (!leadIds.length) return out
+  const { data, error } = await admin
+    .from('leads')
+    .select('id, temperature, score, custom_fields')
+    .in('id', leadIds.slice(0, 200))
+    .eq('temperature', 'hot')
+  if (error) {
+    console.error(`[vigia] quentes: ${error.message}`)
+    return out
+  }
+  for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+    const cf = (row.custom_fields ?? {}) as Record<string, unknown>
+    const qc = cf.qualificacao_conversa as Record<string, unknown> | undefined
+    // Só cobra mais rápido quem foi qualificado NA CONVERSA. Lead quente por outro caminho
+    // (pagou, veio de formulário respondido) segue a régua normal de 30 minutos.
+    if (!qc) continue
+    const nivel = String(qc.nivel ?? 'QUENTE')
+    const score = Number(row.score ?? 0)
+    const cidade = String(qc.cidade ?? '')
+    out.set(String(row.id), `${nivel} ${score}${cidade ? ` · ${cidade}` : ''}`)
+  }
+  return out
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
 
@@ -206,9 +253,11 @@ Deno.serve(async (req) => {
 
   try {
     const pendentes = await pendenciasSemResposta(admin)
+    const quentes = await quentesQualificados(admin, pendentes.map((p) => p.lead_id))
     const resultado = {
       olhados: pendentes.length,
       ia_retomada: 0,
+      quente_avisado: 0,
       equipe_avisada: 0,
       dono_avisado: 0,
       detalhes: [] as Array<{ lead: string; nome: string; minutos: number; acao: string; motivo?: string }>,
@@ -334,6 +383,28 @@ Deno.serve(async (req) => {
         }).catch(() => {})
         resultado.dono_avisado++
         registrar('dono_avisado')
+        continue
+      }
+
+      // ── 2b. Quente qualificado pela Sofia: cobra antes dos 30 ────────────────
+      const q = quentes.get(p.lead_id)
+      if (q && p.minutos >= MIN_AVISAR_QUENTE) {
+        if (body.dry === true) {
+          registrar('avisaria_quente', q)
+          continue
+        }
+        await notifyAgents(admin, {
+          leadId: p.lead_id,
+          kind: 'urgent',
+          title: '🔥 Lead QUENTE esperando',
+          body: `${p.patient_name} foi qualificado (${q}) e está sem resposta há ${p.minutos} minutos.`,
+          includeOwner: true,
+          tenantId: p.tenant_id,
+          dedupeKey: `vigia-quente-${p.lead_id}`,
+          dedupeWindowMinutes: 60,
+        }).catch(() => {})
+        resultado.quente_avisado++
+        registrar('quente_avisado', q)
         continue
       }
 
