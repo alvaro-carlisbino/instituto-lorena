@@ -75,6 +75,36 @@ function temperatureForSource(source: LeadSource, override: string | undefined):
   return 'cold'
 }
 
+const CALOR: Record<LeadTemperature, number> = { cold: 0, warm: 1, hot: 2 }
+
+function ehTemperatura(v: unknown): v is LeadTemperature {
+  return v === 'cold' || v === 'warm' || v === 'hot'
+}
+
+/**
+ * Que temperatura gravar num lead que JÁ existe. `null` = não mexer.
+ *
+ * A temperatura derivada do canal é um palpite do padrão, não uma decisão. Sem esta
+ * guarda ela apagava a temperatura que alguém já tinha decidido: em 29/ago/2026 o lead
+ * da landing /consulta com score 75 de 77 possíveis nasceu QUENTE e virou morno vinte
+ * segundos depois, quando respondeu "Ok" e o webhook do WhatsApp reescreveu o lead sem
+ * override, caindo no padrão `warm` do canal. O `score` já tinha proteção equivalente
+ * no mesmo patch; a temperatura não tinha.
+ *
+ * Override explícito manda, inclusive para esfriar: quem manda override é a triagem ou
+ * uma pessoa, e as duas estão decidindo. Derivada do canal só ESQUENTA (lead frio que
+ * começa a falar no WhatsApp vira morno), nunca esfria.
+ */
+export function proximaTemperatura(
+  atual: unknown,
+  derivada: LeadTemperature,
+  override: string | undefined,
+): LeadTemperature | null {
+  if (ehTemperatura(override)) return override
+  if (!ehTemperatura(atual)) return derivada
+  return CALOR[derivada] > CALOR[atual] ? derivada : null
+}
+
 export async function findLeadByPhone(admin: SupabaseClient, phone: string): Promise<string | null> {
   // 1) Casa por variantes (±55, ±9º dígito) — pega o lead do pedido do site mesmo com
   //    formato diferente do WhatsApp. Prefere o mais antigo (o original) e ignora escondidos.
@@ -429,7 +459,7 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
     const { data: cur, error: curErr } = await admin
       .from('leads')
       .select(
-        'id, custom_fields, pipeline_id, stage_id, owner_id, score, whatsapp_instance_id, patient_name, attribution_channel',
+        'id, custom_fields, pipeline_id, stage_id, owner_id, score, temperature, whatsapp_instance_id, patient_name, attribution_channel',
       )
       .eq('id', existingId)
       .maybeSingle()
@@ -536,7 +566,9 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
     } else {
       patch.score = score
     }
-    patch.temperature = temperature
+    // Ver proximaTemperatura(): o padrão do canal não apaga o que a triagem decidiu.
+    const proxima = proximaTemperatura(current.temperature, temperature, input.temperature)
+    if (proxima) patch.temperature = proxima
     patch.deleted_at = null
 
     if (patch.owner_id != null && String(patch.owner_id).trim()) {
