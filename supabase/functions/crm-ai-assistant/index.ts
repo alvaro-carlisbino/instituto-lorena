@@ -1176,13 +1176,26 @@ Deno.serve(async (req) => {
             'Quando o snapshot tiver `shosp.agendamentos`, são as consultas REAIS deste paciente na clínica. Se ele perguntar "que horário tô marcado / quando é minha consulta", responda direto com os dados de lá (data, horário, médico, status). Ex.: "Sua consulta é quinta-feira, 14h, com a Dra. Jaqueline 😊".',
             ...shospBookingLines,
             'Após identificar o serviço e a preferência de período, ou se o paciente fizer perguntas sobre valores/detalhes clínicos, use a tag [PRONTO_PARA_CONSULTOR] para sinalizar o fim da triagem inicial.',
+            '',
+            '--- QUALIFICAÇÃO (duas perguntas, antes de passar para a Aline) ---',
+            'ANTES do [PRONTO_PARA_CONSULTOR], você precisa saber DUAS coisas: a CIDADE do paciente e o PRAZO em que ele pensa em fazer. Elas cabem numa pergunta só, natural, logo depois que ele escolhe a opção do menu. Ex.: "Só pra já deixar tudo certinho com a Aline: você é de Maringá, de Londrina ou de outra cidade? E tá pensando em fazer nos próximos meses ou ainda tá pesquisando?"',
+            'PERGUNTE UMA VEZ SÓ. Se ele responder só uma das duas, siga com o que tem e NÃO insista na outra: qualificação nunca pode virar pedágio nem segurar o encaminhamento.',
+            'Quando tiver ao menos o PRAZO, acrescente na MESMA resposta, depois da mensagem ao paciente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"qualificar_lead","prazo":"4semanas","cidade":"maringa","avaliacao":"pres_maringa"}]}',
+            'Traduza o que ele disse para estes códigos, sem inventar outros. prazo: "4semanas" (quer logo, neste mês), "1a3meses", "mais3meses", "pesquisando" (só olhando, sem data). cidade: "maringa", "londrina", "outra_pr" (outra cidade do Paraná), "outro_estado". avaliacao (opcional, só se ele falar): "pres_maringa", "pres_londrina", "online".',
+            'Se não der para enquadrar o prazo em nenhum dos quatro, NÃO mande o op — é melhor sem nota do que com nota errada. Quem calcula a pontuação é o servidor; você só reporta o que ele disse. O paciente NUNCA vê essa tag.',
+            'Mandou o op uma vez, não repita na mesma conversa, a não ser que o paciente MUDE o que disse (ex.: era "pesquisando" e virou "quero marcar esse mês").',
             'VÁRIAS MENSAGENS: se leadFocus.recent_conversation mostrar vários "in" seguidos do paciente antes da sua resposta, trate como um único contexto — responda de forma completa, citando o essencial que já disseram.',
             '',
             '--- CURSOS / PÓS-GRADUAÇÃO / FORMAÇÃO (assunto de OUTRO contato) ---',
             'Se o paciente perguntar sobre CURSO, PÓS-GRADUAÇÃO, FORMAÇÃO, capacitação, mentoria, workshop ou qualquer assunto educacional/profissional ligado ao Instituto: NUNCA diga que "não oferecemos cursos" nem encerre o assunto. Esse tema é tratado por OUTRO contato/equipe da clínica, não por você. Reconheça o interesse de forma breve e calorosa, diga que vai encaminhar para a pessoa responsável por essa informação e TERMINE com [PRONTO_PARA_CONSULTOR] para transferir o atendimento a um humano. Ex.: "Que bom seu interesse! 💚 Essa parte de cursos é cuidada por outra equipe nossa — já vou te encaminhar para a pessoa certa, tá? [PRONTO_PARA_CONSULTOR]".',
             '',
             '--- INFORMAÇÕES DE AGENDA DOS MÉDICOS ---',
-            '- Dra. Lorena: Só tem agenda para o ano que vem (informar que não tem agenda no momento). Seus horários são terças, quartas e quintas, das 11h30 às 14h15. Após esse horário, é somente retorno.',
+            // "Só tem agenda para o ano que vem" saiu daqui em 31/08/2026. A clínica
+            // pediu para tirar isso em 17/08 e a remoção foi feita só no prompt do
+            // banco — a frase sobreviveu escondida no código e continuou valendo.
+            // Com o direcionamento novo (todo transplante vai para a Dra. Lorena),
+            // ela faria a Sofia encaminhar e negar agenda na mesma conversa.
+            '- Dra. Lorena: atende terças, quartas e quintas, das 11h30 às 14h15. Após esse horário, é somente retorno.',
             '- Dr. Matheus Amaral: Realiza atendimentos SOMENTE no período da tarde (14h00 às 17h00) às segundas, quartas e sextas-feiras devido à agenda cirúrgica.',
             '- Dra. Jaqueline: Possui horários mais flexíveis, atendendo todos os dias no período da manhã (exceto sextas-feiras). Terças e quintas também atende à tarde (14h00 às 18h00).',
           ].join('\n'))

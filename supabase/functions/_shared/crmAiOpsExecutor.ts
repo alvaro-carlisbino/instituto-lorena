@@ -8,6 +8,7 @@ import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, RED
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForOrder, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
+import { qualificar, resumoQualificacao } from './qualificacaoLead.ts'
 
 /**
  * Recado ao cliente quando ALGUM item do carrinho não entrou — vale pro Pix e pro cartão.
@@ -575,7 +576,10 @@ export async function executeCrmAiOpsFromModel(
 
   const { data: leadRow } = await admin
     .from('leads')
-    .select('id, pipeline_id, stage_id, patient_name, tenant_id, whatsapp_instance_id')
+    // custom_fields entra aqui porque `qualificar_lead` grava DENTRO dele: sem ler
+    // o que já existe, o update trocaria o objeto inteiro e levaria junto o
+    // `lead_form` de quem veio de formulário.
+    .select('id, pipeline_id, stage_id, patient_name, tenant_id, whatsapp_instance_id, custom_fields')
     .eq('id', opts.allowedLeadId)
     .maybeSingle()
   if (!leadRow) {
@@ -675,6 +679,58 @@ export async function executeCrmAiOpsFromModel(
         }
         results.push({ type, ok: true, detail: value })
         summaries.push(`Temperatura: ${value}`)
+        continue
+      }
+
+      // A Sofia pergunta cidade e prazo na conversa e manda as RESPOSTAS aqui;
+      // quem calcula nota e temperatura é o servidor, com a mesma régua do
+      // formulário qualificado. Se a IA escolhesse o score, o número da conversa
+      // não seria comparável com o do formulário — e comparar canal com canal é
+      // exatamente o que faltava.
+      if (type === 'qualificar_lead') {
+        const q = qualificar({
+          prazo: String(op.prazo ?? '').trim().toLowerCase(),
+          cidade: String(op.cidade ?? '').trim().toLowerCase(),
+          avaliacao: String(op.avaliacao ?? '').trim().toLowerCase(),
+        })
+        if (!q) {
+          // Prazo fora da lista é resposta que a IA não conseguiu classificar.
+          // Não inventamos nota: o lead segue como está e a equipe não recebe
+          // um número que ninguém sabe de onde veio.
+          results.push({ type, ok: false, detail: 'prazo_invalido' })
+          continue
+        }
+        const resumo = resumoQualificacao(q)
+        const { error } = await admin
+          .from('leads')
+          .update({
+            score: q.score,
+            temperature: q.temperatura,
+            custom_fields: {
+              ...((leadRow as { custom_fields?: Record<string, unknown> }).custom_fields ?? {}),
+              qualificacao_conversa: { ...q, em: new Date().toISOString() },
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', opts.allowedLeadId)
+        if (error) {
+          results.push({ type, ok: false, detail: error.message.slice(0, 200) })
+          continue
+        }
+        // A nota existe para a Aline ver no card sem abrir a conversa inteira:
+        // qualificação que só vive no histórico não poupa o tempo de ninguém.
+        if (opts.logToInteractions) {
+          await insertInteraction(admin, {
+            leadId: opts.allowedLeadId,
+            patientName,
+            channel: 'system',
+            direction: 'in',
+            author: 'Sofia (IA)',
+            content: `Qualificação na conversa — ${resumo}`,
+          })
+        }
+        results.push({ type, ok: true, detail: resumo })
+        summaries.push(`Qualificação: ${resumo}`)
         continue
       }
 
