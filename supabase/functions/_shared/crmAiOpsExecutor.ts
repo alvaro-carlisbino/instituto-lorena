@@ -4,7 +4,7 @@ import { insertInteraction } from './crm.ts'
 import { notifyAgents } from './notifyAgents.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
-import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, collectAddons, collectCatalogItems, type CatalogRejeitado } from './rede.ts'
+import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, collectAddons, collectCatalogItems, CATALOG_DEFAULT_BOX, type CatalogRejeitado, type CatalogSaleItem } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForOrder, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
@@ -85,6 +85,14 @@ async function resolveFreightCents(
   admin: SupabaseClient,
   tenantId: string,
   op: Record<string, unknown>,
+  /**
+   * Itens de CATÁLOGO já resolvidos (preço e quantidade conferidos contra o Bling). Precisam
+   * chegar aqui porque `collectAddons` só enxerga os avulsos de marca própria (shampoo, gel):
+   * uma venda só de catálogo cotava com a caixa padrão e SEGURO ZERO, enquanto a etiqueta
+   * (autoShipToCart) é comprada declarando o valor cheio do pedido. Mesmo buraco de 18 e 20/ago,
+   * agora no caminho da revenda — quem cota tem que mandar o mesmo insuranceCents de quem compra.
+   */
+  catalogItems: CatalogSaleItem[] = [],
 ): Promise<number | undefined> {
   const literalRaw = op.freight_cents ?? op.freightCents
   const literal =
@@ -116,15 +124,21 @@ async function resolveFreightCents(
     try {
       // A caixa ESCALA com o kit E com os avulsos (peso real): sem isto o frete de 4 frascos saía
       // como o de 1, e o avulso vendido sozinho ia na caixa padrão de 1 frasco.
-      const extras = collectAddons(op).map((a) => ({ qty: a.qty, box: a.addon.box }))
+      const extras = [
+        ...collectAddons(op).map((a) => ({ qty: a.qty, box: a.addon.box })),
+        // Revenda: o catálogo do Bling não guarda peso/medida, então vale a mesma caixa padrão
+        // que a loja do site usa pra despachar esses itens (CATALOG_DEFAULT_BOX).
+        ...catalogItems.map((c) => ({ qty: c.qty, box: CATALOG_DEFAULT_BOX })),
+      ]
       const box = boxForOrder(op.kit, extras)
       // SEGURO/valor declarado: a etiqueta real (autoShipToCart) é comprada declarando o valor do
       // produto, e os Correios cobram isso como %. A cotação que COBRA o cliente tem que incluir o
       // MESMO seguro — senão a etiqueta sai sempre mais cara que o cobrado. Soma kit + avulsos;
       // sem nenhum dos dois, cai no amount_cents e depois no seguro padrão.
       const addonsValueCents = collectAddons(op).reduce((sum, a) => sum + a.qty * a.addon.amountCents, 0)
+      const catalogValueCents = catalogItems.reduce((sum, c) => sum + c.qty * c.amountCents, 0)
       const kitDeclaredCents = declaredValueCentsForKit(op.kit)
-      const declaradoCents = (kitDeclaredCents ?? 0) + addonsValueCents
+      const declaradoCents = (kitDeclaredCents ?? 0) + addonsValueCents + catalogValueCents
       const insuranceCents =
         (declaradoCents > 0 ? declaradoCents : undefined) ??
         (op.amount_cents != null && Number.isFinite(Number(op.amount_cents)) ? Math.max(0, Math.round(Number(op.amount_cents))) : undefined) ??
@@ -871,7 +885,10 @@ export async function executeCrmAiOpsFromModel(
         // Pix DIRETO (copia-e-cola + QR) via e.Rede (createRedePix). Aceita kit OU amount_cents,
         // frete e cupom. (`pagbank_pix`/`pix*` são aliases legados — o motor é 100% e.Rede.)
         // (Preço Pix do kit = tabela PAGBANK_KITS, que já é o valor com 5% off.)
-        const freightCents = await resolveFreightCents(admin, saleTenantId, op)
+        // Catálogo resolvido ANTES do frete de propósito: o peso e o valor declarado dos itens
+        // de revenda entram na cotação que COBRA o cliente (ver resolveFreightCents).
+        const pixCatalogo = await collectCatalogItems(admin, saleTenantId, op)
+        const freightCents = await resolveFreightCents(admin, saleTenantId, op, pixCatalogo.items)
         const snapPix = await persistEntrega(admin, opts.allowedLeadId, op)
         // MESMA trava NF-e do cartão: não gera Pix sem cadastro completo (nome+telefone+CPF+CEP+número).
         const readyPix = validateOrderReadiness(snapPix.cadastro, snapPix.entrega)
@@ -910,7 +927,7 @@ export async function executeCrmAiOpsFromModel(
         }
         // Catálogo sob demanda: o cliente pediu um produto da loja pelo nome. O PREÇO vem do
         // catalog_cache (mesma fonte da loja), nunca do texto da IA. Ver collectCatalogItems.
-        const pixCatalogo = await collectCatalogItems(admin, saleTenantId, op)
+        // (Resolvido lá em cima, antes do frete.)
         for (const item of pixCatalogo.items) {
           pixAmount += item.qty * item.amountCents
           pixDesc = pixDesc ? `${pixDesc} + ${item.qty}× ${item.nome}` : `${item.qty}× ${item.nome}`
@@ -1080,7 +1097,8 @@ export async function executeCrmAiOpsFromModel(
         // Frete (entrega à parte) somado ao link, em centavos. Cotação real: se a IA mandar
         // freight_service ("PAC"/"SEDEX") + to_cep, o servidor recota (Melhor Envio); senão
         // usa o freight_cents literal.
-        const freightCents = await resolveFreightCents(admin, saleTenantId, op)
+        // Catálogo já resolvido acima: entra no peso e no valor declarado da cotação.
+        const freightCents = await resolveFreightCents(admin, saleTenantId, op, cardCatalogo.items)
         const snap = await persistEntrega(admin, opts.allowedLeadId, op)
         // TRAVA NF-e: não gera o link sem cadastro completo (nome+CPF+CEP+número). A nota é
         // emitida automática no fechamento, então o pedido precisa estar pronto p/ NF-e.

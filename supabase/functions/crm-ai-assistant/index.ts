@@ -33,7 +33,7 @@ import { resolveConversationTenantId } from '../_shared/crm.ts'
 import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
-import { readRedeConfig } from '../_shared/rede.ts'
+import { CATALOG_DEFAULT_BOX, readRedeConfig } from '../_shared/rede.ts'
 import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
 import { extractLatestCep, resolveCepBrasil } from '../_shared/cep.ts'
 
@@ -937,18 +937,41 @@ Deno.serve(async (req) => {
                   { key: '3_meses', label: 'Kit 3+1 (4 frascos)' },
                   { key: '5_meses', label: '5 frascos' },
                 ]
+                // Pedido SEM kit (só avulso: shampoo, gel, ou qualquer produto da loja). Sem
+                // estas linhas a IA não tinha número nenhum pra dar em venda de avulso e
+                // hedgeava ("o frete é calculado automaticamente") ou passava pro humano —
+                // casos Rúbia (gel), Alex (shampoo Fito) e Max (Grandha) em agosto.
+                //
+                // O que muda o preço aqui é SÓ o valor declarado: qualquer avulso de 1 ou 2
+                // unidades fica abaixo do piso de 0,7 kg (resolveWeightKg), então a caixa é
+                // sempre a mesma — medido ao vivo, shampoo (0,25 kg), gel (0,05 kg) e a caixa
+                // padrão de catálogo dão o MESMO frete. Por isso as faixas são por VALOR.
+                // O teto da faixa é o seguro cotado, então o mostrado nunca fica ABAIXO do que
+                // o servidor cobra (regra do dono: nunca cobrar menos que o custo).
+                const FAIXAS_AVULSO = [15000, 20000, 30000, 60000]
                 const cityInfo = { localidade: info.localidade, uf: info.uf }
-                const quotes = await Promise.all(
-                  KITS.map((k) =>
-                    quoteFreteMelhorEnvio(dbClient, tenantId, info.cep, {
-                      box: boxForKit(k.key) ?? undefined,
-                      // SEGURO igual ao da etiqueta real (valor declarado do kit): o que a IA
-                      // MOSTRA tem que bater com o que será COBRADO e COMPRADO no Melhor Envio.
-                      insuranceCents: declaredValueCentsForKit(k.key) ?? undefined,
-                      cityInfo,
-                    }).catch(() => null),
+                const [quotes, quotesAvulso] = await Promise.all([
+                  Promise.all(
+                    KITS.map((k) =>
+                      quoteFreteMelhorEnvio(dbClient, tenantId, info.cep, {
+                        box: boxForKit(k.key) ?? undefined,
+                        // SEGURO igual ao da etiqueta real (valor declarado do kit): o que a IA
+                        // MOSTRA tem que bater com o que será COBRADO e COMPRADO no Melhor Envio.
+                        insuranceCents: declaredValueCentsForKit(k.key) ?? undefined,
+                        cityInfo,
+                      }).catch(() => null),
+                    ),
                   ),
-                )
+                  Promise.all(
+                    FAIXAS_AVULSO.map((teto) =>
+                      quoteFreteMelhorEnvio(dbClient, tenantId, info.cep, {
+                        box: CATALOG_DEFAULT_BOX,
+                        insuranceCents: teto,
+                        cityInfo,
+                      }).catch(() => null),
+                    ),
+                  ),
+                ])
                 const porKit = KITS.map((k, i) => {
                   const fq = quotes[i]
                   if (!fq || !fq.ok) return null
@@ -972,14 +995,33 @@ Deno.serve(async (req) => {
                     }),
                   }
                 }).filter(Boolean)
-                if (porKit.length > 0) {
-                  const first = quotes.find((q) => q && q.ok)
+                const avulsos = FAIXAS_AVULSO.map((teto, i) => {
+                  const fq = quotesAvulso[i]
+                  if (!fq || !fq.ok) return null
+                  return {
+                    ate_valor_reais: teto / 100,
+                    opcoes: fq.options.map((o) => {
+                      const cents = applyFreightMarkup(o.priceCents, { internal: o.internal })
+                      return {
+                        servico: o.service,
+                        transportadora: o.company,
+                        valor_reais: cents / 100,
+                        valor_centavos: cents,
+                        prazo_dias_uteis: o.deliveryDays,
+                      }
+                    }),
+                  }
+                }).filter(Boolean)
+                if (porKit.length > 0 || avulsos.length > 0) {
+                  const first = [...quotes, ...quotesAvulso].find((q) => q && q.ok)
                   ;(snapshot as Record<string, unknown>).frete = {
                     origem_cep: first?.fromCep,
                     destino_cep: first?.toCep,
                     destino: `${info.localidade}/${info.uf}`,
                     observacao: 'Frete varia conforme o kit (peso). Use a linha do kit que o cliente escolher. As opções já vêm da MAIS BARATA p/ a mais cara, com a transportadora de cada uma — ofereça as alternativas mais econômicas (Jadlog/Loggi/etc.), não só Correios; destaque a mais barata e cite o prazo.',
                     por_kit: porKit,
+                    avulsos,
+                    observacao_avulsos: 'PEDIDO SEM KIT (só shampoo, gel ou produto da loja): use "avulsos" — escolha a linha cujo "ate_valor_reais" cobre a SOMA dos produtos do pedido (ex.: shampoo de R$130 usa a linha 150; Grandha de R$170 usa a linha 200) e passe esse valor ao cliente. Com kit no MESMO pedido, vale a linha do kit em por_kit, não esta. Estas linhas valem para até 2 unidades; acima disso siga a venda normalmente que o servidor recota sozinho ao gerar o link — NUNCA passe para um humano só por causa disso.',
                   }
                 }
               } catch {
@@ -1073,7 +1115,7 @@ Deno.serve(async (req) => {
       'NUNCA faça promessa de cura nem garanta resultado; fale em benefícios e uso contínuo conforme a posologia informada.',
       'MONJARO / EMAGRECEDORES (Monjaro, Mounjaro, Ozempic, Wegovy, tirzepatida, semaglutida, "canetas" de emagrecimento): NÃO seja defensiva nem responda "não posso indicar / contraindicar / fale com seu médico". A *Dra. Lorena RECOMENDA o Tricopill justamente para quem usa esses medicamentos* — eles costumam causar QUEDA CAPILAR, e o Tricopill é um ótimo complemento para nutrir e fortalecer os fios nessa fase. Responda de forma POSITIVA e acolhedora, reforçando que é um suplemento capilar indicado nesse caso e seguindo para a venda. O ÚNICO limite: não dê conselho médico sobre o emagrecedor em si (não ajuste dose, não mande parar/continuar o remédio) e não prometa resultado — fale em benefício e uso contínuo.',
       'VALORES, PAGAMENTO E FRETE: apresente os valores e as formas de pagamento/parcelas EXATAMENTE como no PROMPT ADICIONAL — nunca invente preço, parcela ou desconto. Ao passar QUALQUER preço, informe SEMPRE que o frete é cobrado à parte (não incluso no produto) e peça o CEP do cliente para COTAR o frete real.',
-      'FRETE REAL (snapshot.frete): quando existir snapshot.frete, são as opções de frete REAIS para o CEP do cliente — em geral Correios PAC/SEDEX (via Melhor Envio); mas quando a opção vier marcada como "Entrega interna" (praça local, ex.: Maringá), é ENTREGA LOCAL da nossa equipe (não Correios; é feita UMA VEZ POR DIA, no fim da tarde — diga isso se perguntarem o prazo/horário). O FRETE VARIA CONFORME O KIT (peso): snapshot.frete.por_kit traz uma lista, cada item com o "kit" (ex.: "1 frasco", "Kit 3+1 (4 frascos)", "5 frascos") e suas "opcoes". Apresente o frete da LINHA do kit que o cliente escolheu (ou, se ele ainda não escolheu, mostre o frete do kit que vocês estão conversando — NUNCA misture o frete de 1 frasco com um pedido de 4). Use valor_reais e prazo_dias_uteis EXATAMENTE como vierem — NUNCA invente outro valor — e pergunte qual serviço (PAC/SEDEX) o cliente prefere. Se o cliente NÃO mandou o CEP ainda, peça o CEP. Só passe para um atendente humano (com [PRONTO_PARA_CONSULTOR]) se, MESMO com o CEP, snapshot.frete não vier (cotação indisponível). Para RETIRADA na clínica (Maringá), não há frete.',
+      'FRETE REAL (snapshot.frete): quando existir snapshot.frete, são as opções de frete REAIS para o CEP do cliente — em geral Correios PAC/SEDEX (via Melhor Envio); mas quando a opção vier marcada como "Entrega interna" (praça local, ex.: Maringá), é ENTREGA LOCAL da nossa equipe (não Correios; é feita UMA VEZ POR DIA, no fim da tarde — diga isso se perguntarem o prazo/horário). O FRETE VARIA CONFORME O KIT (peso): snapshot.frete.por_kit traz uma lista, cada item com o "kit" (ex.: "1 frasco", "Kit 3+1 (4 frascos)", "5 frascos") e suas "opcoes". Apresente o frete da LINHA do kit que o cliente escolheu (ou, se ele ainda não escolheu, mostre o frete do kit que vocês estão conversando — NUNCA misture o frete de 1 frasco com um pedido de 4). Use valor_reais e prazo_dias_uteis EXATAMENTE como vierem — NUNCA invente outro valor — e pergunte qual serviço (PAC/SEDEX) o cliente prefere. PEDIDO SEM KIT (só shampoo, gel ou qualquer produto da loja): o frete NÃO está em por_kit, está em snapshot.frete.avulsos — escolha a linha cujo "ate_valor_reais" cobre a SOMA dos produtos e passe esse valor; NUNCA use a linha de um kit para um pedido que não tem kit, e NUNCA diga que "o frete é calculado automaticamente" sem dar o número. Se o cliente NÃO mandou o CEP ainda, peça o CEP. Só passe para um atendente humano (com [PRONTO_PARA_CONSULTOR]) se, MESMO com o CEP, snapshot.frete não vier (cotação indisponível). Para RETIRADA na clínica (Maringá), não há frete.',
       'ESCOLHA DE ENTREGA (OBRIGATÓRIA antes de fechar): depois do kit + cidade/CEP, pergunte como o cliente quer receber. AS OPÇÕES DEPENDEM DA CIDADE REAL do cliente (snapshot.cep_info.localidade — NUNCA adivinhe pelo número do CEP). Cliente da PRAÇA LOCAL (Maringá, Sarandi, Paiçandu ou Marialva - PR) → ofereça as 3 opções: (A) **Retirada na clínica** em Maringá — grátis; (B) **Entrega pela nossa equipe** — em **Maringá R$ 15**; nas vizinhas **Sarandi, Paiçandu e Marialva R$ 20** (taxas DIFERENTES — Maringá NÃO é o mesmo valor que a região); (C) **Envio pelos Correios**. Cliente de QUALQUER OUTRA CIDADE (ex.: Londrina, Curitiba, São Paulo) → a entrega é SEMPRE pelos **Correios** ("envio_externo"), frete conforme snapshot.frete (PAC/SEDEX): NÃO ofereça entrega da equipe (não existe motoboy fora da praça local) e só mencione retirada se o PRÓPRIO cliente disser que quer buscar em Maringá. Conforme a resposta, passe no op o campo "delivery_mode" com EXATAMENTE um destes: "retirada_clinica" | "entrega_local_maringa" | "envio_externo" — "entrega_local_maringa" é PROIBIDO para cidade fora da praça local (o servidor converte para envio externo e cobra o frete real). O servidor define o frete pelo delivery_mode (retirada=grátis; entrega local=R$15 em Maringá / R$20 na região, calculado pelo CEP; envio=cotação) — você só escolhe PAC/SEDEX (freight_service) quando for ENVIO externo. Para Maringá e região, NÃO assuma retirada: ofereça retirada OU entrega da equipe.',
       'FRETE GRÁTIS NO KIT 5 MESES: o **Kit 5 meses tem FRETE GRÁTIS** em qualquer forma de entrega (o servidor zera o frete sozinho para esse kit — no snapshot.frete.por_kit a linha "5 frascos" virá com valor 0 / "frete grátis", confie nela e NUNCA cobre frete desse kit). Use isso como incentivo de venda: quando o cliente estiver no 3+1 ou na dúvida entre kits, mencione que no Kit 5 meses o frete sai DE GRAÇA (muitas vezes compensa subir pro 5 meses só por isso). Para os outros kits, o frete é cobrado à parte normalmente.',
       'RETIRADA NA CLÍNICA (opção A, Maringá): quando o cliente optar por RETIRAR na clínica, informe o endereço em TERCEIRA PESSOA (impessoal, NÃO "eu te entrego") e passe "delivery_mode":"retirada_clinica" no op. Modelo: "Perfeito! O pedido ficará disponível para retirada na clínica, na *Av. Nóbrega, 814 - Zona 04, Maringá - PR, 87014-180*. Na retirada não há frete". NÃO diga "clínica da Dra. Lorena" / "Dra. Lorena" nesse contexto de retirada — use só "clínica" + endereço. ATENÇÃO: mesmo na retirada a nota fiscal é emitida, então o CADASTRO COMPLETO (nome, CPF, CEP e número do endereço) continua obrigatório.',
@@ -1094,7 +1136,7 @@ Deno.serve(async (req) => {
         : [
             'PIX → SEMPRE HUMANO (NÃO gere Pix): o pagamento por PIX está temporariamente INDISPONÍVEL no atendimento automático. Se o cliente quiser pagar no PIX, você NUNCA gera código/QR nem promete um Pix — diga com cordialidade que um atendente já vai te enviar o Pix certinho e termine a resposta com [PRONTO_PARA_CONSULTOR] na última linha. (Apenas o CARTÃO/Rede você gera sozinha; o Pix é só pelo atendente por enquanto.)',
           ]),
-      'EXCEÇÕES → HUMANO: passe pro humano com [PRONTO_PARA_CONSULTOR] APENAS se o cliente pedir um atendente humano, ou se a cotação de frete REALMENTE não vier mesmo com o CEP informado (snapshot.frete ausente). NUNCA transfira só para "calcular o frete" quando snapshot.frete já traz as opções — apresente os valores e gere o link/Pix você mesma. (O sistema remove o marcador; o cliente não vê.)',
+      'EXCEÇÕES → HUMANO: passe pro humano com [PRONTO_PARA_CONSULTOR] APENAS se o cliente pedir um atendente humano, ou se a cotação de frete REALMENTE não vier mesmo com o CEP informado (snapshot.frete ausente). NUNCA transfira só para "calcular o frete" quando snapshot.frete já traz as opções (por_kit para pedido com kit, avulsos para pedido sem kit) — apresente os valores e gere o link/Pix você mesma. PROIBIDO dizer que vai calcular o frete e passar para a equipe: ou o valor está no snapshot e você o informa, ou ele não está e aí sim é humano. (O sistema remove o marcador; o cliente não vê.)',
       'CONTATOS — NUNCA passe números: você JAMAIS escreve, repete, confirma ou inventa número de telefone, e-mail ou contato de NINGUÉM (nem do cliente, nem de atendente, nem um número alternativo que o cliente tenha dado). Se o cliente mandar um número, apenas registre internamente — NUNCA repita de volta na mensagem. O ÚNICO contato da Tricopill é este próprio WhatsApp; não cite outro número.',
       'NOME do cliente: chame pelo PRIMEIRO nome de forma natural e ESPORÁDICA — NÃO repita o nome em toda mensagem (soa robótico/falso). Use só o nome que o PRÓPRIO cliente disser nesta conversa ou o nome do lead; NUNCA invente um nome nem use o nome de outra conversa.',
       'TRANSFERÊNCIA p/ humano: quando precisar passar para um atendente, diga UMA única vez, curto e caloroso (ex.: "Vou te passar pra nossa atendente, que finaliza pra você"), e termine com [PRONTO_PARA_CONSULTOR]. NÃO fique repetindo "a atendente já vai chegar / já está ciente / já está a caminho" em várias mensagens seguidas.',
