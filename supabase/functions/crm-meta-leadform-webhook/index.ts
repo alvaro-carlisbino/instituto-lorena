@@ -5,7 +5,7 @@ import { createManychatWhatsappSubscriber, sendManychatFlow } from '../_shared/m
 import { enqueueOutreach, loadLeadformOutreachConfig, renderMensagem } from '../_shared/whatsapp/outreach.ts'
 import { normalizeBrPhone } from '../_shared/brPhone.ts'
 import type { LeadAttribution } from '../_shared/attribution.ts'
-import { qualificar } from './qualificacao.ts'
+import { SEM_QUALIFICACAO, qualificar } from './qualificacao.ts'
 
 // Frente B da atribuição Meta: LEAD ADS (formulário dentro do Facebook/Instagram).
 // A Meta chama este webhook a cada formulário enviado (objeto "page", campo "leadgen"),
@@ -428,8 +428,10 @@ async function processLeadData(
       phone,
       summary: `Formulário Meta (Lead Ads)${campaignName ? ` — campanha ${campaignName}` : ''}`,
       source: surface,
-      temperature: qual?.temperatura ?? 'hot',
-      score: qual?.score ?? 70,
+      // Quente é mérito de quem respondeu as perguntas, não brinde de quem
+      // preencheu nome e telefone. Ver SEM_QUALIFICACAO para os números.
+      temperature: qual?.temperatura ?? SEM_QUALIFICACAO.temperatura,
+      score: qual?.score ?? SEM_QUALIFICACAO.score,
       attribution,
       tenantId,
       // Lead de formulário entra na fila de contato ATIVO (etapa "📞 Ligar — Formulário",

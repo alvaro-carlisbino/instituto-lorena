@@ -18,6 +18,25 @@ export const PESO_PRAZO: Record<
   'pesquisando': { nivel: 'FRIO', score: 40, temperatura: 'warm' },
 }
 
+/**
+ * O que vale para o lead de formulário que NÃO respondeu as perguntas.
+ *
+ * Era `hot` com score 70, e a intenção fazia sentido: não punir quem nunca teve
+ * a chance de responder. Medido em 31/08/2026, a premissa não se sustentou. Em
+ * 30 dias, formulário agendou **2,6%** (5 de 193), contra 7,4% da conversa vinda
+ * de anúncio e 18,5% de quem chega sozinho no WhatsApp. E como 786 dos 865 leads
+ * de formulário nasciam quentes sem ninguém ter perguntado nada, o painel ficou
+ * ao contrário: lead `hot` agendava 1,8% e lead `warm` agendava 7,7%.
+ *
+ * `warm`, e não `cold`, porque formulário rende pouco e não rende zero: frio some
+ * da fila da equipe, e 5 agendamentos continuam sendo 5 agendamentos. Quente
+ * volta a ser mérito de quem respondeu, que é para isso que a qualificação existe.
+ */
+export const SEM_QUALIFICACAO: { temperatura: 'warm'; score: number } = {
+  temperatura: 'warm',
+  score: 50,
+}
+
 export type Qualificacao = {
   nivel: string
   score: number
