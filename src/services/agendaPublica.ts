@@ -233,7 +233,11 @@ export async function enviarPreAgendamento(envio: EnvioPreAgendamento): Promise<
  * que está tudo bem porque ninguém reclamou).
  */
 export function registrarEventoLanding(
-  tipo: 'landing_view' | 'landing_triagem' | 'landing_whatsapp' | 'landing_abandono',
+  // Só o que o navegador é dono: abriu, respondeu, clicou no WhatsApp. "Deixou contato"
+  // NÃO entra aqui — quem grava é a `crm-agendar-publico` depois de criar o lead, como
+  // `landing_lead`. Um passo do funil que o cliente reporta sozinho vira contagem sem
+  // lead do outro lado, e foi assim que `landing_contato` virou nome órfão.
+  tipo: 'landing_view' | 'landing_triagem' | 'landing_whatsapp',
   dados: { sessao: string; atribuicao: AtribuicaoLanding; passo?: string },
 ): void {
   if (!supabase) return

@@ -404,16 +404,19 @@ Deno.serve(async (req) => {
   // lista fechada de tipos — sem isso não dá para saber se a página perde gente no
   // passo 2 ou no horário, que é a única pergunta que importa depois de publicar.
   if (texto(payload.action) === 'evento') {
-    // `landing_horarios` continua na lista por causa do histórico gravado antes de a
-    // agenda sair da página; o funil de hoje é view → triagem → contato → whatsapp.
-    const tipos = new Set([
-      'landing_view',
-      'landing_triagem',
-      'landing_contato',
-      'landing_whatsapp',
-      'landing_horarios',
-      'landing_abandono',
-    ])
+    // O NAVEGADOR só reporta o que só ele sabe: abriu, respondeu a triagem, clicou no
+    // WhatsApp. A CONVERSÃO não está aqui de propósito, e essa é a regra que importa:
+    // quem grava "deixou contato" é o servidor, no fim deste mesmo arquivo, como
+    // `landing_lead` (ou `prebooking`, quando há horário). Assim o passo do funil e o
+    // lead nascem do mesmo fato, e não dá para ter um sem o outro.
+    //
+    // `landing_contato` era o nome antigo desse passo, gravado pelo navegador enquanto
+    // existia uma tela só de contato. Está FORA da lista: o histórico dele são 2 linhas
+    // de 27/ago, e mantê-lo aceito só convida alguém a voltar a escrever o mesmo fato
+    // com dois nomes. Contar o funil por `landing_contato` devolve 2 onde a verdade é 10
+    // — foi exatamente esse tropeço, em 01/set, que motivou esta limpeza.
+    // `landing_horarios` e `landing_abandono` saem pelo mesmo motivo: ninguém os emite.
+    const tipos = new Set(['landing_view', 'landing_triagem', 'landing_whatsapp'])
     const tipo = texto(payload.tipo, 40)
     if (!tipos.has(tipo)) return json({ ok: true, ignorado: true })
     const atr = (payload.atribuicao ?? {}) as Record<string, unknown>
@@ -724,6 +727,9 @@ Deno.serve(async (req) => {
     // sem tarefa a fila ainda aparece na tela de pré-agendamentos
   }
 
+  // Este é o passo de CONVERSÃO do funil da landing, e ele mora aqui, não no navegador:
+  // sai depois de o lead existir, então nunca conta uma tentativa como contato. Quem lê o
+  // funil lê `v_landing_consulta_funil`, que soma `landing_lead` + `prebooking` nesta linha.
   try {
     await admin.from('storefront_events').insert({
       tenant_id: TENANT,
