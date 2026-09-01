@@ -2181,18 +2181,24 @@ export const useCrmState = () => {
   useEffect(() => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured) return
 
-    void getCurrentSession().then(async (currentSession) => {
-      setSession(currentSession)
-      if (!currentSession) return
-      hadSessionRef.current = true
-      try {
-        await ensureAppProfile(currentSession)
-        await syncForcedAdminRole(currentSession, parseForceAdminEmails())
-        setProfileReloadTick((t) => t + 1)
-      } catch (error) {
-        setAuthNotice(`Perfil: ${mensagemDeErro(error)}`)
-      }
-    })
+    void getCurrentSession()
+      .then(async (currentSession) => {
+        setSession(currentSession)
+        if (!currentSession) return
+        hadSessionRef.current = true
+        try {
+          await ensureAppProfile(currentSession)
+          await syncForcedAdminRole(currentSession, parseForceAdminEmails())
+          setProfileReloadTick((t) => t + 1)
+        } catch (error) {
+          setAuthNotice(`Perfil: ${mensagemDeErro(error)}`)
+        }
+      })
+      // Sem este catch, uma sessão que não carrega vira promessa rejeitada no vazio: a tela
+      // não recebe `session`, cai no login e quem estava logado jura que o sistema deslogou.
+      .catch((error) => {
+        setAuthNotice(`Sessão: ${mensagemDeErro(error)}`)
+      })
 
     const subscription = onAuthStateChanged((updatedSession) => {
       setSession(updatedSession)
@@ -2224,7 +2230,9 @@ export const useCrmState = () => {
 
   useEffect(() => {
     if (!session) return
-    void getMyProfile()
+    // O id vai daqui de dentro: a sessão já está em mãos, e deixar o serviço perguntar
+    // "quem sou eu?" ao servidor custava uma disputa pelo lock do GoTrue a cada boot.
+    void getMyProfile(session.user.id)
       .then((profile) => {
         setProfileLoadFailed(false)
         if (profile) {

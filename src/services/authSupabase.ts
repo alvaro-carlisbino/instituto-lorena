@@ -1,4 +1,5 @@
 import type { Session } from '@supabase/supabase-js'
+import { comRetryDeLock } from '../lib/authLock'
 import { supabase } from '../lib/supabaseClient'
 
 export type AuthProfile = {
@@ -21,11 +22,27 @@ const assertSupabase = () => {
   return supabase
 }
 
+// Três efeitos do boot pedem a sessão ao mesmo tempo. Cada `getSession()` pega o lock do
+// GoTrue e, se o token expirou, segura ele durante um refresh de rede inteiro — é assim que a
+// fila passa dos 5s e alguém rouba o lock de quem estava dentro. Uma chamada em voo serve as
+// três: mesma resposta, um terço da disputa.
+let sessaoEmVoo: Promise<Session | null> | null = null
+
 export const getCurrentSession = async (): Promise<Session | null> => {
   const client = assertSupabase()
-  const { data, error } = await client.auth.getSession()
-  if (error) throw error
-  return data.session
+  if (sessaoEmVoo) return sessaoEmVoo
+
+  const chamada = comRetryDeLock(async () => {
+    const { data, error } = await client.auth.getSession()
+    if (error) throw error
+    return data.session
+  })
+  sessaoEmVoo = chamada
+  try {
+    return await chamada
+  } finally {
+    if (sessaoEmVoo === chamada) sessaoEmVoo = null
+  }
 }
 
 export const signInWithEmail = async (email: string, password: string): Promise<void> => {
@@ -94,12 +111,21 @@ export const ensureAppProfile = async (session: Session): Promise<void> => {
   if (error) throw error
 }
 
-export const getMyProfile = async (): Promise<AuthProfile | null> => {
+/**
+ * `authUserId` vem de quem já tem a sessão em mãos. Sem ele, o perfil pagava um
+ * `auth.getUser()` — ida à rede E disputa pelo lock do GoTrue — para descobrir um id que o
+ * chamador já tinha no bolso. Era essa chamada que travava e derrubava a tela inteira.
+ */
+export const getMyProfile = async (authUserId?: string): Promise<AuthProfile | null> => {
   const client = assertSupabase()
-  const { data: authData, error: authError } = await client.auth.getUser()
-  if (authError) throw authError
 
-  const userId = authData.user?.id
+  const userId =
+    authUserId ??
+    (await comRetryDeLock(async () => {
+      const { data, error } = await client.auth.getUser()
+      if (error) throw error
+      return data.user?.id ?? null
+    }))
   if (!userId) return null
 
   const { data, error } = await client
@@ -121,8 +147,11 @@ export const getMyProfile = async (): Promise<AuthProfile | null> => {
 
 export const updateMyProfile = async (payload: { displayName: string }): Promise<void> => {
   const client = assertSupabase()
-  const { data: authData, error: authError } = await client.auth.getUser()
-  if (authError) throw authError
+  const authData = await comRetryDeLock(async () => {
+    const { data, error } = await client.auth.getUser()
+    if (error) throw error
+    return data
+  })
 
   const userId = authData.user?.id
   const email = authData.user?.email
