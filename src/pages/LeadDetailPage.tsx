@@ -479,13 +479,24 @@ export function LeadDetailPage() {
               if (!attr || typeof attr !== 'object') return null
               const a = attr as Record<string, unknown>
               const str = (v: unknown) => (v == null ? '' : String(v))
+              // Nem toda origem é campanha: desde 01/set/2026 a frase de abertura
+              // também carimba porta orgânica (link do Direct, bio, site). Canal
+              // sem rótulo aqui aparece cru, o que é melhor que sumir.
               const channelLabels: Record<string, string> = {
                 ctwa_whatsapp: 'Anúncio → WhatsApp',
                 ctwa_instagram: 'Anúncio → Instagram',
+                ctwa: 'Anúncio → WhatsApp',
                 lead_ads: 'Formulário (Lead Ads)',
+                landing_meta_ads: 'Anúncio → landing /consulta',
+                landing: 'Landing /consulta',
+                instagram: 'Instagram (link do Direct)',
+                instagram_bio: 'Instagram (link da bio)',
+                site: 'Site oficial',
+                google: 'Google (perfil da empresa)',
               }
               const channel = str(a.channel)
               const channelLabel = channelLabels[channel] ?? channel
+              const rotulo = str(a.rotulo)
               const campaign = str(a.campaign)
               const headline = str(a.headline)
               const adId = str(a.ad_id)
@@ -496,13 +507,19 @@ export function LeadDetailPage() {
                   className="rounded-md border border-border bg-muted/20 p-3"
                 >
                   <h2 id="lead-attribution-heading" className="mb-2 text-sm font-semibold">
-                    Origem da campanha
+                    Origem
                   </h2>
                   <dl className="grid gap-1.5 text-sm sm:grid-cols-2">
                     {channelLabel ? (
                       <div className="flex flex-col">
                         <dt className="text-xs text-muted-foreground">Canal</dt>
                         <dd>{channelLabel}</dd>
+                      </div>
+                    ) : null}
+                    {rotulo ? (
+                      <div className="flex flex-col">
+                        <dt className="text-xs text-muted-foreground">Porta de entrada</dt>
+                        <dd>{rotulo}</dd>
                       </div>
                     ) : null}
                     {campaign ? (

@@ -59,6 +59,21 @@ import {
 const WHATSAPP_CLINICA = '5544991493656'
 const TELEFONE_VISIVEL = '(44) 99149-3656'
 
+/**
+ * A frase é a ETIQUETA desta porta, não é enfeite de copy.
+ *
+ * `ctwa_aberturas` guarda o trecho "vim pelo site e quero falar sobre a avaliacao
+ * capilar" com canal `landing`, e o carimbo (`crm_ctwa_carimbar`, cron de 15 em
+ * 15 min) usa a PRIMEIRA mensagem do lead para dizer de onde ele veio. Mudar o
+ * texto aqui sem mudar a linha lá devolve a landing para o balde de origem
+ * desconhecida, onde estavam 244 conversas até 01/set/2026.
+ *
+ * Por isso os quatro botões da página usam o mesmo link: os dois do topo e do
+ * rodapé abriam o WhatsApp em branco, e quem saía por eles chegava anônimo.
+ */
+const MENSAGEM_WHATSAPP = 'Olá! Vim pelo site e quero falar sobre a avaliação capilar.'
+const LINK_WHATSAPP = `https://wa.me/${WHATSAPP_CLINICA}?text=${encodeURIComponent(MENSAGEM_WHATSAPP)}`
+
 const numeroBr = (n: number) => n.toLocaleString('pt-BR')
 
 function Botao({
@@ -105,7 +120,7 @@ function Cabecalho() {
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3">
         <img src="/marca/lorena.svg" alt="Instituto Lorena Visentainer" className="h-9 w-auto" />
         <a
-          href={`https://wa.me/${WHATSAPP_CLINICA}`}
+          href={LINK_WHATSAPP}
           target="_blank"
           rel="noreferrer noopener"
           className="inline-flex items-center gap-2 rounded-full border border-[#252A33]/20 px-4 py-2 text-sm font-semibold text-[#252A33] hover:border-[#252A33]/60"
@@ -321,7 +336,7 @@ export function ConsultaLandingPage() {
             <div className="mt-5 hidden lg:block">
               <p className="text-sm text-[#252A33]/60">Sem cadastro e sem custo. Você só digita nome e WhatsApp no fim.</p>
               <a
-                href={`https://wa.me/${WHATSAPP_CLINICA}?text=${encodeURIComponent('Olá! Vim pelo site e quero falar sobre a avaliação capilar.')}`}
+                href={LINK_WHATSAPP}
                 target="_blank"
                 rel="noreferrer noopener"
                 className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#128C4A] hover:underline"
@@ -544,7 +559,7 @@ export function ConsultaLandingPage() {
           <div className="lg:hidden">
             <p className="text-sm text-[#252A33]/60">Sem cadastro e sem custo. Você só digita nome e WhatsApp no fim.</p>
             <a
-              href={`https://wa.me/${WHATSAPP_CLINICA}?text=${encodeURIComponent('Olá! Vim pelo site e quero falar sobre a avaliação capilar.')}`}
+              href={LINK_WHATSAPP}
               target="_blank"
               rel="noreferrer noopener"
               className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-[#128C4A] hover:underline"
@@ -619,7 +634,7 @@ export function ConsultaLandingPage() {
           <div className="text-sm text-[#252A33]/70">
             <p>
               WhatsApp e telefone:{' '}
-              <a className="font-semibold text-[#252A33]" href={`https://wa.me/${WHATSAPP_CLINICA}`}>
+              <a className="font-semibold text-[#252A33]" href={LINK_WHATSAPP}>
                 {TELEFONE_VISIVEL}
               </a>
             </p>
