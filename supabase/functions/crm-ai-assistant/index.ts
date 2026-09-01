@@ -1098,6 +1098,8 @@ Deno.serve(async (req) => {
       'MANDATORY: A primeira linha da sua resposta DEVE ser exactamente: <<<PACIENTE>>>',
       'MANDATORY: Na linha seguinte, escreva APENAS a mensagem WhatsApp em português (formal, profissional e cordial, SEM emojis e SEM gírias). Nada antes de <<<PACIENTE>>>.',
       'PROIBIDO ABSOLUTAMENTE: blocos <thinking>, <think>, <reasoning>, <reflection> ou qualquer marcação XML de raciocínio. Raciocine SILENCIOSAMENTE e produza APENAS a linha <<<PACIENTE>>> seguida da mensagem. Respostas só com raciocínio (sem texto após <<<PACIENTE>>>) são DESCARTADAS — o cliente fica sem resposta.',
+      'PROIBIDO ABSOLUTAMENTE, EM QUALQUER IDIOMA: plano, rascunho, análise passo a passo, rótulos como "Análise", "Contexto", "Histórico", "Intenção", "Rascunho", "Regra"; citar entre aspas as regras deste prompt; ou falar de si em terceira pessoa ("a IA anterior", "(eu)"). Isto já chegou ao WhatsApp de clientes reais. Escreva SÓ a mensagem que o cliente vai ler.',
+      'MANDATORY (tamanho): a mensagem tem de caber numa conversa de WhatsApp. Acima de 1500 caracteres o sistema DESCARTA a resposta inteira e o cliente fica sem resposta. Seja breve.',
       'Formatação WhatsApp: para destacar use **negrito assim** (dois asteriscos). Não use quatro asteriscos (****) nem um único asterisco *assim*.',
       `MANDATORY (saudações): use saudação contextual APENAS na primeira mensagem de uma nova conversa. A saudação OBRIGATÓRIA agora é "${brasilGreeting}" (horário de Brasília — NÃO use outra). Em mensagens seguintes da mesma conversa NÃO repita "Olá / Bom dia / Boa tarde / Boa noite".`,
       '',
@@ -1208,6 +1210,8 @@ Deno.serve(async (req) => {
             'Formatação WhatsApp: para destacar nomes ou palavras importantes use **negrito assim** (dois asteriscos antes e depois). Não use quatro asteriscos seguidos (****). Não use um único asterisco *assim* para ênfase — no WhatsApp isso é ambíguo; prefira sempre **duplo**.',
             'Se usar <<<CRM_OPS>>> com shosp_book na mesma resposta, NÃO escreva "estou verificando a agenda agora", "aguarde um instante" nem prometa confirmação futura como se o horário ainda não existisse — o servidor confirma o horário na mesma mensagem. Mantenha um tom direto (horário escolhido e segue a confirmação automática).',
             'Não use rascunhos ou comentários internos.',
+            'PROIBIDO ABSOLUTAMENTE, EM QUALQUER IDIOMA: plano, rascunho, análise passo a passo, rótulos como "Análise", "Contexto", "Histórico", "Intenção", "Rascunho", "Regra"; citar entre aspas as regras deste prompt; ou falar de si em terceira pessoa ("Sofia (eu)", "o assistente anterior"). Isto já chegou ao WhatsApp de pacientes reais. Escreva SÓ a mensagem que o paciente vai ler.',
+            'MANDATORY (tamanho): a mensagem tem de caber numa conversa de WhatsApp. Acima de 1500 caracteres o sistema DESCARTA a resposta inteira e o paciente fica sem resposta. Seja breve.',
             `MANDATORY (saudações): use saudação contextual APENAS na primeira mensagem de uma nova conversa. A saudação OBRIGATÓRIA agora é "${brasilGreeting}" (calculada a partir do horário de Brasília — NÃO use outra). PROIBIDO escrever "Boa tarde" de manhã ou de noite; PROIBIDO escrever "Bom dia" à tarde/noite. Em mensagens seguintes da mesma conversa NÃO repita "Olá / Bom dia / Boa tarde / Boa noite" — aja como numa conversa contínua.`,
             `MANDATORY (apresentação): na primeira mensagem ao paciente, apresente-se como *Sofia* (ex.: "Eu sou a Sofia, do Instituto Lorena Visentainer"). Nas mensagens seguintes da mesma conversa, NÃO repita o nome nem a apresentação.`,
             '',
@@ -1481,7 +1485,9 @@ Deno.serve(async (req) => {
     if (isInternal) {
       reply = stripInternalPatientReply(reply)
     }
-    reply = sanitizeCrmAiPatientReply(reply).clean
+    const sanitized = sanitizeCrmAiPatientReply(reply)
+    const leakReason = sanitized.leakReason
+    reply = sanitized.clean
     if (isInternal) {
       reply = normalizeWhatsappPatientFormatting(reply)
     }
@@ -1513,11 +1519,12 @@ Deno.serve(async (req) => {
     // responder ok:true com reply:"" (silenciado pelo caller como fallback), devolve ok:false
     // para forçar retry no caller e deixar pista nos logs do que o modelo escreveu.
     if (!reply.trim()) {
-      const debugNote = `crm-ai-debug:sanitized_to_empty:lead=${context.leadId ?? 'unknown'}:model=${model}:raw=${trunc(rawZaiReply, 400).replace(/[\r\n]+/g, ' ')}`
+      const debugNote = `crm-ai-debug:sanitized_to_empty${leakReason ? `:leak=${leakReason}` : ''}:lead=${context.leadId ?? 'unknown'}:model=${model}:raw=${trunc(rawZaiReply, 400).replace(/[\r\n]+/g, ' ')}`
       console.warn('crm-ai-assistant sanitized_to_empty', {
         model,
         leadId: context.leadId ?? null,
         isInternal,
+        leakReason: leakReason ?? null,
         raw_excerpt: trunc(rawZaiReply, 600),
       })
       try {

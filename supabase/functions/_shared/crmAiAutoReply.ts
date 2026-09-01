@@ -20,35 +20,94 @@ export function stripManychatHandoffMarker(reply: string): { clean: string; hand
   return { clean, handoffSuggested: has }
 }
 
+/** Por que uma resposta foi barrada. Vai para o log/`webhook_jobs` — silêncio esconde o problema. */
+export type AiReasoningLeakReason =
+  | 'marcador_pt'
+  | 'abre_com_analise'
+  | 'narra_cliente_em_terceira_pessoa'
+  | 'marcador_en'
+  | 'dump_ingles'
+  | 'tamanho_impossivel'
+
 /**
- * Detecta monólogo de raciocínio/debug da IA (inglês) que NUNCA pode ir ao paciente.
- * Caso Janaine 24/jul: "Correction on History Analysis" + análise de `recent_conversation`.
+ * Tamanho máximo de uma resposta ao paciente. Base: 13.632 respostas da IA em produção,
+ * p99 = 767 caracteres e a MAIOR legítima tem 1.382. Todas as 8 que passaram de 1.600 eram
+ * raciocínio vazado (4.163 a 6.920). Acima disto não é resposta, é rascunho: fail-closed.
  */
-export function looksLikeAiReasoningLeak(text: string): boolean {
+const MAX_PATIENT_REPLY_CHARS = 1800
+
+/**
+ * Frases que só existem quando o modelo está PENSANDO EM VOZ ALTA. Nenhuma delas cabe numa
+ * mensagem para o paciente: falam do prompt, das regras, de "a IA anterior", ou usam "(eu)"
+ * para o modelo se narrar em terceira pessoa. Caso NETO 01/09: "Sofia (eu) mandou a saudação",
+ * "(Isso viola a regra ...)", "*Regra do \"Tanto faz\":* A instrução diz".
+ */
+const COT_MARKER_PT =
+  /\((?:eu|eu\/[^)]{0,40}|humano|assistente|bot|IA)\)|assistente anterior|IA anterior|modelo anterior|resposta anterior \(gerada|viola(?:ndo|)? (?:a|as|essa|essas) regras?|frases? proibidas?|(?:o|no|do) prompt (?:diz|manda|pede|exige|pro[íi]be|tamb[ée]m)|system prompt|prompt do sistema|(?:a|as) (?:regra|instru[çc][ãa]o)s? (?:atual |)?(?:diz|dizem)|regra do "|regra atual|leadFocus|recent_conversation|cadastro_conhecido|snapshot(?: mostra| do lead|\.)|<<<PACIENTE>>>|<<<CRM_OPS>>>/i
+
+/**
+ * A mensagem ABRE com cabeçalho de análise em vez de falar com a pessoa. Todos os vazamentos
+ * em português começaram assim: "1.  *Analisar o Contexto:*", "1.  *Análise do Usuário:*".
+ * Só olha o começo: um "Verificação" no meio de uma resposta de verdade não derruba nada.
+ */
+const COT_ABERTURA_PT =
+  /^\s*(?:\d+[.)]\s*)?\*{0,2}(?:An[áa]lis(?:e|ar)|Analisando|Verifica[çc][ãa]o|Contexto|Hist[óo]rico|Inten[çc][ãa]o|Racioc[íi]nio|Rascunho|Plano de resposta|Passo a passo|Resposta (?:final|ideal|sugerida))\b/i
+
+/**
+ * O modelo narrando o cliente em terceira pessoa — para o próprio cliente. Casos Claudia 18/ago
+ * ("O cliente Claudia disse ...") e Alessandro 25/ago ("O cliente Alessandro enviou uma
+ * mensagem dizendo:"). Só vale na abertura, onde é sempre relatório, nunca conversa.
+ */
+const COT_NARRACAO_PT =
+  /\b[OA]\s+(?:cliente|paciente|lead|usu[áa]ri[oa])\s+(?:[A-ZÀ-Ú][^\s]{1,20}\s+){0,2}(?:disse|enviou|escreveu|perguntou|respondeu|mandou|pediu|quer saber|est[áa] perguntando)\b/
+
+const COT_MARKER_EN =
+  /Correction on History Analysis|History Analysis\s*:|Hypothesis\s*\d|recent_conversation|Analyze the User'?s?\s+Input|Interpretation:\s*\*\*|Constraint Check:|Determine the Intent|\*+\s*Draft\s*:?\s*\*+|\bDraft:|\*Refining\b|Sofia'?s voice|\bI hand off\b|most likely intent|\*+\s*Even simpler|Let'?s stick to|keep it open|The prompt'?s?\s*`|Looking at the conversation|I need to (?:check|verify|analyze|correct)/i
+
+/**
+ * Detecta monólogo de raciocínio/debug da IA que NUNCA pode ir ao paciente, e diz POR QUÊ.
+ *
+ * Nasceu só em inglês (caso Janaine 24/jul). Em 01/09 o GLM passou a raciocinar em PORTUGUÊS
+ * e a rede não viu: o paciente NETO recebeu 6.557 caracteres de plano interno, com as regras
+ * do prompt citadas entre aspas. Daí as regras em PT, a narração em terceira pessoa e o teto
+ * de tamanho — que é a trava que não depende de idioma nenhum.
+ */
+export function detectAiReasoningLeak(text: string): AiReasoningLeakReason | null {
   const t = text.trim()
-  if (!t) return false
-  if (
-    /Correction on History Analysis|History Analysis\s*:|Hypothesis\s*\d|recent_conversation|Analyze the User'?s?\s+Input|Interpretation:\s*\*\*|Constraint Check:|Determine the Intent|\*+\s*Draft\s*:?\s*\*+|\bDraft:|\*Refining\b|Sofia'?s voice|\bI hand off\b|most likely intent|\*+\s*Even simpler|Let'?s stick to|keep it open|The prompt'?s?\s*`|Looking at the conversation|I need to (?:check|verify|analyze|correct)/i
-      .test(t)
-  ) {
-    return true
-  }
+  if (!t) return null
+  const abertura = t.slice(0, 300)
+
+  if (COT_MARKER_PT.test(t)) return 'marcador_pt'
+  if (COT_ABERTURA_PT.test(t)) return 'abre_com_analise'
+  if (COT_NARRACAO_PT.test(abertura)) return 'narra_cliente_em_terceira_pessoa'
+  if (COT_MARKER_EN.test(t)) return 'marcador_en'
+
   // Dump longo em inglês sem abertura típica de atendimento em PT
   if (
     t.length >= 800 &&
     /\b(the prompt|the user's|based on the|hypothesis|conversation history|I should|I will)\b/i.test(t) &&
     !/^(Olá|Oi|Opa|Bom dia|Boa tarde|Boa noite|Perfeito|Prontinho|Claro|Obrigada|Obrigado)/im.test(t.slice(0, 120))
   ) {
-    return true
+    return 'dump_ingles'
   }
-  return false
+
+  // Última rede, e a única que independe de idioma: ninguém escreve isto a um paciente.
+  if (t.length > MAX_PATIENT_REPLY_CHARS) return 'tamanho_impossivel'
+
+  return null
+}
+
+export function looksLikeAiReasoningLeak(text: string): boolean {
+  return detectAiReasoningLeak(text) !== null
 }
 
 /**
  * Texto visível ao paciente / ManyChat: remove marca de handoff e vazamentos comuns de "tools"
  * (blocos fenced, XML de function_call, etc.). Não substitui o system prompt — só a saída.
  */
-export function sanitizeCrmAiPatientReply(reply: string): { clean: string; handoffSuggested: boolean } {
+export function sanitizeCrmAiPatientReply(
+  reply: string,
+): { clean: string; handoffSuggested: boolean; leakReason?: AiReasoningLeakReason } {
   let stripped = reply.replace(/\r\n/g, '\n').replace(/<<<CRM_OPS>>>[\s\S]*$/m, '').trim()
   const { clean: afterHandoff, handoffSuggested } = stripManychatHandoffMarker(stripped)
   let t = afterHandoff.replace(/\r\n/g, '\n')
@@ -61,8 +120,10 @@ export function sanitizeCrmAiPatientReply(reply: string): { clean: string; hando
   t = t.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '')
   t = t.replace(/<(thinking|thought|reasoning)>[\s\S]*?<\/\1>/gi, '')
   t = t.replace(/\n{3,}/g, '\n\n').trim()
-  // Rede de segurança: se ainda parecer CoT/debug em inglês, zera (caller faz fallback/handover).
-  if (looksLikeAiReasoningLeak(t)) return { clean: '', handoffSuggested }
+  // Rede de segurança: se ainda parecer raciocínio/debug (PT ou EN), zera — o caller faz
+  // fallback/handover. `leakReason` sobe junto para o log: barrar calado esconde o problema.
+  const leakReason = detectAiReasoningLeak(t)
+  if (leakReason) return { clean: '', handoffSuggested, leakReason }
   return { clean: t, handoffSuggested }
 }
 
@@ -985,7 +1046,16 @@ export async function invokeCrmAiAssistantForLead(
     reply = reply.replace(/^(?:\d+\.\s+\*?Analyze[\s\S]*?)(?:\n\n|\n[A-Z\xC0-\xDF]|$)/gi, '').trim()
     reply = reply.replace(/<(thinking|thought|reasoning)>[\s\S]*?<\/\1>/gi, '').trim()
     reply = reply.replace(/```(?:thinking|thought|reasoning)[\s\S]*?```/gi, '').trim()
-    if (looksLikeAiReasoningLeak(reply)) reply = ''
+    const leakKind = detectAiReasoningLeak(reply)
+    if (leakKind) {
+      console.warn('crm-ai: raciocínio vazado barrado antes do envio', {
+        leadId,
+        motivo: leakKind,
+        tamanho: reply.length,
+        trecho: reply.slice(0, 220).replace(/\n+/g, ' '),
+      })
+      reply = ''
+    }
 
     // QR do Pix (op rede_pix; `pagbank_pix` é alias legado) para enviar como IMAGEM, via crm_actions.
     const acts = Array.isArray(aiObj.crm_actions) ? (aiObj.crm_actions as Array<Record<string, unknown>>) : []
@@ -1353,8 +1423,23 @@ export async function runWhatsappAiAutoReply(
     console.error('runWhatsappAiAutoReply invoke:', e)
   }
 
-  const { clean: aiReplySanitized, handoffSuggested } = sanitizeCrmAiPatientReply(aiReplyRaw)
+  const { clean: aiReplySanitized, handoffSuggested, leakReason } = sanitizeCrmAiPatientReply(aiReplyRaw)
   const aiReply = aiReplySanitized.trim()
+  if (leakReason) {
+    // Barrado é bom; barrado em silêncio, não. Deixa rastro para saber quando o modelo
+    // começa a pensar em voz alta de novo (foi assim que o caso NETO 01/09 ficou 6 semanas
+    // invisível: a rede só olhava inglês).
+    console.error('runWhatsappAiAutoReply: RACIOCÍNIO VAZADO barrado', {
+      leadId: options.leadId,
+      motivo: leakReason,
+      tamanho: aiReplyRaw.length,
+    })
+    await admin.from('webhook_jobs').insert({
+      source: 'ai_reasoning_leak',
+      status: 'done',
+      note: `ai_reasoning_leak:${leakReason}:${options.leadId}:${aiReplyRaw.slice(0, 300).replace(/[\r\n]+/g, ' ')}`.slice(0, 500),
+    }).then(() => {}, () => {})
+  }
 
   // ANTI-ATROPELO: o z.ai leva ~30-120s. Se durante esse tempo o HUMANO assumiu a conversa
   // (owner_mode=human ou ai_enabled=false), NÃO enviamos mais nada — a equipa é dona do
@@ -1738,6 +1823,18 @@ export async function runManychatAiAutoReply(
   const sanitizedManychat = sanitizeCrmAiPatientReply(aiReplyRaw)
   const aiReply = sanitizedManychat.clean.trim()
   const handoffSuggested = sanitizedManychat.handoffSuggested
+  if (sanitizedManychat.leakReason) {
+    console.error('runManychatAiAutoReply: RACIOCÍNIO VAZADO barrado', {
+      leadId: options.leadId,
+      motivo: sanitizedManychat.leakReason,
+      tamanho: aiReplyRaw.length,
+    })
+    await admin.from('webhook_jobs').insert({
+      source: 'ai_reasoning_leak',
+      status: 'done',
+      note: `ai_reasoning_leak:${sanitizedManychat.leakReason}:${options.leadId}:${aiReplyRaw.slice(0, 300).replace(/[\r\n]+/g, ' ')}`.slice(0, 500),
+    }).then(() => {}, () => {})
+  }
 
   // ANTI-ATROPELO (igual ao WhatsApp): se o humano assumiu durante a geração do z.ai,
   // não envia mais nada. Re-checa o gate antes de qualquer commit/envio ao ManyChat.
