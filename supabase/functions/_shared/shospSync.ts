@@ -18,6 +18,14 @@ import {
 // Sync de leitura Shosp → tabelas espelho do CRM. Tudo idempotente (upsert) e
 // limitado por lote para não estourar o tempo da edge function — o cron alcança
 // o resto ao longo do tempo.
+//
+// NÃO MANDAR `first_seen_at` NO PAYLOAD DE `shosp_appointments`. A coluna guarda
+// a primeira vez que o CRM viu o agendamento, e é o único proxy de "quando foi
+// marcado" (a Shosp só devolve a data DA CONSULTA). Ela funciona por omissão:
+// coluna ausente do payload não entra no DO UPDATE SET do PostgREST, então o
+// default now() vale no INSERT e nada reescreve depois. Incluir o campo, mesmo
+// com o valor certo, faz a data de criação virar a data do último sync e mata a
+// métrica em silêncio, do mesmo jeito que `synced_at` já não serve para isso.
 
 function nowIso(): string {
   return new Date().toISOString()
