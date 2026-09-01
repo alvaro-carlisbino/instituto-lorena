@@ -53,6 +53,42 @@ type Pendente = {
   value_reais: number | null
 }
 
+/**
+ * Monta um evento. O `lead_id` vai como STRING, e isso não é estilo.
+ *
+ * `Number('36795652870078329')` devolve `36795652870078330`: leadgen_id de 17 dígitos passa de
+ * `Number.MAX_SAFE_INTEGER` (9.007.199.254.740.991) e o float mais próximo não é o mesmo número.
+ * A Meta recebe um id que não existe e responde "Invalid Lead ID" (subcode 2804036). Provado em
+ * 01/set: os dois ids de 17 dígitos da fila falham como número e passam como string.
+ *
+ * E como um id inválido derruba o LOTE INTEIRO, dois leads corrompidos seguravam 29 eventos.
+ */
+function eventoCapi(p: Pendente): Record<string, unknown> {
+  const ev: Record<string, unknown> = {
+    event_name: p.event_name,
+    event_time: Math.floor(new Date(p.event_time).getTime() / 1000),
+    action_source: 'system_generated',
+    // String, sempre. Ver o comentário acima antes de "simplificar" para Number.
+    user_data: { lead_id: String(p.leadgen_id) },
+  }
+  if (p.value_reais != null) ev.custom_data = { value: Number(p.value_reais), currency: 'BRL' }
+  return ev
+}
+
+async function postarCapi(
+  token: string,
+  eventos: Array<Record<string, unknown>>,
+): Promise<{ sucesso: boolean; corpo: string }> {
+  try {
+    const body = new URLSearchParams({ data: JSON.stringify(eventos), access_token: token })
+    const res = await fetch(`${GRAPH}/${PIXEL_ID}/events`, { method: 'POST', body })
+    const corpo = (await res.text()).slice(0, 500)
+    return { sucesso: res.ok && !corpo.includes('"error"'), corpo }
+  } catch (e) {
+    return { sucesso: false, corpo: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 async function enviarCapi(admin: SupabaseClient, token: string, dias: number) {
   const { data, error } = await admin.rpc('crm_meta_capi_pendentes', { dias })
   if (error) return { ok: false, erro: `rpc: ${error.message}` }
@@ -61,56 +97,74 @@ async function enviarCapi(admin: SupabaseClient, token: string, dias: number) {
 
   let enviados = 0
   let falhas = 0
+  let isolados = 0
   const detalhes: string[] = []
+  const registrar: Array<Record<string, unknown>> = []
 
   for (let i = 0; i < pend.length; i += CAPI_BATCH) {
     const lote = pend.slice(i, i + CAPI_BATCH)
-    const eventos = lote.map((p) => {
-      const ev: Record<string, unknown> = {
-        event_name: p.event_name,
-        event_time: Math.floor(new Date(p.event_time).getTime() / 1000),
-        action_source: 'system_generated',
-        user_data: { lead_id: Number(p.leadgen_id) },
-      }
-      if (p.value_reais != null) ev.custom_data = { value: Number(p.value_reais), currency: 'BRL' }
-      return ev
-    })
+    const agora = new Date().toISOString()
+    const { sucesso, corpo } = await postarCapi(token, lote.map(eventoCapi))
 
-    let corpo = ''
-    let sucesso = false
-    try {
-      const body = new URLSearchParams({ data: JSON.stringify(eventos), access_token: token })
-      const res = await fetch(`${GRAPH}/${PIXEL_ID}/events`, { method: 'POST', body })
-      corpo = (await res.text()).slice(0, 500)
-      sucesso = res.ok && !corpo.includes('"error"')
-    } catch (e) {
-      corpo = e instanceof Error ? e.message : String(e)
+    if (sucesso) {
+      enviados += lote.length
+      for (const p of lote) {
+        registrar.push({
+          lead_id: p.lead_id,
+          event_name: p.event_name,
+          leadgen_id: p.leadgen_id,
+          event_time: p.event_time,
+          sent_at: agora,
+          ok: true,
+          response: corpo,
+        })
+      }
+      continue
     }
 
-    // Marca lote inteiro. Falha fica registrada com ok=false e volta na próxima
-    // rodada — até a janela de 7 dias fechar, quando o evento se perde de vez.
-    const linhas = lote.map((p) => ({
-      lead_id: p.lead_id,
-      event_name: p.event_name,
-      leadgen_id: p.leadgen_id,
-      event_time: p.event_time,
-      sent_at: new Date().toISOString(),
-      ok: sucesso,
-      response: corpo,
-    }))
-    const { error: upErr } = await admin
-      .from('meta_capi_events')
-      .upsert(linhas, { onConflict: 'lead_id,event_name' })
-    if (upErr) detalhes.push(`log: ${upErr.message}`)
-
-    if (sucesso) enviados += lote.length
-    else {
-      falhas += lote.length
-      detalhes.push(corpo.slice(0, 200))
+    // O lote caiu. Um id ruim reprova os 40, então repete um a um para separar
+    // quem estava bom: sem isto, um evento quebrado congela a fila inteira, que
+    // foi o que segurou 29 eventos por 3 dias em ago/2026.
+    detalhes.push(corpo.slice(0, 200))
+    if (lote.length === 1) {
+      falhas += 1
+      registrar.push({
+        lead_id: lote[0].lead_id,
+        event_name: lote[0].event_name,
+        leadgen_id: lote[0].leadgen_id,
+        event_time: lote[0].event_time,
+        sent_at: agora,
+        ok: false,
+        response: corpo,
+      })
+      continue
+    }
+    for (const p of lote) {
+      isolados += 1
+      const r = await postarCapi(token, [eventoCapi(p)])
+      if (r.sucesso) enviados += 1
+      else falhas += 1
+      registrar.push({
+        lead_id: p.lead_id,
+        event_name: p.event_name,
+        leadgen_id: p.leadgen_id,
+        event_time: p.event_time,
+        sent_at: new Date().toISOString(),
+        ok: r.sucesso,
+        response: r.corpo,
+      })
     }
   }
 
-  return { ok: falhas === 0, pendentes: pend.length, enviados, falhas, detalhes: detalhes.slice(0, 3) }
+  // `tentativas` é somado no banco pelo trigger; aqui só se grava o resultado.
+  for (let i = 0; i < registrar.length; i += 200) {
+    const { error: upErr } = await admin
+      .from('meta_capi_events')
+      .upsert(registrar.slice(i, i + 200), { onConflict: 'lead_id,event_name' })
+    if (upErr) detalhes.push(`log: ${upErr.message}`)
+  }
+
+  return { ok: falhas === 0, pendentes: pend.length, enviados, falhas, isolados, detalhes: detalhes.slice(0, 3) }
 }
 
 async function refazerPublico(
@@ -250,6 +304,55 @@ async function puxarInsights(admin: SupabaseClient, token: string, dias: number)
     } catch (e) {
       erros.push(`${nivel}: ${e instanceof Error ? e.message : String(e)}`)
     }
+  }
+
+  // ── Alcance do anúncio, uma linha por JANELA (não por dia) ────────────────
+  //
+  // `reach` continua fora do laço diário acima: com `time_increment=1` ele é o primeiro
+  // campo que a Meta derruba sob cota, e é por isso que ele nunca entrou. Só que sem
+  // alcance não existe FREQUÊNCIA, que é o número padrão de fadiga de criativo, e a conta
+  // ficou cega justamente para a pergunta "o criativo cansou?".
+  //
+  // A saída é pedir o agregado da janela, sem `time_increment`: uma linha por anúncio em
+  // vez de uma por anúncio por dia, e é exatamente essa a conta que a frequência quer
+  // (impressões ÷ pessoas alcançadas NO PERÍODO). Vai gravado como `nivel='anuncio_janela'`,
+  // com `dia` = último dia da janela, então não briga com a série diária na mesma tabela.
+  try {
+    const qsJanela = new URLSearchParams({
+      level: 'ad',
+      time_range: janela,
+      fields: 'campaign_id,campaign_name,adset_name,ad_id,ad_name,spend,impressions,clicks,reach',
+      limit: '500',
+      access_token: token,
+    })
+    const res = await fetch(`${GRAPH}/${conta}/insights?${qsJanela}`)
+    const j2 = await res.json() as { data?: Array<Record<string, unknown>>; error?: { message?: string } }
+    if (j2.error) erros.push(`anuncio_janela: ${j2.error.message}`)
+    else {
+      for (const r of j2.data ?? []) {
+        const chave = String(r.ad_id ?? '')
+        if (!chave) continue
+        linhas.push({
+          dia: ate.toISOString().slice(0, 10),
+          nivel: 'anuncio_janela',
+          chave,
+          campaign_id: r.campaign_id ?? null,
+          campaign_name: r.campaign_name ?? null,
+          adset_name: r.adset_name ?? null,
+          ad_id: r.ad_id ?? null,
+          ad_name: r.ad_name ?? null,
+          spend_cents: Math.round(Number(r.spend ?? 0) * 100),
+          impressions: Number(r.impressions ?? 0),
+          clicks: Number(r.clicks ?? 0),
+          reach: Number(r.reach ?? 0),
+          leads: 0,
+          conversas: 0,
+          synced_at: new Date().toISOString(),
+        })
+      }
+    }
+  } catch (e) {
+    erros.push(`anuncio_janela: ${e instanceof Error ? e.message : String(e)}`)
   }
 
   let gravadas = 0
