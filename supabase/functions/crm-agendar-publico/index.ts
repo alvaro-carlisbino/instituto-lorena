@@ -167,6 +167,13 @@ function temperaturaDoScore(score: number, teto: number): 'cold' | 'warm' | 'hot
   return 'cold'
 }
 
+/** A temperatura em português, para a nota que a atendente lê na conversa. */
+const ROTULO_TEMPERATURA: Record<'cold' | 'warm' | 'hot', string> = {
+  hot: 'quente',
+  warm: 'morno',
+  cold: 'frio',
+}
+
 // ── Rótulos para o texto que a equipe lê no CRM ──────────────────────────────
 const ROTULO: Record<string, string> = {
   transplante_masculino: 'Transplante capilar (masculino)',
@@ -453,7 +460,8 @@ Deno.serve(async (req) => {
   }
 
   const score = calcularScore(triagem)
-  const temperatura = temperaturaDoScore(score, tetoDoScore(triagem))
+  const teto = tetoDoScore(triagem)
+  const temperatura = temperaturaDoScore(score, teto)
 
   // Estimativa pela referência da casa. Falha aqui não derruba o agendamento.
   let estimativa: { esperado: number; minimo: number; maximo: number; amostra: number } | null = null
@@ -569,8 +577,15 @@ Deno.serve(async (req) => {
   const atribuicao = atribuicaoDaLanding((payload.atribuicao ?? {}) as Record<string, unknown>)
 
   // ── Resumo que a atendente lê antes de ligar ───────────────────────────────
+  // O score sai sobre o TETO desta triagem, NUNCA sobre 100. A landing de 3 perguntas
+  // tem teto 77, então "75/100" (o texto antigo) fazia a atendente ler como mediano um
+  // lead que estava praticamente no máximo — foi o caso do Lucas Gonçalves em 29/ago,
+  // "quer resolver ESTE MÊS", que ficou 43h na fila. A ficha do lead já mostrava a
+  // fração certa (`LeadTriagemCard`); a nota que ela lê DENTRO da conversa é que
+  // continuava mentindo. Os dois têm de contar a mesma coisa.
+  const pctDoTeto = Math.round((score / Math.max(1, teto)) * 100)
   const linhas = [
-    `Triagem da landing · score ${score}/100`,
+    `Triagem da landing · score ${score} de ${teto} (${pctDoTeto}% · ${ROTULO_TEMPERATURA[temperatura]})`,
     ROTULO[triagem.objetivo] ? `Objetivo: ${ROTULO[triagem.objetivo]}` : '',
     grauLegivel(triagem.grau) ? `Grau: ${grauLegivel(triagem.grau)}` : '',
     estimativa ? `Estimativa: ~${estimativa.esperado} unidades foliculares (referência da casa)` : '',
@@ -593,6 +608,14 @@ Deno.serve(async (req) => {
     triagem_cidade: triagem.cidade,
     triagem_unidade: unidade,
     triagem_score: score,
+    // O teto vai GRAVADO junto com o score, e não recalculado na tela. A landing muda de
+    // tamanho (5 perguntas → 3 em ago/2026, e o passo do horário entrou e saiu), e um teto
+    // recalculado hoje sobre a régua de hoje reescreve a nota de quem respondeu ontem.
+    triagem_teto: teto,
+    // Fecha a armadilha documentada em `tetoDaTriagem`: os 15 pontos de "escolheu horário"
+    // entram no score, mas a escolha só existia em `clinic_prebookings`. Sem este carimbo,
+    // quem reservou slot aparecia com teto 15 pontos MENOR que o real, logo fração inflada.
+    triagem_tem_horario: querHorario,
     ...(estimativa ? { estimativa_foliculos: estimativa.esperado } : {}),
   }
 

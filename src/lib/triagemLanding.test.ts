@@ -78,3 +78,47 @@ describe('triagem da landing /consulta', () => {
     expect(grauLegivel('')).toBe('')
   })
 })
+
+describe('teto gravado x teto recalculado', () => {
+  it('prefere o teto que a edge function gravou', () => {
+    // A régua da tela pode ter mudado depois que o lead respondeu. Quem manda é o que
+    // foi gravado na hora, senão a nota de ontem passa a ser lida pela régua de hoje.
+    const t = lerTriagemLanding({
+      origem_landing: 'consulta',
+      triagem_grau: '4',
+      triagem_urgencia: 'este_mes',
+      triagem_score: 60,
+      triagem_teto: 93,
+    })
+    // 60 de 93 é morno; recalculado pela régua de hoje (teto 77) viraria quente.
+    expect(t?.teto).toBe(93)
+    expect(t?.temperatura).toBe('warm')
+  })
+
+  it('soma os 15 pontos de horário no teto quando o lead escolheu slot', () => {
+    // Sem o carimbo, quem reservou horário aparecia com teto 15 pontos menor que o
+    // real, ou seja, com a fração inflada — e subia na fila sem ter subido.
+    expect(tetoDaTriagem({ grau: '4', tempo: '', jaFez: '' })).toBe(77)
+    expect(tetoDaTriagem({ grau: '4', tempo: '', jaFez: '', temHorario: true })).toBe(92)
+
+    const t = lerTriagemLanding({
+      origem_landing: 'consulta',
+      triagem_grau: '4',
+      triagem_urgencia: 'este_mes',
+      triagem_score: 75,
+      triagem_tem_horario: true,
+    })
+    expect(t?.teto).toBe(92)
+  })
+
+  it('cai no cálculo local para o lead gravado antes do carimbo', () => {
+    const t = lerTriagemLanding({
+      origem_landing: 'consulta',
+      triagem_grau: '3v',
+      triagem_urgencia: 'este_mes',
+      triagem_score: 75,
+    })
+    expect(t?.teto).toBe(77)
+    expect(t?.temperatura).toBe('hot')
+  })
+})

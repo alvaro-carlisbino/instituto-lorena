@@ -69,21 +69,30 @@ export type TriagemLanding = {
  * rebaixaria a fila inteira um degrau sem ninguém ter mudado de resposta — por isso a
  * edge function pontua por FRAÇÃO do teto, e a ficha precisa mostrar a mesma conta.
  *
- * ARMADILHA: os 15 pontos de "escolheu horário" entram no score gravado, mas o
- * `custom_fields` não guarda que houve escolha (isso mora em `clinic_prebookings`).
- * Um lead que reservou slot aparece aqui com o teto 15 pontos menor do que o real, ou
- * seja, com fração inflada. Hoje isso não atinge ninguém: `clinic_prebookings` está
- * vazia para as 8 triagens já feitas. Se o passo do horário voltar para a landing,
- * gravar `triagem_tem_horario` no `custom_fields` e somar aqui.
+ * Esta função é o FALLBACK para os leads gravados antes de 31/ago/2026. A partir dali a
+ * edge function grava `triagem_teto` junto com o score, e `lerTriagemLanding` prefere o
+ * valor gravado: teto recalculado na tela é teto da régua de HOJE aplicado a quem
+ * respondeu ONTEM, e a landing já mudou de tamanho duas vezes.
+ *
+ * O termo `temHorario` fecha a armadilha antiga: os 15 pontos de "escolheu horário"
+ * entram no score, mas a escolha só existia em `clinic_prebookings`, então quem reservou
+ * slot aparecia com o teto 15 pontos MENOR que o real, ou seja, com a fração inflada.
+ * Agora o carimbo vem no próprio `custom_fields` (`triagem_tem_horario`).
  */
-export function tetoDaTriagem(t: { grau: string; tempo: string; jaFez: string }): number {
+export function tetoDaTriagem(t: {
+  grau: string
+  tempo: string
+  jaFez: string
+  temHorario?: boolean
+}): number {
   return (
     35 + // urgência
     15 + // objetivo
     12 + // unidade
     (t.grau ? 15 : 0) +
     (t.tempo ? 8 : 0) +
-    (t.jaFez ? 8 : 0)
+    (t.jaFez ? 8 : 0) +
+    (t.temHorario ? 15 : 0)
   )
 }
 
@@ -117,7 +126,16 @@ export function lerTriagemLanding(customFields: Record<string, unknown> | null |
   const jaFezCru = str(cf.triagem_ja_fez)
 
   const score = num(cf.triagem_score)
-  const teto = tetoDaTriagem({ grau: grauCru, tempo: tempoCru, jaFez: jaFezCru })
+  // Teto GRAVADO manda; a conta local só cobre o que entrou antes de 31/ago/2026.
+  const tetoGravado = num(cf.triagem_teto)
+  const teto = tetoGravado != null && tetoGravado > 0
+    ? tetoGravado
+    : tetoDaTriagem({
+        grau: grauCru,
+        tempo: tempoCru,
+        jaFez: jaFezCru,
+        temHorario: cf.triagem_tem_horario === true,
+      })
   const fracao = score == null ? null : score / Math.max(1, teto)
 
   return {
