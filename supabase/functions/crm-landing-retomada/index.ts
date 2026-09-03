@@ -34,7 +34,7 @@ function json(body: Record<string, unknown>, status = 200): Response {
  * Aline responde, o lead sai de todas, e quem sumiu depois disso não é de ninguém. Ver o
  * comentário da migration `20260831210000_landing_parada_vira_tarefa_e_retomada.sql`.
  *
- * A COPY ASSUME O ATRASO. Estes leads pediram avaliação e esperaram de 15h a 63h pela
+ * A COPY ASSUME O ATRASO. Estes leads pediram consulta e esperaram de 15h a 63h pela
  * primeira palavra de um humano — cobrar "você sumiu" de quem ficou esperando é o erro
  * que já apareceu na tela do Álvaro em 18/ago. Ela também NÃO oferece dia nem horário: o
  * modo da linha é o meio-termo (`auto_scheduling_enabled = false`), quem fecha agenda é a
@@ -71,12 +71,12 @@ function diaLocal(at: Date = new Date()): string {
 
 const MENSAGENS = [
   'Oi, {name}! Aqui é a Sofia, do Instituto Lorena Visentainer. 💚 Desculpa a demora no retorno. ' +
-    'Você chegou a receber as informações sobre a sua avaliação capilar? Se ainda fizer sentido pra você, ' +
+    'Você chegou a receber as informações sobre a sua consulta capilar? Se ainda fizer sentido pra você, ' +
     'é só me responder aqui que eu retomo o seu atendimento.',
-  '{name}, passando para não te deixar sem retorno 😊 A sua avaliação capilar continua de pé aqui com a gente. ' +
+  '{name}, passando para não te deixar sem retorno 😊 O seu atendimento continua aberto aqui com a gente. ' +
     'Quando puder, me diz se ainda quer seguir que eu continuo de onde a gente parou.',
-  '{name}, este é o meu último contato para não te incomodar 💚 Se um dia quiser retomar a avaliação capilar, ' +
-    'é só responder esta mensagem que a gente continua de onde parou. Um abraço!',
+  '{name}, este é o meu último contato para não te incomodar 💚 Se um dia quiser retomar a conversa sobre a ' +
+    'sua consulta, é só responder esta mensagem que a gente continua de onde parou. Um abraço!',
 ]
 
 type LeadParado = {

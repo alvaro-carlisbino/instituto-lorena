@@ -62,16 +62,20 @@ const TELEFONE_VISIVEL = '(44) 99149-3656'
 /**
  * A frase é a ETIQUETA desta porta, não é enfeite de copy.
  *
- * `ctwa_aberturas` guarda o trecho "vim pelo site e quero falar sobre a avaliacao
+ * `ctwa_aberturas` guarda o trecho "vim pelo site e quero falar sobre a consulta
  * capilar" com canal `landing`, e o carimbo (`crm_ctwa_carimbar`, cron de 15 em
  * 15 min) usa a PRIMEIRA mensagem do lead para dizer de onde ele veio. Mudar o
  * texto aqui sem mudar a linha lá devolve a landing para o balde de origem
  * desconhecida, onde estavam 244 conversas até 01/set/2026.
  *
+ * A frase dizia "avaliação capilar" até 03/set/2026. O trecho antigo continua
+ * ativo na tabela: quem abriu o WhatsApp com o link velho e só responder semana
+ * que vem ainda precisa ser carimbado como landing.
+ *
  * Por isso os quatro botões da página usam o mesmo link: os dois do topo e do
  * rodapé abriam o WhatsApp em branco, e quem saía por eles chegava anônimo.
  */
-const MENSAGEM_WHATSAPP = 'Olá! Vim pelo site e quero falar sobre a avaliação capilar.'
+const MENSAGEM_WHATSAPP = 'Olá! Vim pelo site e quero falar sobre a consulta capilar.'
 const LINK_WHATSAPP = `https://wa.me/${WHATSAPP_CLINICA}?text=${encodeURIComponent(MENSAGEM_WHATSAPP)}`
 
 const numeroBr = (n: number) => n.toLocaleString('pt-BR')
@@ -433,12 +437,12 @@ export function ConsultaLandingPage() {
                       Faixa de {numeroBr(Math.min(estimativa.minimo, estimativa.esperado))} a{' '}
                       {numeroBr(Math.max(estimativa.maximo, estimativa.esperado))}, calculada sobre{' '}
                       {numeroBr(estimativa.amostra)} cirurgias já realizadas no Instituto. O número final depende da
-                      sua área doadora, e isso só a avaliação médica define.
+                      sua área doadora, e isso só a consulta médica define.
                     </p>
                   </div>
                 ) : (
                   <div className="rounded-2xl bg-[#DCDBD1]/50 p-5">
-                    <h2 className="font-heading text-xl font-semibold">Seu caso pede uma avaliação presencial</h2>
+                    <h2 className="font-heading text-xl font-semibold">Seu caso pede uma consulta presencial</h2>
                     <p className="mt-2 text-sm text-[#252A33]/75">
                       Pelo que você respondeu, o caminho é examinar de perto antes de falar em número de fios ou em
                       técnica.
@@ -495,7 +499,7 @@ export function ConsultaLandingPage() {
                     />
                     <span>
                       Autorizo o Instituto Lorena Visentainer a entrar em contato comigo por WhatsApp e telefone sobre
-                      esta avaliação.
+                      esta solicitação.
                     </span>
                   </label>
                 </div>

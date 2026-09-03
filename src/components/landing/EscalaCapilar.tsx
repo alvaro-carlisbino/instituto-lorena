@@ -6,7 +6,7 @@ import { useId } from 'react'
  * Existe porque pergunta escrita ("qual o seu grau de Norwood?") faz a pessoa
  * desistir: ninguém sabe o próprio grau, e quem sabe erra. Vista de cima, com a
  * falha desenhada, a escolha vira reconhecimento e não conhecimento. É a mesma
- * escala que a clínica usa na avaliação, então o que a pessoa marca aqui já serve
+ * escala que a clínica usa na consulta, então o que a pessoa marca aqui já serve
  * para a equipe se preparar antes de ela sentar na cadeira.
  *
  * O desenho é geométrico de propósito: dois recuos frontais (que formam o M) e uma

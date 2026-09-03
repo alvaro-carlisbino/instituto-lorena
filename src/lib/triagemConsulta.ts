@@ -80,7 +80,7 @@ export const PERGUNTAS: PerguntaTriagem[] = [
   {
     id: 'grau',
     titulo: 'Qual imagem se parece mais com você hoje?',
-    ajuda: 'Escala usada na avaliação médica. Escolha a mais próxima, sem perfeccionismo.',
+    ajuda: 'Escala usada na consulta médica. Escolha a mais próxima, sem perfeccionismo.',
     visual: 'norwood',
     opcoes: GRAUS_NORWOOD,
     visivel: (r) => r.objetivo === 'transplante_masculino',

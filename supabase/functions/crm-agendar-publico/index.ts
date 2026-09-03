@@ -255,7 +255,7 @@ function mensagemDaSofia(input: {
   const pesquisando = input.triagem.urgencia === 'pesquisando'
 
   const resumo = [
-    alvo ? `Você me contou que procura ${alvo}` : 'Você acabou de responder a avaliação',
+    alvo ? `Você me contou que procura ${alvo}` : 'Você acabou de responder a triagem',
     grau ? ` (marcou ${grau})` : '',
     intencao ? ` e que ${intencao}` : '',
     '.',
@@ -264,16 +264,16 @@ function mensagemDaSofia(input: {
   const numero = input.estimativa
     ? `\n\nPela nossa base de cirurgias, um caso parecido costuma pedir algo em torno de ` +
       `${input.estimativa.esperado.toLocaleString('pt-BR')} unidades foliculares. O número final quem define é a ` +
-      `avaliação da Dra., olhando a sua área doadora de perto.`
+      `consulta com a Dra., olhando a sua área doadora de perto.`
     : ''
 
   const fecho = pesquisando
     ? '\n\nSem compromisso nenhum: quer que eu te explique como funciona o tratamento no seu caso?'
-    : '\n\nPosso te explicar como funciona a avaliação e o que a Dra. analisa nela?'
+    : '\n\nPosso te explicar como funciona a consulta e o que a Dra. analisa nela?'
 
   return (
     `Oi, ${primeiro}! Aqui é a Sofia, do Instituto Lorena Visentainer.` +
-    `\n\nAcabei de receber a sua avaliação pelo site, protocolo ${input.protocolo}.` +
+    `\n\nAcabei de receber a sua triagem pelo site, protocolo ${input.protocolo}.` +
     `\n\n${resumo}${numero}${fecho}`
   )
 }
@@ -830,8 +830,8 @@ Deno.serve(async (req) => {
     .maybeSingle()
   const whats = digits(cfg?.whatsapp_e164 ?? '5544991493656')
   const msg = querHorario
-    ? `Olá! Sou ${nome}. Reservei a avaliação ${protocolo} para ${dataLegivel(slotAt)} (${ROTULO[unidade] ?? unidade}) pelo site.`
-    : `Olá! Sou ${nome}. Fiz a triagem no site e quero falar sobre a minha avaliação.`
+    ? `Olá! Sou ${nome}. Reservei a consulta ${protocolo} para ${dataLegivel(slotAt)} (${ROTULO[unidade] ?? unidade}) pelo site.`
+    : `Olá! Sou ${nome}. Fiz a triagem no site e quero falar sobre a minha consulta.`
 
   return json({
     ok: true,
