@@ -1426,6 +1426,115 @@ async function trocarPublico(
 }
 
 /**
+ * praca_casa — quem MORA na praça, e só a cidade que converte.
+ *
+ * Medido em 03/09/2026 (leads que abriram com frase de anúncio desde 26/08):
+ * Maringá 43, Londrina 17, outro DDD 41, sem número BR 33. Ou seja, 55% das
+ * conversas pagas vinham de fora das duas cidades, com todo conjunto de
+ * prospecção mirando "Maringá 50km + Londrina 50km". A conta fecha pelo
+ * `location_types`: sem ele a Meta usa `home` E `recent`, e "recent" é quem
+ * PASSOU pela praça (viajante, visita), que depois recebe o anúncio em casa,
+ * no RJ ou em SP. É por isso que o conjunto de remarketing "50km" entregou
+ * R$ 200 em RJ/MG/RS/SP em 9 dias ([[crm_ads_entrega_por_regiao]]).
+ *
+ * E entre as duas cidades a diferença é de 3x: Maringá agenda 19,4% dos leads,
+ * Londrina 6,1% (30 dias). Com o gargalo no atendimento
+ * ([[crm_teto_de_agendamentos_e_capacidade]]), verba de prospecção vai para a
+ * praça que devolve consulta.
+ *
+ * Sem `adset`: só lista cidades e location_types de cada conjunto ativo.
+ * Com `adset`: `cidades` (nomes, opcional) filtra as cidades já cadastradas
+ * no conjunto (não cria chave nova, reaproveita a que a Graph resolveu) e
+ * `home: true` põe `location_types: ['home']`. O `targeting` volta INTEIRO,
+ * com `targeting_automation`, pela pegadinha de 25/08.
+ */
+async function pracaCasa(
+  token: string,
+  p: { adset: string; cidades: string[]; home: boolean; dry: boolean; nome?: string },
+) {
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  const norm = (s: unknown) => String(s ?? '').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+  type Geo = Record<string, unknown>
+  const resumoGeo = (geo: Geo) => ({
+    cidades: ((geo.cities ?? []) as Array<Geo>).map((c) =>
+      `${c.name ?? c.key}${c.radius ? ` ${c.radius}${c.distance_unit ?? 'km'}` : ''}`
+    ),
+    location_types: (geo.location_types ?? ['home', 'recent (padrão da Meta)']) as string[],
+  })
+
+  if (!p.adset) {
+    const qs = new URLSearchParams({
+      fields: 'id,name,effective_status,campaign{name},targeting{geo_locations}',
+      effective_status: JSON.stringify(['ACTIVE', 'PENDING_REVIEW', 'IN_PROCESS']),
+      limit: '100',
+      access_token: token,
+    })
+    const r = await fetch(`${GRAPH}/${conta}/adsets?${qs}`)
+    const b = await r.json() as Record<string, unknown>
+    if (!r.ok) return { ok: false, erro: b }
+    return {
+      ok: true,
+      conjuntos: ((b.data ?? []) as Array<Record<string, unknown>>).map((c) => ({
+        id: String(c.id ?? ''),
+        nome: String(c.name ?? ''),
+        campanha: String((c.campaign as Record<string, string> | undefined)?.name ?? ''),
+        status: String(c.effective_status ?? ''),
+        ...resumoGeo(((c.targeting as Geo | undefined)?.geo_locations ?? {}) as Geo),
+      })),
+    }
+  }
+
+  const lido = await fetch(
+    `${GRAPH}/${p.adset}?fields=id,name,effective_status,targeting&access_token=${encodeURIComponent(token)}`,
+  )
+  const atual = await lido.json() as Record<string, unknown>
+  if (!lido.ok) return { ok: false, erro: atual }
+  const t = { ...(atual.targeting ?? {}) as Record<string, unknown> }
+  const geoAntes = { ...(t.geo_locations ?? {}) as Geo }
+  const geoDepois: Geo = { ...geoAntes }
+
+  if (p.cidades.length) {
+    const quer = p.cidades.map(norm)
+    const cidades = ((geoAntes.cities ?? []) as Array<Geo>).filter((c) =>
+      quer.some((q) => norm(c.name ?? c.key).includes(q))
+    )
+    // Filtro que zera a lista deixaria o conjunto sem praça nenhuma, que a Meta
+    // lê como "Brasil inteiro" ou recusa. Melhor falhar aqui.
+    if (!cidades.length) return { ok: false, erro: 'nenhuma cidade do conjunto casa com o filtro', ...resumoGeo(geoAntes) }
+    geoDepois.cities = cidades
+  }
+  if (p.home) geoDepois.location_types = ['home']
+  t.geo_locations = geoDepois
+
+  const resumo = { conjunto: p.adset, nome: String(atual.name ?? ''), antes: resumoGeo(geoAntes), depois: resumoGeo(geoDepois) }
+  if (p.dry) return { ok: true, dry: true, ...resumo }
+
+  // O nome vai junto quando muda a praça: "Maringá e Londrina 50km" num conjunto que só
+  // entrega em Maringá engana quem lê a conta depois (a agência, o vigia, a próxima sessão).
+  const post = await fetch(`${GRAPH}/${p.adset}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ targeting: t, ...(p.nome ? { name: p.nome } : {}), access_token: token }),
+  })
+  const pb = await post.json() as Record<string, unknown>
+  if (!post.ok) return { ok: false, erro: pb, ...resumo }
+
+  // Conjunto que volta ACTIVE mas com issues_info é conjunto quebrado calado.
+  const conf = await fetch(
+    `${GRAPH}/${p.adset}?fields=name,effective_status,issues_info,targeting{geo_locations}&access_token=${encodeURIComponent(token)}`,
+  )
+  const cb = await conf.json() as Record<string, unknown>
+  return {
+    ok: true,
+    ...resumo,
+    nome_agora: String(cb.name ?? ''),
+    status: cb.effective_status ?? '?',
+    issues: cb.issues_info ?? null,
+    conferido: resumoGeo(((cb.targeting as Geo | undefined)?.geo_locations ?? {}) as Geo),
+  }
+}
+
+/**
  * prefill — a frase com que a conversa de Clique-para-WhatsApp ABRE.
  *
  * Anúncio de WhatsApp não usa o `text=` do link (conferido em 31/08/2026); usa o
@@ -1660,6 +1769,16 @@ Deno.serve(async (req) => {
         mensagem: String(c.mensagem ?? ''),
       }))
     }
+    if (action === 'praca_casa') {
+      const c = corpo as Record<string, unknown>
+      return json(await pracaCasa(token, {
+        adset: String(c.adset ?? ''),
+        cidades: ((c.cidades ?? []) as unknown[]).map(String),
+        home: c.home !== false,
+        dry: c.dry !== false,
+        nome: c.nome ? String(c.nome) : undefined,
+      }))
+    }
     if (action === 'prefill') {
       const c = corpo as Record<string, unknown>
       return json(await trocarAutopreenchimento(token, {
@@ -1667,7 +1786,7 @@ Deno.serve(async (req) => {
         dry: c.dry !== false,
       }))
     }
-    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'extrato', 'entrega', 'geo', 'cercar', 'atribuir', 'reamarrar_form', 'prefill'] }, 400)
+    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'extrato', 'entrega', 'geo', 'cercar', 'atribuir', 'reamarrar_form', 'prefill', 'praca_casa'] }, 400)
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }
