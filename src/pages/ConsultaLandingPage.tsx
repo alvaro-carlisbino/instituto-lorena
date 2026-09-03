@@ -213,7 +213,7 @@ export function ConsultaLandingPage() {
   // a aba de quem vem do anúncio diz "Instituto Lorena CRM · INTERNO".
   useEffect(() => {
     const anterior = document.title
-    document.title = 'Avaliação capilar · Instituto Lorena Visentainer'
+    document.title = 'Consulta capilar · Instituto Lorena Visentainer'
     const meta = document.querySelector('meta[name="description"]')
     const descricaoAnterior = meta?.getAttribute('content') ?? ''
     meta?.setAttribute(
