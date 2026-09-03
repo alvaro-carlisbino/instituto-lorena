@@ -206,6 +206,11 @@ export function inferTriageOptionFromText(raw: string): TriageOption | null {
   if (opt?.[1] && TRIAGE_MAPPING[opt[1]]) return opt[1] as TriageOption
   const loneLine = lines.find((l) => /^[1-5]$/.test(l))
   if (loneLine && TRIAGE_MAPPING[loneLine]) return loneLine as TriageOption
+  // "1, sou de Maringá" / "3. moro em Londrina": desde que a saudação pergunta cidade e prazo
+  // junto com o menu, a resposta vem assim. Exige pontuação depois do dígito de propósito:
+  // "5 anos de queda" não é a opção 5.
+  const leading = joined.match(/^\s*([1-5])\s*[.,;:)\-]/)
+  if (leading?.[1] && TRIAGE_MAPPING[leading[1]]) return leading[1] as TriageOption
   if (/transplante\s+capilar\s+masculin|transplate\s+capilar\s+masculin|capilar\s+masculino\b/.test(t)) return '1'
   if (/transplante\s+capilar\s+feminin|capilar\s+feminina\b|capilar\s+feminino\b/.test(t)) return '2'
   if (/consulta\s+cl[ií]nica\s+masculin/.test(t)) return '3'
@@ -609,7 +614,7 @@ export function brasilGreetingNow(now: Date = new Date()): string {
  * masculino ("ajudá-lo"), escrevia "equipa" (pt-PT) e listava "Consulta Clínica Masculino/Feminino"
  * sem concordância.
  */
-function buildInitialTriageMessage(name: string): string {
+export function buildInitialTriageMessage(name: string): string {
   const first = String(name ?? '').trim().split(/\s+/)[0] ?? ''
   const vocative = first ? `, ${first}` : ''
   return `Olá${vocative}! 😊
@@ -624,7 +629,41 @@ Para começarmos, por favor escolha uma das opções abaixo:
 2️⃣ Transplante Capilar Feminino
 3️⃣ Consulta Clínica Masculina
 4️⃣ Consulta Clínica Feminina
-5️⃣ Transplante de Sobrancelha`
+5️⃣ Transplante de Sobrancelha
+
+${QUALIFICATION_QUESTIONS}`
+}
+
+/**
+ * As duas perguntas que a Aline precisa, na SAUDAÇÃO.
+ *
+ * Elas existiam no Passo 2b do script (depois do menu), e em 4 dias alcançaram 19 de 137
+ * leads. O motivo é estrutural: dentro do turno a Sofia cala assim que um humano fala, e a
+ * equipe responde em minutos, então a saudação é a única mensagem da Sofia que a maioria
+ * recebe. Pergunta que não está na saudação não é feita. Medido em 03/09/2026: só 10% das
+ * conversas da semana tinham a cidade perguntada nas primeiras 48h, e o feedback da equipe
+ * era "muita gente de longe" e "só querem preço".
+ */
+const QUALIFICATION_QUESTIONS =
+  'E pra eu já te direcionar certinho: você é de Maringá, de Londrina ou de outra cidade? E tá pensando em fazer nos próximos meses, ou ainda tá pesquisando? 😊'
+
+/**
+ * O paciente respondeu cidade ou prazo junto com a opção do menu ("1, sou de Maringá",
+ * "2 quero fazer esse mês")? Aí o eco determinístico NÃO serve: ele repetiria as perguntas
+ * que a pessoa acabou de responder. Quem fecha é a IA, que lê a resposta e grava o op.
+ */
+export function answersQualification(raw: string): boolean {
+  const t = raw.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+  return /\b(maringa|londrina|curitiba|cidade|sou de|sou da|moro|resido|estou em|de fora|outro estado|outra cidade|interior|parana|pesquisand|so olhando|so pesquisa|proxim[oa]s? (?:mes|meses|semana)|esse mes|este mes|nesse mes|neste mes|semana que vem|o quanto antes|urgente|ano que vem|mais pra frente|mais para frente|ainda nao sei|sem pressa|sem data)\b/
+    .test(t)
+}
+
+const DOCTOR_BY_OPTION: Record<TriageOption, { nome: string; ficha: string }> = {
+  '1': { nome: 'a *Dra. Lorena Visentainer*', ficha: 'especialista em saúde e restauração capilar, reconhecida pelo olhar cuidadoso, atendimento humanizado e foco em resultados naturais e personalizados para cada paciente' },
+  '2': { nome: 'a *Dra. Lorena Visentainer*', ficha: 'especialista em saúde e restauração capilar, reconhecida pelo olhar cuidadoso, atendimento humanizado e foco em resultados naturais e personalizados para cada paciente' },
+  '5': { nome: 'a *Dra. Lorena Visentainer*', ficha: 'especialista em saúde e restauração capilar, reconhecida pelo olhar cuidadoso, atendimento humanizado e foco em resultados naturais e personalizados para cada paciente' },
+  '3': { nome: 'o *Dr. Matheus Amaral*', ficha: 'que realiza atendimentos com foco em cuidado clínico capilar individualizado, prezando por um acompanhamento detalhado, humanizado e personalizado para cada paciente' },
+  '4': { nome: 'a *Dra. Jaqueline Augusto*', ficha: 'que realiza atendimentos com foco em saúde capilar e cuidado individualizado, oferecendo uma escuta atenciosa e personalizada para cada paciente' },
 }
 
 /**
@@ -638,7 +677,7 @@ Para começarmos, por favor escolha uma das opções abaixo:
  * consultora humana). `includeIntro` = a escolha veio já na 1ª mensagem (o menu nunca chegou a ser mostrado)
  * → apresenta a Sofia antes, como no Passo 1.
  */
-function buildTriageOptionAckMessage(
+export function buildTriageOptionAckMessage(
   name: string,
   option: TriageOption,
   includeIntro: boolean,
@@ -649,17 +688,18 @@ function buildTriageOptionAckMessage(
   const intro = includeIntro
     ? `Olá${vocative}! 😊\nSeja muito bem-vindo(a) ao Instituto Lorena Visentainer.\nEu sou a *Sofia*, assistente do Instituto. ✨\n\n`
     : ''
+  // Até 03/09/2026 este eco listava os três médicos e terminava com "Com qual profissional
+  // você gostaria de realizar sua consulta?" — a pergunta que o script PROÍBE desde 31/08
+  // (Passo 2: a Sofia direciona, nunca pergunta; ver [[crm_sofia_direciona_medico]]). A regra
+  // tinha sido corrigida no prompt do banco e sobrevivido aqui, no caminho determinístico, que
+  // é justamente o que todo paciente que digita "1" recebe. Direciona pela opção e fecha com
+  // as duas perguntas da Aline, porque chegar aqui significa que ele ainda não as respondeu.
+  const doc = DOCTOR_BY_OPTION[option]
   return `${intro}Perfeito${vocative}! Anotei aqui o seu interesse em *${service}*. 💚
 
-Temos uma equipe médica especializada pronta para cuidar do seu caso com excelência e atenção individualizada.
+Já deixo seu atendimento encaminhado com ${doc.nome}, ${doc.ficha}.
 
-Atualmente, você pode agendar seu atendimento com um dos profissionais abaixo:
-
-👩‍⚕️ Dra. Lorena Visentainer
-👨‍⚕️ Dr. Matheus Amaral
-👩‍⚕️ Dra. Jaqueline Augusto
-
-Com qual profissional você gostaria de realizar sua consulta?`
+Só pra já deixar tudo certinho com a nossa consultora Aline: você é de Maringá, de Londrina ou de outra cidade? E tá pensando em fazer nos próximos meses, ou ainda tá pesquisando? 😊`
 }
 
 export function nowIso(): string {
@@ -1298,7 +1338,8 @@ export async function runWhatsappAiAutoReply(
         // (Passo 2 do script: escolha do médico), a menos que o médico já tenha vindo na mesma
         // mensagem — aí a IA fecha a triagem com o contexto completo (opção + médico).
         const option = resolveTriageOption(normalized)
-        if (option && !mentionsDoctorPreference(normalized)) {
+        // Respondeu cidade/prazo junto com a opção? O eco repetiria a pergunta; a IA fecha.
+        if (option && !mentionsDoctorPreference(normalized) && !answersQualification(normalized)) {
           const { data: ackState } = await admin
             .from('crm_conversation_states')
             .select('last_ai_reply_at')
@@ -1717,7 +1758,8 @@ export async function runManychatAiAutoReply(
         // re-apresentava o menu inteiro (mensagem duplicada). Confirma o serviço + faz o Passo 2
         // (escolha do médico); se o médico já veio junto com a opção, deixa a IA fechar a triagem.
         const option = resolveTriageOption(normalized)
-        if (option && !mentionsDoctorPreference(normalized)) {
+        // Respondeu cidade/prazo junto com a opção? O eco repetiria a pergunta; a IA fecha.
+        if (option && !mentionsDoctorPreference(normalized) && !answersQualification(normalized)) {
           const { data: ackState } = await admin
             .from('crm_conversation_states')
             .select('last_ai_reply_at')

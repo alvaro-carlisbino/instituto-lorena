@@ -54,3 +54,27 @@ Deno.test('sem qualificação nenhuma, o padrão continua morno', () => {
   assertEquals(SEM_QUALIFICACAO.temperatura, 'warm')
   assertEquals(SEM_QUALIFICACAO.score, 50)
 })
+
+// 03/09/2026: a pergunta passou a ser feita na saudação e a resposta mais comum
+// é só a cidade. Sem prazo não há nota, mas a cidade não pode se perder.
+import { qualificarParcial, resumoParcial } from './qualificacaoLead.ts'
+
+Deno.test('só a cidade grava a cidade e avisa fora da praça, sem inventar nota', () => {
+  const p = qualificarParcial({ cidade: 'outro_estado' })!
+  assertEquals(p.foraDePraca, true)
+  const r = resumoParcial(p)
+  assertStringIncludes(r, 'outro estado')
+  assertStringIncludes(r, 'prazo não informado')
+  assertStringIncludes(r, 'fora da praça')
+})
+
+Deno.test('só a cidade, de Maringá, não é fora da praça', () => {
+  const p = qualificarParcial({ cidade: 'maringa' })!
+  assertEquals(p.foraDePraca, false)
+  assertStringIncludes(resumoParcial(p), 'Maringá')
+})
+
+Deno.test('cidade fora da lista não vira qualificação parcial', () => {
+  assertEquals(qualificarParcial({ cidade: 'sao_paulo' }), null)
+  assertEquals(qualificarParcial({}), null)
+})

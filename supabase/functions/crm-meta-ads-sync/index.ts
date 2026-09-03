@@ -1425,6 +1425,149 @@ async function trocarPublico(
   }
 }
 
+/**
+ * prefill — a frase com que a conversa de Clique-para-WhatsApp ABRE.
+ *
+ * Anúncio de WhatsApp não usa o `text=` do link (conferido em 31/08/2026); usa o
+ * autopreenchimento em `page_welcome_message.text_format.message.autofill_message`.
+ * Sem esse campo a Meta manda o padrão dela, "Olá! Posso ter mais informações
+ * sobre isso?", e com o campo mas sem editar, "Olá! Vi um anúncio e gostaria de
+ * saber mais...".
+ *
+ * Por que isso vale dinheiro (medido em 03/09/2026, 30 dias da clínica): 155
+ * conversas abriram com uma dessas duas frases e 1 virou consulta (0,6%);
+ * quem escreveu com as próprias palavras converteu 11%. A frase padrão não
+ * pede nada de quem clica, então qualquer curioso vira "conversa iniciada" e a
+ * conta otimiza para achar mais curiosos. Uma frase própria (tema do vídeo +
+ * "consulta em Maringá ou Londrina") filtra antes do clique e vira o carimbo de
+ * atribuição de [[crm_ctwa_frase_de_abertura_vira_carimbo]].
+ *
+ * Criativo em uso é imutável: o conserto é criar OUTRO criativo com o mesmo
+ * `object_story_spec` mais o autofill, e trocar o criativo de cada anúncio que
+ * usa o antigo. A troca reinicia o aprendizado do anúncio; foi aceito porque a
+ * estrutura tinha 9 dias e entregava 1 consulta a cada R$ 2.100.
+ *
+ * `dry: true` (padrão) só lê e devolve o autofill atual de cada anúncio ativo.
+ * `frases` é `{ criativo_id_antigo: 'frase nova' }`; criativo sem frase fica como está.
+ */
+async function trocarAutopreenchimento(
+  token: string,
+  opts: { frases: Record<string, string>; dry: boolean },
+) {
+  const conta = Deno.env.get('META_ADS_ACCOUNT_ID') ?? 'act_1279722182785466'
+  const qs = new URLSearchParams({
+    fields: 'id,name,effective_status,adset{name},creative{id,name,object_story_spec,degrees_of_freedom_spec,url_tags}',
+    effective_status: JSON.stringify(['ACTIVE', 'PENDING_REVIEW', 'IN_PROCESS']),
+    limit: '200',
+    access_token: token,
+  })
+  const res = await fetch(`${GRAPH}/${conta}/ads?${qs}`)
+  const body = await res.json() as Record<string, unknown>
+  if (!res.ok) return { ok: false, passo: 'listar', erro: body }
+
+  type Spec = Record<string, unknown>
+  const lerAutofill = (media: Spec | undefined): string | null => {
+    const raw = media?.page_welcome_message
+    if (!raw) return null
+    try {
+      const j = typeof raw === 'string' ? JSON.parse(raw) as Spec : raw as Spec
+      const tf = (j.text_format ?? {}) as Spec
+      const msg = (tf.message ?? {}) as Spec
+      const af = (msg.autofill_message ?? {}) as Spec
+      return String(af.content ?? '') || null
+    } catch {
+      return '(page_welcome_message ilegível)'
+    }
+  }
+
+  const anuncios = ((body.data ?? []) as Array<Spec>).map((a) => {
+    const cr = (a.creative ?? {}) as Spec
+    const oss = (cr.object_story_spec ?? {}) as Record<string, Spec>
+    const media = oss.video_data ?? oss.link_data
+    const cta = (media?.call_to_action ?? {}) as Record<string, Spec>
+    const ctwa = String(cta.type ?? '') === 'WHATSAPP_MESSAGE' || String(cta.value?.app_destination ?? '') === 'WHATSAPP'
+    return {
+      ad_id: String(a.id ?? ''),
+      nome: String(a.name ?? ''),
+      status: String(a.effective_status ?? ''),
+      conjunto: String((a.adset as Spec | undefined)?.name ?? ''),
+      criativo_id: String(cr.id ?? ''),
+      criativo_nome: String(cr.name ?? ''),
+      ctwa,
+      video_id: String(media?.video_id ?? ''),
+      autofill_atual: ctwa ? (lerAutofill(media) ?? 'PADRÃO DA META (sem page_welcome_message)') : null,
+      frase_nova: opts.frases[String(cr.id ?? '')] ?? null,
+      _creative: cr,
+    }
+  }).filter((a) => a.ctwa)
+
+  if (opts.dry) {
+    return { ok: true, dry: true, total: anuncios.length, anuncios: anuncios.map(({ _creative: _c, ...resto }) => resto) }
+  }
+
+  // Um criativo novo por criativo antigo (não por anúncio): o mesmo vídeo roda em
+  // até 4 conjuntos, e cada anúncio recebe o mesmo criativo novo.
+  const novos: Record<string, string> = {}
+  const resultado: Array<Record<string, unknown>> = []
+  for (const a of anuncios) {
+    const frase = opts.frases[a.criativo_id]
+    if (!frase) { resultado.push({ ad_id: a.ad_id, nome: a.nome, pulado: 'sem frase' }); continue }
+
+    if (!novos[a.criativo_id]) {
+      const cr = a._creative
+      const oss = JSON.parse(JSON.stringify(cr.object_story_spec ?? {})) as Record<string, Spec>
+      const chave = oss.video_data ? 'video_data' : 'link_data'
+      const media = { ...(oss[chave] ?? {}) }
+      // `image_url` volta na leitura mas não entra na criação: quem identifica a capa é o hash.
+      delete media.image_url
+      media.page_welcome_message = JSON.stringify({
+        type: 'VISUAL_EDITOR',
+        version: 2,
+        landing_screen_type: 'welcome_message',
+        media_type: 'text',
+        text_format: {
+          customer_action_type: 'autofill_message',
+          message: { autofill_message: { content: frase }, text: '🟢Online' },
+        },
+      })
+      oss[chave] = media
+      const payload: Spec = {
+        name: `${String(cr.name ?? a.nome)} · prefill`,
+        object_story_spec: oss,
+        access_token: token,
+      }
+      // Advantage+ Creative com OPT_OUT em tudo: criativo novo sem isso nasce diferente dos irmãos.
+      if (cr.degrees_of_freedom_spec) payload.degrees_of_freedom_spec = cr.degrees_of_freedom_spec
+      if (cr.url_tags) payload.url_tags = cr.url_tags
+      const r = await fetch(`${GRAPH}/${conta}/adcreatives`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const rb = await r.json() as Spec
+      if (!r.ok) { resultado.push({ ad_id: a.ad_id, nome: a.nome, passo: 'criar_criativo', erro: rb }); continue }
+      novos[a.criativo_id] = String(rb.id ?? '')
+    }
+
+    const troca = await fetch(`${GRAPH}/${a.ad_id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ creative: { creative_id: novos[a.criativo_id] }, access_token: token }),
+    })
+    const tb = await troca.json() as Spec
+    resultado.push({
+      ad_id: a.ad_id,
+      nome: a.nome,
+      criativo_antigo: a.criativo_id,
+      criativo_novo: novos[a.criativo_id],
+      frase,
+      ok: troca.ok,
+      ...(troca.ok ? {} : { passo: 'trocar_criativo', erro: tb }),
+    })
+  }
+  return { ok: resultado.every((r) => r.ok !== false), criativos_novos: novos, anuncios: resultado }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -1517,7 +1660,14 @@ Deno.serve(async (req) => {
         mensagem: String(c.mensagem ?? ''),
       }))
     }
-    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'extrato', 'entrega', 'geo', 'cercar', 'atribuir', 'reamarrar_form'] }, 400)
+    if (action === 'prefill') {
+      const c = corpo as Record<string, unknown>
+      return json(await trocarAutopreenchimento(token, {
+        frases: (c.frases ?? {}) as Record<string, string>,
+        dry: c.dry !== false,
+      }))
+    }
+    return json({ error: 'action_invalida', aceitas: ['capi', 'audience', 'insights', 'anuncios', 'extrato', 'entrega', 'geo', 'cercar', 'atribuir', 'reamarrar_form', 'prefill'] }, 400)
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500)
   }

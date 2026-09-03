@@ -8,7 +8,7 @@ import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, RED
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForOrder, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
-import { qualificar, resumoQualificacao } from './qualificacaoLead.ts'
+import { qualificar, qualificarParcial, resumoParcial, resumoQualificacao } from './qualificacaoLead.ts'
 
 /**
  * Recado ao cliente quando ALGUM item do carrinho não entrou — vale pro Pix e pro cartão.
@@ -708,10 +708,48 @@ export async function executeCrmAiOpsFromModel(
           avaliacao: String(op.avaliacao ?? '').trim().toLowerCase(),
         })
         if (!q) {
-          // Prazo fora da lista é resposta que a IA não conseguiu classificar.
-          // Não inventamos nota: o lead segue como está e a equipe não recebe
-          // um número que ninguém sabe de onde veio.
-          results.push({ type, ok: false, detail: 'prazo_invalido' })
+          // Sem prazo não há nota (a régua é do prazo), mas a CIDADE sozinha
+          // vale: desde 03/09/2026 a pergunta é feita na saudação e a resposta
+          // mais comum é só "sou de Curitiba". Descartar isso deixava a Aline
+          // abrir o card sem saber que a pessoa é de fora — a informação que
+          // ela mais pediu. Grava a cidade e a nota; score fica como está.
+          const parcial = qualificarParcial({
+            cidade: String(op.cidade ?? '').trim().toLowerCase(),
+            avaliacao: String(op.avaliacao ?? '').trim().toLowerCase(),
+          })
+          if (!parcial) {
+            // Nem prazo nem cidade reconhecíveis: resposta que a IA não
+            // conseguiu classificar. Não inventamos nota.
+            results.push({ type, ok: false, detail: 'prazo_invalido' })
+            continue
+          }
+          const resumoP = resumoParcial(parcial)
+          const { error: errP } = await admin
+            .from('leads')
+            .update({
+              custom_fields: {
+                ...((leadRow as { custom_fields?: Record<string, unknown> }).custom_fields ?? {}),
+                qualificacao_conversa: { ...parcial, prazo: null, parcial: true, em: new Date().toISOString() },
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', opts.allowedLeadId)
+          if (errP) {
+            results.push({ type, ok: false, detail: errP.message.slice(0, 200) })
+            continue
+          }
+          if (opts.logToInteractions) {
+            await insertInteraction(admin, {
+              leadId: opts.allowedLeadId,
+              patientName,
+              channel: 'system',
+              direction: 'in',
+              author: 'Sofia (IA)',
+              content: `Qualificação na conversa — ${resumoP}`,
+            })
+          }
+          results.push({ type, ok: true, detail: resumoP })
+          summaries.push(`Qualificação: ${resumoP}`)
           continue
         }
         const resumo = resumoQualificacao(q)

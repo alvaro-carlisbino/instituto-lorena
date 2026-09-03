@@ -71,6 +71,44 @@ export function qualificar(respostas: Record<string, string>): Qualificacao | nu
 }
 
 /**
+ * Metade da resposta: o paciente disse a CIDADE e não disse o prazo.
+ *
+ * Existe porque a pergunta passou a ser feita na saudação (03/09/2026) e a
+ * resposta mais comum a "cidade e prazo?" é só a cidade. Antes, sem prazo, o
+ * op era descartado inteiro ('prazo_invalido') e a Aline abria o card sem saber
+ * que a pessoa era de outro estado — que é exatamente a informação que ela
+ * pediu ([[crm_qualificacao_na_conversa]]).
+ *
+ * Não pontua: a régua de score é do PRAZO e continua a mesma. Só grava a cidade
+ * e avisa quando é fora da praça. Quando o prazo chegar, `qualificar()` sobrescreve.
+ */
+export type QualificacaoParcial = {
+  cidade: string
+  avaliacao: string
+  foraDePraca: boolean
+}
+
+export function qualificarParcial(respostas: Record<string, string>): QualificacaoParcial | null {
+  const cidade = String(respostas.cidade ?? '')
+  const avaliacao = String(respostas.avaliacao ?? '')
+  if (!CIDADES.includes(cidade)) return null
+  return { cidade, avaliacao, foraDePraca: cidade === 'outro_estado' && avaliacao !== 'online' }
+}
+
+export function resumoParcial(p: QualificacaoParcial): string {
+  const alerta = p.foraDePraca ? ' ⚠️ fora da praça e não pediu online' : ''
+  const online = p.avaliacao === 'online' ? ' · aceita online' : ''
+  return `${CIDADE_TXT[p.cidade] ?? p.cidade} · prazo não informado${online}${alerta}`
+}
+
+const CIDADE_TXT: Record<string, string> = {
+  maringa: 'Maringá',
+  londrina: 'Londrina',
+  outra_pr: 'outra cidade do PR',
+  outro_estado: 'outro estado',
+}
+
+/**
  * Uma linha curta para a Aline ler no card sem abrir a conversa inteira. É esse
  * o ponto de qualificar: a resposta vira DADO, não fica enterrada no histórico.
  */
