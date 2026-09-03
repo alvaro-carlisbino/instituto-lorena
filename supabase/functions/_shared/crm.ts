@@ -112,13 +112,13 @@ export async function findLeadByPhone(admin: SupabaseClient, phone: string): Pro
   if (variants.length) {
     const { data } = await admin
       .from('leads')
-      .select('id')
+      .select('id, phone, created_at')
       .in('phone', variants)
       .is('deleted_at', null)
       .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle()
-    if (data?.id) return String(data.id)
+      .limit(20)
+    const id = escolheLeadPeloFone(data, phone)
+    if (id) return id
   }
   // 2) Fallback (compat): RPC + eq exato.
   const { data: fromRpc, error: findError } = await admin.rpc('find_lead_id_by_phone_digits', { p_digits: phone })
@@ -143,6 +143,38 @@ export function isPlaceholderName(name: string): boolean {
   )
 }
 
+/** Só as formas ±55 do MESMO número (sem o palpite do 9º dígito). */
+function brPhoneDdiVariants(raw: string): string[] {
+  const d = digitsOnly(raw)
+  if (!d) return []
+  const core = d.length >= 12 && d.startsWith('55') ? d.slice(2) : d
+  return [...new Set([core, '55' + core])].filter((x) => x.length >= 10)
+}
+
+/**
+ * Entre os leads que casaram por variante, escolhe o dono da conversa.
+ *
+ * ±55 é o MESMO número escrito de dois jeitos; ±9º dígito é palpite (ver
+ * crm_identidade_telefone_nono_digito). Antes, o critério era só "o mais antigo", e o palpite
+ * ganhava do exato: em 31/08/2026 a Daniele comprou no site (lead da loja, 5543996827443, na
+ * linha Tricopill) e a mensagem dela na MESMA linha caiu no lead da clínica de julho
+ * (554396827443, sem o 9) — a IA da loja atendeu sem ver as cobranças pendentes e disse que o
+ * pedido estava pago. Agora o número exato (±55) vence; só entre iguais vale o mais antigo.
+ */
+export function escolheLeadPeloFone(
+  rows: Array<{ id: unknown; phone?: unknown; created_at?: unknown }> | null | undefined,
+  phone: string,
+): string | null {
+  const exatos = new Set(brPhoneDdiVariants(phone))
+  const ordenados = [...(rows ?? [])].sort((a, b) => {
+    const ea = exatos.has(digitsOnly(String(a.phone ?? ''))) ? 0 : 1
+    const eb = exatos.has(digitsOnly(String(b.phone ?? ''))) ? 0 : 1
+    if (ea !== eb) return ea - eb
+    return String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''))
+  })
+  return ordenados[0]?.id ? String(ordenados[0].id) : null
+}
+
 async function findLeadIdByPhoneAndInstance(
   admin: SupabaseClient,
   phone: string,
@@ -153,25 +185,25 @@ async function findLeadIdByPhoneAndInstance(
   if (instanceId) {
     const { data: byBoth } = await admin
       .from('leads')
-      .select('id')
+      .select('id, phone, created_at')
       .in('phone', inList)
       .eq('whatsapp_instance_id', instanceId)
       .is('deleted_at', null)
       .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle()
-    if (byBoth?.id) return String(byBoth.id)
+      .limit(20)
+    const idBoth = escolheLeadPeloFone(byBoth, phone)
+    if (idBoth) return idBoth
     // Lead do site: criado sem linha (whatsapp_instance_id null) — casa pela variante do fone.
     const { data: byPhoneNull } = await admin
       .from('leads')
-      .select('id')
+      .select('id, phone, created_at')
       .in('phone', inList)
       .is('whatsapp_instance_id', null)
       .is('deleted_at', null)
       .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle()
-    if (byPhoneNull?.id) return String(byPhoneNull.id)
+      .limit(20)
+    const idNull = escolheLeadPeloFone(byPhoneNull, phone)
+    if (idNull) return idNull
     return null
   }
   return findLeadByPhone(admin, phone)

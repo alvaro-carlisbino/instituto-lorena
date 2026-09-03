@@ -30,6 +30,41 @@ import {
   type ListedLeadRow,
 } from '../_shared/crmAiOpsExecutor.ts'
 import { resolveConversationTenantId } from '../_shared/crm.ts'
+
+/** Só as formas ±55 do MESMO número. O ±9º dígito junta gente diferente e aqui a resposta vira "você já pagou". */
+function fonesIdentidade(raw: string): string[] {
+  const d = String(raw ?? '').replace(/\D/g, '')
+  if (!d) return []
+  const core = d.length >= 12 && d.startsWith('55') ? d.slice(2) : d
+  return [...new Set([core, '55' + core])].filter((x) => x.length >= 10)
+}
+
+/**
+ * Existe cobrança PAGA (Rede, Asaas ou PagBank) nos últimos 60 dias deste lead ou do mesmo
+ * telefone? É a prova que a regra "STATUS DE PAGAMENTO" do prompt exige e que
+ * `endereco_entrega_pendente` passou a depender. Erro de consulta conta como NÃO pago: a IA
+ * prefere pedir o pagamento de novo a afirmar um que não existe.
+ */
+async function temPagamentoPagoRecente(
+  client: SupabaseClient,
+  leadId: string,
+  phone: string,
+  warnings: string[],
+): Promise<boolean> {
+  const desde = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString()
+  const fones = fonesIdentidade(phone)
+  const filtro = fones.length ? `lead_id.eq.${leadId},phone.in.(${fones.join(',')})` : `lead_id.eq.${leadId}`
+  const tabelas = ['rede_payments', 'asaas_payments', 'pagbank_checkouts'] as const
+  const res = await Promise.all(
+    tabelas.map((t) => client.from(t).select('paid_at').eq('status', 'paid').gte('paid_at', desde).or(filtro).limit(1)),
+  )
+  let achou = false
+  res.forEach((r, i) => {
+    if (r.error) warnings.push(`${tabelas[i]}_pago: ${r.error.message}`)
+    else if ((r.data ?? []).length) achou = true
+  })
+  return achou
+}
 import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
@@ -492,13 +527,26 @@ async function buildCrmSnapshot(
         happened_at: row.happened_at,
         content: trunc(String(row.content ?? ''), 420),
       }))
+      const pagamentoPagoRecente = await temPagamentoPagoRecente(
+        userClient,
+        String(d.id ?? ctx.leadId),
+        String(d.phone ?? ''),
+        queryWarnings,
+      )
       leadFocus = {
         ...d,
         summary: trunc(String(d.summary ?? ''), 500),
         custom_fields: cf,
         // Pedido já comprado mas SEM endereço de envio (CEP+número). A IA usa isto para
         // cobrar o endereço com prioridade quando o cliente volta a falar.
+        //
+        // "Já comprado" tem que ser PROVADO: sem cobrança paga, a flag fica desligada. Antes ela
+        // olhava só o endereço, e um endereço antigo sem CEP bastava para a IA abrir com "vi aqui
+        // que seu pedido já está pago" para quem nunca pagou (caso Daniele 31/08/2026; em 03/09
+        // havia 60 leads nesse estado, 55 sem nenhum pagamento).
+        pagamento_pago_recente: pagamentoPagoRecente,
         endereco_entrega_pendente: ((): boolean => {
+          if (!pagamentoPagoRecente) return false
           const ent = (d.custom_fields as Record<string, unknown> | null)?.entrega as Record<string, unknown> | undefined
           if (!ent || typeof ent !== 'object') return false
           if (String(ent.delivery_mode ?? '').trim() === 'retirada_clinica') return false
