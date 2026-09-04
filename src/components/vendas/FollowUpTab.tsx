@@ -51,6 +51,7 @@ import {
   FUNIL_CIRURGICO,
   FUNIL_PROTOCOLOS,
   KANBAN_COLUNAS,
+  ORIGEM_LANDING,
   type FollowupDispensado,
   type KanbanCard,
   type KanbanColuna,
@@ -149,8 +150,9 @@ export function FollowUpTab() {
   /** Salvou a venda: fechar o formulário não deve reabrir o registro do contato. */
   const vendaSalva = useRef(false)
   // A fila da Aline é transplante; a da Ingrid é protocolo. Sem separar, cada uma
-  // trabalhava no meio dos pacientes da outra.
-  const [funil, setFunil] = useState<'cirurgia' | 'protocolo' | 'todos'>('cirurgia')
+  // trabalhava no meio dos pacientes da outra. "Landing" é a terceira fila, e não é de
+  // nenhuma das duas: é lead cru de anúncio que a rotina de retomada põe aqui.
+  const [funil, setFunil] = useState<'cirurgia' | 'protocolo' | 'landing' | 'todos'>('cirurgia')
   const [movendo, setMovendo] = useState<string | null>(null)
   /** Quem saiu do quadro: continua no histórico, e o diálogo devolve qualquer um. */
   const [dispensados, setDispensados] = useState<FollowupDispensado[]>([])
@@ -207,16 +209,24 @@ export function FollowUpTab() {
     //
     // Filtrar é escolher qual fila mostrar primeiro, nunca esconder card com
     // contato marcado.
+    //
+    // A tarefa da landing é a exceção, e ela não contradiz o parágrafo acima: ali o card
+    // some por ERRO de filtro; aqui ele tem fila com nome, contador na aba e continua em
+    // "Todos". O que a separa não é o funil (adivinhar por funil foi o erro de 19/ago), é
+    // o carimbo de quem abriu a tarefa.
     const doFunil =
       funil === 'todos'
         ? cards
-        : // Paciente que ainda não foi triado (funil da recepção) — e qualquer um
-          // em funil que esta tela não conhece — aparece nas duas filas de
-          // propósito: se só aparecesse em "todos", ninguém o veria.
-          cards.filter((c) => {
-            const fila = filaDoFunil(c.pipelineId)
-            return fila === 'ambas' || fila === funil
-          })
+        : funil === 'landing'
+          ? cards.filter((c) => c.origin === ORIGEM_LANDING)
+          : // Paciente que ainda não foi triado (funil da recepção) — e qualquer um
+            // em funil que esta tela não conhece — aparece nas duas filas de
+            // propósito: se só aparecesse em "todos", ninguém o veria.
+            cards.filter((c) => {
+              if (c.origin === ORIGEM_LANDING) return false
+              const fila = filaDoFunil(c.pipelineId)
+              return fila === 'ambas' || fila === funil
+            })
 
     // A fila do dia: só quem já venceu ou vence hoje. É o corte que transforma
     // "todo mundo que existe" na lista do que ela precisa fazer agora.
@@ -239,6 +249,17 @@ export function FollowUpTab() {
     }
     return mapa
   }, [visiveis])
+
+  /**
+   * Quanta gente está esperando na fila da landing.
+   *
+   * Vai no rótulo da aba porque fila em aba fechada é fila que ninguém trabalha — e essa
+   * aqui tem prazo: se ninguém encostar em 24h, quem fala é a Sofia, não a casa.
+   */
+  const naFilaDaLanding = useMemo(
+    () => cards.filter((c) => c.origin === ORIGEM_LANDING && ABERTAS.includes(c.coluna)).length,
+    [cards],
+  )
 
   const atrasados = useMemo(
     () => visiveis.filter((c) => ABERTAS.includes(c.coluna) && c.diasAtraso > 0).length,
@@ -471,6 +492,17 @@ export function FollowUpTab() {
                 `${c.cirurgiaEm.slice(0, 10) < hojeIso() ? 'operou em' : 'cirurgia em'} ${dia(c.cirurgiaEm)}`
               : (c.outcome ?? 'sem desfecho registrado')}
         </p>
+        {/* Em "Todos" as três filas se misturam de novo. Sem o selo, lead que nunca
+            consultou parece paciente esperando retorno. */}
+        {c.origin === ORIGEM_LANDING && (
+          <Badge
+            variant="outline"
+            className="mt-1 text-[10px] font-normal"
+            title="Lead da landing /consulta que parou de responder. Não é paciente: não consultou, não tem agendamento nem venda."
+          >
+            landing · ainda não consultou
+          </Badge>
+        )}
         {funilDeOutroPolo(c) && (
           <Badge
             variant="outline"
@@ -557,9 +589,16 @@ export function FollowUpTab() {
         <div className="flex gap-1">
           {(
             [
-              { id: 'cirurgia', label: 'Transplante' },
-              { id: 'protocolo', label: 'Protocolos e spa' },
-              { id: 'todos', label: 'Todos' },
+              { id: 'cirurgia', label: 'Transplante', dica: 'Paciente de transplante' },
+              { id: 'protocolo', label: 'Protocolos e spa', dica: 'Paciente de protocolo e spa' },
+              {
+                id: 'landing',
+                label: naFilaDaLanding > 0 ? `Landing /consulta (${naFilaDaLanding})` : 'Landing /consulta',
+                dica:
+                  'Lead que pediu consulta pela landing e parou de responder. Ainda não consultou: ' +
+                  'a tarefa é da recepção, não da fila de paciente. Sem contato em 24h, a Sofia manda a retomada.',
+              },
+              { id: 'todos', label: 'Todos', dica: 'As três filas juntas' },
             ] as const
           ).map((op) => (
             <Button
@@ -567,6 +606,7 @@ export function FollowUpTab() {
               size="sm"
               variant={funil === op.id ? 'default' : 'outline'}
               onClick={() => setFunil(op.id)}
+              title={op.dica}
             >
               {op.label}
             </Button>

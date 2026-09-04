@@ -41,6 +41,18 @@ function json(body: Record<string, unknown>, status = 200): Response {
  * consultora, e esta rotina não abre exceção a essa regra.
  */
 
+/**
+ * Carimbo de quem abriu a tarefa (`lead_followups.origin`).
+ *
+ * `lead_followups` é a mesma tabela do quadro de follow-up da Central de Vendas — a fila da
+ * Aline, de paciente que consultou e tem proposta viva. Sem este carimbo, o lead cru da
+ * landing entrava lá no meio (6 cards em 04/set), e o único jeito de ela limpar a tela era
+ * DISPENSAR o card — que é justamente o que esta rotina lê como "ordem humana de encerrar".
+ * Nove leads perderam a retomada da Sofia assim. Com o carimbo, a tela separa as duas filas
+ * e a dispensa volta a significar só o que diz.
+ */
+const ORIGIN = 'landing_retomada'
+
 /** Dias, a partir do vencimento da tarefa, até a tarefa seguinte. Uma cobrança por degrau. */
 const CADENCIA_DIAS = [2, 4]
 
@@ -155,6 +167,7 @@ async function fecharEAbrirProxima(
     channel: 'WhatsApp',
     owner_id: lead.owner_id,
     note: notaDaTarefa(lead, tarefa.attempt_no + 1),
+    origin: ORIGIN,
   })
 }
 
@@ -252,6 +265,7 @@ Deno.serve(async (req) => {
         channel: 'WhatsApp',
         owner_id: lead.owner_id,
         note: notaDaTarefa(lead, tentativasFeitas + 1),
+        origin: ORIGIN,
       })
       if (insErr) {
         console.warn(`retomada: tarefa não abriu lead=${lead.lead_id}:`, insErr.message)

@@ -149,7 +149,22 @@ export type KanbanCard = {
   cirurgiaEm: string | null
   /** Em qual funil o paciente está: é o que separa a fila da Aline da da Ingrid. */
   pipelineId: string | null
+  /** Quem abriu a tarefa. É o que separa fila de PACIENTE de fila de LEAD. */
+  origin: FollowupOrigin
 }
+
+/**
+ * De quem é a fila.
+ *
+ * `clinica` é o follow-up de sempre: a Aline ou a Ingrid marcaram contato com quem
+ * consultou. `landing_retomada` é a tarefa que o cron `crm-landing-retomada` abre para
+ * lead cru da landing /consulta que parou de responder — mesma tabela, outro trabalho,
+ * outra pessoa. Até 04/set as duas caíam no mesmo quadro: seis leads de anúncio sem
+ * consulta, sem agendamento e sem venda no meio da fila de paciente com proposta viva.
+ */
+export type FollowupOrigin = 'clinica' | 'landing_retomada'
+
+export const ORIGEM_LANDING: FollowupOrigin = 'landing_retomada'
 
 export async function listFollowupKanban(): Promise<KanbanCard[]> {
   const client = assertClient()
@@ -157,7 +172,7 @@ export async function listFollowupKanban(): Promise<KanbanCard[]> {
     .from('v_followup_kanban')
     .select(
       'followup_id, lead_id, patient_name, phone, attempt_no, scheduled_for, done_at, outcome, note, ' +
-        'coluna, dias_atraso, venda_id, cirurgia_em, pipeline_id',
+        'coluna, dias_atraso, venda_id, cirurgia_em, pipeline_id, origin',
     )
     .order('scheduled_for', { ascending: true })
     .limit(500)
@@ -180,6 +195,9 @@ export async function listFollowupKanban(): Promise<KanbanCard[]> {
       vendaId: str(row.venda_id),
       cirurgiaEm: str(row.cirurgia_em),
       pipelineId: str(row.pipeline_id),
+      // Linha antiga sem carimbo é da clínica: a coluna nasceu com default 'clinica'
+      // e o backfill só marcou o que a rotina da landing escreveu.
+      origin: row.origin === ORIGEM_LANDING ? ORIGEM_LANDING : 'clinica',
     }
   })
 }
