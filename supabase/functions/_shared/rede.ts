@@ -1339,8 +1339,8 @@ const REDE_RETURN_PT: Record<string, string> = {
   '00': 'Pagamento aprovado.',
   '101': 'Seu banco não autorizou a compra (problema no cartão). Use outro cartão ou fale com o banco emissor.',
   '102': 'Seu banco não autorizou a compra. Fale com o banco emissor do cartão ou use outro cartão.',
-  '103': 'Seu banco não autorizou a compra. Use outro cartão ou ligue para o seu banco e peça a liberação — o link continua valendo.',
-  '104': 'Seu banco não autorizou a compra. Use outro cartão ou ligue para o seu banco e peça a liberação — o link continua valendo.',
+  '103': 'Seu banco não autorizou a compra. Use outro cartão ou ligue para o seu banco e peça a liberação. O link continua valendo.',
+  '104': 'Seu banco não autorizou a compra. Use outro cartão ou ligue para o seu banco e peça a liberação. O link continua valendo.',
   '105': 'Cartão com restrição: o banco não autorizou a compra. Use outro cartão ou fale com o banco emissor.',
   '106': 'O banco não conseguiu processar a compra agora. Tente em alguns minutos ou use outro cartão.',
   '107': 'Seu banco não autorizou a compra. Use outro cartão ou ligue para o seu banco e peça a liberação.',
@@ -1377,7 +1377,10 @@ export function redeReturnMessagePt(returnCode: string): string {
   if (code.startsWith('HTTP_')) {
     return 'Não conseguimos falar com a operadora do cartão agora. Tente de novo em alguns minutos.'
   }
-  return `Seu banco não autorizou a compra (código ${code || '—'}). Use outro cartão ou fale com o banco emissor.`
+  // Sem código conhecido, o recado ainda tem que dizer O QUE FAZER. O código entra só quando
+  // existe, e serve de referência para o suporte.
+  const ref = code ? ` (código ${code})` : ''
+  return `Seu banco não autorizou a compra${ref}. Use outro cartão ou fale com o banco emissor.`
 }
 
 /**
