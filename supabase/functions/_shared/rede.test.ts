@@ -1,5 +1,5 @@
 import { assert, assertFalse } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { nomeConfere } from './rede.ts'
+import { nomeConfere, redeReturnMessagePt } from './rede.ts'
 
 /**
  * O que estes testes protegem: o bot não pode cobrar um produto diferente do que prometeu.
@@ -43,4 +43,42 @@ Deno.test('nomeConfere recusa quando não há nome para conferir', () => {
   assertFalse(nomeConfere('', 'DRY CONFORT SHAMPOO -300ml'))
   assertFalse(nomeConfere('   ', 'DRY CONFORT SHAMPOO -300ml'))
   assertFalse(nomeConfere('Gel Maxi Bonder', ''))
+})
+
+/**
+ * O que estes testes protegem: o cliente nunca mais lê "Unauthorized" na tela de pagamento.
+ *
+ * Caso real (Siulvia, 04/09/2026): o banco dela recusou o cartão duas vezes (e.Rede cód 103).
+ * O /pagar mostrava o `returnMessage` cru da e.Rede, em inglês. Ela leu "Unauthorized",
+ * entendeu que o LINK estava quebrado e mandou print — e a IA, lendo o mesmo print, também
+ * concluiu "falha no acesso ao link": pediu desculpa por um erro técnico que não existia e
+ * gerou dois links novos, que caíram na mesma recusa. Recusa de banco tem que se parecer com
+ * recusa de banco, e tem que dizer o que fazer.
+ */
+
+Deno.test('redeReturnMessagePt traduz a recusa do caso Siulvia (103) e manda trocar de cartão', () => {
+  const msg = redeReturnMessagePt('103')
+  assert(msg.includes('banco'))
+  assert(msg.includes('outro cartão'))
+  // Nada de inglês da e.Rede chegando ao cliente.
+  assertFalse(/unauthorized/i.test(msg))
+})
+
+Deno.test('redeReturnMessagePt cobre os códigos que pedem ação DIFERENTE de trocar de cartão', () => {
+  assert(redeReturnMessagePt('119').includes('CVV'))
+  assert(redeReturnMessagePt('112').includes('validade'))
+  assert(redeReturnMessagePt('111').includes('limite'))
+})
+
+Deno.test('redeReturnMessagePt não culpa o banco quando quem falhou foi a operadora', () => {
+  // `http_500` = a e.Rede não respondeu. Mandar a pessoa ligar no banco aqui é passeio à toa.
+  const msg = redeReturnMessagePt('http_500')
+  assertFalse(msg.includes('banco'))
+  assert(msg.includes('operadora'))
+})
+
+Deno.test('redeReturnMessagePt tem saída em português para código desconhecido', () => {
+  const msg = redeReturnMessagePt('999')
+  assert(msg.includes('999'))
+  assert(msg.includes('outro cartão'))
 })

@@ -755,7 +755,15 @@ export type RedeCard = {
   securityCode: string
 }
 
-export type RedePayResult = { status: 'paid' | 'failed'; returnCode: string; message: string; tid: string | null }
+export type RedePayResult = {
+  status: 'paid' | 'failed'
+  returnCode: string
+  /** Recado em PORTUGUÊS, é o que o cliente lê no /pagar. */
+  message: string
+  /** `returnMessage` cru da e.Rede (inglês) — só para log e nota interna. */
+  rawMessage?: string
+  tid: string | null
+}
 
 /**
  * Confirmação de venda ao cliente — sai pela linha do polo da VENDA.
@@ -1311,6 +1319,110 @@ export async function finalizeRedePaid(
   }
 }
 
+/**
+ * e.Rede: `returnCode` → recado em PORTUGUÊS, escrito para o CLIENTE.
+ *
+ * A API responde em INGLÊS ("Unauthorized. Please try again.") e o /pagar jogava esse texto cru
+ * na tela. 04/09/26, Siulvia (lead-81cd90d4-e0a, Kit 3+1 + frete, R$ 641,00 em 3x): o cartão dela
+ * foi recusado duas vezes com 103, ela leu "Unauthorized", entendeu LINK QUEBRADO e mandou print.
+ * A IA leu o MESMO print, também concluiu "falha no acesso ao link", pediu desculpa por um erro
+ * técnico que não existia e gerou DOIS links novos — que caíram na mesma recusa do banco dela.
+ * Uma hora de cliente pagante, e a conversa terminou em "esse medicamento só é vendido por essa
+ * plataforma?". Recusa de emissor tem que chegar como recusa de emissor.
+ *
+ * Fonte: tabela "Card Center Returns" do manual de integração e.Rede v1.17 (jul/2024), mais os
+ * códigos ABECS (N01..N99) do programa de retentativas. Nenhuma mensagem manda "tente de novo"
+ * no MESMO cartão sem antes oferecer outro caminho: retentativa em cartão recusado é justamente
+ * o que a bandeira pune com N02.
+ */
+const REDE_RETURN_PT: Record<string, string> = {
+  '00': 'Pagamento aprovado.',
+  '101': 'Seu banco não autorizou a compra (problema no cartão). Use outro cartão ou fale com o banco emissor.',
+  '102': 'Seu banco não autorizou a compra. Fale com o banco emissor do cartão ou use outro cartão.',
+  '103': 'Seu banco não autorizou a compra. Use outro cartão ou ligue para o seu banco e peça a liberação — o link continua valendo.',
+  '104': 'Seu banco não autorizou a compra. Use outro cartão ou ligue para o seu banco e peça a liberação — o link continua valendo.',
+  '105': 'Cartão com restrição: o banco não autorizou a compra. Use outro cartão ou fale com o banco emissor.',
+  '106': 'O banco não conseguiu processar a compra agora. Tente em alguns minutos ou use outro cartão.',
+  '107': 'Seu banco não autorizou a compra. Use outro cartão ou ligue para o seu banco e peça a liberação.',
+  '108': 'Seu banco não autorizou esse valor neste cartão. Use outro cartão ou fale com o banco emissor.',
+  '109': 'O banco não encontrou este cartão. Confira o número digitado ou use outro cartão.',
+  '110': 'Este cartão não aceita esse tipo de compra. Use outro cartão ou fale com o banco emissor.',
+  '111': 'Saldo ou limite insuficiente para esta compra. Use outro cartão ou fale com o banco emissor.',
+  '112': 'Cartão vencido. Confira a validade ou use outro cartão.',
+  '113': 'O banco bloqueou a compra por segurança. Fale com o banco para liberar e tente de novo.',
+  '114': 'Este cartão não é aceito aqui. Use um cartão Visa, Mastercard, Elo ou Hipercard.',
+  '115': 'Seu cartão passou do limite de compras do período. Use outro cartão ou fale com o banco emissor.',
+  '116': 'Seu banco não autorizou a compra. Fale com o banco emissor do cartão.',
+  '117': 'Cobrança não encontrada. Peça um link novo para a nossa equipe.',
+  '118': 'Cartão bloqueado. Use outro cartão ou fale com o banco emissor.',
+  '119': 'Código de segurança (CVV) inválido. Confira os 3 dígitos do verso do cartão.',
+  '121': 'Não deu para processar a compra agora. Tente de novo em alguns minutos.',
+  '122': 'Esta cobrança já foi enviada. Confira se o pagamento não passou antes de tentar de novo.',
+  '123': 'O banco encerrou as cobranças recorrentes deste cartão. Use outro cartão.',
+  '124': 'A compra não foi autorizada. Use outro cartão ou fale com a nossa equipe.',
+  N01: 'O banco não vai autorizar este cartão. Use outro cartão.',
+  N02: 'Muitas tentativas seguidas neste cartão. Use outro cartão ou tente mais tarde.',
+  N03: 'Confira os dados do cartão (número, validade e CVV) e tente de novo.',
+  N04: 'A compra não foi autorizada. Fale com a nossa equipe.',
+  N99: 'A compra não foi autorizada. Fale com a nossa equipe.',
+}
+
+/** Recado em português para o cliente a partir do `returnCode` da e.Rede. */
+export function redeReturnMessagePt(returnCode: string): string {
+  const code = String(returnCode ?? '').trim().toUpperCase()
+  const pt = REDE_RETURN_PT[code]
+  if (pt) return pt
+  // `http_500`, `http_504`…: quem não respondeu foi a operadora, NÃO o banco do cliente.
+  // Dizer "seu banco recusou" aqui manda a pessoa ligar no banco à toa.
+  if (code.startsWith('HTTP_')) {
+    return 'Não conseguimos falar com a operadora do cartão agora. Tente de novo em alguns minutos.'
+  }
+  return `Seu banco não autorizou a compra (código ${code || '—'}). Use outro cartão ou fale com o banco emissor.`
+}
+
+/**
+ * Recusa de cartão DEIXA RASTRO na conversa. Antes, uma recusa só virava `status='failed'` numa
+ * linha de `rede_payments` que ninguém lê: a equipe não via, e a IA — cujo snapshot só enxerga
+ * cobrança PAGA — respondia "erro técnico no link" e gerava outro link pro mesmo cartão. A nota
+ * entra no `recent_conversation` do snapshot, então a IA passa a ler o motivo real.
+ *
+ * Carimbo segue a VENDA (tenant do pagamento), igual à nota de pagamento confirmado.
+ */
+async function noteRedeDecline(
+  admin: SupabaseClient,
+  intent: RedeIntent,
+  returnCode: string,
+  rawMessage: string,
+): Promise<void> {
+  if (!intent.leadId) return
+  try {
+    const { data } = await admin
+      .from('leads')
+      .select('id, patient_name, tenant_id')
+      .eq('id', intent.leadId)
+      .maybeSingle()
+    const l = data as { id: string; patient_name?: string; tenant_id?: string } | null
+    if (!l) return
+    const saleTenantId = String(intent.kit ? 'tricopill' : (intent.tenantId || l.tenant_id || ''))
+    const valorBrl = (intent.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    const detalhe = rawMessage && rawMessage !== 'ok' ? ` — ${rawMessage.slice(0, 90)}` : ''
+    await insertInteraction(admin, {
+      leadId: l.id,
+      patientName: String(l.patient_name ?? 'Cliente'),
+      channel: 'system',
+      direction: 'system',
+      author: 'Rede',
+      content:
+        `❌ Cartão RECUSADO pelo banco do cliente (Rede, cód ${returnCode}${detalhe}). ${valorBrl}. ` +
+        `O link ${intent.id} continua válido e o sistema está normal: gerar link novo NÃO resolve. ` +
+        `O cliente precisa de OUTRO cartão, ou liberar a compra com o banco dele.`,
+      tenantId: saleTenantId,
+    })
+  } catch {
+    /* best-effort: a nota nunca pode derrubar a resposta do checkout */
+  }
+}
+
 /** Autoriza+captura a cobrança na e.Rede com os dados do cartão. */
 export async function payRedeIntent(
   admin: SupabaseClient,
@@ -1353,9 +1465,12 @@ export async function payRedeIntent(
   }
   const returnCode = String(parsed.returnCode ?? `http_${res.status}`)
   const tid = typeof parsed.tid === 'string' ? parsed.tid : null
-  const message = String(parsed.returnMessage ?? parsed.message ?? (res.ok ? 'ok' : text.slice(0, 160)))
+  const rawMessage = String(parsed.returnMessage ?? parsed.message ?? (res.ok ? 'ok' : text.slice(0, 160)))
   // e.Rede: returnCode "00" = aprovado.
   const approved = returnCode === '00'
+  // O cliente NUNCA lê o inglês da e.Rede: "Unauthorized" foi lido como link quebrado
+  // (pelo cliente E pela IA) no caso Siulvia 04/09/26. Ver REDE_RETURN_PT.
+  const message = approved ? 'Pagamento aprovado.' : redeReturnMessagePt(returnCode)
 
   // `method`/`installments` REAIS: uma cobrança criada como Pix e paga no CARTÃO (o cliente abre
   // o /pagar/<id> e digita o cartão) continuava gravada como 'pix' — só status/tid mudavam. O
@@ -1373,6 +1488,13 @@ export async function payRedeIntent(
     })
     .eq('id', intent.id)
 
+  // Recusa deixa RASTRO na conversa (equipe + IA). Sem isso a recusa morria numa linha de
+  // rede_payments que ninguém lê, e a IA respondia "erro no link" gerando outro link inútil.
+  if (!approved) {
+    console.error('payRedeIntent recusado', { id: intent.id, returnCode, rawMessage: rawMessage.slice(0, 120) })
+    await noteRedeDecline(admin, intent, returnCode, rawMessage)
+  }
+
   // Pagamento aprovado: roda o downstream COMPARTILHADO (cupom, comprovante, lead, Bling, envio).
   if (approved) {
     await finalizeRedePaid(admin, intent, {
@@ -1384,7 +1506,7 @@ export async function payRedeIntent(
     })
   }
 
-  return { status: approved ? 'paid' : 'failed', returnCode, message, tid }
+  return { status: approved ? 'paid' : 'failed', returnCode, message, rawMessage, tid }
 }
 
 // Status do PIX na CONSULTA e.Rede (qrCodeResponse.status). "Pending" = aguardando.

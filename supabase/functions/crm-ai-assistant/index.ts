@@ -40,6 +40,46 @@ function fonesIdentidade(raw: string): string[] {
 }
 
 /**
+ * Última RECUSA de cartão deste lead nas últimas 48h — o outro lado de `temPagamentoPagoRecente`.
+ *
+ * O snapshot só enxergava cobrança PAGA. Recusa era invisível: 04/09/26 a Siulvia levou dois
+ * "Unauthorized" (e.Rede cód 103, recusa do banco DELA) e a IA, sem nenhum dado, deduziu do print
+ * que o LINK estava quebrado — pediu desculpa por um erro técnico inexistente e gerou dois links
+ * novos que caíram na mesma recusa. Com esta flag ela sabe que o sistema está normal e que o
+ * caminho é outro cartão, não outro link.
+ *
+ * Erro de consulta devolve null (a IA segue sem a regra), nunca uma recusa inventada.
+ */
+async function ultimaRecusaDeCartao(
+  client: SupabaseClient,
+  leadId: string,
+  warnings: string[],
+): Promise<{ codigo: string; quando: string; cobranca: string } | null> {
+  const desde = new Date(Date.now() - 48 * 3600 * 1000).toISOString()
+  const { data, error } = await client
+    .from('rede_payments')
+    .select('id, return_code, created_at')
+    .eq('lead_id', leadId)
+    .eq('status', 'failed')
+    .eq('method', 'card')
+    .gte('created_at', desde)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) {
+    warnings.push(`rede_recusa: ${error.message}`)
+    return null
+  }
+  if (!data) return null
+  const r = data as { id?: string; return_code?: string; created_at?: string }
+  return {
+    codigo: String(r.return_code ?? '—'),
+    quando: String(r.created_at ?? ''),
+    cobranca: String(r.id ?? ''),
+  }
+}
+
+/**
  * Existe cobrança PAGA (Rede, Asaas ou PagBank) nos últimos 60 dias deste lead ou do mesmo
  * telefone? É a prova que a regra "STATUS DE PAGAMENTO" do prompt exige e que
  * `endereco_entrega_pendente` passou a depender. Erro de consulta conta como NÃO pago: a IA
@@ -533,6 +573,7 @@ async function buildCrmSnapshot(
         String(d.phone ?? ''),
         queryWarnings,
       )
+      const recusaCartao = await ultimaRecusaDeCartao(userClient, String(d.id ?? ctx.leadId), queryWarnings)
       leadFocus = {
         ...d,
         summary: trunc(String(d.summary ?? ''), 500),
@@ -545,6 +586,8 @@ async function buildCrmSnapshot(
         // que seu pedido já está pago" para quem nunca pagou (caso Daniele 31/08/2026; em 03/09
         // havia 60 leads nesse estado, 55 sem nenhum pagamento).
         pagamento_pago_recente: pagamentoPagoRecente,
+        // Recusa de cartão nas últimas 48h (null = nenhuma). Ver `ultimaRecusaDeCartao`.
+        cartao_recusado_recente: recusaCartao,
         endereco_entrega_pendente: ((): boolean => {
           if (!pagamentoPagoRecente) return false
           const ent = (d.custom_fields as Record<string, unknown> | null)?.entrega as Record<string, unknown> | undefined
@@ -1171,6 +1214,7 @@ Deno.serve(async (req) => {
       'RETIRADA NA CLÍNICA (opção A, Maringá): quando o cliente optar por RETIRAR na clínica, informe o endereço em TERCEIRA PESSOA (impessoal, NÃO "eu te entrego") e passe "delivery_mode":"retirada_clinica" no op. Modelo: "Perfeito! O pedido ficará disponível para retirada na clínica, na *Av. Nóbrega, 814 - Zona 04, Maringá - PR, 87014-180*. Na retirada não há frete". NÃO diga "clínica da Dra. Lorena" / "Dra. Lorena" nesse contexto de retirada — use só "clínica" + endereço. ATENÇÃO: mesmo na retirada a nota fiscal é emitida, então o CADASTRO COMPLETO (nome, CPF, CEP e número do endereço) continua obrigatório.',
       'ENTREGA LOCAL DA EQUIPE (opção B, Maringá e região): para Maringá, Sarandi, Paiçandu ou Marialva, quando o cliente quiser receber em casa pela nossa equipe, passe "delivery_mode":"entrega_local_maringa" no op (EXCLUSIVO dessas 4 cidades — cliente de qualquer outra cidade vai de "envio_externo", SEMPRE). O frete depende da cidade: **Maringá R$ 15**, e **Sarandi/Paiçandu/Marialva R$ 20** — o servidor calcula pelo CEP, então NUNCA diga "R$ 15 para toda a região"; se o cliente é de Sarandi/Paiçandu/Marialva, o valor é R$ 20. Confirme o endereço completo (CEP + número + complemento). Não usa Correios. PRAZO: as entregas da nossa equipe (entrega local/interna) são feitas UMA VEZ POR DIA, no FIM DA TARDE — informe isso ao cliente quando ele perguntar quando/que horas chega (ex.: "Nossa equipe faz as entregas uma vez por dia, no fim da tarde"). Não prometa horário exato nem "hoje mesmo" se o pedido fechar tarde.',
       'FECHAMENTO NO CARTÃO (você gera o link sozinha): quando o cliente decidir comprar no CARTÃO — já escolheu o kit, quer cartão, escolheu a modalidade de entrega E você JÁ coletou o cadastro completo (nome completo + CPF + CEP + número) — gere o link você mesma. ⚠️ Se ainda faltar qualquer um desses dados, NÃO diga que o link está abaixo: peça os dados que faltam PRIMEIRO (o servidor bloqueia o link sem cadastro completo). Na MESMA resposta, DEPOIS da mensagem ao cliente, acrescente exatamente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_link","kit":"3_meses","installments":12,"delivery_mode":"envio_externo","freight_service":"SEDEX","to_cep":"00000000","to_number":"123","to_name":"Nome Completo","to_cpf":"00000000000","coupon":"CODIGO_SE_HOUVER"}]}. O servidor cria o link e o ANEXA sozinho na sua mensagem. PARCELAMENTO: cartão em até *12x* em QUALQUER kit (até *3x SEM juros*; de 4x a 12x COM juros, o cliente paga). Pode mandar "installments":12 no op; o cliente escolhe de 1x até 12x na própria página de pagamento e vê o valor de cada parcela lá. Diga ao cliente que dá pra parcelar em até 12x no cartão. Escreva um lead-in caloroso dizendo que está GERANDO o link agora — NUNCA afirme que ele "já está aqui embaixo / já te mandei" antes da hora (o servidor anexa o link na sequência SÓ se a geração der certo; se você já afirmou que mandou e falha, o cliente fica perdido). Ex.: "Perfeito! Já estou gerando seu link de pagamento no cartão, só um instante". NUNCA escreva uma URL nem invente o link: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o link — CONTINUE atendendo para tirar dúvidas e ajudar a concluir o pagamento.',
+      'CARTÃO RECUSADO PELO BANCO (quando snapshot.leadFocus.cartao_recusado_recente NÃO for null): o cartão do cliente foi RECUSADO pelo BANCO DELE nas últimas 48h. O link está funcionando e o nosso sistema está normal — a recusa veio do emissor do cartão. ⚠️ PROIBIDO dizer que foi "erro no link", "falha técnica", "instabilidade" ou "problema na plataforma", e PROIBIDO gerar um link NOVO do mesmo pedido achando que resolve: o link anterior continua válido e o mesmo cartão vai ser recusado de novo (gerar link atrás de link foi exatamente o erro do caso Siulvia, 04/09/2026). Se o cliente disser que deu erro no pagamento — inclusive mandando print com a palavra "Unauthorized" —, explique com gentileza que o banco dele não autorizou a compra e ofereça, nesta ordem: (1) tentar OUTRO cartão no MESMO link que você já mandou; (2) o Pix, seguindo as regras de Pix deste prompt; (3) ligar para o banco e pedir a liberação da compra. O campo cartao_recusado_recente.codigo é o código técnico da recusa: use para entender, NUNCA cite o número para o cliente. Se ele insistir, ficar desconfiado ou não puder pagar de outra forma, finalize com [PRONTO_PARA_CONSULTOR].',
       'KIT no op: passe "kit" com a chave — "1_mes", "3_meses" ou "5_meses" — quando vender um kit. O servidor aplica o PREÇO do kit sozinho; você NÃO calcula nem manda o valor — só o frete (freight_service+to_cep). ⚠️ PROIBIDO vender por valor avulso: NUNCA use "amount_cents"/"description". Avulsos de marca própria: **Shampoo Ozonizado (R$ 130,00)** → "shampoo":N; **Gel BrowSculpt (R$ 129,90)** → "gel_sobrancelha":N. QUALQUER OUTRO PRODUTO DA LOJA você TAMBÉM vende: mande "catalogo":[{"id":"<o campo id do item no bling_catalog>","nome":"<o nome EXATO do mesmo item no bling_catalog>","qty":N}] e o servidor cobra o preço do catálogo (você NUNCA manda preço aqui). O "nome" é OBRIGATÓRIO e serve de conferência: copie id e nome DA MESMA LINHA do bling_catalog, nunca de linhas diferentes. Se o nome não descrever o produto do id, o servidor RECUSA o pedido inteiro e nenhum pagamento é gerado. Kit, avulsos e catálogo podem ir JUNTOS no MESMO op. O servidor cria o pedido no Bling com cada item real, baixando o estoque. Só existe UMA regra de recusa: produto que não está no bling_catalog não está à venda — ofereça o mais próximo que ESTIVER na lista, nunca prometa o que não aparece lá.',
       'PARCELAS: cartão em até **12x** em qualquer kit (inclusive 1 frasco) e em valores avulsos. **1x é à vista sem juros**; de **2x a 12x tem juros** (o cliente paga, calculado pelo servidor). Ofereça PIX (à vista), cartão à vista ou parcelado em até 12x. O link de cartão já sai pronto; o cliente escolhe o nº de parcelas e vê o valor de cada uma na própria página de pagamento. Pode dizer "no cartão dá pra parcelar em até 12x" — não precisa cravar o valor da parcela, o cliente vê na hora.',
       'FRETE NO LINK: PREFIRA o caminho robusto — em vez de "freight_cents", passe SEMPRE "freight_service" com o serviço escolhido ("PAC" ou "SEDEX") + "to_cep" com o CEP do cliente. O servidor recota o frete já com a CAIXA DO KIT que você mandou no op (kit), aplicando o valor certo sozinho — assim o frete cobrado é o do kit certo, nunca o de 1 frasco. Só use "freight_cents" (em CENTAVOS) como último recurso, e nesse caso copie o valor_centavos da LINHA do kit escolhido em snapshot.frete.por_kit — NUNCA invente nem use o de outro kit. CIDADE — NUNCA adivinhe a cidade pelo CEP; se existir snapshot.cep_info, a cidade real é cep_info.localidade/cep_info.uf. O frete em si é grátis na retirada e na clínica (o servidor zera), mas o ENDEREÇO continua obrigatório. ENDEREÇO (OBRIGATÓRIO em TODA venda — inclusive retirada e entrega local — porque a nota fiscal é emitida sempre): inclua no op "to_cep" + "to_number" (NÚMERO da casa/prédio) e, se houver, "to_complement" (apto/bloco/referência). Em ENVIO externo, o número também prepara o envio AUTOMÁTICO no Melhor Envio ao confirmar o pagamento. Se ainda não tiver CEP + número, pergunte antes de fechar.',
