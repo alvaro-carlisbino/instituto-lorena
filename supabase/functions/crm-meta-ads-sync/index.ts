@@ -24,6 +24,16 @@
 
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+/** Leads de um bloco `actions` da Graph. `lead` já é o TOTAL da Meta (formulário +
+ * Messenger + pixel); `leadgen.other` e `offsite_conversion.fb_pixel_lead` são partes dele.
+ * Somar os três dobrava a landing: 34 na tela onde a Graph dizia 17 (04/09/2026). As partes
+ * só entram quando `lead` não vem. */
+function leadsDaMeta(m: Map<string, number>): number {
+  const total = m.get('lead')
+  if (total !== undefined) return total
+  return (m.get('leadgen.other') ?? 0) + (m.get('offsite_conversion.fb_pixel_lead') ?? 0)
+}
+
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-cron-secret',
@@ -277,8 +287,7 @@ async function puxarInsights(admin: SupabaseClient, token: string, dias: number)
       for (const r of j.data ?? []) {
         const acoes = (r.actions ?? []) as Array<{ action_type: string; value: string }>
         const m = new Map(acoes.map((a) => [a.action_type, Number(a.value)]))
-        const leads = (m.get('lead') ?? 0) + (m.get('leadgen.other') ?? 0) +
-          (m.get('offsite_conversion.fb_pixel_lead') ?? 0)
+        const leads = leadsDaMeta(m)
         const conversas = m.get('onsite_conversion.messaging_conversation_started_7d') ?? 0
         const chave = nivel === 'anuncio' ? String(r.ad_id ?? '') : String(r.campaign_id ?? '')
         if (!chave) continue
@@ -690,8 +699,7 @@ async function extratoDaConta(token: string, dias: number) {
       impressoes: Number(r.impressions ?? 0),
       cliques: Number(r.clicks ?? 0),
       alcance: Number(r.reach ?? 0),
-      leads: (m.get('lead') ?? 0) + (m.get('leadgen.other') ?? 0) +
-        (m.get('offsite_conversion.fb_pixel_lead') ?? 0),
+      leads: leadsDaMeta(m),
       conversas: m.get('onsite_conversion.messaging_conversation_started_7d') ?? 0,
     }
   }
@@ -847,8 +855,7 @@ async function entregaPorRegiao(token: string, dias: number) {
       gasto: Number(Number(r.spend ?? 0).toFixed(2)),
       impressoes: Number(r.impressions ?? 0),
       cliques: Number(r.clicks ?? 0),
-      leads: (m.get('lead') ?? 0) + (m.get('leadgen.other') ?? 0) +
-        (m.get('offsite_conversion.fb_pixel_lead') ?? 0),
+      leads: leadsDaMeta(m),
       conversas: m.get('onsite_conversion.messaging_conversation_started_7d') ?? 0,
     }
   }
