@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { PaymentBadge, PoloBadge } from '@/components/leads/PaymentBadge'
 import { DeliveryBadge } from '@/components/leads/DeliveryBadge'
 import { AttributionBadge } from '@/components/leads/AttributionBadge'
+import { PortaBadge } from '@/components/leads/PortaBadge'
 import { useNowMs } from '@/hooks/useNowMs'
 import { getSourceStyle } from '@/lib/channelStyles'
 import { cn } from '@/lib/utils'
@@ -188,6 +189,7 @@ export function KanbanLeadCard({
           {sourceLabel}
         </span>
         <PoloBadge name={poloName} />
+        <PortaBadge lead={lead} />
         <PaymentBadge payment={payment} />
         <DeliveryBadge lead={lead} />
         <AttributionBadge lead={lead} />

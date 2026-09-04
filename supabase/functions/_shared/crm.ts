@@ -175,36 +175,55 @@ export function escolheLeadPeloFone(
   return ordenados[0]?.id ? String(ordenados[0].id) : null
 }
 
+/**
+ * Busca do lead por telefone para quem NÃO é conversa de WhatsApp (landing, formulário
+ * da Meta, site, ManyChat).
+ *
+ * ESCOPADA POR POLO quando o chamador diz o tenant. Sem isso a landing `/consulta`
+ * casava com QUALQUER lead do mesmo número, inclusive o cliente da loja Tricopill, e
+ * fazia MERGE da triagem clínica em cima do cadastro de venda: o lead ficava com
+ * `tenant_id = 'tricopill'`, ia parar no funil da clínica e o card saía com o selo
+ * TRICOPILL (04/set/2026, lead-2ce4bc61-e51, o próprio Álvaro testando a landing).
+ * Um CRM por negócio, mesmo banco: a mesma pessoa pode ser lead da loja E da clínica,
+ * e cada polo tem o seu. A unificação entre linhas (`useWhatsappUnify`) é outro
+ * caminho e continua global, porque ali a conversa segue a LINHA.
+ */
 async function findLeadIdByPhoneAndInstance(
   admin: SupabaseClient,
   phone: string,
   instanceId: string | null,
+  tenantId: string | null,
 ): Promise<string | null> {
   const phones = brPhoneVariants(phone)
   const inList = phones.length ? phones : [digitsOnly(phone)]
-  if (instanceId) {
-    const { data: byBoth } = await admin
+  const tenant = String(tenantId ?? '').trim() || null
+  const porFone = () => {
+    const q = admin
       .from('leads')
       .select('id, phone, created_at')
       .in('phone', inList)
-      .eq('whatsapp_instance_id', instanceId)
       .is('deleted_at', null)
+    return tenant ? q.eq('tenant_id', tenant) : q
+  }
+  if (instanceId) {
+    const { data: byBoth } = await porFone()
+      .eq('whatsapp_instance_id', instanceId)
       .order('created_at', { ascending: true })
       .limit(20)
     const idBoth = escolheLeadPeloFone(byBoth, phone)
     if (idBoth) return idBoth
     // Lead do site: criado sem linha (whatsapp_instance_id null) — casa pela variante do fone.
-    const { data: byPhoneNull } = await admin
-      .from('leads')
-      .select('id, phone, created_at')
-      .in('phone', inList)
+    const { data: byPhoneNull } = await porFone()
       .is('whatsapp_instance_id', null)
-      .is('deleted_at', null)
       .order('created_at', { ascending: true })
       .limit(20)
     const idNull = escolheLeadPeloFone(byPhoneNull, phone)
     if (idNull) return idNull
     return null
+  }
+  if (tenant) {
+    const { data } = await porFone().order('created_at', { ascending: true }).limit(20)
+    return escolheLeadPeloFone(data, phone)
   }
   return findLeadByPhone(admin, phone)
 }
@@ -473,7 +492,7 @@ export async function upsertLeadByPhone(admin: SupabaseClient, input: UpsertLead
   const useWhatsappUnify = input.source === 'whatsapp'
   const existingId = useWhatsappUnify
     ? ((await findLeadByPhone(admin, phone)) ?? undefined)
-    : (await findLeadIdByPhoneAndInstance(admin, phone, instanceId)) ?? undefined
+    : (await findLeadIdByPhoneAndInstance(admin, phone, instanceId, input.tenantId ?? null)) ?? undefined
 
   const score = Number(input.score ?? 50) || 50
   const temperature = temperatureForSource(input.source, input.temperature)

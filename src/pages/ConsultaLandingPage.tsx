@@ -138,32 +138,59 @@ function Cabecalho() {
   )
 }
 
-function Prova({ numeros }: { numeros: NumerosPublicos | null }) {
-  if (!numeros || numeros.cirurgiasRealizadas <= 0) {
-    return (
-      <p className="text-sm text-[#252A33]/70">
-        Dra. Lorena Visentainer · CRM 33717 | RQE 27798 · dermatologista e membro da ISHRS
-      </p>
-    )
-  }
+/**
+ * "Quem somos", no desenho do site oficial: números grandes da casa inteira em cima
+ * (a história da Dra. Lorena, não só o centro cirúrgico atual) e, embaixo, o que o
+ * próprio sistema conta desde 2025. O RPC começou a contar em 2025, então mostrar
+ * SÓ ele fazia a landing parecer uma clínica de 190 cirurgias, quando a marca
+ * publica mais de 3.000. Os dois números convivem: um é a marca, o outro é auditável.
+ */
+const NUMEROS_DA_CASA = [
+  { valor: '+3.000', rotulo: 'transplantes realizados' },
+  { valor: '+2 milhões', rotulo: 'de fios implantados' },
+  { valor: '+1.000', rotulo: 'pacientes satisfeitos' },
+] as const
+
+function QuemSomos({ numeros }: { numeros: NumerosPublicos | null }) {
+  const temContagem = Boolean(numeros && numeros.cirurgiasRealizadas > 0)
   return (
-    <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
-      <div>
-        <dt className="text-xs uppercase tracking-widest text-[#252A33]/55">Cirurgias finalizadas</dt>
-        <dd className="font-heading text-2xl font-semibold">{numeroBr(numeros.cirurgiasRealizadas)}</dd>
+    <section className="relative overflow-hidden bg-[#DCDBD1] py-12 sm:py-16">
+      {/* A curva do site oficial, só decoração. */}
+      <svg
+        aria-hidden
+        className="pointer-events-none absolute -right-10 top-0 h-full w-[46%] text-white/70"
+        viewBox="0 0 400 400"
+        fill="none"
+        preserveAspectRatio="none"
+      >
+        <path d="M400 -20 C 250 60, 180 180, 210 420" stroke="currentColor" strokeWidth="2" />
+      </svg>
+      <div className="relative mx-auto max-w-5xl px-4">
+        <h2 className="font-heading text-4xl font-bold leading-none tracking-tight sm:text-5xl">Quem somos</h2>
+        <dl className="mt-8 grid gap-8 sm:grid-cols-3 sm:gap-6">
+          {NUMEROS_DA_CASA.map((n) => (
+            <div key={n.rotulo} className="text-center sm:text-left">
+              <dd className="font-heading text-4xl font-bold leading-none tracking-tight sm:text-5xl">{n.valor}</dd>
+              <dt className="mt-2 text-sm text-[#252A33]/75 sm:text-base">{n.rotulo}</dt>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-8 grid gap-4 border-t border-[#252A33]/15 pt-6 sm:grid-cols-[1.1fr_0.9fr] sm:gap-8">
+          <p className="text-sm leading-relaxed text-[#252A33]/75">
+            A Dra. Lorena Visentainer (CRM 33717 | RQE 27798) é dermatologista, membro da SBD e da ISHRS, criou o
+            Transplante Capilar Regenerativo® e escreveu o primeiro livro de transplante FUE do Brasil.
+          </p>
+          {temContagem && numeros ? (
+            <p className="text-sm leading-relaxed text-[#252A33]/75">
+              Só no centro cirúrgico atual, desde {numeros.desdeAno}:{' '}
+              <strong className="font-semibold text-[#252A33]">{numeroBr(numeros.cirurgiasRealizadas)} cirurgias</strong> e{' '}
+              <strong className="font-semibold text-[#252A33]">{numeroBr(numeros.foliculosImplantados)} folículos</strong>,
+              contados um a um pelo próprio sistema. É dessa base que sai a sua estimativa.
+            </p>
+          ) : null}
+        </div>
       </div>
-      <div>
-        <dt className="text-xs uppercase tracking-widest text-[#252A33]/55">Folículos implantados</dt>
-        <dd className="font-heading text-2xl font-semibold">{numeroBr(numeros.foliculosImplantados)}</dd>
-      </div>
-      <div className="col-span-2 sm:col-span-1">
-        <dt className="text-xs uppercase tracking-widest text-[#252A33]/55">Responsável técnica</dt>
-        <dd className="font-heading text-base font-semibold leading-tight">
-          Dra. Lorena Visentainer
-          <span className="block text-xs font-normal text-[#252A33]/60">CRM 33717 | RQE 27798</span>
-        </dd>
-      </div>
-    </dl>
+    </section>
   )
 }
 
@@ -575,20 +602,11 @@ export function ConsultaLandingPage() {
         </div>
       </section>
 
-      {/* ── Prova, em uma faixa só ──────────────────────────────────────── */}
-      <section className="bg-white py-10">
-        <div className="mx-auto max-w-5xl px-4">
-          <Prova numeros={numeros} />
-          <p className="mt-5 text-sm leading-relaxed text-[#252A33]/70">
-            Números do próprio centro cirúrgico do Instituto, contados a partir das cirurgias finalizadas
-            {numeros?.desdeAno ? ` desde ${numeros.desdeAno}` : ''}. A Dra. Lorena é membro da SBD e da ISHRS, criou o
-            Transplante Capilar Regenerativo® e escreveu o primeiro livro de transplante FUE do Brasil.
-          </p>
-        </div>
-      </section>
+      {/* ── Quem somos ──────────────────────────────────────────────────── */}
+      <QuemSomos numeros={numeros} />
 
       {/* ── Depoimentos ─────────────────────────────────────────────────── */}
-      <section className="border-y border-[#252A33]/10 bg-[#DCDBD1]/30 py-10">
+      <section className="border-b border-[#252A33]/10 bg-[#DCDBD1]/30 py-10">
         <div className="mx-auto max-w-5xl px-4">
           <div className="grid gap-4 sm:grid-cols-3">
             {[
