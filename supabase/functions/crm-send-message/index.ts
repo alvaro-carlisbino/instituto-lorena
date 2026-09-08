@@ -29,6 +29,12 @@ function nowIso(): string {
  */
 const INTERNAL_SOURCE_AUTHORS: Record<string, string> = {
   followup_scheduler: 'Assistente IA (follow-up)',
+  // Cadência de agendamento 24h/48h/7d (crm-followup-agendamento). Autor PRÓPRIO, e não
+  // reaproveitado do follow-up, porque a RPC `crm_sem_agendamento_para_nutrir` usa o autor
+  // para saber o que é resposta de verdade e o que é robô cobrando — com o mesmo carimbo
+  // dos dois lados, o relógio da cadência se reiniciaria a cada mensagem que ela mesma
+  // manda e a pessoa levaria o primeiro degrau para sempre.
+  followup_agendamento: 'Assistente IA (agendamento)',
   reengage_reativacao: 'Assistente IA (reengajamento)',
   reengage_recompra: 'Assistente IA (recompra)',
   cart_recovery: 'Assistente IA (carrinho)',

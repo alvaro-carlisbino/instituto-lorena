@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/select'
 import { NoticeBanner } from '@/components/NoticeBanner'
 import { useCrm } from '@/context/CrmContext'
+import { useTenant } from '@/context/TenantContext'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { cn } from '@/lib/utils'
 import { getDataProviderMode } from '@/services/dataMode'
@@ -31,12 +32,19 @@ type QuickRow = {
   sort_order: number
 }
 
-type FollowupRow = {
-  id: string
-  pipeline_id: string
-  day_number: number
-  message_template: string
+/**
+ * Um degrau da cadência de agendamento (24h / 48h / 7 dias), como vive em
+ * `tenant_integrations.outreach.agendamento.passos`.
+ */
+type PassoAgendamento = {
+  horas: number
+  texto: string
+  video: boolean
+}
+
+type ConfigAgendamento = {
   enabled: boolean
+  passos: PassoAgendamento[]
 }
 
 const defaultRouting: AppointmentCompletedRouting =
@@ -46,10 +54,12 @@ const defaultRouting: AppointmentCompletedRouting =
     targetStageId: 'tc-novo',
   }
 
-const FOLLOWUP_DAYS = [1, 3, 5] as const
+/** Nome de cada degrau na tela. A hora real vem do banco. */
+const ROTULO_DEGRAU = ['24 horas', '48 horas', '7 dias']
 
 export function CrmPhase3OperationalSettings() {
   const crm = useCrm()
+  const { tenant } = useTenant()
   const dataMode = getDataProviderMode()
   const online = dataMode === 'supabase' && isSupabaseConfigured
 
@@ -57,7 +67,7 @@ export function CrmPhase3OperationalSettings() {
   const [qmShortcut, setQmShortcut] = useState('')
   const [qmContent, setQmContent] = useState('')
   const [qmCategory, setQmCategory] = useState('')
-  const [followupRows, setFollowupRows] = useState<FollowupRow[]>([])
+  const [agendamento, setAgendamento] = useState<ConfigAgendamento | null>(null)
 
   const loadQuick = useCallback(async () => {
     if (!online || !supabase) return
@@ -72,48 +82,81 @@ export function CrmPhase3OperationalSettings() {
     setQuickRows((data ?? []) as QuickRow[])
   }, [online])
 
-  const loadFollowup = useCallback(async () => {
+  const loadAgendamento = useCallback(async () => {
     if (!online || !supabase) return
     const { data, error } = await supabase
-      .from('crm_followup_configs')
-      .select('id, pipeline_id, day_number, message_template, enabled')
-      .order('pipeline_id')
-      .order('day_number')
+      .from('tenant_integrations')
+      .select('outreach')
+      .eq('tenant_id', tenant.id)
+      .maybeSingle()
     if (error) {
       toast.error(error.message)
       return
     }
-    setFollowupRows((data ?? []) as FollowupRow[])
-  }, [online])
+    const outreach = ((data?.outreach ?? {}) as Record<string, unknown>)
+    const cfg = (outreach.agendamento ?? null) as Record<string, unknown> | null
+    if (!cfg) {
+      setAgendamento(null)
+      return
+    }
+    setAgendamento({
+      enabled: cfg.enabled === true,
+      passos: (Array.isArray(cfg.passos) ? cfg.passos : []).map((p) => {
+        const row = (p ?? {}) as Record<string, unknown>
+        return {
+          horas: Number(row.horas ?? 0),
+          texto: String(row.texto ?? ''),
+          video: row.video === true,
+        }
+      }),
+    })
+  }, [online, tenant.id])
 
   useEffect(() => {
     void loadQuick()
-    void loadFollowup()
-  }, [loadQuick, loadFollowup])
+    void loadAgendamento()
+  }, [loadQuick, loadAgendamento])
 
   const routing = crm.orgSettings.appointmentCompletedRouting ?? defaultRouting
 
-  const followupFor = (pipelineId: string, day: number): FollowupRow | undefined =>
-    followupRows.find((r) => r.pipeline_id === pipelineId && r.day_number === day)
-
-  const handleSaveFollowup = async (pipelineId: string, day: number, message_template: string, enabled: boolean) => {
+  /**
+   * Grava a cadência inteira de uma vez.
+   *
+   * `outreach` é um JSON com mais coisa dentro (o primeiro contato do formulário mora ao
+   * lado). Ler, mesclar e devolver o objeto todo é o que impede este painel de apagar a
+   * configuração do vizinho — um `update` com `{agendamento: …}` cru levaria o
+   * `leadform` junto.
+   */
+  const salvarAgendamento = async (proximo: ConfigAgendamento) => {
     if (!online || !supabase) return
-    const { error } = await supabase.from('crm_followup_configs').upsert(
-      {
-        pipeline_id: pipelineId,
-        day_number: day,
-        message_template,
-        enabled,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'pipeline_id,day_number' },
-    )
+    const { data, error: readErr } = await supabase
+      .from('tenant_integrations')
+      .select('outreach')
+      .eq('tenant_id', tenant.id)
+      .maybeSingle()
+    if (readErr) {
+      toast.error(readErr.message)
+      return
+    }
+    const outreach = ((data?.outreach ?? {}) as Record<string, unknown>)
+    const anterior = ((outreach.agendamento ?? {}) as Record<string, unknown>)
+    const { error } = await supabase
+      .from('tenant_integrations')
+      .update({
+        outreach: {
+          ...outreach,
+          // `ativado_em`, `video_path`, `max_dias` e `cap_por_rodada` continuam como
+          // estavam: são a trava de backlog e o ritmo, não texto de mensagem.
+          agendamento: { ...anterior, enabled: proximo.enabled, passos: proximo.passos },
+        },
+      })
+      .eq('tenant_id', tenant.id)
     if (error) {
       toast.error(error.message)
       return
     }
-    toast.success('Template de follow-up guardado.')
-    void loadFollowup()
+    toast.success('Cadência de agendamento guardada.')
+    void loadAgendamento()
   }
 
   const handleAddQuick = async () => {
@@ -222,35 +265,53 @@ export function CrmPhase3OperationalSettings() {
 
       <Card className={cn(pageQuietCardClass)}>
         <CardHeader>
-          <CardTitle className="text-base">Follow-up automático (D1 / D3 / D5)</CardTitle>
+          <CardTitle className="text-base">Follow-up de agendamento (24h / 48h / 7 dias)</CardTitle>
           <p className="m-0 mt-1 text-xs text-muted-foreground">
-            O worker horário envia quando não há resposta há 24h, 72h e 120h (com estado ativo). Use {'{{name}}'} no texto.
+            Fala com quem conversou, ouviu sobre a consulta e <strong>parou de responder sem agendar</strong>. Quem está
+            esperando resposta nossa é outra rotina, e quem já agendou não entra aqui. Responder cancela os degraus
+            seguintes.
+          </p>
+          <p className="m-0 mt-2 text-xs text-muted-foreground">
+            Etiquetas: <code>{'{{primeiro_nome}}'}</code> ·{' '}
+            <code>{'{{saudacao}}'}</code> (bom dia / boa tarde / boa noite pela hora do envio) ·{' '}
+            <code>{'{{saudacao_maiuscula}}'}</code> para começar a frase ·{' '}
+            <code>{'{{consulta_medico}}'}</code> vira “ com a Dra. Lorena” quando a conversa registrou o médico, e some
+            quando não registrou.
           </p>
         </CardHeader>
-        <CardContent className="space-y-6">
-          {online ? (
-            crm.pipelineCatalog.map((pipeline) => (
-              <div key={pipeline.id} className="space-y-3">
-                <h3 className="m-0 text-xs font-medium text-muted-foreground">{pipeline.name}</h3>
-                {FOLLOWUP_DAYS.map((day) => {
-                  const row = followupFor(pipeline.id, day)
-                  return (
-                    <FollowupDayEditor
-                      key={`${pipeline.id}-${day}`}
-                      pipelineId={pipeline.id}
-                      day={day}
-                      initialTemplate={row?.message_template ?? ''}
-                      initialEnabled={row?.enabled ?? true}
-                      onSave={(message_template, enabled) =>
-                        void handleSaveFollowup(pipeline.id, day, message_template, enabled)
-                      }
-                    />
-                  )
-                })}
-              </div>
-            ))
-          ) : (
+        <CardContent className="space-y-4">
+          {!online ? (
             <p className="m-0 text-sm text-muted-foreground">Indisponível neste modo de dados.</p>
+          ) : !agendamento ? (
+            <p className="m-0 text-sm text-muted-foreground">
+              Este polo não tem cadência de agendamento configurada.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="agendamento-enabled"
+                  checked={agendamento.enabled}
+                  onCheckedChange={(v) => void salvarAgendamento({ ...agendamento, enabled: v === true })}
+                />
+                <Label htmlFor="agendamento-enabled" className="cursor-pointer text-sm">
+                  Cadência ligada
+                </Label>
+              </div>
+              {agendamento.passos.map((passo, i) => (
+                <PassoAgendamentoEditor
+                  key={i}
+                  rotulo={ROTULO_DEGRAU[i] ?? `${passo.horas} horas`}
+                  passo={passo}
+                  onSave={(texto) =>
+                    void salvarAgendamento({
+                      ...agendamento,
+                      passos: agendamento.passos.map((p, j) => (j === i ? { ...p, texto } : p)),
+                    })
+                  }
+                />
+              ))}
+            </>
           )}
         </CardContent>
       </Card>
@@ -345,41 +406,34 @@ export function CrmPhase3OperationalSettings() {
   )
 }
 
-function FollowupDayEditor({
-  pipelineId,
-  day,
-  initialTemplate,
-  initialEnabled,
+function PassoAgendamentoEditor({
+  rotulo,
+  passo,
   onSave,
 }: {
-  pipelineId: string
-  day: number
-  initialTemplate: string
-  initialEnabled: boolean
-  onSave: (message: string, enabled: boolean) => void
+  rotulo: string
+  passo: PassoAgendamento
+  onSave: (texto: string) => void
 }) {
-  const [text, setText] = useState(initialTemplate)
-  const [enabled, setEnabled] = useState(initialEnabled)
+  const [texto, setTexto] = useState(passo.texto)
 
   useEffect(() => {
-    setText(initialTemplate)
-    setEnabled(initialEnabled)
-  }, [pipelineId, day, initialTemplate, initialEnabled])
+    setTexto(passo.texto)
+  }, [passo.texto])
+
+  const sujo = texto !== passo.texto
 
   return (
-    <div className="rounded-xl border border-border/40 bg-background/40 p-3 space-y-2">
+    <div className="space-y-2 rounded-xl border border-border/40 bg-background/40 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">Dia {day}</span>
-        <div className="flex items-center gap-2">
-          <Switch checked={enabled} onCheckedChange={setEnabled} id={`fu-${pipelineId}-${day}`} />
-          <Label htmlFor={`fu-${pipelineId}-${day}`} className="text-xs cursor-pointer">
-            Ativo
-          </Label>
-        </div>
+        <span className="text-xs font-medium text-muted-foreground">{rotulo}</span>
+        {passo.video && (
+          <span className="text-xs text-muted-foreground">🎥 vai com o vídeo da primeira consulta</span>
+        )}
       </div>
-      <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} className="text-sm" />
-      <Button type="button" size="sm" variant="secondary" onClick={() => onSave(text, enabled)}>
-        Guardar template
+      <Textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={6} className="text-sm" />
+      <Button type="button" size="sm" variant="secondary" disabled={!sujo} onClick={() => onSave(texto)}>
+        Guardar mensagem
       </Button>
     </div>
   )

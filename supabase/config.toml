@@ -496,6 +496,12 @@ verify_jwt = false
 [functions.crm-landing-retomada]
 verify_jwt = false
 
+# Cadência de agendamento (24h/48h/7d) com quem conversou e sumiu sem marcar consulta.
+# pg_cron + x-cron-secret, por isso verify_jwt=false — mas ela NEGA sem o segredo
+# configurado, ao contrário do follow-up scheduler.
+[functions.crm-followup-agendamento]
+verify_jwt = false
+
 # Reengajamento (reativação + recompra): chamado 1x/dia via pg_cron. verify_jwt=false
 # porque o cron não manda JWT de usuário; a função aceita x-cron-secret opcional.
 [functions.crm-reengage-scheduler]
