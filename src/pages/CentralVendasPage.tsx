@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
@@ -49,7 +50,13 @@ const TITULO: Record<CentralVendasTab, { title: string; subtitle: string }> = {
 }
 
 export function CentralVendasPage({ tab }: { tab: CentralVendasTab }) {
-  const [kind, setKind] = useState<ClinicSaleKind>('cirurgia')
+  // O botão "Registrar venda" da ficha do paciente manda o tipo junto: paciente do
+  // funil de protocolo não pode cair no formulário de transplante só porque é o
+  // padrão da tela.
+  const [searchParams] = useSearchParams()
+  const [kind, setKind] = useState<ClinicSaleKind>(
+    searchParams.get('tipo') === 'protocolo' ? 'protocolo' : 'cirurgia',
+  )
   const cabecalho = TITULO[tab]
   // O follow-up é quadro: precisa da altura da tela para cada coluna rolar por
   // dentro. As outras abas são tabela e rolam a página inteira, como sempre.

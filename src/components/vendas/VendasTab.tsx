@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   Ban,
@@ -73,6 +73,7 @@ import {
   vendasSemData,
   vendasSemPaciente,
   zerarFilaDePendencia,
+  pacienteDoLead,
 } from '@/services/clinicSales'
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -203,6 +204,36 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [salvandoMeta, setSalvandoMeta] = useState(false)
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState<{ open: boolean; editing: ClinicSale | null }>({ open: false, editing: null })
+  // Paciente que veio pronto da ficha (botão "Registrar venda"): abre a Nova venda
+  // já com ele escolhido. Antes o caminho da ficha para cá não existia, e quem
+  // procurava onde marcar a cirurgia vendida caía no cadastro de entrega da LOJA.
+  const [prefill, setPrefill] = useState<{ leadId: string; patientName: string; phone: string | null } | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const leadDoLink = searchParams.get('venda')
+
+  useEffect(() => {
+    if (!leadDoLink) return
+    let vivo = true
+    void pacienteDoLead(leadDoLink)
+      .then((p) => {
+        if (vivo && p) setPrefill(p)
+      })
+      .catch(() => {
+        if (vivo) toast.error('Não consegui carregar o paciente. Escolha ele na busca do formulário.')
+      })
+      .finally(() => {
+        // O formulário abre SEMPRE, mesmo se a busca do paciente falhar: clicar em
+        // "Registrar venda" e não acontecer nada é o beco sem saída que este botão
+        // veio resolver. Sem paciente, a pessoa escolhe na busca do próprio form.
+        if (vivo) setForm({ open: true, editing: null })
+        // E só aqui, no fim: limpar o parâmetro lá em cima re-renderiza, a limpeza
+        // do efeito roda antes da busca voltar e o formulário não abria.
+        setSearchParams({}, { replace: true })
+      })
+    return () => {
+      vivo = false
+    }
+  }, [leadDoLink, setSearchParams])
   const [cancelando, setCancelando] = useState<ClinicSale | null>(null)
   const [motivo, setMotivo] = useState('')
   const [estorno, setEstorno] = useState('Em avaliação')
@@ -1162,7 +1193,11 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
         kind={kind}
         staff={staff}
         editing={form.editing}
-        onClose={() => setForm({ open: false, editing: null })}
+        prefill={form.editing ? null : prefill}
+        onClose={() => {
+          setForm({ open: false, editing: null })
+          setPrefill(null)
+        }}
         onSaved={() => void load()}
       />
 

@@ -7,12 +7,20 @@ import {
   readCadastro,
   readEntrega,
 } from '@/components/leads/CadastroEnderecoForm'
+import { useTenant } from '@/context/TenantContext'
 import { syncLeadContato } from '@/services/crmBling'
 import type { Lead } from '@/mocks/crmMock'
 
 // Cartão de "Cadastro de venda / entrega" da ficha do lead: exibe e (para quem pode rotear
 // leads) permite EDITAR nome/CPF/nascimento/e-mail + endereço, e sincronizar com o Bling
 // (cria/atualiza o contato e conserta o pedido vinculado). Grava em custom_fields.cadastro/entrega.
+//
+// No polo CLÍNICA o cartão muda de nome e perde o botão do Bling. O Bling é o ERP da
+// LOJA: sincronizar um paciente de transplante para lá cria contato de cliente de
+// e-commerce. E o título "Cadastro de venda" era o único lugar da ficha com a palavra
+// "venda", então quem procurava onde marcar a cirurgia vendida parava justamente aqui
+// (08/09/26, caso Aisar). Os campos continuam: CPF e endereço do paciente são o que a
+// NFS-e da clínica exige.
 
 type Props = {
   lead: Lead
@@ -23,6 +31,8 @@ type Props = {
 }
 
 export function LeadCadastroCard({ lead, onPatch, canEdit, canSyncBling }: Props) {
+  const { tenant } = useTenant()
+  const isClinic = tenant.poloType !== 'sales'
   const [editing, setEditing] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -68,7 +78,7 @@ export function LeadCadastroCard({ lead, onPatch, canEdit, canSyncBling }: Props
     <section aria-labelledby="lead-cadastro-heading" className="rounded-md border border-border bg-muted/20 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 id="lead-cadastro-heading" className="text-sm font-semibold">
-          Cadastro de venda / entrega
+          {isClinic ? 'Cadastro do paciente' : 'Cadastro de venda / entrega'}
         </h2>
         {canEdit ? (
           <Button variant="ghost" size="sm" onClick={() => setEditing((v) => !v)}>
@@ -98,10 +108,12 @@ export function LeadCadastroCard({ lead, onPatch, canEdit, canSyncBling }: Props
           <Row label="Bairro / Cidade" value={cidadeLinha} />
         </dl>
       ) : (
-        <p className="text-sm text-muted-foreground">Sem cadastro de venda ainda.</p>
+        <p className="text-sm text-muted-foreground">
+          {isClinic ? 'Sem cadastro do paciente ainda.' : 'Sem cadastro de venda ainda.'}
+        </p>
       )}
 
-      {canSyncBling ? (
+      {canSyncBling && !isClinic ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
           <Button variant="outline" size="sm" onClick={() => void handleSync()} disabled={syncing || !cadastro.nomeCompleto}>
             {syncing ? 'Sincronizando…' : 'Atualizar no Bling'}

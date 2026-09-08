@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AlertTriangle, FolderOpen, Trash2 } from 'lucide-react'
+import { AlertTriangle, FolderOpen, ReceiptText, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
@@ -27,6 +27,7 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { useTenant } from '@/context/TenantContext'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
@@ -65,6 +66,8 @@ function initialsFromName(name: string): string {
 export function LeadDetailPage() {
   const crm = useCrm()
   const navigate = useNavigate()
+  const { tenant } = useTenant()
+  const isClinic = tenant.poloType !== 'sales'
   const { leadId } = useParams<{ leadId: string }>()
 
   // A tela seleciona o lead no contexto; selectedLead deriva de selectedLeadId.
@@ -335,6 +338,26 @@ export function LeadDetailPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            ) : null}
+            {/* A venda da clínica mora na Central de Vendas, e até 08/09/26 não havia
+                caminho da ficha para lá: quem queria marcar o paciente como vendido
+                arrastava o card (que pinta a coluna e não cria venda nenhuma) ou
+                parava no cadastro de entrega da loja. O link leva o paciente junto. */}
+            {isClinic ? (
+              <div className="mt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    navigate(
+                      `/central-vendas?venda=${encodeURIComponent(lead.id)}` +
+                        (lead.pipelineId === 'pipeline-protocolos' ? '&tipo=protocolo' : ''),
+                    )
+                  }
+                >
+                  <ReceiptText className="size-3.5" aria-hidden /> Registrar venda
+                </Button>
               </div>
             ) : null}
             {lead.lost_reason?.trim() ? (

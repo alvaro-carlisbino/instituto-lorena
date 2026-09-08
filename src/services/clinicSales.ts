@@ -272,6 +272,26 @@ export async function listClinicSales(kind?: ClinicSaleKind, limit = 400): Promi
   return (data ?? []).map((r) => mapSale(r as unknown as Record<string, unknown>))
 }
 
+/**
+ * Paciente do lead, para a Nova venda já abrir com ele escolhido. É o que permite o
+ * botão "Registrar venda" da ficha do paciente: sem isso a pessoa digita o nome de
+ * novo e ainda corre o risco de casar com o homônimo errado.
+ */
+export async function pacienteDoLead(
+  leadId: string,
+): Promise<{ leadId: string; patientName: string; phone: string | null } | null> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('leads')
+    .select('id, patient_name, phone')
+    .eq('id', leadId)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return null
+  const r = data as { id: string; patient_name: string | null; phone: string | null }
+  return { leadId: r.id, patientName: r.patient_name ?? 'Paciente', phone: r.phone ?? null }
+}
+
 export type ClinicSaleInput = {
   kind: ClinicSaleKind
   leadId?: string | null
