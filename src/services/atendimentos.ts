@@ -105,9 +105,9 @@ export async function listAtendimentos(input: {
 // ---------------------------------------------------------------------------
 
 export type SemanaAtendimentos = {
-  /** Segunda-feira da semana, YYYY-MM-DD. */
+  /** Primeiro dia da faixa, YYYY-MM-DD. Segunda-feira, ou o dia 1 quando o mês começa no meio. */
   inicio: string
-  /** Domingo da semana, YYYY-MM-DD. */
+  /** Último dia da faixa. Domingo, ou o último dia do mês. */
   fim: string
   atendimentos: number
   fecharam: number
@@ -135,13 +135,86 @@ const somaDias = (dia: string, n: number) => {
   return diaLocal(d)
 }
 
+// ---------------------------------------------------------------------------
+// O mês
+// ---------------------------------------------------------------------------
+// A safra é lida MÊS A MÊS, não em "últimas oito semanas": é assim que a planilha dela é
+// organizada (uma aba por mês, "AGOSTO//2026") e é assim que a clínica fecha meta. Pedido
+// dela em 08/set, depois de ver a faixa com oito semanas: "tem como deixar só do mês?".
+
+export type Mes = string // 'YYYY-MM'
+
+const NOMES_DOS_MESES = [
+  'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+  'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+]
+
+export const mesDe = (dia: string): Mes => dia.slice(0, 7)
+
+export const mesAtual = (): Mes => mesDe(hojeLocal())
+
+export function nomeDoMes(mes: Mes): string {
+  const [ano, m] = mes.split('-')
+  return `${NOMES_DOS_MESES[Number(m) - 1] ?? mes} de ${ano}`
+}
+
+/** Mês vizinho. `n` negativo anda para trás. */
+export function mesComOffset(mes: Mes, n: number): Mes {
+  const [ano, m] = mes.split('-').map(Number)
+  const total = ano * 12 + (m - 1) + n
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, '0')}`
+}
+
+/** Primeiro e último dia do mês, em YYYY-MM-DD. */
+export function limitesDoMes(mes: Mes): { primeiro: string; ultimo: string } {
+  const [ano, m] = mes.split('-').map(Number)
+  // Dia 0 do mês seguinte é o último dia deste. Vale para fevereiro e para ano bissexto.
+  const ultimo = new Date(ano, m, 0).getDate()
+  return { primeiro: `${mes}-01`, ultimo: `${mes}-${String(ultimo).padStart(2, '0')}` }
+}
+
+export type ResumoDoMes = {
+  atendimentos: number
+  fecharam: number
+  pct: number | null
+  receitaCents: number
+  incompleta: boolean
+}
+
+const conta = (itens: Atendimento[]): ResumoDoMes => {
+  const fecharam = itens.filter((i) => i.fechou)
+  return {
+    atendimentos: itens.length,
+    fecharam: fecharam.length,
+    pct: itens.length === 0 ? null : Math.round((fecharam.length / itens.length) * 100),
+    receitaCents: fecharam.reduce((t, i) => t + (i.valorCents ?? 0), 0),
+    // Basta UM atendimento que só existe por ter virado venda para o período estar torto:
+    // o que não fechou naquela época nunca foi registrado.
+    incompleta: itens.some((i) => i.fonte === 'venda'),
+  }
+}
+
+/** O fechamento do mês inteiro, que é a linha de baixo da planilha dela. */
+export function resumoDoMes(linhas: Atendimento[]): ResumoDoMes {
+  return conta(linhas)
+}
+
 /**
  * Agrupa a safra por semana, da mais recente para a mais antiga.
  *
- * Semana sem atendimento nenhum não vira linha: a Aline quer comparar semanas de trabalho,
- * e linha vazia no meio só empurra a semana passada para fora da tela.
+ * `limites` recorta a semana que atravessa a virada do mês: a de 31/ago a 06/set aparece
+ * em setembro como "01/09 a 06/09", com os atendimentos de setembro só. Sem o recorte, a
+ * mesma pessoa contaria nos dois meses e o fechamento de nenhum dos dois bateria com a
+ * planilha.
+ *
+ * Semana sem atendimento nenhum não vira linha: ela quer comparar semanas de trabalho, e
+ * linha vazia no meio só empurra a semana passada para fora da tela.
  */
-export function resumoPorSemana(linhas: Atendimento[], quantas = 6): SemanaAtendimentos[] {
+export function resumoPorSemana(
+  linhas: Atendimento[],
+  opts: { quantas?: number; limites?: { primeiro: string; ultimo: string } } = {},
+): SemanaAtendimentos[] {
+  const { quantas = 6, limites } = opts
   const mapa = new Map<string, Atendimento[]>()
   for (const a of linhas) {
     const inicio = segundaDaSemana(a.atendidoEm)
@@ -153,17 +226,13 @@ export function resumoPorSemana(linhas: Atendimento[], quantas = 6): SemanaAtend
     .sort((a, b) => b[0].localeCompare(a[0]))
     .slice(0, quantas)
     .map(([inicio, itens]) => {
-      const fecharam = itens.filter((i) => i.fechou)
+      const fim = somaDias(inicio, 6)
+      const resumo = conta(itens)
       return {
-        inicio,
-        fim: somaDias(inicio, 6),
-        atendimentos: itens.length,
-        fecharam: fecharam.length,
-        pct: itens.length === 0 ? null : Math.round((fecharam.length / itens.length) * 100),
-        receitaCents: fecharam.reduce((t, i) => t + (i.valorCents ?? 0), 0),
-        // Basta UM atendimento que só existe por ter virado venda para a semana estar
-        // torta: o que não fechou naquela semana nunca foi registrado.
-        incompleta: inicio < SAFRA_COMPLETA_DESDE || itens.some((i) => i.fonte === 'venda'),
+        inicio: limites && inicio < limites.primeiro ? limites.primeiro : inicio,
+        fim: limites && fim > limites.ultimo ? limites.ultimo : fim,
+        ...resumo,
+        incompleta: resumo.incompleta || inicio < SAFRA_COMPLETA_DESDE,
       }
     })
 }

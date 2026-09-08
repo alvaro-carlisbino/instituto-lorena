@@ -1,31 +1,39 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
-import { diaLocalComOffset } from '@/lib/diaLocal'
+import { Button } from '@/components/ui/button'
+import { hojeLocal } from '@/lib/diaLocal'
 import { cn } from '@/lib/utils'
 import {
   type Atendimento,
   type IndicacaoAtendimento,
+  type Mes,
   type SemanaAtendimentos,
+  limitesDoMes,
   listAtendimentos,
+  mesAtual,
+  mesComOffset,
+  nomeDoMes,
+  resumoDoMes,
   resumoPorSemana,
-  segundaDaSemana,
 } from '@/services/atendimentos'
 import { KANBAN_COLUNAS, type KanbanColuna } from '@/services/leadFollowups'
 
 /**
- * A porcentagem de fechamento da semana COM OS NOMES, que é o que a planilha da Aline
- * responde de olho (linha verde fechou, linha rosa não) e o CRM não sabia responder.
+ * O fechamento do MÊS, semana a semana e com os nomes.
  *
- * O número sozinho não serve: "23%" não diz com quem falar hoje. Ela pediu explicitamente
- * ("eu precisava que tivesse o nome deles também, para a gente conseguir visualizar e não
- * só números"), e é o mesmo motivo pelo qual a planilha nunca foi um gráfico — a lista É a
- * ferramenta de trabalho, a porcentagem é o resumo dela.
+ * Duas coisas que a Aline pediu em 08/set, nesta ordem. Primeiro os nomes ("eu precisava
+ * que tivesse o nome deles também, para a gente conseguir visualizar e não só números"):
+ * "23%" não diz com quem falar hoje, e é o mesmo motivo pelo qual a planilha dela nunca
+ * virou gráfico. Depois o recorte ("tem como deixar só do mês de setembro?"): a planilha é
+ * uma aba por mês ("AGOSTO//2026") e a clínica fecha meta por mês, então oito semanas
+ * corridas atravessando a virada não é a leitura que ela faz.
  *
  * Denominador é o ATENDIMENTO, não a ligação: das pessoas que saíram do consultório com
- * indicação naquela semana, quantas compraram. Por isso a conta mora aqui e não no quadro
- * de follow-up. O quadro conta trabalho, esta faixa conta safra.
+ * indicação naquele mês, quantas compraram. Por isso a conta mora aqui e não no quadro de
+ * follow-up. O quadro conta trabalho, esta faixa conta safra.
  *
  * Semana marcada como incompleta não é enfeite de rodapé: até 24/ago o CRM só guardava o
  * atendimento que virou venda, então aquelas semanas fecham perto de 100% por construção.
@@ -104,22 +112,20 @@ export function AtendimentosSemana({
   /** Muda quando o quadro recarrega: atendimento novo tem de aparecer na safra na hora. */
   recarregar: number
 }) {
+  const [mes, setMes] = useState<Mes>(() => mesAtual())
   const [linhas, setLinhas] = useState<Atendimento[]>([])
-  const [semanas, setSemanas] = useState<SemanaAtendimentos[]>([])
   const [erro, setErro] = useState<string | null>(null)
-  /** null = a mais recente. Só vira escolha explícita quando ela clica em outra. */
+  /** null = a semana mais recente do mês. Só vira escolha explícita quando ela clica. */
   const [escolhida, setEscolhida] = useState<string | null>(null)
-  const semanaAtual = useMemo(() => segundaDaSemana(diaLocalComOffset(0)), [])
+  const hoje = hojeLocal()
+  const limites = useMemo(() => limitesDoMes(mes), [mes])
 
   useEffect(() => {
     let vivo = true
-    // Oito semanas para caber a comparação que ela faz ("essa semana contra a passada")
-    // com folga, sem virar relatório.
-    listAtendimentos({ indicacao, desde: diaLocalComOffset(-56) })
+    listAtendimentos({ indicacao, desde: limites.primeiro, ate: limites.ultimo })
       .then((rows) => {
         if (!vivo) return
         setLinhas(rows)
-        setSemanas(resumoPorSemana(rows, 6))
         setErro(null)
       })
       .catch((e: unknown) => {
@@ -129,16 +135,26 @@ export function AtendimentosSemana({
     return () => {
       vivo = false
     }
-  }, [indicacao, recarregar])
+  }, [indicacao, recarregar, limites])
 
-  // Trocar de fila (transplante/protocolo) recarrega a lista, e a semana escolhida pode
-  // não existir mais lá. Cair na mais recente é melhor que mostrar lista vazia.
-  const aberta = semanas.some((s) => s.inicio === escolhida) ? escolhida : (semanas[0]?.inicio ?? null)
+  const semanas = useMemo(
+    // Um mês tem no máximo seis pedaços de semana; o corte não esconde nada.
+    () => resumoPorSemana(linhas, { quantas: 6, limites }),
+    [linhas, limites],
+  )
+  const mesInteiro = useMemo(() => resumoDoMes(linhas), [linhas])
+
+  // Trocar de mês ou de fila troca as semanas, e a escolhida pode não existir mais.
+  // Cair na mais recente é melhor que mostrar lista vazia.
+  const aberta: SemanaAtendimentos | null =
+    semanas.find((s) => s.inicio === escolhida) ?? semanas[0] ?? null
 
   const daSemana = useMemo(() => {
     if (!aberta) return { fecharam: [] as Atendimento[], abertos: [] as Atendimento[] }
+    // Por FAIXA DE DATA, não pela segunda-feira: a semana que atravessa a virada do mês vem
+    // recortada, e agrupar pela segunda traria de volta o que é do mês anterior.
     const itens = linhas
-      .filter((a) => segundaDaSemana(a.atendidoEm) === aberta)
+      .filter((a) => a.atendidoEm >= aberta.inicio && a.atendidoEm <= aberta.fim)
       .sort((x, y) => x.atendidoEm.localeCompare(y.atendidoEm) || x.paciente.localeCompare(y.paciente))
     return {
       fecharam: itens.filter((i) => i.fechou),
@@ -146,86 +162,143 @@ export function AtendimentosSemana({
     }
   }, [linhas, aberta])
 
+  const cabecalho = (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-0.5">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="size-7 p-0"
+          title="Mês anterior"
+          onClick={() => setMes((m) => mesComOffset(m, -1))}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <p className="min-w-36 text-center text-xs font-medium first-letter:uppercase">{nomeDoMes(mes)}</p>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="size-7 p-0"
+          title="Mês seguinte"
+          // Mês que ainda não começou não tem atendimento nenhum: o botão só levaria a uma
+          // tela vazia e à dúvida de se o sistema perdeu alguém.
+          disabled={mes >= mesAtual()}
+          onClick={() => setMes((m) => mesComOffset(m, 1))}
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        <span className="text-sm font-semibold tabular-nums text-foreground">
+          {mesInteiro.pct == null ? '—' : `${mesInteiro.pct}%`}
+        </span>{' '}
+        no mês · {mesInteiro.fecharam} de {mesInteiro.atendimentos} atendimentos
+        {mesInteiro.receitaCents > 0 ? ` · ${reais(mesInteiro.receitaCents)}` : ''}
+      </p>
+      {mesInteiro.incompleta && (
+        <Badge
+          variant="outline"
+          className="text-[10px] font-normal"
+          title="Neste mês há atendimento que só ficou gravado porque virou venda. Quem não fechou naquela época não foi registrado, então a taxa sai por cima."
+        >
+          safra incompleta
+        </Badge>
+      )}
+    </div>
+  )
+
   if (erro) {
-    return <p className="text-xs text-muted-foreground">Fechamento por semana indisponível: {erro}</p>
+    return (
+      <div className="rounded-md border border-border p-2">
+        {cabecalho}
+        <p className="mt-1 text-xs text-muted-foreground">
+          Fechamento por semana indisponível: {erro}
+        </p>
+      </div>
+    )
   }
-  if (semanas.length === 0) return null
 
   return (
     <div className="rounded-md border border-border p-2">
-      <div className="flex items-stretch gap-2 overflow-x-auto pb-1">
-        <div className="flex shrink-0 flex-col justify-center pr-1">
-          <p className="text-xs font-medium">Fechamento</p>
-          <p className="text-[11px] text-muted-foreground">por semana</p>
-        </div>
-        {semanas.map((s) => {
-          const atual = s.inicio === semanaAtual
-          return (
-            <button
-              key={s.inicio}
-              type="button"
-              onClick={() => setEscolhida(s.inicio)}
-              className={cn(
-                'shrink-0 rounded-md border border-border px-2.5 py-1.5 text-left transition-colors hover:bg-accent',
-                atual && 'border-primary/60',
-                s.inicio === aberta && 'bg-accent',
-              )}
-              title="Ver quem foi atendido nesta semana"
-            >
-              <p className="text-[11px] text-muted-foreground">
-                {ptBr(s.inicio)} a {ptBr(s.fim)}
-                {atual ? ' · em curso' : ''}
-              </p>
-              <p className="flex items-baseline gap-1.5">
-                <span
-                  className={cn(
-                    'text-base font-semibold tabular-nums',
-                    s.incompleta && 'text-muted-foreground',
-                  )}
-                >
-                  {s.pct == null ? '—' : `${s.pct}%`}
-                </span>
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {s.fecharam}/{s.atendimentos}
-                </span>
-              </p>
-              {s.incompleta && (
-                <Badge variant="outline" className="mt-0.5 text-[10px] font-normal">
-                  só quem fechou
-                </Badge>
-              )}
-            </button>
-          )
-        })}
-      </div>
+      {cabecalho}
 
-      {/* Os nomes. Em duas listas porque a pergunta dela é "quem fechou e quem não":
-          uma lista só, ordenada por data, obriga a ler badge por badge. */}
-      {aberta && (
-        <div className="mt-2 grid gap-3 border-t border-border pt-2 md:grid-cols-2">
-          <div className="space-y-1.5">
-            <p className="text-xs font-medium text-emerald-700 dark:text-emerald-500">
-              Fecharam ({daSemana.fecharam.length})
-            </p>
-            {daSemana.fecharam.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Ninguém fechou nesta semana ainda.</p>
-            ) : (
-              <div className="space-y-1">{daSemana.fecharam.map(linhaDoPaciente)}</div>
-            )}
+      {semanas.length === 0 ? (
+        <p className="mt-2 border-t border-border pt-2 text-xs text-muted-foreground">
+          Nenhum atendimento registrado em {nomeDoMes(mes)}.
+        </p>
+      ) : (
+        <>
+          <div className="mt-2 flex items-stretch gap-2 overflow-x-auto pb-1">
+            {semanas.map((s) => {
+              const emCurso = hoje >= s.inicio && hoje <= s.fim
+              return (
+                <button
+                  key={s.inicio}
+                  type="button"
+                  onClick={() => setEscolhida(s.inicio)}
+                  className={cn(
+                    'shrink-0 rounded-md border border-border px-2.5 py-1.5 text-left transition-colors hover:bg-accent',
+                    emCurso && 'border-primary/60',
+                    s.inicio === aberta?.inicio && 'bg-accent',
+                  )}
+                  title="Ver quem foi atendido nesta semana"
+                >
+                  <p className="text-[11px] text-muted-foreground">
+                    {ptBr(s.inicio)} a {ptBr(s.fim)}
+                    {emCurso ? ' · em curso' : ''}
+                  </p>
+                  <p className="flex items-baseline gap-1.5">
+                    <span
+                      className={cn(
+                        'text-base font-semibold tabular-nums',
+                        s.incompleta && 'text-muted-foreground',
+                      )}
+                    >
+                      {s.pct == null ? '—' : `${s.pct}%`}
+                    </span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {s.fecharam}/{s.atendimentos}
+                    </span>
+                  </p>
+                  {s.incompleta && (
+                    <Badge variant="outline" className="mt-0.5 text-[10px] font-normal">
+                      só quem fechou
+                    </Badge>
+                  )}
+                </button>
+              )
+            })}
           </div>
-          <div className="space-y-1.5">
-            <p className="text-xs font-medium">Ainda não fecharam ({daSemana.abertos.length})</p>
-            {daSemana.abertos.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                {daSemana.fecharam.length > 0
-                  ? 'Todo mundo desta semana fechou.'
-                  : 'Nenhum atendimento registrado nesta semana.'}
-              </p>
-            ) : (
-              <div className="space-y-1">{daSemana.abertos.map(linhaDoPaciente)}</div>
-            )}
-          </div>
-        </div>
+
+          {/* Os nomes. Em duas listas porque a pergunta dela é "quem fechou e quem não":
+              uma lista só, ordenada por data, obriga a ler badge por badge. */}
+          {aberta && (
+            <div className="mt-2 grid gap-3 border-t border-border pt-2 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-emerald-700 dark:text-emerald-500">
+                  Fecharam ({daSemana.fecharam.length})
+                </p>
+                {daSemana.fecharam.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Ninguém fechou nesta semana ainda.</p>
+                ) : (
+                  <div className="space-y-1">{daSemana.fecharam.map(linhaDoPaciente)}</div>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium">Ainda não fecharam ({daSemana.abertos.length})</p>
+                {daSemana.abertos.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {daSemana.fecharam.length > 0
+                      ? 'Todo mundo desta semana fechou.'
+                      : 'Nenhum atendimento registrado nesta semana.'}
+                  </p>
+                ) : (
+                  <div className="space-y-1">{daSemana.abertos.map(linhaDoPaciente)}</div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

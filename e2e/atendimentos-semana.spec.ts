@@ -1,15 +1,37 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * A semana com NOME, não só com porcentagem.
+ * A safra do MÊS, semana a semana e com os nomes.
  *
- * O pedido, em 08/set: "eu precisava que tivesse o nome deles também, para a gente
- * conseguir visualizar e não só números". A porcentagem sozinha não diz com quem falar
- * hoje, e era exatamente por isso que a planilha nunca virou gráfico.
+ * Dois pedidos da Aline em 08/set, na mesma manhã: "eu precisava que tivesse o nome deles
+ * também, para a gente conseguir visualizar e não só números" e, depois, "tem como deixar
+ * só do mês de setembro?".
  *
- * `v_clinic_atendimentos` só é legível logado, então a resposta é interceptada: o que está
- * sob teste é a tela, não a view.
+ * `v_clinic_atendimentos` só é legível logado, então a resposta é interceptada. E o stub
+ * respeita a faixa de datas que a tela pede: sem isso o teste passaria mesmo se a tela
+ * pedisse o ano inteiro, que é justamente o que ela mandou consertar.
  */
+
+// Datas relativas ao mês corrente: a tela mostra o mês de hoje, e fixture com data fixa
+// quebraria sozinha na virada do mês.
+const hoje = new Date()
+const mes = new Date(hoje.getFullYear(), hoje.getMonth(), 1)
+/** Segunda-feira da primeira semana cheia do mês. Os três atendimentos caem nela. */
+const primeiraSegunda = new Date(mes)
+primeiraSegunda.setDate(1 + ((8 - mes.getDay()) % 7))
+
+const dia = (n: number) => {
+  const d = new Date(primeiraSegunda)
+  d.setDate(d.getDate() + n)
+  return {
+    iso: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+    br: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`,
+  }
+}
+
+const SEG = dia(0)
+const TER = dia(1)
+const QUA = dia(2)
 
 const ATENDIMENTOS = [
   {
@@ -22,10 +44,10 @@ const ATENDIMENTOS = [
     origem: 'Indicação',
     tipo: 'consulta',
     indicacao: 'cirurgia',
-    atendido_em: '2026-09-01',
+    atendido_em: SEG.iso,
     medico: 'Dra Lorena',
     observacao: null,
-    venda_em: '2026-09-05',
+    venda_em: QUA.iso,
     valor_cents: 1_500_000,
     fechou: true,
     coluna: 'encerrado',
@@ -41,7 +63,7 @@ const ATENDIMENTOS = [
     origem: 'Instagram',
     tipo: 'retorno',
     indicacao: 'cirurgia',
-    atendido_em: '2026-09-02',
+    atendido_em: TER.iso,
     medico: 'Dra Lorena',
     observacao: null,
     venda_em: null,
@@ -60,7 +82,7 @@ const ATENDIMENTOS = [
     origem: null,
     tipo: 'consulta',
     indicacao: 'cirurgia',
-    atendido_em: '2026-09-03',
+    atendido_em: QUA.iso,
     medico: null,
     observacao: null,
     venda_em: null,
@@ -77,24 +99,36 @@ const json = (body: unknown) => ({
   body: JSON.stringify(body),
 })
 
-async function comSafraFalsa(page: Page) {
-  await page.route('**/rest/v1/v_clinic_atendimentos*', (route) => route.fulfill(json(ATENDIMENTOS)))
+/** O que o PostgREST devolveria: só o que está dentro da faixa pedida na URL. */
+const dentroDaFaixa = (url: string, linhas: typeof ATENDIMENTOS) => {
+  const filtros = new URL(url).searchParams.getAll('atendido_em')
+  const de = filtros.find((f) => f.startsWith('gte.'))?.slice(4)
+  const ate = filtros.find((f) => f.startsWith('lte.'))?.slice(4)
+  return linhas.filter((l) => (!de || l.atendido_em >= de) && (!ate || l.atendido_em <= ate))
+}
+
+async function comSafraFalsa(page: Page, linhas = ATENDIMENTOS) {
+  await page.route('**/rest/v1/v_clinic_atendimentos*', (route) =>
+    route.fulfill(json(dentroDaFaixa(route.request().url(), linhas))),
+  )
   await page.route('**/rest/v1/v_followup_kanban*', (route) => route.fulfill(json([])))
   await page.route('**/rest/v1/lead_followups*', (route) => route.fulfill(json([])))
 }
 
-test.describe('fechamento por semana', () => {
+test.describe('fechamento do mês', () => {
   test('mostra a porcentagem e, embaixo, quem fechou e quem não', async ({ page }) => {
     await comSafraFalsa(page)
     await page.goto('/central-vendas/follow-up')
 
-    // 1 de 3 fechou.
-    await expect(page.getByRole('button', { name: /31\/08 a 06\/09/ })).toContainText('33%')
+    // 1 de 3 fechou, no mês e na semana.
+    await expect(page.getByText(/33% no mês · 1 de 3 atendimentos/)).toBeVisible()
+    await expect(page.getByRole('button', { name: new RegExp(`${SEG.br} a `) })).toContainText('33%')
 
     await expect(page.getByText('Fecharam (1)')).toBeVisible()
     await expect(page.getByRole('link', { name: 'JOSE CARLOS SOUZA BARROS' })).toBeVisible()
     // O valor da venda no lugar do "Fechou" genérico: é o que ela soma no fim da semana.
-    await expect(page.getByText('R$ 15.000')).toBeVisible()
+    // `exact` porque o resumo do mês soma o mesmo valor e também traz "R$ 15.000".
+    await expect(page.getByText('R$ 15.000', { exact: true })).toBeVisible()
 
     await expect(page.getByText('Ainda não fecharam (2)')).toBeVisible()
     await expect(page.getByRole('link', { name: 'CEZAR GUIRRO LUZIA' })).toBeVisible()
@@ -107,25 +141,42 @@ test.describe('fechamento por semana', () => {
     await expect(page.getByText('sem contato marcado')).toBeVisible()
 
     // A linha traz o que ela lê na planilha: tipo, data, médico, cidade e origem.
-    await expect(page.getByText('Consulta 01/09 · Dra Lorena · Maringá · Indicação')).toBeVisible()
-    await expect(page.getByText('Retorno 02/09 · Dra Lorena · Maringá · Instagram')).toBeVisible()
+    await expect(
+      page.getByText(`Consulta ${SEG.br} · Dra Lorena · Maringá · Indicação`),
+    ).toBeVisible()
+    await expect(
+      page.getByText(`Retorno ${TER.br} · Dra Lorena · Maringá · Instagram`),
+    ).toBeVisible()
   })
 
-  test('a semana anterior ao registro de atendimentos sai marcada como incompleta', async ({
-    page,
-  }) => {
-    await page.route('**/rest/v1/v_clinic_atendimentos*', (route) =>
-      route.fulfill(
-        json([{ ...ATENDIMENTOS[0], id: 'at-9', atendido_em: '2026-07-07', fonte: 'venda' }]),
-      ),
-    )
-    await page.route('**/rest/v1/v_followup_kanban*', (route) => route.fulfill(json([])))
-    await page.route('**/rest/v1/lead_followups*', (route) => route.fulfill(json([])))
+  test('o mês anterior fica a um clique, e o seguinte não existe', async ({ page }) => {
+    await comSafraFalsa(page)
+    await page.goto('/central-vendas/follow-up')
+    await expect(page.getByRole('link', { name: 'CEZAR GUIRRO LUZIA' })).toBeVisible()
+
+    // `exact` porque a coluna "Encerrado · cirurgia do mês seguinte" também casa.
+    const proximoMes = page.getByRole('button', { name: 'Mês seguinte', exact: true })
+    // Mês que ainda não começou não tem atendimento: o botão só levaria a tela vazia.
+    await expect(proximoMes).toBeDisabled()
+
+    await page.getByRole('button', { name: 'Mês anterior' }).click()
+
+    // O stub respeita a faixa pedida: ninguém do mês corrente vaza para o anterior.
+    await expect(page.getByText(/Nenhum atendimento registrado em/)).toBeVisible()
+    await expect(page.getByRole('link', { name: 'CEZAR GUIRRO LUZIA' })).toBeHidden()
+    await expect(proximoMes).toBeEnabled()
+  })
+
+  test('marca a safra em que só o que fechou ficou gravado', async ({ page }) => {
+    // `fonte: 'venda'` é a linha que só existe porque virou venda: quem não fechou naquela
+    // época nunca foi registrado, então 100% ali não quer dizer nada.
+    await comSafraFalsa(page, [{ ...ATENDIMENTOS[0], id: 'at-9', fonte: 'venda' }])
     await page.goto('/central-vendas/follow-up')
 
-    // 100% ali não quer dizer nada: antes de 24/ago só o que fechou ficou gravado.
-    const semana = page.getByRole('button', { name: /06\/07 a 12\/07/ })
-    await expect(semana).toContainText('100%')
-    await expect(semana).toContainText('só quem fechou')
+    await expect(page.getByText(/100% no mês · 1 de 1 atendimento/)).toBeVisible()
+    await expect(page.getByText('safra incompleta')).toBeVisible()
+    await expect(page.getByRole('button', { name: new RegExp(`${SEG.br} a `) })).toContainText(
+      'só quem fechou',
+    )
   })
 })

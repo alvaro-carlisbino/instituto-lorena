@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { type Atendimento, resumoPorSemana, segundaDaSemana } from './atendimentos'
+import {
+  type Atendimento,
+  limitesDoMes,
+  mesComOffset,
+  resumoDoMes,
+  resumoPorSemana,
+  segundaDaSemana,
+} from './atendimentos'
 
 /**
  * A conta que a Aline fazia contando linha colorida na planilha. Se ela errar, ela erra
@@ -71,6 +78,21 @@ describe('resumoPorSemana', () => {
     expect(semanas.map((s) => s.inicio)).toEqual(['2026-08-31', '2026-08-24'])
   })
 
+  it('recorta no mês a semana que atravessa a virada', () => {
+    // A semana de 31/08 a 06/09, lida dentro de setembro, é "01/09 a 06/09". Sem o
+    // recorte a mesma pessoa contaria em agosto e em setembro.
+    const [semana] = resumoPorSemana(
+      [
+        atendimento({ atendidoEm: '2026-09-01' }),
+        atendimento({ atendidoEm: '2026-09-04', fechou: true }),
+      ],
+      { limites: limitesDoMes('2026-09') },
+    )
+    expect(semana.inicio).toBe('2026-09-01')
+    expect(semana.fim).toBe('2026-09-06')
+    expect(semana.atendimentos).toBe(2)
+  })
+
   it('marca como incompleta a semana em que só o que fechou ficou gravado', () => {
     // `fonte: 'venda'` é a linha que só existe porque virou venda: quem não fechou naquela
     // semana nunca foi registrado, então 100% ali não quer dizer nada.
@@ -93,5 +115,35 @@ describe('resumoPorSemana', () => {
   it('semana anterior ao início do registro é incompleta mesmo sem linha de venda', () => {
     const [semana] = resumoPorSemana([atendimento({ atendidoEm: '2026-07-06', fonte: 'manual' })])
     expect(semana.incompleta).toBe(true)
+  })
+})
+
+describe('o mês', () => {
+  it('sabe o último dia, inclusive em fevereiro de ano bissexto', () => {
+    expect(limitesDoMes('2026-09')).toEqual({ primeiro: '2026-09-01', ultimo: '2026-09-30' })
+    expect(limitesDoMes('2026-02').ultimo).toBe('2026-02-28')
+    expect(limitesDoMes('2028-02').ultimo).toBe('2028-02-29')
+  })
+
+  it('anda para trás e para a frente virando o ano', () => {
+    expect(mesComOffset('2026-09', -1)).toBe('2026-08')
+    expect(mesComOffset('2026-01', -1)).toBe('2025-12')
+    expect(mesComOffset('2026-12', 1)).toBe('2027-01')
+  })
+
+  it('fecha o mês inteiro, sem depender de onde a semana começa', () => {
+    const resumo = resumoDoMes([
+      atendimento({ atendidoEm: '2026-09-01', fechou: true, valorCents: 1_500_000 }),
+      atendimento({ atendidoEm: '2026-09-15', fechou: false }),
+      atendimento({ atendidoEm: '2026-09-29', fechou: false }),
+      atendimento({ atendidoEm: '2026-09-30', fechou: true, valorCents: 500_000 }),
+    ])
+    expect(resumo).toEqual({
+      atendimentos: 4,
+      fecharam: 2,
+      pct: 50,
+      receitaCents: 2_000_000,
+      incompleta: false,
+    })
   })
 })
