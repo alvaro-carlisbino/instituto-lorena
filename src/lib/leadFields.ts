@@ -26,7 +26,9 @@ export function isManychatSyntheticPhone(phone: string): boolean {
  * wa.me que não existe. Conversar por ali funciona; discar, não.
  */
 export function isWhatsappLidOnly(lead: Pick<Lead, 'phone' | 'customFields'>): boolean {
-  if (lead.customFields?.wa_lid_only === true) return true
+  // Deduzido do dado, não do carimbo: `wa_lid_only` é só um atalho para relatório, e um
+  // carimbo velho grudado esconderia um telefone que existe. Aqui a pergunta é direta —
+  // o que está em `phone` é o próprio lid?
   const digits = String(lead.phone ?? '').replace(/\D/g, '')
   const lid = String(lead.customFields?.wa_lid ?? '').replace(/\D/g, '')
   return Boolean(lid) && lid === digits

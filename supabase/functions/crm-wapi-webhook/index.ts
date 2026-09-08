@@ -259,7 +259,12 @@ Deno.serve(async (req) => {
     ...(waLid ? { wa_lid: waLid } : {}),
     // Carimbo honesto para a tela: o que está em `phone` é um id do WhatsApp, não um número.
     // Sem ele a ficha mostra 15 dígitos com cara de telefone e alguém tenta ligar.
-    ...(normalized.fromIsLid && normalized.fromPhone === waLid ? { wa_lid_only: true } : {}),
+    //
+    // Escrito SEMPRE, inclusive como `false`. Deixá-lo de fora quando o número foi resolvido
+    // deixaria o `true` de ontem grudado: `mergeCustomFields` só sobrepõe o que vem no patch,
+    // e a mesclagem faz o campo do cadastro-lid vencer o do cadastro-com-telefone — o gêmeo
+    // juntado herdaria o carimbo e esconderia um número que existe.
+    ...(waLid ? { wa_lid_only: normalized.fromPhone === waLid } : {}),
   }
 
   const dedupKey = `event:wapi:${payloadInstanceId}:${normalized.externalMessageId}`
