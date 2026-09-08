@@ -28,6 +28,9 @@ import {
   deleteDataView,
   deleteWorkflowField,
   deleteLeadTask,
+  dismissOverdueLeadTasks,
+  restoreLeadTask,
+  fetchDismissedLeadTasks,
   deleteLead as deleteLeadSupabase,
   saveAutomationRule,
   deleteAutomationRule,
@@ -1805,6 +1808,59 @@ export const useCrmState = () => {
     })
   }
 
+  /**
+   * Tira da cobrança o follow-up que já venceu, sem apagar nem concluir nada.
+   *
+   * Existe porque a fila enche sozinha: as regras `stage_entered` criam uma tarefa a cada
+   * passagem de etapa, e em 08/set/2026 havia 2.874 atrasadas — nenhuma concluída desde
+   * maio. O sino mostrava "99+" todo dia e as ~10 pessoas de verdade esperando resposta
+   * ficavam embaixo desse bolo. Quem some é o lembrete, não o paciente.
+   */
+  const dispensarTarefasAtrasadas = async (motivo: string): Promise<number> => {
+    const hoje = new Date()
+    hoje.setHours(0, 0, 0, 0)
+    const corte = hoje.toISOString()
+    const alvo = (t: LeadTask) =>
+      t.status === 'open' && !t.dismissedAt && !!t.dueAt && new Date(t.dueAt).getTime() < hoje.getTime()
+
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) {
+      const quantas = leadTasks.filter(alvo).length
+      setLeadTasks((prev) =>
+        prev.map((t) => (alvo(t) ? { ...t, dismissedAt: new Date().toISOString(), dismissedReason: motivo } : t)),
+      )
+      return quantas
+    }
+
+    const quantas = await dismissOverdueLeadTasks(corte, motivo)
+    // O servidor é quem decide o que saiu (pode ter vencido algo entre carregar e clicar);
+    // o estado local só reflete o mesmo filtro para a tela não ficar mostrando o que já foi.
+    setLeadTasks((prev) => prev.filter((t) => !alvo(t)))
+    return quantas
+  }
+
+  /** Devolve uma dispensada para a fila. */
+  const reabrirTarefaDispensada = async (taskId: string): Promise<void> => {
+    if (dataMode === 'supabase' && isSupabaseConfigured) {
+      await restoreLeadTask(taskId)
+    }
+    setLeadTasks((prev) => {
+      if (prev.some((t) => t.id === taskId)) {
+        return prev.map((t) =>
+          t.id === taskId ? { ...t, dismissedAt: null, dismissedBy: null, dismissedReason: null } : t,
+        )
+      }
+      return prev
+    })
+  }
+
+  /** As dispensadas não vêm no boot: quem abrir a aba busca sob demanda. */
+  const carregarTarefasDispensadas = async (): Promise<LeadTask[]> => {
+    if (dataMode !== 'supabase' || !isSupabaseConfigured) {
+      return leadTasks.filter((t) => !!t.dismissedAt)
+    }
+    return fetchDismissedLeadTasks()
+  }
+
   const removeLeadTask = (taskId: string) => {
     setLeadTasks((prev) => prev.filter((t) => t.id !== taskId))
     if (dataMode === 'supabase' && isSupabaseConfigured) {
@@ -2624,6 +2680,9 @@ export const useCrmState = () => {
     importInteractionsFromPayload,
     addLeadTask,
     updateLeadTask,
+    dispensarTarefasAtrasadas,
+    reabrirTarefaDispensada,
+    carregarTarefasDispensadas,
     removeLead,
     removeLeadTask,
     reorderLeadTasks,

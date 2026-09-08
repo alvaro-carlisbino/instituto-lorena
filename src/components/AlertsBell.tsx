@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlarmClock, Bell, MessageSquare } from 'lucide-react'
+import { AlarmClock, Bell, BrushCleaning, MessageSquare } from 'lucide-react'
+import { toast } from 'sonner'
 
 import {
   DropdownMenu,
@@ -10,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useCrm } from '@/context/CrmContext'
 import { usePendingHandoff } from '@/hooks/usePendingHandoff'
 import { useNowMs } from '@/hooks/useNowMs'
@@ -18,6 +20,9 @@ import { cn } from '@/lib/utils'
 
 /** Quantos itens de cada seção cabem antes de "ver todos". */
 const MAX_POR_SECAO = 4
+
+/** Motivo carimbado em quem sai da fila pelo botão do sino. */
+const MOTIVO_LIMPEZA = 'Limpo pelo sino: follow-up vencido que ficou para trás'
 
 function esperandoHa(iso: string | null | undefined, agora: number): string {
   if (!iso) return 'agora'
@@ -46,15 +51,40 @@ export function AlertsBell() {
   const navigate = useNavigate()
   const handoffs = usePendingHandoff()
   const agora = useNowMs(60_000)
+  const [confirmandoLimpeza, setConfirmandoLimpeza] = useState(false)
+  const [limpando, setLimpando] = useState(false)
 
   // Vencidas entram junto com as de hoje: uma tarefa de ontem que ninguém fez não
-  // deixa de ser cobrança, e some da tela se o filtro for só do dia.
+  // deixa de ser cobrança, e some da tela se o filtro for só do dia. Dispensada não
+  // entra: a tarefa continua lá, quem saiu foi a cobrança.
   const followUps = useMemo(() => {
     const hoje = hojeLocal()
     return crm.leadTasks
-      .filter((t) => t.status === 'open' && t.dueAt && diaLocal(t.dueAt) <= hoje)
+      .filter((t) => t.status === 'open' && !t.dismissedAt && t.dueAt && diaLocal(t.dueAt) <= hoje)
       .sort((a, b) => new Date(a.dueAt ?? 0).getTime() - new Date(b.dueAt ?? 0).getTime())
   }, [crm.leadTasks])
+
+  const atrasadas = useMemo(() => {
+    const hoje = hojeLocal()
+    return followUps.filter((t) => diaLocal(t.dueAt ?? '') < hoje)
+  }, [followUps])
+
+  const limparAtrasadas = async () => {
+    setLimpando(true)
+    try {
+      const quantas = await crm.dispensarTarefasAtrasadas(MOTIVO_LIMPEZA)
+      toast.success(
+        quantas === 0
+          ? 'Nada atrasado para limpar.'
+          : `${quantas} follow-up${quantas > 1 ? 's' : ''} fora da fila. Nada foi apagado: estão em Tarefas > Dispensadas.`,
+      )
+    } catch (e) {
+      toast.error(`Não deu para limpar: ${e instanceof Error ? e.message : 'erro desconhecido'}`)
+    } finally {
+      setLimpando(false)
+      setConfirmandoLimpeza(false)
+    }
+  }
 
   const aguardando = handoffs ?? []
   const total = aguardando.length + followUps.length
@@ -63,96 +93,134 @@ export function AlertsBell() {
   const nomeDoLead = (leadId: string) => crm.leads.find((l) => l.id === leadId)?.patientName ?? 'Lead sem nome'
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        className={cn(
-          'relative flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors',
-          'hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-          total > 0 && 'text-red-600',
-        )}
-        aria-label={total > 0 ? `Alertas: ${total} pendente(s)` : 'Alertas (nada pendente)'}
-      >
-        <Bell className="size-4" aria-hidden />
-        {total > 0 ? (
-          <span
-            className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white tabular-nums"
-            aria-hidden
-          >
-            {total > 99 ? '99+' : total}
-          </span>
-        ) : null}
-      </DropdownMenuTrigger>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(
+            'relative flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors',
+            'hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+            total > 0 && 'text-red-600',
+          )}
+          aria-label={total > 0 ? `Alertas: ${total} pendente(s)` : 'Alertas (nada pendente)'}
+        >
+          <Bell className="size-4" aria-hidden />
+          {total > 0 ? (
+            <span
+              className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white tabular-nums"
+              aria-hidden
+            >
+              {total > 99 ? '99+' : total}
+            </span>
+          ) : null}
+        </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end" className="min-w-[min(100vw-2rem,20rem)]">
-        <DropdownMenuLabel className="text-xs font-semibold">Precisa de você agora</DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        <DropdownMenuContent align="end" className="min-w-[min(100vw-2rem,20rem)]">
+          <DropdownMenuLabel className="text-xs font-semibold">Precisa de você agora</DropdownMenuLabel>
+          <DropdownMenuSeparator />
 
-        {carregando && followUps.length === 0 ? (
-          <p className="px-2 py-3 text-xs text-muted-foreground">Carregando…</p>
-        ) : null}
+          {carregando && followUps.length === 0 ? (
+            <p className="px-2 py-3 text-xs text-muted-foreground">Carregando…</p>
+          ) : null}
 
-        {aguardando.length > 0 ? (
-          <>
-            <p className="px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-red-700/80">
-              Aguardando atendimento · {aguardando.length}
-            </p>
-            {aguardando.slice(0, MAX_POR_SECAO).map((row) => (
-              <DropdownMenuItem
-                key={row.lead_id}
-                onClick={() => navigate(`/chat?leadId=${encodeURIComponent(row.lead_id)}`)}
-              >
-                <MessageSquare className="size-4 text-red-600" aria-hidden />
-                <span className="min-w-0 flex-1 truncate">{row.patient_name || 'Lead sem nome'}</span>
-                {row.reason === 'cliente' ? (
-                  <span className="shrink-0 rounded bg-emerald-500/15 px-1 text-[9px] font-semibold uppercase text-emerald-700">
-                    comprou
+          {aguardando.length > 0 ? (
+            <>
+              <p className="px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-red-700/80">
+                Aguardando atendimento · {aguardando.length}
+              </p>
+              {aguardando.slice(0, MAX_POR_SECAO).map((row) => (
+                <DropdownMenuItem
+                  key={row.lead_id}
+                  onClick={() => navigate(`/chat?leadId=${encodeURIComponent(row.lead_id)}`)}
+                >
+                  <MessageSquare className="size-4 text-red-600" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{row.patient_name || 'Lead sem nome'}</span>
+                  {row.reason === 'cliente' ? (
+                    <span className="shrink-0 rounded bg-emerald-500/15 px-1 text-[9px] font-semibold uppercase text-emerald-700">
+                      comprou
+                    </span>
+                  ) : null}
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {esperandoHa(row.waiting_since, agora)}
                   </span>
-                ) : null}
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  {esperandoHa(row.waiting_since, agora)}
-                </span>
-              </DropdownMenuItem>
-            ))}
-            {aguardando.length > MAX_POR_SECAO ? (
-              <DropdownMenuItem onClick={() => navigate('/dashboard')}>
-                <span className="text-xs text-muted-foreground">
-                  Ver os outros {aguardando.length - MAX_POR_SECAO} no painel
-                </span>
-              </DropdownMenuItem>
-            ) : null}
-          </>
-        ) : null}
+                </DropdownMenuItem>
+              ))}
+              {aguardando.length > MAX_POR_SECAO ? (
+                <DropdownMenuItem onClick={() => navigate('/dashboard')}>
+                  <span className="text-xs text-muted-foreground">
+                    Ver os outros {aguardando.length - MAX_POR_SECAO} no painel
+                  </span>
+                </DropdownMenuItem>
+              ) : null}
+            </>
+          ) : null}
 
-        {followUps.length > 0 ? (
-          <>
-            {aguardando.length > 0 ? <DropdownMenuSeparator /> : null}
-            <p className="px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-amber-700/80">
-              Follow-up de hoje · {followUps.length}
+          {followUps.length > 0 ? (
+            <>
+              {aguardando.length > 0 ? <DropdownMenuSeparator /> : null}
+              <p className="px-2 pt-1.5 text-[10px] font-semibold uppercase tracking-wider text-amber-700/80">
+                Follow-up de hoje · {followUps.length}
+              </p>
+              {followUps.slice(0, MAX_POR_SECAO).map((t) => (
+                <DropdownMenuItem
+                  key={t.id}
+                  onClick={() => navigate(`/chat?leadId=${encodeURIComponent(t.leadId)}`)}
+                >
+                  <AlarmClock className="size-4 text-amber-600" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate">{nomeDoLead(t.leadId)}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {diaLocal(t.dueAt ?? '') < hojeLocal() ? 'atrasado' : 'hoje'}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuItem onClick={() => navigate('/tarefas')}>
+                <span className="text-xs text-muted-foreground">Abrir a lista de follow-up</span>
+              </DropdownMenuItem>
+            </>
+          ) : null}
+
+          {!carregando && total === 0 ? (
+            <p className="px-2 py-3 text-xs text-muted-foreground">
+              Ninguém esperando e nenhum retorno marcado para hoje.
             </p>
-            {followUps.slice(0, MAX_POR_SECAO).map((t) => (
-              <DropdownMenuItem
-                key={t.id}
-                onClick={() => navigate(`/chat?leadId=${encodeURIComponent(t.leadId)}`)}
-              >
-                <AlarmClock className="size-4 text-amber-600" aria-hidden />
-                <span className="min-w-0 flex-1 truncate">{nomeDoLead(t.leadId)}</span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  {diaLocal(t.dueAt ?? '') < hojeLocal() ? 'atrasado' : 'hoje'}
+          ) : null}
+
+          {/*
+            A fila de follow-up enche sozinha (uma tarefa por passagem de etapa) e nunca
+            esvazia sozinha, então o sino vivia em "99+" e ninguém olhava mais. Aqui a
+            recepção limpa o que ficou para trás sem depender de dev — e sem tocar em
+            "aguardando atendimento", que é gente esperando resposta agora.
+          */}
+          {atrasadas.length > 0 ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={limpando} onClick={() => setConfirmandoLimpeza(true)}>
+                <BrushCleaning className="size-4 text-muted-foreground" aria-hidden />
+                <span className="text-xs text-muted-foreground">
+                  Limpar {atrasadas.length} follow-up{atrasadas.length > 1 ? 's' : ''} atrasado
+                  {atrasadas.length > 1 ? 's' : ''}
                 </span>
               </DropdownMenuItem>
-            ))}
-            <DropdownMenuItem onClick={() => navigate('/tarefas')}>
-              <span className="text-xs text-muted-foreground">Abrir a lista de follow-up</span>
-            </DropdownMenuItem>
-          </>
-        ) : null}
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-        {!carregando && total === 0 ? (
-          <p className="px-2 py-3 text-xs text-muted-foreground">
-            Ninguém esperando e nenhum retorno marcado para hoje.
-          </p>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      {/*
+        Fora do <DropdownMenu> de propósito: dentro dele o diálogo desmonta junto com o
+        menu no clique e a confirmação nunca chegava a aparecer.
+      */}
+      <ConfirmDialog
+        open={confirmandoLimpeza}
+        onOpenChange={setConfirmandoLimpeza}
+        title={`Limpar ${atrasadas.length} follow-up${atrasadas.length > 1 ? 's' : ''} atrasado${atrasadas.length > 1 ? 's' : ''}?`}
+        description="Sai do sino e das abas de cobrança o que venceu antes de hoje. Nada é apagado nem marcado como feito: fica em Tarefas > Dispensadas, com quem limpou e quando, e dá para devolver qualquer uma. Quem está aguardando atendimento não é tocado."
+        confirmLabel={limpando ? 'Limpando…' : 'Limpar'}
+        variant="default"
+        icon={BrushCleaning}
+        onConfirm={() => {
+          void limparAtrasadas()
+        }}
+      />
+    </>
   )
 }

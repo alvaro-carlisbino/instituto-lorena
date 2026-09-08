@@ -186,6 +186,9 @@ const mapWorkflowFromDb = (row: Record<string, unknown>): WorkflowField => {
   }
 }
 
+const COLUNAS_LEAD_TASK =
+  'id, lead_id, title, assignee_id, due_at, status, task_type, metadata, created_at, sort_order, dismissed_at, dismissed_by, dismissed_reason'
+
 const mapLeadTaskFromDb = (row: Record<string, unknown>): LeadTask => ({
   id: String(row.id),
   leadId: String(row.lead_id),
@@ -197,6 +200,9 @@ const mapLeadTaskFromDb = (row: Record<string, unknown>): LeadTask => ({
   metadata: (row.metadata && typeof row.metadata === 'object' ? row.metadata : {}) as Record<string, unknown>,
   createdAt: String(row.created_at ?? new Date().toISOString()),
   sortOrder: typeof row.sort_order === 'number' ? row.sort_order : Number(row.sort_order) || 0,
+  dismissedAt: row.dismissed_at != null ? String(row.dismissed_at) : null,
+  dismissedBy: row.dismissed_by != null ? String(row.dismissed_by) : null,
+  dismissedReason: row.dismissed_reason != null ? String(row.dismissed_reason) : null,
 })
 
 type DbFollowupStateRow = { lead_id: string; current_step: number; status: string }
@@ -538,9 +544,14 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   // Derrubar o CRM inteiro por causa dela já aconteceu uma vez; não pode acontecer de novo.
 
   const [tasksRes, rulesRes, tmplRes, dispRes, respRes, tagAssignRes, followupRes] = await Promise.all([
+    // Dispensada não entra no boot de propósito: são 2.874 tarefas automáticas mortas
+    // (ver a migração 20260908190000) e este select não tem limite, então elas comiam
+    // o teto de 1.000 linhas do PostgREST e empurravam para fora a tarefa viva de hoje.
+    // A aba "Dispensadas" busca sob demanda, em `fetchDismissedLeadTasks`.
     client
       .from('lead_tasks')
-      .select('id, lead_id, title, assignee_id, due_at, status, task_type, metadata, created_at, sort_order')
+      .select(COLUNAS_LEAD_TASK)
+      .is('dismissed_at', null)
       .order('sort_order', { ascending: true })
       .order('due_at', { ascending: true }),
     client.from('automation_rules').select('id, name, enabled, trigger_type, trigger_config, action_type, action_config'),
@@ -1432,6 +1443,11 @@ export const saveLeadTask = async (task: LeadTask): Promise<void> => {
     metadata: task.metadata ?? {},
     created_at: task.createdAt,
     sort_order: task.sortOrder,
+    // Explícitos porque isto é upsert: coluna omitida volta ao default no conflito, e a
+    // dispensa sumiria em qualquer edição boba (marcar concluída, trocar responsável).
+    dismissed_at: task.dismissedAt ?? null,
+    dismissed_by: task.dismissedBy ?? null,
+    dismissed_reason: task.dismissedReason ?? null,
   })
   if (error) throw error
 }
@@ -1440,6 +1456,62 @@ export const deleteLeadTask = async (taskId: string): Promise<void> => {
   const client = assertSupabase()
   const { error } = await client.from('lead_tasks').delete().eq('id', taskId)
   if (error) throw error
+}
+
+/**
+ * Tira da cobrança tudo que está aberto e venceu antes de hoje.
+ *
+ * É um UPDATE com filtro, não uma lista de ids montada na tela: o que vencer entre a
+ * tela carregar e o clique não escapa, e o que vence HOJE não é dispensado por engano.
+ * Devolve quantas saíram da fila. A tarefa segue aberta e na ficha do lead — o que
+ * acaba é o lembrete diário de um follow-up que a máquina criou sozinha em maio.
+ */
+export const dismissOverdueLeadTasks = async (
+  beforeIso: string,
+  reason: string,
+): Promise<number> => {
+  const client = assertSupabase()
+  const { data: userData } = await client.auth.getUser()
+  const { data, error } = await client
+    .from('lead_tasks')
+    .update({
+      dismissed_at: new Date().toISOString(),
+      dismissed_by: userData.user?.id ?? null,
+      dismissed_reason: reason.trim() || null,
+    })
+    .eq('status', 'open')
+    .is('dismissed_at', null)
+    .not('due_at', 'is', null)
+    .lt('due_at', beforeIso)
+    .select('id')
+  if (error) throw error
+  return (data ?? []).length
+}
+
+/** Devolve uma tarefa dispensada para a fila, limpando o carimbo inteiro. */
+export const restoreLeadTask = async (taskId: string): Promise<void> => {
+  const client = assertSupabase()
+  const { error } = await client
+    .from('lead_tasks')
+    .update({ dismissed_at: null, dismissed_by: null, dismissed_reason: null })
+    .eq('id', taskId)
+  if (error) throw error
+}
+
+/**
+ * As dispensadas, sob demanda e com teto: elas ficam de fora do boot para não comer o
+ * limite de linhas, mas quem quiser conferir o que saiu da fila abre a aba e vê.
+ */
+export const fetchDismissedLeadTasks = async (limit = 200): Promise<LeadTask[]> => {
+  const client = assertSupabase()
+  const { data, error } = await client
+    .from('lead_tasks')
+    .select(COLUNAS_LEAD_TASK)
+    .not('dismissed_at', 'is', null)
+    .order('dismissed_at', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapLeadTaskFromDb)
 }
 
 export const saveSurveyResponse = async (row: SurveyResponse): Promise<void> => {

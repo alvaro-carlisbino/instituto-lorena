@@ -1,24 +1,29 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { MessageCircle } from 'lucide-react'
+import { BrushCleaning, MessageCircle } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useCrm } from '@/context/CrmContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { cn } from '@/lib/utils'
 import type { LeadTask } from '@/mocks/crmMock'
 
-type Filtro = 'today' | 'late' | 'mine' | 'open' | 'done' | 'all'
+type Filtro = 'today' | 'late' | 'mine' | 'open' | 'done' | 'dismissed' | 'all'
+
+/** Motivo carimbado em quem sai da fila pelo botão de limpar. */
+const MOTIVO_LIMPEZA = 'Limpo em Tarefas: follow-up vencido que ficou para trás'
 
 /** Tarefa aberta com data marcada para antes de hoje. */
 function estaAtrasada(t: LeadTask, hoje: string): boolean {
-  return t.status === 'open' && !!t.dueAt && diaLocal(t.dueAt) < hoje
+  return t.status === 'open' && !t.dismissedAt && !!t.dueAt && diaLocal(t.dueAt) < hoje
 }
 
 function venceHoje(t: LeadTask, hoje: string): boolean {
-  return t.status === 'open' && !!t.dueAt && diaLocal(t.dueAt) === hoje
+  return t.status === 'open' && !t.dismissedAt && !!t.dueAt && diaLocal(t.dueAt) === hoje
 }
 
 export function TasksPage() {
@@ -38,8 +43,36 @@ export function TasksPage() {
     [crm.leadTasks, hoje],
   )
 
+  // As dispensadas não vêm no boot (são milhares e comiam o teto de linhas do PostgREST):
+  // quem abre a aba busca sob demanda.
+  const [dispensadas, setDispensadas] = useState<LeadTask[] | null>(null)
+  const [confirmandoLimpeza, setConfirmandoLimpeza] = useState(false)
+  const [limpando, setLimpando] = useState(false)
+
+  useEffect(() => {
+    if (filter !== 'dismissed') return
+    let vivo = true
+    void crm
+      .carregarTarefasDispensadas()
+      .then((rows) => {
+        if (vivo) setDispensadas(rows)
+      })
+      .catch((e) => {
+        if (vivo) setDispensadas([])
+        toast.error(`Não deu para ler as dispensadas: ${e instanceof Error ? e.message : 'erro'}`)
+      })
+    return () => {
+      vivo = false
+    }
+    // Recarrega ao voltar para a aba, para quem acabou de devolver uma ver a lista certa.
+    // `crm` fica fora de propósito: o objeto do contexto é novo a cada render e a busca
+    // rodaria em loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter])
+
   const tasks = useMemo(() => {
-    let list = [...crm.leadTasks]
+    if (filter === 'dismissed') return dispensadas ?? []
+    let list = crm.leadTasks.filter((t) => !t.dismissedAt)
     if (filter === 'today') list = list.filter((t) => venceHoje(t, hoje))
     if (filter === 'late') list = list.filter((t) => estaAtrasada(t, hoje))
     if (filter === 'mine' && crm.myAppUserId) {
@@ -52,11 +85,39 @@ export function TasksPage() {
       const db = b.dueAt ? new Date(b.dueAt).getTime() : 0
       return da - db
     })
-  }, [crm.leadTasks, crm.myAppUserId, filter, hoje])
+  }, [crm.leadTasks, crm.myAppUserId, dispensadas, filter, hoje])
 
   const toggleDone = (t: LeadTask) => {
     const next = t.status === 'done' ? 'open' : 'done'
     crm.updateLeadTask(t.id, { status: next })
+  }
+
+  const limparAtrasadas = async () => {
+    setLimpando(true)
+    try {
+      const quantas = await crm.dispensarTarefasAtrasadas(MOTIVO_LIMPEZA)
+      setDispensadas(null)
+      toast.success(
+        quantas === 0
+          ? 'Nada atrasado para limpar.'
+          : `${quantas} follow-up${quantas > 1 ? 's' : ''} fora da fila. Nada foi apagado: veja na aba Dispensadas.`,
+      )
+    } catch (e) {
+      toast.error(`Não deu para limpar: ${e instanceof Error ? e.message : 'erro desconhecido'}`)
+    } finally {
+      setLimpando(false)
+      setConfirmandoLimpeza(false)
+    }
+  }
+
+  const devolverParaFila = async (t: LeadTask) => {
+    try {
+      await crm.reabrirTarefaDispensada(t.id)
+      setDispensadas((prev) => (prev ?? []).filter((x) => x.id !== t.id))
+      toast.success('Tarefa de volta na fila.')
+    } catch (e) {
+      toast.error(`Não deu para devolver: ${e instanceof Error ? e.message : 'erro desconhecido'}`)
+    }
   }
 
   if (!crm.currentPermission.canRouteLeads) {
@@ -75,6 +136,7 @@ export function TasksPage() {
     { id: 'open', label: 'Abertas' },
     { id: 'mine', label: 'Minhas' },
     { id: 'done', label: 'Concluídas' },
+    { id: 'dismissed', label: 'Dispensadas' },
     { id: 'all', label: 'Todas' },
   ]
 
@@ -83,7 +145,11 @@ export function TasksPage() {
       ? 'Nenhum retorno marcado para hoje.'
       : filter === 'late'
         ? 'Nada atrasado. Follow-up em dia.'
-        : 'Nenhuma tarefa neste filtro.'
+        : filter === 'dismissed'
+          ? dispensadas === null
+            ? 'Carregando…'
+            : 'Nada dispensado até agora.'
+          : 'Nenhuma tarefa neste filtro.'
 
   return (
     <AppLayout
@@ -119,8 +185,17 @@ export function TasksPage() {
       </div>
 
       <Card className="mb-8">
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
           <CardTitle className="text-base">Tarefas · {tasks.length}</CardTitle>
+          {/*
+            A fila de follow-up enche sozinha — cada passagem de etapa cria uma tarefa — e
+            nunca esvazia sozinha. Sem este botão, "zerar" era pedido de dev.
+          */}
+          {filter === 'late' && contagem.atrasadas > 0 ? (
+            <Button type="button" size="sm" variant="outline" disabled={limpando} onClick={() => setConfirmandoLimpeza(true)}>
+              <BrushCleaning className="size-3.5" aria-hidden /> Limpar as {contagem.atrasadas} atrasadas
+            </Button>
+          ) : null}
         </CardHeader>
         <CardContent className="grid gap-3">
           {tasks.length === 0 ? (
@@ -150,6 +225,12 @@ export function TasksPage() {
                       Lead: {lead?.patientName ?? t.leadId} · Vence:{' '}
                       {t.dueAt ? new Date(t.dueAt).toLocaleString('pt-BR') : '—'}
                     </p>
+                    {t.dismissedAt ? (
+                      <p className="m-0 text-xs text-muted-foreground">
+                        Dispensada em {new Date(t.dismissedAt).toLocaleDateString('pt-BR')}
+                        {t.dismissedReason ? ` · ${t.dismissedReason}` : ''}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {/* Sem isto, ver a tarefa e falar com a pessoa eram duas telas e uma busca. */}
@@ -163,9 +244,22 @@ export function TasksPage() {
                         </Link>
                       }
                     />
-                    <Button type="button" size="sm" variant="outline" onClick={() => toggleDone(t)}>
-                      {t.status === 'done' ? 'Reabrir' : 'Concluir'}
-                    </Button>
+                    {t.dismissedAt ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          void devolverParaFila(t)
+                        }}
+                      >
+                        Devolver à fila
+                      </Button>
+                    ) : (
+                      <Button type="button" size="sm" variant="outline" onClick={() => toggleDone(t)}>
+                        {t.status === 'done' ? 'Reabrir' : 'Concluir'}
+                      </Button>
+                    )}
                   </div>
                 </div>
               )
@@ -173,6 +267,21 @@ export function TasksPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={confirmandoLimpeza}
+        onOpenChange={setConfirmandoLimpeza}
+        title={`Limpar ${contagem.atrasadas} tarefa${contagem.atrasadas > 1 ? 's' : ''} atrasada${contagem.atrasadas > 1 ? 's' : ''}?`}
+        description={
+          'Sai da cobrança tudo que venceu antes de hoje. Nada é apagado nem marcado como feito: fica na aba Dispensadas, com quem limpou e quando, e dá para devolver qualquer uma. O que vence hoje não é tocado.'
+        }
+        confirmLabel={limpando ? 'Limpando…' : 'Limpar'}
+        variant="default"
+        icon={BrushCleaning}
+        onConfirm={() => {
+          void limparAtrasadas()
+        }}
+      />
     </AppLayout>
   )
 }

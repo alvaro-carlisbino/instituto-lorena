@@ -193,6 +193,14 @@ export type LeadTask = {
   metadata: Record<string, unknown>
   createdAt: string
   sortOrder: number
+  /**
+   * Dispensada: a tarefa continua aberta e visível na ficha do lead, mas sai da
+   * cobrança (sino do cabeçalho e abas "vencem hoje"/"atrasadas"). Carimba quem,
+   * quando e por quê, e é reversível pela aba "Dispensadas".
+   */
+  dismissedAt?: string | null
+  dismissedBy?: string | null
+  dismissedReason?: string | null
 }
 
 export type AutomationRule = {
