@@ -32,6 +32,32 @@ const PROJECT = 'fgyfpmnvlkmyxtucbxbu'
 const APLICAR = Deno.args.includes('--aplicar')
 const LIMITE = Number(Deno.args.find((a) => a.startsWith('--limite='))?.split('=')[1] ?? '4000')
 
+/** A chave service_role, pela API de gestão: este Mac não a tem no keychain. */
+async function serviceRoleKey(): Promise<string> {
+  const env = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (env) return env
+  const res = await fetch(`https://api.supabase.com/v1/projects/${PROJECT}/api-keys`, {
+    headers: { Authorization: `Bearer ${TOKEN}` },
+  })
+  const keys = await res.json() as Array<{ name?: string; api_key?: string }>
+  const k = keys.find((x) => x.name === 'service_role')?.api_key
+  if (!k) throw new Error('service_role não veio da API de gestão')
+  return k
+}
+
+/**
+ * Diário em ficheiro. A primeira tentativa desta varredura rodou 25 minutos e morreu sem
+ * deixar UMA linha: stdout de processo em segundo plano fica preso no buffer do pipe, e o
+ * que não foi gravado no banco se perdeu junto. Aqui cada linha vai para o disco na hora.
+ */
+const DIARIO = `/tmp/casar-lid-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.log`
+function diga(linha: string): void {
+  console.log(linha)
+  try {
+    Deno.writeTextFileSync(DIARIO, `${linha}\n`, { append: true })
+  } catch { /* o diário é conforto, não pode derrubar a varredura */ }
+}
+
 /** Intervalo entre chamadas à W-API. Consulta de contato não é mensagem, mas a sessão é a
  *  mesma que atende paciente — varrer 3 mil números a toda velocidade é ruído à toa. */
 const PAUSA_MS = 350
@@ -97,7 +123,8 @@ const órfãos = await sql(`
 `)
 const porLid = new Map<string, Row>()
 for (const o of órfãos) porLid.set(digitos(o.phone), o)
-console.log(`cadastros presos a um lid: ${porLid.size}`)
+diga(`diário em ${DIARIO}`)
+diga(`cadastros presos a um lid: ${porLid.size}`)
 
 // ── 2. varre quem tem telefone de verdade e pergunta o lid à W-API ──────────
 const comFone = await sql(`
@@ -110,10 +137,23 @@ const comFone = await sql(`
   order by last_interaction_at desc nulls last
   limit ${LIMITE}
 `)
-console.log(`números a consultar: ${comFone.length} (pausa de ${PAUSA_MS}ms entre eles)`)
+diga(`números a consultar: ${comFone.length} (pausa de ${PAUSA_MS}ms entre eles)`)
 
-const aprender: Array<{ id: string; lid: string }> = []
-const casar: Array<{ keep: string; drop: string; lid: string; nome: string; fone: string }> = []
+const admin = APLICAR ? createClient(`https://${PROJECT}.supabase.co`, await serviceRoleKey()) : null
+
+/** Grava o índice de um lote. Feito DURANTE a varredura: ver o comentário do diário. */
+async function gravarLote(lote: Array<{ id: string; lid: string }>): Promise<void> {
+  if (!APLICAR || !lote.length) return
+  await sql(`
+    update leads as l set custom_fields = coalesce(l.custom_fields,'{}'::jsonb) || jsonb_build_object('wa_lid', v.lid)
+    from (values ${lote.map((a) => `(${lit(a.id)}, ${lit(a.lid)})`).join(',')}) as v(id, lid)
+    where l.id = v.id
+  `)
+}
+
+let pendente: Array<{ id: string; lid: string }> = []
+let aprendidos = 0
+let juntados = 0
 let consultados = 0
 let semResposta = 0
 
@@ -125,49 +165,38 @@ for (const lead of comFone) {
   if (!lid) {
     semResposta++
   } else {
-    aprender.push({ id: lead.id, lid })
+    pendente.push({ id: lead.id, lid })
+    aprendidos++
     const gêmeo = porLid.get(lid)
     if (gêmeo && gêmeo.id !== lead.id) {
-      casar.push({ keep: lead.id, drop: gêmeo.id, lid, nome: String(lead.patient_name ?? ''), fone: digitos(lead.phone) })
       porLid.delete(lid)
+      const nome = String(lead.patient_name ?? '') || '(sem nome)'
+      diga(`  gêmeo: ${nome} · ${digitos(lead.phone)} ← lid ${lid} (${gêmeo.id})`)
+      // A mesclagem sai na hora, e não numa fila no fim: se a varredura cair no minuto 20,
+      // o que já foi resolvido fica resolvido. Foi assim que a primeira tentativa perdeu
+      // 25 minutos de trabalho sem gravar uma linha.
+      if (admin) {
+        try {
+          await mergeLeadDropIntoKeep(admin, lead.id, gêmeo.id)
+          juntados++
+        } catch (e) {
+          diga(`  !! falhou juntar ${gêmeo.id} → ${lead.id}: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
     }
   }
-  if (consultados % 100 === 0) {
-    console.log(`  ${consultados}/${comFone.length} · lid aprendido: ${aprender.length} · gêmeo achado: ${casar.length}`)
+  if (pendente.length >= 100) {
+    await gravarLote(pendente)
+    pendente = []
+    diga(`  ${consultados}/${comFone.length} · lid aprendido: ${aprendidos} · gêmeos juntados: ${juntados}`)
   }
   await new Promise((r) => setTimeout(r, PAUSA_MS))
 }
+await gravarLote(pendente)
 
-console.log(`\nconsultados: ${consultados} · sem resposta: ${semResposta}`)
-console.log(`lid aprendido (vai para custom_fields.wa_lid): ${aprender.length}`)
-console.log(`cadastros gêmeos a juntar: ${casar.length}`)
-for (const c of casar) console.log(`  ${c.nome || '(sem nome)'} · ${c.fone} ← lid ${c.lid} (${c.drop})`)
-console.log(`sobram presos a um lid, sem número conhecido: ${porLid.size}`)
-
-if (!APLICAR) {
-  console.log('\n(ensaio — rode com --aplicar para gravar)')
-  Deno.exit(0)
-}
-
-// ── 3. grava ────────────────────────────────────────────────────────────────
-// O índice primeiro: mesmo sem gêmeo nenhum, ele é o que faz a PRÓXIMA mensagem por lid
-// cair no cadastro certo em vez de abrir um novo.
-for (let i = 0; i < aprender.length; i += 200) {
-  const lote = aprender.slice(i, i + 200)
-  await sql(`
-    update leads as l set custom_fields = coalesce(l.custom_fields,'{}'::jsonb) || jsonb_build_object('wa_lid', v.lid)
-    from (values ${lote.map((a) => `(${lit(a.id)}, ${lit(a.lid)})`).join(',')}) as v(id, lid)
-    where l.id = v.id
-  `)
-}
-console.log(`wa_lid gravado em ${aprender.length} cadastros.`)
-
-const admin = createClient(
-  `https://${PROJECT}.supabase.co`,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? await keychain('instituto-lorena service_role'),
-)
-for (const c of casar) {
-  await mergeLeadDropIntoKeep(admin, c.keep, c.drop)
-  console.log(`  juntado: ${c.nome} · ${c.drop} → ${c.keep}`)
-}
-console.log(`\npronto. ${casar.length} cadastros gêmeos viraram um só.`)
+diga(``)
+diga(`consultados: ${consultados} · sem resposta da W-API: ${semResposta}`)
+diga(`lid aprendido (custom_fields.wa_lid): ${aprendidos}`)
+diga(`cadastros gêmeos juntados: ${juntados}`)
+diga(`sobram presos a um lid, sem número conhecido: ${porLid.size}`)
+if (!APLICAR) diga(`\n(ensaio — nada foi gravado; rode com --aplicar)`)
