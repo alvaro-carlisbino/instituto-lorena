@@ -84,7 +84,6 @@ async function sql(query: string): Promise<Row[]> {
   if (!res.ok) throw new Error(`SQL ${res.status}: ${JSON.stringify(body).slice(0, 400)}`)
   return body
 }
-const lit = (s: unknown) => `'${String(s).replace(/'/g, "''")}'`
 const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '')
 
 // ── 0. credenciais das linhas ───────────────────────────────────────────────
@@ -128,7 +127,7 @@ diga(`cadastros presos a um lid: ${porLid.size}`)
 
 // ── 2. varre quem tem telefone de verdade e pergunta o lid à W-API ──────────
 const comFone = await sql(`
-  select id, patient_name, phone, tenant_id, whatsapp_instance_id
+  select id, patient_name, phone, tenant_id, whatsapp_instance_id, coalesce(custom_fields,'{}'::jsonb) as custom_fields
   from leads
   where deleted_at is null
     and (custom_fields->>'wa_lid') is null
@@ -139,64 +138,76 @@ const comFone = await sql(`
 `)
 diga(`números a consultar: ${comFone.length} (pausa de ${PAUSA_MS}ms entre eles)`)
 
-const admin = APLICAR ? createClient(`https://${PROJECT}.supabase.co`, await serviceRoleKey()) : null
+// A gravação vai pelo supabase-js com a chave service_role, e não pelo SQL da API de gestão.
+// Não é preferência: `enforce_role_write()` é um gatilho em `leads` que só deixa passar quem
+// se apresenta como service_role no JWT. O SQL da API de gestão não tem JWT nenhum, então
+// TODO update em lote batia em «forbidden: requires can_route_leads» — foi o que derrubou as
+// duas primeiras tentativas desta varredura, uma delas depois de 25 minutos de trabalho.
+const admin = createClient(`https://${PROJECT}.supabase.co`, await serviceRoleKey())
 
-/** Grava o índice de um lote. Feito DURANTE a varredura: ver o comentário do diário. */
-async function gravarLote(lote: Array<{ id: string; lid: string }>): Promise<void> {
-  if (!APLICAR || !lote.length) return
-  await sql(`
-    update leads as l set custom_fields = coalesce(l.custom_fields,'{}'::jsonb) || jsonb_build_object('wa_lid', v.lid)
-    from (values ${lote.map((a) => `(${lit(a.id)}, ${lit(a.lid)})`).join(',')}) as v(id, lid)
-    where l.id = v.id
-  `)
-}
-
-let pendente: Array<{ id: string; lid: string }> = []
 let aprendidos = 0
 let juntados = 0
 let consultados = 0
 let semResposta = 0
+let falhas = 0
 
 for (const lead of comFone) {
   const linha = linhas.find((l) => l.id === lead.whatsapp_instance_id) ??
     linhas.find((l) => l.tenant_id === lead.tenant_id) ?? linhas[0]
   const lid = await lidDoNumero(linha, digitos(lead.phone))
   consultados++
+
   if (!lid) {
     semResposta++
   } else {
-    pendente.push({ id: lead.id, lid })
-    aprendidos++
+    // Grava JÁ, um a um. Guardar 3 mil linhas na memória para escrever no fim foi o que fez
+    // a primeira tentativa perder tudo ao cair. E o custo é zero: a pausa entre as consultas
+    // à W-API é maior do que o update.
+    if (APLICAR) {
+      const { error } = await admin
+        .from('leads')
+        .update({ custom_fields: { ...(lead.custom_fields ?? {}), wa_lid: lid } })
+        .eq('id', lead.id)
+      if (error) {
+        falhas++
+        diga(`  !! wa_lid não gravou em ${lead.id}: ${error.message}`)
+      } else {
+        aprendidos++
+      }
+    } else {
+      aprendidos++
+    }
+
     const gêmeo = porLid.get(lid)
     if (gêmeo && gêmeo.id !== lead.id) {
       porLid.delete(lid)
       const nome = String(lead.patient_name ?? '') || '(sem nome)'
       diga(`  gêmeo: ${nome} · ${digitos(lead.phone)} ← lid ${lid} (${gêmeo.id})`)
-      // A mesclagem sai na hora, e não numa fila no fim: se a varredura cair no minuto 20,
-      // o que já foi resolvido fica resolvido. Foi assim que a primeira tentativa perdeu
-      // 25 minutos de trabalho sem gravar uma linha.
-      if (admin) {
+      if (APLICAR) {
         try {
+          // Aviso esperado aqui: `unique_interaction_per_lead_and_msg_id`. Acontece quando a
+          // MESMA mensagem do WhatsApp foi gravada nos dois cadastros — é duplicata de
+          // verdade, e some junto com o cadastro que sai. Conferido: não gera órfã.
           await mergeLeadDropIntoKeep(admin, lead.id, gêmeo.id)
           juntados++
         } catch (e) {
+          falhas++
           diga(`  !! falhou juntar ${gêmeo.id} → ${lead.id}: ${e instanceof Error ? e.message : String(e)}`)
         }
       }
     }
   }
-  if (pendente.length >= 100) {
-    await gravarLote(pendente)
-    pendente = []
-    diga(`  ${consultados}/${comFone.length} · lid aprendido: ${aprendidos} · gêmeos juntados: ${juntados}`)
+
+  if (consultados % 100 === 0) {
+    diga(`  ${consultados}/${comFone.length} · lid gravado: ${aprendidos} · gêmeos juntados: ${juntados} · falhas: ${falhas}`)
   }
   await new Promise((r) => setTimeout(r, PAUSA_MS))
 }
-await gravarLote(pendente)
 
 diga(``)
 diga(`consultados: ${consultados} · sem resposta da W-API: ${semResposta}`)
-diga(`lid aprendido (custom_fields.wa_lid): ${aprendidos}`)
+diga(`lid gravado em custom_fields.wa_lid: ${aprendidos}`)
 diga(`cadastros gêmeos juntados: ${juntados}`)
+diga(`falhas: ${falhas}`)
 diga(`sobram presos a um lid, sem número conhecido: ${porLid.size}`)
 if (!APLICAR) diga(`\n(ensaio — nada foi gravado; rode com --aplicar)`)
