@@ -55,6 +55,14 @@ export type NormalizedInboundMessage = {
   metaPhoneNumberId?: string
   /** W-API: id da instância no painel deles, para casar com whatsapp_channel_instances.wapi_instance_id. */
   wapiInstanceId?: string
+  /**
+   * `@lid` do contato: o identificador que o WhatsApp usa no lugar do número quando a
+   * pessoa tem a privacidade ligada. Vem junto do telefone na maioria das mensagens — e é
+   * essa coincidência que permite montar o índice lid↔telefone sem gastar chamada de API.
+   */
+  fromLid?: string
+  /** `true` quando `fromPhone` É o lid (não havia telefone no payload). Não é discável. */
+  fromIsLid?: boolean
   mediaItems?: Array<{
     type: 'audio' | 'image' | 'video' | 'document' | 'other'
     mimeType?: string

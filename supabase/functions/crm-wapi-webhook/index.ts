@@ -6,7 +6,7 @@ import {
   runWhatsappAiAutoReply,
   upsertConversationStateInboundOnly,
 } from '../_shared/crmAiAutoReply.ts'
-import { customerSaysPaid, escalateLeadToHuman, insertInteraction, upsertLeadByPhone, wantsHumanAgent } from '../_shared/crm.ts'
+import { customerSaysPaid, escalateLeadToHuman, findPhoneByWaLid, insertInteraction, upsertLeadByPhone, wantsHumanAgent } from '../_shared/crm.ts'
 import { linkSiteAttributionToLead } from '../_shared/siteAttributionBridge.ts'
 import { checkPendingRedePixForLead } from '../_shared/rede.ts'
 import { captureCadastroForLead } from '../_shared/cadastroExtract.ts'
@@ -240,6 +240,28 @@ Deno.serve(async (req) => {
   // (regra da clínica). Aqui a IA continua atendendo até a venda fechar.
   const isSalesBot = String(instanceRow.bot_kind ?? '').toLowerCase() === 'sales'
 
+  // ── `@lid`: identificador, não telefone ─────────────────────────────────────
+  // Quando o payload só traz o lid (o WhatsApp esconde o número de quem tem a privacidade
+  // ligada), procuramos no índice antes de criar cadastro. O índice se monta sozinho: toda
+  // mensagem normal traz o par (número em `sender.id`, lid em `sender.senderLid`), e é ele
+  // que gravamos abaixo em `custom_fields.wa_lid`.
+  //
+  // Sem isto, quem escreve hoje pelo número e amanhã aparece por lid vira DOIS cadastros —
+  // e o segundo com um "telefone" de 15 dígitos que ninguém consegue discar.
+  const waLid = normalized.fromLid ?? ''
+  if (normalized.fromIsLid && waLid) {
+    const foneReal = await findPhoneByWaLid(admin, waLid)
+    if (foneReal) normalized.fromPhone = foneReal
+  }
+  const leadCustomFields: Record<string, unknown> = {
+    provider: 'wapi',
+    externalMessageId: normalized.externalMessageId,
+    ...(waLid ? { wa_lid: waLid } : {}),
+    // Carimbo honesto para a tela: o que está em `phone` é um id do WhatsApp, não um número.
+    // Sem ele a ficha mostra 15 dígitos com cara de telefone e alguém tenta ligar.
+    ...(normalized.fromIsLid && normalized.fromPhone === waLid ? { wa_lid_only: true } : {}),
+  }
+
   const dedupKey = `event:wapi:${payloadInstanceId}:${normalized.externalMessageId}`
   const { data: existing } = await admin
     .from('webhook_jobs')
@@ -286,11 +308,7 @@ Deno.serve(async (req) => {
         summary: normalized.text.slice(0, 500),
         source: 'whatsapp',
         whatsappInstanceId: wInstanceId,
-        customFields: {
-          provider: 'wapi',
-          externalMessageId: normalized.externalMessageId,
-          direction: 'out',
-        },
+        customFields: { ...leadCustomFields, direction: 'out' },
         tenantId,
       })
 
@@ -350,10 +368,7 @@ Deno.serve(async (req) => {
       summary: normalized.text.slice(0, 500),
       source: 'whatsapp',
       whatsappInstanceId: wInstanceId,
-      customFields: {
-        provider: 'wapi',
-        externalMessageId: normalized.externalMessageId,
-      },
+      customFields: leadCustomFields,
       tenantId,
     })
 

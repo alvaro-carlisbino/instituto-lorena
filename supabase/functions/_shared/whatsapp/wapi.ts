@@ -247,6 +247,31 @@ export class WapiProvider implements WhatsappProvider {
       safeString(getByPath(payload, 'key.remoteJid')).toLowerCase().includes('@g.us')
     if (isGroup) return null
 
+    // STATUS não é mensagem. Quando alguém da agenda do telemóvel publica um story, a W-API
+    // manda o mesmo `webhookReceived` de sempre, com `isGroup:false` — e o CRM lia aquilo
+    // como se a pessoa tivesse escrito para a clínica. O estrago, medido em 08/set/2026:
+    //
+    //  • "Aline Comercial Instituto Lorena Visentainer" virou LEAD, com 29 "mensagens" que
+    //    são os stories de divulgação da própria clínica ("Olha como sua experiência no dia
+    //    da sua cirurgia!"), e chegou a ser arrastada até a coluna «Pago»;
+    //  • a Sofia RESPONDEU story de gente: seis vezes ao Luis Nunes, seis à Allinne Lopes,
+    //    sempre com "Seja muito bem-vindo(a) ao Instituto Lorena Visentainer". Isso é DM
+    //    fria para quem nunca escreveu — exatamente a assinatura que a guarda anti-ban
+    //    inteira existe para evitar;
+    //  • "Recepção" e "Spa Capilar", contatos internos, entraram no funil pelo mesmo caminho.
+    //
+    // O que denuncia: `chat.id` vem literalmente `"status"`, e o JID é `status@broadcast`.
+    // `@newsletter` (canais) entra junto porque também não é conversa com ninguém.
+    const destinoRaw = [
+      safeString(getByPath(payload, 'chat.id')),
+      safeString(getByPath(payload, 'chatId')),
+      safeString(getByPath(payload, 'key.remoteJid')),
+      safeString(getByPath(payload, 'key.remoteJID')),
+    ]
+      .join(' ')
+      .toLowerCase()
+    if (/(^|\s)status(\s|$)|status@broadcast|@newsletter/.test(destinoRaw)) return null
+
     const messageId = firstString(payload, [
       'messageid',
       'messageId',
@@ -286,8 +311,28 @@ export class WapiProvider implements WhatsappProvider {
     ])
     const fromRaw = fromMe ? (contraparteRaw || remetenteRaw) : remetenteRaw
     if (fromRaw.toLowerCase().includes('@g.us')) return null
+
+    // `@lid` NÃO é telefone. É o identificador que o WhatsApp passou a usar no lugar do
+    // número quando a pessoa tem a privacidade ligada — 15 dígitos que parecem um telefone
+    // internacional e não são de ninguém. Guardar aquilo em `leads.phone` custou 122 leads
+    // com telefone impossível: a Aline não consegue ligar, o Bling recusa o contato, e a
+    // mesma pessoa nasce DUAS vezes quando volta a escrever pelo número (provado com dois
+    // leads gêmeos, mesmo nome, um com `5544…` e outro com o lid).
+    //
+    // A boa notícia é que o payload quase sempre traz os dois: `sender.id` é o número e
+    // `sender.senderLid` é o lid. Só quando o `chat.id` é a única pista (mensagem NOSSA,
+    // saída pelo telemóvel) é que sobra o lid sozinho — e aí ele vira a chave da conversa,
+    // porque enviar para o lid FUNCIONA; o que não dá é chamá-lo de telefone.
+    const lidRaw = firstString(payload, [
+      'sender.senderLid',
+      'sender.lid',
+      'senderLid',
+      'chat.lid',
+    ])
+    const fromIsLid = fromRaw.toLowerCase().includes('@lid')
     const fromPhone = digitsOnly(fromRaw)
     if (fromPhone.length < 10) return null
+    const fromLid = digitsOnly(lidRaw) || (fromIsLid ? fromPhone : '')
 
     const pushName = firstString(payload, [
       'sender.pushName',
@@ -366,6 +411,8 @@ export class WapiProvider implements WhatsappProvider {
       direction: fromMe ? 'out' : 'in',
       happenedAt: happenedAtIso,
       wapiInstanceId: payloadInstanceId || undefined,
+      fromLid: fromLid || undefined,
+      fromIsLid,
       raw: payload,
     }
   }

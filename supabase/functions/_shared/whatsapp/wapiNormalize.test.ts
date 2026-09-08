@@ -179,3 +179,67 @@ Deno.test('apagar para todos não é confundido com edição', () => {
 Deno.test('mensagem normal não vira edição', () => {
   assertEquals(extractInboundEdit(payload({ msgContent: { conversation: 'oi' } })), null)
 })
+
+/**
+ * STATUS e `@lid`, descobertos em 08/set/2026 lendo payload de verdade no log da linha da
+ * clínica. Os dois vinham com `isGroup:false` e passavam direto pelo caminho de mensagem.
+ */
+
+Deno.test('status não é mensagem: story de contato não vira lead nem acorda a IA', () => {
+  // Payload REAL (dígitos trocados): quem publica um story cai aqui com chat.id "status".
+  // Enquanto isto passou, a "Aline Comercial" virou lead com 29 mensagens que eram os
+  // stories da própria clínica, e a Sofia respondeu story de gente com as boas-vindas.
+  const status = provider.normalizeInbound(
+    payload({ chat: { id: 'status' }, msgcontent: { conversation: 'Olha como foi o dia da sua cirurgia!' } }),
+    headers,
+  )
+  assertEquals(status, null)
+
+  const broadcast = provider.normalizeInbound(
+    payload({ chat: { id: 'status@broadcast' }, msgcontent: { conversation: 'Parte 2' } }),
+    headers,
+  )
+  assertEquals(broadcast, null)
+
+  // Canal (newsletter) também não é conversa com ninguém.
+  assertEquals(
+    provider.normalizeInbound(payload({ chat: { id: '120363000000000000@newsletter' } }), headers),
+    null,
+  )
+})
+
+Deno.test('lid vem SEPARADO do telefone quando o payload traz os dois', () => {
+  // É este par, presente na mensagem normal, que monta o índice lid↔telefone de graça.
+  const n = provider.normalizeInbound(
+    payload({ sender: { id: `${PACIENTE}@c.us`, senderLid: '78159932330227@lid', pushname: 'Joana' } }),
+    headers,
+  )
+  assertEquals(n?.fromPhone, PACIENTE)
+  assertEquals(n?.fromLid, '78159932330227')
+  assertEquals(n?.fromIsLid, false)
+})
+
+Deno.test('lid sozinho vira a chave da conversa, mas carimbado como lid', () => {
+  // Sem telefone no payload, o lid é o único jeito de falar com a pessoa — e enviar para
+  // ele FUNCIONA. O que não pode é o CRM chamar aquilo de telefone.
+  const n = provider.normalizeInbound(
+    payload({ sender: { id: '78159932330227@lid', senderLid: '78159932330227@lid', pushname: 'Joana' } }),
+    headers,
+  )
+  assertEquals(n?.fromPhone, '78159932330227')
+  assertEquals(n?.fromLid, '78159932330227')
+  assertEquals(n?.fromIsLid, true)
+})
+
+Deno.test('saída da equipe com chat em lid: o lid não é confundido com número', () => {
+  const p = payload({
+    fromme: true,
+    sender: { id: `${CLINICA}@c.us`, senderLid: '218790449176647@lid' },
+    chat: { id: '78159932330227@lid' },
+    msgcontent: { conversation: 'oi' },
+  })
+  const n = provider.normalizeInbound(p, headers)
+  assertEquals(n?.direction, 'out')
+  assertEquals(n?.fromIsLid, true)
+  assertEquals(n?.fromPhone, '78159932330227')
+})

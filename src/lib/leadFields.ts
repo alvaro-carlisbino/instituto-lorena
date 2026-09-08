@@ -19,9 +19,27 @@ export function isManychatSyntheticPhone(phone: string): boolean {
  * devolvemos um rótulo honesto de que ainda não há número real. `isReal` permite
  * estilizar (mutado/itálico) o caso sem número.
  */
-export function getLeadPhoneDisplay(lead: Pick<Lead, 'phone' | 'source'>): { label: string; isReal: boolean } {
+/**
+ * O `@lid` é o identificador que o WhatsApp usa no lugar do número quando a pessoa liga a
+ * privacidade. São 15 dígitos com cara de telefone internacional — e a ficha os mostrava
+ * como "Telefone principal", com o botão "Chamar no WhatsApp" ao lado apontando para um
+ * wa.me que não existe. Conversar por ali funciona; discar, não.
+ */
+export function isWhatsappLidOnly(lead: Pick<Lead, 'phone' | 'customFields'>): boolean {
+  if (lead.customFields?.wa_lid_only === true) return true
+  const digits = String(lead.phone ?? '').replace(/\D/g, '')
+  const lid = String(lead.customFields?.wa_lid ?? '').replace(/\D/g, '')
+  return Boolean(lid) && lid === digits
+}
+
+export function getLeadPhoneDisplay(
+  lead: Pick<Lead, 'phone' | 'source' | 'customFields'>,
+): { label: string; isReal: boolean } {
   const phone = String(lead.phone ?? '').trim()
   const digits = phone.replace(/\D/g, '')
+  if (isWhatsappLidOnly(lead)) {
+    return { label: 'Número protegido · só por WhatsApp', isReal: false }
+  }
   if (digits.length >= 10 && !isManychatSyntheticPhone(phone)) {
     return { label: phone, isReal: true }
   }

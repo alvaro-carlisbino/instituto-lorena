@@ -128,6 +128,38 @@ export async function findLeadByPhone(admin: SupabaseClient, phone: string): Pro
   return String((data as { id: unknown }).id)
 }
 
+/**
+ * Telefone de verdade de quem só se apresentou pelo `@lid`.
+ *
+ * O `@lid` é o identificador que o WhatsApp usa no lugar do número quando a pessoa liga a
+ * privacidade. Na maioria das mensagens ele chega ACOMPANHADO do telefone (`sender.id` é o
+ * número, `sender.senderLid` é o lid), e é por isso que gravar o par em `custom_fields.wa_lid`
+ * a cada mensagem monta o índice de graça, sem chamada nenhuma à API.
+ *
+ * Quem usa: o webhook, antes de criar lead. Sem esta consulta, a mesma pessoa que hoje
+ * escreve pelo número e amanhã aparece por lid vira dois cadastros — foi o que aconteceu com
+ * dois leads gêmeos até 08/set/2026.
+ *
+ * Só devolve telefone DISCÁVEL: se o lead achado também estiver guardado por lid (os 122 que
+ * nasceram antes desta correção), devolver o "telefone" dele seria devolver outro lid.
+ */
+export async function findPhoneByWaLid(admin: SupabaseClient, lid: string): Promise<string | null> {
+  const chave = digitsOnly(lid)
+  if (chave.length < 10) return null
+  const { data } = await admin
+    .from('leads')
+    .select('phone, created_at')
+    .contains('custom_fields', { wa_lid: chave })
+    .is('deleted_at', null)
+    .order('created_at', { ascending: true })
+    .limit(5)
+  for (const row of (data ?? []) as Array<{ phone?: unknown }>) {
+    const fone = digitsOnly(String(row.phone ?? ''))
+    if (fone && fone !== chave && fone.length >= 10 && fone.length <= 13) return fone
+  }
+  return null
+}
+
 export function isPlaceholderName(name: string): boolean {
   const n = name.toLowerCase().trim()
   return (
