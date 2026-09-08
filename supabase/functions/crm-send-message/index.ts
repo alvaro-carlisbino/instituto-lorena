@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { resolveWhatsappDestino } from '../_shared/brPhone.ts'
 import { insertInteraction } from '../_shared/crm.ts'
 import { setLineConversationMode } from '../_shared/conversationLineState.ts'
 import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
@@ -419,9 +420,13 @@ Deno.serve(async (req) => {
       .maybeSingle()
     poloTemLinhaPropria = Boolean(linhaDoPolo)
   }
-  // Telefone de verdade (não o sintético 888001… que o ManyChat inventava para quem só
-  // existia no Instagram). Sem telefone real não há linha para onde mandar.
-  const telefoneReal = /^\d{12,}$/.test(effectiveTo) && !effectiveTo.startsWith('888')
+  // Para onde a mensagem VAI, já escrita como o WhatsApp espera. A regra que vivia aqui era
+  // `12 dígitos ou mais`, o tamanho de um brasileiro com DDI — e por isso TODA conversa com
+  // gente de fora (EUA e Chile têm 11 dígitos, o Uruguai também) respondia `no_real_phone`,
+  // dizendo à atendente que a paciente "não tem WhatsApp real" enquanto ela escrevia do
+  // outro lado. O resolvedor lê o Brasil primeiro e só depois aceita o número estrangeiro
+  // como veio; ele também é quem reconhece o sintético `888001…`.
+  const destino = resolveWhatsappDestino(effectiveTo)
   // O polo do ASSUNTO manda na linha, não o polo da pessoa. Quando a rotina declara
   // senderTenantId diferente do tenant do lead, ignoramos a linha vinculada (ela é do
   // polo da pessoa) e resolvemos pela linha do assunto, sem reescrever o vínculo. O
@@ -463,12 +468,13 @@ Deno.serve(async (req) => {
   // Sem esse plano B, telefone sintético (888001…, inventado para quem só falou por DM)
   // não tem para onde ir. Falha AQUI, dizendo porquê, em vez de tentar entregar a um
   // número que não existe — o que é exatamente a assinatura que queima a linha.
-  if (effectiveTo.startsWith('888001') || !telefoneReal) {
+  if (!destino.ok) {
     return json(
       {
         error: 'no_real_phone',
-        message:
-          'Este lead não tem WhatsApp real (número sintético de Instagram/formulário). Responda pelo Instagram ou corrija o telefone no cadastro.',
+        message: destino.phone.startsWith('888')
+          ? 'Este lead não tem WhatsApp real (número sintético de Instagram/formulário). Responda pelo Instagram ou corrija o telefone no cadastro.'
+          : `Este telefone não é discável no WhatsApp: ${destino.motivo}. Corrija o número no cadastro.`,
         phone: effectiveTo,
       },
       400,
@@ -724,7 +730,7 @@ Deno.serve(async (req) => {
 
     for (const peca of pecas) {
       const comum = {
-        to: effectiveTo,
+        to: destino.phone,
         media: peca.media,
         caption: peca.caption || undefined,
         fileName: peca.fileName || undefined,
@@ -807,7 +813,7 @@ Deno.serve(async (req) => {
     // pela rota própria da W-API em vez de morrer em `wapi_sticker_not_implemented`.
     if (stickerWebpBase64) {
       const res = await provider.sendMessage({
-        to: effectiveTo,
+        to: destino.phone,
         text: '',
         leadId,
         stickerWebpBase64,
@@ -850,7 +856,7 @@ Deno.serve(async (req) => {
       switch (especial.type) {
         case 'location': {
           res = await wapi!.sendLocation({
-            to: effectiveTo,
+            to: destino.phone,
             latitude: especial.latitude,
             longitude: especial.longitude,
             name: especial.name,
@@ -869,7 +875,7 @@ Deno.serve(async (req) => {
           res =
             contatos.length === 1
               ? await wapi!.sendContact({
-                  to: effectiveTo,
+                  to: destino.phone,
                   contactName: contatos[0].name,
                   contactPhone: contatos[0].phone,
                   contactBusinessDescription: contatos[0].description,
@@ -877,7 +883,7 @@ Deno.serve(async (req) => {
                   metadata: antiBanMeta,
                 })
               : await wapi!.sendContacts({
-                  to: effectiveTo,
+                  to: destino.phone,
                   contacts: contatos.map((c) => ({
                     contactName: c.name,
                     contactPhone: c.phone,
@@ -891,7 +897,7 @@ Deno.serve(async (req) => {
         }
         case 'poll': {
           res = await wapi!.sendPoll({
-            to: effectiveTo,
+            to: destino.phone,
             message: especial.message,
             poll: especial.options ?? [],
             pollMaxOptions: especial.maxOptions,
@@ -903,7 +909,7 @@ Deno.serve(async (req) => {
         }
         case 'pix': {
           res = await wapi!.sendPix({
-            to: effectiveTo,
+            to: destino.phone,
             merchantName: especial.merchantName,
             pixKey: especial.pixKey,
             type: especial.keyType,
@@ -916,7 +922,7 @@ Deno.serve(async (req) => {
         }
         default: {
           res = await wapi!.sendLink({
-            to: effectiveTo,
+            to: destino.phone,
             message: especial.message,
             linkUrl: especial.linkUrl,
             title: especial.title,
@@ -948,7 +954,7 @@ Deno.serve(async (req) => {
 
     if (textoAvulso.trim()) {
       const res = await provider.sendMessage({
-        to: effectiveTo,
+        to: destino.phone,
         text: textoAvulso,
         leadId,
         replyToMessageId: citar,

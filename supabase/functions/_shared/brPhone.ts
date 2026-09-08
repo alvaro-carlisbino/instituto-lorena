@@ -66,27 +66,77 @@ export function normalizeBrPhone(raw: string): BrPhone {
   const digitos = cru.replace(/\D/g, '')
   if (!digitos) return { phone: '', ok: false, motivo: 'sem telefone', estrangeiro: false }
 
+  const br = lerBrasileiro(digitos)
+  if (br.phone) return { phone: br.phone, ok: true, motivo: '', estrangeiro: false }
+  return recusa(cru, digitos, br.motivo)
+}
+
+/**
+ * A leitura brasileira, isolada: ou devolve `55 + DDD + número`, ou o motivo pelo qual estes
+ * dígitos não são um telefone daqui. Vive à parte porque `resolveWhatsappDestino` precisa da
+ * MESMA leitura — o Brasil tem de ser tentado primeiro nos dois lados, senão `44991000000`
+ * (Maringá guardado sem o 55) sairia para o Reino Unido.
+ */
+function lerBrasileiro(digitos: string): { phone: string; motivo: string } {
   const semZeroInicial = digitos.replace(/^0+/, '')
   const temDdi = semZeroInicial.length >= 12 && semZeroInicial.length <= 15 && semZeroInicial.startsWith('55')
   const nucleo = temDdi ? semZeroInicial.slice(2).replace(/^0+/, '') : semZeroInicial
 
   const ddd = nucleo.slice(0, 2)
   const numero = nucleo.slice(2)
-  if (!DDDS_VALIDOS.has(ddd)) {
-    return recusa(cru, digitos, `DDD ${ddd || '??'} não existe no Brasil`)
-  }
+  if (!DDDS_VALIDOS.has(ddd)) return { phone: '', motivo: `DDD ${ddd || '??'} não existe no Brasil` }
 
-  const bom = (p: string): BrPhone => ({ phone: p, ok: true, motivo: '', estrangeiro: false })
+  const bom = (p: string) => ({ phone: p, motivo: '' })
   if (numero.length === 9) {
     if (numero[0] === '9') return bom(`55${ddd}${numero}`)
-    return recusa(cru, digitos, `celular de 9 dígitos tem de começar com 9, veio ${numero[0]}`)
+    return { phone: '', motivo: `celular de 9 dígitos tem de começar com 9, veio ${numero[0]}` }
   }
   if (numero.length === 8) {
     if (/^[6-9]/.test(numero)) return bom(`55${ddd}9${numero}`)
     if (/^[2-5]/.test(numero)) return bom(`55${ddd}${numero}`)
-    return recusa(cru, digitos, `número começando com ${numero[0]} não é celular nem fixo`)
+    return { phone: '', motivo: `número começando com ${numero[0]} não é celular nem fixo` }
   }
-  return recusa(cru, digitos, `${numero.length} dígitos depois do DDD ${ddd} (celular tem 9, fixo tem 8)`)
+  return { phone: '', motivo: `${numero.length} dígitos depois do DDD ${ddd} (celular tem 9, fixo tem 8)` }
+}
+
+/**
+ * Para onde a mensagem VAI — o outro lado do `normalizeBrPhone`, que cuida de quem CHEGA.
+ *
+ * A diferença que obriga a existirem dois: na entrada o número foi DIGITADO por gente e a
+ * dúvida é se ele é discável; na saída o número quase sempre já veio do próprio WhatsApp
+ * (o `sender` do webhook, quando a pessoa escreveu primeiro) e a dúvida é como escrevê-lo.
+ * Por isso aqui NÃO há lista de DDIs: quem não é do Brasil sai como veio. A lista existia e
+ * era incompleta — não tinha o 56 do Chile nem o 48 da Polónia, dois países com conversa
+ * aberta na linha da clínica hoje.
+ *
+ * O que isto conserta (08/set/2026): a guarda de envio exigia `12 dígitos ou mais`, que é o
+ * tamanho de um brasileiro com DDI. Número dos EUA tem 11, do Chile 11, do Uruguai 11 — toda
+ * conversa com gente de fora respondia `no_real_phone` ("este lead não tem WhatsApp real"),
+ * mesmo com a paciente a escrever do outro lado. Eram 32 conversas na base.
+ *
+ * A ordem importa e é a mesma da entrada: Brasil primeiro. `44991000000` é Maringá sem o 55,
+ * não o Reino Unido; `15082800000` não é Sorocaba (o número depois do DDD começaria com 0),
+ * é os EUA. Quem falha a leitura brasileira e tem entre 10 e 15 dígitos (o teto do E.164)
+ * sai intacto, e é a W-API que dirá se aquele número existe.
+ */
+export function resolveWhatsappDestino(raw: string): BrPhone {
+  const digitos = String(raw ?? '').replace(/\D/g, '')
+  if (!digitos) return { phone: '', ok: false, motivo: 'sem telefone', estrangeiro: false }
+
+  // Telefone sintético do ManyChat (`888001…`, inventado para quem só existia no Instagram).
+  // Não é número de ninguém: mandar para ele é bater em porta fechada, que é assinatura de
+  // lista comprada e derruba a sessão.
+  if (digitos.startsWith('888')) {
+    return { phone: digitos, ok: false, motivo: 'número sintético, não é um WhatsApp real', estrangeiro: false }
+  }
+
+  const br = lerBrasileiro(digitos)
+  if (br.phone) return { phone: br.phone, ok: true, motivo: '', estrangeiro: false }
+
+  if (digitos.length >= 10 && digitos.length <= 15) {
+    return { phone: digitos, ok: true, motivo: '', estrangeiro: true }
+  }
+  return { phone: digitos, ok: false, motivo: br.motivo, estrangeiro: false }
 }
 
 /**

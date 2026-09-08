@@ -1,5 +1,5 @@
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { normalizeBrPhone } from './brPhone.ts'
+import { normalizeBrPhone, resolveWhatsappDestino } from './brPhone.ts'
 
 /**
  * O que estes testes protegem: o telefone que a pessoa DIGITOU no formulário do anúncio é a
@@ -73,4 +73,58 @@ Deno.test('o que não dá para salvar volta ok:false, nunca um número inventado
   assertEquals(normalizeBrPhone('+552090000001').ok, false)   // DDD 20 não existe
   assertEquals(normalizeBrPhone('15550000002').ok, false)     // sem `+`, não vale de estrangeiro
   assertEquals(normalizeBrPhone('').ok, false)
+})
+
+/**
+ * Saída (`resolveWhatsappDestino`): para onde a mensagem VAI. Aqui o número quase sempre já
+ * veio do próprio WhatsApp, então o `+` não existe — e era exatamente por exigir o `+` (e 12
+ * dígitos) que a guarda de envio recusava toda conversa estrangeira. Os formatos abaixo saíram
+ * de `leads.phone` em 08/set/2026; os dígitos são sintéticos porque este repo é público.
+ */
+
+Deno.test('saída: estrangeiro sem `+` sai como veio, e não é recusado', () => {
+  const eua = resolveWhatsappDestino('15550100000')
+  assertEquals(eua.ok, true)
+  assertEquals(eua.estrangeiro, true)
+  assertEquals(eua.phone, '15550100000')
+
+  // Chile (56) e Polónia (48) não estavam na lista de DDIs da entrada — por isso a saída
+  // não tem lista nenhuma: quem falha a leitura brasileira sai intacto.
+  assertEquals(resolveWhatsappDestino('56900000001').phone, '56900000001')
+  assertEquals(resolveWhatsappDestino('48700000002').phone, '48700000002')
+  assertEquals(resolveWhatsappDestino('59890000003').phone, '59890000003')
+})
+
+Deno.test('saída: Brasil vem PRIMEIRO — 44 é Maringá, não o Reino Unido', () => {
+  const maringa = resolveWhatsappDestino('44991000004')
+  assertEquals(maringa.ok, true)
+  assertEquals(maringa.estrangeiro, false)
+  assertEquals(maringa.phone, '5544991000004')
+
+  // Guardado com 10 dígitos (celular antigo, sem o 9º): ganha o 9 e o DDI.
+  assertEquals(resolveWhatsappDestino('4491000005').phone, '5544991000005')
+  // Já completo: não ganha nem perde nada.
+  assertEquals(resolveWhatsappDestino('5544991000006').phone, '5544991000006')
+})
+
+Deno.test('saída: o sintético do ManyChat continua barrado', () => {
+  const fake = resolveWhatsappDestino('8880011234567890')
+  assertEquals(fake.ok, false)
+  assertEquals(fake.phone.startsWith('888'), true)
+})
+
+Deno.test('saída: fora da faixa do E.164 não vira envio', () => {
+  assertEquals(resolveWhatsappDestino('123456789').ok, false)        // 9 dígitos
+  assertEquals(resolveWhatsappDestino('1234567890123456').ok, false) // 16, acima do E.164
+  assertEquals(resolveWhatsappDestino('').ok, false)
+})
+
+Deno.test('saída: entre 10 e 15 dígitos, o que não é do Brasil sai como estrangeiro', () => {
+  // Escolha consciente: aqui NÃO se adivinha. `4400000007` não é um brasileiro (o número
+  // depois do DDD 44 começa com 0), então sai intacto e quem responde é a W-API. Inventar
+  // dígito para "consertar" mandaria a mensagem para outra pessoa — pior do que um erro.
+  const indefinido = resolveWhatsappDestino('4400000007')
+  assertEquals(indefinido.ok, true)
+  assertEquals(indefinido.estrangeiro, true)
+  assertEquals(indefinido.phone, '4400000007')
 })
