@@ -1487,7 +1487,13 @@ export async function payRedeIntent(
       tid,
       return_code: returnCode,
       paid_at: approved ? new Date().toISOString() : null,
-      ...(approved ? { method: 'card', installments: paidInstallments } : {}),
+      // O método é carimbado TAMBÉM na recusa: a cobrança criada como Pix e tentada no cartão
+      // ficava gravada como 'pix', e `ultimaRecusaDeCartao` (crm-ai-assistant), que filtra
+      // method='card', não via a recusa. Foi o caso da terceira tentativa da Siulvia, 04/09/26.
+      // Se depois ela pagar o Pix, `finalizeRedePaid` regrava method='pix' — o caixa por meio
+      // de pagamento continua contando só o que foi PAGO.
+      method: 'card',
+      ...(approved ? { installments: paidInstallments } : {}),
     })
     .eq('id', intent.id)
 
