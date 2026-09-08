@@ -9,6 +9,7 @@ import {
   MoreHorizontal,
   PhoneCall,
   Receipt,
+  Plus,
   RotateCcw,
   Scissors,
   Sparkles,
@@ -39,11 +40,14 @@ import { Label } from '@/components/ui/label'
 import { SearchField } from '@/components/ui/search-field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { AtendimentosSemana } from '@/components/vendas/AtendimentosSemana'
+import { NovoAtendimentoDialog } from '@/components/vendas/NovoAtendimentoDialog'
 import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { combinaBusca } from '@/lib/busca'
 import { cn } from '@/lib/utils'
+import type { IndicacaoAtendimento } from '@/services/atendimentos'
 import { type ClinicSaleKind, type StaffMember, listSurgicalStaff } from '@/services/clinicSales'
 import {
   FOLLOWUP_CHANNELS,
@@ -98,6 +102,7 @@ const ATALHOS = [
 
 /** Cor da faixa de cada coluna. Só o topo: card colorido em seis cores vira festa. */
 const FAIXA: Record<KanbanColuna, string> = {
+  atendimento: 'bg-rose-500',
   contato_1: 'bg-sky-500',
   contato_2: 'bg-violet-500',
   contato_3: 'bg-amber-500',
@@ -114,7 +119,13 @@ const FAIXA: Record<KanbanColuna, string> = {
  * ficasse de fora, ele perderia o botão de registrar e o aviso de atraso, que é
  * exatamente o acompanhamento que se quis preservar ao criar a coluna.
  */
-const ABERTAS: KanbanColuna[] = ['contato_1', 'contato_2', 'contato_3', 'em_acompanhamento']
+const ABERTAS: KanbanColuna[] = [
+  'atendimento',
+  'contato_1',
+  'contato_2',
+  'contato_3',
+  'em_acompanhamento',
+]
 
 /**
  * O follow-up em kanban: 1º, 2º e 3º contato, em acompanhamento, não convertido
@@ -163,6 +174,10 @@ export function FollowUpTab() {
   const buscaAdiada = useDeferredValue(termo)
   /** Liga a fila do dia: some quem tem contato marcado para depois de hoje. */
   const [soPendentes, setSoPendentes] = useState(false)
+  /** O atendimento que ela anota à mão, como na planilha. */
+  const [novoAtendimento, setNovoAtendimento] = useState(false)
+  /** Sobe a cada recarga do quadro para a safra da semana não ficar para trás. */
+  const [versao, setVersao] = useState(0)
   /**
    * "Não convertido" e "Encerrado" nascem FECHADAS. Elas guardam 114 dos 174
    * pacientes da clínica e não têm ação diária nenhuma — abertas, empurravam as
@@ -173,12 +188,25 @@ export function FollowUpTab() {
     'encerrado',
   ])
 
+  const usuarioId = useMemo(
+    () => crm.myAppUserId ?? crm.sdrMembers[0]?.id ?? null,
+    [crm.myAppUserId, crm.sdrMembers],
+  )
+
+  /**
+   * De quem é a safra que a tela está mostrando. Em "Landing" e "Todos" não há safra: a
+   * primeira é lead que nem consultou, a segunda mistura as duas indicações.
+   */
+  const indicacao: IndicacaoAtendimento | null =
+    funil === 'cirurgia' ? 'cirurgia' : funil === 'protocolo' ? 'protocolo' : null
+
   const load = async () => {
     setLoading(true)
     try {
       const [quadro, fora] = await Promise.all([listFollowupKanban(), listFollowupsDispensados()])
       setCards(quadro)
       setDispensados(fora)
+      setVersao((v) => v + 1)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar os follow-ups')
     } finally {
@@ -649,6 +677,10 @@ export function FollowUpTab() {
         </div>
       </div>
 
+      {/* A pergunta que ela respondia contando linha colorida na planilha: quantos dos
+          atendimentos da semana fecharam. Só nas duas filas que têm safra. */}
+      {indicacao && <AtendimentosSemana indicacao={indicacao} recarregar={versao} />}
+
       {/* Coluna fechada vira etiqueta aqui em cima. Sem isto ela ficava fora da
           tela, à direita do quadro, e a tela parecia ter perdido pacientes. */}
       {fechadas.size > 0 && (
@@ -697,8 +729,19 @@ export function FollowUpTab() {
                     : 'Ninguém aqui.'
               }
               badge={
-                // Só em "Encerrado": as colunas de contato são a fila viva da Aline,
-                // e botão de zerar em cima da fila do dia é acidente esperando.
+                // O botão de anotar o atendimento mora no cabeçalho da própria coluna: é
+                // onde ela olha quando volta do consultório com a lista do dia na mão.
+                col.id === 'atendimento' && indicacao && usuarioId ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 gap-1 px-2 text-xs"
+                    onClick={() => setNovoAtendimento(true)}
+                  >
+                    <Plus className="size-3" /> Atendimento
+                  </Button>
+                ) : // Zerar só em "Encerrado": as colunas de contato são a fila viva da
+                // Aline, e botão de zerar em cima da fila do dia é acidente esperando.
                 col.id === 'encerrado' && (porColuna.get(col.id) ?? []).length > 0 ? (
                   <Button
                     size="sm"
@@ -715,6 +758,20 @@ export function FollowUpTab() {
             />
           ))}
         </div>
+      )}
+
+      {/* Montado só quando abre: o formulário nasce em branco e já com a indicação da
+          fila que ela está olhando, sem efeito de reset para alguém esquecer depois. */}
+      {novoAtendimento && indicacao && usuarioId && (
+        <NovoAtendimentoDialog
+          aberto
+          indicacao={indicacao}
+          tenantId={tenant.id}
+          ownerId={usuarioId}
+          usuarioId={usuarioId}
+          onFechar={() => setNovoAtendimento(false)}
+          onSalvo={() => void load()}
+        />
       )}
 
       <Dialog open={alvo != null} onOpenChange={(open) => (!open ? setAlvo(null) : null)}>

@@ -304,6 +304,31 @@ export async function encaminharItem(
     ownerId: ctx.ownerId,
   })
 
+  // A safra da Aline. O destino que ela escolheu aqui É o que o médico indicou, então o
+  // atendimento nasce junto — sem isto, "quantos atendimentos a semana teve" só saberia
+  // dos que ela digitou à mão, e a taxa de fechamento subiria por falta de denominador.
+  // 'followup' fica de fora de propósito: quem saiu dizendo "vou pensar" ainda não tem
+  // indicação, e chutar uma jogaria o paciente na safra errada.
+  if (destino !== 'followup') {
+    const { error: safraErr } = await client.from('clinic_atendimentos').upsert(
+      {
+        item_id: item.itemId,
+        tenant_id: ctx.tenantId,
+        lead_id: leadId,
+        paciente: item.paciente,
+        telefone: telefoneCrm(item.telefone) || null,
+        indicacao: destino,
+        atendido_em: item.consultaEm ?? hojeLocal(),
+        medico: item.prestador,
+        observacao: ctx.nota?.trim() || null,
+        fonte: 'pos_consulta',
+        created_by: ctx.usuarioId ?? null,
+      },
+      { onConflict: 'item_id', ignoreDuplicates: true },
+    )
+    if (safraErr) throw new Error(safraErr.message)
+  }
+
   const { error: resErr } = await client.from('post_consultation_resolutions').upsert(
     {
       item_id: item.itemId,

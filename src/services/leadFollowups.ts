@@ -91,8 +91,8 @@ export async function listFollowupAgenda(): Promise<FollowupAgendaRow[]> {
 }
 
 /**
- * O follow-up em colunas: 1º, 2º e 3º contato, em acompanhamento, não convertido
- * e encerrado.
+ * O follow-up em colunas: atendimento, 1º, 2º e 3º contato, em acompanhamento, não
+ * convertido e encerrado.
  *
  * A coluna é do PACIENTE, não da tentativa — por isso vem da view, que já reduz o
  * histórico a uma linha por lead. Ninguém arrasta card aqui: registrar o contato
@@ -101,6 +101,7 @@ export async function listFollowupAgenda(): Promise<FollowupAgendaRow[]> {
  * "2º contato" preenchida sem que ligação nenhuma tenha acontecido).
  */
 export type KanbanColuna =
+  | 'atendimento'
   | 'contato_1'
   | 'contato_2'
   | 'contato_3'
@@ -109,9 +110,18 @@ export type KanbanColuna =
   | 'encerrado'
 
 export const KANBAN_COLUNAS: Array<{ id: KanbanColuna; label: string; hint: string }> = [
-  { id: 'contato_1', label: '1º contato', hint: 'Primeira tentativa marcada' },
-  { id: 'contato_2', label: '2º contato', hint: 'Já teve uma tentativa' },
-  { id: 'contato_3', label: '3º contato', hint: 'Terceira tentativa' },
+  {
+    // A primeira coluna da planilha da Aline, que faltava aqui: o médico atendeu e
+    // indicou. Antes esta gente caía em "1º contato" sem que ligação nenhuma tivesse
+    // acontecido — a coluna dizia "primeira tentativa marcada" para quem ainda não
+    // tinha sido procurado, e a fila dela parecia de outra pessoa.
+    id: 'atendimento',
+    label: 'Atendimentos',
+    hint: 'Consulta ou retorno com indicação. Ninguém ligou ainda',
+  },
+  { id: 'contato_1', label: '1º contato', hint: 'Uma tentativa já feita' },
+  { id: 'contato_2', label: '2º contato', hint: 'Duas tentativas já feitas' },
+  { id: 'contato_3', label: '3º contato', hint: 'Três tentativas já feitas' },
   {
     // Antes esta gente ficava dentro do "3º contato", que era "terceira tentativa
     // OU MAIS": quem estava na sexta ligação e ainda negociando aparecia colado em
@@ -190,7 +200,7 @@ export async function listFollowupKanban(): Promise<KanbanCard[]> {
       doneAt: str(row.done_at),
       outcome: str(row.outcome),
       note: str(row.note),
-      coluna: (row.coluna as KanbanColuna) ?? 'contato_1',
+      coluna: (row.coluna as KanbanColuna) ?? 'atendimento',
       diasAtraso: Number(row.dias_atraso ?? 0),
       vendaId: str(row.venda_id),
       cirurgiaEm: str(row.cirurgia_em),
