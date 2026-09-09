@@ -114,7 +114,7 @@ async function lidDoNumero(linha: Row, fone: string): Promise<string | null> {
 
 // ── 1. os cadastros que hoje têm um lid no lugar do telefone ────────────────
 const órfãos = await sql(`
-  select id, patient_name, phone, tenant_id, whatsapp_instance_id
+  select id, patient_name, phone, tenant_id, whatsapp_instance_id, coalesce(custom_fields,'{}'::jsonb) as custom_fields
   from leads
   where deleted_at is null
     and length(regexp_replace(phone,'\\D','','g')) between 14 and 15
@@ -210,4 +210,26 @@ diga(`lid gravado em custom_fields.wa_lid: ${aprendidos}`)
 diga(`cadastros gêmeos juntados: ${juntados}`)
 diga(`falhas: ${falhas}`)
 diga(`sobram presos a um lid, sem número conhecido: ${porLid.size}`)
+
+// ── 3. quem sobrou: carimbar o próprio lid ──────────────────────────────────
+// Sem número conhecido, o lid continua sendo a chave da conversa. Carimbando-o em
+// `wa_lid`, a ficha para de exibir 15 dígitos como "Telefone principal" e passa a dizer
+// "Número protegido · só por WhatsApp" (`isWhatsappLidOnly` deduz do dado: wa_lid == phone).
+const sobraram = [...porLid.values()].filter((o) => !digitos(o.custom_fields?.wa_lid))
+diga(``)
+diga(`a carimbar como "só por lid": ${sobraram.length}`)
+if (APLICAR) {
+  let carimbados = 0
+  for (const o of sobraram) {
+    const lid = digitos(o.phone)
+    const { error } = await admin
+      .from('leads')
+      .update({ custom_fields: { ...(o.custom_fields ?? {}), wa_lid: lid, wa_lid_only: true } })
+      .eq('id', o.id)
+    if (error) diga(`  !! não carimbou ${o.id}: ${error.message}`)
+    else carimbados++
+  }
+  diga(`carimbados: ${carimbados}`)
+}
+
 if (!APLICAR) diga(`\n(ensaio — nada foi gravado; rode com --aplicar)`)
