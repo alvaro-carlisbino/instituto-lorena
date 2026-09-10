@@ -73,21 +73,27 @@ const CAP_PADRAO = 6
 const TENTATIVAS_ATE_DESISTIR_DO_VIDEO = 2
 
 /**
- * Orçamento de espera dentro de uma rodada, em ms.
+ * Orçamento de espera dentro de uma rodada, em ms. UMA espera, e só uma.
  *
  * A guarda exige 45–90s entre dois proativos da MESMA linha (`gap_min_segundos` +
  * jitter em `whatsapp_line_policy`). O laço aqui despacha em ~0,6s por lead, então
  * sem espera só o PRIMEIRO da rodada passa e todo o resto leva `ritmo` na cara. Em vez
  * de queimar a lista contra a parede, esperamos o tempo que a própria guarda pede e
- * tentamos o mesmo lead de novo — enquanto couber no orçamento. Fora dele, a rodada
- * acaba: a de daqui a uma hora continua de onde esta parou.
+ * tentamos o mesmo lead de novo.
  *
- * 240s deixa a função inteira bem abaixo do teto de parede da Edge Function.
+ * O TETO NÃO É O DA PAREDE, É O DE OCIOSIDADE. O Edge Runtime derruba a requisição com
+ * `504 IDLE_TIMEOUT` depois de 150s sem atividade — e dormir é exatamente isso. Foi assim
+ * que o reenvio de 10/set/2026 entregou Rita e Karina e morreu antes da Fátima: duas
+ * pausas de 100s numa invocação só. Uma espera cabe com folga; duas nunca cabem.
+ *
+ * Quem dá vazão não é uma rodada mais longa, é rodada mais frequente: o cron passou de
+ * 1x/hora para 4x/hora. Dois nomes por rodada × 44 rodadas = 88/dia, acima dos 66 que o
+ * `cap_por_rodada = 6` prometia e nunca entregou.
  */
-const ORCAMENTO_ESPERA_MS = 240_000
+const ORCAMENTO_ESPERA_MS = 95_000
 
 /** Teto por espera: um `retryAfterSeconds` absurdo não pendura a rodada. */
-const ESPERA_MAX_MS = 100_000
+const ESPERA_MAX_MS = 95_000
 
 const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -245,6 +251,14 @@ async function reenviarVideo(
   let primeiro = true
   for (const lead of leads) {
     const leadId = String(lead.id)
+    // DOIS POR INVOCAÇÃO, pelo mesmo motivo de `ORCAMENTO_ESPERA_MS`: a segunda pausa
+    // levaria a invocação além dos 150s de ociosidade do Edge Runtime e ela morreria com
+    // `504 IDLE_TIMEOUT` no meio da lista — foi o que deixou a Fátima sem o vídeo em
+    // 10/set/2026. O que sobra volta em `pendentes`, para uma segunda chamada.
+    if (!dryRun && results.filter((r) => r.status === 'enviado' || r.status === 'recusado').length >= 2) {
+      results.push({ leadId, nome: lead.patient_name, status: 'pendente' })
+      continue
+    }
     const { data: saida } = await admin
       .from('interactions')
       .select('tenant_id')
