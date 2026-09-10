@@ -62,13 +62,79 @@ const ESPACO_MINIMO_HORAS = 20
 const CAP_PADRAO = 6
 
 /**
- * Depois de duas voltas falhando, o texto sai SEM o vídeo.
+ * Depois de duas voltas FALHANDO O ENVIO, o texto sai SEM o vídeo.
  *
  * O anexo é o que pode quebrar sozinho (URL assinada, W-API fora do ar, arquivo movido no
  * storage). A mensagem importa mais que o vídeo: melhor a pessoa receber o texto do que
  * ficar em silêncio esperando um MP4.
+ *
+ * FALHA, e só falha. Recusa da guarda anti-ban não conta aqui — ver `ehRecusaDaGuarda`.
  */
 const TENTATIVAS_ATE_DESISTIR_DO_VIDEO = 2
+
+/**
+ * Orçamento de espera dentro de uma rodada, em ms.
+ *
+ * A guarda exige 45–90s entre dois proativos da MESMA linha (`gap_min_segundos` +
+ * jitter em `whatsapp_line_policy`). O laço aqui despacha em ~0,6s por lead, então
+ * sem espera só o PRIMEIRO da rodada passa e todo o resto leva `ritmo` na cara. Em vez
+ * de queimar a lista contra a parede, esperamos o tempo que a própria guarda pede e
+ * tentamos o mesmo lead de novo — enquanto couber no orçamento. Fora dele, a rodada
+ * acaba: a de daqui a uma hora continua de onde esta parou.
+ *
+ * 240s deixa a função inteira bem abaixo do teto de parede da Edge Function.
+ */
+const ORCAMENTO_ESPERA_MS = 240_000
+
+/** Teto por espera: um `retryAfterSeconds` absurdo não pendura a rodada. */
+const ESPERA_MAX_MS = 100_000
+
+const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+type Recusa = { error: string; reason: string; message: string; retryAfterSeconds: number | null }
+
+/**
+ * O MOTIVO REAL DA RECUSA, e não "Edge Function returned a non-2xx status code".
+ *
+ * `functions.invoke` do supabase-js engole o corpo quando o status não é 2xx: sobra uma
+ * `FunctionsHttpError` com a frase genérica e a `Response` crua em `.context`. Enquanto
+ * ninguém abria esse corpo, `last_reason` guardava a frase inútil para TODA recusa — e foi
+ * assim que ninguém viu que o que barrava era o ritmo da linha, não o vídeo.
+ */
+async function lerRecusa(sendErr: unknown, sendResult: unknown): Promise<Recusa> {
+  const corpo = (sendResult ?? {}) as Record<string, unknown>
+  let dados: Record<string, unknown> = corpo
+  const ctx = (sendErr as { context?: unknown } | null)?.context
+  if (ctx instanceof Response) {
+    try {
+      dados = (await ctx.clone().json()) as Record<string, unknown>
+    } catch {
+      // Corpo não-JSON (502 do runtime, HTML de gateway): fica o que veio do invoke.
+    }
+  }
+  const retry = Number(dados.retryAfterSeconds)
+  return {
+    error: String(dados.error ?? '').trim(),
+    reason: String(dados.reason ?? '').trim(),
+    message: String(
+      dados.message ?? (sendErr as { message?: string } | null)?.message ?? 'recusado',
+    ).trim(),
+    retryAfterSeconds: Number.isFinite(retry) && retry > 0 ? retry : null,
+  }
+}
+
+/**
+ * "Ainda não" da guarda anti-ban × "quebrou" de verdade.
+ *
+ * A guarda devolve 429 para ritmo, teto do dia, teto da semana por lead, janela de horário
+ * e contato frio. Nada disso diz uma palavra sobre o anexo — e contar essas recusas como
+ * tentativa de vídeo é o que fez Rita, Karina e Fátima receberem "Segue nosso vídeo" com
+ * vídeo nenhum em 10/set/2026: três rodadas barradas por `ritmo`, `attempts` em 3, e o
+ * vídeo abandonado por um problema que nunca existiu.
+ */
+function ehRecusaDaGuarda(r: Recusa): boolean {
+  return r.error === 'blocked_antiban' || r.error === 'rate_limited' || r.error === 'cooldown'
+}
 
 type Passo = { horas: number; texto: string; video: boolean }
 
@@ -239,6 +305,7 @@ Deno.serve(async (req) => {
 
   const agora = new Date()
   let enviadas = 0
+  let gastoEmEsperaMs = 0
   const results: Array<Record<string, unknown>> = []
 
   for (const lead of leads) {
@@ -274,47 +341,70 @@ Deno.serve(async (req) => {
     }
 
     try {
-      const { data: sendResult, error: sendErr } = await admin.functions.invoke('crm-send-message', {
-        body: {
-          leadId: lead.lead_id,
-          text: texto,
-          channel: 'whatsapp',
-          source: 'followup_agendamento',
-          // Polo da CONVERSA, não do cadastro: quem carimba é a linha por onde ela vive
-          // ([[crm_venda_segue_a_linha_nao_a_pessoa]]).
-          senderTenantId: lead.conversa_tenant_id,
-          requireBotKind: lead.conversa_tenant_id === 'tricopill' ? 'sales' : 'clinic',
-          // O texto vira legenda do vídeo: o `crm-send-message` cola a mensagem avulsa na
-          // primeira peça sem legenda. Uma mensagem só, como uma pessoa mandaria.
-          ...(comVideo ? { media: [{ storagePath: cfg.videoPath, kind: 'video' }] } : {}),
-        },
-      })
+      const enviar = () =>
+        admin.functions.invoke('crm-send-message', {
+          body: {
+            leadId: lead.lead_id,
+            text: texto,
+            channel: 'whatsapp',
+            source: 'followup_agendamento',
+            // Polo da CONVERSA, não do cadastro: quem carimba é a linha por onde ela vive
+            // ([[crm_venda_segue_a_linha_nao_a_pessoa]]).
+            senderTenantId: lead.conversa_tenant_id,
+            requireBotKind: lead.conversa_tenant_id === 'tricopill' ? 'sales' : 'clinic',
+            // O texto vira legenda do vídeo: o `crm-send-message` cola a mensagem avulsa na
+            // primeira peça sem legenda. Uma mensagem só, como uma pessoa mandaria.
+            ...(comVideo ? { media: [{ storagePath: cfg.videoPath, kind: 'video' }] } : {}),
+          },
+        })
+
       // Sem `antiBanKind: 'transactional'` de propósito: isto NÃO é confirmação de um ato
       // que a pessoa acabou de praticar, é a casa puxando assunto. Passa pela guarda
       // inteira (janela, teto do dia, ritmo, teto semanal por lead).
-      const ok = !sendErr && (sendResult as { ok?: boolean })?.ok !== false
-      if (!ok) {
-        const motivo = String(
-          (sendResult as { reason?: string; message?: string } | null)?.reason ??
-            (sendResult as { message?: string } | null)?.message ??
-            sendErr?.message ??
-            'recusado',
-        ).slice(0, 200)
+      let { data: sendResult, error: sendErr } = await enviar()
+      let ok = !sendErr && (sendResult as { ok?: boolean })?.ok !== false
+      let recusa = ok ? null : await lerRecusa(sendErr, sendResult)
+
+      // RITMO É RELÓGIO, não veredito: a guarda diz em quantos segundos a linha volta a
+      // aceitar. Esperar o que ela pediu e tentar de novo é o que faz a rodada entregar
+      // mais de um nome — antes, o 2º em diante batia na parede e ia embora recusado.
+      if (recusa && recusa.reason === 'ritmo' && recusa.retryAfterSeconds) {
+        const esperaMs = Math.min(recusa.retryAfterSeconds * 1000 + 2_000, ESPERA_MAX_MS)
+        if (gastoEmEsperaMs + esperaMs <= ORCAMENTO_ESPERA_MS) {
+          gastoEmEsperaMs += esperaMs
+          await dormir(esperaMs)
+          ;({ data: sendResult, error: sendErr } = await enviar())
+          ok = !sendErr && (sendResult as { ok?: boolean })?.ok !== false
+          recusa = ok ? null : await lerRecusa(sendErr, sendResult)
+        } else {
+          // Sem orçamento: o resto da lista levaria `ritmo` igual. Encerra a rodada em vez
+          // de gastar uma recusa por nome — a próxima hora continua daqui.
+          results.push({ leadId: lead.lead_id, status: 'adiado', degrau: proximo + 1, motivo: 'ritmo' })
+          break
+        }
+      }
+
+      if (!ok && recusa) {
+        const motivo = `${recusa.error || 'recusado'}${recusa.reason ? `:${recusa.reason}` : ''} — ${recusa.message}`.slice(0, 200)
         // Recusa da guarda (fora de janela, teto do dia, teto semanal por lead) é "ainda
         // não", não "não": o degrau NÃO sobe e a próxima rodada tenta de novo. É assim que
         // o 3º degrau acaba saindo no 8º dia em vez do 7º, segurado pelo
         // `cap_proativo_semana_por_lead = 2` — e isso é a guarda funcionando.
+        //
+        // E ela NÃO gasta tentativa de vídeo: `attempts` só existe para desistir de um
+        // anexo que quebrou. Ver `ehRecusaDaGuarda`.
+        const daGuarda = ehRecusaDaGuarda(recusa)
         await admin.from('crm_followup_agendamento').upsert({
           lead_id: lead.lead_id,
           tenant_id: lead.tenant_id,
           step: estado.step,
           last_sent_at: estado.last_sent_at,
-          attempts: estado.attempts + 1,
+          attempts: daGuarda ? estado.attempts : estado.attempts + 1,
           last_reason: motivo,
           updated_at: nowIso(),
         })
         console.warn(`followup-agendamento recusado lead=${lead.lead_id}: ${motivo}`)
-        results.push({ leadId: lead.lead_id, status: 'recusado', degrau: proximo + 1, motivo })
+        results.push({ leadId: lead.lead_id, status: 'recusado', degrau: proximo + 1, motivo, daGuarda })
         continue
       }
 
