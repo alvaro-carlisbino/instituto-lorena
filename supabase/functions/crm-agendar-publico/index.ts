@@ -17,7 +17,11 @@ import { WapiProvider } from '../_shared/whatsapp/wapi.ts'
  * Regras que valem mais que o payload:
  *  - o score é calculado AQUI. O que o navegador manda é resposta, não nota.
  *  - a estimativa de folículos sai da RPC `clinica_estimativa_publica` (quartis das
- *    cirurgias reais), nunca do que o cliente enviou.
+ *    cirurgias reais), nunca do que o cliente enviou. Desde 10/set/2026 ela é INTERNA:
+ *    entra na nota que a atendente lê e na ficha do lead, e não vai mais para o
+ *    paciente (nem na landing, nem na mensagem da Sofia). Número de fios é conversa de
+ *    consulta médica; prometer um antes de olhar a área doadora é promessa que a Dra.
+ *    tem de desmanchar depois.
  *  - o horário precisa existir em `clinica_agenda_publica` na hora do POST: sem
  *    isso dava para reservar 03:00 de domingo mandando um JSON à mão.
  *  - quem diz "só pesquisando" NÃO ganha horário. Vira lead frio e pronto; a
@@ -234,20 +238,16 @@ function grauLegivel(grau: string): string {
  *
  * Três decisões de texto:
  *  - devolve o que ela respondeu, com as palavras dela. Prova que alguém leu.
- *  - a estimativa entra aqui de novo, porque é a única informação que ela não
- *    consegue em nenhum outro lugar, e é o que faz valer a pena responder.
+ *  - NENHUM número de folículos. A estimativa saía aqui até 10/set/2026; o que ela
+ *    consegue nesta mensagem, e em nenhum outro lugar, é a clínica já falando do caso
+ *    dela pelo nome.
  *  - termina em PERGUNTA. Resposta dela transforma isto em conversa aberta, e
  *    conversa aberta não gasta cota nenhuma da guarda anti-ban.
  *
  * Sem link, de propósito: link na primeira mensagem de um contato novo é uma das
  * assinaturas que queimam sessão não-oficial (ver crm_wapi_guarda_antiban).
  */
-function mensagemDaSofia(input: {
-  nome: string
-  protocolo: string
-  triagem: Triagem
-  estimativa: { esperado: number } | null
-}): string {
+function mensagemDaSofia(input: { nome: string; protocolo: string; triagem: Triagem }): string {
   const primeiro = input.nome.trim().split(/\s+/)[0] || 'tudo bem'
   const alvo = ALVO_PACIENTE[input.triagem.objetivo] ?? ''
   const grau = grauLegivel(input.triagem.grau)
@@ -261,12 +261,6 @@ function mensagemDaSofia(input: {
     '.',
   ].join('')
 
-  const numero = input.estimativa
-    ? `\n\nPela nossa base de cirurgias, um caso parecido costuma pedir algo em torno de ` +
-      `${input.estimativa.esperado.toLocaleString('pt-BR')} unidades foliculares. O número final quem define é a ` +
-      `consulta com a Dra., olhando a sua área doadora de perto.`
-    : ''
-
   const fecho = pesquisando
     ? '\n\nSem compromisso nenhum: quer que eu te explique como funciona o tratamento no seu caso?'
     : '\n\nPosso te explicar como funciona a consulta e o que a Dra. analisa nela?'
@@ -274,7 +268,7 @@ function mensagemDaSofia(input: {
   return (
     `Oi, ${primeiro}! Aqui é a Sofia, do Instituto Lorena Visentainer.` +
     `\n\nAcabei de receber a sua triagem pelo site, protocolo ${input.protocolo}.` +
-    `\n\n${resumo}${numero}${fecho}`
+    `\n\n${resumo}${fecho}`
   )
 }
 
@@ -466,7 +460,8 @@ Deno.serve(async (req) => {
   const teto = tetoDoScore(triagem)
   const temperatura = temperaturaDoScore(score, teto)
 
-  // Estimativa pela referência da casa. Falha aqui não derruba o agendamento.
+  // Estimativa pela referência da casa, para a ATENDENTE: entra na nota da conversa e
+  // na ficha do lead, e não sai daqui para o paciente. Falha não derruba o agendamento.
   let estimativa: { esperado: number; minimo: number; maximo: number; amostra: number } | null = null
   const escala = triagem.grau.startsWith('ludwig_') ? 'ludwig' : 'norwood'
   const grauRpc = triagem.grau.replace('ludwig_', '')
@@ -760,7 +755,7 @@ Deno.serve(async (req) => {
   //
   // Se qualquer coisa falhar (linha caída, número sem WhatsApp, erro de rede), o lead
   // cai na FILA em vez de sumir: ninguém fica sem contato por causa de um envio ruim.
-  const textoSofia = mensagemDaSofia({ nome, protocolo, triagem, estimativa })
+  const textoSofia = mensagemDaSofia({ nome, protocolo, triagem })
 
   // Mesma pessoa preenchendo de novo (recarregou, mandou duas vezes, voltou no dia
   // seguinte): a conversa já está aberta e mandar a apresentação por cima é o robô se
@@ -840,7 +835,6 @@ Deno.serve(async (req) => {
     protocolo,
     score,
     temperatura,
-    estimativa,
     slotAt: slotAt || null,
     profissional: profissional || null,
     mensagemEnviada,

@@ -35,13 +35,6 @@ export type ProfissionalPublico = {
   proxima: string | null
 }
 
-export type EstimativaPublica = {
-  esperado: number
-  minimo: number
-  maximo: number
-  amostra: number
-}
-
 export type EnvioPreAgendamento = {
   nome: string
   telefone: string
@@ -69,7 +62,6 @@ export type RespostaPreAgendamento = {
    */
   mensagemEnviada: boolean
   whatsappUrl: string
-  estimativa: EstimativaPublica | null
 }
 
 /** Erro com a mensagem que a pessoa deve ler (a do servidor, não a genérica do SDK). */
@@ -159,20 +151,6 @@ export async function carregarNumerosPublicos(): Promise<NumerosPublicos | null>
   }
 }
 
-export async function carregarEstimativa(escala: string, grau: string): Promise<EstimativaPublica | null> {
-  if (!supabase) return null
-  const { data, error } = await supabase.rpc('clinica_estimativa_publica', { p_escala: escala, p_grau: grau })
-  if (error) return null
-  const linha = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null
-  if (!linha || Number(linha.esperado ?? 0) <= 0) return null
-  return {
-    esperado: Number(linha.esperado),
-    minimo: Number(linha.minimo),
-    maximo: Number(linha.maximo),
-    amostra: Number(linha.amostra),
-  }
-}
-
 async function invocar(body: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (!supabase) throw new ErroAgenda('offline', 'Sistema indisponível agora.')
   const { data, error } = await supabase.functions.invoke('crm-agendar-publico', { body })
@@ -223,7 +201,6 @@ export async function enviarPreAgendamento(envio: EnvioPreAgendamento): Promise<
     profissional: p.profissional ? String(p.profissional) : null,
     mensagemEnviada: p.mensagemEnviada === true,
     whatsappUrl: String(p.whatsappUrl ?? ''),
-    estimativa: (p.estimativa as EstimativaPublica | null) ?? null,
   }
 }
 

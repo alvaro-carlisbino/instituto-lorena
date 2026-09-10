@@ -12,7 +12,10 @@ import { diaLocal } from '@/lib/diaLocal'
  *
  * Cada uma das três que ficaram tem função própria e nenhuma é dispensável:
  *  - objetivo: define o assunto e o texto que a pessoa recebe;
- *  - grau: é o que produz a estimativa de folículos, a recompensa da página;
+ *  - grau: vale 20 pontos no score e é o que a atendente lê antes de ligar. Produzia
+ *    também a estimativa de folículos da página, que saiu em 10/set/2026: o número
+ *    continua sendo calculado e guardado no CRM, só não é mais mostrado nem enviado
+ *    para o paciente. Ver o cabeçalho de `ConsultaLandingPage`;
  *  - urgência: é o filtro. Vale 35 dos pontos e separa quem compra de quem passeia.
  *
  * A NOTA não mora aqui. O score é calculado na edge function `crm-agendar-publico`,
@@ -123,17 +126,6 @@ export function triagemCompleta(r: RespostasTriagem): boolean {
  */
 export function podeReservarHorario(r: RespostasTriagem): boolean {
   return Boolean(r.urgencia) && r.urgencia !== 'pesquisando'
-}
-
-/** Estimativa de folículos só existe para cabelo (a referência da casa é de escalpo). */
-export function temEstimativa(r: RespostasTriagem): boolean {
-  return r.objetivo === 'transplante_masculino' || r.objetivo === 'transplante_feminino'
-}
-
-export function escalaDoGrau(grau: string): { escala: 'norwood' | 'ludwig'; grau: string } | null {
-  if (!grau) return null
-  if (grau.startsWith('ludwig_')) return { escala: 'ludwig', grau: grau.replace('ludwig_', '') }
-  return { escala: 'norwood', grau }
 }
 
 export type Horario = {

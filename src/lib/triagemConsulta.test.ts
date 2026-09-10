@@ -2,12 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
   agruparPorDia,
-  escalaDoGrau,
   mascararTelefone,
   perguntasVisiveis,
   podeReservarHorario,
   telefoneValido,
-  temEstimativa,
   triagemCompleta,
 } from './triagemConsulta'
 
@@ -60,19 +58,6 @@ describe('quem vê agenda', () => {
 
   it('não abre agenda antes de responder', () => {
     expect(podeReservarHorario({})).toBe(false)
-  })
-})
-
-describe('estimativa e escala', () => {
-  it('só estima folículos para cabelo', () => {
-    expect(temEstimativa({ objetivo: 'transplante_masculino' })).toBe(true)
-    expect(temEstimativa({ objetivo: 'barba' })).toBe(false)
-  })
-
-  it('traduz o grau para a escala da RPC', () => {
-    expect(escalaDoGrau('3v')).toEqual({ escala: 'norwood', grau: '3v' })
-    expect(escalaDoGrau('ludwig_2')).toEqual({ escala: 'ludwig', grau: '2' })
-    expect(escalaDoGrau('')).toBeNull()
   })
 })
 

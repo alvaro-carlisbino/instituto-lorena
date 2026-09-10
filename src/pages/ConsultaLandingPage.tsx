@@ -4,24 +4,20 @@ import { EscalaCapilar } from '@/components/landing/EscalaCapilar'
 import { capturarAtribuicaoDoNavegador, type AtribuicaoLanding } from '@/lib/atribuicaoLanding'
 import { iniciarPixelMeta, pixelLead, pixelTriagemCompleta } from '@/lib/pixelMeta'
 import {
-  escalaDoGrau,
   mascararTelefone,
   nomeValido,
   perguntasVisiveis,
   podeReservarHorario,
   telefoneValido,
-  temEstimativa,
   triagemCompleta,
   type PerguntaTriagem,
   type RespostasTriagem,
 } from '@/lib/triagemConsulta'
 import {
   ErroAgenda,
-  carregarEstimativa,
   carregarNumerosPublicos,
   enviarPreAgendamento,
   registrarEventoLanding,
-  type EstimativaPublica,
   type NumerosPublicos,
   type RespostaPreAgendamento,
 } from '@/services/agendaPublica'
@@ -40,9 +36,15 @@ import {
  *     "começar": quem chega do anúncio já responde.
  *  2. Nenhuma digitação até o fim. Três perguntas de um toque, com desenho (duas para
  *     sobrancelha e barba). Eram cinco até 27/ago/2026.
- *  3. A recompensa vem antes do pedido: o número de folículos aparece ACIMA dos campos
- *     de nome e WhatsApp, na mesma tela. O quiz do Tricopill morreu por fazer o
+ *  3. O fecho vem antes do pedido: o que a pessoa respondeu volta para ela ACIMA dos
+ *     campos de nome e WhatsApp, na mesma tela. O quiz do Tricopill morreu por fazer o
  *     contrário, e uma tela só para o formulário era um clique que não perguntava nada.
+ *
+ *     Quem ocupava esse lugar era a ESTIMATIVA DE FOLÍCULOS, e ela saiu em 10/set/2026,
+ *     daqui e da mensagem da Sofia. Número de fios é conversa de consulta: a página
+ *     prometia um valor que só a Dra. fecha olhando a área doadora de perto. O CRM
+ *     continua calculando e guardando a referência (nota de sistema e ficha do lead);
+ *     quem deixou de ver o número foi o paciente, não a atendente.
  *  4. A conversa começa SOZINHA. Ao enviar, a Sofia manda a primeira mensagem no
  *     WhatsApp da pessoa (`crm-agendar-publico`), e o botão desta tela abre a conversa
  *     já com o texto lá dentro. Chat vazio é onde o lead pago morre: a pessoa não sabe
@@ -185,7 +187,7 @@ function QuemSomos({ numeros }: { numeros: NumerosPublicos | null }) {
               Só no centro cirúrgico atual, desde {numeros.desdeAno}:{' '}
               <strong className="font-semibold text-[#252A33]">{numeroBr(numeros.cirurgiasRealizadas)} cirurgias</strong> e{' '}
               <strong className="font-semibold text-[#252A33]">{numeroBr(numeros.foliculosImplantados)} folículos</strong>,
-              contados um a um pelo próprio sistema. É dessa base que sai a sua estimativa.
+              contados um a um pelo próprio sistema.
             </p>
           ) : null}
         </div>
@@ -201,8 +203,8 @@ function QuemSomos({ numeros }: { numeros: NumerosPublicos | null }) {
  *
  * 'inicio' (um botão "começar" antes da 1ª pergunta) e 'contato' (o formulário numa
  * tela só dele) foram removidos em 27/ago/2026: eram dois cliques que não perguntavam
- * nada. A estimativa e os campos de nome/WhatsApp agora dividem a tela 'resultado',
- * com o número em cima e o pedido embaixo, que é a ordem que importa.
+ * nada. O fecho da triagem e os campos de nome/WhatsApp dividem a tela 'resultado',
+ * com o fecho em cima e o pedido embaixo, que é a ordem que importa.
  */
 type Etapa = 'triagem' | 'resultado' | 'pronto'
 
@@ -212,7 +214,6 @@ export function ConsultaLandingPage() {
   const [respostas, setRespostas] = useState<RespostasTriagem>({})
 
   const [numeros, setNumeros] = useState<NumerosPublicos | null>(null)
-  const [estimativa, setEstimativa] = useState<EstimativaPublica | null>(null)
   const [nome, setNome] = useState('')
   const [telefone, setTelefone] = useState('')
   const [sobrenome, setSobrenome] = useState('') // armadilha de robô
@@ -245,7 +246,7 @@ export function ConsultaLandingPage() {
     const descricaoAnterior = meta?.getAttribute('content') ?? ''
     meta?.setAttribute(
       'content',
-      'Descubra em 2 minutos quantas unidades foliculares o seu caso pede e fale com a equipe do Instituto Lorena Visentainer no WhatsApp.',
+      'Responda 3 perguntas sobre o seu caso e fale com a equipe do Instituto Lorena Visentainer no WhatsApp, sem cadastro e sem custo.',
     )
     rastro.current = capturarAtribuicaoDoNavegador()
     registrarEventoLanding('landing_view', rastro.current)
@@ -282,12 +283,10 @@ export function ConsultaLandingPage() {
     }
     if (triagemCompleta(novas)) {
       setEtapa('resultado')
-      // Chegar aqui é ver a estimativa E o formulário: 'landing_triagem' passou a ser
-      // o passo do meio inteiro. Não há mais tela de contato para medir à parte.
+      // Chegar aqui é ver o fecho E o formulário: 'landing_triagem' passou a ser o
+      // passo do meio inteiro. Não há mais tela de contato para medir à parte.
       registrarEventoLanding('landing_triagem', { ...rastro.current, passo: novas.urgencia ?? '' })
       pixelTriagemCompleta(novas.objetivo)
-      const escala = temEstimativa(novas) ? escalaDoGrau(novas.grau ?? '') : null
-      if (escala) void carregarEstimativa(escala.escala, escala.grau).then(setEstimativa)
       rolarParaPainel()
     }
   }
@@ -362,7 +361,7 @@ export function ConsultaLandingPage() {
               Descubra o que o seu caso pede em 3 perguntas.
             </h1>
             <p className="mt-3 leading-relaxed text-[#252A33]/75 lg:mt-4 lg:text-lg">
-              A estimativa sai das cirurgias feitas aqui dentro, e a equipe te chama no WhatsApp na hora.
+              A equipe olha o que você respondeu e te chama no WhatsApp na hora.
             </p>
             <div className="mt-5 hidden lg:block">
               <p className="text-sm text-[#252A33]/60">Sem cadastro e sem custo. Você só digita nome e WhatsApp no fim.</p>
@@ -436,8 +435,8 @@ export function ConsultaLandingPage() {
               </div>
             ) : null}
 
-            {/* Estimativa e formulário na MESMA tela: o número em cima é a recompensa,
-                e pedir o contato numa tela separada custava um clique sem perguntar nada. */}
+            {/* Fecho da triagem e formulário na MESMA tela: pedir o contato numa tela
+                separada custava um clique que não perguntava nada. */}
             {etapa === 'resultado' ? (
               <form
                 onSubmit={(e) => {
@@ -453,29 +452,19 @@ export function ConsultaLandingPage() {
                   Voltar
                 </button>
 
-                {estimativa ? (
-                  <div className="rounded-2xl bg-[#252A33] p-5 text-white sm:p-6">
-                    <p className="text-xs uppercase tracking-[0.2em] text-white/60">Sua estimativa</p>
-                    <p className="mt-2 font-heading text-4xl font-semibold leading-none sm:text-5xl">
-                      {numeroBr(estimativa.esperado)}
-                    </p>
-                    <p className="mt-1 text-base font-normal text-white/70">unidades foliculares</p>
-                    <p className="mt-3 text-sm leading-relaxed text-white/75">
-                      Faixa de {numeroBr(Math.min(estimativa.minimo, estimativa.esperado))} a{' '}
-                      {numeroBr(Math.max(estimativa.maximo, estimativa.esperado))}, calculada sobre{' '}
-                      {numeroBr(estimativa.amostra)} cirurgias já realizadas no Instituto. O número final depende da
-                      sua área doadora, e isso só a consulta médica define.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl bg-[#DCDBD1]/50 p-5">
-                    <h2 className="font-heading text-xl font-semibold">Seu caso pede uma consulta presencial</h2>
-                    <p className="mt-2 text-sm text-[#252A33]/75">
-                      Pelo que você respondeu, o caminho é examinar de perto antes de falar em número de fios ou em
-                      técnica.
-                    </p>
-                  </div>
-                )}
+                {/* Um bloco só, para todo caso. Antes o número de folículos entrava aqui e
+                    quem não tinha estimativa lia um texto de consolo; agora a página diz a
+                    mesma coisa para todo mundo, que é o que a consulta de fato resolve. */}
+                <div className="rounded-2xl bg-[#252A33] p-5 text-white sm:p-6">
+                  <p className="text-xs uppercase tracking-[0.2em] text-white/60">Triagem concluída</p>
+                  <h2 className="mt-2 font-heading text-2xl font-semibold leading-tight sm:text-3xl">
+                    O seu caso já está com a equipe
+                  </h2>
+                  <p className="mt-3 text-sm leading-relaxed text-white/75">
+                    Quantos fios e qual técnica quem define é a consulta com a Dra., olhando a sua área doadora de
+                    perto. Agora a equipe te chama no WhatsApp com a orientação do seu caso.
+                  </p>
+                </div>
 
                 <h2 className="mt-6 font-heading text-xl font-semibold sm:text-2xl">
                   {querResolver ? 'Para onde mandamos a sua orientação?' : 'Quer receber a orientação, sem compromisso?'}
@@ -556,8 +545,8 @@ export function ConsultaLandingPage() {
                 <p className="mx-auto mt-3 max-w-md text-[#252A33]/75">
                   {resultado.mensagemEnviada ? (
                     <>
-                      A Sofia acabou de te mandar a orientação do seu caso, com a sua estimativa. Abra a conversa e
-                      responda por lá. A equipe continua contigo.
+                      A Sofia acabou de te mandar a orientação do seu caso. Abra a conversa e responda por lá. A
+                      equipe continua contigo.
                     </>
                   ) : (
                     <>A nossa equipe vai te chamar no WhatsApp com a orientação do seu caso.</>
@@ -672,7 +661,7 @@ export function ConsultaLandingPage() {
       {etapa !== 'pronto' ? (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#252A33]/10 bg-white/95 p-3 backdrop-blur sm:hidden">
           <Botao onClick={rolarParaPainel} className="w-full">
-            {etapa === 'resultado' ? 'Voltar para o meu resultado' : `Responder as ${totalPassos} perguntas`}
+            {etapa === 'resultado' ? 'Voltar para o formulário' : `Responder as ${totalPassos} perguntas`}
           </Botao>
         </div>
       ) : null}
