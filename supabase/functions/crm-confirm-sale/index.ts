@@ -64,11 +64,24 @@ Deno.serve(async (req) => {
   const isCard = method === 'card' || method === 'cartao' || method === 'cartão'
   const createBling = p.createBlingOrder !== false // default true
 
+  // Quem diz se a atendente pode fechar venda neste card é a RLS — a MESMA regra da tela
+  // (polo do lead, linha da conversa ou "conversou comigo"), igual ao crm-conversation-control.
+  // Antes o SELECT exigia `tenant_id = polo da tela` e o lead de OUTRO polo dava
+  // `lead_not_found` na cara da atendente: paciente da clínica que compra na linha do
+  // Tricopill (Neli Ardenghi, 10/set, 4 shampoos, R$ 491,00 — venda travada com o Pix já
+  // pago). A pessoa segue o polo dela; a VENDA segue quem vende, e é `tenantId` (polo da
+  // tela) que carimba pagamento, Bling, frete e comprovante daqui pra baixo.
+  const { data: canSee, error: rlsErr } = await userClient
+    .from('leads').select('id').eq('id', leadId).maybeSingle()
+  if (rlsErr) return json({ error: 'lead_lookup_failed', message: rlsErr.message }, 400)
+  if (!canSee) {
+    return json({ error: 'lead_not_found', message: 'Este lead não aparece neste polo. Abra o CRM do polo dono da conversa.' }, 404)
+  }
+
   const { data: leadRow } = await admin
     .from('leads')
     .select('id, patient_name, phone, custom_fields, tenant_id, pipeline_id')
     .eq('id', leadId)
-    .eq('tenant_id', tenantId)
     .maybeSingle()
   if (!leadRow) return json({ error: 'lead_not_found' }, 404)
   const lead = leadRow as {
@@ -170,14 +183,24 @@ Deno.serve(async (req) => {
   }
   if (coupon.applied) await incrementCouponUse(admin, tenantId, coupon.code, manualPayId)
 
-  // 2) Move o lead para a etapa "Pago" (por nome, fallback do funil Tricopill).
-  let pagoStageId = 'tricopill__vd-pago'
-  if (lead.pipeline_id) {
-    const { data: stage } = await admin
-      .from('pipeline_stages').select('id').eq('pipeline_id', lead.pipeline_id).ilike('name', 'pago%').maybeSingle()
-    if (stage?.id) pagoStageId = String(stage.id)
-  }
-  await admin.from('leads').update({ stage_id: pagoStageId, temperature: 'hot', updated_at: new Date().toISOString() }).eq('id', leadId)
+  // 2) Move o lead para a etapa "Pago" DO FUNIL DELE — e só dele. O fallback
+  //    `tricopill__vd-pago` é etapa do funil de vendas do Tricopill: colado num lead de
+  //    `pipeline-clinica` (ou do cirúrgico/protocolos), deixava o card ÓRFÃO — sumia do
+  //    Kanban da clínica e não aparecia no da loja, porque `pipeline_id` continua o outro.
+  //    Funil sem etapa "Pago" = a venda entra no financeiro e o card fica onde está;
+  //    quem cuida daquele funil não perde o paciente de vista.
+  const { data: stage } = lead.pipeline_id
+    ? await admin.from('pipeline_stages').select('id')
+        .eq('pipeline_id', lead.pipeline_id).ilike('name', 'pago%').maybeSingle()
+    : { data: null }
+  const pagoStageId = stage?.id ? String(stage.id) : null
+  await admin.from('leads')
+    .update({
+      ...(pagoStageId ? { stage_id: pagoStageId } : {}),
+      temperature: 'hot',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', leadId)
 
   // 3) Registra a interação da venda.
   const couponTxt = coupon.applied ? ` (cupom ${coupon.code} -${formatBRLCents(coupon.discountCents)})` : ''
@@ -307,6 +330,7 @@ Deno.serve(async (req) => {
   return json({
     ok: true, leadId, amountCents: totalCents, productCents, freightCents, discountCents: coupon.discountCents,
     couponCode: coupon.applied ? coupon.code : null, method: methodTxt, stage: pagoStageId,
+    stageMoved: pagoStageId !== null,
     blingOrderId, blingNote: blingNote || null, shipNote,
   })
 })
