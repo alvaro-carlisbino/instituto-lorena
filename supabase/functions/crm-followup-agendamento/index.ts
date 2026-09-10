@@ -220,6 +220,89 @@ function renderTexto(template: string, lead: LeadParado, agora = new Date()): st
   return applyLeadName(montado, lead.patient_name, 'nome').trim()
 }
 
+/**
+ * Manda só o vídeo para uma lista escrita à mão, um por vez, respeitando o ritmo da linha.
+ *
+ * O polo da conversa vem da MESMA regra da RPC (o tenant que carimbou as saídas), e não do
+ * cadastro: quem manda na linha é por onde a pessoa conversa
+ * ([[crm_venda_segue_a_linha_nao_a_pessoa]]).
+ */
+async function reenviarVideo(
+  admin: SupabaseClient,
+  leadIds: string[],
+  videoPath: string,
+  legenda: string,
+  dryRun: boolean,
+): Promise<Response> {
+  const { data: linhas } = await admin
+    .from('leads')
+    .select('id, patient_name, phone, tenant_id')
+    .in('id', leadIds)
+    .is('deleted_at', null)
+  const leads = ((linhas as Array<Record<string, unknown>> | null) ?? [])
+
+  const results: Array<Record<string, unknown>> = []
+  let primeiro = true
+  for (const lead of leads) {
+    const leadId = String(lead.id)
+    const { data: saida } = await admin
+      .from('interactions')
+      .select('tenant_id')
+      .eq('lead_id', leadId)
+      .eq('direction', 'out')
+      .in('channel', ['whatsapp', 'meta'])
+      .order('happened_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const conversaTenant = String(
+      (saida as { tenant_id?: string } | null)?.tenant_id || lead.tenant_id || TENANT,
+    )
+
+    // `{nome}` na legenda passa pelo mesmo `applyLeadName` da cadência: metade da lista da
+    // clínica tem por nome o que veio do perfil do WhatsApp ("Leda💃🏽", "😘"), e sem nome
+    // de gente o vocativo SOME em vez de virar piada.
+    const texto = applyLeadName(legenda, String(lead.patient_name ?? ''), 'nome').trim()
+
+    if (dryRun) {
+      results.push({ leadId, nome: lead.patient_name, conversaTenant, texto, status: 'dry' })
+      continue
+    }
+
+    // A guarda exige 45–90s entre dois proativos da mesma linha. Esperar ANTES do segundo
+    // em diante é mais barato que levar `ritmo` e ter de esperar do mesmo jeito.
+    if (!primeiro) await dormir(ESPERA_MAX_MS)
+    primeiro = false
+
+    const { data: sendResult, error: sendErr } = await admin.functions.invoke('crm-send-message', {
+      body: {
+        leadId,
+        text: texto,
+        channel: 'whatsapp',
+        source: 'followup_agendamento',
+        senderTenantId: conversaTenant,
+        requireBotKind: conversaTenant === 'tricopill' ? 'sales' : 'clinic',
+        media: [{ storagePath: videoPath, kind: 'video' }],
+      },
+    })
+    const ok = !sendErr && (sendResult as { ok?: boolean })?.ok !== false
+    if (ok) {
+      results.push({ leadId, nome: lead.patient_name, status: 'enviado' })
+      continue
+    }
+    const recusa = await lerRecusa(sendErr, sendResult)
+    console.warn(`followup-agendamento reenvio recusado lead=${leadId}: ${recusa.error}:${recusa.reason}`)
+    results.push({
+      leadId,
+      nome: lead.patient_name,
+      status: 'recusado',
+      motivo: `${recusa.error || 'recusado'}${recusa.reason ? `:${recusa.reason}` : ''} — ${recusa.message}`.slice(0, 200),
+    })
+  }
+
+  const naoAchados = leadIds.filter((id) => !leads.some((l) => String(l.id) === id))
+  return json({ ok: true, modo: 'reenviarVideo', dryRun, results, naoAchados, at: nowIso() })
+}
+
 async function carregarConfig(admin: SupabaseClient): Promise<Config> {
   const { data } = await admin
     .from('tenant_integrations')
@@ -275,6 +358,25 @@ Deno.serve(async (req) => {
   const dryRun = body.dry === true
 
   const cfg = await carregarConfig(admin)
+
+  // ── Reenvio do vídeo que ficou para trás ────────────────────────────────────────
+  // `{"reenviarVideo": ["lead-x", ...], "legenda": "..."}` manda SÓ o vídeo para uma
+  // lista escrita à mão. É a vassoura do estrago de 10/set/2026: enquanto a recusa por
+  // ritmo contava como tentativa de anexo falhada, três pacientes receberam o texto
+  // prometendo um vídeo que nunca vinha, e prometer de novo não desfaz o primeiro.
+  //
+  // NÃO mexe em `step`: a cadência já entregou aquele degrau. Isto é conserto, não
+  // degrau novo — e por isso também não vira uma linha em `crm_followup_agendamento`.
+  // A guarda anti-ban decide igual (o teto semanal por lead continua valendo), e o
+  // envio sai pelo `crm-send-message`, que é quem grava a bolha no chat.
+  const reenviar = (Array.isArray(body.reenviarVideo) ? body.reenviarVideo : [])
+    .map((v) => String(v ?? '').trim())
+    .filter(Boolean)
+  if (reenviar.length > 0) {
+    if (!cfg.videoPath) return json({ error: 'sem_video_configurado' }, 400)
+    return await reenviarVideo(admin, reenviar, cfg.videoPath, String(body.legenda ?? '').trim(), dryRun)
+  }
+
   if (!cfg.enabled) return json({ ok: true, desligado: true, at: nowIso() })
   if (cfg.passos.length === 0) return json({ ok: true, erro: 'sem_passos_configurados' }, 200)
 
