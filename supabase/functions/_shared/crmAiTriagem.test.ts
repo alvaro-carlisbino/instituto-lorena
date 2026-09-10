@@ -17,7 +17,7 @@ Deno.test('a saudação termina perguntando cidade e prazo', () => {
   assertStringIncludes(m, 'ainda tá pesquisando')
 })
 
-Deno.test('o eco da opção DIRECIONA o médico e não pergunta qual', () => {
+Deno.test('no transplante o eco anuncia a Dra. Lorena e não lista os três', () => {
   const lorena = buildTriageOptionAckMessage('Ana', '1', false)
   assertStringIncludes(lorena, 'Dra. Lorena Visentainer')
   assert(!lorena.includes('Com qual profissional'), 'a pergunta proibida voltou')
@@ -26,8 +26,23 @@ Deno.test('o eco da opção DIRECIONA o médico e não pergunta qual', () => {
 
   assertStringIncludes(buildTriageOptionAckMessage('Ana', '2', false), 'Dra. Lorena Visentainer')
   assertStringIncludes(buildTriageOptionAckMessage('Ana', '5', false), 'Dra. Lorena Visentainer')
-  assertStringIncludes(buildTriageOptionAckMessage('Ana', '3', false), 'Dr. Matheus Amaral')
-  assertStringIncludes(buildTriageOptionAckMessage('Ana', '4', false), 'Dra. Jaqueline Augusto')
+})
+
+// 10/09/2026, pedido da Aline: a Sofia anunciava "já deixo encaminhado com a Dra. Jaqueline"
+// antes de alguém olhar a agenda dos médicos. Na consulta clínica ela não nomeia mais ninguém —
+// abre a porta da preferência e deixa a indicação com a consultora, que concilia os horários.
+Deno.test('na consulta clínica o eco NÃO nomeia médico e convida a preferência', () => {
+  for (const opt of ['3', '4'] as const) {
+    const m = buildTriageOptionAckMessage('Ana', opt, false)
+    assert(!m.includes('Dra. Jaqueline'), `opção ${opt} nomeou a Dra. Jaqueline`)
+    assert(!m.includes('Dr. Matheus'), `opção ${opt} nomeou o Dr. Matheus`)
+    assert(!m.includes('Dra. Lorena'), `opção ${opt} nomeou a Dra. Lorena`)
+    assertStringIncludes(m, 'preferência por algum profissional')
+    assertStringIncludes(m, 'Aline')
+    assertStringIncludes(m, 'de Maringá, de Londrina ou de outra cidade')
+  }
+  assertStringIncludes(buildTriageOptionAckMessage('Ana', '4', false), 'Consulta Clínica Feminina')
+  assertStringIncludes(buildTriageOptionAckMessage('Ana', '3', false), 'Consulta Clínica Masculina')
 })
 
 Deno.test('o eco com intro se apresenta como Sofia uma vez só', () => {

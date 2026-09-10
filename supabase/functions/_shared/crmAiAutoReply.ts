@@ -658,12 +658,20 @@ export function answersQualification(raw: string): boolean {
     .test(t)
 }
 
-const DOCTOR_BY_OPTION: Record<TriageOption, { nome: string; ficha: string }> = {
+/**
+ * O médico que a Sofia ANUNCIA sozinha. Só o transplante e a sobrancelha estão aqui: são
+ * sempre da Dra. Lorena, não há agenda de terceiros para conciliar.
+ *
+ * A consulta clínica (3 e 4) saiu em 10/09/2026, a pedido da Aline: a Sofia dizia "já deixo
+ * encaminhado com a Dra. Jaqueline" antes de alguém olhar a agenda dos médicos, e a paciente
+ * ainda respondia "não é mais a Dra. Lorena?". Quem indica o médico da clínica é a consultora,
+ * que enxerga os horários vagos e prioriza quem preenche. A Sofia só ABRE a porta da
+ * preferência — se a paciente disser um nome, ele vale e é carimbado.
+ */
+const DOCTOR_BY_OPTION: Partial<Record<TriageOption, { nome: string; ficha: string }>> = {
   '1': { nome: 'a *Dra. Lorena Visentainer*', ficha: 'especialista em saúde e restauração capilar, reconhecida pelo olhar cuidadoso, atendimento humanizado e foco em resultados naturais e personalizados para cada paciente' },
   '2': { nome: 'a *Dra. Lorena Visentainer*', ficha: 'especialista em saúde e restauração capilar, reconhecida pelo olhar cuidadoso, atendimento humanizado e foco em resultados naturais e personalizados para cada paciente' },
   '5': { nome: 'a *Dra. Lorena Visentainer*', ficha: 'especialista em saúde e restauração capilar, reconhecida pelo olhar cuidadoso, atendimento humanizado e foco em resultados naturais e personalizados para cada paciente' },
-  '3': { nome: 'o *Dr. Matheus Amaral*', ficha: 'que realiza atendimentos com foco em cuidado clínico capilar individualizado, prezando por um acompanhamento detalhado, humanizado e personalizado para cada paciente' },
-  '4': { nome: 'a *Dra. Jaqueline Augusto*', ficha: 'que realiza atendimentos com foco em saúde capilar e cuidado individualizado, oferecendo uma escuta atenciosa e personalizada para cada paciente' },
 }
 
 /**
@@ -692,12 +700,18 @@ export function buildTriageOptionAckMessage(
   // você gostaria de realizar sua consulta?" — a pergunta que o script PROÍBE desde 31/08
   // (Passo 2: a Sofia direciona, nunca pergunta; ver [[crm_sofia_direciona_medico]]). A regra
   // tinha sido corrigida no prompt do banco e sobrevivido aqui, no caminho determinístico, que
-  // é justamente o que todo paciente que digita "1" recebe. Direciona pela opção e fecha com
-  // as duas perguntas da Aline, porque chegar aqui significa que ele ainda não as respondeu.
+  // é justamente o que todo paciente que digita "1" recebe. Fecha com as duas perguntas da
+  // Aline, porque chegar aqui significa que ele ainda não as respondeu.
   const doc = DOCTOR_BY_OPTION[option]
+  // Transplante e sobrancelha: anuncia a Dra. Lorena. Consulta clínica: convida a preferência
+  // e deixa a indicação com a Aline, que é quem concilia a agenda dos médicos (10/09/2026).
+  const medico = doc
+    ? `Já deixo seu atendimento encaminhado com ${doc.nome}, ${doc.ficha}.`
+    : 'Se você já tem preferência por algum profissional da nossa equipe, é só me dizer que eu deixo anotado — senão, a nossa consultora *Aline* te indica o melhor conforme a agenda 😊'
+
   return `${intro}Perfeito${vocative}! Anotei aqui o seu interesse em *${service}*. 💚
 
-Já deixo seu atendimento encaminhado com ${doc.nome}, ${doc.ficha}.
+${medico}
 
 Só pra já deixar tudo certinho com a nossa consultora Aline: você é de Maringá, de Londrina ou de outra cidade? E tá pensando em fazer nos próximos meses, ou ainda tá pesquisando? 😊`
 }
