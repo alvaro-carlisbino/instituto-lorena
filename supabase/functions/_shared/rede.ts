@@ -14,6 +14,42 @@ import { getCheckoutBaseUrl, getTenantBrand } from './tenantBrand.ts'
 const PIX_QR_IMAGE_BASE = (Deno.env.get('PIX_QR_IMAGE_BASE') ?? 'https://api.qrserver.com/v1/create-qr-code/').trim()
 
 /**
+ * Toda chamada à e.Rede tem PRAZO. Sem isto um gateway pendurado segurava a Edge inteira até a
+ * plataforma matar a função: o cliente não recebia link nem recado, e a cobrança podia ter
+ * nascido do outro lado sem ninguém saber. O único fetch com prazo era o do QR (6s).
+ *
+ * O erro é EXPLÍCITO (`rede_timeout:<rótulo>`) de propósito: quem chama precisa distinguir
+ * "não respondeu a tempo" de "recusou". Para o CARTÃO isso é crítico — timeout NÃO é recusa,
+ * a transação pode ter sido autorizada do lado da Rede, então o prazo é generoso e o rastro
+ * diz para conferir antes de cobrar de novo.
+ */
+const REDE_TIMEOUT_MS = {
+  /** Token OAuth: chamada leve, se demora é porque está fora do ar. */
+  token: 15_000,
+  /** Criação de Pix e consultas: rápidas por natureza. */
+  pix: 20_000,
+  /** Cartão: a autorização passa pelo emissor. Generoso para não abortar venda boa. */
+  card: 45_000,
+} as const
+
+async function redeFetch(
+  url: string,
+  init: RequestInit,
+  label: keyof typeof REDE_TIMEOUT_MS,
+): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(REDE_TIMEOUT_MS[label]) })
+  } catch (e) {
+    const timedOut = e instanceof DOMException && (e.name === 'TimeoutError' || e.name === 'AbortError')
+    if (timedOut) {
+      console.error('rede_timeout', { label, timeoutMs: REDE_TIMEOUT_MS[label], url: url.split('?')[0] })
+      throw new Error(`rede_timeout:${label}`)
+    }
+    throw e
+  }
+}
+
+/**
  * Gera a imagem do QR Code Pix a partir do copia-e-cola (EMV) e devolve um DATA URI base64
  * (data:image/png;base64,...). A e.Rede raramente devolve a imagem do QR, e a W-API só aceita
  * imagem como base64 OU URL terminada em .png/.jpg — a URL do gerador (com query string) é
@@ -421,11 +457,11 @@ async function getRedeAccessToken(cfg: RedeConfig): Promise<string> {
   if (cached && cached.expiresAt - 60_000 > now) return cached.token
 
   const basic = btoa(`${cfg.clientId}:${cfg.clientSecret}`)
-  const res = await fetch(cfg.tokenUrl, {
+  const res = await redeFetch(cfg.tokenUrl, {
     method: 'POST',
     headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: 'grant_type=client_credentials',
-  })
+  }, 'token')
   const text = await res.text()
   let parsed: Record<string, unknown> = {}
   try {
@@ -651,7 +687,7 @@ export async function createRedePix(
 
   // PIX = v1 + Basic auth (mesmas credenciais do cartão: clientId=PV, clientSecret=token).
   const basic = btoa(`${cfg.clientId}:${cfg.clientSecret}`)
-  const res = await fetch(cfg.pixUrl, {
+  const res = await redeFetch(cfg.pixUrl, {
     method: 'POST',
     headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -660,7 +696,7 @@ export async function createRedePix(
       amount: String(amountCents), // centavos como STRING (contrato e.Rede v1 Pix)
       qrCode: { dateTimeExpiration },
     }),
-  })
+  }, 'pix')
   const text = await res.text()
   let parsed: Record<string, unknown> = {}
   try {
@@ -1454,11 +1490,11 @@ export async function payRedeIntent(
     // Enviar o campo sem o serviço contratado pode fazer a Rede recusar a transação.
     subscription: false,
   }
-  const res = await fetch(cfg.txUrl, {
+  const res = await redeFetch(cfg.txUrl, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  })
+  }, 'card')
   const text = await res.text()
   let parsed: Record<string, unknown> = {}
   try {
@@ -1551,10 +1587,10 @@ export async function checkRedePixStatus(admin: SupabaseClient, id: string): Pro
   const cfg = await readRedeConfig(admin, intent.tenantId)
   if (!cfg) throw new Error('rede_nao_configurado')
   const basic = btoa(`${cfg.clientId}:${cfg.clientSecret}`)
-  const res = await fetch(`${cfg.pixUrl}?reference=${encodeURIComponent(id)}`, {
+  const res = await redeFetch(`${cfg.pixUrl}?reference=${encodeURIComponent(id)}`, {
     method: 'GET',
     headers: { Authorization: `Basic ${basic}` },
-  })
+  }, 'pix')
   const text = await res.text()
   // Erro de gateway/credencial (401/403/5xx) NÃO pode virar "pending" silencioso — senão um
   // PIX pago fica preso pra sempre sem ninguém perceber. Surge como exceção (poller registra).
@@ -1601,7 +1637,36 @@ export async function checkRedePixStatus(admin: SupabaseClient, id: string): Pro
     return { id, status: 'failed', rawStatus, paid: false, finalized: false }
   }
 
+  // Status que não está em NENHUMA das duas listas: fica pending (conservador, nunca fabrica
+  // pagamento), mas agora deixa RASTRO. As listas acima nasceram de chute — a string que a
+  // e.Rede usa para "pago" nunca foi observada em produção, e enquanto ninguém a vê um Pix
+  // pago pode ficar pendente para sempre em silêncio. Registra uma linha por string nova
+  // (dedup pelo `note`) para que a primeira ocorrência real vire evidência, não mistério.
+  await logUnknownPixStatus(admin, id, rawStatus)
   return { id, status: 'pending', rawStatus, paid: false, finalized: false }
+}
+
+/** Conhecidos = 'pending' e vazio; não vale ruído. Qualquer outra string é notícia. */
+const REDE_PIX_KNOWN_PENDING = new Set(['pending', 'pendente', 'processing', 'processando', 'waiting', 'aguardando'])
+
+async function logUnknownPixStatus(admin: SupabaseClient, id: string, rawStatus: string): Promise<void> {
+  try {
+    const low = rawStatus.trim().toLowerCase()
+    if (!low || REDE_PIX_KNOWN_PENDING.has(low)) return
+    // Dedup por PREFIXO: uma linha por string nova, guardando junto o pagamento onde ela
+    // apareceu primeiro (é por ele que se confere no painel da e.Rede se aquilo era "pago").
+    const prefixo = `rede-pix-status-desconhecido:${low.slice(0, 60)}`
+    console.error('rede_pix_status_desconhecido', { id, rawStatus })
+    const { data: seen } = await admin.from('webhook_jobs').select('id').like('note', `${prefixo}%`).limit(1).maybeSingle()
+    if (seen) return
+    await admin.from('webhook_jobs').insert({
+      source: 'crm-rede-pix-poll',
+      status: 'done',
+      note: `${prefixo}:${id}`.slice(0, 500),
+    })
+  } catch {
+    // rastro é best-effort: nunca derruba a consulta do Pix
+  }
 }
 
 /**
@@ -1664,11 +1729,11 @@ export async function testRedeTransaction(
     // softDescriptor omitido: serviço desativado na conta e.Rede (ver payRedeIntent).
     subscription: false,
   }
-  const res = await fetch(cfg.txUrl, {
+  const res = await redeFetch(cfg.txUrl, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  })
+  }, 'card')
   const text = await res.text()
   let parsed: Record<string, unknown> = {}
   try {

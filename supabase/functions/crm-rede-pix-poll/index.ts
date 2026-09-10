@@ -52,5 +52,20 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Quem chama é o pg_cron, que DESCARTA esta resposta. Enquanto os erros viviam só aqui, uma
+  // credencial vencida ou a e.Rede fora do ar deixavam todo Pix pago preso em 'pending' sem
+  // nenhum sinal — a rodada dizia "ok" para um cron que não lê. Agora fica rastro no banco.
+  // Uma linha por rodada com falha, com a primeira causa: é o suficiente para achar o padrão
+  // (`select * from webhook_jobs where source = 'crm-rede-pix-poll' order by created_at desc`).
+  if (errors.length > 0) {
+    const primeira = errors[0]!
+    console.error('crm-rede-pix-poll erros', { checked: ids.length, errored: errors.length, primeira })
+    await admin.from('webhook_jobs').insert({
+      source: 'crm-rede-pix-poll',
+      status: 'error',
+      note: `pix_poll_falhou:${errors.length}/${ids.length}:${primeira.id}:${primeira.error}`.slice(0, 500),
+    }).then(() => {}, () => {})
+  }
+
   return json({ ok: true, checked: ids.length, paid, failed, errors })
 })
