@@ -177,6 +177,7 @@ Deno.serve(async (req) => {
     const inboundBurstDebounceMs = hasInboundBurst ? Number(body.inboundBurstDebounceMs) : NaN
     const hasOffhoursOnly = Object.prototype.hasOwnProperty.call(body, 'aiOffhoursOnly')
     const hasTeamHours = Object.prototype.hasOwnProperty.call(body, 'aiTeamHours')
+    const hasFirstTouch = Object.prototype.hasOwnProperty.call(body, 'aiFirstTouchInTeamHours')
 
     const payload: Record<string, unknown> = {
       id: 'default',
@@ -207,6 +208,7 @@ Deno.serve(async (req) => {
       if (!parsed) return json({ error: 'invalid_team_hours' }, 400)
       payload.ai_team_hours = parsed
     }
+    if (hasFirstTouch) payload.ai_first_touch_in_team_hours = coercePgBoolean(body.aiFirstTouchInTeamHours, true)
     const { data, error } = await admin
       .from('crm_ai_configs')
       .upsert(payload, { onConflict: 'tenant_id,id' })

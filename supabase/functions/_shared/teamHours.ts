@@ -171,6 +171,10 @@ export function serializeTeamHours(schedule: TeamHoursSchedule): Record<string, 
  *
  * `humanoJaFalou` vem de `crm_conversation_states.last_human_reply_at`, que já está em mãos no
  * gate — de propósito, para a regra não custar uma consulta por mensagem.
+ *
+ * Desde 11/09/2026 a exceção é uma chave (`crm_ai_configs.ai_first_touch_in_team_hours`), e
+ * a clínica a desligou: pediu que o primeiro contato dentro do turno seja da equipe e
+ * que a IA só abra conversa no plantão. Com ela desligada, a regra volta a ser a de 24/08.
  */
 export function deveCalarPeloTurno(params: {
   offHoursOnly: boolean
@@ -178,9 +182,29 @@ export function deveCalarPeloTurno(params: {
   agora: Date
   schedule: TeamHoursSchedule
   timeZone?: string
+  /** `ai_first_touch_in_team_hours`. Ausente = true, a regra de 31/08. */
+  primeiroAtendimentoNoTurno?: boolean
 }): boolean {
   if (!params.offHoursOnly) return false
   // Primeiro atendimento fura a trava: é justamente o que queremos que a IA filtre.
-  if (!params.humanoJaFalou) return false
+  if (!params.humanoJaFalou && params.primeiroAtendimentoNoTurno !== false) return false
   return isWithinTeamHours(params.agora, params.schedule, params.timeZone)
+}
+
+/**
+ * Fim do intervalo de turno que contém `date`, ou `null` se a equipe não está de plantão
+ * nesse instante. É quando a Sofia volta a poder abrir conversa. O Brasil não tem horário
+ * de verão desde 2019, então somar minutos ao instante é andar no relógio de Maringá.
+ */
+export function fimDoTurno(
+  date: Date,
+  schedule: TeamHoursSchedule = DEFAULT_TEAM_HOURS,
+  timeZone = TEAM_HOURS_TIME_ZONE,
+): Date | null {
+  const now = zonedWeekdayMinutes(date, timeZone)
+  if (!now) return null
+  const range = schedule[now.weekday]?.find(([start, end]) => now.minutes >= start && now.minutes < end)
+  if (!range) return null
+  const inicioDoMinuto = date.getTime() - (date.getTime() % 60_000)
+  return new Date(inicioDoMinuto + (range[1] - now.minutes) * 60_000)
 }

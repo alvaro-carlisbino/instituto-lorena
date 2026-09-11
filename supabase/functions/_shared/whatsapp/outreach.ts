@@ -2,6 +2,7 @@ import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8
 import { resolveOutboundProviderForLead } from './resolveProvider.ts'
 import { horaLocal, loadLinePolicy } from './antiBan.ts'
 import { insertInteraction } from '../crm.ts'
+import { fimDoTurno, isWithinTeamHours, parseTeamHours, type TeamHoursSchedule } from '../teamHours.ts'
 
 /**
  * Fila de PRIMEIRO CONTATO — o que o ManyChat fazia com template aprovado, agora pela
@@ -108,6 +109,67 @@ export function proximaJanela(
 }
 
 /**
+ * O primeiro contato da Sofia espera a equipe? (11/09/2026)
+ *
+ * Com `ai_offhours_only` ligado e `ai_first_touch_in_team_hours` desligado, quem abre conversa
+ * dentro do turno é a equipe. A apresentação da fila só sai no plantão da IA, e só se ninguém
+ * da casa tiver falado com a pessoa até lá. Pedido da clínica: IA ativa de segunda a sexta das
+ * 18h às 8h (na segunda, até as 7h) e do sábado ao meio-dia até segunda às 7h, valendo para o
+ * primeiro contato; follow-up segue como está.
+ */
+export type PrimeiroContatoTurno = { esperaEquipe: boolean; schedule: TeamHoursSchedule }
+
+export async function loadPrimeiroContatoTurno(
+  admin: SupabaseClient,
+  tenantId: string,
+): Promise<PrimeiroContatoTurno> {
+  try {
+    const { data } = await admin
+      .from('crm_ai_configs')
+      .select('ai_offhours_only, ai_team_hours, ai_first_touch_in_team_hours')
+      .eq('id', 'default')
+      .eq('tenant_id', tenantId)
+      .maybeSingle()
+    const cfg = (data ?? {}) as {
+      ai_offhours_only?: boolean | null
+      ai_team_hours?: unknown
+      ai_first_touch_in_team_hours?: boolean | null
+    }
+    return {
+      esperaEquipe: cfg.ai_offhours_only === true && cfg.ai_first_touch_in_team_hours === false,
+      schedule: parseTeamHours(cfg.ai_team_hours),
+    }
+  } catch {
+    // Sem config legível a fila faz o que sempre fez: segurar lead por erro de leitura seria
+    // perder primeiro contato em silêncio.
+    return { esperaEquipe: false, schedule: parseTeamHours(null) }
+  }
+}
+
+/**
+ * Primeiro instante em que a Sofia pode abrir conversa: dentro da janela da linha E, quando o
+ * polo quer a equipe primeiro, fora do turno. As duas grades se cruzam (o turno acaba às 18h,
+ * a janela da linha fecha às 20h e reabre às 8h já dentro do turno), então anda de uma para a
+ * outra até achar um instante que as duas aceitam.
+ */
+export function proximaAberturaDaSofia(
+  janela: { janelaInicio: number; janelaFim: number; permiteDomingo: boolean },
+  turno: PrimeiroContatoTurno,
+  agora: Date = new Date(),
+): Date {
+  let alvo = proximaJanela(janela.janelaInicio, janela.janelaFim, janela.permiteDomingo, agora)
+  if (!turno.esperaEquipe) return alvo
+  for (let volta = 0; volta < 20; volta++) {
+    const fim = fimDoTurno(alvo, turno.schedule)
+    if (!fim) return alvo
+    // O mesmo empurrão da janela: a fila inteira saindo às 18:00:00 em ponto não parece gente.
+    const depois = new Date(fim.getTime() + Math.floor(Math.random() * 20 * 60_000))
+    alvo = proximaJanela(janela.janelaInicio, janela.janelaFim, janela.permiteDomingo, depois)
+  }
+  return alvo
+}
+
+/**
  * Põe um primeiro contato na fila. Idempotente por (lead, kind) enquanto pendente ou já
  * enviado — o webhook ao vivo e a varredura de 30 em 30 minutos veem o mesmo lead, e a
  * pessoa não pode receber a mesma apresentação duas vezes.
@@ -182,7 +244,12 @@ export async function enqueueOutreach(
     if (!instanceId) return { ok: false, queued: false, reason: 'sem_linha_ativa' }
 
     const policy = await loadLinePolicy(admin, instanceId, input.tenantId)
-    const quando = proximaJanela(policy.janela_inicio, policy.janela_fim, policy.permite_domingo)
+    // Janela da linha e, se o polo quer a equipe primeiro, o fim do turno (11/09/2026).
+    const turno = await loadPrimeiroContatoTurno(admin, input.tenantId)
+    const quando = proximaAberturaDaSofia(
+      { janelaInicio: policy.janela_inicio, janelaFim: policy.janela_fim, permiteDomingo: policy.permite_domingo },
+      turno,
+    )
 
     const { error } = await admin.from('whatsapp_outreach_queue').insert({
       tenant_id: input.tenantId,
@@ -238,6 +305,16 @@ export async function drainOutreachQueue(
   if (error) throw new Error(error.message)
   const itens = (data as OutreachItem[] | null) ?? []
 
+  // Turno de cada polo, lido uma vez por volta: a fila mistura polos e a config não muda no meio.
+  const turnos = new Map<string, PrimeiroContatoTurno>()
+  const turnoDoPolo = async (tenantId: string): Promise<PrimeiroContatoTurno> => {
+    const lido = turnos.get(tenantId)
+    if (lido) return lido
+    const novo = await loadPrimeiroContatoTurno(admin, tenantId)
+    turnos.set(tenantId, novo)
+    return novo
+  }
+
   for (const item of itens) {
     out.processados++
     const marcar = async (patch: Record<string, unknown>) => {
@@ -274,6 +351,43 @@ export async function drainOutreachQueue(
         await marcar({ status: 'canceled', last_reason: 'a pessoa escreveu antes' })
         out.recusados++
         out.detalhes.push({ id: item.id, lead_id: item.lead_id, resultado: 'cancelado', motivo: 'ja_escreveu' })
+        continue
+      }
+
+      // A CASA já falou com a pessoa depois que ela entrou na fila: a equipe pelo painel ou
+      // pelo celular (o celular chega aqui pelo crm-wapi-events), ou outra automação. A
+      // apresentação "vi que você deixou seu contato" por cima disso é o robô chegando atrasado
+      // numa conversa que já existe. Virou obrigatório em 11/09/2026: com o primeiro contato do
+      // turno sendo da equipe, a fila segura o lead até o fim do turno justamente para dar a vez
+      // a ela, e não pode falar por cima de quem aproveitou a vez.
+      const { data: casaFalou } = await admin
+        .from('interactions')
+        .select('id')
+        .eq('lead_id', item.lead_id ?? '')
+        .eq('direction', 'out')
+        .eq('channel', 'whatsapp')
+        .gte('created_at', item.created_at ?? item.scheduled_at)
+        .limit(1)
+        .maybeSingle()
+      if (casaFalou) {
+        await marcar({ status: 'canceled', last_reason: 'a equipe já falou com a pessoa' })
+        out.recusados++
+        out.detalhes.push({ id: item.id, lead_id: item.lead_id, resultado: 'cancelado', motivo: 'casa_ja_falou' })
+        continue
+      }
+
+      // Venceu dentro do turno de um polo que quer a equipe primeiro (11/09/2026): volta para o
+      // fim do turno. Não conta tentativa, porque não é recusa: é a vez da equipe.
+      const turno = await turnoDoPolo(item.tenant_id)
+      if (turno.esperaEquipe && isWithinTeamHours(new Date(), turno.schedule)) {
+        const policy = await loadLinePolicy(admin, item.instance_id ?? '', item.tenant_id)
+        const quando = proximaAberturaDaSofia(
+          { janelaInicio: policy.janela_inicio, janelaFim: policy.janela_fim, permiteDomingo: policy.permite_domingo },
+          turno,
+        )
+        await marcar({ scheduled_at: quando.toISOString(), last_reason: 'turno_da_equipe' })
+        out.reagendados++
+        out.detalhes.push({ id: item.id, lead_id: item.lead_id, resultado: 'reagendado', motivo: 'turno_da_equipe' })
         continue
       }
 

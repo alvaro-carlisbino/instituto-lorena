@@ -955,11 +955,15 @@ export async function evaluateCrmAiAutoReplyGate(
   // O teste de 21/08 avisa do risco: com a IA ligada, 30% das conversas nunca falaram com um
   // humano em 7 dias. É por isso que isto vem junto com o vigia cobrando lead QUENTE parado.
   // Ver [[crm_ia_fora_horario_comercial]] e [[crm_experimento_ia_tarde_2026_08_21]].
+  //
+  // 11/09/2026: a exceção virou chave (`ai_first_touch_in_team_hours`) e a clínica a desligou.
+  // Dentro do turno o primeiro contato voltou a ser da equipe; a IA só abre conversa no plantão.
   const withinTeamHours = deveCalarPeloTurno({
     offHoursOnly,
     humanoJaFalou: Boolean(stateLastHumanReplyAt),
     agora: new Date(),
     schedule: teamHoursSchedule,
+    primeiroAtendimentoNoTurno: config?.ai_first_touch_in_team_hours !== false,
   })
 
   const skipReasons: string[] = []

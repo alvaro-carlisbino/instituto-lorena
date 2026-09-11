@@ -165,6 +165,7 @@ export function SettingsPage() {
   const [aiBusinessRules, setAiBusinessRules] = useState<Record<string, unknown>>({})
   const [aiOffhoursOnly, setAiOffhoursOnly] = useState(false)
   const [aiTeamHours, setAiTeamHours] = useState<TeamHoursSchedule>(DEFAULT_TEAM_HOURS)
+  const [aiFirstTouchInTeamHours, setAiFirstTouchInTeamHours] = useState(true)
   const [aiLoading, setAiLoading] = useState(false)
 
   const sensors = useSensors(
@@ -207,6 +208,7 @@ export function SettingsPage() {
         setAiBusinessRules(cfg.business_rules || {})
         setAiOffhoursOnly(cfg.ai_offhours_only === true)
         setAiTeamHours(parseTeamHours(cfg.ai_team_hours))
+        setAiFirstTouchInTeamHours(cfg.ai_first_touch_in_team_hours !== false)
       })
       .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao carregar configuração da IA.'))
       .finally(() => setAiLoading(false))
@@ -228,6 +230,7 @@ export function SettingsPage() {
         setAiBusinessRules(cfg.business_rules || {})
         setAiOffhoursOnly(cfg.ai_offhours_only === true)
         setAiTeamHours(parseTeamHours(cfg.ai_team_hours))
+        setAiFirstTouchInTeamHours(cfg.ai_first_touch_in_team_hours !== false)
       } catch (e) {
         console.error('[ai-config] failed to load', e)
       } finally {
@@ -361,6 +364,20 @@ export function SettingsPage() {
                     Turno atual: {describeTeamHours(aiTeamHours) || 'nenhum dia — ninguém da equipe atende'}. Horário
                     de Maringá; o fim é exclusivo (18:00 já é da IA).
                   </p>
+                  <Label className="cursor-pointer select-none pt-2">
+                    <Switch
+                      checked={aiFirstTouchInTeamHours}
+                      onCheckedChange={setAiFirstTouchInTeamHours}
+                      className="shrink-0"
+                    />
+                    <span className="text-sm font-medium">IA faz o primeiro atendimento dentro do turno</span>
+                  </Label>
+                  <p className="m-0 text-xs text-muted-foreground">
+                    Ligado: enquanto ninguém da equipe falou na conversa, a IA acolhe e qualifica mesmo no turno.
+                    Desligado: no turno o primeiro contato é da equipe. A IA não responde quem chega, e a mensagem do
+                    formulário e da landing espera o fim do turno (e só sai se ninguém da equipe tiver falado até lá).
+                    Os follow-ups não mudam.
+                  </p>
                 </div>
               ) : null}
             </div>
@@ -480,6 +497,7 @@ export function SettingsPage() {
                     inboundBurstDebounceMs: aiBurstDebounceSeconds * 1000,
                     aiOffhoursOnly,
                     aiTeamHours: turno,
+                    aiFirstTouchInTeamHours,
                   })
                     .then(() => toast.success('Configuração da IA salva com sucesso.'))
                     .catch((error) => toast.error(error instanceof Error ? error.message : 'Falha ao salvar configuração da IA.'))

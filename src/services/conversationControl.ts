@@ -32,6 +32,11 @@ export type AiConfig = {
   ai_offhours_only?: boolean | null
   /** `{"1":[["08:00","18:00"]], …}` — dia 0=domingo..6=sábado, fim exclusivo. */
   ai_team_hours?: Record<string, unknown> | null
+  /**
+   * Só vale com `ai_offhours_only`. true = no turno a IA faz o primeiro atendimento até um
+   * humano falar; false = no turno a IA não abre conversa (clínica, desde 11/09/2026).
+   */
+  ai_first_touch_in_team_hours?: boolean | null
 }
 
 async function invokeControl(body: Record<string, unknown>) {
@@ -85,6 +90,7 @@ export async function saveAiConfig(payload: {
   inboundBurstDebounceMs?: number
   aiOffhoursOnly?: boolean
   aiTeamHours?: Record<string, string[][]>
+  aiFirstTouchInTeamHours?: boolean
 }): Promise<AiConfig> {
   const body: Record<string, unknown> = {
     action: 'set_config',
@@ -103,6 +109,7 @@ export async function saveAiConfig(payload: {
   // a grade de horários de quem configurou.
   if (typeof payload.aiOffhoursOnly === 'boolean') body.aiOffhoursOnly = payload.aiOffhoursOnly
   if (payload.aiTeamHours) body.aiTeamHours = payload.aiTeamHours
+  if (typeof payload.aiFirstTouchInTeamHours === 'boolean') body.aiFirstTouchInTeamHours = payload.aiFirstTouchInTeamHours
   const parsed = await invokeControl(body)
   return parsed.config as AiConfig
 }

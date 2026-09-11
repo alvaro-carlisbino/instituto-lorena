@@ -1,9 +1,19 @@
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { DEFAULT_TEAM_HOURS, deveCalarPeloTurno, parseTeamHours } from './teamHours.ts'
+import { DEFAULT_TEAM_HOURS, deveCalarPeloTurno, fimDoTurno, parseTeamHours } from './teamHours.ts'
 
-// Turno real da clínica: seg–sex 08–18, sáb 08–12, domingo é da IA.
+// Turno da clínica até 11/09/2026: seg–sex 08–18, sáb 08–12, domingo é da IA.
 const CLINICA = parseTeamHours({
   '1': [['08:00', '18:00']],
+  '2': [['08:00', '18:00']],
+  '3': [['08:00', '18:00']],
+  '4': [['08:00', '18:00']],
+  '5': [['08:00', '18:00']],
+  '6': [['08:00', '12:00']],
+})
+
+// Turno pedido pela clínica em 11/09/2026: a segunda começa às 7h.
+const CLINICA_11_09 = parseTeamHours({
+  '1': [['07:00', '18:00']],
   '2': [['08:00', '18:00']],
   '3': [['08:00', '18:00']],
   '4': [['08:00', '18:00']],
@@ -60,4 +70,43 @@ Deno.test('a escala padrão continua valendo para quem não configurou', () => {
     deveCalarPeloTurno({ offHoursOnly: true, humanoJaFalou: true, agora: segundaDeManha, schedule: DEFAULT_TEAM_HOURS }),
     true,
   )
+})
+
+Deno.test('primeiro atendimento desligado (clínica, 11/09): lead novo no turno fica com a equipe', () => {
+  // Pedido da clínica: dentro do turno quem abre a conversa é a equipe, não a Sofia.
+  assertEquals(
+    deveCalarPeloTurno({
+      offHoursOnly: true,
+      humanoJaFalou: false,
+      agora: segundaDeManha,
+      schedule: CLINICA_11_09,
+      primeiroAtendimentoNoTurno: false,
+    }),
+    true,
+  )
+})
+
+Deno.test('primeiro atendimento desligado: fora do turno a IA segue de plantão para lead novo', () => {
+  assertEquals(
+    deveCalarPeloTurno({
+      offHoursOnly: true,
+      humanoJaFalou: false,
+      agora: segundaANoite,
+      schedule: CLINICA_11_09,
+      primeiroAtendimentoNoTurno: false,
+    }),
+    false,
+  )
+})
+
+Deno.test('turno de 11/09: segunda 07:30 já é da equipe, terça 07:30 ainda é da IA', () => {
+  // 14/09/2026 é segunda; 15/09 é terça. 07:30 em Maringá = 10:30 UTC.
+  const base = { offHoursOnly: true, humanoJaFalou: false, schedule: CLINICA_11_09, primeiroAtendimentoNoTurno: false }
+  assertEquals(deveCalarPeloTurno({ ...base, agora: new Date('2026-09-14T10:30:00Z') }), true)
+  assertEquals(deveCalarPeloTurno({ ...base, agora: new Date('2026-09-15T10:30:00Z') }), false)
+})
+
+Deno.test('fimDoTurno: segunda 10:50 no turno acaba às 18:00; à noite não há turno', () => {
+  assertEquals(fimDoTurno(segundaDeManha, CLINICA)?.toISOString(), '2026-08-31T21:00:00.000Z')
+  assertEquals(fimDoTurno(segundaANoite, CLINICA), null)
 })

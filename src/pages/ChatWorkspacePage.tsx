@@ -292,6 +292,7 @@ export function ChatWorkspacePage({
           aiEnabled: state.ai_enabled !== false,
           offHoursOnly: turno.offHoursOnly,
           teamHours: turno.teamHours,
+          firstTouchInTeamHours: turno.firstTouchInTeamHours,
         })
       })
       .catch(() => {
@@ -332,6 +333,7 @@ export function ChatWorkspacePage({
               // Turno vem da config da IA, não do estado da conversa: preserva o que já foi lido.
               offHoursOnly: prev?.offHoursOnly,
               teamHours: prev?.teamHours,
+              firstTouchInTeamHours: prev?.firstTouchInTeamHours,
             }))
           })
         }

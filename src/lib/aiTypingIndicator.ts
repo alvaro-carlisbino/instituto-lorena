@@ -9,6 +9,11 @@ export type AiConversationGate = {
   offHoursOnly?: boolean
   /** Turno da equipe já lido de `crm_ai_configs.ai_team_hours`. */
   teamHours?: TeamHoursSchedule
+  /**
+   * `crm_ai_configs.ai_first_touch_in_team_hours`. false = no turno a IA também não faz o
+   * primeiro atendimento (clínica, desde 11/09/2026). Ausente = true.
+   */
+  firstTouchInTeamHours?: boolean
 }
 
 /**
@@ -20,10 +25,12 @@ export type AiConversationGate = {
 export function teamHoursGateFromAiConfig(cfg: {
   ai_offhours_only?: boolean | null
   ai_team_hours?: unknown
-}): { offHoursOnly: boolean; teamHours: TeamHoursSchedule } {
+  ai_first_touch_in_team_hours?: boolean | null
+}): { offHoursOnly: boolean; teamHours: TeamHoursSchedule; firstTouchInTeamHours: boolean } {
   return {
     offHoursOnly: cfg.ai_offhours_only === true,
     teamHours: parseTeamHours(cfg.ai_team_hours),
+    firstTouchInTeamHours: cfg.ai_first_touch_in_team_hours !== false,
   }
 }
 
@@ -66,8 +73,12 @@ export function isAiReplyLikelyPending(args: {
   // ninguém da equipe tiver falado, a Sofia responde mesmo dentro do turno. Sem esta linha
   // o indicador sumiria exatamente quando ela está digitando, e a atendente responderia por
   // cima — que é o duplo atendimento que este indicador existe para evitar.
+  //
+  // Desde 11/09/2026 essa exceção é uma chave: na clínica ela está desligada, e dentro do turno
+  // a Sofia não abre conversa. Aí o indicador também não aparece, humano tendo falado ou não.
   const humanoJaFalou = args.history.some((i) => i.direction === 'out' && isFromHuman(i.author))
-  if (args.gate.offHoursOnly && humanoJaFalou && isWithinTeamHours(now, args.gate.teamHours)) {
+  const primeiroAtendimentoPassa = !humanoJaFalou && args.gate.firstTouchInTeamHours !== false
+  if (args.gate.offHoursOnly && !primeiroAtendimentoPassa && isWithinTeamHours(now, args.gate.teamHours)) {
     return false
   }
 

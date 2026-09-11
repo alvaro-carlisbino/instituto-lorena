@@ -114,6 +114,7 @@ export function LeadDetailPage() {
           aiEnabled: state.ai_enabled !== false,
           offHoursOnly: turno.offHoursOnly,
           teamHours: turno.teamHours,
+          firstTouchInTeamHours: turno.firstTouchInTeamHours,
         })
       } catch {
         setLeadAiGate(null)

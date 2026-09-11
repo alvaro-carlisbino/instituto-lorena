@@ -3,7 +3,8 @@ import { upsertLeadByPhone, insertInteraction } from '../_shared/crm.ts'
 import type { LeadAttribution } from '../_shared/attribution.ts'
 import { shospConfigured, shospGetAgenda } from '../_shared/shosp.ts'
 import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
-import { enqueueOutreach } from '../_shared/whatsapp/outreach.ts'
+import { enqueueOutreach, loadPrimeiroContatoTurno } from '../_shared/whatsapp/outreach.ts'
+import { isWithinTeamHours } from '../_shared/teamHours.ts'
 import { WapiProvider } from '../_shared/whatsapp/wapi.ts'
 
 /**
@@ -770,8 +771,25 @@ Deno.serve(async (req) => {
     .limit(1)
     .maybeSingle()
 
+  // Turno da equipe (11/09/2026). Com o primeiro contato do turno sendo da equipe, a Sofia não
+  // escreve daqui: o lead vai para a fila, que só sai no plantão e é cancelada se a equipe falar
+  // antes. A página recebe `mensagemEnviada: false` e abre o WhatsApp com o texto pronto, então
+  // a conversa não começa vazia: começa pela pessoa, e quem responde é a Aline.
+  const turno = await loadPrimeiroContatoTurno(admin, TENANT)
+  const vezDaEquipe = turno.esperaEquipe && isWithinTeamHours(new Date(), turno.schedule)
+
   let mensagemEnviada = Boolean(jaFalou)
-  if (!mensagemEnviada) {
+  if (!mensagemEnviada && vezDaEquipe) {
+    await enqueueOutreach(admin, {
+      tenantId: TENANT,
+      leadId,
+      phone: telefone,
+      message: textoSofia,
+      kind: 'optin',
+      source: 'landing_consulta',
+      ignorarConversaAberta: true,
+    })
+  } else if (!mensagemEnviada) {
     try {
       const { provider, lineTenantId } = await resolveOutboundProviderForLead(admin, {
         id: leadId,
