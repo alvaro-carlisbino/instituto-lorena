@@ -26,6 +26,14 @@ export type SaleReceiptInput = {
   couponCode?: string | null
   /** Produto vendido (label do kit ou descrição da cobrança). */
   produto?: string | null
+  /**
+   * Itens REAIS da cobrança (`rede_payments.items`: `{id,nome,qty,precoCents}`). O `produto`
+   * do carrinho da loja é um rótulo genérico ("Pedido loja Tricopill (2 itens)") que não diz
+   * O QUE saiu — em 12/09/26 uma venda de 2 géis BrowSculpt (R$129,90 cada) foi lida no grupo
+   * como 2 frascos de Tricopill a preço errado, e virou chamado de "bug de preço" que não
+   * existia. Com a lista, o financeiro confere sem abrir o Bling.
+   */
+  items?: Array<Record<string, unknown>> | null
   blingOrderId?: string | null
   /** Número VISÍVEL do pedido no Bling (ex.: 3306) — resolvido automaticamente a partir do id interno. */
   blingOrderNumero?: string | null
@@ -90,6 +98,33 @@ function enderecoLinha(ent?: Record<string, unknown> | null): { linha: string; m
   return { linha, modo }
 }
 
+/**
+ * Linhas de "Itens" do comprovante. Um item cabe na mesma linha; vários viram lista, porque o
+ * WhatsApp quebra linha comprida em qualquer aparelho e a conferência é feita item a item.
+ * Cap de 8 linhas para não virar um muro de texto num pedido grande.
+ */
+function itensLinhas(items?: Array<Record<string, unknown>> | null): string[] {
+  if (!Array.isArray(items) || !items.length) return []
+  const fmt = (it: Record<string, unknown>) => {
+    const nome = String(it?.nome ?? '').trim().slice(0, 60)
+    if (!nome) return ''
+    const qty = Math.max(1, Math.floor(Number(it?.qty) || 1))
+    const preco = Number(it?.precoCents)
+    const total = Number.isFinite(preco) ? ` — ${fmtBRL(preco * qty)}` : ''
+    return `${qty}× ${nome}${total}`
+  }
+  const linhas = items.map(fmt).filter(Boolean)
+  if (!linhas.length) return []
+  if (linhas.length === 1) return [`• Itens: ${linhas[0]}`]
+  const mostradas = linhas.slice(0, 8)
+  const resto = linhas.length - mostradas.length
+  return [
+    '• Itens:',
+    ...mostradas.map((l) => `   – ${l}`),
+    ...(resto > 0 ? [`   – (+${resto} ${resto === 1 ? 'item' : 'itens'})`] : []),
+  ]
+}
+
 export function buildSaleReceiptText(d: SaleReceiptInput): string {
   const { data, hora } = brasiliaDateTime(d.paidAtIso)
   const metodo = d.method === 'pix'
@@ -118,6 +153,7 @@ export function buildSaleReceiptText(d: SaleReceiptInput): string {
 
   const pedido: string[] = []
   if (d.produto?.trim()) pedido.push(`• Produto: ${d.produto.trim().slice(0, 120)}`)
+  pedido.push(...itensLinhas(d.items))
   // Número visível (3306) é o que a busca do Bling encontra; o id interno da API
   // (26275181279) não acha nada e confundiu o financeiro (caso Kellen 07/07).
   if (d.blingOrderNumero) pedido.push(`• Pedido Bling: nº ${d.blingOrderNumero}`)
@@ -403,6 +439,7 @@ type RedeRow = {
   kit?: string | null; description?: string | null; coupon_code?: string | null; discount_cents?: number | null
   bling_order_id?: string | null; tid?: string | null; customer_name?: string | null
   phone?: string | null; customer_doc?: string | null; freight_cents?: number | null; paid_at?: string | null
+  items?: Array<Record<string, unknown>> | null
 }
 type AsaasRow = RedeRow & { asaas_payment_id?: string | null }
 
@@ -458,6 +495,7 @@ function rowToReceipt(row: RedeRow, gateway: string, transactionId?: string | nu
     discountCents: row.discount_cents ?? undefined,
     couponCode: row.coupon_code ?? undefined,
     produto: (row.description && row.description.trim()) || (row.kit ? `Tricopill (${row.kit})` : 'Tricopill'),
+    items: Array.isArray(row.items) ? row.items : null,
     blingOrderId: row.bling_order_id ?? undefined,
     transactionId: transactionId ?? row.tid ?? undefined,
     // DATA/HORA = quando o cliente PAGOU, não quando o vigia reenviou. Sem isto o
@@ -504,7 +542,9 @@ export async function resendMissingSaleReceipts(
 
   try {
     const redeCols = 'id, tenant_id, lead_id, method, amount_cents, installments, kit, description, coupon_code, discount_cents, bling_order_id, tid, customer_name, phone, customer_doc, freight_cents, paid_at, receipt_group_sent_at, receipt_owner_sent_at'
-    const { data: rede } = await admin.from('rede_payments').select(redeCols)
+    // `items` só existe em rede_payments (o carrinho da loja); asaas_payments não tem a coluna,
+    // e pedir campo inexistente faz o PostgREST devolver 400 e o vigia inteiro parar.
+    const { data: rede } = await admin.from('rede_payments').select(`${redeCols}, items`)
       .eq('status', 'paid').or(missing)
       .gte('paid_at', sinceIso).lte('paid_at', untilIso).limit(limit)
     for (const row of (rede ?? []) as RedeRow[]) await handle(row, 'e.Rede')

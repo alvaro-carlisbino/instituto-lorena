@@ -1020,6 +1020,7 @@ export async function finalizeRedePaid(
       discountCents: intent.discountCents,
       couponCode: intent.couponCode,
       produto: orderKit ? (REDE_KITS[orderKit]?.label ?? intent.description) : intent.description,
+      items: intent.items,
       blingOrderId: receiptBlingId,
       transactionId: opts.tid,
       buyer: {
@@ -1270,6 +1271,7 @@ export async function finalizeRedePaid(
         discountCents: intent.discountCents,
         couponCode: intent.couponCode,
         produto: orderKit ? (REDE_KITS[orderKit]?.label ?? intent.description) : intent.description,
+        items: intent.items,
         blingOrderId: receiptBlingId,
         transactionId: opts.tid,
         buyer: {
