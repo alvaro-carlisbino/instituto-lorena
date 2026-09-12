@@ -102,6 +102,7 @@ function enderecoLinha(ent?: Record<string, unknown> | null): { linha: string; m
  * Linhas de "Itens" do comprovante. Um item cabe na mesma linha; vários viram lista, porque o
  * WhatsApp quebra linha comprida em qualquer aparelho e a conferência é feita item a item.
  * Cap de 8 linhas para não virar um muro de texto num pedido grande.
+ * Sem travessão: é texto que aparece no WhatsApp, e travessão está fora da copy da casa.
  */
 function itensLinhas(items?: Array<Record<string, unknown>> | null): string[] {
   if (!Array.isArray(items) || !items.length) return []
@@ -110,7 +111,7 @@ function itensLinhas(items?: Array<Record<string, unknown>> | null): string[] {
     if (!nome) return ''
     const qty = Math.max(1, Math.floor(Number(it?.qty) || 1))
     const preco = Number(it?.precoCents)
-    const total = Number.isFinite(preco) ? ` — ${fmtBRL(preco * qty)}` : ''
+    const total = Number.isFinite(preco) ? ` (${fmtBRL(preco * qty)})` : ''
     return `${qty}× ${nome}${total}`
   }
   const linhas = items.map(fmt).filter(Boolean)
@@ -120,8 +121,8 @@ function itensLinhas(items?: Array<Record<string, unknown>> | null): string[] {
   const resto = linhas.length - mostradas.length
   return [
     '• Itens:',
-    ...mostradas.map((l) => `   – ${l}`),
-    ...(resto > 0 ? [`   – (+${resto} ${resto === 1 ? 'item' : 'itens'})`] : []),
+    ...mostradas.map((l) => `   ${l}`),
+    ...(resto > 0 ? [`   (+${resto} ${resto === 1 ? 'item' : 'itens'})`] : []),
   ]
 }
 

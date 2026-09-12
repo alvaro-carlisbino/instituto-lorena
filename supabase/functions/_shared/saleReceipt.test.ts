@@ -30,7 +30,7 @@ Deno.test('comprovante do carrinho da loja nomeia o item e o total dele', () => 
     produto: 'Pedido loja Tricopill (2 itens) + frete (Pix 5% off)',
     items: [{ id: '16691834812', qty: 2, nome: 'Gel de Sobrancelha BrowSculpt 10ml', precoCents: 12990 }],
   })
-  assertStringIncludes(txt, '• Itens: 2× Gel de Sobrancelha BrowSculpt 10ml — R$ 259,80')
+  assertStringIncludes(txt, '• Itens: 2× Gel de Sobrancelha BrowSculpt 10ml (R$ 259,80)')
 })
 
 Deno.test('carrinho com mais de um item vira lista, uma linha por item', () => {
@@ -43,8 +43,8 @@ Deno.test('carrinho com mais de um item vira lista, uma linha por item', () => {
     ],
   })
   assertStringIncludes(txt, '• Itens:')
-  assertStringIncludes(txt, '   – 1× Tricopill — 3 frascos + 1 grátis (4 frascos) — R$ 597,00')
-  assertStringIncludes(txt, '   – 2× Gel de Sobrancelha BrowSculpt 10ml — R$ 259,80')
+  assertStringIncludes(txt, '   1× Tricopill — 3 frascos + 1 grátis (4 frascos) (R$ 597,00)')
+  assertStringIncludes(txt, '   2× Gel de Sobrancelha BrowSculpt 10ml (R$ 259,80)')
 })
 
 Deno.test('venda de kit (sem lista de itens) segue igual, sem linha vazia', () => {
