@@ -60,6 +60,15 @@ export type NfeImportPlan = {
  * Sem casar → 'novo'. O usuário revê e pode conectar manualmente na tela.
  */
 export function suggestItemPlan(nfe: NfeParsed, stock: StockItem[]): NfeItemPlan[] {
+  // Item consolidado pela contagem aponta pro que ficou: a nota casa pelo nome/EAN antigo e
+  // a entrada cai no item que a enfermagem conta. O limite de saltos protege contra ciclo.
+  const replacedBy = new Map<string, string>()
+  for (const s of stock) if (s.replacedBy) replacedBy.set(s.id, s.replacedBy)
+  const resolve = (id: string) => {
+    let current = id
+    for (let hop = 0; hop < 5 && replacedBy.has(current); hop += 1) current = replacedBy.get(current)!
+    return current
+  }
   const byEan = new Map<string, string>()
   const bySku = new Map<string, string>()
   const byName = new Map<string, string>()
@@ -101,7 +110,7 @@ export function suggestItemPlan(nfe: NfeParsed, stock: StockItem[]): NfeItemPlan
       return { index, action: 'existente' as const, matchedItemId: aliasPartial.id, matchedBy: 'alias' as const }
     }
     return { index, action: 'novo' as const, matchedItemId: null, matchedBy: null }
-  })
+  }).map((plan) => (plan.matchedItemId ? { ...plan, matchedItemId: resolve(plan.matchedItemId) } : plan))
 }
 
 export type NfeImportResult = {

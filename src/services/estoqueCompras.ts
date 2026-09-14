@@ -81,6 +81,8 @@ export type StockItem = {
   aliases: string[]
   /** ID do produto no Bling — quando vinculado, a entrada de estoque é espelhada no Bling. */
   blingProductId: string | null
+  /** Item que substituiu este na consolidação por inventário. A entrada de NF-e segue o ponteiro. */
+  replacedBy?: string | null
   /** saldo atual (da view stock_balances) */
   qty: number
   lastMovementAt: string | null
@@ -90,7 +92,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
   const client = assertClient()
   let itemsQuery = client
     .from('stock_items')
-    .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active, aliases, bling_product_id')
+    .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active, aliases, bling_product_id, replaced_by')
     .order('name')
   if (!includeInactive) itemsQuery = itemsQuery.eq('active', true)
   const [items, balances] = await Promise.all([
@@ -105,6 +107,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
   return (items.data ?? []).map((r) => {
     const bal = byItem.get(String(r.id))
     const aliasesRaw = (r as { aliases?: unknown }).aliases
+    const replacedRaw = (r as { replaced_by?: unknown }).replaced_by
     return {
       id: String(r.id),
       name: String(r.name),
@@ -119,6 +122,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
       active: Boolean(r.active),
       aliases: Array.isArray(aliasesRaw) ? aliasesRaw.map((a) => String(a)) : [],
       blingProductId: r.bling_product_id != null ? String(r.bling_product_id) : null,
+      replacedBy: replacedRaw != null ? String(replacedRaw) : null,
       qty: Number(bal?.qty ?? 0),
       lastMovementAt: bal?.last_movement_at ? String(bal.last_movement_at) : null,
     }
