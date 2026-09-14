@@ -1,19 +1,10 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, PhoneCall, TrendingUp } from 'lucide-react'
+import { PhoneCall, TrendingUp } from 'lucide-react'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import {
-  atrasoDeLancamento,
-  denominadorIncompleto,
-  entraramPorVenda,
-  fetchConversaoConsulta,
-  ganhoDoFollowUp,
-  taxaProjetada,
-  vendasForaDaConta,
-  type ConversaoConsulta,
-} from '@/services/conversaoConsulta'
+import { fetchConversaoConsulta, taxaProjetada, type ConversaoConsulta } from '@/services/conversaoConsulta'
 
 /**
  * "De quem sentou na cadeira, quantos compraram" — a conta que a Aline fazia de
@@ -28,8 +19,6 @@ import {
 
 const brl = (cents: number) =>
   (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
-
-const diaCurto = (iso: string | null) => (iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) : '—')
 
 /** 35.6 → "35,6". O Postgres devolve ponto e o Brasil lê vírgula. */
 const pct = (n: number | null | undefined) =>
@@ -106,14 +95,7 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
     }
   }, [mes, kind])
 
-  const ganho = ganhoDoFollowUp(dados)
-  const fora = vendasForaDaConta(dados)
-  const incompleto = denominadorIncompleto(dados)
-  const porVenda = entraramPorVenda(dados)
   const projetada = taxaProjetada(dados)
-  const atraso = atrasoDeLancamento(dados)
-  const soTc = dados?.denominador?.tipo_usado === 'tc'
-  const clinicaInteira = dados?.outra_regua?.tipo_usado === 'todas' ? dados.outra_regua : null
   const semConsulta = !carregando && dados != null && dados.pacientes === 0
 
   return (
@@ -140,171 +122,33 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
           </div>
         ) : semConsulta ? (
           <p className="py-4 text-center text-xs text-muted-foreground">
-            Nenhuma consulta na agenda da Shosp neste mês. A conversão precisa da agenda para ter denominador — sem ela
-            não dá para dizer de quantos pacientes as vendas vieram.
+            Nenhuma consulta na agenda da Shosp neste mês.
           </p>
         ) : (
-          <>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Cenario
-                titulo="Das consultas do mês"
-                explicacao="Consulta gerada no mês que virou venda ainda no mês. É a safra: casa com a meta e com o fechamento."
-                valor={dados?.cenario_mes.pct ?? null}
-                vendas={dados?.cenario_mes.vendas ?? 0}
-                pacientes={dados?.pacientes ?? 0}
-                receitaCents={dados?.cenario_mes.receita_cents ?? 0}
-                piso={projetada?.pctSafra}
-                icone={TrendingUp}
-              />
-              <Cenario
-                titulo="Fechado no mês (com follow-up)"
-                explicacao="Tudo o que fechou dentro do mês, inclusive de consulta de meses atrás. É o caixa do mês."
-                valor={dados?.cenario_followup.pct ?? null}
-                vendas={dados?.cenario_followup.vendas ?? 0}
-                pacientes={dados?.pacientes ?? 0}
-                receitaCents={dados?.cenario_followup.receita_cents ?? 0}
-                piso={projetada?.pctCaixa}
-                destaque
-                icone={PhoneCall}
-              />
-            </div>
-
-            {/* A gerência pediu a conversão de TC, mas a leitura da clínica inteira não pode
-                sumir: é ela que diz se o mês foi ruim de transplante ou ruim de movimento. */}
-            {soTc && clinicaInteira ? (
-              <p className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                Só de transplante. Contando <span className="font-semibold text-foreground">toda consulta</span> da
-                clínica ({clinicaInteira.pacientes} pacientes), a mesma conta dá{' '}
-                <span className="font-semibold text-foreground">{pct(clinicaInteira.cenario_mes.pct)}</span> na safra e{' '}
-                <span className="font-semibold text-foreground">{pct(clinicaInteira.cenario_followup.pct)}</span> no
-                caixa do mês.
-              </p>
-            ) : null}
-
-            {ganho.vendas > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Do que fechou neste mês,{' '}
-                <span className="font-semibold text-foreground">
-                  {ganho.vendas} venda{ganho.vendas > 1 ? 's' : ''} ({brl(ganho.receitaCents)})
-                </span>{' '}
-                veio de consulta de mês anterior — é o follow-up trabalhando. Sem ele, o mês teria parado nos{' '}
-                {pct(dados?.cenario_mes.pct)}.
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Neste mês nenhuma venda veio de consulta de mês anterior: tudo o que fechou nasceu de consulta do
-                próprio mês. Quando o follow-up resgatar uma consulta antiga, ela aparece aqui.
-              </p>
-            )}
-
-            {/* O denominador é o mesmo para os dois tipos de venda: uma consulta pode virar
-                cirurgia OU protocolo, e medir cada uma contra o bolo inteiro esconde isso. */}
-            {dados && dados.outro_kind?.pacientes > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Das mesmas consultas,{' '}
-                <span className="font-semibold text-foreground">
-                  {dados.outro_kind.pacientes} paciente{dados.outro_kind.pacientes > 1 ? 's' : ''}
-                </span>{' '}
-                fechou {dados.outro_kind.kind === 'protocolo' ? 'protocolo' : 'cirurgia'} em vez de{' '}
-                {dados.kind === 'cirurgia' ? 'cirurgia' : 'protocolo'}. O denominador é compartilhado: não é tudo
-                perda.
-              </p>
-            ) : null}
-
-            {/* Venda que não casa com consulta nenhuma: fora da conta, mas na tela. */}
-            {fora.vendas > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                <span className="font-semibold text-foreground">
-                  {fora.vendas} venda{fora.vendas > 1 ? 's' : ''} ({brl(fora.receitaCents)})
-                </span>{' '}
-                não entrou nesta conta: não há prontuário na venda nem no lead que ligue o paciente a uma consulta{' '}
-                {soTc ? 'de transplante' : ''} da agenda. Fica fora da taxa de propósito, porque numerador sem
-                denominador foi o que já fez este card mentir. Enquanto não é preenchido, a taxa é PISO.
-              </p>
-            ) : null}
-
-            {/* Quem entrou no denominador por ter fechado, não por ter consulta de TC na agenda.
-                Só entra convertido, então sobe a taxa: some calado seria enganação. */}
-            {porVenda > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                <span className="font-semibold text-foreground">
-                  {porVenda} paciente{porVenda > 1 ? 's' : ''}
-                </span>{' '}
-                entrou nesta conta por ter fechado cirurgia numa consulta que a agenda não classifica como
-                transplante (consulta clínica, ou consulta ainda sem tipo). A venda é real e não podia sumir de um
-                painel de cirurgia, mas quem entra assim já entra convertido: sem{' '}
-                {porVenda > 1 ? 'esses' : 'esse'}, a safra seria{' '}
-                {pct(
-                  dados && dados.pacientes - porVenda > 0
-                    ? Number(
-                        (
-                          (100 * (dados.cenario_mes.vendas - porVenda)) /
-                          (dados.pacientes - porVenda)
-                        ).toFixed(1),
-                      )
-                    : null,
-                )}
-                .
-              </p>
-            ) : null}
-
-            {/* A régua de TC entrou em campo antes de a agenda terminar de dizer o tipo, e em
-                26/08 descobrimos que ela nunca vai terminar: das 56 consultas sem serviço em
-                agosto, 53 foram buscadas paciente por paciente e a Shosp devolveu sem o campo.
-                Mostrar só o número medido seria vender uma conversão que o denominador não
-                sustenta, então a tela mostra a faixa. */}
-            {incompleto != null ? (
-              <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
-                <div className="space-y-1.5 text-xs leading-relaxed">
-                  {projetada ? (
-                    <p>
-                      <span className="font-semibold text-amber-700 dark:text-amber-500">
-                        A conversão real está entre {pct(projetada.pctSafra)} e {pct(dados?.cenario_mes.pct)} na
-                        safra
-                      </span>{' '}
-                      ({pct(projetada.pctCaixa)} a {pct(dados?.cenario_followup.pct)} no caixa). O card mede{' '}
-                      {dados?.pacientes} pacientes de transplante; aplicando às consultas sem tipo a mesma proporção
-                      de transplante das que têm tipo, o denominador seria perto de {projetada.pacientes}.
-                    </p>
-                  ) : null}
-                  <p className="text-muted-foreground">
-                    Por que falta: a grade da Shosp não devolve o serviço, só a busca por paciente, e{' '}
-                    <span className="font-semibold text-foreground">
-                      {incompleto.consultasSemTipo} consulta{incompleto.consultasSemTipo > 1 ? 's' : ''}
-                    </span>{' '}
-                    deste mês continua sem classificação mesmo depois de consultada uma a uma (cobertura em{' '}
-                    {pct(incompleto.coberturaPct)}). Isso não se resolve sozinho: depende de a Shosp preencher o
-                    serviço no agendamento.
-                  </p>
-                </div>
-              </div>
-            ) : null}
-
-            {/* O furo que faria o card mentir: a agenda entra sozinha e vai até
-                hoje, a venda é digitada e atrasa. */}
-            {atraso != null ? (
-              <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
-                <p className="text-xs leading-relaxed">
-                  <span className="font-semibold text-amber-700 dark:text-amber-500">
-                    A última venda lançada é de {diaCurto(dados?.ultima_venda_registrada ?? null)}, há {atraso} dias
-                  </span>
-                  , mas a agenda já contou consulta até {diaCurto(dados?.ate_dia ?? null)}. Enquanto o lançamento não
-                  alcança a agenda, esta conversão é PISO: o numerador está atrasado e o denominador não.
-                </p>
-              </div>
-            ) : null}
-          </>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Cenario
+              titulo="Das consultas do mês"
+              explicacao="Consulta do mês que fechou no próprio mês."
+              valor={dados?.cenario_mes.pct ?? null}
+              vendas={dados?.cenario_mes.vendas ?? 0}
+              pacientes={dados?.pacientes ?? 0}
+              receitaCents={dados?.cenario_mes.receita_cents ?? 0}
+              piso={projetada?.pctSafra}
+              icone={TrendingUp}
+            />
+            <Cenario
+              titulo="Fechado no mês (com follow-up)"
+              explicacao="Tudo o que fechou no mês, inclusive de consulta de meses anteriores."
+              valor={dados?.cenario_followup.pct ?? null}
+              vendas={dados?.cenario_followup.vendas ?? 0}
+              pacientes={dados?.pacientes ?? 0}
+              receitaCents={dados?.cenario_followup.receita_cents ?? 0}
+              piso={projetada?.pctCaixa}
+              destaque
+              icone={PhoneCall}
+            />
+          </div>
         )}
-
-        <p className="border-t border-border/40 pt-2 text-[11px] leading-relaxed text-muted-foreground">
-          Conta paciente, não agendamento: quem passa duas vezes no mês decide uma vez. Consulta é a mesma leitura da
-          fila de pós-consulta (hora passada, sem desmarcação nem falta, fora do spa, e retorno/lavagem/protocolo não
-          entram). A venda só entra quando dá para ligá-la a um paciente que consultou, pelo prontuário da venda ou do
-          lead. Em cirurgia o denominador é só consulta de transplante, que é o que esta central mede, e não muda com
-          o filtro de consultora.
-        </p>
       </CardContent>
     </Card>
   )

@@ -104,6 +104,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
   const [entrada, setEntrada] = useState('')
   const [entradaData, setEntradaData] = useState('')
   const [entradaPara, setEntradaPara] = useState<'' | DepositPayee>('')
+  const [entradaPaga, setEntradaPaga] = useState(false)
   const [custoMaterial, setCustoMaterial] = useState('')
   const [custoMedico, setCustoMedico] = useState('')
   const [imposto, setImposto] = useState('')
@@ -116,6 +117,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
   const [aDefinir, setADefinir] = useState(false)
   const [hotel, setHotel] = useState(false)
   const [contrato, setContrato] = useState('')
+  const [contratoAssinado, setContratoAssinado] = useState(false)
   const [obs, setObs] = useState('')
   const [salvando, setSalvando] = useState(false)
 
@@ -143,6 +145,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       setEntrada(showMoney(editing.depositCents))
       setEntradaData(editing.depositAt ?? '')
       setEntradaPara(editing.depositPayee ?? '')
+      setEntradaPaga(editing.depositPaid)
       setCustoMaterial(showMoney(editing.costMaterialsCents))
       setCustoMedico(showMoney(editing.costDoctorCents))
       setImposto(showMoney(editing.taxCents))
@@ -162,6 +165,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       }
       setHotel(editing.hotelNeeded)
       setContrato(editing.contractUrl ?? '')
+      setContratoAssinado(editing.contractSigned)
       setObs(editing.note ?? '')
       return
     }
@@ -182,6 +186,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     setEntrada('')
     setEntradaData('')
     setEntradaPara('')
+    setEntradaPaga(false)
     setCustoMaterial('')
     setCustoMedico('')
     setImposto('')
@@ -194,6 +199,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     setADefinir(false)
     setHotel(false)
     setContrato('')
+    setContratoAssinado(false)
     setObs('')
     // O prefill entra pelo id do paciente, não pelo objeto: a tela que abre monta
     // um literal novo a cada render, e o efeito limparia o formulário no meio da
@@ -265,6 +271,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       depositCents: entrada ? parseMoney(entrada) : null,
       depositAt: entradaData || null,
       depositPayee: entradaPara || null,
+      depositPaid: entradaPaga,
       costMaterialsCents: parseMoney(custoMaterial),
       costDoctorCents: parseMoney(custoMedico),
       taxCents: parseMoney(imposto),
@@ -276,6 +283,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       schedulePending: aDefinir || !scheduledAt,
       hotelNeeded: hotel,
       contractUrl: contrato,
+      contractSigned: contratoAssinado,
       note: obs,
     }
     setSalvando(true)
@@ -644,6 +652,16 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox checked={entradaPaga} onCheckedChange={(v) => setEntradaPaga(v === true)} />
+              Entrada paga
+            </label>
+            {cirurgia && (
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={contratoAssinado} onCheckedChange={(v) => setContratoAssinado(v === true)} />
+                Contrato assinado
+              </label>
+            )}
             <label className="flex items-center gap-2 text-sm">
               <Checkbox checked={nf} onCheckedChange={(v) => setNf(v === true)} />
               Nota fiscal emitida

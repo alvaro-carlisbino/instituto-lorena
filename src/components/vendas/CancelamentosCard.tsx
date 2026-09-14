@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, CalendarX2, ChevronDown, Scissors, Sparkles } from 'lucide-react'
+import { AlertTriangle, CalendarX2, ChevronDown, Scissors } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -25,10 +25,11 @@ import {
 } from '@/services/cancelamentos'
 
 /**
- * Consulta, protocolo e cirurgia cancelados no mês, lado a lado.
+ * Consulta desmarcada e cirurgia cancelada no mês.
  *
- * Fica fora do botão Transplante / Protocolos de propósito: o pedido foi ver os três
- * juntos, e a consulta desmarcada não é de nenhum dos dois tipos de venda.
+ * A Central mede TC (14/09/2026): protocolo cancelado sai do card. A consulta segue
+ * contando toda consulta da clínica, porque a agenda da Shosp não diz o tipo da
+ * maioria delas.
  */
 
 const brl = (c: number) =>
@@ -97,9 +98,12 @@ export function CancelamentosCard({ mes, rotuloMes }: { mes: string; rotuloMes: 
   const dados = carregando ? null : resultado.dados
   const erro = carregando ? null : resultado.erro
 
-  const resumo = useMemo(() => resumoCancelamentos(dados), [dados])
-  const linhas = useMemo(() => linhasDeCancelamento(dados), [dados])
-  const trocas = dados?.trocas_de_horario ?? 0
+  const doTc = useMemo(
+    () => (dados ? { ...dados, vendas: dados.vendas.filter((v) => v.kind === 'cirurgia') } : null),
+    [dados],
+  )
+  const resumo = useMemo(() => resumoCancelamentos(doTc), [doTc])
+  const linhas = useMemo(() => linhasDeCancelamento(doTc), [doTc])
 
   return (
     <Card>
@@ -107,7 +111,7 @@ export function CancelamentosCard({ mes, rotuloMes }: { mes: string; rotuloMes: 
         <CardTitle className="flex flex-wrap items-baseline gap-2">
           Cancelamentos
           <span className="text-xs font-normal text-muted-foreground">
-            {rotuloMes} · consultas, protocolos e cirurgias
+            {rotuloMes} · consultas e cirurgias
           </span>
         </CardTitle>
         {resumo.total > 0 && (
@@ -125,14 +129,13 @@ export function CancelamentosCard({ mes, rotuloMes }: { mes: string; rotuloMes: 
             {erro}
           </p>
         ) : carregando ? (
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Skeleton className="h-20 w-full" />
+          <div className="grid gap-3 sm:grid-cols-2">
             <Skeleton className="h-20 w-full" />
             <Skeleton className="h-20 w-full" />
           </div>
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Numero
                 rotulo="Consultas desmarcadas"
                 icone={CalendarX2}
@@ -144,12 +147,6 @@ export function CancelamentosCard({ mes, rotuloMes }: { mes: string; rotuloMes: 
                       ? `${resumo.consultas.remarcaram} ${resumo.consultas.remarcaram === 1 ? 'remarcou' : 'remarcaram'} · ${resumo.consultas.semNovaData} sem nova data`
                       : 'nenhuma remarcou até agora'
                 }
-              />
-              <Numero
-                rotulo="Protocolos cancelados"
-                icone={Sparkles}
-                qtd={resumo.protocolo.qtd}
-                detalhe={resumo.protocolo.qtd > 0 ? `${brl(resumo.protocolo.valorCents)} em vendas` : 'nenhum no mês'}
               />
               <Numero
                 rotulo="Cirurgias canceladas"
@@ -244,15 +241,6 @@ export function CancelamentosCard({ mes, rotuloMes }: { mes: string; rotuloMes: 
             )}
           </>
         )}
-
-        <p className="border-t border-border/40 pt-2 text-[11px] leading-relaxed text-muted-foreground">
-          Consulta conta pela data do horário desmarcado na agenda da Shosp, que não guarda o dia em que foi
-          desmarcado. Troca de horário não é cancelamento: quem desmarcou e continua com consulta no mesmo dia fica
-          fora
-          {trocas > 0 ? ` (${trocas} ${trocas === 1 ? 'troca' : 'trocas'} de horário neste mês)` : ''}. Protocolo e
-          cirurgia contam pelo dia em que a venda foi cancelada; a lista de vendas abaixo continua pelo mês em que
-          fecharam.
-        </p>
       </CardContent>
     </Card>
   )

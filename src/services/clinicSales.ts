@@ -55,6 +55,8 @@ export type ClinicSale = {
   depositCents: number | null
   depositAt: string | null
   depositPayee: DepositPayee | null
+  /** A entrada já foi paga. Em cirurgia, fecha o item do checklist que o lembrete cobra do paciente. */
+  depositPaid: boolean
   paymentMethod: string | null
   installments: number | null
   invoiceIssued: boolean
@@ -73,6 +75,7 @@ export type ClinicSale = {
   room: string | null
   hotelNeeded: boolean
   contractUrl: string | null
+  contractSigned: boolean
   note: string | null
   status: ClinicSaleStatus
   canceledAt: string | null
@@ -212,6 +215,7 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
     depositAt: str(r.deposit_at),
     depositPayee:
       r.deposit_payee === 'clinica' || r.deposit_payee === 'anestesista' ? r.deposit_payee : null,
+    depositPaid: r.deposit_paid === true,
     paymentMethod: str(r.payment_method),
     installments: num(r.installments),
     invoiceIssued: r.invoice_issued === true,
@@ -233,6 +237,7 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
     room: str(r.room),
     hotelNeeded: r.hotel_needed === true,
     contractUrl: str(r.contract_url),
+    contractSigned: r.contract_signed === true,
     note: str(r.note),
     status: (['vendida', 'agendada', 'realizada', 'cancelada'] as const).includes(r.status as ClinicSaleStatus)
       ? (r.status as ClinicSaleStatus)
@@ -259,7 +264,7 @@ const SALE_COLS =
   'cancel_reason, refund_status, cancel_note, surgery_account_id, srg_surgery_id, created_at, ' +
   'confirmation_status, confirmation_at, confirmation_note, cost_materials_cents, cost_doctor_cents, ' +
   'tax_cents, cost_other_cents, profit_cents, no_date_dismissed_at, no_date_dismissed_reason, ' +
-  'no_patient_dismissed_at, no_patient_dismissed_reason'
+  'no_patient_dismissed_at, no_patient_dismissed_reason, deposit_paid, contract_signed'
 
 export async function listClinicSales(kind?: ClinicSaleKind, limit = 400): Promise<ClinicSale[]> {
   const client = assertClient()
@@ -312,6 +317,7 @@ export type ClinicSaleInput = {
   depositCents?: number | null
   depositAt?: string | null
   depositPayee?: DepositPayee | null
+  depositPaid?: boolean
   paymentMethod?: string | null
   installments?: number | null
   invoiceIssued?: boolean
@@ -325,6 +331,7 @@ export type ClinicSaleInput = {
   room?: string | null
   hotelNeeded?: boolean
   contractUrl?: string | null
+  contractSigned?: boolean
   note?: string | null
 }
 
@@ -351,6 +358,10 @@ function toRow(input: ClinicSaleInput) {
     deposit_cents: input.depositCents != null ? Math.max(0, Math.round(input.depositCents)) : null,
     deposit_at: input.depositAt || null,
     deposit_payee: input.depositPayee || null,
+    // Só grava quando veio: quem salva sem esses campos não pode desmarcar entrada
+    // paga, e o checklist do lembrete desmarcaria junto.
+    ...(input.depositPaid !== undefined && { deposit_paid: input.depositPaid }),
+    ...(input.contractSigned !== undefined && { contract_signed: input.contractSigned }),
     cost_materials_cents: Math.max(0, Math.round(input.costMaterialsCents ?? 0)),
     cost_doctor_cents: Math.max(0, Math.round(input.costDoctorCents ?? 0)),
     tax_cents: Math.max(0, Math.round(input.taxCents ?? 0)),

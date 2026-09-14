@@ -122,6 +122,9 @@ function rotuloPrazo(dias: number | null): { texto: string; tom: string } {
   return { texto: `follow-up · ${dias} dias`, tom: 'text-sky-600' }
 }
 
+/** Entrada ou contrato que ainda falta: aviso, não erro como a nota fiscal. */
+const PENDENTE = 'border-amber-500/40 text-amber-700 dark:text-amber-400'
+
 const FILTRO_STATUS: { valor: FiltroStatusVendas; rotulo: string }[] = [
   { valor: 'ativas', rotulo: 'Ativas (sem canceladas)' },
   { valor: 'vendida', rotulo: 'Só vendidas' },
@@ -380,6 +383,10 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
     return base > 0 ? Math.round((prazo.followUp / base) * 100) : 0
   }, [prazo])
 
+  // A Central mede TC. Protocolo continua com a lista para lançar e conferir venda,
+  // mas meta, conversão, cancelamentos e resultado são só de transplante.
+  const metricas = kind === 'cirurgia'
+
   /** Clicar de novo no recorte ativo volta para o mês — o botão liga e desliga. */
   const alternarRecorte = (alvo: Exclude<RecorteVendas, 'mes'>) => {
     // A tela abre pelo que cobra. A exceção é a fila já zerada: entrar nela e
@@ -488,7 +495,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
 
   return (
     <div className="space-y-4">
-      {recorte === 'mes' && (
+      {metricas && recorte === 'mes' && (
         <Card>
           <CardHeader>
             <CardTitle>
@@ -503,10 +510,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           </CardHeader>
           <CardContent>
             {!meta ? (
-              <p className="text-sm text-muted-foreground">
-                Sem meta definida para este mês. Com a meta, esta faixa mostra o quanto já foi feito e o
-                quanto o ritmo do mês projeta até o dia {progresso.diasNoMes}.
-              </p>
+              <p className="text-sm text-muted-foreground">Sem meta definida para este mês.</p>
             ) : (
               <div className="space-y-3">
                 {/* A régua é o que foi COMBINADO. Meta só de quantidade (agosto/2026: 30 vendas,
@@ -592,7 +596,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                               {brl(progresso.projecaoCents)}
                             </span>
                           )}
-                          . Projeção é régua de três, não promessa.
+                          .
                         </p>
                       )}
                     </>
@@ -606,66 +610,70 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
 
       {/* Conversão só faz sentido no recorte por mês: as filas de pendência
           atravessam o mês de propósito e não têm safra de consulta para dividir. */}
-      {recorte === 'mes' && <ConversaoConsultaCard mes={mes} kind={kind} rotuloMes={nomeDoMes(mes)} />}
+      {metricas && recorte === 'mes' && (
+        <ConversaoConsultaCard mes={mes} kind={kind} rotuloMes={nomeDoMes(mes)} />
+      )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-6">
-        <Kpi rotulo={`Vendas · ${rotuloRecorte}`} valor={resumo.qtd} />
-        <Kpi rotulo="Faturamento" valor={brl(resumo.total)} />
-        <Kpi rotulo="Ticket médio" valor={brl(resumo.ticket)} />
-        {/* Sem NENHUM custo lançado, `lucro` é o faturamento inteiro — e o card anunciava
-            "Lucro R$ 403.211,92" com um "nenhum custo lançado" miúdo embaixo. Quem bate o olho
-            lê a manchete, não a nota de rodapé, e sai achando que o mês deu meio milhão de
-            lucro. Número que não existe não vira manchete: some, e o rótulo explica o que
-            falta. Mesmo vício de o DRE ser teto e ser lido como lucro. */}
-        <Kpi
-          rotulo="Lucro"
-          valor={resultado.custo > 0 ? brl(resultado.lucro) : '—'}
-          tom={
-            resultado.custo === 0
-              ? 'text-muted-foreground'
-              : resultado.lucro < 0
-                ? 'text-destructive'
+      {metricas && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-6">
+          <Kpi rotulo={`Vendas · ${rotuloRecorte}`} valor={resumo.qtd} />
+          <Kpi rotulo="Faturamento" valor={brl(resumo.total)} />
+          <Kpi rotulo="Ticket médio" valor={brl(resumo.ticket)} />
+          {/* Sem NENHUM custo lançado, `lucro` é o faturamento inteiro — e o card anunciava
+              "Lucro R$ 403.211,92" com um "nenhum custo lançado" miúdo embaixo. Quem bate o olho
+              lê a manchete, não a nota de rodapé, e sai achando que o mês deu meio milhão de
+              lucro. Número que não existe não vira manchete: some, e o rótulo explica o que
+              falta. Mesmo vício de o DRE ser teto e ser lido como lucro. */}
+          <Kpi
+            rotulo="Lucro"
+            valor={resultado.custo > 0 ? brl(resultado.lucro) : '—'}
+            tom={
+              resultado.custo === 0
+                ? 'text-muted-foreground'
+                : resultado.lucro < 0
+                  ? 'text-destructive'
+                  : undefined
+            }
+            detalhe={
+              resultado.custo > 0
+                ? `${resultado.margem}% de margem` +
+                  (resultado.semCusto > 0 ? ` · ${resultado.semCusto} sem custo` : '')
+                : `sem custo lançado · ${brl(resultado.receita)} de faturamento`
+            }
+          />
+          <Kpi
+            rotulo="Fechou em follow-up"
+            valor={prazo.followUp}
+            detalhe={`de ${prazo.noDia + prazo.followUp} · ${pctFollowUp}% · ${brl(prazo.valorFollowUpCents)}${
+              prazo.medianaDias > 0 ? ` · mediana ${prazo.medianaDias} dias` : ''
+            }`}
+          />
+          <Kpi
+            rotulo="Vendidas sem data"
+            icone={CalendarOff}
+            valor={resumo.semData}
+            tom={resumo.semData > 0 ? 'text-amber-600' : undefined}
+            detalhe={
+              resumo.semData > 0
+                ? `${brl(resumo.semDataCents)} parados · clique para ver`
+                : dispensadas['sem-data'].length > 0
+                  ? // Fila zerada não é o mesmo que "toda venda tem data": essas
+                    // continuam sem data, só saíram da cobrança.
+                    `${dispensadas['sem-data'].length} dispensadas da fila`
+                  : 'toda venda tem data'
+            }
+            ativo={recorte === 'sem-data'}
+            onClick={
+              resumo.semData > 0 || dispensadas['sem-data'].length > 0
+                ? () => alternarRecorte('sem-data')
                 : undefined
-          }
-          detalhe={
-            resultado.custo > 0
-              ? `${resultado.margem}% de margem` +
-                (resultado.semCusto > 0 ? ` · ${resultado.semCusto} sem custo` : '')
-              : `sem custo lançado · ${brl(resultado.receita)} de faturamento`
-          }
-        />
-        <Kpi
-          rotulo="Fechou em follow-up"
-          valor={prazo.followUp}
-          detalhe={`de ${prazo.noDia + prazo.followUp} · ${pctFollowUp}% · ${brl(prazo.valorFollowUpCents)}${
-            prazo.medianaDias > 0 ? ` · mediana ${prazo.medianaDias} dias` : ''
-          }`}
-        />
-        <Kpi
-          rotulo="Vendidas sem data"
-          icone={CalendarOff}
-          valor={resumo.semData}
-          tom={resumo.semData > 0 ? 'text-amber-600' : undefined}
-          detalhe={
-            resumo.semData > 0
-              ? `${brl(resumo.semDataCents)} parados · clique para ver`
-              : dispensadas['sem-data'].length > 0
-                ? // Fila zerada não é o mesmo que "toda venda tem data": essas
-                  // continuam sem data, só saíram da cobrança.
-                  `${dispensadas['sem-data'].length} dispensadas da fila`
-                : 'toda venda tem data'
-          }
-          ativo={recorte === 'sem-data'}
-          onClick={
-            resumo.semData > 0 || dispensadas['sem-data'].length > 0
-              ? () => alternarRecorte('sem-data')
-              : undefined
-          }
-          descricao="Mostrar as vendas fechadas que ainda não têm data marcada"
-        />
-      </div>
+            }
+            descricao="Mostrar as vendas fechadas que ainda não têm data marcada"
+          />
+        </div>
+      )}
 
-      {recorte === 'mes' && <CancelamentosCard mes={mes} rotuloMes={nomeDoMes(mes)} />}
+      {metricas && recorte === 'mes' && <CancelamentosCard mes={mes} rotuloMes={nomeDoMes(mes)} />}
 
       <Card>
         <CardHeader className="gap-3">
@@ -878,7 +886,11 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                     <TableHead scope="col" className="hidden text-right lg:table-cell">Lucro</TableHead>
                     <TableHead scope="col">{kind === 'cirurgia' ? 'Cirurgia' : 'Agendado'}</TableHead>
                     <TableHead scope="col">Status</TableHead>
-                    <TableHead scope="col" className="hidden text-right xl:table-cell">NF</TableHead>
+                    <TableHead scope="col" className="hidden lg:table-cell">Entrada</TableHead>
+                    {kind === 'cirurgia' && (
+                      <TableHead scope="col" className="hidden lg:table-cell">Contrato</TableHead>
+                    )}
+                    <TableHead scope="col" className="hidden text-right lg:table-cell">NF</TableHead>
                     <TableHead scope="col"><span className="sr-only">Ações</span></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -998,6 +1010,28 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                           {STATUS_LABEL[s.status]}
                         </Badge>
                       </TableCell>
+                      <TableCell className="hidden whitespace-nowrap lg:table-cell">
+                        {s.depositPaid ? (
+                          <span className="text-muted-foreground">Paga</span>
+                        ) : !s.depositCents ? (
+                          <span className="text-xs text-muted-foreground">sem entrada</span>
+                        ) : (
+                          <Badge variant="outline" className={PENDENTE}>
+                            Pendente
+                          </Badge>
+                        )}
+                      </TableCell>
+                      {kind === 'cirurgia' && (
+                        <TableCell className="hidden whitespace-nowrap lg:table-cell">
+                          {s.contractSigned ? (
+                            <span className="text-muted-foreground">Assinado</span>
+                          ) : (
+                            <Badge variant="outline" className={PENDENTE}>
+                              Pendente
+                            </Badge>
+                          )}
+                        </TableCell>
+                      )}
                       {/* Nota pendente é dívida com o fisco, não detalhe: some do
                           olho em cinza claro e escondida só no XL. Vermelho, e já
                           visível no notebook da recepção. */}
@@ -1062,17 +1096,15 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
         </CardContent>
       </Card>
 
-      {doMes.length > 0 && (
+      {metricas && doMes.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Resultado de {rotuloRecorte}</CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">
-              O que entrou menos o que a venda custou. Custo em branco entra como zero, então lucro só é
-              lucro de verdade quando as {doMes.length} vendas do mês estiverem lançadas —
-              {resultado.semCusto > 0
-                ? ` hoje ${resultado.semCusto} ainda não estão.`
-                : ' todas já estão.'}
-            </p>
+            {resultado.semCusto > 0 && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {resultado.semCusto} de {doMes.length} vendas sem custo lançado.
+              </p>
+            )}
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
@@ -1098,14 +1130,10 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
         </Card>
       )}
 
-      {porMedico.length > 0 && (
+      {metricas && porMedico.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Por médico em {rotuloRecorte}</CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Quem vendeu, quanto vendeu e quantas executa. É o fechamento que hoje é digitado na mão no rodapé
-              da planilha.
-            </p>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -1151,11 +1179,6 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
             <CardTitle>
               Ticket por procedimento em {rotuloRecorte}
             </CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Transplante masculino, feminino e de sobrancelha têm preços diferentes, e a média dos
-              três junta não é o preço de nenhum deles. O procedimento é texto livre no cadastro, então
-              cada linha mostra as grafias que caíram nela.
-            </p>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
