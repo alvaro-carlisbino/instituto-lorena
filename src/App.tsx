@@ -17,6 +17,7 @@ import { RouteTransition } from './components/RouteTransition'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
+import { AvisoVersaoNova } from '@/components/page/AvisoVersaoNova'
 import { AppSidebar } from '@/layouts/AppSidebar'
 import { Button } from './components/ui/button'
 
@@ -358,6 +359,7 @@ function App() {
           </TooltipProvider>
         </BillingGate>
         <Toaster richColors position="top-right" />
+        <AvisoVersaoNova />
         <PwaInstallBanner />
       </CrmProvider>
       </PoloGate>
