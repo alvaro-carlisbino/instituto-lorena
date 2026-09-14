@@ -38,6 +38,7 @@ import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
 import { centroForaDoTotal } from '@/lib/centroCusto'
 import { GastosPorCentro, type LinhaGasto } from '@/components/financeiro/GastosPorCentro'
 import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
+import { possiveisCopias } from '@/lib/copiasBanco'
 import { SaidaEditor } from '@/components/financeiro/SaidaEditor'
 import { useTenant } from '@/context/TenantContext'
 import { hojeLocal } from '@/lib/diaLocal'
@@ -171,28 +172,36 @@ export function GastosControlePage() {
 
   const foraDoTotal = (r: SaidaTudo) => r.naoEGasto || centroForaDoTotal(centros, r.centroCusto)
 
-  // Lançamentos do banco IGUAIS (dia, descrição e valor): cada grupo com mais de um tem cópia a
-  // apagar. Vale para qualquer origem da cópia, não só a pendente do Open Finance: em setembro a
-  // mesma conta de luz apareceu três vezes no mesmo dia.
+  // Possíveis cópias no banco (lib/copiasBanco): mesmo dia e valor, e descrição igual ou só o
+  // trilho do pagamento. Em setembro a conta de luz veio três vezes no mesmo dia, e um boleto veio
+  // duas vezes como "SISPAG FORNECEDORES" e mais uma com o nome do fornecedor.
   const copias = useMemo(() => {
-    const grupos = new Map<string, SaidaTudo[]>()
+    const porId = possiveisCopias(rows.filter((r) => r.origem === 'banco'))
+    // Extra por grupo de dia e valor: um grupo de três cópias tem dois a mais, não três.
+    const grupos = new Map<string, { n: number; cents: number }>()
     for (const r of rows) {
-      if (r.origem !== 'banco') continue
-      const k = `${r.data}|${r.descricao}|${r.amountCents}`
-      grupos.set(k, [...(grupos.get(k) ?? []), r])
+      if (!porId.has(r.id)) continue
+      const k = `${r.data}|${r.amountCents}`
+      const g = grupos.get(k) ?? { n: 0, cents: r.amountCents }
+      g.n += 1
+      grupos.set(k, g)
     }
-    const ids = new Set<string>()
     let extras = 0
     let extrasCents = 0
     for (const g of grupos.values()) {
-      if (g.length < 2) continue
-      for (const r of g) ids.add(r.id)
-      extras += g.length - 1
-      extrasCents += (g.length - 1) * g[0].amountCents
+      extras += g.n - 1
+      extrasCents += (g.n - 1) * g.cents
     }
-    return { ids, extras, extrasCents }
+    return { porId, extras, extrasCents }
   }, [rows])
-  const temCopia = (r: SaidaTudo) => r.origem === 'banco' && copias.ids.has(r.id)
+  const temCopia = (r: SaidaTudo) => r.origem === 'banco' && copias.porId.has(r.id)
+  const outrosDe = (r: SaidaTudo) =>
+    (copias.porId.get(r.id) ?? []).map((o) => ({
+      id: o.id,
+      descricao: o.contraparte && o.contraparte !== o.descricao ? `${o.contraparte} (${o.descricao})` : o.descricao,
+      data: o.data,
+      amountCents: o.amountCents,
+    }))
 
   const numeros = useMemo(() => {
     const soma = (xs: SaidaTudo[]) => xs.reduce((s, r) => s + r.amountCents, 0)
@@ -406,8 +415,8 @@ export function GastosControlePage() {
           <span className="font-medium">
             {numeros.repetidos.extras} lançamento(s) do banco aparecem repetidos ({brl(numeros.repetidos.cents)} a mais).
           </span>{' '}
-          Mesmo dia, valor e descrição. Estão somados no total até alguém conferir: se for cópia, apague na lixeira da
-          linha. <span className="underline">Ver quais</span>
+          Mesmo dia e valor, e a descrição igual ou sem o nome de quem recebeu. Estão somados no total até alguém
+          conferir: se for o mesmo pagamento, apague na lixeira da linha e escolha qual fica. <span className="underline">Ver quais</span>
         </button>
       )}
 
@@ -587,7 +596,8 @@ export function GastosControlePage() {
                               variante="icone"
                               origem={r.origem}
                               id={r.id}
-                              temCopia={temCopia(r)}
+                              descricao={r.descricao}
+                              outros={outrosDe(r)}
                               resumo={`${nome} · ${dia(r.data)} · ${brl(r.amountCents)}`}
                               centros={centros}
                               onTirarDoTotal={(c) => classificar(r, c, false)}
@@ -608,7 +618,7 @@ export function GastosControlePage() {
                                   void load(true)
                                 }}
                                 onCancelar={() => setAbertoId(null)}
-                                temCopia={temCopia(r)}
+                                outros={outrosDe(r)}
                               />
                             </td>
                           </tr>

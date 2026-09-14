@@ -6,8 +6,8 @@
 //   Conta a pagar que não foi compra (proposta comercial faturada antes do "sim", boleto golpe
 //   que entrou pela SEFAZ): sai do gasto e fica registrada como cancelada, com o motivo.
 //
-//   Lançamento do banco que tem OUTRO IGUAL (mesmo dia, valor e descrição): a cópia sai e a
-//   outra fica, com a classificação que tiver.
+//   Lançamento do banco com possível cópia (mesmo dia e valor; ver lib/copiasBanco): a pessoa
+//   escolhe qual fica, e a classificação da que sai passa para a que fica.
 //
 //   Lançamento do banco sem cópia: saiu da conta de verdade e não se apaga. Se não é gasto
 //   (PIX devolvido, transferência), a tela oferece tirar do total pelo centro certo, em vez de
@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { GRUPO_FORA_DO_TOTAL } from '@/lib/centroCusto'
+import { padraoDaRegra } from '@/lib/extratoPadrao'
 import { cn } from '@/lib/utils'
 import { excluirContaAPagar, excluirLancamentoRepetido, type CostCenter } from '@/services/financeiro'
 
@@ -40,10 +41,15 @@ const MOTIVOS = [
   'Outro',
 ] as const
 
+export type OutroLancamento = { id: string; descricao: string; data: string; amountCents: number }
+
+const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
 export function ExcluirLancamento({
   origem,
   id,
-  temCopia = false,
+  descricao = '',
+  outros = [],
   resumo,
   onExcluido,
   variante = 'botao',
@@ -52,8 +58,10 @@ export function ExcluirLancamento({
 }: {
   origem: 'banco' | 'a pagar'
   id: string
-  /** Existe outro lançamento do banco igual a este: só então ele pode sair. */
-  temCopia?: boolean
+  /** Descrição do banco deste lançamento, para mostrar ao lado dos outros na escolha. */
+  descricao?: string
+  /** Outros lançamentos do banco que podem ser o mesmo pagamento: só com eles este pode sair. */
+  outros?: OutroLancamento[]
   resumo: string
   onExcluido: () => void
   variante?: 'botao' | 'icone'
@@ -65,6 +73,15 @@ export function ExcluirLancamento({
   const [motivo, setMotivo] = useState<(typeof MOTIVOS)[number]>(MOTIVOS[0])
   const [outro, setOutro] = useState('')
   const [busy, setBusy] = useState(false)
+  // Fica, por padrão, o que diz quem recebeu: o pendente só diz o trilho ("SISPAG FORNECEDORES").
+  const [escolhido, setFica] = useState<string>('')
+  // A lista de outros muda depois de cada recarga (apagar uma cópia tira ela daqui): a escolha
+  // que não existe mais volta para o padrão em vez de mandar um id apagado ao banco.
+  const fica =
+    outros.find((o) => o.id === escolhido)?.id ??
+    (outros.find((o) => padraoDaRegra(o.descricao) != null) ?? outros[0])?.id ??
+    ''
+  const temCopia = outros.length > 0
 
   const caso: 'conta' | 'copia' | 'pagamento' =
     origem === 'a pagar' ? 'conta' : temCopia ? 'copia' : 'pagamento'
@@ -79,7 +96,7 @@ export function ExcluirLancamento({
     setBusy(true)
     try {
       if (caso === 'conta') await excluirContaAPagar(id, texto)
-      else await excluirLancamentoRepetido(id)
+      else await excluirLancamentoRepetido(id, fica || null)
       toast.success('Lançamento apagado. Dá para desfazer em “Excluídos”, no fim da página.')
       setAberto(false)
       onExcluido()
@@ -142,10 +159,37 @@ export function ExcluirLancamento({
           </DialogHeader>
 
           {caso === 'copia' && (
-            <p className="text-sm text-muted-foreground">
-              Existe outro lançamento igual a este no banco (mesmo dia, valor e descrição). Esta cópia sai e a outra
-              fica, com a classificação que tiver.
-            </p>
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                No mesmo dia e com o mesmo valor, o banco tem {outros.length === 1 ? 'outro lançamento' : 'outros lançamentos'}.
+                Se é o mesmo pagamento, este sai e fica o que você marcar, com a classificação deste se ele não tiver.
+              </p>
+              <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+                <span className="text-muted-foreground">Sai: </span>
+                <span className="font-medium">{descricao || resumo}</span>
+              </div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fica</div>
+              <div className="grid gap-1.5">
+                {outros.map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    aria-pressed={fica === o.id}
+                    onClick={() => setFica(o.id)}
+                    className={cn(
+                      'flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm',
+                      fica === o.id ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40',
+                    )}
+                  >
+                    <span className="truncate">{o.descricao}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{brl(o.amountCents)}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Se não é o mesmo pagamento (duas compras de mesmo valor no mesmo dia), cancele.
+              </p>
+            </div>
           )}
 
           {caso === 'conta' && (

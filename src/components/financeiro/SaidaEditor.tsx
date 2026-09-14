@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
-import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
+import { ExcluirLancamento, type OutroLancamento } from '@/components/financeiro/ExcluirLancamento'
 import { LancamentoEditor } from '@/components/financeiro/LancamentoEditor'
 import { ParcelaEditor } from '@/components/financeiro/ParcelaEditor'
 import { type Payable, getPayable } from '@/services/estoqueCompras'
@@ -26,12 +26,12 @@ export function SaidaEditor({
   centros,
   onSalvo,
   onCancelar,
-  temCopia = false,
+  outros = [],
 }: {
   origem: 'banco' | 'a pagar'
   id: string
-  /** Existe outro lançamento do banco igual: só nesse caso ele pode ser apagado. */
-  temCopia?: boolean
+  /** Possíveis cópias deste lançamento do banco: só com elas ele pode ser apagado. */
+  outros?: OutroLancamento[]
   categorias: FinCategory[]
   centros: CostCenter[]
   onSalvo: () => void
@@ -78,7 +78,8 @@ export function SaidaEditor({
           <ExcluirLancamento
             origem="banco"
             id={txn.id}
-            temCopia={temCopia}
+            descricao={txn.description ?? ''}
+            outros={outros}
             resumo={`${txn.description ?? txn.counterparty ?? ''} · ${(Math.abs(txn.amountCents) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
             onExcluido={onSalvo}
             centros={centros}

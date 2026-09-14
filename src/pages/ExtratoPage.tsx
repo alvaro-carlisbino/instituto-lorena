@@ -33,6 +33,7 @@ import { ArrowDownLeft, ArrowUpRight, Landmark, Tag, Wand2 } from 'lucide-react'
 
 import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
 import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
+import { possiveisCopias } from '@/lib/copiasBanco'
 import { centroForaDoTotal } from '@/lib/centroCusto'
 import { GastosPorCentro, type LinhaGasto } from '@/components/financeiro/GastosPorCentro'
 
@@ -158,12 +159,21 @@ export function ExtratoPage() {
     return lancamentos.filter((t) => t.direction === 'out' && banco.has(t.accountId))
   }, [lancamentos, contas])
 
-  // Saídas iguais na mesma conta (dia, descrição e valor): a cópia pode ser apagada.
-  const comCopia = useMemo(() => {
-    const n = new Map<string, number>()
-    const chave = (t: FinTransaction) => `${t.accountId}|${t.date}|${t.description ?? ''}|${t.amountCents}`
-    for (const t of lancamentos) if (t.direction === 'out') n.set(chave(t), (n.get(chave(t)) ?? 0) + 1)
-    return new Set(lancamentos.filter((t) => t.direction === 'out' && (n.get(chave(t)) ?? 0) > 1).map((t) => t.id))
+  // Possíveis cópias entre as saídas da mesma conta (lib/copiasBanco).
+  const copias = useMemo(() => {
+    const porConta = new Map<string, FinTransaction[]>()
+    for (const t of lancamentos) {
+      if (t.direction !== 'out') continue
+      porConta.set(t.accountId, [...(porConta.get(t.accountId) ?? []), t])
+    }
+    const out = new Map<string, Array<{ id: string; descricao: string; data: string; amountCents: number }>>()
+    for (const lista of porConta.values()) {
+      const m = possiveisCopias(
+        lista.map((t) => ({ id: t.id, data: t.date, descricao: t.description ?? '', amountCents: Math.abs(t.amountCents) })),
+      )
+      for (const [id, outros] of m) out.set(id, outros)
+    }
+    return out
   }, [lancamentos])
 
   const foraDoResultado = useMemo(
@@ -531,7 +541,8 @@ export function ExtratoPage() {
                         variante="icone"
                         origem="banco"
                         id={t.id}
-                        temCopia={comCopia.has(t.id)}
+                        descricao={t.description ?? ''}
+                        outros={copias.get(t.id) ?? []}
                         resumo={`${nome} · ${dia(t.date)} · ${brl(Math.abs(t.amountCents))}`}
                         centros={centros}
                         onTirarDoTotal={(c) => classificarCentro(t, c, false)}

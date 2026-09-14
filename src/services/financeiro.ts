@@ -1335,10 +1335,13 @@ export async function excluirContaAPagar(id: string, motivo: string): Promise<vo
   if (error) throw new Error(error.message)
 }
 
-/** Cópia repetida do banco. O banco recusa se não existir o outro igual: aí é pagamento. */
-export async function excluirLancamentoRepetido(id: string): Promise<void> {
+/**
+ * Cópia repetida do banco. `fica` é o lançamento que continua: o banco confere que é da mesma
+ * conta, dia e valor. Sem `fica`, só aceita se houver outro com a mesma descrição.
+ */
+export async function excluirLancamentoRepetido(id: string, fica?: string | null): Promise<void> {
   const client = assertClient()
-  const { error } = await client.rpc('crm_excluir_lancamento_repetido', { p_id: id, p_motivo: null })
+  const { error } = await client.rpc('crm_excluir_lancamento_repetido', { p_id: id, p_motivo: null, p_fica: fica ?? null })
   if (error) throw new Error(error.message)
 }
 
@@ -1380,6 +1383,36 @@ export async function desfazerExclusao(excluidoId: string): Promise<void> {
   const client = assertClient()
   const { error } = await client.rpc('crm_desfazer_exclusao', { p_excluido_id: excluidoId })
   if (error) throw new Error(error.message)
+}
+
+/** Conta a pagar ligada a um pagamento do extrato: por qual lançamento e em que dia. */
+export type PagamentoLigado = { transactionId: string; parcelaId: string; data: string; descricao: string }
+
+/** Todas as contas a pagar já ligadas ao extrato. É o que diz "pago pelo banco" × "marcado à mão". */
+export async function listPagamentosLigados(): Promise<Map<string, PagamentoLigado>> {
+  const client = assertClient()
+  const rows = await buscarTudo<Record<string, unknown>>(
+    () =>
+      client
+        .from('fin_transactions')
+        .select('id, date, description, reconciled_ref_id')
+        .eq('reconciled_ref_type', 'payable')
+        .order('date', { ascending: false })
+        .order('id'),
+    { rotulo: 'pagamentos_ligados', maxPaginas: 10 },
+  )
+  const m = new Map<string, PagamentoLigado>()
+  for (const r of rows) {
+    const parcelaId = String(r.reconciled_ref_id ?? '')
+    if (!parcelaId) continue
+    m.set(parcelaId, {
+      transactionId: String(r.id),
+      parcelaId,
+      data: String(r.date ?? ''),
+      descricao: String(r.description ?? ''),
+    })
+  }
+  return m
 }
 
 /** Quantos lançamentos um "aplicar aos iguais" vai mexer, para a tela mostrar ANTES. */
