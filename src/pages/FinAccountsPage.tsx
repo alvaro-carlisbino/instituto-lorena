@@ -1,5 +1,13 @@
+// CONTAS & CAIXA: o dinheiro de verdade e de onde ele vem.
+//
+// Redesenho de 14/set/2026: esta tela ganhou as CONEXÕES com o banco (Open Finance e importar
+// OFX/CSV), que moravam em Conciliação, e perdeu duas coisas que existiam em dobro no financeiro:
+// a lista de extrato (a tela Extrato faz isso com classificação) e o cadastro de categorias (a
+// classificação é por centro de custo, em Configuração).
+
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
+import { Link } from 'react-router-dom'
 import {
   AlertTriangle,
   Banknote,
@@ -7,15 +15,14 @@ import {
   Landmark,
   Plus,
   RefreshCw,
-  Search,
   Settings2,
-  Tags,
   Wallet,
 } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { StatCard } from '@/components/page/StatCard'
+import { ConexoesBanco } from '@/components/financeiro/ConexoesBanco'
 import { SaldoSparkline, type PontoSaldo } from '@/components/financeiro/SaldoSparkline'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -29,16 +36,12 @@ import { diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
 import { linkBancoMcp } from '@/services/openFinance'
 import {
   type AccountKind,
-  type CategoryKind,
   type FinAccount,
-  type FinCategory,
   type FinTransaction,
   accountBalances,
   listAccounts,
-  listCategories,
   listTransactions,
   upsertAccount,
-  upsertCategory,
 } from '@/services/financeiro'
 
 function formatBRL(cents: number): string {
@@ -90,41 +93,33 @@ export function FinAccountsPage() {
   const [accounts, setAccounts] = useState<FinAccount[]>([])
   const [balances, setBalances] = useState<Map<string, number>>(new Map())
   const [txns, setTxns] = useState<FinTransaction[]>([])
-  const [categories, setCategories] = useState<FinCategory[]>([])
   const [loading, setLoading] = useState(false)
   const [atualizando, setAtualizando] = useState(false)
 
   const [gerenciar, setGerenciar] = useState(false)
   const [accForm, setAccForm] = useState({ ...EMPTY_ACCOUNT })
   const [savingAcc, setSavingAcc] = useState(false)
-  const [catName, setCatName] = useState('')
-  const [catKind, setCatKind] = useState<CategoryKind>('despesa')
-  const [savingCat, setSavingCat] = useState(false)
-
-  const [filtroConta, setFiltroConta] = useState<string>('todas')
-  const [busca, setBusca] = useState('')
 
   const load = async () => {
     setLoading(true)
     try {
-      const [acc, bal, cats, tx] = await Promise.all([
+      const [acc, bal, tx] = await Promise.all([
         listAccounts(true),
         accountBalances(),
-        listCategories(undefined, true),
         listTransactions({ from: diaLocalComOffset(-60), limit: 3000 }),
       ])
       setAccounts(acc)
       setBalances(bal)
-      setCategories(cats)
       setTxns(tx)
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao carregar contas e categorias')
+      toast.error(e instanceof Error ? e.message : 'Falha ao carregar as contas')
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [])
 
@@ -228,26 +223,6 @@ export function FinAccountsPage() {
     }
   }
 
-  const extrato = useMemo(() => {
-    const termo = busca.trim().toLowerCase()
-    return txns
-      .filter((t) => (filtroConta === 'todas' ? true : t.accountId === filtroConta))
-      .filter((t) =>
-        termo ? `${t.description ?? ''} ${t.counterparty ?? ''}`.toLowerCase().includes(termo) : true,
-      )
-      .slice(0, 60)
-  }, [txns, filtroConta, busca])
-
-  const nomeDaConta = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts])
-
-  const catsByKind = useMemo(
-    () => ({
-      receita: categories.filter((c) => c.kind === 'receita'),
-      despesa: categories.filter((c) => c.kind === 'despesa'),
-    }),
-    [categories],
-  )
-
   const handleCreateAccount = async () => {
     if (!accForm.name.trim()) {
       toast.error('Dê um nome à conta.')
@@ -290,37 +265,10 @@ export function FinAccountsPage() {
     }
   }
 
-  const handleCreateCategory = async () => {
-    if (!catName.trim()) {
-      toast.error('Informe o nome da categoria.')
-      return
-    }
-    setSavingCat(true)
-    try {
-      await upsertCategory({ name: catName, kind: catKind })
-      toast.success('Categoria criada.')
-      setCatName('')
-      await load()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao criar categoria')
-    } finally {
-      setSavingCat(false)
-    }
-  }
-
-  const toggleCategory = async (c: FinCategory) => {
-    try {
-      await upsertCategory({ id: c.id, name: c.name, kind: c.kind, active: !c.active })
-      await load()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao atualizar categoria')
-    }
-  }
-
   return (
     <AppLayout
       title="Contas & caixa"
-      subtitle="O dinheiro de verdade: saldo que veio do banco, fatura do cartão e o extrato que alimenta o resto do financeiro."
+      subtitle="O dinheiro de verdade: saldo do banco, fatura do cartão e as conexões que trazem o extrato."
       actions={
         conectadas.length > 0 ? (
           <Button size="sm" variant="outline" onClick={() => void atualizarBanco()} disabled={atualizando}>
@@ -388,15 +336,15 @@ export function FinAccountsPage() {
         />
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
-        <div className="space-y-4">
+      <div className="mt-4">
+        <div className="grid gap-4 xl:grid-cols-2">
           {conectadas.length === 0 && !loading ? (
             <Card>
               <CardContent className="pt-4">
                 <EmptyState
                   icon={Landmark}
                   title="Nenhum banco conectado"
-                  description="Conecte o banco pela Conciliação para o saldo e o extrato entrarem sozinhos."
+                  description="Conecte o banco logo abaixo, em Conexões, para o saldo e o extrato entrarem sozinhos."
                 />
               </CardContent>
             </Card>
@@ -552,76 +500,21 @@ export function FinAccountsPage() {
           ) : null}
         </div>
 
-        <Card className="xl:sticky xl:top-4 xl:self-start">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Extrato</CardTitle>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-              <Select value={filtroConta} onValueChange={(v) => setFiltroConta(v ?? 'todas')}>
-                <SelectTrigger className="sm:w-[190px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todas">Todas as contas</SelectItem>
-                  {ativas.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="relative flex-1">
-                <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <Input
-                  className="pl-8"
-                  placeholder="Buscar por descrição"
-                  value={busca}
-                  onChange={(e) => setBusca(e.target.value)}
-                />
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {extrato.length === 0 ? (
-              <EmptyState
-                icon={Banknote}
-                title={loading ? 'Carregando…' : 'Nada por aqui'}
-                description="Sem lançamentos nos últimos 60 dias para este filtro."
-              />
-            ) : (
-              <div className="max-h-[32rem] overflow-y-auto">
-                <table className="w-full table-fixed text-sm">
-                  <tbody>
-                    {extrato.map((t) => (
-                      <tr key={t.id} className="border-b border-border/60 last:border-0">
-                        <td className="w-12 py-1.5 align-top text-xs tabular-nums text-muted-foreground">{ddmm(t.date)}</td>
-                        <td className="py-1.5 align-top">
-                          <div className="truncate" title={t.description ?? ''}>
-                            {t.description ?? 'Lançamento'}
-                          </div>
-                          {filtroConta === 'todas' ? (
-                            <div className="truncate text-[0.7rem] text-muted-foreground">{nomeDaConta.get(t.accountId)}</div>
-                          ) : null}
-                        </td>
-                        <td
-                          className={`w-28 py-1.5 text-right align-top font-medium tabular-nums ${
-                            t.amountCents < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
-                          }`}
-                        >
-                          {formatBRL(t.amountCents)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      </div>
+
+      <div className="mt-6">
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold">Conexões com o banco</h2>
+          <Link to="/extrato" className="text-xs underline underline-offset-2">
+            Ver o extrato completo
+          </Link>
+        </div>
+        <ConexoesBanco accounts={accounts} onMudou={() => void load()} />
       </div>
 
       <div className="mt-4">
         <Button variant="ghost" size="sm" onClick={() => setGerenciar((v) => !v)}>
-          <Settings2 className="size-4" /> {gerenciar ? 'Esconder cadastro' : 'Cadastro de contas e categorias'}
+          <Settings2 className="size-4" /> {gerenciar ? 'Esconder cadastro' : 'Cadastro de contas'}
         </Button>
       </div>
 
@@ -731,75 +624,6 @@ export function FinAccountsPage() {
             </Card>
           </div>
 
-          <div className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <Tags className="size-4 text-primary" /> Nova categoria (plano de contas)
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid grid-cols-[1fr_auto] gap-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cat-name">Nome</Label>
-                    <Input
-                      id="cat-name"
-                      value={catName}
-                      onChange={(e) => setCatName(e.target.value)}
-                      placeholder="Ex.: Aluguel, Consultas"
-                      onKeyDown={(e) => e.key === 'Enter' && handleCreateCategory()}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cat-kind">Tipo</Label>
-                    <Select value={catKind} onValueChange={(v) => setCatKind((v as CategoryKind) ?? 'despesa')}>
-                      <SelectTrigger id="cat-kind" className="w-[130px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="despesa">Despesa</SelectItem>
-                        <SelectItem value="receita">Receita</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <Button className="w-full" onClick={handleCreateCategory} disabled={savingCat}>
-                  <Plus className="size-4" /> {savingCat ? 'Criando…' : 'Criar categoria'}
-                </Button>
-              </CardContent>
-            </Card>
-
-            {(['despesa', 'receita'] as CategoryKind[]).map((kind) => (
-              <Card key={kind}>
-                <CardHeader>
-                  <CardTitle className="text-sm capitalize">{kind === 'despesa' ? 'Despesas' : 'Receitas'}</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-wrap gap-1.5">
-                  {catsByKind[kind].length === 0 ? (
-                    <p className="py-2 text-sm text-muted-foreground">Nenhuma categoria de {kind}.</p>
-                  ) : (
-                    catsByKind[kind].map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => void toggleCategory(c)}
-                        title={c.active ? 'Clique para arquivar' : 'Clique para reativar'}
-                      >
-                        <Badge
-                          variant="secondary"
-                          className={`cursor-pointer ${c.active ? '' : 'line-through opacity-50'} ${
-                            kind === 'receita' ? 'bg-emerald-500/15 text-emerald-600' : ''
-                          }`}
-                        >
-                          {c.name}
-                        </Badge>
-                      </button>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
         </div>
       ) : null}
     </AppLayout>
