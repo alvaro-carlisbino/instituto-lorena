@@ -32,6 +32,7 @@ import {
 import { ArrowDownLeft, ArrowUpRight, Landmark, Tag, Wand2 } from 'lucide-react'
 
 import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
+import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
 import { centroForaDoTotal } from '@/lib/centroCusto'
 import { GastosPorCentro, type LinhaGasto } from '@/components/financeiro/GastosPorCentro'
 
@@ -156,6 +157,14 @@ export function ExtratoPage() {
     const banco = new Set(contas.filter((c) => c.kind === 'banco').map((c) => c.id))
     return lancamentos.filter((t) => t.direction === 'out' && banco.has(t.accountId))
   }, [lancamentos, contas])
+
+  // Saídas iguais na mesma conta (dia, descrição e valor): a cópia pode ser apagada.
+  const comCopia = useMemo(() => {
+    const n = new Map<string, number>()
+    const chave = (t: FinTransaction) => `${t.accountId}|${t.date}|${t.description ?? ''}|${t.amountCents}`
+    for (const t of lancamentos) if (t.direction === 'out') n.set(chave(t), (n.get(chave(t)) ?? 0) + 1)
+    return new Set(lancamentos.filter((t) => t.direction === 'out' && (n.get(chave(t)) ?? 0) > 1).map((t) => t.id))
+  }, [lancamentos])
 
   const foraDoResultado = useMemo(
     () => saidasBanco.filter(saidaForaDoTotal).reduce((s, t) => s + Math.abs(t.amountCents), 0),
@@ -515,6 +524,18 @@ export function ExtratoPage() {
                         padrao={padraoDaRegra(t.description ?? t.counterparty ?? '')}
                         excluirId={t.id}
                         onPick={(c, { aplicarIguais }) => classificarCentro(t, c, aplicarIguais)}
+                      />
+                    ) : null}
+                    {saida ? (
+                      <ExcluirLancamento
+                        variante="icone"
+                        origem="banco"
+                        id={t.id}
+                        temCopia={comCopia.has(t.id)}
+                        resumo={`${nome} · ${dia(t.date)} · ${brl(Math.abs(t.amountCents))}`}
+                        centros={centros}
+                        onTirarDoTotal={(c) => classificarCentro(t, c, false)}
+                        onExcluido={() => void carregar()}
                       />
                     ) : (
                       // O Select do projeto entrega `string | null`; sem a guarda, limpar a

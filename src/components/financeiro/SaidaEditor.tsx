@@ -12,6 +12,7 @@ import { LancamentoEditor } from '@/components/financeiro/LancamentoEditor'
 import { ParcelaEditor } from '@/components/financeiro/ParcelaEditor'
 import { type Payable, getPayable } from '@/services/estoqueCompras'
 import {
+  classificarSaida,
   type CostCenter,
   type FinCategory,
   type FinTransaction,
@@ -25,12 +26,12 @@ export function SaidaEditor({
   centros,
   onSalvo,
   onCancelar,
-  possivelDuplicado = false,
+  temCopia = false,
 }: {
   origem: 'banco' | 'a pagar'
   id: string
-  /** Cópia repetida pelo Open Finance: só nesse caso lançamento do banco pode ser excluído. */
-  possivelDuplicado?: boolean
+  /** Existe outro lançamento do banco igual: só nesse caso ele pode ser apagado. */
+  temCopia?: boolean
   categorias: FinCategory[]
   centros: CostCenter[]
   onSalvo: () => void
@@ -77,9 +78,19 @@ export function SaidaEditor({
           <ExcluirLancamento
             origem="banco"
             id={txn.id}
-            possivelDuplicado={possivelDuplicado}
+            temCopia={temCopia}
             resumo={`${txn.description ?? txn.counterparty ?? ''} · ${(Math.abs(txn.amountCents) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
             onExcluido={onSalvo}
+            centros={centros}
+            onTirarDoTotal={async (c) => {
+              try {
+                await classificarSaida(txn.id, c.name)
+                toast.success(`Fora do total: ${c.name}.`)
+                onSalvo()
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : 'Falha ao classificar')
+              }
+            }}
           />
         </div>
       </div>

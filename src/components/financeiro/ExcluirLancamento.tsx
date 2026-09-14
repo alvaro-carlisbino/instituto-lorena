@@ -1,13 +1,19 @@
-// Excluir um lançamento de Gastos, com as duas regras que protegem o dinheiro de verdade.
+// Apagar um lançamento de Gastos, com as regras que protegem o dinheiro de verdade.
 //
-// Conta a pagar que não foi compra (proposta comercial faturada antes do "sim", boleto golpe
-// que entrou pela SEFAZ) sai do gasto e fica registrada como cancelada, com o motivo.
+// Pedido do financeiro e do Dr. (14/set/2026): "botão de apagar, tem lançamento duplicado e
+// errado". Os três casos que isso cobre são diferentes e a tela trata cada um do seu jeito:
 //
-// Lançamento do banco só sai se for CÓPIA repetida pelo Open Finance. Pagamento que saiu da
-// conta não se exclui: o dinheiro saiu. Se não é gasto, o caminho é o centro "Transferência
-// entre contas", e a tela diz isso em vez de esconder o botão sem explicar.
+//   Conta a pagar que não foi compra (proposta comercial faturada antes do "sim", boleto golpe
+//   que entrou pela SEFAZ): sai do gasto e fica registrada como cancelada, com o motivo.
 //
-// Tudo que se exclui aqui volta pela lista "Excluídos" em Gastos.
+//   Lançamento do banco que tem OUTRO IGUAL (mesmo dia, valor e descrição): a cópia sai e a
+//   outra fica, com a classificação que tiver.
+//
+//   Lançamento do banco sem cópia: saiu da conta de verdade e não se apaga. Se não é gasto
+//   (PIX devolvido, transferência), a tela oferece tirar do total pelo centro certo, em vez de
+//   esconder o botão sem explicar nada.
+//
+// Tudo que se apaga aqui volta pela lista "Excluídos" em Gastos.
 
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -23,8 +29,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { GRUPO_FORA_DO_TOTAL } from '@/lib/centroCusto'
 import { cn } from '@/lib/utils'
-import { excluirContaAPagar, excluirLancamentoRepetido } from '@/services/financeiro'
+import { excluirContaAPagar, excluirLancamentoRepetido, type CostCenter } from '@/services/financeiro'
 
 const MOTIVOS = [
   'Não foi compra: proposta comercial',
@@ -36,73 +43,112 @@ const MOTIVOS = [
 export function ExcluirLancamento({
   origem,
   id,
-  possivelDuplicado = false,
+  temCopia = false,
   resumo,
   onExcluido,
+  variante = 'botao',
+  centros = [],
+  onTirarDoTotal,
 }: {
   origem: 'banco' | 'a pagar'
   id: string
-  possivelDuplicado?: boolean
+  /** Existe outro lançamento do banco igual a este: só então ele pode sair. */
+  temCopia?: boolean
   resumo: string
   onExcluido: () => void
+  variante?: 'botao' | 'icone'
+  /** Para o caso sem cópia: os centros "Não é gasto" viram as opções de tirar do total. */
+  centros?: CostCenter[]
+  onTirarDoTotal?: (centro: CostCenter) => Promise<void>
 }) {
   const [aberto, setAberto] = useState(false)
   const [motivo, setMotivo] = useState<(typeof MOTIVOS)[number]>(MOTIVOS[0])
   const [outro, setOutro] = useState('')
   const [busy, setBusy] = useState(false)
 
-  if (origem === 'banco' && !possivelDuplicado) {
-    return (
-      <span className="text-xs text-muted-foreground">
-        Pagamento que saiu do banco não se exclui. Se não é gasto, escolha o centro “Transferência entre contas”.
-      </span>
-    )
-  }
+  const caso: 'conta' | 'copia' | 'pagamento' =
+    origem === 'a pagar' ? 'conta' : temCopia ? 'copia' : 'pagamento'
+  const foraDoTotal = centros.filter((c) => c.grupo === GRUPO_FORA_DO_TOTAL && c.active)
 
   const confirmar = async () => {
     const texto = motivo === 'Outro' ? outro.trim() : motivo
-    if (origem === 'a pagar' && !texto) {
+    if (caso === 'conta' && !texto) {
       toast.error('Escreva o motivo.')
       return
     }
     setBusy(true)
     try {
-      if (origem === 'a pagar') await excluirContaAPagar(id, texto)
+      if (caso === 'conta') await excluirContaAPagar(id, texto)
       else await excluirLancamentoRepetido(id)
-      toast.success('Lançamento excluído. Dá para desfazer em “Excluídos”, no fim da lista.')
+      toast.success('Lançamento apagado. Dá para desfazer em “Excluídos”, no fim da página.')
       setAberto(false)
       onExcluido()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao excluir')
+      toast.error(e instanceof Error ? e.message : 'Falha ao apagar')
     } finally {
       setBusy(false)
     }
   }
 
+  const tirar = async (c: CostCenter) => {
+    if (!onTirarDoTotal) return
+    setBusy(true)
+    try {
+      await onTirarDoTotal(c)
+      setAberto(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const titulo = caso === 'conta' ? 'Apagar lançamento' : caso === 'copia' ? 'Apagar cópia repetida' : 'Este pagamento não se apaga'
+
   return (
     <>
-      <Button
-        size="sm"
-        variant="outline"
-        className="border-destructive/40 text-destructive hover:bg-destructive/10"
-        onClick={() => setAberto(true)}
-      >
-        <Trash2 className="size-3.5" /> {origem === 'banco' ? 'Excluir cópia repetida' : 'Excluir lançamento'}
-      </Button>
+      {variante === 'icone' ? (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          aria-label={`Apagar ${resumo}`}
+          title="Apagar"
+          onClick={(e) => {
+            e.stopPropagation()
+            setAberto(true)
+          }}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      ) : caso === 'pagamento' && !onTirarDoTotal ? (
+        <span className="text-xs text-muted-foreground">
+          Pagamento que saiu do banco não se apaga. Se não é gasto, escolha um centro de “Não é gasto”.
+        </span>
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          className="border-destructive/40 text-destructive hover:bg-destructive/10"
+          onClick={() => setAberto(true)}
+        >
+          <Trash2 className="size-3.5" /> {caso === 'copia' ? 'Apagar cópia repetida' : 'Apagar lançamento'}
+        </Button>
+      )}
 
       <Dialog open={aberto} onOpenChange={setAberto}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
-            <DialogTitle>{origem === 'banco' ? 'Excluir cópia repetida' : 'Excluir lançamento'}</DialogTitle>
+            <DialogTitle>{titulo}</DialogTitle>
             <DialogDescription>{resumo}</DialogDescription>
           </DialogHeader>
 
-          {origem === 'banco' ? (
+          {caso === 'copia' && (
             <p className="text-sm text-muted-foreground">
-              Existe outro lançamento igual (mesmo dia, valor e descrição). Esta cópia sai e a outra fica, com a
-              classificação que tiver.
+              Existe outro lançamento igual a este no banco (mesmo dia, valor e descrição). Esta cópia sai e a outra
+              fica, com a classificação que tiver.
             </p>
-          ) : (
+          )}
+
+          {caso === 'conta' && (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">
                 A conta sai do gasto e fica guardada como cancelada. A nota não volta a ser lançada.
@@ -129,13 +175,43 @@ export function ExcluirLancamento({
             </div>
           )}
 
+          {caso === 'pagamento' && (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Este dinheiro saiu da conta do banco de verdade e não tem outro lançamento igual, então não é cópia. Se
+                ele não é gasto, tire do total:
+              </p>
+              {onTirarDoTotal && foraDoTotal.length > 0 ? (
+                <div className="grid gap-1.5">
+                  {foraDoTotal.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void tirar(c)}
+                      className="rounded-md border border-border px-3 py-2 text-left hover:bg-muted/40 disabled:opacity-50"
+                    >
+                      <span className="block text-sm font-medium">{c.name}</span>
+                      {c.description ? <span className="block text-xs text-muted-foreground">{c.description}</span> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                Se o valor está certo e só a classificação está errada, troque o centro de custo na linha.
+              </p>
+            </div>
+          )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setAberto(false)} disabled={busy}>
-              Cancelar
+              {caso === 'pagamento' ? 'Fechar' : 'Cancelar'}
             </Button>
-            <Button variant="destructive" onClick={() => void confirmar()} disabled={busy}>
-              {busy ? 'Excluindo…' : 'Excluir'}
-            </Button>
+            {caso !== 'pagamento' && (
+              <Button variant="destructive" onClick={() => void confirmar()} disabled={busy}>
+                {busy ? 'Apagando…' : 'Apagar'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

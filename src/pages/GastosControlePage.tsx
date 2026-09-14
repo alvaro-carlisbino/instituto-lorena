@@ -37,6 +37,7 @@ import {
 import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
 import { centroForaDoTotal } from '@/lib/centroCusto'
 import { GastosPorCentro, type LinhaGasto } from '@/components/financeiro/GastosPorCentro'
+import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
 import { SaidaEditor } from '@/components/financeiro/SaidaEditor'
 import { useTenant } from '@/context/TenantContext'
 import { hojeLocal } from '@/lib/diaLocal'
@@ -170,6 +171,29 @@ export function GastosControlePage() {
 
   const foraDoTotal = (r: SaidaTudo) => r.naoEGasto || centroForaDoTotal(centros, r.centroCusto)
 
+  // Lançamentos do banco IGUAIS (dia, descrição e valor): cada grupo com mais de um tem cópia a
+  // apagar. Vale para qualquer origem da cópia, não só a pendente do Open Finance: em setembro a
+  // mesma conta de luz apareceu três vezes no mesmo dia.
+  const copias = useMemo(() => {
+    const grupos = new Map<string, SaidaTudo[]>()
+    for (const r of rows) {
+      if (r.origem !== 'banco') continue
+      const k = `${r.data}|${r.descricao}|${r.amountCents}`
+      grupos.set(k, [...(grupos.get(k) ?? []), r])
+    }
+    const ids = new Set<string>()
+    let extras = 0
+    let extrasCents = 0
+    for (const g of grupos.values()) {
+      if (g.length < 2) continue
+      for (const r of g) ids.add(r.id)
+      extras += g.length - 1
+      extrasCents += (g.length - 1) * g[0].amountCents
+    }
+    return { ids, extras, extrasCents }
+  }, [rows])
+  const temCopia = (r: SaidaTudo) => r.origem === 'banco' && copias.ids.has(r.id)
+
   const numeros = useMemo(() => {
     const soma = (xs: SaidaTudo[]) => xs.reduce((s, r) => s + r.amountCents, 0)
     const gasto = rows.filter((r) => !foraDoTotal(r))
@@ -178,17 +202,17 @@ export function GastosControlePage() {
     const hoje = hojeLocal()
     const notasVencidas = notas.filter((r) => r.data <= hoje)
     const fora = rows.filter(foraDoTotal)
-    const repetidos = rows.filter((r) => r.possivelDuplicado)
+    const repetidos = rows.filter((r) => temCopia(r))
     return {
       gasto: { n: gasto.length, cents: soma(gasto) },
       semCentro: { n: semCentro.length, cents: soma(semCentro) },
       notas: { n: notas.length, cents: soma(notas) },
       notasVencidas: { n: notasVencidas.length, cents: soma(notasVencidas) },
       fora: { n: fora.length, cents: soma(fora) },
-      repetidos: { n: repetidos.length, cents: soma(repetidos) },
+      repetidos: { n: repetidos.length, cents: copias.extrasCents, extras: copias.extras },
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, centros])
+  }, [rows, centros, copias])
 
   const linhasCentro = useMemo<LinhaGasto[]>(
     () =>
@@ -203,7 +227,7 @@ export function GastosControlePage() {
         centro: r.centroCusto,
         foraDoTotal: foraDoTotal(r),
         nota: ehNotaAberta(r),
-        possivelDuplicado: r.possivelDuplicado,
+        possivelDuplicado: temCopia(r),
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rows, centros],
@@ -215,7 +239,7 @@ export function GastosControlePage() {
       if (filtro === 'sem_centro' && (r.centroCusto || foraDoTotal(r))) return false
       if (filtro === 'notas' && !ehNotaAberta(r)) return false
       if (filtro === 'fora' && !foraDoTotal(r)) return false
-      if (filtro === 'repetidos' && !r.possivelDuplicado) return false
+      if (filtro === 'repetidos' && !temCopia(r)) return false
       if (!termo) return true
       return (
         r.descricao.toLowerCase().includes(termo) ||
@@ -225,7 +249,7 @@ export function GastosControlePage() {
     })
     return ordem === 'valor' ? [...base].sort((a, b) => b.amountCents - a.amountCents) : base
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, filtro, q, ordem, centros])
+  }, [rows, filtro, q, ordem, centros, copias])
 
   const abrirFiltro = (f: Filtro) => {
     setFiltro((atual) => (atual === f && vista === 'lancamentos' ? 'todos' : f))
@@ -380,10 +404,10 @@ export function GastosControlePage() {
           className="mb-3 w-full rounded-lg border border-amber-500/40 bg-amber-500/[0.06] px-3 py-2 text-left text-xs"
         >
           <span className="font-medium">
-            {numeros.repetidos.n} lançamento(s) do banco parecem repetidos ({brl(numeros.repetidos.cents)}).
+            {numeros.repetidos.extras} lançamento(s) do banco aparecem repetidos ({brl(numeros.repetidos.cents)} a mais).
           </span>{' '}
-          Mesmo dia, valor e descrição, gravados duas vezes pelo Open Finance. Estão somados no total até alguém
-          conferir no extrato do Itaú. <span className="underline">Ver quais</span>
+          Mesmo dia, valor e descrição. Estão somados no total até alguém conferir: se for cópia, apague na lixeira da
+          linha. <span className="underline">Ver quais</span>
         </button>
       )}
 
@@ -491,6 +515,9 @@ export function GastosControlePage() {
                     <th className="px-3 py-2 text-left font-medium">Quem recebeu</th>
                     <th className="w-52 px-3 py-2 text-left font-medium">Centro de custo</th>
                     <th className="w-32 px-3 py-2 text-right font-medium">Valor</th>
+                    <th className="w-10 px-1 py-2">
+                      <span className="sr-only">Apagar</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -524,7 +551,7 @@ export function GastosControlePage() {
                                   lançado à mão
                                 </Badge>
                               ) : null}
-                              {r.possivelDuplicado ? (
+                              {temCopia(r) ? (
                                 <Badge
                                   variant="outline"
                                   className="shrink-0 border-amber-500/60 text-[0.65rem] text-amber-700 dark:text-amber-400"
@@ -555,10 +582,22 @@ export function GastosControlePage() {
                           <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums">
                             {brl(r.amountCents)}
                           </td>
+                          <td className="px-1 py-1.5 text-center">
+                            <ExcluirLancamento
+                              variante="icone"
+                              origem={r.origem}
+                              id={r.id}
+                              temCopia={temCopia(r)}
+                              resumo={`${nome} · ${dia(r.data)} · ${brl(r.amountCents)}`}
+                              centros={centros}
+                              onTirarDoTotal={(c) => classificar(r, c, false)}
+                              onExcluido={() => void load(true)}
+                            />
+                          </td>
                         </tr>
                         {aberto && (
                           <tr className="border-t border-border/60 bg-muted/10">
-                            <td colSpan={4} className="px-3 py-2">
+                            <td colSpan={5} className="px-3 py-2">
                               <SaidaEditor
                                 origem={r.origem}
                                 id={r.id}
@@ -569,7 +608,7 @@ export function GastosControlePage() {
                                   void load(true)
                                 }}
                                 onCancelar={() => setAbertoId(null)}
-                                possivelDuplicado={r.possivelDuplicado}
+                                temCopia={temCopia(r)}
                               />
                             </td>
                           </tr>
@@ -586,6 +625,7 @@ export function GastosControlePage() {
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">
                       {brl(visiveis.reduce((s, r) => s + r.amountCents, 0))}
                     </td>
+                    <td />
                   </tr>
                 </tfoot>
               </table>
