@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
+import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
 import { LancamentoEditor } from '@/components/financeiro/LancamentoEditor'
 import { ParcelaEditor } from '@/components/financeiro/ParcelaEditor'
 import { type Payable, getPayable } from '@/services/estoqueCompras'
@@ -24,9 +25,12 @@ export function SaidaEditor({
   centros,
   onSalvo,
   onCancelar,
+  possivelDuplicado = false,
 }: {
   origem: 'banco' | 'a pagar'
   id: string
+  /** Cópia repetida pelo Open Finance: só nesse caso lançamento do banco pode ser excluído. */
+  possivelDuplicado?: boolean
   categorias: FinCategory[]
   centros: CostCenter[]
   onSalvo: () => void
@@ -67,23 +71,39 @@ export function SaidaEditor({
   }
   if (txn) {
     return (
-      <LancamentoEditor
-        lancamento={txn}
-        categorias={categorias}
-        centros={centros}
-        onSalvo={onSalvo}
-      />
+      <div className="space-y-2">
+        <LancamentoEditor lancamento={txn} categorias={categorias} centros={centros} onSalvo={onSalvo} />
+        <div className="flex flex-wrap items-center justify-end gap-2 px-1">
+          <ExcluirLancamento
+            origem="banco"
+            id={txn.id}
+            possivelDuplicado={possivelDuplicado}
+            resumo={`${txn.description ?? txn.counterparty ?? ''} · ${(Math.abs(txn.amountCents) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
+            onExcluido={onSalvo}
+          />
+        </div>
+      </div>
     )
   }
   if (parcela) {
     return (
-      <ParcelaEditor
-        parcela={parcela}
-        categorias={categorias}
-        centros={centros}
-        onSalvo={onSalvo}
-        onCancelar={onCancelar}
-      />
+      <div className="space-y-2">
+        <ParcelaEditor
+          parcela={parcela}
+          categorias={categorias}
+          centros={centros}
+          onSalvo={onSalvo}
+          onCancelar={onCancelar}
+        />
+        <div className="flex flex-wrap items-center justify-end gap-2 px-1">
+          <ExcluirLancamento
+            origem="a pagar"
+            id={parcela.id}
+            resumo={`${parcela.counterparty || parcela.supplierName || parcela.description} · ${(parcela.amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
+            onExcluido={onSalvo}
+          />
+        </div>
+      </div>
     )
   }
   return <p className="px-1 py-2 text-xs text-muted-foreground">Nada para editar aqui.</p>

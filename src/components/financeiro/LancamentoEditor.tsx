@@ -3,8 +3,8 @@
 // O que NÃO aparece aqui é decisão, não esquecimento: VALOR e DATA vêm do banco e não se editam.
 // Se o extrato pudesse ser corrigido à mão, no dia que a conciliação discordasse ninguém saberia
 // se o errado é o banco ou a nossa edição — e a única fonte confiável do sistema morre. O que se
-// corrige é a LEITURA: quem é a contraparte, que categoria é, em que centro entra, e como o
-// valor se divide.
+// corrige é a LEITURA: quem é a contraparte, em que centro de custo entra, e como o valor se
+// divide. Categoria não se pergunta mais: o banco deriva do centro (migration 20260914200000).
 //
 // O rateio soma na tela em tempo real contra o valor do lançamento, porque a conta que não fecha
 // é o erro mais comum aqui e descobrir isso só no "Salvar" é frustrante à toa.
@@ -16,8 +16,9 @@ import { Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
 import {
+  classificarSaida,
   listSplits,
   saveSplits,
   updateTransaction,
@@ -37,16 +38,16 @@ function paraCentavos(v: string): number {
 }
 const paraTexto = (c: number) => (c / 100).toFixed(2).replace('.', ',')
 
-type ItemRateio = { amount: string; categoryId: string; costCenter: string }
+type ItemRateio = { amount: string; costCenter: string }
 
 export function LancamentoEditor({
   lancamento,
-  categorias,
   centros,
   onSalvo,
 }: {
   lancamento: FinTransaction
-  categorias: FinCategory[]
+  /** Não é mais perguntada: a categoria do DRE vem do centro de custo. */
+  categorias?: FinCategory[]
   centros: CostCenter[]
   onSalvo: () => void
 }) {
@@ -66,7 +67,6 @@ export function LancamentoEditor({
       setItens(
         s.map((x) => ({
           amount: paraTexto(x.amountCents),
-          categoryId: x.categoryId ?? '',
           costCenter: x.costCenter ?? '',
         })),
       )
@@ -78,7 +78,7 @@ export function LancamentoEditor({
 
   const somaRateio = itens.reduce((s, i) => s + paraCentavos(i.amount), 0)
   const sobra = total - somaRateio
-  const catsDoTipo = categorias.filter((c) => (saida ? c.kind === 'despesa' : c.kind === 'receita'))
+  const categoriaDoCentro = (nome: string) => centros.find((c) => c.name === nome)?.categoryId ?? null
 
   const salvar = async () => {
     if (somaRateio > total) {
@@ -87,18 +87,19 @@ export function LancamentoEditor({
     }
     setBusy(true)
     try {
-      await updateTransaction(lancamento.id, {
-        counterparty: contraparte,
-        note: nota,
-        costCenter: centro || null,
-      })
+      await updateTransaction(lancamento.id, { counterparty: contraparte, note: nota })
+      if (saida && centro !== (lancamento.costCenter ?? '')) {
+        // Pelo mesmo caminho do seletor da tabela, para a categoria sair do centro no banco.
+        if (centro) await classificarSaida(lancamento.id, centro)
+        else await updateTransaction(lancamento.id, { costCenter: null, categoryId: null })
+      }
       await saveSplits(
         lancamento.id,
         itens
           .filter((i) => paraCentavos(i.amount) > 0)
           .map((i) => ({
             amountCents: paraCentavos(i.amount),
-            categoryId: i.categoryId || null,
+            categoryId: i.costCenter ? categoriaDoCentro(i.costCenter) : null,
             costCenter: i.costCenter || null,
           })),
       )
@@ -123,21 +124,25 @@ export function LancamentoEditor({
             className="h-8"
           />
         </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Centro de custo</Label>
-          <Select value={centro} onValueChange={(v) => setCentro(v ?? '')}>
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue placeholder="—" />
-            </SelectTrigger>
-            <SelectContent>
-              {centros.map((c) => (
-                <SelectItem key={c.id} value={c.name}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {saida ? (
+          <div className="space-y-1">
+            <Label className="text-xs">Centro de custo</Label>
+            <CentroCustoPicker
+              size="sm"
+              className="h-8 w-full"
+              centros={centros}
+              value={centro || null}
+              resumo={{
+                descricao: lancamento.description ?? lancamento.counterparty ?? '',
+                data: lancamento.date,
+                amountCents: total,
+              }}
+              onPick={(c) => setCentro(c.name)}
+            />
+          </div>
+        ) : (
+          <div />
+        )}
         <div className="space-y-1">
           <Label className="text-xs">Observação</Label>
           <Input value={nota} onChange={(e) => setNota(e.target.value)} className="h-8" />
@@ -146,14 +151,14 @@ export function LancamentoEditor({
 
       <div className="space-y-2 border-t border-border pt-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <Label className="text-xs">Rateio — quando um pagamento cobriu mais de uma coisa</Label>
+          <Label className="text-xs">Rateio: quando um pagamento cobriu mais de uma coisa</Label>
           <span className="text-xs text-muted-foreground">
             {itens.length === 0
-              ? `${brl(total)} numa categoria só`
+              ? `${brl(total)} num centro só`
               : sobra === 0
                 ? `fecha em ${brl(total)}`
                 : sobra > 0
-                  ? `faltam ${brl(sobra)} — ficam sem categoria`
+                  ? `faltam ${brl(sobra)}, ficam sem centro`
                   : `passou ${brl(-sobra)} do lançamento`}
           </span>
         </div>
@@ -169,40 +174,13 @@ export function LancamentoEditor({
               inputMode="decimal"
               className="h-8 w-[110px]"
             />
-            <Select
-              value={it.categoryId}
-              onValueChange={(v) =>
-                setItens((a) => a.map((x, j) => (j === i ? { ...x, categoryId: v ?? '' } : x)))
-              }
-            >
-              <SelectTrigger className="h-8 w-[190px] text-xs">
-                <SelectValue placeholder="Categoria" />
-              </SelectTrigger>
-              <SelectContent>
-                {catsDoTipo.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select
-              value={it.costCenter}
-              onValueChange={(v) =>
-                setItens((a) => a.map((x, j) => (j === i ? { ...x, costCenter: v ?? '' } : x)))
-              }
-            >
-              <SelectTrigger className="h-8 w-[170px] text-xs">
-                <SelectValue placeholder="Centro de custo" />
-              </SelectTrigger>
-              <SelectContent>
-                {centros.map((c) => (
-                  <SelectItem key={c.id} value={c.name}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <CentroCustoPicker
+              size="sm"
+              className="h-8 w-[200px]"
+              centros={centros}
+              value={it.costCenter || null}
+              onPick={(c) => setItens((a) => a.map((x, j) => (j === i ? { ...x, costCenter: c.name } : x)))}
+            />
             <Button
               size="sm"
               variant="ghost"
@@ -222,7 +200,7 @@ export function LancamentoEditor({
               ...a,
               // O primeiro pedaço já vem com o que sobra: ratear costuma ser "tira X do total",
               // e obrigar a digitar o valor cheio de novo é atrito à toa.
-              { amount: paraTexto(Math.max(0, sobra)), categoryId: '', costCenter: centro },
+              { amount: paraTexto(Math.max(0, sobra)), costCenter: centro },
             ])
           }
         >
@@ -235,7 +213,7 @@ export function LancamentoEditor({
           Salvar
         </Button>
         <span className="self-center text-xs text-muted-foreground">
-          Valor e data não se editam — vêm do banco.
+          Valor e data vêm do banco e não se editam.
         </span>
       </div>
     </div>

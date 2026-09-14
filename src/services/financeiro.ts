@@ -1233,13 +1233,27 @@ export type SaidaTudo = {
   categoria: string | null
   centroCusto: string | null
   conciliado: boolean
+  /** Transferência entre contas ou aplicação: saiu da conta e não é gasto. */
+  naoEGasto: boolean
+  /** Cópia pendente que o Open Finance deixou quando o lançamento compensou com outro id. */
+  possivelDuplicado: boolean
+  /** Da conta a pagar: 'aberto' | 'pago'. Do banco, sempre 'pago'. */
+  status: string
 }
 
 export async function listSaidasTudo(de: string, ate: string): Promise<SaidaTudo[]> {
   const client = assertClient()
-  const { data, error } = await client.rpc('crm_saidas_tudo', { p_de: de, p_ate: ate })
-  if (error) throw new Error(error.message)
-  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+  // Paginado: um período de três meses passa das 1.000 linhas do PostgREST sem aviso.
+  const rows = await buscarTudo<Record<string, unknown>>(
+    () =>
+      client
+        .rpc('crm_saidas_tudo', { p_de: de, p_ate: ate })
+        .order('data', { ascending: false })
+        .order('origem')
+        .order('id'),
+    { rotulo: 'crm_saidas_tudo' },
+  )
+  return rows.map((r) => ({
     origem: (r.origem as SaidaTudo['origem']) ?? 'banco',
     id: String(r.id ?? ''),
     data: String(r.data ?? ''),
@@ -1249,7 +1263,138 @@ export async function listSaidasTudo(de: string, ate: string): Promise<SaidaTudo
     categoria: (r.categoria as string | null) ?? null,
     centroCusto: (r.centro_custo as string | null) ?? null,
     conciliado: Boolean(r.conciliado),
+    naoEGasto: Boolean(r.nao_e_gasto),
+    possivelDuplicado: Boolean(r.possivel_duplicado),
+    status: String(r.status ?? 'pago'),
   }))
+}
+
+/** Uma linha de saída do banco já explodida pelo rateio: o que o DRE soma. */
+export type SaidaEfetiva = {
+  transactionId: string
+  data: string
+  descricao: string
+  amountCents: number
+  categoria: string | null
+  centroCusto: string | null
+  origem: 'lancamento' | 'rateio' | 'sobra'
+}
+
+export async function listSaidasEfetivas(de: string, ate: string): Promise<SaidaEfetiva[]> {
+  const client = assertClient()
+  const rows = await buscarTudo<Record<string, unknown>>(
+    () =>
+      client
+        .rpc('crm_saidas_efetivas', { p_de: de, p_ate: ate })
+        .order('data', { ascending: false })
+        .order('transaction_id')
+        .order('origem')
+        .order('amount_cents'),
+    { rotulo: 'crm_saidas_efetivas' },
+  )
+  return rows.map((r) => ({
+    transactionId: String(r.transaction_id ?? ''),
+    data: String(r.data ?? ''),
+    descricao: String(r.descricao ?? ''),
+    amountCents: Number(r.amount_cents ?? 0),
+    categoria: (r.categoria as string | null) ?? null,
+    centroCusto: (r.cost_center as string | null) ?? null,
+    origem: (r.origem as SaidaEfetiva['origem']) ?? 'lancamento',
+  }))
+}
+
+/**
+ * Classifica uma saída do banco num centro de custo. Com `pattern`, vira regra e carimba os
+ * iguais que ainda estão sem centro (e os que a mesma regra já tinha carimbado).
+ *
+ * A categoria não vai daqui: o banco deriva do centro, então centro e categoria nunca mais
+ * discordam. Devolve quantos lançamentos ALÉM deste foram carimbados.
+ */
+export async function classificarSaida(
+  transactionId: string,
+  centro: string,
+  pattern?: string | null,
+): Promise<number> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_classificar_saida', {
+    p_transaction_id: transactionId,
+    p_centro: centro,
+    p_pattern: pattern ?? null,
+  })
+  if (error) throw new Error(error.message)
+  return Number(data ?? 0)
+}
+
+/**
+ * Conta a pagar que não foi compra (proposta comercial, boleto golpe): vira 'cancelado' e sai
+ * do gasto. A nota fica guardada, e é isso que impede a SEFAZ de lançar a mesma nota de novo.
+ */
+export async function excluirContaAPagar(id: string, motivo: string): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.rpc('crm_excluir_conta_a_pagar', { p_id: id, p_motivo: motivo })
+  if (error) throw new Error(error.message)
+}
+
+/** Cópia repetida do banco. O banco recusa se não existir o outro igual: aí é pagamento. */
+export async function excluirLancamentoRepetido(id: string): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.rpc('crm_excluir_lancamento_repetido', { p_id: id, p_motivo: null })
+  if (error) throw new Error(error.message)
+}
+
+export type LancamentoExcluido = {
+  id: string
+  origem: 'a pagar' | 'banco'
+  motivo: string
+  excluidoEm: string
+  descricao: string
+  data: string
+  amountCents: number
+}
+
+/** O que foi excluído e ainda pode voltar. */
+export async function listLancamentosExcluidos(limite = 50): Promise<LancamentoExcluido[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('fin_lancamentos_excluidos')
+    .select('id, origem, motivo, excluido_em, snapshot')
+    .is('desfeito_em', null)
+    .order('excluido_em', { ascending: false })
+    .limit(limite)
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => {
+    const s = (r.snapshot ?? {}) as Record<string, unknown>
+    return {
+      id: String(r.id),
+      origem: r.origem === 'banco' ? 'banco' : 'a pagar',
+      motivo: String(r.motivo ?? ''),
+      excluidoEm: String(r.excluido_em ?? ''),
+      descricao: String(s.counterparty || s.description || ''),
+      data: String(s.due_date ?? s.date ?? ''),
+      amountCents: Math.abs(Number(s.amount_cents ?? 0)),
+    }
+  })
+}
+
+export async function desfazerExclusao(excluidoId: string): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.rpc('crm_desfazer_exclusao', { p_excluido_id: excluidoId })
+  if (error) throw new Error(error.message)
+}
+
+/** Quantos lançamentos um "aplicar aos iguais" vai mexer, para a tela mostrar ANTES. */
+export async function contarIguaisSemCentro(
+  pattern: string,
+  excluirId?: string,
+): Promise<{ qtd: number; amountCents: number }> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_iguais_sem_centro', {
+    p_pattern: pattern,
+    p_excluir: excluirId ?? null,
+  })
+  if (error) throw new Error(error.message)
+  const r = ((data ?? []) as Record<string, unknown>[])[0] ?? {}
+  return { qtd: Number(r.qtd ?? 0), amountCents: Number(r.amount_cents ?? 0) }
 }
 
 // ──────────────────────────────────────────── configuração do financeiro
@@ -1258,11 +1403,26 @@ export async function listSaidasTudo(de: string, ate: string): Promise<SaidaTudo
 // "Tricoscopia" ou renomear "SPA" exigia deploy. Enquanto for código, o financeiro depende de
 // programador pra mudar a própria estrutura de custo.
 
-export type CostCenter = { id: string; name: string; active: boolean; sortOrder: number }
+export type CostCenter = {
+  id: string
+  name: string
+  active: boolean
+  sortOrder: number
+  /** O que entra aqui, em uma frase. É o que tira a dúvida na hora de classificar. */
+  description: string | null
+  /** Cabeçalho do seletor e do relatório: Pessoas, Operação, Não é gasto. */
+  grupo: string | null
+  /** Linha do DRE. A categoria do lançamento é derivada dela. */
+  categoryId: string | null
+}
 
 export async function listCostCenters(includeInactive = false): Promise<CostCenter[]> {
   const client = assertClient()
-  let q = client.from('fin_cost_centers').select('id, name, active, sort_order').order('sort_order').order('name')
+  let q = client
+    .from('fin_cost_centers')
+    .select('id, name, active, sort_order, description, grupo, category_id')
+    .order('sort_order')
+    .order('name')
   if (!includeInactive) q = q.eq('active', true)
   const { data, error } = await q
   if (error) throw new Error(error.message)
@@ -1273,6 +1433,9 @@ export async function listCostCenters(includeInactive = false): Promise<CostCent
       name: String(row.name ?? ''),
       active: Boolean(row.active),
       sortOrder: Number(row.sort_order ?? 100),
+      description: (row.description as string | null) ?? null,
+      grupo: (row.grupo as string | null) ?? null,
+      categoryId: (row.category_id as string | null) ?? null,
     }
   })
 }
@@ -1282,11 +1445,17 @@ export async function upsertCostCenter(payload: {
   name: string
   active?: boolean
   sortOrder?: number
+  description?: string | null
+  grupo?: string | null
+  categoryId?: string | null
 }): Promise<void> {
   const client = assertClient()
   const row: Record<string, unknown> = { name: payload.name.trim() }
   if (payload.active !== undefined) row.active = payload.active
   if (payload.sortOrder !== undefined) row.sort_order = payload.sortOrder
+  if (payload.description !== undefined) row.description = payload.description?.trim() || null
+  if (payload.grupo !== undefined) row.grupo = payload.grupo?.trim() || null
+  if (payload.categoryId !== undefined) row.category_id = payload.categoryId || null
   const { error } = payload.id
     ? await client.from('fin_cost_centers').update(row).eq('id', payload.id)
     : await client.from('fin_cost_centers').insert(row)
@@ -1562,6 +1731,24 @@ export type DreMes = {
   despesaClassificadaCents: number
   foraDoResultadoCents: number
   resultadoCents: number
+}
+
+/**
+ * Último dia com venda importada. O DRE lê a receita de fin_receivables, que só cresce quando
+ * alguém importa o relatório do Shosp: em 14/set/2026 a última carga ia até 10/08, e agosto
+ * aparecia com um prejuízo que não existiu.
+ */
+export async function ultimoDiaComReceita(): Promise<string | null> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('fin_receivables')
+    .select('due_date')
+    .neq('status', 'cancelado')
+    .order('due_date', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(error.message)
+  return (data as { due_date?: string } | null)?.due_date ?? null
 }
 
 export async function listDre(de: string, ate: string): Promise<DreMes[]> {

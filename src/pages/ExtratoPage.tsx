@@ -7,12 +7,15 @@
 // não vira despesa em lugar nenhum. Sem isso não existe DRE, margem, nem custo de cirurgia.
 //
 // A tela é a ponte: classificar o extrato É construir a despesa. E classificar UMA vez vale
-// para sempre — "PIX ENVIADO LAVANDERIA B" volta todo mês, então a classificação vira regra e
-// carimba de uma vez os meses passados e os futuros.
+// para sempre: "PIX ENVIADO LAVANDERIA B" volta todo mês, então a classificação vira regra e
+// carimba os meses passados e, desde 14/set/2026, também o que ainda vai chegar do banco.
 //
-// O número que mantém esta tela honesta é "sem categoria". Enquanto ele for grande, o gráfico
-// de despesa está mentindo por omissão, e é melhor dizer isso do que desenhar uma pizza bonita
-// sobre 10% do dinheiro.
+// Saída se classifica por CENTRO DE CUSTO, com o mesmo seletor de Gastos. Antes esta tela
+// perguntava "categoria" numa lista e Gastos perguntava "centro" em outra, e quem classificava
+// aqui não via o número de lá mexer. Entrada continua por categoria de receita.
+//
+// O número que mantém esta tela honesta é "sem centro de custo". Enquanto ele for grande, a
+// divisão da despesa está mentindo por omissão.
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -28,9 +31,12 @@ import {
 } from 'recharts'
 import { ArrowDownLeft, ArrowUpRight, Landmark, Tag, Wand2 } from 'lucide-react'
 
+import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
+import { centroForaDoTotal } from '@/lib/centroCusto'
+import { GastosPorCentro, type LinhaGasto } from '@/components/financeiro/GastosPorCentro'
+
 import { AppLayout } from '@/layouts/AppLayout'
 import { FinanceTabs } from '@/components/page/FinanceTabs'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -40,15 +46,15 @@ import { useTenant } from '@/context/TenantContext'
 import { hojeLocal } from '@/lib/diaLocal'
 import { FiltroPeriodo } from '@/components/page/FiltroPeriodo'
 import { mesAtual, periodoDoMes, type Periodo } from '@/lib/periodo'
-import { sugerirPadrao } from '@/lib/extratoPadrao'
+import { padraoDaRegra, sugerirPadrao } from '@/lib/extratoPadrao'
 import { LancamentoEditor } from '@/components/financeiro/LancamentoEditor'
 import { SugestaoIAPanel } from '@/components/financeiro/SugestaoIA'
 import {
+  classificarSaida,
   listAccounts,
   listCategories,
   listCostCenters,
   listExtratoPorDia,
-  listSaidaPorCategoria,
   listTransactions,
   saveCategoryRule,
   updateTransaction,
@@ -57,7 +63,6 @@ import {
   type FinAccount,
   type FinCategory,
   type FinTransaction,
-  type SaidaCategoria,
 } from '@/services/financeiro'
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -85,11 +90,10 @@ export function ExtratoPage() {
   const de = periodo.de
   const ate = periodo.ate
   const [dias, setDias] = useState<ExtratoDia[]>([])
-  const [porCategoria, setPorCategoria] = useState<SaidaCategoria[]>([])
   const [lancamentos, setLancamentos] = useState<FinTransaction[]>([])
   const [categorias, setCategorias] = useState<FinCategory[]>([])
   const [contas, setContas] = useState<FinAccount[]>([])
-  const [filtro, setFiltro] = useState<'todos' | 'in' | 'out' | 'sem_categoria'>('sem_categoria')
+  const [filtro, setFiltro] = useState<'todos' | 'in' | 'out' | 'sem_centro'>('sem_centro')
   const [criarRegra, setCriarRegra] = useState(true)
   const [centros, setCentros] = useState<CostCenter[]>([])
   /** Linha aberta pra edição. Uma por vez: duas abertas viram formulário perdido. */
@@ -99,16 +103,14 @@ export function ExtratoPage() {
   const carregar = async (d = de, a = ate) => {
     setBusy(true)
     try {
-      const [dd, cc, tx, cats, ce, ac] = await Promise.all([
+      const [dd, tx, cats, ce, ac] = await Promise.all([
         listExtratoPorDia(d, a),
-        listSaidaPorCategoria(d, a),
         listTransactions({ from: d, to: a, limit: 5000 }),
         listCategories(),
         listCostCenters(),
         listAccounts(),
       ])
       setDias(dd)
-      setPorCategoria(cc)
       setLancamentos(tx)
       setCategorias(cats)
       setCentros(ce)
@@ -145,9 +147,37 @@ export function ExtratoPage() {
   // Dinheiro que só trocou de conta: aplicação e transferência entre contas próprias. O DRE já
   // tira isso do resultado (é a convenção do nome "não é despesa"), mas o extrato somava tudo
   // junto — e é o que faz um dia de R$ 180 mil de "saída" parecer gasto que não houve.
+  const nomeCategoriaPorId = useMemo(() => new Map(categorias.map((c) => [c.id, c.name])), [categorias])
+  const saidaForaDoTotal = (t: FinTransaction) =>
+    centroForaDoTotal(centros, t.costCenter) || /não é despesa/i.test(nomeCategoriaPorId.get(t.categoryId ?? '') ?? '')
+
+  // Saídas de BANCO, o mesmo recorte dos cards (a lista traz cartão e caixa junto).
+  const saidasBanco = useMemo(() => {
+    const banco = new Set(contas.filter((c) => c.kind === 'banco').map((c) => c.id))
+    return lancamentos.filter((t) => t.direction === 'out' && banco.has(t.accountId))
+  }, [lancamentos, contas])
+
   const foraDoResultado = useMemo(
-    () => porCategoria.filter((c) => /não é despesa/i.test(c.categoria)).reduce((s, c) => s + c.amountCents, 0),
-    [porCategoria],
+    () => saidasBanco.filter(saidaForaDoTotal).reduce((s, t) => s + Math.abs(t.amountCents), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [saidasBanco, centros, nomeCategoriaPorId],
+  )
+
+  const linhasCentro = useMemo<LinhaGasto[]>(
+    () =>
+      saidasBanco.map((t) => ({
+        id: t.id,
+        refId: t.id,
+        origem: 'banco' as const,
+        data: t.date,
+        nome: t.counterparty || t.description || 'sem descrição',
+        descricao: t.description ?? '',
+        amountCents: Math.abs(t.amountCents),
+        centro: t.costCenter,
+        foraDoTotal: saidaForaDoTotal(t),
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [saidasBanco, centros, nomeCategoriaPorId],
   )
 
   // Os cards vêm da RPC, que só olha conta de BANCO. A lista de lançamentos traz cartão e caixa
@@ -192,7 +222,7 @@ export function ExtratoPage() {
     const base = lancamentos.filter((t) => {
       if (filtro === 'in') return t.direction === 'in'
       if (filtro === 'out') return t.direction === 'out'
-      if (filtro === 'sem_categoria') return t.categoryId == null
+      if (filtro === 'sem_centro') return t.direction === 'out' && !t.costCenter
       return true
     })
     return base.slice(0, 300)
@@ -200,7 +230,25 @@ export function ExtratoPage() {
 
   const nomeCategoria = (id: string | null) => categorias.find((c) => c.id === id)?.name ?? null
 
-  /** Classifica um lançamento e, se pedido, transforma em regra que carimba o resto. */
+  /** Saída: centro de custo, e com "iguais" vira regra (inclusive para o que ainda vai chegar). */
+  const classificarCentro = async (
+    t: FinTransaction,
+    c: CostCenter,
+    aplicarIguais: boolean,
+    padraoGrupo?: string | null,
+  ) => {
+    setLancamentos((xs) => xs.map((x) => (x.id === t.id ? { ...x, costCenter: c.name } : x)))
+    try {
+      const padrao = aplicarIguais ? (padraoGrupo ?? padraoDaRegra(t.description ?? t.counterparty ?? '')) : null
+      const n = await classificarSaida(t.id, c.name, padrao)
+      toast.success(n > 0 ? `${c.name}: este e mais ${n} lançamento(s) iguais.` : `Classificado em ${c.name}.`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao classificar')
+    }
+    await carregar()
+  }
+
+  /** Entrada: categoria de receita e, se pedido, regra que carimba o resto. */
   const classificar = async (t: FinTransaction, categoryId: string) => {
     setBusy(true)
     try {
@@ -230,7 +278,7 @@ export function ExtratoPage() {
   return (
     <AppLayout
       title="Extrato"
-      subtitle="O que entrou, o que saiu e o que é cada coisa. Classificar aqui é o que constrói a despesa."
+      subtitle="O que entrou e o que saiu do banco. Toda saída ganha um centro de custo, o mesmo de Gastos."
     >
       <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
@@ -307,20 +355,32 @@ export function ExtratoPage() {
           </CardContent>
         </Card>
         {/* O número que mantém o resto honesto. */}
-        <Card className={totais.semCategoria > 0 ? 'border-amber-500/40 bg-amber-500/[0.04]' : ''}>
-          <CardContent className="pt-4">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Tag className="size-3.5" /> Saída sem categoria
-            </div>
-            <div className="mt-0.5 text-lg font-semibold">{brl(totais.semCategoria)}</div>
-            <div className="text-xs text-muted-foreground">
-              {pctClassificada.toFixed(0)}% da saída está classificada
-            </div>
-          </CardContent>
-        </Card>
+        <button
+          type="button"
+          aria-pressed={filtro === 'sem_centro'}
+          onClick={() => {
+            setFiltro('sem_centro')
+            document.getElementById('extrato-lancamentos')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }}
+          className="text-left"
+        >
+          <Card
+            className={`h-full transition-colors hover:bg-muted/30 ${totais.semCategoria > 0 ? 'border-amber-500/40 bg-amber-500/[0.04]' : ''}`}
+          >
+            <CardContent className="pt-4">
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Tag className="size-3.5" /> Saída sem centro de custo
+              </div>
+              <div className="mt-0.5 text-lg font-semibold">{brl(totais.semCategoria)}</div>
+              <div className="text-xs text-muted-foreground">
+                {pctClassificada.toFixed(0)}% da saída classificada. Clique para ver.
+              </div>
+            </CardContent>
+          </Card>
+        </button>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1fr_minmax(0,340px)]">
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Entrou × saiu por dia</CardTitle>
@@ -356,33 +416,18 @@ export function ExtratoPage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Saída por categoria</CardTitle>
+            <CardTitle className="text-sm">Saída por centro de custo</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1.5">
-            {porCategoria.length === 0 ? (
-              <EmptyState title="Nada saiu no período" description="" />
-            ) : (
-              porCategoria.map((c) => {
-                const pct = totais.saiu > 0 ? (c.amountCents / totais.saiu) * 100 : 0
-                const semCat = c.categoryId == null
-                return (
-                  <div key={c.categoria}>
-                    <div className="flex items-center justify-between gap-2 text-sm">
-                      <span className={`min-w-0 truncate ${semCat ? 'text-amber-600' : ''}`}>
-                        {c.categoria} <span className="text-xs text-muted-foreground">({c.qtd})</span>
-                      </span>
-                      <span className="shrink-0 font-medium">{brl(c.amountCents)}</span>
-                    </div>
-                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className={`h-full rounded-full ${semCat ? 'bg-amber-500' : 'bg-primary'}`}
-                        style={{ width: `${Math.max(2, pct)}%` }}
-                      />
-                    </div>
-                  </div>
-                )
-              })
-            )}
+          <CardContent>
+            <GastosPorCentro
+              linhas={linhasCentro}
+              centros={centros}
+              vazio="Nada saiu do banco no período."
+              onClassificar={async (l, c, aplicarIguais, padrao) => {
+                const t = lancamentos.find((x) => x.id === l.refId)
+                if (t) await classificarCentro(t, c, aplicarIguais, padrao)
+              }}
+            />
           </CardContent>
         </Card>
       </div>
@@ -396,21 +441,26 @@ export function ExtratoPage() {
       )}
 
       <Card className="mt-4">
-        <CardHeader className="flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+        <CardHeader
+          id="extrato-lancamentos"
+          className="scroll-mt-20 flex-row flex-wrap items-center justify-between gap-2 space-y-0"
+        >
           <CardTitle className="text-sm">Lançamentos</CardTitle>
           <div className="flex flex-wrap items-center gap-3">
-            {/* Ligado por padrão: classificar um por um em 63 lançamentos por mês é o
-                caminho garantido pra ninguém classificar nada. */}
-            <label className="flex cursor-pointer items-center gap-1.5 text-xs">
-              <Checkbox checked={criarRegra} onCheckedChange={() => setCriarRegra((v) => !v)} />
-              <Wand2 className="size-3.5" /> classificar todos os iguais
-            </label>
+            {/* Só para ENTRADA. Na saída, "aplicar aos iguais" mora dentro do seletor de centro,
+                com a contagem à vista antes de confirmar. */}
+            {(filtro === 'in' || filtro === 'todos') && (
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                <Checkbox checked={criarRegra} onCheckedChange={() => setCriarRegra((v) => !v)} />
+                <Wand2 className="size-3.5" /> entradas: classificar as iguais
+              </label>
+            )}
             <Select value={filtro} onValueChange={(v) => setFiltro((v as typeof filtro) ?? 'todos')}>
-              <SelectTrigger className="h-8 w-[190px] text-xs">
+              <SelectTrigger className="h-8 w-[230px] text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="sem_categoria">Sem categoria</SelectItem>
+                <SelectItem value="sem_centro">Saídas sem centro de custo</SelectItem>
                 <SelectItem value="out">Só saídas</SelectItem>
                 <SelectItem value="in">Só entradas</SelectItem>
                 <SelectItem value="todos">Todos</SelectItem>
@@ -418,66 +468,77 @@ export function ExtratoPage() {
             </Select>
           </div>
         </CardHeader>
-        <CardContent className="space-y-1.5">
+        <CardContent className="p-0">
           {visiveis.length === 0 ? (
             <EmptyState
               icon={Tag}
               title={busy ? 'Carregando…' : 'Nada aqui'}
-              description="Com o filtro em “Sem categoria”, vazio quer dizer que está tudo classificado."
+              description="Com o filtro em “Saídas sem centro de custo”, vazio quer dizer que está tudo classificado."
             />
           ) : (
             <>
+              <div className="divide-y divide-border/60 border-t border-border/60">
               {visiveis.map((t) => {
                 const cat = nomeCategoria(t.categoryId)
                 const saida = t.direction === 'out'
                 const aberto = abertoId === t.id
+                const nome = t.description || t.counterparty || 'sem descrição'
                 return (
-                  <div key={t.id} className="rounded-md border border-border px-3 py-2">
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div key={t.id} className={aberto ? 'bg-muted/20' : ''}>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 hover:bg-muted/20">
+                    <span className="w-20 shrink-0 text-xs tabular-nums text-muted-foreground">{dia(t.date)}</span>
                     <button
                       type="button"
                       className="min-w-0 flex-1 text-left"
                       onClick={() => setAbertoId(aberto ? null : t.id)}
                     >
-                      <div className="truncate text-sm">{t.description || t.counterparty || 'sem descrição'}</div>
+                      <div className="truncate text-sm font-medium">{nome}</div>
                       <div className="text-xs text-muted-foreground">
-                        {dia(t.date)}
-                        {cat ? ` · ${cat}` : ''}
-                        {t.costCenter ? ` · ${t.costCenter}` : ''}
-                        <span className="ml-1 underline">{aberto ? 'fechar' : 'editar'}</span>
+                        {!saida && cat ? `${cat} · ` : ''}
+                        <span className="underline underline-offset-2">{aberto ? 'fechar' : 'detalhes e rateio'}</span>
                       </div>
                     </button>
-                    <span className={`shrink-0 font-semibold ${saida ? 'text-red-500' : 'text-emerald-600'}`}>
+                    <span
+                      className={`w-32 shrink-0 text-right font-semibold tabular-nums ${saida ? 'text-red-500' : 'text-emerald-600'}`}
+                    >
                       {saida ? '−' : '+'}
                       {brl(Math.abs(t.amountCents))}
                     </span>
-                    {cat ? (
-                      <Badge variant="secondary" className="shrink-0">
-                        {cat}
-                      </Badge>
-                    ) : null}
-                    {/* O Select do projeto entrega `string | null`; sem a guarda, limpar a
-                        seleção chamaria classificar com null e gravaria categoria vazia. */}
-                    <Select value="" onValueChange={(v) => (v ? void classificar(t, v) : undefined)}>
-                      <SelectTrigger className="h-8 w-[200px] shrink-0 text-xs">
-                        <SelectValue placeholder={cat ? 'Trocar categoria…' : 'Classificar…'} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categorias
-                          .filter((c) => (saida ? c.kind === 'despesa' : c.kind === 'receita'))
-                          .map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
+                    {saida ? (
+                      <CentroCustoPicker
+                        size="sm"
+                        className="h-8 w-[210px] shrink-0"
+                        centros={centros}
+                        value={t.costCenter}
+                        resumo={{ descricao: nome, data: t.date, amountCents: Math.abs(t.amountCents) }}
+                        permitirIguais
+                        padrao={padraoDaRegra(t.description ?? t.counterparty ?? '')}
+                        excluirId={t.id}
+                        onPick={(c, { aplicarIguais }) => classificarCentro(t, c, aplicarIguais)}
+                      />
+                    ) : (
+                      // O Select do projeto entrega `string | null`; sem a guarda, limpar a
+                      // seleção chamaria classificar com null e gravaria categoria vazia.
+                      <Select value="" onValueChange={(v) => (v ? void classificar(t, v) : undefined)}>
+                        <SelectTrigger className="h-8 w-[210px] shrink-0 text-xs">
+                          <SelectValue placeholder={cat ? 'Trocar categoria…' : 'Categoria da entrada…'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {categorias
+                            .filter((c) => c.kind === 'receita')
+                            .map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                   {aberto && (
-                    <div className="mt-2">
+                    <div className="px-4 pb-3">
                       <LancamentoEditor
                         lancamento={t}
-                        categorias={categorias}
                         centros={centros}
                         onSalvo={() => {
                           setAbertoId(null)
@@ -489,9 +550,10 @@ export function ExtratoPage() {
                   </div>
                 )
               })}
+              </div>
               {/* Nunca cortar calado. */}
               {lancamentos.length > visiveis.length && filtro === 'todos' && (
-                <p className="pt-1 text-xs text-muted-foreground">
+                <p className="px-4 py-2 text-xs text-muted-foreground">
                   Mostrando 300 de {lancamentos.length} lançamentos do período. Os totais e o gráfico
                   acima usam todos.
                 </p>

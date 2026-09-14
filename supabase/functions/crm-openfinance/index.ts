@@ -56,7 +56,15 @@ type PluggyAccount = {
   number?: string
   balance?: number
 }
-type PluggyTxn = { id: string; description?: string; amount?: number; date?: string; type?: string }
+type PluggyTxn = {
+  id: string
+  description?: string
+  amount?: number
+  date?: string
+  type?: string
+  /** PENDING ganha OUTRO id quando compensa; gravar o pendente deixa a cópia velha para sempre. */
+  status?: 'PENDING' | 'POSTED'
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
@@ -172,7 +180,7 @@ async function syncTransactions(
   for (const acc of (accounts ?? []) as Array<{ id: string; of_account_id: string; of_last_sync_at: string | null }>) {
     // janela: do último sync (com 3 dias de folga) ou 180 dias atrás
     const fromDate = acc.of_last_sync_at
-      ? new Date(new Date(acc.of_last_sync_at).getTime() - 3 * 86400_000)
+      ? new Date(new Date(acc.of_last_sync_at).getTime() - 10 * 86400_000)
       : new Date(Date.now() - 180 * 86400_000)
     const from = dayStr(fromDate)
 
@@ -188,6 +196,10 @@ async function syncTransactions(
         const isCredit = t.type ? t.type === 'CREDIT' : amt >= 0
         const magnitude = Math.abs(Math.round(amt * 100))
         if (magnitude === 0) continue
+        // Lançamento pendente fica de fora até compensar. O Pluggy devolve o pendente com um id e o
+        // compensado com outro: gravar os dois fez a fatura do cartão aparecer duas
+        // vezes em 17/08/2026. Compensado, ele volta numa rodada seguinte: a janela recua 10 dias para dar tempo.
+        if (t.status === 'PENDING') continue
         rows.push({
           account_id: acc.id,
           date: String(t.date ?? '').slice(0, 10) || from,

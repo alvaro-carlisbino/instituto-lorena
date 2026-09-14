@@ -16,12 +16,9 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
 import { type Payable, updatePayable } from '@/services/estoqueCompras'
 import type { CostCenter, FinCategory } from '@/services/financeiro'
-
-/** Sentinela do Select: base-ui não aceita item de valor vazio, e "sem centro" é uma escolha. */
-const NENHUM = '__none__'
 
 /** "1.250,00" → 125000. Aceita o que a pessoa digitar, inclusive só "1250". */
 function paraCentavos(v: string): number {
@@ -33,13 +30,13 @@ const paraTexto = (c: number) => (c / 100).toFixed(2).replace('.', ',')
 
 export function ParcelaEditor({
   parcela,
-  categorias,
   centros,
   onSalvo,
   onCancelar,
 }: {
   parcela: Payable
-  categorias: FinCategory[]
+  /** Não é mais perguntada: a categoria do DRE vem do centro de custo. */
+  categorias?: FinCategory[]
   centros: CostCenter[]
   onSalvo: () => void
   onCancelar?: () => void
@@ -51,13 +48,10 @@ export function ParcelaEditor({
   const [vencimento, setVencimento] = useState(parcela.dueDate)
   const [valor, setValor] = useState(paraTexto(parcela.amountCents))
   const [centro, setCentro] = useState(parcela.costCenter ?? '')
-  const [categoria, setCategoria] = useState(parcela.categoryId ?? '')
   const [subcategoria, setSubcategoria] = useState(parcela.subcategory ?? '')
   const [forma, setForma] = useState(parcela.paymentMethod ?? '')
   const [nota, setNota] = useState(parcela.note ?? '')
   const [busy, setBusy] = useState(false)
-
-  const despesas = categorias.filter((c) => c.kind === 'despesa')
 
   const salvar = async () => {
     setBusy(true)
@@ -66,7 +60,8 @@ export function ParcelaEditor({
         description: descricao,
         counterparty: contraparte,
         costCenter: centro || null,
-        categoryId: categoria || null,
+        // Uma pergunta só: a linha do DRE é a do centro escolhido.
+        categoryId: centro ? (centros.find((c) => c.name === centro)?.categoryId ?? parcela.categoryId) : null,
         subcategory: subcategoria,
         paymentMethod: forma,
         note: nota,
@@ -121,44 +116,24 @@ export function ParcelaEditor({
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Centro de custo</Label>
-          <Select
-            value={centro || NENHUM}
-            onValueChange={(v) => setCentro(!v || v === NENHUM ? '' : String(v))}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue placeholder="—" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NENHUM}>— sem centro</SelectItem>
-              {centros.map((c) => (
-                <SelectItem key={c.id} value={c.name}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-1">
+            <CentroCustoPicker
+              size="sm"
+              className="h-8 w-full"
+              centros={centros}
+              value={centro || null}
+              resumo={{ descricao: contraparte || descricao, data: vencimento, amountCents: paraCentavos(valor) }}
+              onPick={(c) => setCentro(c.name)}
+            />
+            {centro ? (
+              <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => setCentro('')}>
+                Tirar
+              </Button>
+            ) : null}
+          </div>
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Categoria</Label>
-          <Select
-            value={categoria || NENHUM}
-            onValueChange={(v) => setCategoria(!v || v === NENHUM ? '' : String(v))}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue placeholder="—" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NENHUM}>— sem categoria</SelectItem>
-              {despesas.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">Subcategoria</Label>
+          <Label className="text-xs">Detalhe</Label>
           <Input
             value={subcategoria}
             onChange={(e) => setSubcategoria(e.target.value)}

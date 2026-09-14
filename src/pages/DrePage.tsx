@@ -8,9 +8,13 @@
 //      e a clínica registrou pouquíssimo em contas a pagar — então o resultado é um TETO, não
 //      um lucro. Melhor um teto declarado do que um lucro inventado.
 //
-//   2. A QUEBRA POR CATEGORIA SÓ VALE SOBRE O QUE FOI CLASSIFICADO. Enquanto isso for uma
-//      fração, o gráfico de composição fala de uma minoria do dinheiro, e dizer o percentual
-//      é a diferença entre um relatório e um enfeite.
+//   2. A QUEBRA POR CENTRO DE CUSTO SÓ VALE SOBRE O QUE FOI CLASSIFICADO. Enquanto isso for
+//      uma fração, a composição fala de uma minoria do dinheiro, e dizer o percentual é a
+//      diferença entre um relatório e um enfeite.
+//
+// A composição é por CENTRO DE CUSTO desde 14/set/2026, e abre: centro → quem recebeu (somado)
+// → cada pagamento. Por categoria ela dizia "Salários e pró-labore" juntando folha, médico e
+// benefício, e "Outros" com a maior fatia do dinheiro, que é o mesmo que não dizer.
 //
 // Aplicação financeira e transferência entre contas próprias saem do resultado. São o mesmo
 // dinheiro trocando de lugar — contá-las como despesa erraria o DRE em R$ 859 mil.
@@ -31,6 +35,8 @@ import {
 import { AlertTriangle, Download, TrendingUp } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
+import { centroForaDoTotal } from '@/lib/centroCusto'
+import { GastosPorCentro, type LinhaGasto } from '@/components/financeiro/GastosPorCentro'
 import { FinanceTabs } from '@/components/page/FinanceTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -39,7 +45,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useTenant } from '@/context/TenantContext'
 import { hojeLocal } from '@/lib/diaLocal'
-import { listDre, listSaidaPorCategoria, type DreMes, type SaidaCategoria } from '@/services/financeiro'
+import {
+  listCostCenters,
+  listDre,
+  listSaidasEfetivas,
+  ultimoDiaComReceita,
+  type CostCenter,
+  type DreMes,
+  type SaidaEfetiva,
+} from '@/services/financeiro'
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const brlCurto = (c: number) =>
@@ -58,15 +72,24 @@ export function DrePage() {
   const [de, setDe] = useState(mesesAtras(5))
   const [ate, setAte] = useState(hojeLocal())
   const [meses, setMeses] = useState<DreMes[]>([])
-  const [categorias, setCategorias] = useState<SaidaCategoria[]>([])
+  const [saidas, setSaidas] = useState<SaidaEfetiva[]>([])
+  const [centros, setCentros] = useState<CostCenter[]>([])
+  const [ultimaReceita, setUltimaReceita] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const carregar = async (d = de, a = ate) => {
     setBusy(true)
     try {
-      const [m, c] = await Promise.all([listDre(d, a), listSaidaPorCategoria(d, a)])
+      const [m, sx, cc, ur] = await Promise.all([
+        listDre(d, a),
+        listSaidasEfetivas(d, a),
+        listCostCenters(),
+        ultimoDiaComReceita().catch(() => null),
+      ])
+      setUltimaReceita(ur)
       setMeses(m)
-      setCategorias(c)
+      setSaidas(sx)
+      setCentros(cc)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao montar o DRE')
     } finally {
@@ -94,6 +117,28 @@ export function DrePage() {
       ),
     [meses],
   )
+
+  const linhasCentro = useMemo<LinhaGasto[]>(
+    () =>
+      saidas.map((x, i) => ({
+        id: `${x.transactionId}-${x.origem}-${i}`,
+        data: x.data,
+        nome: x.descricao || 'sem descrição',
+        descricao: x.origem === 'lancamento' ? '' : x.origem === 'rateio' ? 'parte de um rateio' : 'sobra de rateio',
+        amountCents: x.amountCents,
+        centro: x.centroCusto,
+        // Mesma regra do resultado: o que o DRE tira do total, a composição mostra à parte.
+        foraDoTotal: /não é despesa/i.test(x.categoria ?? '') || centroForaDoTotal(centros, x.centroCusto),
+      })),
+    [saidas, centros],
+  )
+
+  // Receita importada até antes do fim do período (ou de hoje, se o período ainda corre): o
+  // resultado compara despesa do período inteiro com receita de só um pedaço dele.
+  const fimQueImporta = ate < hojeLocal() ? ate : hojeLocal()
+  const receitaIncompleta = ultimaReceita != null && ultimaReceita < fimQueImporta && ultimaReceita >= de
+  const semReceitaNoPeriodo = ultimaReceita != null && ultimaReceita < de
+  const diaBr = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR')
 
   const pctClassificada = total.despesa > 0 ? (total.classificada / total.despesa) * 100 : 100
   const margem = total.receita > 0 ? (total.resultado / total.receita) * 100 : 0
@@ -134,7 +179,7 @@ export function DrePage() {
   return (
     <AppLayout
       title="DRE"
-      subtitle="Receita menos despesa por mês — e o tamanho do que ainda não dá pra afirmar."
+      subtitle="Receita menos despesa por mês, e o tamanho do que ainda não dá para afirmar."
     >
       <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
@@ -156,6 +201,25 @@ export function DrePage() {
         </Button>
       </div>
 
+      {(receitaIncompleta || semReceitaNoPeriodo) && ultimaReceita && (
+        <Card className="mt-4 border-destructive/50 bg-destructive/[0.06]">
+          <CardContent className="space-y-1 pt-4 text-sm">
+            <div className="flex items-center gap-1.5 font-semibold text-destructive">
+              <AlertTriangle className="size-4" /> A receita deste período está incompleta
+            </div>
+            <p>
+              As vendas do Shosp foram importadas só até <strong>{diaBr(ultimaReceita)}</strong>. A despesa vai até{' '}
+              {diaBr(fimQueImporta)}, então o resultado abaixo compara a despesa inteira com parte da receita e
+              aparece pior do que é. Importe o relatório de vendas do Shosp a partir de {diaBr(ultimaReceita)} em{' '}
+              <a href="/importar-vendas" className="font-medium underline underline-offset-2">
+                Receber › Importar vendas
+              </a>
+              .
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* As duas ressalvas ficam ANTES do número, não num rodapé que ninguém lê. */}
       <Card className="mt-4 border-amber-500/40 bg-amber-500/[0.05]">
         <CardContent className="space-y-1 pt-4 text-xs">
@@ -164,20 +228,20 @@ export function DrePage() {
           </div>
           <p>
             A despesa conta só o que <strong>saiu da conta</strong>. Compromisso registrado e ainda
-            não pago não entra, e a clínica lançou pouquíssimo em contas a pagar — então o
+            não pago não entra, e a clínica lançou pouquíssimo em contas a pagar. Por isso o
             resultado abaixo é um <strong>teto</strong>, não um lucro apurado.
           </p>
           {/* Sem despesa no período, "100% classificada" seria uma afirmação sobre nada. */}
           {total.despesa > 0 && (
             <p>
-              {pctClassificada.toFixed(0)}% da despesa tem categoria. A quebra por categoria fala
+              {pctClassificada.toFixed(0)}% da despesa tem centro de custo. A divisão por centro fala
               só dessa fatia; o resto está somado no total, mas sem nome.
             </p>
           )}
           {total.fora > 0 && (
             <p>
               {brl(total.fora)} de aplicação e transferência entre contas próprias ficaram fora do
-              resultado — é o mesmo dinheiro trocando de lugar, não despesa.
+              resultado: é o mesmo dinheiro trocando de lugar, não despesa.
             </p>
           )}
         </CardContent>
@@ -188,7 +252,11 @@ export function DrePage() {
           <CardContent className="pt-4">
             <div className="text-xs text-muted-foreground">Receita</div>
             <div className="mt-0.5 text-lg font-semibold">{brl(total.receita)}</div>
-            <div className="text-xs text-muted-foreground">venda do Shosp no período</div>
+            <div className={`text-xs ${receitaIncompleta || semReceitaNoPeriodo ? 'font-medium text-destructive' : 'text-muted-foreground'}`}>
+              {receitaIncompleta || semReceitaNoPeriodo
+                ? `venda do Shosp importada só até ${ultimaReceita ? diaBr(ultimaReceita) : ''}`
+                : 'venda do Shosp no período'}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -211,7 +279,12 @@ export function DrePage() {
           <CardContent className="pt-4">
             <div className="text-xs text-muted-foreground">Despesa sem nome</div>
             <div className="mt-0.5 text-lg font-semibold">{brl(total.despesa - total.classificada)}</div>
-            <div className="text-xs text-muted-foreground">classifique no Extrato</div>
+            <div className="text-xs text-muted-foreground">
+              sem centro de custo.{' '}
+              <a href="/gastos" className="underline underline-offset-2">
+                Classificar em Gastos
+              </a>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -249,7 +322,7 @@ export function DrePage() {
         </CardContent>
       </Card>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+      <div className="mt-4 grid gap-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Detalhe por mês</CardTitle>
@@ -288,31 +361,10 @@ export function DrePage() {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Composição da despesa</CardTitle>
+            <CardTitle className="text-sm">Despesa por centro de custo</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1.5">
-            {categorias.length === 0 ? (
-              <EmptyState title="Nada no período" description="" />
-            ) : (
-              categorias.map((c) => {
-                const pct = total.despesa > 0 ? (c.amountCents / total.despesa) * 100 : 0
-                const semCat = c.categoryId == null
-                return (
-                  <div key={c.categoria}>
-                    <div className="flex items-center justify-between gap-2 text-sm">
-                      <span className={`min-w-0 truncate ${semCat ? 'text-amber-600' : ''}`}>{c.categoria}</span>
-                      <span className="shrink-0 font-medium">{brl(c.amountCents)}</span>
-                    </div>
-                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className={`h-full rounded-full ${semCat ? 'bg-amber-500' : 'bg-primary'}`}
-                        style={{ width: `${Math.max(2, Math.min(100, pct))}%` }}
-                      />
-                    </div>
-                  </div>
-                )
-              })
-            )}
+          <CardContent>
+            <GastosPorCentro linhas={linhasCentro} centros={centros} vazio="Nada saiu no período." />
           </CardContent>
         </Card>
       </div>

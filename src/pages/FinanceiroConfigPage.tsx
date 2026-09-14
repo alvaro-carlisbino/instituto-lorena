@@ -60,7 +60,14 @@ export function FinanceiroConfigPage() {
   const [busy, setBusy] = useState(false)
 
   const [novoCentro, setNovoCentro] = useState('')
-  const [editando, setEditando] = useState<{ id: string; de: string; para: string } | null>(null)
+  const [editando, setEditando] = useState<{
+    id: string
+    de: string
+    para: string
+    grupo: string
+    descricao: string
+    categoryId: string
+  } | null>(null)
   const [novaCat, setNovaCat] = useState({ name: '', kind: 'despesa' as 'despesa' | 'receita' })
 
   const carregar = async () => {
@@ -89,7 +96,8 @@ export function FinanceiroConfigPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const nomeCategoria = (id: string) => categorias.find((c) => c.id === id)?.name ?? '—'
+  const nomeCategoria = (id: string | null) => categorias.find((c) => c.id === id)?.name ?? '—'
+  const despesas = categorias.filter((c) => c.kind === 'despesa' && c.active)
 
   const acao = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true)
@@ -116,7 +124,7 @@ export function FinanceiroConfigPage() {
   return (
     <AppLayout
       title="Configuração do financeiro"
-      subtitle="Centros de custo, categorias e as regras que classificam o extrato sozinhas."
+      subtitle="Centros de custo, as linhas do DRE e as regras que classificam o extrato sozinhas."
     >
       <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
@@ -124,7 +132,7 @@ export function FinanceiroConfigPage() {
         {(
           [
             ['centros', 'Centros de custo', centros.length],
-            ['categorias', 'Categorias', categorias.length],
+            ['categorias', 'Linhas do DRE', categorias.length],
             ['regras', 'Regras de classificação', regras.length],
           ] as Array<[Aba, string, number]>
         ).map(([id, label, n]) => (
@@ -150,8 +158,10 @@ export function FinanceiroConfigPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Renomear arrasta o histórico junto: o lançamento antigo passa a apontar para o nome
-              novo, em vez de virar linha fantasma no relatório.
+              É a lista que aparece para classificar em Gastos e no Extrato. A explicação aparece
+              embaixo do nome na hora de escolher, e a linha do DRE é preenchida sozinha a partir do
+              centro. Renomear arrasta o histórico junto. Centros do grupo “Não é gasto” ficam fora
+              do total de gastos.
             </p>
             <div className="flex gap-2">
               <Input
@@ -165,7 +175,11 @@ export function FinanceiroConfigPage() {
                 disabled={busy || novoCentro.trim().length < 2}
                 onClick={() =>
                   void acao(async () => {
-                    await upsertCostCenter({ name: novoCentro })
+                    // Centro novo entra no DRE como "Outros" até alguém dizer a linha certa.
+                    await upsertCostCenter({
+                      name: novoCentro,
+                      categoryId: despesas.find((d) => d.name === 'Outros')?.id ?? null,
+                    })
                     setNovoCentro('')
                   }, 'Centro criado.')
                 }
@@ -177,38 +191,96 @@ export function FinanceiroConfigPage() {
               {centros.map((c) => (
                 <div key={c.id} className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2">
                   {editando?.id === c.id ? (
-                    <>
+                    <div className="grid w-full gap-2 sm:grid-cols-2">
                       <Input
                         value={editando.para}
                         onChange={(e) => setEditando({ ...editando, para: e.target.value })}
-                        className="h-8 max-w-[260px]"
+                        placeholder="Nome"
+                        className="h-8"
                       />
-                      <Button
-                        size="sm"
-                        disabled={busy || editando.para.trim().length < 2}
-                        onClick={() =>
-                          void acao(async () => {
-                            await renameCostCenter(c.id, editando.de, editando.para)
-                            setEditando(null)
-                          }, 'Renomeado, com o histórico junto.')
-                        }
+                      <Input
+                        value={editando.grupo}
+                        onChange={(e) => setEditando({ ...editando, grupo: e.target.value })}
+                        placeholder="Grupo (Pessoas, Operação, Não é gasto…)"
+                        className="h-8"
+                      />
+                      <Input
+                        value={editando.descricao}
+                        onChange={(e) => setEditando({ ...editando, descricao: e.target.value })}
+                        placeholder="O que entra aqui, em uma frase"
+                        className="h-8 sm:col-span-2"
+                      />
+                      <Select
+                        value={editando.categoryId}
+                        onValueChange={(v) => setEditando({ ...editando, categoryId: String(v ?? '') })}
                       >
-                        Salvar
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setEditando(null)}>
-                        Cancelar
-                      </Button>
-                    </>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Linha do DRE" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {despesas.map((d) => (
+                            <SelectItem key={d.id} value={d.id}>
+                              {d.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          disabled={busy || editando.para.trim().length < 2}
+                          onClick={() =>
+                            void acao(async () => {
+                              if (editando.para.trim() !== editando.de) {
+                                await renameCostCenter(c.id, editando.de, editando.para)
+                              }
+                              await upsertCostCenter({
+                                id: c.id,
+                                name: editando.para,
+                                grupo: editando.grupo,
+                                description: editando.descricao,
+                                categoryId: editando.categoryId || null,
+                              })
+                              setEditando(null)
+                            }, 'Centro salvo.')
+                          }
+                        >
+                          Salvar
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditando(null)}>
+                          Cancelar
+                        </Button>
+                      </div>
+                    </div>
                   ) : (
                     <>
-                      <span className={`min-w-0 flex-1 ${c.active ? '' : 'text-muted-foreground line-through'}`}>
-                        {c.name}
-                      </span>
+                      <div className={`min-w-0 flex-1 ${c.active ? '' : 'text-muted-foreground line-through'}`}>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-medium">{c.name}</span>
+                          {c.grupo ? (
+                            <Badge variant="secondary" className="text-[0.65rem]">
+                              {c.grupo}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {c.description ?? 'Sem explicação.'} · DRE: {nomeCategoria(c.categoryId)}
+                        </div>
+                      </div>
                       <Button
                         size="sm"
                         variant="ghost"
                         className="h-7 px-2"
-                        onClick={() => setEditando({ id: c.id, de: c.name, para: c.name })}
+                        onClick={() =>
+                          setEditando({
+                            id: c.id,
+                            de: c.name,
+                            para: c.name,
+                            grupo: c.grupo ?? '',
+                            descricao: c.description ?? '',
+                            categoryId: c.categoryId ?? '',
+                          })
+                        }
                       >
                         <Pencil className="size-3.5" />
                       </Button>
@@ -322,15 +394,15 @@ export function FinanceiroConfigPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Criadas quando você classifica um lançamento no Extrato. “Desfazer” tira a categoria
-              só das linhas que <em>esta regra</em> carimbou — o que foi classificado à mão fica
-              intacto.
+              Criadas quando você classifica com “aplicar também aos iguais”. Valem para o que já
+              existe e para o que ainda vai chegar do banco. “Desfazer” tira o centro só das linhas
+              que <em>esta regra</em> carimbou; o que foi classificado à mão fica intacto.
             </p>
             {regrasOrdenadas.length === 0 ? (
               <EmptyState
                 icon={Wand2}
                 title={busy ? 'Carregando…' : 'Nenhuma regra ainda'}
-                description="Classifique um lançamento no Extrato com “classificar todos os iguais” ligado."
+                description="Classifique um lançamento com “aplicar também aos iguais” ligado."
               />
             ) : (
               <div className="space-y-1">
@@ -344,8 +416,7 @@ export function FinanceiroConfigPage() {
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium">{r.pattern}</div>
                         <div className="text-xs text-muted-foreground">
-                          → {nomeCategoria(r.categoryId)}
-                          {r.costCenter ? ` · ${r.costCenter}` : ''}
+                          → {r.costCenter ?? `só categoria: ${nomeCategoria(r.categoryId)}`}
                           {r.direction ? ` · ${r.direction === 'out' ? 'saídas' : 'entradas'}` : ''}
                         </div>
                       </div>
