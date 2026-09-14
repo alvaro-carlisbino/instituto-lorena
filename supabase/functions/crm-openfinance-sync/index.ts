@@ -110,6 +110,8 @@ Deno.serve(async (req) => {
         const data = (await res.json().catch(() => ({}))) as { results?: PluggyTxn[]; totalPages?: number }
         if (!res.ok) throw new Error(`transactions ${res.status}`)
         totalPages = Number(data.totalPages ?? 1)
+        // Se o conector marcar tudo como pendente, pular tudo pararia o extrato calado.
+        const temCompensado = (data.results ?? []).some((t) => t.status !== 'PENDING')
         for (const t of data.results ?? []) {
           const amt = Number(t.amount ?? 0)
           const isCredit = t.type ? t.type === 'CREDIT' : amt >= 0
@@ -118,7 +120,7 @@ Deno.serve(async (req) => {
           // Lançamento pendente fica de fora até compensar. O Pluggy devolve o pendente com um id e o
           // compensado com outro: gravar os dois fez a fatura do cartão aparecer duas
           // vezes em 17/08/2026. Compensado, ele volta numa rodada seguinte: a janela recua 10 dias para dar tempo.
-          if (t.status === 'PENDING') continue
+          if (temCompensado && t.status === 'PENDING') continue
           rows.push({
             tenant_id: acc.tenant_id,
             account_id: acc.id,

@@ -191,6 +191,8 @@ async function syncTransactions(
       const data = await pluggyGet(apiKey, `/transactions?accountId=${acc.of_account_id}&from=${from}&pageSize=500&page=${page}`)
       const results = (data.results ?? []) as PluggyTxn[]
       totalPages = Number(data.totalPages ?? 1)
+      // Se o conector marcar tudo como pendente, pular tudo pararia o extrato calado.
+      const temCompensado = results.some((t) => t.status !== 'PENDING')
       for (const t of results) {
         const amt = Number(t.amount ?? 0)
         const isCredit = t.type ? t.type === 'CREDIT' : amt >= 0
@@ -199,7 +201,7 @@ async function syncTransactions(
         // Lançamento pendente fica de fora até compensar. O Pluggy devolve o pendente com um id e o
         // compensado com outro: gravar os dois fez a fatura do cartão aparecer duas
         // vezes em 17/08/2026. Compensado, ele volta numa rodada seguinte: a janela recua 10 dias para dar tempo.
-        if (t.status === 'PENDING') continue
+        if (temCompensado && t.status === 'PENDING') continue
         rows.push({
           account_id: acc.id,
           date: String(t.date ?? '').slice(0, 10) || from,

@@ -619,7 +619,7 @@ async function syncMcpAccounts(
       const fromDate = fromOverride
         ? new Date(`${fromOverride}T00:00:00Z`)
         : acc.of_last_sync_at
-          ? new Date(new Date(acc.of_last_sync_at).getTime() - 3 * 86400_000)
+          ? new Date(new Date(acc.of_last_sync_at).getTime() - 10 * 86400_000)
           : new Date(Date.now() - 90 * 86400_000)
       const from = dayStr(fromDate)
       const to = dayStr(new Date())
@@ -639,9 +639,17 @@ async function syncMcpAccounts(
           (pageRes.transactions as Array<Record<string, unknown>>) ??
           []
         totalPages = Number(pageRes.total_pages ?? pageRes.totalPages ?? 1)
+        // Lançamento PENDENTE ganha outro id quando compensa, e gravar os dois deixou a fatura do
+        // cartão em dobro em 17/08/2026. Ele fica de fora até compensar (a janela recua 10 dias
+        // para pegá-lo depois). Só vale quando a página também traz compensado: se o conector
+        // marcar TUDO como pendente, pular tudo pararia o extrato calado, e isso é pior que a cópia.
+        const statusDe = (t: Record<string, unknown>) =>
+          String(t.status ?? t.transactionStatus ?? '').toUpperCase()
+        const temCompensado = list.some((t) => statusDe(t) !== 'PENDING')
         for (const t of list) {
           const id = String(t.id ?? t.transaction_id ?? '')
           if (!id) continue
+          if (temCompensado && statusDe(t) === 'PENDING') continue
           const amtRaw = Number(
             (t.amount as number | undefined) ??
               (t.transactionAmount as { amount?: string } | undefined)?.amount ??
