@@ -5,11 +5,13 @@ import {
   createPurchaseInvoice,
   listStockItems,
   registerMovement,
+  salvarFatorEmbalagem,
   upsertStockItem,
   upsertSupplier,
 } from '@/services/estoqueCompras'
 import { ensureBatch, logControlledEntry } from '@/services/estoqueKits'
 import { fetchBlingCatalog, pushBlingStockEntry } from '@/services/crmBling'
+import { chavesEmbalagem, converterPorEmbalagem, sugerirFatorEmbalagem } from '@/lib/nfeEmbalagem'
 import { limparNomeItemNfe, temRastroNoNome } from '@/lib/nfeNomeItem'
 
 const onlyDigits = (v: string | null | undefined) => String(v ?? '').replace(/\D/g, '')
@@ -26,6 +28,16 @@ export type NfeItemPlan = {
   matchedItemId: string | null
   /** Como a sugestão casou com o estoque (pra mostrar na tela). null = não casou / manual. */
   matchedBy: 'ean' | 'sku' | 'nome' | 'alias' | null
+  /** Unidades do item por unidade da nota (1 CX = 200 pares → 200). Ausente = 1. */
+  packFactor?: number
+  /** De onde veio o fator: guardado no item, lido do nome da nota, ou digitado na tela. */
+  packSource?: 'aprendido' | 'nome' | 'manual' | null
+}
+
+/** Fator sugerido para a linha da nota entrando neste item (1 quando nada indica embalagem). */
+export function fatorParaLinha(nfeItem: NfeParsed['items'][number], item: StockItem | undefined) {
+  const sugestao = item ? sugerirFatorEmbalagem(nfeItem, item) : null
+  return { packFactor: sugestao?.fator ?? 1, packSource: sugestao?.origem ?? null }
 }
 
 const onlyDigitsStr = (v: string | null | undefined) => String(v ?? '').replace(/\D/g, '')
@@ -63,6 +75,7 @@ export function suggestItemPlan(nfe: NfeParsed, stock: StockItem[]): NfeItemPlan
   // Item consolidado pela contagem aponta pro que ficou: a nota casa pelo nome/EAN antigo e
   // a entrada cai no item que a enfermagem conta. O limite de saltos protege contra ciclo.
   const replacedBy = new Map<string, string>()
+  const stockById = new Map(stock.map((s) => [s.id, s] as const))
   for (const s of stock) if (s.replacedBy) replacedBy.set(s.id, s.replacedBy)
   const resolve = (id: string) => {
     let current = id
@@ -110,7 +123,15 @@ export function suggestItemPlan(nfe: NfeParsed, stock: StockItem[]): NfeItemPlan
       return { index, action: 'existente' as const, matchedItemId: aliasPartial.id, matchedBy: 'alias' as const }
     }
     return { index, action: 'novo' as const, matchedItemId: null, matchedBy: null }
-  }).map((plan) => (plan.matchedItemId ? { ...plan, matchedItemId: resolve(plan.matchedItemId) } : plan))
+  }).map((plan) => {
+    if (!plan.matchedItemId) return plan
+    const matchedItemId = resolve(plan.matchedItemId)
+    const alvo = stockById.get(matchedItemId)
+    // Desativado sem substituto = alguém decidiu que aquilo não é estoque (a baixa de 14/09 tirou
+    // obra, móvel e equipamento). A próxima nota da mesma TV não pode ressuscitar o saldo escondido.
+    if (alvo && !alvo.active) return { ...plan, action: 'ignorar' as const, matchedItemId: null }
+    return { ...plan, matchedItemId, ...fatorParaLinha(nfe.items[plan.index], alvo) }
+  })
 }
 
 export type NfeImportResult = {
@@ -142,7 +163,7 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
   })
 
   // 3) Itens → estoque (cria ou reusa, dá entrada, cria lote e loga controlado)
-  const est = await darEntradaItensNfe(nfe, invoice.id, plan.itemsPlan)
+  const est = await darEntradaItensNfe(nfe, invoice.id, plan.itemsPlan, { learnPacks: true })
 
   // 4) Parcelas → contas a pagar. Nota a prazo traz as duplicatas em cobr/dup; compra à vista
   //    (papelaria, balcão) não traz cobr nenhum — e antes disso o gasto entrava no estoque e
@@ -202,7 +223,11 @@ export async function darEntradaItensNfe(
   nfe: NfeParsed,
   invoiceId: string,
   itemsPlan: NfeItemPlan[],
-  opts?: { needsReview?: boolean },
+  opts?: {
+    needsReview?: boolean
+    /** Import manual: quem revisou a nota confirmou o fator, então o item aprende. A SEFAZ não. */
+    learnPacks?: boolean
+  },
 ): Promise<{ itemsStocked: number; itemsCreated: number; batches: number; blingPushed: number }> {
   const currentStock = await listStockItems(true)
   const byId = new Map(currentStock.map((s) => [s.id, s] as const))
@@ -229,6 +254,9 @@ export async function darEntradaItensNfe(
 
     let stockItemId = itemPlan.matchedItemId
     let controlled = false
+    // Item novo nasce na unidade da nota: só converte quem entra num item que já existe.
+    const fator = itemPlan.action === 'existente' && stockItemId ? (itemPlan.packFactor ?? 1) : 1
+    const { qty, unitCostCents } = converterPorEmbalagem(nfeItem.qty, nfeItem.unitCostCents, fator)
     if (itemPlan.action === 'novo' || !stockItemId) {
       // O fornecedor põe lote/validade dentro do xProd. Item nasce com o nome limpo e guarda
       // o nome cru como alias — senão a próxima nota, com outro lote, cria um item repetido.
@@ -257,7 +285,15 @@ export async function darEntradaItensNfe(
           minQty: current.minQty,
           controlled: current.controlled,
           note: current.note,
+          // sem isso o upsert reativa item desativado (default active=true)
+          active: current.active,
         })
+      }
+      const confirmado = itemPlan.packSource === 'manual' || itemPlan.packSource === 'nome'
+      if (opts?.learnPacks && current && confirmado) {
+        const chaves = chavesEmbalagem(nfeItem.description, nfeItem.ean)
+        // Guarda no mapa local também: a mesma nota pode trazer o produto em duas linhas.
+        current.packFactors = await salvarFatorEmbalagem(current.id, current.packFactors ?? {}, chaves, fator)
       }
     }
 
@@ -274,13 +310,15 @@ export async function darEntradaItensNfe(
     const movementId = await registerMovement({
       itemId: stockItemId,
       kind: 'entrada',
-      qty: nfeItem.qty,
+      qty,
       reason: 'compra (NF-e)',
-      note: `NF ${nfe.number}${nfeItem.lotCode ? ` · lote ${nfeItem.lotCode}` : ''}`,
+      note:
+        `NF ${nfe.number}${nfeItem.lotCode ? ` · lote ${nfeItem.lotCode}` : ''}` +
+        (fator !== 1 ? ` · ${nfeItem.qty} ${nfeItem.unit} × ${fator}` : ''),
       refType: 'purchase_invoice',
       refId: invoiceId,
       batchId,
-      unitCostCents: nfeItem.unitCostCents,
+      unitCostCents,
     })
     itemsStocked += 1
 
@@ -293,8 +331,8 @@ export async function darEntradaItensNfe(
       try {
         await pushBlingStockEntry({
           blingProductId: linkedBlingId,
-          qty: nfeItem.qty,
-          unitCostCents: nfeItem.unitCostCents,
+          qty,
+          unitCostCents,
           note: `Entrada NF ${nfe.number} (import CRM)`,
         })
         blingPushed += 1
@@ -308,7 +346,7 @@ export async function darEntradaItensNfe(
         itemId: stockItemId,
         batchId,
         movementId,
-        qty: nfeItem.qty,
+        qty,
         note: `Entrada por NF ${nfe.number}`,
       })
     }

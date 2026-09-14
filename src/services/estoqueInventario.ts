@@ -1,3 +1,4 @@
+import { buscarTudo } from '@/lib/supabasePaginate'
 import { supabase } from '@/lib/supabaseClient'
 import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 
@@ -46,12 +47,15 @@ export async function listCounts(): Promise<StockCount[]> {
       .select('id, label, status, note, created_at, finalized_at')
       .order('created_at', { ascending: false })
       .limit(50),
-    client.from('stock_count_items').select('id, count_id, item_id, system_qty, counted_qty'),
+    // As duas contagens de 14/09 somam mais de 1.000 linhas: sem paginar, uma delas abria pela metade.
+    buscarTudo<Record<string, unknown>>(
+      () => client.from('stock_count_items').select('id, count_id, item_id, system_qty, counted_qty').order('id'),
+      { rotulo: 'stock_count_items' },
+    ),
   ])
   if (counts.error) throw new Error(counts.error.message)
-  if (items.error) throw new Error(items.error.message)
   const byCount = new Map<string, StockCountItem[]>()
-  for (const r of items.data ?? []) {
+  for (const r of items) {
     const key = String(r.count_id)
     const list = byCount.get(key) ?? []
     list.push(mapItem(r as Record<string, unknown>))

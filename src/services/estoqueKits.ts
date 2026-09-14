@@ -1,3 +1,4 @@
+import { buscarTudo } from '@/lib/supabasePaginate'
 import { supabase } from '@/lib/supabaseClient'
 import { registerMovement } from '@/services/estoqueCompras'
 
@@ -22,13 +23,15 @@ export type StockBatch = {
 
 export async function listBatchBalances(itemId?: string): Promise<StockBatch[]> {
   const client = assertClient()
-  let query = client
-    .from('stock_batch_balances')
-    .select('batch_id, item_id, lot_code, expires_on, qty')
-  if (itemId) query = query.eq('item_id', itemId)
-  const { data, error } = await query
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => ({
+  const data = await buscarTudo<Record<string, unknown>>(() => {
+    let query = client
+      .from('stock_batch_balances')
+      .select('batch_id, item_id, lot_code, expires_on, qty')
+      .order('batch_id')
+    if (itemId) query = query.eq('item_id', itemId)
+    return query
+  }, { rotulo: 'stock_batch_balances' })
+  return data.map((r) => ({
     id: String(r.batch_id),
     itemId: String(r.item_id),
     lotCode: String(r.lot_code ?? ''),
@@ -137,24 +140,25 @@ export async function deactivateKitTemplate(id: string): Promise<void> {
 /** Último custo de compra conhecido por item (entradas valoradas + linhas de OC). */
 export async function listItemLastCosts(): Promise<Map<string, number>> {
   const client = assertClient()
-  const { data, error } = await client
-    .from('stock_item_last_costs')
-    .select('item_id, unit_cost_cents')
-  if (error) throw new Error(error.message)
+  // Uma linha por item: passou de 1.000 e o teto do PostgREST deixava item sem custo no relatório.
+  const data = await buscarTudo<{ item_id: unknown; unit_cost_cents: unknown }>(
+    () => client.from('stock_item_last_costs').select('item_id, unit_cost_cents').order('item_id'),
+    { rotulo: 'stock_item_last_costs' },
+  )
   const map = new Map<string, number>()
-  for (const r of data ?? []) map.set(String(r.item_id), Number(r.unit_cost_cents ?? 0))
+  for (const r of data) map.set(String(r.item_id), Number(r.unit_cost_cents ?? 0))
   return map
 }
 
 /** Custo real por lote (custo da entrada valorada do lote). */
 export async function listBatchCosts(): Promise<Map<string, number>> {
   const client = assertClient()
-  const { data, error } = await client
-    .from('stock_batch_costs')
-    .select('batch_id, unit_cost_cents')
-  if (error) throw new Error(error.message)
+  const data = await buscarTudo<{ batch_id: unknown; unit_cost_cents: unknown }>(
+    () => client.from('stock_batch_costs').select('batch_id, unit_cost_cents').order('batch_id'),
+    { rotulo: 'stock_batch_costs' },
+  )
   const map = new Map<string, number>()
-  for (const r of data ?? []) map.set(String(r.batch_id), Number(r.unit_cost_cents ?? 0))
+  for (const r of data) map.set(String(r.batch_id), Number(r.unit_cost_cents ?? 0))
   return map
 }
 

@@ -83,31 +83,45 @@ export type StockItem = {
   blingProductId: string | null
   /** Item que substituiu este na consolidação por inventário. A entrada de NF-e segue o ponteiro. */
   replacedBy?: string | null
+  /** Fator de embalagem aprendido ("ean:…"/"nome:…" → unidades do item por unidade da nota). */
+  packFactors?: Record<string, number>
   /** saldo atual (da view stock_balances) */
   qty: number
   lastMovementAt: string | null
 }
 
+type StockItemRow = {
+  id: unknown; name: unknown; sku: unknown; barcode: unknown; category: unknown; unit: unknown
+  min_qty: unknown; source: unknown; controlled: unknown; note: unknown; active: unknown
+  aliases: unknown; bling_product_id: unknown; replaced_by: unknown; pack_factors: unknown
+}
+type StockBalanceRow = { item_id: unknown; qty: unknown; last_movement_at: unknown }
+
 export async function listStockItems(includeInactive = false): Promise<StockItem[]> {
   const client = assertClient()
-  let itemsQuery = client
-    .from('stock_items')
-    .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active, aliases, bling_product_id, replaced_by')
-    .order('name')
-  if (!includeInactive) itemsQuery = itemsQuery.eq('active', true)
+  // Paginado: a clínica passou de 1.000 itens (contando os consolidados pela contagem) e o
+  // PostgREST corta em 1.000 calado — saldo sumia da tela e a NF-e deixava de casar com item.
   const [items, balances] = await Promise.all([
-    itemsQuery,
-    client.from('stock_balances').select('item_id, qty, last_movement_at'),
+    buscarTudo<StockItemRow>(() => {
+      let q = client
+        .from('stock_items')
+        .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active, aliases, bling_product_id, replaced_by, pack_factors')
+        .order('name')
+        .order('id')
+      if (!includeInactive) q = q.eq('active', true)
+      return q
+    }, { rotulo: 'stock_items' }),
+    buscarTudo<StockBalanceRow>(
+      () => client.from('stock_balances').select('item_id, qty, last_movement_at').order('item_id'),
+      { rotulo: 'stock_balances' },
+    ),
   ])
-  if (items.error) throw new Error(items.error.message)
-  if (balances.error) throw new Error(balances.error.message)
-  const byItem = new Map(
-    (balances.data ?? []).map((b) => [String(b.item_id), b] as const),
-  )
-  return (items.data ?? []).map((r) => {
+  const byItem = new Map(balances.map((b) => [String(b.item_id), b] as const))
+  return items.map((r) => {
     const bal = byItem.get(String(r.id))
-    const aliasesRaw = (r as { aliases?: unknown }).aliases
-    const replacedRaw = (r as { replaced_by?: unknown }).replaced_by
+    const aliasesRaw = r.aliases
+    const replacedRaw = r.replaced_by
+    const packRaw = r.pack_factors
     return {
       id: String(r.id),
       name: String(r.name),
@@ -123,10 +137,33 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
       aliases: Array.isArray(aliasesRaw) ? aliasesRaw.map((a) => String(a)) : [],
       blingProductId: r.bling_product_id != null ? String(r.bling_product_id) : null,
       replacedBy: replacedRaw != null ? String(replacedRaw) : null,
+      packFactors: packRaw && typeof packRaw === 'object' ? (packRaw as Record<string, number>) : {},
       qty: Number(bal?.qty ?? 0),
       lastMovementAt: bal?.last_movement_at ? String(bal.last_movement_at) : null,
     }
   })
+}
+
+/**
+ * Guarda o fator de embalagem confirmado na importação (por EAN e por nome da nota): a próxima
+ * nota do mesmo produto converte sozinha, inclusive na entrada automática da SEFAZ.
+ * Recebe os fatores atuais do item pra não apagar os de outros fornecedores.
+ */
+export async function salvarFatorEmbalagem(
+  itemId: string,
+  atuais: Record<string, number>,
+  chaves: string[],
+  fator: number,
+): Promise<Record<string, number>> {
+  const client = assertClient()
+  const proximos = { ...atuais }
+  for (const chave of chaves) proximos[chave] = fator
+  const { error } = await client
+    .from('stock_items')
+    .update({ pack_factors: proximos, updated_at: new Date().toISOString() })
+    .eq('id', itemId)
+  if (error) throw new Error(error.message)
+  return proximos
 }
 
 export async function upsertStockItem(payload: {
@@ -213,15 +250,19 @@ export type StockMovementRow = StockMovement & {
 /** Movimentos de TODOS os itens no período (base dos relatórios). Datas em yyyy-mm-dd. */
 export async function listMovementsInRange(fromDay: string, toDay: string): Promise<StockMovementRow[]> {
   const client = assertClient()
-  const { data, error } = await client
-    .from('stock_movements')
-    .select('id, item_id, kind, qty_delta, reason, note, ref_type, unit_cost_cents, created_at')
-    .gte('created_at', `${fromDay}T00:00:00`)
-    .lte('created_at', `${toDay}T23:59:59.999`)
-    .order('created_at', { ascending: false })
-    .limit(5000)
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => ({
+  // `.limit(5000)` era ficção (teto de 1.000): a contagem de 14/09 sozinha gerou 1.133 movimentos.
+  const data = await buscarTudo<Record<string, unknown>>(
+    () =>
+      client
+        .from('stock_movements')
+        .select('id, item_id, kind, qty_delta, reason, note, ref_type, unit_cost_cents, created_at')
+        .gte('created_at', `${fromDay}T00:00:00`)
+        .lte('created_at', `${toDay}T23:59:59.999`)
+        .order('created_at', { ascending: false })
+        .order('id'),
+    { rotulo: 'stock_movements (relatório)' },
+  )
+  return data.map((r) => ({
     id: String(r.id),
     itemId: String(r.item_id),
     kind: (r.kind === 'saida' || r.kind === 'ajuste' ? r.kind : 'entrada') as StockMovement['kind'],

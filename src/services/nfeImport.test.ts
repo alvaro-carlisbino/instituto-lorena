@@ -78,4 +78,34 @@ describe('suggestItemPlan com item consolidado pela contagem', () => {
     const [plano] = suggestItemPlan(nota([{ description: 'LUVA 7,0 (ESTERIL)' }]), [contado, antigo])
     expect(plano.matchedItemId).toBe('luva-70')
   })
+
+  it('item desativado sem substituto (não é estoque) vira "ignorar", não entrada escondida', () => {
+    const tv = item({ id: 'tv', name: 'TV SAMSUNG 55 QLED 4K QN55Q7FAA', active: false })
+    const [plano] = suggestItemPlan(nota([{ description: 'TV SAMSUNG 55 QLED 4K QN55Q7FAA' }]), [tv])
+    expect(plano).toMatchObject({ action: 'ignorar', matchedItemId: null })
+  })
+})
+
+describe('suggestItemPlan com embalagem', () => {
+  const luva = item({ id: 'luva-70', name: 'LUVA 7,0 (ESTERIL)', aliases: ['LUVA CIRURGICA 7,0 ESTERIL C/200 PARES-BECARE'] })
+
+  it('caixa entrando no item contado em pares sugere o fator do nome', () => {
+    const [plano] = suggestItemPlan(nota([{ description: 'LUVA CIRURGICA 7,0 ESTERIL C/200 PARES-BECARE', unit: 'cx' }]), [luva])
+    expect(plano).toMatchObject({ matchedItemId: 'luva-70', packFactor: 200, packSource: 'nome' })
+  })
+
+  it('fator aprendido pelo item consolidado vale pra nota que casa pelo ponteiro', () => {
+    const contado = item({ id: 'clonidin', name: 'CLONIDIN EV', packFactors: { 'nome:clonidina (clonidin) 150mcg/ml c/30 amp 1ml - im/iv - sterile pack': 30 } })
+    const antigo = item({ id: 'x', name: 'CLONIDINA (CLONIDIN) 150MCG/ML C/30 AMP 1ML - IM/IV - STERILE PACK', active: false, replacedBy: 'clonidin' })
+    const [plano] = suggestItemPlan(
+      nota([{ description: 'CLONIDINA (CLONIDIN) 150MCG/ML C/30 AMP 1ML - IM/IV - STERILE PACK', unit: 'UN' }]),
+      [contado, antigo],
+    )
+    expect(plano).toMatchObject({ matchedItemId: 'clonidin', packFactor: 30, packSource: 'aprendido' })
+  })
+
+  it('sem sinal de embalagem o fator é 1', () => {
+    const [plano] = suggestItemPlan(nota([{ description: 'LUVA 7,0 (ESTERIL)', unit: 'PR' }]), [luva])
+    expect(plano).toMatchObject({ packFactor: 1, packSource: null })
+  })
 })

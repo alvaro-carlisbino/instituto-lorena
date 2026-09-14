@@ -42,7 +42,8 @@ import {
   setPayableStatus,
 } from '@/services/estoqueCompras'
 import { type NfeParsed, parseNfeXml } from '@/services/nfeXml'
-import { type NfeItemPlan, importNfe, suggestItemPlan } from '@/services/nfeImport'
+import { type NfeItemPlan, fatorParaLinha, importNfe, suggestItemPlan } from '@/services/nfeImport'
+import { converterPorEmbalagem } from '@/lib/nfeEmbalagem'
 import {
   type CostCenter,
   type FinAccount,
@@ -894,6 +895,48 @@ export function ContasPagarPage() {
                                 {matchLabel ? ` · ${matchLabel}` : ' · manual'}
                               </div>
                             ) : null}
+                            {matchedItem && plan ? (() => {
+                              // A nota vende caixa, o estoque conta unidade: sem o fator, 1 CX de
+                              // 200 pares entrava como 1 par ao preço da caixa.
+                              const fator = plan.packFactor ?? 1
+                              const conv = converterPorEmbalagem(item.qty, item.unitCostCents, fator)
+                              return (
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                                  <Label htmlFor={`nfe-fator-${index}`} className="text-xs font-normal">
+                                    1 {item.unit} =
+                                  </Label>
+                                  <Input
+                                    id={`nfe-fator-${index}`}
+                                    type="number"
+                                    inputMode="decimal"
+                                    min={0.001}
+                                    step="any"
+                                    className="h-7 w-20 px-2 text-xs"
+                                    value={plan.packFactor ?? ''}
+                                    placeholder="1"
+                                    onChange={(e) => {
+                                      // Campo vazio vale 1, mas fica vazio: forçar 1 impedia apagar pra digitar.
+                                      const valor = Number(e.target.value)
+                                      setNfePlan((prev) =>
+                                        prev.map((p, j) =>
+                                          j === index
+                                            ? { ...p, packFactor: valor > 0 ? valor : undefined, packSource: 'manual' as const }
+                                            : p,
+                                        ),
+                                      )
+                                    }}
+                                  />
+                                  <span>{matchedItem.unit}</span>
+                                  {fator !== 1 ? (
+                                    <span className="text-foreground">
+                                      · entram {conv.qty} {matchedItem.unit} a {formatBRL(conv.unitCostCents)} cada
+                                    </span>
+                                  ) : null}
+                                  {plan.packSource === 'nome' ? <span>· lido do nome da nota, confira</span> : null}
+                                  {plan.packSource === 'aprendido' ? <span>· fator já confirmado antes</span> : null}
+                                </div>
+                              )
+                            })() : null}
                           </div>
                           <Select
                             value={plan?.action === 'existente' ? (plan.matchedItemId ?? 'novo') : (plan?.action ?? 'novo')}
@@ -905,7 +948,13 @@ export function ContasPagarPage() {
                                       ? { index, action: 'novo', matchedItemId: null, matchedBy: null }
                                       : v === 'ignorar'
                                         ? { index, action: 'ignorar', matchedItemId: null, matchedBy: null }
-                                        : { index, action: 'existente', matchedItemId: v, matchedBy: null }
+                                        : {
+                                            index,
+                                            action: 'existente',
+                                            matchedItemId: v,
+                                            matchedBy: null,
+                                            ...fatorParaLinha(item, stockItems.find((s) => s.id === v)),
+                                          }
                                     : p,
                                 ),
                               )
