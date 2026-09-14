@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
+import { CancelamentosCard } from '@/components/vendas/CancelamentosCard'
 import { ConversaoConsultaCard } from '@/components/vendas/ConversaoConsultaCard'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -663,6 +664,8 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           descricao="Mostrar as vendas fechadas que ainda não têm data marcada"
         />
       </div>
+
+      {recorte === 'mes' && <CancelamentosCard mes={mes} rotuloMes={nomeDoMes(mes)} />}
 
       <Card>
         <CardHeader className="gap-3">
