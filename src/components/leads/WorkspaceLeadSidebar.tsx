@@ -10,7 +10,17 @@ import { DynamicFieldRenderer } from '@/components/leads/DynamicFieldRenderer'
 import { buttonVariants } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { saidasDeOutroFunil } from '@/lib/etapaDeSaida'
 import { workflowFieldsForContext } from '@/lib/leadFields'
 import type { Lead, Interaction, WorkflowField } from '@/mocks/crmMock'
 
@@ -45,20 +55,32 @@ export function WorkspaceLeadSidebar({ lead, history, className }: Props) {
     crm.persistLeadPatch(updatedLead)
   }
 
+  const currentPipeline = useMemo(
+    () => crm.pipelineCatalog.find((p) => p.id === lead.pipelineId) ?? crm.selectedPipeline,
+    [crm.pipelineCatalog, lead.pipelineId, crm.selectedPipeline],
+  )
+
+  // Funil sem etapa de encerramento (o do transplante) ganha as saídas da clínica no seletor.
+  const saidas = useMemo(
+    () => saidasDeOutroFunil(crm.pipelineCatalog, currentPipeline),
+    [crm.pipelineCatalog, currentPipeline],
+  )
+
   const handleStageChange = (value: string | null) => {
     const stageId = value ?? ''
     if (!stageId || stageId === lead.stageId) return
+    const saida = saidas.find((s) => s.stage.id === stageId)
+    if (saida) {
+      crm.moveLeadToPipeline(lead.id, saida.pipeline.id, stageId)
+      toast.success(`Atendimento encerrado: lead movido para "${saida.stage.name}" (${saida.pipeline.name})`)
+      return
+    }
     crm.reorderLeadCard(lead.id, { stageId, index: 0 })
     const stageName = crm.pipelineCatalog
       .flatMap((p) => p.stages)
       .find((s) => s.id === stageId)?.name ?? 'Nova etapa'
     toast.success(`Lead movido para "${stageName}"`)
   }
-
-  const currentPipeline = useMemo(
-    () => crm.pipelineCatalog.find((p) => p.id === lead.pipelineId) ?? crm.selectedPipeline,
-    [crm.pipelineCatalog, lead.pipelineId, crm.selectedPipeline],
-  )
 
   const currentStageName = useMemo(
     () => currentPipeline.stages.find((s) => s.id === lead.stageId)?.name ?? '—',
@@ -101,6 +123,21 @@ export function WorkspaceLeadSidebar({ lead, history, className }: Props) {
                   {stage.name}
                 </SelectItem>
               ))}
+              {saidas.length > 0 ? (
+                <>
+                  <SelectSeparator />
+                  <SelectGroup>
+                    <SelectLabel className="text-[10px] font-semibold uppercase tracking-wide">
+                      Encerrar atendimento
+                    </SelectLabel>
+                    {saidas.map(({ pipeline, stage }) => (
+                      <SelectItem key={stage.id} value={stage.id} className="text-xs">
+                        {stage.name} · {pipeline.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </>
+              ) : null}
             </SelectContent>
           </Select>
         </div>
