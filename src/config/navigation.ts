@@ -685,6 +685,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: (ctx) => isClinic(ctx) && canBoards(ctx),
   },
   {
+    id: 'estoque-codigos',
+    path: '/estoque-codigos',
+    label: 'Códigos de barras',
+    icon: ScanBarcode,
+    group: 'estoque',
+    keywords: ['etiqueta', 'bipar', 'leitor', 'ean', 'codigo'],
+    visible: canBoards,
+  },
+  {
     id: 'estoque-relatorios',
     path: '/estoque-relatorios',
     label: 'Relatórios de estoque',

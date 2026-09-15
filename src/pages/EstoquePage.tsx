@@ -51,6 +51,7 @@ export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: st
   return [
     { to: '/estoque', label: 'Estoque' },
     { to: '/bipagem', label: 'Bipagem' },
+    { to: '/estoque-codigos', label: 'Códigos de barras' },
     { to: '/compras', label: 'Ordens de compra' },
     { to: '/transferencias-estoque', label: 'Transferências' },
     { to: '/inventario', label: 'Inventário' },

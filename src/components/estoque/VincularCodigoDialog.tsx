@@ -27,6 +27,7 @@ export function VincularCodigoDialog({
   itens,
   onClose,
   onVinculado,
+  onCadastrarNovo,
   titulo = 'Código não cadastrado',
 }: {
   codigo: string | null
@@ -34,6 +35,8 @@ export function VincularCodigoDialog({
   itens: StockItem[]
   onClose: () => void
   onVinculado: (item: StockItem) => void
+  /** Produto que ainda não existe no estoque: abre o cadastro com o código preenchido. */
+  onCadastrarNovo?: (codigo: string) => void
   titulo?: string
 }) {
   const [termo, setTermo] = useState('')
@@ -116,10 +119,15 @@ export function VincularCodigoDialog({
             ))
           )}
         </div>
-        <DialogFooter>
+        <DialogFooter className="gap-2">
           <Button variant="outline" onClick={onClose}>
             Ignorar este bipe
           </Button>
+          {onCadastrarNovo && codigo ? (
+            <Button variant="secondary" onClick={() => onCadastrarNovo(codigo)}>
+              É um produto novo
+            </Button>
+          ) : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>

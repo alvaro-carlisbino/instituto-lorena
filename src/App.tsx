@@ -118,6 +118,7 @@ const NfePage = lazyPage(() => import('./pages/NfePage'), 'NfePage')
 const KitsPage = lazyPage(() => import('./pages/KitsPage'), 'KitsPage')
 const InventarioPage = lazyPage(() => import('./pages/InventarioPage'), 'InventarioPage')
 const EstoqueRelatoriosPage = lazyPage(() => import('./pages/EstoqueRelatoriosPage'), 'EstoqueRelatoriosPage')
+const CodigosBarrasPage = lazyPage(() => import('./pages/CodigosBarrasPage'), 'CodigosBarrasPage')
 const TransferenciasEstoquePage = lazyPage(() => import('./pages/TransferenciasEstoquePage'), 'TransferenciasEstoquePage')
 const ContaCirurgicaPage = lazyPage(() => import('./pages/ContaCirurgicaPage'), 'ContaCirurgicaPage')
 const AlertasPagamentoPage = lazyPage(() => import('./pages/AlertasPagamentoPage'), 'AlertasPagamentoPage')
@@ -188,6 +189,7 @@ function AppRoutes() {
         <Route path="/kits" element={<KitsPage />} />
         <Route path="/inventario" element={<InventarioPage />} />
         <Route path="/estoque-relatorios" element={<EstoqueRelatoriosPage />} />
+        <Route path="/estoque-codigos" element={<CodigosBarrasPage />} />
         <Route path="/transferencias-estoque" element={<TransferenciasEstoquePage />} />
         <Route path="/conta-cirurgica" element={<ContaCirurgicaPage />} />
         <Route path="/alertas-pagamento" element={<FinanceOnly><AlertasPagamentoPage /></FinanceOnly>} />
