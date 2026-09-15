@@ -27,6 +27,7 @@ import { ImportarNfe } from '@/components/financeiro/ImportarNfe'
 import { NotasSefazPanel } from '@/components/financeiro/NotasSefazPanel'
 import { PagarContaDialog } from '@/components/financeiro/PagarContaDialog'
 import { ParcelaEditor } from '@/components/financeiro/ParcelaEditor'
+import { VencimentoNaLinha } from '@/components/financeiro/VencimentoNaLinha'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -549,7 +550,16 @@ export function ContasPagarPage() {
                               onClick={() => setAbertaId(aberta ? null : p.id)}
                             >
                               <td className="px-3 py-2">
-                                <div className="tabular-nums">{dia(p.dueDate)}</div>
+                                <VencimentoNaLinha
+                                  id={p.id}
+                                  vencimento={p.dueDate}
+                                  onSalvo={(novo) => {
+                                    if (aberta) setAbertaId(null)
+                                    setPayables((xs) => xs.map((x) => (x.id === p.id ? { ...x, dueDate: novo } : x)))
+                                    toast.success(`Vencimento mudado para ${dia(novo)}.`)
+                                    void load(true)
+                                  }}
+                                />
                                 <div className={cn('text-xs', q.tom)}>{q.texto}</div>
                               </td>
                               <td className="max-w-[380px] px-3 py-2">

@@ -12,7 +12,8 @@
  * 2. LANÇA AS NOTAS EM RESUMO. Sem XML não há itens, então a nota vira fornecedor + documento
  *    + UMA parcela EM ABERTO vencendo na emissão. Em aberto porque o resumo não diz nada sobre
  *    pagamento, e marcar como paga seria inventar. Boa parte já saiu do banco: quem confere
- *    corrige contra o extrato. Carimbado errado, ninguém descobre.
+ *    corrige contra o extrato. Carimbado errado, ninguém descobre. Quando o XML dessa nota
+ *    chega depois, o passo 2b troca a parcela pelas duplicatas reais (o vencimento do boleto).
  *
  * 3. NÃO lança as notas COMPLETAS. Elas exigem a cascata de casamento de item, lote e espelho
  *    no Bling que vive em `src/services/nfeImport.ts`, em cima do client do navegador. Duplicar
@@ -71,6 +72,12 @@ const diaDe = (iso: unknown): string | null => {
 const numeroDaChave = (chave: string) => String(Number(chave.slice(25, 34) || '0')) || chave.slice(-6)
 
 type Parcela = { numero: string; vencimento: string; centavos: number }
+
+/**
+ * O texto da parcela que vence na emissão. É também a marca que o passo 2b procura: a mesma
+ * string mora em `crm_sefaz_aplicar_duplicatas`, e mudar uma sem a outra desliga a correção.
+ */
+const NOTA_VENCE_NA_EMISSAO = 'Vencimento = emissão: a nota não traz duplicata. Conferir se já foi paga.'
 
 /**
  * Lê do XML só o CABEÇALHO e as DUPLICATAS. Os itens ficam de fora de propósito.
@@ -342,7 +349,7 @@ async function lancarNota(
               due_date: emissao,
               amount_cents: totalCents,
               payment_method: null as string | null,
-              note: 'Vencimento = emissão: a nota não traz duplicata. Conferir se já foi paga.',
+              note: NOTA_VENCE_NA_EMISSAO,
             }]
           : []
 
@@ -529,6 +536,74 @@ Deno.serve(async (req) => {
       }
       conta.xmlBaixados = baixados
       conta.xmlNaoEntregue = semXmlNaFocus
+
+      // ── 2b. resumo que ganhou XML: o vencimento de verdade ────────────────────────────
+      // A parcela do resumo vence na emissão porque a SEFAZ não mandou a duplicata. Quando o XML
+      // chega, a duplicata está nele, e sem este passo ninguém relia: a Surya NF 2843542 vencia
+      // 08/10 e a tela mostrou "sem pagamento no banco" desde 08/09. Eram 23 notas assim.
+      //
+      // Não fica pendurado no download do passo 2: se a rodada morrer entre guardar o XML e trocar
+      // a parcela, a seguinte ainda acha a parcela marcada e termina o serviço. A troca em si, com
+      // as guardas (parcela intocada, em aberto, sem conciliação), é uma transação no banco.
+      const { data: marcadasRaw } = await admin
+        .from('payable_installments')
+        .select('id, import_key, due_date, amount_cents, purchase_invoices(issue_date, total_cents)')
+        .eq('tenant_id', tenantId).eq('status', 'aberto')
+        .eq('note', NOTA_VENCE_NA_EMISSAO).like('import_key', 'sefaz:%')
+        .limit(1000)
+      const parcelaDaChave = new Map<string, string>()
+      // Muitos-para-um: o PostgREST devolve a nota como objeto, embora o tipo gerado diga lista.
+      for (const m of (marcadasRaw ?? []) as unknown as Array<{
+        id: string
+        import_key: string
+        due_date: string
+        amount_cents: number
+        purchase_invoices: { issue_date: string | null; total_cents: number } | null
+      }>) {
+        const chave = m.import_key.slice('sefaz:'.length)
+        // Vencimento ou valor já mexidos por alguém: não é mais a parcela do resumo, e reler o XML
+        // dela a cada hora seria trabalho para a função recusar.
+        const nota = m.purchase_invoices
+        if (!/^\d{44}$/.test(chave) || !nota || m.due_date !== nota.issue_date || m.amount_cents !== nota.total_cents) continue
+        parcelaDaChave.set(chave, m.id)
+      }
+      let vencimentosCorrigidos = 0
+      let parcelasDoXml = 0
+      const chavesMarcadas = [...parcelaDaChave.keys()]
+      for (let i = 0; i < chavesMarcadas.length && Date.now() < deadline; i += 50) {
+        const { data: comXml } = await admin
+          .from('sefaz_documentos').select('id, chave')
+          .eq('tenant_id', tenantId).in('chave', chavesMarcadas.slice(i, i + 50))
+          .not('xml', 'is', null)
+        for (const d of (comXml ?? []) as Array<{ id: string; chave: string }>) {
+          if (Date.now() > deadline) break
+          const { data: x } = await admin.from('sefaz_documentos').select('xml').eq('id', d.id).maybeSingle()
+          const xml = (x as { xml?: string } | null)?.xml
+          if (!xml) continue
+          let dups: Parcela[]
+          try {
+            dups = parseNfeFinanceiro(xml).parcelas
+          } catch {
+            continue
+          }
+          const { data: n, error: dupErr } = await admin.rpc('crm_sefaz_aplicar_duplicatas', {
+            p_tenant: tenantId,
+            p_parcela: parcelaDaChave.get(d.chave),
+            p_dups: dups,
+          })
+          // Uma nota que falha não pode segurar o lançamento das outras no passo 3.
+          if (dupErr) {
+            conta.duplicatasErro = `${d.chave}: ${dupErr.message}`.slice(0, 300)
+            continue
+          }
+          if (Number(n) > 0 && dups.length > 0) {
+            vencimentosCorrigidos += 1
+            parcelasDoXml += Number(n)
+          }
+        }
+      }
+      conta.resumoComVencimentoDoXml = vencimentosCorrigidos
+      conta.parcelasDoXml = parcelasDoXml
 
       // ── 3. lança o que dá sem julgamento humano: as em resumo ─────────────────────────
       if (lancar) {

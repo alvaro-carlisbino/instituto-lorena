@@ -842,8 +842,11 @@ export async function updatePayable(id: string, patch: PayablePatch): Promise<vo
   }
 
   row.updated_at = new Date().toISOString()
-  const { error } = await client.from('payable_installments').update(row).eq('id', id)
+  // Com `select`, a gravação que a RLS filtrou (ou de parcela que outra aba apagou) volta vazia em
+  // vez de passar como sucesso: sem isto a tela dizia "vencimento mudado" e o banco não mudava nada.
+  const { data, error } = await client.from('payable_installments').update(row).eq('id', id).select('id')
   if (error) throw new Error(error.message)
+  if (!data || data.length === 0) throw new Error('Não foi possível salvar: a parcela não existe mais ou você não tem acesso.')
 }
 
 export async function createPayables(payload: {

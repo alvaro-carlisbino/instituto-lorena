@@ -40,6 +40,7 @@ import { GastosPorCentro, type LinhaGasto } from '@/components/financeiro/Gastos
 import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
 import { possiveisCopias } from '@/lib/copiasBanco'
 import { SaidaEditor } from '@/components/financeiro/SaidaEditor'
+import { VencimentoNaLinha } from '@/components/financeiro/VencimentoNaLinha'
 import { useTenant } from '@/context/TenantContext'
 import { hojeLocal } from '@/lib/diaLocal'
 import { padraoDaRegra } from '@/lib/extratoPadrao'
@@ -281,6 +282,19 @@ export function GastosControlePage() {
       toast.error(e instanceof Error ? e.message : 'Falha ao classificar')
     }
     await load(true)
+  }
+
+  /** Vencimento mudado na linha. Para fora do período a linha some da tabela, então o aviso diz onde foi parar. */
+  const remarcar = (r: SaidaTudo, novo: string) => {
+    const chave = `${r.origem}-${r.id}`
+    if (abertoId === chave) setAbertoId(null)
+    const fora = novo < periodo.de || novo > periodo.ate
+    const mes = new Date(`${novo}T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+    toast.success(
+      fora ? `Vence em ${dia(novo)}. Saiu deste período e aparece em ${mes}.` : `Vencimento mudado para ${dia(novo)}.`,
+    )
+    setRows((xs) => xs.map((x) => (x.origem === r.origem && x.id === r.id ? { ...x, data: novo } : x)))
+    void load(true)
   }
 
   const handleImport = async (file: File | null) => {
@@ -545,7 +559,13 @@ export function GastosControlePage() {
                           )}
                           onClick={() => setAbertoId(aberto ? null : chave)}
                         >
-                          <td className="whitespace-nowrap px-3 py-2 tabular-nums">{dia(r.data)}</td>
+                          <td className="whitespace-nowrap px-3 py-2 tabular-nums">
+                            {r.origem === 'a pagar' && r.status !== 'pago' ? (
+                              <VencimentoNaLinha id={r.id} vencimento={r.data} onSalvo={(novo) => remarcar(r, novo)} />
+                            ) : (
+                              dia(r.data)
+                            )}
+                          </td>
                           <td className="max-w-[360px] px-3 py-2">
                             <div className="flex min-w-0 items-center gap-1.5">
                               <span className="truncate font-medium" title={nome}>
