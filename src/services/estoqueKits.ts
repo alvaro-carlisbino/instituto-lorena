@@ -189,6 +189,8 @@ export type StockKitItem = {
   id: string
   itemId: string
   qty: number
+  /** Quanto desta linha voltou para o estoque (sobra da bandeja). Usado = qty - returnedQty. */
+  returnedQty: number
   isExtra: boolean
   chargeCents: number
   label: string | null
@@ -205,6 +207,7 @@ export type StockKit = {
   note: string | null
   createdAt: string
   consumedAt: string | null
+  cancelledAt: string | null
   items: StockKitItem[]
 }
 
@@ -212,23 +215,35 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
   const client = assertClient()
   let kitsQuery = client
     .from('stock_kits')
-    .select('id, name, template_id, lead_id, patient_name, procedure_label, scheduled_for, status, note, created_at, consumed_at')
+    .select('id, name, template_id, lead_id, patient_name, procedure_label, scheduled_for, status, note, created_at, consumed_at, cancelled_at')
     .order('created_at', { ascending: false })
   kitsQuery = leadId ? kitsQuery.eq('lead_id', leadId) : kitsQuery.limit(100)
-  const [kits, items] = await Promise.all([
-    kitsQuery,
-    client.from('stock_kit_items').select('id, kit_id, item_id, qty, is_extra, charge_cents, label'),
-  ])
+  const kits = await kitsQuery
   if (kits.error) throw new Error(kits.error.message)
-  if (items.error) throw new Error(items.error.message)
+  const kitIds = (kits.data ?? []).map((r) => String(r.id))
+  // Só as linhas destes kits. Antes vinha a tabela inteira: um Kit Cirúrgico CC tem 90 linhas,
+  // e no 12º kit o teto de 1.000 do PostgREST começava a esconder item de kit antigo.
+  const linhas = kitIds.length
+    ? await buscarTudo<Record<string, unknown>>(
+        () =>
+          client
+            .from('stock_kit_items')
+            .select('id, kit_id, item_id, qty, returned_qty, is_extra, charge_cents, label, created_at')
+            .in('kit_id', kitIds)
+            .order('created_at')
+            .order('id'),
+        { rotulo: 'stock_kit_items' },
+      )
+    : []
   const byKit = new Map<string, StockKitItem[]>()
-  for (const r of items.data ?? []) {
+  for (const r of linhas) {
     const key = String(r.kit_id)
     const list = byKit.get(key) ?? []
     list.push({
       id: String(r.id),
       itemId: String(r.item_id),
       qty: Number(r.qty ?? 0),
+      returnedQty: Number(r.returned_qty ?? 0),
       isExtra: Boolean(r.is_extra),
       chargeCents: Number(r.charge_cents ?? 0),
       label: r.label != null ? String(r.label) : null,
@@ -247,6 +262,7 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
     note: r.note != null ? String(r.note) : null,
     createdAt: String(r.created_at ?? ''),
     consumedAt: r.consumed_at != null ? String(r.consumed_at) : null,
+    cancelledAt: r.cancelled_at != null ? String(r.cancelled_at) : null,
     items: byKit.get(String(r.id)) ?? [],
   }))
 }
@@ -258,9 +274,8 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
  *
  * Baixa por FEFO (vence primeiro sai primeiro) e registra controlados no livro, igual à
  * conferência fazia antes. Depois disso:
- *   • "consumido" = a enfermeira confirma que usou (NÃO mexe no estoque de novo)
- *   • "cancelado" = cirurgia caiu → cancelKit ESTORNA tudo pro estoque
- * Sobra de bandeja volta por ajuste manual, que é o caso raro.
+ *   • "consumido" = a enfermeira registra o uso; a sobra da bandeja volta por devolverSobraKit
+ *   • "cancelado" = cirurgia caiu ou kit errado → cancelKit estorna o que ainda está fora
  */
 export async function createKit(payload: {
   templateId?: string | null
@@ -401,53 +416,80 @@ async function deductKitStock(
 }
 
 /**
- * Conferência da enfermeira: confirma que o kit foi usado no paciente. NÃO mexe no estoque —
- * o material já saiu na montagem (createKit). É o carimbo de "cirurgia aconteceu", que fecha
- * o custo do procedimento e serve de trilha pra auditoria.
+ * Registra o uso do kit e devolve a sobra da bandeja ao estoque.
+ *
+ * `devolucoes` é por LINHA do kit (o mesmo produto pode estar no modelo e como avulso). A
+ * função do banco devolve para os lotes de onde saiu, grava o livro de controlados e soma
+ * em `returned_qty`, tudo numa transação. Com `fechar`, o kit montado passa a "consumido".
+ * Kit já consumido aceita devolução depois (a caixa voltou no dia seguinte).
  */
-export async function consumeKit(kit: StockKit): Promise<void> {
+export async function devolverSobraKit(
+  kitId: string,
+  devolucoes: Array<{ kitItemId: string; qty: number }>,
+  fechar = true,
+): Promise<{ movimentos: number; unidades: number; controlados: number }> {
   const client = assertClient()
-  const { error } = await client
-    .from('stock_kits')
-    .update({ status: 'consumido', consumed_at: new Date().toISOString() })
-    .eq('id', kit.id)
+  const { data, error } = await client.rpc('stock_kit_devolver', {
+    p_kit_id: kitId,
+    p_devolucoes: devolucoes
+      .filter((d) => d.qty > 0)
+      .map((d) => ({ kit_item_id: d.kitItemId, qty: d.qty })),
+    p_fechar: fechar,
+  })
   if (error) throw new Error(error.message)
+  const r = (data ?? {}) as { movimentos?: number; unidades?: number; controlados?: number }
+  return { movimentos: Number(r.movimentos ?? 0), unidades: Number(r.unidades ?? 0), controlados: Number(r.controlados ?? 0) }
+}
+
+/** Confirma o uso sem sobra. Mantido para quem só quer o carimbo. */
+export async function consumeKit(kit: StockKit): Promise<void> {
+  await devolverSobraKit(kit.id, [], true)
 }
 
 /**
- * Cancela o kit e ESTORNA o material pro estoque (entrada de volta), porque a baixa
- * aconteceu lá na montagem. Sem isso, cirurgia cancelada sumiria com o material pra sempre.
- * Idempotente na prática: a tela só oferece cancelar kit 'montado'.
+ * Cancela o kit, montado ou já usado, e devolve ao estoque tudo que ainda está fora (saída
+ * menos o que já voltou por sobra), lote a lote e com o livro de controlados. Antes só dava
+ * para cancelar kit montado, e o estorno não passava pelo livro.
  */
 export async function cancelKit(kit: StockKit): Promise<{ restored: number }> {
   const client = assertClient()
-  const lastCosts = await listItemLastCosts()
-  let restored = 0
-  // Devolve exatamente o que saiu, lote a lote (o movimento de saída guarda o batch_id).
-  // A coluna é qty_delta e vem NEGATIVA na saída — registerMovement quer qty positivo.
-  const { data: movs } = await client
-    .from('stock_movements')
-    .select('item_id, qty_delta, batch_id, unit_cost_cents')
-    .eq('ref_type', 'stock_kit')
-    .eq('ref_id', kit.id)
-    .eq('kind', 'saida')
-  for (const m of ((movs ?? []) as Array<{ item_id: string; qty_delta: number; batch_id: string | null; unit_cost_cents: number | null }>)) {
-    await registerMovement({
-      itemId: String(m.item_id),
-      kind: 'entrada',
-      qty: Math.abs(Number(m.qty_delta)),
-      reason: 'kit cancelado (estorno)',
-      note: `${kit.name}${kit.patientName ? ` — ${kit.patientName}` : ''}`,
-      refType: 'stock_kit',
-      refId: kit.id,
-      batchId: m.batch_id,
-      unitCostCents: m.unit_cost_cents ?? lastCosts.get(String(m.item_id)) ?? null,
-    })
-    restored += 1
-  }
-  const { error } = await client.from('stock_kits').update({ status: 'cancelado' }).eq('id', kit.id)
+  const { data, error } = await client.rpc('stock_kit_cancelar', { p_kit_id: kit.id })
   if (error) throw new Error(error.message)
-  return { restored }
+  return { restored: Number((data as { movimentos?: number } | null)?.movimentos ?? 0) }
+}
+
+/** Troca nome e itens do modelo. Kits já montados guardam as próprias linhas e não mudam. */
+export async function updateKitTemplate(payload: {
+  id: string
+  name: string
+  items: Array<{ itemId: string; qty: number }>
+}): Promise<void> {
+  const client = assertClient()
+  const items = payload.items.filter((i) => i.itemId && i.qty > 0)
+  if (payload.name.trim().length < 2) throw new Error('Informe o nome do modelo.')
+  if (items.length === 0) throw new Error('O modelo precisa de ao menos um item.')
+  const { data: antigos, error: readErr } = await client
+    .from('kit_template_items')
+    .select('item_id, qty')
+    .eq('template_id', payload.id)
+  if (readErr) throw new Error(readErr.message)
+  const { error } = await client
+    .from('kit_templates')
+    .update({ name: payload.name.trim(), updated_at: new Date().toISOString() })
+    .eq('id', payload.id)
+  if (error) throw new Error(error.message)
+  const { error: delErr } = await client.from('kit_template_items').delete().eq('template_id', payload.id)
+  if (delErr) throw new Error(delErr.message)
+  const { error: insErr } = await client
+    .from('kit_template_items')
+    .insert(items.map((i) => ({ template_id: payload.id, item_id: i.itemId, qty: i.qty })))
+  if (insErr) {
+    // Sem as linhas o modelo ficaria vazio: recoloca as de antes.
+    await client
+      .from('kit_template_items')
+      .insert((antigos ?? []).map((a) => ({ template_id: payload.id, item_id: a.item_id, qty: a.qty })))
+    throw new Error(insErr.message)
+  }
 }
 
 // --------------------------------------------------- livro de controlados
@@ -523,47 +565,76 @@ export async function logControlledExit(payload: {
   if (error) throw new Error(error.message)
 }
 
-/** Conta do paciente a partir do kit (itens + avulsos + acréscimos) — PDF via print. */
-export function printKitPatientBill(
-  kit: StockKit,
-  itemNames: Map<string, string>,
-): void {
+/**
+ * Imprime um HTML sem abrir janela. Era `window.open(..., 'noopener')`, e com `noopener` o
+ * navegador devolve null mesmo quando abre a aba: a tela sempre dizia "Permita pop-ups".
+ * O iframe escondido imprime só o documento dele e some depois.
+ */
+export function imprimirHtml(html: string): void {
+  const frame = document.createElement('iframe')
+  frame.setAttribute('aria-hidden', 'true')
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'
+  document.body.appendChild(frame)
+  const doc = frame.contentDocument
+  if (!doc || !frame.contentWindow) {
+    frame.remove()
+    throw new Error('Não foi possível preparar a impressão.')
+  }
+  doc.open()
+  doc.write(html)
+  doc.close()
+  const imprimir = () => {
+    frame.contentWindow?.focus()
+    frame.contentWindow?.print()
+    window.setTimeout(() => frame.remove(), 60_000)
+  }
+  if (doc.readyState === 'complete') window.setTimeout(imprimir, 50)
+  else frame.addEventListener('load', imprimir, { once: true })
+}
+
+const escaparHtml = (v: string) =>
+  v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
+
+/** Conta do paciente a partir do kit (itens usados + avulsos + acréscimos). */
+export function printKitPatientBill(kit: StockKit, itemNames: Map<string, string>): void {
   const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
   const chargeTotal = kit.items.reduce((s, i) => s + Math.max(0, i.chargeCents), 0)
   const rows = kit.items
     .map((i) => {
-      const name = i.label || itemNames.get(i.itemId) || '?'
+      const name = escaparHtml(i.label || itemNames.get(i.itemId) || '?')
+      const usado = i.qty - i.returnedQty
+      if (usado <= 0 && i.chargeCents <= 0) return ''
       return `<tr>
         <td>${i.isExtra ? 'Avulso' : 'Kit'}</td>
-        <td>${i.qty}× ${name}</td>
-        <td style="text-align:right">${i.chargeCents > 0 ? brl(i.chargeCents) : '—'}</td>
+        <td>${usado}× ${name}${i.returnedQty > 0 ? ` <small>(saíram ${i.qty}, voltaram ${i.returnedQty})</small>` : ''}</td>
+        <td style="text-align:right">${i.chargeCents > 0 ? brl(i.chargeCents) : '-'}</td>
       </tr>`
     })
     .join('')
-  const html = `<!doctype html><html><head><meta charset="utf-8"/><title>Conta — ${kit.patientName ?? kit.name}</title>
+  const titulo = escaparHtml(kit.patientName ?? kit.name)
+  const data = kit.scheduledFor
+    ? new Date(`${kit.scheduledFor}T12:00:00`).toLocaleDateString('pt-BR')
+    : new Date(kit.createdAt).toLocaleDateString('pt-BR')
+  imprimirHtml(`<!doctype html><html><head><meta charset="utf-8"/><title>Conta · ${titulo}</title>
     <style>
       body{font-family:Georgia,serif;padding:32px;max-width:720px;margin:0 auto;color:#1a1a1a}
       h1{font-size:22px;margin:0 0 4px}.meta{color:#555;font-size:13px;margin-bottom:20px}
       table{width:100%;border-collapse:collapse;font-size:13px}
       th,td{border-bottom:1px solid #ddd;padding:8px 6px;text-align:left}
       th{font-size:11px;text-transform:uppercase;color:#666}
+      small{color:#777}
       .tot{margin-top:18px;font-size:16px;font-weight:700}
     </style></head><body>
     <h1>Conta do paciente</h1>
     <div class="meta">
-      <div><strong>${kit.patientName ?? '—'}</strong></div>
-      <div>${[kit.name, kit.procedureLabel].filter(Boolean).join(' · ')}</div>
-      <div>${kit.scheduledFor ? new Date(`${kit.scheduledFor}T12:00:00`).toLocaleDateString('pt-BR') : new Date(kit.createdAt).toLocaleDateString('pt-BR')}</div>
+      <div><strong>${escaparHtml(kit.patientName ?? '-')}</strong></div>
+      <div>${escaparHtml([kit.name, kit.procedureLabel].filter(Boolean).join(' · '))}</div>
+      <div>${data}</div>
     </div>
     <table>
       <thead><tr><th>Tipo</th><th>Item</th><th style="text-align:right">Cobrança</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="tot">Total cobrado: ${brl(chargeTotal)}</div>
-    <script>window.onload=()=>window.print()</script>
-    </body></html>`
-  const w = window.open('', '_blank', 'noopener,noreferrer,width=860,height=700')
-  if (!w) throw new Error('Permita pop-ups para imprimir o PDF.')
-  w.document.write(html)
-  w.document.close()
+    </body></html>`)
 }

@@ -134,7 +134,7 @@ export function SearchPicker({
   }
 
   return (
-    <div className={cn('w-full', className)}>
+    <div className={cn('w-full min-w-0', className)}>
       <div className="flex items-center gap-1">
         <Button
           type="button"
@@ -142,7 +142,8 @@ export function SearchPicker({
           disabled={disabled}
           onClick={() => setAberto(true)}
           className={cn(
-            'w-full justify-between gap-2 font-normal',
+            // min-w-0: sem ele o botão não encolhe e o × de limpar vaza por cima do campo ao lado.
+            'w-full min-w-0 shrink justify-between gap-2 font-normal',
             size === 'sm' && 'h-8 text-xs',
             !value && 'text-muted-foreground',
           )}

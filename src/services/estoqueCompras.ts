@@ -210,6 +210,30 @@ export async function upsertStockItem(payload: {
   return String((data as { id: unknown }).id)
 }
 
+/**
+ * Ensina ao item um código que o leitor bipou. Item sem código ganha o `barcode`; item que já
+ * tem guarda o novo em `aliases` (caixa e unidade do mesmo produto têm EANs diferentes).
+ * Update só das duas colunas: o upsert completo zeraria o que não fosse repassado.
+ */
+export async function vincularCodigoAoItem(item: StockItem, codigo: string): Promise<StockItem> {
+  const client = assertClient()
+  const code = codigo.replace(/\s+/g, '').trim()
+  if (!code) throw new Error('Código vazio.')
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  let atualizado: StockItem
+  if (!item.barcode) {
+    patch.barcode = code
+    atualizado = { ...item, barcode: code }
+  } else {
+    const aliases = item.aliases.includes(code) ? item.aliases : [...item.aliases, code]
+    patch.aliases = aliases
+    atualizado = { ...item, aliases }
+  }
+  const { error } = await client.from('stock_items').update(patch).eq('id', item.id)
+  if (error) throw new Error(error.message)
+  return atualizado
+}
+
 // ---------------------------------------------------------------- movimentos
 
 export type StockMovement = {
