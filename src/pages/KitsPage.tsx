@@ -10,6 +10,7 @@ import { KitsLista } from '@/components/kits/KitsLista'
 import { LivroControlados } from '@/components/kits/LivroControlados'
 import { ModelosKit } from '@/components/kits/ModelosKit'
 import { MontarKit } from '@/components/kits/MontarKit'
+import { EditarKitDialog } from '@/components/kits/EditarKitDialog'
 import { RegistrarUsoDialog } from '@/components/kits/RegistrarUsoDialog'
 import { useTenant } from '@/context/TenantContext'
 import { estoqueTabs } from '@/pages/EstoquePage'
@@ -56,6 +57,8 @@ export function KitsPage() {
   const [lastCosts, setLastCosts] = useState<Map<string, number>>(new Map())
   const [loading, setLoading] = useState(true)
   const [registrando, setRegistrando] = useState<StockKit | null>(null)
+  // Guarda o id, não o kit: a cada edição a lista recarrega e o dialog precisa do kit novo.
+  const [editandoId, setEditandoId] = useState<string | null>(null)
 
   // `loading` só vale para a primeira carga (nasce true); recarregar depois de uma ação não
   // pisca a tela inteira de "Carregando…".
@@ -85,6 +88,24 @@ export function KitsPage() {
   useEffect(() => {
     void load()
   }, [])
+
+  // `/kits?aba=kits&kit=<id>` abre a edição direto: é o link do Resultado por cirurgia.
+  const kitDaUrl = params.get('kit')
+  useEffect(() => {
+    if (!kitDaUrl || loading) return
+    const t = window.setTimeout(() => {
+      if (kits.some((k) => k.id === kitDaUrl)) setEditandoId(kitDaUrl)
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          next.delete('kit')
+          return next
+        },
+        { replace: true },
+      )
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [kitDaUrl, loading, kits, setParams])
 
   const trocarItem = useCallback(
     (item: StockItem) => setItems((prev) => prev.map((i) => (i.id === item.id ? item : i))),
@@ -137,6 +158,7 @@ export function KitsPage() {
             lastCosts={lastCosts}
             loading={loading}
             onRegistrarUso={setRegistrando}
+            onEditar={(k) => setEditandoId(k.id)}
             onMudou={() => void load()}
           />
         </TabsContent>
@@ -147,6 +169,19 @@ export function KitsPage() {
           <LivroControlados rows={controlledLog} nomes={nomes} />
         </TabsContent>
       </Tabs>
+
+      {editandoId ? (
+        <EditarKitDialog
+          key={editandoId}
+          kit={kits.find((k) => k.id === editandoId) ?? null}
+          tenantId={tenant.id}
+          items={items}
+          lastCosts={lastCosts}
+          onItemAtualizado={trocarItem}
+          onMudou={load}
+          onClose={() => setEditandoId(null)}
+        />
+      ) : null}
 
       <RegistrarUsoDialog
         key={registrando?.id ?? 'nenhum'}

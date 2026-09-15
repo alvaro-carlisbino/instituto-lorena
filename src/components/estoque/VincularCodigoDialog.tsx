@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { type StockItem, vincularCodigoAoItem } from '@/services/estoqueCompras'
 import { cn } from '@/lib/utils'
 
-const normalizar = (v: string) => v.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+const normalizar = (v: string) => v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 
 /**
  * Código bipado que nenhum item conhece. A contagem de 14/09 cadastrou os itens pelo nome da

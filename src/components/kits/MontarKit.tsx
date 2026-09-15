@@ -20,6 +20,7 @@ import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
 import { formatBRL, formatQtd, itemEhEscolha, produtosParaBusca } from '@/components/kits/kitUi'
+import { VendaDoKitPicker } from '@/components/kits/VendaDoKitPicker'
 import { beep } from '@/lib/beep'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { type LinhaMontagem, aplicarBipe, novaChave, resumirMontagem } from '@/lib/kitMontagem'
@@ -31,6 +32,8 @@ import { type KitTemplate, createKit } from '@/services/estoqueKits'
 type Rascunho = {
   templateId: string
   leadId: string
+  /** Venda da Central de Vendas: é o que põe o custo do kit na conta da cirurgia. */
+  clinicSaleId: string | null
   leadName: string
   paciente: string
   procedimento: string
@@ -38,7 +41,7 @@ type Rascunho = {
   linhas: LinhaMontagem[]
 }
 
-const VAZIO: Rascunho = { templateId: '', leadId: '', leadName: '', paciente: '', procedimento: '', data: '', linhas: [] }
+const VAZIO: Rascunho = { templateId: '', leadId: '', clinicSaleId: null, leadName: '', paciente: '', procedimento: '', data: '', linhas: [] }
 
 // Montar um Kit Cirúrgico CC é bipar 90 itens. A tela do CRM remonta quando a aba volta do
 // foco, então sem rascunho guardado uma troca de aba jogava fora a bandeja inteira.
@@ -175,6 +178,7 @@ export function MontarKit({
         templateId: tpl?.id || null,
         name: nome,
         leadId: r.leadId || null,
+        clinicSaleId: r.leadId ? r.clinicSaleId : null,
         patientName: nomePaciente,
         procedureLabel: r.procedimento,
         scheduledFor: r.data || null,
@@ -228,8 +232,8 @@ export function MontarKit({
             onSearch={async (q) =>
               (await searchLeadsByName(tenantId, q, 40)).map((p) => ({ id: p.id, label: p.name, hint: p.phone || undefined }))
             }
-            onPick={(p) => set({ leadId: p.id, leadName: p.label })}
-            onClear={() => set({ leadId: '', leadName: '' })}
+            onPick={(p) => set({ leadId: p.id, leadName: p.label, clinicSaleId: null })}
+            onClear={() => set({ leadId: '', leadName: '', clinicSaleId: null })}
           />
           {!r.leadId ? (
             <Input
@@ -241,6 +245,19 @@ export function MontarKit({
             />
           ) : null}
         </div>
+        {r.leadId ? (
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Venda da cirurgia</Label>
+            <VendaDoKitPicker
+              key={r.leadId}
+              leadId={r.leadId}
+              data={r.data || null}
+              value={r.clinicSaleId}
+              autoEscolher
+              onChange={(clinicSaleId) => set({ clinicSaleId })}
+            />
+          </div>
+        ) : null}
         <div className="space-y-1.5">
           <Label htmlFor="kit-proc">Procedimento</Label>
           <Input

@@ -1,5 +1,6 @@
 import { buscarTudo } from '@/lib/supabasePaginate'
 import { supabase } from '@/lib/supabaseClient'
+import { escaparHtml, imprimirHtml } from '@/lib/exportar'
 import { registerMovement } from '@/services/estoqueCompras'
 
 // Fase 2 do estoque: lotes com validade (FEFO), kits cirúrgicos e livro de
@@ -200,6 +201,8 @@ export type StockKit = {
   name: string
   templateId: string | null
   leadId: string | null
+  /** Venda (clinic_sales) a que o kit pertence: é o elo com o valor da cirurgia. */
+  clinicSaleId: string | null
   patientName: string | null
   procedureLabel: string | null
   scheduledFor: string | null
@@ -215,7 +218,7 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
   const client = assertClient()
   let kitsQuery = client
     .from('stock_kits')
-    .select('id, name, template_id, lead_id, patient_name, procedure_label, scheduled_for, status, note, created_at, consumed_at, cancelled_at')
+    .select('id, name, template_id, lead_id, clinic_sale_id, patient_name, procedure_label, scheduled_for, status, note, created_at, consumed_at, cancelled_at')
     .order('created_at', { ascending: false })
   kitsQuery = leadId ? kitsQuery.eq('lead_id', leadId) : kitsQuery.limit(100)
   const kits = await kitsQuery
@@ -255,6 +258,7 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
     name: String(r.name),
     templateId: r.template_id != null ? String(r.template_id) : null,
     leadId: r.lead_id != null ? String(r.lead_id) : null,
+    clinicSaleId: r.clinic_sale_id != null ? String(r.clinic_sale_id) : null,
     patientName: r.patient_name != null ? String(r.patient_name) : null,
     procedureLabel: r.procedure_label != null ? String(r.procedure_label) : null,
     scheduledFor: r.scheduled_for != null ? String(r.scheduled_for) : null,
@@ -281,6 +285,7 @@ export async function createKit(payload: {
   templateId?: string | null
   name: string
   leadId?: string | null
+  clinicSaleId?: string | null
   patientName?: string
   procedureLabel?: string
   scheduledFor?: string | null
@@ -303,6 +308,7 @@ export async function createKit(payload: {
       template_id: payload.templateId || null,
       name: payload.name.trim() || 'Kit',
       lead_id: payload.leadId || null,
+      clinic_sale_id: payload.clinicSaleId || null,
       patient_name: payload.patientName?.trim() || null,
       procedure_label: payload.procedureLabel?.trim() || null,
       scheduled_for: payload.scheduledFor || null,
@@ -458,6 +464,82 @@ export async function cancelKit(kit: StockKit): Promise<{ restored: number }> {
   return { restored: Number((data as { movimentos?: number } | null)?.movimentos ?? 0) }
 }
 
+// ------------------------------------------------------------ editar kit montado
+// Cada ação mexe no estoque na hora, pelas funções do banco (FEFO, custo do lote, livro de
+// controlados, tudo numa transação). A tela não calcula baixa nenhuma.
+
+const rpcKit = async (fn: string, args: Record<string, unknown>) => {
+  const { data, error } = await assertClient().rpc(fn, args)
+  if (error) throw new Error(error.message)
+  return data
+}
+
+/** Põe um item no kit (a cirurgia pediu mais). Baixa na hora. */
+export async function adicionarItemKit(payload: {
+  kitId: string
+  itemId: string
+  qty: number
+  avulso?: boolean
+  cobrancaCents?: number
+}): Promise<string> {
+  return String(
+    await rpcKit('stock_kit_adicionar_item', {
+      p_kit_id: payload.kitId,
+      p_item_id: payload.itemId,
+      p_qty: payload.qty,
+      p_avulso: payload.avulso ?? true,
+      p_cobranca_cents: Math.max(0, Math.round(payload.cobrancaCents ?? 0)),
+    }),
+  )
+}
+
+/** Muda quantidade (baixa ou devolve a diferença), cobrança e avulso de uma linha. */
+export async function alterarLinhaKit(payload: {
+  kitItemId: string
+  qty: number
+  cobrancaCents?: number | null
+  avulso?: boolean | null
+}): Promise<void> {
+  await rpcKit('stock_kit_alterar_linha', {
+    p_kit_item_id: payload.kitItemId,
+    p_qty: payload.qty,
+    p_cobranca_cents: payload.cobrancaCents == null ? null : Math.max(0, Math.round(payload.cobrancaCents)),
+    p_avulso: payload.avulso ?? null,
+  })
+}
+
+/** Tira a linha do kit; o que ainda estava fora volta ao estoque. */
+export async function removerLinhaKit(kitItemId: string): Promise<void> {
+  await rpcKit('stock_kit_remover_linha', { p_kit_item_id: kitItemId })
+}
+
+/** Exclui o kit lançado errado: devolve o que estiver fora e apaga o registro. */
+export async function excluirKit(kitId: string): Promise<void> {
+  await rpcKit('stock_kit_excluir', { p_kit_id: kitId })
+}
+
+/** Paciente, procedimento e data do kit. Não mexe no estoque. */
+export async function atualizarKit(payload: {
+  id: string
+  leadId: string | null
+  clinicSaleId?: string | null
+  patientName: string | null
+  procedureLabel: string | null
+  scheduledFor: string | null
+}): Promise<void> {
+  const { error } = await assertClient()
+    .from('stock_kits')
+    .update({
+      ...(payload.clinicSaleId !== undefined ? { clinic_sale_id: payload.clinicSaleId } : {}),
+      lead_id: payload.leadId,
+      patient_name: payload.patientName?.trim() || null,
+      procedure_label: payload.procedureLabel?.trim() || null,
+      scheduled_for: payload.scheduledFor || null,
+    })
+    .eq('id', payload.id)
+  if (error) throw new Error(error.message)
+}
+
 /** Troca nome e itens do modelo. Kits já montados guardam as próprias linhas e não mudam. */
 export async function updateKitTemplate(payload: {
   id: string
@@ -564,36 +646,6 @@ export async function logControlledExit(payload: {
   })
   if (error) throw new Error(error.message)
 }
-
-/**
- * Imprime um HTML sem abrir janela. Era `window.open(..., 'noopener')`, e com `noopener` o
- * navegador devolve null mesmo quando abre a aba: a tela sempre dizia "Permita pop-ups".
- * O iframe escondido imprime só o documento dele e some depois.
- */
-export function imprimirHtml(html: string): void {
-  const frame = document.createElement('iframe')
-  frame.setAttribute('aria-hidden', 'true')
-  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'
-  document.body.appendChild(frame)
-  const doc = frame.contentDocument
-  if (!doc || !frame.contentWindow) {
-    frame.remove()
-    throw new Error('Não foi possível preparar a impressão.')
-  }
-  doc.open()
-  doc.write(html)
-  doc.close()
-  const imprimir = () => {
-    frame.contentWindow?.focus()
-    frame.contentWindow?.print()
-    window.setTimeout(() => frame.remove(), 60_000)
-  }
-  if (doc.readyState === 'complete') window.setTimeout(imprimir, 50)
-  else frame.addEventListener('load', imprimir, { once: true })
-}
-
-const escaparHtml = (v: string) =>
-  v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
 
 /** Conta do paciente a partir do kit (itens usados + avulsos + acréscimos). */
 export function printKitPatientBill(kit: StockKit, itemNames: Map<string, string>): void {

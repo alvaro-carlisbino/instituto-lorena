@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Ban, ChevronDown, MoreHorizontal, PackageCheck, Printer, RotateCcw, ShieldAlert, Undo2 } from 'lucide-react'
+import { Ban, ChevronDown, MoreHorizontal, PackageCheck, Pencil, Printer, RotateCcw, ShieldAlert, Trash2, Undo2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -17,7 +17,7 @@ import { STATUS_KIT, formatBRL, formatQtd } from '@/components/kits/kitUi'
 import { podeVoltar } from '@/lib/kitMontagem'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
-import { type KitCost, type KitStatus, type StockKit, cancelKit, printKitPatientBill } from '@/services/estoqueKits'
+import { type KitCost, type KitStatus, type StockKit, cancelKit, excluirKit, printKitPatientBill } from '@/services/estoqueKits'
 
 type Filtro = 'abertos' | KitStatus | 'todos'
 
@@ -31,6 +31,7 @@ export function KitsLista({
   lastCosts,
   loading,
   onRegistrarUso,
+  onEditar,
   onMudou,
 }: {
   kits: StockKit[]
@@ -39,12 +40,14 @@ export function KitsLista({
   lastCosts: Map<string, number>
   loading: boolean
   onRegistrarUso: (kit: StockKit) => void
+  onEditar: (kit: StockKit) => void
   onMudou: () => void
 }) {
   const abertos = kits.filter((k) => k.status === 'montado').length
   const [filtro, setFiltro] = useState<Filtro>(abertos > 0 ? 'abertos' : 'todos')
   const [aberto, setAberto] = useState<string | null>(null)
   const [cancelando, setCancelando] = useState<StockKit | null>(null)
+  const [excluindo, setExcluindo] = useState<StockKit | null>(null)
 
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
   const nomes = useMemo(() => new Map(items.map((i) => [i.id, i.name] as const)), [items])
@@ -66,6 +69,17 @@ export function KitsLista({
       onMudou()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao cancelar')
+    }
+  }
+
+  const excluir = async (kit: StockKit) => {
+    setExcluindo(null)
+    try {
+      await excluirKit(kit.id)
+      toast.success('Kit excluído.')
+      onMudou()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao excluir')
     }
   }
 
@@ -161,6 +175,11 @@ export function KitsLista({
                       <MoreHorizontal className="size-4" aria-hidden />
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="min-w-48">
+                      {kit.status !== 'cancelado' ? (
+                        <DropdownMenuItem onClick={() => onEditar(kit)}>
+                          <Pencil className="size-4" aria-hidden /> Editar kit e cobranças
+                        </DropdownMenuItem>
+                      ) : null}
                       <DropdownMenuItem onClick={() => imprimir(kit)}>
                         <Printer className="size-4" aria-hidden /> Conta do paciente (PDF)
                       </DropdownMenuItem>
@@ -169,14 +188,15 @@ export function KitsLista({
                           <Undo2 className="size-4" aria-hidden /> Devolver sobra
                         </DropdownMenuItem>
                       ) : null}
+                      <DropdownMenuSeparator />
                       {kit.status !== 'cancelado' ? (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem variant="destructive" onClick={() => setCancelando(kit)}>
-                            <Ban className="size-4" aria-hidden /> Cancelar kit
-                          </DropdownMenuItem>
-                        </>
+                        <DropdownMenuItem variant="destructive" onClick={() => setCancelando(kit)}>
+                          <Ban className="size-4" aria-hidden /> Cancelar kit
+                        </DropdownMenuItem>
                       ) : null}
+                      <DropdownMenuItem variant="destructive" onClick={() => setExcluindo(kit)}>
+                        <Trash2 className="size-4" aria-hidden /> Excluir kit
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -189,6 +209,11 @@ export function KitsLista({
                   ) : podeDevolver ? (
                     <Button size="sm" variant="outline" className="h-8" onClick={() => onRegistrarUso(kit)}>
                       <RotateCcw className="size-4" aria-hidden /> Devolver sobra
+                    </Button>
+                  ) : null}
+                  {kit.status !== 'cancelado' ? (
+                    <Button size="sm" variant="outline" className="h-8" onClick={() => onEditar(kit)}>
+                      <Pencil className="size-4" aria-hidden /> Editar
                     </Button>
                   ) : null}
                   <Button size="sm" variant="ghost" className="ml-auto h-8 text-muted-foreground" onClick={() => setAberto(expandido ? null : kit.id)}>
@@ -241,6 +266,20 @@ export function KitsLista({
         confirmLabel="Cancelar kit"
         cancelLabel="Voltar"
         onConfirm={() => cancelando && void cancelar(cancelando)}
+      />
+
+      <ConfirmDialog
+        open={excluindo != null}
+        onOpenChange={(open) => !open && setExcluindo(null)}
+        title="Excluir este kit?"
+        description={
+          excluindo?.status === 'cancelado'
+            ? 'O kit já foi cancelado e o material já voltou. Ele some da lista.'
+            : 'Tudo que ainda está fora volta ao estoque e o kit some da lista e da conta do paciente.'
+        }
+        confirmLabel="Excluir kit"
+        cancelLabel="Voltar"
+        onConfirm={() => excluindo && void excluir(excluindo)}
       />
     </div>
   )
