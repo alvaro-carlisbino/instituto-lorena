@@ -1,11 +1,19 @@
 import { diaLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Boxes, Plus, ArrowDownToLine, ArrowUpFromLine, History, ScanBarcode, ShieldAlert } from 'lucide-react'
+import { Boxes, Plus, ArrowDownToLine, ArrowUpFromLine, History, MoreHorizontal, Pencil, ScanBarcode, ShieldAlert } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
+import { cn } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -93,6 +101,8 @@ export function EstoquePage() {
   }, [isSalesPolo])
   const [form, setForm] = useState({ ...EMPTY_ITEM })
   const [editId, setEditId] = useState<string | null>(null)
+  // O item inteiro: salvar precisa devolver observação e ativo como estavam (o upsert zera o que não recebe).
+  const [editando, setEditando] = useState<StockItem | null>(null)
   const [saving, setSaving] = useState(false)
   const [filter, setFilter] = useState('')
 
@@ -140,7 +150,8 @@ export function EstoquePage() {
         i.name.toLowerCase().includes(q) ||
         (i.category ?? '').toLowerCase().includes(q) ||
         (i.sku ?? '').toLowerCase().includes(q) ||
-        (i.barcode ?? '').includes(q),
+        (i.barcode ?? '').includes(q) ||
+        i.aliases.some((a) => a.toLowerCase().includes(q)),
     )
   }, [items, filter])
 
@@ -151,7 +162,7 @@ export function EstoquePage() {
     if (!code) return
     setCameraOpen(false)
     setScanCode('')
-    const found = items.find((i) => i.barcode === code) ?? items.find((i) => (i.sku ?? '') === code)
+    const found = acharItemPorCodigo(items, code)
     if (found) {
       openMove(found, 'entrada')
     } else {
@@ -159,6 +170,18 @@ export function EstoquePage() {
       toast.info(`Código ${code} não cadastrado, já deixei preenchido no formulário de novo item.`)
     }
   }
+
+  // As unidades que o estoque usa de verdade (UN, CX, FR, AMP...). A lista fixa era minúscula
+  // ("un", "cx") e o item gravado como "UN" abria a edição com o campo vazio.
+  const unidades = useMemo(() => {
+    const vistas = new Map<string, string>()
+    for (const u of ['UN', 'CX', 'PCT', 'FR', 'AMP', 'ML', 'L', 'G', 'KG', 'RL', 'PAR', ...items.map((i) => i.unit)]) {
+      const chave = (u ?? '').trim().toUpperCase()
+      if (chave && !vistas.has(chave)) vistas.set(chave, (u ?? '').trim())
+    }
+    if (form.unit && !vistas.has(form.unit.trim().toUpperCase())) vistas.set(form.unit.trim().toUpperCase(), form.unit)
+    return [...vistas.values()]
+  }, [items, form.unit])
 
   const belowMin = items.filter((i) => i.minQty > 0 && i.qty < i.minQty)
 
@@ -203,10 +226,13 @@ export function EstoquePage() {
         minQty: form.minQty.trim() ? Number(form.minQty.replace(',', '.')) : 0,
         controlled: form.controlled,
         blingProductId: form.blingProductId || null,
+        // Sem isso, editar o nome apagava a observação do item e reativava item desativado.
+        ...(editando ? { note: editando.note, active: editando.active } : {}),
       })
       toast.success(editId ? `Item "${form.name.trim()}" atualizado.` : `Item "${form.name.trim()}" cadastrado.`)
       setForm({ ...EMPTY_ITEM })
       setEditId(null)
+      setEditando(null)
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao salvar item')
@@ -217,6 +243,7 @@ export function EstoquePage() {
 
   const openEdit = (item: StockItem) => {
     setEditId(item.id)
+    setEditando(item)
     setForm({
       name: item.name,
       sku: item.sku ?? '',
@@ -227,11 +254,11 @@ export function EstoquePage() {
       controlled: item.controlled,
       blingProductId: item.blingProductId ?? '',
     })
-    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const cancelEdit = () => {
     setEditId(null)
+    setEditando(null)
     setForm({ ...EMPTY_ITEM })
   }
 
@@ -277,6 +304,125 @@ export function EstoquePage() {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar histórico')
     }
   }
+
+  const camposDoItem = (
+    <>
+            <div className="space-y-1.5">
+              <Label htmlFor="st-name">Nome</Label>
+              <Input
+                id="st-name"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="Ex.: Luva nitrílica M"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="st-cat">Categoria</Label>
+                <Input
+                  id="st-cat"
+                  value={form.category}
+                  onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                  placeholder="Ex.: Descartáveis"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="st-sku">Código/SKU</Label>
+                <Input
+                  id="st-sku"
+                  value={form.sku}
+                  onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))}
+                  placeholder="Opcional"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="st-barcode" className="flex items-center gap-1.5">
+                <ScanBarcode className="size-3.5" /> Código de barras (EAN)
+              </Label>
+              <Input
+                id="st-barcode"
+                value={form.barcode}
+                onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))}
+                placeholder="Bipe com o leitor ou digite, a NF-e preenche sozinha"
+                inputMode="numeric"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="st-unit">Unidade</Label>
+                <Select value={form.unit} onValueChange={(v) => setForm((f) => ({ ...f, unit: v ?? 'un' }))}>
+                  <SelectTrigger id="st-unit">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {unidades.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="st-min">Estoque mínimo</Label>
+                <Input
+                  id="st-min"
+                  value={form.minQty}
+                  onChange={(e) => setForm((f) => ({ ...f, minQty: e.target.value }))}
+                  placeholder="0"
+                  inputMode="decimal"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="st-controlled"
+                checked={form.controlled}
+                onCheckedChange={(checked) => setForm((f) => ({ ...f, controlled: checked }))}
+              />
+              <Label htmlFor="st-controlled" className="gap-1.5 font-normal">
+                <ShieldAlert className="size-3.5 text-amber-500" aria-hidden /> Substância controlada
+              </Label>
+            </div>
+            {isSalesPolo ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="st-bling" className="flex items-center gap-1.5">
+                  <Boxes className="size-3.5" aria-hidden /> Produto no Bling (vínculo)
+                </Label>
+                <Select
+                  value={form.blingProductId || '__none__'}
+                  onValueChange={(v) => setForm((f) => ({ ...f, blingProductId: v === '__none__' ? '' : (v ?? '') }))}
+                >
+                  <SelectTrigger id="st-bling">
+                    <SelectValue placeholder="Sem vínculo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sem vínculo</SelectItem>
+                    {blingItems.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.nome}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Vinculado, a entrada por NF-e/compra também dá entrada no Bling (saldo que vende).
+                </p>
+              </div>
+            ) : null}
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={handleSave} disabled={saving}>
+                {saving ? 'Salvando…' : editId ? 'Salvar alterações' : 'Cadastrar item'}
+              </Button>
+              {editId ? (
+                <Button variant="outline" onClick={cancelEdit} disabled={saving}>
+                  Cancelar
+                </Button>
+              ) : null}
+            </div>
+    </>
+  )
 
   return (
     <AppLayout
@@ -401,124 +547,15 @@ export function EstoquePage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <Plus className="size-4 text-primary" /> {editId ? 'Editar item' : 'Novo item'}
+              <Plus className="size-4 text-primary" /> Novo item
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="st-name">Nome</Label>
-              <Input
-                id="st-name"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Ex.: Luva nitrílica M"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="st-cat">Categoria</Label>
-                <Input
-                  id="st-cat"
-                  value={form.category}
-                  onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-                  placeholder="Ex.: Descartáveis"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="st-sku">Código/SKU</Label>
-                <Input
-                  id="st-sku"
-                  value={form.sku}
-                  onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))}
-                  placeholder="Opcional"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="st-barcode" className="flex items-center gap-1.5">
-                <ScanBarcode className="size-3.5" /> Código de barras (EAN)
-              </Label>
-              <Input
-                id="st-barcode"
-                value={form.barcode}
-                onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))}
-                placeholder="Bipe com o leitor ou digite, a NF-e preenche sozinha"
-                inputMode="numeric"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="st-unit">Unidade</Label>
-                <Select value={form.unit} onValueChange={(v) => setForm((f) => ({ ...f, unit: v ?? 'un' }))}>
-                  <SelectTrigger id="st-unit">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {['un', 'cx', 'pct', 'ml', 'g', 'kg', 'frasco', 'ampola'].map((u) => (
-                      <SelectItem key={u} value={u}>
-                        {u}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="st-min">Estoque mínimo</Label>
-                <Input
-                  id="st-min"
-                  value={form.minQty}
-                  onChange={(e) => setForm((f) => ({ ...f, minQty: e.target.value }))}
-                  placeholder="0"
-                  inputMode="decimal"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="st-controlled"
-                checked={form.controlled}
-                onCheckedChange={(checked) => setForm((f) => ({ ...f, controlled: checked }))}
-              />
-              <Label htmlFor="st-controlled" className="gap-1.5 font-normal">
-                <ShieldAlert className="size-3.5 text-amber-500" aria-hidden /> Substância controlada
-              </Label>
-            </div>
-            {isSalesPolo ? (
-              <div className="space-y-1.5">
-                <Label htmlFor="st-bling" className="flex items-center gap-1.5">
-                  <Boxes className="size-3.5" aria-hidden /> Produto no Bling (vínculo)
-                </Label>
-                <Select
-                  value={form.blingProductId || '__none__'}
-                  onValueChange={(v) => setForm((f) => ({ ...f, blingProductId: v === '__none__' ? '' : (v ?? '') }))}
-                >
-                  <SelectTrigger id="st-bling">
-                    <SelectValue placeholder="Sem vínculo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Sem vínculo</SelectItem>
-                    {blingItems.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.nome}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-[11px] text-muted-foreground">
-                  Vinculado, a entrada por NF-e/compra também dá entrada no Bling (saldo que vende).
-                </p>
-              </div>
-            ) : null}
-            <div className="flex gap-2">
-              <Button className="flex-1" onClick={handleSave} disabled={saving}>
-                {saving ? 'Salvando…' : editId ? 'Salvar alterações' : 'Cadastrar item'}
-              </Button>
-              {editId ? (
-                <Button variant="outline" onClick={cancelEdit} disabled={saving}>
-                  Cancelar
-                </Button>
-              ) : null}
-            </div>
+            {editId ? (
+              <p className="text-sm text-muted-foreground">Editando “{form.name}” na janela aberta.</p>
+            ) : (
+              camposDoItem
+            )}
           </CardContent>
         </Card>
 
@@ -583,7 +620,7 @@ export function EstoquePage() {
                       <TableHead>Item</TableHead>
                       <TableHead className="w-[10rem]">Categoria</TableHead>
                       <TableHead className="w-[7rem] text-right">Saldo</TableHead>
-                      <TableHead className="w-[6rem] text-right">Ações</TableHead>
+                      <TableHead className="w-[3.5rem] text-right"><span className="sr-only">Ações</span></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -593,7 +630,9 @@ export function EstoquePage() {
                         <TableRow key={item.id}>
                           <TableCell>
                             <div className="flex min-w-0 items-center gap-1.5 font-medium">
-                              <span className="truncate" title={item.name}>{item.name}</span>
+                              <button type="button" className="truncate text-left hover:underline" title={`Editar ${item.name}`} onClick={() => openEdit(item)}>
+                                {item.name}
+                              </button>
                               {item.controlled ? <ShieldAlert className="size-3.5 shrink-0 text-amber-500" /> : null}
                             </div>
                             {item.sku || item.barcode ? (
@@ -609,25 +648,28 @@ export function EstoquePage() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            <div className="flex justify-end gap-1">
-                              <Button size="sm" variant="outline" onClick={() => openMove(item, 'entrada')}>
-                                <ArrowDownToLine className="size-3.5" /> Entrada
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => openMove(item, 'saida')}>
-                                <ArrowUpFromLine className="size-3.5" /> Saída
-                              </Button>
-                              <Button
-                                size="icon-sm"
-                                variant="ghost"
-                                onClick={() => void openHistory(item)}
-                                aria-label={`Histórico de ${item.name}`}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger
+                                className={cn(buttonVariants({ variant: 'ghost', size: 'icon' }), 'ml-auto')}
+                                aria-label={`Ações de ${item.name}`}
                               >
-                                <History className="size-3.5" aria-hidden />
-                              </Button>
-                              <Button size="sm" variant="ghost" onClick={() => openEdit(item)}>
-                                Editar
-                              </Button>
-                            </div>
+                                <MoreHorizontal className="size-4" aria-hidden />
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="min-w-40">
+                                <DropdownMenuItem onClick={() => openEdit(item)}>
+                                  <Pencil className="size-4" aria-hidden /> Editar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openMove(item, 'entrada')}>
+                                  <ArrowDownToLine className="size-4" aria-hidden /> Entrada
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openMove(item, 'saida')}>
+                                  <ArrowUpFromLine className="size-4" aria-hidden /> Saída
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => void openHistory(item)}>
+                                  <History className="size-4" aria-hidden /> Histórico
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       )
@@ -639,6 +681,16 @@ export function EstoquePage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={editId != null} onOpenChange={(open) => (!open && !saving ? cancelEdit() : null)}>
+        <DialogContent className="sm:max-w-md max-sm:max-h-dvh">
+          <DialogHeader>
+            <DialogTitle>Editar item</DialogTitle>
+            <DialogDescription>{editando?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">{camposDoItem}</div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={moveItem != null} onOpenChange={(open) => (!open ? setMoveItem(null) : null)}>
         <DialogContent className="sm:max-w-md">

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { SearchPicker } from '@/components/ui/search-picker'
+import { produtosParaBusca } from '@/components/kits/kitUi'
 import { toast } from 'sonner'
 import { FilePlus2, Plus, Printer, Trash2 } from 'lucide-react'
 
@@ -190,30 +192,20 @@ export function ContaCirurgicaPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select
-                    value={line.stockItemId || 'livre'}
-                    onValueChange={(v) => {
-                      const id = !v || v === 'livre' ? '' : v
-                      const name = id ? itemName.get(id) ?? '' : ''
+                  <SearchPicker
+                    size="sm"
+                    title="Item de estoque"
+                    placeholder="Item de estoque (opcional)"
+                    searchPlaceholder="Digite o nome, SKU ou código…"
+                    items={produtosParaBusca(items)}
+                    value={line.stockItemId ? { id: line.stockItemId, label: itemName.get(line.stockItemId) ?? 'Item' } : null}
+                    onPick={(p) =>
                       setLines((prev) =>
-                        prev.map((r, j) =>
-                          j === i ? { ...r, stockItemId: id, description: r.description || name } : r,
-                        ),
+                        prev.map((r, j) => (j === i ? { ...r, stockItemId: p.id, description: r.description || p.label } : r)),
                       )
-                    }}
-                  >
-                    <SelectTrigger className="h-8">
-                      <SelectValue placeholder="Item de estoque (opcional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="livre">Sem vínculo de estoque</SelectItem>
-                      {items.map((it) => (
-                        <SelectItem key={it.id} value={it.id}>
-                          {it.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    }
+                    onClear={() => setLines((prev) => prev.map((r, j) => (j === i ? { ...r, stockItemId: '' } : r)))}
+                  />
                   <Input
                     className="h-8"
                     value={line.description}

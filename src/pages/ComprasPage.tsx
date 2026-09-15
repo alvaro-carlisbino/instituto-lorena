@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { SearchPicker } from '@/components/ui/search-picker'
+import { produtosParaBusca } from '@/components/kits/kitUi'
 import { toast } from 'sonner'
 import { ClipboardList, Plus, Trash2, Truck, Check, ShoppingCart, Ban } from 'lucide-react'
 
@@ -312,19 +314,16 @@ export function ComprasPage() {
               <Label>Itens da OC</Label>
               {rows.map((row, i) => (
                 <div key={i} className="space-y-1.5 rounded-md border border-border p-2.5">
-                  <Select value={row.itemId || 'livre'} onValueChange={(v) => pickStockItem(i, !v || v === 'livre' ? '' : v)}>
-                    <SelectTrigger className="h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="livre">Item livre (sem vínculo de estoque)</SelectItem>
-                      {stockItems.map((it) => (
-                        <SelectItem key={it.id} value={it.id}>
-                          {it.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchPicker
+                    size="sm"
+                    title="Item de estoque"
+                    placeholder="Item livre (sem vínculo de estoque)"
+                    searchPlaceholder="Digite o nome, SKU ou código…"
+                    items={produtosParaBusca(stockItems)}
+                    value={row.itemId ? { id: row.itemId, label: stockItems.find((it) => it.id === row.itemId)?.name ?? 'Item' } : null}
+                    onPick={(p) => pickStockItem(i, p.id)}
+                    onClear={() => pickStockItem(i, '')}
+                  />
                   <Input
                     value={row.description}
                     onChange={(e) => setRow(i, { description: e.target.value })}
