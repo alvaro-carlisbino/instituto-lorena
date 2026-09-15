@@ -524,6 +524,16 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: (ctx) => canFinance(ctx) && isClinic(ctx) && canBoards(ctx),
   },
   {
+    id: 'resultado-cirurgias',
+    path: '/resultado-cirurgias',
+    label: 'Resultado por cirurgia',
+    icon: TrendingUp,
+    group: 'financeiro',
+    keywords: ['lucro', 'custo', 'margem', 'cirurgia', 'kit', 'conta do paciente', 'resultado', 'protocolo'],
+    // Mesma régua de "Cirurgia foi paga?": quem vende e cobra a cirurgia vê o resultado dela.
+    visible: (ctx) => isClinic(ctx) && canBoards(ctx) && (canFinance(ctx) || canRoute(ctx)),
+  },
+  {
     id: 'cirurgia-paga',
     path: '/cirurgia-paga',
     label: 'Cirurgia foi paga?',

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient'
+import { imprimirHtml } from '@/lib/exportar'
 
 const assertClient = () => {
   if (!supabase) throw new Error('Sistema não configurado.')
@@ -249,10 +250,7 @@ export function printSurgeryAccountPdf(
       <div>Pagamentos/descontos: ${brl(totals.paymentsCents)}</div>
       <div><strong>Saldo: ${brl(totals.balanceCents)}</strong></div>
     </div>
-    <script>window.onload=()=>{window.print()}</script>
     </body></html>`
-  const w = window.open('', '_blank', 'noopener,noreferrer,width=900,height=700')
-  if (!w) throw new Error('Permita pop-ups para imprimir o PDF.')
-  w.document.write(html)
-  w.document.close()
+  // Era window.open com 'noopener', que devolve null sempre: a tela pedia pop-up e não imprimia.
+  imprimirHtml(html)
 }

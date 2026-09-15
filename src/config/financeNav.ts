@@ -70,6 +70,7 @@ export const FINANCE_GROUPS: FinanceGroup[] = [
     label: 'Conferir',
     tabs: [
       { to: '/cirurgia-paga', label: 'Cirurgia foi paga?', polo: 'clinica', semFinanceiro: true },
+      { to: '/resultado-cirurgias', label: 'Resultado por cirurgia', polo: 'clinica', semFinanceiro: true },
       { to: '/caixa-dinheiro', label: 'Caixa em dinheiro', polo: 'clinica' },
       { to: '/alertas-pagamento', label: 'Alertas de pagamento' },
     ],
