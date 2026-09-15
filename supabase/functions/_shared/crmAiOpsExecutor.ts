@@ -4,7 +4,7 @@ import { insertInteraction } from './crm.ts'
 import { notifyAgents } from './notifyAgents.ts'
 import { shospGetAgenda, shospSchedule } from './shosp.ts'
 import { createPagBankCheckout, PAGBANK_KITS, normalizeKitKey } from './pagbank.ts'
-import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, collectAddons, collectCatalogItems, CATALOG_DEFAULT_BOX, type CatalogRejeitado, type CatalogSaleItem } from './rede.ts'
+import { createRedeIntent, createRedePix, pixQrImageDataUri, resolveRedeKit, REDE_KIT_MAX_INSTALLMENTS, REDE_KITS, inferRedeKit, AI_ADDONS, collectAddons, collectCatalogItems, CATALOG_DEFAULT_BOX, type CatalogRejeitado, type CatalogSaleItem } from './rede.ts'
 import { formatBRLCents, normalizeCouponCode } from './coupons.ts'
 import { applyFreightMarkup, boxForOrder, declaredValueCentsForKit, isFreeShippingKit, localDeliveryCents, melhorEnvioConfigured, pickFreteOption, quoteFreteMelhorEnvio } from './melhorEnvio.ts'
 import { enrichEnderecoViaCep, isLocalDeliveryCity, resolveCepBrasil } from './cep.ts'
@@ -52,6 +52,26 @@ async function avisaCarrinhoRecusado(
       error: e instanceof Error ? e.message : String(e),
     })
   }
+}
+
+/**
+ * Rastro do que a IA pediu na cobrança (só produto e quantidade, nada do cliente). Até 15/09/2026
+ * o op não ficava em lugar nenhum: o link saía sem o gel e não dava para saber se a IA esqueceu
+ * o item ou se o servidor o descartou.
+ */
+function logOpDeCobranca(type: string, leadId: string, op: Record<string, unknown>): void {
+  const catalogo = Array.isArray(op.catalogo)
+    ? (op.catalogo as Array<Record<string, unknown>>).map((c) => `${String(c?.id ?? '?')}x${String(c?.qty ?? '?')}`)
+    : []
+  console.log('[ia] op de cobrança', {
+    type,
+    leadId,
+    kit: op.kit ?? null,
+    avulsos: Object.fromEntries(Object.keys(AI_ADDONS).filter((k) => op[k] != null).map((k) => [k, op[k]])),
+    catalogo,
+    cupom: op.coupon != null,
+    frete: op.freight_service ?? op.freight_cents ?? null,
+  })
 }
 
 /** Modalidades de entrega canônicas (gravadas em custom_fields.entrega.delivery_mode). */
@@ -350,7 +370,19 @@ export function peelCrmOpsFromModelReply(raw: string): { remainder: string; ops:
   return { remainder, ops }
 }
 
-export type CrmAiActionResult = { type: string; ok: boolean; detail?: string; customerNote?: string; imageUrl?: string; installments?: number }
+export type CrmAiActionResult = {
+  type: string
+  ok: boolean
+  detail?: string
+  customerNote?: string
+  imageUrl?: string
+  installments?: number
+  /**
+   * Cobrança criada (rede_link/rede_pix): id e valores, para o crm-ai-assistant conferir o total
+   * que a IA escreveu contra o que o link cobra antes de mandar. Ver totalPrometidoDiverge.
+   */
+  cobranca?: { id: string; amountCents: number; baseCents: number; freightCents: number }
+}
 
 /** Token para ilike: remove wildcards problemáticos. */
 export function sanitizeLeadSearchToken(raw: string): string {
@@ -920,6 +952,7 @@ export async function executeCrmAiOpsFromModel(
       }
 
       if (type === 'rede_pix' || type === 'pagbank_pix' || type === 'pix' || type === 'pix_qr') {
+        logOpDeCobranca(type, opts.allowedLeadId, op)
         // Pix DIRETO (copia-e-cola + QR) via e.Rede (createRedePix). Aceita kit OU amount_cents,
         // frete e cupom. (`pagbank_pix`/`pix*` são aliases legados — o motor é 100% e.Rede.)
         // (Preço Pix do kit = tabela PAGBANK_KITS, que já é o valor com 5% off.)
@@ -1028,6 +1061,7 @@ export async function executeCrmAiOpsFromModel(
             detail: out.qrText,
             customerNote: pixNote || undefined,
             ...(pixImg ? { imageUrl: pixImg } : {}),
+            cobranca: { id: out.id, amountCents: out.amountCents, baseCents: out.baseCents, freightCents: out.freightCents },
           })
           summaries.push(`Pix gerado via Rede (${pixDesc}${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`)
           // VENDA QUENTE: o cliente recebeu o Pix — avisa o consultor pra acompanhar o fechamento.
@@ -1068,6 +1102,7 @@ export async function executeCrmAiOpsFromModel(
       }
 
       if (type === 'rede_link' || type === 'rede_checkout' || type === 'rede_card') {
+        logOpDeCobranca(type, opts.allowedLeadId, op)
         // Cartão (e.Rede), parcelado até 12x. Aceita kit OU amount_cents+description, e cupom.
         const kitRaw = op.kit != null ? String(op.kit) : ''
         const resolved = kitRaw ? resolveRedeKit(kitRaw) : null
@@ -1169,7 +1204,14 @@ export async function executeCrmAiOpsFromModel(
           })
           const note = couponNote(op.coupon, out.couponCode, out.baseCents, out.discountCents, out.amountCents)
           const linkNote = [note, pickupAdviceNote(snap.entrega)].filter(Boolean).join('\n\n')
-          results.push({ type: 'rede_link', ok: true, detail: out.url, customerNote: linkNote || undefined, installments: effInstallments })
+          results.push({
+            type: 'rede_link',
+            ok: true,
+            detail: out.url,
+            customerNote: linkNote || undefined,
+            installments: effInstallments,
+            cobranca: { id: out.id, amountCents: out.amountCents, baseCents: out.baseCents, freightCents: out.freightCents },
+          })
           summaries.push(
             `Link cartão e.Rede gerado (${description}, até ${effInstallments}x${out.couponCode ? `, cupom ${out.couponCode} -${formatBRLCents(out.discountCents)}` : ''})`,
           )

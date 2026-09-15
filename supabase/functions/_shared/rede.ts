@@ -258,7 +258,8 @@ export async function collectCatalogItems(
   )
   const porId = new Map(cache.map((c) => [String(c.id ?? ''), c]))
   // Os avulsos de marca própria têm caixa medida e preço próprio: se a IA mandar um deles aqui,
-  // deixa o caminho de AI_ADDONS cuidar, senão o item entraria duas vezes no pedido.
+  // deixa o caminho de AI_ADDONS cuidar (o `collectAddons` lê o `catalogo` também), senão o
+  // item entraria duas vezes no pedido.
   const daMarca = new Set(Object.values(AI_ADDONS).map((a) => a.blingProductId))
 
   const items: CatalogSaleItem[] = []
@@ -322,14 +323,89 @@ export function addonExtrasFromItems(items: Array<Record<string, unknown>> | nul
   return out
 }
 
-/** Lê do op quais avulsos foram pedidos e em que quantidade. Ignora zero/negativo/lixo. */
+/**
+ * Lê do op quais avulsos foram pedidos e em que quantidade. Ignora zero/negativo/lixo.
+ *
+ * Aceita o avulso pelos DOIS caminhos que a IA usa: a chave própria (`"gel_sobrancelha":1`) e
+ * a linha dele dentro de `catalogo`, porque o gel e o shampoo também aparecem no bling_catalog
+ * do prompt, com id. O `collectCatalogItems` pula esses ids para não cobrar duas vezes, e até
+ * 15/09/2026 ninguém os pegava do outro lado: a IA combinou kit 5+1 + gel (R$ 1.124,90) e o
+ * link saiu R$ 995,00, só com o kit. Vindo pelos dois caminhos é o MESMO item, então vale a
+ * maior quantidade, não a soma.
+ */
 export function collectAddons(op: Record<string, unknown>): Array<{ key: string; qty: number; addon: (typeof AI_ADDONS)[string] }> {
+  const catalogo = Array.isArray(op.catalogo) ? (op.catalogo as Array<Record<string, unknown>>) : []
   const out: Array<{ key: string; qty: number; addon: (typeof AI_ADDONS)[string] }> = []
   for (const [key, addon] of Object.entries(AI_ADDONS)) {
-    const qty = Math.max(0, Math.floor(Number(op[key]) || 0))
+    const qtyChave = Math.max(0, Math.floor(Number(op[key]) || 0))
+    const qtyCatalogo = catalogo
+      .filter((c) => String(c?.id ?? '').trim() === addon.blingProductId)
+      .reduce((max, c) => Math.max(max, Math.floor(Number(c?.qty) || 0)), 0)
+    const qty = Math.max(qtyChave, qtyCatalogo)
     if (qty > 0) out.push({ key, qty, addon })
   }
   return out
+}
+
+/** "R$ 1.124,90" → 112490. Aceita milhar com ponto e centavos opcionais. */
+function brlParaCents(raw: string): number | null {
+  const m = raw.match(/^(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?$/)
+  if (!m) return null
+  const reais = Number(m[1].replace(/\./g, ''))
+  const cents = m[2] ? Number(m[2].padEnd(2, '0')) : 0
+  return reais * 100 + cents
+}
+
+/**
+ * Os valores que a IA chamou de TOTAL na mensagem que acompanha a cobrança.
+ *
+ * Só conta o que vem logo depois da palavra "total", na mesma frase. Frase que fala do OUTRO
+ * meio de pagamento é ignorada: num link de cartão, "no Pix o total sairia R$ 945,25" não é
+ * promessa sobre o link.
+ */
+export function totaisDaMensagem(texto: string, metodo: 'cartao' | 'pix'): number[] {
+  const t = String(texto ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  const outroMeio = metodo === 'cartao' ? /\bpix\b/ : /\bcartao\b/
+  const out: number[] = []
+  for (const m of t.matchAll(/\btota(?:l|is)\b/g)) {
+    const inicio = m.index ?? 0
+    // Começo da frase: o meio de pagamento costuma vir ANTES ("no Pix o total sairia...").
+    const antes = t.slice(Math.max(0, inicio - 60), inicio)
+    const cortes = [...antes.matchAll(/[\n!?;]|\.\s/g)]
+    const antesNaFrase = cortes.length ? antes.slice((cortes[cortes.length - 1].index ?? 0) + 1) : antes
+    let frase = t.slice(inicio + m[0].length, inicio + m[0].length + 90)
+    const fim = frase.search(/[\n!?;]|\.\s/)
+    if (fim >= 0) frase = frase.slice(0, fim)
+    if (outroMeio.test(antesNaFrase) || outroMeio.test(frase)) continue
+    for (const v of frase.matchAll(/r\$\s*(\d[\d.]*(?:,\d{1,2})?)/g)) {
+      const cents = brlParaCents(v[1].replace(/\.$/, ''))
+      if (cents != null && cents > 0) out.push(cents)
+    }
+  }
+  return out
+}
+
+/**
+ * A mensagem da IA promete um total que a cobrança NÃO cobra?
+ *
+ * Existe porque o op e a prosa saem do mesmo turno mas por caminhos separados: em 15/09/2026 a
+ * IA escreveu "o total é R$ 1.124,90" (kit 5+1 + gel) e o op gerou um link de R$ 995,00. O
+ * cliente só descobre no checkout. Aceita como "bate" o valor cobrado com e sem frete e com e
+ * sem cupom, que são as formas honestas de a IA ter falado do mesmo pedido. Sem "total" na
+ * mensagem não há promessa para conferir, e não bloqueia.
+ */
+export function totalPrometidoDiverge(
+  texto: string,
+  cobranca: { metodo: 'cartao' | 'pix'; cobradoCents: number; baseCents?: number; freteCents?: number },
+): { diverge: boolean; prometidoCents: number | null } {
+  const totais = totaisDaMensagem(texto, cobranca.metodo)
+  if (!totais.length) return { diverge: false, prometidoCents: null }
+  const frete = Math.max(0, Math.round(cobranca.freteCents ?? 0))
+  const cobrado = Math.round(cobranca.cobradoCents)
+  const base = Math.round(cobranca.baseCents ?? cobrado - frete)
+  const aceitos = [cobrado, cobrado - frete, base, base + frete]
+  const bate = totais.some((v) => aceitos.some((a) => Math.abs(v - a) <= 100))
+  return { diverge: !bate, prometidoCents: bate ? null : totais[totais.length - 1] }
 }
 
 /**

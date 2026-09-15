@@ -987,6 +987,26 @@ Deno.serve(async (req) => {
     const preservedAiEnabled =
       state?.ai_enabled !== undefined && state?.ai_enabled !== null ? Boolean(state.ai_enabled) : true
 
+    // ROTINA NÃO É GENTE (15/09/2026). Chamada com a service_role é robô: follow-up,
+    // recuperação de carrinho, reengajamento, cadência de agendamento, confirmação de
+    // pagamento, lembrete de cirurgia. Até aqui todas caíam no "assumi na mão" abaixo e viravam
+    // a conversa para Humano: o follow-up das 10h00 calou o bot, a cliente perguntou "verifique
+    // o valor do link" às 10h02 e ninguém respondeu. Na data eram 125 conversas mudas assim.
+    // O envio de rotina conta como resposta da máquina (last_ai_reply_at, que o follow-up e o
+    // reengajamento já leem como "já falamos") e não mexe em quem é dono da conversa.
+    if (isServiceRole) {
+      await admin
+        .from('crm_conversation_states')
+        .update({ last_ai_reply_at: nowIso(), updated_at: nowIso() })
+        .eq('lead_id', leadId)
+      return json({
+        ok: true,
+        provider: provider.name,
+        externalMessageId,
+        status: sent.status,
+      })
+    }
+
     // "Assumi na mão" vale NA LINHA em que a equipe respondeu. A atendente da clínica
     // responder aqui não pode calar o bot de vendas do Tricopill pra mesma pessoa.
     await setLineConversationMode(admin, {

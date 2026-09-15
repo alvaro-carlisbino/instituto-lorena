@@ -108,7 +108,9 @@ async function temPagamentoPagoRecente(
 import { readZaiConfigForTenant } from '../_shared/tenantLlmConfig.ts'
 import { buildShospAiContext } from '../_shared/shospAiContext.ts'
 import { buildBlingCatalog } from '../_shared/bling.ts'
-import { CATALOG_DEFAULT_BOX, readRedeConfig } from '../_shared/rede.ts'
+import { CATALOG_DEFAULT_BOX, readRedeConfig, totalPrometidoDiverge } from '../_shared/rede.ts'
+import { formatBRLCents } from '../_shared/coupons.ts'
+import { notifyAgents } from '../_shared/notifyAgents.ts'
 import { applyFreightMarkup, boxForKit, declaredValueCentsForKit, isFreeShippingKit, melhorEnvioConfigured, quoteFreteMelhorEnvio } from '../_shared/melhorEnvio.ts'
 import { extractLatestCep, resolveCepBrasil } from '../_shared/cep.ts'
 
@@ -1636,6 +1638,58 @@ Deno.serve(async (req) => {
     }
 
     if (isInternal && context.leadId && actionChunks.length > 0 && reply.trim()) {
+      // TOTAL FALADO x TOTAL COBRADO (15/09/2026). A prosa e o op saem do mesmo turno por
+      // caminhos separados, e nada conferia um contra o outro: a IA escreveu "o total é
+      // R$ 1.124,90" (kit 5+1 + gel) e o link cobrava R$ 995,00. Em 01/09 foi igual com o
+      // shampoo num Pix, e esse foi PAGO sem o shampoo. Aqui, antes de anexar link ou Pix, o
+      // total que a mensagem promete tem que ser o que a cobrança cobra. Não bateu: a cobrança
+      // é cancelada (senão a recuperação de carrinho reenvia o valor errado), o cliente não
+      // recebe o link e a equipe é chamada. Rodado sobre as 182 mensagens de pagamento do bot
+      // até esta data, só marcou as 3 que estavam de fato erradas.
+      for (const chunk of actionChunks) {
+        if ((chunk.type !== 'rede_link' && chunk.type !== 'rede_pix') || !chunk.ok || !chunk.cobranca) continue
+        const metodo = chunk.type === 'rede_pix' ? 'pix' : 'cartao'
+        const conferido = totalPrometidoDiverge(reply, {
+          metodo,
+          cobradoCents: chunk.cobranca.amountCents,
+          baseCents: chunk.cobranca.baseCents,
+          freteCents: chunk.cobranca.freightCents,
+        })
+        if (!conferido.diverge || conferido.prometidoCents == null) continue
+        const prometido = formatBRLCents(conferido.prometidoCents)
+        const cobrado = formatBRLCents(chunk.cobranca.amountCents)
+        console.error('crm-ai-assistant total_divergente', {
+          leadId: context.leadId,
+          cobrancaId: chunk.cobranca.id,
+          metodo,
+          prometidoCents: conferido.prometidoCents,
+          cobradoCents: chunk.cobranca.amountCents,
+        })
+        await dbClient
+          .from('rede_payments')
+          .update({ status: 'canceled' })
+          .eq('id', chunk.cobranca.id)
+          .eq('status', 'pending')
+          .then(() => {}, () => {})
+        await notifyAgents(dbClient, {
+          leadId: context.leadId,
+          kind: 'urgent',
+          title: 'Link da IA saiu com valor errado',
+          body:
+            `A IA combinou ${prometido} na conversa e ${metodo === 'pix' ? 'o Pix' : 'o link'} saiu de ${cobrado}. ` +
+            'A cobrança foi cancelada e NÃO foi enviada. Confira os itens com o cliente e gere de novo.',
+          includeOwner: true,
+          tenantId: tenantId || undefined,
+          dedupeKey: 'total_divergente',
+          dedupeWindowMinutes: 30,
+        }).catch(() => 0)
+        chunk.ok = false
+        chunk.detail = `total_divergente:prometido=${conferido.prometidoCents}:cobrado=${chunk.cobranca.amountCents}:${chunk.cobranca.id}`
+        delete chunk.imageUrl
+        chunk.customerNote =
+          `Opa, antes de te mandar o pagamento conferi aqui e o valor não bateu com o total que te passei (${prometido}) 🙏 ` +
+          'Pra não te cobrar errado, já chamei a equipe pra acertar o seu pedido e te mando certinho, tá? 💚'
+      }
       // shosp_book: o detail já vem formatado "DD/MM/AAAA HH:MM" (não re-parsear como Date).
       const shospBooked = actionChunks.find(
         (c) => c.type === 'shosp_book' && c.ok && typeof c.detail === 'string' && c.detail.length >= 8,

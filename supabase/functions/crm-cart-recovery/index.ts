@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
-import { applyLeadName } from '../_shared/leadName.ts'
+import { applyLeadName, firstNameOrEmpty } from '../_shared/leadName.ts'
 import { sendCartRecoveryEmail } from '../_shared/tricopillEmails.ts'
 import { buildCheckoutUrl } from '../_shared/tenantBrand.ts'
 
@@ -104,6 +104,17 @@ Deno.serve(async (req) => {
     for (const p of (paidRows ?? []) as Array<{ lead_id: string }>) paid.add(p.lead_id)
   }
 
+  // Nome de QUEM CONVERSA, não o do titular da cobrança. O `customer_name` é o nome da nota e
+  // do cartão, e pode ser de outra pessoa: em 15/09/2026 a cliente fechou no nome do marido e
+  // levou "Oi, Fábio!" no WhatsApp dela. O titular só entra quando o card não tem nome de gente.
+  const nomeDoCard = new Map<string, string>()
+  if (leadIds.length) {
+    const { data: leadRows } = await admin.from('leads').select('id, patient_name').in('id', leadIds)
+    for (const l of (leadRows ?? []) as Array<{ id: string; patient_name: string | null }>) {
+      if (firstNameOrEmpty(l.patient_name)) nomeDoCard.set(l.id, String(l.patient_name))
+    }
+  }
+
   const results: Array<Record<string, unknown>> = []
   for (const r of candidates) {
     if (paid.has(r.lead_id)) continue
@@ -116,6 +127,24 @@ Deno.serve(async (req) => {
     else if (step === 1 && ageH >= 24 && lastSentH >= 20) target = 2
     if (!target) continue
 
+    // Cliente ESPERANDO resposta nossa não recebe lembrete de carrinho. A última mensagem dela
+    // é uma pergunta sem resposta, e "deu algum problema?" por cima disso é robô atropelando a
+    // conversa: em 15/09/2026 a cliente escreveu "acho que não foi somado o gel" e 28 min depois
+    // levou o lembrete com o mesmo link errado. Não avança o passo: quando alguém responder, o
+    // lembrete volta a valer na rodada seguinte, se ela ainda não tiver pago.
+    const { data: ultima } = await admin
+      .from('interactions')
+      .select('direction')
+      .eq('lead_id', r.lead_id)
+      .in('direction', ['in', 'out'])
+      .order('happened_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if ((ultima as { direction?: string } | null)?.direction === 'in') {
+      results.push({ id: r.id, lead: r.lead_id, tenant: r.tenant_id, target, skipped: 'cliente_aguardando_resposta' })
+      continue
+    }
+
     // Link no domínio do polo DONO da cobrança (era env global, sempre o da clínica).
     // Polo sem domínio configurado: pula a linha em vez de recuperar carrinho com a marca errada.
     let link: string
@@ -125,7 +154,7 @@ Deno.serve(async (req) => {
       results.push({ id: r.id, lead: r.lead_id, tenant: r.tenant_id, skipped: e instanceof Error ? e.message : String(e) })
       continue
     }
-    const nome = String(r.customer_name ?? '')
+    const nome = nomeDoCard.get(r.lead_id) ?? String(r.customer_name ?? '')
     const desc = r.description ? ` (${r.description})` : ''
     let text: string
     // O nome entra por {nome} (e não por interpolação) pra que `applyLeadName` possa APAGAR
