@@ -348,13 +348,15 @@ async function lancarNota(
 
       if (linhas.length > 0) {
         const { error: payErr } = await admin.from('payable_installments').insert(
-          linhas.map((l) => ({
+          // A chave é única por polo: duplicata em várias parcelas precisa de uma chave por
+          // parcela, senão o banco recusa a nota inteira (Avantimedical NF 38973, 04/set).
+          linhas.map((l, i) => ({
             ...l,
             tenant_id: tenantId,
             supplier_id: fornecedor.id,
             invoice_id: invoiceId,
             status: 'aberto',
-            import_key: `sefaz:${doc.chave}`,
+            import_key: linhas.length > 1 ? `sefaz:${doc.chave}:${i + 1}` : `sefaz:${doc.chave}`,
           })),
         )
         if (payErr) throw new Error(`parcela: ${payErr.message}`)
@@ -496,13 +498,13 @@ Deno.serve(async (req) => {
 
       // ── 2. o XML, enquanto existe ─────────────────────────────────────────────────────
       const { data: semXml } = await admin
-        .from('sefaz_documentos').select('id, chave')
+        .from('sefaz_documentos').select('id, chave, status')
         .eq('tenant_id', tenantId).eq('xml_completo', true).is('xml', null)
         .order('data_emissao', { ascending: false })
         .limit(200)
       let baixados = 0
       let semXmlNaFocus = 0
-      for (const d of (semXml ?? []) as Array<{ id: string; chave: string }>) {
+      for (const d of (semXml ?? []) as Array<{ id: string; chave: string; status: string }>) {
         if (Date.now() > deadline) break
         const xml = await baixarXml(d.chave, basic)
         if (!xml) {
@@ -511,8 +513,17 @@ Deno.serve(async (req) => {
           semXmlNaFocus += 1
           continue
         }
+        // Nota que chegou em resumo já foi lançada no financeiro "sem itens de estoque", e o passo
+        // 3b só pega status 'novo'. Sem voltar para a fila aqui, o XML chegava e os itens nunca
+        // entravam no estoque: foi o que aconteceu com 57 notas entre 17/ago e 11/set (agulha,
+        // luva, campo cirúrgico, punch).
         await admin.from('sefaz_documentos')
-          .update({ xml, xml_baixado_em: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .update({
+            xml,
+            xml_baixado_em: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            ...(d.status === 'lancado' ? { estoque_pendente: true } : {}),
+          })
           .eq('id', d.id)
         baixados += 1
       }
