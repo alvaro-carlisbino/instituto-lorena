@@ -991,7 +991,8 @@ Deno.serve(async (req) => {
     // recuperação de carrinho, reengajamento, cadência de agendamento, confirmação de
     // pagamento, lembrete de cirurgia. Até aqui todas caíam no "assumi na mão" abaixo e viravam
     // a conversa para Humano: o follow-up das 10h00 calou o bot, a cliente perguntou "verifique
-    // o valor do link" às 10h02 e ninguém respondeu. Na data eram 125 conversas mudas assim.
+    // o valor do link" às 10h02 e ninguém respondeu. Na data eram 192 conversas em Humano por
+    // carimbo de rotina (limpeza em 20260915190000_robo_nao_cala_ia.sql).
     // O envio de rotina conta como resposta da máquina (last_ai_reply_at, que o follow-up e o
     // reengajamento já leem como "já falamos") e não mexe em quem é dono da conversa.
     if (isServiceRole) {
