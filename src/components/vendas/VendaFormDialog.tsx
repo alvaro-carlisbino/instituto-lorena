@@ -34,6 +34,7 @@ import {
   listSellerNames,
   updateClinicSale,
 } from '@/services/clinicSales'
+import { type RegraRepasse, acharRegra, calcularRepasse, descreverRegra, listRegrasRepasse } from '@/services/repasseRegras'
 
 const hojeIso = () => {
   const d = new Date()
@@ -107,6 +108,11 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
   const [entradaPaga, setEntradaPaga] = useState(false)
   const [custoMaterial, setCustoMaterial] = useState('')
   const [custoMedico, setCustoMedico] = useState('')
+  const [custoAnestesia, setCustoAnestesia] = useState('')
+  // Digitado à mão vence a regra da pessoa só nesta venda. Sem a marca, quem manda é a regra.
+  const [medicoManual, setMedicoManual] = useState(false)
+  const [anestesiaManual, setAnestesiaManual] = useState(false)
+  const [regras, setRegras] = useState<RegraRepasse[]>([])
   const [imposto, setImposto] = useState('')
   const [custoOutros, setCustoOutros] = useState('')
   const [pagamento, setPagamento] = useState('')
@@ -148,6 +154,9 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       setEntradaPaga(editing.depositPaid)
       setCustoMaterial(showMoney(editing.costMaterialsCents))
       setCustoMedico(showMoney(editing.costDoctorCents))
+      setCustoAnestesia(showMoney(editing.costAnesthesiaCents))
+      setMedicoManual(editing.costDoctorManual)
+      setAnestesiaManual(editing.costAnesthesiaManual)
       setImposto(showMoney(editing.taxCents))
       setCustoOutros(showMoney(editing.costOtherCents))
       setPagamento(editing.paymentMethod ?? '')
@@ -189,6 +198,9 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     setEntradaPaga(false)
     setCustoMaterial('')
     setCustoMedico('')
+    setCustoAnestesia('')
+    setMedicoManual(false)
+    setAnestesiaManual(false)
     setImposto('')
     setCustoOutros('')
     setPagamento('')
@@ -215,6 +227,10 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     listAnesthesiaProviders()
       .then(setAnestesistas)
       .catch(() => setAnestesistas([]))
+    // Sem as regras o formulário só não mostra a prévia: quem calcula de verdade é o banco.
+    listRegrasRepasse()
+      .then(setRegras)
+      .catch(() => setRegras([]))
   }, [open])
 
   // Sugere o mesmo médico para operar, que é o caso comum. Fica editável porque
@@ -227,8 +243,19 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
   // O lucro aparece enquanto ela digita: é a conta que hoje ela faz na
   // calculadora do celular depois de fechar a planilha.
   const valorCents = parseMoney(valor)
+  // Protocolo não tem campo de quem opera: o banco grava quem atendeu (ver toRow), e a regra
+  // procura pelo mesmo nome.
+  const medicoDaRegra = cirurgia ? medicoExecuta || medicoAtendeu : medicoAtendeu
+  const regraMedico = acharRegra(regras, 'medico', kind, medicoDaRegra)
+  const regraAnestesia = cirurgia ? acharRegra(regras, 'anestesia', kind, anestesista) : null
+  const repasseCents = medicoManual ? parseMoney(custoMedico) : calcularRepasse(regraMedico, valorCents)
+  const anestesiaCents = !cirurgia
+    ? 0
+    : anestesiaManual
+      ? parseMoney(custoAnestesia)
+      : calcularRepasse(regraAnestesia, valorCents)
   const custoCents =
-    parseMoney(custoMaterial) + parseMoney(custoMedico) + parseMoney(imposto) + parseMoney(custoOutros)
+    parseMoney(custoMaterial) + repasseCents + anestesiaCents + parseMoney(imposto) + parseMoney(custoOutros)
   const lucroCents = valorCents - custoCents
 
   // Venda antiga com origem escrita à mão continua aparecendo na lista, senão
@@ -273,7 +300,10 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       depositPayee: entradaPara || null,
       depositPaid: entradaPaga,
       costMaterialsCents: parseMoney(custoMaterial),
-      costDoctorCents: parseMoney(custoMedico),
+      costDoctorCents: repasseCents,
+      costDoctorManual: medicoManual,
+      costAnesthesiaCents: anestesiaCents,
+      costAnesthesiaManual: cirurgia && anestesiaManual,
       taxCents: parseMoney(imposto),
       costOtherCents: parseMoney(custoOutros),
       paymentMethod: pagamento || null,
@@ -535,45 +565,6 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
             </div>
           )}
 
-          <div className="space-y-2 rounded-md border border-border p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label>Custos desta venda</Label>
-              <span className="text-sm">
-                Lucro:{' '}
-                <span className={lucroCents < 0 ? 'font-medium text-destructive' : 'font-medium text-emerald-600'}>
-                  {(lucroCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                </span>
-                {valorCents > 0 && custoCents > 0 && (
-                  <span className="ml-1 text-xs text-muted-foreground">
-                    {Math.round((lucroCents / valorCents) * 100)}% de margem
-                  </span>
-                )}
-              </span>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-normal text-muted-foreground">Material</Label>
-                <Input value={custoMaterial} onChange={(e) => setCustoMaterial(e.target.value)} placeholder="0,00" inputMode="decimal" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-normal text-muted-foreground">Repasse do médico</Label>
-                <Input value={custoMedico} onChange={(e) => setCustoMedico(e.target.value)} placeholder="0,00" inputMode="decimal" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-normal text-muted-foreground">Imposto</Label>
-                <Input value={imposto} onChange={(e) => setImposto(e.target.value)} placeholder="0,00" inputMode="decimal" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-normal text-muted-foreground">Outros</Label>
-                <Input value={custoOutros} onChange={(e) => setCustoOutros(e.target.value)} placeholder="0,00" inputMode="decimal" />
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Pode ficar em branco agora e ser preenchido no fechamento — o painel mostra quantas vendas
-              do mês ainda estão sem custo lançado.
-            </p>
-          </div>
-
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Forma de pagamento</Label>
@@ -613,6 +604,75 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
                 </Select>
               </div>
             )}
+          </div>
+
+          <div className="space-y-2 rounded-md border border-border p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label>Custos desta venda</Label>
+              <span className="text-sm">
+                Lucro:{' '}
+                <span className={lucroCents < 0 ? 'font-medium text-destructive' : 'font-medium text-emerald-600'}>
+                  {(lucroCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                </span>
+                {valorCents > 0 && custoCents > 0 && (
+                  <span className="ml-1 text-xs text-muted-foreground">
+                    {Math.round((lucroCents / valorCents) * 100)}% de margem
+                  </span>
+                )}
+              </span>
+            </div>
+            <div className={cirurgia ? 'grid gap-3 sm:grid-cols-5' : 'grid gap-3 sm:grid-cols-4'}>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-normal text-muted-foreground">Material</Label>
+                <Input value={custoMaterial} onChange={(e) => setCustoMaterial(e.target.value)} placeholder="0,00" inputMode="decimal" />
+              </div>
+              <CustoPelaRegra
+                rotulo="Repasse do médico"
+                pessoa={medicoDaRegra}
+                regra={regraMedico}
+                manual={medicoManual}
+                valorCents={repasseCents}
+                texto={custoMedico}
+                onDigitar={(t) => {
+                  setMedicoManual(true)
+                  setCustoMedico(t)
+                }}
+                onUsarRegra={() => {
+                  setMedicoManual(false)
+                  setCustoMedico('')
+                }}
+              />
+              {cirurgia && (
+                <CustoPelaRegra
+                  rotulo="Anestesia"
+                  pessoa={anestesista}
+                  regra={regraAnestesia}
+                  manual={anestesiaManual}
+                  valorCents={anestesiaCents}
+                  texto={custoAnestesia}
+                  onDigitar={(t) => {
+                    setAnestesiaManual(true)
+                    setCustoAnestesia(t)
+                  }}
+                  onUsarRegra={() => {
+                    setAnestesiaManual(false)
+                    setCustoAnestesia('')
+                  }}
+                />
+              )}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-normal text-muted-foreground">Imposto</Label>
+                <Input value={imposto} onChange={(e) => setImposto(e.target.value)} placeholder="0,00" inputMode="decimal" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-normal text-muted-foreground">Outros</Label>
+                <Input value={custoOutros} onChange={(e) => setCustoOutros(e.target.value)} placeholder="0,00" inputMode="decimal" />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Repasse e anestesia saem da regra de cada um (Central de Vendas, botão Repasses). Digitar um valor
+              vale só para esta venda. Material e imposto podem ficar para o fechamento.
+            </p>
           </div>
 
           <div className="space-y-2 rounded-md border border-border p-3">
@@ -697,5 +757,62 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Campo de custo que vem da regra da pessoa. Mostra o valor calculado e diz de onde ele saiu;
+ * digitar por cima vira valor desta venda, e "usar a regra" desfaz.
+ */
+function CustoPelaRegra({
+  rotulo,
+  pessoa,
+  regra,
+  manual,
+  valorCents,
+  texto,
+  onDigitar,
+  onUsarRegra,
+}: {
+  rotulo: string
+  pessoa: string
+  regra: RegraRepasse | null
+  manual: boolean
+  valorCents: number
+  texto: string
+  onDigitar: (texto: string) => void
+  onUsarRegra: () => void
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs font-normal text-muted-foreground">{rotulo}</Label>
+      <Input
+        value={manual ? texto : showMoney(valorCents)}
+        onChange={(e) => onDigitar(e.target.value)}
+        placeholder="0,00"
+        inputMode="decimal"
+      />
+      <p className="text-[11px] leading-tight text-muted-foreground">
+        {manual ? (
+          <>
+            digitado nesta venda
+            {regra && (
+              <>
+                {' · '}
+                <button type="button" className="underline underline-offset-2" onClick={onUsarRegra}>
+                  usar a regra
+                </button>
+              </>
+            )}
+          </>
+        ) : regra ? (
+          descreverRegra(regra)
+        ) : pessoa ? (
+          `sem regra para ${pessoa}`
+        ) : (
+          'escolha quem faz'
+        )}
+      </p>
+    </div>
   )
 }

@@ -64,10 +64,16 @@ export type ClinicSale = {
   confirmationAt: string | null
   confirmationNote: string | null
   costMaterialsCents: number
+  /** Repasse do médico que opera. Sai da regra dele, salvo quando `costDoctorManual`. */
   costDoctorCents: number
+  /** Custo da anestesia. Sai da regra do anestesista, salvo quando `costAnesthesiaManual`. */
+  costAnesthesiaCents: number
+  /** O repasse foi digitado nesta venda e não segue a regra. */
+  costDoctorManual: boolean
+  costAnesthesiaManual: boolean
   taxCents: number
   costOtherCents: number
-  /** Coluna gerada no banco: valor menos os quatro custos. */
+  /** Coluna gerada no banco: valor menos os cinco custos. */
   profitCents: number
   scheduledAt: string | null
   schedulePending: boolean
@@ -228,6 +234,9 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
     confirmationNote: str(r.confirmation_note),
     costMaterialsCents: Number(r.cost_materials_cents ?? 0),
     costDoctorCents: Number(r.cost_doctor_cents ?? 0),
+    costAnesthesiaCents: Number(r.cost_anesthesia_cents ?? 0),
+    costDoctorManual: r.cost_doctor_manual === true,
+    costAnesthesiaManual: r.cost_anesthesia_manual === true,
     taxCents: Number(r.tax_cents ?? 0),
     costOtherCents: Number(r.cost_other_cents ?? 0),
     profitCents: Number(r.profit_cents ?? 0),
@@ -264,7 +273,8 @@ const SALE_COLS =
   'cancel_reason, refund_status, cancel_note, surgery_account_id, srg_surgery_id, created_at, ' +
   'confirmation_status, confirmation_at, confirmation_note, cost_materials_cents, cost_doctor_cents, ' +
   'tax_cents, cost_other_cents, profit_cents, no_date_dismissed_at, no_date_dismissed_reason, ' +
-  'no_patient_dismissed_at, no_patient_dismissed_reason, deposit_paid, contract_signed'
+  'no_patient_dismissed_at, no_patient_dismissed_reason, deposit_paid, contract_signed, ' +
+  'cost_anesthesia_cents, cost_doctor_manual, cost_anesthesia_manual'
 
 export async function listClinicSales(kind?: ClinicSaleKind, limit = 400): Promise<ClinicSale[]> {
   const client = assertClient()
@@ -323,6 +333,10 @@ export type ClinicSaleInput = {
   invoiceIssued?: boolean
   costMaterialsCents?: number | null
   costDoctorCents?: number | null
+  costAnesthesiaCents?: number | null
+  /** Sem `true`, o banco troca o valor pelo da regra ao salvar. */
+  costDoctorManual?: boolean
+  costAnesthesiaManual?: boolean
   taxCents?: number | null
   costOtherCents?: number | null
   scheduledAt?: string | null
@@ -363,7 +377,12 @@ function toRow(input: ClinicSaleInput) {
     ...(input.depositPaid !== undefined && { deposit_paid: input.depositPaid }),
     ...(input.contractSigned !== undefined && { contract_signed: input.contractSigned }),
     cost_materials_cents: Math.max(0, Math.round(input.costMaterialsCents ?? 0)),
+    // Repasse e anestesia só valem o digitado com a marca de manual; sem ela o trigger
+    // `clinic_sales_repasse_pela_regra` recalcula pela regra da pessoa.
     cost_doctor_cents: Math.max(0, Math.round(input.costDoctorCents ?? 0)),
+    cost_anesthesia_cents: Math.max(0, Math.round(input.costAnesthesiaCents ?? 0)),
+    cost_doctor_manual: input.costDoctorManual === true,
+    cost_anesthesia_manual: input.costAnesthesiaManual === true,
     tax_cents: Math.max(0, Math.round(input.taxCents ?? 0)),
     cost_other_cents: Math.max(0, Math.round(input.costOtherCents ?? 0)),
     payment_method: input.paymentMethod || null,
@@ -761,20 +780,23 @@ export function resultadoDasVendas(vendas: ClinicSale[]) {
   let receita = 0
   let material = 0
   let repasse = 0
+  let anestesia = 0
   let imposto = 0
   let outros = 0
   for (const s of vendas) {
     receita += s.valueCents
     material += s.costMaterialsCents
     repasse += s.costDoctorCents
+    anestesia += s.costAnesthesiaCents
     imposto += s.taxCents
     outros += s.costOtherCents
   }
-  const custo = material + repasse + imposto + outros
+  const custo = material + repasse + anestesia + imposto + outros
   return {
     receita,
     material,
     repasse,
+    anestesia,
     imposto,
     outros,
     custo,
@@ -782,7 +804,8 @@ export function resultadoDasVendas(vendas: ClinicSale[]) {
     margem: receita > 0 ? Math.round(((receita - custo) / receita) * 100) : 0,
     /** Quantas vendas ainda não tiveram nenhum custo lançado. */
     semCusto: vendas.filter(
-      (s) => s.costMaterialsCents + s.costDoctorCents + s.taxCents + s.costOtherCents === 0,
+      (s) =>
+        s.costMaterialsCents + s.costDoctorCents + s.costAnesthesiaCents + s.taxCents + s.costOtherCents === 0,
     ).length,
   }
 }

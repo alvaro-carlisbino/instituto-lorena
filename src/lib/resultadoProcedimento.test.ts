@@ -8,6 +8,7 @@ const base = {
   materiaisKitsCents: 0,
   materiaisManualCents: 0,
   custoMedicoCents: 0,
+  custoAnestesiaCents: 0,
   impostoCents: 0,
   outrosCents: 0,
   kits: 0,
@@ -44,10 +45,11 @@ describe('somarContas', () => {
   it('soma receita, custo e lucro de várias linhas', () => {
     const t = somarContas([
       { ...base, kits: 1, materiaisKitsCents: 100_000 },
-      { ...base, receitaCents: 1_000_000, custoMedicoCents: 300_000 },
+      { ...base, receitaCents: 1_000_000, custoMedicoCents: 300_000, custoAnestesiaCents: 250_000 },
     ])
     expect(t.receita).toBe(3_800_000)
-    expect(t.custo).toBe(400_000)
-    expect(t.lucro).toBe(3_400_000)
+    expect(t.anestesia).toBe(250_000)
+    expect(t.custo).toBe(650_000)
+    expect(t.lucro).toBe(3_150_000)
   })
 })

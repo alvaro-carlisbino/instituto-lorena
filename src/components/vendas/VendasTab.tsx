@@ -8,6 +8,7 @@ import {
   Eraser,
   FileSpreadsheet,
   FileWarning,
+  HandCoins,
   Pencil,
   Plus,
   Target,
@@ -43,7 +44,9 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { RegrasRepasseDialog } from '@/components/vendas/RegrasRepasseDialog'
 import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
+import { useTenant } from '@/context/TenantContext'
 import {
   DEPOSIT_PAYEE_LABEL,
   FILA_PENDENCIA_LABEL,
@@ -208,6 +211,8 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [salvandoMeta, setSalvandoMeta] = useState(false)
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState<{ open: boolean; editing: ClinicSale | null }>({ open: false, editing: null })
+  const [regrasAbertas, setRegrasAbertas] = useState(false)
+  const { canViewFinance } = useTenant()
   // Paciente que veio pronto da ficha (botão "Registrar venda"): abre a Nova venda
   // já com ele escolhido. Antes o caminho da ficha para cá não existia, e quem
   // procurava onde marcar a cirurgia vendida caía no cadastro de entrega da LOJA.
@@ -678,7 +683,14 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
       <Card>
         <CardHeader className="gap-3">
           <CardTitle>{kind === 'cirurgia' ? 'Vendas cirúrgicas' : 'Vendas de protocolo'}</CardTitle>
-          <CardAction>
+          <CardAction className="flex flex-wrap justify-end gap-2">
+            {/* Regra de repasse muda o lucro de todas as vendas da pessoa: é da gerência, não da
+                recepção. A Aline vê o valor calculado dentro da venda. */}
+            {canViewFinance && (
+              <Button size="sm" variant="outline" onClick={() => setRegrasAbertas(true)}>
+                <HandCoins className="size-3.5" aria-hidden /> Repasses
+              </Button>
+            )}
             <Button size="sm" onClick={() => setForm({ open: true, editing: null })}>
               <Plus className="size-3.5" aria-hidden /> Nova venda
             </Button>
@@ -963,7 +975,8 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                         )}
                       </TableCell>
                       <TableCell className="hidden text-right whitespace-nowrap lg:table-cell">
-                        {s.costMaterialsCents + s.costDoctorCents + s.taxCents + s.costOtherCents === 0 ? (
+                        {s.costMaterialsCents + s.costDoctorCents + s.costAnesthesiaCents + s.taxCents + s.costOtherCents ===
+                        0 ? (
                           <span className="text-xs text-muted-foreground">sem custo</span>
                         ) : (
                           <>
@@ -1107,11 +1120,14 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
             )}
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
+            <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-7">
               {[
                 { label: 'Faturamento', valor: resultado.receita, tom: '' },
                 { label: 'Material', valor: -resultado.material, tom: 'text-muted-foreground' },
                 { label: 'Repasse médico', valor: -resultado.repasse, tom: 'text-muted-foreground' },
+                ...(kind === 'cirurgia'
+                  ? [{ label: 'Anestesia', valor: -resultado.anestesia, tom: 'text-muted-foreground' }]
+                  : []),
                 { label: 'Imposto', valor: -resultado.imposto, tom: 'text-muted-foreground' },
                 { label: 'Outros', valor: -resultado.outros, tom: 'text-muted-foreground' },
                 {
@@ -1224,6 +1240,14 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           setForm({ open: false, editing: null })
           setPrefill(null)
         }}
+        onSaved={() => void load()}
+      />
+
+      <RegrasRepasseDialog
+        open={regrasAbertas}
+        kind={kind}
+        staff={staff}
+        onClose={() => setRegrasAbertas(false)}
         onSaved={() => void load()}
       />
 

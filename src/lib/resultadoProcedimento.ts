@@ -7,6 +7,7 @@ export type LinhaResultado = {
   materiaisKitsCents: number
   materiaisManualCents: number
   custoMedicoCents: number
+  custoAnestesiaCents: number
   impostoCents: number
   outrosCents: number
   kits: number
@@ -27,7 +28,7 @@ export function contaDoProcedimento(l: LinhaResultado): ContaResultado {
   const materiaisOrigem = l.kits > 0 ? 'kits' : l.materiaisManualCents > 0 ? 'manual' : 'nenhum'
   const materiais = l.kits > 0 ? l.materiaisKitsCents : l.materiaisManualCents
   const receitaTotal = l.receitaCents + l.cobradoKitsCents
-  const custoTotal = materiais + l.custoMedicoCents + l.impostoCents + l.outrosCents
+  const custoTotal = materiais + l.custoMedicoCents + l.custoAnestesiaCents + l.impostoCents + l.outrosCents
   const lucro = receitaTotal - custoTotal
   return {
     receitaTotal,
@@ -46,12 +47,13 @@ export function somarContas(linhas: LinhaResultado[]) {
       acc.receita += c.receitaTotal
       acc.materiais += c.materiais
       acc.medico += l.custoMedicoCents
+      acc.anestesia += l.custoAnestesiaCents
       acc.imposto += l.impostoCents
       acc.outros += l.outrosCents
       acc.custo += c.custoTotal
       acc.lucro += c.lucro
       return acc
     },
-    { receita: 0, materiais: 0, medico: 0, imposto: 0, outros: 0, custo: 0, lucro: 0 },
+    { receita: 0, materiais: 0, medico: 0, anestesia: 0, imposto: 0, outros: 0, custo: 0, lucro: 0 },
   )
 }

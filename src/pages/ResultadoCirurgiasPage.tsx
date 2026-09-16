@@ -99,12 +99,12 @@ export function ResultadoCirurgiasPage() {
   const semCusto = visiveis.filter((l) => l.kind !== 'sem_venda' && contaDoProcedimento(l).custoTotal === 0).length
   const margemTotal = total.receita > 0 ? total.lucro / total.receita : null
 
-  const colunas = ['Data', 'Paciente', 'Procedimento', 'Tipo', 'Prontuário Shosp', 'Receita', 'Cobrado nos kits', 'Materiais', 'Médico', 'Impostos', 'Outros', 'Custo total', 'Lucro', 'Margem %', 'Recebido (Shosp)', 'Kits']
+  const colunas = ['Data', 'Paciente', 'Procedimento', 'Tipo', 'Prontuário Shosp', 'Receita', 'Cobrado nos kits', 'Materiais', 'Médico', 'Anestesia', 'Impostos', 'Outros', 'Custo total', 'Lucro', 'Margem %', 'Recebido (Shosp)', 'Kits']
   const linhaExport = (l: Procedimento) => {
     const c = contaDoProcedimento(l)
     const rec = l.srgSurgeryId != null ? pagamentos.get(l.srgSurgeryId)?.recebidoCents : undefined
     return [dataBr(l.dia), l.paciente, l.procedimento, l.kind === 'sem_venda' ? 'Kit sem venda' : l.kind, l.prontuario ?? '',
-      reais(l.receitaCents), reais(l.cobradoKitsCents), reais(c.materiais), reais(l.custoMedicoCents), reais(l.impostoCents),
+      reais(l.receitaCents), reais(l.cobradoKitsCents), reais(c.materiais), reais(l.custoMedicoCents), reais(l.custoAnestesiaCents), reais(l.impostoCents),
       reais(l.outrosCents), reais(c.custoTotal), reais(c.lucro), c.margem == null ? '' : Math.round(c.margem * 1000) / 10,
       rec == null ? '' : reais(rec), l.kits]
   }
@@ -128,6 +128,7 @@ export function ResultadoCirurgiasPage() {
                   ['Receita', reais(total.receita)],
                   ['Materiais', reais(total.materiais)],
                   ['Médico', reais(total.medico)],
+                  ['Anestesia', reais(total.anestesia)],
                   ['Impostos', reais(total.imposto)],
                   ['Outros custos', reais(total.outros)],
                   ['Lucro', reais(total.lucro)],
@@ -152,7 +153,7 @@ export function ResultadoCirurgiasPage() {
               linhas: visiveis.map((l) => {
                 const c = contaDoProcedimento(l)
                 return [dataBr(l.dia), l.paciente, l.procedimento, formatBRL(c.receitaTotal), formatBRL(c.materiais),
-                  formatBRL(l.custoMedicoCents + l.impostoCents + l.outrosCents), formatBRL(c.lucro), pct(c.margem)]
+                  formatBRL(l.custoMedicoCents + l.custoAnestesiaCents + l.impostoCents + l.outrosCents), formatBRL(c.lucro), pct(c.margem)]
               }),
               rodape: 'Materiais = custo real dos kits (saída menos devolução, pelo custo do lote). Sem kit, vale o material lançado na venda.',
             })
@@ -176,7 +177,7 @@ export function ResultadoCirurgiasPage() {
           { rotulo: 'Custos', valor: formatBRL(total.custo), dica: `materiais ${formatBRL(total.materiais)}` },
           { rotulo: 'Lucro', valor: formatBRL(total.lucro), dica: `margem ${pct(margemTotal)}`, destaque: total.lucro < 0 ? 'neg' : 'pos' },
           { rotulo: 'Recebido (Shosp)', valor: formatBRL(recebido), dica: 'cirurgias com sala vinculada' },
-          { rotulo: 'Médico e impostos', valor: formatBRL(total.medico + total.imposto), dica: `outros ${formatBRL(total.outros)}` },
+          { rotulo: 'Médico, anestesia e impostos', valor: formatBRL(total.medico + total.anestesia + total.imposto), dica: `anestesia ${formatBRL(total.anestesia)} · outros ${formatBRL(total.outros)}` },
         ].map((k) => (
           <div key={k.rotulo} className="rounded-xl border border-border bg-card px-3 py-2.5">
             <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{k.rotulo}</p>
@@ -300,6 +301,7 @@ function ProcedimentoDialog({
 }) {
   const [custos, setCustos] = useState(() => ({
     medico: linha.custoMedicoCents ? String(linha.custoMedicoCents / 100).replace('.', ',') : '',
+    anestesia: linha.custoAnestesiaCents ? String(linha.custoAnestesiaCents / 100).replace('.', ',') : '',
     imposto: linha.impostoCents ? String(linha.impostoCents / 100).replace('.', ',') : '',
     outros: linha.outrosCents ? String(linha.outrosCents / 100).replace('.', ',') : '',
     materiais: linha.materiaisManualCents ? String(linha.materiaisManualCents / 100).replace('.', ',') : '',
@@ -312,6 +314,7 @@ function ProcedimentoDialog({
   const simulada = {
     ...linha,
     custoMedicoCents: cents(custos.medico),
+    custoAnestesiaCents: cents(custos.anestesia),
     impostoCents: cents(custos.imposto),
     outrosCents: cents(custos.outros),
     materiaisManualCents: cents(custos.materiais),
@@ -322,8 +325,11 @@ function ProcedimentoDialog({
     if (!linha.saleId) return
     setSalvando(true)
     try {
+      // Só o que foi alterado vira "digitado à mão"; o resto continua seguindo a regra.
       await salvarCustosDaVenda(linha.saleId, {
-        medicoCents: simulada.custoMedicoCents,
+        medicoCents: simulada.custoMedicoCents !== linha.custoMedicoCents ? simulada.custoMedicoCents : undefined,
+        anestesiaCents:
+          simulada.custoAnestesiaCents !== linha.custoAnestesiaCents ? simulada.custoAnestesiaCents : undefined,
         impostoCents: simulada.impostoCents,
         outrosCents: simulada.outrosCents,
         materiaisManualCents: simulada.materiaisManualCents,
@@ -440,7 +446,8 @@ function ProcedimentoDialog({
               <p className="text-xs text-muted-foreground">Kit sem venda: ligue o kit à venda do paciente para os custos entrarem na conta.</p>
             ) : (
               <div className="grid grid-cols-2 gap-3">
-                {campo('medico', 'Médico / equipe')}
+                {campo('medico', linha.medicoManual ? 'Repasse do médico (digitado)' : 'Repasse do médico (regra)')}
+                {campo('anestesia', linha.anestesiaManual ? 'Anestesia (digitada)' : 'Anestesia (regra)')}
                 {campo('imposto', 'Impostos')}
                 {campo('outros', 'Outros (sala, hotel, taxa)')}
                 {campo('materiais', linha.kits > 0 ? 'Materiais (vem dos kits)' : 'Materiais (sem kit)', linha.kits > 0)}

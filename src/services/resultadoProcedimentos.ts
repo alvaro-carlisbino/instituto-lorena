@@ -19,6 +19,9 @@ export type Procedimento = LinhaResultado & {
   vinculo: 'manual' | 'automatico' | 'sem_kit' | 'sem_venda'
   srgSurgeryId: number | null
   prontuario: string | null
+  /** Repasse e anestesia digitados na venda, fora da regra da pessoa. */
+  medicoManual: boolean
+  anestesiaManual: boolean
 }
 
 export async function listResultadoProcedimentos(de: string, ate: string): Promise<Procedimento[]> {
@@ -37,6 +40,7 @@ export async function listResultadoProcedimentos(de: string, ate: string): Promi
     materiaisKitsCents: Number(r.materiais_kits_cents ?? 0),
     materiaisManualCents: Number(r.materiais_manual_cents ?? 0),
     custoMedicoCents: Number(r.custo_medico_cents ?? 0),
+    custoAnestesiaCents: Number(r.custo_anestesia_cents ?? 0),
     impostoCents: Number(r.imposto_cents ?? 0),
     outrosCents: Number(r.outros_cents ?? 0),
     kits: Number(r.kits ?? 0),
@@ -44,18 +48,39 @@ export async function listResultadoProcedimentos(de: string, ate: string): Promi
     vinculo: (r.vinculo as Procedimento['vinculo']) ?? 'sem_kit',
     srgSurgeryId: r.srg_surgery_id != null ? Number(r.srg_surgery_id) : null,
     prontuario: (r.shosp_prontuario as string | null) ?? null,
+    medicoManual: r.medico_manual === true,
+    anestesiaManual: r.anestesia_manual === true,
   }))
 }
 
-/** Custos lançados na venda. `profit_cents` na tabela é coluna calculada e acompanha sozinho. */
+/**
+ * Custos lançados na venda. `profit_cents` na tabela é coluna calculada e acompanha sozinho.
+ *
+ * Repasse e anestesia só são gravados quando vêm (`undefined` = não mexeu): o valor que a tela
+ * mostrou saiu da regra da pessoa, e regravá-lo marcaria a venda como digitada à mão, que para
+ * de acompanhar a regra.
+ */
 export async function salvarCustosDaVenda(
   saleId: string,
-  custos: { medicoCents: number; impostoCents: number; outrosCents: number; materiaisManualCents: number },
+  custos: {
+    medicoCents?: number
+    anestesiaCents?: number
+    impostoCents: number
+    outrosCents: number
+    materiaisManualCents: number
+  },
 ): Promise<void> {
   const { error } = await assertClient()
     .from('clinic_sales')
     .update({
-      cost_doctor_cents: Math.max(0, Math.round(custos.medicoCents)),
+      ...(custos.medicoCents !== undefined && {
+        cost_doctor_cents: Math.max(0, Math.round(custos.medicoCents)),
+        cost_doctor_manual: true,
+      }),
+      ...(custos.anestesiaCents !== undefined && {
+        cost_anesthesia_cents: Math.max(0, Math.round(custos.anestesiaCents)),
+        cost_anesthesia_manual: true,
+      }),
       tax_cents: Math.max(0, Math.round(custos.impostoCents)),
       cost_other_cents: Math.max(0, Math.round(custos.outrosCents)),
       cost_materials_cents: Math.max(0, Math.round(custos.materiaisManualCents)),
