@@ -21,6 +21,11 @@ export function firstNameOrEmpty(patientName: unknown): string {
   if (!raw || isProviderPlaceholderName(raw) || isPlaceholderName(raw)) return ''
   const token = (raw.split(/\s+/)[0] ?? '').replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '')
   if ((token.match(/\p{L}/gu) ?? []).length < 2) return ''
+  // Nome de gente só tem letra, hífen e apóstrofo. Em 16/set/2026 o follow-up de agendamento
+  // mandou "Boa tarde, Osvaldodonizetebarbosa@gm!": o cadastro guardou o e-mail no nome e o
+  // corte acima só limpa as PONTAS do token. Arroba, dígito, ponto ou sublinhado no meio =
+  // não é nome, e o vocativo some.
+  if (/[^\p{L}\p{M}'’-]/u.test(token)) return ''
   // "MARIA" e "neusabarbosa" saem como vieram do WhatsApp. Só normaliza quando o token está
   // todo numa caixa só: "McKenzie" e "d'Ávila" ficam como a pessoa escreveu.
   return token === token.toUpperCase() || token === token.toLowerCase()

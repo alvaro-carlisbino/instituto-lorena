@@ -114,6 +114,7 @@ type Tarefa = {
   scheduled_for: string
   done_at: string | null
   dismissed_at: string | null
+  created_at: string
 }
 
 /** Nota que a atendente lê na fila, antes de ligar. Sem isso a tarefa é um nome e uma data. */
@@ -231,20 +232,43 @@ Deno.serve(async (req) => {
 
     const { data: tarefas } = await admin
       .from('lead_followups')
-      .select('id, attempt_no, scheduled_for, done_at, dismissed_at')
+      .select('id, attempt_no, scheduled_for, done_at, dismissed_at, created_at')
       .eq('lead_id', lead.lead_id)
-      .order('attempt_no', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(20)
 
     const historico = (tarefas ?? []) as Tarefa[]
-    const aberta = historico.find((t) => !t.done_at && !t.dismissed_at)
+    let aberta = historico.find((t) => !t.done_at && !t.dismissed_at)
+
+    // A cadência é da CONVERSA PARADA, não do lead para sempre. Em 16/set/2026 a leitura das
+    // conversas achou "este é o meu último contato" chegando um dia depois de a pessoa ter
+    // voltado a falar: a contagem somava as tentativas de antes da volta. Quem respondeu
+    // recomeça do zero, e a tarefa aberta de antes da resposta fecha como "Respondeu".
+    const voltouEm = lead.ultima_entrada ? new Date(lead.ultima_entrada).getTime() : null
+    const desdeQueVoltou = voltouEm == null
+      ? historico
+      : historico.filter((t) => new Date(t.created_at).getTime() > voltouEm)
+    if (aberta && voltouEm != null && new Date(aberta.created_at).getTime() < voltouEm) {
+      if (!dryRun) {
+        await admin
+          .from('lead_followups')
+          .update({
+            done_at: nowIso(),
+            outcome: 'Respondeu',
+            note: `${aberta.attempt_no}ª tentativa encerrada: o paciente voltou a falar antes dela vencer.`,
+            updated_at: nowIso(),
+          })
+          .eq('id', aberta.id)
+      }
+      aberta = undefined
+    }
 
     // ── 1. Sem tarefa aberta: a equipe leva a primeira chance ──────────────────
     if (!aberta) {
       // Já dispensada ou já cumprida a cadência inteira? Então acabou: dispensar é ordem
       // humana explícita, e ela não pode ser desfeita por um cron que roda de hora em hora.
       const dispensada = historico.some((t) => t.dismissed_at)
-      const tentativasFeitas = historico.length
+      const tentativasFeitas = desdeQueVoltou.length
       if (dispensada || tentativasFeitas >= MENSAGENS.length) {
         encerrados++
         results.push({ leadId: lead.lead_id, status: dispensada ? 'dispensado' : 'cadencia_cumprida' })
