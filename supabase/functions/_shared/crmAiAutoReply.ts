@@ -9,6 +9,7 @@ import {
 import { matchesInternalContact } from './internalContacts.ts'
 import { describeTeamHours, deveCalarPeloTurno, parseTeamHours } from './teamHours.ts'
 import { alertOwnerAiOutOfBalance } from './saleReceipt.ts'
+import { separarPixDaResposta } from './pixCopiaECola.ts'
 import type { WhatsappProvider } from './whatsapp/types.ts'
 
 /** Mesma convenção do fluxo n8n ManyChat (triagem → consultor humano). */
@@ -1033,7 +1034,7 @@ export async function invokeCrmAiAssistantForLead(
   aiInboundUserText: string,
   promptOverride: string,
   opts?: { maxAttempts?: number; whatsappInstanceId?: string | null },
-): Promise<{ reply: string; pixQrUrl?: string; failKind?: 'transient' | 'balance' | 'other' }> {
+): Promise<{ reply: string; pixQrUrl?: string; pixCode?: string; failKind?: 'transient' | 'balance' | 'other' }> {
   // Classifica a falha do z.ai p/ o caller decidir: 'transient' (1302 concorrência / 5xx /
   // timeout → o cron retenta sozinho, sem mandar desculpa), 'balance' (1113 sem saldo → alerta
   // o dono), 'other' (vazio persistente / erro não-retentável → mantém o fallback de sempre).
@@ -1121,8 +1122,13 @@ export async function invokeCrmAiAssistantForLead(
       (a) => a && typeof a === 'object' && (String(a.type ?? '') === 'rede_pix' || String(a.type ?? '') === 'pagbank_pix') && a.ok === true && typeof a.imageUrl === 'string' && a.imageUrl,
     )
     const pixQrUrl = pixAct ? String(pixAct.imageUrl) : ''
+    // Copia-e-cola do mesmo op: vai numa mensagem SÓ com o código (ver pixCopiaECola.ts).
+    const pixCodeAct = acts.find(
+      (a) => a && typeof a === 'object' && String(a.type ?? '') === 'rede_pix' && a.ok === true && typeof a.detail === 'string' && a.detail.length > 20,
+    )
+    const pixCode = pixCodeAct ? String(pixCodeAct.detail) : ''
 
-    if (reply.trim()) return { reply, pixQrUrl: pixQrUrl || undefined }
+    if (reply.trim()) return { reply, pixQrUrl: pixQrUrl || undefined, pixCode: pixCode || undefined }
     if (attempt < attempts - 1) await sleepMs(500 * (attempt + 1))
   }
 
@@ -1456,6 +1462,7 @@ export async function runWhatsappAiAutoReply(
   const inboundAntes = await latestInboundAt(admin, options.leadId)
   let aiReplyRaw = ''
   let pixQrUrl = ''
+  let pixCode = ''
   let aiFailKind: 'transient' | 'balance' | 'other' | undefined
   try {
     let resolvedWaInst = options.whatsappInstanceId != null ? String(options.whatsappInstanceId).trim() : ''
@@ -1477,6 +1484,7 @@ export async function runWhatsappAiAutoReply(
     )
     aiReplyRaw = invokeRes.reply
     pixQrUrl = invokeRes.pixQrUrl ?? ''
+    pixCode = invokeRes.pixCode ?? ''
     aiFailKind = invokeRes.failKind
   } catch (e) {
     console.error('runWhatsappAiAutoReply invoke:', e)
@@ -1650,35 +1658,75 @@ export async function runWhatsappAiAutoReply(
           : 0
     if (delay > 0) await sleepMs(delay)
 
+    // Pix: o código sai do texto e vai SOZINHO na mensagem seguinte. Tocar e segurar no WhatsApp
+    // copia a mensagem inteira, e o banco recusa o código colado junto com a conversa.
+    const pixSeparado = pixCode ? separarPixDaResposta(aiReply, pixCode) : null
+    const textoPrincipal = pixSeparado ? pixSeparado.texto : aiReply
+
     const sent = await options.sendProvider.sendMessage({
       to: options.fromPhone,
-      text: aiReply,
+      text: textoPrincipal,
       leadId: options.leadId,
     })
-    // QR do Pix como IMAGEM (best-effort): o copia-e-cola já foi no texto, então se o
-    // envio da imagem falhar a venda não trava. Só onde o provider suporta (W-API).
-    if (pixQrUrl && typeof options.sendProvider.sendImageMessage === 'function') {
-      try {
-        await options.sendProvider.sendImageMessage({
-          to: options.fromPhone,
-          imageUrl: pixQrUrl,
-          caption: 'QR Code Pix 💸',
-          leadId: options.leadId,
-        })
-      } catch (e) {
-        console.warn('runWhatsappAiAutoReply pix qr image:', e instanceof Error ? e.message : e)
-      }
-    }
     await insertInteraction(admin, {
       leadId: options.leadId,
       patientName: options.patientName,
       channel: 'whatsapp',
       direction: 'out',
       author: 'Assistente IA',
-      content: aiReply,
+      content: textoPrincipal,
       happenedAt: nowIso(),
       externalMessageId: sent.externalMessageId,
     })
+    if (pixSeparado) {
+      // Gravado com o id da mensagem logo após o envio: eco da W-API sem registro vira
+      // "Equipe (WhatsApp)" e marca resposta humana na conversa.
+      let codigoEnviado = false
+      for (let tentativa = 0; tentativa < 2 && !codigoEnviado; tentativa++) {
+        try {
+          if (tentativa > 0) await sleepMs(1500)
+          const sentCode = await options.sendProvider.sendMessage({
+            to: options.fromPhone,
+            text: pixSeparado.codigo,
+            leadId: options.leadId,
+          })
+          codigoEnviado = true
+          await insertInteraction(admin, {
+            leadId: options.leadId,
+            patientName: options.patientName,
+            channel: 'whatsapp',
+            direction: 'out',
+            author: 'Assistente IA',
+            content: pixSeparado.codigo,
+            happenedAt: nowIso(),
+            externalMessageId: sentCode.externalMessageId,
+          })
+        } catch (e) {
+          console.error('runWhatsappAiAutoReply pix code:', e instanceof Error ? e.message : e)
+          if (tentativa === 1 && !codigoEnviado) {
+            await admin.from('webhook_jobs').insert({
+              source: options.aiJobSource,
+              status: 'error',
+              note: `pix_codigo_nao_enviado:${options.leadId}:${e instanceof Error ? e.message : String(e)}`.slice(0, 500),
+            }).then(() => {}, () => {})
+          }
+        }
+      }
+    }
+    // QR do Pix como IMAGEM (best-effort): o copia-e-cola já foi, então se o envio da imagem
+    // falhar a venda não trava. Só onde o provider suporta (W-API).
+    if (pixQrUrl && typeof options.sendProvider.sendImageMessage === 'function') {
+      try {
+        await options.sendProvider.sendImageMessage({
+          to: options.fromPhone,
+          imageUrl: pixQrUrl,
+          caption: 'O mesmo Pix em QR Code, para pagar lendo com a câmera de outro aparelho 💸',
+          leadId: options.leadId,
+        })
+      } catch (e) {
+        console.warn('runWhatsappAiAutoReply pix qr image:', e instanceof Error ? e.message : e)
+      }
+    }
     await admin.from('crm_conversation_states').upsert({
       lead_id: options.leadId,
       // NÃO regravar owner_mode/ai_enabled (upsert de conclusão da IA): preserva

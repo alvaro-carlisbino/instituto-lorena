@@ -30,6 +30,7 @@ import {
   type ListedLeadRow,
 } from '../_shared/crmAiOpsExecutor.ts'
 import { resolveConversationTenantId } from '../_shared/crm.ts'
+import { juntarPixNaResposta } from '../_shared/pixCopiaECola.ts'
 
 /** Só as formas ±55 do MESMO número. O ±9º dígito junta gente diferente e aqui a resposta vira "você já pagou". */
 function fonesIdentidade(raw: string): string[] {
@@ -1226,7 +1227,8 @@ Deno.serve(async (req) => {
       'ENDEREÇO PENDENTE DE PEDIDO JÁ PAGO (quando snapshot.leadFocus.endereco_entrega_pendente = true): este cliente JÁ COMPROU, mas NÃO temos o endereço de entrega completo para despachar. PRIORIDADE MÁXIMA: assim que ele mandar qualquer mensagem, antes de qualquer outro assunto, peça de forma calorosa o endereço de entrega COMPLETO — CEP, rua, número, bairro, cidade e complemento (ex.: "Oi [nome]! Vi aqui que seu pedido já está pago Pra eu conseguir despachar, me confirma seu endereço completo de entrega? CEP, rua, número, bairro, cidade e complemento"). Quando ele responder, REPITA o endereço para ele confirmar. NÃO gere novo pagamento nem link/Pix (ele já pagou) — o objetivo é só coletar o endereço. NÃO use [PRONTO_PARA_CONSULTOR] só por isso; continue você mesma. Se ele NÃO está nesse estado (flag ausente/false), ignore esta regra.',
       ...(pixEnabled
         ? [
-            'FECHAMENTO NO PIX (você gera o Pix sozinha — copia-e-cola + QR): quando o cliente decidir comprar no PIX (escolheu o kit, a modalidade de entrega E você JÁ coletou o cadastro completo: nome completo + CPF + CEP + número), gere o Pix. ⚠️ Se faltar algum desses dados, NÃO diga que o Pix está abaixo: peça primeiro (o servidor bloqueia sem cadastro completo). Na MESMA resposta, DEPOIS da mensagem, acrescente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_pix","kit":"3_meses","delivery_mode":"envio_externo","freight_service":"SEDEX","to_cep":"00000000","to_number":"123","to_name":"Nome Completo","to_cpf":"00000000000","coupon":"CODIGO_SE_HOUVER"}]}. O servidor gera o Pix e ANEXA o copia-e-cola no texto + envia o QR Code como imagem — então escreva um lead-in caloroso dizendo que está GERANDO o Pix agora; NUNCA afirme que "já te mandei o Pix / já está aqui embaixo" antes da hora (o servidor só anexa o Pix SE a geração der certo; se você já disse que mandou e falha, o cliente paga por fora ou fica perdido). Ex.: "Perfeito! Já estou gerando seu Pix aqui, só um instante". NUNCA escreva/invente um código Pix você mesma: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o Pix — CONTINUE atendendo.',
+            'FECHAMENTO NO PIX (você gera o Pix sozinha — copia-e-cola + QR): quando o cliente decidir comprar no PIX (escolheu o kit, a modalidade de entrega E você JÁ coletou o cadastro completo: nome completo + CPF + CEP + número), gere o Pix. ⚠️ Se faltar algum desses dados, NÃO diga que o Pix está abaixo: peça primeiro (o servidor bloqueia sem cadastro completo). Na MESMA resposta, DEPOIS da mensagem, acrescente: <<<CRM_OPS>>>{"version":1,"ops":[{"type":"rede_pix","kit":"3_meses","delivery_mode":"envio_externo","freight_service":"SEDEX","to_cep":"00000000","to_number":"123","to_name":"Nome Completo","to_cpf":"00000000000","coupon":"CODIGO_SE_HOUVER"}]}. O servidor gera o Pix e manda o copia-e-cola numa MENSAGEM SEPARADA, só com o código (logo depois da sua), + o QR Code como imagem — então escreva um lead-in caloroso dizendo que está GERANDO o Pix agora; NUNCA afirme que "já te mandei o Pix / já está aqui embaixo" antes da hora (o servidor só anexa o Pix SE a geração der certo; se você já disse que mandou e falha, o cliente paga por fora ou fica perdido). Ex.: "Perfeito! Já estou gerando seu Pix aqui, só um instante". NUNCA escreva/invente um código Pix você mesma: só o servidor gera. NÃO use [PRONTO_PARA_CONSULTOR] ao gerar o Pix — CONTINUE atendendo.',
+            'PIX QUE O CLIENTE NÃO CONSEGUE PAGAR ("não tô conseguindo", "manda só a chave", "manda só o copia e cola", "código inválido"): o problema é quase sempre COPIAR, não o Pix. Explique curto: o código vem sozinho numa mensagem própria, é só tocar e segurar nela, copiar e colar em Pix > Pix copia e cola no app do banco. Se o Pix gerado tem mais de 20h ou o cliente pedir, gere de novo com o op rede_pix (o servidor manda o código sozinho). NUNCA troque para o link de cartão dizendo que ele tem Pix: o link /pagar de cartão NÃO oferece Pix. Link de cartão só se o cliente PEDIR cartão. NUNCA passe chave Pix de CNPJ, e-mail ou telefone: pagamento fora da cobrança gerada não é confirmado pelo sistema.',
             'OBSERVAÇÃO PIX: o "kit"/"delivery_mode"/"freight_service"/"to_cep"/"to_number"/"to_name"/"to_cpf"/"coupon" do op rede_pix seguem as MESMAS regras do cartão — o frete vem do delivery_mode (retirada=0, entrega local=R$15 em Maringá / R$20 na região pelo CEP, envio=cotação por freight_service+to_cep), o cadastro completo é obrigatório, e o cupom é validado pelo servidor. O Pix da e.Rede já aplica o desconto de 5% próprio dos kits.',
           ]
         : [
@@ -1717,13 +1719,14 @@ Deno.serve(async (req) => {
         const parcela = inst > 1 ? ` (em até ${inst}x)` : ''
         reply = `${reply.trim()}\n\n💳 Pague no cartão${parcela} por aqui:\n${redeLink.detail}${note}`
       }
-      // rede_pix: Pix DIRETO (e.Rede) — copia-e-cola no texto (o QR vai como imagem à parte, via auto-reply).
+      // rede_pix: Pix DIRETO (e.Rede) — copia-e-cola no texto. No WhatsApp o auto-reply tira o
+      // código daqui e manda SOZINHO numa mensagem própria (ver _shared/pixCopiaECola.ts); o QR vai
+      // como imagem à parte.
       const pixQr = actionChunks.find(
         (c) => c.type === 'rede_pix' && c.ok && typeof c.detail === 'string' && c.detail.length > 20,
       )
       if (pixQr?.detail && !reply.includes(pixQr.detail)) {
-        const note = pixQr.customerNote ? `\n${pixQr.customerNote}` : ''
-        reply = `${reply.trim()}\n\n💸 *Pix copia e cola* — toque para copiar e pague no app do seu banco:\n${pixQr.detail}${note}\n\nAssim que o pagamento cair eu confirmo aqui, viu? 💚`
+        reply = juntarPixNaResposta(reply, pixQr.detail, pixQr.customerNote)
       }
       // PAGAMENTO FALHOU: a IA escreve a prosa ASSUMINDO sucesso ("seu Pix/link está aqui
       // embaixo"). Se a geração falha, NÃO dá pra deixar essa promessa falsa no texto — o

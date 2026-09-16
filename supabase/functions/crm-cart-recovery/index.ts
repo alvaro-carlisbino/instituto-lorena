@@ -44,6 +44,7 @@ type Row = {
   id: string
   lead_id: string
   tenant_id: string
+  method: string | null
   amount_cents: number
   description: string | null
   customer_name: string | null
@@ -71,24 +72,38 @@ Deno.serve(async (req) => {
 
   const { data: rowsRaw, error } = await admin
     .from('rede_payments')
-    .select('id, lead_id, tenant_id, amount_cents, description, customer_name, created_at, recovery_step, recovery_sent_at')
+    .select('id, lead_id, tenant_id, method, amount_cents, description, customer_name, created_at, recovery_step, recovery_sent_at')
     .eq('status', 'pending')
     // rede_payments guarda os dois polos. Sem este filtro entrava na fila cobrança da
     // clínica (sinal de consulta) com texto de carrinho do Tricopill.
     .eq('tenant_id', 'tricopill')
     .not('lead_id', 'is', null)
     .gte('created_at', since)
-    .lte('created_at', until)
     .order('created_at', { ascending: false })
   if (error) return json({ error: 'query_failed', message: error.message }, 500)
   const rows = (rowsRaw ?? []) as Row[]
 
-  // 1 link por lead = o pendente MAIS RECENTE (evita spam p/ quem gerou vários, ex.: Alecio).
+  // O passo e o último envio são da PESSOA, não da cobrança. Antes, o "mais recente" era escolhido
+  // só entre as cobranças com mais de 2h, e cada cobrança nascia com passo 0: quem gerou três numa
+  // conversa levava três lembretes, um a cada rodada, conforme cada uma completava 2h. Eloísa
+  // (16/09/2026): Pix 11:47, Pix 12:29 e cartão 12:47, lembrete às 14:00, 14:30 e 15:00, cada
+  // um com um link diferente.
+  const passoDoLead = new Map<string, { step: number; lastSentMs: number }>()
+  for (const r of rows) {
+    const cur = passoDoLead.get(r.lead_id) ?? { step: 0, lastSentMs: 0 }
+    cur.step = Math.max(cur.step, r.recovery_step ?? 0)
+    if (r.recovery_sent_at) cur.lastSentMs = Math.max(cur.lastSentMs, new Date(r.recovery_sent_at).getTime())
+    passoDoLead.set(r.lead_id, cur)
+  }
+
+  // 1 link por lead = o pendente MAIS RECENTE de todos (evita spam p/ quem gerou vários, ex.:
+  // Alecio). Se o mais recente ainda não tem 2h, a conversa está viva: ninguém recebe lembrete.
   const seen = new Set<string>()
   const candidates: Row[] = []
   for (const r of rows) {
     if (seen.has(r.lead_id)) continue
     seen.add(r.lead_id)
+    if (new Date(r.created_at).getTime() > new Date(until).getTime()) continue
     candidates.push(r)
   }
 
@@ -119,8 +134,9 @@ Deno.serve(async (req) => {
   for (const r of candidates) {
     if (paid.has(r.lead_id)) continue
     const ageH = (now - new Date(r.created_at).getTime()) / 3600000
-    const step = r.recovery_step ?? 0
-    const lastSentH = r.recovery_sent_at ? (now - new Date(r.recovery_sent_at).getTime()) / 3600000 : Infinity
+    const doLead = passoDoLead.get(r.lead_id) ?? { step: 0, lastSentMs: 0 }
+    const step = doLead.step
+    const lastSentH = doLead.lastSentMs ? (now - doLead.lastSentMs) / 3600000 : Infinity
 
     let target = 0
     if (step === 0 && ageH >= 2) target = 1
@@ -159,7 +175,16 @@ Deno.serve(async (req) => {
     let text: string
     // O nome entra por {nome} (e não por interpolação) pra que `applyLeadName` possa APAGAR
     // o vocativo quando o lead não tem nome de gente — senão sai "Oi, Contato!".
-    if (target === 1) {
+    // Pix da e.Rede vale 24h. Link de Pix vencido abre uma tela que só manda pedir outro, então
+    // depois de ~23h o lembrete não leva link: convida a responder, e a IA gera um Pix novo.
+    const pixVencido = r.method === 'pix' && ageH >= 23
+    if (pixVencido) {
+      text = applyLeadName(
+        `Oi, {nome}! 😊 Vi aqui que o seu pedido${desc} ficou sem pagar e o Pix que te mandei já venceu. ` +
+          `Se ainda quiser, é só responder aqui que eu gero um Pix novo na hora 💚`,
+        nome,
+      )
+    } else if (target === 1) {
       text = applyLeadName(
         `Oi, {nome}! 😊 Vi aqui que você estava finalizando seu pedido${desc} mas o pagamento ainda não foi concluído. ` +
           `Deu algum problema? Tô por aqui pra te ajudar 💚`,
