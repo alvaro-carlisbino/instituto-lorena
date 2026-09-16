@@ -24,7 +24,10 @@ export type NfeInstallment = {
 }
 
 export type NfeParsed = {
-  /** Chave de acesso (44 dígitos, do Id de infNFe). Identidade da nota — trava reimportação. */
+  /** 'nfse' = nota de serviço: não tem produto, entra só no financeiro. Ausente = NF-e. */
+  kind?: 'nfe' | 'nfse'
+  /** Chave de acesso (44 dígitos, do Id de infNFe). Identidade da nota — trava reimportação.
+   *  Na NFS-e não existe chave nacional única: vira `nfse:<cnpj do prestador>:<número>`. */
   key: string | null
   number: string
   series: string | null
@@ -107,6 +110,7 @@ export function parseNfeXml(xml: string): NfeParsed {
   const icmsTot = infNFe.getElementsByTagName('ICMSTot')[0]
 
   return {
+    kind: 'nfe',
     key,
     number: (ide ? text(ide, 'nNF') : null) ?? '',
     series: ide ? text(ide, 'serie') : null,
@@ -117,4 +121,94 @@ export function parseNfeXml(xml: string): NfeParsed {
     items,
     installments,
   }
+}
+
+// ------------------------------------------------------------------ NFS-e (nota de serviço)
+//
+// Nota de serviço não passa pela SEFAZ: sai da prefeitura (ABRASF: GISS, Betha, ISS.net…) ou do
+// emissor nacional. A captura automática nunca vê, e o "Importar XML" recusava por não ter
+// infNFe, então nota de farmácia de manipulação (Health Tech, 135700, set/26) ficava de fora.
+// Não traz produto nem duplicata: entra só no financeiro.
+
+/** Por nome local: o XML municipal às vezes vem com prefixo (ns2:Numero), e o nome qualificado não casaria. */
+const byLocal = (parent: Element | Document, tag: string): Element | null =>
+  parent.getElementsByTagNameNS('*', tag)[0] ?? null
+
+const localText = (parent: Element | Document | null, tag: string): string | null => {
+  const value = parent ? byLocal(parent, tag)?.textContent?.trim() : null
+  return value ? value : null
+}
+
+/** Filho direto: InfNfse tem Numero da nota, mas também Numero do endereço e do RPS lá dentro. */
+const childText = (parent: Element | null, tag: string): string | null => {
+  if (!parent) return null
+  for (let i = 0; i < parent.children.length; i += 1) {
+    const el = parent.children[i]!
+    if (el.localName === tag) return el.textContent?.trim() || null
+  }
+  return null
+}
+
+export function isNfseXml(xml: string): boolean {
+  return /<(\w+:)?(InfNfse|infNFSe)[\s>]/.test(xml)
+}
+
+export function parseNfseXml(xml: string): NfeParsed {
+  const doc = new DOMParser().parseFromString(xml, 'text/xml')
+  if (doc.getElementsByTagName('parsererror').length > 0) {
+    throw new Error('Arquivo não é um XML válido.')
+  }
+  if (byLocal(doc, 'NfseCancelamento')) {
+    throw new Error('Esta NFS-e foi cancelada na prefeitura, não entra no financeiro.')
+  }
+
+  // Emissor nacional (nfse.gov.br): NFSe/infNFSe, com emit e valores/vLiq.
+  const nacional = byLocal(doc, 'infNFSe')
+  if (nacional) {
+    const emit = byLocal(nacional, 'emit')
+    const number = childText(nacional, 'nNFSe') ?? ''
+    const cnpj = localText(emit, 'CNPJ') ?? localText(emit, 'CPF')
+    return {
+      kind: 'nfse',
+      key: cnpj && number ? `nfse:${cnpj}:${number}` : null,
+      number,
+      series: null,
+      issueDate: toDay(localText(nacional, 'dhEmi') ?? childText(nacional, 'dhProc')),
+      supplierCnpj: cnpj,
+      supplierName: localText(emit, 'xNome'),
+      totalCents: toCents(localText(nacional, 'vLiq') ?? localText(nacional, 'vServ')),
+      items: [],
+      installments: [],
+    }
+  }
+
+  // ABRASF (1.0 e 2.x): CompNfse/Nfse/InfNfse.
+  const inf = byLocal(doc, 'InfNfse')
+  if (!inf) throw new Error('XML não parece ser uma NFS-e (tag InfNfse não encontrada).')
+  // 2.x põe o CNPJ em DeclaracaoPrestacaoServico/Prestador; 1.0 em PrestadorServico/IdentificacaoPrestador.
+  // Nunca procurar Cnpj solto: o do tomador (a clínica) também está no arquivo.
+  const prestadorServico = byLocal(inf, 'PrestadorServico')
+  const prestador = byLocal(inf, 'Prestador')
+  const cnpj =
+    localText(prestador, 'Cnpj') ?? localText(prestadorServico, 'Cnpj') ?? localText(prestador, 'Cpf') ?? localText(prestadorServico, 'Cpf')
+  const number = childText(inf, 'Numero') ?? ''
+  return {
+    kind: 'nfse',
+    key: cnpj && number ? `nfse:${cnpj}:${number}` : null,
+    number,
+    series: null,
+    issueDate: toDay(childText(inf, 'DataEmissao') ?? localText(inf, 'Competencia')),
+    supplierCnpj: cnpj,
+    supplierName: localText(prestadorServico, 'RazaoSocial') ?? localText(prestadorServico, 'NomeFantasia'),
+    // Líquido é o que sai do banco (retenção de ISS/IR o tomador paga ao governo), e é com o
+    // extrato que a parcela precisa casar.
+    totalCents: toCents(localText(inf, 'ValorLiquidoNfse') ?? localText(inf, 'ValorServicos')),
+    items: [],
+    installments: [],
+  }
+}
+
+/** Porta única do upload: NF-e de produto ou NFS-e de serviço, pelo que o arquivo é. */
+export function parseNotaXml(xml: string): NfeParsed {
+  return isNfseXml(xml) ? parseNfseXml(xml) : parseNfeXml(xml)
 }

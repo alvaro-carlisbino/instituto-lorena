@@ -592,7 +592,7 @@ export async function createPurchaseInvoice(payload: {
     if (storagePath) await client.storage.from(BUCKET).remove([storagePath]).catch(() => {})
     // 23505 = índice único da chave: a nota já foi importada antes (por outra pessoa ou em lote).
     if (error.code === '23505' && error.message.includes('nfe_key')) {
-      throw new Error('Esta NF-e já foi importada — a chave de acesso já existe neste polo.')
+      throw new Error('Esta nota já foi importada — a chave de acesso já existe neste polo.')
     }
     throw new Error(error.message)
   }
@@ -617,8 +617,9 @@ export async function createPurchaseInvoice(payload: {
 export async function findInvoiceByNfeKey(
   nfeKey: string,
 ): Promise<{ id: string; number: string; issueDate: string | null; createdAt: string } | null> {
-  const key = nfeKey.replace(/\D/g, '')
-  if (key.length !== 44) return null
+  // NFS-e não tem chave de 44 dígitos: guarda `nfse:<cnpj>:<número>` (ver parseNfseXml).
+  const key = nfeKey.startsWith('nfse:') ? nfeKey : nfeKey.replace(/\D/g, '')
+  if (!key.startsWith('nfse:') && key.length !== 44) return null
   const client = assertClient()
   const { data, error } = await client
     .from('purchase_invoices')

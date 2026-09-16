@@ -13,6 +13,7 @@ import { ensureBatch, logControlledEntry } from '@/services/estoqueKits'
 import { fetchBlingCatalog, pushBlingStockEntry } from '@/services/crmBling'
 import { chavesEmbalagem, converterPorEmbalagem, sugerirFatorEmbalagem } from '@/lib/nfeEmbalagem'
 import { limparNomeItemNfe, temRastroNoNome } from '@/lib/nfeNomeItem'
+import type { BoletoDaNota } from '@/lib/boletosDaNota'
 
 const onlyDigits = (v: string | null | undefined) => String(v ?? '').replace(/\D/g, '')
 
@@ -55,9 +56,9 @@ export type NfeImportPlan = {
   createSupplier: boolean
   supplierId: string | null
   createPayables: boolean
-  /** NF sem duplicatas (compra à vista/balcão): vencimento da parcela ÚNICA, valor = total da nota.
-   *  Sem isso a nota entra só no estoque e o gasto some do financeiro. */
-  singleDueDate?: string | null
+  /** Nota sem duplicata no XML (NFS-e, balcão): os boletos digitados na tela, com o vencimento e
+   *  o valor de cada um. Sem isso a nota entra só no estoque e o gasto some do financeiro. */
+  boletos?: BoletoDaNota[]
   itemsPlan: NfeItemPlan[]
 }
 
@@ -158,7 +159,10 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
     supplierId,
     issueDate: nfe.issueDate,
     totalCents: nfe.totalCents,
-    note: `Importada do XML da NF-e${nfe.series ? ` (série ${nfe.series})` : ''}`,
+    note:
+      nfe.kind === 'nfse'
+        ? 'Importada do XML da NFS-e (nota de serviço, sem itens de estoque)'
+        : `Importada do XML da NF-e${nfe.series ? ` (série ${nfe.series})` : ''}`,
     nfeKey: nfe.key,
   })
 
@@ -166,10 +170,11 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
   const est = await darEntradaItensNfe(nfe, invoice.id, plan.itemsPlan, { learnPacks: true })
 
   // 4) Parcelas → contas a pagar. Nota a prazo traz as duplicatas em cobr/dup; compra à vista
-  //    (papelaria, balcão) não traz cobr nenhum — e antes disso o gasto entrava no estoque e
-  //    nunca aparecia no financeiro. Sem duplicata, a parcela única é o total da nota.
+  //    (papelaria, balcão) e NFS-e não trazem cobr nenhum — e antes disso o gasto entrava no
+  //    estoque e nunca aparecia no financeiro. Sem duplicata, valem os boletos digitados na tela.
   let payables = 0
   if (plan.createPayables) {
+    const boletos = (plan.boletos ?? []).filter((b) => b.dueDate && b.amountCents > 0)
     const rows =
       nfe.installments.length > 0
         ? nfe.installments.map((inst) => ({
@@ -178,16 +183,14 @@ export async function importNfe(nfe: NfeParsed, plan: NfeImportPlan): Promise<Nf
             amountCents: inst.amountCents,
             paymentMethod: 'boleto' as string | null,
           }))
-        : plan.singleDueDate && nfe.totalCents > 0
-          ? [
-              {
-                description: `NF ${nfe.number} — à vista`,
-                dueDate: plan.singleDueDate,
-                amountCents: nfe.totalCents,
-                paymentMethod: null as string | null,
-              },
-            ]
-          : []
+        : boletos.map((b, i) => ({
+            // Uma parcela só pode ser Pix ou cartão no balcão; parcelado é boleto.
+            description:
+              boletos.length > 1 ? `NF ${nfe.number} — boleto ${i + 1}/${boletos.length}` : `NF ${nfe.number} — parcela única`,
+            dueDate: b.dueDate,
+            amountCents: b.amountCents,
+            paymentMethod: (boletos.length > 1 ? 'boleto' : null) as string | null,
+          }))
     if (rows.length > 0) {
       await createPayablesExact(
         rows.map((r) => ({ ...r, supplierId, invoiceId: invoice.id })),
