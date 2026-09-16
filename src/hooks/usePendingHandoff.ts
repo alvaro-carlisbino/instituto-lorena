@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
+import { useLinhasParticularesOcultas } from '@/hooks/useLinhasParticularesOcultas'
 
 /**
  * Handoffs mais antigos que isto saem do card e viram cobrança do vigia
@@ -148,10 +149,21 @@ export function usePendingHandoff(): PendingHandoffRow[] | null {
   )
 
   const lista = enabled ? local : mock
+  // A fila vem da RPC por POLO; conversa de linha particular de outra pessoa (o WhatsApp da
+  // Aline Muniz) sai do alerta de quem não é a dona nem admin.
+  const linhasOcultas = useLinhasParticularesOcultas()
+  const linhaDoLead = useMemo(() => {
+    const m = new Map<string, string>()
+    if (linhasOcultas.size === 0) return m
+    for (const l of crm.leads) {
+      if (l.whatsappInstanceId && linhasOcultas.has(l.whatsappInstanceId)) m.set(l.id, l.whatsappInstanceId)
+    }
+    return m
+  }, [crm.leads, linhasOcultas])
   return useMemo(() => {
     if (lista === null) return null
-    return [...lista].sort(
+    return lista.filter((r) => !linhaDoLead.has(r.lead_id)).sort(
       (a, b) => new Date(a.waiting_since ?? 0).getTime() - new Date(b.waiting_since ?? 0).getTime(),
     )
-  }, [lista])
+  }, [lista, linhaDoLead])
 }

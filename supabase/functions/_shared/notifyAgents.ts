@@ -59,6 +59,38 @@ async function resolveRoleAuthIds(
     .filter((id): id is string => typeof id === 'string' && id.length > 0)
 }
 
+/**
+ * LINHA PARTICULAR (16/set/2026): lead amarrado numa linha com `private_owner_id` (o WhatsApp
+ * da Aline Muniz) só notifica a dona e os admins. Sem isto a Aline da SDR recebia "novo lead
+ * aguardando" da carteira da colega. `null` = linha comum, regra de sempre.
+ */
+async function resolvePrivateLineOwnerAuthId(
+  admin: SupabaseClient,
+  leadId: string,
+): Promise<{ privada: boolean; authId: string | null }> {
+  const { data: lead } = await admin
+    .from('leads')
+    .select('whatsapp_instance_id')
+    .eq('id', leadId)
+    .maybeSingle()
+  const linhaId = (lead as { whatsapp_instance_id?: string | null } | null)?.whatsapp_instance_id
+  if (!linhaId) return { privada: false, authId: null }
+  const { data: linha, error } = await admin
+    .from('whatsapp_channel_instances')
+    .select('private_owner_id')
+    .eq('id', linhaId)
+    .maybeSingle()
+  const donaId = error ? null : (linha as { private_owner_id?: string | null } | null)?.private_owner_id
+  if (!donaId) return { privada: false, authId: null }
+  const { data: dona } = await admin
+    .from('app_users')
+    .select('auth_user_id')
+    .eq('id', donaId)
+    .maybeSingle()
+  const authId = (dona as { auth_user_id?: string | null } | null)?.auth_user_id
+  return { privada: true, authId: typeof authId === 'string' && authId.length > 0 ? authId : null }
+}
+
 async function resolveTenantFromLeadRow(admin: SupabaseClient, leadId: string): Promise<string | null> {
   const { data } = await admin.from('leads').select('tenant_id').eq('id', leadId).maybeSingle()
   const tid = (data as { tenant_id?: string | null } | null)?.tenant_id
@@ -92,12 +124,17 @@ async function alreadyNotifiedRecently(
  */
 export async function notifyAgents(admin: SupabaseClient, input: NotifyInput): Promise<number> {
   try {
-    const roles = input.roles && input.roles.length > 0 ? input.roles : DEFAULT_ROLES
+    const pedidos = input.roles && input.roles.length > 0 ? input.roles : DEFAULT_ROLES
+    const particular = await resolvePrivateLineOwnerAuthId(admin, input.leadId)
+    // Linha particular: dos papéis pedidos, só admin continua; a dona entra no lugar do resto.
+    const roles = particular.privada ? pedidos.filter((r) => r === 'admin') : pedidos
     // Sem tenant explícito, descobre via lead — só notifica usuários do mesmo tenant.
     const tenantId = input.tenantId ?? (await resolveTenantFromLeadRow(admin, input.leadId))
     const targets = new Set<string>(await resolveRoleAuthIds(admin, roles, tenantId))
 
-    if (input.includeOwner) {
+    if (particular.privada) {
+      if (particular.authId) targets.add(particular.authId)
+    } else if (input.includeOwner) {
       const ownerAuthId = await resolveOwnerAuthId(admin, input.leadId)
       if (ownerAuthId) targets.add(ownerAuthId)
     }

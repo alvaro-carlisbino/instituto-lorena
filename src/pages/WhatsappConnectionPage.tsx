@@ -1198,6 +1198,36 @@ export function WhatsappConnectionPage() {
                       </p>
                     ) : null}
                   </div>
+                  <div className="w-full space-y-1.5 md:max-w-md">
+                    <Label className="text-xs">Quem vê as conversas deste número</Label>
+                    <Select
+                      value={row.privateOwnerId ?? '__polo__'}
+                      onValueChange={(v) =>
+                        updateRouteDraft(inst.id, { privateOwnerId: !v || v === '__polo__' ? null : v })
+                      }
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Toda a equipe do polo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__polo__" className="text-xs">
+                          Toda a equipe do polo
+                        </SelectItem>
+                        {crm.sdrMembers
+                          .filter((s) => s.active || s.id === row.privateOwnerId)
+                          .map((s) => (
+                            <SelectItem key={s.id} value={s.id} className="text-xs">
+                              Só {s.name} (e admin)
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    {row.privateOwnerId ? (
+                      <p className="m-0 text-[11px] text-muted-foreground">
+                        Sai da lista do chat, dos alertas e das notificações de quem não é essa pessoa. O card continua no quadro.
+                      </p>
+                    ) : null}
+                  </div>
                   <div className="w-full space-y-1.5">
                     <Label className="text-xs">Prompt IA só desta linha (opcional)</Label>
                     <Textarea

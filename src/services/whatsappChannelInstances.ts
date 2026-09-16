@@ -34,6 +34,12 @@ export type WhatsappChannelInstance = {
    * próprio da Aline). Ver migration 20260916220000.
    */
   aiAutoReply: boolean
+  /**
+   * Linha PARTICULAR: preenchido, as conversas desta linha só aparecem (lista do chat,
+   * alertas, notificações) para este usuário e para admin. `null` = todo o polo vê.
+   * Ver migration 20260916230000.
+   */
+  privateOwnerId: string | null
   phoneE164: string | null
   active: boolean
   sortOrder: number
@@ -74,6 +80,7 @@ function mapRow(r: Record<string, unknown>): WhatsappChannelInstance {
     metaAppSecret: strOrNull(r.meta_app_secret),
     aiSystemPrompt: String(r.ai_system_prompt ?? ''),
     aiAutoReply: r.ai_auto_reply !== false,
+    privateOwnerId: strOrNull(r.private_owner_id),
     phoneE164: strOrNull(r.phone_e164),
     active: r.active !== false,
     sortOrder: typeof r.sort_order === 'number' ? r.sort_order : Number(r.sort_order) || 0,
@@ -85,7 +92,7 @@ function mapRow(r: Record<string, unknown>): WhatsappChannelInstance {
 }
 
 const SELECT_COLS =
-  'id, tenant_id, label, channel_provider, bot_kind, evolution_instance_name, manychat_instance_key, wapi_instance_id, wapi_token, wapi_base_url, wapi_webhook_secret, meta_phone_number_id, meta_waba_id, meta_access_token, meta_app_secret, ai_system_prompt, ai_auto_reply, phone_e164, active, sort_order, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change'
+  'id, tenant_id, label, channel_provider, bot_kind, evolution_instance_name, manychat_instance_key, wapi_instance_id, wapi_token, wapi_base_url, wapi_webhook_secret, meta_phone_number_id, meta_waba_id, meta_access_token, meta_app_secret, ai_system_prompt, ai_auto_reply, private_owner_id, phone_e164, active, sort_order, entry_pipeline_id, entry_stage_id, default_owner_id, on_line_change'
 
 export async function fetchWhatsappChannelInstances(): Promise<WhatsappChannelInstance[]> {
   if (!supabase) return []
@@ -114,6 +121,7 @@ export async function upsertWhatsappChannelInstance(row: {
   metaAppSecret?: string | null
   aiSystemPrompt?: string
   aiAutoReply?: boolean
+  privateOwnerId?: string | null
   phoneE164?: string | null
   active?: boolean
   sortOrder?: number
@@ -174,6 +182,8 @@ export async function upsertWhatsappChannelInstance(row: {
     // upsert, e um `?? true` aqui religaria a IA numa linha só da equipe sempre que alguém
     // salvasse a linha por um caminho que não conhece o campo.
     ...(typeof row.aiAutoReply === 'boolean' ? { ai_auto_reply: row.aiAutoReply } : {}),
+    // Mesmo motivo: `undefined` = quem chama não sabe, não mexe; `null` = todo o polo vê.
+    ...(row.privateOwnerId !== undefined ? { private_owner_id: row.privateOwnerId } : {}),
     phone_e164: row.phoneE164 ?? null,
     active: row.active !== false,
     sort_order: row.sortOrder ?? 0,

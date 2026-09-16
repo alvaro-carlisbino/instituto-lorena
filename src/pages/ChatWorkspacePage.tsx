@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { WorkspaceLeadSidebar } from '@/components/leads/WorkspaceLeadSidebar'
 import { useCrm } from '@/context/CrmContext'
+import { useLinhasParticularesOcultas } from '@/hooks/useLinhasParticularesOcultas'
 import { useTenant } from '@/context/TenantContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { ehMensagemDeConversa, ehRecebidaDoPaciente } from '@/lib/mensagemDeConversa'
@@ -76,6 +77,9 @@ export function ChatWorkspacePage({
   // Ids das linhas do POLO ATIVO. null = ainda carregando.
   const [tenantInstanceIds, setTenantInstanceIds] = useState<Set<string> | null>(null)
   const [aiConversationBase, setAiConversationBase] = useState<AiConversationGate | null>(null)
+  // Linha particular de outra pessoa (o WhatsApp da Aline Muniz): a conversa não entra na
+  // lista de quem não é a dona nem admin.
+  const linhasOcultas = useLinhasParticularesOcultas()
 
   const ownerSelectLabel = useMemo(
     () =>
@@ -163,6 +167,7 @@ export function ChatWorkspacePage({
       // leads dos 2 polos p/ quem é multi-polo e a Dandara via clínica + Tricopill
       // misturados mesmo com o polo trocado no switcher.
       if (!belongsToWorkspace(lead)) return false
+      if (lead.whatsappInstanceId && linhasOcultas.has(lead.whatsappInstanceId)) return false
       if (restrictToBotKind) {
         if (!restrictInstanceIds) return false
         if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) return false
@@ -209,7 +214,7 @@ export function ChatWorkspacePage({
     }
 
     return filtered.sort((a, b) => recencia(b) - recencia(a))
-  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread, belongsToWorkspace])
+  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread, belongsToWorkspace, linhasOcultas])
 
   // Contador do selo "Não lidas" com o MESMO escopo da lista (workspace/tenant + linha
   // de bot + responsável) — só sem o filtro de texto e o próprio toggle. O `unreadCount`
@@ -221,6 +226,7 @@ export function ChatWorkspacePage({
     let n = 0
     for (const lead of crm.leads) {
       if (!belongsToWorkspace(lead)) continue
+      if (lead.whatsappInstanceId && linhasOcultas.has(lead.whatsappInstanceId)) continue
       if (restrictToBotKind) {
         if (!restrictInstanceIds) continue
         if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) continue
@@ -229,7 +235,7 @@ export function ChatWorkspacePage({
       if (isUnread(lead.id)) n += 1
     }
     return n
-  }, [crm.leads, belongsToWorkspace, restrictToBotKind, restrictInstanceIds, ownerFilter, isUnread])
+  }, [crm.leads, belongsToWorkspace, restrictToBotKind, restrictInstanceIds, ownerFilter, isUnread, linhasOcultas])
 
   const activeLead = crm.selectedLead ?? conversations[0] ?? null
   // No celular o chat é master-detail: mostra a LISTA ou a CONVERSA, nunca as duas empilhadas
