@@ -3,12 +3,15 @@ import { supabase } from '@/lib/supabaseClient'
 import type { ClinicSaleKind } from './clinicSales'
 
 /**
- * Regra de repasse: quanto o médico que opera e a anestesia recebem por venda.
+ * Quanto o médico e a anestesia recebem por venda.
  *
- * Não existia regra em lugar nenhum até 16/09/2026, e por isso "os repasses não calculavam": o
- * campo era digitado, e ninguém digitou em 441 vendas. A conta de verdade roda no banco
- * (`clinic_payout_cents`, trigger da venda). As funções puras daqui repetem a mesma conta só
- * para o formulário mostrar o valor enquanto a Aline digita; quem grava é o banco.
+ * CIRURGIA segue a política da clínica (16/09/2026, Luana), não a pessoa: 13% quando o médico
+ * atendeu, vendeu e opera; R$ 3.200 fixo quando só opera, mais R$ 500 de indicação para quem
+ * atendeu; anestesia pelo procedimento. Os valores moram em `clinic_payout_policy` e a conta roda
+ * no banco (gatilho da venda). O formulário pede a prévia ao banco em vez de repetir a conta.
+ *
+ * PROTOCOLO continua com a regra por pessoa (`clinic_payout_rules`). As funções puras de pessoa
+ * repetem aquela conta só para a prévia do formulário; quem grava é o banco.
  */
 
 const assertClient = () => {
@@ -110,4 +113,143 @@ export async function salvarRegraRepasse(id: string | null, input: RegraRepasseI
 export async function apagarRegraRepasse(id: string): Promise<void> {
   const { error } = await assertClient().from('clinic_payout_rules').delete().eq('id', id)
   if (error) throw new Error(traduzErro(error.message))
+}
+
+// ─────────────────────────────────────────────────── cirurgia: política da clínica
+
+export type PoliticaRepasse = {
+  tenantId: string
+  /** Médico que atendeu, vendeu e opera: % do valor. */
+  medicoMesmoPct: number
+  /** Médico que só opera (a venda veio de outro médico). */
+  medicoCirurgiaoCents: number
+  /** Para quem atendeu e passou a cirurgia para outro médico. */
+  medicoIndicacaoCents: number
+  anestSobrancelhaCents: number
+  /** Feminina, masculina sem raspagem e masculina com raspagem acima do limite de UF. */
+  anestPadraoCents: number
+  /** Masculina com raspagem abaixo do limite de UF. */
+  anestMascPequenaCents: number
+  anestLimiteUf: number
+  /** Soma ao procedimento. */
+  anestNanofatCents: number
+}
+
+const POLITICA_COLS =
+  'tenant_id, medico_mesmo_pct, medico_cirurgiao_cents, medico_indicacao_cents, anest_sobrancelha_cents, ' +
+  'anest_padrao_cents, anest_masc_pequena_cents, anest_limite_uf, anest_nanofat_cents'
+
+export async function getPoliticaRepasse(): Promise<PoliticaRepasse | null> {
+  const { data, error } = await assertClient().from('clinic_payout_policy').select(POLITICA_COLS).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return null
+  const r = data as unknown as Record<string, unknown>
+  return {
+    tenantId: String(r.tenant_id),
+    medicoMesmoPct: Number(r.medico_mesmo_pct ?? 0),
+    medicoCirurgiaoCents: Number(r.medico_cirurgiao_cents ?? 0),
+    medicoIndicacaoCents: Number(r.medico_indicacao_cents ?? 0),
+    anestSobrancelhaCents: Number(r.anest_sobrancelha_cents ?? 0),
+    anestPadraoCents: Number(r.anest_padrao_cents ?? 0),
+    anestMascPequenaCents: Number(r.anest_masc_pequena_cents ?? 0),
+    anestLimiteUf: Number(r.anest_limite_uf ?? 0),
+    anestNanofatCents: Number(r.anest_nanofat_cents ?? 0),
+  }
+}
+
+/** Salvar recalcula todas as cirurgias do polo que não tiveram o valor digitado à mão. */
+export async function salvarPoliticaRepasse(p: PoliticaRepasse): Promise<void> {
+  const { data, error } = await assertClient()
+    .from('clinic_payout_policy')
+    .update({
+      medico_mesmo_pct: p.medicoMesmoPct,
+      medico_cirurgiao_cents: Math.max(0, Math.round(p.medicoCirurgiaoCents)),
+      medico_indicacao_cents: Math.max(0, Math.round(p.medicoIndicacaoCents)),
+      anest_sobrancelha_cents: Math.max(0, Math.round(p.anestSobrancelhaCents)),
+      anest_padrao_cents: Math.max(0, Math.round(p.anestPadraoCents)),
+      anest_masc_pequena_cents: Math.max(0, Math.round(p.anestMascPequenaCents)),
+      anest_limite_uf: Math.max(1, Math.round(p.anestLimiteUf)),
+      anest_nanofat_cents: Math.max(0, Math.round(p.anestNanofatCents)),
+    })
+    .eq('tenant_id', p.tenantId)
+    .select('tenant_id')
+  if (error) throw new Error(traduzErro(error.message))
+  // A RLS filtra a gravação sem erro: zero linhas é "sem permissão", não sucesso.
+  if (!data || data.length === 0) throw new Error('Só o financeiro e a gerência alteram a política de repasse.')
+}
+
+export type RegraMedicoCirurgia = 'mesmo_medico' | 'outro_cirurgiao' | 'sem_cirurgiao'
+
+export type PreviaCirurgia = {
+  temPolitica: boolean
+  medicoCents: number | null
+  cirurgiaoCents: number | null
+  indicacaoCents: number
+  medicoPct: number | null
+  medicoRegra: RegraMedicoCirurgia | null
+  /** null = o nome do procedimento não diz qual anestesia é. */
+  anestesiaCents: number | null
+  anestesiaRegra: string | null
+  /** UF que valeu na conta: da sala quando ligada, senão a previsão. */
+  uf: number | null
+  ufDaSala: boolean
+}
+
+export async function previaRepasseCirurgia(input: {
+  procedimento: string
+  atendeu: string
+  opera: string
+  valorCents: number
+  semRaspagem: boolean
+  uf: number | null
+  srgSurgeryId: number | null
+}): Promise<PreviaCirurgia> {
+  const { data, error } = await assertClient().rpc('clinic_repasse_previa', {
+    p_procedimento: input.procedimento,
+    p_atendeu: input.atendeu || null,
+    p_opera: input.opera || null,
+    p_valor: Math.max(0, Math.round(input.valorCents)),
+    p_sem_raspagem: input.semRaspagem,
+    p_uf: input.uf,
+    p_srg: input.srgSurgeryId,
+  })
+  if (error) throw new Error(error.message)
+  const r = ((data ?? []) as Array<Record<string, unknown>>)[0] ?? {}
+  const n = (v: unknown) => (v == null ? null : Number(v))
+  const regra = r.medico_regra
+  return {
+    temPolitica: r.tem_politica === true,
+    medicoCents: n(r.medico_cents),
+    cirurgiaoCents: n(r.cirurgiao_cents),
+    indicacaoCents: Number(r.indicacao_cents ?? 0),
+    medicoPct: n(r.medico_pct),
+    medicoRegra:
+      regra === 'mesmo_medico' || regra === 'outro_cirurgiao' || regra === 'sem_cirurgiao' ? regra : null,
+    anestesiaCents: n(r.anestesia_cents),
+    anestesiaRegra: r.anestesia_regra != null ? String(r.anestesia_regra) : null,
+    uf: n(r.uf),
+    ufDaSala: r.uf_da_sala === true,
+  }
+}
+
+const brl = (cents: number) =>
+  (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
+
+/** De onde saiu o repasse do médico, na linha curta embaixo do campo. */
+export function descreverMedicoCirurgia(p: PreviaCirurgia, atendeu: string, opera: string): string {
+  if (!p.temPolitica) return 'sem política de repasse'
+  if (p.medicoRegra === 'sem_cirurgiao' || p.medicoRegra == null) return 'escolha quem opera'
+  if (p.medicoRegra === 'mesmo_medico') {
+    return `${(p.medicoPct ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 })}% do valor: atendeu, vendeu e opera`
+  }
+  const cirurgiao = `${brl(p.cirurgiaoCents ?? 0)} para ${opera || 'quem opera'}`
+  return p.indicacaoCents > 0 && atendeu
+    ? `${cirurgiao} + ${brl(p.indicacaoCents)} de indicação para ${atendeu}`
+    : cirurgiao
+}
+
+export function descreverAnestesiaCirurgia(p: PreviaCirurgia): string {
+  if (!p.temPolitica) return 'sem política de repasse'
+  if (p.anestesiaCents == null) return 'o procedimento não diz qual anestesia'
+  return p.ufDaSala ? `${p.anestesiaRegra ?? ''} (UF da sala)` : (p.anestesiaRegra ?? '')
 }

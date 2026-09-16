@@ -64,13 +64,20 @@ export type ClinicSale = {
   confirmationAt: string | null
   confirmationNote: string | null
   costMaterialsCents: number
-  /** Repasse do médico que opera. Sai da regra dele, salvo quando `costDoctorManual`. */
+  /**
+   * Repasse do médico, salvo quando `costDoctorManual`. Cirurgia segue a política da clínica
+   * (13% / fixo do cirurgião + indicação); protocolo, a regra da pessoa.
+   */
   costDoctorCents: number
-  /** Custo da anestesia. Sai da regra do anestesista, salvo quando `costAnesthesiaManual`. */
+  /** Custo da anestesia. Cirurgia pelo procedimento (política da clínica), salvo `costAnesthesiaManual`. */
   costAnesthesiaCents: number
   /** O repasse foi digitado nesta venda e não segue a regra. */
   costDoctorManual: boolean
   costAnesthesiaManual: boolean
+  /** Transplante sem raspagem: muda a anestesia da cirurgia masculina. */
+  semRaspagem: boolean
+  /** Unidades foliculares previstas. Com a cirurgia da sala ligada, o banco usa o implantado. */
+  follicularUnits: number | null
   taxCents: number
   costOtherCents: number
   /** Coluna gerada no banco: valor menos os cinco custos. */
@@ -237,6 +244,8 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
     costAnesthesiaCents: Number(r.cost_anesthesia_cents ?? 0),
     costDoctorManual: r.cost_doctor_manual === true,
     costAnesthesiaManual: r.cost_anesthesia_manual === true,
+    semRaspagem: r.sem_raspagem === true,
+    follicularUnits: num(r.follicular_units),
     taxCents: Number(r.tax_cents ?? 0),
     costOtherCents: Number(r.cost_other_cents ?? 0),
     profitCents: Number(r.profit_cents ?? 0),
@@ -274,7 +283,7 @@ const SALE_COLS =
   'confirmation_status, confirmation_at, confirmation_note, cost_materials_cents, cost_doctor_cents, ' +
   'tax_cents, cost_other_cents, profit_cents, no_date_dismissed_at, no_date_dismissed_reason, ' +
   'no_patient_dismissed_at, no_patient_dismissed_reason, deposit_paid, contract_signed, ' +
-  'cost_anesthesia_cents, cost_doctor_manual, cost_anesthesia_manual'
+  'cost_anesthesia_cents, cost_doctor_manual, cost_anesthesia_manual, sem_raspagem, follicular_units'
 
 export async function listClinicSales(kind?: ClinicSaleKind, limit = 400): Promise<ClinicSale[]> {
   const client = assertClient()
@@ -337,6 +346,8 @@ export type ClinicSaleInput = {
   /** Sem `true`, o banco troca o valor pelo da regra ao salvar. */
   costDoctorManual?: boolean
   costAnesthesiaManual?: boolean
+  semRaspagem?: boolean
+  follicularUnits?: number | null
   taxCents?: number | null
   costOtherCents?: number | null
   scheduledAt?: string | null
@@ -383,6 +394,12 @@ function toRow(input: ClinicSaleInput) {
     cost_anesthesia_cents: Math.max(0, Math.round(input.costAnesthesiaCents ?? 0)),
     cost_doctor_manual: input.costDoctorManual === true,
     cost_anesthesia_manual: input.costAnesthesiaManual === true,
+    // Só grava quando veio, como a entrada paga: quem salva sem o formulário de cirurgia não
+    // pode apagar a marca de raspagem nem a previsão de UF, e a anestesia mudaria junto.
+    ...(input.semRaspagem !== undefined && { sem_raspagem: input.semRaspagem }),
+    ...(input.follicularUnits !== undefined && {
+      follicular_units: input.follicularUnits != null ? Math.max(0, Math.round(input.follicularUnits)) : null,
+    }),
     tax_cents: Math.max(0, Math.round(input.taxCents ?? 0)),
     cost_other_cents: Math.max(0, Math.round(input.costOtherCents ?? 0)),
     payment_method: input.paymentMethod || null,

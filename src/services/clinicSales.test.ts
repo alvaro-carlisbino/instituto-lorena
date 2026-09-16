@@ -51,6 +51,8 @@ const venda = (over: Partial<ClinicSale> = {}): ClinicSale =>
     costAnesthesiaCents: 0,
     costDoctorManual: false,
     costAnesthesiaManual: false,
+    semRaspagem: false,
+    follicularUnits: null,
     taxCents: 0,
     costOtherCents: 0,
     profitCents: 3_000_000,

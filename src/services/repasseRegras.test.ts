@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { type RegraRepasse, acharRegra, calcularRepasse, descreverRegra } from './repasseRegras'
+import {
+  type PreviaCirurgia,
+  type RegraRepasse,
+  acharRegra,
+  calcularRepasse,
+  descreverAnestesiaCirurgia,
+  descreverMedicoCirurgia,
+  descreverRegra,
+} from './repasseRegras'
 
 const regra = (over: Partial<RegraRepasse> = {}): RegraRepasse => ({
   id: 'r1',
@@ -49,5 +57,55 @@ describe('descreverRegra', () => {
   it('fala em português o que a regra faz', () => {
     expect(descreverRegra(regra({ percentual: 27.5 }))).toBe('27,5% do valor')
     expect(descreverRegra(regra({ modo: 'fixo', fixoCents: 250_000 }))).toMatch(/2\.500,00 por venda$/)
+  })
+})
+
+const previa = (over: Partial<PreviaCirurgia> = {}): PreviaCirurgia => ({
+  temPolitica: true,
+  medicoCents: 390_000,
+  cirurgiaoCents: 390_000,
+  indicacaoCents: 0,
+  medicoPct: 13,
+  medicoRegra: 'mesmo_medico',
+  anestesiaCents: 250_000,
+  anestesiaRegra: 'com raspagem, UF a informar',
+  uf: null,
+  ufDaSala: false,
+  ...over,
+})
+
+describe('descreverMedicoCirurgia', () => {
+  it('mesmo médico: diz o percentual', () => {
+    expect(descreverMedicoCirurgia(previa(), 'Lorena Visentainer', 'Lorena Visentainer')).toBe(
+      '13% do valor: atendeu, vendeu e opera',
+    )
+  })
+
+  it('outro cirurgião: separa o fixo de quem opera da indicação de quem atendeu', () => {
+    const p = previa({ medicoRegra: 'outro_cirurgiao', medicoCents: 370_000, cirurgiaoCents: 320_000, indicacaoCents: 50_000 })
+    // O Intl separa "R$" do número com espaço não separável.
+    expect(descreverMedicoCirurgia(p, 'Lorena Visentainer', 'Matheus Amaral').replace(/\u00a0/g, ' ')).toBe(
+      'R$ 3.200 para Matheus Amaral + R$ 500 de indicação para Lorena Visentainer',
+    )
+  })
+
+  it('sem política ou sem cirurgião, diz o que falta', () => {
+    expect(descreverMedicoCirurgia(previa({ temPolitica: false }), '', '')).toBe('sem política de repasse')
+    expect(descreverMedicoCirurgia(previa({ medicoRegra: 'sem_cirurgiao' }), 'A', '')).toBe('escolha quem opera')
+  })
+})
+
+describe('descreverAnestesiaCirurgia', () => {
+  it('mostra a regra e avisa quando a UF veio da sala', () => {
+    expect(descreverAnestesiaCirurgia(previa())).toBe('com raspagem, UF a informar')
+    expect(descreverAnestesiaCirurgia(previa({ anestesiaRegra: 'com raspagem, 1.981 UF', ufDaSala: true }))).toBe(
+      'com raspagem, 1.981 UF (UF da sala)',
+    )
+  })
+
+  it('procedimento que não diz qual anestesia', () => {
+    expect(descreverAnestesiaCirurgia(previa({ anestesiaCents: null, anestesiaRegra: null }))).toBe(
+      'o procedimento não diz qual anestesia',
+    )
   })
 })

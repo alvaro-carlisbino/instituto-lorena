@@ -34,7 +34,17 @@ import {
   listSellerNames,
   updateClinicSale,
 } from '@/services/clinicSales'
-import { type RegraRepasse, acharRegra, calcularRepasse, descreverRegra, listRegrasRepasse } from '@/services/repasseRegras'
+import {
+  type PreviaCirurgia,
+  type RegraRepasse,
+  acharRegra,
+  calcularRepasse,
+  descreverAnestesiaCirurgia,
+  descreverMedicoCirurgia,
+  descreverRegra,
+  listRegrasRepasse,
+  previaRepasseCirurgia,
+} from '@/services/repasseRegras'
 
 const hojeIso = () => {
   const d = new Date()
@@ -109,10 +119,14 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
   const [custoMaterial, setCustoMaterial] = useState('')
   const [custoMedico, setCustoMedico] = useState('')
   const [custoAnestesia, setCustoAnestesia] = useState('')
-  // Digitado à mão vence a regra da pessoa só nesta venda. Sem a marca, quem manda é a regra.
+  // Digitado à mão vence a regra só nesta venda. Sem a marca, quem manda é a regra.
   const [medicoManual, setMedicoManual] = useState(false)
   const [anestesiaManual, setAnestesiaManual] = useState(false)
   const [regras, setRegras] = useState<RegraRepasse[]>([])
+  // Cirurgia: a anestesia masculina depende de raspagem e de quantas UF. A conta é do banco.
+  const [semRaspagem, setSemRaspagem] = useState(false)
+  const [ufTexto, setUfTexto] = useState('')
+  const [previa, setPrevia] = useState<PreviaCirurgia | null>(null)
   const [imposto, setImposto] = useState('')
   const [custoOutros, setCustoOutros] = useState('')
   const [pagamento, setPagamento] = useState('')
@@ -157,6 +171,8 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       setCustoAnestesia(showMoney(editing.costAnesthesiaCents))
       setMedicoManual(editing.costDoctorManual)
       setAnestesiaManual(editing.costAnesthesiaManual)
+      setSemRaspagem(editing.semRaspagem)
+      setUfTexto(editing.follicularUnits ? String(editing.follicularUnits) : '')
       setImposto(showMoney(editing.taxCents))
       setCustoOutros(showMoney(editing.costOtherCents))
       setPagamento(editing.paymentMethod ?? '')
@@ -201,6 +217,8 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     setCustoAnestesia('')
     setMedicoManual(false)
     setAnestesiaManual(false)
+    setSemRaspagem(false)
+    setUfTexto('')
     setImposto('')
     setCustoOutros('')
     setPagamento('')
@@ -243,17 +261,57 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
   // O lucro aparece enquanto ela digita: é a conta que hoje ela faz na
   // calculadora do celular depois de fechar a planilha.
   const valorCents = parseMoney(valor)
+  const ufNum = ufTexto.replace(/\D/g, '') ? Number(ufTexto.replace(/\D/g, '')) : null
   // Protocolo não tem campo de quem opera: o banco grava quem atendeu (ver toRow), e a regra
   // procura pelo mesmo nome.
   const medicoDaRegra = cirurgia ? medicoExecuta || medicoAtendeu : medicoAtendeu
-  const regraMedico = acharRegra(regras, 'medico', kind, medicoDaRegra)
-  const regraAnestesia = cirurgia ? acharRegra(regras, 'anestesia', kind, anestesista) : null
-  const repasseCents = medicoManual ? parseMoney(custoMedico) : calcularRepasse(regraMedico, valorCents)
+  const regraMedico = cirurgia ? null : acharRegra(regras, 'medico', kind, medicoDaRegra)
+  const srgSurgeryId = editing?.srgSurgeryId ?? null
+
+  // Cirurgia segue a política da clínica, e quem calcula é o banco: a prévia é a mesma função
+  // do gatilho que grava. Espera a digitação parar para não perguntar a cada tecla.
+  useEffect(() => {
+    if (!open || !cirurgia) return
+    let vivo = true
+    const t = setTimeout(() => {
+      previaRepasseCirurgia({
+        procedimento,
+        atendeu: medicoAtendeu,
+        opera: medicoDaRegra,
+        valorCents,
+        semRaspagem,
+        uf: ufNum,
+        srgSurgeryId,
+      })
+        .then((p) => vivo && setPrevia(p))
+        .catch(() => vivo && setPrevia(null))
+    }, 300)
+    return () => {
+      vivo = false
+      clearTimeout(t)
+    }
+  }, [open, cirurgia, procedimento, medicoAtendeu, medicoDaRegra, valorCents, semRaspagem, ufNum, srgSurgeryId])
+
+  const repasseCents = medicoManual
+    ? parseMoney(custoMedico)
+    : cirurgia
+      ? (previa?.medicoCents ?? 0)
+      : calcularRepasse(regraMedico, valorCents)
   const anestesiaCents = !cirurgia
     ? 0
     : anestesiaManual
       ? parseMoney(custoAnestesia)
-      : calcularRepasse(regraAnestesia, valorCents)
+      : (previa?.anestesiaCents ?? 0)
+  const descricaoMedico = cirurgia
+    ? previa
+      ? descreverMedicoCirurgia(previa, medicoAtendeu, medicoDaRegra)
+      : 'calculando…'
+    : regraMedico
+      ? descreverRegra(regraMedico)
+      : medicoDaRegra
+        ? `sem regra para ${medicoDaRegra}`
+        : 'escolha quem faz'
+  const descricaoAnestesia = previa ? descreverAnestesiaCirurgia(previa) : 'calculando…'
   const custoCents =
     parseMoney(custoMaterial) + repasseCents + anestesiaCents + parseMoney(imposto) + parseMoney(custoOutros)
   const lucroCents = valorCents - custoCents
@@ -304,6 +362,8 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       costDoctorManual: medicoManual,
       costAnesthesiaCents: anestesiaCents,
       costAnesthesiaManual: cirurgia && anestesiaManual,
+      semRaspagem: cirurgia ? semRaspagem : undefined,
+      follicularUnits: cirurgia ? ufNum : undefined,
       taxCents: parseMoney(imposto),
       costOtherCents: parseMoney(custoOutros),
       paymentMethod: pagamento || null,
@@ -606,6 +666,30 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
             )}
           </div>
 
+          {cirurgia && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="venda-uf">Unidades foliculares previstas</Label>
+                <Input
+                  id="venda-uf"
+                  value={ufTexto}
+                  onChange={(e) => setUfTexto(e.target.value.replace(/[^\d.]/g, '').slice(0, 7))}
+                  placeholder="2.500"
+                  inputMode="numeric"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {previa?.ufDaSala && previa.uf != null
+                    ? `A sala registrou ${previa.uf.toLocaleString('pt-BR')} UF implantadas: vale o número da sala.`
+                    : 'Muda a anestesia da cirurgia masculina com raspagem. Depois da cirurgia, vale o número da sala.'}
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm sm:pt-7">
+                <Checkbox checked={semRaspagem} onCheckedChange={(v) => setSemRaspagem(v === true)} />
+                Sem raspagem
+              </label>
+            </div>
+          )}
+
           <div className="space-y-2 rounded-md border border-border p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Label>Custos desta venda</Label>
@@ -628,8 +712,8 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
               </div>
               <CustoPelaRegra
                 rotulo="Repasse do médico"
-                pessoa={medicoDaRegra}
-                regra={regraMedico}
+                descricao={descricaoMedico}
+                temRegra={cirurgia ? previa?.medicoCents != null : regraMedico != null}
                 manual={medicoManual}
                 valorCents={repasseCents}
                 texto={custoMedico}
@@ -645,8 +729,8 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
               {cirurgia && (
                 <CustoPelaRegra
                   rotulo="Anestesia"
-                  pessoa={anestesista}
-                  regra={regraAnestesia}
+                  descricao={descricaoAnestesia}
+                  temRegra={previa?.anestesiaCents != null}
                   manual={anestesiaManual}
                   valorCents={anestesiaCents}
                   texto={custoAnestesia}
@@ -670,8 +754,10 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Repasse e anestesia saem da regra de cada um (Central de Vendas, botão Repasses). Digitar um valor
-              vale só para esta venda. Material e imposto podem ficar para o fechamento.
+              {cirurgia
+                ? 'Repasse e anestesia seguem a política da clínica (Central de Vendas, botão Repasses).'
+                : 'O repasse sai da regra de cada médico (Central de Vendas, botão Repasses).'}{' '}
+              Digitar um valor vale só para esta venda. Material e imposto podem ficar para o fechamento.
             </p>
           </div>
 
@@ -761,13 +847,13 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
 }
 
 /**
- * Campo de custo que vem da regra da pessoa. Mostra o valor calculado e diz de onde ele saiu;
- * digitar por cima vira valor desta venda, e "usar a regra" desfaz.
+ * Campo de custo que vem da regra. Mostra o valor calculado e diz de onde ele saiu; digitar por
+ * cima vira valor desta venda, e "usar a regra" desfaz.
  */
 function CustoPelaRegra({
   rotulo,
-  pessoa,
-  regra,
+  descricao,
+  temRegra,
   manual,
   valorCents,
   texto,
@@ -775,8 +861,9 @@ function CustoPelaRegra({
   onUsarRegra,
 }: {
   rotulo: string
-  pessoa: string
-  regra: RegraRepasse | null
+  /** De onde saiu o valor, ou o que falta para calcular. */
+  descricao: string
+  temRegra: boolean
   manual: boolean
   valorCents: number
   texto: string
@@ -796,7 +883,7 @@ function CustoPelaRegra({
         {manual ? (
           <>
             digitado nesta venda
-            {regra && (
+            {temRegra && (
               <>
                 {' · '}
                 <button type="button" className="underline underline-offset-2" onClick={onUsarRegra}>
@@ -805,12 +892,8 @@ function CustoPelaRegra({
               </>
             )}
           </>
-        ) : regra ? (
-          descreverRegra(regra)
-        ) : pessoa ? (
-          `sem regra para ${pessoa}`
         ) : (
-          'escolha quem faz'
+          descricao
         )}
       </p>
     </div>

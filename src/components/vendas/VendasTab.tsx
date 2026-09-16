@@ -45,7 +45,6 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { RegrasRepasseDialog } from '@/components/vendas/RegrasRepasseDialog'
-import { listRegrasRepasse } from '@/services/repasseRegras'
 import { listResultadoProcedimentos } from '@/services/resultadoProcedimentos'
 import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
 import { useTenant } from '@/context/TenantContext'
@@ -217,8 +216,6 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [regrasAbertas, setRegrasAbertas] = useState(false)
   /** Custo real dos kits por venda, ligado como no Resultado por cirurgia. */
   const [kitsPorVenda, setKitsPorVenda] = useState<Map<string, KitsDaVenda>>(new Map())
-  /** Regras de repasse deste tipo de venda. null = ainda não leu (ou falhou). */
-  const [qtdRegras, setQtdRegras] = useState<number | null>(null)
   const { canViewFinance } = useTenant()
   // Paciente que veio pronto da ficha (botão "Registrar venda"): abre a Nova venda
   // já com ele escolhido. Antes o caminho da ficha para cá não existia, e quem
@@ -274,14 +271,13 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const load = async () => {
     setLoading(true)
     try {
-      const [s, st, mt, procs, regras] = await Promise.all([
+      const [s, st, mt, procs] = await Promise.all([
         listClinicSales(kind),
         listSurgicalStaff(),
         listSalesTargets(kind).catch(() => [] as SalesTarget[]),
         // Mesma função do Resultado por cirurgia, no período inteiro: a venda de agosto operada em
         // setembro tem o kit em setembro. Auxiliar: se falhar, o lucro fica só com o digitado.
         listResultadoProcedimentos('2020-01-01', '2100-12-31').catch(() => []),
-        listRegrasRepasse().catch(() => null),
       ])
       setSales(s)
       setStaff(st)
@@ -293,7 +289,6 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
             .map((p) => [p.saleId as string, { custoCents: p.materiaisKitsCents, cobradoCents: p.cobradoKitsCents }]),
         ),
       )
-      setQtdRegras(regras ? regras.filter((r) => r.kind === kind).length : null)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar as vendas')
     } finally {
@@ -399,9 +394,6 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
     [doMes, meta, mes, recorte],
   )
   const resultado = useMemo(() => resultadoDasVendas(doMes, kitsPorVenda), [doMes, kitsPorVenda])
-  // "Sem custo lançado" com a Aline já escolhendo médico e anestesista era, na verdade, falta de
-  // regra: sem regra o repasse calcula R$ 0. Para quem pode cadastrar, o card diz isso e abre.
-  const semRegraDeRepasse = canViewFinance && qtdRegras === 0
 
   // Quanto do mês fechou na própria consulta e quanto veio de follow-up.
   const prazo = useMemo(() => followUpStats(doMes), [doMes])
@@ -664,14 +656,9 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
             detalhe={
               resultado.custo > 0
                 ? `${resultado.margem}% de margem` +
-                  (resultado.semCusto > 0 ? ` · ${resultado.semCusto} sem custo` : '') +
-                  (semRegraDeRepasse ? ' · sem regra de repasse' : '')
-                : semRegraDeRepasse
-                  ? 'sem custo: nenhuma regra de repasse cadastrada. Clique para cadastrar.'
-                  : `sem custo lançado · ${brl(resultado.receita)} de faturamento`
+                  (resultado.semCusto > 0 ? ` · ${resultado.semCusto} sem custo` : '')
+                : `sem custo lançado · ${brl(resultado.receita)} de faturamento`
             }
-            onClick={semRegraDeRepasse ? () => setRegrasAbertas(true) : undefined}
-            descricao={semRegraDeRepasse ? 'Cadastrar o repasse de cada médico e anestesista' : undefined}
           />
           <Kpi
             rotulo="Fechou em follow-up"
@@ -1143,8 +1130,6 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
             {resultado.semCusto > 0 && (
               <p className="mt-1 text-sm text-muted-foreground">
                 {resultado.semCusto} de {doMes.length} vendas sem custo lançado.
-                {semRegraDeRepasse &&
-                  ' Nenhuma regra de repasse cadastrada: o repasse do médico e da anestesia sai R$ 0 até cadastrar em Repasses.'}
               </p>
             )}
           </CardHeader>
