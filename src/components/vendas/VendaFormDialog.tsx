@@ -137,6 +137,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
   const [aDefinir, setADefinir] = useState(false)
   const [hotel, setHotel] = useState(false)
   const [contrato, setContrato] = useState('')
+  const [contratoEnviado, setContratoEnviado] = useState(false)
   const [contratoAssinado, setContratoAssinado] = useState(false)
   const [obs, setObs] = useState('')
   const [salvando, setSalvando] = useState(false)
@@ -190,6 +191,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       }
       setHotel(editing.hotelNeeded)
       setContrato(editing.contractUrl ?? '')
+      setContratoEnviado(editing.contractSent)
       setContratoAssinado(editing.contractSigned)
       setObs(editing.note ?? '')
       return
@@ -229,6 +231,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     setADefinir(false)
     setHotel(false)
     setContrato('')
+    setContratoEnviado(false)
     setContratoAssinado(false)
     setObs('')
     // O prefill entra pelo id do paciente, não pelo objeto: a tela que abre monta
@@ -373,6 +376,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       schedulePending: aDefinir || !scheduledAt,
       hotelNeeded: hotel,
       contractUrl: contrato,
+      contractSent: contratoEnviado || contratoAssinado,
       contractSigned: contratoAssinado,
       note: obs,
     }
@@ -802,9 +806,28 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
               <Checkbox checked={entradaPaga} onCheckedChange={(v) => setEntradaPaga(v === true)} />
               Entrada paga
             </label>
+            {/* Assinado implica enviado: marcar um arrasta o outro, nos dois sentidos. */}
             {cirurgia && (
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={contratoAssinado} onCheckedChange={(v) => setContratoAssinado(v === true)} />
+                <Checkbox
+                  checked={contratoEnviado || contratoAssinado}
+                  onCheckedChange={(v) => {
+                    setContratoEnviado(v === true)
+                    if (v !== true) setContratoAssinado(false)
+                  }}
+                />
+                Contrato enviado
+              </label>
+            )}
+            {cirurgia && (
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={contratoAssinado}
+                  onCheckedChange={(v) => {
+                    setContratoAssinado(v === true)
+                    if (v === true) setContratoEnviado(true)
+                  }}
+                />
                 Contrato assinado
               </label>
             )}

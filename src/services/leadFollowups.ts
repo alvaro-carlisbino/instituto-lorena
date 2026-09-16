@@ -161,6 +161,9 @@ export type KanbanCard = {
   pipelineId: string | null
   /** Quem abriu a tarefa. É o que separa fila de PACIENTE de fila de LEAD. */
   origin: FollowupOrigin
+  /** A última observação de por que ainda não fechou. É do paciente, não da tentativa. */
+  objecao: string | null
+  objecaoEm: string | null
 }
 
 /**
@@ -182,7 +185,7 @@ export async function listFollowupKanban(): Promise<KanbanCard[]> {
     .from('v_followup_kanban')
     .select(
       'followup_id, lead_id, patient_name, phone, attempt_no, scheduled_for, done_at, outcome, note, ' +
-        'coluna, dias_atraso, venda_id, cirurgia_em, pipeline_id, origin',
+        'coluna, dias_atraso, venda_id, cirurgia_em, pipeline_id, origin, objecao, objecao_em',
     )
     .order('scheduled_for', { ascending: true })
     .limit(500)
@@ -208,8 +211,64 @@ export async function listFollowupKanban(): Promise<KanbanCard[]> {
       // Linha antiga sem carimbo é da clínica: a coluna nasceu com default 'clinica'
       // e o backfill só marcou o que a rotina da landing escreveu.
       origin: row.origin === ORIGEM_LANDING ? ORIGEM_LANDING : 'clinica',
+      objecao: str(row.objecao),
+      objecaoEm: str(row.objecao_em),
     }
   })
+}
+
+/**
+ * Por que o paciente ainda não fechou, nas palavras da comercial.
+ *
+ * Mora fora de `lead_followups` porque a nota de lá é da TENTATIVA: registrar o contato
+ * fecha a linha com a nota e abre a do próximo contato vazia, e o card chegava em
+ * "1º contato" sem o motivo, justo quando ela ia ligar de novo. Guarda histórico porque a
+ * objeção muda durante a negociação; o card mostra a última.
+ */
+export type FollowupObservacao = {
+  id: string
+  texto: string
+  createdAt: string
+}
+
+export async function listObservacoesDoPaciente(leadId: string): Promise<FollowupObservacao[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('lead_followup_observacoes')
+    .select('id, texto, created_at')
+    .eq('lead_id', leadId)
+    .order('created_at', { ascending: false })
+    .limit(100)
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => ({
+    id: String(r.id),
+    texto: String(r.texto ?? ''),
+    createdAt: String(r.created_at ?? ''),
+  }))
+}
+
+export async function registrarObservacao(payload: {
+  leadId: string
+  texto: string
+  usuarioId?: string | null
+}): Promise<void> {
+  const texto = payload.texto.trim()
+  if (!texto) throw new Error('Escreva a observação.')
+  const client = assertClient()
+  const { error } = await client.from('lead_followup_observacoes').insert({
+    lead_id: payload.leadId,
+    texto,
+    created_by: payload.usuarioId ?? null,
+  })
+  if (error) throw new Error(error.message)
+}
+
+/** Apaga a observação escrita errado. Cobra a linha: delete barrado pela RLS volta vazio, sem erro. */
+export async function apagarObservacao(id: string): Promise<void> {
+  const client = assertClient()
+  const { data, error } = await client.from('lead_followup_observacoes').delete().eq('id', id).select('id')
+  if (error) throw new Error(error.message)
+  if ((data ?? []).length === 0) throw new Error('A observação não foi apagada.')
 }
 
 export const FUNIL_CIRURGICO = 'pipeline-processo-cirurgico'

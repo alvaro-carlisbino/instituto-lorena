@@ -62,6 +62,7 @@ const venda = (over: Partial<ClinicSale> = {}): ClinicSale =>
     room: null,
     hotelNeeded: false,
     contractUrl: null,
+    contractSent: false,
     contractSigned: false,
     note: null,
     status: 'vendida',

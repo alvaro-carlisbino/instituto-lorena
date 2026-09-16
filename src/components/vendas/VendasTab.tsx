@@ -5,6 +5,7 @@ import {
   Ban,
   BellOff,
   CalendarOff,
+  CircleCheck,
   Eraser,
   FileSpreadsheet,
   FileWarning,
@@ -1052,6 +1053,10 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                         <TableCell className="hidden whitespace-nowrap lg:table-cell">
                           {s.contractSigned ? (
                             <span className="text-muted-foreground">Assinado</span>
+                          ) : s.contractSent ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                              <CircleCheck className="size-3.5" aria-hidden /> Enviado
+                            </span>
                           ) : (
                             <Badge variant="outline" className={PENDENTE}>
                               Pendente

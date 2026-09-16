@@ -7,12 +7,14 @@ import {
   EyeOff,
   MessageCircle,
   MoreHorizontal,
+  NotebookPen,
   PhoneCall,
   Receipt,
   Plus,
   RotateCcw,
   Scissors,
   Sparkles,
+  Trash2,
   Undo2,
 } from 'lucide-react'
 
@@ -46,6 +48,7 @@ import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { combinaBusca } from '@/lib/busca'
+import { diaLocal } from '@/lib/diaLocal'
 import { cn } from '@/lib/utils'
 import type { IndicacaoAtendimento } from '@/services/atendimentos'
 import { type ClinicSaleKind, type StaffMember, listSurgicalStaff } from '@/services/clinicSales'
@@ -57,16 +60,20 @@ import {
   KANBAN_COLUNAS,
   ORIGEM_LANDING,
   type FollowupDispensado,
+  type FollowupObservacao,
   type KanbanCard,
   type KanbanColuna,
+  apagarObservacao,
   completeFollowup,
   devolverFollowupAoQuadro,
   dispensarFollowups,
   listFollowupKanban,
   listFollowupsDispensados,
+  listObservacoesDoPaciente,
   filaDoFunil,
   moverLeadDeFunil,
   reabrirFollowup,
+  registrarObservacao,
 } from '@/services/leadFollowups'
 
 /**
@@ -176,6 +183,10 @@ export function FollowUpTab() {
   const [soPendentes, setSoPendentes] = useState(false)
   /** O atendimento que ela anota à mão, como na planilha. */
   const [novoAtendimento, setNovoAtendimento] = useState(false)
+  /** Por que ainda não fechou: a objeção, que atravessa as tentativas. */
+  const [observando, setObservando] = useState<KanbanCard | null>(null)
+  const [textoObs, setTextoObs] = useState('')
+  const [anteriores, setAnteriores] = useState<FollowupObservacao[]>([])
   /** Sobe a cada recarga do quadro para a safra da semana não ficar para trás. */
   const [versao, setVersao] = useState(0)
   /**
@@ -264,7 +275,9 @@ export function FollowUpTab() {
 
     // A busca atravessa as seis colunas: quem procura um paciente não sabe (nem
     // deveria precisar saber) em qual coluna do kanban ele está parado hoje.
-    return doDia.filter((c) => combinaBusca(buscaAdiada, c.patientName, c.phone, c.note, c.outcome))
+    return doDia.filter((c) =>
+      combinaBusca(buscaAdiada, c.patientName, c.phone, c.note, c.outcome, c.objecao),
+    )
   }, [cards, funil, buscaAdiada, soPendentes])
 
   const porColuna = useMemo(() => {
@@ -469,6 +482,40 @@ export function FollowUpTab() {
     })()
   }
 
+  const abrirObservacao = (card: KanbanCard) => {
+    setObservando(card)
+    setTextoObs('')
+    setAnteriores([])
+    listObservacoesDoPaciente(card.leadId)
+      .then(setAnteriores)
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao carregar as observações'))
+  }
+
+  const salvarObservacao = async () => {
+    if (!observando) return
+    setSalvando(true)
+    try {
+      await registrarObservacao({ leadId: observando.leadId, texto: textoObs, usuarioId })
+      toast.success(`Observação salva no card de ${observando.patientName}.`)
+      setObservando(null)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao salvar a observação')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  const apagarAnterior = async (obs: FollowupObservacao) => {
+    try {
+      await apagarObservacao(obs.id)
+      setAnteriores((prev) => prev.filter((o) => o.id !== obs.id))
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao apagar a observação')
+    }
+  }
+
   const reabrir = async () => {
     if (!reabrindo) return
     setSalvando(true)
@@ -511,15 +558,30 @@ export function FollowUpTab() {
             </Badge>
           )}
         </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {ABERTAS.includes(c.coluna)
-            ? `contato em ${dia(c.scheduledFor)}`
-            : c.cirurgiaEm
-              ? // "cirurgia em 24/02" para quem já operou fazia a coluna parecer
-                // fila de gente esperando. Data que passou vira "operou em".
-                `${c.cirurgiaEm.slice(0, 10) < hojeIso() ? 'operou em' : 'cirurgia em'} ${dia(c.cirurgiaEm)}`
-              : (c.outcome ?? 'sem desfecho registrado')}
-        </p>
+        <div className="mt-0.5 flex items-center justify-between gap-1">
+          <p className="min-w-0 truncate text-xs text-muted-foreground">
+            {ABERTAS.includes(c.coluna)
+              ? `contato em ${dia(c.scheduledFor)}`
+              : c.cirurgiaEm
+                ? // "cirurgia em 24/02" para quem já operou fazia a coluna parecer
+                  // fila de gente esperando. Data que passou vira "operou em".
+                  `${c.cirurgiaEm.slice(0, 10) < hojeIso() ? 'operou em' : 'cirurgia em'} ${dia(c.cirurgiaEm)}`
+                : (c.outcome ?? 'sem desfecho registrado')}
+          </p>
+          {/* Nesta linha e não na de ações: com WhatsApp, Registrar e o menu, a de baixo
+              já ocupa a largura do card. Quem fechou não tem objeção para anotar. */}
+          {c.coluna !== 'encerrado' && (
+            <Button
+              size="xs"
+              variant="ghost"
+              className="-my-0.5 shrink-0 text-muted-foreground"
+              title="Por que ainda não fechou"
+              onClick={() => abrirObservacao(c)}
+            >
+              <NotebookPen /> Observação
+            </Button>
+          )}
+        </div>
         {/* Em "Todos" as três filas se misturam de novo. Sem o selo, lead que nunca
             consultou parece paciente esperando retorno. */}
         {c.origin === ORIGEM_LANDING && (
@@ -539,6 +601,16 @@ export function FollowUpTab() {
           >
             card no funil {funilDeOutroPolo(c)}
           </Badge>
+        )}
+        {c.objecao && (
+          <button
+            type="button"
+            onClick={() => abrirObservacao(c)}
+            title={c.objecaoEm ? `Observação de ${dia(diaLocal(c.objecaoEm))}` : undefined}
+            className="mt-1 block w-full rounded-sm border-l-2 border-amber-500 bg-amber-500/10 px-1.5 py-0.5 text-left text-xs hover:bg-amber-500/15"
+          >
+            <span className="line-clamp-2">{c.objecao}</span>
+          </button>
         )}
         {c.note && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{c.note}</p>}
         <div className="mt-1.5 flex items-center gap-1">
@@ -888,6 +960,59 @@ export function FollowUpTab() {
             </Button>
             <Button disabled={salvando} onClick={() => void registrar()}>
               {salvando ? 'Salvando…' : 'Registrar contato'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={observando != null} onOpenChange={(open) => (!open ? setObservando(null) : null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Por que {observando?.patientName} ainda não fechou</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Textarea
+              value={textoObs}
+              onChange={(e) => setTextoObs(e.target.value)}
+              rows={3}
+              autoFocus
+              placeholder="Achou caro, vai conversar com a esposa, quer esperar o 13º…"
+            />
+            {anteriores.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>Anteriores</Label>
+                <div className="max-h-48 space-y-1.5 overflow-y-auto">
+                  {anteriores.map((o) => (
+                    <div
+                      key={o.id}
+                      className="flex items-start justify-between gap-2 rounded-md border border-border p-2"
+                    >
+                      <div className="min-w-0 text-sm">
+                        <p className="text-xs text-muted-foreground">{dia(diaLocal(o.createdAt))}</p>
+                        <p className="whitespace-pre-wrap break-words">{o.texto}</p>
+                      </div>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        className="shrink-0 text-muted-foreground"
+                        title="Apagar esta observação"
+                        aria-label="Apagar esta observação"
+                        onClick={() => void apagarAnterior(o)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setObservando(null)}>
+              Cancelar
+            </Button>
+            <Button disabled={salvando || textoObs.trim().length === 0} onClick={() => void salvarObservacao()}>
+              {salvando ? 'Salvando…' : 'Salvar observação'}
             </Button>
           </DialogFooter>
         </DialogContent>

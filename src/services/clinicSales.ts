@@ -88,6 +88,8 @@ export type ClinicSale = {
   room: string | null
   hotelNeeded: boolean
   contractUrl: string | null
+  /** O contrato já foi enviado ao paciente. Assinado implica enviado (o banco garante). */
+  contractSent: boolean
   contractSigned: boolean
   note: string | null
   status: ClinicSaleStatus
@@ -255,6 +257,7 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
     room: str(r.room),
     hotelNeeded: r.hotel_needed === true,
     contractUrl: str(r.contract_url),
+    contractSent: r.contract_sent === true || r.contract_signed === true,
     contractSigned: r.contract_signed === true,
     note: str(r.note),
     status: (['vendida', 'agendada', 'realizada', 'cancelada'] as const).includes(r.status as ClinicSaleStatus)
@@ -282,7 +285,7 @@ const SALE_COLS =
   'cancel_reason, refund_status, cancel_note, surgery_account_id, srg_surgery_id, created_at, ' +
   'confirmation_status, confirmation_at, confirmation_note, cost_materials_cents, cost_doctor_cents, ' +
   'tax_cents, cost_other_cents, profit_cents, no_date_dismissed_at, no_date_dismissed_reason, ' +
-  'no_patient_dismissed_at, no_patient_dismissed_reason, deposit_paid, contract_signed, ' +
+  'no_patient_dismissed_at, no_patient_dismissed_reason, deposit_paid, contract_signed, contract_sent, ' +
   'cost_anesthesia_cents, cost_doctor_manual, cost_anesthesia_manual, sem_raspagem, follicular_units'
 
 export async function listClinicSales(kind?: ClinicSaleKind, limit = 400): Promise<ClinicSale[]> {
@@ -356,6 +359,7 @@ export type ClinicSaleInput = {
   room?: string | null
   hotelNeeded?: boolean
   contractUrl?: string | null
+  contractSent?: boolean
   contractSigned?: boolean
   note?: string | null
 }
@@ -386,6 +390,7 @@ function toRow(input: ClinicSaleInput) {
     // Só grava quando veio: quem salva sem esses campos não pode desmarcar entrada
     // paga, e o checklist do lembrete desmarcaria junto.
     ...(input.depositPaid !== undefined && { deposit_paid: input.depositPaid }),
+    ...(input.contractSent !== undefined && { contract_sent: input.contractSent }),
     ...(input.contractSigned !== undefined && { contract_signed: input.contractSigned }),
     cost_materials_cents: Math.max(0, Math.round(input.costMaterialsCents ?? 0)),
     // Repasse e anestesia só valem o digitado com a marca de manual; sem ela o trigger

@@ -1,7 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, Ban, CalendarCheck2, CalendarPlus, CalendarSync, Copy } from 'lucide-react'
+import { AlertTriangle, Ban, CalendarCheck2, CalendarPlus, CalendarSync, CircleCheck, Copy } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -423,6 +423,19 @@ export function CirurgiasTab() {
                             {s.city && <span className="text-xs text-muted-foreground">{s.city}</span>}
                             {s.hotelNeeded && (
                               <span className="text-xs text-muted-foreground">precisa de hotel</span>
+                            )}
+                            {s.contractSigned ? (
+                              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                <CircleCheck className="size-3" aria-hidden /> contrato assinado
+                              </span>
+                            ) : s.contractSent ? (
+                              <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
+                                <CircleCheck className="size-3" aria-hidden /> contrato enviado
+                              </span>
+                            ) : (
+                              (s.status === 'vendida' || s.status === 'agendada') && (
+                                <span className="text-xs text-amber-700 dark:text-amber-400">contrato não enviado</span>
+                              )
                             )}
                             {falhou && (
                               <Badge variant="destructive" className="text-[10px]">
