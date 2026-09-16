@@ -11,6 +11,7 @@ import {
   type IndicacaoAtendimento,
   type Mes,
   type SemanaAtendimentos,
+  alterarTipoAtendimento,
   limitesDoMes,
   listAtendimentos,
   mesAtual,
@@ -63,15 +64,13 @@ function ondeEsta(a: Atendimento): string {
   return ROTULO_COLUNA.get(a.coluna)?.toLowerCase() ?? a.coluna
 }
 
-function linhaDoPaciente(a: Atendimento) {
-  const detalhe = [
-    `${a.tipo === 'retorno' ? 'Retorno' : 'Consulta'} ${ptBr(a.atendidoEm)}`,
-    a.medico,
-    a.cidade,
-    a.origem,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+function linhaDoPaciente(
+  a: Atendimento,
+  trocarTipo: (a: Atendimento) => void,
+  trocando: boolean,
+) {
+  const detalhe = [ptBr(a.atendidoEm), a.medico, a.cidade, a.origem].filter(Boolean).join(' · ')
+  const retorno = a.tipo === 'retorno'
 
   return (
     <div
@@ -89,7 +88,23 @@ function linhaDoPaciente(a: Atendimento) {
         ) : (
           <p className="truncate text-sm font-medium leading-tight">{a.paciente}</p>
         )}
-        <p className="truncate text-xs text-muted-foreground">{detalhe}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {/* A Shosp agenda muito retorno como "CONSULTA ...", e só quem atendeu sabe.
+              Por isso a palavra é o próprio botão: um clique troca, outro desfaz. */}
+          <button
+            type="button"
+            disabled={trocando}
+            onClick={() => trocarTipo(a)}
+            title={retorno ? 'Era consulta? Clique para voltar a consulta' : 'Foi retorno? Clique para marcar como retorno'}
+            className={cn(
+              'rounded-sm underline decoration-dotted underline-offset-2 hover:text-foreground disabled:cursor-wait disabled:opacity-60',
+              retorno && 'font-medium text-amber-700 dark:text-amber-500',
+            )}
+          >
+            {retorno ? 'Retorno' : 'Consulta'}
+          </button>{' '}
+          {detalhe}
+        </p>
       </div>
       {a.fechou ? (
         <Badge className="shrink-0 bg-emerald-600 text-[10px] text-white hover:bg-emerald-600">
@@ -117,6 +132,25 @@ export function AtendimentosSemana({
   const [erro, setErro] = useState<string | null>(null)
   /** null = a semana mais recente do mês. Só vira escolha explícita quando ela clica. */
   const [escolhida, setEscolhida] = useState<string | null>(null)
+  const [trocando, setTrocando] = useState<string | null>(null)
+  const [avisoTipo, setAvisoTipo] = useState<string | null>(null)
+
+  // Troca na tela na hora e grava por trás; se o banco recusar, volta como estava e diz
+  // por quê. Esperar a volta do banco para mudar a palavra faria o clique parecer morto.
+  const trocarTipo = (a: Atendimento) => {
+    const novo = a.tipo === 'retorno' ? 'consulta' : 'retorno'
+    const aplicar = (tipo: Atendimento['tipo']) =>
+      setLinhas((ls) => ls.map((l) => (l.id === a.id ? { ...l, tipo } : l)))
+    setTrocando(a.id)
+    setAvisoTipo(null)
+    aplicar(novo)
+    alterarTipoAtendimento(a.id, novo)
+      .catch((e: unknown) => {
+        aplicar(a.tipo)
+        setAvisoTipo(e instanceof Error ? e.message : 'Não deu para trocar consulta e retorno.')
+      })
+      .finally(() => setTrocando(null))
+  }
   const hoje = hojeLocal()
   const limites = useMemo(() => limitesDoMes(mes), [mes])
 
@@ -193,6 +227,9 @@ export function AtendimentosSemana({
           {mesInteiro.pct == null ? '—' : `${mesInteiro.pct}%`}
         </span>{' '}
         no mês · {mesInteiro.fecharam} de {mesInteiro.atendimentos} atendimentos
+        {mesInteiro.retornos > 0
+          ? ` (${mesInteiro.retornos} ${mesInteiro.retornos === 1 ? 'retorno' : 'retornos'})`
+          : ''}
         {mesInteiro.receitaCents > 0 ? ` · ${reais(mesInteiro.receitaCents)}` : ''}
       </p>
       {mesInteiro.incompleta && (
@@ -281,7 +318,9 @@ export function AtendimentosSemana({
                 {daSemana.fecharam.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Ninguém fechou nesta semana ainda.</p>
                 ) : (
-                  <div className="space-y-1">{daSemana.fecharam.map(linhaDoPaciente)}</div>
+                  <div className="space-y-1">
+                    {daSemana.fecharam.map((a) => linhaDoPaciente(a, trocarTipo, trocando === a.id))}
+                  </div>
                 )}
               </div>
               <div className="space-y-1.5">
@@ -293,9 +332,12 @@ export function AtendimentosSemana({
                       : 'Nenhum atendimento registrado nesta semana.'}
                   </p>
                 ) : (
-                  <div className="space-y-1">{daSemana.abertos.map(linhaDoPaciente)}</div>
+                  <div className="space-y-1">
+                    {daSemana.abertos.map((a) => linhaDoPaciente(a, trocarTipo, trocando === a.id))}
+                  </div>
                 )}
               </div>
+              {avisoTipo && <p className="text-xs text-destructive md:col-span-2">{avisoTipo}</p>}
             </div>
           )}
         </>

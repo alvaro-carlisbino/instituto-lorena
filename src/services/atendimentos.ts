@@ -57,6 +57,18 @@ export const SAFRA_COMPLETA_DESDE = '2026-08-24'
 const texto = (v: unknown): string | null =>
   v == null || String(v).length === 0 ? null : String(v)
 
+/**
+ * Consulta ou retorno, pelo nome do serviço na agenda da Shosp.
+ *
+ * Só o que a Shosp CHAMA de retorno ("RETORNO DE FINALIZAÇÃO", "RETORNO PÓS PROTOCOLO").
+ * Retorno agendado como "CONSULTA ..." existe, e é por isso que a linha da safra tem troca
+ * manual: chutar retorno por "já veio antes" jogaria para fora quem voltou para decidir o
+ * transplante, que é justamente o atendimento que a Aline quer contar.
+ */
+export function tipoPeloServico(servico: string | null | undefined): TipoAtendimento {
+  return /^\s*retorno/i.test(servico ?? '') ? 'retorno' : 'consulta'
+}
+
 const CAMPOS =
   'id, lead_id, paciente, telefone, cidade, email, origem, tipo, indicacao, atendido_em, ' +
   'medico, observacao, venda_em, valor_cents, fechou, coluna, fonte'
@@ -176,6 +188,8 @@ export function limitesDoMes(mes: Mes): { primeiro: string; ultimo: string } {
 export type ResumoDoMes = {
   atendimentos: number
   fecharam: number
+  /** Quantos dos atendimentos foram retorno. Entram na conta, como na planilha dela. */
+  retornos: number
   pct: number | null
   receitaCents: number
   incompleta: boolean
@@ -186,6 +200,7 @@ const conta = (itens: Atendimento[]): ResumoDoMes => {
   return {
     atendimentos: itens.length,
     fecharam: fecharam.length,
+    retornos: itens.filter((i) => i.tipo === 'retorno').length,
     pct: itens.length === 0 ? null : Math.round((fecharam.length / itens.length) * 100),
     receitaCents: fecharam.reduce((t, i) => t + (i.valorCents ?? 0), 0),
     // Basta UM atendimento que só existe por ter virado venda para o período estar torto:
@@ -235,6 +250,24 @@ export function resumoPorSemana(
         incompleta: resumo.incompleta || inicio < SAFRA_COMPLETA_DESDE,
       }
     })
+}
+
+/**
+ * Corrige consulta ↔ retorno numa linha da safra.
+ *
+ * O `select` depois do update não é enfeite: com a RLS, atualizar linha de outro polo
+ * devolve sucesso com zero linhas, e a tela mostraria "Retorno" sem ter gravado nada.
+ */
+export async function alterarTipoAtendimento(id: string, tipo: TipoAtendimento): Promise<void> {
+  const { data, error } = await assertClient()
+    .from('clinic_atendimentos')
+    .update({ tipo })
+    .eq('id', id)
+    .select('id')
+  if (error) throw new Error(error.message)
+  if ((data ?? []).length === 0) {
+    throw new Error('Não deu para trocar: este atendimento não está ao alcance do seu polo.')
+  }
 }
 
 // ---------------------------------------------------------------------------

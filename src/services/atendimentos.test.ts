@@ -7,6 +7,7 @@ import {
   resumoDoMes,
   resumoPorSemana,
   segundaDaSemana,
+  tipoPeloServico,
 } from './atendimentos'
 
 /**
@@ -141,9 +142,39 @@ describe('o mês', () => {
     expect(resumo).toEqual({
       atendimentos: 4,
       fecharam: 2,
+      retornos: 0,
       pct: 50,
       receitaCents: 2_000_000,
       incompleta: false,
     })
+  })
+
+  it('conta os retornos sem tirá-los da taxa', () => {
+    const resumo = resumoDoMes([
+      atendimento({ tipo: 'retorno', fechou: true, valorCents: 1_000_000 }),
+      atendimento({ tipo: 'retorno' }),
+      atendimento({ tipo: 'consulta' }),
+      atendimento({ tipo: 'consulta' }),
+    ])
+    expect(resumo.retornos).toBe(2)
+    expect(resumo.atendimentos).toBe(4)
+    expect(resumo.pct).toBe(25)
+  })
+})
+
+describe('tipoPeloServico', () => {
+  it('reconhece o retorno como a Shosp escreve', () => {
+    expect(tipoPeloServico('RETORNO DE FINALIZAÇÃO')).toBe('retorno')
+    expect(tipoPeloServico('  Retorno pós protocolo')).toBe('retorno')
+  })
+
+  it('o resto é consulta, inclusive sem serviço', () => {
+    expect(tipoPeloServico('CONSULTA TRANSPLANTE CAPILAR MASCULINO - DRA LORENA')).toBe('consulta')
+    expect(tipoPeloServico('EVOLUÇÃO DE PRONTUÁRIO')).toBe('consulta')
+    expect(tipoPeloServico(null)).toBe('consulta')
+  })
+
+  it('não confunde retorno no meio do nome com o tipo do atendimento', () => {
+    expect(tipoPeloServico('CONSULTA COM RETORNO INCLUSO')).toBe('consulta')
   })
 })

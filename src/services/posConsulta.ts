@@ -1,6 +1,7 @@
 import { diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
 import { supabase } from '@/lib/supabaseClient'
 
+import { tipoPeloServico } from './atendimentos'
 import { scheduleFollowup } from './leadFollowups'
 
 /**
@@ -318,6 +319,7 @@ export async function encaminharItem(
         paciente: item.paciente,
         telefone: telefoneCrm(item.telefone) || null,
         indicacao: destino,
+        tipo: tipoPeloServico(item.servico),
         atendido_em: item.consultaEm ?? hojeLocal(),
         medico: item.prestador,
         observacao: ctx.nota?.trim() || null,
