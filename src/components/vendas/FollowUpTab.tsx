@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   CalendarClock,
+  CalendarDays,
   Eraser,
   EyeOff,
   MessageCircle,
@@ -20,6 +21,7 @@ import {
 
 import { BoardColumn } from '@/components/board/BoardColumn'
 import { useColunasFechadas } from '@/components/board/useColunasFechadas'
+import { FiltroPeriodo } from '@/components/page/FiltroPeriodo'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import {
@@ -48,7 +50,8 @@ import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { combinaBusca } from '@/lib/busca'
-import { diaLocal } from '@/lib/diaLocal'
+import { diaLocal, hojeLocal } from '@/lib/diaLocal'
+import type { Periodo } from '@/lib/periodo'
 import { cn } from '@/lib/utils'
 import type { IndicacaoAtendimento } from '@/services/atendimentos'
 import { type ClinicSaleKind, type StaffMember, listSurgicalStaff } from '@/services/clinicSales'
@@ -65,6 +68,7 @@ import {
   type KanbanColuna,
   apagarObservacao,
   completeFollowup,
+  dataVisivelDoCard,
   devolverFollowupAoQuadro,
   dispensarFollowups,
   listFollowupKanban,
@@ -181,6 +185,13 @@ export function FollowUpTab() {
   const buscaAdiada = useDeferredValue(termo)
   /** Liga a fila do dia: some quem tem contato marcado para depois de hoje. */
   const [soPendentes, setSoPendentes] = useState(false)
+  /**
+   * Corte por data: a mesma que o card mostra ("contato em", ou a cirurgia nas colunas
+   * fechadas). Não soma com "Contato de hoje": são duas perguntas sobre o mesmo campo, e
+   * as duas ligadas juntas davam quadro vazio sem dizer por quê.
+   */
+  const [periodo, setPeriodo] = useState<Periodo | null>(null)
+  const [verData, setVerData] = useState(false)
   /** O atendimento que ela anota à mão, como na planilha. */
   const [novoAtendimento, setNovoAtendimento] = useState(false)
   /** Por que ainda não fechou: a objeção, que atravessa as tentativas. */
@@ -273,12 +284,19 @@ export function FollowUpTab() {
       ? doFunil.filter((c) => ABERTAS.includes(c.coluna) && c.scheduledFor.slice(0, 10) <= hojeIso())
       : doFunil
 
+    const doPeriodo = periodo
+      ? doDia.filter((c) => {
+          const d = dataVisivelDoCard(c)
+          return d != null && d >= periodo.de && d <= periodo.ate
+        })
+      : doDia
+
     // A busca atravessa as seis colunas: quem procura um paciente não sabe (nem
     // deveria precisar saber) em qual coluna do kanban ele está parado hoje.
-    return doDia.filter((c) =>
+    return doPeriodo.filter((c) =>
       combinaBusca(buscaAdiada, c.patientName, c.phone, c.note, c.outcome, c.objecao),
     )
-  }, [cards, funil, buscaAdiada, soPendentes])
+  }, [cards, funil, buscaAdiada, soPendentes, periodo])
 
   const porColuna = useMemo(() => {
     const mapa = new Map<KanbanColuna, KanbanCard[]>()
@@ -718,12 +736,25 @@ export function FollowUpTab() {
           <Button
             size="sm"
             variant={soPendentes ? 'default' : 'outline'}
-            onClick={() => setSoPendentes((v) => !v)}
+            onClick={() => {
+              setSoPendentes((v) => !v)
+              setPeriodo(null)
+            }}
             title="Só quem tem contato marcado para hoje ou antes"
           >
             <CalendarClock className="size-4" />
             Contato de hoje
             {atrasados > 0 && !soPendentes ? ` (${atrasados} atrasado${atrasados > 1 ? 's' : ''})` : ''}
+          </Button>
+          <Button
+            size="sm"
+            variant={periodo ? 'default' : 'outline'}
+            onClick={() => setVerData((v) => !v)}
+            aria-expanded={verData}
+            title="Filtrar pela data que aparece no card"
+          >
+            <CalendarDays className="size-4" />
+            {periodo ? periodo.rotulo : 'Data'}
           </Button>
           <SearchField
             value={termo}
@@ -748,6 +779,35 @@ export function FollowUpTab() {
           )}
         </div>
       </div>
+
+      {verData && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-2">
+          <span className="text-xs text-muted-foreground">
+            Data do contato <span className="hidden sm:inline">(nas colunas fechadas, a da cirurgia)</span>
+          </span>
+          <FiltroPeriodo
+            valor={periodo ?? { de: hojeLocal(), ate: hojeLocal(), rotulo: '', id: 'nenhum' }}
+            onChange={(p) => {
+              setPeriodo(p)
+              setSoPendentes(false)
+            }}
+            atalhos={['hoje', 'amanha', 'semana', 'semana-que-vem', 'mes-inteiro']}
+            agenda
+          />
+          {periodo && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setPeriodo(null)
+                setVerData(false)
+              }}
+            >
+              Limpar
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* A pergunta que ela respondia contando linha colorida na planilha: quantos dos
           atendimentos da semana fecharam. Só nas duas filas que têm safra. */}
@@ -794,7 +854,9 @@ export function FollowUpTab() {
               emptyLabel={
                 termo.trim().length > 0
                   ? 'Ninguém com esse termo.'
-                  : soPendentes
+                  : periodo
+                    ? 'Ninguém nessa data.'
+                    : soPendentes
                     ? ABERTAS.includes(col.id)
                       ? 'Nada para hoje.'
                       : 'Fora da fila de hoje.'

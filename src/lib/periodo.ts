@@ -95,6 +95,48 @@ export function periodoPersonalizado(de: string, ate: string): Periodo {
 
 const diaCurto = (d: string) => d.split('-').reverse().slice(0, 2).join('/')
 
+// Períodos para AGENDA. Os de cima olham para trás (resultado não conta o que ainda
+// não aconteceu); estes olham para frente, porque contato marcado mora no futuro. Com
+// `periodoDoMes` o follow-up escondia todo paciente com ligação marcada para depois de hoje.
+
+/** Soma dias a um YYYY-MM-DD em aritmética de calendário, sem depender do fuso do navegador. */
+const somaDias = (d: string, dias: number) =>
+  new Date(Date.parse(`${d}T12:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10)
+
+/** Um dia só, contado a partir de hoje: 0 é hoje, 1 é amanhã. */
+export function periodoDoDia(offset: number): Periodo {
+  const d = diaLocalComOffset(offset)
+  return {
+    de: d,
+    ate: d,
+    rotulo: offset === 0 ? 'Hoje' : offset === 1 ? 'Amanhã' : diaCurto(d),
+    id: `dia:${offset}`,
+  }
+}
+
+/** Semana INTEIRA de segunda a domingo (a semana da clínica começa na segunda): 0 é esta, 1 a que vem. */
+export function periodoDaSemana(offset: number): Periodo {
+  const hoje = hojeLocal()
+  const desdeSegunda = (new Date(`${hoje}T12:00:00Z`).getUTCDay() + 6) % 7
+  const de = somaDias(hoje, offset * 7 - desdeSegunda)
+  return {
+    de,
+    ate: somaDias(de, 6),
+    rotulo: offset === 0 ? 'Esta semana' : offset === 1 ? 'Semana que vem' : `${diaCurto(de)} a ${diaCurto(somaDias(de, 6))}`,
+    id: `semana:${offset}`,
+  }
+}
+
+/** Mês de ponta a ponta, INCLUSIVE os dias que ainda não chegaram. */
+export function periodoDoMesInteiro(ym: string): Periodo {
+  return {
+    de: `${ym}-01`,
+    ate: `${ym}-${String(ultimoDia(ym)).padStart(2, '0')}`,
+    rotulo: rotuloDoMes(ym),
+    id: `mes-inteiro:${ym}`,
+  }
+}
+
 /** Período anterior do MESMO tamanho, para comparação. */
 export function periodoAnterior(p: Periodo): Periodo {
   const de = new Date(`${p.de}T12:00:00`)

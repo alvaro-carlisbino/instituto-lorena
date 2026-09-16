@@ -1,3 +1,4 @@
+import { diaLocal } from '@/lib/diaLocal'
 import { supabase } from '@/lib/supabaseClient'
 
 /**
@@ -164,6 +165,23 @@ export type KanbanCard = {
   /** A última observação de por que ainda não fechou. É do paciente, não da tentativa. */
   objecao: string | null
   objecaoEm: string | null
+}
+
+/**
+ * A data que o card MOSTRA, e é por ela que o filtro de data do quadro corta.
+ *
+ * Nas colunas de contato é o "contato em"; em "Não convertido" e "Encerrado" o card
+ * mostra a cirurgia ("cirurgia em"/"operou em"), então vale a cirurgia. Filtrar por uma
+ * data que não aparece na tela faria card sumir sem explicação. Card fechado sem
+ * cirurgia não tem data na tela e fica de fora de qualquer período.
+ */
+export function dataVisivelDoCard(
+  card: Pick<KanbanCard, 'coluna' | 'scheduledFor' | 'cirurgiaEm'>,
+): string | null {
+  if (card.coluna === 'nao_convertido' || card.coluna === 'encerrado') {
+    return card.cirurgiaEm ? diaLocal(card.cirurgiaEm) || null : null
+  }
+  return card.scheduledFor ? card.scheduledFor.slice(0, 10) : null
 }
 
 /**

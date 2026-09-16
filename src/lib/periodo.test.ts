@@ -1,15 +1,55 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   mesAtual,
   mesComOffset,
   periodoAnterior,
+  periodoDaSemana,
+  periodoDoDia,
   periodoDoMes,
+  periodoDoMesInteiro,
   periodoEmInstantes,
   periodoPersonalizado,
   periodoUltimosDias,
   rotuloDoMes,
 } from './periodo'
+
+describe('períodos de agenda (olham para frente)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('amanhã é o dia seguinte no fuso da clínica, mesmo às 22h de Maringá', () => {
+    vi.useFakeTimers()
+    // 22h de 16/set em Maringá já é 17/set em UTC.
+    vi.setSystemTime(new Date('2026-09-17T01:00:00Z'))
+    expect(periodoDoDia(0)).toMatchObject({ de: '2026-09-16', ate: '2026-09-16', rotulo: 'Hoje' })
+    expect(periodoDoDia(1)).toMatchObject({ de: '2026-09-17', ate: '2026-09-17', rotulo: 'Amanhã' })
+  })
+
+  it('a semana vai de segunda a domingo e inclui os dias que ainda não chegaram', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-16T15:00:00Z')) // quarta-feira
+    expect(periodoDaSemana(0)).toMatchObject({ de: '2026-09-14', ate: '2026-09-20' })
+    expect(periodoDaSemana(1)).toMatchObject({ de: '2026-09-21', ate: '2026-09-27', rotulo: 'Semana que vem' })
+  })
+
+  it('no domingo, "esta semana" ainda é a que começou na segunda anterior', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-20T15:00:00Z')) // domingo
+    expect(periodoDaSemana(0)).toMatchObject({ de: '2026-09-14', ate: '2026-09-20' })
+  })
+
+  it('a semana que atravessa o mês não é cortada', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-01T15:00:00Z')) // quinta-feira
+    expect(periodoDaSemana(0)).toMatchObject({ de: '2026-09-28', ate: '2026-10-04' })
+  })
+
+  it('o mês inteiro vai até o último dia, mesmo sendo o mês corrente', () => {
+    expect(periodoDoMesInteiro('2026-09')).toMatchObject({ de: '2026-09-01', ate: '2026-09-30', rotulo: 'Setembro/2026' })
+  })
+})
 
 describe('mesComOffset', () => {
   it('atravessa a virada do ano para trás', () => {

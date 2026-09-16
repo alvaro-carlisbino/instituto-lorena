@@ -7,7 +7,10 @@ import { Label } from '@/components/ui/label'
 import {
   mesAtual,
   mesComOffset,
+  periodoDaSemana,
+  periodoDoDia,
   periodoDoMes,
+  periodoDoMesInteiro,
   periodoEsteAno,
   periodoPersonalizado,
   periodoUltimosDias,
@@ -26,18 +29,33 @@ const ATALHOS: Array<{ id: string; label: string; build: () => Periodo }> = [
   { id: 'dias:90', label: '90 dias', build: () => periodoUltimosDias(90) },
   { id: 'mes-atual', label: 'Este mês', build: () => periodoDoMes(mesAtual()) },
   { id: 'mes-passado', label: 'Mês passado', build: () => periodoDoMes(mesComOffset(mesAtual(), -1)) },
+  // Agenda: olham para frente (contato marcado, cirurgia marcada).
+  { id: 'hoje', label: 'Hoje', build: () => periodoDoDia(0) },
+  { id: 'amanha', label: 'Amanhã', build: () => periodoDoDia(1) },
+  { id: 'semana', label: 'Esta semana', build: () => periodoDaSemana(0) },
+  { id: 'semana-que-vem', label: 'Semana que vem', build: () => periodoDaSemana(1) },
+  { id: 'mes-inteiro', label: 'Este mês', build: () => periodoDoMesInteiro(mesAtual()) },
 ]
+
+/** O padrão olha para trás. Os de agenda só aparecem quando a tela pede por `atalhos`. */
+const ATALHOS_DE_RESULTADO = ['dias:7', 'dias:30', 'dias:90', 'mes-atual', 'mes-passado']
 
 export function FiltroPeriodo({
   valor,
   onChange,
-  atalhos = ATALHOS.map((a) => a.id),
+  atalhos = ATALHOS_DE_RESULTADO,
+  agenda = false,
   className,
 }: {
   valor: Periodo
   onChange: (p: Periodo) => void
   /** Quais atalhos mostrar, na ordem. */
   atalhos?: string[]
+  /**
+   * Tela de agenda (o que está MARCADO): o mês escolhido vai até o último dia e aceita mês
+   * futuro, e some o "Ano todo", que para em hoje.
+   */
+  agenda?: boolean
   className?: string
 }) {
   const [aberto, setAberto] = useState(false)
@@ -85,9 +103,12 @@ export function FiltroPeriodo({
             <Input
               id="fp-mes"
               type="month"
-              max={mesAtual()}
-              value={valor.id.startsWith('mes:') ? valor.id.slice(4) : ''}
-              onChange={(e) => e.target.value && onChange(periodoDoMes(e.target.value))}
+              max={agenda ? undefined : mesAtual()}
+              value={/^mes(-inteiro)?:/.test(valor.id) ? valor.id.slice(valor.id.indexOf(':') + 1) : ''}
+              onChange={(e) =>
+                e.target.value &&
+                onChange(agenda ? periodoDoMesInteiro(e.target.value) : periodoDoMes(e.target.value))
+              }
               className="h-8 w-[150px]"
             />
           </div>
@@ -117,9 +138,11 @@ export function FiltroPeriodo({
               className="h-8 w-[145px]"
             />
           </div>
-          <Button size="sm" variant="ghost" onClick={() => onChange(periodoEsteAno())}>
-            Ano todo
-          </Button>
+          {!agenda && (
+            <Button size="sm" variant="ghost" onClick={() => onChange(periodoEsteAno())}>
+              Ano todo
+            </Button>
+          )}
         </div>
       ) : null}
     </div>
