@@ -89,6 +89,23 @@ export async function signedMediaUrl(storagePath: string): Promise<string | null
   return data.signedUrl
 }
 
+/**
+ * Conteúdo (base64) da mídia inline da W-API, por id, só para as bolhas da conversa aberta.
+ * O refresh global do chat não traz mais base64 (13 MB por mensagem nova derrubaram o
+ * banco em 16/09), então a mídia que chega com a conversa já aberta vem buscar aqui.
+ * Devolve `null` quando a consulta falha, para quem chamou poder tentar de novo.
+ */
+export async function loadMediaBase64ByIds(ids: string[]): Promise<Record<string, string> | null> {
+  if (!supabase || ids.length === 0) return {}
+  const { data, error } = await supabase.from('crm_media_items').select('id, media_base64').in('id', ids)
+  if (error) return null
+  const porId: Record<string, string> = {}
+  for (const row of (data ?? []) as Array<{ id: string; media_base64: string | null }>) {
+    if (row.media_base64) porId[String(row.id)] = row.media_base64
+  }
+  return porId
+}
+
 // ── Ações sobre mensagens ────────────────────────────────────────────────────
 
 export type MessageActionResult = { ok: true } | { ok: false; error: string; kind?: string }

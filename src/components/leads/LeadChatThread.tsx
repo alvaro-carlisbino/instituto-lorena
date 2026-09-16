@@ -86,6 +86,7 @@ import { forceAiReply } from '@/services/conversationControl'
 import {
   deleteMessage as apagarMensagem,
   discardChatMedia,
+  loadMediaBase64ByIds,
   loadReactionsForLead,
   reactToMessage,
   removeMessageReaction,
@@ -278,7 +279,7 @@ function InlineVideo({ item }: { item: InlineMediaItem }) {
 
 export function LeadChatThread({
   leadId,
-  history,
+  history: historyRecebido,
   whatsappOnly,
   canCompose,
   readOnlyInstagramHint,
@@ -288,6 +289,37 @@ export function LeadChatThread({
   const navigate = useNavigate()
   const { tenant } = useTenant()
   const isSalesPolo = tenant.poloType === 'sales'
+
+  // Mídia inline (W-API) que chegou sem o base64. O refresh global do chat deixou de
+  // trazê-lo, então a foto/áudio/PDF que chega com a conversa aberta busca o conteúdo
+  // aqui, uma vez por item, e só para esta conversa.
+  const [base64PorId, setBase64PorId] = useState<Record<string, string>>({})
+  const base64Pedido = useRef(new Set<string>())
+  useEffect(() => {
+    if (!isSupabaseConfigured) return
+    const faltando = historyRecebido
+      .flatMap((m) => m.media ?? [])
+      .filter((m) => !m.base64 && !m.url && !m.storagePath && !base64Pedido.current.has(m.id))
+      .map((m) => m.id)
+    if (faltando.length === 0) return
+    for (const id of faltando) base64Pedido.current.add(id)
+    void loadMediaBase64ByIds(faltando).then((achados) => {
+      if (!achados) {
+        // Falhou (rede, banco lento): libera para tentar no próximo refresh.
+        for (const id of faltando) base64Pedido.current.delete(id)
+        return
+      }
+      if (Object.keys(achados).length) setBase64PorId((atuais) => ({ ...atuais, ...achados }))
+    })
+  }, [historyRecebido])
+  const history = useMemo(() => {
+    if (Object.keys(base64PorId).length === 0) return historyRecebido
+    return historyRecebido.map((msg) =>
+      msg.media?.some((m) => !m.base64 && base64PorId[m.id])
+        ? { ...msg, media: msg.media.map((m) => (!m.base64 && base64PorId[m.id] ? { ...m, base64: base64PorId[m.id] } : m)) }
+        : msg,
+    )
+  }, [historyRecebido, base64PorId])
 
   // Rascunho do compositor = estado LOCAL (antes vivia no context global e cada tecla
   // re-renderizava o app inteiro). Só este componente re-renderiza ao digitar.

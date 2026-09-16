@@ -880,12 +880,14 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
     fetchAllLeadsPaged(client),
     consultaDeInteracoes(client).order('happened_at', { ascending: false }).limit(3200),
     client.from('lead_tag_assignments').select('lead_id, tag_id'),
-    // Base64 SÓ das mídias recentes (48h): este refresh roda o tempo todo e baixava os
-    // ~9MB de TODAS as mídias a cada ciclo. Mídia antiga chega por lead ao abrir a
-    // conversa (loadLeadInteractionsFromSupabase); o merge preserva o que já está rico.
+    // SEM media_base64: este refresh roda a cada mensagem nova, em cada aba aberta. Com
+    // base64 da janela de 48h, dois PDFs (2 e 5 MB) em 16/09 fizeram cada refresh pesar
+    // 13 MB e derrubaram o banco (Micro, 1 GB) duas vezes no dia. O base64 chega por lead
+    // ao abrir a conversa (loadLeadInteractionsFromSupabase) e, para mídia que chega com a
+    // conversa aberta, pela bolha (loadMediaBase64ByIds).
     client
       .from('crm_media_items')
-      .select('id, interaction_id, media_type, mime_type, media_base64, storage_path, metadata')
+      .select('id, interaction_id, media_type, mime_type, storage_path, metadata')
       .gte('created_at', new Date(Date.now() - 48 * 3_600_000).toISOString())
       .order('created_at', { ascending: false })
       .limit(120),
@@ -929,7 +931,6 @@ export const loadChatSliceFromSupabase = async (): Promise<ChatSlice> => {
         id: String(row.id),
         type: row.media_type as any,
         mimeType: row.mime_type,
-        base64: row.media_base64,
         // `storage_path` guarda duas coisas por herança: URL pública (mídia antiga do
         // ManyChat) e caminho do bucket privado (mídia nova que sai pelo CRM). Caminho de
         // bucket num `src` de <img> dá imagem quebrada — separamos aqui, e quem renderiza
@@ -965,9 +966,11 @@ export const loadInteractionsSliceFromSupabase = async (): Promise<Interaction[]
   const client = assertSupabase()
   const [interactionsRes, mediaRes] = await Promise.all([
     consultaDeInteracoes(client).order('happened_at', { ascending: false }).limit(1000),
+    // Sem media_base64, pelo mesmo motivo de loadChatSliceFromSupabase: é o refresh mais
+    // frequente do sistema e não pode carregar arquivo nenhum.
     client
       .from('crm_media_items')
-      .select('id, interaction_id, media_type, mime_type, media_base64, storage_path, metadata')
+      .select('id, interaction_id, media_type, mime_type, storage_path, metadata')
       .gte('created_at', new Date(Date.now() - 48 * 3_600_000).toISOString())
       .order('created_at', { ascending: false })
       .limit(120),
@@ -984,7 +987,6 @@ export const loadInteractionsSliceFromSupabase = async (): Promise<Interaction[]
         id: String(row.id),
         type: row.media_type as any,
         mimeType: row.mime_type,
-        base64: row.media_base64,
         // `storage_path` guarda duas coisas por herança: URL pública (mídia antiga do
         // ManyChat) e caminho do bucket privado (mídia nova que sai pelo CRM). Caminho de
         // bucket num `src` de <img> dá imagem quebrada — separamos aqui, e quem renderiza
