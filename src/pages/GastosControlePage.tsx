@@ -12,10 +12,14 @@
 //
 // Classificar é UMA pergunta, centro de custo, com o mesmo seletor do Extrato. A categoria do
 // DRE é derivada do centro no banco. Ver a migration 20260914200000.
+//
+// Nota sem pagamento no banco tem "Vincular" na linha (16/set, pedido do Kauan): boleto pago com
+// juros sai com outro valor, o motor automático não casa, e a nota ficava em aberto com o
+// pagamento dela ali do lado. Vinculada, a nota sai daqui e fica a linha do banco.
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ArrowDownWideNarrow, CalendarDays, Plus, RefreshCw, Search, Upload } from 'lucide-react'
+import { ArrowDownWideNarrow, CalendarDays, Link2, Plus, RefreshCw, Search, Upload } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { FinanceTabs } from '@/components/page/FinanceTabs'
@@ -39,6 +43,7 @@ import { centroForaDoTotal } from '@/lib/centroCusto'
 import { GastosPorCentro, type LinhaGasto } from '@/components/financeiro/GastosPorCentro'
 import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
 import { possiveisCopias } from '@/lib/copiasBanco'
+import { PagarContaDialog } from '@/components/financeiro/PagarContaDialog'
 import { SaidaEditor } from '@/components/financeiro/SaidaEditor'
 import { VencimentoNaLinha } from '@/components/financeiro/VencimentoNaLinha'
 import { useTenant } from '@/context/TenantContext'
@@ -47,15 +52,17 @@ import { padraoDaRegra } from '@/lib/extratoPadrao'
 import { mesAtual, periodoDoMes, type Periodo } from '@/lib/periodo'
 import { cn } from '@/lib/utils'
 import { createGastoManual, importGastosRows, parseGastosSpreadsheet } from '@/services/gastosControle'
-import { updatePayable } from '@/services/estoqueCompras'
+import { type Payable, getPayable, updatePayable } from '@/services/estoqueCompras'
 import {
   classificarSaida,
   desfazerExclusao,
+  listAccounts,
   listCategories,
   listCostCenters,
   listLancamentosExcluidos,
   listSaidasTudo,
   type CostCenter,
+  type FinAccount,
   type FinCategory,
   type LancamentoExcluido,
   type SaidaTudo,
@@ -138,6 +145,10 @@ export function GastosControlePage() {
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
+
+  /** Nota aberta no diálogo de vincular ao pagamento. As contas só carregam na primeira vez. */
+  const [vinculando, setVinculando] = useState<Payable | null>(null)
+  const [contas, setContas] = useState<FinAccount[] | null>(null)
 
   const [openForm, setOpenForm] = useState(false)
   const [form, setForm] = useState({ ...EMPTY_FORM })
@@ -297,6 +308,20 @@ export function GastosControlePage() {
     void load(true)
   }
 
+  const abrirVincular = async (r: SaidaTudo) => {
+    try {
+      const [parcela, cs] = await Promise.all([getPayable(r.id), contas ?? listAccounts()])
+      if (!parcela) {
+        toast.error('Esta nota não existe mais. Atualize a tela.')
+        return
+      }
+      setContas(cs)
+      setVinculando(parcela)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao abrir a nota')
+    }
+  }
+
   const handleImport = async (file: File | null) => {
     if (!file) return
     setImporting(true)
@@ -406,7 +431,7 @@ export function GastosControlePage() {
           valor={brl(numeros.notas.cents)}
           dica={`${numeros.notasVencidas.n} vencidas (${brl(numeros.notasVencidas.cents)}) e ${
             numeros.notas.n - numeros.notasVencidas.n
-          } a vencer. Nota que não foi compra se exclui no detalhe da linha.`}
+          } a vencer. Pagou com juros? Vincular na linha. Nota que não foi compra se exclui na lixeira.`}
           ativo={vista === 'lancamentos' && filtro === 'notas'}
           onClick={() => abrirFiltro('notas')}
         />
@@ -572,9 +597,23 @@ export function GastosControlePage() {
                                 {nome}
                               </span>
                               {ehNotaAberta(r) ? (
-                                <Badge variant="outline" className="shrink-0 text-[0.65rem]">
-                                  {r.data > hojeLocal() ? `nota vence ${dia(r.data).slice(0, 5)}` : 'nota sem pagamento no banco'}
-                                </Badge>
+                                <>
+                                  <Badge variant="outline" className="shrink-0 text-[0.65rem]">
+                                    {r.data > hojeLocal() ? `nota vence ${dia(r.data).slice(0, 5)}` : 'nota sem pagamento no banco'}
+                                  </Badge>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 shrink-0 px-2 text-[0.7rem]"
+                                    title="Vincular ao pagamento no extrato, mesmo com juros ou multa"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      void abrirVincular(r)
+                                    }}
+                                  >
+                                    <Link2 className="size-3" /> Vincular
+                                  </Button>
+                                </>
                               ) : r.origem === 'a pagar' ? (
                                 <Badge variant="outline" className="shrink-0 text-[0.65rem]">
                                   lançado à mão
@@ -713,6 +752,17 @@ export function GastosControlePage() {
           )}
         </div>
       )}
+
+      <PagarContaDialog
+        key={vinculando?.id ?? 'nenhuma'}
+        parcela={vinculando}
+        contas={contas ?? []}
+        onFechar={() => setVinculando(null)}
+        onPago={() => {
+          setVinculando(null)
+          void load(true)
+        }}
+      />
 
       <Dialog open={openForm} onOpenChange={setOpenForm}>
         <DialogContent>

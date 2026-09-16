@@ -6,17 +6,20 @@
 // financeiro não achava a conta vencida no meio dos formulários.
 //
 // Agora são quatro vistas sobre o mesmo dado, e os formulários viraram botões no topo:
-//   A pagar             · a agenda, vencidas primeiro, com centro de custo, Pagar e apagar
+//   A pagar             · a agenda, vencidas primeiro, com centro de custo, Vincular e apagar
 //   Conferir com banco  · o que o sistema não ligou sozinho ao extrato
 //   Pagas               · o que saiu, e se foi ligado ao extrato ou marcado à mão
 //   Notas fiscais       · as notas de compra (SEFAZ, XML ou digitadas) e o que entrou no estoque
 //
-// "Pagar" não lança mais saída no banco conectado: procura o pagamento no extrato e liga os dois
+// "Vincular" não lança saída no banco conectado: procura o pagamento no extrato e liga os dois
 // (ver PagarContaDialog). Lançar outra saída no Itaú contava o mesmo boleto duas vezes em Gastos.
+//
+// Na vista de notas, cada nota diz se entrou no estoque e, quando não entrou, por quê
+// (crm_notas_estoque). Antes isso só aparecia abrindo nota por nota, e o financeiro não achou.
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, ChevronDown, FileText, Paperclip, Plus, RefreshCw, RotateCcw, Search } from 'lucide-react'
+import { ChevronDown, FileText, Link2, Paperclip, Plus, RefreshCw, RotateCcw, Search } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { FinanceTabs } from '@/components/page/FinanceTabs'
@@ -49,6 +52,7 @@ import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { cn } from '@/lib/utils'
 import { desfazerConciliacao } from '@/services/conciliacaoAuto'
 import {
+  type EstoqueDaNota,
   type InvoiceMovement,
   type Payable,
   type PurchaseInvoice,
@@ -57,6 +61,7 @@ import {
   createPayables,
   createPurchaseInvoice,
   getAttachmentSignedUrl,
+  listEstoqueDasNotas,
   listInvoiceMovements,
   listPayables,
   listPurchaseInvoices,
@@ -89,6 +94,7 @@ function rotuloDoMes(ym: string): string {
 }
 
 type Vista = 'apagar' | 'conferir' | 'pagas' | 'notas'
+type FiltroNotas = 'todas' | 'entrou' | 'fora'
 type Recorte = 'todas' | 'vencidas' | 'semana' | 'mes'
 
 const NOVA_CONTA = {
@@ -143,6 +149,35 @@ function Indicador({
   )
 }
 
+/** Entrou no estoque? E quando não entrou, o motivo, que muda o que dá para fazer. */
+const ESTOQUE_DA_NOTA: Record<EstoqueDaNota['situacao'], { rotulo: string; dica: string; tom: string }> = {
+  entrou: {
+    rotulo: 'no estoque',
+    dica: 'Os produtos desta nota entraram no estoque. Abra a nota para ver quais.',
+    tom: 'border-emerald-500/50 text-emerald-700 dark:text-emerald-400',
+  },
+  pendente: {
+    rotulo: 'entrada pendente',
+    dica: 'Já está no financeiro e a entrada no estoque roda sozinha com esta aba aberta. Atualize em instantes.',
+    tom: 'border-amber-500/50 text-amber-700 dark:text-amber-400',
+  },
+  resumo: {
+    rotulo: 'só resumo da SEFAZ',
+    dica: 'A SEFAZ mandou só o resumo, sem a lista de produtos. Para dar entrada, importe o XML da nota pelo botão Importar XML (o fornecedor ou o contador têm).',
+    tom: 'text-muted-foreground',
+  },
+  nao_entrou: {
+    rotulo: 'não entrou',
+    dica: 'Tem a lista de produtos, mas não deu entrada no estoque: não era material (café, flores, serviço) ou ficou de fora porque já estava contado no inventário.',
+    tom: 'border-amber-500/50 text-amber-700 dark:text-amber-400',
+  },
+  sem_xml: {
+    rotulo: 'sem XML',
+    dica: 'Registrada à mão, sem XML: não tem lista de produtos para dar entrada.',
+    tom: 'text-muted-foreground',
+  },
+}
+
 export function ContasPagarPage() {
   const { tenant } = useTenant()
   const [payables, setPayables] = useState<Payable[]>([])
@@ -152,6 +187,8 @@ export function ContasPagarPage() {
   const [accounts, setAccounts] = useState<FinAccount[]>([])
   const [centros, setCentros] = useState<CostCenter[]>([])
   const [ligados, setLigados] = useState<Map<string, PagamentoLigado>>(new Map())
+  const [estoqueNotas, setEstoqueNotas] = useState<Map<string, EstoqueDaNota>>(new Map())
+  const [filtroNotas, setFiltroNotas] = useState<FiltroNotas>('todas')
   const [loading, setLoading] = useState(false)
 
   const [vista, setVista] = useState<Vista>('apagar')
@@ -174,7 +211,7 @@ export function ContasPagarPage() {
   const load = async (silencioso = false) => {
     if (!silencioso) setLoading(true)
     try {
-      const [p, inv, sup, items, acc, cc, lig] = await Promise.all([
+      const [p, inv, sup, items, acc, cc, lig, est] = await Promise.all([
         listPayables(),
         listPurchaseInvoices(),
         listSuppliers(),
@@ -182,6 +219,8 @@ export function ContasPagarPage() {
         listAccounts(),
         listCostCenters(),
         listPagamentosLigados().catch(() => new Map<string, PagamentoLigado>()),
+        // Auxiliar: se falhar, a tela de contas não pode cair junto.
+        listEstoqueDasNotas().catch(() => new Map<string, EstoqueDaNota>()),
       ])
       setPayables(p)
       setInvoices(inv)
@@ -190,6 +229,7 @@ export function ContasPagarPage() {
       setAccounts(acc)
       setCentros(cc)
       setLigados(lig)
+      setEstoqueNotas(est)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar contas a pagar')
     } finally {
@@ -270,10 +310,22 @@ export function ContasPagarPage() {
     return m
   }, [payables])
 
+  const entrouNoEstoque = (id: string) => estoqueNotas.get(id)?.situacao === 'entrou'
+
   const notas = useMemo(() => {
     const t = busca.trim().toLowerCase()
-    return invoices.filter((i) => !t || `${i.number} ${i.supplierName ?? ''}`.toLowerCase().includes(t))
-  }, [invoices, busca])
+    return invoices.filter((i) => {
+      if (filtroNotas === 'entrou' && !entrouNoEstoque(i.id)) return false
+      if (filtroNotas === 'fora' && entrouNoEstoque(i.id)) return false
+      return !t || `${i.number} ${i.supplierName ?? ''}`.toLowerCase().includes(t)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices, busca, filtroNotas, estoqueNotas])
+
+  const notasNoEstoque = useMemo(
+    () => invoices.filter((i) => estoqueNotas.get(i.id)?.situacao === 'entrou').length,
+    [invoices, estoqueNotas],
+  )
 
   const abrirRecorte = (r: Recorte) => {
     setVista('apagar')
@@ -407,7 +459,7 @@ export function ContasPagarPage() {
           dica={
             numeros.vencidas.n === 0
               ? 'Nada vencido em aberto.'
-              : `${plural(numeros.vencidas.n, 'conta', 'contas')} sem pagamento no banco. Pode ter sido paga de outro jeito: confira.`
+              : `${plural(numeros.vencidas.n, 'conta', 'contas')} sem pagamento no banco. Pagou com juros ou de outro jeito? Vincular na linha.`
           }
           tom={numeros.vencidas.n > 0 ? 'ruim' : undefined}
           ativo={vista === 'apagar' && recorte === 'vencidas'}
@@ -590,8 +642,14 @@ export function ContasPagarPage() {
                               <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums">{brl(p.amountCents)}</td>
                               <td className="px-2 py-1.5">
                                 <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                                  <Button size="sm" variant="outline" className="h-7" onClick={() => setPagando(p)}>
-                                    <Check className="size-3.5" /> Pagar
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7"
+                                    onClick={() => setPagando(p)}
+                                    title="Vincular ao pagamento no extrato, mesmo com juros, ou marcar como paga"
+                                  >
+                                    <Link2 className="size-3.5" /> Vincular
                                   </Button>
                                   <ExcluirLancamento
                                     variante="icone"
@@ -712,9 +770,30 @@ export function ContasPagarPage() {
           <Card>
             <CardContent className="p-0">
               <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-                <span className="text-xs text-muted-foreground">
-                  Notas de compra: as da SEFAZ entram sozinhas, as de XML pelo botão Importar XML.
-                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(
+                    [
+                      ['todas', 'Todas', invoices.length],
+                      ['entrou', 'Entraram no estoque', notasNoEstoque],
+                      ['fora', 'Não entraram', invoices.length - notasNoEstoque],
+                    ] as Array<[FiltroNotas, string, number]>
+                  ).map(([f, rotulo, n]) => (
+                    <button
+                      key={f}
+                      type="button"
+                      aria-pressed={filtroNotas === f}
+                      onClick={() => setFiltroNotas(f)}
+                      className={cn(
+                        'rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+                        filtroNotas === f
+                          ? 'border-primary bg-primary/10 text-foreground'
+                          : 'border-border text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      {rotulo} <span className="tabular-nums opacity-70">{n}</span>
+                    </button>
+                  ))}
+                </div>
                 <Button size="sm" variant="ghost" onClick={() => setNovaNota({ ...NOVA_NOTA })}>
                   <FileText className="size-3.5" /> Registrar nota sem XML
                 </Button>
@@ -729,6 +808,7 @@ export function ContasPagarPage() {
                         <th className="w-28 px-3 py-2 text-left font-medium">Emissão</th>
                         <th className="px-3 py-2 text-left font-medium">Nota e fornecedor</th>
                         <th className="px-3 py-2 text-left font-medium">Contas a pagar</th>
+                        <th className="px-3 py-2 text-left font-medium">Estoque</th>
                         <th className="w-32 px-3 py-2 text-right font-medium">Total</th>
                         <th className="w-12 px-2 py-2" />
                       </tr>
@@ -739,6 +819,8 @@ export function ContasPagarPage() {
                         const abertasDaNota = parc.filter((p) => p.status === 'aberto').length
                         const aberta = notaAberta === inv.id
                         const movs = movimentos[inv.id]
+                        const est = estoqueNotas.get(inv.id)
+                        const selo = est ? ESTOQUE_DA_NOTA[est.situacao] : null
                         return (
                           <Fragment key={inv.id}>
                             <tr
@@ -765,6 +847,14 @@ export function ContasPagarPage() {
                                   </span>
                                 )}
                               </td>
+                              <td className="px-3 py-2 text-xs">
+                                {selo ? (
+                                  <Badge variant="outline" className={cn('whitespace-nowrap', selo.tom)} title={selo.dica}>
+                                    {selo.rotulo}
+                                    {est?.situacao === 'entrou' ? ` · ${plural(est.itens, 'produto', 'produtos')}` : ''}
+                                  </Badge>
+                                ) : null}
+                              </td>
                               <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums">{brl(inv.totalCents)}</td>
                               <td className="px-2 py-2 text-right" onClick={(e) => e.stopPropagation()}>
                                 {inv.storagePath ? (
@@ -781,14 +871,17 @@ export function ContasPagarPage() {
                             </tr>
                             {aberta && (
                               <tr className="border-t border-border/60 bg-muted/10 text-xs">
-                                <td colSpan={5} className="px-3 py-2">
+                                <td colSpan={6} className="px-3 py-2">
                                   <div className="grid gap-3 md:grid-cols-2">
                                     <div>
                                       <div className="mb-1 font-semibold">Entrou no estoque</div>
                                       {!movs ? (
                                         <p className="text-muted-foreground">Carregando…</p>
                                       ) : movs.length === 0 ? (
-                                        <p className="text-muted-foreground">Nenhuma entrada de estoque desta nota.</p>
+                                        <p className="text-muted-foreground">
+                                          Nenhuma entrada de estoque desta nota.{' '}
+                                          {selo && est?.situacao !== 'entrou' ? selo.dica : ''}
+                                        </p>
                                       ) : (
                                         <ul className="space-y-0.5">
                                           {movs.map((m) => (

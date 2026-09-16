@@ -104,6 +104,41 @@ export async function listConciliacaoPendentes(): Promise<ConciliacaoPendente[]>
   }))
 }
 
+/** Uma saída do extrato que pode ter pago uma parcela, para vincular à mão. */
+export type CandidatoPagamento = {
+  transacaoId: string
+  data: string
+  descricao: string
+  conta: string
+  amountCents: number
+  /** Positivo: saiu mais que a nota (juros, multa). Negativo: saiu menos (desconto). */
+  diferencaCents: number
+  /** O nome do fornecedor aparece na descrição do extrato, pela mesma regra do motor. */
+  nomeBate: boolean
+  /** Dias entre o vencimento e a saída. Positivo = pago com atraso. */
+  dias: number
+}
+
+/**
+ * As saídas ainda soltas em volta do vencimento de uma parcela, com o valor EXATO primeiro,
+ * depois o mesmo fornecedor e depois a menor diferença. É o caso que o motor automático não
+ * decide: boleto pago depois do vencimento, com juros e multa, sai com outro valor.
+ */
+export async function listCandidatosPagamento(parcelaId: string): Promise<CandidatoPagamento[]> {
+  const { data, error } = await assertClient().rpc('crm_conciliacao_candidatos', { p_parcela: parcelaId })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    transacaoId: String(r.transacao_id ?? ''),
+    data: String(r.data ?? ''),
+    descricao: String(r.descricao ?? ''),
+    conta: String(r.conta ?? ''),
+    amountCents: Number(r.valor_cents ?? 0),
+    diferencaCents: Number(r.diferenca_cents ?? 0),
+    nomeBate: r.nome_bate === true,
+    dias: Number(r.dias ?? 0),
+  }))
+}
+
 /** Confirma um par da fila. Usa a data do BANCO como data de pagamento, igual ao motor. */
 export async function confirmarConciliacao(parcelaId: string, transacaoId: string): Promise<boolean> {
   const { data, error } = await assertClient().rpc('crm_conciliacao_confirmar', {

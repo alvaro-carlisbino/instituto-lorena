@@ -523,14 +523,18 @@ export type PurchaseInvoice = {
 }
 
 export async function listPurchaseInvoices(): Promise<PurchaseInvoice[]> {
-  const client = assertClient()
-  const { data, error } = await client
-    .from('purchase_invoices')
-    .select('id, supplier_id, po_id, number, issue_date, total_cents, storage_path, file_name, note, created_at, stock_suppliers(name)')
-    .order('created_at', { ascending: false })
-    .limit(200)
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => {
+  // Todas, não as 200 mais novas: a clínica passou de 400 notas e a busca por número não achava
+  // nota de junho.
+  const data = await buscarTudo<Record<string, unknown>>(
+    () =>
+      assertClient()
+        .from('purchase_invoices')
+        .select('id, supplier_id, po_id, number, issue_date, total_cents, storage_path, file_name, note, created_at, stock_suppliers(name)')
+        .order('created_at', { ascending: false })
+        .order('id'),
+    { rotulo: 'purchase_invoices', maxPaginas: 10 },
+  )
+  return data.map((r) => {
     const supplier = r.stock_suppliers as { name?: unknown } | null
     return {
       id: String(r.id),
@@ -644,6 +648,44 @@ export type InvoiceMovement = {
 
 /** O que essa NF colocou no estoque. Sem isso a nota registrada é só um total: não dava
  *  pra conferir se a entrada bateu com o que veio na caixa. */
+/**
+ * Se a nota entrou no estoque, e quando não entrou, por quê. Vem de uma função do banco
+ * (`crm_notas_estoque`) para não baixar todos os movimentos e todos os XMLs só para contar.
+ */
+export type EstoqueDaNota =
+  | { situacao: 'entrou'; itens: number }
+  /** Já no financeiro, esperando a entrada, que roda ao abrir a aba Notas fiscais. */
+  | { situacao: 'pendente' }
+  /** A SEFAZ só mandou o resumo: sem lista de produtos, não há o que dar entrada. */
+  | { situacao: 'resumo' }
+  /** Tem a lista de produtos e ninguém deu entrada: não era material, ou ficou de fora. */
+  | { situacao: 'nao_entrou' }
+  /** Registrada à mão, sem XML. */
+  | { situacao: 'sem_xml' }
+
+export async function listEstoqueDasNotas(): Promise<Map<string, EstoqueDaNota>> {
+  const data = await buscarTudo<Record<string, unknown>>(
+    () => assertClient().rpc('crm_notas_estoque').order('invoice_id'),
+    { rotulo: 'crm_notas_estoque', maxPaginas: 10 },
+  )
+  const m = new Map<string, EstoqueDaNota>()
+  for (const r of data) {
+    const itens = Number(r.itens ?? 0)
+    const e: EstoqueDaNota =
+      itens > 0
+        ? { situacao: 'entrou', itens }
+        : r.pendente
+          ? { situacao: 'pendente' }
+          : r.da_sefaz && !r.tem_xml
+            ? { situacao: 'resumo' }
+            : r.tem_xml
+              ? { situacao: 'nao_entrou' }
+              : { situacao: 'sem_xml' }
+    m.set(String(r.invoice_id), e)
+  }
+  return m
+}
+
 export async function listInvoiceMovements(invoiceId: string): Promise<InvoiceMovement[]> {
   const client = assertClient()
   const { data, error } = await client
