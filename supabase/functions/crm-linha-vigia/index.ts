@@ -86,23 +86,57 @@ function dentroDaJanela(policy: PolicyRow | null, now: Date): boolean {
   return hora >= inicio && hora < fim
 }
 
-/** Timestamp da última mensagem RECEBIDA nesta linha. `null` = nunca recebeu nada. */
-async function ultimaEntradaMs(admin: SupabaseClient, line: LinhaRow): Promise<number | null> {
-  const { data } = await admin
+/**
+ * Até onde olhar para trás quando a conta é POR LINHA. O recorte pela linha passa por um join
+ * com `leads`, e numa linha de pouco movimento sem limite ele varreria o histórico inteiro do
+ * polo de 5 em 5 minutos. Sem entrada nesse prazo vale `sem_historico`: não acusa.
+ */
+const JANELA_POR_LINHA_MS = 48 * 60 * 60 * 1000
+
+/**
+ * Timestamp da última mensagem RECEBIDA nesta linha. `null` = nunca recebeu nada.
+ *
+ * `interactions` não diz por qual linha a mensagem entrou. Com UMA linha W-API no polo, a
+ * conta do polo é a conta da linha. Com mais de uma (16/set/2026, o WhatsApp da Aline ao lado
+ * da SDR), a linha vem do cadastro: o webhook reescreve `leads.whatsapp_instance_id` a cada
+ * mensagem que entra, então a última entrada de quem está amarrado nesta linha entrou por ela.
+ * A aproximação só erra para o lado do silêncio (quem escreveu aqui e depois foi para a outra
+ * linha sai da conta), e o veredito ainda exige sonda ou silêncio longo com saída fluindo.
+ */
+async function ultimaEntradaMs(admin: SupabaseClient, line: LinhaRow, porLinha: boolean): Promise<number | null> {
+  let consulta = admin
     .from('interactions')
-    .select('happened_at')
+    .select(porLinha ? 'happened_at, leads!inner(whatsapp_instance_id)' : 'happened_at')
     .eq('tenant_id', line.tenant_id)
     .eq('channel', 'whatsapp')
     .eq('direction', 'in')
-    .order('happened_at', { ascending: false })
-    .limit(1)
+  if (porLinha) {
+    consulta = consulta
+      .eq('leads.whatsapp_instance_id', line.id)
+      .gte('happened_at', new Date(Date.now() - JANELA_POR_LINHA_MS).toISOString())
+  }
+  const { data, error } = await consulta.order('happened_at', { ascending: false }).limit(1)
+  if (error) console.warn(`[linha-vigia] entrada da linha ${line.id}: ${error.message}`)
   const ultima = (data ?? [])[0] as { happened_at?: string } | undefined
   if (!ultima?.happened_at) return null
   return Date.parse(ultima.happened_at)
 }
 
-/** Quantas mensagens o CRM mandou desde então: a prova de que insistimos e ninguém voltou. */
-async function saidasDesde(admin: SupabaseClient, line: LinhaRow, desdeIso: string): Promise<number> {
+/**
+ * Quantas mensagens o CRM mandou desde então: a prova de que insistimos e ninguém voltou.
+ * Por linha, o livro-caixa da guarda anti-ban (`whatsapp_outbound_log`) já sabe a linha de
+ * cada envio que saiu.
+ */
+async function saidasDesde(admin: SupabaseClient, line: LinhaRow, desdeIso: string, porLinha: boolean): Promise<number> {
+  if (porLinha) {
+    const { count } = await admin
+      .from('whatsapp_outbound_log')
+      .select('id', { count: 'exact', head: true })
+      .eq('instance_id', line.id)
+      .eq('decision', 'allowed')
+      .gte('created_at', desdeIso)
+    return Number(count ?? 0)
+  }
   const { count } = await admin
     .from('interactions')
     .select('id', { count: 'exact', head: true })
@@ -294,12 +328,9 @@ Deno.serve(async (req) => {
       resultado.push({ linha: line.id, acao: 'ok', motivo: 'sem_credencial' })
       continue
     }
-    // `interactions` não diz por qual linha a mensagem entrou. Com uma linha ativa por polo
-    // a conta do polo É a conta da linha; com duas, seria chute — e chute vira alarme falso.
-    if ((porTenant.get(line.tenant_id) ?? 0) > 1) {
-      resultado.push({ linha: line.id, acao: 'ok', motivo: 'polo_com_mais_de_uma_linha_ativa' })
-      continue
-    }
+    // Com uma linha ativa no polo a conta do polo É a conta da linha. Com duas, medir o polo
+    // deixaria a linha viva esconder a caída; até 16/set o vigia se declarava cego aqui.
+    const porLinha = (porTenant.get(line.tenant_id) ?? 0) > 1
 
     const [{ data: policyRaw }, { data: healthRaw }] = await Promise.all([
       admin.from('whatsapp_line_policy')
@@ -321,13 +352,13 @@ Deno.serve(async (req) => {
 
     const vigiaAntes = ((health?.detail ?? {}) as { vigia?: Record<string, unknown> }).vigia ?? {}
     const avisadoEm = String(vigiaAntes.avisado_em ?? '')
-    const entradaMs = await ultimaEntradaMs(admin, line)
+    const entradaMs = await ultimaEntradaMs(admin, line, porLinha)
     // O silêncio que acusa começa na abertura da janela de hoje, nunca antes dela.
     const referenciaMs = Math.max(entradaMs ?? 0, aberturaDaJanelaHoje(policy, agora))
     const sinal: SinalDaLinha = {
       minutosSemEntrada: entradaMs === null ? null : Math.floor((Date.now() - entradaMs) / 60_000),
       minutosDeSilencioNaJanela: Math.max(0, Math.floor((Date.now() - referenciaMs) / 60_000)),
-      saidasNoSilencio: await saidasDesde(admin, line, new Date(referenciaMs).toISOString()),
+      saidasNoSilencio: await saidasDesde(admin, line, new Date(referenciaMs).toISOString(), porLinha),
       dentroDaJanela: dentroDaJanela(policy, agora),
       sonda: null,
       avisadoHaMinutos: avisadoEm ? Math.floor((Date.now() - Date.parse(avisadoEm)) / 60_000) : null,

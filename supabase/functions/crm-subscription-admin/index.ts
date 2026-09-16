@@ -14,7 +14,7 @@ async function sendWapi(admin: ReturnType<typeof createClient>, tenantId: string
   const to = digits(phone); if (to.length < 10) return false
   const full = to.startsWith('55') ? to : '55' + to
   try {
-    const { data } = await admin.from('whatsapp_channel_instances').select('wapi_instance_id, wapi_token, wapi_base_url').eq('tenant_id', tenantId).eq('channel_provider', 'wapi').eq('active', true).limit(1).maybeSingle()
+    const { data } = await admin.from('whatsapp_channel_instances').select('wapi_instance_id, wapi_token, wapi_base_url').eq('tenant_id', tenantId).eq('channel_provider', 'wapi').eq('active', true).order('sort_order', { ascending: true }).order('created_at', { ascending: true }).limit(1).maybeSingle()
     const row = data as { wapi_instance_id?: string; wapi_token?: string; wapi_base_url?: string | null } | null
     const inst = row?.wapi_instance_id ? String(row.wapi_instance_id).trim() : ''; const tok = row?.wapi_token ? String(row.wapi_token).trim() : ''
     if (!inst || !tok) return false

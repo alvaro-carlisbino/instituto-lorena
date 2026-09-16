@@ -1174,6 +1174,30 @@ export function WhatsappConnectionPage() {
                     </Button>
                   </div>
                   </div>
+                  <div className="w-full space-y-1.5 md:max-w-md">
+                    <Label className="text-xs">Quem responde neste número</Label>
+                    <Select
+                      value={row.aiAutoReply ? 'ia' : 'equipe'}
+                      onValueChange={(v) => updateRouteDraft(inst.id, { aiAutoReply: v === 'ia' })}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ia" className="text-xs">
+                          IA e equipe, pelas regras do polo
+                        </SelectItem>
+                        <SelectItem value="equipe" className="text-xs">
+                          Só a equipe: a IA não fala por este número
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {!row.aiAutoReply ? (
+                      <p className="m-0 text-[11px] text-muted-foreground">
+                        Sem primeiro atendimento, plantão ou follow-up da IA. Lembrete de cirurgia e confirmação de pagamento continuam saindo.
+                      </p>
+                    ) : null}
+                  </div>
                   <div className="w-full space-y-1.5">
                     <Label className="text-xs">Prompt IA só desta linha (opcional)</Label>
                     <Textarea

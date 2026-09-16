@@ -44,6 +44,20 @@ const INTERNAL_SOURCE_AUTHORS: Record<string, string> = {
   confirmacao_pagamento: 'Confirmação de pagamento',
 }
 
+/**
+ * Rotinas que falam COM A VOZ DA IA (as "Assistente IA" acima). Numa linha só da equipe
+ * (`whatsapp_channel_instances.ai_auto_reply = false`, o WhatsApp da Aline) elas não saem:
+ * a pessoa conversa com a Aline e não pode receber cobrança de robô pelo número dela.
+ * Aviso (lembrete de cirurgia, confirmação de pagamento) continua saindo.
+ */
+const ROTINAS_COM_VOZ_DE_IA = new Set([
+  'followup_scheduler',
+  'followup_agendamento',
+  'reengage_reativacao',
+  'reengage_recompra',
+  'cart_recovery',
+])
+
 /** Bucket onde o painel sobe o que vai por anexo. Já existia (tarefas, comprovantes). */
 const MEDIA_BUCKET = 'crm-lead-attachments'
 
@@ -534,6 +548,25 @@ Deno.serve(async (req) => {
       },
       409,
     )
+  }
+
+  // Linha só da equipe: rotina com voz de IA não fala por ela. Pessoa na tela passa.
+  if (isServiceRole && ROTINAS_COM_VOZ_DE_IA.has(sourceTag) && resolvedInstanceId) {
+    const { data: linhaIa } = await admin
+      .from('whatsapp_channel_instances')
+      .select('ai_auto_reply')
+      .eq('id', resolvedInstanceId)
+      .maybeSingle()
+    if ((linhaIa as { ai_auto_reply?: boolean | null } | null)?.ai_auto_reply === false) {
+      return json(
+        {
+          error: 'linha_sem_ia',
+          message: `Envio automático recusado: a linha ${resolvedInstanceId} é só da equipe e a IA não fala por ela.`,
+          instanceId: resolvedInstanceId,
+        },
+        409,
+      )
+    }
   }
 
   try {

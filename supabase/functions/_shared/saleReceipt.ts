@@ -185,7 +185,7 @@ type WapiRow = { wapi_instance_id?: string; wapi_token?: string; wapi_base_url?:
 async function loadWapiCreds(admin: SupabaseClient, tenantId: string): Promise<{ instanceId: string; token: string; baseUrl: string } | null> {
   const { data } = await admin.from('whatsapp_channel_instances')
     .select('wapi_instance_id, wapi_token, wapi_base_url')
-    .eq('tenant_id', tenantId).eq('channel_provider', 'wapi').eq('active', true).limit(1).maybeSingle()
+    .eq('tenant_id', tenantId).eq('channel_provider', 'wapi').eq('active', true).order('sort_order', { ascending: true }).order('created_at', { ascending: true }).limit(1).maybeSingle()
   const row = data as WapiRow | null
   const instanceId = row?.wapi_instance_id ? String(row.wapi_instance_id).trim() : ''
   const token = row?.wapi_token ? String(row.wapi_token).trim() : ''

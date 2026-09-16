@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
   // Credenciais W-API (mesma fonte do saleReceipt)
   const { data: w } = await admin.from('whatsapp_channel_instances')
     .select('wapi_instance_id, wapi_token, wapi_base_url')
-    .eq('tenant_id', 'tricopill').eq('channel_provider', 'wapi').eq('active', true).limit(1).maybeSingle()
+    .eq('tenant_id', 'tricopill').eq('channel_provider', 'wapi').eq('active', true).order('sort_order', { ascending: true }).order('created_at', { ascending: true }).limit(1).maybeSingle()
   const wr = w as { wapi_instance_id?: string; wapi_token?: string; wapi_base_url?: string | null } | null
   const inst = String(wr?.wapi_instance_id ?? '').trim()
   const tok = String(wr?.wapi_token ?? '').trim()

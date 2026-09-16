@@ -826,6 +826,19 @@ export async function evaluateCrmAiAutoReplyGate(
   const lineId = String(options.whatsappInstanceId ?? '').trim()
   const lineMode = lineId ? await loadLineConversationMode(admin, leadId, lineId) : null
 
+  // LINHA SÓ DA EQUIPE (16/set/2026). O WhatsApp próprio da Aline: ali quem responde é ela,
+  // nem primeiro atendimento nem plantão. Leitura à parte e tolerante: se a coluna não vier
+  // (erro, linha apagada), vale o comportamento de sempre em vez de calar a IA do polo.
+  let linhaSemIa = false
+  if (lineId) {
+    const { data: lineAiRow } = await admin
+      .from('whatsapp_channel_instances')
+      .select('ai_auto_reply')
+      .eq('id', lineId)
+      .maybeSingle()
+    linhaSemIa = (lineAiRow as { ai_auto_reply?: boolean | null } | null)?.ai_auto_reply === false
+  }
+
   // SEM REGISTO NESTA LINHA, HERDA O QUE FOI DECIDIDO PARA O LEAD (25/ago/2026).
   //
   // "Ninguém decidiu nada nesta linha" caía direto no default da config, e o default da
@@ -903,7 +916,9 @@ export async function evaluateCrmAiAutoReplyGate(
   const handoffDays = handoffNuncaExpira ? 0 : Math.max(0, Number(config?.handoff_expires_days ?? 7))
   let ownerMode = rawOwnerMode
   let handoffExpired = false
-  if (rawOwnerMode === 'human' && aiEnabled && handoffDays > 0) {
+  // Em linha sem IA a expiração não tem o que devolver: persistir 'auto' só faria o painel
+  // mostrar "IA" numa conversa que a IA nunca vai responder.
+  if (rawOwnerMode === 'human' && aiEnabled && handoffDays > 0 && !linhaSemIa) {
     const lastHumanAt = stateLastHumanReplyAt ? new Date(String(stateLastHumanReplyAt)).getTime() : 0
     const daysSinceHuman = lastHumanAt ? (Date.now() - lastHumanAt) / 86400000 : Number.POSITIVE_INFINITY
     if (daysSinceHuman >= handoffDays) {
@@ -980,6 +995,7 @@ export async function evaluateCrmAiAutoReplyGate(
     skipReasons.push('min_seconds_between_ai_replies')
   }
   if (withinTeamHours) skipReasons.push('horario_da_equipe')
+  if (linhaSemIa) skipReasons.push('linha_sem_ia')
 
   // max_ai_replies_per_hour em crm_ai_configs mantém-se para métricas/UI; não bloqueia mais o auto-reply
   // (limite global fazia a IA “parar” em conversas com várias mensagens).
@@ -991,9 +1007,13 @@ export async function evaluateCrmAiAutoReplyGate(
     shouldAiByMode &&
     options.directionIsInbound &&
     !withinTeamHours &&
+    !linhaSemIa &&
     (minSecondsBetween === 0 || elapsedSinceAi >= minSecondsBetween)
 
   const hintParts: string[] = []
+  if (skipReasons.includes('linha_sem_ia')) {
+    hintParts.push('Linha só da equipe: a IA não responde por este número (ajuste em /admin-whatsapp).')
+  }
   if (skipReasons.includes('contato_interno')) {
     hintParts.push('Contato interno (clínica/financeiro/sócios): o bot de vendas não responde.')
   }
