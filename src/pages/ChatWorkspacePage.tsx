@@ -42,6 +42,30 @@ const MODE_SUMMARY: Record<ConversationOwnerMode, string> = {
   auto: 'Misto',
 }
 
+/** Chave do número escolhido nas abas da lista (por navegador). */
+const LINHA_ESCOLHIDA_KEY = 'chat.linhaEscolhida'
+
+function lerLinhaEscolhida(): string | null {
+  try {
+    return window.localStorage.getItem(LINHA_ESCOLHIDA_KEY)
+  } catch {
+    return null
+  }
+}
+
+function gravarLinhaEscolhida(id: string) {
+  try {
+    window.localStorage.setItem(LINHA_ESCOLHIDA_KEY, id)
+  } catch {
+    // sem armazenamento: a escolha vale só até recarregar
+  }
+}
+
+/** "SDR Instituto (W-API)" → "SDR Instituto": o parêntese não cabe na aba. */
+function nomeCurtoDaLinha(label: string): string {
+  return label.replace(/\s*\([^)]*\)\s*$/, '').trim() || label
+}
+
 /** Iniciais para o avatar do contato na lista (1ª + última palavra). */
 function initials(name: string): string {
   const parts = (name || '').trim().split(/\s+/).filter(Boolean)
@@ -80,6 +104,10 @@ export function ChatWorkspacePage({
   // Linha particular de outra pessoa (o WhatsApp da Aline Muniz): a conversa não entra na
   // lista de quem não é a dona nem admin.
   const linhasOcultas = useLinhasParticularesOcultas()
+  // Linhas ATIVAS do polo, na ordem de `sort_order` (a primeira é a padrão de saída).
+  const [linhasDoPolo, setLinhasDoPolo] = useState<Array<{ id: string; label: string }>>([])
+  // Aba de número escolhida. null = ninguém escolheu ainda (abre na primeira linha).
+  const [linhaEscolhida, setLinhaEscolhida] = useState<string | null>(() => lerLinhaEscolhida())
 
   const ownerSelectLabel = useMemo(
     () =>
@@ -126,6 +154,12 @@ export function ChatWorkspacePage({
       .then((rows) => {
         if (!alive) return
         setTenantInstanceIds(new Set(rows.filter((r) => r.tenantId === tenant.id).map((r) => r.id)))
+        setLinhasDoPolo(
+          rows
+            .filter((r) => r.tenantId === tenant.id && r.active)
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+            .map((r) => ({ id: r.id, label: r.label })),
+        )
         setRestrictInstanceIds(
           restrictToBotKind
             ? new Set(rows.filter((r) => r.botKind === restrictToBotKind).map((r) => r.id))
@@ -160,6 +194,42 @@ export function ChatWorkspacePage({
     [tenant.id, tenantInstanceIds],
   )
 
+  /**
+   * SEPARADO POR NÚMERO (16/set/2026). Com o WhatsApp da Aline Muniz ao lado da SDR, quem vê os
+   * dois (admin, e a própria Muniz) pediu para ver "os dois, mas separados": uma aba por linha.
+   *
+   * A conversa pertence à linha em que o lead está amarrado. Lead sem linha, ou amarrado em
+   * linha desligada ou de outro polo, sai pela linha PADRÃO do polo (a primeira ativa por
+   * `sort_order`, mesma regra do `resolveOutboundProviderForLead`), então fica na aba dela.
+   */
+  const linhasVisiveis = useMemo(
+    () => linhasDoPolo.filter((l) => !linhasOcultas.has(l.id)),
+    [linhasDoPolo, linhasOcultas],
+  )
+  const separarPorLinha = !restrictToBotKind && linhasVisiveis.length >= 2
+  const linhaDaConversa = useCallback(
+    (lead: { whatsappInstanceId?: string | null }): string | null => {
+      const id = lead.whatsappInstanceId
+      if (id && linhasDoPolo.some((l) => l.id === id)) return id
+      return linhasDoPolo[0]?.id ?? null
+    },
+    [linhasDoPolo],
+  )
+  const filtroLinha = useMemo((): string => {
+    if (!separarPorLinha) return 'all'
+    if (linhaEscolhida === 'all') return 'all'
+    if (linhaEscolhida && linhasVisiveis.some((l) => l.id === linhaEscolhida)) return linhaEscolhida
+    return linhasVisiveis[0]!.id
+  }, [separarPorLinha, linhaEscolhida, linhasVisiveis])
+  const escolherLinha = useCallback((id: string) => {
+    setLinhaEscolhida(id)
+    gravarLinhaEscolhida(id)
+  }, [])
+  const nomeCurtoPorLinha = useMemo(
+    () => new Map(linhasDoPolo.map((l) => [l.id, nomeCurtoDaLinha(l.label)])),
+    [linhasDoPolo],
+  )
+
   const conversations = useMemo(() => {
     const text = search.trim().toLowerCase()
     const filtered = crm.leads.filter((lead) => {
@@ -168,6 +238,7 @@ export function ChatWorkspacePage({
       // misturados mesmo com o polo trocado no switcher.
       if (!belongsToWorkspace(lead)) return false
       if (lead.whatsappInstanceId && linhasOcultas.has(lead.whatsappInstanceId)) return false
+      if (filtroLinha !== 'all' && linhaDaConversa(lead) !== filtroLinha) return false
       if (restrictToBotKind) {
         if (!restrictInstanceIds) return false
         if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) return false
@@ -214,7 +285,7 @@ export function ChatWorkspacePage({
     }
 
     return filtered.sort((a, b) => recencia(b) - recencia(a))
-  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread, belongsToWorkspace, linhasOcultas])
+  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread, belongsToWorkspace, linhasOcultas, filtroLinha, linhaDaConversa])
 
   // Contador do selo "Não lidas" com o MESMO escopo da lista (workspace/tenant + linha
   // de bot + responsável) — só sem o filtro de texto e o próprio toggle. O `unreadCount`
@@ -222,8 +293,10 @@ export function ChatWorkspacePage({
   // um número que não batia com a lista: o selo tinha "3" mas clicar em "Não lidas" trazia
   // lista vazia porque as não lidas eram de outro polo/linha (ou forçadas em localStorage
   // de leads que nem estão carregados aqui).
-  const scopedUnreadCount = useMemo(() => {
+  // Na mesma passada, as não lidas de CADA número, para o selo das abas.
+  const { scopedUnreadCount, naoLidasPorLinha } = useMemo(() => {
     let n = 0
+    const porLinha = new Map<string, number>()
     for (const lead of crm.leads) {
       if (!belongsToWorkspace(lead)) continue
       if (lead.whatsappInstanceId && linhasOcultas.has(lead.whatsappInstanceId)) continue
@@ -232,10 +305,14 @@ export function ChatWorkspacePage({
         if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) continue
       }
       if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) continue
-      if (isUnread(lead.id)) n += 1
+      if (!isUnread(lead.id)) continue
+      const linha = linhaDaConversa(lead)
+      if (linha) porLinha.set(linha, (porLinha.get(linha) ?? 0) + 1)
+      if (filtroLinha !== 'all' && linha !== filtroLinha) continue
+      n += 1
     }
-    return n
-  }, [crm.leads, belongsToWorkspace, restrictToBotKind, restrictInstanceIds, ownerFilter, isUnread, linhasOcultas])
+    return { scopedUnreadCount: n, naoLidasPorLinha: porLinha }
+  }, [crm.leads, belongsToWorkspace, restrictToBotKind, restrictInstanceIds, ownerFilter, isUnread, linhasOcultas, filtroLinha, linhaDaConversa])
 
   const activeLead = crm.selectedLead ?? conversations[0] ?? null
   // No celular o chat é master-detail: mostra a LISTA ou a CONVERSA, nunca as duas empilhadas
@@ -367,6 +444,44 @@ export function ChatWorkspacePage({
               </Badge>
             </div>
             <div className="mt-3 space-y-2">
+              {separarPorLinha ? (
+                <div
+                  role="tablist"
+                  aria-label="Número de WhatsApp"
+                  className="flex gap-1 rounded-lg bg-muted/40 p-0.5"
+                >
+                  {[...linhasVisiveis.map((l) => ({ id: l.id, nome: nomeCurtoDaLinha(l.label) })), { id: 'all', nome: 'Todos' }].map((aba) => {
+                    const ativa = filtroLinha === aba.id
+                    const naoLidas =
+                      aba.id === 'all'
+                        ? [...naoLidasPorLinha.values()].reduce((a, b) => a + b, 0)
+                        : naoLidasPorLinha.get(aba.id) ?? 0
+                    return (
+                      <button
+                        key={aba.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={ativa}
+                        onClick={() => escolherLinha(aba.id)}
+                        className={cn(
+                          'inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors',
+                          ativa
+                            ? 'bg-background font-semibold text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                        title={aba.id === 'all' ? 'Conversas de todos os números' : `Conversas do número ${aba.nome}`}
+                      >
+                        <span className="truncate">{aba.nome}</span>
+                        {naoLidas > 0 ? (
+                          <span className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold tabular-nums text-primary-foreground">
+                            {naoLidas > 99 ? '99+' : naoLidas}
+                          </span>
+                        ) : null}
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground/70" aria-hidden />
                 <Input
@@ -505,6 +620,14 @@ export function ChatWorkspacePage({
                         <span className={cn('h-1 w-1 rounded-full', getSourceStyle(lead.source).dot)} aria-hidden />
                         {getSourceStyle(lead.source).label}
                       </span>
+                      {separarPorLinha && filtroLinha === 'all' ? (
+                        <span
+                          className="truncate rounded-md bg-muted px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground"
+                          title="Número de WhatsApp desta conversa"
+                        >
+                          {nomeCurtoPorLinha.get(linhaDaConversa(lead) ?? '') ?? ''}
+                        </span>
+                      ) : null}
                       {waitingSince ? (
                         <span
                           className={cn(
