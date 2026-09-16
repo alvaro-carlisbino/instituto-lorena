@@ -8,6 +8,7 @@ import {
   filtrarVendas,
   followUpStats,
   progressoDaMeta,
+  resultadoDasVendas,
   salesByDoctor,
   salesByProcedure,
   vendasDispensadas,
@@ -434,5 +435,27 @@ describe('progressoDaMeta', () => {
     const p = progressoDaMeta(treze, { ...metaSoQtd, targetCents: 50_000_000 }, '2026-08', hoje25)
     expect(p.porValor).toBe(true)
     expect(p.projecaoCents).toBe(Math.round((13 * 3_800_000 / 25) * 31))
+  })
+})
+
+describe('resultadoDasVendas', () => {
+  it('sem kit, material é o digitado na venda', () => {
+    const r = resultadoDasVendas([venda({ id: 'a', costMaterialsCents: 50_000, costDoctorCents: 900_000 })])
+    expect(r.material).toBe(50_000)
+    expect(r.materialKits).toBe(0)
+    expect(r.custo).toBe(950_000)
+    expect(r.lucro).toBe(3_000_000 - 950_000)
+    expect(r.semCusto).toBe(0)
+  })
+
+  it('com kit, o custo real do kit substitui o digitado e a cobrança do kit entra na receita', () => {
+    const kits = new Map([['a', { custoCents: 120_000, cobradoCents: 30_000 }]])
+    const r = resultadoDasVendas([venda({ id: 'a', costMaterialsCents: 50_000 }), venda({ id: 'b' })], kits)
+    expect(r.material).toBe(120_000)
+    expect(r.materialKits).toBe(120_000)
+    expect(r.receita).toBe(6_030_000)
+    expect(r.lucro).toBe(6_030_000 - 120_000)
+    // A venda com kit tem custo; a outra continua sem nenhum.
+    expect(r.semCusto).toBe(1)
   })
 })

@@ -775,26 +775,44 @@ export function progressoDaMeta(
   }
 }
 
-/** Faturamento, custo e lucro de um conjunto de vendas. */
-export function resultadoDasVendas(vendas: ClinicSale[]) {
+/** Custo e cobrança dos kits de uma venda, como o Resultado por cirurgia calcula. */
+export type KitsDaVenda = { custoCents: number; cobradoCents: number }
+
+/**
+ * Faturamento, custo e lucro de um conjunto de vendas.
+ *
+ * `kits` (por id da venda) segue a regra de `contaDoProcedimento`: venda com kit usa o custo
+ * REAL dos kits como material no lugar do que foi digitado, e o que se cobrou nas linhas do kit
+ * entra no faturamento. Sem isso a Central e o Resultado por cirurgia davam dois lucros para o
+ * mesmo mês, e lançar o kit não mudava o card que a gerência olha.
+ */
+export function resultadoDasVendas(vendas: ClinicSale[], kits: Map<string, KitsDaVenda> = new Map()) {
   let receita = 0
   let material = 0
+  let materialKits = 0
   let repasse = 0
   let anestesia = 0
   let imposto = 0
   let outros = 0
+  let semCusto = 0
   for (const s of vendas) {
-    receita += s.valueCents
-    material += s.costMaterialsCents
+    const kit = kits.get(s.id)
+    const materialDaVenda = kit ? kit.custoCents : s.costMaterialsCents
+    receita += s.valueCents + (kit?.cobradoCents ?? 0)
+    material += materialDaVenda
+    if (kit) materialKits += kit.custoCents
     repasse += s.costDoctorCents
     anestesia += s.costAnesthesiaCents
     imposto += s.taxCents
     outros += s.costOtherCents
+    if (materialDaVenda + s.costDoctorCents + s.costAnesthesiaCents + s.taxCents + s.costOtherCents === 0) semCusto += 1
   }
   const custo = material + repasse + anestesia + imposto + outros
   return {
     receita,
     material,
+    /** Parte do material que veio de kit montado (o resto foi digitado na venda). */
+    materialKits,
     repasse,
     anestesia,
     imposto,
@@ -803,10 +821,7 @@ export function resultadoDasVendas(vendas: ClinicSale[]) {
     lucro: receita - custo,
     margem: receita > 0 ? Math.round(((receita - custo) / receita) * 100) : 0,
     /** Quantas vendas ainda não tiveram nenhum custo lançado. */
-    semCusto: vendas.filter(
-      (s) =>
-        s.costMaterialsCents + s.costDoctorCents + s.costAnesthesiaCents + s.taxCents + s.costOtherCents === 0,
-    ).length,
+    semCusto,
   }
 }
 
