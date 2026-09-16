@@ -58,8 +58,8 @@ export type SendWhatsappPayload = {
    */
   special?: SpecialWhatsappMessage
   /**
-   * Override humano explícito após opt-out. Só usar depois de confirmar no diálogo
-   * "assumo risco de ban". Backend registra interaction `system` de auditoria.
+   * Override humano explícito: opt-out ou recusa de contato novo da guarda anti-ban.
+   * Só usar depois de confirmar no diálogo "assumo o risco" (ver `confirmarAssumirRisco`).
    */
   manualOverride?: boolean
   /**
@@ -105,7 +105,10 @@ export type SendWhatsappResult =
         | 'lead_opted_out'
         | 'out_of_window'
         | 'wrong_sender_tenant'
+        | 'blocked_antiban'
         | 'unknown'
+      /** Motivo da guarda anti-ban (`frio_espera`, `cap_frio_dia`...), quando foi ela que segurou. */
+      reason?: string
     }
 
 /**
@@ -155,6 +158,7 @@ const KNOWN_ERROR_KINDS = new Set([
   'lead_opted_out',
   'out_of_window',
   'wrong_sender_tenant',
+  'blocked_antiban',
 ])
 
 function classifyError(raw: string): SendWhatsappResult extends infer R
@@ -193,6 +197,7 @@ export async function sendWhatsappMessage(payload: SendWhatsappPayload): Promise
         detail,
         outOfMessagingWindow: detectOutOfMessagingWindow(errStr, detail),
         kind: classifyError(errStr),
+        reason: typeof body.reason === 'string' ? body.reason : undefined,
       }
     }
     return { ok: false, error: error.message || 'Falha ao enviar mensagem.', kind: 'unknown' }
@@ -216,7 +221,54 @@ export async function sendWhatsappMessage(payload: SendWhatsappPayload): Promise
     detail,
     outOfMessagingWindow: detectOutOfMessagingWindow(errStr, detail),
     kind: classifyError(errStr),
+    reason: typeof parsed.reason === 'string' ? parsed.reason : undefined,
   }
+}
+
+/**
+ * Recusas da guarda anti-ban que o `manualOverride` fura (`coldOverride` em `antiBan.ts`).
+ * São as regras de contato novo: quem está na tela pode assumir o risco, mas precisa dizer
+ * que assume. Linha caída, pausada ou banida, e número sem WhatsApp, não entram: ali o
+ * clique não resolve nada.
+ */
+const ANTIBAN_ASSUMIVEL = new Set([
+  'frio_espera',
+  'frio_max_tentativas',
+  'cap_frio_dia',
+  'cap_optin_dia',
+  'cap_optin_reserva',
+  'link_primeiro_contato',
+  'numero_nao_verificado',
+  'opt_out',
+])
+
+/**
+ * Pergunta ao humano se ele assume o risco de furar o opt-out ou a guarda de contato novo.
+ * `null` quando a recusa não admite override (segue para `notifySendError`); senão, a resposta.
+ */
+export function confirmarAssumirRisco(
+  result: Extract<SendWhatsappResult, { ok: false }>,
+  oQue: 'mensagem' | 'figurinha' = 'mensagem',
+): boolean | null {
+  const envio = oQue === 'figurinha' ? 'Enviar a figurinha' : 'Enviar mesmo assim'
+  if (result.kind === 'lead_opted_out' || (result.kind === 'blocked_antiban' && result.reason === 'opt_out')) {
+    return window.confirm(
+      'Este paciente pediu para parar de receber mensagens (opt-out).\n\n' +
+        `${envio} assume o risco de denúncia/banimento do número da clínica pelo WhatsApp. ` +
+        'O envio fica registrado como override humano no histórico do lead.\n\n' +
+        'Confirma o envio?',
+    )
+  }
+  if (result.kind === 'blocked_antiban' && result.reason && ANTIBAN_ASSUMIVEL.has(result.reason)) {
+    return window.confirm(
+      'A guarda anti-ban segurou este envio para proteger a linha.\n\n' +
+        `${result.detail ?? ''}\n\n` +
+        `${envio} assume o risco de denúncia/banimento do número. ` +
+        'Se a pessoa já conversa com a gente por outro cadastro, o certo é mesclar os leads.\n\n' +
+        'Confirma o envio?',
+    )
+  }
+  return null
 }
 
 /**
@@ -253,6 +305,10 @@ export function notifySendError(
       description:
         'Para enviar mesmo assim, confirme o override no diálogo. Ou reative o lead em LeadDetail após contato externo.',
     })
+    return
+  }
+  if (result.kind === 'blocked_antiban') {
+    toast.warning('Envio segurado pela guarda anti-ban da linha.', { description: result.detail })
     return
   }
   if (result.kind === 'out_of_window') {

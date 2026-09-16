@@ -128,7 +128,12 @@ import { mergeKanbanFieldOrder, isLeadWhatsappComposeBlocked, calculateLeadScore
 import { slotBetween } from '../lib/leadOrdering'
 import { getDataProviderMode } from '../services/dataMode'
 import { fetchLeadPaymentSummaries, type LeadPaymentSummary } from '../services/crmLeadPayments'
-import { notifySendError, sendWhatsappMessage, type SendWhatsappPayload } from '../services/crmWhatsapp'
+import {
+  confirmarAssumirRisco,
+  notifySendError,
+  sendWhatsappMessage,
+  type SendWhatsappPayload,
+} from '../services/crmWhatsapp'
 import { dispatchNps } from '../services/npsDispatch'
 import type { WebhookJob, AuditLogEntry } from '../services/crmSupabase'
 import { signupCreateTenant } from '../services/tenant'
@@ -731,16 +736,10 @@ export const useCrmState = () => {
         special: opts.special,
       })
 
-      if (!result.ok && result.kind === 'lead_opted_out') {
-        const confirmed = window.confirm(
-          'Este paciente pediu para parar de receber mensagens (opt-out).\n\n' +
-            'Enviar mesmo assim assume o risco de denúncia/banimento do número da clínica pelo WhatsApp. ' +
-            'O envio fica registrado como override humano no histórico do lead.\n\n' +
-            'Confirma o envio?',
-        )
-        if (!confirmed) {
-          return { ok: false, restore: true }
-        }
+      // Opt-out e recusa de contato novo da guarda anti-ban: quem está na tela pode assumir o risco.
+      const assumeRisco = result.ok ? null : confirmarAssumirRisco(result, 'mensagem')
+      if (assumeRisco === false) return { ok: false, restore: true }
+      if (assumeRisco === true) {
         result = await sendWhatsappMessage({
           leadId: selectedLead.id,
           to: selectedLead.phone,
@@ -830,14 +829,9 @@ export const useCrmState = () => {
         stickerWebpBase64: raw,
       })
 
-      if (!result.ok && result.kind === 'lead_opted_out') {
-        const confirmed = window.confirm(
-          'Este paciente pediu para parar de receber mensagens (opt-out).\n\n' +
-            'Enviar a figurinha assume risco de denúncia/banimento do número da clínica. ' +
-            'O envio fica registrado como override humano.\n\n' +
-            'Confirma o envio?',
-        )
-        if (!confirmed) return
+      const assumeRisco = result.ok ? null : confirmarAssumirRisco(result, 'figurinha')
+      if (assumeRisco === false) return
+      if (assumeRisco === true) {
         result = await sendWhatsappMessage({
           leadId: selectedLead.id,
           to: selectedLead.phone,
