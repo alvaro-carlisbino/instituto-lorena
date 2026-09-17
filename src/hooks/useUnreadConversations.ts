@@ -18,8 +18,24 @@ const STORAGE_KEY = 'crm.chat.lastSeen.v1'
 // do "visto por último" porque tem precedência: vale mesmo que não tenha chegado msg nova.
 const UNREAD_KEY = 'crm.chat.forcedUnread.v1'
 
-type SeenMap = Record<string, number>
+export type SeenMap = Record<string, number>
 type ForcedMap = Record<string, true>
+
+/**
+ * O mapa de "visto por último" depois de abrir uma conversa. **Devolve o MESMO objeto
+ * quando não há nada para ver** — é essa identidade que segura o ciclo de render (ver
+ * `markSeen`). Pura e exportada para poder ser testada sem montar a árvore do React.
+ */
+export function proximoSeen(
+  prev: SeenMap,
+  chave: string,
+  ultimaRecebida: number,
+  agora: number,
+): SeenMap {
+  if (!chave) return prev
+  if ((prev[chave] ?? 0) >= ultimaRecebida) return prev
+  return { ...prev, [chave]: Math.max(agora, ultimaRecebida) }
+}
 
 function loadSeen(): SeenMap {
   try {
@@ -107,12 +123,31 @@ export function useUnreadConversations(interactions: Interaction[]): UnreadConve
     return n
   }, [lastInboundByLead, seen, forced])
 
+  /**
+   * Marcar como lida é IDEMPOTENTE: conversa já lida não vira estado novo.
+   *
+   * A guarda daqui era `>= Date.now()`, e o relógio sempre anda: toda chamada devolvia um
+   * mapa novo, mesmo numa conversa lida há uma hora. Quem abre uma conversa fecha um
+   * ciclo com isso — `seen` novo → `isUnread` novo → a lista de conversas é remontada →
+   * `activeConversa` é outro objeto → o efeito que marca como lida roda DE NOVO. O ciclo
+   * só parava quando duas voltas caíam no MESMO milissegundo, ou seja, por sorte: em tela
+   * leve convergia em duas voltas, e na lista cheia da clínica (2,7 mil contatos, 32 mil
+   * mensagens) cada volta passa de 1ms e ele não converge nunca. O React corta em 50
+   * updates aninhados e a tela morre com o erro #185 ("Maximum update depth exceeded") —
+   * "O CRM encontrou um erro ao abrir" ao clicar na conversa, 17/set/2026.
+   *
+   * Agora a pergunta certa: já vi tudo o que o paciente mandou? Se já, não mexe em nada, e
+   * o ciclo morre na primeira volta por construção, não por corrida com o relógio. Guarda
+   * pelo menos o horário da última recebida para que mensagem com data adiantada (relógio
+   * do WhatsApp à frente) não deixe a conversa eternamente não lida — que traria o loop de
+   * volta pela outra ponta.
+   */
   const markSeen = useCallback((leadId: string) => {
     if (!leadId) return
+    const ultimaRecebida = lastInboundByLead.get(leadId) ?? 0
     setSeen((prev) => {
-      const now = Date.now()
-      if ((prev[leadId] ?? 0) >= now) return prev
-      const next = { ...prev, [leadId]: now }
+      const next = proximoSeen(prev, leadId, ultimaRecebida, Date.now())
+      if (next === prev) return prev
       saveSeen(next)
       return next
     })
@@ -124,7 +159,7 @@ export function useUnreadConversations(interactions: Interaction[]): UnreadConve
       saveForced(next)
       return next
     })
-  }, [])
+  }, [lastInboundByLead])
 
   const markUnread = useCallback((leadId: string) => {
     if (!leadId) return

@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-18-chat-erro-ao-abrir",
+    "data": "2026-09-18",
+    "titulo": "Corrigido: \"O CRM encontrou um erro ao abrir\" ao clicar na conversa",
+    "itens": [
+      "Abrir uma conversa pelo link do contato podia derrubar a tela do chat com um erro vermelho, e só voltava clicando em Voltar ao painel.",
+      "Era a marcação de lida se repetindo sozinha sem parar. Quanto mais cheia a lista, mais fácil de acontecer, por isso pegava mais na clínica.",
+      "A conversa continua sendo marcada como lida ao abrir, e o Marcar como não lida segue funcionando igual."
+    ]
+  },
+  {
     "id": "2026-09-17-envio-polo-errado",
     "data": "2026-09-17",
     "titulo": "Corrigido: \"envio bloqueado, o número não está ativo no polo\"",
