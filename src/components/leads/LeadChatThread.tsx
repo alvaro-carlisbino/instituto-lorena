@@ -68,6 +68,7 @@ import { AttachmentTray, type PendingMedia } from '@/components/leads/chat/Attac
 import { AudioRecorder } from '@/components/leads/chat/AudioRecorder'
 import { ForwardDialog, type ForwardTarget } from '@/components/leads/chat/ForwardDialog'
 import { SpecialMessageDialog, type SpecialKind } from '@/components/leads/chat/SpecialMessageDialog'
+import { VisualizadorDeImagem, type ImagemDaConversa } from '@/components/leads/chat/VisualizadorDeImagem'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { useLinhasDoPolo } from '@/hooks/useLinhasParticularesOcultas'
@@ -1180,21 +1181,38 @@ export function LeadChatThread({
     return groups
   }, [items])
 
+  // ManyChat traz URL S3 (item.url). WhatsApp traz inline base64. Mídia que saiu pelo CRM vive no
+  // bucket privado e o link assinado chega pelo id (efeito acima). Um resolvedor só para os três.
+  const srcDaMidia = (item: NonNullable<Interaction['media']>[number], fallbackMime: string): string | null => {
+    if (item.url && item.url.trim()) return item.url
+    if (item.storagePath && signedUrls[item.id]) return signedUrls[item.id]
+    if (item.base64 && item.base64.trim()) return `data:${item.mimeType || fallbackMime};base64,${item.base64}`
+    return null
+  }
+
+  // Todas as fotos do fio, na ordem da conversa: é o que as setas do visualizador percorrem.
+  const imagensDaConversa: ImagemDaConversa[] = []
+  for (const msg of items) {
+    for (const item of msg.media ?? []) {
+      if (item.type !== 'image') continue
+      const src = srcDaMidia(item, 'image/jpeg')
+      if (!src) continue
+      imagensDaConversa.push({
+        id: item.id,
+        src,
+        legenda: item.caption || undefined,
+        rodape: `${resolveAuthorLabel(msg.author, crm.users).nome} · ${format(new Date(msg.happenedAt), "dd/MM 'às' HH:mm", { locale: ptBR })}`,
+      })
+    }
+  }
+  const [fotoAberta, setFotoAberta] = useState<number | null>(null)
+
   const renderContent = (msg: Interaction) => {
     const { content, media } = msg
     
     // If we have actual media objects attached
     if (media && media.length > 0) {
-      // ManyChat traz URL S3 (item.url). WhatsApp Evolution traz inline base64.
-      // resolveSrc usa qualquer um — assim o mesmo renderer atende os dois canais.
-      const resolveSrc = (item: NonNullable<Interaction['media']>[number], fallbackMime: string): string | null => {
-        if (item.url && item.url.trim()) return item.url
-        // Mídia que saiu pelo CRM vive no bucket privado: o link assinado é resolvido no
-        // efeito acima e chega aqui pelo id.
-        if (item.storagePath && signedUrls[item.id]) return signedUrls[item.id]
-        if (item.base64 && item.base64.trim()) return `data:${item.mimeType || fallbackMime};base64,${item.base64}`
-        return null
-      }
+      const resolveSrc = srcDaMidia
       return (
         <div className="flex flex-col gap-2 py-1">
           {media.map((item) => {
@@ -1206,8 +1224,12 @@ export function LeadChatThread({
                   <Button
                     type="button"
                     variant="ghost"
-                    onClick={() => openMedia({ ...item, url: src }, 'image/jpeg')}
-                    aria-label={item.caption ? `Abrir imagem: ${item.caption}` : 'Abrir imagem em nova aba'}
+                    onClick={() => {
+                      const i = imagensDaConversa.findIndex((img) => img.id === item.id)
+                      if (i >= 0) setFotoAberta(i)
+                      else openMedia({ ...item, url: src }, 'image/jpeg')
+                    }}
+                    aria-label={item.caption ? `Ver foto: ${item.caption}` : 'Ver foto'}
                     className="block h-auto w-full rounded-none border-0 p-0 hover:bg-transparent"
                   >
                     <img
@@ -2260,6 +2282,13 @@ export function LeadChatThread({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <VisualizadorDeImagem
+        imagens={imagensDaConversa}
+        indice={fotoAberta}
+        onIndice={setFotoAberta}
+        onFechar={() => setFotoAberta(null)}
+      />
 
       <ConfirmDialog
         open={deleteMsgOpen}
