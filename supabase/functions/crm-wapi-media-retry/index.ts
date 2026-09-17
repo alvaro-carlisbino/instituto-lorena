@@ -87,13 +87,23 @@ Deno.serve(async (req) => {
       )
 
       if (dl.ok && dl.base64) {
+        // A mídia pode ser de mensagem que a equipe mandou pelo CELULAR: herda o lado da bolha.
+        let lado: 'in' | 'out' = 'in'
+        if (job.interaction_id) {
+          const { data: inter } = await admin
+            .from('interactions')
+            .select('direction')
+            .eq('id', String(job.interaction_id))
+            .maybeSingle()
+          if ((inter as { direction?: string } | null)?.direction === 'out') lado = 'out'
+        }
         const { data: inserted } = await admin
           .from('crm_media_items')
           .insert({
             lead_id: job.lead_id,
             interaction_id: job.interaction_id,
             tenant_id: job.tenant_id,
-            direction: 'in',
+            direction: lado,
             media_type: job.media_type,
             mime_type: dl.mimeType ?? null,
             media_base64: dl.base64,

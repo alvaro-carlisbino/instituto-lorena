@@ -235,8 +235,12 @@ export class WapiProvider implements WhatsappProvider {
     // Mantemos fallbacks p/ nomes camelCase/Baileys por robustez.
     const event = safeString(payload.event ?? payload.type).toLowerCase()
     // Só descarta se for claramente um evento de não-mensagem (status/conexão/presença).
+    // `msgContent` com C maiúsculo é o formato REAL do `webhookDelivery` (amostra de 17/set/2026):
+    // a mensagem que a equipe manda pelo CELULAR chega por aqui. Checar só `msgcontent` fazia toda
+    // saída do aparelho virar null, e em nenhuma linha o CRM registrava o que foi respondido fora
+    // dele. Recibo de status (`webhookStatus`) não traz conteúdo e continua caindo fora.
     if (event && /(status|connect|disconnect|presence|qrcode|delivery|ack)/.test(event)) {
-      if (!payload.msgcontent && !payload.message) return null
+      if (!payload.msgcontent && !payload.msgContent && !payload.message) return null
     }
 
     // Ignora mensagens de grupo (não viram lead/atendimento 1:1).
@@ -323,13 +327,14 @@ export class WapiProvider implements WhatsappProvider {
     // `sender.senderLid` é o lid. Só quando o `chat.id` é a única pista (mensagem NOSSA,
     // saída pelo telemóvel) é que sobra o lid sozinho — e aí ele vira a chave da conversa,
     // porque enviar para o lid FUNCIONA; o que não dá é chamá-lo de telefone.
-    const lidRaw = firstString(payload, [
-      'sender.senderLid',
-      'sender.lid',
-      'senderLid',
-      'chat.lid',
-    ])
+    // Em mensagem NOSSA (`fromMe`) o `sender` é a própria linha: o `senderLid` dele é o lid da
+    // CLÍNICA. Usá-lo como lid do contato fez a primeira mensagem mandada pelo celular da Aline
+    // Muniz (17/set/2026, para um Guilherme que só aparecia por lid) ser traduzida para o número
+    // dela mesma e cair no cadastro "Aline Comercial". Na saída, o lid só pode vir do `chat`.
     const fromIsLid = fromRaw.toLowerCase().includes('@lid')
+    const lidRaw = fromMe
+      ? (fromIsLid ? fromRaw : firstString(payload, ['chat.lid']))
+      : firstString(payload, ['sender.senderLid', 'sender.lid', 'senderLid', 'chat.lid'])
     const fromPhone = digitsOnly(fromRaw)
     if (fromPhone.length < 10) return null
     const fromLid = digitsOnly(lidRaw) || (fromIsLid ? fromPhone : '')
@@ -1457,6 +1462,60 @@ export function extractInboundMedia(
   const m = found.media
   const caption = typeof m.caption === 'string' ? m.caption : typeof m.fileName === 'string' ? m.fileName : ''
   return { mediaType: found.mediaType, caption, media: m }
+}
+
+/**
+ * A mensagem saiu PELA API (o próprio CRM, a IA, uma rotina), não pelo celular.
+ *
+ * A W-API avisa no `webhookDelivery` tudo o que a instância enviou, inclusive o que nós mesmos
+ * mandamos (`fromApi: true`). Esse eco não pode virar "mensagem da equipe pelo celular": quem
+ * enviou pela API já gravou a interação, e tratar o eco duplicaria a bolha (o aviso pode chegar
+ * antes de o CRM gravar) e carimbaria `last_human_reply_at` numa resposta que foi da IA.
+ */
+export function ehEnvioPelaApi(payload: Record<string, unknown>): boolean {
+  return payload?.fromApi === true || payload?.fromapi === true
+}
+
+/**
+ * Foto de perfil do CONTATO que vem no próprio webhook. Em mensagem recebida é o `sender`; em
+ * mensagem nossa (`fromMe`) o `sender` é a clínica e o contato é o `chat`. O link do WhatsApp
+ * expira em algumas semanas, então é regravado a cada mensagem.
+ */
+export function extractContactProfilePicture(payload: Record<string, unknown>): string {
+  const fromMe = payload?.fromMe === true || payload?.fromme === true
+  const url = safeString(getByPath(payload, fromMe ? 'chat.profilePicture' : 'sender.profilePicture'))
+  return /^https:\/\//.test(url) ? url : ''
+}
+
+export type StatusDeEntrega = 'sent' | 'delivered' | 'read' | 'played' | 'failed'
+
+/** Ordem do recibo: um "entregue" que chega atrasado não pode desfazer um "lido". */
+export const ORDEM_DO_STATUS: Record<StatusDeEntrega, number> = { failed: 0, sent: 1, delivered: 2, read: 3, played: 4 }
+
+/**
+ * Recibo de uma mensagem (`webhookStatus`): enviada, entregue, lida, ouvida ou falhou.
+ * Formato real (17/set/2026): `{ event: "webhookStatus", status: "READ", messageId, fromMe, chat }`.
+ */
+export function extractMessageStatus(
+  payload: Record<string, unknown>,
+): { messageId: string; status: StatusDeEntrega } | null {
+  const event = safeString(payload?.event ?? payload?.type).toLowerCase()
+  if (!event.includes('status')) return null
+  const messageId = firstString(payload, ['messageId', 'messageid', 'data.messageId', 'id'])
+  const bruto = safeString(payload?.status ?? getByPath(payload, 'data.status')).toLowerCase()
+  if (!messageId || !bruto) return null
+  const status: StatusDeEntrega | null = /fail|error|erro/.test(bruto)
+    ? 'failed'
+    : /play/.test(bruto)
+      ? 'played'
+      : /read|lid/.test(bruto)
+        ? 'read'
+        : /deliver|entreg|received/.test(bruto)
+          ? 'delivered'
+          : /sent|server|enviad|pending|ack/.test(bruto)
+            ? 'sent'
+            : null
+  return status ? { messageId, status } : null
 }
 
 /**

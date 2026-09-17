@@ -108,6 +108,8 @@ export type Interaction = {
    * quando havia um número só). Ver `src/lib/linhaWhatsapp.ts`.
    */
   whatsappInstanceId?: string
+  /** Recibo do WhatsApp para mensagem que saiu: enviada, entregue, lida, ouvida, falhou. */
+  deliveryStatus?: 'sent' | 'delivered' | 'read' | 'played' | 'failed'
   media?: Array<{
     id: string
     type: 'audio' | 'image' | 'video' | 'document' | 'other'

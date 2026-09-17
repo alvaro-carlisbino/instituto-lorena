@@ -12,7 +12,14 @@
 // caminho quente das duas linhas em produção e não pode mudar de comportamento.
 
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { extractInboundEdit, extractInboundRevoke, WapiProvider } from './wapi.ts'
+import {
+  ehEnvioPelaApi,
+  extractContactProfilePicture,
+  extractInboundEdit,
+  extractInboundRevoke,
+  extractMessageStatus,
+  WapiProvider,
+} from './wapi.ts'
 
 const provider = new WapiProvider({
   baseUrl: '',
@@ -243,3 +250,80 @@ Deno.test('saída da equipe com chat em lid: o lid não é confundido com númer
   assertEquals(n?.fromIsLid, true)
   assertEquals(n?.fromPhone, '78159932330227')
 })
+
+// ── Formato REAL do webhookDelivery, capturado em produção em 17/set/2026 ──────────────────
+// Camel case (`msgContent`, `fromMe`, `messageId`, `instanceId`). A checagem antiga só aceitava
+// `msgcontent` minúsculo nos eventos de entrega, e por isso NENHUMA mensagem mandada pelo
+// celular virava interação, em linha nenhuma.
+function entrega(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    event: 'webhookDelivery',
+    instanceId: 'LITE-FAKE',
+    connectedPhone: CLINICA,
+    isGroup: false,
+    messageId: '3EB0A99D4658F83018C23A',
+    fromMe: true,
+    chat: { id: PACIENTE, profilePicture: 'https://pps.whatsapp.net/v/foto-paciente.jpg' },
+    sender: { id: CLINICA, profilePicture: 'https://pps.whatsapp.net/v/foto-clinica.jpg', pushName: 'Atendimento Comercial' },
+    moment: 1_789_645_829,
+    fromApi: false,
+    msgContent: { conversation: 'Victor, sobre o investimento da consulta' },
+    ...over,
+  }
+}
+
+Deno.test('entrega pelo celular (msgContent camelCase): vira saída para a paciente', () => {
+  const n = provider.normalizeInbound(entrega(), headers)
+  assertEquals(n?.direction, 'out')
+  assertEquals(n?.fromPhone, PACIENTE)
+  assertEquals(n?.text, 'Victor, sobre o investimento da consulta')
+  assertEquals(n?.externalMessageId, '3EB0A99D4658F83018C23A')
+})
+
+Deno.test('eco do que o CRM mandou pela API é reconhecido para ser ignorado', () => {
+  assertEquals(ehEnvioPelaApi(entrega({ fromApi: true })), true)
+  assertEquals(ehEnvioPelaApi(entrega()), false)
+})
+
+Deno.test('foto de perfil: na saída é a do chat (contato), na entrada é a do sender', () => {
+  assertEquals(extractContactProfilePicture(entrega()), 'https://pps.whatsapp.net/v/foto-paciente.jpg')
+  assertEquals(
+    extractContactProfilePicture({ fromMe: false, sender: { profilePicture: 'https://pps.whatsapp.net/v/x.jpg' } }),
+    'https://pps.whatsapp.net/v/x.jpg',
+  )
+  assertEquals(extractContactProfilePicture({ fromMe: false }), '')
+})
+
+Deno.test('recibo webhookStatus (formato real): READ vira lida; entrega sem conteúdo não vira mensagem', () => {
+  const recibo = {
+    event: 'webhookStatus',
+    instanceId: 'LITE-FAKE',
+    status: 'READ',
+    messageId: '3EB03C1C48012B6B99EF3A',
+    fromMe: true,
+    moment: 1_789_645_802,
+    chat: { id: PACIENTE },
+    isGroup: false,
+  }
+  assertEquals(extractMessageStatus(recibo), { messageId: '3EB03C1C48012B6B99EF3A', status: 'read' })
+  assertEquals(extractMessageStatus({ ...recibo, status: 'DELIVERY_ACK' }), { messageId: '3EB03C1C48012B6B99EF3A', status: 'delivered' })
+  assertEquals(extractMessageStatus({ ...recibo, status: 'PLAYED' })?.status, 'played')
+  assertEquals(extractMessageStatus(entrega()), null)
+  assertEquals(provider.normalizeInbound(recibo, headers), null)
+})
+
+Deno.test('saída pelo celular para contato que só aparece por lid: lid é o do CHAT, nunca o da linha', () => {
+  const n = provider.normalizeInbound(
+    entrega({
+      chat: { id: '70613725143196@lid' },
+      sender: { id: CLINICA, senderLid: '99128197513321@lid', pushName: 'Aline Comercial' },
+      msgContent: { conversation: 'Guilherme, conseguiu verificar minha ultima mensagem ?' },
+    }),
+    headers,
+  )
+  assertEquals(n?.direction, 'out')
+  assertEquals(n?.fromIsLid, true)
+  assertEquals(n?.fromLid, '70613725143196')
+  assertEquals(n?.fromPhone, '70613725143196')
+})
+

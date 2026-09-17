@@ -24,6 +24,8 @@ import {
   Smile,
   Sticker,
   CreditCard,
+  Check,
+  CheckCheck,
   CheckCircle2,
   Truck,
   Download,
@@ -282,6 +284,31 @@ function InlineVideo({ item }: { item: InlineMediaItem }) {
       </video>
       {item.caption && <p className="mt-1 px-2 pb-1 text-xs opacity-80">{item.caption}</p>}
     </div>
+  )
+}
+
+/**
+ * Recibo do WhatsApp na bolha que saiu (17/set/2026): ✓ enviada, ✓✓ entregue, ✓✓ azul lida
+ * (ou ouvida, no áudio). Vem do `webhookStatus` da W-API gravado em `interactions.delivery_status`.
+ * Sem recibo (histórico, Instagram) não desenha nada: não afirmar o que não se sabe.
+ */
+function ReciboDeEntrega({ status }: { status?: Interaction['deliveryStatus'] }) {
+  if (!status) return null
+  if (status === 'failed') {
+    return (
+      <span className="font-semibold text-destructive" title="O WhatsApp não entregou esta mensagem">
+        não entregue
+      </span>
+    )
+  }
+  const lida = status === 'read' || status === 'played'
+  const titulo =
+    status === 'sent' ? 'Enviada' : status === 'delivered' ? 'Entregue' : status === 'played' ? 'Ouvida' : 'Lida'
+  const Icone = status === 'sent' ? Check : CheckCheck
+  return (
+    <span title={titulo} aria-label={titulo} className="inline-flex">
+      <Icone className={cn('size-3.5', lida ? 'text-sky-500' : 'text-muted-foreground/70')} aria-hidden />
+    </span>
   )
 }
 
@@ -1749,6 +1776,7 @@ export function LeadChatThread({
                     })()}
                     <span className="opacity-30">•</span>
                     <time dateTime={first.happenedAt}>{format(new Date(first.happenedAt), 'HH:mm', { locale: ptBR })}</time>
+                    {out ? <ReciboDeEntrega status={group[group.length - 1]?.deliveryStatus} /> : null}
                     <span
                       className={cn(
                         'rounded-md px-1.5 py-0.5 text-[9px] uppercase tracking-wider',

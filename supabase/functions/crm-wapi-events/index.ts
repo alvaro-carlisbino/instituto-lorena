@@ -1,6 +1,15 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { createWapiProviderForRow, loadWhatsappInstanceByWapiId } from '../_shared/whatsapp/wapiConfig.ts'
-import type { WapiProvider } from '../_shared/whatsapp/wapi.ts'
+import {
+  ehEnvioPelaApi,
+  extractInboundEdit,
+  extractInboundReaction,
+  extractInboundRevoke,
+  extractMessageStatus,
+  ORDEM_DO_STATUS,
+  type StatusDeEntrega,
+  type WapiProvider,
+} from '../_shared/whatsapp/wapi.ts'
 import { pausarLinha, registrarSaudeDaLinha } from '../_shared/whatsapp/antiBan.ts'
 import { sendWapiDirectText } from '../_shared/saleReceipt.ts'
 
@@ -121,8 +130,18 @@ Deno.serve(async (req) => {
     //
     // ACK puro não vira mensagem: `normalizeInbound` devolve null quando não há texto nem
     // marcador de mídia, então recibo de entrega não cria lead nem interação.
-    const comoMensagem = provider.normalizeInbound(payload, req.headers)
-    if (comoMensagem?.direction === 'out') {
+    //
+    // 17/set/2026: o formato real do `webhookDelivery` é camelCase (`msgContent`) e o normalizador
+    // só aceitava `msgcontent`; por isso este repasse nunca tinha disparado. E o mesmo gancho
+    // avisa o que NÓS mandamos pela API (`fromApi: true`), que não é saída do aparelho: quem
+    // enviou já gravou a interação. Reação, edição e "apagar para todos" feitos no celular
+    // também vêm por aqui e seguem o mesmo repasse.
+    const pelaApi = ehEnvioPelaApi(payload)
+    const comoMensagem = pelaApi ? null : provider.normalizeInbound(payload, req.headers)
+    const doAparelho = !pelaApi && (payload.fromMe === true || payload.fromme === true)
+    const acaoNoAparelho =
+      doAparelho && Boolean(extractInboundReaction(payload) || extractInboundEdit(payload) || extractInboundRevoke(payload))
+    if (comoMensagem?.direction === 'out' || acaoNoAparelho) {
       // Repassa cru para quem já sabe tratar. Lá existem o dedupe por `external_message_id`
       // (que descarta o eco do que o próprio CRM enviou), o upsert do lead no polo certo e o
       // carimbo de `last_human_reply_at`. Duplicar essa lógica aqui criaria uma segunda
@@ -140,10 +159,10 @@ Deno.serve(async (req) => {
         console.log('[wapi-events] saida-do-aparelho repassada', {
           instancia: row.id,
           evento,
-          messageId: comoMensagem.externalMessageId,
+          messageId: comoMensagem?.externalMessageId ?? String(payload.messageId ?? ''),
           status: res.status,
         })
-        return json({ ok: true, event: evento, forwarded: 'outbound_device', status: res.status })
+        return json({ ok: true, event: evento, forwarded: comoMensagem ? 'outbound_device' : 'acao_do_aparelho', status: res.status })
       } catch (e) {
         // Nunca deixar o repasse derrubar a saúde da linha: se falhar, segue o fluxo normal.
         console.warn('[wapi-events] repasse da saida falhou:', e instanceof Error ? e.message : String(e))
@@ -219,6 +238,26 @@ Deno.serve(async (req) => {
     // Uma falha isolada é rotina (número errado, aparelho desligado). O que interessa é a
     // SEQUÊNCIA: muita falha na mesma hora costuma ser o primeiro sintoma de linha marcada.
     if (/status|delivery|ack/.test(evento)) {
+      // RECIBO na bolha: enviada ✓, entregue ✓✓, lida ✓✓ azul. Só sobe de nível: um "entregue"
+      // que chega atrasado não desfaz um "lido".
+      const recibo = extractMessageStatus(payload)
+      const deGrupo = payload.isGroup === true || String((payload.chat as Record<string, unknown> | undefined)?.id ?? '').includes('@g.us')
+      if (recibo && !deGrupo) {
+        const { data: alvos } = await admin
+          .from('interactions')
+          .select('id, delivery_status')
+          .eq('external_message_id', recibo.messageId)
+          .limit(3)
+        for (const alvo of (alvos ?? []) as Array<{ id: string; delivery_status: string | null }>) {
+          const atual = alvo.delivery_status as StatusDeEntrega | null
+          const sobe = !atual || ORDEM_DO_STATUS[recibo.status] > (ORDEM_DO_STATUS[atual] ?? -1) || recibo.status === 'failed'
+          if (!sobe) continue
+          await admin
+            .from('interactions')
+            .update({ delivery_status: recibo.status, delivery_status_at: new Date().toISOString() })
+            .eq('id', alvo.id)
+        }
+      }
       const status = String(
         payload.status ?? (payload.data as Record<string, unknown> | undefined)?.status ?? '',
       ).toLowerCase()

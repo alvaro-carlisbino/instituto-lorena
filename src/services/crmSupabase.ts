@@ -106,6 +106,7 @@ type DbInteraction = {
   deleted_scope?: 'crm' | 'everyone' | null
   forwarded_from_id?: string | null
   whatsapp_instance_id?: string | null
+  delivery_status?: Interaction['deliveryStatus'] | null
 }
 
 export type CrmDataSnapshot = {
@@ -357,6 +358,7 @@ function mapDbInteraction(
     deletedBy: interaction.deleted_by || undefined,
     forwardedFromId: interaction.forwarded_from_id || undefined,
     whatsappInstanceId: interaction.whatsapp_instance_id || undefined,
+    deliveryStatus: interaction.delivery_status || undefined,
     media,
     reactions,
   }
@@ -376,7 +378,7 @@ function splitStoragePath(valor: string | null | undefined): { url?: string; sto
 }
 
 const INTERACTION_SELECT =
-  'id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id, reply_to_external_id, edited_at, deleted_at, deleted_by, deleted_scope, forwarded_from_id, whatsapp_instance_id' as const
+  'id, lead_id, patient_name, channel, direction, author, content, happened_at, external_message_id, reply_to_external_id, edited_at, deleted_at, deleted_by, deleted_scope, forwarded_from_id, whatsapp_instance_id, delivery_status' as const
 
 /**
  * Mensagem é do polo da LINHA onde ela aconteceu, e a tela de um polo não mostra a do

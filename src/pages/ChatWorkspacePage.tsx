@@ -14,6 +14,8 @@ import { LabeledSelectTrigger } from '@/components/ui/labeled-select-trigger'
 import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { WorkspaceLeadSidebar } from '@/components/leads/WorkspaceLeadSidebar'
+import { FotoDoContato } from '@/components/leads/FotoDoContato'
+import { fotoDoContato } from '@/lib/fotoDoContato'
 import { useCrm } from '@/context/CrmContext'
 import { useLinhasDoPolo } from '@/hooks/useLinhasParticularesOcultas'
 import { chaveDaConversa, linhaDaMensagem } from '@/lib/linhaWhatsapp'
@@ -679,6 +681,11 @@ export function ChatWorkspacePage({
                       aria-hidden
                     >
                       {initials(lead.patientName)}
+                      <FotoDoContato
+                        url={fotoDoContato(lead.customFields)}
+                        nome={lead.patientName}
+                        className="absolute inset-0 size-full rounded-full object-cover"
+                      />
                       {unread ? (
                         <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-primary ring-2 ring-card" />
                       ) : null}

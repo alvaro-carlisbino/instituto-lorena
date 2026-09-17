@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import {
   disableAiOnHandoff,
   evaluateCrmAiAutoReplyGate,
@@ -20,6 +20,8 @@ import {
   loadWhatsappInstanceByWapiId,
 } from '../_shared/whatsapp/wapiConfig.ts'
 import {
+  ehEnvioPelaApi,
+  extractContactProfilePicture,
   extractInboundMedia,
   extractInboundReaction,
   extractInboundReplyTo,
@@ -28,6 +30,8 @@ import {
   isMediaOnlyMarker,
   WapiProvider,
 } from '../_shared/whatsapp/wapi.ts'
+import { setLineConversationMode } from '../_shared/conversationLineState.ts'
+import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
 import { enrichMediaRowsFromBase64 } from '../_shared/manychatMediaEnrich.ts'
 import { registerSalesReceiptGroup, sendWapiGroupText } from '../_shared/saleReceipt.ts'
 
@@ -66,6 +70,94 @@ function scheduleBackground(task: Promise<void>): void {
     /* ignore */
   }
   void safe
+}
+
+/**
+ * Baixa a mídia de uma mensagem (a que CHEGOU ou a que a equipe mandou pelo CELULAR) e grava em
+ * `crm_media_items`. Roda em BACKGROUND (não atrasa a resposta do webhook) com RETRY: o fileLink da
+ * W-API EXPIRA, então um timeout na 1ª tentativa perdia a mídia pra sempre (era o caso dos áudios
+ * "sumindo", ficava só o placeholder "🎤 Áudio"). Se ainda assim falhar, vai para a fila do
+ * `crm-wapi-media-retry`. Devolve a mídia extraída (ou null) para quem precisa decidir algo com ela.
+ */
+function salvarMidiaDaMensagem(
+  admin: SupabaseClient,
+  provider: WhatsappProvider,
+  args: {
+    leadId: string
+    interactionId: string
+    tenantId?: string
+    instanceId: string
+    messageId: string
+    direction: 'in' | 'out'
+    raw: Record<string, unknown>
+  },
+): ReturnType<typeof extractInboundMedia> {
+  let med: ReturnType<typeof extractInboundMedia> = null
+  try {
+    med = extractInboundMedia(args.raw)
+  } catch {
+    med = null
+  }
+  if (!med || !(provider instanceof WapiProvider)) return med
+  const wapiProvider = provider
+  const midia = med
+  scheduleBackground((async () => {
+    let dl = await wapiProvider.downloadMedia(args.messageId, midia.mediaType, midia.media)
+    // Retry do zero (o POST refaz o fileLink) em timeout / erro transitório (5xx).
+    for (
+      let attempt = 1;
+      attempt <= 2 && !dl.ok && /timed out|exception|http_5\d\d|media_url_http_5\d\d/i.test(dl.debug);
+      attempt++
+    ) {
+      await new Promise((r) => setTimeout(r, 1500 * attempt))
+      dl = await wapiProvider.downloadMedia(args.messageId, midia.mediaType, midia.media)
+    }
+    await admin.from('webhook_jobs').insert({
+      source: 'wapi-media-debug',
+      status: dl.ok ? 'done' : 'error',
+      note: `${args.direction}:${midia.mediaType}:${args.messageId}:${dl.debug}`.slice(0, 490),
+    })
+    if (dl.ok && dl.base64) {
+      const { data: insertedMedia } = await admin
+        .from('crm_media_items')
+        .insert({
+          lead_id: args.leadId,
+          interaction_id: args.interactionId,
+          tenant_id: args.tenantId,
+          direction: args.direction,
+          media_type: midia.mediaType,
+          mime_type: dl.mimeType ?? null,
+          media_base64: dl.base64,
+          metadata: { source: args.direction === 'out' ? 'wapi-celular' : 'wapi', caption: midia.caption || null },
+        })
+        .select('id')
+        .single()
+      // Enriquece (OCR/transcrição) p/ a IA enxergar a mídia, best-effort.
+      if (insertedMedia?.id) {
+        try {
+          await enrichMediaRowsFromBase64(admin, { rowIds: [String(insertedMedia.id)] })
+        } catch (e) {
+          console.warn('[wapi-webhook] media enrich failed:', e instanceof Error ? e.message : String(e))
+        }
+      }
+      // Cutuca o realtime de `leads` p/ o chat exibir a mídia na hora (sem esperar o poll).
+      await admin.from('leads').update({ updated_at: new Date().toISOString() }).eq('id', args.leadId)
+    } else {
+      // Não perde a mídia: enfileira p/ o worker tentar de novo FORA da requisição.
+      await admin.from('crm_media_retry_jobs').insert({
+        tenant_id: args.tenantId ?? null,
+        lead_id: args.leadId,
+        interaction_id: args.interactionId,
+        whatsapp_instance_id: args.instanceId,
+        message_id: args.messageId,
+        media_type: midia.mediaType,
+        media: midia.media,
+        caption: midia.caption || null,
+        last_error: `${dl.debug}`.slice(0, 300),
+      })
+    }
+  })())
+  return med
 }
 
 function extractWapiInstanceIdFromPayload(payload: Record<string, unknown>): string {
@@ -155,6 +247,10 @@ Deno.serve(async (req) => {
   // exibir um texto que já não existia do lado dela. Tratados ANTES do caminho normal.
   {
     const cru = payload as Record<string, unknown>
+    // Vinda do CELULAR da equipe (`fromMe`), a reação/apagamento é NOSSO, não do contato.
+    const doAparelho = cru.fromMe === true || cru.fromme === true
+    const ladoDaAcao = doAparelho ? 'out' : 'in'
+    const autorDaAcao = doAparelho ? 'equipe' : 'contato'
     const reacao = extractInboundReaction(cru)
     if (reacao) {
       const { data: alvo } = await admin
@@ -168,7 +264,7 @@ Deno.serve(async (req) => {
             .from('crm_message_reactions')
             .delete()
             .eq('external_message_id', reacao.targetMessageId)
-            .eq('direction', 'in')
+            .eq('direction', ladoDaAcao)
         } else {
           await admin.from('crm_message_reactions').upsert(
             {
@@ -177,8 +273,8 @@ Deno.serve(async (req) => {
               interaction_id: alvo.id,
               external_message_id: reacao.targetMessageId,
               emoji: reacao.emoji,
-              direction: 'in',
-              author: 'contato',
+              direction: ladoDaAcao,
+              author: autorDaAcao,
               updated_at: new Date().toISOString(),
             },
             { onConflict: 'external_message_id,direction,author' },
@@ -218,7 +314,7 @@ Deno.serve(async (req) => {
         .from('interactions')
         .update({
           deleted_at: new Date().toISOString(),
-          deleted_by: 'contato',
+          deleted_by: autorDaAcao,
           deleted_scope: 'everyone',
         })
         .eq('external_message_id', revogada.targetMessageId)
@@ -253,8 +349,22 @@ Deno.serve(async (req) => {
     const foneReal = await findPhoneByWaLid(admin, waLid)
     if (foneReal) normalized.fromPhone = foneReal
   }
+
+  // Trava: a conversa nunca é com o PRÓPRIO número da linha. Mensagem que "vem" dele é resolução
+  // errada de contato (lid da linha tomado pelo do contato, story, eco estranho) e gravá-la criava
+  // conversa da clínica consigo mesma. Compara DDI+DDD e os 8 últimos dígitos (o 9º dígito varia).
+  {
+    const proprio = String((payload as Record<string, unknown>).connectedPhone ?? (instanceRow as { phone_e164?: string | null }).phone_e164 ?? '').replace(/\D/g, '')
+    const outro = String(normalized.fromPhone ?? '').replace(/\D/g, '')
+    if (proprio.length >= 10 && outro.length >= 10 && proprio.slice(0, 4) === outro.slice(0, 4) && proprio.slice(-8) === outro.slice(-8)) {
+      return json({ ok: true, skipped: 'mensagem_do_proprio_numero', instance: wInstanceId }, 202)
+    }
+  }
+  // Foto de perfil do contato já vem no webhook (do `sender` na entrada, do `chat` na saída).
+  const fotoDoContato = extractContactProfilePicture(payload as Record<string, unknown>)
   const leadCustomFields: Record<string, unknown> = {
     provider: 'wapi',
+    ...(fotoDoContato ? { wa_foto: fotoDoContato, wa_foto_em: new Date().toISOString() } : {}),
     externalMessageId: normalized.externalMessageId,
     ...(waLid ? { wa_lid: waLid } : {}),
     // Carimbo honesto para a tela: o que está em `phone` é um id do WhatsApp, não um número.
@@ -304,9 +414,15 @@ Deno.serve(async (req) => {
       console.warn('[owner-assistant] falhou, seguindo fluxo normal:', e instanceof Error ? e.message : String(e))
     }
 
-    // Outbound (mensagem enviada do dispositivo / painel da W-API):
-    // só registra eco e atualiza last_human_reply_at — não dispara IA.
+    // Outbound (mensagem que a equipe mandou pelo CELULAR ou pelo WhatsApp Web):
+    // registra a saída (texto e mídia) e marca que um humano assumiu nesta linha. Não dispara IA.
     if (normalized.direction !== 'in') {
+      // Eco do que o PRÓPRIO CRM mandou pela API (IA, painel, rotina): quem enviou já gravou.
+      // Tratar aqui duplicaria a bolha e marcaria "humano respondeu" numa resposta da Sofia.
+      if (ehEnvioPelaApi(payload as Record<string, unknown>)) {
+        await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', String(jobRow.id))
+        return json({ ok: true, processed: 'outbound_api_echo_ignored', provider: 'wapi' })
+      }
       const lead = await upsertLeadByPhone(admin, {
         patientName: normalized.fromName,
         phone: normalized.fromPhone,
@@ -326,7 +442,7 @@ Deno.serve(async (req) => {
       const skipAsCrmEcho = Boolean(existingInt?.id)
 
       if (!skipAsCrmEcho) {
-        await insertInteraction(admin, {
+        const saidaId = await insertInteraction(admin, {
           leadId: lead.leadId,
           patientName: normalized.fromName,
           channel: 'whatsapp',
@@ -342,21 +458,41 @@ Deno.serve(async (req) => {
           externalMessageId: normalized.externalMessageId,
           tenantId,
         })
+        // Foto, áudio, vídeo e documento mandados pelo celular também aparecem no chat.
+        salvarMidiaDaMensagem(admin, provider, {
+          leadId: lead.leadId,
+          interactionId: saidaId,
+          tenantId,
+          instanceId: wInstanceId,
+          messageId: normalized.externalMessageId,
+          direction: 'out',
+          raw: normalized.raw as Record<string, unknown>,
+        })
+
+        // Responder pelo celular é responder: a conversa fica com a equipe NESTA linha, como
+        // quando a resposta sai pelo painel (crm-send-message). Sem isso a Sofia podia falar por
+        // cima de quem acabou de responder no aparelho.
+        const { data: outState } = await admin
+          .from('crm_conversation_states')
+          .select('ai_enabled')
+          .eq('lead_id', lead.leadId)
+          .maybeSingle()
+        const aiEnabledPreservado = outState?.ai_enabled === false ? false : true
+        await setLineConversationMode(admin, {
+          leadId: lead.leadId,
+          instanceId: wInstanceId,
+          ownerMode: 'human',
+          aiEnabled: aiEnabledPreservado,
+          lastHumanReplyAt: nowIso(),
+        })
+        await admin.from('crm_conversation_states').upsert({
+          lead_id: lead.leadId,
+          owner_mode: 'human',
+          ai_enabled: aiEnabledPreservado,
+          last_human_reply_at: nowIso(),
+          updated_at: nowIso(),
+        })
       }
-
-      const { data: outState } = await admin
-        .from('crm_conversation_states')
-        .select('owner_mode, ai_enabled')
-        .eq('lead_id', lead.leadId)
-        .maybeSingle()
-
-      await admin.from('crm_conversation_states').upsert({
-        lead_id: lead.leadId,
-        owner_mode: String(outState?.owner_mode ?? 'auto'),
-        ai_enabled: Boolean(outState?.ai_enabled ?? true),
-        last_human_reply_at: nowIso(),
-        updated_at: nowIso(),
-      })
 
       await admin.from('webhook_jobs').update({ status: 'done' }).eq('id', String(jobRow.id))
       return json({
@@ -411,81 +547,15 @@ Deno.serve(async (req) => {
     // (era o caso dos áudios "sumindo" — só ficava o placeholder "🎤 Áudio").
     // Extraída uma vez: usada no download (abaixo) e na decisão de segurar a IA
     // até o OCR/transcrição terminar (deferForMediaMs no dispatch mais adiante).
-    let inboundMedia: ReturnType<typeof extractInboundMedia> = null
-    try {
-      inboundMedia = extractInboundMedia(normalized.raw as Record<string, unknown>)
-    } catch {
-      inboundMedia = null
-    }
-
-    try {
-      const med = inboundMedia
-      if (med && provider instanceof WapiProvider) {
-        const wapiProvider = provider
-        const messageId = normalized.externalMessageId
-        const leadIdForMedia = lead.leadId
-        scheduleBackground((async () => {
-          let dl = await wapiProvider.downloadMedia(messageId, med.mediaType, med.media)
-          // Retry do zero (o POST refaz o fileLink) em timeout / erro transitório (5xx).
-          for (
-            let attempt = 1;
-            attempt <= 2 && !dl.ok && /timed out|exception|http_5\d\d|media_url_http_5\d\d/i.test(dl.debug);
-            attempt++
-          ) {
-            await new Promise((r) => setTimeout(r, 1500 * attempt))
-            dl = await wapiProvider.downloadMedia(messageId, med.mediaType, med.media)
-          }
-          await admin.from('webhook_jobs').insert({
-            source: 'wapi-media-debug',
-            status: dl.ok ? 'done' : 'error',
-            note: `${med.mediaType}:${messageId}:${dl.debug}`.slice(0, 490),
-          })
-          if (dl.ok && dl.base64) {
-            const { data: insertedMedia } = await admin
-              .from('crm_media_items')
-              .insert({
-                lead_id: leadIdForMedia,
-                interaction_id: inboundInteractionId,
-                tenant_id: tenantId,
-                direction: 'in',
-                media_type: med.mediaType,
-                mime_type: dl.mimeType ?? null,
-                media_base64: dl.base64,
-                metadata: { source: 'wapi', caption: med.caption || null },
-              })
-              .select('id')
-              .single()
-            // Enriquece (OCR/transcrição) p/ a IA enxergar a mídia — mesmo pipeline do ManyChat,
-            // best-effort (não derruba o background task se o OCR/ASR falhar).
-            if (insertedMedia?.id) {
-              try {
-                await enrichMediaRowsFromBase64(admin, { rowIds: [String(insertedMedia.id)] })
-              } catch (e) {
-                console.warn('[wapi-webhook] media enrich failed:', e instanceof Error ? e.message : String(e))
-              }
-            }
-            // Cutuca o realtime de `leads` p/ o chat exibir a mídia na hora (sem esperar o poll de 12s).
-            await admin.from('leads').update({ updated_at: new Date().toISOString() }).eq('id', leadIdForMedia)
-          } else {
-            // Não perde a mídia: enfileira p/ o worker (crm-wapi-media-retry) tentar de novo
-            // FORA da requisição — o áudio do W-API costuma estourar o timeout aqui na hora.
-            await admin.from('crm_media_retry_jobs').insert({
-              tenant_id: tenantId ?? null,
-              lead_id: leadIdForMedia,
-              interaction_id: inboundInteractionId,
-              whatsapp_instance_id: wInstanceId,
-              message_id: messageId,
-              media_type: med.mediaType,
-              media: med.media,
-              caption: med.caption || null,
-              last_error: `${dl.debug}`.slice(0, 300),
-            })
-          }
-        })())
-      }
-    } catch (e) {
-      console.warn('[wapi-webhook] inbound media failed:', e instanceof Error ? e.message : String(e))
-    }
+    const inboundMedia = salvarMidiaDaMensagem(admin, provider, {
+      leadId: lead.leadId,
+      interactionId: inboundInteractionId,
+      tenantId,
+      instanceId: wInstanceId,
+      messageId: normalized.externalMessageId,
+      direction: 'in',
+      raw: normalized.raw as Record<string, unknown>,
+    })
 
     // Captura passiva de dados de cadastro p/ agendar na Shosp sem digitação.
     // (o próprio captureCadastroForLead religa o envio se o endereço foi completado
