@@ -6,6 +6,8 @@ import { BrowserRouter } from 'react-router-dom'
 import './lib/authLinkFlow'
 import { APP_DOCUMENT_TITLE } from './config/branding'
 import { instalarRecuperacaoDeChunk } from './lib/chunkReload'
+import { instalarRegistroDeErros } from './lib/erroDeTela'
+import { AppErrorBoundary } from './components/AppErrorBoundary'
 import './index.css'
 import { RootApp } from './RootApp'
 import { ehLandingDaClinica } from './lib/rotaPublica'
@@ -16,6 +18,8 @@ if (!ehLandingDaClinica()) document.title = APP_DOCUMENT_TITLE
 // Antes de montar: deploy no meio da sessão deixa o index.html apontando para chunks
 // que não existem mais, e a tela abre em branco. Isto recarrega uma vez e resolve.
 instalarRecuperacaoDeChunk()
+// Exceção fora do React (evento, timer, promessa) também fica registrada em app_client_errors.
+instalarRegistroDeErros()
 
 /**
  * Caminho em que o app está montado. `import.meta.env.BASE_URL` é o `base` do Vite:
@@ -37,8 +41,10 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter basename={BASE || undefined}>
-      <RootApp />
-    </BrowserRouter>
+    <AppErrorBoundary>
+      <BrowserRouter basename={BASE || undefined}>
+        <RootApp />
+      </BrowserRouter>
+    </AppErrorBoundary>
   </StrictMode>,
 )
