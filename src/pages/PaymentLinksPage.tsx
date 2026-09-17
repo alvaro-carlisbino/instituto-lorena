@@ -12,19 +12,18 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
-import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
+import {
+  CARD_KIT_AMOUNTS,
+  KIT_MAX_INSTALLMENTS,
+  PAGBANK_KIT_LABELS,
+  PIX_KIT_AMOUNTS,
+  type PagbankKit,
+} from '@/services/crmPagbank'
 import { checkRedePix, generateRedeLink, generateRedePix } from '@/services/crmRede'
 import { quoteFrete, type FreteOption } from '@/services/crmFrete'
 import { ClinicPaymentsPanel } from '@/components/payments/ClinicPaymentsPanel'
 
 const NO_LEAD = '__none__'
-
-// Preço CHEIO para cartão (e.Rede) — sem o desconto de 5% do Pix.
-const CARD_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99500 }
-// Preço do Pix por kit (com 5% off) — mesma tabela do PAGBANK_KITS no backend.
-const PIX_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 56715, '5_meses': 94525 }
-// Parcelamento com juros (Asaas) até 12x em todos os kits.
-const KIT_MAX_INSTALLMENTS: Record<PagbankKit, number> = { '1_mes': 12, '3_meses': 12, '5_meses': 12 }
 
 function formatBRL(cents: number): string {
   return (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })

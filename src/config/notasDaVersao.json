@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-17-link-pagamento-frete",
+    "data": "2026-09-17",
+    "titulo": "Link de pagamento pelo chat agora pergunta o frete",
+    "itens": [
+      "Clicou no kit em Link pagamento? Abre uma caixa antes de gerar: dá para digitar o frete na mão ou cotar pelo CEP do cadastro.",
+      "A caixa mostra o total que o cliente vai ver (kit mais frete) e o nome que vai no pedido do Bling.",
+      "Dá para trocar o kit e o parcelamento ali mesmo, sem sair da conversa.",
+      "Antes o link saía no clique, sempre no valor seco do kit, e quem precisava cobrar a entrega tinha que ir na tela de Links de pagamento."
+    ]
+  },
+  {
     "id": "2026-09-17-transferir-conversa",
     "data": "2026-09-17",
     "titulo": "Transferir conversa entre a SDR e a Aline Muniz",

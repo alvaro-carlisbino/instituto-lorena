@@ -68,13 +68,13 @@ import { AttachmentTray, type PendingMedia } from '@/components/leads/chat/Attac
 import { AudioRecorder } from '@/components/leads/chat/AudioRecorder'
 import { ForwardDialog, type ForwardTarget } from '@/components/leads/chat/ForwardDialog'
 import { SpecialMessageDialog, type SpecialKind } from '@/components/leads/chat/SpecialMessageDialog'
+import { PaymentLinkDialog } from '@/components/leads/chat/PaymentLinkDialog'
 import { VisualizadorDeImagem, type ImagemDaConversa } from '@/components/leads/chat/VisualizadorDeImagem'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
 import { useLinhasDoPolo } from '@/hooks/useLinhasParticularesOcultas'
 import { linhaDaMensagem } from '@/lib/linhaWhatsapp'
 import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
-import { generateRedeLink } from '@/services/crmRede'
 import {
   isWaInstagramMergeNotice,
   tryConsumeWaInstagramMergeToast,
@@ -100,10 +100,6 @@ import {
   type ReactionRow,
 } from '@/services/crmChat'
 import { sendWhatsappMessage, notifySendError } from '@/services/crmWhatsapp'
-
-// Valor cheio do cartão por kit Tricopill (mesma tabela do PaymentLinksPage). Cartão+Pix = e.Rede
-// (Asaas é SÓ assinatura); o link /pagar deixa o cliente escolher Pix (5% off) ou cartão até 3x.
-const REDE_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99500 }
 
 
 type ChatFilter = 'all' | 'whatsapp' | 'meta'
@@ -454,36 +450,22 @@ export function LeadChatThread({
     }
   }
 
-  const handleGenerateRede = async (kit: PagbankKit) => {
-    if (pagbankLoading) return
-    setPagbankLoading(true)
-    try {
-      const amountCents = REDE_KIT_AMOUNTS[kit]
-      const maxInstallments = kit === '1_mes' ? 1 : 3
-      const res = await generateRedeLink({
-        amountCents,
-        description: `Tricopill ${kit.replace('_', ' ')}`,
-        leadId,
-        installments: maxInstallments,
-      })
-      setDraftMessage((prev) => {
-        const base = prev.trim()
-        const linkLine = `💳 Aqui está seu link de pagamento (Pix ou cartão):\n${res.payLink}`
-        return base ? `${base}\n\n${linkLine}` : linkLine
-      })
-      toast.success('Link de pagamento (Rede) gerado. Revise e envie.')
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao gerar link de pagamento')
-    } finally {
-      setPagbankLoading(false)
-    }
+  // O link cai no rascunho, para a pessoa reler antes de enviar (o valor já vem com o frete).
+  const handleLinkGerado = (payLink: string, amountCents: number) => {
+    setDraftMessage((prev) => {
+      const base = prev.trim()
+      const linkLine = `💳 Aqui está seu link de pagamento (Pix ou cartão):\n${payLink}`
+      return base ? `${base}\n\n${linkLine}` : linkLine
+    })
+    const valor = (amountCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    toast.success(`Link de pagamento gerado (${valor}). Revise e envie.`)
   }
   const draftTextareaRef = useRef<HTMLTextAreaElement>(null)
   const stickerInputRef = useRef<HTMLInputElement>(null)
   const isActiveLead = crm.selectedLeadId === leadId
   const [filter, setFilter] = useState<ChatFilter>(whatsappOnly ? 'whatsapp' : 'all')
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
-  const [pagbankLoading, setPagbankLoading] = useState(false)
+  const [kitParaLink, setKitParaLink] = useState<PagbankKit | null>(null)
   const [retryingBling, setRetryingBling] = useState(false)
 
   const handleRetryBling = async () => {
@@ -2156,7 +2138,6 @@ export function LeadChatThread({
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       type="button"
-                      disabled={pagbankLoading}
                       title="Gerar link de pagamento (Pix ou cartão) · Rede"
                       className={cn(
                         buttonVariants({ variant: 'ghost', size: 'sm' }),
@@ -2164,11 +2145,11 @@ export function LeadChatThread({
                       )}
                     >
                       <CreditCard className="mr-1.5 h-3.5 w-3.5 text-primary" aria-hidden />
-                      {pagbankLoading ? 'Gerando…' : 'Link pagamento'}
+                      Link pagamento
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start">
                       {(Object.keys(PAGBANK_KIT_LABELS) as PagbankKit[]).map((kit) => (
-                        <DropdownMenuItem key={kit} onClick={() => void handleGenerateRede(kit)}>
+                        <DropdownMenuItem key={kit} onClick={() => setKitParaLink(kit)}>
                           {PAGBANK_KIT_LABELS[kit]}
                         </DropdownMenuItem>
                       ))}
@@ -2327,6 +2308,15 @@ export function LeadChatThread({
         destinos={destinosDeEncaminhamento}
         enviando={forwarding}
         onConfirm={(ids) => void encaminhar(ids)}
+      />
+
+      <PaymentLinkDialog
+        key={`link-${kitParaLink ?? 'nenhum'}`}
+        kitInicial={kitParaLink}
+        leadId={leadId}
+        lead={leadDoChat}
+        onClose={() => setKitParaLink(null)}
+        onGerado={handleLinkGerado}
       />
 
       <ScheduleAppointmentDialog

@@ -9,6 +9,15 @@ export const PAGBANK_KIT_LABELS: Record<PagbankKit, string> = {
   '5_meses': '5+1 frascos (6) — Pix R$ 945,25 / cartão R$ 995,00',
 }
 
+// Tabela de preço do kit, num lugar só. Antes cada tela tinha a sua cópia (página de links,
+// botão do chat) e bastava mexer numa para o mesmo kit sair com dois preços.
+/** Preço CHEIO para cartão (e.Rede) — sem o desconto de 5% do Pix. */
+export const CARD_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 59700, '5_meses': 99500 }
+/** Preço do Pix por kit (com 5% off) — mesma tabela do PAGBANK_KITS no backend. */
+export const PIX_KIT_AMOUNTS: Record<PagbankKit, number> = { '1_mes': 19900, '3_meses': 56715, '5_meses': 94525 }
+/** Parcelamento com juros (Asaas) até 12x em todos os kits. */
+export const KIT_MAX_INSTALLMENTS: Record<PagbankKit, number> = { '1_mes': 12, '3_meses': 12, '5_meses': 12 }
+
 export type PagbankLinkResult = { ok: true; payLink: string; label: string; amountCents: number }
 
 /**
