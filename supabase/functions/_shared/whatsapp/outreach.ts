@@ -338,14 +338,21 @@ export async function drainOutreachQueue(
       //   já mandou cancela, como sempre foi. São 516 mensagens de backlog de 20/08
       //   esperando outubro nesta fila: afrouxar a regra delas por tabela mandaria
       //   apresentação para quem já conversou, e ninguém pediu isso.
-      const ehFormularioFresco = item.source === 'leadform' || item.source === 'sweep_leadform'
+      // - `aviso_*`: recado pontual para quem JÁ é conhecido da casa (a agenda de Londrina
+      //   do mês, por exemplo). Não é apresentação, então conversa antiga não cancela: se
+      //   cancelasse, o recado nunca chegaria a ninguém, porque essa gente só está na lista
+      //   porque já falou com a clínica. O que cancela continua sendo falar DEPOIS que o
+      //   recado entrou na fila, pela pessoa ou pela equipe (guarda logo abaixo).
+      const cortaPelaEntradaNaFila = item.source === 'leadform' ||
+        item.source === 'sweep_leadform' ||
+        String(item.source ?? '').startsWith('aviso_')
       let qEntrou = admin
         .from('interactions')
         .select('id')
         .eq('lead_id', item.lead_id ?? '')
         .eq('direction', 'in')
         .eq('channel', 'whatsapp')
-      if (ehFormularioFresco) qEntrou = qEntrou.gte('created_at', item.created_at ?? item.scheduled_at)
+      if (cortaPelaEntradaNaFila) qEntrou = qEntrou.gte('created_at', item.created_at ?? item.scheduled_at)
       const { data: entrou } = await qEntrou.limit(1).maybeSingle()
       if (entrou) {
         await marcar({ status: 'canceled', last_reason: 'a pessoa escreveu antes' })
