@@ -501,6 +501,27 @@ async function buildCrmSnapshot(
   let leadFocus: Record<string, unknown> | null = null
   if (ctx.leadId) {
     const nowIso = new Date().toISOString()
+    // UM NÚMERO POR CONVERSA (16/set/2026). O mesmo contato pode falar com a SDR e com a Aline
+    // Muniz (número particular dela, sem IA). A IA respondendo pela SDR não pode ler a conversa
+    // do outro número: é outra atendente, e lá passam valores que a Sofia não fala. Mensagem de
+    // WhatsApp sem linha gravada é da linha padrão (histórico de quando havia um número só);
+    // nota de sistema e Instagram seguem entrando.
+    let filtroDaLinha: string | null = null
+    if (ctx.whatsappInstanceId && opts?.tenantId) {
+      const { data: padrao } = await userClient
+        .from('whatsapp_channel_instances')
+        .select('id')
+        .eq('tenant_id', opts.tenantId)
+        .eq('active', true)
+        .order('sort_order', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+      const ehPadrao = (padrao as { id?: string } | null)?.id === ctx.whatsappInstanceId
+      filtroDaLinha =
+        `channel.neq.whatsapp,whatsapp_instance_id.eq.${ctx.whatsappInstanceId}` +
+        (ehPadrao ? ',whatsapp_instance_id.is.null' : '')
+    }
+    const threadQuery = interacoesDoPolo('id, channel, direction, author, content, happened_at').eq('lead_id', ctx.leadId)
     const [leadRes, mediaRes, apptRes, roomsRes, threadRes] = await Promise.all([
       userClient
         .from('leads')
@@ -521,8 +542,7 @@ async function buildCrmSnapshot(
         .order('starts_at', { ascending: true })
         .limit(12),
       userClient.from('rooms').select('id, name, active').eq('active', true).order('name', { ascending: true }).limit(24),
-      interacoesDoPolo('id, channel, direction, author, content, happened_at')
-        .eq('lead_id', ctx.leadId)
+      (filtroDaLinha ? threadQuery.or(filtroDaLinha) : threadQuery)
         .order('happened_at', { ascending: false })
         .limit(36),
     ])
