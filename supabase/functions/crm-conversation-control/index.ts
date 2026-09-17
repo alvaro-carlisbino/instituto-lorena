@@ -2,7 +2,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8'
 import { coercePgBoolean } from '../_shared/coercePgBoolean.ts'
 import { disableAiOnHandoff, runManychatAiAutoReply, runWhatsappAiAutoReply } from '../_shared/crmAiAutoReply.ts'
 import { setLineConversationMode } from '../_shared/conversationLineState.ts'
+import { insertInteraction } from '../_shared/crm.ts'
 import { DEFAULT_TEAM_HOURS, parseTeamHours, serializeTeamHours } from '../_shared/teamHours.ts'
+import {
+  type LinhaParaTransferir,
+  nomeCurtoDaLinha,
+  notaDaTransferencia,
+  planejarTransferencia,
+} from '../_shared/transferenciaConversa.ts'
 import { pushManychatInstagramDmAfterReply, readManychatPushConfigFromEnv } from '../_shared/manychatPublicApi.ts'
 import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
 import type { WhatsappProvider } from '../_shared/whatsapp/types.ts'
@@ -19,7 +26,7 @@ function json(body: Record<string, unknown>, status = 200): Response {
   })
 }
 
-type Action = 'get_state' | 'set_mode' | 'get_config' | 'set_config' | 'force_ai_reply'
+type Action = 'get_state' | 'set_mode' | 'get_config' | 'set_config' | 'force_ai_reply' | 'transfer'
 
 /**
  * Normaliza o turno da equipe vindo da tela para o formato de `crm_ai_configs.ai_team_hours`.
@@ -56,7 +63,7 @@ Deno.serve(async (req) => {
   const authUserId = authData.user.id
   const userEmail = authData.user.email ?? ''
 
-  const { data: me } = await admin.from('app_users').select('id, role, email').eq('auth_user_id', authUserId).maybeSingle()
+  const { data: me } = await admin.from('app_users').select('id, name, role, email').eq('auth_user_id', authUserId).maybeSingle()
   const role = String((me?.role as string | undefined) ?? 'sdr').toLowerCase()
   const canManageConfig = role === 'admin' || role === 'gestor'
 
@@ -229,6 +236,183 @@ Deno.serve(async (req) => {
       config: {
         ...row,
         enabled: coercePgBoolean(row.enabled, true),
+      },
+    })
+  }
+
+  // Transferir a conversa para outro número do polo e/ou outra pessoa (SDR ↔ Aline Muniz).
+  // Regras em `_shared/transferenciaConversa.ts`.
+  if (action === 'transfer') {
+    if (!['admin', 'gestor', 'sdr'].includes(role)) {
+      return json({ error: 'forbidden', message: 'Seu perfil não pode transferir conversas.' }, 403)
+    }
+    const leadId = String(body.leadId ?? '').trim()
+    const paraLinhaId = String(body.toInstanceId ?? '').trim()
+    if (!leadId || !paraLinhaId) {
+      return json({ error: 'invalid_payload', message: 'Escolha para qual número a conversa vai.' }, 400)
+    }
+    if (!tenantId) return json({ error: 'tenant_unresolved', message: 'Não deu para saber o polo desta tela.' }, 400)
+    const recado = String(body.note ?? '').trim().slice(0, 500)
+
+    const { data: canSee, error: rlsErr } = await userClient.from('leads').select('id').eq('id', leadId).maybeSingle()
+    if (rlsErr) return json({ error: rlsErr.message }, 400)
+    if (!canSee) return json({ error: 'forbidden', message: 'Sem acesso a este contato.' }, 403)
+
+    const { data: leadData, error: leadErr } = await admin
+      .from('leads')
+      .select('id, patient_name, owner_id, whatsapp_instance_id')
+      .eq('id', leadId)
+      .maybeSingle()
+    if (leadErr || !leadData) return json({ error: 'lead_not_found', message: 'Contato não encontrado.' }, 404)
+    const lead = leadData as {
+      id: string
+      patient_name: string | null
+      owner_id: string | null
+      whatsapp_instance_id: string | null
+    }
+
+    // Só os números do polo da TELA: transferir nunca atravessa polo.
+    const { data: linhasData, error: linhasErr } = await admin
+      .from('whatsapp_channel_instances')
+      .select('id, label, active, sort_order, private_owner_id, ai_auto_reply')
+      .eq('tenant_id', tenantId)
+    if (linhasErr) return json({ error: linhasErr.message }, 500)
+    const linhas: LinhaParaTransferir[] = ((linhasData ?? []) as Array<Record<string, unknown>>).map((r) => ({
+      id: String(r.id),
+      label: String(r.label ?? r.id),
+      active: r.active !== false,
+      sortOrder: Number(r.sort_order) || 0,
+      privateOwnerId: r.private_owner_id ? String(r.private_owner_id) : null,
+      aiAutoReply: r.ai_auto_reply !== false,
+    }))
+
+    const plano = planejarTransferencia(
+      linhas,
+      { ownerId: lead.owner_id, whatsappInstanceId: lead.whatsapp_instance_id },
+      {
+        paraLinhaId,
+        deLinhaId: String(body.fromInstanceId ?? '').trim() || null,
+        responsavelId: String(body.ownerId ?? '').trim() || null,
+      },
+    )
+    if ('erro' in plano) return json({ error: plano.erro, message: plano.mensagem }, 409)
+
+    const idsDePessoas = [...new Set([plano.responsavel, lead.owner_id].filter((x): x is string => Boolean(x)))]
+    const { data: pessoasData } = idsDePessoas.length
+      ? await admin.from('app_users').select('id, name, email, auth_user_id').in('id', idsDePessoas)
+      : { data: [] }
+    const pessoas = new Map(
+      ((pessoasData ?? []) as Array<{ id: string; name: string | null; email: string | null; auth_user_id: string | null }>).map(
+        (p) => [p.id, p],
+      ),
+    )
+    const nomeDe = (id: string | null) => {
+      if (!id) return null
+      const p = pessoas.get(id)
+      return p?.name?.trim() || p?.email?.trim() || id
+    }
+    if (plano.trocaResponsavel && plano.responsavel && !pessoas.has(plano.responsavel)) {
+      return json({ error: 'responsavel_invalido', message: 'Essa pessoa não existe mais no cadastro.' }, 400)
+    }
+
+    const patch: Record<string, unknown> = {}
+    if (plano.gravaNumero) patch.whatsapp_instance_id = plano.para.id
+    if (plano.trocaResponsavel) patch.owner_id = plano.responsavel
+    if (Object.keys(patch).length) {
+      const { error: upErr } = await admin.from('leads').update(patch).eq('id', leadId)
+      if (upErr) return json({ error: 'update_failed', message: `Não deu para transferir: ${upErr.message}` }, 500)
+    }
+
+    if (plano.gravaNumero) {
+      const { error: evErr } = await admin.from('lead_wa_line_events').insert({
+        lead_id: leadId,
+        from_instance_id: lead.whatsapp_instance_id,
+        to_instance_id: plano.para.id,
+        tenant_id: tenantId,
+      })
+      if (evErr) console.warn('[transfer] lead_wa_line_events:', evErr.message)
+    }
+
+    const agora = new Date().toISOString()
+    if (plano.segurarIaNaOrigem && plano.de) {
+      await setLineConversationMode(admin, {
+        leadId,
+        instanceId: plano.de.id,
+        ownerMode: 'human',
+        lastHumanReplyAt: agora,
+      })
+    }
+
+    const quem = String(me?.name ?? '').trim() || userEmail || 'Equipe'
+    const nomeDoContato = String(lead.patient_name ?? '').trim() || 'Contato'
+    try {
+      await insertInteraction(admin, {
+        leadId,
+        patientName: nomeDoContato,
+        channel: 'system',
+        direction: 'system',
+        author: 'CRM',
+        content: notaDaTransferencia({
+          quem,
+          plano,
+          responsavelAnterior: nomeDe(lead.owner_id),
+          responsavel: nomeDe(plano.responsavel),
+          recado,
+        }),
+        happenedAt: agora,
+        tenantId,
+      })
+    } catch (e) {
+      console.warn('[transfer] nota:', e instanceof Error ? e.message : String(e))
+    }
+
+    // Aviso para quem recebe, inclusive quando já era a responsável (a SDR passando para a Muniz
+    // um contato que já estava no nome dela). Quem transferiu para si mesmo não se avisa.
+    const destinatario = plano.responsavel ? pessoas.get(plano.responsavel)?.auth_user_id ?? null : null
+    let avisado = false
+    if (destinatario && destinatario !== authUserId) {
+      const partes = [`${nomeDoContato}, por ${quem}.`]
+      if (plano.trocaNumero) partes.push(`Agora no número ${nomeCurtoDaLinha(plano.para.label)}.`)
+      if (recado) partes.push(`Recado: ${recado}`)
+      const { error: notErr } = await admin.from('app_inbox_notifications').insert({
+        auth_user_id: destinatario,
+        title: 'Conversa transferida para você',
+        body: partes.join(' ').slice(0, 600),
+        kind: 'handoff',
+        metadata: { leadId, whatsappInstanceId: plano.para.id, transferencia: true },
+        tenant_id: tenantId,
+      })
+      if (notErr) console.warn('[transfer] aviso:', notErr.message)
+      avisado = !notErr
+    }
+
+    await admin.from('audit_logs').insert({
+      actor_id: (me?.id as string | undefined) ?? null,
+      actor_email: userEmail || null,
+      action: 'UPDATE',
+      target_table: 'leads',
+      target_id: leadId,
+      metadata: {
+        transferencia: {
+          de: plano.de?.id ?? null,
+          para: plano.para.id,
+          responsavel_anterior: lead.owner_id,
+          responsavel: plano.responsavel,
+          ia_segurada_na_origem: plano.segurarIaNaOrigem,
+        },
+      },
+    }).then(() => {}, () => {})
+
+    return json({
+      ok: true,
+      transferencia: {
+        whatsappInstanceId: plano.para.id,
+        paraNome: nomeCurtoDaLinha(plano.para.label),
+        ownerId: plano.responsavel,
+        responsavelNome: nomeDe(plano.responsavel),
+        trocaNumero: plano.trocaNumero,
+        trocaResponsavel: plano.trocaResponsavel,
+        avisado,
       },
     })
   }

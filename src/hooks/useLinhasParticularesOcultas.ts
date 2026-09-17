@@ -67,7 +67,15 @@ export function useLinhasParticularesOcultas(): Set<string> {
   )
 }
 
-export type LinhaDoPolo = { id: string; label: string; nomeCurto: string }
+export type LinhaDoPolo = {
+  id: string
+  label: string
+  nomeCurto: string
+  /** Dona do número particular (só ela e admin veem). `null` = o polo inteiro vê. */
+  privateOwnerId: string | null
+  /** `false` = número só da equipe, a IA não fala por ele. */
+  aiAutoReply: boolean
+}
 
 export type LinhasDoPolo = {
   /** Linhas ATIVAS do polo da tela, na ordem de `sort_order`. */
@@ -91,7 +99,13 @@ export function useLinhasDoPolo(): LinhasDoPolo {
     const linhas = todas
       .filter((l) => l.tenantId === tenant.id && l.active)
       .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map((l) => ({ id: l.id, label: l.label, nomeCurto: nomeCurtoDaLinha(l.label) }))
+      .map((l) => ({
+        id: l.id,
+        label: l.label,
+        nomeCurto: nomeCurtoDaLinha(l.label),
+        privateOwnerId: l.privateOwnerId,
+        aiAutoReply: l.aiAutoReply,
+      }))
     return {
       linhas,
       ids: new Set(linhas.map((l) => l.id)),

@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-17-transferir-conversa",
+    "data": "2026-09-17",
+    "titulo": "Transferir conversa entre a SDR e a Aline Muniz",
+    "itens": [
+      "No chat, abra a conversa e clique em Transferir, ao lado de Não lida. Escolha o número e quem fica com o contato.",
+      "A resposta, os lembretes e o follow-up passam a sair pelo número escolhido, e quem recebe ganha um aviso no sino.",
+      "Deixe um recado para quem recebe. Fica uma nota na conversa dizendo quem transferiu, e a IA não responde por cima no número de onde saiu.",
+      "Se o paciente voltar a escrever no número antigo, a resposta volta a sair por lá."
+    ]
+  },
+  {
     "id": "2026-09-17-estoque-de-qual-nota-veio",
     "data": "2026-09-17",
     "titulo": "Estoque: de qual nota veio cada item",

@@ -5,6 +5,7 @@ import { ChevronLeft, Mail, Search, UserRound } from 'lucide-react'
 
 import { ConversationModeSwitch } from '@/components/leads/ConversationModeSwitch'
 import { LeadChatThread } from '@/components/leads/LeadChatThread'
+import { TransferirConversa } from '@/components/leads/TransferirConversa'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -828,6 +829,19 @@ export function ChatWorkspacePage({
                   </div>
 
                   <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    {crm.dataMode === 'supabase' && crm.currentPermission.canRouteLeads ? (
+                      <TransferirConversa
+                        lead={activeLead}
+                        linhaAtual={porLinha ? activeConversa?.linha ?? null : null}
+                        onTransferido={(linha) => {
+                          // Quem enxerga o número de destino passa a olhar a conversa dele: é por
+                          // ele que a próxima resposta sai. Particular de outra pessoa fica onde está.
+                          if (porLinha && !linhasPolo.ocultas.has(linha)) {
+                            setLinhaSelecionada({ leadId: activeLead.id, linha })
+                          }
+                        }}
+                      />
+                    ) : null}
                     <Button
                       variant="outline"
                       size="sm"

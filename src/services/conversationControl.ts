@@ -1,3 +1,4 @@
+import { edgeErrorMessage } from '@/lib/edgeError'
 import { supabase } from '@/lib/supabaseClient'
 
 export type ConversationOwnerMode = 'human' | 'ai' | 'auto'
@@ -114,3 +115,37 @@ export async function saveAiConfig(payload: {
   return parsed.config as AiConfig
 }
 
+export type TransferenciaDeConversa = {
+  whatsappInstanceId: string
+  paraNome: string
+  ownerId: string | null
+  responsavelNome: string | null
+  trocaNumero: boolean
+  trocaResponsavel: boolean
+  /** Quem recebeu ganhou aviso no sino (não avisa quem transferiu para si mesmo). */
+  avisado: boolean
+}
+
+/**
+ * Passa a conversa para outro número do polo e/ou outra pessoa (SDR ↔ Aline Muniz). As regras
+ * moram em `supabase/functions/_shared/transferenciaConversa.ts`. O motivo da recusa vem no
+ * corpo do erro ("Esse contato já está nesse número e com essa pessoa.").
+ */
+export async function transferirConversa(input: {
+  leadId: string
+  toInstanceId: string
+  fromInstanceId?: string | null
+  ownerId?: string | null
+  note?: string
+}): Promise<TransferenciaDeConversa> {
+  if (!supabase) throw new Error('Sistema não configurado.')
+  const { data, error } = await supabase.functions.invoke('crm-conversation-control', {
+    body: { action: 'transfer', ...input },
+  })
+  if (error) throw new Error(await edgeErrorMessage(error, 'Não deu para transferir a conversa.'))
+  const parsed = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>
+  if (parsed.ok !== true) {
+    throw new Error(String(parsed.message ?? parsed.error ?? 'Não deu para transferir a conversa.'))
+  }
+  return parsed.transferencia as TransferenciaDeConversa
+}
