@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
+import { lembrarPoloDaTela } from '@/lib/poloDaTela'
 import { poloFixoDoDeploy } from '@/lib/poloFixo'
 import { isSupabaseConfigured, supabase } from '@/lib/supabaseClient'
 import {
@@ -120,6 +121,11 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           }
 
           setPoloBloqueado(null)
+          // Uma fonte só para "que polo esta tela está servindo". A tela lista os números
+          // do WhatsApp por `tenant.id` (`useLinhasDoPolo`) e o envio declara o polo por
+          // `poloDaTela()`; quando os dois divergiam, a mensagem saía pedindo um número do
+          // polo A declarando o polo B — 409 `linha_indisponivel` (ver [poloDaTela]).
+          lembrarPoloDaTela(t.id)
           setTenant({ ...t, billing })
           setIsSuperAdmin(sa)
           setCanViewFinance(finance)

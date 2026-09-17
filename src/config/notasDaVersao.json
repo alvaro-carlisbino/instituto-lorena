@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-17-envio-polo-errado",
+    "data": "2026-09-17",
+    "titulo": "Corrigido: \"envio bloqueado, o número não está ativo no polo\"",
+    "itens": [
+      "Quem usa os dois CRMs (clínica e Tricopill) esbarrava nisso: abrir um logo depois do outro deixava a tela certa, mas o envio saía dizendo o polo do CRM anterior, e a mensagem travava.",
+      "Agora o endereço manda: abriu o CRM da clínica, é a clínica, mesmo que o seu último acesso tenha sido o do Tricopill.",
+      "Pelo mesmo motivo, o CRM podia abrir com lead, conversa e número do outro negócio na tela até apertar F5. Agora ele se acerta sozinho antes de mostrar qualquer coisa.",
+      "Nada muda para quem usa um CRM só."
+    ]
+  },
+  {
     "id": "2026-09-17-link-pagamento-frete",
     "data": "2026-09-17",
     "titulo": "Link de pagamento pelo chat agora pergunta o frete",

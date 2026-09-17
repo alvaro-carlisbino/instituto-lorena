@@ -49,6 +49,7 @@ import type {
 } from '../mocks/crmMock'
 import { defaultVisibleInAll } from '../lib/leadFields'
 import { lembrarPoloDaTela, poloDaTela } from '../lib/poloDaTela'
+import { poloFixoDoDeploy } from '../lib/poloFixo'
 import { supabase } from '../lib/supabaseClient'
 
 /** Alinha papel do banco (ex.: casing) ao union usado no app. */
@@ -457,6 +458,12 @@ export const fetchLeadsByIds = async (leadIds: string[]): Promise<{ leads: Lead[
   }
 }
 
+/**
+ * Trava anti-loop do alinhamento de polo abaixo. Se `set_active_tenant` não pegar (RPC
+ * velha, permissão), o boot tentaria de novo para sempre.
+ */
+let jaTentouAlinharPolo = false
+
 export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   const client = assertSupabase()
 
@@ -768,9 +775,26 @@ export const loadCrmData = async (): Promise<CrmDataSnapshot> => {
   // Linha do polo ativo; se a RPC falhar (ou a base ainda não for multi-polo), a primeira serve.
   const orgRows = (orgSettingsRes.error ? [] : (orgSettingsRes.data ?? [])) as Record<string, unknown>[]
   const tenantAtivo = typeof tenantAtivoRes.data === 'string' ? tenantAtivoRes.data.trim() : ''
+  // ENDEREÇO TRAVADO COM O POLO ATIVO ATRASADO: recarrega antes de entregar a tela.
+  //
+  // `active_tenant_id` é por PESSOA e vive no banco. Quem estava no CRM do Tricopill e abre
+  // o da clínica chega aqui com `tricopill` ativo, e é ele que a RLS usa — ou seja, TUDO
+  // que este boot acabou de ler é do polo errado. O `TenantProvider` realinha, mas ele roda
+  // em PARALELO (o `useCrmState` monta fora dele) e ninguém recarregava os dados depois:
+  // a tela da clínica ficava com lead, conversa e métrica do Tricopill até apertar F5.
+  // Alinha e lê de novo — o preço é um boot dobrado no caso raro, e o caso raro é o dono e
+  // a gerência, que são justamente quem usa os dois CRMs.
+  const poloDoEndereco = poloFixoDoDeploy()
+  if (poloDoEndereco && tenantAtivo && tenantAtivo !== poloDoEndereco && !jaTentouAlinharPolo) {
+    jaTentouAlinharPolo = true
+    const { error: erroAlinhar } = await client.rpc('set_active_tenant', { p_tenant_id: poloDoEndereco })
+    // Erro aqui é gente que não pertence a este CRM: o `PoloGate` mostra a porta certa.
+    if (!erroAlinhar) return await loadCrmData()
+    console.warn('[polo] boot não conseguiu alinhar com o endereço:', erroAlinhar.message)
+  }
   // Confirma o polo desta tela para as consultas de conversa (ver `poloDaTela`). Até aqui
   // valia o polo do endereço; a partir daqui vale o polo ativo do login, que é o mesmo
-  // que a RLS usa.
+  // que a RLS usa — a menos que ele desminta o endereço, e aí quem vale é o endereço.
   lembrarPoloDaTela(tenantAtivo)
   const orgRow =
     (tenantAtivo ? orgRows.find((r) => String(r.tenant_id ?? '') === tenantAtivo) : undefined) ??

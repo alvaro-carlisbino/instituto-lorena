@@ -22,8 +22,26 @@ export function poloDaTela(): string | null {
   return poloConhecido
 }
 
-/** Chamado pelo boot com o polo ativo do login (RPC `current_tenant_id`). */
+/**
+ * Chamado pelo boot com o polo ativo do login (RPC `current_tenant_id`).
+ *
+ * **No endereço travado, quem manda é o ENDEREÇO.** O `active_tenant_id` é por PESSOA e
+ * vive no banco: quem acabou de usar o CRM do Tricopill chega ao CRM da clínica com
+ * `tricopill` guardado lá, e o `TenantProvider` leva alguns fetches até realinhar. O boot
+ * do CRM roda em PARALELO (o `useCrmState` monta fora do provider) e chegava antes,
+ * carimbando aqui o polo VELHO por cima do polo do endereço — e ficava assim até a aba
+ * recarregar.
+ *
+ * O estrago aparecia no envio, 17/set/2026: a tela já era a da clínica e listava os números
+ * dela, mas a mensagem saía declarando `senderTenantId: 'tricopill'`. Com a guarda de linha
+ * isso vira `linha_indisponivel` na cara de quem atende ("o número wa-wapi-mu4jwsjf não está
+ * ativo no polo 'tricopill'"); ANTES dela, a resposta saía calada pelo número do outro
+ * negócio. Valor que desmente o endereço é banco atrasado, não notícia: ignora.
+ */
 export function lembrarPoloDaTela(tenantId: string | null | undefined): void {
   const limpo = typeof tenantId === 'string' ? tenantId.trim() : ''
-  if (limpo) poloConhecido = limpo
+  if (!limpo) return
+  const fixo = poloFixoDoDeploy()
+  if (fixo && limpo !== fixo) return
+  poloConhecido = limpo
 }
