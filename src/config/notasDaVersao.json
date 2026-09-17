@@ -1,0 +1,23 @@
+[
+  {
+    "id": "2026-09-17-estoque-de-qual-nota-veio",
+    "data": "2026-09-17",
+    "titulo": "Estoque: de qual nota veio cada item",
+    "itens": [
+      "Clique no nome do item em Estoque: a ficha mostra as notas de compra, os lotes, para quais pacientes cada lote saiu e o histórico com saldo.",
+      "Nota que chegou com o nome do fornecedor e não aparece na ficha: use Procurar a nota deste item e junte no item certo.",
+      "Setores e endereços: diga em que armário cada item fica. Transferência, bipagem, kit e inventário agora respeitam o setor.",
+      "Lançamento errado não se apaga: use Estornar na ficha do item. O original continua no histórico."
+    ]
+  },
+  {
+    "id": "2026-09-17-nota-da-versao",
+    "data": "2026-09-17",
+    "titulo": "Aviso de versão nova mostra o que mudou",
+    "itens": [
+      "Quando sair uma versão nova, o aviso no alto da tela já conta o que mudou.",
+      "Clique em Atualizar para carregar a versão nova. Salve antes o que estiver editando.",
+      "Se você recarregar a página por conta própria, as novidades aparecem uma vez ao abrir o CRM."
+    ]
+  }
+]
