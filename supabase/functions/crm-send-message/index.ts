@@ -205,6 +205,14 @@ Deno.serve(async (req) => {
      */
     requireBotKind?: string
     /**
+     * Número de WhatsApp escolhido por quem envia: a conversa aberta no painel. Com mais de um
+     * número no polo (SDR e o WhatsApp da Aline Muniz), a mesma pessoa conversa pelos dois, e a
+     * resposta sai pelo número que a atendente está a olhar, não pelo último em que a pessoa
+     * escreveu. Não reamarra o lead. Linha desligada, de outro polo ou particular de outra
+     * pessoa é recusada.
+     */
+    whatsappInstanceId?: string
+    /**
      * Tenant do ASSUNTO, quando ele não é o tenant do lead. Lembrete de cirurgia é
      * conteúdo da clínica mesmo quando o paciente vive no polo Tricopill (Rodrigo Pupin
      * e Evandro Matos: cirurgia marcada, lead no Tricopill porque compraram suplemento
@@ -512,6 +520,44 @@ Deno.serve(async (req) => {
   let resolvedBotKind: string | null = null
   let resolvedInstanceId: string | null = null
   let resolvedLineTenantId: string | null = null
+  const linhaPedida = String(body.whatsappInstanceId ?? '').trim()
+  if (linhaPedida) {
+    const { data: linhaRow } = await admin
+      .from('whatsapp_channel_instances')
+      .select('id, tenant_id, active, private_owner_id')
+      .eq('id', linhaPedida)
+      .maybeSingle()
+    const linha = linhaRow as
+      | { id: string; tenant_id: string | null; active: boolean | null; private_owner_id: string | null }
+      | null
+    const poloEsperado = senderTenantId || row.tenant_id
+    if (!linha || linha.active === false || linha.tenant_id !== poloEsperado) {
+      return json(
+        {
+          error: 'linha_indisponivel',
+          message: `Envio bloqueado: o número ${linhaPedida} não está ativo no polo '${poloEsperado}'.`,
+        },
+        409,
+      )
+    }
+    if (linha.private_owner_id && !isServiceRole) {
+      const { data: quem } = await admin
+        .from('app_users')
+        .select('id, role')
+        .eq('auth_user_id', String(user?.id ?? ''))
+        .maybeSingle()
+      const eu = quem as { id?: string; role?: string } | null
+      if (eu?.id !== linha.private_owner_id && eu?.role !== 'admin') {
+        return json(
+          {
+            error: 'linha_particular',
+            message: 'Envio bloqueado: este número é particular de outra pessoa da equipe.',
+          },
+          403,
+        )
+      }
+    }
+  }
   try {
     ;({
       provider,
@@ -521,12 +567,14 @@ Deno.serve(async (req) => {
     } =
       await resolveOutboundProviderForLead(
         admin,
-        {
-          id: row.id,
-          whatsapp_instance_id: assuntoDeOutroPolo ? null : row.whatsapp_instance_id,
-          tenant_id: assuntoDeOutroPolo ? senderTenantId : row.tenant_id,
-        },
-        assuntoDeOutroPolo ? { bindDefault: false } : undefined,
+        linhaPedida
+          ? { id: row.id, whatsapp_instance_id: linhaPedida, tenant_id: senderTenantId || row.tenant_id }
+          : {
+              id: row.id,
+              whatsapp_instance_id: assuntoDeOutroPolo ? null : row.whatsapp_instance_id,
+              tenant_id: assuntoDeOutroPolo ? senderTenantId : row.tenant_id,
+            },
+        linhaPedida || assuntoDeOutroPolo ? { bindDefault: false } : undefined,
       ))
   } catch (e) {
     return json({ error: 'provider_not_configured', message: e instanceof Error ? e.message : String(e) }, 500)
@@ -803,6 +851,7 @@ Deno.serve(async (req) => {
         leadId: String(lead.id),
         patientName: String(lead.patient_name ?? 'Lead'),
         channel: 'whatsapp',
+        whatsappInstanceId: resolvedInstanceId ?? undefined,
         direction: 'out',
         author: outboundAuthor,
         content: peca.caption || MEDIA_LABEL[peca.kind],
@@ -860,6 +909,7 @@ Deno.serve(async (req) => {
         leadId: String(lead.id),
         patientName: String(lead.patient_name ?? 'Lead'),
         channel: 'whatsapp',
+        whatsappInstanceId: resolvedInstanceId ?? undefined,
         direction: 'out',
         author: outboundAuthor,
         content: MEDIA_LABEL.sticker,
@@ -976,6 +1026,7 @@ Deno.serve(async (req) => {
         leadId: String(lead.id),
         patientName: String(lead.patient_name ?? 'Lead'),
         channel: 'whatsapp',
+        whatsappInstanceId: resolvedInstanceId ?? undefined,
         direction: 'out',
         author: outboundAuthor,
         content: resumo,
@@ -999,6 +1050,7 @@ Deno.serve(async (req) => {
         leadId: String(lead.id),
         patientName: String(lead.patient_name ?? 'Lead'),
         channel: 'whatsapp',
+        whatsappInstanceId: resolvedInstanceId ?? undefined,
         direction: 'out',
         author: outboundAuthor,
         content: textoAvulso,
@@ -1045,7 +1097,9 @@ Deno.serve(async (req) => {
     // responder aqui não pode calar o bot de vendas do Tricopill pra mesma pessoa.
     await setLineConversationMode(admin, {
       leadId,
-      instanceId: row.whatsapp_instance_id,
+      // A linha por onde a resposta SAIU, que com número escolhido no painel pode não ser a
+      // amarrada no lead.
+      instanceId: resolvedInstanceId ?? row.whatsapp_instance_id,
       ownerMode: 'human',
       aiEnabled: preservedAiEnabled,
       lastHumanReplyAt: nowIso(),

@@ -425,6 +425,7 @@ export async function drainOutreachQueue(
           leadId: item.lead_id,
           patientName: String((leadRow as { patient_name?: string } | null)?.patient_name ?? 'Lead'),
           channel: 'whatsapp',
+          whatsappInstanceId: item.instance_id ?? undefined,
           direction: 'out',
           author: 'Sofia (IA)',
           content: item.message,

@@ -15,7 +15,8 @@ import { Select, SelectContent, SelectItem } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { WorkspaceLeadSidebar } from '@/components/leads/WorkspaceLeadSidebar'
 import { useCrm } from '@/context/CrmContext'
-import { useLinhasParticularesOcultas } from '@/hooks/useLinhasParticularesOcultas'
+import { useLinhasDoPolo } from '@/hooks/useLinhasParticularesOcultas'
+import { chaveDaConversa, linhaDaMensagem } from '@/lib/linhaWhatsapp'
 import { useTenant } from '@/context/TenantContext'
 import { AppLayout } from '@/layouts/AppLayout'
 import { ehMensagemDeConversa, ehRecebidaDoPaciente } from '@/lib/mensagemDeConversa'
@@ -34,6 +35,7 @@ import {
 import { getLeadPhoneDisplay, isLeadWhatsappComposeBlocked } from '@/lib/leadFields'
 import { formatConversationHeaderStamp, formatConversationStamp } from '@/lib/chatDates'
 import { fetchWhatsappChannelInstances, type BotKind } from '@/services/whatsappChannelInstances'
+import type { Lead } from '@/mocks/crmMock'
 import { useUnreadConversations } from '@/hooks/useUnreadConversations'
 
 const MODE_SUMMARY: Record<ConversationOwnerMode, string> = {
@@ -61,10 +63,11 @@ function gravarLinhaEscolhida(id: string) {
   }
 }
 
-/** "SDR Instituto (W-API)" → "SDR Instituto": o parêntese não cabe na aba. */
-function nomeCurtoDaLinha(label: string): string {
-  return label.replace(/\s*\([^)]*\)\s*$/, '').trim() || label
-}
+/**
+ * Uma conversa da lista. Com mais de um número no polo, é o par (lead, número): a mesma pessoa
+ * que fala com a SDR e com a Aline Muniz aparece duas vezes, cada uma com o seu fio.
+ */
+type Conversa = { lead: Lead; linha: string | null; chave: string }
 
 /** Iniciais para o avatar do contato na lista (1ª + última palavra). */
 function initials(name: string): string {
@@ -94,20 +97,31 @@ export function ChatWorkspacePage({
   const [modeLoading, setModeLoading] = useState(false)
   const [leadSheetOpen, setLeadSheetOpen] = useState(false)
   const [unreadOnly, setUnreadOnly] = useState(false)
-  const { isUnread, markSeen, markUnread } = useUnreadConversations(crm.interactions)
+  // Números de WhatsApp do polo, os que este usuário vê e a linha padrão.
+  const linhasPolo = useLinhasDoPolo()
+  // Conversa separada por número: só quando o polo tem mais de um (e fora da aba do Tricopill,
+  // que já filtra por tipo de linha).
+  const porLinha = !restrictToBotKind && linhasPolo.variasLinhas
+  // "Não lida" é por CONVERSA: mensagem nova no número da Muniz não acende a conversa da SDR.
+  const interacoesPorConversa = useMemo(() => {
+    if (!porLinha) return crm.interactions
+    return crm.interactions.map((i) => {
+      const linha = linhaDaMensagem(i, linhasPolo.ids, linhasPolo.padraoId)
+      const chave = linha ? chaveDaConversa(i.leadId, linha, linhasPolo.padraoId) : i.leadId
+      return chave === i.leadId ? i : { ...i, leadId: chave }
+    })
+  }, [porLinha, crm.interactions, linhasPolo])
+  const { isUnread, markSeen, markUnread } = useUnreadConversations(interacoesPorConversa)
   // Ids das linhas de WhatsApp do tipo `restrictToBotKind` (ex.: vendas/Tricopill).
   // null = ainda carregando; Set vazio = nenhuma linha desse tipo configurada.
   const [restrictInstanceIds, setRestrictInstanceIds] = useState<Set<string> | null>(null)
   // Ids das linhas do POLO ATIVO. null = ainda carregando.
   const [tenantInstanceIds, setTenantInstanceIds] = useState<Set<string> | null>(null)
   const [aiConversationBase, setAiConversationBase] = useState<AiConversationGate | null>(null)
-  // Linha particular de outra pessoa (o WhatsApp da Aline Muniz): a conversa não entra na
-  // lista de quem não é a dona nem admin.
-  const linhasOcultas = useLinhasParticularesOcultas()
-  // Linhas ATIVAS do polo, na ordem de `sort_order` (a primeira é a padrão de saída).
-  const [linhasDoPolo, setLinhasDoPolo] = useState<Array<{ id: string; label: string }>>([])
   // Aba de número escolhida. null = ninguém escolheu ainda (abre na primeira linha).
   const [linhaEscolhida, setLinhaEscolhida] = useState<string | null>(() => lerLinhaEscolhida())
+  // Número da conversa clicada, amarrado ao lead (o mesmo lead pode estar em dois números).
+  const [linhaSelecionada, setLinhaSelecionada] = useState<{ leadId: string; linha: string | null } | null>(null)
 
   const ownerSelectLabel = useMemo(
     () =>
@@ -154,12 +168,6 @@ export function ChatWorkspacePage({
       .then((rows) => {
         if (!alive) return
         setTenantInstanceIds(new Set(rows.filter((r) => r.tenantId === tenant.id).map((r) => r.id)))
-        setLinhasDoPolo(
-          rows
-            .filter((r) => r.tenantId === tenant.id && r.active)
-            .sort((a, b) => a.sortOrder - b.sortOrder)
-            .map((r) => ({ id: r.id, label: r.label })),
-        )
         setRestrictInstanceIds(
           restrictToBotKind
             ? new Set(rows.filter((r) => r.botKind === restrictToBotKind).map((r) => r.id))
@@ -196,57 +204,121 @@ export function ChatWorkspacePage({
 
   /**
    * SEPARADO POR NÚMERO (16/set/2026). Com o WhatsApp da Aline Muniz ao lado da SDR, quem vê os
-   * dois (admin, e a própria Muniz) pediu para ver "os dois, mas separados": uma aba por linha.
+   * dois (admin, e a própria Muniz) pediu "os dois, mas separados" e depois "tá misturando
+   * mensagem, não pode". A conversa é o par (lead, número): cada mensagem de WhatsApp diz por
+   * onde passou (`interactions.whatsapp_instance_id`), e a mesma pessoa aparece uma vez em cada
+   * número por onde falou. Uma aba por número, mais "Todos".
    *
-   * A conversa pertence à linha em que o lead está amarrado. Lead sem linha, ou amarrado em
-   * linha desligada ou de outro polo, sai pela linha PADRÃO do polo (a primeira ativa por
-   * `sort_order`, mesma regra do `resolveOutboundProviderForLead`), então fica na aba dela.
+   * Mensagem sem número gravado (todo o histórico de antes) e contato sem mensagem em memória
+   * ficam no número "de casa": onde o lead está amarrado, ou o padrão do polo (primeira linha
+   * ativa por `sort_order`, a mesma regra do `resolveOutboundProviderForLead`).
    */
-  const linhasVisiveis = useMemo(
-    () => linhasDoPolo.filter((l) => !linhasOcultas.has(l.id)),
-    [linhasDoPolo, linhasOcultas],
-  )
-  const separarPorLinha = !restrictToBotKind && linhasVisiveis.length >= 2
-  const linhaDaConversa = useCallback(
-    (lead: { whatsappInstanceId?: string | null }): string | null => {
-      const id = lead.whatsappInstanceId
-      if (id && linhasDoPolo.some((l) => l.id === id)) return id
-      return linhasDoPolo[0]?.id ?? null
-    },
-    [linhasDoPolo],
-  )
+  const separarPorLinha = porLinha && linhasPolo.visiveis.length >= 2
   const filtroLinha = useMemo((): string => {
     if (!separarPorLinha) return 'all'
     if (linhaEscolhida === 'all') return 'all'
-    if (linhaEscolhida && linhasVisiveis.some((l) => l.id === linhaEscolhida)) return linhaEscolhida
-    return linhasVisiveis[0]!.id
-  }, [separarPorLinha, linhaEscolhida, linhasVisiveis])
+    if (linhaEscolhida && linhasPolo.visiveis.some((l) => l.id === linhaEscolhida)) return linhaEscolhida
+    return linhasPolo.visiveis[0]!.id
+  }, [separarPorLinha, linhaEscolhida, linhasPolo])
   const escolherLinha = useCallback((id: string) => {
     setLinhaEscolhida(id)
     gravarLinhaEscolhida(id)
   }, [])
   const nomeCurtoPorLinha = useMemo(
-    () => new Map(linhasDoPolo.map((l) => [l.id, nomeCurtoDaLinha(l.label)])),
-    [linhasDoPolo],
+    () => new Map(linhasPolo.linhas.map((l) => [l.id, l.nomeCurto])),
+    [linhasPolo],
+  )
+  const linhaDeCasa = useCallback(
+    (lead: { whatsappInstanceId?: string | null }): string | null => {
+      const id = lead.whatsappInstanceId
+      return id && linhasPolo.ids.has(id) ? id : linhasPolo.padraoId
+    },
+    [linhasPolo],
   )
 
-  const conversations = useMemo(() => {
-    const text = search.trim().toLowerCase()
-    const filtered = crm.leads.filter((lead) => {
+  // Última mensagem, prévia e espera de CADA conversa (lead + número), num passe só.
+  const resumoPorConversa = useMemo(() => {
+    const resumo = new Map<string, { ultima: number; ultimaIso: string; previa: string; entrada: number; saida: number }>()
+    const linhasPorLead = new Map<string, Set<string>>()
+    if (!porLinha) return { resumo, linhasPorLead }
+    for (const i of crm.interactions) {
+      if (!ehMensagemDeConversa(i)) continue
+      const linha = linhaDaMensagem(i, linhasPolo.ids, linhasPolo.padraoId)
+      if (!linha) continue
+      const t = new Date(i.happenedAt).getTime()
+      if (Number.isNaN(t)) continue
+      const chave = chaveDaConversa(i.leadId, linha, linhasPolo.padraoId)
+      let r = resumo.get(chave)
+      if (!r) {
+        r = { ultima: 0, ultimaIso: '', previa: '', entrada: 0, saida: 0 }
+        resumo.set(chave, r)
+      }
+      if (t > r.ultima) {
+        r.ultima = t
+        r.ultimaIso = i.happenedAt
+        r.previa = i.content
+      }
+      if (ehRecebidaDoPaciente(i)) r.entrada = Math.max(r.entrada, t)
+      else if (i.direction === 'out') r.saida = Math.max(r.saida, t)
+      let set = linhasPorLead.get(i.leadId)
+      if (!set) {
+        set = new Set()
+        linhasPorLead.set(i.leadId, set)
+      }
+      set.add(linha)
+    }
+    return { resumo, linhasPorLead }
+  }, [porLinha, crm.interactions, linhasPolo])
+
+  const esperaDaConversa = useCallback(
+    (c: Conversa): number | null => {
+      if (porLinha) {
+        const r = resumoPorConversa.resumo.get(c.chave)
+        if (r) return r.entrada > r.saida ? r.entrada : null
+      }
+      return waitingSinceByLead.get(c.lead.id) ?? null
+    },
+    [porLinha, resumoPorConversa, waitingSinceByLead],
+  )
+
+  // Todas as conversas do escopo (polo, linha do bot, responsável), antes da busca, da aba e do
+  // "só não lidas". Os contadores das abas saem daqui.
+  const todasAsConversas = useMemo((): Conversa[] => {
+    const lista: Conversa[] = []
+    for (const lead of crm.leads) {
       // Escopa ao workspace ATIVO (Clínica × Tricopill). Sem isso, o RLS traz os
       // leads dos 2 polos p/ quem é multi-polo e a Dandara via clínica + Tricopill
       // misturados mesmo com o polo trocado no switcher.
-      if (!belongsToWorkspace(lead)) return false
-      if (lead.whatsappInstanceId && linhasOcultas.has(lead.whatsappInstanceId)) return false
-      if (filtroLinha !== 'all' && linhaDaConversa(lead) !== filtroLinha) return false
+      if (!belongsToWorkspace(lead)) continue
       if (restrictToBotKind) {
-        if (!restrictInstanceIds) return false
-        if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) return false
+        if (!restrictInstanceIds) continue
+        if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) continue
       }
-      if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) return false
-      if (unreadOnly && !isUnread(lead.id)) return false
+      if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) continue
+      if (!porLinha) {
+        // Um número só: uma conversa por lead, como sempre. Particular de outra pessoa fica fora.
+        if (lead.whatsappInstanceId && linhasPolo.ocultas.has(lead.whatsappInstanceId)) continue
+        lista.push({ lead, linha: null, chave: lead.id })
+        continue
+      }
+      const linhas = new Set(resumoPorConversa.linhasPorLead.get(lead.id) ?? [])
+      const casa = linhaDeCasa(lead)
+      if (casa) linhas.add(casa)
+      for (const linha of linhasPolo.linhas) {
+        if (!linhas.has(linha.id) || linhasPolo.ocultas.has(linha.id)) continue
+        lista.push({ lead, linha: linha.id, chave: chaveDaConversa(lead.id, linha.id, linhasPolo.padraoId) })
+      }
+    }
+    return lista
+  }, [crm.leads, belongsToWorkspace, restrictToBotKind, restrictInstanceIds, ownerFilter, porLinha, linhasPolo, resumoPorConversa, linhaDeCasa])
+
+  const conversations = useMemo(() => {
+    const text = search.trim().toLowerCase()
+    const filtered = todasAsConversas.filter((c) => {
+      if (filtroLinha !== 'all' && c.linha !== filtroLinha) return false
+      if (unreadOnly && !isUnread(c.chave)) return false
       if (!text) return true
-      return [lead.patientName, lead.phone, lead.summary].join(' ').toLowerCase().includes(text)
+      return [c.lead.patientName, c.lead.phone, c.lead.summary].join(' ').toLowerCase().includes(text)
     })
 
     // Última mensagem por lead, calculada UMA vez.
@@ -268,15 +340,24 @@ export function ChatWorkspacePage({
         ultimaMsgPorLead.set(i.leadId, new Date(i.happenedAt).getTime())
       }
     }
-    const recencia = (lead: (typeof filtered)[number]): number =>
-      ultimaMsgPorLead.get(lead.id) ?? new Date(lead.createdAt).getTime()
+    // Por número, vale a última mensagem DAQUELE número. Sem nenhuma em memória, a conversa de
+    // casa herda a do lead (Instagram, histórico); a de outro número, a data do cadastro.
+    const recencia = (c: Conversa): number => {
+      const doNumero = porLinha ? resumoPorConversa.resumo.get(c.chave)?.ultima : undefined
+      if (doNumero) return doNumero
+      if (!porLinha || c.linha === linhaDeCasa(c.lead)) {
+        const doLead = ultimaMsgPorLead.get(c.lead.id)
+        if (doLead) return doLead
+      }
+      return new Date(c.lead.createdAt).getTime()
+    }
 
     if (sortMode === 'long_wait') {
       // Leads aguardando resposta primeiro, mais antigos no topo.
       // Lead sem espera pendente cai pro fim (ordenado por interação recente).
       return filtered.sort((a, b) => {
-        const aw = waitingSinceByLead.get(a.id) ?? null
-        const bw = waitingSinceByLead.get(b.id) ?? null
+        const aw = esperaDaConversa(a)
+        const bw = esperaDaConversa(b)
         if (aw !== null && bw !== null) return aw - bw
         if (aw !== null) return -1
         if (bw !== null) return 1
@@ -285,7 +366,7 @@ export function ChatWorkspacePage({
     }
 
     return filtered.sort((a, b) => recencia(b) - recencia(a))
-  }, [crm.leads, crm.interactions, ownerFilter, search, sortMode, waitingSinceByLead, restrictToBotKind, restrictInstanceIds, unreadOnly, isUnread, belongsToWorkspace, linhasOcultas, filtroLinha, linhaDaConversa])
+  }, [todasAsConversas, crm.interactions, search, sortMode, unreadOnly, isUnread, filtroLinha, porLinha, resumoPorConversa, linhaDeCasa, esperaDaConversa])
 
   // Contador do selo "Não lidas" com o MESMO escopo da lista (workspace/tenant + linha
   // de bot + responsável) — só sem o filtro de texto e o próprio toggle. O `unreadCount`
@@ -296,25 +377,37 @@ export function ChatWorkspacePage({
   // Na mesma passada, as não lidas de CADA número, para o selo das abas.
   const { scopedUnreadCount, naoLidasPorLinha } = useMemo(() => {
     let n = 0
-    const porLinha = new Map<string, number>()
-    for (const lead of crm.leads) {
-      if (!belongsToWorkspace(lead)) continue
-      if (lead.whatsappInstanceId && linhasOcultas.has(lead.whatsappInstanceId)) continue
-      if (restrictToBotKind) {
-        if (!restrictInstanceIds) continue
-        if (!lead.whatsappInstanceId || !restrictInstanceIds.has(lead.whatsappInstanceId)) continue
-      }
-      if (ownerFilter !== 'all' && lead.ownerId !== ownerFilter) continue
-      if (!isUnread(lead.id)) continue
-      const linha = linhaDaConversa(lead)
-      if (linha) porLinha.set(linha, (porLinha.get(linha) ?? 0) + 1)
-      if (filtroLinha !== 'all' && linha !== filtroLinha) continue
+    const porNumero = new Map<string, number>()
+    for (const c of todasAsConversas) {
+      if (!isUnread(c.chave)) continue
+      if (c.linha) porNumero.set(c.linha, (porNumero.get(c.linha) ?? 0) + 1)
+      if (filtroLinha !== 'all' && c.linha !== filtroLinha) continue
       n += 1
     }
-    return { scopedUnreadCount: n, naoLidasPorLinha: porLinha }
-  }, [crm.leads, belongsToWorkspace, restrictToBotKind, restrictInstanceIds, ownerFilter, isUnread, linhasOcultas, filtroLinha, linhaDaConversa])
+    return { scopedUnreadCount: n, naoLidasPorLinha: porNumero }
+  }, [todasAsConversas, isUnread, filtroLinha])
 
-  const activeLead = crm.selectedLead ?? conversations[0] ?? null
+  // Conversa aberta. O lead selecionado pode estar em mais de um número: vale o que foi clicado,
+  // senão o de casa, senão o primeiro que este usuário vê.
+  const activeConversa = useMemo((): Conversa | null => {
+    const lead = crm.selectedLead
+    if (!lead) return conversations[0] ?? null
+    const doLead = todasAsConversas.filter((c) => c.lead.id === lead.id)
+    const clicada = linhaSelecionada?.leadId === lead.id ? linhaSelecionada.linha : undefined
+    const achada =
+      (clicada !== undefined ? doLead.find((c) => c.linha === clicada) : undefined) ??
+      doLead.find((c) => c.linha === linhaDeCasa(lead)) ??
+      doLead[0]
+    if (achada) return achada
+    if (!porLinha) return { lead, linha: null, chave: lead.id }
+    // Fora da lista (outro responsável no filtro, por exemplo): abre no número de casa, ou no
+    // primeiro que este usuário vê se o de casa for particular de outra pessoa.
+    const casa = linhaDeCasa(lead)
+    const linha = casa && !linhasPolo.ocultas.has(casa) ? casa : linhasPolo.visiveis[0]?.id ?? null
+    return { lead, linha, chave: chaveDaConversa(lead.id, linha, linhasPolo.padraoId) }
+  }, [crm.selectedLead, conversations, todasAsConversas, linhaSelecionada, linhaDeCasa, porLinha, linhasPolo])
+
+  const activeLead = activeConversa?.lead ?? null
   // No celular o chat é master-detail: mostra a LISTA ou a CONVERSA, nunca as duas empilhadas
   // (antes a lista comia 38dvh fixos no topo e a conversa ficava espremida embaixo). A partir
   // de md volta a ser lado-a-lado. `hasSelection` = atendente abriu uma conversa de propósito.
@@ -395,8 +488,8 @@ export function ChatWorkspacePage({
   // propósito: a 1ª conversa da lista aparece por fallback mas NÃO deve "auto-ler" sozinha,
   // senão o "marcar como não lida" seria revertido na hora.
   useEffect(() => {
-    if (crm.selectedLeadId) markSeen(crm.selectedLeadId)
-  }, [crm.selectedLeadId, activeHistory, markSeen])
+    if (crm.selectedLeadId && activeConversa) markSeen(activeConversa.chave)
+  }, [crm.selectedLeadId, activeConversa, activeHistory, markSeen])
 
   useEffect(() => {
     if (dataMode !== 'supabase' || !isSupabaseConfigured || !supabase) return
@@ -450,7 +543,7 @@ export function ChatWorkspacePage({
                   aria-label="Número de WhatsApp"
                   className="flex gap-1 rounded-lg bg-muted/40 p-0.5"
                 >
-                  {[...linhasVisiveis.map((l) => ({ id: l.id, nome: nomeCurtoDaLinha(l.label) })), { id: 'all', nome: 'Todos' }].map((aba) => {
+                  {[...linhasPolo.visiveis.map((l) => ({ id: l.id, nome: l.nomeCurto })), { id: 'all', nome: 'Todos' }].map((aba) => {
                     const ativa = filtroLinha === aba.id
                     const naoLidas =
                       aba.id === 'all'
@@ -552,19 +645,25 @@ export function ChatWorkspacePage({
               />
             ) : (
               <div className="divide-y divide-border/5">
-                {conversations.map((lead) => {
-                  const waitingSince = waitingSinceByLead.get(lead.id) ?? null
+                {conversations.map((conversa) => {
+                  const lead = conversa.lead
+                  const resumo = porLinha ? resumoPorConversa.resumo.get(conversa.chave) : undefined
+                  const waitingSince = esperaDaConversa(conversa)
                   const waitingMinutes = waitingSince ? Math.floor((Date.now() - waitingSince) / 60000) : 0
                   // Sem isto, conversas paradas há semanas viravam "2486H 39M".
                   const waitingLabel = formatDurationFromMinutes(waitingMinutes)
-                  const unread = isUnread(lead.id)
-                  const isActive = crm.selectedLeadId === lead.id
+                  const unread = isUnread(conversa.chave)
+                  const isActive = crm.selectedLeadId === lead.id && activeConversa?.chave === conversa.chave
                   return (
                   <Button
-                    key={lead.id}
+                    key={conversa.chave}
                     type="button"
                     variant="ghost"
-                    onClick={() => { markSeen(lead.id); crm.setSelectedLeadId(lead.id) }}
+                    onClick={() => {
+                      markSeen(conversa.chave)
+                      setLinhaSelecionada({ leadId: lead.id, linha: conversa.linha })
+                      crm.setSelectedLeadId(lead.id)
+                    }}
                     className={cn(
                       'flex h-auto w-full items-start justify-start gap-3 whitespace-normal rounded-none border-0 p-3 text-left font-normal transition-all duration-200 hover:bg-muted/30 hover:text-foreground sm:px-4',
                       isActive
@@ -596,14 +695,14 @@ export function ChatWorkspacePage({
                         "shrink-0 text-[10px] tabular-nums",
                         unread ? "font-semibold text-primary" : "text-muted-foreground/60"
                       )}>
-                        {formatConversationStamp(lead.last_interaction_at ?? lead.createdAt)}
+                        {formatConversationStamp(resumo?.ultimaIso || (lead.last_interaction_at ?? lead.createdAt))}
                       </span>
                     </div>
                     <p className={cn(
                       "line-clamp-1 w-full text-xs leading-normal",
                       unread ? "font-medium text-foreground/80" : "text-muted-foreground/70"
                     )}>
-                      {lead.summary || 'Sem resumo disponível'}
+                      {resumo?.previa || lead.summary || 'Sem resumo disponível'}
                     </p>
                     <div className="mt-1 flex items-center gap-2">
                       <span className={cn(
@@ -620,12 +719,12 @@ export function ChatWorkspacePage({
                         <span className={cn('h-1 w-1 rounded-full', getSourceStyle(lead.source).dot)} aria-hidden />
                         {getSourceStyle(lead.source).label}
                       </span>
-                      {separarPorLinha && filtroLinha === 'all' ? (
+                      {separarPorLinha && filtroLinha === 'all' && conversa.linha ? (
                         <span
                           className="truncate rounded-md bg-muted px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground"
                           title="Número de WhatsApp desta conversa"
                         >
-                          {nomeCurtoPorLinha.get(linhaDaConversa(lead) ?? '') ?? ''}
+                          {nomeCurtoPorLinha.get(conversa.linha) ?? ''}
                         </span>
                       ) : null}
                       {waitingSince ? (
@@ -727,7 +826,7 @@ export function ChatWorkspacePage({
                       size="sm"
                       className="rounded-xl gap-1.5 text-xs"
                       onClick={() => {
-                        markUnread(activeLead.id)
+                        markUnread(activeConversa?.chave ?? activeLead.id)
                         crm.setSelectedLeadId('')
                         toast.success('Conversa marcada como não lida')
                       }}
@@ -762,6 +861,7 @@ export function ChatWorkspacePage({
                 <LeadChatThread
                   leadId={activeLead.id}
                   history={activeHistory}
+                  linha={porLinha ? activeConversa?.linha ?? null : undefined}
                   canCompose={crm.currentPermission.canRouteLeads && !waComposeBlocked}
                   readOnlyInstagramHint={waComposeBlocked}
                   aiConversationBase={crm.dataMode === 'supabase' ? aiGateForThread : null}

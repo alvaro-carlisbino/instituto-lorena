@@ -706,6 +706,8 @@ export const useCrmState = () => {
       forwardedFromId?: string
       /** Localização, contato, enquete, Pix ou link com prévia. */
       special?: SendWhatsappPayload['special']
+      /** Número da conversa aberta (polo com mais de um WhatsApp). */
+      whatsappInstanceId?: string
     } = {},
   ): Promise<{ ok: boolean; restore?: boolean }> => {
     const temMidia = (opts.media?.length ?? 0) > 0 || attachments.length > 0 || Boolean(opts.special)
@@ -734,6 +736,7 @@ export const useCrmState = () => {
         replyToMessageId: opts.replyToMessageId,
         forwardedFromId: opts.forwardedFromId,
         special: opts.special,
+        whatsappInstanceId: opts.whatsappInstanceId,
       })
 
       // Opt-out e recusa de contato novo da guarda anti-ban: quem está na tela pode assumir o risco.
@@ -749,6 +752,7 @@ export const useCrmState = () => {
           replyToMessageId: opts.replyToMessageId,
           forwardedFromId: opts.forwardedFromId,
           special: opts.special,
+          whatsappInstanceId: opts.whatsappInstanceId,
           manualOverride: true,
         })
       }

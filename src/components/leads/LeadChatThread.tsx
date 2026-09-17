@@ -68,6 +68,8 @@ import { ForwardDialog, type ForwardTarget } from '@/components/leads/chat/Forwa
 import { SpecialMessageDialog, type SpecialKind } from '@/components/leads/chat/SpecialMessageDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
+import { useLinhasDoPolo } from '@/hooks/useLinhasParticularesOcultas'
+import { linhaDaMensagem } from '@/lib/linhaWhatsapp'
 import { PAGBANK_KIT_LABELS, type PagbankKit } from '@/services/crmPagbank'
 import { generateRedeLink } from '@/services/crmRede'
 import {
@@ -111,6 +113,12 @@ type Props = {
   readOnlyInstagramHint?: boolean
   /** Modo + IA activa + turno da equipe (Supabase). Sem isto o indicador de “IA a responder” não aparece. */
   aiConversationBase?: AiConversationGate | null
+  /**
+   * Número de WhatsApp da conversa, quando quem abre já escolheu (a lista do /chat é por par
+   * lead + número). Sem isto e com o contato falando por mais de um número, o fio mostra um
+   * seletor e abre no número em que a pessoa escreveu por último.
+   */
+  linha?: string | null
 }
 
 // --- Mídia inline (áudio/vídeo) ---------------------------------------------
@@ -279,16 +287,58 @@ function InlineVideo({ item }: { item: InlineMediaItem }) {
 
 export function LeadChatThread({
   leadId,
-  history: historyRecebido,
+  history: historyTodas,
   whatsappOnly,
   canCompose,
   readOnlyInstagramHint,
   aiConversationBase,
+  linha: linhaPedida,
 }: Props) {
   const crm = useCrm()
   const navigate = useNavigate()
   const { tenant } = useTenant()
   const isSalesPolo = tenant.poloType === 'sales'
+
+  // UM NÚMERO POR FIO (16/set/2026). Com o WhatsApp da Aline Muniz ao lado da SDR, o mesmo
+  // contato conversa pelos dois e o fio juntava tudo: o "teste" que saiu pela SDR logo acima do
+  // que chegou no número da Muniz. Agora o fio mostra só as mensagens de UM número, e a resposta
+  // sai por ele. Nota de sistema e Instagram são do contato e aparecem em qualquer número.
+  // Mensagem de número particular de outra pessoa nunca aparece (ver useLinhasParticularesOcultas).
+  const linhasDoPolo = useLinhasDoPolo()
+  const pinDoLead = useMemo(() => {
+    const id = crm.leads.find((l) => l.id === leadId)?.whatsappInstanceId
+    return id && linhasDoPolo.ids.has(id) ? id : linhasDoPolo.padraoId
+  }, [crm.leads, leadId, linhasDoPolo])
+  const linhasNoFio = useMemo(() => {
+    if (!linhasDoPolo.variasLinhas) return []
+    const presentes = new Set<string>()
+    if (pinDoLead) presentes.add(pinDoLead)
+    for (const m of historyTodas) {
+      const l = linhaDaMensagem(m, linhasDoPolo.ids, linhasDoPolo.padraoId)
+      if (l) presentes.add(l)
+    }
+    return linhasDoPolo.visiveis.filter((l) => presentes.has(l.id))
+  }, [historyTodas, linhasDoPolo, pinDoLead])
+  // Escolha feita no seletor do fio, amarrada ao lead: trocar de contato volta ao padrão.
+  const [escolhaNoFio, setEscolhaNoFio] = useState<{ leadId: string; linha: string } | null>(null)
+  const linhaDoFio = useMemo((): string | null => {
+    if (!linhasDoPolo.variasLinhas) return null
+    if (linhaPedida) return linhaPedida
+    const escolhida = escolhaNoFio?.leadId === leadId ? escolhaNoFio.linha : null
+    if (escolhida && linhasNoFio.some((l) => l.id === escolhida)) return escolhida
+    if (pinDoLead && !linhasDoPolo.ocultas.has(pinDoLead)) return pinDoLead
+    return linhasNoFio[0]?.id ?? linhasDoPolo.visiveis[0]?.id ?? null
+  }, [linhasDoPolo, linhaPedida, escolhaNoFio, leadId, linhasNoFio, pinDoLead])
+  const historyRecebido = useMemo(() => {
+    if (!linhasDoPolo.variasLinhas) return historyTodas
+    return historyTodas.filter((m) => {
+      const l = linhaDaMensagem(m, linhasDoPolo.ids, linhasDoPolo.padraoId)
+      if (l === null) return true
+      if (linhasDoPolo.ocultas.has(l)) return false
+      return !linhaDoFio || l === linhaDoFio
+    })
+  }, [historyTodas, linhasDoPolo, linhaDoFio])
+  const mostrarSeletorDeLinha = !linhaPedida && linhasNoFio.length >= 2
 
   // Mídia inline (W-API) que chegou sem o base64. O refresh global do chat deixou de
   // trazê-lo, então a foto/áudio/PDF que chega com a conversa aberta busca o conteúdo
@@ -360,6 +410,7 @@ export function LeadChatThread({
       const res = await crm.sendMessage(text, atts, {
         media: midia.length ? midia : undefined,
         replyToMessageId: citada,
+        whatsappInstanceId: linhaDoFio ?? undefined,
       })
       if (res?.restore) {
         // O operador cancelou o envio a um opt-out: devolve o rascunho INTEIRO, inclusive
@@ -808,7 +859,7 @@ export function LeadChatThread({
     if (sending) return
     setSending(true)
     try {
-      const res = await crm.sendMessage('', [], { special: mensagem })
+      const res = await crm.sendMessage('', [], { special: mensagem, whatsappInstanceId: linhaDoFio ?? undefined })
       if (res?.ok) {
         setSpecialKind(null)
         toast.success('Enviado.')
@@ -1223,6 +1274,27 @@ export function LeadChatThread({
           <Badge variant="secondary" className="max-w-full shrink truncate rounded-lg px-2 py-0.5 text-[10px] font-normal sm:text-xs">
             IG → WhatsApp vinculado
           </Badge>
+        ) : null}
+        {mostrarSeletorDeLinha ? (
+          <div className="inline-flex shrink-0 items-center rounded-lg bg-muted/60 p-0.5" role="group" aria-label="Número de WhatsApp">
+            {linhasNoFio.map((l) => (
+              <Button
+                key={l.id}
+                type="button"
+                size="sm"
+                variant="ghost"
+                aria-pressed={linhaDoFio === l.id}
+                title={`Conversa pelo número ${l.label}`}
+                className={cn(
+                  'h-7 rounded-md px-2.5 text-xs font-medium',
+                  linhaDoFio === l.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground',
+                )}
+                onClick={() => setEscolhaNoFio({ leadId, linha: l.id })}
+              >
+                {l.nomeCurto}
+              </Button>
+            ))}
+          </div>
         ) : null}
         {hasMultipleChannels ? (
           <div className="inline-flex shrink-0 items-center rounded-lg bg-muted/60 p-0.5" role="group" aria-label="Filtrar por canal">

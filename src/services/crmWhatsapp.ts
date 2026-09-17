@@ -21,6 +21,12 @@ export type SendWhatsappPayload = {
   leadId: string
   to: string
   text: string
+  /**
+   * Número de WhatsApp da CONVERSA aberta. Com mais de um número no polo, a mesma pessoa conversa
+   * pelos dois e a resposta tem de sair pelo número em que a atendente está a olhar, não pelo
+   * último em que a pessoa escreveu. Ausente = a edge resolve pela linha do lead, como antes.
+   */
+  whatsappInstanceId?: string
   /** Base64 WebP (cru ou data URL). Só WhatsApp; Instagram/ManyChat devolve erro na Edge. */
   stickerWebpBase64?: string
   attachments?: Array<{

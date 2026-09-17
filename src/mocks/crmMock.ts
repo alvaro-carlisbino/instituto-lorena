@@ -103,6 +103,11 @@ export type Interaction = {
   content: string
   happenedAt: string
   externalMessageId?: string
+  /**
+   * Linha de WhatsApp por onde a mensagem passou. Ausente = linha padrão do polo (histórico de
+   * quando havia um número só). Ver `src/lib/linhaWhatsapp.ts`.
+   */
+  whatsappInstanceId?: string
   media?: Array<{
     id: string
     type: 'audio' | 'image' | 'video' | 'document' | 'other'

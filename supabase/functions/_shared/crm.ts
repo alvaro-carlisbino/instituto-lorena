@@ -768,6 +768,12 @@ export async function insertInteraction(
     replyToExternalId?: string
     /** Encaminhada a partir desta interaction (a W-API não tem rota de encaminhar). */
     forwardedFromId?: string
+    /**
+     * Linha de WhatsApp por onde a mensagem passou. Com mais de um número no polo a conversa é
+     * separada por linha (migration 20260917000000). Omitido, o trigger herda a linha em que o
+     * lead está amarrado agora, o que só erra quando quem envia escolheu outro número.
+     */
+    whatsappInstanceId?: string | null
   },
 ): Promise<string> {
   const row: Record<string, unknown> = {
@@ -783,6 +789,7 @@ export async function insertInteraction(
   if (input.tenantId) row.tenant_id = input.tenantId
   if (input.replyToExternalId) row.reply_to_external_id = input.replyToExternalId
   if (input.forwardedFromId) row.forwarded_from_id = input.forwardedFromId
+  if (input.whatsappInstanceId) row.whatsapp_instance_id = input.whatsappInstanceId
   const { data, error } = await admin.from('interactions').insert(row).select('id').single()
   if (error) throw new Error(error.message)
   if (!data?.id) throw new Error('insert_interaction_no_id')

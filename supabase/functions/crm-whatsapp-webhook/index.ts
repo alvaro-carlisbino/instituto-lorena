@@ -186,6 +186,7 @@ Deno.serve(async (req) => {
           leadId: lead.leadId,
           patientName: outboundPatientLabel,
           channel: 'whatsapp',
+          whatsappInstanceId: wInstanceId ?? undefined,
           direction: 'out',
           // Equipe falando de FORA do CRM. Mesmo autor do ramo da W-API, para as duas
           // linhas contarem igual em analytics.
@@ -292,6 +293,7 @@ Deno.serve(async (req) => {
       leadId: lead.leadId,
       patientName: normalized.fromName,
       channel: 'whatsapp',
+      whatsappInstanceId: wInstanceId ?? undefined,
       direction: 'in',
       author: normalized.fromName,
       content: normalized.text,
@@ -397,6 +399,7 @@ Deno.serve(async (req) => {
             leadId: lead.leadId,
             patientName: normalized.fromName,
             channel: 'whatsapp',
+            whatsappInstanceId: wInstanceId ?? undefined,
             direction: 'out',
             author: 'NPS (Sofia)',
             content: npsResult.thankYouText,

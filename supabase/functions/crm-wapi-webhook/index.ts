@@ -330,6 +330,7 @@ Deno.serve(async (req) => {
           leadId: lead.leadId,
           patientName: normalized.fromName,
           channel: 'whatsapp',
+          whatsappInstanceId: wInstanceId,
           direction: 'out',
           // Autor fixo e reconhecível: é a equipe falando de FORA do CRM (celular ou
           // WhatsApp Web). Sem isso o autor viria com o nome da paciente e a mensagem
@@ -390,6 +391,7 @@ Deno.serve(async (req) => {
       leadId: lead.leadId,
       patientName: normalized.fromName,
       channel: 'whatsapp',
+      whatsappInstanceId: wInstanceId,
       direction: 'in',
       author: normalized.fromName,
       content: normalized.text,
@@ -531,6 +533,7 @@ Deno.serve(async (req) => {
           leadId: lead.leadId,
           patientName: normalized.fromName,
           channel: 'whatsapp',
+          whatsappInstanceId: wInstanceId,
           direction: 'out',
           author: 'NPS (IA)',
           content: npsResult.thankYouText,
