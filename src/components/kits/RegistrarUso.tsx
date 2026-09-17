@@ -20,6 +20,7 @@ import {
   podeVoltar,
   registroDeUso,
   usadoNaLinha,
+  voltouNaLinha,
 } from '@/lib/kitMontagem'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
@@ -92,8 +93,8 @@ export function RegistrarUso({
 
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
   const fechando = kit.status === 'montado'
-  // No kit já usado só aparece o que ainda está fora: o que já voltou inteiro não tem o que marcar.
-  const linhas = useMemo(() => kit.items.filter((l) => (fechando ? true : podeVoltar(l) > 0)), [kit, fechando])
+  // Todas as linhas, também no kit já usado: a que voltou inteira pode ter sido marcada por engano.
+  const linhas = kit.items
   const itensDoKit = useMemo(() => {
     const ids = new Set(kit.items.map((l) => l.itemId))
     return items.filter((i) => ids.has(i.id))
@@ -130,7 +131,7 @@ export function RegistrarUso({
 
   const resumoDaLinha = (l: Linha) => {
     const marca = marcasRef.current[l.id] ?? 0
-    return `${nomeDaLinha(l)}: usado ${formatQtd(usadoNaLinha(l, marca))}, voltou ${formatQtd(Math.max(0, marca))}`
+    return `${nomeDaLinha(l)}: usado ${formatQtd(usadoNaLinha(l, marca))}, voltou ${formatQtd(voltouNaLinha(l, marca))}`
   }
 
   const aplicarBipe = (item: StockItem) => {
@@ -169,7 +170,7 @@ export function RegistrarUso({
     if (visiveis.length !== 1) return
     const l = visiveis[0]
     const marca = marcasRef.current[l.id] ?? 0
-    const nova = modo === 'usado' ? marcaPorUsado(l, usadoNaLinha(l, marca) + 1) : marcaPorVoltou(l, marca + 1)
+    const nova = modo === 'usado' ? marcaPorUsado(l, usadoNaLinha(l, marca) + 1) : marcaPorVoltou(l, voltouNaLinha(l, marca) + 1)
     if (nova === marca) {
       beep(false)
       setUltima(`${nomeDaLinha(l)}: já voltou tudo que saiu`)
@@ -194,6 +195,7 @@ export function RegistrarUso({
       const r = await registrarUsoKit(kit.id, registro.itens, true)
       const partes = [
         r.unidades > 0 ? `${formatQtd(r.unidades)} ${r.unidades === 1 ? 'unidade voltou' : 'unidades voltaram'} ao estoque` : null,
+        r.desfeito > 0 ? `${formatQtd(r.desfeito)} ${r.desfeito === 1 ? 'devolução desfeita' : 'devoluções desfeitas'}` : null,
         r.aMais > 0 ? `${formatQtd(r.aMais)} a mais ${r.aMais === 1 ? 'saiu' : 'saíram'} do estoque` : null,
       ].filter(Boolean)
       toast.success(
@@ -305,10 +307,11 @@ export function RegistrarUso({
         <ul className="divide-y divide-border">
           {visiveis.map((l) => {
             const item = porId.get(l.itemId)
-            const fora = podeVoltar(l)
             const marca = marcas[l.id] ?? 0
-            const voltou = Math.max(0, marca)
+            const voltou = voltouNaLinha(l, marca)
             const usado = usadoNaLinha(l, marca)
+            const desfaz = marca < 0 ? Math.min(-marca, l.returnedQty) : 0
+            const aMais = marca < 0 ? -marca - desfaz : 0
             const nome = nomeDaLinha(l)
             return (
               <li
@@ -326,25 +329,27 @@ export function RegistrarUso({
                   </p>
                   <p className="text-xs text-muted-foreground tabular-nums">
                     saiu {formatQtd(l.qty)}
-                    {l.returnedQty > 0 ? ` · já voltou ${formatQtd(l.returnedQty)}` : ''}
                     {modo === 'usado' ? (
-                      <span className={cn(voltou > 0 && 'font-medium text-emerald-700 dark:text-emerald-300')}> · volta {formatQtd(voltou)}</span>
+                      <span className={cn(marca !== 0 && 'font-medium text-foreground')}> · voltou {formatQtd(voltou)}</span>
                     ) : (
                       <span className={cn(marca !== 0 && 'font-medium text-foreground')}> · usado {formatQtd(usado)}</span>
                     )}
-                    {marca < 0 ? (
-                      <span className="font-medium text-amber-700 dark:text-amber-300"> · {formatQtd(-marca)} a mais que saiu</span>
+                    {desfaz > 0 ? (
+                      <span className="font-medium text-amber-700 dark:text-amber-300"> · desfaz {formatQtd(desfaz)} da devolução</span>
+                    ) : null}
+                    {aMais > 0 ? (
+                      <span className="font-medium text-amber-700 dark:text-amber-300"> · {formatQtd(aMais)} a mais que saiu</span>
                     ) : null}
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-0.5">
                   <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                    {modo === 'usado' ? 'usado' : fechando ? 'voltou' : 'volta mais'}
+                    {modo === 'usado' ? 'usado' : 'voltou'}
                   </span>
                   {modo === 'usado' ? (
                     <QtyStepper value={usado} label={`uso de ${nome}`} onChange={(n) => marcar(l, marcaPorUsado(l, n))} />
                   ) : (
-                    <QtyStepper value={voltou} max={fora} label={`devolução de ${nome}`} onChange={(n) => marcar(l, marcaPorVoltou(l, n))} />
+                    <QtyStepper value={voltou} max={l.qty} label={`devolução de ${nome}`} onChange={(n) => marcar(l, marcaPorVoltou(l, n))} />
                   )}
                 </div>
               </li>
@@ -356,7 +361,7 @@ export function RegistrarUso({
                 ? `Nenhum item com "${termo}" neste kit.`
                 : soAlterados
                   ? 'Nada marcado ainda.'
-                  : 'Tudo que saiu neste kit já voltou.'}
+                  : 'Este kit não tem itens.'}
             </li>
           ) : null}
         </ul>
@@ -368,6 +373,7 @@ export function RegistrarUso({
             {alterados > 0
               ? [
                   registro.voltam > 0 ? `Voltam ${formatQtd(registro.voltam)} ${registro.voltam === 1 ? 'unidade' : 'unidades'}` : null,
+                  registro.desfeito > 0 ? `desfaz ${formatQtd(registro.desfeito)} de devolução` : null,
                   registro.aMais > 0 ? `saem mais ${formatQtd(registro.aMais)} do estoque` : null,
                 ]
                   .filter(Boolean)

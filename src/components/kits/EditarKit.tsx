@@ -24,6 +24,7 @@ import {
   type StockKit,
   adicionarItemKit,
   alterarLinhaKit,
+  alterarVoltouLinhaKit,
   atualizarKit,
   excluirKit,
   removerLinhaKit,
@@ -67,10 +68,11 @@ export function EditarKit({
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
   const busca = useMemo(() => produtosParaBusca(items), [items])
   const fila = useRef<Promise<unknown>>(Promise.resolve())
-  // Quantidade digitada que ainda espera o dedo parar: linha → { timer, qty }.
-  const esperando = useRef(new Map<string, { timer: number; qty: number }>())
+  // Número digitado que ainda espera o dedo parar: "saiu:<linha>" ou "voltou:<linha>" → gravação.
+  const esperando = useRef(new Map<string, { timer: number; rotulo: string; gravar: () => Promise<unknown> }>())
   const [pendentes, setPendentes] = useState(0)
-  const [qtdLocal, setQtdLocal] = useState<Record<string, number>>({})
+  // Valor na tela antes de o banco confirmar, pela mesma chave de `esperando`.
+  const [local, setLocal] = useState<Record<string, number>>({})
   const [removendo, setRemovendo] = useState<string | null>(null)
   const [excluindo, setExcluindo] = useState(false)
   const [concluindo, setConcluindo] = useState(false)
@@ -91,16 +93,14 @@ export function EditarKit({
     (dados.procedimento.trim() || null) !== (kit.procedureLabel ?? null) ||
     (dados.data || null) !== (kit.scheduledFor ?? null)
 
-  // Saiu da tela (voltar do navegador) com quantidade ainda esperando: grava assim mesmo.
+  // Saiu da tela (voltar do navegador) com número ainda esperando: grava assim mesmo.
   // Antes o timer era só cancelado, e a mudança feita no último meio segundo sumia.
   useEffect(() => {
     const mapa = esperando.current
     return () => {
-      mapa.forEach(({ timer, qty }, linhaId) => {
+      mapa.forEach(({ timer, rotulo, gravar }) => {
         window.clearTimeout(timer)
-        void alterarLinhaKit({ kitItemId: linhaId, qty }).catch((e) =>
-          toast.error(`Quantidade: ${e instanceof Error ? e.message : 'falhou'}`),
-        )
+        void gravar().catch((e) => toast.error(`${rotulo}: ${e instanceof Error ? e.message : 'falhou'}`))
       })
       mapa.clear()
     }
@@ -121,30 +121,37 @@ export function EditarKit({
 
   const editavel = kit.status !== 'cancelado'
 
-  const gravarQtd = (linhaId: string) => {
-    const espera = esperando.current.get(linhaId)
+  const gravar = (chave: string) => {
+    const espera = esperando.current.get(chave)
     if (!espera) return
     window.clearTimeout(espera.timer)
-    esperando.current.delete(linhaId)
-    void enfileirar('Quantidade', () => alterarLinhaKit({ kitItemId: linhaId, qty: espera.qty })).then(() =>
-      setQtdLocal((prev) => {
+    esperando.current.delete(chave)
+    void enfileirar(espera.rotulo, espera.gravar).then(() =>
+      setLocal((prev) => {
         const next = { ...prev }
-        delete next[linhaId]
+        delete next[chave]
         return next
       }),
     )
   }
 
-  const mudarQtd = (linhaId: string, qty: number) => {
-    setQtdLocal((prev) => ({ ...prev, [linhaId]: qty }))
-    const anterior = esperando.current.get(linhaId)
+  const agendar = (chave: string, valor: number, rotulo: string, gravarNoBanco: () => Promise<unknown>) => {
+    setLocal((prev) => ({ ...prev, [chave]: valor }))
+    const anterior = esperando.current.get(chave)
     if (anterior) window.clearTimeout(anterior.timer)
-    esperando.current.set(linhaId, { qty, timer: window.setTimeout(() => gravarQtd(linhaId), ESPERA_QTD_MS) })
+    esperando.current.set(chave, { rotulo, gravar: gravarNoBanco, timer: window.setTimeout(() => gravar(chave), ESPERA_QTD_MS) })
   }
+
+  const mudarQtd = (linhaId: string, qty: number) =>
+    agendar(`saiu:${linhaId}`, qty, 'Quantidade', () => alterarLinhaKit({ kitItemId: linhaId, qty }))
+
+  // Sobra da bandeja, para mais ou para menos: voltar a 0 desfaz devolução marcada por engano.
+  const mudarVoltou = (linha: StockKit['items'][number], voltou: number) =>
+    agendar(`voltou:${linha.id}`, voltou, 'Voltou', () => alterarVoltouLinhaKit(kit.id, linha.id, voltou))
 
   const concluir = async () => {
     setConcluindo(true)
-    for (const linhaId of [...esperando.current.keys()]) gravarQtd(linhaId)
+    for (const chave of [...esperando.current.keys()]) gravar(chave)
     await fila.current.catch(() => undefined)
     onConcluir()
   }
@@ -153,7 +160,7 @@ export function EditarKit({
     const existente = kit.items.find((l) => l.itemId === item.id)
     beep(true)
     if (existente) {
-      const atual = qtdLocal[existente.id] ?? existente.qty
+      const atual = local[`saiu:${existente.id}`] ?? existente.qty
       mudarQtd(existente.id, atual + 1)
       toast.success(`${item.name}: ${formatQtd(atual + 1)} no kit`)
     } else {
@@ -173,7 +180,11 @@ export function EditarKit({
     incluir(item)
   }
 
-  const custo = kit.items.reduce((s, l) => s + Math.round((l.qty - l.returnedQty) * (lastCosts.get(l.itemId) ?? 0)), 0)
+  const custo = kit.items.reduce(
+    (s, l) =>
+      s + Math.round(Math.max(0, (local[`saiu:${l.id}`] ?? l.qty) - (local[`voltou:${l.id}`] ?? l.returnedQty)) * (lastCosts.get(l.itemId) ?? 0)),
+    0,
+  )
   const cobrado = kit.items.reduce((s, l) => s + Math.max(0, l.chargeCents), 0)
   const status = STATUS_KIT[kit.status]
   const nomeDaLinha = (l: StockKit['items'][number]) => l.label || porId.get(l.itemId)?.name
@@ -193,7 +204,7 @@ export function EditarKit({
           <Badge variant="secondary" className={status.className}>
             {status.label}
           </Badge>
-          <span className="text-xs text-muted-foreground">Cada mudança baixa ou devolve no estoque na hora.</span>
+          <span className="text-xs text-muted-foreground">Mude o que saiu, o que voltou ou a cobrança: o estoque acerta na hora.</span>
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <Label>Paciente</Label>
@@ -318,20 +329,23 @@ export function EditarKit({
         <ul className="divide-y divide-border">
           {linhasVisiveis.map((l) => {
             const item = porId.get(l.itemId)
-            const qty = qtdLocal[l.id] ?? l.qty
+            const nome = l.label || item?.name || 'Item'
+            const saiu = local[`saiu:${l.id}`] ?? l.qty
+            const voltou = local[`voltou:${l.id}`] ?? l.returnedQty
+            const usado = Math.max(0, saiu - voltou)
             const escolha = itemEhEscolha(item?.name)
             return (
-              <li key={l.id} className="space-y-2 px-3 py-2.5 sm:px-4">
+              <li key={l.id} className="space-y-2 px-3 py-3 sm:px-4">
                 <div className="flex items-start gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="flex items-center gap-1 text-sm font-medium leading-snug">
-                      {l.label || item?.name || 'Item'}
+                      {nome}
                       {item?.controlled ? <ShieldAlert className="size-3.5 shrink-0 text-amber-500" aria-label="controlado" /> : null}
                     </p>
                     <p className="text-xs text-muted-foreground tabular-nums">
                       {l.isExtra ? 'avulso · ' : ''}
-                      {l.returnedQty > 0 ? `voltaram ${formatQtd(l.returnedQty)} · ` : ''}
-                      custo {formatBRL(Math.round((qty - l.returnedQty) * (lastCosts.get(l.itemId) ?? 0)))}
+                      <span className="font-medium text-foreground">usado {formatQtd(usado)}</span>
+                      {' · '}custo {formatBRL(Math.round(usado * (lastCosts.get(l.itemId) ?? 0)))}
                       {escolha ? <span className="text-amber-700 dark:text-amber-300"> · item de escolha, troque</span> : null}
                     </p>
                   </div>
@@ -341,37 +355,51 @@ export function EditarKit({
                       size="icon"
                       className="size-9 shrink-0 text-muted-foreground"
                       onClick={() => setRemovendo(l.id)}
-                      aria-label={`Tirar ${item?.name ?? 'item'} do kit`}
+                      aria-label={`Tirar ${nome} do kit`}
                     >
                       <Trash2 className="size-4" aria-hidden />
                     </Button>
                   ) : null}
                 </div>
-                <div className="flex items-center justify-between gap-3">
-                  {editavel ? (
-                    <QtyStepper value={qty} min={Math.max(l.returnedQty, 0.01)} label={item?.name ?? 'item'} onChange={(n) => mudarQtd(l.id, n)} />
-                  ) : (
-                    <span className="text-sm tabular-nums">{formatQtd(qty)}</span>
-                  )}
-                  <div className="relative w-32">
-                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">R$</span>
-                    <Input
-                      key={`${l.id}-${l.chargeCents}`}
-                      defaultValue={reais(l.chargeCents)}
-                      placeholder="cobrar"
-                      inputMode="decimal"
-                      disabled={!editavel}
-                      aria-label={`Cobrança de ${item?.name ?? 'item'}`}
-                      className="h-9 pl-8 text-right tabular-nums"
-                      onBlur={(e) => {
-                        const cents = centavos(e.target.value)
-                        if (cents === l.chargeCents) return
-                        void enfileirar('Cobrança', () => alterarLinhaKit({ kitItemId: l.id, qty: l.qty, cobrancaCents: cents }))
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') e.currentTarget.blur()
-                      }}
-                    />
+                <div className="grid grid-cols-2 items-end gap-x-3 gap-y-2 sm:grid-cols-[auto_auto_1fr]">
+                  <div className="space-y-1">
+                    <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Saiu</span>
+                    {editavel ? (
+                      <QtyStepper value={saiu} min={Math.max(voltou, 0.01)} label={`saída de ${nome}`} onChange={(n) => mudarQtd(l.id, n)} />
+                    ) : (
+                      <span className="text-sm tabular-nums">{formatQtd(saiu)}</span>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Voltou</span>
+                    {editavel ? (
+                      <QtyStepper value={voltou} max={saiu} label={`devolução de ${nome}`} onChange={(n) => mudarVoltou(l, n)} />
+                    ) : (
+                      <span className="text-sm tabular-nums">{formatQtd(voltou)}</span>
+                    )}
+                  </div>
+                  <div className="col-span-2 space-y-1 sm:col-span-1 sm:justify-self-end">
+                    <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:text-right">Cobrar do paciente</span>
+                    <div className="relative sm:w-36">
+                      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">R$</span>
+                      <Input
+                        key={`${l.id}-${l.chargeCents}`}
+                        defaultValue={reais(l.chargeCents)}
+                        placeholder="0,00"
+                        inputMode="decimal"
+                        disabled={!editavel}
+                        aria-label={`Cobrança de ${nome}`}
+                        className="h-9 pl-8 text-right tabular-nums"
+                        onBlur={(e) => {
+                          const cents = centavos(e.target.value)
+                          if (cents === l.chargeCents) return
+                          void enfileirar('Cobrança', () => alterarLinhaKit({ kitItemId: l.id, qty: l.qty, cobrancaCents: cents }))
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur()
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
               </li>

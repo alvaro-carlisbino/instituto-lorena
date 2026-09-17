@@ -97,36 +97,45 @@ export function aplicarBipeDevolucao(
 // ------------------------------------------------------------ registrar uso
 
 /**
- * Marca de uma linha no "Registrar uso": quanto VOLTOU. Negativo é o que foi usado além do
- * que saiu (a bandeja levou 6 Ringer e a cirurgia usou 9 → -3). Um número só serve às duas
- * maneiras de marcar, "o que voltou" e "o que foi usado", sem as duas divergirem.
+ * Marca de uma linha no "Registrar uso": quanto VOLTA agora. Negativo é o contrário: desfaz
+ * devolução marcada por engano (lençol "voltou 1" quando usaram os 3) e, passando disso, é uso
+ * além do que saiu (a bandeja levou 6 Ringer e a cirurgia usou 9 → -3). Um número só serve às
+ * duas maneiras de marcar, "o que voltou" e "o que foi usado", sem as duas divergirem.
  */
 export type MarcasDeUso = Record<string, number>
 
-/** Usado na linha com esta marca: o que está fora menos o que voltou (a mais soma). */
+/** Usado na linha com esta marca: o que está fora menos o que volta (a mais soma). */
 export const usadoNaLinha = (l: LinhaKit, marca = 0) => Math.max(0, podeVoltar(l) - marca)
+
+/** Total que terá voltado desta linha com esta marca (o que já voltou mais o de agora). */
+export const voltouNaLinha = (l: LinhaKit, marca = 0) => Math.max(0, l.returnedQty + marca)
 
 /** Marca a partir do que a enfermeira diz que usou. Passar do que saiu vira uso a mais. */
 export const marcaPorUsado = (l: LinhaKit, usado: number) => podeVoltar(l) - Math.max(0, usado)
 
-/** Marca a partir do que voltou: nunca mais do que está fora. */
-export const marcaPorVoltou = (l: LinhaKit, voltou: number) => Math.min(podeVoltar(l), Math.max(0, voltou))
+/** Marca a partir do TOTAL que voltou (0 a quanto saiu). Abaixo do que já voltou, desfaz. */
+export const marcaPorVoltou = (l: LinhaKit, voltouTotal: number) =>
+  Math.min(l.qty, Math.max(0, voltouTotal)) - l.returnedQty
 
-/** O que vai ao banco: por linha, quanto voltou ou quanto foi usado a mais (nunca os dois). */
+/** O que vai ao banco: por linha, quanto volta, quanto de devolução se desfaz e quanto foi usado a mais. */
 export function registroDeUso(linhas: LinhaKit[], marcas: MarcasDeUso) {
-  const itens: Array<{ kitItemId: string; voltou: number; aMais: number }> = []
+  const itens: Array<{ kitItemId: string; voltou: number; desfazer: number; aMais: number }> = []
   let voltam = 0
+  let desfeito = 0
   let aMais = 0
   for (const l of linhas) {
     const marca = marcas[l.id] ?? 0
     if (marca > 0) {
       const voltou = Math.min(marca, podeVoltar(l))
-      itens.push({ kitItemId: l.id, voltou, aMais: 0 })
+      itens.push({ kitItemId: l.id, voltou, desfazer: 0, aMais: 0 })
       voltam += voltou
     } else if (marca < 0) {
-      itens.push({ kitItemId: l.id, voltou: 0, aMais: -marca })
-      aMais -= marca
+      const desfazer = Math.min(-marca, l.returnedQty)
+      const mais = -marca - desfazer
+      itens.push({ kitItemId: l.id, voltou: 0, desfazer, aMais: mais })
+      desfeito += desfazer
+      aMais += mais
     }
   }
-  return { itens, voltam, aMais }
+  return { itens, voltam, desfeito, aMais }
 }

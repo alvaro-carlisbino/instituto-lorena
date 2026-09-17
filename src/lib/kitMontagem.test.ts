@@ -9,6 +9,7 @@ import {
   registroDeUso,
   resumirMontagem,
   usadoNaLinha,
+  voltouNaLinha,
 } from './kitMontagem'
 
 const linha = (chave: string, itemId: string, qty: number, conferido = 0, avulso = false): LinhaMontagem => ({
@@ -88,23 +89,39 @@ describe('aplicarBipeDevolucao', () => {
 describe('registrar uso', () => {
   const ringer = { id: 'r', itemId: 'ringer', qty: 6, returnedQty: 0 }
   const gaze = { id: 'g', itemId: 'gaze', qty: 10, returnedQty: 2 }
+  const lencol = { id: 'l', itemId: 'lencol', qty: 3, returnedQty: 1 }
 
-  it('marcar o usado e marcar o que voltou dão o mesmo registro', () => {
+  it('marcar o usado e marcar o total que voltou dão o mesmo registro', () => {
     expect(marcaPorUsado(gaze, 3)).toBe(5)
-    expect(marcaPorVoltou(gaze, 5)).toBe(5)
+    expect(marcaPorVoltou(gaze, 7)).toBe(5)
     expect(usadoNaLinha(gaze, 5)).toBe(3)
+    expect(voltouNaLinha(gaze, 5)).toBe(7)
   })
 
   it('usar mais do que saiu vira uso a mais, não devolução', () => {
     const marca = marcaPorUsado(ringer, 9)
     expect(marca).toBe(-3)
     expect(usadoNaLinha(ringer, marca)).toBe(9)
-    expect(registroDeUso([ringer], { r: marca })).toEqual({ itens: [{ kitItemId: 'r', voltou: 0, aMais: 3 }], voltam: 0, aMais: 3 })
+    expect(registroDeUso([ringer], { r: marca })).toEqual({
+      itens: [{ kitItemId: 'r', voltou: 0, desfazer: 0, aMais: 3 }],
+      voltam: 0,
+      desfeito: 0,
+      aMais: 3,
+    })
   })
 
-  it('o que voltou nunca passa do que está fora', () => {
+  it('devolução marcada por engano se desfaz antes de virar uso a mais', () => {
+    // Lençol: saiu 3, marcaram voltou 1, usaram os 3.
+    expect(marcaPorUsado(lencol, 3)).toBe(-1)
+    expect(marcaPorVoltou(lencol, 0)).toBe(-1)
+    expect(registroDeUso([lencol], { l: -1 }).itens).toEqual([{ kitItemId: 'l', voltou: 0, desfazer: 1, aMais: 0 }])
+    // Usaram 4: desfaz 1 e o outro é a mais.
+    expect(registroDeUso([lencol], { l: marcaPorUsado(lencol, 4) }).itens).toEqual([{ kitItemId: 'l', voltou: 0, desfazer: 1, aMais: 1 }])
+  })
+
+  it('o total que voltou nunca passa do que saiu', () => {
     expect(marcaPorVoltou(gaze, 50)).toBe(8)
-    expect(registroDeUso([gaze, ringer], { g: 8 })).toEqual({ itens: [{ kitItemId: 'g', voltou: 8, aMais: 0 }], voltam: 8, aMais: 0 })
+    expect(registroDeUso([gaze, ringer], { g: 8 }).itens).toEqual([{ kitItemId: 'g', voltou: 8, desfazer: 0, aMais: 0 }])
   })
 
   it('bipe de devolução desconta o uso a mais', () => {

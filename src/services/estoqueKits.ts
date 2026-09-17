@@ -393,30 +393,45 @@ export async function devolverSobraKit(
 }
 
 /**
- * Registrar uso com o que voltou E o que foi usado além do que saiu, numa transação: a linha
- * com uso a mais baixa a diferença e sobe a quantidade; o que voltou segue por stock_kit_devolver.
+ * Registrar (ou corrigir) uso numa transação: o que voltou segue por stock_kit_devolver; a
+ * devolução marcada por engano se desfaz (a unidade sai de novo); uso além do que saiu baixa a
+ * diferença e sobe a quantidade. `fechar` passa o kit montado a usado.
  */
 export async function registrarUsoKit(
   kitId: string,
-  linhas: Array<{ kitItemId: string; voltou: number; aMais: number }>,
+  linhas: Array<{ kitItemId: string; voltou: number; desfazer?: number; aMais: number }>,
   fechar = true,
-): Promise<{ movimentos: number; unidades: number; controlados: number; aMais: number }> {
+): Promise<{ movimentos: number; unidades: number; controlados: number; aMais: number; desfeito: number }> {
   const client = assertClient()
   const { data, error } = await client.rpc('stock_kit_registrar_uso', {
     p_kit_id: kitId,
     p_linhas: linhas
-      .filter((l) => l.voltou > 0 || l.aMais > 0)
-      .map((l) => ({ kit_item_id: l.kitItemId, voltou: l.voltou, a_mais: l.aMais })),
+      .filter((l) => l.voltou > 0 || (l.desfazer ?? 0) > 0 || l.aMais > 0)
+      .map((l) => ({ kit_item_id: l.kitItemId, voltou: l.voltou, desfazer: l.desfazer ?? 0, a_mais: l.aMais })),
     p_fechar: fechar,
   })
   if (error) throw new Error(error.message)
-  const r = (data ?? {}) as { movimentos?: number; unidades?: number; controlados?: number; a_mais?: number }
+  const r = (data ?? {}) as { movimentos?: number; unidades?: number; controlados?: number; a_mais?: number; desfeito?: number }
   return {
     movimentos: Number(r.movimentos ?? 0),
     unidades: Number(r.unidades ?? 0),
     controlados: Number(r.controlados ?? 0),
     aMais: Number(r.a_mais ?? 0),
+    desfeito: Number(r.desfeito ?? 0),
   }
+}
+
+/**
+ * Muda o TOTAL que voltou de uma linha (sobra da bandeja), para mais ou para menos, sem fechar o
+ * kit. A diferença sai do banco na hora de gravar, não da tela: com dois toques e uma gravação no
+ * meio, a tela ainda teria o valor antigo e aplicaria a diferença duas vezes.
+ */
+export async function alterarVoltouLinhaKit(kitId: string, kitItemId: string, voltouTotal: number) {
+  const { data, error } = await assertClient().from('stock_kit_items').select('returned_qty').eq('id', kitItemId).single()
+  if (error) throw new Error(error.message)
+  const dif = voltouTotal - Number((data as { returned_qty: unknown }).returned_qty ?? 0)
+  if (dif === 0) return
+  await registrarUsoKit(kitId, [{ kitItemId, voltou: Math.max(0, dif), desfazer: Math.max(0, -dif), aMais: 0 }], false)
 }
 
 /** Confirma o uso sem sobra. Mantido para quem só quer o carimbo. */
