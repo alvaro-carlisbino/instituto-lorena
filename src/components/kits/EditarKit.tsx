@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, Loader2, ShieldAlert, Trash2 } from 'lucide-react'
+import { Check, Loader2, Printer, ShieldAlert, Trash2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,7 @@ import {
   alterarVoltouLinhaKit,
   atualizarKit,
   excluirKit,
+  imprimirContaDoKit,
   removerLinhaKit,
 } from '@/services/estoqueKits'
 
@@ -76,6 +77,7 @@ export function EditarKit({
   const [removendo, setRemovendo] = useState<string | null>(null)
   const [excluindo, setExcluindo] = useState(false)
   const [concluindo, setConcluindo] = useState(false)
+  const [imprimindo, setImprimindo] = useState(false)
   const [codigo, setCodigo] = useState<string | null>(null)
   const [pesquisa, setPesquisa] = useState('')
   const termo = useDeferredValue(pesquisa)
@@ -287,14 +289,35 @@ export function EditarKit({
         ) : null}
       </section>
 
-      <section className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border text-center">
-        <div className="bg-card px-3 py-2.5">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Custo dos materiais</p>
-          <p className="text-base font-semibold tabular-nums">{formatBRL(custo)}</p>
+      <section className="overflow-hidden rounded-xl border border-border bg-card">
+        <div className="grid grid-cols-2 gap-px bg-border text-center">
+          <div className="bg-card px-3 py-2.5">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Custo dos materiais</p>
+            <p className="text-base font-semibold tabular-nums">{formatBRL(custo)}</p>
+          </div>
+          <div className="bg-card px-3 py-2.5">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Cobrado do paciente</p>
+            <p className="text-base font-semibold tabular-nums">{formatBRL(cobrado)}</p>
+          </div>
         </div>
-        <div className="bg-card px-3 py-2.5">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Cobrado do paciente</p>
-          <p className="text-base font-semibold tabular-nums">{formatBRL(cobrado)}</p>
+        <div className="border-t border-border p-2">
+          <Button
+            variant="ghost"
+            className="h-9 w-full"
+            disabled={ocupado || imprimindo}
+            onClick={() => {
+              setImprimindo(true)
+              void imprimirContaDoKit(
+                kit,
+                new Map(items.map((i) => [i.id, { name: i.name, controlled: i.controlled }] as const)),
+                lastCosts,
+              )
+                .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao imprimir'))
+                .finally(() => setImprimindo(false))
+            }}
+          >
+            <Printer className="size-4" aria-hidden /> {pendentes > 0 ? 'Aguarde salvar para imprimir' : 'Imprimir ou salvar a conta (PDF)'}
+          </Button>
         </div>
       </section>
 

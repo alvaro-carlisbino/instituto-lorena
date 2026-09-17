@@ -17,7 +17,7 @@ import { STATUS_KIT, formatBRL, formatQtd, ordenarPorNome } from '@/components/k
 import { podeVoltar } from '@/lib/kitMontagem'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
-import { type KitCost, type KitStatus, type StockKit, cancelKit, excluirKit, printKitPatientBill } from '@/services/estoqueKits'
+import { type KitCost, type KitStatus, type StockKit, cancelKit, excluirKit, imprimirContaDoKit } from '@/services/estoqueKits'
 
 type Filtro = 'abertos' | KitStatus | 'todos'
 
@@ -50,7 +50,6 @@ export function KitsLista({
   const [excluindo, setExcluindo] = useState<StockKit | null>(null)
 
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
-  const nomes = useMemo(() => new Map(items.map((i) => [i.id, i.name] as const)), [items])
 
   const contagem: Record<Filtro, number> = {
     abertos,
@@ -83,11 +82,15 @@ export function KitsLista({
     }
   }
 
-  const imprimir = (kit: StockKit) => {
+  const [imprimindo, setImprimindo] = useState<string | null>(null)
+  const imprimir = async (kit: StockKit) => {
+    setImprimindo(kit.id)
     try {
-      printKitPatientBill(kit, nomes)
+      await imprimirContaDoKit(kit, porId, lastCosts)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao imprimir')
+    } finally {
+      setImprimindo(null)
     }
   }
 
@@ -182,7 +185,7 @@ export function KitsLista({
                           <Pencil className="size-4" aria-hidden /> Editar kit e cobranças
                         </DropdownMenuItem>
                       ) : null}
-                      <DropdownMenuItem onClick={() => imprimir(kit)}>
+                      <DropdownMenuItem onClick={() => void imprimir(kit)} disabled={imprimindo === kit.id}>
                         <Printer className="size-4" aria-hidden /> Conta do paciente (PDF)
                       </DropdownMenuItem>
                       {podeCorrigir ? (

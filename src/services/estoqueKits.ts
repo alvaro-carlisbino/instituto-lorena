@@ -1,6 +1,7 @@
 import { buscarTudo } from '@/lib/supabasePaginate'
 import { supabase } from '@/lib/supabaseClient'
-import { escaparHtml, imprimirHtml } from '@/lib/exportar'
+import { valorarLinhas, htmlContaDoKit } from '@/lib/contaDoKit'
+import { imprimirHtml } from '@/lib/exportar'
 
 // Fase 2 do estoque: lotes com validade (FEFO), kits cirúrgicos e livro de
 // substâncias controladas. A baixa é sempre por AÇÃO da enfermagem (consumir o
@@ -634,46 +635,50 @@ export async function logControlledExit(payload: {
   if (error) throw new Error(error.message)
 }
 
-/** Conta do paciente a partir do kit (itens usados + avulsos + acréscimos). */
-export function printKitPatientBill(kit: StockKit, itemNames: Map<string, string>): void {
-  const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-  const chargeTotal = kit.items.reduce((s, i) => s + Math.max(0, i.chargeCents), 0)
-  const rows = kit.items
-    .map((i) => {
-      const name = escaparHtml(i.label || itemNames.get(i.itemId) || '?')
-      const usado = i.qty - i.returnedQty
-      if (usado <= 0 && i.chargeCents <= 0) return ''
-      return `<tr>
-        <td>${i.isExtra ? 'Avulso' : 'Kit'}</td>
-        <td>${usado}× ${name}${i.returnedQty > 0 ? ` <small>(saíram ${i.qty}, voltaram ${i.returnedQty})</small>` : ''}</td>
-        <td style="text-align:right">${i.chargeCents > 0 ? brl(i.chargeCents) : '-'}</td>
-      </tr>`
-    })
-    .join('')
-  const titulo = escaparHtml(kit.patientName ?? kit.name)
-  const data = kit.scheduledFor
-    ? new Date(`${kit.scheduledFor}T12:00:00`).toLocaleDateString('pt-BR')
-    : new Date(kit.createdAt).toLocaleDateString('pt-BR')
-  imprimirHtml(`<!doctype html><html><head><meta charset="utf-8"/><title>Conta · ${titulo}</title>
-    <style>
-      body{font-family:Georgia,serif;padding:32px;max-width:720px;margin:0 auto;color:#1a1a1a}
-      h1{font-size:22px;margin:0 0 4px}.meta{color:#555;font-size:13px;margin-bottom:20px}
-      table{width:100%;border-collapse:collapse;font-size:13px}
-      th,td{border-bottom:1px solid #ddd;padding:8px 6px;text-align:left}
-      th{font-size:11px;text-transform:uppercase;color:#666}
-      small{color:#777}
-      .tot{margin-top:18px;font-size:16px;font-weight:700}
-    </style></head><body>
-    <h1>Conta do paciente</h1>
-    <div class="meta">
-      <div><strong>${escaparHtml(kit.patientName ?? '-')}</strong></div>
-      <div>${escaparHtml([kit.name, kit.procedureLabel].filter(Boolean).join(' · '))}</div>
-      <div>${data}</div>
-    </div>
-    <table>
-      <thead><tr><th>Tipo</th><th>Item</th><th style="text-align:right">Cobrança</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="tot">Total cobrado: ${brl(chargeTotal)}</div>
-    </body></html>`)
+/**
+ * Conta do paciente em PDF (pela impressão do navegador): itens usados com valor, cobrança
+ * quando houver. O valor vem dos movimentos do próprio kit, a custo da baixa.
+ */
+export async function imprimirContaDoKit(
+  kit: StockKit,
+  itens: Map<string, { name: string; controlled: boolean }>,
+  ultimoCusto: Map<string, number>,
+): Promise<void> {
+  const movs = await buscarTudo<{ item_id: unknown; qty_delta: unknown; unit_cost_cents: unknown }>(
+    () =>
+      assertClient()
+        .from('stock_movements')
+        .select('item_id, qty_delta, unit_cost_cents')
+        .eq('ref_type', 'stock_kit')
+        .eq('ref_id', kit.id)
+        .order('id'),
+    { rotulo: 'stock_movements do kit' },
+  )
+  const linhas = valorarLinhas(
+    kit.items.map((l) => ({
+      id: l.id,
+      itemId: l.itemId,
+      nome: l.label || itens.get(l.itemId)?.name || 'Item',
+      qty: l.qty,
+      returnedQty: l.returnedQty,
+      avulso: l.isExtra,
+      controlado: Boolean(itens.get(l.itemId)?.controlled),
+      cobrancaCents: l.chargeCents,
+    })),
+    movs.map((m) => ({
+      itemId: String(m.item_id),
+      qtyDelta: Number(m.qty_delta ?? 0),
+      custoCents: m.unit_cost_cents == null ? null : Number(m.unit_cost_cents),
+    })),
+    ultimoCusto,
+  )
+  const { html } = htmlContaDoKit({
+    paciente: kit.patientName,
+    procedimento: kit.procedureLabel,
+    data: kit.scheduledFor ?? kit.createdAt.slice(0, 10),
+    kitNome: kit.name,
+    status: kit.status,
+    linhas,
+  })
+  imprimirHtml(html)
 }
