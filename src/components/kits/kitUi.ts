@@ -19,6 +19,21 @@ export const STATUS_KIT: Record<KitStatus, { label: string; className: string }>
  */
 export const itemEhEscolha = (nome: string | undefined) => Boolean(nome && /\(\s*\)/.test(nome))
 
+const colacao = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true })
+
+/**
+ * Linhas de kit em ordem alfabética do produto. Com 90 itens na ordem em que foram lançados,
+ * achar o Ringer era rolar a lista inteira. Linha ainda sem produto vai para o fim.
+ */
+export function ordenarPorNome<T>(linhas: T[], nome: (linha: T) => string | null | undefined): T[] {
+  return [...linhas].sort((a, b) => {
+    const na = nome(a)
+    const nb = nome(b)
+    if (!na || !nb) return na ? -1 : nb ? 1 : 0
+    return colacao.compare(na, nb)
+  })
+}
+
 export function produtosParaBusca(items: StockItem[]) {
   return items.map((i) => ({
     id: i.id,

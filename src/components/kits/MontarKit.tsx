@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Check, ClipboardList, PackagePlus, ShieldAlert, Trash2, TriangleAlert } from 'lucide-react'
 
@@ -14,14 +14,16 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SearchField } from '@/components/ui/search-field'
 import { SearchPicker } from '@/components/ui/search-picker'
 import { Switch } from '@/components/ui/switch'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { formatBRL, formatQtd, itemEhEscolha, produtosParaBusca } from '@/components/kits/kitUi'
+import { formatBRL, formatQtd, itemEhEscolha, ordenarPorNome, produtosParaBusca } from '@/components/kits/kitUi'
 import { VendaDoKitPicker } from '@/components/kits/VendaDoKitPicker'
 import { beep } from '@/lib/beep'
+import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { type LinhaMontagem, aplicarBipe, novaChave, resumirMontagem } from '@/lib/kitMontagem'
 import { cn } from '@/lib/utils'
@@ -73,6 +75,8 @@ export function MontarKit({
 }) {
   const [r, setR] = useState<Rascunho>(() => lerRascunho(tenantId))
   const [filtro, setFiltro] = useState<Filtro>('todos')
+  const [pesquisa, setPesquisa] = useState('')
+  const termo = useDeferredValue(pesquisa)
   const [editando, setEditando] = useState<string | null>(null)
   const [trocarModelo, setTrocarModelo] = useState<string | null>(null)
   const [codigoDesconhecido, setCodigoDesconhecido] = useState<string | null>(null)
@@ -143,6 +147,8 @@ export function MontarKit({
     linhasRef.current = res.linhas
     set({ linhas: res.linhas })
     const linha = res.linhas.find((l) => l.chave === res.chave)
+    // A linha bipada precisa aparecer: busca que não acha este item sai da frente.
+    if (pesquisa && !combinaBusca(pesquisa, item.name, item.sku, item.barcode)) setPesquisa('')
     beep(true)
     setDestaque(res.chave)
     setUltimaLeitura(
@@ -164,6 +170,7 @@ export function MontarKit({
 
   const limpar = () => {
     setR(VAZIO)
+    setPesquisa('')
     setUltimaLeitura(null)
   }
 
@@ -183,7 +190,6 @@ export function MontarKit({
         procedureLabel: r.procedimento,
         scheduledFor: r.data || null,
         items: linhas.map((l) => ({ itemId: l.itemId, qty: l.qty, isExtra: l.avulso, chargeCents: l.cobrancaCents })),
-        controlledItemIds: new Set(items.filter((i) => i.controlled).map((i) => i.id)),
       })
       toast.success(
         `${nome} montado${nomePaciente ? ` para ${nomePaciente}` : ''}: ${movements} ${movements === 1 ? 'baixa' : 'baixas'} no estoque` +
@@ -211,11 +217,16 @@ export function MontarKit({
     else void montar()
   }
 
-  const linhasVisiveis = r.linhas.filter((l) => {
-    if (filtro === 'faltam') return l.conferido < l.qty
-    if (filtro === 'problema') return resumo.semSaldo.has(l.itemId) || itemEhEscolha(porId.get(l.itemId)?.name) || !l.itemId
-    return true
-  })
+  const linhasVisiveis = ordenarPorNome(
+    r.linhas.filter((l) => {
+      const item = porId.get(l.itemId)
+      if (termo && !combinaBusca(termo, item?.name, item?.sku, item?.barcode)) return false
+      if (filtro === 'faltam') return l.conferido < l.qty
+      if (filtro === 'problema') return resumo.semSaldo.has(l.itemId) || itemEhEscolha(item?.name) || !l.itemId
+      return true
+    }),
+    (l) => porId.get(l.itemId)?.name,
+  )
   const linhaEditada = r.linhas.find((l) => l.chave === editando) ?? null
   const progresso = resumo.linhas > 0 ? Math.round((resumo.completas / resumo.linhas) * 100) : 0
 
@@ -325,6 +336,13 @@ export function MontarKit({
               <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                 <div className="h-full rounded-full bg-emerald-500 transition-[width]" style={{ width: `${progresso}%` }} />
               </div>
+              <SearchField
+                value={pesquisa}
+                onChange={setPesquisa}
+                label="Buscar item na bandeja"
+                resultados={linhasVisiveis.length}
+                className="pt-1"
+              />
               <div className="flex gap-1.5 overflow-x-auto pt-1">
                 {(
                   [
@@ -414,7 +432,9 @@ export function MontarKit({
               )
             })}
             {linhasVisiveis.length === 0 ? (
-              <li className="px-4 py-6 text-center text-sm text-muted-foreground">Nada neste filtro.</li>
+              <li className="px-4 py-6 text-center text-sm text-muted-foreground">
+                {termo ? `Nenhum item com "${termo}" na bandeja.` : 'Nada neste filtro.'}
+              </li>
             ) : null}
           </ul>
         )}

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { RotateCcw, ShieldAlert } from 'lucide-react'
 
@@ -11,11 +11,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { SearchField } from '@/components/ui/search-field'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { formatQtd } from '@/components/kits/kitUi'
+import { formatQtd, ordenarPorNome } from '@/components/kits/kitUi'
 import { beep } from '@/lib/beep'
+import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { aplicarBipeDevolucao, podeVoltar } from '@/lib/kitMontagem'
 import { cn } from '@/lib/utils'
@@ -47,6 +49,8 @@ export function RegistrarUsoDialog({
   const [codigo, setCodigo] = useState<string | null>(null)
   const [ultima, setUltima] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
+  const [pesquisa, setPesquisa] = useState('')
+  const termo = useDeferredValue(pesquisa)
 
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
   const fechando = kit?.status === 'montado'
@@ -116,7 +120,14 @@ export function RegistrarUsoDialog({
     }
   }
 
-  const visiveis = soDevolvidos ? linhas.filter((l) => (devolucoes[l.id] ?? 0) > 0) : linhas
+  const visiveis = ordenarPorNome(
+    linhas.filter((l) => {
+      if (soDevolvidos && (devolucoes[l.id] ?? 0) <= 0) return false
+      const item = porId.get(l.itemId)
+      return combinaBusca(termo, l.label, item?.name, item?.sku, item?.barcode)
+    }),
+    (l) => l.label || porId.get(l.itemId)?.name,
+  )
 
   return (
     <Dialog open={kit != null} onOpenChange={(open) => !open && !salvando && onClose()}>
@@ -130,6 +141,12 @@ export function RegistrarUsoDialog({
 
         <div className="space-y-2 border-b border-border p-3 sm:p-4">
           <ScanBar onCode={onCode} ultimaLeitura={ultima} placeholder="Bipe cada item que voltou" />
+          <SearchField
+            value={pesquisa}
+            onChange={setPesquisa}
+            label={`Buscar entre os ${linhas.length} itens do kit`}
+            resultados={visiveis.length}
+          />
           <div className="flex items-center justify-between gap-2 text-xs">
             <span className="truncate text-muted-foreground" aria-live="polite">
               {ultima ?? `${linhas.length} ${linhas.length === 1 ? 'item pode voltar' : 'itens podem voltar'}`}
@@ -191,7 +208,11 @@ export function RegistrarUsoDialog({
           })}
           {visiveis.length === 0 ? (
             <li className="px-4 py-10 text-center text-sm text-muted-foreground">
-              {soDevolvidos ? 'Nada marcado para voltar ainda.' : 'Tudo que saiu neste kit já voltou.'}
+              {termo
+                ? `Nenhum item com "${termo}" neste kit.`
+                : soDevolvidos
+                  ? 'Nada marcado para voltar ainda.'
+                  : 'Tudo que saiu neste kit já voltou.'}
             </li>
           ) : null}
         </ul>

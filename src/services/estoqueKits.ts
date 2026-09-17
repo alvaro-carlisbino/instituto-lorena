@@ -1,7 +1,6 @@
 import { buscarTudo } from '@/lib/supabasePaginate'
 import { supabase } from '@/lib/supabaseClient'
 import { escaparHtml, imprimirHtml } from '@/lib/exportar'
-import { registerMovement } from '@/services/estoqueCompras'
 
 // Fase 2 do estoque: lotes com validade (FEFO), kits cirúrgicos e livro de
 // substâncias controladas. A baixa é sempre por AÇÃO da enfermagem (consumir o
@@ -276,10 +275,13 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
  * quem monta a bandeja é quem tira o material da prateleira, então é nesse instante que o
  * estoque some de verdade. Um momento, uma pessoa — é o que a equipe sustenta no dia a dia.
  *
- * Baixa por FEFO (vence primeiro sai primeiro) e registra controlados no livro, igual à
- * conferência fazia antes. Depois disso:
+ * Baixa por FEFO (vence primeiro sai primeiro) e registra controlados no livro. Depois disso:
  *   • "consumido" = a enfermeira registra o uso; a sobra da bandeja volta por devolverSobraKit
  *   • "cancelado" = cirurgia caiu ou kit errado → cancelKit estorna o que ainda está fora
+ *
+ * Tudo numa chamada (stock_kit_montar). A baixa pelo navegador ia item por item, e um Kit
+ * Cirúrgico CC de 90 linhas levava 38 s para salvar; no banco leva menos de 1 s, e uma falha
+ * no meio não deixa kit meio baixado.
  */
 export async function createKit(payload: {
   templateId?: string | null
@@ -296,15 +298,12 @@ export async function createKit(payload: {
     chargeCents?: number
     label?: string | null
   }>
-  /** ids dos itens controlados — vão pro livro na baixa (Portaria 344). */
-  controlledItemIds?: Set<string>
 }): Promise<{ kitId: string; movements: number; controlled: number }> {
   const client = assertClient()
   const items = payload.items.filter((i) => i.itemId && i.qty > 0)
   if (items.length === 0) throw new Error('O kit precisa de ao menos um item.')
-  const { data, error } = await client
-    .from('stock_kits')
-    .insert({
+  const { data, error } = await client.rpc('stock_kit_montar', {
+    p_kit: {
       template_id: payload.templateId || null,
       name: payload.name.trim() || 'Kit',
       lead_id: payload.leadId || null,
@@ -312,34 +311,18 @@ export async function createKit(payload: {
       patient_name: payload.patientName?.trim() || null,
       procedure_label: payload.procedureLabel?.trim() || null,
       scheduled_for: payload.scheduledFor || null,
-    })
-    .select('id')
-    .single()
-  if (error) throw new Error(error.message)
-  const kitId = String((data as { id: unknown }).id)
-  const { error: itemsErr } = await client.from('stock_kit_items').insert(
-    items.map((i) => ({
-      kit_id: kitId,
+    },
+    p_itens: items.map((i) => ({
       item_id: i.itemId,
       qty: i.qty,
       is_extra: Boolean(i.isExtra),
       charge_cents: Math.max(0, Math.round(i.chargeCents ?? 0)),
       label: i.label?.trim() || null,
     })),
-  )
-  if (itemsErr) {
-    await client.from('stock_kits').delete().eq('id', kitId)
-    throw new Error(itemsErr.message)
-  }
-
-  // Baixa o material. Se falhar no meio, o kit fica registrado e a tela avisa — não apagamos
-  // o kit, senão perderíamos o rastro das baixas que já saíram.
-  const out = await deductKitStock(
-    { id: kitId, name: payload.name.trim() || 'Kit', patientName: payload.patientName?.trim() || null, procedureLabel: payload.procedureLabel?.trim() || null, items },
-    payload.controlledItemIds ?? new Set<string>(),
-    'kit montado',
-  )
-  return { kitId, ...out }
+  })
+  if (error) throw new Error(error.message)
+  const r = (data ?? {}) as { kit_id?: string; movimentos?: number; controlados?: number }
+  return { kitId: String(r.kit_id ?? ''), movements: Number(r.movimentos ?? 0), controlled: Number(r.controlados ?? 0) }
 }
 
 /** Aloca a quantidade nos lotes por FEFO (vence primeiro sai primeiro; sem lote por último). */
@@ -366,59 +349,6 @@ export function allocateFefo(
   // sem lote suficiente: o restante sai sem vínculo de lote (estoque legado/sem lote)
   if (remaining > 0) allocation.push({ batchId: null, qty: remaining })
   return allocation
-}
-
-/**
- * Baixa o material de um kit: FEFO por item + livro de controlados. Usada na MONTAGEM
- * (createKit) — é o único ponto que tira material do estoque.
- */
-async function deductKitStock(
-  kit: { id: string; name: string; patientName: string | null; procedureLabel: string | null; items: Array<{ itemId: string; qty: number }> },
-  controlledItemIds: Set<string>,
-  reason: string,
-): Promise<{ movements: number; controlled: number }> {
-  const client = assertClient()
-  // Valoração da saída: custo real do lote; sem lote (ou lote sem custo),
-  // último custo de compra do item. null = fica sem custo (total vira "parcial").
-  const [batchCosts, lastCosts] = await Promise.all([listBatchCosts(), listItemLastCosts()])
-  let movements = 0
-  let controlled = 0
-  for (const item of kit.items) {
-    const batches = await listBatchBalances(item.itemId)
-    const allocation = allocateFefo(batches, item.qty)
-    for (const slice of allocation) {
-      const unitCostCents =
-        (slice.batchId ? batchCosts.get(slice.batchId) : undefined) ??
-        lastCosts.get(item.itemId) ??
-        null
-      const movementId = await registerMovement({
-        itemId: item.itemId,
-        kind: 'saida',
-        qty: slice.qty,
-        reason,
-        note: `${kit.name}${kit.patientName ? ` — ${kit.patientName}` : ''}`,
-        refType: 'stock_kit',
-        refId: kit.id,
-        batchId: slice.batchId,
-        unitCostCents,
-      })
-      movements += 1
-      if (controlledItemIds.has(item.itemId)) {
-        const { error } = await client.from('controlled_substance_log').insert({
-          item_id: item.itemId,
-          batch_id: slice.batchId,
-          movement_id: movementId,
-          action: 'saida',
-          qty: slice.qty,
-          patient_name: kit.patientName || null,
-          note: kit.procedureLabel || null,
-        })
-        if (error) throw new Error(error.message)
-        controlled += 1
-      }
-    }
-  }
-  return { movements, controlled }
 }
 
 /**

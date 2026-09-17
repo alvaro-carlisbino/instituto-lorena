@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Layers, Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react'
 
@@ -15,12 +15,14 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SearchField } from '@/components/ui/search-field'
 import { SearchPicker } from '@/components/ui/search-picker'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { formatQtd, itemEhEscolha, produtosParaBusca } from '@/components/kits/kitUi'
+import { formatQtd, itemEhEscolha, ordenarPorNome, produtosParaBusca } from '@/components/kits/kitUi'
 import { beep } from '@/lib/beep'
+import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
@@ -94,7 +96,9 @@ export function ModelosKit({
                       </p>
                     ) : null}
                     <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">
-                      {t.items.map((i) => `${formatQtd(i.qty)}× ${porId.get(i.itemId)?.name ?? '?'}`).join(', ')}
+                      {ordenarPorNome(t.items, (i) => porId.get(i.itemId)?.name)
+                        .map((i) => `${formatQtd(i.qty)}× ${porId.get(i.itemId)?.name ?? '?'}`)
+                        .join(', ')}
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-1">
@@ -160,8 +164,20 @@ function EditorModelo({
   const [linhas, setLinhas] = useState<Linha[]>(inicial.linhas)
   const [codigo, setCodigo] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
+  const [pesquisa, setPesquisa] = useState('')
+  const termo = useDeferredValue(pesquisa)
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
   const busca = useMemo(() => produtosParaBusca(items), [items])
+  // Em ordem alfabética na tela; o índice é o da lista guardada, que é o que as ações alteram.
+  const visiveis = ordenarPorNome(
+    linhas
+      .map((l, idx) => ({ l, idx }))
+      .filter(({ l }) => {
+        const item = porId.get(l.itemId)
+        return combinaBusca(termo, item?.name, item?.sku, item?.barcode)
+      }),
+    ({ l }) => porId.get(l.itemId)?.name,
+  )
 
   const adicionar = (itemId: string) =>
     setLinhas((prev) => {
@@ -221,9 +237,17 @@ function EditorModelo({
             value={null}
             onPick={(p) => adicionar(p.id)}
           />
+          {linhas.length > 0 ? (
+            <SearchField
+              value={pesquisa}
+              onChange={setPesquisa}
+              label={`Buscar entre os ${linhas.length} itens do modelo`}
+              resultados={visiveis.length}
+            />
+          ) : null}
         </div>
         <ul className="min-h-0 flex-1 divide-y divide-border overflow-y-auto">
-          {linhas.map((l, idx) => {
+          {visiveis.map(({ l, idx }) => {
             const item = porId.get(l.itemId)
             const escolha = itemEhEscolha(item?.name)
             return (
@@ -261,6 +285,9 @@ function EditorModelo({
             )
           })}
           {linhas.length === 0 ? <li className="px-4 py-10 text-center text-sm text-muted-foreground">Nenhum item ainda.</li> : null}
+          {linhas.length > 0 && visiveis.length === 0 ? (
+            <li className="px-4 py-8 text-center text-sm text-muted-foreground">Nenhum item com "{termo}" no modelo.</li>
+          ) : null}
         </ul>
         <DialogFooter className="flex-row items-center gap-3 border-t border-border p-3 sm:p-4">
           <p className="min-w-0 flex-1 text-xs text-muted-foreground">{linhas.length} itens</p>

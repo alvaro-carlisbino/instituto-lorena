@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { EmptyState } from '@/components/ui/empty-state'
-import { STATUS_KIT, formatBRL, formatQtd } from '@/components/kits/kitUi'
+import { STATUS_KIT, formatBRL, formatQtd, ordenarPorNome } from '@/components/kits/kitUi'
 import { podeVoltar } from '@/lib/kitMontagem'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
@@ -224,7 +224,7 @@ export function KitsLista({
 
                 {expandido ? (
                   <ul className="divide-y divide-border border-t border-border text-sm">
-                    {kit.items.map((l) => {
+                    {ordenarPorNome(kit.items, (l) => l.label || porId.get(l.itemId)?.name).map((l) => {
                       const item = porId.get(l.itemId)
                       return (
                         <li key={l.id} className="flex items-center justify-between gap-3 px-3 py-2 sm:px-4">

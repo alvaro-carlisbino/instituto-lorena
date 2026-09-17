@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, ShieldAlert, Trash2 } from 'lucide-react'
 
@@ -15,14 +15,16 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SearchField } from '@/components/ui/search-field'
 import { SearchPicker } from '@/components/ui/search-picker'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { STATUS_KIT, formatBRL, formatQtd, itemEhEscolha, produtosParaBusca } from '@/components/kits/kitUi'
+import { STATUS_KIT, formatBRL, formatQtd, itemEhEscolha, ordenarPorNome, produtosParaBusca } from '@/components/kits/kitUi'
 import { VendaDoKitPicker } from '@/components/kits/VendaDoKitPicker'
 import { vincularKitAVenda } from '@/services/resultadoProcedimentos'
 import { beep } from '@/lib/beep'
+import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { searchLeadsByName } from '@/services/clinicalNotes'
 import type { StockItem } from '@/services/estoqueCompras'
@@ -72,6 +74,8 @@ export function EditarKitDialog({
   const [removendo, setRemovendo] = useState<string | null>(null)
   const [excluindo, setExcluindo] = useState(false)
   const [codigo, setCodigo] = useState<string | null>(null)
+  const [pesquisa, setPesquisa] = useState('')
+  const termo = useDeferredValue(pesquisa)
 
   const [dados, setDados] = useState(() => ({
     leadId: kit?.leadId ?? '',
@@ -154,6 +158,14 @@ export function EditarKitDialog({
   const custo = kit.items.reduce((s, l) => s + Math.round((l.qty - l.returnedQty) * (lastCosts.get(l.itemId) ?? 0)), 0)
   const cobrado = kit.items.reduce((s, l) => s + Math.max(0, l.chargeCents), 0)
   const status = STATUS_KIT[kit.status]
+  const nomeDaLinha = (l: StockKit['items'][number]) => l.label || porId.get(l.itemId)?.name
+  const linhasVisiveis = ordenarPorNome(
+    kit.items.filter((l) => {
+      const item = porId.get(l.itemId)
+      return combinaBusca(termo, l.label, item?.name, item?.sku, item?.barcode)
+    }),
+    nomeDaLinha,
+  )
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -286,8 +298,17 @@ export function EditarKitDialog({
             </section>
           ) : null}
 
+          <div className="sticky top-0 z-10 border-b border-border bg-background px-3 py-2 sm:px-4">
+            <SearchField
+              value={pesquisa}
+              onChange={setPesquisa}
+              label={`Buscar entre os ${kit.items.length} itens do kit`}
+              resultados={linhasVisiveis.length}
+            />
+          </div>
+
           <ul className="divide-y divide-border">
-            {kit.items.map((l) => {
+            {linhasVisiveis.map((l) => {
               const item = porId.get(l.itemId)
               const qty = qtdLocal[l.id] ?? l.qty
               const escolha = itemEhEscolha(item?.name)
@@ -348,6 +369,9 @@ export function EditarKitDialog({
                 </li>
               )
             })}
+            {termo && linhasVisiveis.length === 0 ? (
+              <li className="px-4 py-8 text-center text-sm text-muted-foreground">Nenhum item com "{termo}" neste kit.</li>
+            ) : null}
           </ul>
         </div>
 
