@@ -185,8 +185,12 @@ export function PaymentLinksPage() {
     setLastLink(null)
     try {
       const res = await generateRedeLink({ amountCents, description: desc, leadId: selectedLeadId, freightCents, installments, customerName: selectedName })
-      setLastLink({ url: res.payLink, via: `Cartão · ${formatBRL(res.amountCents)}` })
-      toast.success(`Link de cartão gerado (${formatBRL(res.amountCents)}).`)
+      // O cartão devolve o valor que MANDAMOS (só o produto): quem soma o frete é o servidor, ao
+      // montar a cobrança. Sem somar aqui, a tela dizia R$ 597,00 num link que cobra R$ 630,00 —
+      // caso do Max Druciak, 17/set. O Pix já devolve o total e não precisa disto.
+      const cobradoCents = res.amountCents + (freightCents ?? 0)
+      setLastLink({ url: res.payLink, via: `Cartão · ${formatBRL(cobradoCents)}` })
+      toast.success(`Link de cartão gerado (${formatBRL(cobradoCents)}).`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao gerar link de cartão (Rede)')
     } finally {

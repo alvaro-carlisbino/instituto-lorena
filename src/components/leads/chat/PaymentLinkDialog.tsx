@@ -138,7 +138,9 @@ export function PaymentLinkDialog({ kitInicial, leadId, lead, onClose, onGerado 
         freightCents,
         customerName: nomeCompleto,
       })
-      onGerado(res.payLink, res.amountCents)
+      // `amountCents` do cartão volta sem o frete (quem soma é o servidor); o aviso mostra o
+      // total que o cliente vai ver de fato.
+      onGerado(res.payLink, res.amountCents + (freightCents ?? 0))
       onClose()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao gerar link de pagamento')
