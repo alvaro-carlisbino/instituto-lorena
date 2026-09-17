@@ -20,7 +20,7 @@ import { Switch } from '@/components/ui/switch'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { formatBRL, formatQtd, itemEhEscolha, ordenarPorNome, produtosParaBusca } from '@/components/kits/kitUi'
+import { formatBRL, formatQtd, itemEhEscolha, ordenarPorNome, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
 import { VendaDoKitPicker } from '@/components/kits/VendaDoKitPicker'
 import { beep } from '@/lib/beep'
 import { combinaBusca } from '@/lib/busca'
@@ -159,6 +159,7 @@ export function MontarKit({
   }
 
   const onCode = (code: string) => {
+    setPesquisa((p) => semCodigoBipado(p, code))
     const item = acharItemPorCodigo(items, code)
     if (!item) {
       beep(false)

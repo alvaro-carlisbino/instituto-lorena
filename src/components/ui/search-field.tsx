@@ -19,6 +19,11 @@ type Props = {
   className?: string
   disabled?: boolean
   autoFocus?: boolean
+  /**
+   * Enter no campo. Enter de leitor de código de barras não chega aqui: o leitor global
+   * (ScanBar) já tratou a rajada e marcou o evento.
+   */
+  onEnter?: () => void
 }
 
 /**
@@ -39,6 +44,7 @@ export function SearchField({
   className,
   disabled,
   autoFocus,
+  onEnter,
 }: Props) {
   const id = useId()
   const temTermo = value.length > 0
@@ -62,6 +68,10 @@ export function SearchField({
           if (e.key === 'Escape' && temTermo) {
             e.preventDefault()
             onChange('')
+          }
+          if (e.key === 'Enter' && onEnter && !e.defaultPrevented) {
+            e.preventDefault()
+            onEnter()
           }
         }}
         className={cn('pl-8 [&::-webkit-search-cancel-button]:appearance-none', temTermo && 'pr-8')}

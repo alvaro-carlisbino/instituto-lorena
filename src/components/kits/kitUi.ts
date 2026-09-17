@@ -34,6 +34,13 @@ export function ordenarPorNome<T>(linhas: T[], nome: (linha: T) => string | null
   })
 }
 
+/**
+ * Leitor disparado com o cursor na barra de busca digita o código ali antes do Enter. O bipe
+ * vale (o leitor global trata), mas a busca ficaria com o código e esconderia a lista.
+ */
+export const semCodigoBipado = (busca: string, codigo: string) =>
+  codigo && busca.endsWith(codigo) ? busca.slice(0, -codigo.length).trimEnd() : busca
+
 export function produtosParaBusca(items: StockItem[]) {
   return items.map((i) => ({
     id: i.id,

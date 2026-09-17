@@ -377,6 +377,33 @@ export async function devolverSobraKit(
   return { movimentos: Number(r.movimentos ?? 0), unidades: Number(r.unidades ?? 0), controlados: Number(r.controlados ?? 0) }
 }
 
+/**
+ * Registrar uso com o que voltou E o que foi usado além do que saiu, numa transação: a linha
+ * com uso a mais baixa a diferença e sobe a quantidade; o que voltou segue por stock_kit_devolver.
+ */
+export async function registrarUsoKit(
+  kitId: string,
+  linhas: Array<{ kitItemId: string; voltou: number; aMais: number }>,
+  fechar = true,
+): Promise<{ movimentos: number; unidades: number; controlados: number; aMais: number }> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('stock_kit_registrar_uso', {
+    p_kit_id: kitId,
+    p_linhas: linhas
+      .filter((l) => l.voltou > 0 || l.aMais > 0)
+      .map((l) => ({ kit_item_id: l.kitItemId, voltou: l.voltou, a_mais: l.aMais })),
+    p_fechar: fechar,
+  })
+  if (error) throw new Error(error.message)
+  const r = (data ?? {}) as { movimentos?: number; unidades?: number; controlados?: number; a_mais?: number }
+  return {
+    movimentos: Number(r.movimentos ?? 0),
+    unidades: Number(r.unidades ?? 0),
+    controlados: Number(r.controlados ?? 0),
+    aMais: Number(r.a_mais ?? 0),
+  }
+}
+
 /** Confirma o uso sem sobra. Mantido para quem só quer o carimbo. */
 export async function consumeKit(kit: StockKit): Promise<void> {
   await devolverSobraKit(kit.id, [], true)

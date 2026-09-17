@@ -20,7 +20,7 @@ import { SearchPicker } from '@/components/ui/search-picker'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { STATUS_KIT, formatBRL, formatQtd, itemEhEscolha, ordenarPorNome, produtosParaBusca } from '@/components/kits/kitUi'
+import { STATUS_KIT, formatBRL, formatQtd, itemEhEscolha, ordenarPorNome, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
 import { VendaDoKitPicker } from '@/components/kits/VendaDoKitPicker'
 import { vincularKitAVenda } from '@/services/resultadoProcedimentos'
 import { beep } from '@/lib/beep'
@@ -146,6 +146,7 @@ export function EditarKitDialog({
   }
 
   const onCode = (code: string) => {
+    setPesquisa((p) => semCodigoBipado(p, code))
     const item = acharItemPorCodigo(items, code)
     if (!item) {
       beep(false)
@@ -375,7 +376,7 @@ export function EditarKitDialog({
           </ul>
         </div>
 
-        <DialogFooter className="flex-row items-center justify-between gap-2 border-t border-border p-3 sm:justify-between sm:p-4">
+        <DialogFooter className="m-0 flex-row items-center justify-between gap-2 border-t border-border p-3 sm:justify-between sm:p-4">
           <Button variant="ghost" className="text-destructive" onClick={() => setExcluindo(true)} disabled={pendentes > 0}>
             <Trash2 className="size-4" aria-hidden /> Excluir kit
           </Button>

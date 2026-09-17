@@ -289,7 +289,7 @@ function EditorModelo({
             <li className="px-4 py-8 text-center text-sm text-muted-foreground">Nenhum item com "{termo}" no modelo.</li>
           ) : null}
         </ul>
-        <DialogFooter className="flex-row items-center gap-3 border-t border-border p-3 sm:p-4">
+        <DialogFooter className="m-0 flex-row items-center gap-3 border-t border-border p-3 sm:p-4">
           <p className="min-w-0 flex-1 text-xs text-muted-foreground">{linhas.length} itens</p>
           <Button variant="outline" onClick={onClose} disabled={salvando}>
             Cancelar

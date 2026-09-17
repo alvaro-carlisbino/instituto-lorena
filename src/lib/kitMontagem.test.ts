@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { type LinhaMontagem, aplicarBipe, aplicarBipeDevolucao, resumirMontagem } from './kitMontagem'
+import {
+  type LinhaMontagem,
+  aplicarBipe,
+  aplicarBipeDevolucao,
+  marcaPorUsado,
+  marcaPorVoltou,
+  registroDeUso,
+  resumirMontagem,
+  usadoNaLinha,
+} from './kitMontagem'
 
 const linha = (chave: string, itemId: string, qty: number, conferido = 0, avulso = false): LinhaMontagem => ({
   chave,
@@ -73,5 +82,32 @@ describe('aplicarBipeDevolucao', () => {
 
   it('avisa quando o item não saiu neste kit', () => {
     expect(aplicarBipeDevolucao(kit, {}, 'gaze').resultado).toBe('fora_do_kit')
+  })
+})
+
+describe('registrar uso', () => {
+  const ringer = { id: 'r', itemId: 'ringer', qty: 6, returnedQty: 0 }
+  const gaze = { id: 'g', itemId: 'gaze', qty: 10, returnedQty: 2 }
+
+  it('marcar o usado e marcar o que voltou dão o mesmo registro', () => {
+    expect(marcaPorUsado(gaze, 3)).toBe(5)
+    expect(marcaPorVoltou(gaze, 5)).toBe(5)
+    expect(usadoNaLinha(gaze, 5)).toBe(3)
+  })
+
+  it('usar mais do que saiu vira uso a mais, não devolução', () => {
+    const marca = marcaPorUsado(ringer, 9)
+    expect(marca).toBe(-3)
+    expect(usadoNaLinha(ringer, marca)).toBe(9)
+    expect(registroDeUso([ringer], { r: marca })).toEqual({ itens: [{ kitItemId: 'r', voltou: 0, aMais: 3 }], voltam: 0, aMais: 3 })
+  })
+
+  it('o que voltou nunca passa do que está fora', () => {
+    expect(marcaPorVoltou(gaze, 50)).toBe(8)
+    expect(registroDeUso([gaze, ringer], { g: 8 })).toEqual({ itens: [{ kitItemId: 'g', voltou: 8, aMais: 0 }], voltam: 8, aMais: 0 })
+  })
+
+  it('bipe de devolução desconta o uso a mais', () => {
+    expect(aplicarBipeDevolucao([ringer], { r: -3 }, 'ringer').devolucoes).toEqual({ r: -2 })
   })
 })
