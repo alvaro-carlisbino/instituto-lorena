@@ -429,7 +429,7 @@ function ProcedimentoDialog({
                           {linha.vinculo === 'automatico' ? ' · vínculo automático (mesmo paciente e data próxima)' : ''}
                         </span>
                       </span>
-                      <Button variant="ghost" size="sm" nativeButton={false} render={<Link to={`/kits?aba=kits&kit=${k.id}`} />}>
+                      <Button variant="ghost" size="sm" nativeButton={false} render={<Link to={`/kits/${k.id}/editar`} />}>
                         Abrir
                       </Button>
                     </li>

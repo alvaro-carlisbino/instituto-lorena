@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Ban, ChevronDown, MoreHorizontal, PackageCheck, Pencil, Printer, RotateCcw, ShieldAlert, Trash2, Undo2 } from 'lucide-react'
+import { Ban, ChevronDown, MoreHorizontal, PackageCheck, Pencil, Printer, ShieldAlert, Trash2, Undo2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -134,7 +134,9 @@ export function KitsLista({
             const estimado = kit.items.reduce((s, l) => s + Math.round((l.qty - l.returnedQty) * (lastCosts.get(l.itemId) ?? 0)), 0)
             const cobrado = kit.items.reduce((s, l) => s + Math.max(0, l.chargeCents), 0)
             const expandido = aberto === kit.id
-            const podeDevolver = kit.status === 'consumido' && foraAgora(kit) > 0
+            // Kit usado não "pede" devolução: o que foi usado conta como fora do estoque e não volta.
+            // Se esqueceram de marcar algo, "Corrigir uso" no menu reabre a mesma tela.
+            const podeCorrigir = kit.status === 'consumido' && foraAgora(kit) > 0
             return (
               <li key={kit.id} className="rounded-xl border border-border bg-card">
                 <div className="flex items-start gap-3 p-3 sm:p-4">
@@ -183,9 +185,9 @@ export function KitsLista({
                       <DropdownMenuItem onClick={() => imprimir(kit)}>
                         <Printer className="size-4" aria-hidden /> Conta do paciente (PDF)
                       </DropdownMenuItem>
-                      {podeDevolver ? (
+                      {podeCorrigir ? (
                         <DropdownMenuItem onClick={() => onRegistrarUso(kit)}>
-                          <Undo2 className="size-4" aria-hidden /> Devolver sobra
+                          <Undo2 className="size-4" aria-hidden /> Corrigir uso
                         </DropdownMenuItem>
                       ) : null}
                       <DropdownMenuSeparator />
@@ -205,10 +207,6 @@ export function KitsLista({
                   {kit.status === 'montado' ? (
                     <Button size="sm" className="h-8" onClick={() => onRegistrarUso(kit)}>
                       <PackageCheck className="size-4" aria-hidden /> Registrar uso
-                    </Button>
-                  ) : podeDevolver ? (
-                    <Button size="sm" variant="outline" className="h-8" onClick={() => onRegistrarUso(kit)}>
-                      <RotateCcw className="size-4" aria-hidden /> Devolver sobra
                     </Button>
                   ) : null}
                   {kit.status !== 'cancelado' ? (

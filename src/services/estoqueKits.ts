@@ -213,18 +213,15 @@ export type StockKit = {
   items: StockKitItem[]
 }
 
-export async function listKits(leadId?: string): Promise<StockKit[]> {
+const COLUNAS_KIT =
+  'id, name, template_id, lead_id, clinic_sale_id, patient_name, procedure_label, scheduled_for, status, note, created_at, consumed_at, cancelled_at'
+
+/** Junta os kits com as linhas deles. Só as linhas destes kits, paginadas. */
+async function comLinhas(kits: Array<Record<string, unknown>>): Promise<StockKit[]> {
   const client = assertClient()
-  let kitsQuery = client
-    .from('stock_kits')
-    .select('id, name, template_id, lead_id, clinic_sale_id, patient_name, procedure_label, scheduled_for, status, note, created_at, consumed_at, cancelled_at')
-    .order('created_at', { ascending: false })
-  kitsQuery = leadId ? kitsQuery.eq('lead_id', leadId) : kitsQuery.limit(100)
-  const kits = await kitsQuery
-  if (kits.error) throw new Error(kits.error.message)
-  const kitIds = (kits.data ?? []).map((r) => String(r.id))
-  // Só as linhas destes kits. Antes vinha a tabela inteira: um Kit Cirúrgico CC tem 90 linhas,
-  // e no 12º kit o teto de 1.000 do PostgREST começava a esconder item de kit antigo.
+  const kitIds = kits.map((r) => String(r.id))
+  // Antes vinha a tabela inteira: um Kit Cirúrgico CC tem 90 linhas, e no 12º kit o teto de
+  // 1.000 do PostgREST começava a esconder item de kit antigo.
   const linhas = kitIds.length
     ? await buscarTudo<Record<string, unknown>>(
         () =>
@@ -252,7 +249,7 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
     })
     byKit.set(key, list)
   }
-  return (kits.data ?? []).map((r) => ({
+  return kits.map((r) => ({
     id: String(r.id),
     name: String(r.name),
     templateId: r.template_id != null ? String(r.template_id) : null,
@@ -268,6 +265,24 @@ export async function listKits(leadId?: string): Promise<StockKit[]> {
     cancelledAt: r.cancelled_at != null ? String(r.cancelled_at) : null,
     items: byKit.get(String(r.id)) ?? [],
   }))
+}
+
+export async function listKits(leadId?: string): Promise<StockKit[]> {
+  const client = assertClient()
+  let kitsQuery = client.from('stock_kits').select(COLUNAS_KIT).order('created_at', { ascending: false })
+  kitsQuery = leadId ? kitsQuery.eq('lead_id', leadId) : kitsQuery.limit(100)
+  const kits = await kitsQuery
+  if (kits.error) throw new Error(kits.error.message)
+  return comLinhas((kits.data ?? []) as Array<Record<string, unknown>>)
+}
+
+/** Um kit só, para as telas de registrar uso e editar. null = não existe ou é de outro polo. */
+export async function buscarKit(kitId: string): Promise<StockKit | null> {
+  const { data, error } = await assertClient().from('stock_kits').select(COLUNAS_KIT).eq('id', kitId).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data) return null
+  const [kit] = await comLinhas([data as Record<string, unknown>])
+  return kit ?? null
 }
 
 /**

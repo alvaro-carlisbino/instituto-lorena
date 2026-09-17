@@ -116,6 +116,9 @@ const FluxoCaixaPage = lazyPage(() => import('./pages/FluxoCaixaPage'), 'FluxoCa
 const RecorrentesPage = lazyPage(() => import('./pages/RecorrentesPage'), 'RecorrentesPage')
 const NfePage = lazyPage(() => import('./pages/NfePage'), 'NfePage')
 const KitsPage = lazyPage(() => import('./pages/KitsPage'), 'KitsPage')
+const KitUsoPage = lazyPage(() => import('./pages/KitUsoPage'), 'KitUsoPage')
+const KitEditarPage = lazyPage(() => import('./pages/KitEditarPage'), 'KitEditarPage')
+const KitModeloPage = lazyPage(() => import('./pages/KitModeloPage'), 'KitModeloPage')
 const InventarioPage = lazyPage(() => import('./pages/InventarioPage'), 'InventarioPage')
 const EstoqueRelatoriosPage = lazyPage(() => import('./pages/EstoqueRelatoriosPage'), 'EstoqueRelatoriosPage')
 const CodigosBarrasPage = lazyPage(() => import('./pages/CodigosBarrasPage'), 'CodigosBarrasPage')
@@ -187,6 +190,9 @@ function AppRoutes() {
         <Route path="/recorrentes" element={<FinanceOnly><RecorrentesPage /></FinanceOnly>} />
         <Route path="/nfe" element={<NfePage />} />
         <Route path="/kits" element={<KitsPage />} />
+        <Route path="/kits/:kitId/uso" element={<KitUsoPage />} />
+        <Route path="/kits/:kitId/editar" element={<KitEditarPage />} />
+        <Route path="/kits/modelos/:modeloId" element={<KitModeloPage />} />
         <Route path="/inventario" element={<InventarioPage />} />
         <Route path="/estoque-relatorios" element={<EstoqueRelatoriosPage />} />
         <Route path="/estoque-codigos" element={<CodigosBarrasPage />} />

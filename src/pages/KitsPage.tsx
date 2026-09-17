@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Boxes, Layers, PackageCheck, ShieldAlert } from 'lucide-react'
 
@@ -10,8 +10,6 @@ import { KitsLista } from '@/components/kits/KitsLista'
 import { LivroControlados } from '@/components/kits/LivroControlados'
 import { ModelosKit } from '@/components/kits/ModelosKit'
 import { MontarKit } from '@/components/kits/MontarKit'
-import { EditarKitDialog } from '@/components/kits/EditarKitDialog'
-import { RegistrarUsoDialog } from '@/components/kits/RegistrarUsoDialog'
 import { useTenant } from '@/context/TenantContext'
 import { estoqueTabs } from '@/pages/EstoquePage'
 import { type StockItem, listStockItems } from '@/services/estoqueCompras'
@@ -56,9 +54,7 @@ export function KitsPage() {
   const [kitCosts, setKitCosts] = useState<Map<string, KitCost>>(new Map())
   const [lastCosts, setLastCosts] = useState<Map<string, number>>(new Map())
   const [loading, setLoading] = useState(true)
-  const [registrando, setRegistrando] = useState<StockKit | null>(null)
-  // Guarda o id, não o kit: a cada edição a lista recarrega e o dialog precisa do kit novo.
-  const [editandoId, setEditandoId] = useState<string | null>(null)
+  const navigate = useNavigate()
 
   // `loading` só vale para a primeira carga (nasce true); recarregar depois de uma ação não
   // pisca a tela inteira de "Carregando…".
@@ -89,23 +85,12 @@ export function KitsPage() {
     void load()
   }, [])
 
-  // `/kits?aba=kits&kit=<id>` abre a edição direto: é o link do Resultado por cirurgia.
+  // `/kits?aba=kits&kit=<id>` era o link antigo da edição (Resultado por cirurgia, favoritos):
+  // a edição virou tela, então o link velho segue para ela.
   const kitDaUrl = params.get('kit')
   useEffect(() => {
-    if (!kitDaUrl || loading) return
-    const t = window.setTimeout(() => {
-      if (kits.some((k) => k.id === kitDaUrl)) setEditandoId(kitDaUrl)
-      setParams(
-        (prev) => {
-          const next = new URLSearchParams(prev)
-          next.delete('kit')
-          return next
-        },
-        { replace: true },
-      )
-    }, 0)
-    return () => window.clearTimeout(t)
-  }, [kitDaUrl, loading, kits, setParams])
+    if (kitDaUrl) navigate(`/kits/${kitDaUrl}/editar`, { replace: true })
+  }, [kitDaUrl, navigate])
 
   const trocarItem = useCallback(
     (item: StockItem) => setItems((prev) => prev.map((i) => (i.id === item.id ? item : i))),
@@ -157,43 +142,19 @@ export function KitsPage() {
             kitCosts={kitCosts}
             lastCosts={lastCosts}
             loading={loading}
-            onRegistrarUso={setRegistrando}
-            onEditar={(k) => setEditandoId(k.id)}
+            onRegistrarUso={(k) => navigate(`/kits/${k.id}/uso`)}
+            onEditar={(k) => navigate(`/kits/${k.id}/editar`)}
             onMudou={() => void load()}
           />
         </TabsContent>
         <TabsContent value="modelos">
-          <ModelosKit templates={templates} items={items} onMudou={() => void load()} onItemAtualizado={trocarItem} />
+          <ModelosKit templates={templates} items={items} onMudou={() => void load()} />
         </TabsContent>
         <TabsContent value="controlados">
           <LivroControlados rows={controlledLog} nomes={nomes} />
         </TabsContent>
       </Tabs>
 
-      {editandoId ? (
-        <EditarKitDialog
-          key={editandoId}
-          kit={kits.find((k) => k.id === editandoId) ?? null}
-          tenantId={tenant.id}
-          items={items}
-          lastCosts={lastCosts}
-          onItemAtualizado={trocarItem}
-          onMudou={load}
-          onClose={() => setEditandoId(null)}
-        />
-      ) : null}
-
-      <RegistrarUsoDialog
-        key={registrando?.id ?? 'nenhum'}
-        kit={registrando}
-        items={items}
-        onItemAtualizado={trocarItem}
-        onClose={() => setRegistrando(null)}
-        onFeito={() => {
-          setRegistrando(null)
-          void load()
-        }}
-      />
     </AppLayout>
   )
 }
