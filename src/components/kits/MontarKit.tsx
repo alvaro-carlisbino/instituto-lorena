@@ -20,7 +20,8 @@ import { Switch } from '@/components/ui/switch'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { formatBRL, formatQtd, itemEhEscolha, ordenarPorNome, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
+import { CabecalhoGrupo } from '@/components/kits/CabecalhoGrupo'
+import { agruparMatMed, formatBRL, formatQtd, itemEhEscolha, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
 import { VendaDoKitPicker } from '@/components/kits/VendaDoKitPicker'
 import { beep } from '@/lib/beep'
 import { combinaBusca } from '@/lib/busca'
@@ -84,7 +85,7 @@ export function MontarKit({
   const [destaque, setDestaque] = useState<string | null>(null)
   const [confirmar, setConfirmar] = useState(false)
   const [salvando, setSalvando] = useState(false)
-  const listaRef = useRef<HTMLUListElement>(null)
+  const listaRef = useRef<HTMLDivElement>(null)
   // Leitor USB manda um código atrás do outro mais rápido que o React renderiza: o bipe lê a
   // bandeja daqui, senão o segundo bipe partiria da lista de antes do primeiro e o apagaria.
   const linhasRef = useRef(r.linhas)
@@ -218,16 +219,13 @@ export function MontarKit({
     else void montar()
   }
 
-  const linhasVisiveis = ordenarPorNome(
-    r.linhas.filter((l) => {
-      const item = porId.get(l.itemId)
-      if (termo && !combinaBusca(termo, item?.name, item?.sku, item?.barcode)) return false
-      if (filtro === 'faltam') return l.conferido < l.qty
-      if (filtro === 'problema') return resumo.semSaldo.has(l.itemId) || itemEhEscolha(item?.name) || !l.itemId
-      return true
-    }),
-    (l) => porId.get(l.itemId)?.name,
-  )
+  const linhasVisiveis = r.linhas.filter((l) => {
+    const item = porId.get(l.itemId)
+    if (termo && !combinaBusca(termo, item?.name, item?.sku, item?.barcode)) return false
+    if (filtro === 'faltam') return l.conferido < l.qty
+    if (filtro === 'problema') return resumo.semSaldo.has(l.itemId) || itemEhEscolha(item?.name) || !l.itemId
+    return true
+  })
   const linhaEditada = r.linhas.find((l) => l.chave === editando) ?? null
   const progresso = resumo.linhas > 0 ? Math.round((resumo.completas / resumo.linhas) * 100) : 0
 
@@ -378,66 +376,73 @@ export function MontarKit({
             </p>
           </div>
         ) : (
-          <ul ref={listaRef} className="divide-y divide-border">
-            {linhasVisiveis.map((l) => {
-              const item = porId.get(l.itemId)
-              const completo = l.conferido >= l.qty
-              const semSaldo = resumo.semSaldo.has(l.itemId)
-              const escolha = itemEhEscolha(item?.name)
-              return (
-                <li
-                  key={l.chave}
-                  data-chave={l.chave}
-                  className={cn('flex items-center gap-2.5 px-3 py-2.5 transition-colors sm:px-4', destaque === l.chave && 'bg-emerald-500/10')}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setLinha(l.chave, { conferido: completo ? 0 : l.qty })}
-                    className={cn(
-                      'flex size-8 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold tabular-nums',
-                      completo
-                        ? 'border-emerald-500 bg-emerald-500 text-white'
-                        : l.conferido > 0
-                          ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300'
-                          : 'border-border text-muted-foreground',
-                    )}
-                    aria-label={completo ? `Desmarcar ${item?.name ?? 'item'}` : `Marcar ${item?.name ?? 'item'} como conferido`}
-                  >
-                    {completo ? <Check className="size-4" aria-hidden /> : l.conferido > 0 ? formatQtd(l.conferido) : null}
-                  </button>
-                  <button type="button" onClick={() => setEditando(l.chave)} className="min-w-0 flex-1 text-left">
-                    <span className="block text-sm font-medium leading-snug">{item?.name ?? 'Escolher item'}</span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                      <span className={cn(semSaldo && 'font-medium text-destructive')}>
-                        saldo {formatQtd(item?.qty ?? 0)} {item?.unit}
-                      </span>
-                      {escolha ? (
-                        <span className="font-medium text-amber-600 dark:text-amber-400">trocar pelo item certo</span>
-                      ) : null}
-                      {l.avulso ? <span>avulso</span> : null}
-                      {l.cobrancaCents > 0 ? <span>{formatBRL(l.cobrancaCents)}</span> : null}
-                      {item?.controlled ? (
-                        <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
-                          <ShieldAlert className="size-3" aria-hidden /> controlado
-                        </span>
-                      ) : null}
-                    </span>
-                  </button>
-                  <QtyStepper
-                    value={l.qty}
-                    min={0}
-                    label={item?.name ?? 'item'}
-                    onChange={(qty) => setLinha(l.chave, { qty, conferido: Math.min(l.conferido, qty) })}
-                  />
-                </li>
-              )
-            })}
+          <div ref={listaRef}>
+            {agruparMatMed(linhasVisiveis, (l) => porId.get(l.itemId)?.name, (l) => porId.get(l.itemId)?.category).map((g) => (
+              <div key={g.grupo}>
+                <CabecalhoGrupo grupo={g.grupo} rotulo={g.rotulo} total={g.linhas.length} />
+                <ul className="divide-y divide-border">
+                  {g.linhas.map((l) => {
+                      const item = porId.get(l.itemId)
+                      const completo = l.conferido >= l.qty
+                      const semSaldo = resumo.semSaldo.has(l.itemId)
+                      const escolha = itemEhEscolha(item?.name)
+                      return (
+                        <li
+                          key={l.chave}
+                          data-chave={l.chave}
+                          className={cn('flex items-center gap-2.5 px-3 py-2.5 transition-colors sm:px-4', destaque === l.chave && 'bg-emerald-500/10')}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setLinha(l.chave, { conferido: completo ? 0 : l.qty })}
+                            className={cn(
+                              'flex size-8 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold tabular-nums',
+                              completo
+                                ? 'border-emerald-500 bg-emerald-500 text-white'
+                                : l.conferido > 0
+                                  ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300'
+                                  : 'border-border text-muted-foreground',
+                            )}
+                            aria-label={completo ? `Desmarcar ${item?.name ?? 'item'}` : `Marcar ${item?.name ?? 'item'} como conferido`}
+                          >
+                            {completo ? <Check className="size-4" aria-hidden /> : l.conferido > 0 ? formatQtd(l.conferido) : null}
+                          </button>
+                          <button type="button" onClick={() => setEditando(l.chave)} className="min-w-0 flex-1 text-left">
+                            <span className="block text-sm font-medium leading-snug">{item?.name ?? 'Escolher item'}</span>
+                            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                              <span className={cn(semSaldo && 'font-medium text-destructive')}>
+                                saldo {formatQtd(item?.qty ?? 0)} {item?.unit}
+                              </span>
+                              {escolha ? (
+                                <span className="font-medium text-amber-600 dark:text-amber-400">trocar pelo item certo</span>
+                              ) : null}
+                              {l.avulso ? <span>avulso</span> : null}
+                              {l.cobrancaCents > 0 ? <span>{formatBRL(l.cobrancaCents)}</span> : null}
+                              {item?.controlled ? (
+                                <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+                                  <ShieldAlert className="size-3" aria-hidden /> controlado
+                                </span>
+                              ) : null}
+                            </span>
+                          </button>
+                          <QtyStepper
+                            value={l.qty}
+                            min={0}
+                            label={item?.name ?? 'item'}
+                            onChange={(qty) => setLinha(l.chave, { qty, conferido: Math.min(l.conferido, qty) })}
+                          />
+                        </li>
+                      )
+                  })}
+                </ul>
+              </div>
+            ))}
             {linhasVisiveis.length === 0 ? (
-              <li className="px-4 py-6 text-center text-sm text-muted-foreground">
+              <p className="px-4 py-6 text-center text-sm text-muted-foreground">
                 {termo ? `Nenhum item com "${termo}" na bandeja.` : 'Nada neste filtro.'}
-              </li>
+              </p>
             ) : null}
-          </ul>
+          </div>
         )}
 
         <div className="border-t border-border p-3 sm:p-4">

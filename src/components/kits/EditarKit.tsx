@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, Loader2, Printer, ShieldAlert, Trash2 } from 'lucide-react'
+import { Check, ClipboardCheck, Loader2, Printer, ShieldAlert, Trash2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,8 @@ import { SearchPicker } from '@/components/ui/search-picker'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { STATUS_KIT, formatBRL, formatQtd, itemEhEscolha, ordenarPorNome, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
+import { CabecalhoGrupo } from '@/components/kits/CabecalhoGrupo'
+import { STATUS_KIT, agruparMatMed, formatBRL, formatQtd, itemEhEscolha, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
 import { VendaDoKitPicker } from '@/components/kits/VendaDoKitPicker'
 import { vincularKitAVenda } from '@/services/resultadoProcedimentos'
 import { beep } from '@/lib/beep'
@@ -28,6 +29,7 @@ import {
   atualizarKit,
   excluirKit,
   imprimirContaDoKit,
+  imprimirFolhaDoKit,
   removerLinhaKit,
 } from '@/services/estoqueKits'
 
@@ -190,13 +192,10 @@ export function EditarKit({
   const cobrado = kit.items.reduce((s, l) => s + Math.max(0, l.chargeCents), 0)
   const status = STATUS_KIT[kit.status]
   const nomeDaLinha = (l: StockKit['items'][number]) => l.label || porId.get(l.itemId)?.name
-  const linhasVisiveis = ordenarPorNome(
-    kit.items.filter((l) => {
-      const item = porId.get(l.itemId)
-      return combinaBusca(termo, l.label, item?.name, item?.sku, item?.barcode)
-    }),
-    nomeDaLinha,
-  )
+  const linhasVisiveis = kit.items.filter((l) => {
+    const item = porId.get(l.itemId)
+    return combinaBusca(termo, l.label, item?.name, item?.sku, item?.barcode)
+  })
   const ocupado = pendentes > 0 || concluindo
 
   return (
@@ -300,24 +299,29 @@ export function EditarKit({
             <p className="text-base font-semibold tabular-nums">{formatBRL(cobrado)}</p>
           </div>
         </div>
-        <div className="border-t border-border p-2">
-          <Button
-            variant="ghost"
-            className="h-9 w-full"
-            disabled={ocupado || imprimindo}
-            onClick={() => {
-              setImprimindo(true)
-              void imprimirContaDoKit(
-                kit,
-                new Map(items.map((i) => [i.id, { name: i.name, controlled: i.controlled }] as const)),
-                lastCosts,
-              )
-                .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao imprimir'))
-                .finally(() => setImprimindo(false))
-            }}
-          >
-            <Printer className="size-4" aria-hidden /> {pendentes > 0 ? 'Aguarde salvar para imprimir' : 'Imprimir ou salvar a conta (PDF)'}
-          </Button>
+        <div className="grid grid-cols-2 gap-px border-t border-border bg-border">
+          {(
+            [
+              ['folha', ClipboardCheck, 'Folha para ticar'],
+              ['conta', Printer, 'Conta do paciente'],
+            ] as const
+          ).map(([qual, Icone, rotulo]) => (
+            <Button
+              key={qual}
+              variant="ghost"
+              className="h-10 rounded-none bg-card"
+              disabled={ocupado || imprimindo}
+              onClick={() => {
+                setImprimindo(true)
+                const itens = new Map(items.map((i) => [i.id, { name: i.name, controlled: i.controlled, category: i.category }] as const))
+                void (qual === 'folha' ? imprimirFolhaDoKit(kit, itens) : imprimirContaDoKit(kit, itens, lastCosts))
+                  .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao imprimir'))
+                  .finally(() => setImprimindo(false))
+              }}
+            >
+              <Icone className="size-4" aria-hidden /> {rotulo}
+            </Button>
+          ))}
         </div>
       </section>
 
@@ -349,89 +353,95 @@ export function EditarKit({
           />
         </div>
 
-        <ul className="divide-y divide-border">
-          {linhasVisiveis.map((l) => {
-            const item = porId.get(l.itemId)
-            const nome = l.label || item?.name || 'Item'
-            const saiu = local[`saiu:${l.id}`] ?? l.qty
-            const voltou = local[`voltou:${l.id}`] ?? l.returnedQty
-            const usado = Math.max(0, saiu - voltou)
-            const escolha = itemEhEscolha(item?.name)
-            return (
-              <li key={l.id} className="space-y-2 px-3 py-3 sm:px-4">
-                <div className="flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="flex items-center gap-1 text-sm font-medium leading-snug">
-                      {nome}
-                      {item?.controlled ? <ShieldAlert className="size-3.5 shrink-0 text-amber-500" aria-label="controlado" /> : null}
-                    </p>
-                    <p className="text-xs text-muted-foreground tabular-nums">
-                      {l.isExtra ? 'avulso · ' : ''}
-                      <span className="font-medium text-foreground">usado {formatQtd(usado)}</span>
-                      {' · '}custo {formatBRL(Math.round(usado * (lastCosts.get(l.itemId) ?? 0)))}
-                      {escolha ? <span className="text-amber-700 dark:text-amber-300"> · item de escolha, troque</span> : null}
-                    </p>
-                  </div>
-                  {editavel ? (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-9 shrink-0 text-muted-foreground"
-                      onClick={() => setRemovendo(l.id)}
-                      aria-label={`Tirar ${nome} do kit`}
-                    >
-                      <Trash2 className="size-4" aria-hidden />
-                    </Button>
-                  ) : null}
-                </div>
-                <div className="grid grid-cols-2 items-end gap-x-3 gap-y-2 sm:grid-cols-[auto_auto_1fr]">
-                  <div className="space-y-1">
-                    <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Saiu</span>
-                    {editavel ? (
-                      <QtyStepper value={saiu} min={Math.max(voltou, 0.01)} label={`saída de ${nome}`} onChange={(n) => mudarQtd(l.id, n)} />
-                    ) : (
-                      <span className="text-sm tabular-nums">{formatQtd(saiu)}</span>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Voltou</span>
-                    {editavel ? (
-                      <QtyStepper value={voltou} max={saiu} label={`devolução de ${nome}`} onChange={(n) => mudarVoltou(l, n)} />
-                    ) : (
-                      <span className="text-sm tabular-nums">{formatQtd(voltou)}</span>
-                    )}
-                  </div>
-                  <div className="col-span-2 space-y-1 sm:col-span-1 sm:justify-self-end">
-                    <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:text-right">Cobrar do paciente</span>
-                    <div className="relative sm:w-36">
-                      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">R$</span>
-                      <Input
-                        key={`${l.id}-${l.chargeCents}`}
-                        defaultValue={reais(l.chargeCents)}
-                        placeholder="0,00"
-                        inputMode="decimal"
-                        disabled={!editavel}
-                        aria-label={`Cobrança de ${nome}`}
-                        className="h-9 pl-8 text-right tabular-nums"
-                        onBlur={(e) => {
-                          const cents = centavos(e.target.value)
-                          if (cents === l.chargeCents) return
-                          void enfileirar('Cobrança', () => alterarLinhaKit({ kitItemId: l.id, qty: l.qty, cobrancaCents: cents }))
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') e.currentTarget.blur()
-                        }}
-                      />
+        {agruparMatMed(linhasVisiveis, nomeDaLinha, (l) => porId.get(l.itemId)?.category).map((g) => (
+          <div key={g.grupo}>
+            <CabecalhoGrupo grupo={g.grupo} rotulo={g.rotulo} total={g.linhas.length} />
+            <ul className="divide-y divide-border">
+              {g.linhas.map((l) => {
+                const item = porId.get(l.itemId)
+                const nome = l.label || item?.name || 'Item'
+                const saiu = local[`saiu:${l.id}`] ?? l.qty
+                const voltou = local[`voltou:${l.id}`] ?? l.returnedQty
+                const usado = Math.max(0, saiu - voltou)
+                const escolha = itemEhEscolha(item?.name)
+                return (
+                  <li key={l.id} className="space-y-2 px-3 py-3 sm:px-4">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="flex items-center gap-1 text-sm font-medium leading-snug">
+                          {nome}
+                          {item?.controlled ? <ShieldAlert className="size-3.5 shrink-0 text-amber-500" aria-label="controlado" /> : null}
+                        </p>
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          {l.isExtra ? 'avulso · ' : ''}
+                          {l.consumoSetor ? 'consumo do setor · ' : ''}
+                          <span className="font-medium text-foreground">usado {formatQtd(usado)}</span>
+                          {' · '}custo {formatBRL(Math.round(usado * (lastCosts.get(l.itemId) ?? 0)))}
+                          {escolha ? <span className="text-amber-700 dark:text-amber-300"> · item de escolha, troque</span> : null}
+                        </p>
+                      </div>
+                      {editavel ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-9 shrink-0 text-muted-foreground"
+                          onClick={() => setRemovendo(l.id)}
+                          aria-label={`Tirar ${nome} do kit`}
+                        >
+                          <Trash2 className="size-4" aria-hidden />
+                        </Button>
+                      ) : null}
                     </div>
-                  </div>
-                </div>
-              </li>
-            )
-          })}
-          {termo && linhasVisiveis.length === 0 ? (
-            <li className="px-4 py-8 text-center text-sm text-muted-foreground">Nenhum item com "{termo}" neste kit.</li>
-          ) : null}
-        </ul>
+                    <div className="grid grid-cols-2 items-end gap-x-3 gap-y-2 sm:grid-cols-[auto_auto_1fr]">
+                      <div className="space-y-1">
+                        <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Saiu</span>
+                        {editavel ? (
+                          <QtyStepper value={saiu} min={Math.max(voltou, 0.01)} label={`saída de ${nome}`} onChange={(n) => mudarQtd(l.id, n)} />
+                        ) : (
+                          <span className="text-sm tabular-nums">{formatQtd(saiu)}</span>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Voltou</span>
+                        {editavel ? (
+                          <QtyStepper value={voltou} max={saiu} label={`devolução de ${nome}`} onChange={(n) => mudarVoltou(l, n)} />
+                        ) : (
+                          <span className="text-sm tabular-nums">{formatQtd(voltou)}</span>
+                        )}
+                      </div>
+                      <div className="col-span-2 space-y-1 sm:col-span-1 sm:justify-self-end">
+                        <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:text-right">Cobrar do paciente</span>
+                        <div className="relative sm:w-36">
+                          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">R$</span>
+                          <Input
+                            key={`${l.id}-${l.chargeCents}`}
+                            defaultValue={reais(l.chargeCents)}
+                            placeholder="0,00"
+                            inputMode="decimal"
+                            disabled={!editavel}
+                            aria-label={`Cobrança de ${nome}`}
+                            className="h-9 pl-8 text-right tabular-nums"
+                            onBlur={(e) => {
+                              const cents = centavos(e.target.value)
+                              if (cents === l.chargeCents) return
+                              void enfileirar('Cobrança', () => alterarLinhaKit({ kitItemId: l.id, qty: l.qty, cobrancaCents: cents }))
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') e.currentTarget.blur()
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ))}
+        {termo && linhasVisiveis.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">Nenhum item com "{termo}" neste kit.</p>
+        ) : null}
       </section>
 
       <div className="sticky bottom-0 z-10 -mx-3 border-t border-border bg-background px-3 py-3 shadow-[0_-4px_12px_-8px_rgb(0_0_0/0.25)] sm:mx-0 sm:rounded-xl sm:border sm:px-4">

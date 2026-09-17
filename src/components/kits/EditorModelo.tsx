@@ -11,13 +11,14 @@ import { SearchPicker } from '@/components/ui/search-picker'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { formatQtd, itemEhEscolha, ordenarPorNome, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
+import { CabecalhoGrupo } from '@/components/kits/CabecalhoGrupo'
+import { agruparMatMed, formatQtd, itemEhEscolha, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
 import { beep } from '@/lib/beep'
 import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
-import { type KitTemplate, createKitTemplate, updateKitTemplate } from '@/services/estoqueKits'
+import { type KitTemplate, type SetorKit, createKitTemplate, updateKitTemplate } from '@/services/estoqueKits'
 
 type Linha = { itemId: string; qty: number }
 
@@ -37,6 +38,7 @@ export function EditorModelo({
   onItemAtualizado: (item: StockItem) => void
 }) {
   const [nome, setNome] = useState(modelo?.name ?? '')
+  const [setor, setSetor] = useState<SetorKit | null>(modelo?.setor ?? null)
   const [linhas, setLinhas] = useState<Linha[]>(() => (modelo?.items ?? []).map((i) => ({ itemId: i.itemId, qty: i.qty })))
   const [codigo, setCodigo] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
@@ -44,16 +46,13 @@ export function EditorModelo({
   const termo = useDeferredValue(pesquisa)
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
   const busca = useMemo(() => produtosParaBusca(items), [items])
-  // Em ordem alfabética na tela; o índice é o da lista guardada, que é o que as ações alteram.
-  const visiveis = ordenarPorNome(
-    linhas
-      .map((l, idx) => ({ l, idx }))
-      .filter(({ l }) => {
-        const item = porId.get(l.itemId)
-        return combinaBusca(termo, item?.name, item?.sku, item?.barcode)
-      }),
-    ({ l }) => porId.get(l.itemId)?.name,
-  )
+  // Na tela sai em MAT/MED e ordem alfabética; o índice é o da lista guardada, que é o que as ações alteram.
+  const visiveis = linhas
+    .map((l, idx) => ({ l, idx }))
+    .filter(({ l }) => {
+      const item = porId.get(l.itemId)
+      return combinaBusca(termo, item?.name, item?.sku, item?.barcode)
+    })
 
   const adicionar = (itemId: string) =>
     setLinhas((prev) => {
@@ -83,8 +82,8 @@ export function EditorModelo({
     }
     setSalvando(true)
     try {
-      if (modelo) await updateKitTemplate({ id: modelo.id, name: nome, items: validas })
-      else await createKitTemplate({ name: nome, items: validas })
+      if (modelo) await updateKitTemplate({ id: modelo.id, name: nome, setor, items: validas })
+      else await createKitTemplate({ name: nome, setor, items: validas })
       toast.success(modelo ? 'Modelo atualizado.' : `Modelo "${nome.trim()}" criado.`)
       onSalvo()
     } catch (e) {
@@ -99,6 +98,31 @@ export function EditorModelo({
         <div className="space-y-1.5">
           <Label htmlFor="modelo-nome">Nome do modelo</Label>
           <Input id="modelo-nome" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Kit Biópsia Ambulatório" className="h-9" />
+        </div>
+        <div className="space-y-1.5">
+          <span className="block text-sm font-medium">Setor</span>
+          <div className="inline-flex rounded-lg border border-border p-0.5" role="group" aria-label="Setor do kit">
+            {(
+              [
+                ['cirurgia', 'Centro cirúrgico'],
+                ['spa', 'SPA'],
+              ] as Array<[SetorKit, string]>
+            ).map(([st, rotulo]) => (
+              <button
+                key={st}
+                type="button"
+                aria-pressed={setor === st}
+                onClick={() => setSetor(setor === st ? null : st)}
+                className={cn(
+                  'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                  setor === st ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {rotulo}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">Decide o padrão do consumo do setor ao registrar o uso.</p>
         </div>
         <ScanBar onCode={onCode} placeholder="Bipe para adicionar item" />
         <SearchPicker
@@ -122,51 +146,56 @@ export function EditorModelo({
             />
           </div>
         ) : null}
-        <ul className="divide-y divide-border">
-          {visiveis.map(({ l, idx }) => {
-            const item = porId.get(l.itemId)
-            const escolha = itemEhEscolha(item?.name)
-            return (
-              <li key={`${l.itemId}-${idx}`} className="flex items-center gap-2 px-3 py-2 sm:px-4">
-                <div className="min-w-0 flex-1">
-                  <SearchPicker
-                    size="sm"
-                    title="Trocar item"
-                    placeholder="Escolher item"
-                    searchPlaceholder="Nome, SKU ou código…"
-                    items={busca}
-                    value={l.itemId ? { id: l.itemId, label: item?.name ?? 'Item' } : null}
-                    onPick={(p) => setLinhas((prev) => prev.map((x, j) => (j === idx ? { ...x, itemId: p.id } : x)))}
-                  />
-                  <p className={cn('mt-0.5 text-xs text-muted-foreground', escolha && 'text-amber-700 dark:text-amber-300')}>
-                    {escolha ? 'É uma escolha, não um produto: troque ou escolha na montagem' : `saldo ${formatQtd(item?.qty ?? 0)} ${item?.unit ?? ''}`}
-                  </p>
-                </div>
-                <QtyStepper
-                  value={l.qty}
-                  min={1}
-                  label={item?.name ?? 'item'}
-                  onChange={(qty) => setLinhas((prev) => prev.map((x, j) => (j === idx ? { ...x, qty } : x)))}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-9 shrink-0"
-                  onClick={() => setLinhas((prev) => prev.filter((_, j) => j !== idx))}
-                  aria-label={`Tirar ${item?.name ?? 'item'} do modelo`}
-                >
-                  <Trash2 className="size-4" aria-hidden />
-                </Button>
-              </li>
-            )
-          })}
-          {linhas.length === 0 ? (
-            <li className="px-4 py-10 text-center text-sm text-muted-foreground">Nenhum item ainda. Bipe ou busque pelo nome.</li>
-          ) : null}
-          {linhas.length > 0 && visiveis.length === 0 ? (
-            <li className="px-4 py-8 text-center text-sm text-muted-foreground">Nenhum item com "{termo}" no modelo.</li>
-          ) : null}
-        </ul>
+        {agruparMatMed(visiveis, ({ l }) => porId.get(l.itemId)?.name, ({ l }) => porId.get(l.itemId)?.category).map((g) => (
+          <div key={g.grupo}>
+            <CabecalhoGrupo grupo={g.grupo} rotulo={g.rotulo} total={g.linhas.length} />
+            <ul className="divide-y divide-border">
+              {g.linhas.map(({ l, idx }) => {
+                const item = porId.get(l.itemId)
+                const escolha = itemEhEscolha(item?.name)
+                return (
+                  <li key={`${l.itemId}-${idx}`} className="flex items-center gap-2 px-3 py-2 sm:px-4">
+                    <div className="min-w-0 flex-1">
+                      <SearchPicker
+                        size="sm"
+                        title="Trocar item"
+                        placeholder="Escolher item"
+                        searchPlaceholder="Nome, SKU ou código…"
+                        items={busca}
+                        value={l.itemId ? { id: l.itemId, label: item?.name ?? 'Item' } : null}
+                        onPick={(p) => setLinhas((prev) => prev.map((x, j) => (j === idx ? { ...x, itemId: p.id } : x)))}
+                      />
+                      <p className={cn('mt-0.5 text-xs text-muted-foreground', escolha && 'text-amber-700 dark:text-amber-300')}>
+                        {escolha ? 'É uma escolha, não um produto: troque ou escolha na montagem' : `saldo ${formatQtd(item?.qty ?? 0)} ${item?.unit ?? ''}`}
+                      </p>
+                    </div>
+                    <QtyStepper
+                      value={l.qty}
+                      min={1}
+                      label={item?.name ?? 'item'}
+                      onChange={(qty) => setLinhas((prev) => prev.map((x, j) => (j === idx ? { ...x, qty } : x)))}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-9 shrink-0"
+                      onClick={() => setLinhas((prev) => prev.filter((_, j) => j !== idx))}
+                      aria-label={`Tirar ${item?.name ?? 'item'} do modelo`}
+                    >
+                      <Trash2 className="size-4" aria-hidden />
+                    </Button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ))}
+        {linhas.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">Nenhum item ainda. Bipe ou busque pelo nome.</p>
+        ) : null}
+        {linhas.length > 0 && visiveis.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">Nenhum item com "{termo}" no modelo.</p>
+        ) : null}
       </section>
 
       <div className="sticky bottom-0 z-10 -mx-3 border-t border-border bg-background px-3 py-3 shadow-[0_-4px_12px_-8px_rgb(0_0_0/0.25)] sm:mx-0 sm:rounded-xl sm:border sm:px-4">

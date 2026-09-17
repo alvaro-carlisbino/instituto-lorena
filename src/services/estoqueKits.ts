@@ -1,6 +1,6 @@
 import { buscarTudo } from '@/lib/supabasePaginate'
 import { supabase } from '@/lib/supabaseClient'
-import { valorarLinhas, htmlContaDoKit } from '@/lib/contaDoKit'
+import { htmlContaDoKit, htmlFolhaDoKit, valorarLinhas } from '@/lib/contaDoKit'
 import { imprimirHtml } from '@/lib/exportar'
 
 // Fase 2 do estoque: lotes com validade (FEFO), kits cirúrgicos e livro de
@@ -70,18 +70,21 @@ export async function ensureBatch(payload: {
 // ------------------------------------------------------------ modelos de kit
 
 export type KitTemplateItem = { id: string; itemId: string; qty: number }
+/** De onde é o kit: decide o padrão do consumo do setor no registro de uso. */
+export type SetorKit = 'cirurgia' | 'spa'
 export type KitTemplate = {
   id: string
   name: string
   note: string | null
   active: boolean
+  setor: SetorKit | null
   items: KitTemplateItem[]
 }
 
 export async function listKitTemplates(): Promise<KitTemplate[]> {
   const client = assertClient()
   const [tpls, items] = await Promise.all([
-    client.from('kit_templates').select('id, name, note, active').eq('active', true).order('name'),
+    client.from('kit_templates').select('id, name, note, active, setor').eq('active', true).order('name'),
     client.from('kit_template_items').select('id, template_id, item_id, qty'),
   ])
   if (tpls.error) throw new Error(tpls.error.message)
@@ -98,13 +101,23 @@ export async function listKitTemplates(): Promise<KitTemplate[]> {
     name: String(r.name),
     note: r.note != null ? String(r.note) : null,
     active: Boolean(r.active),
+    setor: r.setor === 'cirurgia' || r.setor === 'spa' ? r.setor : null,
     items: byTpl.get(String(r.id)) ?? [],
   }))
+}
+
+/** Setor do modelo (inclusive desativado): kit antigo continua sabendo de onde veio. */
+export async function setorDoModelo(templateId: string): Promise<SetorKit | null> {
+  const { data, error } = await assertClient().from('kit_templates').select('setor').eq('id', templateId).maybeSingle()
+  if (error) throw new Error(error.message)
+  const setor = (data as { setor?: unknown } | null)?.setor
+  return setor === 'cirurgia' || setor === 'spa' ? setor : null
 }
 
 export async function createKitTemplate(payload: {
   name: string
   note?: string
+  setor?: SetorKit | null
   items: Array<{ itemId: string; qty: number }>
 }): Promise<void> {
   const client = assertClient()
@@ -113,7 +126,7 @@ export async function createKitTemplate(payload: {
   if (items.length === 0) throw new Error('Inclua ao menos um item no modelo.')
   const { data, error } = await client
     .from('kit_templates')
-    .insert({ name: payload.name.trim(), note: payload.note?.trim() || null })
+    .insert({ name: payload.name.trim(), note: payload.note?.trim() || null, setor: payload.setor ?? null })
     .select('id')
     .single()
   if (error) throw new Error(error.message)
@@ -193,6 +206,8 @@ export type StockKitItem = {
   /** Quanto desta linha voltou para o estoque (sobra da bandeja). Usado = qty - returnedQty. */
   returnedQty: number
   isExtra: boolean
+  /** Entrou pelo consumo do setor no registro de uso (álcool, luvas, toca), não pela bandeja. */
+  consumoSetor: boolean
   chargeCents: number
   label: string | null
 }
@@ -228,7 +243,7 @@ async function comLinhas(kits: Array<Record<string, unknown>>): Promise<StockKit
         () =>
           client
             .from('stock_kit_items')
-            .select('id, kit_id, item_id, qty, returned_qty, is_extra, charge_cents, label, created_at')
+            .select('id, kit_id, item_id, qty, returned_qty, is_extra, consumo_setor, charge_cents, label, created_at')
             .in('kit_id', kitIds)
             .order('created_at')
             .order('id'),
@@ -245,6 +260,7 @@ async function comLinhas(kits: Array<Record<string, unknown>>): Promise<StockKit
       qty: Number(r.qty ?? 0),
       returnedQty: Number(r.returned_qty ?? 0),
       isExtra: Boolean(r.is_extra),
+      consumoSetor: Boolean(r.consumo_setor),
       chargeCents: Number(r.charge_cents ?? 0),
       label: r.label != null ? String(r.label) : null,
     })
@@ -402,7 +418,9 @@ export async function registrarUsoKit(
   kitId: string,
   linhas: Array<{ kitItemId: string; voltou: number; desfazer?: number; aMais: number }>,
   fechar = true,
-): Promise<{ movimentos: number; unidades: number; controlados: number; aMais: number; desfeito: number }> {
+  /** Consumo do setor já na unidade do estoque (2 pares de luva = 0,04 caixa). */
+  consumo: Array<{ itemId: string; qty: number }> = [],
+): Promise<{ movimentos: number; unidades: number; controlados: number; aMais: number; desfeito: number; consumoItens: number }> {
   const client = assertClient()
   const { data, error } = await client.rpc('stock_kit_registrar_uso', {
     p_kit_id: kitId,
@@ -410,15 +428,89 @@ export async function registrarUsoKit(
       .filter((l) => l.voltou > 0 || (l.desfazer ?? 0) > 0 || l.aMais > 0)
       .map((l) => ({ kit_item_id: l.kitItemId, voltou: l.voltou, desfazer: l.desfazer ?? 0, a_mais: l.aMais })),
     p_fechar: fechar,
+    p_consumo: consumo.filter((c) => c.qty > 0).map((c) => ({ item_id: c.itemId, qty: c.qty })),
   })
   if (error) throw new Error(error.message)
-  const r = (data ?? {}) as { movimentos?: number; unidades?: number; controlados?: number; a_mais?: number; desfeito?: number }
+  const r = (data ?? {}) as {
+    movimentos?: number
+    unidades?: number
+    controlados?: number
+    a_mais?: number
+    desfeito?: number
+    consumo_itens?: number
+  }
   return {
     movimentos: Number(r.movimentos ?? 0),
     unidades: Number(r.unidades ?? 0),
     controlados: Number(r.controlados ?? 0),
     aMais: Number(r.a_mais ?? 0),
     desfeito: Number(r.desfeito ?? 0),
+    consumoItens: Number(r.consumo_itens ?? 0),
+  }
+}
+
+// ------------------------------------------------------------ consumo do setor
+
+export type ConsumoSetor = {
+  id: string | null
+  itemId: string
+  rotulo: string
+  /** Como a equipe conta: "par", "ml", "un". */
+  unidade: string
+  /** Quanto do estoque sai por unidade lançada (par de luva, caixa de 100 → 0,02). */
+  fator: number
+  padraoCirurgia: number
+  padraoSpa: number
+}
+
+export async function listConsumoSetor(): Promise<ConsumoSetor[]> {
+  const { data, error } = await assertClient()
+    .from('stock_consumo_setor')
+    .select('id, item_id, rotulo, unidade, fator, padrao_cirurgia, padrao_spa, ordem')
+    .order('ordem')
+    .order('rotulo')
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => ({
+    id: String(r.id),
+    itemId: String(r.item_id),
+    rotulo: String(r.rotulo),
+    unidade: String(r.unidade ?? 'un'),
+    fator: Number(r.fator ?? 1),
+    padraoCirurgia: Number(r.padrao_cirurgia ?? 0),
+    padraoSpa: Number(r.padrao_spa ?? 0),
+  }))
+}
+
+/** Grava a lista inteira: atualiza, inclui e apaga o que saiu da tela. */
+export async function salvarConsumoSetor(lista: ConsumoSetor[]): Promise<void> {
+  const client = assertClient()
+  const validas = lista.filter((c) => c.itemId && c.rotulo.trim() && c.fator > 0)
+  const itens = new Set<string>()
+  for (const c of validas) {
+    if (itens.has(c.itemId)) throw new Error(`O item de "${c.rotulo}" aparece duas vezes na lista.`)
+    itens.add(c.itemId)
+  }
+  const { data: atuais, error: readErr } = await client.from('stock_consumo_setor').select('id, item_id')
+  if (readErr) throw new Error(readErr.message)
+  // Pelo item, não pelo id: linha que trocou de item vira outra linha no upsert, e a antiga sai.
+  const apagar = (atuais ?? []).filter((r) => !itens.has(String(r.item_id))).map((r) => String(r.id))
+  if (apagar.length) {
+    const { error } = await client.from('stock_consumo_setor').delete().in('id', apagar)
+    if (error) throw new Error(error.message)
+  }
+  const linhas = validas.map((c, ordem) => ({
+    item_id: c.itemId,
+    rotulo: c.rotulo.trim(),
+    unidade: c.unidade.trim() || 'un',
+    fator: c.fator,
+    padrao_cirurgia: Math.max(0, c.padraoCirurgia),
+    padrao_spa: Math.max(0, c.padraoSpa),
+    ordem,
+  }))
+  if (linhas.length) {
+    // Chave (tenant, item): trocar o item de uma linha vira outra linha, sem duplicar.
+    const { error } = await client.from('stock_consumo_setor').upsert(linhas, { onConflict: 'tenant_id,item_id' })
+    if (error) throw new Error(error.message)
   }
 }
 
@@ -532,6 +624,7 @@ export async function atualizarKit(payload: {
 export async function updateKitTemplate(payload: {
   id: string
   name: string
+  setor?: SetorKit | null
   items: Array<{ itemId: string; qty: number }>
 }): Promise<void> {
   const client = assertClient()
@@ -545,7 +638,11 @@ export async function updateKitTemplate(payload: {
   if (readErr) throw new Error(readErr.message)
   const { error } = await client
     .from('kit_templates')
-    .update({ name: payload.name.trim(), updated_at: new Date().toISOString() })
+    .update({
+      name: payload.name.trim(),
+      ...(payload.setor !== undefined ? { setor: payload.setor } : {}),
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', payload.id)
   if (error) throw new Error(error.message)
   const { error: delErr } = await client.from('kit_template_items').delete().eq('template_id', payload.id)
@@ -639,9 +736,11 @@ export async function logControlledExit(payload: {
  * Conta do paciente em PDF (pela impressão do navegador): itens usados com valor, cobrança
  * quando houver. O valor vem dos movimentos do próprio kit, a custo da baixa.
  */
+type ItemParaImpressao = { name: string; controlled: boolean; category: string | null }
+
 export async function imprimirContaDoKit(
   kit: StockKit,
-  itens: Map<string, { name: string; controlled: boolean }>,
+  itens: Map<string, ItemParaImpressao>,
   ultimoCusto: Map<string, number>,
 ): Promise<void> {
   const movs = await buscarTudo<{ item_id: unknown; qty_delta: unknown; unit_cost_cents: unknown }>(
@@ -663,6 +762,8 @@ export async function imprimirContaDoKit(
       returnedQty: l.returnedQty,
       avulso: l.isExtra,
       controlado: Boolean(itens.get(l.itemId)?.controlled),
+      categoria: itens.get(l.itemId)?.category ?? null,
+      consumoSetor: l.consumoSetor,
       cobrancaCents: l.chargeCents,
     })),
     movs.map((m) => ({
@@ -679,6 +780,29 @@ export async function imprimirContaDoKit(
     kitNome: kit.name,
     status: kit.status,
     linhas,
+  })
+  imprimirHtml(html)
+}
+
+/** Folha para ticar durante a cirurgia (itens do kit em MAT/MED + consumo do setor em branco). */
+export async function imprimirFolhaDoKit(kit: StockKit, itens: Map<string, ItemParaImpressao>): Promise<void> {
+  const consumo = await listConsumoSetor()
+  const { html } = htmlFolhaDoKit({
+    paciente: kit.patientName,
+    procedimento: kit.procedureLabel,
+    data: kit.scheduledFor ?? kit.createdAt.slice(0, 10),
+    kitNome: kit.name,
+    linhas: kit.items
+      .filter((l) => !l.consumoSetor)
+      .map((l) => ({
+        nome: l.label || itens.get(l.itemId)?.name || 'Item',
+        qty: l.qty,
+        categoria: itens.get(l.itemId)?.category ?? null,
+        controlado: Boolean(itens.get(l.itemId)?.controlled),
+        avulso: l.isExtra,
+        consumoSetor: false,
+      })),
+    consumo: consumo.map((c) => ({ rotulo: c.rotulo, unidade: c.unidade })),
   })
   imprimirHtml(html)
 }

@@ -8,7 +8,8 @@ import { SearchField } from '@/components/ui/search-field'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { formatQtd, ordenarPorNome, semCodigoBipado } from '@/components/kits/kitUi'
+import { CabecalhoGrupo } from '@/components/kits/CabecalhoGrupo'
+import { agruparMatMed, formatFracao, formatQtd, semCodigoBipado } from '@/components/kits/kitUi'
 import { beep } from '@/lib/beep'
 import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
@@ -24,7 +25,7 @@ import {
 } from '@/lib/kitMontagem'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
-import { type StockKit, registrarUsoKit } from '@/services/estoqueKits'
+import { type ConsumoSetor, type SetorKit, type StockKit, registrarUsoKit } from '@/services/estoqueKits'
 
 /** Marcar o que voltou (bandeja voltou quase vazia) ou o que foi usado (voltou quase cheia). */
 type Modo = 'usado' | 'voltou'
@@ -57,16 +58,25 @@ type Linha = StockKit['items'][number]
  * dela. Usou mais do que a bandeja levou (9 Ringer num kit de 6): o modo usado aceita, e a
  * diferença baixa junto no estoque. Bipar continua sendo "voltou 1". No kit já usado vira
  * "Corrigir uso": parte do que foi registrado e muda só o que foi esquecido.
+ *
+ * Embaixo, o consumo do setor (álcool, luvas, toca): não vai na bandeja, mas entra na conta do
+ * paciente. Vem com o padrão do setor do kit e sai do estoque na mesma gravação.
  */
 export function RegistrarUso({
   kit,
   items,
+  consumo,
+  setor,
   voltarPara,
   onFeito,
   onItemAtualizado,
 }: {
   kit: StockKit
   items: StockItem[]
+  /** Lista configurada do consumo do setor. */
+  consumo: ConsumoSetor[]
+  /** Setor do modelo do kit; sem modelo, a equipe escolhe. */
+  setor: SetorKit | null
   /** Endereço do "Cancelar". */
   voltarPara: string
   onFeito: () => void
@@ -81,6 +91,13 @@ export function RegistrarUso({
   const [codigo, setCodigo] = useState<string | null>(null)
   const [ultima, setUltima] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
+  const fechando = kit.status === 'montado'
+  const [setorEscolhido, setSetorEscolhido] = useState<SetorKit>(setor ?? 'cirurgia')
+  // Quantidade do consumo do setor, na unidade da equipe (par, ml). No kit já usado começa em
+  // zero: o que foi lançado antes já está na lista, e aqui só se soma.
+  const padraoConsumo = (s: SetorKit) =>
+    Object.fromEntries(consumo.map((c) => [c.itemId, fechando ? (s === 'spa' ? c.padraoSpa : c.padraoCirurgia) : 0]))
+  const [consumoQtd, setConsumoQtd] = useState<Record<string, number>>(() => padraoConsumo(setor ?? 'cirurgia'))
 
   useEffect(() => {
     try {
@@ -92,7 +109,6 @@ export function RegistrarUso({
   }, [marcas, kit.id])
 
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
-  const fechando = kit.status === 'montado'
   // Todas as linhas, também no kit já usado: a que voltou inteira pode ter sido marcada por engano.
   const linhas = kit.items
   const itensDoKit = useMemo(() => {
@@ -119,15 +135,17 @@ export function RegistrarUso({
 
   const registro = registroDeUso(linhas, marcas)
   const alterados = registro.itens.length
+  const consumoLancado = consumo
+    .map((c) => ({ itemId: c.itemId, qty: Math.round((consumoQtd[c.itemId] ?? 0) * c.fator * 10000) / 10000 }))
+    .filter((c) => c.qty > 0)
+  const temPadrao = consumo.some((c) => c.padraoCirurgia > 0 || c.padraoSpa > 0)
 
-  const visiveis = ordenarPorNome(
-    linhas.filter((l) => {
-      if (soAlterados && (marcas[l.id] ?? 0) === 0) return false
-      const item = porId.get(l.itemId)
-      return combinaBusca(termo, l.label, item?.name, item?.sku, item?.barcode)
-    }),
-    nomeDaLinha,
-  )
+  // A ordem (MAT/MED, alfabética) é da renderização; aqui só o filtro.
+  const visiveis = linhas.filter((l) => {
+    if (soAlterados && (marcas[l.id] ?? 0) === 0) return false
+    const item = porId.get(l.itemId)
+    return combinaBusca(termo, l.label, item?.name, item?.sku, item?.barcode)
+  })
 
   const resumoDaLinha = (l: Linha) => {
     const marca = marcasRef.current[l.id] ?? 0
@@ -192,11 +210,12 @@ export function RegistrarUso({
   const confirmar = async () => {
     setSalvando(true)
     try {
-      const r = await registrarUsoKit(kit.id, registro.itens, true)
+      const r = await registrarUsoKit(kit.id, registro.itens, true, consumoLancado)
       const partes = [
         r.unidades > 0 ? `${formatQtd(r.unidades)} ${r.unidades === 1 ? 'unidade voltou' : 'unidades voltaram'} ao estoque` : null,
         r.desfeito > 0 ? `${formatQtd(r.desfeito)} ${r.desfeito === 1 ? 'devolução desfeita' : 'devoluções desfeitas'}` : null,
         r.aMais > 0 ? `${formatQtd(r.aMais)} a mais ${r.aMais === 1 ? 'saiu' : 'saíram'} do estoque` : null,
+        r.consumoItens > 0 ? `${r.consumoItens} ${r.consumoItens === 1 ? 'item' : 'itens'} de consumo do setor na conta` : null,
       ].filter(Boolean)
       toast.success(
         partes.length > 0
@@ -304,77 +323,151 @@ export function RegistrarUso({
           </div>
         </div>
 
-        <ul className="divide-y divide-border">
-          {visiveis.map((l) => {
-            const item = porId.get(l.itemId)
-            const marca = marcas[l.id] ?? 0
-            const voltou = voltouNaLinha(l, marca)
-            const usado = usadoNaLinha(l, marca)
-            const desfaz = marca < 0 ? Math.min(-marca, l.returnedQty) : 0
-            const aMais = marca < 0 ? -marca - desfaz : 0
-            const nome = nomeDaLinha(l)
-            return (
-              <li
-                key={l.id}
-                className={cn(
-                  'flex items-center gap-3 px-3 py-2.5 sm:px-4',
-                  marca > 0 && 'bg-emerald-500/5',
-                  marca < 0 && 'bg-amber-500/5',
-                )}
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-1 text-sm font-medium leading-snug">
-                    {nome}
-                    {item?.controlled ? <ShieldAlert className="size-3.5 shrink-0 text-amber-500" aria-label="controlado" /> : null}
-                  </p>
-                  <p className="text-xs text-muted-foreground tabular-nums">
-                    saiu {formatQtd(l.qty)}
-                    {modo === 'usado' ? (
-                      <span className={cn(marca !== 0 && 'font-medium text-foreground')}> · voltou {formatQtd(voltou)}</span>
-                    ) : (
-                      <span className={cn(marca !== 0 && 'font-medium text-foreground')}> · usado {formatQtd(usado)}</span>
+        {agruparMatMed(visiveis, nomeDaLinha, (l) => porId.get(l.itemId)?.category).map((g) => (
+          <div key={g.grupo}>
+            <CabecalhoGrupo grupo={g.grupo} rotulo={g.rotulo} total={g.linhas.length} />
+            <ul className="divide-y divide-border">
+              {g.linhas.map((l) => {
+                const item = porId.get(l.itemId)
+                const marca = marcas[l.id] ?? 0
+                const voltou = voltouNaLinha(l, marca)
+                const usado = usadoNaLinha(l, marca)
+                const desfaz = marca < 0 ? Math.min(-marca, l.returnedQty) : 0
+                const aMais = marca < 0 ? -marca - desfaz : 0
+                const nome = nomeDaLinha(l)
+                return (
+                  <li
+                    key={l.id}
+                    className={cn(
+                      'flex items-center gap-3 px-3 py-2.5 sm:px-4',
+                      marca > 0 && 'bg-emerald-500/5',
+                      marca < 0 && 'bg-amber-500/5',
                     )}
-                    {desfaz > 0 ? (
-                      <span className="font-medium text-amber-700 dark:text-amber-300"> · desfaz {formatQtd(desfaz)} da devolução</span>
-                    ) : null}
-                    {aMais > 0 ? (
-                      <span className="font-medium text-amber-700 dark:text-amber-300"> · {formatQtd(aMais)} a mais que saiu</span>
-                    ) : null}
-                  </p>
-                </div>
-                <div className="flex flex-col items-end gap-0.5">
-                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                    {modo === 'usado' ? 'usado' : 'voltou'}
-                  </span>
-                  {modo === 'usado' ? (
-                    <QtyStepper value={usado} label={`uso de ${nome}`} onChange={(n) => marcar(l, marcaPorUsado(l, n))} />
-                  ) : (
-                    <QtyStepper value={voltou} max={l.qty} label={`devolução de ${nome}`} onChange={(n) => marcar(l, marcaPorVoltou(l, n))} />
-                  )}
-                </div>
-              </li>
-            )
-          })}
-          {visiveis.length === 0 ? (
-            <li className="px-4 py-10 text-center text-sm text-muted-foreground">
-              {termo
-                ? `Nenhum item com "${termo}" neste kit.`
-                : soAlterados
-                  ? 'Nada marcado ainda.'
-                  : 'Este kit não tem itens.'}
-            </li>
-          ) : null}
-        </ul>
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-center gap-1 text-sm font-medium leading-snug">
+                        {nome}
+                        {item?.controlled ? <ShieldAlert className="size-3.5 shrink-0 text-amber-500" aria-label="controlado" /> : null}
+                      </p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        saiu {formatQtd(l.qty)}
+                        {modo === 'usado' ? (
+                          <span className={cn(marca !== 0 && 'font-medium text-foreground')}> · voltou {formatQtd(voltou)}</span>
+                        ) : (
+                          <span className={cn(marca !== 0 && 'font-medium text-foreground')}> · usado {formatQtd(usado)}</span>
+                        )}
+                        {desfaz > 0 ? (
+                          <span className="font-medium text-amber-700 dark:text-amber-300"> · desfaz {formatQtd(desfaz)} da devolução</span>
+                        ) : null}
+                        {aMais > 0 ? (
+                          <span className="font-medium text-amber-700 dark:text-amber-300"> · {formatQtd(aMais)} a mais que saiu</span>
+                        ) : null}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {modo === 'usado' ? 'usado' : 'voltou'}
+                      </span>
+                      {modo === 'usado' ? (
+                        <QtyStepper value={usado} label={`uso de ${nome}`} onChange={(n) => marcar(l, marcaPorUsado(l, n))} />
+                      ) : (
+                        <QtyStepper value={voltou} max={l.qty} label={`devolução de ${nome}`} onChange={(n) => marcar(l, marcaPorVoltou(l, n))} />
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ))}
+        {visiveis.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+            {termo
+              ? `Nenhum item com "${termo}" neste kit.`
+              : soAlterados
+                ? 'Nada marcado ainda.'
+                : 'Este kit não tem itens.'}
+          </p>
+        ) : null}
       </section>
+
+      {consumo.length > 0 ? (
+        <section className="rounded-xl border border-border bg-card" aria-labelledby="consumo-setor-titulo">
+          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border p-3 sm:p-4">
+            <div className="min-w-0">
+              <h2 id="consumo-setor-titulo" className="text-sm font-semibold">
+                Consumo do setor
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                {fechando
+                  ? 'Não vai na bandeja, mas entra na conta deste paciente e sai do estoque junto.'
+                  : 'O que já foi lançado está na lista acima. Aqui só se soma.'}
+              </p>
+            </div>
+            {fechando && temPadrao ? (
+              <div className="inline-flex rounded-lg border border-border p-0.5" role="group" aria-label="Setor do atendimento">
+                {(
+                  [
+                    ['cirurgia', 'Centro cirúrgico'],
+                    ['spa', 'SPA'],
+                  ] as Array<[SetorKit, string]>
+                ).map(([st, rotulo]) => (
+                  <button
+                    key={st}
+                    type="button"
+                    aria-pressed={setorEscolhido === st}
+                    onClick={() => {
+                      setSetorEscolhido(st)
+                      setConsumoQtd(padraoConsumo(st))
+                    }}
+                    className={cn(
+                      'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                      setorEscolhido === st ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <ul className="divide-y divide-border">
+            {consumo.map((c) => {
+              const item = porId.get(c.itemId)
+              const qtd = consumoQtd[c.itemId] ?? 0
+              return (
+                <li key={c.itemId} className={cn('flex items-center gap-3 px-3 py-2.5 sm:px-4', qtd > 0 && 'bg-sky-500/5')}>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium leading-snug">{c.rotulo}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {item?.name ?? 'item fora do estoque'}
+                      {qtd > 0 ? ` · sai ${formatFracao(Math.round(qtd * c.fator * 10000) / 10000)} ${item?.unit ?? ''}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-0.5">
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{c.unidade}</span>
+                    <QtyStepper
+                      value={qtd}
+                      label={`${c.rotulo} em ${c.unidade}`}
+                      onChange={(n) => setConsumoQtd((prev) => ({ ...prev, [c.itemId]: n }))}
+                    />
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="sticky bottom-0 z-10 -mx-3 border-t border-border bg-background px-3 py-3 shadow-[0_-4px_12px_-8px_rgb(0_0_0/0.25)] sm:mx-0 sm:rounded-xl sm:border sm:px-4">
         <div className="flex items-center gap-3">
           <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-            {alterados > 0
+            {alterados > 0 || consumoLancado.length > 0
               ? [
                   registro.voltam > 0 ? `Voltam ${formatQtd(registro.voltam)} ${registro.voltam === 1 ? 'unidade' : 'unidades'}` : null,
                   registro.desfeito > 0 ? `desfaz ${formatQtd(registro.desfeito)} de devolução` : null,
                   registro.aMais > 0 ? `saem mais ${formatQtd(registro.aMais)} do estoque` : null,
+                  consumoLancado.length > 0 ? `${consumoLancado.length} de consumo do setor` : null,
                 ]
                   .filter(Boolean)
                   .join(' · ')
@@ -385,7 +478,7 @@ export function RegistrarUso({
           <Link to={voltarPara} className={cn(buttonVariants({ variant: 'outline' }), 'h-10 shrink-0', salvando && 'pointer-events-none opacity-50')}>
             Cancelar
           </Link>
-          <Button onClick={() => void confirmar()} disabled={salvando || (!fechando && alterados === 0)} className="h-10 shrink-0 px-4">
+          <Button onClick={() => void confirmar()} disabled={salvando || (!fechando && alterados === 0 && consumoLancado.length === 0)} className="h-10 shrink-0 px-4">
             {salvando ? 'Salvando…' : fechando ? 'Registrar uso' : 'Salvar correção'}
           </Button>
         </div>

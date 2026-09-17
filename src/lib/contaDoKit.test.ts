@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { htmlContaDoKit, valorarLinhas } from './contaDoKit'
+import { htmlContaDoKit, htmlFolhaDoKit, valorarLinhas } from './contaDoKit'
 
-const linha = (id: string, itemId: string, qty: number, returnedQty = 0, cobrancaCents = 0) => ({
+const linha = (id: string, itemId: string, qty: number, returnedQty = 0, cobrancaCents = 0, categoria: string | null = 'Material hospitalar') => ({
   id,
   itemId,
   nome: itemId.toUpperCase(),
@@ -10,6 +10,8 @@ const linha = (id: string, itemId: string, qty: number, returnedQty = 0, cobranc
   returnedQty,
   avulso: false,
   controlado: false,
+  categoria,
+  consumoSetor: false,
   cobrancaCents,
 })
 
@@ -59,5 +61,40 @@ describe('htmlContaDoKit', () => {
     expect(html).toContain('R$&nbsp;9,00'.replace('&nbsp;', ' '))
     expect(html).not.toContain('<th class="n">Cobrança</th>')
     expect(html).toContain('Paciente &lt;b&gt;')
+  })
+})
+
+describe('MAT/MED nos PDFs', () => {
+  it('conta separa material de medicação, material primeiro', () => {
+    const linhas = valorarLinhas(
+      [linha('a', 'propofol', 2, 0, 0, 'Medicação'), linha('b', 'gaze', 3)],
+      [
+        { itemId: 'propofol', qtyDelta: -2, custoCents: 600 },
+        { itemId: 'gaze', qtyDelta: -3, custoCents: 13 },
+      ],
+      new Map(),
+    )
+    const { html } = htmlContaDoKit({ paciente: 'X', procedimento: null, data: null, kitNome: 'Kit', status: 'consumido', linhas })
+    expect(html.indexOf('>MAT<')).toBeGreaterThan(-1)
+    expect(html.indexOf('>MAT<')).toBeLessThan(html.indexOf('>MED<'))
+    expect(html.indexOf('GAZE')).toBeLessThan(html.indexOf('>MED<'))
+    expect(html.indexOf('PROPOFOL')).toBeGreaterThan(html.indexOf('>MED<'))
+  })
+
+  it('folha para ticar tem uma caixinha por item e o consumo do setor em branco', () => {
+    const { html, titulo } = htmlFolhaDoKit({
+      paciente: 'Ricardo',
+      procedimento: 'tc',
+      data: '2026-09-17',
+      kitNome: 'Kit CC',
+      linhas: [
+        { nome: 'RINGER 500ML', qty: 6, categoria: 'Medicação', controlado: false, avulso: false, consumoSetor: false },
+        { nome: 'GAZE', qty: 20, categoria: 'Material hospitalar', controlado: false, avulso: false, consumoSetor: false },
+      ],
+      consumo: [{ rotulo: 'Luva nitrílica', unidade: 'par' }],
+    })
+    expect(titulo).toBe('Folha do kit - Ricardo - Kit CC - 17-09-2026')
+    expect(html.match(/class="caixa"/g)).toHaveLength(3)
+    expect(html).toContain('Luva nitrílica')
   })
 })

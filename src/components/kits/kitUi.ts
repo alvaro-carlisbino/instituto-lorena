@@ -6,6 +6,9 @@ export const formatBRL = (cents: number): string =>
 
 export const formatQtd = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
 
+/** Fração pequena de estoque (2 ml de um frasco de 1 L = 0,002): com 2 casas vira "0". */
+export const formatFracao = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 4 })
+
 /** "consumido" é palavra de banco; na tela da enfermagem o kit foi usado. */
 export const STATUS_KIT: Record<KitStatus, { label: string; className: string }> = {
   montado: { label: 'Montado', className: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' },
@@ -32,6 +35,34 @@ export function ordenarPorNome<T>(linhas: T[], nome: (linha: T) => string | null
     if (!na || !nb) return na ? -1 : nb ? 1 : 0
     return colacao.compare(na, nb)
   })
+}
+
+export type GrupoMatMed = 'MAT' | 'MED'
+export const ROTULO_GRUPO: Record<GrupoMatMed, string> = { MAT: 'Material', MED: 'Medicação' }
+
+/** Medicação pela categoria do cadastro; material hospitalar, saneantes e sem categoria são MAT. */
+export const grupoMatMed = (categoria: string | null | undefined): GrupoMatMed =>
+  categoria && /medica/.test(categoria.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()) ? 'MED' : 'MAT'
+
+/**
+ * Separa em Material e Medicação, cada grupo em ordem alfabética, como a equipe confere a bandeja
+ * e como a conta é lida. Grupo vazio não aparece.
+ */
+export function agruparMatMed<T>(
+  linhas: T[],
+  nome: (linha: T) => string | null | undefined,
+  categoria: (linha: T) => string | null | undefined,
+): Array<{ grupo: GrupoMatMed; rotulo: string; linhas: T[] }> {
+  return (['MAT', 'MED'] as const)
+    .map((grupo) => ({
+      grupo,
+      rotulo: ROTULO_GRUPO[grupo],
+      linhas: ordenarPorNome(
+        linhas.filter((l) => grupoMatMed(categoria(l)) === grupo),
+        nome,
+      ),
+    }))
+    .filter((g) => g.linhas.length > 0)
 }
 
 /**

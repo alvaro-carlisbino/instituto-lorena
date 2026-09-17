@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Ban, ChevronDown, MoreHorizontal, PackageCheck, Pencil, Printer, ShieldAlert, Trash2, Undo2 } from 'lucide-react'
+import { Ban, ChevronDown, ClipboardCheck, MoreHorizontal, PackageCheck, Pencil, Printer, ShieldAlert, Trash2, Undo2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -13,11 +13,12 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { EmptyState } from '@/components/ui/empty-state'
-import { STATUS_KIT, formatBRL, formatQtd, ordenarPorNome } from '@/components/kits/kitUi'
+import { CabecalhoGrupo } from '@/components/kits/CabecalhoGrupo'
+import { STATUS_KIT, agruparMatMed, formatBRL, formatQtd } from '@/components/kits/kitUi'
 import { podeVoltar } from '@/lib/kitMontagem'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
-import { type KitCost, type KitStatus, type StockKit, cancelKit, excluirKit, imprimirContaDoKit } from '@/services/estoqueKits'
+import { type KitCost, type KitStatus, type StockKit, cancelKit, excluirKit, imprimirContaDoKit, imprimirFolhaDoKit } from '@/services/estoqueKits'
 
 type Filtro = 'abertos' | KitStatus | 'todos'
 
@@ -83,10 +84,11 @@ export function KitsLista({
   }
 
   const [imprimindo, setImprimindo] = useState<string | null>(null)
-  const imprimir = async (kit: StockKit) => {
+  const imprimir = async (kit: StockKit, qual: 'conta' | 'folha') => {
     setImprimindo(kit.id)
     try {
-      await imprimirContaDoKit(kit, porId, lastCosts)
+      if (qual === 'folha') await imprimirFolhaDoKit(kit, porId)
+      else await imprimirContaDoKit(kit, porId, lastCosts)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao imprimir')
     } finally {
@@ -185,7 +187,10 @@ export function KitsLista({
                           <Pencil className="size-4" aria-hidden /> Editar kit e cobranças
                         </DropdownMenuItem>
                       ) : null}
-                      <DropdownMenuItem onClick={() => void imprimir(kit)} disabled={imprimindo === kit.id}>
+                      <DropdownMenuItem onClick={() => void imprimir(kit, 'folha')} disabled={imprimindo === kit.id}>
+                        <ClipboardCheck className="size-4" aria-hidden /> Folha para ticar (PDF)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => void imprimir(kit, 'conta')} disabled={imprimindo === kit.id}>
                         <Printer className="size-4" aria-hidden /> Conta do paciente (PDF)
                       </DropdownMenuItem>
                       {podeCorrigir ? (
@@ -208,9 +213,14 @@ export function KitsLista({
 
                 <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2 sm:px-4">
                   {kit.status === 'montado' ? (
-                    <Button size="sm" className="h-8" onClick={() => onRegistrarUso(kit)}>
-                      <PackageCheck className="size-4" aria-hidden /> Registrar uso
-                    </Button>
+                    <>
+                      <Button size="sm" className="h-8" onClick={() => onRegistrarUso(kit)}>
+                        <PackageCheck className="size-4" aria-hidden /> Registrar uso
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-8" onClick={() => void imprimir(kit, 'folha')} disabled={imprimindo === kit.id}>
+                        <ClipboardCheck className="size-4" aria-hidden /> Folha para ticar
+                      </Button>
+                    </>
                   ) : podeCorrigir ? (
                     <Button size="sm" variant="outline" className="h-8" onClick={() => onRegistrarUso(kit)}>
                       <Undo2 className="size-4" aria-hidden /> Corrigir uso e devolução
@@ -228,30 +238,37 @@ export function KitsLista({
                 </div>
 
                 {expandido ? (
-                  <ul className="divide-y divide-border border-t border-border text-sm">
-                    {ordenarPorNome(kit.items, (l) => l.label || porId.get(l.itemId)?.name).map((l) => {
-                      const item = porId.get(l.itemId)
-                      return (
-                        <li key={l.id} className="flex items-center justify-between gap-3 px-3 py-2 sm:px-4">
-                          <span className="min-w-0">
-                            <span className="block leading-snug">{l.label || item?.name || '?'}</span>
-                            {l.isExtra || l.chargeCents > 0 ? (
-                              <span className="block text-xs text-muted-foreground">
-                                {[l.isExtra ? 'avulso' : null, l.chargeCents > 0 ? formatBRL(l.chargeCents) : null].filter(Boolean).join(' · ')}
-                              </span>
-                            ) : null}
-                          </span>
-                          <span className="shrink-0 text-right text-xs tabular-nums">
-                            <span className="font-medium">{formatQtd(l.qty - l.returnedQty)}</span>
-                            <span className="text-muted-foreground"> usado</span>
-                            {l.returnedQty > 0 ? (
-                              <span className="block text-emerald-700 dark:text-emerald-300">{formatQtd(l.returnedQty)} voltou</span>
-                            ) : null}
-                          </span>
-                        </li>
-                      )
-                    })}
-                  </ul>
+                  <div className="border-t border-border text-sm">
+                    {agruparMatMed(kit.items, (l) => l.label || porId.get(l.itemId)?.name, (l) => porId.get(l.itemId)?.category).map((g) => (
+                      <div key={g.grupo}>
+                        <CabecalhoGrupo grupo={g.grupo} rotulo={g.rotulo} total={g.linhas.length} className="first:border-t-0" />
+                        <ul className="divide-y divide-border">
+                          {g.linhas.map((l) => {
+                            const item = porId.get(l.itemId)
+                            return (
+                              <li key={l.id} className="flex items-center justify-between gap-3 px-3 py-2 sm:px-4">
+                                <span className="min-w-0">
+                                  <span className="block leading-snug">{l.label || item?.name || '?'}</span>
+                                  {l.isExtra || l.consumoSetor || l.chargeCents > 0 ? (
+                                    <span className="block text-xs text-muted-foreground">
+                                      {[l.isExtra ? 'avulso' : null, l.consumoSetor ? 'consumo do setor' : null, l.chargeCents > 0 ? formatBRL(l.chargeCents) : null].filter(Boolean).join(' · ')}
+                                    </span>
+                                  ) : null}
+                                </span>
+                                <span className="shrink-0 text-right text-xs tabular-nums">
+                                  <span className="font-medium">{formatQtd(l.qty - l.returnedQty)}</span>
+                                  <span className="text-muted-foreground"> usado</span>
+                                  {l.returnedQty > 0 ? (
+                                    <span className="block text-emerald-700 dark:text-emerald-300">{formatQtd(l.returnedQty)} voltou</span>
+                                  ) : null}
+                                </span>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
                 ) : null}
               </li>
             )

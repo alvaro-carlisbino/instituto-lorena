@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Layers, Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react'
+import { Layers, Pencil, Plus, SprayCan, Trash2, TriangleAlert } from 'lucide-react'
 
 import { Button, buttonVariants } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -38,9 +38,14 @@ export function ModelosKit({
     <div className="mx-auto w-full max-w-3xl space-y-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">O modelo é a lista padrão da bandeja. Na montagem dá para ajustar tudo.</p>
-        <Link to="/kits/modelos/novo" className={cn(buttonVariants(), 'shrink-0')}>
-          <Plus className="size-4" aria-hidden /> Novo modelo
-        </Link>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <Link to="/kits/consumo-do-setor" className={buttonVariants({ variant: 'outline' })}>
+            <SprayCan className="size-4" aria-hidden /> Consumo do setor
+          </Link>
+          <Link to="/kits/modelos/novo" className={buttonVariants()}>
+            <Plus className="size-4" aria-hidden /> Novo modelo
+          </Link>
+        </div>
       </div>
 
       {templates.length === 0 ? (
@@ -57,7 +62,14 @@ export function ModelosKit({
               <li key={t.id} className="rounded-xl border border-border bg-card p-3 sm:p-4">
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">{t.name}</p>
+                    <p className="text-sm font-semibold">
+                      {t.name}
+                      {t.setor ? (
+                        <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                          {t.setor === 'spa' ? 'SPA' : 'Centro cirúrgico'}
+                        </span>
+                      ) : null}
+                    </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {t.items.length} itens · dá para montar {kitsPossiveis} com o saldo atual
                     </p>

@@ -9,7 +9,7 @@ import { LISTA_DE_KITS, useKitDaTela, voltarDaTela } from '@/components/kits/nav
 export function KitUsoPage() {
   const { kitId = '' } = useParams()
   const navigate = useNavigate()
-  const { kit, items, carregando, erro, trocarItem } = useKitDaTela(kitId)
+  const { kit, items, consumo, setor, carregando, erro, trocarItem } = useKitDaTela(kitId, { comConsumo: true })
   const corrigindo = kit?.status === 'consumido'
 
   return (
@@ -28,6 +28,8 @@ export function KitUsoPage() {
             key={kit.id}
             kit={kit}
             items={items}
+            consumo={consumo}
+            setor={setor}
             voltarPara={LISTA_DE_KITS}
             onItemAtualizado={trocarItem}
             onFeito={() => voltarDaTela(navigate)}
