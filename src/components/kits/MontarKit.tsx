@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, ClipboardList, PackagePlus, ShieldAlert, Trash2, TriangleAlert } from 'lucide-react'
+import { Check, ClipboardList, PackagePlus, Printer, ShieldAlert, Trash2, TriangleAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -30,7 +30,7 @@ import { type LinhaMontagem, aplicarBipe, novaChave, resumirMontagem } from '@/l
 import { cn } from '@/lib/utils'
 import { searchLeadsByName } from '@/services/clinicalNotes'
 import type { StockItem } from '@/services/estoqueCompras'
-import { type KitTemplate, createKit } from '@/services/estoqueKits'
+import { type KitTemplate, createKit, imprimirFolhaDeItens } from '@/services/estoqueKits'
 
 type Rascunho = {
   templateId: string
@@ -288,9 +288,27 @@ export function MontarKit({
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">Modelo</h2>
           {r.linhas.length > 0 ? (
-            <Button variant="ghost" size="sm" onClick={limpar} className="text-muted-foreground">
-              Começar de novo
-            </Button>
+            <div className="flex gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  void imprimirFolhaDeItens({
+                    kitNome: templates.find((t) => t.id === r.templateId)?.name || 'Kit avulso',
+                    paciente: nomePaciente || null,
+                    procedimento: r.procedimento || null,
+                    data: r.data || null,
+                    linhas: r.linhas,
+                    itens: new Map(items.map((i) => [i.id, { name: i.name, controlled: i.controlled, category: i.category }] as const)),
+                  }).catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao imprimir'))
+                }
+              >
+                <Printer className="size-4" aria-hidden /> Imprimir folha
+              </Button>
+              <Button variant="ghost" size="sm" onClick={limpar} className="text-muted-foreground">
+                Começar de novo
+              </Button>
+            </div>
           ) : null}
         </div>
         <div className="flex flex-wrap gap-2">

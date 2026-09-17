@@ -91,6 +91,7 @@ const ESTILO_BASE = `
   .info div:last-child { border-right: 0; }
   .info span { display: block; font-size: 8px; text-transform: uppercase; letter-spacing: .09em; color: #8a8d93; margin-bottom: 2px; }
   .info strong { font-size: 11.5px; }
+  .info.em-branco div { padding-bottom: 16px; }
   .aviso { margin: 0 0 10px; padding: 7px 10px; border-radius: 6px; background: #f6efd9; color: #6b5412; font-size: 9.5px; }
   table { width: 100%; border-collapse: collapse; }
   thead { display: table-header-group; }
@@ -114,16 +115,23 @@ const ESTILO_BASE = `
   .rodape { margin-top: 22px; padding-top: 8px; border-top: 1px solid #DCDBD1; display: flex; justify-content: space-between; color: #8a8d93; font-size: 8.5px; }
 `
 
-function cabecalho(titulo: string, subtitulo: string, dados: { paciente: string | null; procedimento: string | null; data: string | null; kitNome: string }) {
+function cabecalho(
+  titulo: string,
+  subtitulo: string,
+  dados: { paciente: string | null; procedimento: string | null; data: string | null; kitNome: string },
+  emBranco = false,
+) {
+  // Folha do modelo: sem kit montado ainda, paciente/procedimento/data ficam para escrever à mão.
+  const campo = (valor: string) => (emBranco ? '&nbsp;' : escaparHtml(valor))
   return `
   <header class="topo">
     <div class="logo" aria-label="Instituto Lorena Visentainer">${logoSemCabecalho()}</div>
     <div class="doc"><h1>${escaparHtml(titulo)}</h1><p>${escaparHtml(subtitulo)}</p></div>
   </header>
-  <section class="info">
-    <div><span>Paciente</span><strong>${escaparHtml(dados.paciente || 'Não informado')}</strong></div>
-    <div><span>Procedimento</span><strong>${escaparHtml(dados.procedimento || '-')}</strong></div>
-    <div><span>Data</span><strong>${dataBrDe(dados.data) ?? '-'}</strong></div>
+  <section class="info${emBranco ? ' em-branco' : ''}">
+    <div><span>Paciente</span><strong>${campo(dados.paciente || 'Não informado')}</strong></div>
+    <div><span>Procedimento</span><strong>${campo(dados.procedimento || '-')}</strong></div>
+    <div><span>Data</span><strong>${emBranco ? '&nbsp;' : (dataBrDe(dados.data) ?? '-')}</strong></div>
     <div><span>Kit</span><strong>${escaparHtml(dados.kitNome)}</strong></div>
   </section>`
 }
@@ -247,11 +255,15 @@ export function htmlFolhaDoKit(dados: {
   kitNome: string
   linhas: Array<{ nome: string; qty: number; categoria: string | null; controlado: boolean; avulso: boolean; consumoSetor: boolean }>
   consumo: Array<{ rotulo: string; unidade: string }>
+  /** Folha tirada do modelo, sem paciente: cabeçalho em branco para preencher à mão. */
+  emBranco?: boolean
   emitidoEm?: Date
 }): { titulo: string; html: string } {
   const emitido = dados.emitidoEm ?? new Date()
   const dataBr = dataBrDe(dados.data)
-  const titulo = ['Folha do kit', dados.paciente ?? 'paciente', dados.kitNome, dataBr?.replace(/\//g, '-')].filter(Boolean).join(' - ')
+  const titulo = dados.emBranco
+    ? `Folha do kit - ${dados.kitNome}`
+    : ['Folha do kit', dados.paciente ?? 'paciente', dados.kitNome, dataBr?.replace(/\//g, '-')].filter(Boolean).join(' - ')
 
   let n = 0
   const linhasHtml = agruparMatMed(dados.linhas, (l) => l.nome, (l) => l.categoria)
@@ -298,7 +310,7 @@ export function htmlFolhaDoKit(dados: {
   .instrucao { margin: 0 0 10px; color: #6b6f76; font-size: 9.5px; }
   .obs { margin-top: 16px; border: 1px solid #DCDBD1; border-radius: 8px; padding: 8px 10px; height: 70px; color: #8a8d93; font-size: 9px; page-break-inside: avoid; }
 </style></head><body>
-  ${cabecalho('Folha do kit', 'Marque durante o procedimento', dados)}
+  ${cabecalho('Folha do kit', dados.emBranco ? 'Montagem e conferência da bandeja' : 'Marque durante o procedimento', dados, dados.emBranco)}
   <p class="instrucao">Ticar o que foi aberto. Anotar quanto foi usado e quanto voltou; depois lançar em "Registrar uso" no CRM.</p>
   <table>
     <thead><tr><th class="caixa-th"></th><th>#</th><th>Item</th><th class="n">Saiu</th><th class="branco-th">Usado</th><th class="branco-th">Voltou</th></tr></thead>

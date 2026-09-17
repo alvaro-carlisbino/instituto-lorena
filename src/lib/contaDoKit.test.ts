@@ -97,4 +97,19 @@ describe('MAT/MED nos PDFs', () => {
     expect(html.match(/class="caixa"/g)).toHaveLength(3)
     expect(html).toContain('Luva nitrílica')
   })
+
+  it('folha do modelo sai com paciente, procedimento e data em branco', () => {
+    const { html, titulo } = htmlFolhaDoKit({
+      paciente: null,
+      procedimento: null,
+      data: null,
+      kitNome: 'Kit Cirúrgico CC',
+      emBranco: true,
+      linhas: [{ nome: 'GAZE', qty: 20, categoria: null, controlado: false, avulso: false, consumoSetor: false }],
+      consumo: [],
+    })
+    expect(titulo).toBe('Folha do kit - Kit Cirúrgico CC')
+    expect(html).toContain('info em-branco')
+    expect(html).not.toContain('Não informado')
+  })
 })

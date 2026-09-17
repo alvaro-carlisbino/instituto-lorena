@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Layers, Pencil, Plus, SprayCan, Trash2, TriangleAlert } from 'lucide-react'
+import { Layers, Pencil, Plus, Printer, SprayCan, Trash2, TriangleAlert } from 'lucide-react'
 
 import { Button, buttonVariants } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { formatQtd, itemEhEscolha, ordenarPorNome } from '@/components/kits/kitUi'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
-import { type KitTemplate, deactivateKitTemplate } from '@/services/estoqueKits'
+import { type KitTemplate, deactivateKitTemplate, imprimirFolhaDeItens } from '@/services/estoqueKits'
 
 export function ModelosKit({
   templates,
@@ -90,7 +90,19 @@ export function ModelosKit({
                         .join(', ')}
                     </p>
                   </div>
-                  <div className="flex shrink-0 gap-1">
+                  <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() =>
+                        void imprimirFolhaDeItens({ kitNome: t.name, linhas: t.items, itens: new Map(items.map((i) => [i.id, { name: i.name, controlled: i.controlled, category: i.category }] as const)) }).catch((e) =>
+                          toast.error(e instanceof Error ? e.message : 'Falha ao imprimir'),
+                        )
+                      }
+                    >
+                      <Printer className="size-3.5" aria-hidden /> Imprimir
+                    </Button>
                     <Link to={`/kits/modelos/${t.id}`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8')}>
                       <Pencil className="size-3.5" aria-hidden /> Editar
                     </Link>

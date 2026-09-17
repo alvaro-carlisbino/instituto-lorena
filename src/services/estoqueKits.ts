@@ -806,3 +806,38 @@ export async function imprimirFolhaDoKit(kit: StockKit, itens: Map<string, ItemP
   })
   imprimirHtml(html)
 }
+
+/**
+ * Folha a partir de itens soltos: do modelo (cabeçalho em branco, para escrever à mão) ou da
+ * bandeja ainda na montagem (com o paciente e a data que já foram preenchidos).
+ */
+export async function imprimirFolhaDeItens(dados: {
+  kitNome: string
+  paciente?: string | null
+  procedimento?: string | null
+  data?: string | null
+  linhas: Array<{ itemId: string; qty: number; avulso?: boolean }>
+  itens: Map<string, ItemParaImpressao>
+}): Promise<void> {
+  const consumo = await listConsumoSetor()
+  const emBranco = !dados.paciente && !dados.procedimento && !dados.data
+  const { html } = htmlFolhaDoKit({
+    paciente: dados.paciente ?? null,
+    procedimento: dados.procedimento ?? null,
+    data: dados.data ?? null,
+    kitNome: dados.kitNome,
+    emBranco,
+    linhas: dados.linhas
+      .filter((l) => l.itemId && l.qty > 0)
+      .map((l) => ({
+        nome: dados.itens.get(l.itemId)?.name ?? 'Item',
+        qty: l.qty,
+        categoria: dados.itens.get(l.itemId)?.category ?? null,
+        controlado: Boolean(dados.itens.get(l.itemId)?.controlled),
+        avulso: Boolean(l.avulso),
+        consumoSetor: false,
+      })),
+    consumo: consumo.map((c) => ({ rotulo: c.rotulo, unidade: c.unidade })),
+  })
+  imprimirHtml(html)
+}

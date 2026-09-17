@@ -1,7 +1,7 @@
 import { useDeferredValue, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Trash2 } from 'lucide-react'
+import { Printer, Trash2 } from 'lucide-react'
 
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,7 +18,7 @@ import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
-import { type KitTemplate, type SetorKit, createKitTemplate, updateKitTemplate } from '@/services/estoqueKits'
+import { type KitTemplate, type SetorKit, createKitTemplate, imprimirFolhaDeItens, updateKitTemplate } from '@/services/estoqueKits'
 
 type Linha = { itemId: string; qty: number }
 
@@ -42,6 +42,7 @@ export function EditorModelo({
   const [linhas, setLinhas] = useState<Linha[]>(() => (modelo?.items ?? []).map((i) => ({ itemId: i.itemId, qty: i.qty })))
   const [codigo, setCodigo] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
+  const [imprimindo, setImprimindo] = useState(false)
   const [pesquisa, setPesquisa] = useState('')
   const termo = useDeferredValue(pesquisa)
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
@@ -72,6 +73,18 @@ export function EditorModelo({
     beep(true)
     adicionar(item.id)
     toast.success(`${item.name} no modelo`)
+  }
+
+  // Imprime o que está na tela, mesmo antes de salvar: é a lista que vai para a bandeja.
+  const imprimir = () => {
+    if (linhas.length === 0) {
+      toast.error('O modelo ainda não tem itens para imprimir.')
+      return
+    }
+    setImprimindo(true)
+    void imprimirFolhaDeItens({ kitNome: nome.trim() || 'Kit', linhas, itens: new Map(items.map((i) => [i.id, { name: i.name, controlled: i.controlled, category: i.category }] as const)) })
+      .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao imprimir'))
+      .finally(() => setImprimindo(false))
   }
 
   const salvar = async () => {
@@ -124,6 +137,9 @@ export function EditorModelo({
           </div>
           <p className="text-xs text-muted-foreground">Decide o padrão do consumo do setor ao registrar o uso.</p>
         </div>
+        <Button variant="outline" className="h-10 w-full" onClick={imprimir} disabled={imprimindo || linhas.length === 0}>
+          <Printer className="size-4" aria-hidden /> {imprimindo ? 'Preparando…' : 'Imprimir folha do kit (PDF)'}
+        </Button>
         <ScanBar onCode={onCode} placeholder="Bipe para adicionar item" />
         <SearchPicker
           title="Adicionar item ao modelo"
