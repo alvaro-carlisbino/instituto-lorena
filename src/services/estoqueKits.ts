@@ -78,13 +78,15 @@ export type KitTemplate = {
   note: string | null
   active: boolean
   setor: SetorKit | null
+  /** Setor do estoque de onde o material do kit sai. Nulo = setor padrão. */
+  warehouseId: string | null
   items: KitTemplateItem[]
 }
 
 export async function listKitTemplates(): Promise<KitTemplate[]> {
   const client = assertClient()
   const [tpls, items] = await Promise.all([
-    client.from('kit_templates').select('id, name, note, active, setor').eq('active', true).order('name'),
+    client.from('kit_templates').select('id, name, note, active, setor, warehouse_id').eq('active', true).order('name'),
     client.from('kit_template_items').select('id, template_id, item_id, qty'),
   ])
   if (tpls.error) throw new Error(tpls.error.message)
@@ -102,6 +104,7 @@ export async function listKitTemplates(): Promise<KitTemplate[]> {
     note: r.note != null ? String(r.note) : null,
     active: Boolean(r.active),
     setor: r.setor === 'cirurgia' || r.setor === 'spa' ? r.setor : null,
+    warehouseId: r.warehouse_id != null ? String(r.warehouse_id) : null,
     items: byTpl.get(String(r.id)) ?? [],
   }))
 }
@@ -118,6 +121,7 @@ export async function createKitTemplate(payload: {
   name: string
   note?: string
   setor?: SetorKit | null
+  warehouseId?: string | null
   items: Array<{ itemId: string; qty: number }>
 }): Promise<void> {
   const client = assertClient()
@@ -126,7 +130,12 @@ export async function createKitTemplate(payload: {
   if (items.length === 0) throw new Error('Inclua ao menos um item no modelo.')
   const { data, error } = await client
     .from('kit_templates')
-    .insert({ name: payload.name.trim(), note: payload.note?.trim() || null, setor: payload.setor ?? null })
+    .insert({
+      name: payload.name.trim(),
+      note: payload.note?.trim() || null,
+      setor: payload.setor ?? null,
+      warehouse_id: payload.warehouseId || null,
+    })
     .select('id')
     .single()
   if (error) throw new Error(error.message)
@@ -323,6 +332,8 @@ export async function createKit(payload: {
   patientName?: string
   procedureLabel?: string
   scheduledFor?: string | null
+  /** Setor de onde o material sai. Sem ele vale o do modelo, e sem esse o padrão. */
+  warehouseId?: string | null
   items: Array<{
     itemId: string
     qty: number
@@ -343,6 +354,7 @@ export async function createKit(payload: {
       patient_name: payload.patientName?.trim() || null,
       procedure_label: payload.procedureLabel?.trim() || null,
       scheduled_for: payload.scheduledFor || null,
+      warehouse_id: payload.warehouseId || null,
     },
     p_itens: items.map((i) => ({
       item_id: i.itemId,
@@ -625,6 +637,7 @@ export async function updateKitTemplate(payload: {
   id: string
   name: string
   setor?: SetorKit | null
+  warehouseId?: string | null
   items: Array<{ itemId: string; qty: number }>
 }): Promise<void> {
   const client = assertClient()
@@ -641,6 +654,7 @@ export async function updateKitTemplate(payload: {
     .update({
       name: payload.name.trim(),
       ...(payload.setor !== undefined ? { setor: payload.setor } : {}),
+      ...(payload.warehouseId !== undefined ? { warehouse_id: payload.warehouseId || null } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq('id', payload.id)

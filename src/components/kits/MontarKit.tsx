@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { SearchField } from '@/components/ui/search-field'
 import { SearchPicker } from '@/components/ui/search-picker'
 import { Switch } from '@/components/ui/switch'
@@ -30,6 +31,7 @@ import { type LinhaMontagem, aplicarBipe, novaChave, resumirMontagem } from '@/l
 import { cn } from '@/lib/utils'
 import { searchLeadsByName } from '@/services/clinicalNotes'
 import type { StockItem } from '@/services/estoqueCompras'
+import { type StockWarehouse, listWarehouseBalances, listWarehouses } from '@/services/estoqueArmazens'
 import { type KitTemplate, createKit, imprimirFolhaDeItens } from '@/services/estoqueKits'
 
 type Rascunho = {
@@ -41,6 +43,8 @@ type Rascunho = {
   paciente: string
   procedimento: string
   data: string
+  /** Setor de onde sai o material. Nulo = o do modelo (ou o padrão). */
+  setorId?: string | null
   linhas: LinhaMontagem[]
 }
 
@@ -101,8 +105,27 @@ export function MontarKit({
     }
   }, [r, tenantId])
 
+  // O material sai de um setor: o aviso de "sem saldo" olha o saldo DESSE setor, não o total.
+  const [setores, setSetores] = useState<StockWarehouse[]>([])
+  const [saldosPorSetor, setSaldosPorSetor] = useState<Array<{ warehouseId: string; itemId: string; qty: number }> | null>(null)
+  useEffect(() => {
+    Promise.all([listWarehouses(), listWarehouseBalances()])
+      .then(([whs, saldos]) => {
+        setSetores(whs)
+        setSaldosPorSetor(saldos)
+      })
+      .catch(() => setSaldosPorSetor(null))
+  }, [items])
+  const modeloEscolhido = templates.find((t) => t.id === r.templateId)
+  const setorEfetivo = r.setorId ?? modeloEscolhido?.warehouseId ?? setores.find((w) => w.isDefault)?.id ?? null
+
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
-  const saldo = useMemo(() => new Map(items.map((i) => [i.id, i.qty] as const)), [items])
+  const saldo = useMemo(() => {
+    if (!saldosPorSetor || !setorEfetivo) return new Map(items.map((i) => [i.id, i.qty] as const))
+    const m = new Map<string, number>()
+    for (const b of saldosPorSetor) if (b.warehouseId === setorEfetivo) m.set(b.itemId, b.qty)
+    return m
+  }, [items, saldosPorSetor, setorEfetivo])
   const busca = useMemo(() => produtosParaBusca(items), [items])
   const resumo = useMemo(() => resumirMontagem(r.linhas, saldo), [r.linhas, saldo])
   const escolhas = r.linhas.filter((l) => itemEhEscolha(porId.get(l.itemId)?.name))
@@ -117,6 +140,8 @@ export function MontarKit({
     const tpl = templates.find((t) => t.id === templateId)
     set({
       templateId,
+      // Modelo novo, setor do modelo novo: a troca feita à mão valia para o anterior.
+      setorId: null,
       linhas: (tpl?.items ?? []).map((i) => ({
         chave: novaChave(),
         itemId: i.itemId,
@@ -191,6 +216,7 @@ export function MontarKit({
         patientName: nomePaciente,
         procedureLabel: r.procedimento,
         scheduledFor: r.data || null,
+        warehouseId: setorEfetivo,
         items: linhas.map((l) => ({ itemId: l.itemId, qty: l.qty, isExtra: l.avulso, chargeCents: l.cobrancaCents })),
       })
       toast.success(
@@ -311,6 +337,28 @@ export function MontarKit({
             </div>
           ) : null}
         </div>
+        {setores.length > 1 ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Label htmlFor="kit-setor-estoque" className="font-normal text-muted-foreground">
+              Material sai de
+            </Label>
+            <Select
+              value={setorEfetivo ?? ''}
+              onValueChange={(v) => set({ setorId: !v || v === (modeloEscolhido?.warehouseId ?? setores.find((w) => w.isDefault)?.id) ? null : v })}
+            >
+              <SelectTrigger id="kit-setor-estoque" className="h-8 w-auto min-w-40">
+                <span className="truncate text-sm font-medium">{setores.find((w) => w.id === setorEfetivo)?.name ?? 'Setor'}</span>
+              </SelectTrigger>
+              <SelectContent>
+                {setores.map((w) => (
+                  <SelectItem key={w.id} value={w.id}>
+                    {w.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {templates.map((t) => (
             <button

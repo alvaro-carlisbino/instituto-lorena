@@ -28,6 +28,7 @@ import {
   LineChart,
   List,
   ListChecks,
+  MapPin,
   Megaphone,
   MessagesSquare,
   Microscope,
@@ -627,7 +628,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     label: 'Estoque',
     icon: Warehouse,
     group: 'estoque',
-    keywords: ['produtos', 'saldo', 'almoxarifado'],
+    keywords: ['produtos', 'saldo', 'almoxarifado', 'kardex', 'histórico', 'nota do item', 'lote'],
     visible: canBoards,
   },
   {
@@ -655,6 +656,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: ArrowLeftRight,
     group: 'estoque',
     keywords: ['movimentação', 'entre depósitos'],
+    visible: canBoards,
+  },
+  {
+    id: 'estoque-enderecos',
+    path: '/estoque-enderecos',
+    label: 'Setores e endereços',
+    icon: MapPin,
+    group: 'estoque',
+    keywords: ['endereçamento', 'prateleira', 'armário', 'localização', 'onde fica', 'setor', 'depósito'],
     visible: canBoards,
   },
   {

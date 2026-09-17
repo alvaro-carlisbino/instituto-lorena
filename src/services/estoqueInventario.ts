@@ -1,10 +1,10 @@
 import { buscarTudo } from '@/lib/supabasePaginate'
 import { supabase } from '@/lib/supabaseClient'
-import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 
-// Inventário (contagem física). Ao abrir, fotografa o saldo do sistema de cada item;
-// a enfermeira conta o físico; ao finalizar, cada divergência vira um movimento de
-// 'ajuste' (livro-razão único — não zera nem sobrescreve, só corrige a diferença).
+// Inventário (contagem física) de UM setor. Ao abrir, fotografa o saldo do sistema naquele
+// setor; a equipe conta o físico; ao finalizar, cada divergência vira 'ajuste' no livro, a
+// falta saindo dos lotes por FEFO. Abrir, incluir item e finalizar moram no banco
+// (migration 20260917213000): uma transação, com setor, lote e a contagem como origem.
 
 const assertClient = () => {
   if (!supabase) throw new Error('Sistema não configurado.')
@@ -23,6 +23,8 @@ export type StockCountItem = {
 export type StockCount = {
   id: string
   label: string
+  /** Setor contado. Nulo nas contagens antigas, que valiam para o setor padrão. */
+  warehouseId: string | null
   status: CountStatus
   note: string | null
   createdAt: string
@@ -44,7 +46,7 @@ export async function listCounts(): Promise<StockCount[]> {
   const [counts, items] = await Promise.all([
     client
       .from('stock_counts')
-      .select('id, label, status, note, created_at, finalized_at')
+      .select('id, label, status, note, created_at, finalized_at, warehouse_id')
       .order('created_at', { ascending: false })
       .limit(50),
     // As duas contagens de 14/09 somam mais de 1.000 linhas: sem paginar, uma delas abria pela metade.
@@ -64,6 +66,7 @@ export async function listCounts(): Promise<StockCount[]> {
   return (counts.data ?? []).map((r) => ({
     id: String(r.id),
     label: String(r.label ?? ''),
+    warehouseId: r.warehouse_id != null ? String(r.warehouse_id) : null,
     status: (r.status === 'finalizada' || r.status === 'cancelada' ? r.status : 'aberta') as CountStatus,
     note: r.note != null ? String(r.note) : null,
     createdAt: String(r.created_at ?? ''),
@@ -72,36 +75,37 @@ export async function listCounts(): Promise<StockCount[]> {
   }))
 }
 
-/** Abre uma contagem fotografando o saldo atual de todos os itens ativos. */
-export async function openCount(label: string): Promise<string> {
-  const client = assertClient()
-  const stock = await listStockItems()
-  const { data, error } = await client
-    .from('stock_counts')
-    .insert({ label: label.trim() || 'Contagem' })
-    .select('id')
-    .single()
+/**
+ * Abre a contagem de um setor. Sem `todos`, lista só o que o sistema diz estar no setor (ou tem
+ * endereço nele); o que aparecer na prateleira e não estiver na lista se inclui bipando.
+ */
+export async function openCount(label: string, setorId: string | null, todos = false): Promise<string> {
+  const { data, error } = await assertClient().rpc('stock_inventario_abrir', {
+    p_rotulo: label.trim() || 'Contagem',
+    p_setor: setorId,
+    p_todos: todos,
+  })
   if (error) throw new Error(error.message)
-  const countId = String((data as { id: unknown }).id)
-  if (stock.length > 0) {
-    const { error: itemsErr } = await client.from('stock_count_items').insert(
-      stock.map((s) => ({ count_id: countId, item_id: s.id, system_qty: s.qty })),
-    )
-    if (itemsErr) {
-      await client.from('stock_counts').delete().eq('id', countId)
-      throw new Error(itemsErr.message)
-    }
-  }
-  return countId
+  return String(data ?? '')
+}
+
+/** Item achado na prateleira que não estava na lista da contagem. Devolve a linha (nova ou existente). */
+export async function incluirNaContagem(countId: string, itemId: string): Promise<string> {
+  const { data, error } = await assertClient().rpc('stock_inventario_incluir', { p_count: countId, p_item_id: itemId })
+  if (error) throw new Error(error.message)
+  return String(data ?? '')
 }
 
 export async function setCountedQty(countItemId: string, countedQty: number | null): Promise<void> {
   const client = assertClient()
-  const { error } = await client
+  const { data, error } = await client
     .from('stock_count_items')
     .update({ counted_qty: countedQty })
     .eq('id', countItemId)
+    .select('id')
   if (error) throw new Error(error.message)
+  // A RLS que filtra a gravação devolve sucesso com zero linhas: sem isso o número "salvo" sumia.
+  if (!data || data.length === 0) throw new Error('A contagem não foi salva. Recarregue a tela e tente de novo.')
 }
 
 export async function cancelCount(id: string): Promise<void> {
@@ -111,43 +115,12 @@ export async function cancelCount(id: string): Promise<void> {
 }
 
 /**
- * Finaliza: para cada item CONTADO com divergência vs. o saldo ATUAL, gera um ajuste.
- * Usa o saldo atual (não o fotografado) pra não desfazer entradas/saídas ocorridas
- * durante a contagem; a diferença aplicada leva o sistema ao valor físico contado.
+ * Finaliza no banco: cada item contado vai ao número contado no setor, comparando com o saldo
+ * de AGORA (não o fotografado), para não desfazer o que entrou ou saiu durante a contagem.
  */
-export async function finalizeCount(
-  count: StockCount,
-  currentStock: StockItem[],
-): Promise<{ adjusted: number }> {
-  const client = assertClient()
-  const qtyById = new Map(currentStock.map((s) => [s.id, s.qty] as const))
-  // Ajuste pode ser negativo (contou menos que o sistema) — gravamos o delta COM sinal
-  // direto no livro-razão (registerMovement força positivo, não serve aqui).
-  const adjustments = count.items
-    .filter((item) => item.countedQty != null)
-    .map((item) => {
-      const current = qtyById.get(item.itemId) ?? item.systemQty
-      return { item, current, diff: item.countedQty! - current }
-    })
-    .filter((a) => a.diff !== 0)
-
-  if (adjustments.length > 0) {
-    const { error: movErr } = await client.from('stock_movements').insert(
-      adjustments.map((a) => ({
-        item_id: a.item.itemId,
-        kind: 'ajuste',
-        qty_delta: a.diff,
-        reason: 'inventário',
-        note: `${count.label}: sistema ${a.current} → contado ${a.item.countedQty}`,
-      })),
-    )
-    if (movErr) throw new Error(movErr.message)
-  }
-  const adjusted = adjustments.length
-  const { error } = await client
-    .from('stock_counts')
-    .update({ status: 'finalizada', finalized_at: new Date().toISOString() })
-    .eq('id', count.id)
+export async function finalizeCount(count: StockCount): Promise<{ adjusted: number }> {
+  const { data, error } = await assertClient().rpc('stock_inventario_finalizar', { p_count: count.id })
   if (error) throw new Error(error.message)
-  return { adjusted }
+  const r = (data ?? {}) as { ajustados?: number }
+  return { adjusted: Number(r.ajustados ?? 0) }
 }

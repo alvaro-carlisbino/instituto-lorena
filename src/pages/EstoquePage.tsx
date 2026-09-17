@@ -1,5 +1,6 @@
 import { diaLocal } from '@/lib/diaLocal'
 import { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Boxes, Plus, ArrowDownToLine, ArrowUpFromLine, History, MoreHorizontal, Pencil, ScanBarcode, ShieldAlert } from 'lucide-react'
 
@@ -32,12 +33,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   type StockItem,
-  type StockMovement,
-  listMovements,
   listStockItems,
   registerMovement,
   upsertStockItem,
 } from '@/services/estoqueCompras'
+import { type StockWarehouse, listWarehouseBalances, listWarehouses } from '@/services/estoqueArmazens'
+import {
+  type EnderecoEstoque,
+  baixarEstoque,
+  compararCodigoEndereco,
+  listarEnderecos,
+  listarItensNosEnderecos,
+} from '@/services/estoqueRastreio'
+import { normalizarBusca } from '@/lib/busca'
+import { formatQtd } from '@/components/kits/kitUi'
 import { type BlingCatalogItem, fetchBlingCatalog } from '@/services/crmBling'
 import { type StockBatch, listBatchBalances } from '@/services/estoqueKits'
 import { BarcodeCameraDialog } from '@/components/estoque/BarcodeCameraDialog'
@@ -54,6 +63,7 @@ export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: st
     { to: '/estoque-codigos', label: 'Códigos de barras' },
     { to: '/compras', label: 'Ordens de compra' },
     { to: '/transferencias-estoque', label: 'Transferências' },
+    { to: '/estoque-enderecos', label: 'Endereços' },
     { to: '/inventario', label: 'Inventário' },
     ...(isSalesPolo
       ? []
@@ -69,11 +79,19 @@ export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: st
  * Ficava aqui, numa régua plana de 14 abas — e uma tela de ESTOQUE ser a dona do menu do
  * FINANCEIRO era metade do motivo de ninguém achar nada. */
 
-const EMPTY_ITEM = { name: '', sku: '', barcode: '', category: '', unit: 'un', minQty: '', controlled: false, blingProductId: '' }
+const EMPTY_ITEM = { name: '', sku: '', barcode: '', category: '', unit: 'un', minQty: '', controlled: false, blingProductId: '', custoRef: '' }
+
+const centavosDoCampo = (v: string): number | null => {
+  const n = Number(v.trim().replace(/\./g, '').replace(',', '.'))
+  return v.trim() && Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null
+}
+const campoDosCentavos = (c: number | null | undefined) => (c != null && c > 0 ? (c / 100).toFixed(2).replace('.', ',') : '')
 
 export function EstoquePage() {
   const { tenant } = useTenant()
   const isSalesPolo = tenant.poloType === 'sales'
+  const navigate = useNavigate()
+  const [params, setParams] = useSearchParams()
   const [items, setItems] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -113,15 +131,20 @@ export function EstoquePage() {
   const [moveQty, setMoveQty] = useState('')
   const [moveReason, setMoveReason] = useState('')
   const [moveCost, setMoveCost] = useState('')
+  const [moveSetor, setMoveSetor] = useState<string | null>(null)
+  const [movePaciente, setMovePaciente] = useState('')
   const [moving, setMoving] = useState(false)
+
+  // Setores: saldo por setor e o filtro da lista. Nulo = soma de todos.
+  const [setores, setSetores] = useState<StockWarehouse[]>([])
+  const [setorFiltro, setSetorFiltro] = useState<string | null>(null)
+  const [saldoNoSetor, setSaldoNoSetor] = useState<Map<string, number>>(new Map())
+  // "Onde fica": códigos de endereço por item, já com o nome do setor.
+  const [enderecosDoItem, setEnderecosDoItem] = useState<Map<string, Array<EnderecoEstoque & { setorNome: string }>>>(new Map())
 
   // bipar código de barras (leitor USB digita + Enter; câmera via BarcodeDetector)
   const [scanCode, setScanCode] = useState('')
   const [cameraOpen, setCameraOpen] = useState(false)
-
-  // dialog de histórico
-  const [historyItem, setHistoryItem] = useState<StockItem | null>(null)
-  const [historyRows, setHistoryRows] = useState<StockMovement[]>([])
 
   // Lotes p/ o alerta de validade (vencidos + vencendo em ≤30 dias).
   const [batches, setBatches] = useState<StockBatch[]>([])
@@ -129,9 +152,32 @@ export function EstoquePage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [it, bs] = await Promise.all([listStockItems(), listBatchBalances()])
+      const [it, bs, whs, saldos, ends, guardados] = await Promise.all([
+        listStockItems(),
+        listBatchBalances(),
+        listWarehouses(),
+        listWarehouseBalances(),
+        listarEnderecos(),
+        listarItensNosEnderecos(),
+      ])
       setItems(it)
       setBatches(bs)
+      setSetores(whs)
+      const porSetorItem = new Map<string, number>()
+      for (const b of saldos) porSetorItem.set(`${b.warehouseId}:${b.itemId}`, b.qty)
+      setSaldoNoSetor(porSetorItem)
+      const nomeSetor = new Map(whs.map((w) => [w.id, w.name] as const))
+      const endPorId = new Map(ends.map((e) => [e.id, e] as const))
+      const porItem = new Map<string, Array<EnderecoEstoque & { setorNome: string }>>()
+      for (const g of guardados) {
+        const e = endPorId.get(g.enderecoId)
+        if (!e) continue
+        const lista = porItem.get(g.itemId) ?? []
+        lista.push({ ...e, setorNome: nomeSetor.get(e.setorId) ?? '' })
+        porItem.set(g.itemId, lista)
+      }
+      for (const lista of porItem.values()) lista.sort((a, b) => compararCodigoEndereco(a.codigo, b.codigo))
+      setEnderecosDoItem(porItem)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar o estoque')
     } finally {
@@ -143,18 +189,47 @@ export function EstoquePage() {
     void load()
   }, [])
 
+  const qtdNaLista = (i: StockItem) => (setorFiltro ? (saldoNoSetor.get(`${setorFiltro}:${i.id}`) ?? 0) : i.qty)
+
+  // A busca acha também pelo LOTE e pelo ENDEREÇO: quem está com a caixa na mão lê o lote,
+  // quem está na prateleira lê o código dela.
+  const lotesPorItem = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const b of batches) {
+      if (!b.lotCode) continue
+      const lista = m.get(b.itemId) ?? []
+      lista.push(b.lotCode)
+      m.set(b.itemId, lista)
+    }
+    return m
+  }, [batches])
+
   const filtered = useMemo(() => {
-    const q = filter.trim().toLowerCase()
-    if (!q) return items
-    return items.filter(
-      (i) =>
-        i.name.toLowerCase().includes(q) ||
-        (i.category ?? '').toLowerCase().includes(q) ||
-        (i.sku ?? '').toLowerCase().includes(q) ||
-        (i.barcode ?? '').includes(q) ||
-        i.aliases.some((a) => a.toLowerCase().includes(q)),
-    )
-  }, [items, filter])
+    const termos = normalizarBusca(filter).split(/\s+/).filter(Boolean)
+    return items.filter((i) => {
+      if (setorFiltro) {
+        const noSetor = saldoNoSetor.get(`${setorFiltro}:${i.id}`) ?? 0
+        const guardadoAli = (enderecosDoItem.get(i.id) ?? []).some((e) => e.setorId === setorFiltro)
+        if (noSetor === 0 && !guardadoAli) return false
+      }
+      if (termos.length === 0) return true
+      const texto = normalizarBusca(
+        [
+          i.name,
+          i.category,
+          i.sku,
+          i.barcode,
+          ...i.aliases,
+          ...(lotesPorItem.get(i.id) ?? []),
+          ...(enderecosDoItem.get(i.id) ?? []).map((e) => e.codigo),
+        ]
+          .filter(Boolean)
+          .join(' '),
+      )
+      return termos.every((t) => texto.includes(t))
+    })
+  }, [items, filter, setorFiltro, saldoNoSetor, enderecosDoItem, lotesPorItem])
+
 
   // Código bipado: acha o item (barcode, depois SKU) e abre o movimento; código
   // desconhecido pré-preenche o cadastro de novo item.
@@ -215,6 +290,11 @@ export function EstoquePage() {
       toast.error('Informe o nome do item.')
       return
     }
+    const custoRef = centavosDoCampo(form.custoRef)
+    if (form.custoRef.trim() && custoRef == null) {
+      toast.error('Custo de referência inválido. Use por exemplo 12,50.')
+      return
+    }
     setSaving(true)
     try {
       await upsertStockItem({
@@ -227,6 +307,7 @@ export function EstoquePage() {
         minQty: form.minQty.trim() ? Number(form.minQty.replace(',', '.')) : 0,
         controlled: form.controlled,
         blingProductId: form.blingProductId || null,
+        ...(custoRef !== (editando?.referenceCostCents ?? null) ? { referenceCostCents: custoRef } : {}),
         // Sem isso, editar o nome apagava a observação do item e reativava item desativado.
         ...(editando ? { note: editando.note, active: editando.active } : {}),
       })
@@ -254,6 +335,7 @@ export function EstoquePage() {
       minQty: item.minQty ? String(item.minQty) : '',
       controlled: item.controlled,
       blingProductId: item.blingProductId ?? '',
+      custoRef: campoDosCentavos(item.referenceCostCents),
     })
   }
 
@@ -263,13 +345,39 @@ export function EstoquePage() {
     setForm({ ...EMPTY_ITEM })
   }
 
+  const setorPadrao = setores.find((w) => w.isDefault)?.id ?? setores[0]?.id ?? null
+
   const openMove = (item: StockItem, kind: 'entrada' | 'saida') => {
     setMoveItem(item)
     setMoveKind(kind)
     setMoveQty('')
     setMoveReason('')
     setMoveCost('')
+    setMovePaciente('')
+    setMoveSetor(setorFiltro ?? setorPadrao)
   }
+
+  // Links da ficha do item: /estoque?item=<id>&acao=entrada|saida|editar abre direto o que foi pedido.
+  useEffect(() => {
+    const alvo = params.get('item')
+    const acao = params.get('acao')
+    if (!alvo || !acao || items.length === 0) return
+    const item = items.find((i) => i.id === alvo)
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('item')
+        next.delete('acao')
+        return next
+      },
+      { replace: true },
+    )
+    if (!item) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (acao === 'editar') openEdit(item)
+    else if (acao === 'entrada' || acao === 'saida') openMove(item, acao)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, params])
 
   const handleMove = async () => {
     if (!moveItem) return
@@ -283,9 +391,24 @@ export function EstoquePage() {
       moveKind === 'entrada' && Number.isFinite(costNumber) && costNumber > 0
         ? Math.round(costNumber * 100)
         : null
+    if (moveKind === 'saida' && moveItem.controlled && movePaciente.trim().length < 3) {
+      toast.error('Saída de item controlado precisa do nome do paciente (livro de controlados).')
+      return
+    }
     setMoving(true)
     try {
-      await registerMovement({ itemId: moveItem.id, kind: moveKind, qty, reason: moveReason, unitCostCents })
+      if (moveKind === 'saida') {
+        // Pelo banco: sai por lote (vence antes sai antes) no setor escolhido, com custo do lote.
+        await baixarEstoque({
+          setorId: moveSetor,
+          itens: [{ itemId: moveItem.id, qty }],
+          motivo: moveReason,
+          paciente: movePaciente,
+          origem: 'manual',
+        })
+      } else {
+        await registerMovement({ itemId: moveItem.id, kind: moveKind, qty, reason: moveReason, unitCostCents, warehouseId: moveSetor })
+      }
       toast.success(`${moveKind === 'saida' ? 'Saída' : 'Entrada'} registrada em ${moveItem.name}.`)
       setMoveItem(null)
       await load()
@@ -296,15 +419,7 @@ export function EstoquePage() {
     }
   }
 
-  const openHistory = async (item: StockItem) => {
-    setHistoryItem(item)
-    setHistoryRows([])
-    try {
-      setHistoryRows(await listMovements(item.id))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao carregar histórico')
-    }
-  }
+  const abrirFicha = (item: StockItem) => navigate(`/estoque/item/${item.id}`)
 
   const camposDoItem = (
     <>
@@ -376,6 +491,19 @@ export function EstoquePage() {
                 />
               </div>
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="st-custo-ref">Custo de referência (R$ por {form.unit || 'unidade'})</Label>
+              <Input
+                id="st-custo-ref"
+                value={form.custoRef}
+                onChange={(e) => setForm((f) => ({ ...f, custoRef: e.target.value }))}
+                placeholder="Só para item sem nota, ex.: 12,50"
+                inputMode="decimal"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Entra no valor do estoque e na conta do paciente até chegar compra por nota.
+              </p>
+            </div>
             <div className="flex items-center gap-2">
               <Checkbox
                 id="st-controlled"
@@ -428,7 +556,7 @@ export function EstoquePage() {
   return (
     <AppLayout
       title="Estoque"
-      subtitle="Itens e saldos do polo atual · entrada e baixa manuais por enquanto (Shosp/Bling em fase futura)."
+      subtitle="Itens e saldos por setor. Clique no item para ver de qual nota veio, os lotes, onde fica e todo o histórico."
     >
       <SubTabs tabs={estoqueTabs(isSalesPolo)} />
 
@@ -591,12 +719,27 @@ export function EstoquePage() {
                   <ScanBarcode className="size-4" aria-hidden />
                 </Button>
               </div>
+              <Select value={setorFiltro ?? 'todos'} onValueChange={(v) => setSetorFiltro(!v || v === 'todos' ? null : v)}>
+                <SelectTrigger aria-label="Setor" className="h-8 w-[150px]">
+                  <span className="truncate text-sm">
+                    {setorFiltro ? (setores.find((w) => w.id === setorFiltro)?.name ?? 'Setor') : 'Todos os setores'}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos os setores</SelectItem>
+                  {setores.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>
+                      {w.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Buscar item…"
-                aria-label="Buscar item"
-                className="h-8 w-[160px]"
+                placeholder="Item, código, lote ou endereço"
+                aria-label="Buscar item por nome, código, lote ou endereço"
+                className="h-8 w-[200px]"
               />
             </div>
           </CardHeader>
@@ -627,25 +770,32 @@ export function EstoquePage() {
                   <TableBody>
                     {filtered.map((item) => {
                       const low = item.minQty > 0 && item.qty < item.minQty
+                      const onde = (enderecosDoItem.get(item.id) ?? []).filter((e) => !setorFiltro || e.setorId === setorFiltro)
                       return (
                         <TableRow key={item.id}>
                           <TableCell>
                             <div className="flex min-w-0 items-center gap-1.5 font-medium">
-                              <button type="button" className="truncate text-left hover:underline" title={`Editar ${item.name}`} onClick={() => openEdit(item)}>
+                              <Link to={`/estoque/item/${item.id}`} className="truncate text-left hover:underline" title={`Ficha de ${item.name}: notas, lotes e histórico`}>
                                 {item.name}
-                              </button>
+                              </Link>
                               {item.controlled ? <ShieldAlert className="size-3.5 shrink-0 text-amber-500" /> : null}
                             </div>
-                            {item.sku || item.barcode ? (
+                            {item.sku || item.barcode || onde.length > 0 ? (
                               <div className="truncate text-xs tabular-nums text-muted-foreground">
-                                {[item.sku, item.barcode].filter(Boolean).join(' · ')}
+                                {[
+                                  ...onde.map((e) => (setores.length > 1 && !setorFiltro ? `${e.setorNome} ${e.codigo}` : e.codigo)),
+                                  item.sku,
+                                  item.barcode,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' · ')}
                               </div>
                             ) : null}
                           </TableCell>
                           <TableCell className="text-muted-foreground">{item.category ?? '—'}</TableCell>
                           <TableCell className="text-right">
-                            <Badge variant={low ? 'destructive' : 'secondary'}>
-                              {item.qty} {item.unit}
+                            <Badge variant={low ? 'destructive' : 'secondary'} title={setorFiltro ? `Total em todos os setores: ${formatQtd(item.qty)}` : undefined}>
+                              {formatQtd(qtdNaLista(item))} {item.unit}
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
@@ -657,6 +807,9 @@ export function EstoquePage() {
                                 <MoreHorizontal className="size-4" aria-hidden />
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="min-w-40">
+                                <DropdownMenuItem onClick={() => abrirFicha(item)}>
+                                  <History className="size-4" aria-hidden /> Ficha e histórico
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => openEdit(item)}>
                                   <Pencil className="size-4" aria-hidden /> Editar
                                 </DropdownMenuItem>
@@ -665,9 +818,6 @@ export function EstoquePage() {
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => openMove(item, 'saida')}>
                                   <ArrowUpFromLine className="size-4" aria-hidden /> Saída
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => void openHistory(item)}>
-                                  <History className="size-4" aria-hidden /> Histórico
                                 </DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -698,7 +848,10 @@ export function EstoquePage() {
           <DialogHeader>
             <DialogTitle>Movimentar {moveItem?.name}</DialogTitle>
             <DialogDescription>
-              Saldo atual: {moveItem?.qty} {moveItem?.unit}
+              Saldo total: {formatQtd(moveItem?.qty ?? 0)} {moveItem?.unit}
+              {moveItem && moveSetor && setores.length > 1
+                ? ` · em ${setores.find((w) => w.id === moveSetor)?.name ?? 'setor'}: ${formatQtd(saldoNoSetor.get(`${moveSetor}:${moveItem.id}`) ?? 0)}`
+                : ''}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -715,6 +868,23 @@ export function EstoquePage() {
                 </SelectContent>
               </Select>
             </div>
+            {setores.length > 1 ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="mv-setor">{moveKind === 'saida' ? 'Sai de' : 'Entra em'}</Label>
+                <Select value={moveSetor ?? ''} onValueChange={(v) => setMoveSetor(v || null)}>
+                  <SelectTrigger id="mv-setor">
+                    <span className="truncate text-sm">{setores.find((w) => w.id === moveSetor)?.name ?? 'Escolha o setor'}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {setores.map((w) => (
+                      <SelectItem key={w.id} value={w.id}>
+                        {w.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="mv-qty">Quantidade</Label>
               <Input
@@ -734,6 +904,17 @@ export function EstoquePage() {
                   onChange={(e) => setMoveCost(e.target.value)}
                   inputMode="decimal"
                   placeholder="Opcional, alimenta o custo por cirurgia"
+                />
+              </div>
+            ) : null}
+            {moveKind === 'saida' && moveItem?.controlled ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="mv-paciente">Paciente (item controlado)</Label>
+                <Input
+                  id="mv-paciente"
+                  value={movePaciente}
+                  onChange={(e) => setMovePaciente(e.target.value)}
+                  placeholder="Nome do paciente para o livro de controlados"
                 />
               </div>
             ) : null}
@@ -757,34 +938,6 @@ export function EstoquePage() {
 
       <BarcodeCameraDialog open={cameraOpen} onOpenChange={setCameraOpen} onScan={handleScanned} />
 
-      <Dialog open={historyItem != null} onOpenChange={(open) => (!open ? setHistoryItem(null) : null)}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Histórico · {historyItem?.name}</DialogTitle>
-            <DialogDescription>Últimos {historyRows.length} movimentos.</DialogDescription>
-          </DialogHeader>
-          <div className="max-h-[50vh] space-y-1 overflow-y-auto text-sm">
-            {historyRows.length === 0 ? (
-              <p className="py-6 text-center text-muted-foreground">Sem movimentos registrados.</p>
-            ) : (
-              historyRows.map((m) => (
-                <div key={m.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-                  <div>
-                    <span className={m.qtyDelta < 0 ? 'font-semibold text-red-500' : 'font-semibold text-emerald-600'}>
-                      {m.qtyDelta > 0 ? `+${m.qtyDelta}` : m.qtyDelta}
-                    </span>{' '}
-                    <span className="text-muted-foreground">{m.reason ?? m.kind}</span>
-                    {m.note ? <div className="text-xs text-muted-foreground">{m.note}</div> : null}
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(m.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </AppLayout>
   )
 }

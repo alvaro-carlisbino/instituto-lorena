@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Printer, Trash2 } from 'lucide-react'
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SearchField } from '@/components/ui/search-field'
 import { SearchPicker } from '@/components/ui/search-picker'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
@@ -18,6 +19,7 @@ import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
+import { type StockWarehouse, listWarehouses } from '@/services/estoqueArmazens'
 import { type KitTemplate, type SetorKit, createKitTemplate, imprimirFolhaDeItens, updateKitTemplate } from '@/services/estoqueKits'
 
 type Linha = { itemId: string; qty: number }
@@ -39,6 +41,13 @@ export function EditorModelo({
 }) {
   const [nome, setNome] = useState(modelo?.name ?? '')
   const [setor, setSetor] = useState<SetorKit | null>(modelo?.setor ?? null)
+  const [setorEstoque, setSetorEstoque] = useState<string | null>(modelo?.warehouseId ?? null)
+  const [setoresEstoque, setSetoresEstoque] = useState<StockWarehouse[]>([])
+  useEffect(() => {
+    listWarehouses()
+      .then(setSetoresEstoque)
+      .catch(() => setSetoresEstoque([]))
+  }, [])
   const [linhas, setLinhas] = useState<Linha[]>(() => (modelo?.items ?? []).map((i) => ({ itemId: i.itemId, qty: i.qty })))
   const [codigo, setCodigo] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
@@ -95,8 +104,8 @@ export function EditorModelo({
     }
     setSalvando(true)
     try {
-      if (modelo) await updateKitTemplate({ id: modelo.id, name: nome, setor, items: validas })
-      else await createKitTemplate({ name: nome, setor, items: validas })
+      if (modelo) await updateKitTemplate({ id: modelo.id, name: nome, setor, warehouseId: setorEstoque, items: validas })
+      else await createKitTemplate({ name: nome, setor, warehouseId: setorEstoque, items: validas })
       toast.success(modelo ? 'Modelo atualizado.' : `Modelo "${nome.trim()}" criado.`)
       onSalvo()
     } catch (e) {
@@ -137,6 +146,29 @@ export function EditorModelo({
           </div>
           <p className="text-xs text-muted-foreground">Decide o padrão do consumo do setor ao registrar o uso.</p>
         </div>
+        {setoresEstoque.length > 1 ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="modelo-setor-estoque">Material sai do estoque de</Label>
+            <Select value={setorEstoque ?? 'padrao'} onValueChange={(v) => setSetorEstoque(!v || v === 'padrao' ? null : v)}>
+              <SelectTrigger id="modelo-setor-estoque" className="h-9 w-full">
+                <span className="truncate text-sm">
+                  {setorEstoque
+                    ? (setoresEstoque.find((w) => w.id === setorEstoque)?.name ?? 'Setor')
+                    : `Setor padrão (${setoresEstoque.find((w) => w.isDefault)?.name ?? 'Principal'})`}
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="padrao">Setor padrão ({setoresEstoque.find((w) => w.isDefault)?.name ?? 'Principal'})</SelectItem>
+                {setoresEstoque.map((w) => (
+                  <SelectItem key={w.id} value={w.id}>
+                    {w.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Ao montar, o material sai deste setor, lote a lote. Dá para trocar na montagem.</p>
+          </div>
+        ) : null}
         <Button variant="outline" className="h-10 w-full" onClick={imprimir} disabled={imprimindo || linhas.length === 0}>
           <Printer className="size-4" aria-hidden /> {imprimindo ? 'Preparando…' : 'Imprimir folha do kit (PDF)'}
         </Button>

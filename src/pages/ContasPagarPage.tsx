@@ -18,6 +18,7 @@
 // (crm_notas_estoque). Antes isso só aparecia abrindo nota por nota, e o financeiro não achou.
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ChevronDown, FileText, Link2, Paperclip, Plus, RefreshCw, RotateCcw, Search } from 'lucide-react'
 
@@ -206,6 +207,8 @@ export function ContasPagarPage() {
 
   const [notaAberta, setNotaAberta] = useState<string | null>(null)
   const [movimentos, setMovimentos] = useState<Record<string, InvoiceMovement[]>>({})
+  // A ficha do item (estoque) linka a nota que comprou: /contas-a-pagar?nota=<id> abre ela aqui.
+  const [params, setParams] = useSearchParams()
 
   /** `silencioso` recarrega sem trocar a lista por "Carregando…": a rolagem não pula. */
   const load = async (silencioso = false) => {
@@ -416,6 +419,32 @@ export function ContasPagarPage() {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar a nota')
     }
   }
+
+  useEffect(() => {
+    const id = params.get('nota')
+    if (!id || invoices.length === 0) return
+    // Link de fora (ficha do item) consumido uma vez: limpa a URL e abre a nota.
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('nota')
+        return next
+      },
+      { replace: true },
+    )
+    if (!invoices.some((i) => i.id === id)) {
+      toast.error('Nota não encontrada neste polo.')
+      return
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVista('notas')
+    setBusca('')
+    setFiltroNotas('todas')
+    setNotaAberta(null)
+    void abrirNota(id)
+    window.setTimeout(() => document.getElementById(`nota-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 150)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices, params])
 
   const abrirAnexo = async (path: string) => {
     try {
@@ -824,6 +853,7 @@ export function ContasPagarPage() {
                         return (
                           <Fragment key={inv.id}>
                             <tr
+                              id={`nota-${inv.id}`}
                               className={cn('cursor-pointer border-t border-border/60 hover:bg-muted/30', aberta && 'bg-muted/30')}
                               onClick={() => void abrirNota(inv.id)}
                             >
@@ -886,7 +916,9 @@ export function ContasPagarPage() {
                                         <ul className="space-y-0.5">
                                           {movs.map((m) => (
                                             <li key={m.id} className="flex justify-between gap-2">
-                                              <span className="truncate">{m.itemName}</span>
+                                              <Link to={`/estoque/item/${m.itemId}`} className="truncate hover:underline" title="Ficha do item: lotes, setor e para onde foi">
+                                                {m.itemName}
+                                              </Link>
                                               <span className="shrink-0 text-muted-foreground">
                                                 {m.qtyDelta} {m.unit}
                                                 {m.unitCostCents != null ? ` · ${brl(m.unitCostCents)}/un` : ''}

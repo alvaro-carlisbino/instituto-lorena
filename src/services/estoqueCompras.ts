@@ -85,6 +85,8 @@ export type StockItem = {
   replacedBy?: string | null
   /** Fator de embalagem aprendido ("ean:…"/"nome:…" → unidades do item por unidade da nota). */
   packFactors?: Record<string, number>
+  /** Custo por unidade fixado à mão (item sem nota): vale até a próxima compra por nota. */
+  referenceCostCents?: number | null
   /** saldo atual (da view stock_balances) */
   qty: number
   lastMovementAt: string | null
@@ -94,6 +96,7 @@ type StockItemRow = {
   id: unknown; name: unknown; sku: unknown; barcode: unknown; category: unknown; unit: unknown
   min_qty: unknown; source: unknown; controlled: unknown; note: unknown; active: unknown
   aliases: unknown; bling_product_id: unknown; replaced_by: unknown; pack_factors: unknown
+  reference_cost_cents?: unknown
 }
 type StockBalanceRow = { item_id: unknown; qty: unknown; last_movement_at: unknown }
 
@@ -105,7 +108,7 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
     buscarTudo<StockItemRow>(() => {
       let q = client
         .from('stock_items')
-        .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active, aliases, bling_product_id, replaced_by, pack_factors')
+        .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active, aliases, bling_product_id, replaced_by, pack_factors, reference_cost_cents')
         .order('name')
         .order('id')
       if (!includeInactive) q = q.eq('active', true)
@@ -117,31 +120,54 @@ export async function listStockItems(includeInactive = false): Promise<StockItem
     ),
   ])
   const byItem = new Map(balances.map((b) => [String(b.item_id), b] as const))
-  return items.map((r) => {
-    const bal = byItem.get(String(r.id))
-    const aliasesRaw = r.aliases
-    const replacedRaw = r.replaced_by
-    const packRaw = r.pack_factors
-    return {
-      id: String(r.id),
-      name: String(r.name),
-      sku: r.sku != null ? String(r.sku) : null,
-      barcode: r.barcode != null ? String(r.barcode) : null,
-      category: r.category != null ? String(r.category) : null,
-      unit: String(r.unit ?? 'un'),
-      minQty: Number(r.min_qty ?? 0),
-      source: String(r.source ?? 'manual'),
-      controlled: Boolean(r.controlled),
-      note: r.note != null ? String(r.note) : null,
-      active: Boolean(r.active),
-      aliases: Array.isArray(aliasesRaw) ? aliasesRaw.map((a) => String(a)) : [],
-      blingProductId: r.bling_product_id != null ? String(r.bling_product_id) : null,
-      replacedBy: replacedRaw != null ? String(replacedRaw) : null,
-      packFactors: packRaw && typeof packRaw === 'object' ? (packRaw as Record<string, number>) : {},
-      qty: Number(bal?.qty ?? 0),
-      lastMovementAt: bal?.last_movement_at ? String(bal.last_movement_at) : null,
-    }
-  })
+  return items.map((r) => mapStockItem(r, byItem.get(String(r.id))))
+}
+
+function mapStockItem(r: StockItemRow, bal: StockBalanceRow | undefined): StockItem {
+  const aliasesRaw = r.aliases
+  const replacedRaw = r.replaced_by
+  const packRaw = r.pack_factors
+  return {
+    id: String(r.id),
+    name: String(r.name),
+    sku: r.sku != null ? String(r.sku) : null,
+    barcode: r.barcode != null ? String(r.barcode) : null,
+    category: r.category != null ? String(r.category) : null,
+    unit: String(r.unit ?? 'un'),
+    minQty: Number(r.min_qty ?? 0),
+    source: String(r.source ?? 'manual'),
+    controlled: Boolean(r.controlled),
+    note: r.note != null ? String(r.note) : null,
+    active: Boolean(r.active),
+    aliases: Array.isArray(aliasesRaw) ? aliasesRaw.map((a) => String(a)) : [],
+    blingProductId: r.bling_product_id != null ? String(r.bling_product_id) : null,
+    replacedBy: replacedRaw != null ? String(replacedRaw) : null,
+    packFactors: packRaw && typeof packRaw === 'object' ? (packRaw as Record<string, number>) : {},
+    referenceCostCents: r.reference_cost_cents != null ? Number(r.reference_cost_cents) : null,
+    qty: Number(bal?.qty ?? 0),
+    lastMovementAt: bal?.last_movement_at ? String(bal.last_movement_at) : null,
+  }
+}
+
+/** Um item só (ficha do item), com saldo e último custo, sem baixar o catálogo inteiro. */
+export async function getStockItem(id: string): Promise<(StockItem & { lastCostCents: number | null }) | null> {
+  const client = assertClient()
+  const [item, bal, custo] = await Promise.all([
+    client
+      .from('stock_items')
+      .select('id, name, sku, barcode, category, unit, min_qty, source, controlled, note, active, aliases, bling_product_id, replaced_by, pack_factors, reference_cost_cents')
+      .eq('id', id)
+      .maybeSingle(),
+    client.from('stock_balances').select('item_id, qty, last_movement_at').eq('item_id', id).maybeSingle(),
+    client.from('stock_item_last_costs').select('unit_cost_cents').eq('item_id', id).maybeSingle(),
+  ])
+  if (item.error) throw new Error(item.error.message)
+  if (!item.data) return null
+  const custoCents = (custo.data as { unit_cost_cents?: unknown } | null)?.unit_cost_cents
+  return {
+    ...mapStockItem(item.data as StockItemRow, (bal.data ?? undefined) as StockBalanceRow | undefined),
+    lastCostCents: custoCents != null ? Number(custoCents) : null,
+  }
 }
 
 /**
@@ -182,6 +208,8 @@ export async function upsertStockItem(payload: {
   blingProductId?: string | null
   /** Marca produto que nasceu de import automático e ninguém olhou ainda. */
   needsReview?: boolean
+  /** Custo por unidade fixado à mão. Só vai quando muda: gravar de novo renovaria a data. */
+  referenceCostCents?: number | null
 }): Promise<string> {
   const client = assertClient()
   const row: Record<string, unknown> = {
@@ -202,6 +230,11 @@ export async function upsertStockItem(payload: {
   if (payload.source) row.source = payload.source
   if (payload.blingProductId !== undefined) row.bling_product_id = payload.blingProductId?.trim() || null
   if (payload.needsReview !== undefined) row.needs_review = payload.needsReview
+  if (payload.referenceCostCents !== undefined) {
+    const c = payload.referenceCostCents
+    row.reference_cost_cents = c != null && c > 0 ? Math.round(c) : null
+    row.reference_cost_at = c != null && c > 0 ? new Date().toISOString() : null
+  }
   const query = payload.id
     ? client.from('stock_items').update(row).eq('id', payload.id)
     : client.from('stock_items').insert(row)

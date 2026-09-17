@@ -35,15 +35,9 @@ import {
   registerMovement,
   upsertStockItem,
 } from '@/services/estoqueCompras'
-import {
-  allocateFefo,
-  ensureBatch,
-  listBatchBalances,
-  listBatchCosts,
-  listItemLastCosts,
-  logControlledEntry,
-  logControlledExit,
-} from '@/services/estoqueKits'
+import { ensureBatch, logControlledEntry } from '@/services/estoqueKits'
+import { type StockWarehouse, listWarehouses } from '@/services/estoqueArmazens'
+import { baixarEstoque } from '@/services/estoqueRastreio'
 import { pushBlingStockEntry } from '@/services/crmBling'
 import { BarcodeCameraDialog } from '@/components/estoque/BarcodeCameraDialog'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
@@ -79,6 +73,9 @@ export function BipagemPage() {
   const [reason, setReason] = useState('')
   const [patient, setPatient] = useState('')
   const [confirming, setConfirming] = useState(false)
+  // Setor onde a caixa entra ou de onde o material sai. Começa no padrão (Principal).
+  const [setores, setSetores] = useState<StockWarehouse[]>([])
+  const [setor, setSetor] = useState<string | null>(null)
 
   const [scanCode, setScanCode] = useState('')
   const [cameraOpen, setCameraOpen] = useState(false)
@@ -95,7 +92,10 @@ export function BipagemPage() {
   const load = async () => {
     setLoading(true)
     try {
-      setItems(await listStockItems())
+      const [it, whs] = await Promise.all([listStockItems(), listWarehouses()])
+      setItems(it)
+      setSetores(whs)
+      setSetor((atual) => atual ?? whs.find((w) => w.isDefault)?.id ?? whs[0]?.id ?? null)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar o estoque')
     } finally {
@@ -214,6 +214,7 @@ export function BipagemPage() {
             refType: 'bipagem',
             batchId,
             unitCostCents,
+            warehouseId: setor,
           })
           movements += 1
           if (line.item.controlled) {
@@ -234,36 +235,17 @@ export function BipagemPage() {
           }
         }
       } else {
-        const [batchCosts, lastCosts] = await Promise.all([listBatchCosts(), listItemLastCosts()])
-        for (const line of lines) {
-          const batches = await listBatchBalances(line.item.id)
-          const allocation = allocateFefo(batches, line.qty)
-          for (const slice of allocation) {
-            const unitCostCents =
-              (slice.batchId ? batchCosts.get(slice.batchId) : undefined) ?? lastCosts.get(line.item.id) ?? null
-            const movementId = await registerMovement({
-              itemId: line.item.id,
-              kind: 'saida',
-              qty: slice.qty,
-              reason: reason.trim() || 'saída por bipagem',
-              note: patient.trim() ? `Paciente: ${patient.trim()}` : undefined,
-              refType: 'bipagem',
-              batchId: slice.batchId,
-              unitCostCents,
-            })
-            movements += 1
-            if (line.item.controlled) {
-              await logControlledExit({
-                itemId: line.item.id,
-                batchId: slice.batchId,
-                movementId,
-                qty: slice.qty,
-                patientName: patient,
-                note: reason || null,
-              })
-            }
-          }
-        }
+        // Uma chamada: o banco tira de cada item por lote (vence antes sai antes) no setor
+        // escolhido, com o custo do lote, e grava o livro de controlados. Antes eram duas idas
+        // ao banco por lote, em série, e o lote era escolhido sem olhar o setor.
+        const r = await baixarEstoque({
+          setorId: setor,
+          itens: lines.map((l) => ({ itemId: l.item.id, qty: l.qty })),
+          motivo: reason.trim() || 'saída por bipagem',
+          paciente: patient,
+          origem: 'bipagem',
+        })
+        movements = r.movimentos
       }
       toast.success(
         mode === 'entrada'
@@ -316,6 +298,24 @@ export function BipagemPage() {
               <p className="text-[11px] text-muted-foreground">
                 Pra trocar entre entrada e saída, confirme ou limpe a lista atual.
               </p>
+            ) : null}
+
+            {setores.length > 1 ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="bip-setor">{mode === 'entrada' ? 'Entra em' : 'Sai de'}</Label>
+                <Select value={setor ?? ''} onValueChange={(v) => setSetor(v || null)}>
+                  <SelectTrigger id="bip-setor" className="h-10 w-full">
+                    <span className="truncate text-sm">{setores.find((w) => w.id === setor)?.name ?? 'Escolha o setor'}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {setores.map((w) => (
+                      <SelectItem key={w.id} value={w.id}>
+                        {w.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             ) : null}
 
             <div className="space-y-1.5">

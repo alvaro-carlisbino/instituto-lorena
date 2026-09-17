@@ -315,8 +315,10 @@ export async function darEntradaItensNfe(
       kind: 'entrada',
       qty,
       reason: 'compra (NF-e)',
+      // O nome do produto como veio na nota fica no lançamento: quando a nota casa com item de
+      // outro nome (apelido, EAN), a ficha do item ainda mostra o que o fornecedor faturou.
       note:
-        `NF ${nfe.number}${nfeItem.lotCode ? ` · lote ${nfeItem.lotCode}` : ''}` +
+        `NF ${nfe.number} · ${nfeItem.description}${nfeItem.lotCode ? ` · lote ${nfeItem.lotCode}` : ''}` +
         (fator !== 1 ? ` · ${nfeItem.qty} ${nfeItem.unit} × ${fator}` : ''),
       refType: 'purchase_invoice',
       refId: invoiceId,

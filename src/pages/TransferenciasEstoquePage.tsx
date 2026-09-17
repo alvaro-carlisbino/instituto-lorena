@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowDownUp, ArrowLeftRight, Plus, Trash2 } from 'lucide-react'
+import { ArrowDownUp, ArrowLeftRight, MapPin, Trash2, Undo2 } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { ExportarMenu } from '@/components/page/ExportarMenu'
 import { SubTabs } from '@/components/page/SubTabs'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -17,14 +19,17 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SearchField } from '@/components/ui/search-field'
 import { SearchPicker } from '@/components/ui/search-picker'
+import { Textarea } from '@/components/ui/textarea'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
-import { formatQtd, produtosParaBusca } from '@/components/kits/kitUi'
+import { formatQtd, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
 import { estoqueTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { beep } from '@/lib/beep'
+import { normalizarBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { exportarExcel, exportarPdf } from '@/lib/exportar'
 import { cn } from '@/lib/utils'
@@ -32,13 +37,20 @@ import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 import {
   type StockTransfer,
   type StockWarehouse,
+  cancelarTransferencia,
   createTransfer,
   listTransfers,
+  listWarehouseBalances,
   listWarehouses,
-  upsertWarehouse,
 } from '@/services/estoqueArmazens'
 
 type Linha = { itemId: string; qty: number }
+
+const dataHora = (iso: string) =>
+  new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+/** Motivo de cancelamento precisa dizer alguma coisa: "ok" ou "..." não explica nada depois. */
+const letras = (v: string) => v.replace(/[^\p{L}]/gu, '').length
 
 /**
  * Levar material de um setor para outro (Principal → Centro Cirúrgico, SPA, Consultório,
@@ -48,6 +60,7 @@ type Linha = { itemId: string; qty: number }
 export function TransferenciasEstoquePage() {
   const { tenant } = useTenant()
   const [warehouses, setWarehouses] = useState<StockWarehouse[]>([])
+  // Inclui inativos: transferência antiga de item consolidado ainda precisa mostrar o nome.
   const [items, setItems] = useState<StockItem[]>([])
   const [transfers, setTransfers] = useState<StockTransfer[]>([])
   const [loading, setLoading] = useState(true)
@@ -58,15 +71,36 @@ export function TransferenciasEstoquePage() {
   const [linhas, setLinhas] = useState<Linha[]>([])
   const [saving, setSaving] = useState(false)
   const [codigo, setCodigo] = useState<string | null>(null)
-  const [novoSetor, setNovoSetor] = useState(false)
-  const [whName, setWhName] = useState('')
+
+  // Saldo do setor de origem. Guarda de qual setor veio para não mostrar o saldo do setor
+  // anterior enquanto o novo carrega.
+  const [saldoOrigem, setSaldoOrigem] = useState<{ setorId: string; porItem: Map<string, number> } | null>(null)
+  const [versaoSaldo, setVersaoSaldo] = useState(0)
+
+  const [cancelando, setCancelando] = useState<StockTransfer | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [cancelSalvando, setCancelSalvando] = useState(false)
+
+  const [filtroSetor, setFiltroSetor] = useState('')
+  const [buscaHist, setBuscaHist] = useState('')
 
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
-  const busca = useMemo(() => produtosParaBusca(items), [items])
+  const ativos = useMemo(() => items.filter((i) => i.active), [items])
+  const nomeOrigem = warehouses.find((w) => w.id === fromId)?.name ?? 'origem'
+  const saldoNaOrigem = (itemId: string) =>
+    saldoOrigem != null && saldoOrigem.setorId === fromId ? (saldoOrigem.porItem.get(itemId) ?? 0) : null
+
+  // Na busca, o número ao lado do nome é o saldo no setor de onde vai sair, não o total.
+  const busca = useMemo(() => {
+    const base = produtosParaBusca(ativos)
+    if (!saldoOrigem || saldoOrigem.setorId !== fromId) return base
+    const unidade = new Map(ativos.map((i) => [i.id, i.unit] as const))
+    return base.map((p) => ({ ...p, meta: `${formatQtd(saldoOrigem.porItem.get(p.id) ?? 0)} ${unidade.get(p.id) ?? 'un'}` }))
+  }, [ativos, saldoOrigem, fromId])
 
   const load = async () => {
     try {
-      const [w, it, tr] = await Promise.all([listWarehouses(), listStockItems(), listTransfers()])
+      const [w, it, tr] = await Promise.all([listWarehouses(), listStockItems(true), listTransfers()])
       setWarehouses(w)
       setItems(it)
       setTransfers(tr)
@@ -84,6 +118,21 @@ export function TransferenciasEstoquePage() {
     void load()
   }, [])
 
+  useEffect(() => {
+    if (!fromId) return
+    let cancelado = false
+    listWarehouseBalances(fromId)
+      .then((saldos) => {
+        if (!cancelado) setSaldoOrigem({ setorId: fromId, porItem: new Map(saldos.map((s) => [s.itemId, s.qty] as const)) })
+      })
+      .catch((e) => {
+        if (!cancelado) toast.error(e instanceof Error ? e.message : 'Falha ao carregar o saldo do setor')
+      })
+    return () => {
+      cancelado = true
+    }
+  }, [fromId, versaoSaldo])
+
   const incluir = (item: StockItem) => {
     beep(true)
     setLinhas((prev) => {
@@ -94,7 +143,9 @@ export function TransferenciasEstoquePage() {
   }
 
   const onCode = (code: string) => {
-    const item = acharItemPorCodigo(items, code)
+    // Leitor disparado com o cursor na busca do histórico digita o código ali também.
+    setBuscaHist((b) => semCodigoBipado(b, code))
+    const item = acharItemPorCodigo(ativos, code)
     if (!item) {
       beep(false)
       setCodigo(code)
@@ -119,6 +170,7 @@ export function TransferenciasEstoquePage() {
       toast.success(`Transferência registrada: ${validas.length} ${validas.length === 1 ? 'item' : 'itens'}.`)
       setLinhas([])
       setNote('')
+      setVersaoSaldo((v) => v + 1)
       await load()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha na transferência')
@@ -127,16 +179,24 @@ export function TransferenciasEstoquePage() {
     }
   }
 
-  const criarSetor = async () => {
-    if (whName.trim().length < 2) return
+  const abrirCancelamento = (t: StockTransfer) => {
+    setMotivo('')
+    setCancelando(t)
+  }
+
+  const confirmarCancelamento = async () => {
+    if (!cancelando || letras(motivo) < 3) return
+    setCancelSalvando(true)
     try {
-      await upsertWarehouse({ name: whName, code: null })
-      toast.success(`Setor "${whName.trim()}" criado.`)
-      setWhName('')
-      setNovoSetor(false)
+      await cancelarTransferencia(cancelando.id, motivo)
+      toast.success(`Transferência cancelada. Os itens voltaram para ${cancelando.fromName}.`)
+      setCancelando(null)
+      setVersaoSaldo((v) => v + 1)
       await load()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao criar setor')
+      toast.error(e instanceof Error ? e.message : 'Falha ao cancelar a transferência')
+    } finally {
+      setCancelSalvando(false)
     }
   }
 
@@ -149,7 +209,7 @@ export function TransferenciasEstoquePage() {
           disabled={w.id === bloqueado}
           onClick={() => onChange(w.id)}
           className={cn(
-            'rounded-lg border px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+            'min-h-9 rounded-lg border px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40',
             valor === w.id ? 'border-primary bg-primary/10 font-medium' : 'border-border bg-card hover:bg-muted',
           )}
         >
@@ -159,8 +219,37 @@ export function TransferenciasEstoquePage() {
     </div>
   )
 
-  const linhasHistorico = transfers.flatMap((t) =>
-    t.items.map((i) => [new Date(t.createdAt).toLocaleString('pt-BR'), t.fromName, t.toName, porId.get(i.itemId)?.name ?? '?', i.qty, t.note ?? '']),
+  // Setores que aparecem no histórico, inclusive os já desativados.
+  const setoresDoHistorico = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const t of transfers) {
+      m.set(t.fromWarehouseId, t.fromName)
+      m.set(t.toWarehouseId, t.toName)
+    }
+    return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+  }, [transfers])
+
+  const visiveis = useMemo(() => {
+    const termo = normalizarBusca(buscaHist)
+    return transfers.filter((t) => {
+      if (filtroSetor && t.fromWarehouseId !== filtroSetor && t.toWarehouseId !== filtroSetor) return false
+      if (!termo) return true
+      return t.items.some((i) => normalizarBusca(porId.get(i.itemId)?.name ?? '').includes(termo))
+    })
+  }, [transfers, filtroSetor, buscaHist, porId])
+  const filtrando = filtroSetor !== '' || buscaHist.trim() !== ''
+
+  const situacao = (t: StockTransfer) => (t.cancelledAt ? `Cancelada${t.cancelReason ? `: ${t.cancelReason}` : ''}` : 'Feita')
+  const linhasHistorico = visiveis.flatMap((t) =>
+    t.items.map((i) => [
+      new Date(t.createdAt).toLocaleString('pt-BR'),
+      t.fromName,
+      t.toName,
+      porId.get(i.itemId)?.name ?? '?',
+      i.qty,
+      t.note ?? '',
+      situacao(t),
+    ]),
   )
 
   return (
@@ -169,17 +258,21 @@ export function TransferenciasEstoquePage() {
       subtitle="Leve material entre setores: digite ou bipe o item, ajuste a quantidade e confirme."
       actions={
         <ExportarMenu
-          disabled={transfers.length === 0}
+          disabled={visiveis.length === 0}
           onExcel={() =>
             exportarExcel('transferencias-estoque', [
-              { nome: 'Transferências', colunas: ['Data', 'De', 'Para', 'Item', 'Quantidade', 'Observação'], linhas: linhasHistorico },
+              {
+                nome: 'Transferências',
+                colunas: ['Data', 'De', 'Para', 'Item', 'Quantidade', 'Observação', 'Situação'],
+                linhas: linhasHistorico,
+              },
             ])
           }
           onPdf={() =>
             exportarPdf({
               titulo: 'Transferências de estoque',
               subtitulo: tenant.name,
-              colunas: ['Data', 'De', 'Para', 'Item', 'Qtd', 'Observação'],
+              colunas: ['Data', 'De', 'Para', 'Item', 'Qtd', 'Observação', 'Situação'],
               numericas: [4],
               linhas: linhasHistorico,
             })
@@ -192,11 +285,14 @@ export function TransferenciasEstoquePage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
         <section className="space-y-4 rounded-xl border border-border bg-card p-3 sm:p-4">
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <Label>Sai de</Label>
-              <Button variant="ghost" size="sm" onClick={() => setNovoSetor(true)} className="text-muted-foreground">
-                <Plus className="size-3.5" aria-hidden /> Novo setor
-              </Button>
+              <Link
+                to="/estoque-enderecos"
+                className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+              >
+                <MapPin className="size-3.5" aria-hidden /> Setores e endereços
+              </Link>
             </div>
             {setores(fromId, setFromId, toId)}
           </div>
@@ -204,6 +300,7 @@ export function TransferenciasEstoquePage() {
             <Button
               variant="outline"
               size="sm"
+              className="h-9"
               onClick={() => {
                 setFromId(toId)
                 setToId(fromId)
@@ -222,7 +319,7 @@ export function TransferenciasEstoquePage() {
             <Label>Itens</Label>
             <ScanBar onCode={onCode} placeholder="Bipe o item" />
             <SearchPicker
-              title="Buscar item do estoque"
+              title={`Buscar item (saldo em ${nomeOrigem})`}
               placeholder="Digite o nome do item"
               searchPlaceholder="Nome, SKU ou código de barras…"
               items={busca}
@@ -242,30 +339,49 @@ export function TransferenciasEstoquePage() {
             <ul className="divide-y divide-border rounded-lg border border-border">
               {linhas.map((l) => {
                 const item = porId.get(l.itemId)
-                const falta = item != null && l.qty > item.qty
+                const unidade = item?.unit ?? 'un'
+                const noSetor = saldoNaOrigem(l.itemId)
+                // Só avisa: o saldo por setor ainda tem lançamento antigo sem setor, e travar aqui
+                // impediria levar material que está de fato na prateleira.
+                const passa = noSetor != null && l.qty > noSetor + 1e-9
                 return (
-                  <li key={l.itemId} className="flex items-center gap-2 px-3 py-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium leading-snug">{item?.name ?? 'Item'}</p>
-                      <p className={cn('text-xs text-muted-foreground', falta && 'text-destructive')}>
-                        saldo total {formatQtd(item?.qty ?? 0)} {item?.unit}
-                      </p>
+                  <li key={l.itemId} className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        {/* Aba nova: tocar no nome no meio da transferência não pode apagar a lista. */}
+                        <Link
+                          to={`/estoque/item/${l.itemId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm font-medium leading-snug hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+                        >
+                          {item?.name ?? 'Item'}
+                        </Link>
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          {noSetor == null ? 'conferindo saldo no setor…' : `no setor de origem: ${formatQtd(noSetor)} ${unidade}`}
+                        </p>
+                      </div>
+                      <QtyStepper
+                        value={l.qty}
+                        min={0}
+                        label={item?.name ?? 'item'}
+                        onChange={(qty) => setLinhas((prev) => prev.map((x) => (x.itemId === l.itemId ? { ...x, qty } : x)))}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-9 shrink-0"
+                        onClick={() => setLinhas((prev) => prev.filter((x) => x.itemId !== l.itemId))}
+                        aria-label={`Tirar ${item?.name ?? 'item'}`}
+                      >
+                        <Trash2 className="size-4" aria-hidden />
+                      </Button>
                     </div>
-                    <QtyStepper
-                      value={l.qty}
-                      min={0}
-                      label={item?.name ?? 'item'}
-                      onChange={(qty) => setLinhas((prev) => prev.map((x) => (x.itemId === l.itemId ? { ...x, qty } : x)))}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-9 shrink-0"
-                      onClick={() => setLinhas((prev) => prev.filter((x) => x.itemId !== l.itemId))}
-                      aria-label={`Tirar ${item?.name ?? 'item'}`}
-                    >
-                      <Trash2 className="size-4" aria-hidden />
-                    </Button>
+                    {passa ? (
+                      <p className="mt-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-xs text-amber-800 dark:text-amber-200">
+                        O sistema registra {formatQtd(noSetor)} em {nomeOrigem}; confira antes de transferir.
+                      </p>
+                    ) : null}
                   </li>
                 )
               })}
@@ -279,26 +395,89 @@ export function TransferenciasEstoquePage() {
           </Button>
         </section>
 
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold">Histórico ({transfers.length})</h2>
-          {transfers.length === 0 ? (
-            <EmptyState icon={ArrowLeftRight} title={loading ? 'Carregando…' : 'Nenhuma transferência'} description="As transferências confirmadas aparecem aqui." />
+        <section className="min-w-0 space-y-2">
+          <h2 className="text-sm font-semibold">
+            Histórico ({filtrando ? `${visiveis.length} de ${transfers.length}` : transfers.length})
+          </h2>
+          {transfers.length > 0 ? (
+            <div className="space-y-2">
+              <SearchField value={buscaHist} onChange={setBuscaHist} label="Buscar item no histórico" resultados={visiveis.length} />
+              {setoresDoHistorico.length > 1 ? (
+                <div className="flex gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Filtrar por setor">
+                  {[{ id: '', name: 'Todos' }, ...setoresDoHistorico].map((s) => (
+                    <button
+                      key={s.id || 'todos'}
+                      type="button"
+                      aria-pressed={filtroSetor === s.id}
+                      onClick={() => setFiltroSetor(s.id)}
+                      className={cn(
+                        'min-h-9 shrink-0 rounded-full border px-3 text-xs font-medium',
+                        filtroSetor === s.id ? 'border-foreground bg-foreground text-background' : 'border-border text-muted-foreground hover:bg-muted',
+                      )}
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {visiveis.length === 0 ? (
+            <EmptyState
+              icon={ArrowLeftRight}
+              title={loading ? 'Carregando…' : filtrando ? 'Nenhuma transferência com esse filtro' : 'Nenhuma transferência'}
+              description={filtrando ? 'Troque o setor ou a busca.' : 'As transferências confirmadas aparecem aqui.'}
+            />
           ) : (
             <ul className="space-y-2">
-              {transfers.map((t) => (
-                <li key={t.id} className="rounded-xl border border-border bg-card p-3 text-sm">
-                  <p className="font-semibold">
-                    {t.fromName} → {t.toName}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(t.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                    {t.note ? ` · ${t.note}` : ''}
-                  </p>
+              {visiveis.map((t) => (
+                <li key={t.id} className={cn('rounded-xl border border-border bg-card p-3 text-sm', t.cancelledAt && 'bg-muted/40')}>
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <p className={cn('font-semibold', t.cancelledAt && 'text-muted-foreground line-through')}>
+                          {t.fromName} → {t.toName}
+                        </p>
+                        {t.cancelledAt ? (
+                          <Badge variant="destructive">Cancelada</Badge>
+                        ) : null}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {dataHora(t.createdAt)}
+                        {t.note ? ` · ${t.note}` : ''}
+                      </p>
+                    </div>
+                    {!t.cancelledAt ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-9 shrink-0 text-muted-foreground"
+                        onClick={() => abrirCancelamento(t)}
+                        aria-label={`Cancelar transferência de ${t.fromName} para ${t.toName}`}
+                      >
+                        <Undo2 className="size-4" aria-hidden /> Cancelar
+                      </Button>
+                    ) : null}
+                  </div>
+                  {t.cancelledAt ? (
+                    <p className="mt-1.5 rounded-md bg-destructive/5 px-2 py-1 text-xs text-destructive">
+                      Cancelada em {dataHora(t.cancelledAt)}
+                      {t.cancelReason ? `: ${t.cancelReason}` : ''}
+                    </p>
+                  ) : null}
                   <ul className="mt-1.5 space-y-0.5 text-xs">
                     {t.items.map((i) => (
                       <li key={i.id} className="flex justify-between gap-2">
-                        <span className="truncate">{porId.get(i.itemId)?.name ?? '?'}</span>
-                        <span className="shrink-0 tabular-nums">{formatQtd(i.qty)}</span>
+                        <Link
+                          to={`/estoque/item/${i.itemId}`}
+                          className="min-w-0 truncate hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+                        >
+                          {porId.get(i.itemId)?.name ?? 'Item removido'}
+                        </Link>
+                        <span className="shrink-0 tabular-nums">
+                          {formatQtd(i.qty)} {porId.get(i.itemId)?.unit ?? ''}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -309,26 +488,46 @@ export function TransferenciasEstoquePage() {
         </section>
       </div>
 
-      <Dialog open={novoSetor} onOpenChange={setNovoSetor}>
-        <DialogContent className="sm:max-w-sm">
+      <Dialog open={cancelando != null} onOpenChange={(open) => !open && !cancelSalvando && setCancelando(null)}>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Novo setor</DialogTitle>
-            <DialogDescription>Ex.: Centro Cirúrgico, SPA, Consultório.</DialogDescription>
+            <DialogTitle>Cancelar esta transferência?</DialogTitle>
+            <DialogDescription>
+              {cancelando
+                ? `${cancelando.fromName} → ${cancelando.toName}, ${dataHora(cancelando.createdAt)}, ${cancelando.items.length} ${cancelando.items.length === 1 ? 'item' : 'itens'}. Ela continua no histórico como cancelada.`
+                : ''}
+            </DialogDescription>
           </DialogHeader>
-          <Input
-            autoFocus
-            value={whName}
-            onChange={(e) => setWhName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void criarSetor()}
-            placeholder="Nome do setor"
-            className="h-10"
-          />
+          {cancelando ? (
+            <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+              Os itens voltam para {cancelando.fromName}. Se já foram usados em {cancelando.toName}, o saldo de lá pode ficar negativo.
+            </p>
+          ) : null}
+          <div className="space-y-1.5">
+            <Label htmlFor="motivo-cancelamento">Motivo</Label>
+            <Textarea
+              id="motivo-cancelamento"
+              autoFocus
+              rows={2}
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Ex.: setor errado, quantidade lançada a mais"
+            />
+            {motivo.trim() !== '' && letras(motivo) < 3 ? (
+              <p className="text-xs text-destructive">Escreva o motivo com pelo menos 3 letras.</p>
+            ) : null}
+          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setNovoSetor(false)}>
-              Cancelar
+            <Button variant="outline" className="h-9" onClick={() => setCancelando(null)} disabled={cancelSalvando}>
+              Voltar
             </Button>
-            <Button onClick={() => void criarSetor()} disabled={whName.trim().length < 2}>
-              Criar setor
+            <Button
+              variant="destructive"
+              className="h-9"
+              onClick={() => void confirmarCancelamento()}
+              disabled={cancelSalvando || letras(motivo) < 3}
+            >
+              {cancelSalvando ? 'Cancelando…' : 'Cancelar transferência'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -336,7 +535,7 @@ export function TransferenciasEstoquePage() {
 
       <VincularCodigoDialog
         codigo={codigo}
-        itens={items}
+        itens={ativos}
         onClose={() => setCodigo(null)}
         onVinculado={(item) => {
           setCodigo(null)

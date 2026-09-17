@@ -11,7 +11,8 @@
 // v2: a v1 podia guardar uma página HTML sob a URL de um chunk .js (ver o fetch de
 // assets abaixo). Trocar o nome faz o `activate` apagar o cache envenenado de quem já
 // estava com o problema — é o que desfaz o erro sem pedir limpeza manual de cache.
-const CACHE = 'crm-app-v2'
+// v3: só arquivo estático passa pelo cache-first (ver o fetch abaixo).
+const CACHE = 'crm-app-v3'
 
 /**
  * Pasta em que este SW está montado: "/" na raiz, "/interno/" quando o CRM roda dentro
@@ -53,39 +54,58 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone()
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => undefined)
+          // Página de erro não serve de fallback offline.
+          if (res.ok) {
+            const copy = res.clone()
+            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => undefined)
+          }
           return res
         })
-        .catch(() => caches.match(req).then((cached) => cached || caches.match(BASE))),
+        // Sem rede e sem cópia: `undefined` no respondWith vira outro erro no console.
+        .catch(() =>
+          caches
+            .match(req)
+            .then((cached) => cached || caches.match(BASE))
+            .then((cached) => cached || Response.error()),
+        ),
     )
     return
   }
+
+  // Todo GET que não era página caía no cache-first abaixo, inclusive rota do app pedida por
+  // fetch sem `accept: text/html` (em 17/set/2026 foi um `/ponto`). Nada disso é cacheado, e
+  // uma falha de rede ali rejeitava o respondWith: "FetchEvent for .../ponto resulted in a
+  // network error response" + "Uncaught (in promise) TypeError: Failed to fetch" no sw.js.
+  // Só arquivo estático passa pelo SW; o resto vai direto à rede, como se ele não existisse.
+  const ehAsset =
+    url.pathname.startsWith(`${BASE}assets/`) || /\.(js|css|png|svg|webp|woff2?)$/.test(url.pathname)
+  if (!ehAsset) return
 
   // Assets: cache-first com fallback rede.
   event.respondWith(
     caches.match(req).then((cached) => {
       if (cached) return cached
-      return fetch(req).then((res) => {
-        const ehAsset =
-          url.pathname.startsWith(`${BASE}assets/`) || url.pathname.match(/\.(js|css|png|svg|webp|woff2?)$/)
+      return fetch(req)
+        .then((res) => {
+          // `res.ok` NÃO basta. Quando um chunk com hash antigo some (deploy novo), o
+          // rewrite do Vercel respondia a página com status 200 e `text/html` — a
+          // condição antiga aceitava isso e GRAVAVA O HTML sob a URL do .js. Daí em
+          // diante o cache-first servia HTML como script para sempre, e o erro
+          // "Expected a JavaScript-or-Wasm module script" sobrevivia a qualquer reload.
+          // Agora um asset só entra no cache se o tipo devolvido combinar com o pedido.
+          const tipo = res.headers.get('content-type') || ''
+          const pediuScript = /\.(js|mjs)$/.test(url.pathname) || url.pathname.startsWith(`${BASE}assets/`)
+          const veioHtml = tipo.includes('text/html')
 
-        // `res.ok` NÃO basta. Quando um chunk com hash antigo some (deploy novo), o
-        // rewrite do Vercel respondia a página com status 200 e `text/html` — a
-        // condição antiga aceitava isso e GRAVAVA O HTML sob a URL do .js. Daí em
-        // diante o cache-first servia HTML como script para sempre, e o erro
-        // "Expected a JavaScript-or-Wasm module script" sobrevivia a qualquer reload.
-        // Agora um asset só entra no cache se o tipo devolvido combinar com o pedido.
-        const tipo = res.headers.get('content-type') || ''
-        const pediuScript = /\.(js|mjs)$/.test(url.pathname) || url.pathname.startsWith(`${BASE}assets/`)
-        const veioHtml = tipo.includes('text/html')
-
-        if (res.ok && ehAsset && !(pediuScript && veioHtml)) {
-          const copy = res.clone()
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => undefined)
-        }
-        return res
-      })
+          if (res.ok && !(pediuScript && veioHtml)) {
+            const copy = res.clone()
+            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => undefined)
+          }
+          return res
+        })
+        // Sem rede e fora do cache não há o que servir. Devolver o erro explícito evita a
+        // rejeição solta; o import que falhar cai no src/lib/chunkReload.ts como antes.
+        .catch(() => Response.error())
     }),
   )
 })
