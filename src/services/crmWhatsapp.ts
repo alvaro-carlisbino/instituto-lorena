@@ -112,6 +112,9 @@ export type SendWhatsappResult =
         | 'out_of_window'
         | 'wrong_sender_tenant'
         | 'blocked_antiban'
+        | 'linha_particular'
+        | 'linha_sem_ia'
+        | 'linha_indisponivel'
         | 'unknown'
       /** Motivo da guarda anti-ban (`frio_espera`, `cap_frio_dia`...), quando foi ela que segurou. */
       reason?: string
@@ -165,6 +168,10 @@ const KNOWN_ERROR_KINDS = new Set([
   'out_of_window',
   'wrong_sender_tenant',
   'blocked_antiban',
+  // Número de gente: particular de alguém da equipe, ou com a IA desligada.
+  'linha_particular',
+  'linha_sem_ia',
+  'linha_indisponivel',
 ])
 
 function classifyError(raw: string): SendWhatsappResult extends infer R
@@ -285,7 +292,24 @@ export function confirmarAssumirRisco(
 export function notifySendError(
   result: Extract<SendWhatsappResult, { ok: false }>,
   context: 'manual' | 'sticker' | 'automation' = 'manual',
+  /** Nome de quem ficaria sem a mensagem. Sem ele o aviso da automação vira adivinhação. */
+  alvo?: string,
 ): void {
+  // Número de gente. A automação de etapa dispara em silêncio quando o card muda de
+  // coluna: quem arrasta precisa saber, na hora, que ESTE paciente não recebeu e por quê
+  // — senão fica achando que recebeu (ou, pior, a mensagem sai pelo celular de alguém).
+  if (result.kind === 'linha_sem_ia' || result.kind === 'linha_particular') {
+    const nome = alvo ? `${alvo} não recebeu` : 'Mensagem não enviada'
+    toast.warning(
+      context === 'automation' ? `${nome}: a conversa vive num número da equipe.` : 'Número particular da equipe.',
+      {
+        description:
+          result.detail ??
+          'A conversa deste paciente vive num WhatsApp pessoal da equipe. Quem fala por ali é a dona do número — escreva por ela ou transfira a conversa para o número do atendimento.',
+      },
+    )
+    return
+  }
   if (result.outOfMessagingWindow) {
     toast.warning(
       'Paciente sem responder há mais de 24h.',

@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-18-automacao-nao-fala-pelo-numero-da-equipe",
+    "data": "2026-09-18",
+    "titulo": "Automação de etapa não fala mais pelo WhatsApp pessoal da equipe",
+    "itens": [
+      "Mover um card para uma etapa com mensagem automática mandava o texto pelo número em que a conversa do paciente vive. Quando essa conversa vive no WhatsApp próprio da Aline Muniz, a mensagem assinada Sofia saía do celular dela: foi o que aconteceu com cinco pacientes na tarde de 18 de setembro.",
+      "Agora a automação não escreve por número particular da equipe nem por número com a IA desligada. O card muda de coluna do mesmo jeito, e quem arrastou recebe o aviso na tela dizendo qual paciente ficou sem a mensagem e por quê.",
+      "A mesma regra passou a valer para quem digita: em conversa que vive num número particular, só a dona do número e um administrador conseguem responder. Antes qualquer pessoa da equipe falava por ali abrindo a ficha do lead.",
+      "A automação de etapa também deixou de valer como pessoa na tela para a guarda anti ban. Arrastar vinte cards furava o teto do dia e a janela de horário de uma vez só, e rajada é o que derruba número não oficial. Lembrete de cirurgia e confirmação de pagamento continuam saindo normalmente."
+    ]
+  },
+  {
     "id": "2026-09-18-mais-listas-configuraveis",
     "data": "2026-09-18",
     "titulo": "Grupo do centro de custo e status de estorno viram lista",

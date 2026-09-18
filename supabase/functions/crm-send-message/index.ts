@@ -56,7 +56,25 @@ const ROTINAS_COM_VOZ_DE_IA = new Set([
   'reengage_reativacao',
   'reengage_recompra',
   'cart_recovery',
+  // Automação de etapa do quadro. Ver AUTOMACOES_DA_TELA.
+  'stage_automation',
 ])
+
+/**
+ * ENVIO QUE A TELA DISPARA SOZINHA, com o login de quem mexeu: mover um card para uma
+ * etapa com mensagem automática configurada (`boardConfig.stageAutomations`).
+ *
+ * Chega com JWT de pessoa, mas NÃO é uma pessoa digitando — e por isso passava por cima de
+ * tudo que protege as duas coisas: o número particular de alguém da equipe e o ritmo da
+ * linha. 18/set/2026: a SDR e a gerência arrastaram cards para «Follow-up 1» e cinco
+ * pacientes receberam "Aqui é a Sofia… ainda não fechamos o seu agendamento" PELO WHATSAPP
+ * DA ALINE MUNIZ, que é particular e tem a IA desligada. Ela viu sair do próprio celular.
+ *
+ * Aqui dentro, automação da tela vale como rotina: não fala por linha de gente
+ * ([[crm_linha_aline_whatsapp_proprio]]) e não fura teto nem janela da guarda anti-ban —
+ * arrastar 40 cards é uma rajada de 40 mensagens, e rajada mata linha não-oficial.
+ */
+const AUTOMACOES_DA_TELA = new Set(['stage_automation'])
 
 /** Bucket onde o painel sobe o que vai por anexo. Já existia (tarefas, comprovantes). */
 const MEDIA_BUCKET = 'crm-lead-attachments'
@@ -524,12 +542,12 @@ Deno.serve(async (req) => {
   if (linhaPedida) {
     const { data: linhaRow } = await admin
       .from('whatsapp_channel_instances')
-      .select('id, tenant_id, active, private_owner_id')
+      .select('id, tenant_id, active')
       .eq('id', linhaPedida)
       .maybeSingle()
-    const linha = linhaRow as
-      | { id: string; tenant_id: string | null; active: boolean | null; private_owner_id: string | null }
-      | null
+    // Quem pode falar por ela é decidido DEPOIS, na linha resolvida — lá a regra alcança
+    // também o envio que não escolheu número nenhum.
+    const linha = linhaRow as { id: string; tenant_id: string | null; active: boolean | null } | null
     const poloEsperado = senderTenantId || row.tenant_id
     if (!linha || linha.active === false || linha.tenant_id !== poloEsperado) {
       return json(
@@ -539,23 +557,6 @@ Deno.serve(async (req) => {
         },
         409,
       )
-    }
-    if (linha.private_owner_id && !isServiceRole) {
-      const { data: quem } = await admin
-        .from('app_users')
-        .select('id, role')
-        .eq('auth_user_id', String(user?.id ?? ''))
-        .maybeSingle()
-      const eu = quem as { id?: string; role?: string } | null
-      if (eu?.id !== linha.private_owner_id && eu?.role !== 'admin') {
-        return json(
-          {
-            error: 'linha_particular',
-            message: 'Envio bloqueado: este número é particular de outra pessoa da equipe.',
-          },
-          403,
-        )
-      }
     }
   }
   try {
@@ -598,22 +599,63 @@ Deno.serve(async (req) => {
     )
   }
 
-  // Linha só da equipe: rotina com voz de IA não fala por ela. Pessoa na tela passa.
-  if (isServiceRole && ROTINAS_COM_VOZ_DE_IA.has(sourceTag) && resolvedInstanceId) {
-    const { data: linhaIa } = await admin
+  // ── Quem pode falar pela linha RESOLVIDA ────────────────────────────────────────
+  //
+  // A pergunta é sobre o número por onde a mensagem VAI SAIR, e não sobre o que alguém
+  // escolheu na tela. Enquanto a checagem morava lá em cima, dentro do `if (linhaPedida)`,
+  // ela só valia para quem escolhia o número: o envio que herda a linha do lead — o chat
+  // pela ficha e a automação de etapa do quadro — entrava por baixo dela. Foi assim que a
+  // SDR e a gerência falaram pelo WhatsApp particular da Aline em 18/set/2026.
+  const ehEnvioAutomatico = isServiceRole || AUTOMACOES_DA_TELA.has(sourceTag)
+  if (resolvedInstanceId) {
+    const { data: linhaRow } = await admin
       .from('whatsapp_channel_instances')
-      .select('ai_auto_reply')
+      .select('private_owner_id, ai_auto_reply, label')
       .eq('id', resolvedInstanceId)
       .maybeSingle()
-    if ((linhaIa as { ai_auto_reply?: boolean | null } | null)?.ai_auto_reply === false) {
+    const linha = linhaRow as
+      | { private_owner_id: string | null; ai_auto_reply: boolean | null; label: string | null }
+      | null
+    const rotulo = linha?.label || resolvedInstanceId
+
+    // 1. Linha de gente: automação não fala por ela. Linha PARTICULAR conta como "de
+    //    gente" mesmo com a IA ligada — o número é de uma pessoa da equipe, e mensagem
+    //    automática saindo dali chega ao celular dela, não ao da clínica.
+    //    Aviso continua saindo (lembrete de cirurgia, confirmação de pagamento): quem
+    //    conversa com a Aline tem de receber por onde conversa.
+    if (
+      ehEnvioAutomatico &&
+      ROTINAS_COM_VOZ_DE_IA.has(sourceTag) &&
+      (linha?.ai_auto_reply === false || linha?.private_owner_id)
+    ) {
       return json(
         {
           error: 'linha_sem_ia',
-          message: `Envio automático recusado: a linha ${resolvedInstanceId} é só da equipe e a IA não fala por ela.`,
+          message: `Envio automático recusado: a conversa deste lead vive em "${rotulo}", que é um número da equipe — automação não fala por ele.`,
           instanceId: resolvedInstanceId,
         },
         409,
       )
+    }
+
+    // 2. Linha particular: só a dona e admin digitam por ela.
+    if (linha?.private_owner_id && !isServiceRole) {
+      const { data: quem } = await admin
+        .from('app_users')
+        .select('id, role')
+        .eq('auth_user_id', String(user?.id ?? ''))
+        .maybeSingle()
+      const eu = quem as { id?: string; role?: string } | null
+      if (eu?.id !== linha.private_owner_id && eu?.role !== 'admin') {
+        return json(
+          {
+            error: 'linha_particular',
+            message: `Envio bloqueado: a conversa deste lead vive em "${rotulo}", número particular de outra pessoa da equipe.`,
+            instanceId: resolvedInstanceId,
+          },
+          403,
+        )
+      }
     }
   }
 
@@ -677,9 +719,12 @@ Deno.serve(async (req) => {
       isServiceRole && String(body.antiBanKind ?? '').trim() === 'transactional'
         ? 'transactional'
         : undefined
+    //  • Automação da tela NÃO é "pessoa na tela": mover um card não é olhar a conversa.
+    //    Com o override, arrastar 40 cards furava o teto do dia e a janela de horário de
+    //    uma vez só — rajada é o que mata linha não-oficial ([[crm_wapi_guarda_antiban]]).
     const antiBanMeta = {
       antiBanSource: sourceTag || (isServiceRole ? 'rotina' : 'painel'),
-      antiBanHumanOverride: !isServiceRole,
+      antiBanHumanOverride: !ehEnvioAutomatico,
       antiBanColdOverride: body.manualOverride === true,
       ...(antiBanKind ? { antiBanKind } : {}),
     }

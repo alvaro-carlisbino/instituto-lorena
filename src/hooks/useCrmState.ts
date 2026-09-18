@@ -883,7 +883,7 @@ export const useCrmState = () => {
         source: 'stage_automation',
       })
       if (!result.ok) {
-        notifySendError(result, 'automation')
+        notifySendError(result, 'automation', lead.patientName)
         return
       }
       if (result.provider.startsWith('manychat_')) {
