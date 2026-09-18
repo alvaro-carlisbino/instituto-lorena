@@ -16,9 +16,11 @@ import {
   createMedicalRecord,
   fetchPatientConsents,
   listMedicalRecords,
+  listRecordTypes,
   RECORD_TYPES,
   setPatientConsent,
   type MedicalRecord,
+  type RecordTypeOption,
 } from '@/services/medicalRecords'
 
 export function MedicalRecordsPage() {
@@ -27,6 +29,9 @@ export function MedicalRecordsPage() {
   const [records, setRecords] = useState<MedicalRecord[]>([])
   const [loading, setLoading] = useState<boolean>(false)
   const [recordType, setRecordType] = useState<string>('evolucao')
+  // Os tipos vêm da tabela que a FK do prontuário usa; a constante é só o que aparece enquanto
+  // a consulta não volta.
+  const [tipos, setTipos] = useState<RecordTypeOption[]>(() => [...RECORD_TYPES])
   const [content, setContent] = useState<string>('')
   const [saving, setSaving] = useState<boolean>(false)
   const [consent, setConsent] = useState<boolean | null>(null)
@@ -51,6 +56,16 @@ export function MedicalRecordsPage() {
   useEffect(() => {
     if (leadId) void load(leadId)
   }, [leadId])
+
+  useEffect(() => {
+    let vivo = true
+    void listRecordTypes().then((t) => {
+      if (vivo && t.length > 0) setTipos(t)
+    })
+    return () => {
+      vivo = false
+    }
+  }, [])
 
   const handleGrantConsent = async () => {
     try {
@@ -150,7 +165,7 @@ export function MedicalRecordsPage() {
                 <Select value={recordType} onValueChange={(v) => setRecordType(v ?? 'evolucao')}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {RECORD_TYPES.map((t) => (
+                    {tipos.map((t) => (
                       <SelectItem key={t.code} value={t.code}>{t.label}</SelectItem>
                     ))}
                   </SelectContent>

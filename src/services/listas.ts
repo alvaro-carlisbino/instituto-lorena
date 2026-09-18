@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabaseClient'
-import { padraoDaLista, type ChaveLista } from '@/config/listas'
+import { definicaoDaLista, padraoDaLista, type ChaveLista } from '@/config/listas'
 
 /**
  * LISTAS CONFIGURÁVEIS — o vocabulário que antes era `const` no fonte.
@@ -22,14 +22,20 @@ export type OpcaoLista = {
   id: string
   chave: ChaveLista
   label: string
+  /** Código gravado no registro quando ele difere do rótulo. Nulo = vale o próprio rótulo. */
+  value: string | null
   active: boolean
   sortOrder: number
 }
+
+/** O que o formulário precisa: o que mostrar e o que gravar. */
+export type OpcaoEscolhivel = { label: string; value: string }
 
 const mapear = (r: Record<string, unknown>): OpcaoLista => ({
   id: String(r.id),
   chave: String(r.list_key) as ChaveLista,
   label: String(r.label ?? ''),
+  value: (r.value as string | null) ?? null,
   active: Boolean(r.active),
   sortOrder: Number(r.sort_order ?? 100),
 })
@@ -39,7 +45,7 @@ export async function listarOpcoes(chave: ChaveLista, incluirInativas = false): 
   const client = assertClient()
   let q = client
     .from('app_list_options')
-    .select('id, list_key, label, active, sort_order')
+    .select('id, list_key, label, value, active, sort_order')
     .eq('list_key', chave)
   if (!incluirInativas) q = q.eq('active', true)
   const { data, error } = await q.order('sort_order').order('label')
@@ -52,7 +58,7 @@ export async function listarTodasAsOpcoes(): Promise<Map<ChaveLista, OpcaoLista[
   const client = assertClient()
   const { data, error } = await client
     .from('app_list_options')
-    .select('id, list_key, label, active, sort_order')
+    .select('id, list_key, label, value, active, sort_order')
     .order('sort_order')
     .order('label')
   if (error) throw new Error(error.message)
@@ -66,11 +72,26 @@ export async function listarTodasAsOpcoes(): Promise<Map<ChaveLista, OpcaoLista[
   return m
 }
 
+/** Código a partir do rótulo, para lista que guarda código: "Plano / conduta" vira "plano_conduta". */
+export function codigoDoRotulo(label: string): string {
+  return label
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40)
+}
+
 export async function criarOpcao(chave: ChaveLista, label: string): Promise<void> {
   const client = assertClient()
-  const { error } = await client
-    .from('app_list_options')
-    .insert({ list_key: chave, label: label.trim(), sort_order: 500 })
+  const comCodigo = definicaoDaLista(chave).comCodigo === true
+  const { error } = await client.from('app_list_options').insert({
+    list_key: chave,
+    label: label.trim(),
+    value: comCodigo ? codigoDoRotulo(label) : null,
+    sort_order: 500,
+  })
   if (error) {
     // 23505 = índice único. A mensagem crua ("duplicate key value violates…") não ajuda ninguém.
     throw new Error(error.code === '23505' ? 'Essa opção já está na lista.' : error.message)
@@ -137,20 +158,28 @@ export async function usoDaLista(chave: ChaveLista): Promise<Map<string, number>
 // o campo sumir é pior do que o campo estar desatualizado por um minuto. Cache por chave na
 // memória do módulo, e a tela de configuração limpa depois de salvar.
 
-const cache = new Map<ChaveLista, Promise<string[]>>()
+const cache = new Map<ChaveLista, Promise<OpcaoEscolhivel[]>>()
 
-export async function opcoesAtivas(chave: ChaveLista): Promise<string[]> {
+/** Rótulo e valor de cada opção ativa, com o padrão do fonte como rede de segurança. */
+export async function opcoesEscolhiveis(chave: ChaveLista): Promise<OpcaoEscolhivel[]> {
   const emCache = cache.get(chave)
   if (emCache) return emCache
+  const padrao = () => padraoDaLista(chave).map((l) => ({ label: l, value: l }))
   const p = listarOpcoes(chave)
-    .then((rows) => (rows.length > 0 ? rows.map((r) => r.label) : padraoDaLista(chave)))
+    .then((rows) =>
+      rows.length > 0 ? rows.map((r) => ({ label: r.label, value: r.value ?? r.label })) : padrao(),
+    )
     .catch(() => {
       // Falhou: não guarda a promessa quebrada, para a próxima abertura tentar de novo.
       cache.delete(chave)
-      return padraoDaLista(chave)
+      return padrao()
     })
   cache.set(chave, p)
   return p
+}
+
+export async function opcoesAtivas(chave: ChaveLista): Promise<string[]> {
+  return (await opcoesEscolhiveis(chave)).map((o) => o.label)
 }
 
 export function limparCacheDeOpcoes(chave?: ChaveLista): void {

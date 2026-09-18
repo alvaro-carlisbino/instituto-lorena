@@ -17,14 +17,16 @@ import {
 } from '@/components/ui/select'
 import { useTenant } from '@/context/TenantContext'
 import { useCrm } from '@/context/CrmContext'
+import { useOpcoesEscolhiveis } from '@/hooks/useOpcoes'
 import {
-  fetchClinicalNotes, createClinicalNote, searchLeadsByName, NOTE_CATEGORIES, type ClinicalNote,
+  fetchClinicalNotes, createClinicalNote, searchLeadsByName, type ClinicalNote,
 } from '@/services/clinicalNotes'
 
-const CAT_LABEL: Record<string, string> = Object.fromEntries(NOTE_CATEGORIES.map((c) => [c.value, c.label]))
 
-function catBadge(cat: string) {
-  const label = CAT_LABEL[cat] ?? cat ?? 'Nota'
+
+/** O rótulo vem da lista configurável; a nota guarda o código, então categoria apagada da lista
+ *  ainda aparece no histórico com o código que está gravado. */
+function catBadge(cat: string, label: string) {
   const tone = cat === 'encaminhamento' ? 'bg-amber-100 text-amber-700'
     : cat === 'plano' ? 'bg-blue-100 text-blue-700'
     : cat === 'consulta' ? 'bg-emerald-100 text-emerald-700'
@@ -34,6 +36,9 @@ function catBadge(cat: string) {
 
 export function ClinicalNotesPage() {
   const { tenant } = useTenant()
+  const categorias = useOpcoesEscolhiveis('nota_clinica_categoria')
+  const rotuloDaCategoria = (cat: string) =>
+    categorias.find((c) => c.value === cat)?.label ?? cat ?? 'Nota'
   const crm = useCrm()
   const canWrite = crm.currentPermission?.canRouteLeads ?? true
 
@@ -128,10 +133,10 @@ export function ClinicalNotesPage() {
                 )}
 
                 {/* categoria */}
-                <Select value={category} onValueChange={(v) => setCategory(v ?? 'observacao')} items={NOTE_CATEGORIES}>
+                <Select value={category} onValueChange={(v) => setCategory(v ?? 'observacao')} items={categorias}>
                   <SelectTrigger aria-label="Categoria da nota"><SelectValue placeholder="Categoria" /></SelectTrigger>
                   <SelectContent>
-                    {NOTE_CATEGORIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                    {categorias.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
 
@@ -165,7 +170,7 @@ export function ClinicalNotesPage() {
                   <User className="h-3.5 w-3.5 text-muted-foreground" aria-hidden /> {n.patientName}
                 </span>
                 <div className="flex items-center gap-2">
-                  {catBadge(n.category)}
+                  {catBadge(n.category, rotuloDaCategoria(n.category))}
                   <span className="text-xs text-muted-foreground">{new Date(n.createdAt).toLocaleString('pt-BR')}</span>
                 </div>
               </div>

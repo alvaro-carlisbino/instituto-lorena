@@ -49,6 +49,7 @@ import { RegrasRepasseDialog } from '@/components/vendas/RegrasRepasseDialog'
 import { listResultadoProcedimentos } from '@/services/resultadoProcedimentos'
 import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
 import { useTenant } from '@/context/TenantContext'
+import { useOpcoesComAtual } from '@/hooks/useOpcoes'
 import {
   DEPOSIT_PAYEE_LABEL,
   FILA_PENDENCIA_LABEL,
@@ -251,6 +252,9 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   const [cancelando, setCancelando] = useState<ClinicSale | null>(null)
   const [motivo, setMotivo] = useState('')
   const [estorno, setEstorno] = useState('Em avaliação')
+  // Status de estorno é lista (/listas); o valor já gravado entra junto para venda antiga não
+  // abrir com o campo vazio.
+  const statusEstorno = useOpcoesComAtual('venda_status_estorno', estorno)
   const [obsCancel, setObsCancel] = useState('')
   const [recorte, setRecorte] = useState<RecorteVendas>('mes')
   /** Dentro de uma fila de pendência: ver o que foi dispensado em vez do que cobra. */
@@ -1382,7 +1386,18 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
             </div>
             <div className="space-y-1.5">
               <Label>Estorno da entrada</Label>
-              <Input value={estorno} onChange={(e) => setEstorno(e.target.value)} />
+              <Select value={estorno} onValueChange={(v) => setEstorno(String(v ?? ''))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Em que pé está" />
+                </SelectTrigger>
+                <SelectContent>
+                  {statusEstorno.map((e) => (
+                    <SelectItem key={e} value={e}>
+                      {e}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Observação</Label>

@@ -113,9 +113,13 @@ export function ListasPage() {
     }
   }
 
-  /** O que está gravado no dado e não está cadastrado. Ordenado pelo que mais pesa. */
+  /**
+   * O que está gravado no dado e não está cadastrado. Ordenado pelo que mais pesa.
+   *
+   * A comparação é pelo que o REGISTRO guarda: em lista com código, é o código, não o rótulo.
+   */
   const foraDaLista = useMemo(() => {
-    const cadastradas = new Set(opcoes.map((o) => o.label.trim().toLowerCase()))
+    const cadastradas = new Set(opcoes.map((o) => (o.value ?? o.label).trim().toLowerCase()))
     return [...uso.entries()]
       .filter(([label]) => !cadastradas.has(label.trim().toLowerCase()))
       .sort((a, b) => b[1] - a[1])
@@ -138,7 +142,7 @@ export function ListasPage() {
   return (
     <AppLayout
       title="Listas do sistema"
-      subtitle="As opções que aparecem para escolher nos formulários. Criar, renomear, desativar e apagar — sem deploy."
+      subtitle="As opções que aparecem para escolher nos formulários. Criar, renomear, desativar e apagar, sem deploy."
     >
       <div className="grid gap-4 lg:grid-cols-[minmax(0,260px)_1fr]">
         <nav className="space-y-4">
@@ -223,7 +227,7 @@ export function ListasPage() {
               ) : (
                 <div className="space-y-1">
                   {opcoes.map((o, i) => {
-                    const n = uso.get(o.label) ?? 0
+                    const n = uso.get(o.value ?? o.label) ?? 0
                     return (
                       <div
                         key={o.id}
@@ -280,6 +284,9 @@ export function ListasPage() {
                               }`}
                             >
                               {o.label}
+                              {o.value ? (
+                                <span className="ml-2 text-xs text-muted-foreground">{o.value}</span>
+                              ) : null}
                             </span>
                             {n > 0 ? (
                               <Badge variant="secondary" className="shrink-0 text-[0.65rem]">
@@ -358,9 +365,12 @@ export function ListasPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Texto que já está gravado em registro e não aparece para escolher — quase sempre
+                  O que já está gravado em registro e não aparece para escolher, quase sempre
                   grafia que veio de importação ou de campo livre. Adicionar coloca na lista como
-                  está; mesclar troca por uma opção existente e leva os registros junto.
+                  está.
+                  {def.arrastaHistorico
+                    ? ' Mesclar troca por uma opção existente e leva os registros junto.'
+                    : ''}
                 </p>
                 <div className="space-y-1">
                   {foraDaLista.map(([label, n]) => (
@@ -381,6 +391,7 @@ export function ListasPage() {
                       >
                         Adicionar
                       </Button>
+                      {def.arrastaHistorico ? (
                       <Select
                         value=""
                         onValueChange={(v) => {
@@ -400,6 +411,7 @@ export function ListasPage() {
                             ))}
                         </SelectContent>
                       </Select>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -415,7 +427,7 @@ export function ListasPage() {
         title={`Apagar “${apagando?.label ?? ''}”?`}
         description={
           (uso.get(apagando?.label ?? '') ?? 0) > 0
-            ? `${plural(uso.get(apagando?.label ?? '') ?? 0, 'registro continua', 'registros continuam')} com esse texto gravado — o histórico não muda, a opção só some da lista de escolha. Para sumir da escolha e poder voltar atrás, use Desativar.`
+            ? `${plural(uso.get(apagando?.label ?? '') ?? 0, 'registro continua', 'registros continuam')} com esse texto gravado: o histórico não muda, a opção só some da lista de escolha. Para sumir da escolha e poder voltar atrás, use Desativar.`
             : 'Ninguém usou esta opção ainda. Ela sai da lista de escolha.'
         }
         confirmLabel="Apagar"

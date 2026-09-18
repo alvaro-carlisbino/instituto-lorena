@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-18-mais-listas-configuraveis",
+    "data": "2026-09-18",
+    "titulo": "Grupo do centro de custo e status de estorno viram lista",
+    "itens": [
+      "O grupo do centro de custo era campo livre na Configuração do financeiro. Como é ele que junta os centros no relatório, e o grupo \"Não é gasto\" tira o centro do total, uma letra diferente virava grupo novo. Agora o campo sugere os grupos que existem, e a lista se edita em Listas do sistema.",
+      "O estorno da entrada, no cancelamento de venda e de cirurgia, também era campo livre: uma venda tem como status a frase \"Não pagou entrada por ser teste de tc\". Agora é escolha, e a explicação vai na observação do cancelamento.",
+      "Categorias de nota clínica entraram na mesma tela. Como a nota guarda um código, renomear muda só o que aparece, sem reescrever nota nenhuma.",
+      "Os tipos de registro do prontuário passaram a vir do banco, que é quem manda neles. Antes a tela tinha uma cópia da lista, então tipo criado no banco não aparecia para escolher."
+    ]
+  },
+  {
     "id": "2026-09-18-subclassificacao-do-gasto",
     "data": "2026-09-18",
     "titulo": "Gasto agora responde em quê, não só onde",

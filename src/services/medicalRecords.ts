@@ -18,6 +18,15 @@ export type PatientConsentPurpose =
   | 'health_insurance'
   | 'whatsapp_messages'
 
+/**
+ * Os tipos válidos vivem em `medical_record_types` no banco desde a 20260526230000, e são CHAVE
+ * ESTRANGEIRA de `medical_records.record_type`. Esta cópia aqui é só a rede de segurança para a
+ * tela abrir se a consulta falhar: a lista que manda é a do banco, lida por `listRecordTypes`.
+ *
+ * Escrita não passa pela tela de propósito. O prontuário é append-only, o código viaja em
+ * registro assinado, e 'errata' tem regra atrás dele (corrects_record_id); tipo novo entra por
+ * migration, com quem entende a regra olhando.
+ */
 export const RECORD_TYPES = [
   { code: 'anamnese',   label: 'Anamnese' },
   { code: 'evolucao',   label: 'Evolução' },
@@ -29,6 +38,19 @@ export const RECORD_TYPES = [
   { code: 'observacao', label: 'Observação' },
   { code: 'errata',     label: 'Errata' },
 ] as const
+
+export type RecordTypeOption = { code: string; label: string }
+
+/** Tipos de registro do prontuário, da tabela que a FK usa. */
+export async function listRecordTypes(): Promise<RecordTypeOption[]> {
+  if (!supabase) return [...RECORD_TYPES]
+  const { data, error } = await supabase.from('medical_record_types').select('code, label')
+  if (error || !data || data.length === 0) return [...RECORD_TYPES]
+  return (data as Array<{ code: string; label: string }>).map((r) => ({
+    code: String(r.code),
+    label: String(r.label ?? r.code),
+  }))
+}
 
 /** Lista registros do prontuário do lead. Loga acesso automaticamente. */
 export async function listMedicalRecords(leadId: string): Promise<MedicalRecord[]> {

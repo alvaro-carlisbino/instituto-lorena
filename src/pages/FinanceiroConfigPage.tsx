@@ -31,6 +31,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useTenant } from '@/context/TenantContext'
+import { useOpcoes } from '@/hooks/useOpcoes'
 import {
   deleteCategoryRule,
   deleteCostCenter,
@@ -53,6 +54,7 @@ type Aba = 'centros' | 'categorias' | 'regras'
 
 export function FinanceiroConfigPage() {
   const { tenant } = useTenant()
+  const grupos = useOpcoes('financeiro_grupo_centro')
   const [aba, setAba] = useState<Aba>('centros')
   const [centros, setCentros] = useState<CostCenter[]>([])
   const [categorias, setCategorias] = useState<FinCategory[]>([])
@@ -208,12 +210,20 @@ export function FinanceiroConfigPage() {
                         placeholder="Nome"
                         className="h-8"
                       />
+                      {/* Grupo é lista (/listas → Grupos de centro de custo): é ele que junta os
+                          centros no relatório, e "Não é gasto" tira o centro do total. */}
                       <Input
                         value={editando.grupo}
                         onChange={(e) => setEditando({ ...editando, grupo: e.target.value })}
                         placeholder="Grupo (Pessoas, Operação, Não é gasto…)"
                         className="h-8"
+                        list="grupos-de-centro"
                       />
+                      <datalist id="grupos-de-centro">
+                        {grupos.map((g) => (
+                          <option key={g} value={g} />
+                        ))}
+                      </datalist>
                       <Input
                         value={editando.descricao}
                         onChange={(e) => setEditando({ ...editando, descricao: e.target.value })}

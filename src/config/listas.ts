@@ -26,9 +26,12 @@ export type ChaveLista =
   | 'followup_canal'
   | 'followup_resultado'
   | 'atendimento_origem'
+  | 'venda_status_estorno'
+  | 'nota_clinica_categoria'
   | 'financeiro_motivo_exclusao'
+  | 'financeiro_grupo_centro'
 
-export type ModuloLista = 'Vendas' | 'Funil e follow-up' | 'Financeiro'
+export type ModuloLista = 'Vendas' | 'Funil e follow-up' | 'Financeiro' | 'Clínica'
 
 export type DefinicaoLista = {
   chave: ChaveLista
@@ -43,6 +46,12 @@ export type DefinicaoLista = {
    * histórico, e a tela avisa quantos registros vão junto antes de deixar salvar.
    */
   arrastaHistorico: boolean
+  /**
+   * A opção tem CÓDIGO próprio: o registro guarda o código e a tela mostra o rótulo
+   * (`clinical_notes.category` guarda 'consulta', não 'Consulta'). Renomear vira cosmético, que
+   * é justamente a graça: trocar o nome que aparece não pode reescrever nota clínica.
+   */
+  comCodigo?: boolean
   padrao: string[]
 }
 
@@ -110,7 +119,7 @@ export const LISTAS: DefinicaoLista[] = [
     titulo: 'Origem da venda',
     ondeAparece: 'Central de Vendas → venda',
     explicacao:
-      'De onde veio o paciente, na palavra de quem fechou. É a única fonte que sabe — o Ads identifica anúncio em pouquíssimas vendas.',
+      'De onde veio o paciente, na palavra de quem fechou. É a única fonte que sabe, porque o Ads identifica anúncio em pouquíssimas vendas.',
     arrastaHistorico: true,
     padrao: [
       'Indicação de paciente ou conhecido',
@@ -141,12 +150,29 @@ export const LISTAS: DefinicaoLista[] = [
     ],
   },
   {
+    chave: 'venda_status_estorno',
+    modulo: 'Vendas',
+    titulo: 'Status de estorno',
+    ondeAparece: 'Central de Vendas → cancelar venda ou cirurgia',
+    explicacao:
+      'Em que pé está a devolução do que o paciente pagou. Era campo livre, e uma venda chegou a ter uma frase inteira gravada como status; a explicação do caso vai na observação do cancelamento.',
+    arrastaHistorico: true,
+    padrao: [
+      'Em avaliação',
+      'Estorno aprovado',
+      'Estornado',
+      'Sem estorno',
+      'Não pagou',
+      'Crédito para outra data',
+    ],
+  },
+  {
     chave: 'lead_motivo_perda',
     modulo: 'Funil e follow-up',
     titulo: 'Motivos de perda',
     ondeAparece: 'Quadro → mover para perdido · ficha do paciente',
     explicacao:
-      'Por que o paciente não fechou. Alimenta o ranking de motivos na análise do funil — e por isso a lista precisa ser curta: dez motivos parecidos viram dez linhas de 10%.',
+      'Por que o paciente não fechou. Alimenta o ranking de motivos na análise do funil, e por isso a lista precisa ser curta: dez motivos parecidos viram dez linhas de 10%.',
     arrastaHistorico: true,
     padrao: [
       'Preço / Orçamento alto',
@@ -200,6 +226,27 @@ export const LISTAS: DefinicaoLista[] = [
     padrao: ['Indicação', 'Já é paciente', 'Instagram', 'Google', 'Facebook', 'Site'],
   },
   {
+    chave: 'nota_clinica_categoria',
+    modulo: 'Clínica',
+    titulo: 'Categorias de nota clínica',
+    ondeAparece: 'Notas clínicas → nova nota',
+    explicacao:
+      'Que tipo de anotação é. A nota guarda o código, então renomear muda só o que aparece na tela.',
+    arrastaHistorico: false,
+    comCodigo: true,
+    padrao: ['Consulta', 'Observação', 'Encaminhamento', 'Plano / conduta', 'Recepção / Aline'],
+  },
+  {
+    chave: 'financeiro_grupo_centro',
+    modulo: 'Financeiro',
+    titulo: 'Grupos de centro de custo',
+    ondeAparece: 'Configuração do financeiro → centros de custo',
+    explicacao:
+      'Junta os centros no relatório de gastos. O grupo “Não é gasto” é o que tira o centro do total, então errar uma letra aqui muda o total do mês.',
+    arrastaHistorico: true,
+    padrao: ['Pessoas', 'Operação', 'Estrutura', 'Comercial', 'Impostos e sócios', 'Não é gasto'],
+  },
+  {
     chave: 'financeiro_motivo_exclusao',
     modulo: 'Financeiro',
     titulo: 'Motivos para excluir um lançamento',
@@ -229,4 +276,4 @@ export function padraoDaLista(chave: ChaveLista): string[] {
   return POR_CHAVE.get(chave)?.padrao ?? []
 }
 
-export const MODULOS_DE_LISTA: ModuloLista[] = ['Vendas', 'Funil e follow-up', 'Financeiro']
+export const MODULOS_DE_LISTA: ModuloLista[] = ['Vendas', 'Funil e follow-up', 'Clínica', 'Financeiro']

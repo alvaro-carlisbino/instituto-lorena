@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/table'
 import { CalendarioVagas } from '@/components/vendas/CalendarioVagas'
 import { combinaBusca } from '@/lib/busca'
+import { useOpcoesComAtual } from '@/hooks/useOpcoes'
 import { mesAtual } from '@/lib/periodo'
 import { cn } from '@/lib/utils'
 import {
@@ -115,6 +116,8 @@ export function CirurgiasTab() {
   const [cancelando, setCancelando] = useState<ClinicSale | null>(null)
   const [motivo, setMotivo] = useState('')
   const [estorno, setEstorno] = useState('Em avaliação')
+  /** Mesma lista do cancelamento de venda (/listas → Status de estorno). */
+  const statusEstorno = useOpcoesComAtual('venda_status_estorno', estorno)
   const [enviando, setEnviando] = useState(false)
   const [termo, setTermo] = useState('')
   const buscaAdiada = useDeferredValue(termo)
@@ -612,7 +615,18 @@ export function CirurgiasTab() {
             </div>
             <div className="space-y-1.5">
               <Label>Estorno da entrada</Label>
-              <Input value={estorno} onChange={(e) => setEstorno(e.target.value)} />
+              <Select value={estorno} onValueChange={(v) => setEstorno(String(v ?? ''))}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Em que pé está" />
+                </SelectTrigger>
+                <SelectContent>
+                  {statusEstorno.map((e) => (
+                    <SelectItem key={e} value={e}>
+                      {e}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>
