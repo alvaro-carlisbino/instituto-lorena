@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-18-conta-do-banco-so-entra-aprovada",
+    "data": "2026-09-18",
+    "titulo": "Corrigido: saída no Extrato que não existia no extrato do banco",
+    "itens": [
+      "Apareceram para classificar saídas que o financeiro não achava no extrato do Itaú Empresas, como os boletos de 14/09 e o de 01/09. Elas eram de verdade, só que de OUTRAS contas Itaú, que entraram no CRM ontem sem ninguém pedir.",
+      "Eram seis contas do mesmo login do banco (duas contas correntes e quatro cartões) que não são da clínica. Elas trouxeram 420 lançamentos de junho para cá e ainda deram baixa em três contas a pagar por coincidência de valor.",
+      "Os 420 lançamentos saíram do financeiro da clínica, e as três contas a pagar voltaram para em aberto: NF 27 (Herica Fernanda), NF 73786 (Acor Romão) e NF 345015 (Líder Full). Nada do extrato do Itaú Empresas foi tocado.",
+      "Agora conta nova que aparecer na conexão do banco fica esperando em Contas & caixa, com os botões É nossa e Não é. Enquanto ninguém responder, o extrato dela não entra em lugar nenhum: nem no Extrato, nem no Gastos, nem na conciliação."
+    ]
+  },
+  {
     "id": "2026-09-18-chat-erro-ao-abrir",
     "data": "2026-09-18",
     "titulo": "Corrigido: \"O CRM encontrou um erro ao abrir\" ao clicar na conversa",

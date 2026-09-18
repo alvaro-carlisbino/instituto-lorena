@@ -48,6 +48,11 @@ export type FinAccount = {
   ofBillDueDate: string | null
   /** Incidente aberto no provedor: os números podem vir degradados. */
   ofProviderNote: string | null
+  /**
+   * A conexão trouxe a conta, mas quem diz que ela é da casa somos nós. 'pendente' não
+   * sincroniza lançamento nenhum — ver a migration 20260918120000.
+   */
+  ofApproval: 'pendente' | 'aprovada' | 'recusada'
 }
 
 export type OfAccountMeta = {
@@ -66,7 +71,7 @@ export type OfAccountMeta = {
 }
 
 const ACCOUNT_COLS =
-  'id, name, kind, bank_name, branch, number, opening_balance_cents, active, note, of_provider, of_account_id, of_last_sync_at, of_balance_cents, of_balance_at, of_status, of_last_error, of_meta, of_bill_open_cents, of_bill_due_cents, of_debt_total_cents, of_bill_close_date, of_bill_due_date, of_provider_note'
+  'id, name, kind, bank_name, branch, number, opening_balance_cents, active, note, of_provider, of_account_id, of_last_sync_at, of_balance_cents, of_balance_at, of_status, of_last_error, of_meta, of_bill_open_cents, of_bill_due_cents, of_debt_total_cents, of_bill_close_date, of_bill_due_date, of_provider_note, of_approval'
 
 function mapAccount(r: Record<string, unknown>): FinAccount {
   const kind = (r.kind === 'caixa' || r.kind === 'carteira' ? r.kind : 'banco') as AccountKind
@@ -94,6 +99,10 @@ function mapAccount(r: Record<string, unknown>): FinAccount {
     ofBillCloseDate: r.of_bill_close_date != null ? String(r.of_bill_close_date) : null,
     ofBillDueDate: r.of_bill_due_date != null ? String(r.of_bill_due_date) : null,
     ofProviderNote: r.of_provider_note != null ? String(r.of_provider_note) : null,
+    ofApproval:
+      r.of_approval === 'aprovada' || r.of_approval === 'recusada'
+        ? (r.of_approval as 'aprovada' | 'recusada')
+        : 'pendente',
   }
 }
 
@@ -104,6 +113,18 @@ export async function listAccounts(includeInactive = false): Promise<FinAccount[
   const { data, error } = await query
   if (error) throw new Error(error.message)
   return (data ?? []).map((r) => mapAccount(r as Record<string, unknown>))
+}
+
+/**
+ * Diz se a conta que a conexão trouxe é da casa. Enquanto ninguém responde, ela fica pendente e
+ * o sync não puxa lançamento nenhum dela — foi assim que seis contas pessoais viraram 420 linhas
+ * na fila de classificar do financeiro em 18/09/2026. Recusar também desliga a conta, para ela
+ * não voltar a perguntar toda rodada do cron.
+ */
+export async function approveAccount(accountId: string, aprovar: boolean): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.rpc('crm_conta_aprovar', { p_account: accountId, p_aprovar: aprovar })
+  if (error) throw new Error(error.message)
 }
 
 export async function upsertAccount(payload: {

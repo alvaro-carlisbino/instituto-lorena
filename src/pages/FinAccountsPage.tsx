@@ -39,6 +39,7 @@ import {
   type FinAccount,
   type FinTransaction,
   accountBalances,
+  approveAccount,
   listAccounts,
   listTransactions,
   upsertAccount,
@@ -99,6 +100,7 @@ export function FinAccountsPage() {
   const [gerenciar, setGerenciar] = useState(false)
   const [accForm, setAccForm] = useState({ ...EMPTY_ACCOUNT })
   const [savingAcc, setSavingAcc] = useState(false)
+  const [respondendo, setRespondendo] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -122,6 +124,27 @@ export function FinAccountsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [])
+
+  // A conexão traz a conta; quem diz que ela é da casa é o financeiro. Enquanto não responder,
+  // a conta fica aqui em cima e não puxa extrato nenhum — ver a migration 20260918120000.
+  const pendentes = useMemo(() => accounts.filter((a) => a.ofApproval === 'pendente'), [accounts])
+
+  const responderConta = async (a: FinAccount, aprovar: boolean) => {
+    setRespondendo(a.id)
+    try {
+      await approveAccount(a.id, aprovar)
+      toast.success(
+        aprovar
+          ? `${a.name} entrou no financeiro. O extrato dela chega no próximo sync.`
+          : `${a.name} ficou de fora. Não volta a perguntar.`,
+      )
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Não deu para responder agora')
+    } finally {
+      setRespondendo(null)
+    }
+  }
 
   const ativas = useMemo(() => accounts.filter((a) => a.active), [accounts])
   const conectadas = useMemo(() => ativas.filter((a) => a.ofAccountId), [ativas])
@@ -279,6 +302,55 @@ export function FinAccountsPage() {
       }
     >
       <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
+
+      {pendentes.length > 0 ? (
+        <Card className="mb-4 border-amber-500/40 bg-amber-500/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <AlertTriangle className="size-4 text-amber-600" aria-hidden />
+              {pendentes.length === 1
+                ? 'Uma conta nova apareceu na conexão'
+                : `${pendentes.length} contas novas apareceram na conexão`}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              O banco compartilhou {pendentes.length === 1 ? 'esta conta' : 'estas contas'} no mesmo login.
+              Enquanto ninguém confirmar que {pendentes.length === 1 ? 'é' : 'são'} da casa, o extrato{' '}
+              {pendentes.length === 1 ? 'dela' : 'delas'} não entra no financeiro — nem em Extrato, nem em
+              Gastos, nem na conciliação.
+            </p>
+            {pendentes.map((a) => (
+              <div
+                key={a.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{a.name}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {a.kind === 'carteira' ? 'Cartão' : 'Conta'}
+                    {a.number ? ` · ${a.number}` : ''}
+                    {a.ofBalanceCents != null ? ` · saldo no banco ${formatBRL(a.ofBalanceCents)}` : ''}
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button size="sm" onClick={() => void responderConta(a, true)} disabled={respondendo === a.id}>
+                    É nossa
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void responderConta(a, false)}
+                    disabled={respondendo === a.id}
+                  >
+                    Não é
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {avisos.length > 0 ? (
         <div className="mb-4 space-y-2">

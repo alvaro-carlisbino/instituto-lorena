@@ -469,13 +469,17 @@ Deno.serve(async (req) => {
         }
 
         let linked = 0
+        let pendentes = 0
         const paraLigar = porBanco.flatMap((b) => b.contas.map((a) => ({ banco: b, a })))
         for (const { banco, a } of paraLigar) {
           const ofAccountId = String(a.id ?? a.account_id ?? '')
           if (!ofAccountId) continue
           const kind = String(a.type ?? '').toUpperCase().includes('CREDIT') ? 'carteira' : 'banco'
           const label = a.marketingName || a.name || banco.bankName
-          const row = {
+          // O que o banco diz sobre a conta pode mudar (apelido, número, item novo depois de
+          // reconectar). Já `active` e `of_approval` são decisão NOSSA — se entrassem aqui, toda
+          // rodada do cron religaria a conta que o financeiro tinha acabado de recusar.
+          const dadosDoBanco = {
             name: `${banco.bankName} · ${label}`.slice(0, 120),
             kind,
             bank_name: banco.bankName,
@@ -483,14 +487,13 @@ Deno.serve(async (req) => {
             of_provider: 'mcp_ai',
             of_item_id: banco.itemId,
             of_account_id: ofAccountId,
-            active: true,
             updated_at: new Date().toISOString(),
             ...(tenantId && isCron ? { tenant_id: tenantId } : {}),
           }
           // Erro de escrita aqui NÃO pode passar batido: sem isso a tela dizia
           // "banco conectado, N contas" com o banco de dados vazio (RLS barrando, coluna
           // faltando) e ninguém descobria até o extrato não chegar.
-          let busca = db.from('fin_accounts').select('id').eq('of_account_id', ofAccountId)
+          let busca = db.from('fin_accounts').select('id, of_approval').eq('of_account_id', ofAccountId)
           // service_role enxerga todos os polos: sem este filtro a conta de um polo
           // poderia ser reescrita pelo sync do outro.
           if (isCron && tenantId) busca = busca.eq('tenant_id', tenantId)
@@ -499,14 +502,21 @@ Deno.serve(async (req) => {
           if (existing) {
             const { error: updErr } = await db
               .from('fin_accounts')
-              .update(row)
+              .update(dadosDoBanco)
               .eq('id', (existing as { id: string }).id)
             if (updErr) throw new Error(`fin_accounts (atualizar ${ofAccountId}): ${updErr.message}`)
+            if ((existing as { of_approval?: string }).of_approval === 'aprovada') linked += 1
+            else pendentes += 1
           } else {
-            const { error: insErr } = await db.from('fin_accounts').insert(row)
+            // Conta que ninguém reconheceu nasce CALADA: desligada e pendente. Em 17/09/2026
+            // seis contas pessoais viraram conta da clínica só por estarem no mesmo login da
+            // MCP.AI, e no dia seguinte 420 lançamentos delas caíram na fila de classificar.
+            const { error: insErr } = await db
+              .from('fin_accounts')
+              .insert({ ...dadosDoBanco, active: false, of_approval: 'pendente' })
             if (insErr) throw new Error(`fin_accounts (criar ${ofAccountId}): ${insErr.message}`)
+            pendentes += 1
           }
-          linked += 1
         }
 
         // `item` vazio = ligou todas as conexões, então sincroniza todas também.
@@ -516,6 +526,10 @@ Deno.serve(async (req) => {
           bankName,
           itemId,
           accountsLinked: linked,
+          accountsPending: pendentes,
+          pendingNotice: pendentes
+            ? `${pendentes} conta${pendentes > 1 ? 's' : ''} nova${pendentes > 1 ? 's' : ''} esperando aprovação em Contas e caixa. Enquanto ninguém confirmar que ${pendentes > 1 ? 'são' : 'é'} da casa, o extrato ${pendentes > 1 ? 'delas' : 'dela'} não entra no financeiro.`
+            : null,
           banks: porBanco.map((b) => ({ bankName: b.bankName, itemId: b.itemId, accounts: b.contas.length })),
           ...synced,
         })
@@ -543,6 +557,10 @@ async function syncMcpAccounts(
     .from('fin_accounts')
     .select('id, tenant_id, of_account_id, of_item_id, of_last_sync_at')
     .eq('of_provider', 'mcp_ai')
+    // A trava de verdade mora AQUI, não no link: conta pendente ou recusada não puxa extrato
+    // nenhum. Sem esta linha, adiar a adoção só adiava o estrago — os lançamentos entravam
+    // igual e a conta aparecia depois. Ver a migration 20260918120000.
+    .eq('of_approval', 'aprovada')
     .not('of_account_id', 'is', null)
   if (itemId) query = query.eq('of_item_id', itemId)
   if (isCron && tenantId) query = query.eq('tenant_id', tenantId)
