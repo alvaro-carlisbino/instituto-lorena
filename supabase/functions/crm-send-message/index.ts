@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supa
 import { resolveWhatsappDestino } from '../_shared/brPhone.ts'
 import { insertInteraction } from '../_shared/crm.ts'
 import { setLineConversationMode } from '../_shared/conversationLineState.ts'
+import { recordWhatsappOutbound } from '../_shared/whatsapp/antiBan.ts'
 import { resolveOutboundProviderForLead } from '../_shared/whatsapp/resolveProvider.ts'
 import type { SendWhatsappMessageResult, WhatsappProvider } from '../_shared/whatsapp/types.ts'
 import { WapiProvider } from '../_shared/whatsapp/wapi.ts'
@@ -628,6 +629,18 @@ Deno.serve(async (req) => {
       ROTINAS_COM_VOZ_DE_IA.has(sourceTag) &&
       (linha?.ai_auto_reply === false || linha?.private_owner_id)
     ) {
+      // No livro-caixa, senão a recusa não existe em lugar nenhum: o toast morre com a
+      // aba e ninguém consegue perguntar "quantas vezes a automação tentou falar pelo
+      // número da Aline esta semana?" ([[crm_sistema_no_ar_e_morto]]).
+      await recordWhatsappOutbound(admin, {
+        instanceId: resolvedInstanceId,
+        tenantId: senderTenantId || row.tenant_id,
+        leadId: row.id,
+        phone: effectiveTo,
+        text,
+        source: sourceTag || 'rotina',
+        decision: { allow: false, kind: 'proactive', reason: 'linha_de_gente', typingDelaySeconds: 0 },
+      })
       return json(
         {
           error: 'linha_sem_ia',
@@ -647,6 +660,15 @@ Deno.serve(async (req) => {
         .maybeSingle()
       const eu = quem as { id?: string; role?: string } | null
       if (eu?.id !== linha.private_owner_id && eu?.role !== 'admin') {
+        await recordWhatsappOutbound(admin, {
+          instanceId: resolvedInstanceId,
+          tenantId: senderTenantId || row.tenant_id,
+          leadId: row.id,
+          phone: effectiveTo,
+          text,
+          source: sourceTag || 'painel',
+          decision: { allow: false, kind: 'reply', reason: 'linha_particular', typingDelaySeconds: 0 },
+        })
         return json(
           {
             error: 'linha_particular',
