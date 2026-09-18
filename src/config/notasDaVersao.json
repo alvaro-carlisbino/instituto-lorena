@@ -1,12 +1,37 @@
 [
   {
+    "id": "2026-09-18-subclassificacao-do-gasto",
+    "data": "2026-09-18",
+    "titulo": "Gasto agora responde em quê, não só onde",
+    "itens": [
+      "O centro de custo diz onde o dinheiro foi (Centro Cirúrgico, Salários e encargos). Agora tem o nível de baixo: em quê. Salários para quem, benefício qual, centro cirúrgico com o quê.",
+      "Ao classificar, depois de escolher o centro o sistema pergunta o detalhe na mesma caixa. Dá para escolher da lista, escrever um novo (ele entra na lista sozinho) ou seguir sem detalhar.",
+      "Quando você marca \"aplicar aos iguais\", a regra guarda o centro e o detalhe juntos — classificar duas vezes a mesma linha é o que ninguém faz.",
+      "Em Gastos, na vista por centro de custo, cada centro abre com a faixa \"Em quê\": quanto foi para cada subclassificação, com \"Sem detalhe\" em âmbar para mostrar o tamanho do que falta responder.",
+      "A lista já nasceu preenchida com a classificação que o financeiro usava nas parcelas: 96 subclassificações em 13 centros (Benefícios com VA/VR, VT, plano odontológico; Centro Cirúrgico com consumíveis, medicamentos, estacionamento de pacientes). Dá para editar, apagar e criar."
+    ]
+  },
+  {
+    "id": "2026-09-18-listas-do-sistema",
+    "data": "2026-09-18",
+    "titulo": "As listas do sistema agora se editam na tela, sem esperar deploy",
+    "itens": [
+      "Nova tela Listas do sistema, em Configurações: procedimento de cirurgia, protocolo, tipo de consulta, forma de pagamento, origem da venda, motivo de perda, motivo de cancelamento, origem do atendimento, canal e resultado do follow-up, e os motivos para excluir um lançamento. Tudo isso estava escrito no código, então criar ou renomear uma opção dependia de programador.",
+      "Renomear leva o histórico junto. Trocar o nome de um protocolo muda também as vendas antigas que usavam o nome anterior, para o relatório não virar duas linhas para a mesma coisa.",
+      "A tela mostra o que já está gravado nos registros e não aparece para escolher, como CRED 2X, CRED 3X e CRED 10X no lugar de \"Cartão de crédito\". Dá para adicionar à lista ou mesclar numa opção existente, levando os registros junto.",
+      "Cada opção mostra quantos registros usam ela, e apagar avisa antes: o histórico não muda, a opção só some da lista de escolha.",
+      "O motivo de perda era uma lista no quadro e outra na ficha do paciente, para a mesma informação. Agora é uma só.",
+      "No financeiro, centro de custo, linha do DRE e regras de classificação continuam onde estavam, em Configuração do financeiro."
+    ]
+  },
+  {
     "id": "2026-09-18-nota-da-sefaz-espera-o-ok",
     "data": "2026-09-18",
     "titulo": "Nota da SEFAZ agora espera seu ok antes de virar conta a pagar",
     "itens": [
       "Toda nota emitida contra o CNPJ virava dívida sozinha, inclusive as que não são compra: proposta, remessa, brinde e nota já paga à vista. Era isso que inflava o saldo devedor.",
       "Em Contas a pagar, o painel Notas na SEFAZ agora lista as notas que chegaram com dois botões: É compra (vai para o contas a pagar na hora) e Não é (fica de fora, e não pergunta de novo).",
-      "Quando a nota tem XML, a lista mostra a natureza da operação — é ela que separa venda de remessa.",
+      "Quando a nota tem XML, a lista mostra a natureza da operação, que é o que separa venda de remessa.",
       "A captura continua automática e sem pedir nada: ela tem prazo (sem ciência em 10 dias o XML completo some do banco). Quem passou a esperar é só o lançamento.",
       "Vale para nota nova. As 231 parcelas que já estão em aberto seguem onde estavam, para não sumir dívida de verdade junto com a errada."
     ]

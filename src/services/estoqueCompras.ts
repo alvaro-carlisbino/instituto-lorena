@@ -856,6 +856,8 @@ export type PayablePatch = {
   dueDate?: string
   amountCents?: number
   costCenter?: string | null
+  /** Em quê, dentro do centro de custo. Ver a migration 20260918180000. */
+  costDetail?: string | null
   categoryId?: string | null
   subcategory?: string | null
   paymentMethod?: string | null
@@ -886,6 +888,7 @@ export function montarPatchParcela(patch: PayablePatch): Record<string, unknown>
     row.amount_cents = Math.round(patch.amountCents)
   }
   if (patch.costCenter !== undefined) row.cost_center = patch.costCenter || null
+  if (patch.costDetail !== undefined) row.cost_detail = patch.costDetail?.trim() || null
   if (patch.categoryId !== undefined) row.category_id = patch.categoryId || null
   if (patch.subcategory !== undefined) row.subcategory = patch.subcategory?.trim() || null
   if (patch.paymentMethod !== undefined) row.payment_method = patch.paymentMethod?.trim() || null

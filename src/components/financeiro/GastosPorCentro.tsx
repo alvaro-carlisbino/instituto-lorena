@@ -38,12 +38,15 @@ export type LinhaGasto = {
   descricao: string
   amountCents: number
   centro: string | null
+  /** Em quê, dentro do centro. É o que responde "Centro Cirúrgico, mas com o quê?". */
+  detalhe?: string | null
   foraDoTotal: boolean
   /** Nota que o banco ainda não mostrou paga. */
   nota?: boolean
   possivelDuplicado?: boolean
 }
 
+const SEM_DETALHE = 'Sem detalhe'
 const SEM_CENTRO = 'Sem centro de custo'
 const PAGADORES_VISIVEIS = 8
 
@@ -80,11 +83,23 @@ export function GastosPorCentro({
     const blocos = [...porCentro.entries()].map(([centro, itens]) => {
       const total = itens.reduce((s, i) => s + i.amountCents, 0)
       const pagadores = agruparPorPagador(itens.map((i) => ({ ...i, chave: i.nota ? i.nome : assinaturaPagador(i.nome) })))
+      // "Centro Cirúrgico, mas em quê?" — a quebra por subclassificação, maior primeiro. O que
+      // ainda não tem detalhe aparece como "Sem detalhe" em vez de sumir: é ele que diz o
+      // tamanho do que falta responder.
+      const porDetalhe = new Map<string, number>()
+      for (const i of itens) {
+        const k = i.detalhe?.trim() || SEM_DETALHE
+        porDetalhe.set(k, (porDetalhe.get(k) ?? 0) + i.amountCents)
+      }
+      const detalhes = [...porDetalhe.entries()]
+        .map(([nome, cents]) => ({ nome, cents }))
+        .sort((x, y) => y.cents - x.cents)
       return {
         centro,
         itens,
         total,
         pagadores,
+        detalhes,
         foraDoTotal: itens.every((i) => i.foraDoTotal),
         descricao: centros.find((c) => c.name === centro)?.description ?? null,
       }
@@ -155,6 +170,26 @@ export function GastosPorCentro({
         {aberto && (
           <div className="border-t border-border px-2 pb-2 pt-1">
             {b.descricao ? <p className="px-2 py-1 text-xs text-muted-foreground">{b.descricao}</p> : null}
+            {/* Só aparece quando há o que dizer: um centro com tudo "Sem detalhe" não ganha uma
+                faixa para repetir o total que já está no cabeçalho. */}
+            {b.detalhes.length > 1 || (b.detalhes[0] && b.detalhes[0].nome !== SEM_DETALHE) ? (
+              <div className="mb-1 flex flex-wrap items-center gap-1.5 px-2 py-1">
+                <span className="text-[0.68rem] uppercase tracking-wide text-muted-foreground">Em quê</span>
+                {b.detalhes.map((d) => (
+                  <span
+                    key={d.nome}
+                    className={cn(
+                      'rounded-full border px-2 py-0.5 text-xs',
+                      d.nome === SEM_DETALHE
+                        ? 'border-amber-500/50 text-amber-700 dark:text-amber-400'
+                        : 'border-border text-muted-foreground',
+                    )}
+                  >
+                    {d.nome} <span className="tabular-nums">{brl(d.cents)}</span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[0.68rem] uppercase tracking-wide text-muted-foreground">

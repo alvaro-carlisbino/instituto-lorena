@@ -253,6 +253,8 @@ export type FinTransaction = {
   categoryId: string | null
   /** centro de custo da saída; mesmo vocabulário de payable_installments */
   costCenter: string | null
+  /** Subclassificação dentro do centro: em quê o dinheiro foi. */
+  costDetail: string | null
   description: string | null
   counterparty: string | null
   source: TxnSource
@@ -263,7 +265,7 @@ export type FinTransaction = {
 }
 
 const TXN_COLS =
-  'id, account_id, date, amount_cents, direction, category_id, cost_center, description, counterparty, source, external_id, reconciled_ref_type, reconciled_ref_id, note'
+  'id, account_id, date, amount_cents, direction, category_id, cost_center, cost_detail, description, counterparty, source, external_id, reconciled_ref_type, reconciled_ref_id, note'
 
 function mapTxn(r: Record<string, unknown>): FinTransaction {
   return {
@@ -274,6 +276,7 @@ function mapTxn(r: Record<string, unknown>): FinTransaction {
     direction: (r.direction === 'in' ? 'in' : 'out') as TxnDirection,
     categoryId: r.category_id != null ? String(r.category_id) : null,
     costCenter: r.cost_center != null ? String(r.cost_center) : null,
+    costDetail: r.cost_detail != null ? String(r.cost_detail) : null,
     description: r.description != null ? String(r.description) : null,
     counterparty: r.counterparty != null ? String(r.counterparty) : null,
     source: (['ofx', 'csv', 'payable', 'receivable', 'openfinance'].includes(String(r.source)) ? r.source : 'manual') as TxnSource,
@@ -1114,12 +1117,14 @@ export async function updateTransaction(
     note?: string | null
     counterparty?: string | null
     costCenter?: string | null
+    costDetail?: string | null
   },
 ): Promise<void> {
   const client = assertClient()
   const row: Record<string, unknown> = {}
   if (patch.categoryId !== undefined) row.category_id = patch.categoryId || null
   if (patch.costCenter !== undefined) row.cost_center = patch.costCenter || null
+  if (patch.costDetail !== undefined) row.cost_detail = patch.costDetail || null
   if (patch.note !== undefined) row.note = patch.note?.trim() || null
   if (patch.counterparty !== undefined) row.counterparty = patch.counterparty?.trim() || null
   if (Object.keys(row).length === 0) return
@@ -1264,6 +1269,8 @@ export type SaidaTudo = {
   conta: string | null
   /** Item de fatura de cartão. O pagamento da fatura não entra aqui, senão contaria em dobro. */
   doCartao: boolean
+  /** Em quê, dentro do centro de custo: "Salários e encargos" → para quem. */
+  centroDetalhe: string | null
 }
 
 export async function listSaidasTudo(de: string, ate: string): Promise<SaidaTudo[]> {
@@ -1293,6 +1300,7 @@ export async function listSaidasTudo(de: string, ate: string): Promise<SaidaTudo
     status: String(r.status ?? 'pago'),
     conta: (r.conta as string | null) ?? null,
     doCartao: Boolean(r.do_cartao),
+    centroDetalhe: (r.centro_detalhe as string | null) ?? null,
   }))
 }
 
@@ -1341,12 +1349,16 @@ export async function classificarSaida(
   transactionId: string,
   centro: string,
   pattern?: string | null,
+  detalhe?: string | null,
 ): Promise<number> {
   const client = assertClient()
   const { data, error } = await client.rpc('crm_classificar_saida', {
     p_transaction_id: transactionId,
     p_centro: centro,
     p_pattern: pattern ?? null,
+    // Detalhe digitado que ainda não existe entra na lista pela própria RPC: obrigar a
+    // cadastrar antes é a diferença entre detalhar o gasto e deixar em branco.
+    p_detalhe: detalhe ?? null,
   })
   if (error) throw new Error(error.message)
   return Number(data ?? 0)
@@ -1474,6 +1486,62 @@ export type CostCenter = {
   grupo: string | null
   /** Linha do DRE. A categoria do lançamento é derivada dela. */
   categoryId: string | null
+}
+
+/**
+ * A subclassificação do gasto: dentro do centro de custo, EM QUÊ.
+ *
+ * "Salários e encargos: R$ 111 mil" serve para pagar, não para decidir — o financeiro pediu o
+ * nível de baixo ("salários, mas para quem? benefício, mas qual?"). A lista nasceu da taxonomia
+ * que eles já usavam nas parcelas, e cresce sozinha: detalhe digitado na hora de classificar
+ * entra na lista pela própria RPC.
+ */
+export type CostDetail = {
+  id: string
+  /** Nome do centro a que pertence — o mesmo texto que vai em `cost_center`. */
+  costCenter: string
+  name: string
+  active: boolean
+}
+
+export async function listCostDetails(): Promise<CostDetail[]> {
+  const client = assertClient()
+  const { data, error } = await client
+    .from('fin_cost_details')
+    .select('id, cost_center, name, active')
+    .eq('active', true)
+    .order('name')
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>
+    return {
+      id: String(row.id),
+      costCenter: String(row.cost_center ?? ''),
+      name: String(row.name ?? ''),
+      active: Boolean(row.active),
+    }
+  })
+}
+
+/** Gasto aberto por centro e detalhe: a resposta para "Centro Cirúrgico, e dentro disso o quê?". */
+export async function gastoPorDetalhe(
+  de: string,
+  ate: string,
+  centro?: string | null,
+): Promise<Array<{ centro: string; detalhe: string; qtd: number; amountCents: number }>> {
+  const client = assertClient()
+  const { data, error } = await client.rpc('crm_gasto_por_detalhe', {
+    p_de: de,
+    p_ate: ate,
+    p_centro: centro ?? null,
+  })
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    centro: String(r.centro ?? ''),
+    detalhe: String(r.detalhe ?? ''),
+    qtd: Number(r.qtd ?? 0),
+    amountCents: Number(r.amount_cents ?? 0),
+  }))
 }
 
 export async function listCostCenters(includeInactive = false): Promise<CostCenter[]> {

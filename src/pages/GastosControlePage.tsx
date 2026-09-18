@@ -59,9 +59,11 @@ import {
   listAccounts,
   listCategories,
   listCostCenters,
+  listCostDetails,
   listLancamentosExcluidos,
   listSaidasTudo,
   type CostCenter,
+  type CostDetail,
   type FinAccount,
   type FinCategory,
   type LancamentoExcluido,
@@ -133,6 +135,7 @@ export function GastosControlePage() {
   const [periodo, setPeriodo] = useState<Periodo>(() => periodoDoMes(mesAtual()))
   const [rows, setRows] = useState<SaidaTudo[]>([])
   const [centros, setCentros] = useState<CostCenter[]>([])
+  const [detalhesCentro, setDetalhesCentro] = useState<CostDetail[]>([])
   const [categorias, setCategorias] = useState<FinCategory[]>([])
   const [excluidos, setExcluidos] = useState<LancamentoExcluido[]>([])
   const [verExcluidos, setVerExcluidos] = useState(false)
@@ -158,17 +161,19 @@ export function GastosControlePage() {
   const load = async (silencioso = false) => {
     if (!silencioso) setLoading(true)
     try {
-      const [todas, cc, cats, ex] = await Promise.all([
+      const [todas, cc, cats, ex, det] = await Promise.all([
         listSaidasTudo(periodo.de, periodo.ate),
         listCostCenters(),
         listCategories('despesa'),
         // Lista auxiliar: se falhar, a tela principal não pode cair junto.
         listLancamentosExcluidos().catch(() => [] as LancamentoExcluido[]),
+        listCostDetails().catch(() => [] as CostDetail[]),
       ])
       setRows(todas)
       setCentros(cc)
       setCategorias(cats)
       setExcluidos(ex)
+      setDetalhesCentro(det)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar gastos')
     } finally {
@@ -246,6 +251,7 @@ export function GastosControlePage() {
         descricao: r.descricao,
         amountCents: r.amountCents,
         centro: r.centroCusto,
+        detalhe: r.centroDetalhe,
         foraDoTotal: foraDoTotal(r),
         nota: ehNotaAberta(r),
         possivelDuplicado: temCopia(r),
@@ -277,17 +283,30 @@ export function GastosControlePage() {
     setVista('lancamentos')
   }
 
-  const classificar = async (r: SaidaTudo, c: CostCenter, aplicarIguais: boolean, padraoGrupo?: string | null) => {
+  const classificar = async (
+    r: SaidaTudo,
+    c: CostCenter,
+    aplicarIguais: boolean,
+    padraoGrupo?: string | null,
+    detalhe?: string | null,
+  ) => {
     // Otimista: a linha muda na hora; a recarga silenciosa traz os iguais que a regra carimbou.
-    setRows((xs) => xs.map((x) => (x.origem === r.origem && x.id === r.id ? { ...x, centroCusto: c.name } : x)))
+    setRows((xs) =>
+      xs.map((x) =>
+        x.origem === r.origem && x.id === r.id
+          ? { ...x, centroCusto: c.name, centroDetalhe: detalhe ?? null }
+          : x,
+      ),
+    )
+    const onde = detalhe ? `${c.name} · ${detalhe}` : c.name
     try {
       if (r.origem === 'banco') {
         const padrao = aplicarIguais ? (padraoGrupo ?? padraoDaRegra(r.descricao || r.contraparte)) : null
-        const n = await classificarSaida(r.id, c.name, padrao)
-        toast.success(n > 0 ? `${c.name}: este e mais ${n} lançamento(s) iguais.` : `Classificado em ${c.name}.`)
+        const n = await classificarSaida(r.id, c.name, padrao, detalhe ?? null)
+        toast.success(n > 0 ? `${onde}: este e mais ${n} lançamento(s) iguais.` : `Classificado em ${onde}.`)
       } else {
-        await updatePayable(r.id, { costCenter: c.name, categoryId: c.categoryId })
-        toast.success(`Classificado em ${c.name}.`)
+        await updatePayable(r.id, { costCenter: c.name, categoryId: c.categoryId, costDetail: detalhe ?? null })
+        toast.success(`Classificado em ${onde}.`)
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao classificar')
@@ -631,6 +650,11 @@ export function GastosControlePage() {
                                   {r.doCartao ? 'cartão' : 'conta'} · {r.conta.replace(/^.*·\s*/, '')}
                                 </Badge>
                               ) : null}
+                              {r.centroDetalhe ? (
+                                <Badge variant="secondary" className="shrink-0 text-[0.65rem] font-normal">
+                                  {r.centroDetalhe}
+                                </Badge>
+                              ) : null}
                               {temCopia(r) ? (
                                 <Badge
                                   variant="outline"
@@ -656,7 +680,11 @@ export function GastosControlePage() {
                               permitirIguais={r.origem === 'banco'}
                               padrao={r.origem === 'banco' ? padraoDaRegra(r.descricao || r.contraparte) : null}
                               excluirId={r.id}
-                              onPick={(c, { aplicarIguais }) => classificar(r, c, aplicarIguais)}
+                              detalhes={detalhesCentro}
+                              valueDetalhe={r.centroDetalhe}
+                              onPick={(c, { aplicarIguais, detalhe }) =>
+                                classificar(r, c, aplicarIguais, null, detalhe)
+                              }
                             />
                           </td>
                           <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums">
@@ -813,8 +841,12 @@ export function GastosControlePage() {
               <CentroCustoPicker
                 className="w-full"
                 centros={centros}
+                detalhes={detalhesCentro}
                 value={form.costCenter || null}
-                onPick={(c) => setForm((f) => ({ ...f, costCenter: c.name }))}
+                valueDetalhe={form.subcategory || null}
+                onPick={(c, { detalhe }) =>
+                  setForm((f) => ({ ...f, costCenter: c.name, subcategory: detalhe ?? '' }))
+                }
               />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">

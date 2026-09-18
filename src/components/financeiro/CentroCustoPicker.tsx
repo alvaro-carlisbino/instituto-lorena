@@ -21,15 +21,22 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import { centroForaDoTotal, GRUPO_FORA_DO_TOTAL } from '@/lib/centroCusto'
 import { cn } from '@/lib/utils'
-import { contarIguaisSemCentro, type CostCenter } from '@/services/financeiro'
+import { contarIguaisSemCentro, type CostCenter, type CostDetail } from '@/services/financeiro'
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const normalizar = (v: string) => v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 
 type Props = {
   centros: CostCenter[]
+  /** Subclassificação por centro: "Salários e encargos" → para quem, "Benefícios" → qual. */
+  detalhes?: CostDetail[]
   value: string | null
-  onPick: (centro: CostCenter, opcoes: { aplicarIguais: boolean }) => void | Promise<void>
+  /** O detalhe já escolhido, para o segundo passo abrir marcando o que está valendo. */
+  valueDetalhe?: string | null
+  onPick: (
+    centro: CostCenter,
+    opcoes: { aplicarIguais: boolean; detalhe: string | null },
+  ) => void | Promise<void>
   /** O lançamento sendo classificado, para o modal dizer DO QUE se trata. */
   resumo?: { descricao: string; data?: string; amountCents?: number }
   /** Padrão de "aplicar aos iguais". `null` quando o lançamento não diz quem recebeu. */
@@ -45,7 +52,9 @@ type Props = {
 
 export function CentroCustoPicker({
   centros,
+  detalhes = [],
   value,
+  valueDetalhe,
   onPick,
   resumo,
   padrao,
@@ -56,6 +65,11 @@ export function CentroCustoPicker({
   className,
 }: Props) {
   const [aberto, setAberto] = useState(false)
+  // Segundo passo, no MESMO modal. Perguntar o detalhe numa coluna à parte seria uma segunda
+  // passada na lista, e a segunda ninguém faz — pelo mesmo motivo a regra carimba os dois juntos.
+  const [etapa, setEtapa] = useState<'centro' | 'detalhe'>('centro')
+  const [escolhido, setEscolhido] = useState<{ centro: CostCenter; aplicarIguais: boolean } | null>(null)
+  const [termoDetalhe, setTermoDetalhe] = useState('')
   const [termo, setTermo] = useState('')
   const [cursor, setCursor] = useState(0)
   const [iguais, setIguais] = useState<{ qtd: number; amountCents: number } | null>(null)
@@ -99,10 +113,37 @@ export function CentroCustoPicker({
 
   const escolher = (c: CostCenter) => {
     const comIguais = Boolean(permitirIguais && padrao && aplicarIguais && (iguais?.qtd ?? 0) > 0)
-    setAberto(false)
     setTermo('')
-    void onPick(c, { aplicarIguais: comIguais })
+    setEscolhido({ centro: c, aplicarIguais: comIguais })
+    setTermoDetalhe(value === c.name ? (valueDetalhe ?? '') : '')
+    setEtapa('detalhe')
   }
+
+  /** Fecha gravando. `detalhe` vazio é resposta legítima: o centro sozinho já classifica. */
+  const concluir = (detalhe: string | null) => {
+    if (!escolhido) return
+    const { centro, aplicarIguais: comIguais } = escolhido
+    setAberto(false)
+    setEtapa('centro')
+    setEscolhido(null)
+    setTermoDetalhe('')
+    void onPick(centro, { aplicarIguais: comIguais, detalhe: detalhe?.trim() || null })
+  }
+
+  const detalhesDoCentro = useMemo(() => {
+    if (!escolhido) return []
+    const q = normalizar(termoDetalhe.trim())
+    const base = detalhes.filter((d) => normalizar(d.costCenter) === normalizar(escolhido.centro.name))
+    if (!q) return base
+    return base.filter((d) => normalizar(d.name).includes(q))
+  }, [detalhes, escolhido, termoDetalhe])
+
+  /** Digitou algo que ainda não existe: vira detalhe novo, criado ao classificar. */
+  const detalheNovo = useMemo(() => {
+    const t = termoDetalhe.trim()
+    if (t.length < 2) return null
+    return detalhesDoCentro.some((d) => normalizar(d.name) === normalizar(t)) ? null : t
+  }, [termoDetalhe, detalhesDoCentro])
 
   const teclado = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
@@ -143,10 +184,24 @@ export function CentroCustoPicker({
         <ChevronDown className="size-3.5 shrink-0 opacity-50" aria-hidden />
       </Button>
 
-      <Dialog open={aberto} onOpenChange={setAberto}>
+      <Dialog
+        open={aberto}
+        onOpenChange={(v) => {
+          setAberto(v)
+          // Fechar no meio do caminho não grava nada: o centro sem o "em quê" seria uma escolha
+          // que o usuário não confirmou.
+          if (!v) {
+            setEtapa('centro')
+            setEscolhido(null)
+            setTermoDetalhe('')
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-lg" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>
-            <DialogTitle>Centro de custo</DialogTitle>
+            <DialogTitle>
+              {etapa === 'centro' ? 'Centro de custo' : `${escolhido?.centro.name}: em quê?`}
+            </DialogTitle>
             {resumo ? (
               <DialogDescription className="flex flex-wrap items-baseline gap-x-2">
                 <span className="font-medium text-foreground">{resumo.descricao}</span>
@@ -156,6 +211,8 @@ export function CentroCustoPicker({
             ) : null}
           </DialogHeader>
 
+          {etapa === 'centro' ? (
+          <>
           <div className="relative">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
@@ -250,6 +307,82 @@ export function CentroCustoPicker({
               </p>
             )
           ) : null}
+          </>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">
+                O centro diz onde o dinheiro foi. Aqui é em quê — e é isto que faz o relatório
+                responder mais que “{escolhido?.centro.name}”.
+                {escolhido?.aplicarIguais ? ' Vale também para os iguais.' : ''}
+              </p>
+
+              <div className="relative">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden
+                />
+                <Input
+                  autoFocus
+                  value={termoDetalhe}
+                  onChange={(e) => setTermoDetalhe(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      // Enter com um nome só na lista escolhe ele; com nome novo, cria.
+                      concluir(detalhesDoCentro.length === 1 ? detalhesDoCentro[0].name : termoDetalhe)
+                    }
+                  }}
+                  placeholder="Buscar ou escrever um novo: VT, Dra Lorena, Oxigênio…"
+                  aria-label="Buscar subclassificação"
+                  className="h-10 pl-9"
+                />
+              </div>
+
+              <div className="max-h-[40vh] overflow-y-auto rounded-md border border-border">
+                {detalheNovo ? (
+                  <button
+                    type="button"
+                    onClick={() => concluir(detalheNovo)}
+                    className="flex w-full items-center gap-2 border-b border-border/50 px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    <Wand2 className="size-3.5 shrink-0 text-primary" aria-hidden />
+                    <span>
+                      Usar <span className="font-medium">{detalheNovo}</span>
+                      <span className="text-muted-foreground"> · entra na lista deste centro</span>
+                    </span>
+                  </button>
+                ) : null}
+                {detalhesDoCentro.length === 0 && !detalheNovo ? (
+                  <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+                    Este centro ainda não tem subclassificação. Escreva a primeira acima.
+                  </p>
+                ) : (
+                  detalhesDoCentro.map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => concluir(d.name)}
+                      className="flex w-full items-center justify-between gap-3 border-b border-border/50 px-3 py-2 text-left text-sm last:border-0 hover:bg-muted"
+                    >
+                      <span className="min-w-0 truncate">{d.name}</span>
+                      {valueDetalhe === d.name ? <Check className="size-4 shrink-0 text-primary" /> : null}
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setEtapa('centro')}>
+                  Trocar o centro
+                </Button>
+                {/* Sair sem detalhe tem que ser fácil: o centro sozinho já é uma classificação
+                    válida, e um passo obrigatório faria voltar a não classificar nada. */}
+                <Button type="button" variant="outline" size="sm" onClick={() => concluir(null)}>
+                  Salvar sem detalhar
+                </Button>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </>

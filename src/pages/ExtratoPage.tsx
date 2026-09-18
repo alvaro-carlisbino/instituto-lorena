@@ -56,11 +56,13 @@ import {
   listAccounts,
   listCategories,
   listCostCenters,
+  listCostDetails,
   listExtratoPorDia,
   listTransactions,
   saveCategoryRule,
   updateTransaction,
   type CostCenter,
+  type CostDetail,
   type ExtratoDia,
   type FinAccount,
   type FinCategory,
@@ -98,6 +100,7 @@ export function ExtratoPage() {
   const [filtro, setFiltro] = useState<'todos' | 'in' | 'out' | 'sem_centro'>('sem_centro')
   const [criarRegra, setCriarRegra] = useState(true)
   const [centros, setCentros] = useState<CostCenter[]>([])
+  const [detalhesCentro, setDetalhesCentro] = useState<CostDetail[]>([])
   /** Linha aberta pra edição. Uma por vez: duas abertas viram formulário perdido. */
   const [abertoId, setAbertoId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -105,18 +108,20 @@ export function ExtratoPage() {
   const carregar = async (d = de, a = ate) => {
     setBusy(true)
     try {
-      const [dd, tx, cats, ce, ac] = await Promise.all([
+      const [dd, tx, cats, ce, ac, det] = await Promise.all([
         listExtratoPorDia(d, a),
         listTransactions({ from: d, to: a, limit: 5000 }),
         listCategories(),
         listCostCenters(),
         listAccounts(),
+        listCostDetails(),
       ])
       setDias(dd)
       setLancamentos(tx)
       setCategorias(cats)
       setCentros(ce)
       setContas(ac)
+      setDetalhesCentro(det)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar o extrato')
     } finally {
@@ -193,6 +198,7 @@ export function ExtratoPage() {
         descricao: t.description ?? '',
         amountCents: Math.abs(t.amountCents),
         centro: t.costCenter,
+        detalhe: t.costDetail,
         foraDoTotal: saidaForaDoTotal(t),
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -265,12 +271,14 @@ export function ExtratoPage() {
     c: CostCenter,
     aplicarIguais: boolean,
     padraoGrupo?: string | null,
+    detalhe?: string | null,
   ) => {
     setLancamentos((xs) => xs.map((x) => (x.id === t.id ? { ...x, costCenter: c.name } : x)))
     try {
       const padrao = aplicarIguais ? (padraoGrupo ?? padraoDaRegra(t.description ?? t.counterparty ?? '')) : null
-      const n = await classificarSaida(t.id, c.name, padrao)
-      toast.success(n > 0 ? `${c.name}: este e mais ${n} lançamento(s) iguais.` : `Classificado em ${c.name}.`)
+      const n = await classificarSaida(t.id, c.name, padrao, detalhe ?? null)
+      const onde = detalhe ? `${c.name} · ${detalhe}` : c.name
+      toast.success(n > 0 ? `${onde}: este e mais ${n} lançamento(s) iguais.` : `Classificado em ${onde}.`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao classificar')
     }
@@ -527,6 +535,7 @@ export function ExtratoPage() {
                             confere ia procurar no extrato de uma conta só — quando a linha era de
                             outra, virava "essa saída não existe no banco". */}
                         {nomeDaConta(t.accountId) ? `${nomeDaConta(t.accountId)} · ` : ''}
+                        {t.costDetail ? `${t.costDetail} · ` : ''}
                         {!saida && cat ? `${cat} · ` : ''}
                         <span className="underline underline-offset-2">{aberto ? 'fechar' : 'detalhes e rateio'}</span>
                       </div>
@@ -547,7 +556,11 @@ export function ExtratoPage() {
                         permitirIguais
                         padrao={padraoDaRegra(t.description ?? t.counterparty ?? '')}
                         excluirId={t.id}
-                        onPick={(c, { aplicarIguais }) => classificarCentro(t, c, aplicarIguais)}
+                        detalhes={detalhesCentro}
+                        valueDetalhe={t.costDetail}
+                        onPick={(c, { aplicarIguais, detalhe }) =>
+                          classificarCentro(t, c, aplicarIguais, null, detalhe)
+                        }
                       />
                     ) : null}
                     {saida ? (
