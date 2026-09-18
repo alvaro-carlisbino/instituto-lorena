@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { useOpcoes } from '@/hooks/useOpcoes'
 import { diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
 import {
   type IndicacaoAtendimento,
@@ -30,9 +31,6 @@ import {
  * O que a planilha não tem e é obrigatório aqui: a data do primeiro contato. Atendimento sem
  * data de contato é a linha que a planilha da Ingrid tem às centenas e ninguém trabalha.
  */
-
-/** O que aparece escrito na coluna de origem da planilha dela, virado em atalho. */
-const ORIGENS = ['Indicação', 'Já é paciente', 'Instagram', 'Google', 'Facebook', 'Site']
 
 const vazio = (indicacao: IndicacaoAtendimento) => ({
   paciente: '',
@@ -68,6 +66,8 @@ export function NovoAtendimentoDialog({
   // Abriu do filtro de protocolo, o atendimento nasce de protocolo — chutar "transplante"
   // jogaria o paciente na safra da outra consultora. O estado nasce certo porque quem
   // chama só monta o diálogo quando ele abre; não há efeito de reset para esquecer.
+  /** "Como chegou" é lista configurável (/listas → Origem do atendimento). */
+  const origens = useOpcoes('atendimento_origem')
   const [form, setForm] = useState(() => vazio(indicacao))
   const [salvando, setSalvando] = useState(false)
 
@@ -169,7 +169,7 @@ export function NovoAtendimentoDialog({
                 placeholder="Indicação, Instagram, já é paciente…"
               />
               <datalist id="atendimento-origens">
-                {ORIGENS.map((o) => (
+                {origens.map((o) => (
                   <option key={o} value={o} />
                 ))}
               </datalist>

@@ -18,6 +18,7 @@
 // consegue nem selecionar.
 
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Pencil, Plus, RotateCcw, Settings2, Tag, Trash2, Wand2 } from 'lucide-react'
 
@@ -127,6 +128,15 @@ export function FinanceiroConfigPage() {
       subtitle="Centros de custo, as linhas do DRE e as regras que classificam o extrato sozinhas."
     >
       <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
+
+      <p className="mb-3 text-xs text-muted-foreground">
+        As listas do comercial (procedimento, protocolo, origem da venda, motivo de perda) e os
+        motivos para excluir um lançamento ficam em{' '}
+        <Link to="/listas" className="font-medium underline underline-offset-2">
+          Listas do sistema
+        </Link>
+        .
+      </p>
 
       <div className="mb-4 flex gap-1">
         {(

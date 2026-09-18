@@ -28,6 +28,7 @@ import {
   LineChart,
   List,
   ListChecks,
+  ListTree,
   MapPin,
   Megaphone,
   MessagesSquare,
@@ -838,6 +839,17 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: Settings,
     group: 'configuracao',
     keywords: ['ajustes', 'preferências', 'ia', 'automação'],
+  },
+  {
+    // Vocabulário do comercial: procedimento, protocolo, origem, motivo, canal. Era `const` no
+    // fonte até 18/09 — ver src/config/listas.ts.
+    id: 'listas',
+    path: '/listas',
+    label: 'Listas do sistema',
+    icon: ListTree,
+    group: 'configuracao',
+    keywords: ['opcao', 'opções', 'procedimento', 'protocolo', 'origem', 'motivo', 'forma de pagamento', 'vocabulario'],
+    visible: isClinic,
   },
   {
     id: 'config-funis',

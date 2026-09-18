@@ -6,7 +6,7 @@
     "itens": [
       "O centro de custo diz onde o dinheiro foi (Centro Cirúrgico, Salários e encargos). Agora tem o nível de baixo: em quê. Salários para quem, benefício qual, centro cirúrgico com o quê.",
       "Ao classificar, depois de escolher o centro o sistema pergunta o detalhe na mesma caixa. Dá para escolher da lista, escrever um novo (ele entra na lista sozinho) ou seguir sem detalhar.",
-      "Quando você marca \"aplicar aos iguais\", a regra guarda o centro e o detalhe juntos — classificar duas vezes a mesma linha é o que ninguém faz.",
+      "Quando você marca \"aplicar aos iguais\", a regra guarda o centro e o detalhe juntos: classificar duas vezes a mesma linha é o que ninguém faz.",
       "Em Gastos, na vista por centro de custo, cada centro abre com a faixa \"Em quê\": quanto foi para cada subclassificação, com \"Sem detalhe\" em âmbar para mostrar o tamanho do que falta responder.",
       "A lista já nasceu preenchida com a classificação que o financeiro usava nas parcelas: 96 subclassificações em 13 centros (Benefícios com VA/VR, VT, plano odontológico; Centro Cirúrgico com consumíveis, medicamentos, estacionamento de pacientes). Dá para editar, apagar e criar."
     ]

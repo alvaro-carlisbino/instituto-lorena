@@ -140,67 +140,18 @@ export type SurgeryReminder = {
   error: string | null
 }
 
-/** Procedimentos que aparecem na planilha da Aline, na grafia dela. */
-export const PROCEDURE_OPTIONS = [
-  'Tc Frontal/ Coroa',
-  'Tc Frontal',
-  'Tc Frontal/ Coroa/ Barba',
-  'Tc masculino/ Barba',
-  'Barba',
-  'Sobrancelha',
-  'Sobrancelha + Nanofat',
-  'TC Feminino',
-  'TC Feminino + Nanofat',
-  'TC Feminino + Sobrancelha',
-]
-
-/** Protocolos da planilha da Ingrid. */
-export const PROTOCOL_OPTIONS = [
-  'Protocolo pós TC',
-  'Protocolo convencional',
-  'Protocolo inicial 3 sessões',
-  'Pacote 3 sessões de tratamento',
-  'Pacote terapia',
-  'Exossomos',
-  'Células',
-  'MMP',
-  'Mesoject',
-]
-
-export const CONSULTATION_TYPES = ['Consulta clínica', 'Retorno 1 mês', 'Retorno clínico', 'Consulta TC']
-
-export const PAYMENT_METHODS = [
-  'Dinheiro',
-  'Pix',
-  'Cartão de crédito',
-  'Cartão de débito',
-  'Boleto',
-  'Transferência',
-  'Misto',
-]
-
-/**
- * Vocabulário fechado de origem da venda. É escolha, não texto livre: com o campo
- * aberto, 415 das 428 vendas do último ano ficaram vazias e as 13 preenchidas
- * vieram em três grafias diferentes, que não agrupam.
- *
- * A divisão é a que o Ads não consegue responder sozinho. Só 2 das 428 vendas têm
- * anúncio identificado, então quem fecha a venda é a única fonte que sabe se o
- * paciente veio de anúncio, de indicação ou já era da casa.
- *
- * "Não perguntei" existe de propósito: campo obrigatório sem saída honesta vira
- * chute, e chute contamina o dado pior do que ausência declarada.
- */
-export const ORIGIN_OPTIONS = [
-  'Indicação de paciente ou conhecido',
-  'Indicação de outro médico',
-  'Já era paciente da casa',
-  'Viu anúncio no Instagram ou Facebook',
-  'Achou o Instagram sem ser anúncio',
-  'Google, site ou busca',
-  'Outro',
-  'Não perguntei',
-]
+// O QUE APARECE PARA ESCOLHER na venda — procedimento, protocolo, tipo de consulta, forma de
+// pagamento e origem — saiu daqui em 18/09/2026. Eram cinco arrays `const`, e trocar uma palavra
+// pedia deploy: quem descobre que falta um procedimento é quem vende.
+//
+// Agora vive em `app_list_options` e se edita em /listas. O padrão (que também é a rede de
+// segurança se o banco não responder) está em `src/config/listas.ts`; nos formulários, use o
+// hook `useOpcoes`.
+//
+// A origem continua sendo ESCOLHA e não texto livre pelo motivo de sempre: com o campo aberto,
+// 415 das 428 vendas do último ano ficaram vazias, e as 13 preenchidas vieram em três grafias
+// que não agrupam. "Não perguntei" segue na lista de propósito — campo obrigatório sem saída
+// honesta vira chute, e chute contamina o dado pior do que ausência declarada.
 
 /** Prefixo de `origin` quando a vendedora escolhe "Outro" e descreve à mão. */
 export const ORIGIN_OTHER_PREFIX = 'Outro: '

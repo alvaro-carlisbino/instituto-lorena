@@ -106,6 +106,7 @@ const CaixaDinheiroPage = lazyPage(() => import('./pages/CaixaDinheiroPage'), 'C
 const NfsePage = lazyPage(() => import('./pages/NfsePage'), 'NfsePage')
 const ExtratoPage = lazyPage(() => import('./pages/ExtratoPage'), 'ExtratoPage')
 const FinanceiroConfigPage = lazyPage(() => import('./pages/FinanceiroConfigPage'), 'FinanceiroConfigPage')
+const ListasPage = lazyPage(() => import('./pages/ListasPage'), 'ListasPage')
 const DrePage = lazyPage(() => import('./pages/DrePage'), 'DrePage')
 const ImportarVendasPage = lazyPage(() => import('./pages/ImportarVendasPage'), 'ImportarVendasPage')
 const CirurgiasVinculoPage = lazyPage(() => import('./pages/CirurgiasVinculoPage'), 'CirurgiasVinculoPage')
@@ -191,6 +192,7 @@ function AppRoutes() {
         <Route path="/nfse" element={<FinanceOnly><NfsePage /></FinanceOnly>} />
         <Route path="/extrato" element={<FinanceOnly><ExtratoPage /></FinanceOnly>} />
         <Route path="/financeiro-config" element={<FinanceOnly><FinanceiroConfigPage /></FinanceOnly>} />
+        <Route path="/listas" element={<ListasPage />} />
         <Route path="/dre" element={<FinanceOnly><DrePage /></FinanceOnly>} />
         <Route path="/importar-vendas" element={<FinanceOnly><ImportarVendasPage /></FinanceOnly>} />
         <Route path="/fluxo-caixa" element={<FinanceOnly><FluxoCaixaPage /></FinanceOnly>} />

@@ -16,14 +16,10 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { PatientSearchField, type PatientPick } from '@/components/PatientSearchField'
+import { useOpcoes, useOpcoesComAtual } from '@/hooks/useOpcoes'
 import {
-  CONSULTATION_TYPES,
   DEPOSIT_PAYEE_LABEL,
-  ORIGIN_OPTIONS,
   ORIGIN_OTHER_PREFIX,
-  PAYMENT_METHODS,
-  PROCEDURE_OPTIONS,
-  PROTOCOL_OPTIONS,
   type AnesthesiaProvider,
   type ClinicSale,
   type ClinicSaleKind,
@@ -321,11 +317,11 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
 
   // Venda antiga com origem escrita à mão continua aparecendo na lista, senão
   // editar o valor de uma venda de meses atrás obrigaria a reclassificar a origem
-  // de memória.
-  const opcoesOrigem = useMemo(
-    () => (origem && !ORIGIN_OPTIONS.includes(origem) ? [origem, ...ORIGIN_OPTIONS] : ORIGIN_OPTIONS),
-    [origem],
-  )
+  // de memória. As opções vêm de /listas — ver src/config/listas.ts.
+  const opcoesOrigem = useOpcoesComAtual('venda_origem', origem)
+  const opcoesProcedimento = useOpcoes(cirurgia ? 'venda_procedimento' : 'venda_protocolo')
+  const tiposConsulta = useOpcoes('venda_tipo_consulta')
+  const formasPagamento = useOpcoes('venda_forma_pagamento')
 
   const salvar = async () => {
     if (!origem) {
@@ -393,8 +389,6 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       setSalvando(false)
     }
   }
-
-  const opcoesProcedimento = cirurgia ? PROCEDURE_OPTIONS : PROTOCOL_OPTIONS
 
   return (
     <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : null)}>
@@ -518,7 +512,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
                 placeholder="Retorno 1 mês"
               />
               <datalist id="tipos-consulta">
-                {CONSULTATION_TYPES.map((t) => (
+                {tiposConsulta.map((t) => (
                   <option key={t} value={t} />
                 ))}
               </datalist>
@@ -639,7 +633,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
                 placeholder="Cartão de crédito"
               />
               <datalist id="formas-pagamento">
-                {PAYMENT_METHODS.map((p) => (
+                {formasPagamento.map((p) => (
                   <option key={p} value={p} />
                 ))}
               </datalist>

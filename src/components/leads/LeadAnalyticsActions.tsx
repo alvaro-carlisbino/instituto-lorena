@@ -21,11 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  DEFAULT_LOST_REASONS,
-  setLeadExcludedFromMetrics,
-  setLeadLostReason,
-} from '@/services/analytics'
+import { useOpcoes } from '@/hooks/useOpcoes'
+import { setLeadExcludedFromMetrics, setLeadLostReason } from '@/services/analytics'
 
 type Props = {
   leadId: string
@@ -39,12 +36,14 @@ type Props = {
  * não acoplar ao Lead type global.
  */
 export function LeadAnalyticsActions({ leadId, canManage }: Props) {
+  // Os motivos vivem em /listas — a mesma lista que o quadro usa ao mover para perdido.
+  const motivos = useOpcoes('lead_motivo_perda')
   const [excluded, setExcluded] = useState<boolean>(false)
   const [lostReason, setLostReasonState] = useState<string>('')
   const [optedOutAt, setOptedOutAt] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [dialogOpen, setDialogOpen] = useState<boolean>(false)
-  const [selectedReason, setSelectedReason] = useState<string>(DEFAULT_LOST_REASONS[0])
+  const [selectedReason, setSelectedReason] = useState<string>(motivos[0] ?? '')
   const [customReason, setCustomReason] = useState<string>('')
   const [saving, setSaving] = useState<boolean>(false)
 
@@ -170,12 +169,12 @@ export function LeadAnalyticsActions({ leadId, canManage }: Props) {
           <div className="grid gap-3">
             <div className="grid gap-1.5">
               <Label className="text-xs">Motivo</Label>
-              <Select value={selectedReason} onValueChange={(v) => setSelectedReason(v ?? DEFAULT_LOST_REASONS[0])}>
+              <Select value={selectedReason} onValueChange={(v) => setSelectedReason(v ?? motivos[0] ?? '')}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {DEFAULT_LOST_REASONS.map((r) => (
+                  {motivos.map((r) => (
                     <SelectItem key={r} value={r}>
                       {r}
                     </SelectItem>

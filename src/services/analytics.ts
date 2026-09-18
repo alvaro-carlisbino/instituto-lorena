@@ -359,18 +359,10 @@ export async function setLeadExcludedFromMetrics(leadId: string, excluded: boole
   if (error) throw new Error(error.message)
 }
 
-/** Lista padrão de motivos de perda — clínica médica. Sugestões; texto livre permitido. */
-export const DEFAULT_LOST_REASONS = [
-  'Sem orçamento',
-  'Achou caro',
-  'Sem interesse',
-  'Já fechou em outro lugar',
-  'Sem retorno',
-  'Distância / localização',
-  'Conta errada / contato inválido',
-  'Equipe / fornecedor',
-  'Outro',
-] as const
+// Os motivos de perda saíram daqui em 18/09/2026: viraram lista configurável em /listas
+// (`lead_motivo_perda`). Eram duas listas divergentes para a MESMA coluna `leads.lost_reason` —
+// esta e a do diálogo do quadro —, o que dividia o ranking de motivos em dois jeitos de escrever
+// a mesma desistência.
 
 // ---- Conversão comercial: do lead ao dinheiro -------------------------------
 // A /resultados contava lead, resposta e SLA e parava aí — origem que traz 400

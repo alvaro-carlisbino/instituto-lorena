@@ -49,6 +49,7 @@ import { NovoAtendimentoDialog } from '@/components/vendas/NovoAtendimentoDialog
 import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
 import { useCrm } from '@/context/CrmContext'
 import { useTenant } from '@/context/TenantContext'
+import { useOpcoes } from '@/hooks/useOpcoes'
 import { combinaBusca } from '@/lib/busca'
 import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import type { Periodo } from '@/lib/periodo'
@@ -56,8 +57,6 @@ import { cn } from '@/lib/utils'
 import type { IndicacaoAtendimento } from '@/services/atendimentos'
 import { type ClinicSaleKind, type StaffMember, listSurgicalStaff } from '@/services/clinicSales'
 import {
-  FOLLOWUP_CHANNELS,
-  FOLLOWUP_OUTCOMES,
   FUNIL_CIRURGICO,
   FUNIL_PROTOCOLOS,
   KANBAN_COLUNAS,
@@ -150,12 +149,15 @@ const ABERTAS: KanbanColuna[] = [
 export function FollowUpTab() {
   const crm = useCrm()
   const { tenant } = useTenant()
+  // Resultado e canal saíram do fonte: a lista se edita em /listas.
+  const resultados = useOpcoes('followup_resultado')
+  const canais = useOpcoes('followup_canal')
   const [cards, setCards] = useState<KanbanCard[]>([])
   const [loading, setLoading] = useState(false)
   const [alvo, setAlvo] = useState<KanbanCard | null>(null)
   const [reabrindo, setReabrindo] = useState<KanbanCard | null>(null)
-  const [outcome, setOutcome] = useState(FOLLOWUP_OUTCOMES[0])
-  const [canal, setCanal] = useState(FOLLOWUP_CHANNELS[0])
+  const [outcome, setOutcome] = useState(resultados[0] ?? '')
+  const [canal, setCanal] = useState(canais[0] ?? '')
   const [nota, setNota] = useState('')
   const [proxima, setProxima] = useState(emDias(7))
   const [semProxima, setSemProxima] = useState(false)
@@ -414,8 +416,8 @@ export function FollowUpTab() {
 
   const abrir = (card: KanbanCard) => {
     setAlvo(card)
-    setOutcome(FOLLOWUP_OUTCOMES[0])
-    setCanal(FOLLOWUP_CHANNELS[0])
+    setOutcome(resultados[0] ?? '')
+    setCanal(canais[0] ?? '')
     setNota('')
     setProxima(emDias(7))
     setSemProxima(false)
@@ -926,7 +928,7 @@ export function FollowUpTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {FOLLOWUP_OUTCOMES.map((o) => (
+                    {resultados.map((o) => (
                       <SelectItem key={o} value={o}>
                         {o}
                       </SelectItem>
@@ -941,7 +943,7 @@ export function FollowUpTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {FOLLOWUP_CHANNELS.map((c) => (
+                    {canais.map((c) => (
                       <SelectItem key={c} value={c}>
                         {c}
                       </SelectItem>

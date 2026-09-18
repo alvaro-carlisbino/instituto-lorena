@@ -10,28 +10,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { useOpcoes } from '@/hooks/useOpcoes'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
-const COMMON_REASONS = [
-  'Preço / Orçamento alto',
-  'Distância / Localização',
-  'Indecisão do paciente',
-  'Fez em outra clínica',
-  'Falta de agenda / horário',
-  'Apenas curiosidade',
-  'Não respondeu o follow-up',
-]
-
-const CANCELLATION_REASONS = [
-  'Financeiro / forma de pagamento',
-  'Remarcou / vai reagendar',
-  'Medo / insegurança',
-  'Motivo de saúde',
-  'Problema de agenda',
-  'Fez em outra clínica',
-  'Desistiu do tratamento',
-]
 
 type Props = {
   open: boolean
@@ -43,6 +25,11 @@ type Props = {
 }
 
 export function LeadLossReasonDialog({ open, onOpenChange, onConfirm, patientName, stageName }: Props) {
+  // Motivo de perda e motivo de cancelamento são listas configuráveis (/listas). Antes eram
+  // dois arrays aqui dentro, e o de perda divergia do que a ficha do paciente oferecia para a
+  // mesma coluna — mesmo motivo escrito de dois jeitos não soma no ranking.
+  const motivosPerda = useOpcoes('lead_motivo_perda')
+  const motivosCancelamento = useOpcoes('venda_motivo_cancelamento')
   const [reason, setReason] = useState('')
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
   const notesId = useId()
@@ -53,7 +40,7 @@ export function LeadLossReasonDialog({ open, onOpenChange, onConfirm, patientNam
     : /protocolo/i.test(stageName ?? '')
       ? 'o protocolo'
       : 'o atendimento'
-  const presets = isCancellation ? CANCELLATION_REASONS : COMMON_REASONS
+  const presets = isCancellation ? motivosCancelamento : motivosPerda
 
   const handleConfirm = () => {
     const finalReason = selectedPreset

@@ -29,17 +29,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { useOpcoes } from '@/hooks/useOpcoes'
 import { GRUPO_FORA_DO_TOTAL } from '@/lib/centroCusto'
 import { padraoDaRegra } from '@/lib/extratoPadrao'
 import { cn } from '@/lib/utils'
 import { excluirContaAPagar, excluirLancamentoRepetido, type CostCenter } from '@/services/financeiro'
-
-const MOTIVOS = [
-  'Não foi compra: proposta comercial',
-  'Boleto falso ou golpe',
-  'Nota lançada em duplicidade',
-  'Outro',
-] as const
 
 export type OutroLancamento = { id: string; descricao: string; data: string; amountCents: number }
 
@@ -70,7 +64,9 @@ export function ExcluirLancamento({
   onTirarDoTotal?: (centro: CostCenter) => Promise<void>
 }) {
   const [aberto, setAberto] = useState(false)
-  const [motivo, setMotivo] = useState<(typeof MOTIVOS)[number]>(MOTIVOS[0])
+  // Os motivos se editam em /listas → Motivos para excluir um lançamento.
+  const motivos = useOpcoes('financeiro_motivo_exclusao')
+  const [motivo, setMotivo] = useState<string>(motivos[0] ?? '')
   const [outro, setOutro] = useState('')
   const [busy, setBusy] = useState(false)
   // Fica, por padrão, o que diz quem recebeu: o pendente só diz o trilho ("SISPAG FORNECEDORES").
@@ -198,7 +194,7 @@ export function ExcluirLancamento({
                 A conta sai do gasto e fica guardada como cancelada. A nota não volta a ser lançada.
               </p>
               <div className="grid gap-1.5">
-                {MOTIVOS.map((m) => (
+                {motivos.map((m) => (
                   <button
                     key={m}
                     type="button"
