@@ -614,7 +614,10 @@ Deno.serve(async (req) => {
         const { data: pendentes } = await admin
           .from('sefaz_documentos')
           .select('id, chave, numero, emitente, cnpj_emitente, valor_cents, data_emissao')
-          .eq('tenant_id', tenantId).eq('status', 'novo').eq('xml_completo', false)
+          // Só nota que o financeiro liberou. Capturar é automático; virar dívida, não —
+          // nota de proposta, remessa e brinde chegam pelo mesmo cano da compra de verdade.
+          // Ver a migration 20260918160000.
+          .eq('tenant_id', tenantId).eq('status', 'novo').eq('aprovacao', 'aprovada').eq('xml_completo', false)
           .order('data_emissao', { ascending: true })
           .limit(Math.min(Number(corpo.limiteLancamento ?? 0) || 400, 400))
 
@@ -651,7 +654,7 @@ Deno.serve(async (req) => {
         const { data: completas } = await admin
           .from('sefaz_documentos')
           .select('id, chave, numero, emitente, cnpj_emitente, valor_cents, data_emissao')
-          .eq('tenant_id', tenantId).eq('status', 'novo').eq('xml_completo', true)
+          .eq('tenant_id', tenantId).eq('status', 'novo').eq('aprovacao', 'aprovada').eq('xml_completo', true)
           .not('xml', 'is', null)
           .order('data_emissao', { ascending: true })
           .limit(Math.min(Number(corpo.limiteLancamento ?? 0) || 200, 200))

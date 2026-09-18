@@ -250,3 +250,57 @@ export async function darEntradaLote(
   onProgresso?.({ feitas: notas.length, total: notas.length, atual: '' })
   return resultados
 }
+
+/**
+ * Nota capturada que ainda não virou conta a pagar.
+ *
+ * Pedido do financeiro em 18/09/2026: nota recebida não é o mesmo que compra a pagar — chega
+ * nota de proposta, de remessa, de brinde, e nota que já foi paga à vista. Todas viravam saldo
+ * devedor no contas a pagar. A captura segue automática (é ela que tem prazo: sem ciência em 10
+ * dias o XML completo some); o que passou a esperar é o lançamento, que prazo nenhum tem.
+ */
+export type NotaEsperandoOk = {
+  id: string
+  chave: string
+  numero: string | null
+  emitente: string | null
+  cnpjEmitente: string | null
+  valor: number
+  dataEmissao: string | null
+  xmlCompleto: boolean
+  /** Natureza da operação do XML: é ela que separa compra de remessa. Null no resumo. */
+  natureza: string | null
+}
+
+export async function listarNotasEsperandoOk(): Promise<NotaEsperandoOk[]> {
+  const { data, error } = await client().rpc('crm_notas_esperando_ok')
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    chave: String(r.chave ?? ''),
+    numero: (r.numero as string | null) ?? null,
+    emitente: (r.emitente as string | null) ?? null,
+    cnpjEmitente: (r.cnpj_emitente as string | null) ?? null,
+    valor: Number(r.valor_cents ?? 0) / 100,
+    dataEmissao: (r.data_emissao as string | null) ?? null,
+    xmlCompleto: Boolean(r.xml_completo),
+    natureza: (r.natureza as string | null) ?? null,
+  }))
+}
+
+/**
+ * Responde uma nota da fila. Aprovar não lança sozinho: quem lança é a edge, que lê o XML e
+ * monta as duplicatas reais. Por isso o `sincronizarSefaz()` logo em seguida — sem ele, quem
+ * clicou em "É compra" ficaria olhando uma tela que não mudou até a próxima rodada do cron.
+ */
+export async function responderNota(documentoId: string, aprovar: boolean): Promise<void> {
+  const { error } = await client().rpc('crm_nota_aprovar', { p_documento: documentoId, p_aprovar: aprovar })
+  if (error) throw new Error(error.message)
+  if (aprovar) {
+    try {
+      await sincronizarSefaz()
+    } catch {
+      // O ok já está gravado. Se o lançamento não coube agora, a rodada do cron pega.
+    }
+  }
+}

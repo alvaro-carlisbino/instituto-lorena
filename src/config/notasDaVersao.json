@@ -1,5 +1,17 @@
 [
   {
+    "id": "2026-09-18-nota-da-sefaz-espera-o-ok",
+    "data": "2026-09-18",
+    "titulo": "Nota da SEFAZ agora espera seu ok antes de virar conta a pagar",
+    "itens": [
+      "Toda nota emitida contra o CNPJ virava dívida sozinha, inclusive as que não são compra: proposta, remessa, brinde e nota já paga à vista. Era isso que inflava o saldo devedor.",
+      "Em Contas a pagar, o painel Notas na SEFAZ agora lista as notas que chegaram com dois botões: É compra (vai para o contas a pagar na hora) e Não é (fica de fora, e não pergunta de novo).",
+      "Quando a nota tem XML, a lista mostra a natureza da operação — é ela que separa venda de remessa.",
+      "A captura continua automática e sem pedir nada: ela tem prazo (sem ciência em 10 dias o XML completo some do banco). Quem passou a esperar é só o lançamento.",
+      "Vale para nota nova. As 231 parcelas que já estão em aberto seguem onde estavam, para não sumir dívida de verdade junto com a errada."
+    ]
+  },
+  {
     "id": "2026-09-18-gasto-do-cartao-item-a-item",
     "data": "2026-09-18",
     "titulo": "Gasto do cartão agora é item a item, não a fatura inteira",

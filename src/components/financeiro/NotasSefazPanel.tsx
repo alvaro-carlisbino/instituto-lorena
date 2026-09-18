@@ -8,8 +8,11 @@ import { Badge } from '@/components/ui/badge'
 import {
   darEntradaLote,
   listarEstoquePendente,
+  listarNotasEsperandoOk,
+  responderNota,
   resumoSefaz,
   sincronizarSefaz,
+  type NotaEsperandoOk,
   type ResultadoEntrada,
   type ResumoSefaz,
 } from '@/services/nfeSefaz'
@@ -52,13 +55,17 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
   const [sincronizando, setSincronizando] = useState(false)
   const [progresso, setProgresso] = useState<{ feitas: number; total: number; atual: string } | null>(null)
   const [falhas, setFalhas] = useState<ResultadoEntrada[] | null>(null)
+  // Nota capturada que ainda não virou dívida: quem diz se é compra é o financeiro.
+  const [esperandoOk, setEsperandoOk] = useState<NotaEsperandoOk[]>([])
+  const [respondendoNota, setRespondendoNota] = useState<string | null>(null)
 
   // Sem `setCarregando(true)` aqui: além de ser setState síncrono dentro do efeito, recarregar
   // mostrando o número antigo até o novo chegar é melhor do que piscar "carregando" a cada vez.
   const carregar = useCallback(async () => {
     try {
-      const r = await resumoSefaz()
+      const [r, fila] = await Promise.all([resumoSefaz(), listarNotasEsperandoOk()])
       setResumo(r)
+      setEsperandoOk(fila)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao ler as notas da SEFAZ')
     } finally {
@@ -70,12 +77,31 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
   // de /contas-a-pagar antes da consulta voltar não deve tomar setState em componente morto.
   useEffect(() => {
     let vivo = true
-    void resumoSefaz()
-      .then((r) => { if (vivo) setResumo(r) })
+    void Promise.all([resumoSefaz(), listarNotasEsperandoOk()])
+      .then(([r, fila]) => { if (vivo) { setResumo(r); setEsperandoOk(fila) } })
       .catch((e) => toast.error(e instanceof Error ? e.message : 'Falha ao ler as notas da SEFAZ'))
       .finally(() => { if (vivo) setCarregando(false) })
     return () => { vivo = false }
   }, [])
+
+  /** "É compra" lança a nota no contas a pagar; "Não é" arquiva e ela não volta a perguntar. */
+  const responder = async (n: NotaEsperandoOk, aprovar: boolean) => {
+    setRespondendoNota(n.id)
+    try {
+      await responderNota(n.id, aprovar)
+      toast.success(
+        aprovar
+          ? `Nota ${n.numero ?? ''} de ${n.emitente ?? ''} entrou no contas a pagar.`
+          : `Nota ${n.numero ?? ''} ficou de fora do financeiro.`,
+      )
+      await carregar()
+      onImportou?.()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Não deu para responder agora')
+    } finally {
+      setRespondendoNota(null)
+    }
+  }
 
   /**
    * `silencioso` é a rodada automática ao abrir a tela: ela não avisa quando não fez nada, mas
@@ -161,6 +187,57 @@ export function NotasSefazPanel({ onImportou }: { onImportou?: () => void }) {
         </p>
 
         {carregando && !resumo && <p className="text-xs text-muted-foreground">Carregando…</p>}
+
+        {/* A fila do ok. Nota recebida não é o mesmo que compra a pagar: chega nota de proposta,
+            de remessa, de brinde e nota já paga à vista, e todas viravam saldo devedor. Capturar
+            continua automático — é o passo com prazo; quem espera agora é o lançamento. */}
+        {esperandoOk.length > 0 && (
+          <div className="space-y-2 rounded border border-amber-500/40 bg-amber-500/[0.06] p-2 text-xs">
+            <p className="font-medium">
+              {esperandoOk.length} nota(s) esperando seu ok ·{' '}
+              {brl(esperandoOk.reduce((s, n) => s + n.valor, 0))}
+            </p>
+            <p className="text-muted-foreground">
+              Chegaram da SEFAZ e ainda não viraram conta a pagar. Diga quais são compra de
+              verdade — as outras ficam de fora do financeiro.
+            </p>
+            {esperandoOk.map((n) => (
+              <div
+                key={n.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded border bg-background px-2 py-1.5"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-medium" title={n.emitente ?? ''}>
+                    {n.emitente ?? 'sem emitente'} · {brl(n.valor)}
+                  </div>
+                  <div className="text-muted-foreground">
+                    nota {n.numero ?? '—'} · {dia(n.dataEmissao)}
+                    {n.natureza ? ` · ${n.natureza}` : n.xmlCompleto ? '' : ' · só o resumo, sem XML'}
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-1.5">
+                  <Button
+                    size="sm"
+                    className="h-7 px-2"
+                    disabled={respondendoNota === n.id}
+                    onClick={() => void responder(n, true)}
+                  >
+                    É compra
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2"
+                    disabled={respondendoNota === n.id}
+                    onClick={() => void responder(n, false)}
+                  >
+                    Não é
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {resumo && (
           <div className="space-y-3 text-xs">
