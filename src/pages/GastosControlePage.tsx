@@ -619,6 +619,18 @@ export function GastosControlePage() {
                                   lançado à mão
                                 </Badge>
                               ) : null}
+                              {/* De onde saiu. Sem isto, quem confere procura no extrato errado:
+                                  compra de cartão não está no extrato da conta corrente, e conta
+                                  nenhuma se identifica sozinha numa lista de data e valor. */}
+                              {r.conta ? (
+                                <Badge
+                                  variant="outline"
+                                  className="shrink-0 text-[0.65rem] font-normal text-muted-foreground"
+                                  title={r.doCartao ? `Compra no cartão ${r.conta}` : `Saiu da conta ${r.conta}`}
+                                >
+                                  {r.doCartao ? 'cartão' : 'conta'} · {r.conta.replace(/^.*·\s*/, '')}
+                                </Badge>
+                              ) : null}
                               {temCopia(r) ? (
                                 <Badge
                                   variant="outline"

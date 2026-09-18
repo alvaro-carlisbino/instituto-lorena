@@ -249,6 +249,16 @@ export function ExtratoPage() {
 
   const nomeCategoria = (id: string | null) => categorias.find((c) => c.id === id)?.name ?? null
 
+  /**
+   * Nome curto da conta, sem o prefixo do banco ("Itaú Empresas · Conta corrente" vira "Conta
+   * corrente"). Some quando só existe uma conta ligada: aí a coluna não informa nada.
+   */
+  const nomeDaConta = (id: string) => {
+    if (contas.filter((c) => c.active).length < 2) return null
+    const a = contas.find((c) => c.id === id)
+    return a ? a.name.replace(/^.*·\s*/, '') : null
+  }
+
   /** Saída: centro de custo, e com "iguais" vira regra (inclusive para o que ainda vai chegar). */
   const classificarCentro = async (
     t: FinTransaction,
@@ -513,6 +523,10 @@ export function ExtratoPage() {
                     >
                       <div className="truncate text-sm font-medium">{nome}</div>
                       <div className="text-xs text-muted-foreground">
+                        {/* De qual conta é a linha. A lista mostrava data, nome e valor, e quem
+                            confere ia procurar no extrato de uma conta só — quando a linha era de
+                            outra, virava "essa saída não existe no banco". */}
+                        {nomeDaConta(t.accountId) ? `${nomeDaConta(t.accountId)} · ` : ''}
                         {!saida && cat ? `${cat} · ` : ''}
                         <span className="underline underline-offset-2">{aberto ? 'fechar' : 'detalhes e rateio'}</span>
                       </div>

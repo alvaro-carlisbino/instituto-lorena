@@ -1260,6 +1260,10 @@ export type SaidaTudo = {
   possivelDuplicado: boolean
   /** Da conta a pagar: 'aberto' | 'pago'. Do banco, sempre 'pago'. */
   status: string
+  /** De qual conta saiu. Null na conta a pagar, que ainda não saiu de lugar nenhum. */
+  conta: string | null
+  /** Item de fatura de cartão. O pagamento da fatura não entra aqui, senão contaria em dobro. */
+  doCartao: boolean
 }
 
 export async function listSaidasTudo(de: string, ate: string): Promise<SaidaTudo[]> {
@@ -1287,6 +1291,8 @@ export async function listSaidasTudo(de: string, ate: string): Promise<SaidaTudo
     naoEGasto: Boolean(r.nao_e_gasto),
     possivelDuplicado: Boolean(r.possivel_duplicado),
     status: String(r.status ?? 'pago'),
+    conta: (r.conta as string | null) ?? null,
+    doCartao: Boolean(r.do_cartao),
   }))
 }
 

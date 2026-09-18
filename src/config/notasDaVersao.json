@@ -1,5 +1,17 @@
 [
   {
+    "id": "2026-09-18-gasto-do-cartao-item-a-item",
+    "data": "2026-09-18",
+    "titulo": "Gasto do cartão agora é item a item, não a fatura inteira",
+    "itens": [
+      "Em Gastos e no DRE o cartão aparecia como uma linha só: em julho, R$ 55.618 de \"BOLETO PAGO Fatura Carta\", sem dizer o que foi comprado. Agora entram as compras da fatura, uma a uma, com data, valor e centro de custo.",
+      "Para não contar duas vezes, o pagamento da fatura (\"BOLETO PAGO Fatura Carta\" e \"BUSINESS 4004-2658\") deixou de ser despesa: ele é só a quitação do que já está lançado item a item.",
+      "A despesa passou a pesar no mês da COMPRA, não no mês em que a fatura foi paga. Por isso os totais de junho a setembro mudaram: a compra de 28/06, que caía em julho junto com a fatura, agora pesa em junho.",
+      "Setembro ganhou R$ 10.889 de compras no cartão que antes só apareceriam quando a fatura fosse paga.",
+      "Cada linha de Gastos e do Extrato agora diz de qual conta ou cartão ela saiu."
+    ]
+  },
+  {
     "id": "2026-09-18-conta-do-banco-so-entra-aprovada",
     "data": "2026-09-18",
     "titulo": "Corrigido: saída no Extrato que não existia no extrato do banco",
