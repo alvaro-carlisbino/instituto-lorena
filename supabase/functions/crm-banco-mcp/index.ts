@@ -60,9 +60,17 @@ async function ofPost(
 
   // O teto do MCP.AI é 2 req/s e a paginação do extrato estoura isso fácil. Sem retry, um
   // 429 no meio virava "conta falhou" e o dia inteiro ficava sem extrato.
-  if (res.status === 429 && tentativa <= 3) {
+  // O mesmo teto também chega como 200 + ok:true, com o 429 escondido DENTRO de `result`
+  // ({ total: 0, results: [], error: { status: 429 } }). Visto em 21/09/2026: a rodada lia
+  // "nenhum lançamento" e seguia como se o banco estivesse vazio.
+  const interno = (data.result as { error?: { status?: unknown } } | undefined)?.error
+  const limiteInterno = Number(interno?.status) === 429
+  if ((res.status === 429 || limiteInterno) && tentativa <= 3) {
     await dorme(1200 * tentativa)
     return ofPost(path, body, tentativa + 1)
+  }
+  if (limiteInterno) {
+    throw new Error(`Banco MCP ${path}: limite de requisições do provedor, tente de novo em instantes`)
   }
 
   // O MCP.AI devolve 200 com { error, message } em caso de assinatura vencida / chave
@@ -555,7 +563,7 @@ async function syncMcpAccounts(
 ): Promise<{ inserted: number; accounts: number; results: Array<Record<string, unknown>> }> {
   let query = db
     .from('fin_accounts')
-    .select('id, tenant_id, of_account_id, of_item_id, of_last_sync_at')
+    .select('id, tenant_id, kind, of_account_id, of_item_id, of_last_sync_at')
     .eq('of_provider', 'mcp_ai')
     // A trava de verdade mora AQUI, não no link: conta pendente ou recusada não puxa extrato
     // nenhum. Sem esta linha, adiar a adoção só adiava o estrago — os lançamentos entravam
@@ -570,6 +578,7 @@ async function syncMcpAccounts(
   const contas = (accs ?? []) as Array<{
     id: string
     tenant_id: string
+    kind: string | null
     of_account_id: string
     of_item_id: string | null
     of_last_sync_at: string | null
@@ -643,6 +652,11 @@ async function syncMcpAccounts(
       const to = dayStr(new Date())
 
       const rows: Record<string, unknown>[] = []
+      // Tudo o que o banco mostrou na janela, pendente inclusive: é a lista contra a qual o
+      // nosso extrato é conferido no fim (crm_banco_retirou_do_extrato).
+      const vistos = new Set<string>()
+      let totalBanco = NaN
+      let primeiroDia: string | null = null
       let page = 1
       let totalPages = 1
       do {
@@ -657,16 +671,26 @@ async function syncMcpAccounts(
           (pageRes.transactions as Array<Record<string, unknown>>) ??
           []
         totalPages = Number(pageRes.total_pages ?? pageRes.totalPages ?? 1)
+        if (page === 1) totalBanco = Number(pageRes.total ?? NaN)
         // Lançamento PENDENTE ganha outro id quando compensa, e gravar os dois deixou a fatura do
         // cartão em dobro em 17/08/2026. Ele fica de fora até compensar (a janela recua 10 dias
         // para pegá-lo depois). Só vale quando a página também traz compensado: se o conector
         // marcar TUDO como pendente, pular tudo pararia o extrato calado, e isso é pior que a cópia.
         const statusDe = (t: Record<string, unknown>) =>
           String(t.status ?? t.transactionStatus ?? '').toUpperCase()
-        const temCompensado = list.some((t) => statusDe(t) !== 'PENDING')
+        // No CARTÃO pendente não é provisório: é compra da fatura aberta, com o mesmo id de quando
+        // fechar (as 328 compras de mai a set batem id a id com o banco). Lá ele fica pendente por
+        // meses, então pular faria a compra sair da janela de 10 dias sem nunca entrar, bastando
+        // uma compra já fechada cair na mesma janela.
+        const cartao = acc.kind === 'carteira' ||
+          String(saldos.get(acc.of_account_id)?.type ?? '').toUpperCase().includes('CREDIT')
+        const temCompensado = !cartao && list.some((t) => statusDe(t) !== 'PENDING')
         for (const t of list) {
           const id = String(t.id ?? t.transaction_id ?? '')
           if (!id) continue
+          vistos.add(id)
+          const dia = String(t.date ?? t.transactionDateTime ?? '').slice(0, 10)
+          if (dia && (!primeiroDia || dia < primeiroDia)) primeiroDia = dia
           if (temCompensado && statusDe(t) === 'PENDING') continue
           const amtRaw = Number(
             (t.amount as number | undefined) ??
@@ -693,6 +717,10 @@ async function syncMcpAccounts(
         }
         page += 1
       } while (page <= totalPages && page <= 30)
+      // Só confere contra o banco com a lista inteira na mão: parar no teto de 30 páginas, ou
+      // receber menos ids do que o total que o próprio provedor anunciou, faria lançamento de
+      // verdade parecer retirado.
+      const leuTudo = page > totalPages && (!Number.isFinite(totalBanco) || vistos.size === totalBanco)
 
       for (let i = 0; i < rows.length; i += 200) {
         const chunk = rows.slice(i, i + 200)
@@ -745,7 +773,37 @@ async function syncMcpAccounts(
           ...(sit ? { of_status: [sit.status, sit.exec].filter(Boolean).join(' / ') } : {}),
         })
         .eq('id', acc.id)
-      results.push({ account: acc.id, rows: rows.length })
+
+      // O Itaú publica o agendamento na véspera ("SISPAG FORNECEDORES", "PIX AGENDADO") e no dia
+      // seguinte troca pelo compensado, com outro id, ou retira quando o pagamento não sai. Gravar
+      // por id e nunca apagar deixou R$ 97 mil de fantasma em /gastos entre agosto e setembro.
+      // A conferência vai do dia seguinte ao início da janela (a borda depende do fuso do
+      // provedor) até hoje, e nunca antes do primeiro dia que o banco de fato devolveu.
+      let retirados: unknown = null
+      if (leuTudo && vistos.size > 0 && primeiroDia) {
+        const diaSeguinte = dayStr(new Date(fromDate.getTime() + 86400_000))
+        const de = primeiroDia > diaSeguinte ? primeiroDia : diaSeguinte
+        // Apagar é só da service_role: a lista de ids vem do banco, nunca de quem chamou. As
+        // contas daqui já passaram pela RLS do usuário quando o clique veio da tela.
+        const admin = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+          ? createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
+          : db
+        const { data: ret, error: retErr } = await admin.rpc('crm_banco_retirou_do_extrato', {
+          p_account: acc.id,
+          p_de: de,
+          p_ate: to,
+          p_vistos: [...vistos],
+          // Varredura pedida à mão (com "from") pode pegar um passivo antigo de uma vez.
+          p_teto: fromOverride ? 40 : 10,
+        })
+        if (retErr) {
+          // Não derruba a rodada: o extrato novo já entrou e o saldo já foi gravado. Mas fica
+          // na conta, que é onde a tela e o crm_banco_sync_health olham.
+          await db.from('fin_accounts').update({ of_last_error: retErr.message.slice(0, 500) }).eq('id', acc.id)
+        }
+        retirados = retErr ? { erro: retErr.message } : ret
+      }
+      results.push({ account: acc.id, rows: rows.length, retirados })
     } catch (e) {
       const motivo = e instanceof Error ? e.message : String(e)
       // Grava o motivo na conta. Antes o erro só voltava no corpo da resposta, que o cron
