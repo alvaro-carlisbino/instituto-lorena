@@ -260,6 +260,8 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
   // O lucro aparece enquanto ela digita: é a conta que hoje ela faz na
   // calculadora do celular depois de fechar a planilha.
   const valorCents = parseMoney(valor)
+  // A entrada entra na conta do repasse: no transplante ela já é o pagamento do anestesista.
+  const entradaCents = parseMoney(entrada)
   const ufNum = ufTexto.replace(/\D/g, '') ? Number(ufTexto.replace(/\D/g, '')) : null
   // Protocolo não tem campo de quem opera: o banco grava quem atendeu (ver toRow), e a regra
   // procura pelo mesmo nome.
@@ -281,6 +283,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
         semRaspagem,
         uf: ufNum,
         srgSurgeryId,
+        entradaCents,
       })
         .then((p) => vivo && setPrevia(p))
         .catch(() => vivo && setPrevia(null))
@@ -289,7 +292,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       vivo = false
       clearTimeout(t)
     }
-  }, [open, cirurgia, procedimento, medicoAtendeu, medicoDaRegra, valorCents, semRaspagem, ufNum, srgSurgeryId])
+  }, [open, cirurgia, procedimento, medicoAtendeu, medicoDaRegra, valorCents, semRaspagem, ufNum, srgSurgeryId, entradaCents])
 
   const repasseCents = medicoManual
     ? parseMoney(custoMedico)
@@ -352,7 +355,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       performingDoctor: medicoExecuta || null,
       anesthetist: anestesista || null,
       valueCents: parseMoney(valor),
-      depositCents: entrada ? parseMoney(entrada) : null,
+      depositCents: entrada ? entradaCents : null,
       depositAt: entradaData || null,
       depositPayee: entradaPara || null,
       depositPaid: entradaPaga,

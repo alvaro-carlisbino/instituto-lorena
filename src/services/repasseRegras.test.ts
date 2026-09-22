@@ -69,6 +69,8 @@ const previa = (over: Partial<PreviaCirurgia> = {}): PreviaCirurgia => ({
   medicoRegra: 'mesmo_medico',
   anestesiaCents: 250_000,
   anestesiaRegra: 'com raspagem, UF a informar',
+  anestesiaPoliticaCents: 250_000,
+  anestesiaEntradaCents: 0,
   uf: null,
   ufDaSala: false,
   ...over,
@@ -106,6 +108,22 @@ describe('descreverAnestesiaCirurgia', () => {
   it('procedimento que não diz qual anestesia', () => {
     expect(descreverAnestesiaCirurgia(previa({ anestesiaCents: null, anestesiaRegra: null }))).toBe(
       'o procedimento não diz qual anestesia',
+    )
+  })
+
+  // A entrada do transplante É o pagamento do anestesista: o campo zera e a linha explica
+  // por quê. Sem a frase, o zero parece erro e alguém digita o valor cheio por cima.
+  it('entrada que cobre a anestesia inteira zera o campo e diz de onde veio', () => {
+    const p = previa({ anestesiaCents: 0, anestesiaEntradaCents: 250_000 })
+    expect(descreverAnestesiaCirurgia(p).replace(/\u00a0/g, ' ')).toBe(
+      'com raspagem, UF a informar: R$ 2.500 pagos na entrada do paciente',
+    )
+  })
+
+  it('entrada menor que a anestesia abate só o que pagou', () => {
+    const p = previa({ anestesiaCents: 30_000, anestesiaEntradaCents: 220_000 })
+    expect(descreverAnestesiaCirurgia(p).replace(/\u00a0/g, ' ')).toBe(
+      'com raspagem, UF a informar: R$ 2.500 menos R$ 2.200 da entrada',
     )
   })
 })

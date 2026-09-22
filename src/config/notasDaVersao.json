@@ -1,5 +1,17 @@
 [
   {
+    "id": "2026-09-22-entrada-do-transplante-paga-o-anestesista",
+    "data": "2026-09-22",
+    "titulo": "A entrada do transplante já é o pagamento do anestesista",
+    "itens": [
+      "A venda descontava o anestesista duas vezes: o valor é cadastrado já sem a entrada, e a política de repasse somava a anestesia cheia por cima. Agora a anestesia da cirurgia é o que a política manda menos a entrada que o paciente já pagou, nunca abaixo de zero.",
+      "No formulário, o campo Anestesia mostra de onde veio o número: \"R$ 2.500 pagos na entrada do paciente\" quando a entrada cobre tudo, ou \"R$ 2.500 menos R$ 2.200 da entrada\" quando cobre em parte. Digitar um valor à mão continua valendo só para aquela venda.",
+      "Vale para qualquer entrada de cirurgia, tenha ela sido paga à clínica ou direto ao anestesista: nos dois casos o valor da venda não conta esse dinheiro. A marcação de quem recebeu continua servindo ao financeiro, para saber se procura ou não o Pix no extrato.",
+      "As 210 cirurgias já cadastradas foram recalculadas. A anestesia do ano, que aparecia como R$ 568 mil de custo, passou a R$ 101 mil, que é o que de fato sai do caixa da clínica, e o lucro do ano subiu R$ 466 mil.",
+      "O card Resultado da Central de Vendas explica a mudança embaixo dos números, para a anestesia quase zerada não parecer custo esquecido."
+    ]
+  },
+  {
     "id": "2026-09-22-kit-paciente-do-shosp-e-bandeja-do-modelo",
     "data": "2026-09-22",
     "titulo": "Kits: paciente da agenda do Shosp e bandeja que acompanha o modelo",

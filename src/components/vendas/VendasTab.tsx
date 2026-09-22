@@ -1169,6 +1169,13 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                 </div>
               ))}
             </div>
+            {kind === 'cirurgia' && (
+              // Sem esta linha, a anestesia quase zerada parece custo esquecido.
+              <p className="mt-3 text-xs text-muted-foreground">
+                A entrada do paciente é o pagamento do anestesista, e o valor da venda já vem sem
+                ela: a anestesia aqui é só o que ainda sai do caixa da clínica.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

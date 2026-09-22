@@ -187,9 +187,13 @@ export type PreviaCirurgia = {
   indicacaoCents: number
   medicoPct: number | null
   medicoRegra: RegraMedicoCirurgia | null
-  /** null = o nome do procedimento não diz qual anestesia é. */
+  /** O que a clínica ainda paga: a política menos a entrada que o paciente já pagou. null = o nome do procedimento não diz qual anestesia é. */
   anestesiaCents: number | null
   anestesiaRegra: string | null
+  /** O que a política manda, antes de abater a entrada. */
+  anestesiaPoliticaCents: number | null
+  /** Quanto da entrada do paciente já cobriu a anestesia. */
+  anestesiaEntradaCents: number
   /** UF que valeu na conta: da sala quando ligada, senão a previsão. */
   uf: number | null
   ufDaSala: boolean
@@ -203,6 +207,8 @@ export async function previaRepasseCirurgia(input: {
   semRaspagem: boolean
   uf: number | null
   srgSurgeryId: number | null
+  /** Entrada do paciente: no transplante ela já é o pagamento do anestesista. */
+  entradaCents: number
 }): Promise<PreviaCirurgia> {
   const { data, error } = await assertClient().rpc('clinic_repasse_previa', {
     p_procedimento: input.procedimento,
@@ -212,6 +218,7 @@ export async function previaRepasseCirurgia(input: {
     p_sem_raspagem: input.semRaspagem,
     p_uf: input.uf,
     p_srg: input.srgSurgeryId,
+    p_entrada: Math.max(0, Math.round(input.entradaCents)),
   })
   if (error) throw new Error(error.message)
   const r = ((data ?? []) as Array<Record<string, unknown>>)[0] ?? {}
@@ -227,6 +234,8 @@ export async function previaRepasseCirurgia(input: {
       regra === 'mesmo_medico' || regra === 'outro_cirurgiao' || regra === 'sem_cirurgiao' ? regra : null,
     anestesiaCents: n(r.anestesia_cents),
     anestesiaRegra: r.anestesia_regra != null ? String(r.anestesia_regra) : null,
+    anestesiaPoliticaCents: n(r.anestesia_politica_cents),
+    anestesiaEntradaCents: Number(r.anestesia_entrada_cents ?? 0),
     uf: n(r.uf),
     ufDaSala: r.uf_da_sala === true,
   }
@@ -251,5 +260,14 @@ export function descreverMedicoCirurgia(p: PreviaCirurgia, atendeu: string, oper
 export function descreverAnestesiaCirurgia(p: PreviaCirurgia): string {
   if (!p.temPolitica) return 'sem política de repasse'
   if (p.anestesiaCents == null) return 'o procedimento não diz qual anestesia'
-  return p.ufDaSala ? `${p.anestesiaRegra ?? ''} (UF da sala)` : (p.anestesiaRegra ?? '')
+  const regra = p.ufDaSala ? `${p.anestesiaRegra ?? ''} (UF da sala)` : (p.anestesiaRegra ?? '')
+  // A entrada do transplante É o pagamento do anestesista. Sem dizer isso aqui, o campo
+  // zerado vira mistério e alguém digita o valor cheio por cima.
+  if (p.anestesiaEntradaCents > 0) {
+    const cheio = brl(p.anestesiaPoliticaCents ?? 0)
+    return p.anestesiaCents === 0
+      ? `${regra}: ${cheio} pagos na entrada do paciente`
+      : `${regra}: ${cheio} menos ${brl(p.anestesiaEntradaCents)} da entrada`
+  }
+  return regra
 }
