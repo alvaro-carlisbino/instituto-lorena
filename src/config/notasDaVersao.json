@@ -1,5 +1,17 @@
 [
   {
+    "id": "2026-09-22-kit-paciente-do-shosp-e-bandeja-do-modelo",
+    "data": "2026-09-22",
+    "titulo": "Kits: paciente da agenda do Shosp e bandeja que acompanha o modelo",
+    "itens": [
+      "Na montagem do kit, a busca de paciente agora acha também quem está só no Shosp. Ao abrir a busca aparece a agenda de hoje do Shosp: é só tocar no paciente do horário. No kit do SPA, os horários do Spa Capilar vêm primeiro.",
+      "Quando o modelo muda depois que a bandeja foi começada (itens tirados ou incluídos), a tela Montar avisa e mostra o botão Atualizar a bandeja. O que já foi conferido continua marcado, e o item que saiu do modelo sai da bandeja.",
+      "Tocar no modelo que já está escolhido agora oferece recarregar a bandeja pelo modelo atual. Antes o toque não fazia nada, e recarregar a página também não resolvia, porque a bandeja fica guardada no navegador.",
+      "Paciente do Shosp sem cadastro no CRM entra no kit com o nome, o prontuário fica à vista na montagem e a data do kit vem do horário da agenda. A mesma busca vale no Editar kit.",
+      "A tela Montar mostra quando a bandeja foi começada, para ficar claro quando é uma bandeja esquecida de outro dia."
+    ]
+  },
+  {
     "id": "2026-09-18-automacao-nao-fala-pelo-numero-da-equipe",
     "data": "2026-09-18",
     "titulo": "Automação de etapa não fala mais pelo WhatsApp pessoal da equipe",

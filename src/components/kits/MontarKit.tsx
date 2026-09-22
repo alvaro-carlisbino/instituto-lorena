@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, ClipboardList, PackagePlus, Printer, ShieldAlert, Trash2, TriangleAlert } from 'lucide-react'
+import { Check, ClipboardList, PackagePlus, Printer, RefreshCw, ShieldAlert, Trash2, TriangleAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { SearchField } from '@/components/ui/search-field'
-import { SearchPicker } from '@/components/ui/search-picker'
+import { type PickerItem, SearchPicker } from '@/components/ui/search-picker'
 import { Switch } from '@/components/ui/switch'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
@@ -26,10 +26,20 @@ import { agruparMatMed, formatBRL, formatQtd, itemEhEscolha, produtosParaBusca, 
 import { VendaDoKitPicker } from '@/components/kits/VendaDoKitPicker'
 import { beep } from '@/lib/beep'
 import { combinaBusca } from '@/lib/busca'
+import { hojeLocal } from '@/lib/diaLocal'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
-import { type LinhaMontagem, aplicarBipe, novaChave, resumirMontagem } from '@/lib/kitMontagem'
+import {
+  type LinhaMontagem,
+  aplicarBipe,
+  assinaturaDoModelo,
+  atualizarPeloModelo,
+  diferencaDoModelo,
+  novaChave,
+  resumirMontagem,
+} from '@/lib/kitMontagem'
+import { type PacienteDoKit, dicaDoPaciente } from '@/lib/pacienteDoKit'
 import { cn } from '@/lib/utils'
-import { searchLeadsByName } from '@/services/clinicalNotes'
+import { agendaDoDiaParaKit, buscarPacientesDoKit } from '@/services/pacienteDoKit'
 import type { StockItem } from '@/services/estoqueCompras'
 import { type StockWarehouse, listWarehouseBalances, listWarehouses } from '@/services/estoqueArmazens'
 import { type KitTemplate, createKit, imprimirFolhaDeItens } from '@/services/estoqueKits'
@@ -45,10 +55,28 @@ type Rascunho = {
   data: string
   /** Setor de onde sai o material. Nulo = o do modelo (ou o padrão). */
   setorId?: string | null
+  /** Prontuário do Shosp de quem não tem cadastro no CRM (o kit fica com o nome). */
+  prontuario?: string | null
+  /** Retrato do modelo quando a bandeja foi carregada: diferente do de agora = o modelo mudou. */
+  assinaturaModelo?: string
+  /** Quando a bandeja começou: rascunho esquecido de outro dia fica à vista. */
+  iniciadaEm?: string
   linhas: LinhaMontagem[]
 }
 
 const VAZIO: Rascunho = { templateId: '', leadId: '', clinicSaleId: null, leadName: '', paciente: '', procedimento: '', data: '', linhas: [] }
+
+// O picker devolve no onPick o mesmo objeto que recebeu: o paciente inteiro (lead, prontuário,
+// data do horário) vai junto do id e do rótulo.
+type ItemPaciente = PickerItem & { paciente: PacienteDoKit }
+const paraPicker = (lista: PacienteDoKit[]): ItemPaciente[] =>
+  lista.map((p) => ({ id: p.chave, label: p.nome, hint: dicaDoPaciente(p), paciente: p }))
+
+const quandoComecou = (iso: string) => {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
 
 // Montar um Kit Cirúrgico CC é bipar 90 itens. A tela do CRM remonta quando a aba volta do
 // foco, então sem rascunho guardado uma troca de aba jogava fora a bandeja inteira.
@@ -84,6 +112,7 @@ export function MontarKit({
   const termo = useDeferredValue(pesquisa)
   const [editando, setEditando] = useState<string | null>(null)
   const [trocarModelo, setTrocarModelo] = useState<string | null>(null)
+  const [recarregarModelo, setRecarregarModelo] = useState(false)
   const [codigoDesconhecido, setCodigoDesconhecido] = useState<string | null>(null)
   const [ultimaLeitura, setUltimaLeitura] = useState<string | null>(null)
   const [destaque, setDestaque] = useState<string | null>(null)
@@ -132,9 +161,52 @@ export function MontarKit({
   const temControlado = r.linhas.some((l) => porId.get(l.itemId)?.controlled)
   const nomePaciente = r.paciente.trim() || r.leadName
 
+  // Bandeja × modelo de agora. Com a assinatura guardada, compara o retrato; rascunho antigo
+  // (sem assinatura) compara os itens que vieram do modelo.
+  const diferenca = useMemo(
+    () => (modeloEscolhido ? diferencaDoModelo(r.linhas, modeloEscolhido.items) : { sairam: 0, entraram: 0 }),
+    [modeloEscolhido, r.linhas],
+  )
+  const modeloMudou =
+    Boolean(modeloEscolhido) &&
+    r.linhas.length > 0 &&
+    (r.assinaturaModelo
+      ? r.assinaturaModelo !== assinaturaDoModelo(modeloEscolhido?.items ?? [])
+      : diferenca.sairam + diferenca.entraram > 0)
+
+  // Agenda do Shosp de hoje: é o que a busca de paciente mostra antes de digitar.
+  const [agendaDeHoje, setAgendaDeHoje] = useState<PacienteDoKit[]>([])
+  const setorDoModelo = modeloEscolhido?.setor ?? null
+  useEffect(() => {
+    let vivo = true
+    agendaDoDiaParaKit(hojeLocal(), setorDoModelo)
+      .then((lista) => vivo && setAgendaDeHoje(lista))
+      .catch(() => vivo && setAgendaDeHoje([]))
+    return () => {
+      vivo = false
+    }
+  }, [setorDoModelo])
+  const sugestoesAgenda = useMemo(() => paraPicker(agendaDeHoje), [agendaDeHoje])
+
   const set = (patch: Partial<Rascunho>) => setR((prev) => ({ ...prev, ...patch }))
   const setLinha = (chave: string, patch: Partial<LinhaMontagem>) =>
     setR((prev) => ({ ...prev, linhas: prev.linhas.map((l) => (l.chave === chave ? { ...l, ...patch } : l)) }))
+
+  const escolherPaciente = (item: PickerItem) => {
+    const p = (item as Partial<ItemPaciente>).paciente
+    const leadId = p ? p.leadId : item.id.startsWith('lead:') ? item.id.slice(5) : null
+    setR((prev) => ({
+      ...prev,
+      leadId: leadId ?? '',
+      leadName: leadId ? p?.nome || item.label : '',
+      clinicSaleId: null,
+      // Sem cadastro no CRM, o kit fica com o nome que está no Shosp.
+      paciente: leadId ? '' : p?.nome || item.label,
+      prontuario: p?.prontuario ?? null,
+      // Escolhido na agenda do dia: a data do kit é a do horário, se ainda não tinha data.
+      data: prev.data || p?.data || '',
+    }))
+  }
 
   const aplicarModelo = (templateId: string) => {
     const tpl = templates.find((t) => t.id === templateId)
@@ -142,6 +214,8 @@ export function MontarKit({
       templateId,
       // Modelo novo, setor do modelo novo: a troca feita à mão valia para o anterior.
       setorId: null,
+      assinaturaModelo: assinaturaDoModelo(tpl?.items ?? []),
+      iniciadaEm: new Date().toISOString(),
       linhas: (tpl?.items ?? []).map((i) => ({
         chave: novaChave(),
         itemId: i.itemId,
@@ -154,8 +228,24 @@ export function MontarKit({
     setFiltro('todos')
   }
 
+  /** Traz a bandeja para o modelo de agora, sem perder o que já foi conferido. */
+  const atualizarBandeja = () => {
+    if (!modeloEscolhido) return
+    const linhas = atualizarPeloModelo(linhasRef.current, modeloEscolhido.items)
+    linhasRef.current = linhas
+    set({ linhas, assinaturaModelo: assinaturaDoModelo(modeloEscolhido.items) })
+    setFiltro('todos')
+    toast.success(`Bandeja atualizada: ${linhas.length} itens do ${modeloEscolhido.name}.`)
+  }
+
   const escolherModelo = (templateId: string) => {
-    if (templateId === r.templateId) return
+    // Tocar no modelo que já está escolhido não pode ser um botão morto: com bandeja vazia,
+    // carrega; com bandeja, oferece recarregar pelo modelo atual.
+    if (templateId === r.templateId) {
+      if (r.linhas.length === 0) aplicarModelo(templateId)
+      else setRecarregarModelo(true)
+      return
+    }
     if (r.linhas.length > 0) setTrocarModelo(templateId)
     else aplicarModelo(templateId)
   }
@@ -169,9 +259,10 @@ export function MontarKit({
   }, [destaque])
 
   const bipar = (item: StockItem) => {
+    const vazia = linhasRef.current.length === 0
     const res = aplicarBipe(linhasRef.current, item.id)
     linhasRef.current = res.linhas
-    set({ linhas: res.linhas })
+    set(vazia ? { linhas: res.linhas, iniciadaEm: new Date().toISOString() } : { linhas: res.linhas })
     const linha = res.linhas.find((l) => l.chave === res.chave)
     // A linha bipada precisa aparecer: busca que não acha este item sai da frente.
     if (pesquisa && !combinaBusca(pesquisa, item.name, item.sku, item.barcode)) setPesquisa('')
@@ -262,16 +353,28 @@ export function MontarKit({
           <Label>Paciente</Label>
           <SearchPicker
             title="Buscar paciente"
-            placeholder="Buscar paciente no CRM"
+            placeholder="Buscar paciente no CRM ou na agenda do Shosp"
             searchPlaceholder="Nome ou telefone…"
-            value={r.leadId ? { id: r.leadId, label: r.leadName || 'Paciente' } : null}
-            onSearch={async (q) =>
-              (await searchLeadsByName(tenantId, q, 40)).map((p) => ({ id: p.id, label: p.name, hint: p.phone || undefined }))
+            emptyLabel="Ninguém com esse nome no CRM nem no Shosp. Digite o nome no campo abaixo."
+            value={
+              r.leadId
+                ? { id: `lead:${r.leadId}`, label: r.leadName || 'Paciente' }
+                : r.prontuario && r.paciente
+                  ? { id: `shosp:${r.prontuario}`, label: r.paciente }
+                  : null
             }
-            onPick={(p) => set({ leadId: p.id, leadName: p.label, clinicSaleId: null })}
-            onClear={() => set({ leadId: '', leadName: '', clinicSaleId: null })}
+            sugestoes={sugestoesAgenda}
+            tituloSugestoes="Agenda de hoje no Shosp"
+            onSearch={async (q) => paraPicker(await buscarPacientesDoKit(tenantId, q))}
+            onPick={escolherPaciente}
+            onClear={() => set({ leadId: '', leadName: '', clinicSaleId: null, prontuario: null, paciente: '' })}
           />
-          {!r.leadId ? (
+          {!r.leadId && r.prontuario ? (
+            <p className="text-xs text-muted-foreground">
+              Paciente do Shosp (prontuário {r.prontuario}) sem cadastro no CRM: o kit fica com o nome.
+            </p>
+          ) : null}
+          {!r.leadId && !r.prontuario ? (
             <Input
               value={r.paciente}
               onChange={(e) => set({ paciente: e.target.value })}
@@ -380,6 +483,29 @@ export function MontarKit({
             <p className="text-sm text-muted-foreground">Nenhum modelo ainda. Crie na aba Modelos ou bipe os itens avulsos.</p>
           ) : null}
         </div>
+        {r.linhas.length > 0 && r.iniciadaEm ? (
+          <p className="text-xs text-muted-foreground">
+            Bandeja começada em {quandoComecou(r.iniciadaEm)}. Se não é deste kit, toque em Começar de novo.
+          </p>
+        ) : null}
+        {modeloMudou && modeloEscolhido ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm">
+            <TriangleAlert className="size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+            <p className="min-w-0 flex-1">
+              O modelo <span className="font-medium">{modeloEscolhido.name}</span> mudou depois que esta bandeja foi começada
+              {r.assinaturaModelo ? '' : ` (${[
+                diferenca.sairam > 0 ? `${diferenca.sairam} ${diferenca.sairam === 1 ? 'item saiu' : 'itens saíram'}` : '',
+                diferenca.entraram > 0 ? `${diferenca.entraram} ${diferenca.entraram === 1 ? 'item entrou' : 'itens entraram'}` : '',
+              ]
+                .filter(Boolean)
+                .join(', ')})`}
+              . O que já foi conferido continua marcado.
+            </p>
+            <Button size="sm" onClick={atualizarBandeja} className="shrink-0">
+              <RefreshCw className="size-4" aria-hidden /> Atualizar a bandeja
+            </Button>
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-xl border border-border bg-card">
@@ -632,6 +758,20 @@ export function MontarKit({
         onConfirm={() => {
           if (trocarModelo) aplicarModelo(trocarModelo)
           setTrocarModelo(null)
+        }}
+      />
+
+      <ConfirmDialog
+        open={recarregarModelo}
+        onOpenChange={setRecarregarModelo}
+        title="Recarregar o modelo?"
+        description={`A bandeja volta a ter os ${modeloEscolhido?.items.length ?? 0} itens do ${modeloEscolhido?.name ?? 'modelo'} de agora. O que já foi conferido continua marcado; item que saiu do modelo sai da bandeja.`}
+        confirmLabel="Recarregar"
+        variant="default"
+        icon={RefreshCw}
+        onConfirm={() => {
+          atualizarBandeja()
+          setRecarregarModelo(false)
         }}
       />
 

@@ -26,6 +26,10 @@ type Props = {
   items?: PickerItem[]
   /** Busca no servidor (paciente: são 2.620). Recebe o termo já com 2+ caracteres. */
   onSearch?: (term: string) => Promise<PickerItem[]>
+  /** Com `onSearch`: o que aparece antes de digitar (ex.: a agenda do dia). */
+  sugestoes?: PickerItem[]
+  /** Título em cima das sugestões. */
+  tituloSugestoes?: string
   placeholder?: string
   /** Título do modal. */
   title?: string
@@ -59,6 +63,8 @@ export function SearchPicker({
   onClear,
   items,
   onSearch,
+  sugestoes,
+  tituloSugestoes,
   placeholder = 'Escolher…',
   title,
   searchPlaceholder = 'Digite para buscar…',
@@ -96,15 +102,17 @@ export function SearchPicker({
     }
   }, [termo, aberto, onSearch])
 
+  const mostrandoSugestoes = Boolean(onSearch && sugestoes?.length && termo.trim().length < 2)
+
   const resultados = useMemo(() => {
-    if (onSearch) return remotos
+    if (onSearch) return mostrandoSugestoes ? (sugestoes ?? []) : remotos
     const base = items ?? []
     const q = normalizar(termo.trim())
     if (!q) return base.slice(0, 100)
     return base
       .filter((i) => normalizar(`${i.label} ${i.hint ?? ''} ${i.searchable ?? ''}`).includes(q))
       .slice(0, 100)
-  }, [items, onSearch, remotos, termo])
+  }, [items, onSearch, remotos, termo, mostrandoSugestoes, sugestoes])
 
   useEffect(() => setCursor(0), [termo, aberto])
 
@@ -190,6 +198,9 @@ export function SearchPicker({
             />
           </div>
 
+          {mostrandoSugestoes && tituloSugestoes ? (
+            <p className="-mb-2 text-xs font-medium text-muted-foreground">{tituloSugestoes}</p>
+          ) : null}
           <div ref={listaRef} className="max-h-80 overflow-y-auto rounded-md border border-border">
             {resultados.length === 0 ? (
               <p className="px-3 py-6 text-center text-sm text-muted-foreground">

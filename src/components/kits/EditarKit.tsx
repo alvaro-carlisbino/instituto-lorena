@@ -19,8 +19,9 @@ import { vincularKitAVenda } from '@/services/resultadoProcedimentos'
 import { beep } from '@/lib/beep'
 import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
-import { searchLeadsByName } from '@/services/clinicalNotes'
+import { dicaDoPaciente } from '@/lib/pacienteDoKit'
 import type { StockItem } from '@/services/estoqueCompras'
+import { buscarPacientesDoKit } from '@/services/pacienteDoKit'
 import {
   type StockKit,
   adicionarItemKit,
@@ -211,14 +212,18 @@ export function EditarKit({
           <Label>Paciente</Label>
           <SearchPicker
             title="Buscar paciente"
-            placeholder="Vincular paciente do CRM"
+            placeholder="Vincular paciente do CRM ou do Shosp"
             searchPlaceholder="Nome ou telefone…"
             disabled={!editavel}
-            value={dados.leadId ? { id: dados.leadId, label: dados.leadName || 'Paciente' } : null}
+            value={dados.leadId ? { id: `lead:${dados.leadId}`, label: dados.leadName || 'Paciente' } : null}
             onSearch={async (q) =>
-              (await searchLeadsByName(tenantId, q, 40)).map((p) => ({ id: p.id, label: p.name, hint: p.phone || undefined }))
+              (await buscarPacientesDoKit(tenantId, q)).map((p) => ({ id: p.chave, label: p.nome, hint: dicaDoPaciente(p), leadId: p.leadId }))
             }
-            onPick={(p) => setDados((d) => ({ ...d, leadId: p.id, leadName: p.label, paciente: p.label }))}
+            onPick={(p) => {
+              // Paciente só do Shosp não tem lead: fica o nome.
+              const leadId = (p as { leadId?: string | null }).leadId ?? ''
+              setDados((d) => ({ ...d, leadId, leadName: leadId ? p.label : '', paciente: p.label }))
+            }}
             onClear={() => setDados((d) => ({ ...d, leadId: '', leadName: '' }))}
           />
           <Input

@@ -4,6 +4,9 @@ import {
   type LinhaMontagem,
   aplicarBipe,
   aplicarBipeDevolucao,
+  assinaturaDoModelo,
+  atualizarPeloModelo,
+  diferencaDoModelo,
   marcaPorUsado,
   marcaPorVoltou,
   registroDeUso,
@@ -126,5 +129,40 @@ describe('registrar uso', () => {
 
   it('bipe de devolução desconta o uso a mais', () => {
     expect(aplicarBipeDevolucao([ringer], { r: -3 }, 'ringer').devolucoes).toEqual({ r: -2 })
+  })
+})
+
+describe('bandeja × modelo', () => {
+  it('assinatura não depende da ordem e muda com a quantidade', () => {
+    const a = assinaturaDoModelo([{ itemId: 'luva', qty: 4 }, { itemId: 'gaze', qty: 2 }])
+    expect(assinaturaDoModelo([{ itemId: 'gaze', qty: 2 }, { itemId: 'luva', qty: 4 }])).toBe(a)
+    expect(assinaturaDoModelo([{ itemId: 'gaze', qty: 3 }, { itemId: 'luva', qty: 4 }])).not.toBe(a)
+  })
+
+  it('diferença ignora avulso e conta o que saiu e o que entrou no modelo', () => {
+    const bandeja = [linha('a', 'luva', 4), linha('b', 'aramin', 1), linha('c', 'swab', 1, 1, true)]
+    expect(diferencaDoModelo(bandeja, [{ itemId: 'luva', qty: 4 }, { itemId: 'gaze', qty: 2 }])).toEqual({ sairam: 1, entraram: 1 })
+    expect(diferencaDoModelo(bandeja.slice(0, 1), [{ itemId: 'luva', qty: 6 }])).toEqual({ sairam: 0, entraram: 0 })
+  })
+
+  it('atualizar pelo modelo tira o que saiu, mantém o conferido e os avulsos', () => {
+    const bandeja = [
+      { ...linha('a', 'luva', 4, 3), cobrancaCents: 500 },
+      linha('b', 'aramin', 1, 1),
+      linha('c', 'swab', 1, 1, true),
+    ]
+    const nova = atualizarPeloModelo(bandeja, [{ itemId: 'luva', qty: 2 }, { itemId: 'gaze', qty: 2 }])
+    expect(nova.map((l) => [l.itemId, l.qty, l.conferido, l.avulso])).toEqual([
+      ['luva', 2, 2, false],
+      ['gaze', 2, 0, false],
+      ['swab', 1, 1, true],
+    ])
+    expect(nova[0]).toMatchObject({ chave: 'a', cobrancaCents: 500 })
+  })
+
+  it('avulso de item que entrou no modelo não vira linha repetida', () => {
+    const nova = atualizarPeloModelo([linha('c', 'gaze', 1, 1, true)], [{ itemId: 'gaze', qty: 2 }])
+    expect(nova).toHaveLength(1)
+    expect(nova[0]).toMatchObject({ itemId: 'gaze', qty: 2, conferido: 1, avulso: false })
   })
 })

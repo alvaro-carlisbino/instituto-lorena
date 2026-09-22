@@ -66,6 +66,65 @@ export function resumirMontagem(linhas: LinhaMontagem[], saldo: Map<string, numb
   return { linhas: validas.length, completas, faltaConferir: validas.length - completas, semSaldo }
 }
 
+// ------------------------------------------------------- bandeja × modelo
+
+// A bandeja em montagem mora no navegador (rascunho) e sobrevive a recarregar a página. Em
+// 22/09 a enfermagem tirou itens do Kit Cirúrgico CC, voltou para Montar e a bandeja antiga
+// continuava lá: tocar no modelo não fazia nada (já era o escolhido) e recarregar não mudava
+// nada. Estas regras dizem quando a bandeja ficou para trás e como trazê-la para o modelo atual.
+
+export type ItemDoModelo = { itemId: string; qty: number }
+
+/** Retrato do modelo (itens e quantidades, sem ordem): muda quando alguém edita o modelo. */
+export function assinaturaDoModelo(itens: ItemDoModelo[]): string {
+  return itens
+    .map((i) => `${i.itemId}:${i.qty}`)
+    .sort()
+    .join('|')
+}
+
+/**
+ * Compara os itens da bandeja que vieram do modelo (avulsos ficam de fora) com o modelo de agora.
+ * Serve para rascunho antigo, de antes de a bandeja guardar a assinatura do modelo.
+ */
+export function diferencaDoModelo(linhas: LinhaMontagem[], itens: ItemDoModelo[]): { sairam: number; entraram: number } {
+  const naBandeja = new Set(linhas.filter((l) => !l.avulso && l.itemId).map((l) => l.itemId))
+  const noModelo = new Set(itens.map((i) => i.itemId))
+  let sairam = 0
+  let entraram = 0
+  for (const id of naBandeja) if (!noModelo.has(id)) sairam += 1
+  for (const id of noModelo) if (!naBandeja.has(id)) entraram += 1
+  return { sairam, entraram }
+}
+
+/**
+ * Refaz a bandeja pelo modelo atual sem jogar fora o trabalho: item que continua no modelo
+ * mantém o que já foi conferido (até a quantidade nova) e a cobrança; item que saiu do modelo
+ * sai da bandeja; avulso bipado à parte fica.
+ */
+export function atualizarPeloModelo(linhas: LinhaMontagem[], itens: ItemDoModelo[]): LinhaMontagem[] {
+  // Linha do modelo tem preferência; na falta dela, o avulso do mesmo produto empresta o conferido.
+  const antigas = new Map<string, LinhaMontagem>()
+  for (const l of linhas) {
+    const ja = antigas.get(l.itemId)
+    if (l.itemId && (!ja || (ja.avulso && !l.avulso))) antigas.set(l.itemId, l)
+  }
+  const doModelo = itens.map((i): LinhaMontagem => {
+    const antiga = antigas.get(i.itemId)
+    return {
+      chave: antiga?.chave ?? novaChave(),
+      itemId: i.itemId,
+      qty: i.qty,
+      conferido: Math.min(antiga?.conferido ?? 0, i.qty),
+      avulso: false,
+      cobrancaCents: antiga?.cobrancaCents ?? 0,
+    }
+  })
+  const noModelo = new Set(itens.map((i) => i.itemId))
+  // Avulso de um item que agora faz parte do modelo não pode virar linha repetida do mesmo produto.
+  return [...doModelo, ...linhas.filter((l) => l.avulso && !noModelo.has(l.itemId))]
+}
+
 // ---------------------------------------------------------------- devolução
 
 export type LinhaKit = { id: string; itemId: string; qty: number; returnedQty: number }
