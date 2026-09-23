@@ -696,6 +696,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: (ctx) => isClinic(ctx) && canBoards(ctx),
   },
   {
+    id: 'conferencia-spa',
+    path: '/kits/conferencia-spa',
+    label: 'Conferência do SPA',
+    icon: ClipboardCheck,
+    group: 'estoque',
+    keywords: ['spa capilar', 'agenda', 'shosp', 'baixa', 'atendimento sem kit', 'conciliar'],
+    visible: (ctx) => isClinic(ctx) && canBoards(ctx),
+  },
+  {
     id: 'conta-cirurgica',
     path: '/conta-cirurgica',
     label: 'Conta cirúrgica',

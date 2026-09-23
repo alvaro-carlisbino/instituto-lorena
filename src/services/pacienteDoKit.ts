@@ -41,12 +41,13 @@ export async function agendaDoDiaParaKit(dia: string, setor: 'cirurgia' | 'spa' 
   if (!supabase) return []
   const { data, error } = await supabase
     .from('shosp_appointments')
-    .select('prontuario, lead_id, prestador, horario, status, data, paciente:payload->>paciente')
+    .select('codigo_agendamento, prontuario, lead_id, prestador, horario, status, data, paciente:payload->>paciente')
     .eq('data', dia)
     .order('horario')
     .limit(300)
   if (error) return []
   const horarios: HorarioDaAgenda[] = ((data ?? []) as Array<Record<string, unknown>>).map((h) => ({
+    agendamento: h.codigo_agendamento != null ? String(h.codigo_agendamento) : null,
     prontuario: h.prontuario != null ? String(h.prontuario) : null,
     leadId: h.lead_id != null ? String(h.lead_id) : null,
     nome: String(h.paciente ?? ''),
@@ -56,4 +57,32 @@ export async function agendaDoDiaParaKit(dia: string, setor: 'cirurgia' | 'spa' 
     data: String(h.data ?? dia),
   }))
   return sugestoesDaAgenda(horarios, setor)
+}
+
+/** Um horário da agenda do Shosp, para abrir a montagem já com o paciente (conferência do SPA). */
+export async function horarioDoShosp(codigoAgendamento: string): Promise<PacienteDoKit | null> {
+  if (!supabase) return null
+  const { data, error } = await supabase
+    .from('shosp_appointments')
+    .select('codigo_agendamento, prontuario, lead_id, prestador, horario, status, data, paciente:payload->>paciente')
+    .eq('codigo_agendamento', codigoAgendamento)
+    .maybeSingle()
+  if (error || !data) return null
+  const h = data as Record<string, unknown>
+  const [p] = sugestoesDaAgenda(
+    [
+      {
+        agendamento: String(h.codigo_agendamento),
+        prontuario: h.prontuario != null ? String(h.prontuario) : null,
+        leadId: h.lead_id != null ? String(h.lead_id) : null,
+        nome: String(h.paciente ?? ''),
+        horario: h.horario != null ? String(h.horario) : null,
+        prestador: h.prestador != null ? String(h.prestador) : null,
+        status: null,
+        data: String(h.data ?? ''),
+      },
+    ],
+    null,
+  )
+  return p ?? null
 }

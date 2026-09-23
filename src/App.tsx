@@ -122,6 +122,7 @@ const KitUsoPage = lazyPage(() => import('./pages/KitUsoPage'), 'KitUsoPage')
 const KitEditarPage = lazyPage(() => import('./pages/KitEditarPage'), 'KitEditarPage')
 const KitModeloPage = lazyPage(() => import('./pages/KitModeloPage'), 'KitModeloPage')
 const KitConsumoSetorPage = lazyPage(() => import('./pages/KitConsumoSetorPage'), 'KitConsumoSetorPage')
+const KitConferenciaSpaPage = lazyPage(() => import('./pages/KitConferenciaSpaPage'), 'KitConferenciaSpaPage')
 const InventarioPage = lazyPage(() => import('./pages/InventarioPage'), 'InventarioPage')
 const EstoqueRelatoriosPage = lazyPage(() => import('./pages/EstoqueRelatoriosPage'), 'EstoqueRelatoriosPage')
 const CodigosBarrasPage = lazyPage(() => import('./pages/CodigosBarrasPage'), 'CodigosBarrasPage')
@@ -205,6 +206,7 @@ function AppRoutes() {
         <Route path="/kits/:kitId/editar" element={<KitEditarPage />} />
         <Route path="/kits/modelos/:modeloId" element={<KitModeloPage />} />
         <Route path="/kits/consumo-do-setor" element={<KitConsumoSetorPage />} />
+        <Route path="/kits/conferencia-spa" element={<KitConferenciaSpaPage />} />
         <Route path="/inventario" element={<InventarioPage />} />
         <Route path="/estoque-relatorios" element={<EstoqueRelatoriosPage />} />
         <Route path="/estoque-codigos" element={<CodigosBarrasPage />} />

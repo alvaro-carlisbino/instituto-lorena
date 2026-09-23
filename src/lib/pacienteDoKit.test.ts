@@ -40,7 +40,7 @@ describe('sugestoesDaAgenda', () => {
     ...extra,
   })
 
-  it('no kit do SPA, o Spa Capilar vem primeiro; desmarcado e falta saem', () => {
+  it('no kit do SPA só entra a agenda do Spa Capilar; desmarcado e falta saem', () => {
     const r = sugestoesDaAgenda(
       [
         h('A', '08:00', 'Lorena Visentainer'),
@@ -51,7 +51,12 @@ describe('sugestoesDaAgenda', () => {
       ],
       'spa',
     )
-    expect(r.map((p) => p.nome)).toEqual(['C', 'B', 'A'])
+    expect(r.map((p) => p.nome)).toEqual(['C', 'B'])
+  })
+
+  it('no kit da cirurgia a agenda toda entra, com o Spa Capilar no fim', () => {
+    const r = sugestoesDaAgenda([h('B', '07:00', 'Spa Capilar - Samir'), h('A', '08:00', 'Lorena Visentainer')], 'cirurgia')
+    expect(r.map((p) => p.nome)).toEqual(['A', 'B'])
   })
 
   it('paciente com dois horários aparece uma vez, no primeiro', () => {

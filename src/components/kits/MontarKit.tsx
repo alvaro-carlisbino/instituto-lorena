@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { useSearchParams } from 'react-router-dom'
 import { Check, ClipboardList, PackagePlus, Printer, RefreshCw, ShieldAlert, Trash2, TriangleAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -39,7 +40,7 @@ import {
 } from '@/lib/kitMontagem'
 import { type PacienteDoKit, dicaDoPaciente } from '@/lib/pacienteDoKit'
 import { cn } from '@/lib/utils'
-import { agendaDoDiaParaKit, buscarPacientesDoKit } from '@/services/pacienteDoKit'
+import { agendaDoDiaParaKit, buscarPacientesDoKit, horarioDoShosp } from '@/services/pacienteDoKit'
 import type { StockItem } from '@/services/estoqueCompras'
 import { type StockWarehouse, listWarehouseBalances, listWarehouses } from '@/services/estoqueArmazens'
 import { type KitTemplate, createKit, imprimirFolhaDeItens } from '@/services/estoqueKits'
@@ -57,6 +58,8 @@ type Rascunho = {
   setorId?: string | null
   /** Prontuário do Shosp de quem não tem cadastro no CRM (o kit fica com o nome). */
   prontuario?: string | null
+  /** Horário do Shosp de onde o paciente veio: casa o kit com o atendimento na conferência do SPA. */
+  agendamento?: string | null
   /** Retrato do modelo quando a bandeja foi carregada: diferente do de agora = o modelo mudou. */
   assinaturaModelo?: string
   /** Quando a bandeja começou: rascunho esquecido de outro dia fica à vista. */
@@ -182,6 +185,7 @@ export function MontarKit({
   // Agenda do Shosp de hoje: é o que a busca de paciente mostra antes de digitar.
   const [agendaDeHoje, setAgendaDeHoje] = useState<PacienteDoKit[]>([])
   const setorDoModelo = modeloEscolhido?.setor ?? null
+  const ehSpa = setorDoModelo === 'spa'
   useEffect(() => {
     let vivo = true
     agendaDoDiaParaKit(hojeLocal(), setorDoModelo)
@@ -208,10 +212,48 @@ export function MontarKit({
       // Sem cadastro no CRM, o kit fica com o nome que está no Shosp.
       paciente: leadId ? '' : p?.nome || item.label,
       prontuario: p?.prontuario ?? null,
+      agendamento: p?.agendamento ?? null,
       // Escolhido na agenda do dia: a data do kit é a do horário, se ainda não tinha data.
       data: prev.data || p?.data || '',
     }))
   }
+
+  // Vindo da conferência do SPA (/kits?aba=montar&agendamento=…): já entra com o paciente do horário.
+  const [params, setParams] = useSearchParams()
+  const agendamentoDaUrl = params.get('agendamento')
+  useEffect(() => {
+    if (!agendamentoDaUrl) return
+    let vivo = true
+    void horarioDoShosp(agendamentoDaUrl).then((p) => {
+      if (!vivo) return
+      if (p) {
+        setR((prev) => ({
+          ...prev,
+          leadId: p.leadId ?? '',
+          leadName: p.leadId ? p.nome : '',
+          clinicSaleId: null,
+          paciente: p.leadId ? '' : p.nome,
+          prontuario: p.prontuario,
+          agendamento: p.agendamento ?? null,
+          data: p.data ?? prev.data,
+        }))
+        toast.success(`Paciente do horário: ${p.nome}. Agora escolha o modelo do kit.`)
+      } else {
+        toast.error('Horário não encontrado na agenda do Shosp.')
+      }
+      setParams(
+        (atual) => {
+          const n = new URLSearchParams(atual)
+          n.delete('agendamento')
+          return n
+        },
+        { replace: true },
+      )
+    })
+    return () => {
+      vivo = false
+    }
+  }, [agendamentoDaUrl, setParams])
 
   const aplicarModelo = (templateId: string) => {
     const tpl = templates.find((t) => t.id === templateId)
@@ -308,7 +350,9 @@ export function MontarKit({
         templateId: tpl?.id || null,
         name: nome,
         leadId: r.leadId || null,
-        clinicSaleId: r.leadId ? r.clinicSaleId : null,
+        clinicSaleId: r.leadId && !ehSpa ? r.clinicSaleId : null,
+        shospProntuario: r.prontuario ?? null,
+        shospAgendamento: r.agendamento ?? null,
         patientName: nomePaciente,
         procedureLabel: r.procedimento,
         scheduledFor: r.data || null,
@@ -372,7 +416,7 @@ export function MontarKit({
             tituloSugestoes="Agenda de hoje no Shosp"
             onSearch={async (q) => paraPicker(await buscarPacientesDoKit(tenantId, q))}
             onPick={escolherPaciente}
-            onClear={() => set({ leadId: '', leadName: '', clinicSaleId: null, prontuario: null, paciente: '' })}
+            onClear={() => set({ leadId: '', leadName: '', clinicSaleId: null, prontuario: null, agendamento: null, paciente: '' })}
           />
           {!r.leadId && r.prontuario ? (
             <p className="text-xs text-muted-foreground">
@@ -389,7 +433,8 @@ export function MontarKit({
             />
           ) : null}
         </div>
-        {r.leadId ? (
+        {/* Kit do SPA não é da cirurgia: o seletor escolhia sozinho a venda da cirurgia do paciente. */}
+        {r.leadId && !ehSpa ? (
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Venda da cirurgia</Label>
             <VendaDoKitPicker
@@ -413,7 +458,7 @@ export function MontarKit({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="kit-data">Data da cirurgia</Label>
+          <Label htmlFor="kit-data">{ehSpa ? 'Data do atendimento' : 'Data da cirurgia'}</Label>
           <Input id="kit-data" type="date" value={r.data} onChange={(e) => set({ data: e.target.value })} className="h-9" />
         </div>
       </section>

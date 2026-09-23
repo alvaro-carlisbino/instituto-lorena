@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-23-conferencia-do-spa",
+    "data": "2026-09-23",
+    "titulo": "Conferência do SPA com a agenda do Shosp",
+    "itens": [
+      "Nova tela Conferência do SPA (Kits cirúrgicos, botão Conferência do SPA): mostra quem foi atendido no Spa Capilar, pela agenda do Shosp, e se o material saiu do estoque. Cada paciente aparece uma vez por dia, mesmo com vários horários.",
+      "Atendimento sem baixa tem o botão Montar kit, que já abre a montagem com o paciente e a data do horário. Se o atendimento não usa material, toque em Não usa material e ele sai da lista.",
+      "No kit do SPA, a busca de paciente mostra só a agenda do Spa Capilar e não liga mais o kit a uma venda de cirurgia. A data passou a se chamar Data do atendimento.",
+      "O kit agora guarda o prontuário e o horário do Shosp, e a conferência acha o kit certo mesmo quando o paciente não tem cadastro no CRM."
+    ]
+  },
+  {
     "id": "2026-09-23-estoque-por-setor-e-lista-de-compra",
     "data": "2026-09-23",
     "titulo": "Estoque por setor e Lista de compra para o pedido do mês",

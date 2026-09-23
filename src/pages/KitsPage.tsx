@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Boxes, Layers, PackageCheck, ShieldAlert } from 'lucide-react'
+import { Boxes, CalendarCheck, Layers, PackageCheck, ShieldAlert } from 'lucide-react'
+import { buttonVariants } from '@/components/ui/button'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { SubTabs } from '@/components/page/SubTabs'
@@ -105,6 +106,7 @@ export function KitsPage() {
       <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
       <Tabs value={aba} onValueChange={(v) => irPara(v as Aba)}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
         <TabsList className="overflow-x-auto">
           <TabsTrigger value="montar">
             <Boxes aria-hidden /> Montar
@@ -122,6 +124,10 @@ export function KitsPage() {
             <ShieldAlert aria-hidden /> Controlados
           </TabsTrigger>
         </TabsList>
+        <Link to="/kits/conferencia-spa" className={buttonVariants({ variant: 'outline', size: 'sm', className: 'h-8' })}>
+          <CalendarCheck aria-hidden /> Conferência do SPA
+        </Link>
+        </div>
 
         <TabsContent value="montar">
           <MontarKit

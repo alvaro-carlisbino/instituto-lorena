@@ -14,6 +14,8 @@ export type PacienteDoKit = {
   horario?: string | null
   prestador?: string | null
   data?: string | null
+  /** Código do agendamento no Shosp: é o que a conferência do SPA usa para casar kit e atendimento. */
+  agendamento?: string | null
 }
 
 export type LeadAchado = { id: string; name: string; phone: string }
@@ -63,6 +65,7 @@ export function dicaDoPaciente(p: PacienteDoKit): string {
 }
 
 export type HorarioDaAgenda = {
+  agendamento?: string | null
   prontuario: string | null
   leadId: string | null
   nome: string
@@ -74,7 +77,8 @@ export type HorarioDaAgenda = {
 
 /**
  * Agenda do dia virando sugestão: sem desmarcado nem falta, um paciente uma vez só (o primeiro horário),
- * por horário. No kit do SPA, os horários do Spa Capilar vêm primeiro; no da cirurgia, os demais.
+ * por horário. No kit do SPA só entram os horários do Spa Capilar (a Édina, 23/09: "tá puxando o
+ * paciente da agenda cirúrgica"); no da cirurgia, os do Spa vão para o fim.
  */
 export function sugestoesDaAgenda(horarios: HorarioDaAgenda[], setor: 'cirurgia' | 'spa' | null): PacienteDoKit[] {
   const ehSpa = (h: HorarioDaAgenda) => /^spa\b/i.test((h.prestador ?? '').trim())
@@ -82,6 +86,7 @@ export function sugestoesDaAgenda(horarios: HorarioDaAgenda[], setor: 'cirurgia'
   const vistos = new Set<string>()
   return horarios
     .filter((h) => h.nome.trim() && !/desmarcad|cancelad|faltou/i.test(h.status ?? ''))
+    .filter((h) => setor !== 'spa' || ehSpa(h))
     .sort((a, b) => peso(a) - peso(b) || (a.horario ?? '').localeCompare(b.horario ?? ''))
     .filter((h) => {
       const chave = h.leadId ?? h.prontuario ?? h.nome.trim().toLowerCase()
@@ -98,5 +103,6 @@ export function sugestoesDaAgenda(horarios: HorarioDaAgenda[], setor: 'cirurgia'
       horario: h.horario,
       prestador: h.prestador,
       data: h.data,
+      agendamento: h.agendamento ?? null,
     }))
 }

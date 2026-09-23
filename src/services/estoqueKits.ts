@@ -334,6 +334,9 @@ export async function createKit(payload: {
   scheduledFor?: string | null
   /** Setor de onde o material sai. Sem ele vale o do modelo, e sem esse o padrão. */
   warehouseId?: string | null
+  /** Paciente e horário do Shosp: a conferência do SPA casa o kit com o atendimento por eles. */
+  shospProntuario?: string | null
+  shospAgendamento?: string | null
   items: Array<{
     itemId: string
     qty: number
@@ -355,6 +358,8 @@ export async function createKit(payload: {
       procedure_label: payload.procedureLabel?.trim() || null,
       scheduled_for: payload.scheduledFor || null,
       warehouse_id: payload.warehouseId || null,
+      shosp_prontuario: payload.shospProntuario || null,
+      shosp_agendamento: payload.shospAgendamento || null,
     },
     p_itens: items.map((i) => ({
       item_id: i.itemId,
