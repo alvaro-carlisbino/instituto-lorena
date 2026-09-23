@@ -134,7 +134,8 @@ export function MontarKit({
     }
   }, [r, tenantId])
 
-  // O material sai de um setor: o aviso de "sem saldo" olha o saldo DESSE setor, não o total.
+  // O material sai do setor e, se lá não tiver, do Principal (stock_kit_montar): o aviso de
+  // "sem saldo" olha esses dois, não o total de todos os setores.
   const [setores, setSetores] = useState<StockWarehouse[]>([])
   const [saldosPorSetor, setSaldosPorSetor] = useState<Array<{ warehouseId: string; itemId: string; qty: number }> | null>(null)
   useEffect(() => {
@@ -151,10 +152,14 @@ export function MontarKit({
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
   const saldo = useMemo(() => {
     if (!saldosPorSetor || !setorEfetivo) return new Map(items.map((i) => [i.id, i.qty] as const))
+    const padrao = setores.find((w) => w.isDefault)?.id ?? null
     const m = new Map<string, number>()
-    for (const b of saldosPorSetor) if (b.warehouseId === setorEfetivo) m.set(b.itemId, b.qty)
+    for (const b of saldosPorSetor) {
+      if (b.warehouseId === setorEfetivo) m.set(b.itemId, (m.get(b.itemId) ?? 0) + b.qty)
+      else if (b.warehouseId === padrao && b.qty > 0) m.set(b.itemId, (m.get(b.itemId) ?? 0) + b.qty)
+    }
     return m
-  }, [items, saldosPorSetor, setorEfetivo])
+  }, [items, saldosPorSetor, setorEfetivo, setores])
   const busca = useMemo(() => produtosParaBusca(items), [items])
   const resumo = useMemo(() => resumirMontagem(r.linhas, saldo), [r.linhas, saldo])
   const escolhas = r.linhas.filter((l) => itemEhEscolha(porId.get(l.itemId)?.name))

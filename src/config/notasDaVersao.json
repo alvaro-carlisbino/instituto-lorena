@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-23-estoque-por-setor-e-lista-de-compra",
+    "data": "2026-09-23",
+    "titulo": "Estoque por setor e Lista de compra para o pedido do mês",
+    "itens": [
+      "Nova tela Lista de compra (Estoque e compras > Lista de compra): mostra o que foi gasto no período, quanto tem hoje somando todos os setores e quanto comprar. Confira as quantidades, desmarque o que não quer e toque em Criar ordem de compra. A ordem vai para Ordens de compra como solicitada, para o financeiro aprovar.",
+      "Os kits agora baixam do setor onde são usados: os do centro cirúrgico saem do Centro Cirúrgico e os do SPA saem do SPA. Se o setor não tiver o item, o sistema tira o que falta do Principal, então nenhum kit trava por falta de transferência.",
+      "A saída avulsa (Bipagem, modo Saída, ou o botão Saída no Estoque) segue a mesma regra: sai do setor escolhido em \"Sai de\" e completa pelo Principal.",
+      "O consumo dos relatórios passou a contar só o que foi gasto de verdade: desconta a sobra devolvida do kit e não conta transferência entre setores como gasto. Antes o kit contava cheio e o pedido sairia maior do que o necessário."
+    ]
+  },
+  {
     "id": "2026-09-22-entrada-do-transplante-paga-o-anestesista",
     "data": "2026-09-22",
     "titulo": "A entrada do transplante já é o pagamento do anestesista",

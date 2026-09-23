@@ -22,6 +22,8 @@ import {
 } from '@/services/estoqueCompras'
 import { type StockBatch, listBatchBalances, listItemLastCosts } from '@/services/estoqueKits'
 import { downloadCsv } from '@/services/tricopillReports'
+import { consumoLiquido } from '@/lib/reposicao'
+import { formatFracao } from '@/components/kits/kitUi'
 
 const formatBRL = (cents: number): string =>
   (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -106,22 +108,15 @@ export function EstoqueRelatoriosPage() {
       .sort((a, b) => (a.expiresOn ?? '').localeCompare(b.expiresOn ?? ''))
   }, [batches, itemById])
 
-  // ---- Consumo por item no período (itens de uso: saídas, kits inclusos)
-  const consumption = useMemo(() => {
-    const byItem = new Map<string, { qty: number; costCents: number; uncosted: boolean }>()
-    for (const m of movements) {
-      if (m.kind !== 'saida') continue
-      const acc = byItem.get(m.itemId) ?? { qty: 0, costCents: 0, uncosted: false }
-      const qty = Math.abs(m.qtyDelta)
-      acc.qty += qty
-      if (m.unitCostCents != null) acc.costCents += Math.round(qty * m.unitCostCents)
-      else acc.uncosted = true
-      byItem.set(m.itemId, acc)
-    }
-    return [...byItem.entries()]
-      .map(([itemId, v]) => ({ itemId, name: itemById.get(itemId)?.name ?? '?', unit: itemById.get(itemId)?.unit ?? 'un', ...v }))
-      .sort((a, b) => b.costCents - a.costCents || b.qty - a.qty)
-  }, [movements, itemById])
+  // ---- Consumo por item no período: saída menos sobra de kit devolvida, sem transferência entre
+  // setores (regra em lib/reposicao, a mesma da lista de compra).
+  const consumption = useMemo(
+    () =>
+      [...consumoLiquido(movements).entries()]
+        .map(([itemId, v]) => ({ itemId, name: itemById.get(itemId)?.name ?? '?', unit: itemById.get(itemId)?.unit ?? 'un', ...v }))
+        .sort((a, b) => b.costCents - a.costCents || b.qty - a.qty),
+    [movements, itemById],
+  )
   const consumptionTotalCents = consumption.reduce((acc, c) => acc + c.costCents, 0)
 
   const entriesTotalCents = movements
@@ -286,7 +281,7 @@ export function EstoqueRelatoriosPage() {
                 <EmptyState
                   icon={Flame}
                   title={loading ? 'Carregando…' : 'Sem consumo no período'}
-                  description="As saídas (uso avulso e kits consumidos) aparecem aqui com quantidade e custo."
+                  description="O que foi gasto (uso avulso e kits, já descontada a sobra devolvida) aparece aqui com quantidade e custo."
                 />
               ) : (
                 <div className="max-h-[360px] overflow-auto">
@@ -302,7 +297,7 @@ export function EstoqueRelatoriosPage() {
                       {consumption.map((c) => (
                         <TableRow key={c.itemId}>
                           <TableCell className="truncate font-medium" title={c.name}>{c.name}</TableCell>
-                          <TableCell className="text-right">{c.qty} {c.unit}</TableCell>
+                          <TableCell className="text-right">{formatFracao(c.qty)} {c.unit}</TableCell>
                           <TableCell className="text-right">
                             {formatBRL(c.costCents)}
                             {c.uncosted ? <span className="text-xs text-muted-foreground"> (parcial)</span> : null}

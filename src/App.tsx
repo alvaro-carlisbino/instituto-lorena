@@ -94,6 +94,7 @@ const CentralVendasConferenciaPage = lazyPage(() => import('./pages/CentralVenda
 const EstoquePage = lazyPage(() => import('./pages/EstoquePage'), 'EstoquePage')
 const BipagemPage = lazyPage(() => import('./pages/BipagemPage'), 'BipagemPage')
 const ComprasPage = lazyPage(() => import('./pages/ComprasPage'), 'ComprasPage')
+const EstoqueReposicaoPage = lazyPage(() => import('./pages/EstoqueReposicaoPage'), 'EstoqueReposicaoPage')
 const ContasPagarPage = lazyPage(() => import('./pages/ContasPagarPage'), 'ContasPagarPage')
 const GastosControlePage = lazyPage(() => import('./pages/GastosControlePage'), 'GastosControlePage')
 const ContasReceberPage = lazyPage(() => import('./pages/ContasReceberPage'), 'ContasReceberPage')
@@ -179,6 +180,7 @@ function AppRoutes() {
         <Route path="/estoque/item/:itemId/juntar" element={<EstoqueJuntarItemPage />} />
         <Route path="/estoque-enderecos" element={<EnderecosEstoquePage />} />
         <Route path="/bipagem" element={<BipagemPage />} />
+        <Route path="/estoque-reposicao" element={<EstoqueReposicaoPage />} />
         <Route path="/compras" element={<ComprasPage />} />
         <Route path="/contas-a-pagar" element={<FinanceOnly><ContasPagarPage /></FinanceOnly>} />
         <Route path="/gastos" element={<FinanceOnly><GastosControlePage /></FinanceOnly>} />

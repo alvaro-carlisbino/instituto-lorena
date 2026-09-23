@@ -642,6 +642,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: canBoards,
   },
   {
+    id: 'estoque-reposicao',
+    path: '/estoque-reposicao',
+    label: 'Lista de compra',
+    icon: ShoppingCart,
+    group: 'estoque',
+    keywords: ['pedido de compra', 'reposição', 'o que comprar', 'relação', 'falta', 'consumo'],
+    visible: canBoards,
+  },
+  {
     id: 'compras',
     path: '/compras',
     label: 'Ordens de compra',
