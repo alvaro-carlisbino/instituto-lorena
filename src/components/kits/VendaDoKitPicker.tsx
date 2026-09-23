@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link2, Link2Off } from 'lucide-react'
 
-import { formatBRL } from '@/components/kits/kitUi'
 import { cn } from '@/lib/utils'
 import { type VendaDoPaciente, listVendasDoPaciente } from '@/services/resultadoProcedimentos'
 
 const dataCurta = (d: string | null) => (d ? new Date(`${d}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : 'sem data')
 
 /**
- * De qual venda é este kit. É o que liga o material que saiu ao valor da cirurgia no
- * Resultado por cirurgia. Com um paciente só e uma venda perto da data, já vem escolhida:
+ * De qual venda é este kit. É o que liga o material que saiu à cirurgia no Resultado por
+ * cirurgia. Mostra procedimento, data e situação, nunca o valor da cirurgia. Com um paciente só e uma venda perto da data, já vem escolhida:
  * a enfermagem não deveria ter que pensar nisso.
  */
 export function VendaDoKitPicker({
@@ -75,9 +74,7 @@ export function VendaDoKitPicker({
             {value === v.id ? <Link2 className="size-3" aria-hidden /> : null}
             {v.procedimento || v.kind} · {dataCurta(v.dia)}
           </span>
-          <span className="block text-muted-foreground">
-            {v.status} · {formatBRL(v.valorCents)}
-          </span>
+          <span className="block text-muted-foreground">{v.status}</span>
         </button>
       ))}
       <button

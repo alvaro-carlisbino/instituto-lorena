@@ -1,5 +1,14 @@
 [
   {
+    "id": "2026-09-23-kit-sem-valor-da-cirurgia",
+    "data": "2026-09-23",
+    "titulo": "Kit do paciente não mostra mais o valor da cirurgia",
+    "itens": [
+      "Na montagem e no Editar kit, o campo Venda da cirurgia mostra só o procedimento, a data e a situação da venda. O valor da cirurgia saiu da tela do kit.",
+      "O custo dos materiais e o que foi cobrado do paciente continuam aparecendo no kit, como antes."
+    ]
+  },
+  {
     "id": "2026-09-23-etiqueta-cme-no-formato-antigo",
     "data": "2026-09-23",
     "titulo": "Etiqueta da CME no formato da etiqueta antiga",

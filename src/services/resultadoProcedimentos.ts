@@ -96,14 +96,16 @@ export type VendaDoPaciente = {
   status: string
   dia: string | null
   procedimento: string
-  valorCents: number
 }
 
-/** Vendas do paciente para ligar o kit à cirurgia certa (mais próximas da data primeiro). */
+/**
+ * Vendas do paciente para ligar o kit à cirurgia certa (mais próximas da data primeiro). Sem o
+ * valor: a tela do kit é da enfermagem e o valor da cirurgia não é da conta dela (pedido de 23/09).
+ */
 export async function listVendasDoPaciente(leadId: string, dataReferencia?: string | null): Promise<VendaDoPaciente[]> {
   const { data, error } = await assertClient()
     .from('clinic_sales')
-    .select('id, kind, status, sold_at, scheduled_at, procedure_label, value_cents')
+    .select('id, kind, status, sold_at, scheduled_at, procedure_label')
     .eq('lead_id', leadId)
     .neq('status', 'cancelada')
     .order('sold_at', { ascending: false })
@@ -119,7 +121,6 @@ export async function listVendasDoPaciente(leadId: string, dataReferencia?: stri
         status: String(r.status ?? ''),
         dia: agendada ?? (r.sold_at != null ? String(r.sold_at) : null),
         procedimento: String(r.procedure_label ?? ''),
-        valorCents: Number(r.value_cents ?? 0),
       }
     })
     .sort((a, b) => {
