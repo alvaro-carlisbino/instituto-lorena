@@ -29,6 +29,7 @@ import { beep } from '@/lib/beep'
 import { combinaBusca } from '@/lib/busca'
 import { hojeLocal } from '@/lib/diaLocal'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
+import { ehCodigoDePacote } from '@/lib/etiquetaCme'
 import {
   type LinhaMontagem,
   aplicarBipe,
@@ -44,6 +45,7 @@ import { agendaDoDiaParaKit, buscarPacientesDoKit, horarioDoShosp } from '@/serv
 import type { StockItem } from '@/services/estoqueCompras'
 import { type StockWarehouse, listWarehouseBalances, listWarehouses } from '@/services/estoqueArmazens'
 import { type KitTemplate, createKit, imprimirFolhaDeItens } from '@/services/estoqueKits'
+import { SITUACAO_PACOTE, acharPacote, usarPacotesNoKit } from '@/services/cme'
 
 type Rascunho = {
   templateId: string
@@ -60,6 +62,8 @@ type Rascunho = {
   prontuario?: string | null
   /** Horário do Shosp de onde o paciente veio: casa o kit com o atendimento na conferência do SPA. */
   agendamento?: string | null
+  /** Pacotes esterilizados da CME bipados na bandeja: ficam ligados ao paciente ao montar. */
+  pacotesCme?: Array<{ codigo: string; nome: string; lote: string }>
   /** Retrato do modelo quando a bandeja foi carregada: diferente do de agora = o modelo mudou. */
   assinaturaModelo?: string
   /** Quando a bandeja começou: rascunho esquecido de outro dia fica à vista. */
@@ -322,8 +326,38 @@ export function MontarKit({
     )
   }
 
+  // Etiqueta da CME (EAN 29…): não é item de estoque, é o pacote esterilizado que vai para o paciente.
+  const biparPacoteCme = async (code: string) => {
+    if ((r.pacotesCme ?? []).some((p) => p.codigo === code)) {
+      setUltimaLeitura(`Pacote ${code} já está no kit`)
+      return
+    }
+    try {
+      const p = await acharPacote(code)
+      if (!p) {
+        beep(false)
+        toast.error(`Nenhum pacote da CME com o código ${code}.`)
+        return
+      }
+      if (p.situacao !== 'ok') {
+        beep(false)
+        toast.error(`${p.materialNome} (lote ${p.lote}): ${SITUACAO_PACOTE[p.situacao].rotulo}.`)
+        return
+      }
+      beep(true)
+      setR((prev) => ({ ...prev, pacotesCme: [...(prev.pacotesCme ?? []), { codigo: p.codigo, nome: p.materialNome, lote: p.lote }] }))
+      setUltimaLeitura(`CME: ${p.materialNome} · lote ${p.lote}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao consultar o pacote')
+    }
+  }
+
   const onCode = (code: string) => {
     setPesquisa((p) => semCodigoBipado(p, code))
+    if (ehCodigoDePacote(code)) {
+      void biparPacoteCme(code.trim())
+      return
+    }
     const item = acharItemPorCodigo(items, code)
     if (!item) {
       beep(false)
@@ -346,7 +380,7 @@ export function MontarKit({
     try {
       const tpl = templates.find((t) => t.id === r.templateId)
       const nome = tpl?.name || 'Kit avulso'
-      const { movements, controlled } = await createKit({
+      const { kitId, movements, controlled } = await createKit({
         templateId: tpl?.id || null,
         name: nome,
         leadId: r.leadId || null,
@@ -363,6 +397,15 @@ export function MontarKit({
         `${nome} montado${nomePaciente ? ` para ${nomePaciente}` : ''}: ${movements} ${movements === 1 ? 'baixa' : 'baixas'} no estoque` +
           (controlled > 0 ? `, ${controlled} no livro de controlados.` : '.'),
       )
+      const pacotes = (r.pacotesCme ?? []).map((p) => p.codigo)
+      if (pacotes.length > 0) {
+        try {
+          await usarPacotesNoKit(pacotes, kitId)
+          toast.success(`${pacotes.length} ${pacotes.length === 1 ? 'pacote da CME ligado' : 'pacotes da CME ligados'} ao paciente.`)
+        } catch (e) {
+          toast.error(`Kit montado, mas os pacotes da CME não foram ligados: ${e instanceof Error ? e.message : 'erro'}`)
+        }
+      }
       limpar()
       onMontado()
     } catch (e) {
@@ -565,6 +608,24 @@ export function MontarKit({
             <p className="truncate text-xs text-muted-foreground" aria-live="polite">
               Último: {ultimaLeitura}
             </p>
+          ) : null}
+          {(r.pacotesCme ?? []).length > 0 ? (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="font-medium">Pacotes da CME:</span>
+              {(r.pacotesCme ?? []).map((p) => (
+                <span key={p.codigo} className="inline-flex items-center gap-1 rounded-full border border-border py-0.5 pl-2 pr-0.5">
+                  {p.nome} · {p.lote}
+                  <button
+                    type="button"
+                    aria-label={`Tirar ${p.nome} do kit`}
+                    className="rounded-full px-1 text-muted-foreground hover:text-foreground"
+                    onClick={() => setR((prev) => ({ ...prev, pacotesCme: (prev.pacotesCme ?? []).filter((x) => x.codigo !== p.codigo) }))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
           ) : null}
           {resumo.linhas > 0 ? (
             <div className="space-y-1.5">

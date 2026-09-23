@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-23-cme-esterilizacao",
+    "data": "2026-09-23",
+    "titulo": "CME: ciclos da autoclave e etiquetas para a Zebra",
+    "itens": [
+      "Nova tela CME · Esterilização (menu Estoque e compras). Em Novo ciclo, escolha a Autoclave 1 ou 2, quem preparou e quantos pacotes de cada material, e toque em Abrir ciclo e imprimir etiquetas. As etiquetas saem antes de o material entrar na autoclave.",
+      "A etiqueta traz o que a RDC 15 pede: nome do material, lote (autoclave e número do ciclo), data da esterilização, validade, método e o nome de quem preparou, mais um código de barras do pacote.",
+      "Quando o ciclo termina, toque em Registrar resultado. Aprovado libera os pacotes; reprovado bloqueia e mostra se algum paciente já recebeu pacote daquele ciclo.",
+      "Na montagem do kit, bipe a etiqueta do pacote: ele fica ligado ao paciente. Pacote vencido, de ciclo reprovado ou ainda sem resultado é recusado na hora. Antes de começar, cadastre materiais e colaboradores na aba Cadastro e imprima uma etiqueta de teste."
+    ]
+  },
+  {
     "id": "2026-09-23-conferencia-do-spa",
     "data": "2026-09-23",
     "titulo": "Conferência do SPA com a agenda do Shosp",

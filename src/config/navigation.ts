@@ -705,6 +705,15 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: (ctx) => isClinic(ctx) && canBoards(ctx),
   },
   {
+    id: 'cme',
+    path: '/cme',
+    label: 'CME · Esterilização',
+    icon: FlaskConical,
+    group: 'estoque',
+    keywords: ['autoclave', 'ciclo', 'etiqueta', 'esterilização', 'lote', 'zebra', 'rastreabilidade', 'pacote'],
+    visible: (ctx) => isClinic(ctx) && canBoards(ctx),
+  },
+  {
     id: 'conta-cirurgica',
     path: '/conta-cirurgica',
     label: 'Conta cirúrgica',
