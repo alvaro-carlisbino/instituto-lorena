@@ -76,8 +76,12 @@ export function assinaturaPagador(descricao: string): string {
  *
  * "SISPAG PIX QR-CODE" são dezenas de pagamentos por mês para gente diferente. Virar regra com isso
  * carimbaria todos no mesmo centro, então aqui não sai padrão e a tela classifica só o lançamento.
+ *
+ * Mercado Livre é o mesmo caso por outro motivo: "MERCADOLIVRE*MERCADOL" é o nome em toda compra, e
+ * só o pedido diz se foi material da clínica, marketing ou compra pessoal. Classifica compra a compra.
  */
 export function padraoDaRegra(descricao: string): string | null {
+  if (/mercado\s*livre/i.test(descricao)) return null
   const nome = semTrilho(descricao)
   return nome.replace(/[^a-zà-ú]/gi, '').length >= 4 ? nome : null
 }

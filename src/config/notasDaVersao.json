@@ -7,6 +7,7 @@
       "As compras do Mercado Livre no cartão da empresa que ainda não tinham centro de custo foram para o novo centro Pessoal ou empresa?. Elas saem do total de gastos e do DRE até alguém conferir. As que já estavam classificadas (Marketing, Administrativo, Atendimento) não mudaram.",
       "Toda compra nova do Mercado Livre entra nesse centro sozinha. Em Gastos aparece um aviso em âmbar com o total e o botão Ver quais.",
       "Para responder: confira os pedidos em Minhas compras no Mercado Livre. O que for da clínica vai para o centro dela, e o que for pessoal vai para Retirada sócios, escolhendo Dra Lorena ou Dr Fabricio.",
+      "Mercado Livre se classifica compra a compra, em qualquer tela (Gastos e Extrato): escolher o centro de uma compra muda só aquela. A opção de aplicar aos iguais não aparece para o Mercado Livre, porque o nome é o mesmo em todas as compras.",
       "Novo: em Gastos, na visão por centro, os centros Sem centro de custo e Pessoal ou empresa? têm caixas de marcar. Marque várias compras (ou o grupo inteiro) e escolha o centro uma vez só. A classificação em lote não cria regra, então a próxima compra continua esperando conferência."
     ]
   },

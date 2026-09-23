@@ -33,6 +33,12 @@ describe('padraoDaRegra', () => {
     expect(padraoDaRegra('SISPAG TRANSF CC ITAU')).toBeNull()
     expect(padraoDaRegra('PIX ENVIADO 65.893.843 C')).toBeNull()
   })
+
+  it('Mercado Livre não vira regra: o nome é o mesmo em toda compra, só o pedido diz o centro', () => {
+    expect(padraoDaRegra('MERCADOLIVRE*MERCADOL')).toBeNull()
+    expect(padraoDaRegra('MERCADOLIVRE*MERCA04/07')).toBeNull()
+    expect(padraoDaRegra('MERCADOLIVRE*CAFEITAL')).toBeNull()
+  })
 })
 
 describe('agruparPorPagador', () => {
