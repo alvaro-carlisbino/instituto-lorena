@@ -1,9 +1,15 @@
+import qrcode from 'qrcode-generator'
+
 import { ean13Svg, ean13Valido } from '@/lib/codigoBarras'
 import { escaparHtml } from '@/lib/exportar'
 
 // Etiqueta da CME na térmica (Zebra): uma página por etiqueta, no tamanho exato do rolo, pelo
 // driver da impressora. RDC 15/2012, art. 85: nome do produto, lote, data da esterilização, data
-// limite de uso, método e responsável pelo preparo. O lote leva a autoclave e o ciclo.
+// limite de uso, método e responsável pelo preparo.
+//
+// O desenho segue a etiqueta que a clínica já usava (foto do Álvaro, 23/09/2026): cabeçalho
+// centralizado, nome do material, uma linha "ROTULO: valor" por campo, com EQUIPAMENTO separado do
+// LOTE, e o QR à direita com o número do pacote embaixo.
 
 export type PacoteParaEtiqueta = {
   codigo: string
@@ -17,8 +23,14 @@ export type PacoteParaEtiqueta = {
 }
 
 export type TamanhoEtiqueta = { larguraMm: number; alturaMm: number }
+/** QR como na etiqueta antiga; barras para leitor que só lê código de uma dimensão. */
+export type FormatoCodigo = 'qr' | 'barras'
+export type ConfigEtiqueta = TamanhoEtiqueta & { codigo: FormatoCodigo }
 
-export const TAMANHO_PADRAO: TamanhoEtiqueta = { larguraMm: 50, alturaMm: 30 }
+export const TAMANHO_PADRAO: TamanhoEtiqueta = { larguraMm: 100, alturaMm: 50 }
+export const CONFIG_PADRAO: ConfigEtiqueta = { ...TAMANHO_PADRAO, codigo: 'qr' }
+
+export const CABECALHO = 'INSTITUTO LORENA - CME'
 
 /** Pacote da CME: EAN-13 interno com prefixo 29 (o estoque usa 20). */
 export const ehCodigoDePacote = (codigo: string) => /^29\d{11}$/.test(codigo.trim()) && ean13Valido(codigo.trim())
@@ -36,57 +48,94 @@ const horaBr = (iso: string) => {
 export const metodoCurto = (metodo: string) =>
   /vapor/i.test(metodo) ? 'Vapor' : /per[oó]xido/i.test(metodo) ? 'Peróxido H2O2' : /[oó]xido de etileno|eto/i.test(metodo) ? 'Óxido de etileno' : metodo
 
-export function etiquetaHtml(p: PacoteParaEtiqueta): string {
-  return `<section class="et">
-  <div class="topo"><span>Instituto Lorena · CME</span><span>${escaparHtml(metodoCurto(p.metodo))}</span></div>
+/** QR do código do pacote em SVG, módulo a módulo (nítido em qualquer escala da térmica). */
+export function qrSvg(texto: string): string {
+  const qr = qrcode(0, 'M')
+  qr.addData(texto)
+  qr.make()
+  const n = qr.getModuleCount()
+  const margem = 1
+  let rects = ''
+  for (let y = 0; y < n; y += 1) {
+    for (let x = 0; x < n; x += 1) {
+      if (qr.isDark(y, x)) rects += `<rect x="${x + margem}" y="${y + margem}" width="1" height="1"/>`
+    }
+  }
+  const lado = n + margem * 2
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${lado} ${lado}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><g fill="#000">${rects}</g></svg>`
+}
+
+const maiusculo = (s: string) => s.toLocaleUpperCase('pt-BR')
+
+export function etiquetaHtml(p: PacoteParaEtiqueta, formato: FormatoCodigo = 'qr'): string {
+  const linha = (rotulo: string, valor: string) => `<div class="l"><span class="r">${rotulo}:</span>${escaparHtml(valor)}</div>`
+  const codigo =
+    formato === 'qr'
+      ? `<div class="qr">${qrSvg(p.codigo)}<div class="num">${p.codigo}</div></div>`
+      : `<div class="barras">${ean13Svg(p.codigo, { altura: 30, modulo: 2 }).replace('<svg ', '<svg preserveAspectRatio="none" ')}<div class="num">${p.codigo}</div></div>`
+  return `<section class="et et-${formato}">
+  <div class="cab">${CABECALHO}</div>
   <div class="nome">${escaparHtml(p.materialNome)}</div>
-  <div class="dados">
-    <b>Lote</b><span>${escaparHtml(p.lote)} · ${escaparHtml(p.autoclave)}</span>
-    <b>Esteril.</b><span>${dataBr(p.esterilizadoEm)} ${horaBr(p.esterilizadoEm)}</span>
-    <b>Validade</b><span class="val">${dataBr(p.validade)}</span>
-    <b>Resp.</b><span>${escaparHtml(p.responsavel)}</span>
+  <div class="corpo">
+    <div class="campos">
+      ${linha('ESTERILIZAÇÃO', `${dataBr(p.esterilizadoEm)} ${horaBr(p.esterilizadoEm)}`.trim())}
+      ${linha('VALIDADE', dataBr(p.validade))}
+      ${linha('MÉTODO ESTER', maiusculo(metodoCurto(p.metodo)))}
+      ${linha('LOTE', p.lote)}
+      ${linha('EQUIPAMENTO', p.autoclave)}
+      ${linha('RESPONSÁVEL', maiusculo(p.responsavel))}
+    </div>
+    ${codigo}
   </div>
-  <div class="barra">${ean13Svg(p.codigo, { altura: 30, modulo: 2 }).replace('<svg ', '<svg preserveAspectRatio="none" ')}<div class="num">${p.codigo}</div></div>
 </section>`
 }
 
-export function folhaDeEtiquetas(pacotes: PacoteParaEtiqueta[], tamanho: TamanhoEtiqueta = TAMANHO_PADRAO): string {
-  const { larguraMm: w, alturaMm: h } = tamanho
+export function folhaDeEtiquetas(pacotes: PacoteParaEtiqueta[], config: Partial<ConfigEtiqueta> = CONFIG_PADRAO): string {
+  const w = config.larguraMm ?? CONFIG_PADRAO.larguraMm
+  const h = config.alturaMm ?? CONFIG_PADRAO.alturaMm
+  const formato = config.codigo ?? CONFIG_PADRAO.codigo
+  // Tudo em proporção da altura: o mesmo desenho serve para 100×50, 80×40 ou 60×30.
+  const u = h / 50
+  const mm = (v: number) => `${(v * u).toFixed(2)}mm`
   return `<!doctype html><html><head><meta charset="utf-8"><title>Etiquetas CME</title><style>
   @page { size: ${w}mm ${h}mm; margin: 0; }
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #000; }
-  .et { width: ${w}mm; height: ${h}mm; padding: 1.4mm 2mm; display: flex; flex-direction: column; gap: 0.5mm; overflow: hidden; page-break-after: always; break-after: page; }
+  .et { width: ${w}mm; height: ${h}mm; padding: ${mm(2.2)} ${mm(3)}; display: flex; flex-direction: column; overflow: hidden; page-break-after: always; break-after: page; }
   .et:last-child { page-break-after: auto; break-after: auto; }
-  .topo { display: flex; justify-content: space-between; font-size: 5.5pt; text-transform: uppercase; letter-spacing: 0.02em; }
-  .nome { font-size: 8.5pt; font-weight: 700; line-height: 1.05; max-height: 2.1em; overflow: hidden; }
-  .dados { display: grid; grid-template-columns: auto 1fr; column-gap: 1.5mm; font-size: 6.2pt; line-height: 1.15; }
-  .dados b { font-weight: 400; }
-  .dados span { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .barra { margin-top: auto; text-align: center; }
-  .barra svg { width: 100%; height: ${Math.max(4, Math.round(h * 0.22))}mm; display: block; }
-  .num { font-size: 5.5pt; letter-spacing: 0.08em; }
-</style></head><body>${pacotes.map(etiquetaHtml).join('\n')}</body></html>`
+  .cab { text-align: center; font-size: ${mm(3.1)}; font-weight: 700; letter-spacing: 0.02em; }
+  .nome { font-size: ${mm(3.6)}; font-weight: 700; line-height: 1.1; margin-top: ${mm(0.6)}; max-height: 2.2em; overflow: hidden; }
+  .corpo { flex: 1; display: flex; gap: ${mm(2)}; align-items: center; min-height: 0; margin-top: ${mm(0.8)}; }
+  .campos { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; align-self: stretch; }
+  .l { font-size: ${mm(3)}; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .r { letter-spacing: 0.02em; margin-right: ${mm(0.6)}; }
+  .qr { width: ${mm(23)}; flex: none; text-align: center; }
+  .qr svg { width: 100%; height: auto; display: block; }
+  .num { font-size: ${mm(2.5)}; margin-top: ${mm(0.5)}; letter-spacing: 0.04em; }
+  .barras { width: 42%; flex: none; text-align: center; }
+  .barras svg { width: 100%; height: ${mm(14)}; display: block; }
+</style></head><body>${pacotes.map((p) => etiquetaHtml(p, formato)).join('\n')}</body></html>`
 }
 
-const CHAVE_TAMANHO = 'cme:etiqueta:tamanho'
+const CHAVE_CONFIG = 'cme:etiqueta:config'
 
-export function lerTamanhoEtiqueta(): TamanhoEtiqueta {
+export function lerConfigEtiqueta(): ConfigEtiqueta {
   try {
-    const t = JSON.parse(window.localStorage.getItem(CHAVE_TAMANHO) ?? 'null') as Partial<TamanhoEtiqueta> | null
+    const t = JSON.parse(window.localStorage.getItem(CHAVE_CONFIG) ?? 'null') as Partial<ConfigEtiqueta> | null
     const l = Number(t?.larguraMm)
     const a = Number(t?.alturaMm)
-    if (l >= 20 && l <= 120 && a >= 15 && a <= 120) return { larguraMm: l, alturaMm: a }
+    const codigo: FormatoCodigo = t?.codigo === 'barras' ? 'barras' : 'qr'
+    if (l >= 30 && l <= 150 && a >= 20 && a <= 150) return { larguraMm: l, alturaMm: a, codigo }
+    return { ...CONFIG_PADRAO, codigo }
   } catch {
-    /* sem armazenamento: vale o padrão */
+    return CONFIG_PADRAO
   }
-  return TAMANHO_PADRAO
 }
 
-export function guardarTamanhoEtiqueta(t: TamanhoEtiqueta): void {
+export function guardarConfigEtiqueta(c: ConfigEtiqueta): void {
   try {
-    window.localStorage.setItem(CHAVE_TAMANHO, JSON.stringify(t))
+    window.localStorage.setItem(CHAVE_CONFIG, JSON.stringify(c))
   } catch {
     /* segue com o padrão */
   }

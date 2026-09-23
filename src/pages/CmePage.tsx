@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { imprimirHtml } from '@/lib/exportar'
-import { type TamanhoEtiqueta, folhaDeEtiquetas, guardarTamanhoEtiqueta, lerTamanhoEtiqueta } from '@/lib/etiquetaCme'
+import { type ConfigEtiqueta, folhaDeEtiquetas, guardarConfigEtiqueta, lerConfigEtiqueta } from '@/lib/etiquetaCme'
 import { cn } from '@/lib/utils'
 import {
   type Autoclave,
@@ -62,7 +62,7 @@ function imprimirPacotes(pacotes: PacoteCme[]) {
     return
   }
   try {
-    imprimirHtml(folhaDeEtiquetas(pacotes, lerTamanhoEtiqueta()))
+    imprimirHtml(folhaDeEtiquetas(pacotes, lerConfigEtiqueta()))
   } catch (e) {
     toast.error(e instanceof Error ? e.message : 'Falha ao imprimir')
   }
@@ -510,7 +510,7 @@ function AbaCadastro({
 }) {
   const [editando, setEditando] = useState<{ id?: string; nome: string; embalagem: string; validade: string } | null>(null)
   const [novoColab, setNovoColab] = useState('')
-  const [tamanho, setTamanho] = useState<TamanhoEtiqueta>(lerTamanhoEtiqueta)
+  const [tamanho, setTamanho] = useState<ConfigEtiqueta>(lerConfigEtiqueta)
 
   const salvarMat = async () => {
     if (!editando) return
@@ -545,7 +545,7 @@ function AbaCadastro({
   }
 
   const testarEtiqueta = () => {
-    guardarTamanhoEtiqueta(tamanho)
+    guardarConfigEtiqueta(tamanho)
     try {
       imprimirHtml(
         folhaDeEtiquetas(
@@ -663,7 +663,29 @@ function AbaCadastro({
       <section className="space-y-2">
         <h2 className="text-base font-semibold">Etiqueta</h2>
         <p className="text-sm text-muted-foreground">
-          Tamanho do rolo da Zebra, em milímetros. Imprima uma de teste para conferir antes de usar. Este tamanho fica guardado neste computador.
+          Tamanho do rolo da Zebra, em milímetros, e o tipo de código. Imprima uma de teste para conferir antes de usar. Fica guardado neste computador.
+        </p>
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Tipo de código">
+          {(
+            [
+              ['qr', 'QR code (como a etiqueta antiga)'],
+              ['barras', 'Código de barras'],
+            ] as const
+          ).map(([f, rotulo]) => (
+            <Button
+              key={f}
+              type="button"
+              size="sm"
+              variant={tamanho.codigo === f ? 'default' : 'outline'}
+              aria-pressed={tamanho.codigo === f}
+              onClick={() => setTamanho({ ...tamanho, codigo: f })}
+            >
+              {rotulo}
+            </Button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          QR só é lido por leitor 2D (o que lê código no celular). Se o leitor da montagem não ler o QR, use código de barras.
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1.5">

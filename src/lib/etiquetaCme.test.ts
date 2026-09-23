@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ehCodigoDePacote, folhaDeEtiquetas, metodoCurto } from './etiquetaCme'
+import { ehCodigoDePacote, folhaDeEtiquetas, metodoCurto, qrSvg } from './etiquetaCme'
 
 const pacote = {
   codigo: '2900000000018',
@@ -20,21 +20,37 @@ describe('etiqueta da CME', () => {
     expect(ehCodigoDePacote('2000000000015')).toBe(false)
   })
 
-  it('traz os seis campos da RDC 15, a autoclave e escapa o nome', () => {
+  it('traz os seis campos da RDC 15 como na etiqueta antiga, com o equipamento e o QR', () => {
     const html = folhaDeEtiquetas([pacote])
+    expect(html).toContain('INSTITUTO LORENA - CME')
     expect(html).toContain('Caixa Transplante &lt;1&gt;')
-    expect(html).toContain('AC2-0457 · Autoclave 2')
-    expect(html).toContain('23/09/2026 14:10')
-    expect(html).toContain('23/10/2026')
-    expect(html).toContain('Vapor')
-    expect(html).toContain('Édina')
+    expect(html).toContain('ESTERILIZAÇÃO:</span>23/09/2026 14:10')
+    expect(html).toContain('VALIDADE:</span>23/10/2026')
+    expect(html).toContain('MÉTODO ESTER:</span>VAPOR')
+    expect(html).toContain('LOTE:</span>AC2-0457')
+    expect(html).toContain('EQUIPAMENTO:</span>Autoclave 2')
+    expect(html).toContain('RESPONSÁVEL:</span>ÉDINA')
+    expect(html).toContain('class="qr"')
     expect(html).toContain('2900000000018')
   })
 
+  it('código de barras quando o leitor não lê QR', () => {
+    const html = folhaDeEtiquetas([pacote], { codigo: 'barras' })
+    expect(html).toContain('class="barras"')
+    expect(html).not.toContain('class="qr"')
+  })
+
+  it('o QR sai quadrado e com módulos', () => {
+    const svg = qrSvg('2900000000018')
+    const [, lado] = svg.match(/viewBox="0 0 (\d+) \1"/) ?? []
+    expect(Number(lado)).toBeGreaterThan(20)
+    expect(svg.match(/<rect x=/g)!.length).toBeGreaterThan(100)
+  })
+
   it('uma página por etiqueta, no tamanho do rolo', () => {
-    const html = folhaDeEtiquetas([pacote, pacote], { larguraMm: 60, alturaMm: 40 })
+    const html = folhaDeEtiquetas([pacote, pacote], { larguraMm: 60, alturaMm: 40, codigo: 'qr' })
     expect(html).toContain('size: 60mm 40mm')
-    expect(html.match(/class="et"/g)).toHaveLength(2)
+    expect(html.match(/class="et /g)).toHaveLength(2)
   })
 
   it('método curto', () => {

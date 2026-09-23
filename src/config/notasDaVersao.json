@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-23-etiqueta-cme-no-formato-antigo",
+    "data": "2026-09-23",
+    "titulo": "Etiqueta da CME no formato da etiqueta antiga",
+    "itens": [
+      "A etiqueta da CME ficou como a que a clínica já usava: cabeçalho no alto, nome do material, uma linha para cada campo (esterilização, validade, método, lote, equipamento e responsável) e o QR code à direita com o número do pacote.",
+      "O tamanho padrão passou a 100 x 50 mm. Em CME, aba Cadastro, dá para mudar a medida do rolo e escolher entre QR code e código de barras. Imprima uma etiqueta de teste antes da primeira carga.",
+      "Se o leitor da montagem do kit não ler o QR code, escolha código de barras: o sistema aceita os dois."
+    ]
+  },
+  {
     "id": "2026-09-23-pessoal-ou-empresa",
     "data": "2026-09-23",
     "titulo": "Compras do Mercado Livre: pessoal ou empresa, e classificar várias de uma vez",
