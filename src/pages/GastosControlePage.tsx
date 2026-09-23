@@ -39,7 +39,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
-import { centroForaDoTotal } from '@/lib/centroCusto'
+import { CENTRO_A_CONFIRMAR, centroForaDoTotal } from '@/lib/centroCusto'
 import { GastosPorCentro, type LinhaGasto } from '@/components/financeiro/GastosPorCentro'
 import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
 import { possiveisCopias } from '@/lib/copiasBanco'
@@ -73,7 +73,7 @@ import {
 const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dia = (iso: string) => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR') : '')
 
-type Filtro = 'todos' | 'sem_centro' | 'notas' | 'fora' | 'repetidos'
+type Filtro = 'todos' | 'sem_centro' | 'a_confirmar' | 'notas' | 'fora' | 'repetidos'
 type Vista = 'centros' | 'lancamentos'
 
 const EMPTY_FORM = {
@@ -188,6 +188,8 @@ export function GastosControlePage() {
   }, [periodo.de, periodo.ate])
 
   const foraDoTotal = (r: SaidaTudo) => r.naoEGasto || centroForaDoTotal(centros, r.centroCusto)
+  /** Fora do total, mas é pergunta: compra do cartão que ninguém disse se foi da clínica ou pessoal. */
+  const aConfirmar = (r: SaidaTudo) => r.centroCusto === CENTRO_A_CONFIRMAR
 
   // Possíveis cópias no banco (lib/copiasBanco): mesmo dia e valor, e descrição igual ou só o
   // trilho do pagamento. Em setembro a conta de luz veio três vezes no mesmo dia, e um boleto veio
@@ -227,13 +229,15 @@ export function GastosControlePage() {
     const notas = rows.filter(ehNotaAberta)
     const hoje = hojeLocal()
     const notasVencidas = notas.filter((r) => r.data <= hoje)
-    const fora = rows.filter(foraDoTotal)
+    const confirmar = rows.filter(aConfirmar)
+    const fora = rows.filter((r) => foraDoTotal(r) && !aConfirmar(r))
     const repetidos = rows.filter((r) => temCopia(r))
     return {
       gasto: { n: gasto.length, cents: soma(gasto) },
       semCentro: { n: semCentro.length, cents: soma(semCentro) },
       notas: { n: notas.length, cents: soma(notas) },
       notasVencidas: { n: notasVencidas.length, cents: soma(notasVencidas) },
+      aConfirmar: { n: confirmar.length, cents: soma(confirmar) },
       fora: { n: fora.length, cents: soma(fora) },
       repetidos: { n: repetidos.length, cents: copias.extrasCents, extras: copias.extras },
     }
@@ -265,7 +269,8 @@ export function GastosControlePage() {
     const base = rows.filter((r) => {
       if (filtro === 'sem_centro' && (r.centroCusto || foraDoTotal(r))) return false
       if (filtro === 'notas' && !ehNotaAberta(r)) return false
-      if (filtro === 'fora' && !foraDoTotal(r)) return false
+      if (filtro === 'a_confirmar' && !aConfirmar(r)) return false
+      if (filtro === 'fora' && (!foraDoTotal(r) || aConfirmar(r))) return false
       if (filtro === 'repetidos' && !temCopia(r)) return false
       if (!termo) return true
       return (
@@ -301,7 +306,9 @@ export function GastosControlePage() {
     const onde = detalhe ? `${c.name} · ${detalhe}` : c.name
     try {
       if (r.origem === 'banco') {
-        const padrao = aplicarIguais ? (padraoGrupo ?? padraoDaRegra(r.descricao || r.contraparte)) : null
+        // "Pessoal ou empresa?" se responde compra a compra: um padrão aqui viraria regra mais
+        // longa que a MERCADOLIVRE e decidiria sozinho as próximas compras.
+        const padrao = aplicarIguais && !aConfirmar(r) ? (padraoGrupo ?? padraoDaRegra(r.descricao || r.contraparte)) : null
         const n = await classificarSaida(r.id, c.name, padrao, detalhe ?? null)
         toast.success(n > 0 ? `${onde}: este e mais ${n} lançamento(s) iguais.` : `Classificado em ${onde}.`)
       } else {
@@ -311,6 +318,33 @@ export function GastosControlePage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao classificar')
     }
+    await load(true)
+  }
+
+  /**
+   * Várias de uma vez, sem regra: cada uma pelo mesmo caminho da classificação à mão, um aviso
+   * e uma recarga só no fim. Em grupos de 5 para não abrir 30 chamadas juntas.
+   */
+  const classificarVarios = async (alvo: SaidaTudo[], c: CostCenter, detalhe: string | null) => {
+    if (alvo.length === 0) return
+    const chaves = new Set(alvo.map((r) => `${r.origem}-${r.id}`))
+    setRows((xs) =>
+      xs.map((x) => (chaves.has(`${x.origem}-${x.id}`) ? { ...x, centroCusto: c.name, centroDetalhe: detalhe } : x)),
+    )
+    const onde = detalhe ? `${c.name} · ${detalhe}` : c.name
+    let falhas = 0
+    for (let i = 0; i < alvo.length; i += 5) {
+      const res = await Promise.allSettled(
+        alvo.slice(i, i + 5).map((r) =>
+          r.origem === 'banco'
+            ? classificarSaida(r.id, c.name, null, detalhe)
+            : updatePayable(r.id, { costCenter: c.name, categoryId: c.categoryId, costDetail: detalhe }),
+        ),
+      )
+      falhas += res.filter((x) => x.status === 'rejected').length
+    }
+    if (falhas > 0) toast.error(`${falhas} de ${alvo.length} não foram classificadas. Confira e tente de novo.`)
+    else toast.success(`${alvo.length} lançamento(s) em ${onde}.`)
     await load(true)
   }
 
@@ -464,6 +498,20 @@ export function GastosControlePage() {
         />
       </div>
 
+      {numeros.aConfirmar.n > 0 && (
+        <button
+          type="button"
+          onClick={() => abrirFiltro('a_confirmar')}
+          className="mb-3 w-full rounded-lg border border-amber-500/40 bg-amber-500/[0.06] px-3 py-2 text-left text-xs"
+        >
+          <span className="font-medium">
+            {numeros.aConfirmar.n} compra(s) do cartão da empresa sem saber se foram da clínica ou pessoais ({brl(numeros.aConfirmar.cents)}).
+          </span>{' '}
+          O Mercado Livre não diz o que foi comprado. Estão fora do total até alguém conferir em Minhas compras: o que for
+          da clínica vai para o centro dela, o que for pessoal vai para Retirada sócios. <span className="underline">Ver quais</span>
+        </button>
+      )}
+
       {numeros.repetidos.n > 0 && (
         <button
           type="button"
@@ -532,6 +580,7 @@ export function GastosControlePage() {
               ['todos', 'Todos', rows.length],
               ['sem_centro', 'Falta classificar', numeros.semCentro.n],
               ['notas', 'Notas sem pagamento', numeros.notas.n],
+              ...(numeros.aConfirmar.n > 0 ? [['a_confirmar', 'Pessoal ou empresa?', numeros.aConfirmar.n]] : []),
               ['fora', 'Fora do total', numeros.fora.n],
               ...(numeros.repetidos.n > 0 ? [['repetidos', 'Repetidos?', numeros.repetidos.n]] : []),
             ] as Array<[Filtro, string, number]>
@@ -567,6 +616,13 @@ export function GastosControlePage() {
                 const r = rows.find((x) => x.origem === l.origem && x.id === l.refId)
                 if (r) await classificar(r, c, aplicarIguais, padrao)
               }}
+              onClassificarVarios={async (ls, c, detalhe) => {
+                const alvo = ls
+                  .map((l) => rows.find((x) => x.origem === l.origem && x.id === l.refId))
+                  .filter((r): r is SaidaTudo => Boolean(r))
+                await classificarVarios(alvo, c, detalhe)
+              }}
+              detalhes={detalhesCentro}
             />
           ) : visiveis.length === 0 ? (
             <EmptyState

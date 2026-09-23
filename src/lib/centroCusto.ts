@@ -8,3 +8,9 @@ export function centroForaDoTotal(centros: CostCenter[], nome: string | null | u
   if (!nome) return false
   return centros.find((c) => c.name === nome)?.grupo === GRUPO_FORA_DO_TOTAL
 }
+
+/**
+ * Compra do cartão da empresa que ainda não se sabe se foi da clínica ou pessoal (Mercado Livre).
+ * Fica no grupo "Não é gasto", mas é pergunta e não resposta: a tela cobra em âmbar.
+ */
+export const CENTRO_A_CONFIRMAR = 'Pessoal ou empresa?'

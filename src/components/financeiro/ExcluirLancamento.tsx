@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { useOpcoes } from '@/hooks/useOpcoes'
-import { GRUPO_FORA_DO_TOTAL } from '@/lib/centroCusto'
+import { CENTRO_A_CONFIRMAR, GRUPO_FORA_DO_TOTAL } from '@/lib/centroCusto'
 import { padraoDaRegra } from '@/lib/extratoPadrao'
 import { cn } from '@/lib/utils'
 import { excluirContaAPagar, excluirLancamentoRepetido, type CostCenter } from '@/services/financeiro'
@@ -81,7 +81,9 @@ export function ExcluirLancamento({
 
   const caso: 'conta' | 'copia' | 'pagamento' =
     origem === 'a pagar' ? 'conta' : temCopia ? 'copia' : 'pagamento'
-  const foraDoTotal = centros.filter((c) => c.grupo === GRUPO_FORA_DO_TOTAL && c.active)
+  const foraDoTotal = centros.filter(
+    (c) => c.grupo === GRUPO_FORA_DO_TOTAL && c.active && c.name !== CENTRO_A_CONFIRMAR,
+  )
 
   const confirmar = async () => {
     const texto = motivo === 'Outro' ? outro.trim() : motivo

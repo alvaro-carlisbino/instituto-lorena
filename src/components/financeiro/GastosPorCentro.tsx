@@ -16,9 +16,11 @@ import { ChevronRight } from 'lucide-react'
 
 import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
+import { CENTRO_A_CONFIRMAR } from '@/lib/centroCusto'
 import { assinaturaPagador, agruparPorPagador, padraoDaRegra } from '@/lib/extratoPadrao'
 import { cn } from '@/lib/utils'
-import type { CostCenter } from '@/services/financeiro'
+import type { CostCenter, CostDetail } from '@/services/financeiro'
 
 const brl = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dia = (iso: string) => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR') : '')
@@ -55,10 +57,20 @@ export function GastosPorCentro({
   centros,
   vazio = 'Nada saiu no período.',
   onClassificar,
+  onClassificarVarios,
+  detalhes = [],
 }: {
   linhas: LinhaGasto[]
   centros: CostCenter[]
   vazio?: string
+  /**
+   * Classificar em lote o que foi marcado, SEM criar regra. É o caso do Mercado Livre: o nome
+   * é o mesmo em toda compra, então só quem confere o pedido sabe o centro, e uma regra
+   * decidiria a próxima compra no chute. Marcar 20 e escolher uma vez é o que evita o um a um.
+   */
+  onClassificarVarios?: (linhas: LinhaGasto[], centro: CostCenter, detalhe: string | null) => Promise<void>
+  /** Subclassificação, para o lote já perguntar "Retirada sócios, de quem?". */
+  detalhes?: CostDetail[]
   /**
    * Classificar direto do "Sem centro de custo": o recebedor inteiro de uma vez quando o nome
    * identifica alguém, ou pagamento por pagamento quando não identifica (PIX QR-CODE).
@@ -73,6 +85,17 @@ export function GastosPorCentro({
   const [centroAberto, setCentroAberto] = useState<string | null>(null)
   const [pagadorAberto, setPagadorAberto] = useState<string | null>(null)
   const [todosDe, setTodosDe] = useState<string | null>(null)
+  /** Compras marcadas para classificar juntas (id da LinhaGasto). */
+  const [marcados, setMarcados] = useState<Set<string>>(new Set())
+  const alternar = (ids: string[], marcar: boolean) =>
+    setMarcados((atual) => {
+      const novo = new Set(atual)
+      for (const id of ids) {
+        if (marcar) novo.add(id)
+        else novo.delete(id)
+      }
+      return novo
+    })
 
   const { dentro, fora, totalDentro, totalFora } = useMemo(() => {
     const porCentro = new Map<string, LinhaGasto[]>()
@@ -108,7 +131,10 @@ export function GastosPorCentro({
       .filter((b) => !b.foraDoTotal)
       // "Sem centro" primeiro: é o que falta fazer, e o que torna o resto parcial.
       .sort((a, b) => (a.centro === SEM_CENTRO ? -1 : b.centro === SEM_CENTRO ? 1 : b.total - a.total))
-    const f = blocos.filter((b) => b.foraDoTotal).sort((a, b) => b.total - a.total)
+    const f = blocos
+      .filter((b) => b.foraDoTotal)
+      // "Pessoal ou empresa?" abre a lista de fora: é a única dali que ainda espera resposta.
+      .sort((a, b) => (a.centro === CENTRO_A_CONFIRMAR ? -1 : b.centro === CENTRO_A_CONFIRMAR ? 1 : b.total - a.total))
     return {
       dentro: d,
       fora: f,
@@ -126,6 +152,15 @@ export function GastosPorCentro({
   const renderBloco = (b: (typeof dentro)[number], referencia: number) => {
     const aberto = centroAberto === b.centro
     const semCentro = b.centro === SEM_CENTRO
+    // "Pessoal ou empresa?" está fora do total mas é pergunta: cobra em âmbar e classifica
+    // compra a compra. Nunca pelo grupo, senão a regra nova (mais longa) ganharia da
+    // MERCADOLIVRE e a próxima compra entraria já decidida.
+    const aConfirmar = b.centro === CENTRO_A_CONFIRMAR
+    const pergunta = semCentro || aConfirmar
+    const emLote = pergunta && Boolean(onClassificarVarios)
+    const doLote = emLote ? b.itens.filter((i) => i.refId && marcados.has(i.id)) : []
+    const loteCents = doLote.reduce((s, i) => s + i.amountCents, 0)
+    const todosMarcaveis = b.itens.filter((i) => i.refId).map((i) => i.id)
     const topo = b.pagadores[0]
     const visiveis = todosDe === b.centro ? b.pagadores : b.pagadores.slice(0, PAGADORES_VISIVEIS)
     return (
@@ -144,7 +179,7 @@ export function GastosPorCentro({
           />
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline justify-between gap-3">
-              <span className={cn('truncate text-sm font-medium', semCentro && 'text-amber-700 dark:text-amber-400')}>
+              <span className={cn('truncate text-sm font-medium', pergunta && 'text-amber-700 dark:text-amber-400')}>
                 {b.centro}
               </span>
               <span className="shrink-0 text-sm font-semibold tabular-nums">{brl(b.total)}</span>
@@ -152,7 +187,7 @@ export function GastosPorCentro({
             <div className="mt-1 flex items-center gap-2">
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                 <div
-                  className={cn('h-full rounded-full', semCentro ? 'bg-amber-500' : b.foraDoTotal ? 'bg-muted-foreground/40' : 'bg-primary')}
+                  className={cn('h-full rounded-full', pergunta ? 'bg-amber-500' : b.foraDoTotal ? 'bg-muted-foreground/40' : 'bg-primary')}
                   style={{ width: `${Math.max(2, Math.min(100, (b.total / (semCentro ? referencia || 1 : maior)) * 100))}%` }}
                 />
               </div>
@@ -170,6 +205,47 @@ export function GastosPorCentro({
         {aberto && (
           <div className="border-t border-border px-2 pb-2 pt-1">
             {b.descricao ? <p className="px-2 py-1 text-xs text-muted-foreground">{b.descricao}</p> : null}
+            {emLote ? (
+              <div className="sticky top-0 z-10 mb-1 flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-background px-2 py-1.5 text-xs">
+                <label className="flex cursor-pointer items-center gap-1.5 font-medium">
+                  <Checkbox
+                    checked={doLote.length > 0 && doLote.length === todosMarcaveis.length}
+                    indeterminate={doLote.length > 0 && doLote.length < todosMarcaveis.length}
+                    onCheckedChange={(v) => alternar(todosMarcaveis, Boolean(v))}
+                  />
+                  {doLote.length === 0
+                    ? `Marcar todas (${todosMarcaveis.length})`
+                    : `${plural(doLote.length, 'marcada', 'marcadas')} · ${brl(loteCents)}`}
+                </label>
+                {doLote.length > 0 && onClassificarVarios ? (
+                  <>
+                    <CentroCustoPicker
+                      size="sm"
+                      className="h-7 w-[180px]"
+                      centros={centros}
+                      detalhes={detalhes}
+                      value={null}
+                      resumo={{ descricao: plural(doLote.length, 'compra marcada', 'compras marcadas'), amountCents: loteCents }}
+                      onPick={async (c, { detalhe }) => {
+                        await onClassificarVarios(doLote, c, detalhe)
+                        alternar(doLote.map((i) => i.id), false)
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => alternar(todosMarcaveis, false)}
+                      className="text-muted-foreground underline-offset-2 hover:underline"
+                    >
+                      Desmarcar
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-muted-foreground">
+                    Marque as compras do mesmo destino e classifique todas de uma vez.
+                  </span>
+                )}
+              </div>
+            ) : null}
             {/* Só aparece quando há o que dizer: um centro com tudo "Sem detalhe" não ganha uma
                 faixa para repetir o total que já está no cabeçalho. */}
             {b.detalhes.length > 1 || (b.detalhes[0] && b.detalhes[0].nome !== SEM_DETALHE) ? (
@@ -217,14 +293,14 @@ export function GastosPorCentro({
                           .sort((a, z) => a.length - z.length)[0] ?? null)
                       : null
                   const acao =
-                    semCentro && onClassificar && unico?.refId && (padraoGrupo || !varios) ? (
+                    pergunta && onClassificar && unico?.refId && (padraoGrupo || !varios) ? (
                       <CentroCustoPicker
                         size="sm"
                         className="h-7 w-[150px]"
                         centros={centros}
                         value={null}
                         resumo={{ descricao: p.rotulo, amountCents: p.totalCents }}
-                        permitirIguais={unico.origem === 'banco'}
+                        permitirIguais={unico.origem === 'banco' && !aConfirmar}
                         padrao={padraoGrupo}
                         excluirId={unico.refId}
                         onPick={(c, { aplicarIguais }) => onClassificar(unico, c, aplicarIguais, padraoGrupo)}
@@ -238,6 +314,18 @@ export function GastosPorCentro({
                       >
                         <td className="px-2 py-1.5">
                           <div className="flex min-w-0 items-center gap-1.5">
+                            {emLote ? (
+                              <span onClick={(e) => e.stopPropagation()} className="flex shrink-0">
+                                <Checkbox
+                                  aria-label={`Marcar ${p.rotulo}`}
+                                  checked={p.itens.every((i) => marcados.has(i.id))}
+                                  indeterminate={
+                                    p.itens.some((i) => marcados.has(i.id)) && !p.itens.every((i) => marcados.has(i.id))
+                                  }
+                                  onCheckedChange={(v) => alternar(p.itens.filter((i) => i.refId).map((i) => i.id), Boolean(v))}
+                                />
+                              </span>
+                            ) : null}
                             {varios ? (
                               <ChevronRight
                                 className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', pAberto && 'rotate-90')}
@@ -287,6 +375,13 @@ export function GastosPorCentro({
                           <tr key={i.id} className="bg-muted/30 text-xs">
                             <td className="py-1 pl-9 pr-2">
                               <div className="flex min-w-0 items-center gap-1.5">
+                                {emLote && i.refId ? (
+                                  <Checkbox
+                                    aria-label={`Marcar compra de ${dia(i.data)}`}
+                                    checked={marcados.has(i.id)}
+                                    onCheckedChange={(v) => alternar([i.id], Boolean(v))}
+                                  />
+                                ) : null}
                                 <span className="shrink-0 tabular-nums text-muted-foreground">{dia(i.data)}</span>
                                 <span className="truncate" title={i.descricao}>
                                   {i.descricao || i.nome}
@@ -297,7 +392,7 @@ export function GastosPorCentro({
                                     repetido?
                                   </Badge>
                                 ) : null}
-                                {semCentro && onClassificar && i.refId && !padraoGrupo ? (
+                                {pergunta && onClassificar && i.refId && !padraoGrupo ? (
                                   <span className="ml-auto shrink-0" onClick={(e) => e.stopPropagation()}>
                                     <CentroCustoPicker
                                       size="sm"

@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-23-pessoal-ou-empresa",
+    "data": "2026-09-23",
+    "titulo": "Compras do Mercado Livre: pessoal ou empresa, e classificar várias de uma vez",
+    "itens": [
+      "As compras do Mercado Livre no cartão da empresa que ainda não tinham centro de custo foram para o novo centro Pessoal ou empresa?. Elas saem do total de gastos e do DRE até alguém conferir. As que já estavam classificadas (Marketing, Administrativo, Atendimento) não mudaram.",
+      "Toda compra nova do Mercado Livre entra nesse centro sozinha. Em Gastos aparece um aviso em âmbar com o total e o botão Ver quais.",
+      "Para responder: confira os pedidos em Minhas compras no Mercado Livre. O que for da clínica vai para o centro dela, e o que for pessoal vai para Retirada sócios, escolhendo Dra Lorena ou Dr Fabricio.",
+      "Novo: em Gastos, na visão por centro, os centros Sem centro de custo e Pessoal ou empresa? têm caixas de marcar. Marque várias compras (ou o grupo inteiro) e escolha o centro uma vez só. A classificação em lote não cria regra, então a próxima compra continua esperando conferência."
+    ]
+  },
+  {
     "id": "2026-09-23-cme-esterilizacao",
     "data": "2026-09-23",
     "titulo": "CME: ciclos da autoclave e etiquetas para a Zebra",
