@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-23-venda-de-tc-pelo-valor-total",
+    "data": "2026-09-23",
+    "titulo": "Venda de transplante: digite o valor total que o paciente paga",
+    "itens": [
+      "No cadastro da venda de cirurgia, o campo agora se chama Valor total: digite tudo o que o paciente paga, com a entrada dentro (ex.: R$ 45.200). Coloque a entrada no campo Entrada (ex.: R$ 2.500).",
+      "O sistema tira a entrada sozinho e mostra quanto fica para a clínica (R$ 42.700). O repasse do médico continua sendo 13% desse valor, sem a entrada.",
+      "A anestesia volta a aparecer nos custos com o valor cheio e a frase \"paga com a entrada do paciente\". O lucro é o mesmo de antes, só ficou mais fácil de conferir.",
+      "Sem entrada, a tela avisa. Entrada maior que o total não deixa salvar. Na lista de vendas, a cirurgia mostra o total e, embaixo, a entrada e o valor da clínica. Vendas antigas não mudaram."
+    ]
+  },
+  {
     "id": "2026-09-23-kit-sem-valor-da-cirurgia",
     "data": "2026-09-23",
     "titulo": "Kit do paciente não mostra mais o valor da cirurgia",

@@ -30,6 +30,7 @@ import {
   listSellerNames,
   updateClinicSale,
 } from '@/services/clinicSales'
+import { anestesiaParaGravar, anestesiaParaMostrar, totalParaMostrar, valorParaGravar } from '@/lib/valorDaCirurgia'
 import {
   type PreviaCirurgia,
   type RegraRepasse,
@@ -55,6 +56,8 @@ const parseMoney = (v: string): number => {
 
 const showMoney = (cents: number | null | undefined) =>
   cents == null || cents === 0 ? '' : (cents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+
+const brlCampo = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 type Props = {
   open: boolean
@@ -158,14 +161,17 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       setMedicoAtendeu(editing.attendingDoctor ?? '')
       setMedicoExecuta(editing.performingDoctor ?? '')
       setAnestesista(editing.anesthetist ?? '')
-      setValor(showMoney(editing.valueCents))
+      // Transplante: a tela mostra o total (valor gravado + entrada), ver lib/valorDaCirurgia.
+      setValor(showMoney(editing.kind === 'cirurgia' ? totalParaMostrar(editing.valueCents, editing.depositCents) : editing.valueCents))
       setEntrada(showMoney(editing.depositCents))
       setEntradaData(editing.depositAt ?? '')
       setEntradaPara(editing.depositPayee ?? '')
       setEntradaPaga(editing.depositPaid)
       setCustoMaterial(showMoney(editing.costMaterialsCents))
       setCustoMedico(showMoney(editing.costDoctorCents))
-      setCustoAnestesia(showMoney(editing.costAnesthesiaCents))
+      setCustoAnestesia(
+        showMoney(editing.costAnesthesiaManual ? anestesiaParaMostrar(editing.costAnesthesiaCents, editing.depositCents ?? 0) : editing.costAnesthesiaCents),
+      )
       setMedicoManual(editing.costDoctorManual)
       setAnestesiaManual(editing.costAnesthesiaManual)
       setSemRaspagem(editing.semRaspagem)
@@ -259,9 +265,12 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
 
   // O lucro aparece enquanto ela digita: é a conta que hoje ela faz na
   // calculadora do celular depois de fechar a planilha.
-  const valorCents = parseMoney(valor)
   // A entrada entra na conta do repasse: no transplante ela já é o pagamento do anestesista.
   const entradaCents = parseMoney(entrada)
+  // Transplante: digita-se o TOTAL que o paciente paga; o valor da venda (base dos 13% do médico e
+  // do que é gravado) é o total sem a entrada. Protocolo segue como era.
+  const totalCents = parseMoney(valor)
+  const valorCents = cirurgia ? valorParaGravar(totalCents, entradaCents) : totalCents
   const ufNum = ufTexto.replace(/\D/g, '') ? Number(ufTexto.replace(/\D/g, '')) : null
   // Protocolo não tem campo de quem opera: o banco grava quem atendeu (ver toRow), e a regra
   // procura pelo mesmo nome.
@@ -299,11 +308,15 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     : cirurgia
       ? (previa?.medicoCents ?? 0)
       : calcularRepasse(regraMedico, valorCents)
+  // Gravada: sem o que a entrada já pagou. Na tela: cheia, como custo.
   const anestesiaCents = !cirurgia
     ? 0
     : anestesiaManual
-      ? parseMoney(custoAnestesia)
+      ? anestesiaParaGravar(parseMoney(custoAnestesia), entradaCents)
       : (previa?.anestesiaCents ?? 0)
+  const anestesiaNaTelaCents = anestesiaManual
+    ? parseMoney(custoAnestesia)
+    : anestesiaParaMostrar(anestesiaCents, previa?.anestesiaEntradaCents ?? 0)
   const descricaoMedico = cirurgia
     ? previa
       ? descreverMedicoCirurgia(previa, medicoAtendeu, medicoDaRegra)
@@ -317,6 +330,8 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
   const custoCents =
     parseMoney(custoMaterial) + repasseCents + anestesiaCents + parseMoney(imposto) + parseMoney(custoOutros)
   const lucroCents = valorCents - custoCents
+  // Margem sobre o que o paciente paga (o total), que é o número que a gerência digitou.
+  const baseMargemCents = cirurgia ? totalCents : valorCents
 
   // Venda antiga com origem escrita à mão continua aparecendo na lista, senão
   // editar o valor de uma venda de meses atrás obrigaria a reclassificar a origem
@@ -333,6 +348,10 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     }
     if (origem === 'Outro' && !origemOutro.trim()) {
       toast.error('Descreva a origem no campo ao lado de "Outro".')
+      return
+    }
+    if (cirurgia && entradaCents > totalCents) {
+      toast.error('A entrada está maior que o valor total. Digite no Valor total tudo o que o paciente paga, com a entrada dentro.')
       return
     }
     const origemFinal = origem === 'Outro' ? `${ORIGIN_OTHER_PREFIX}${origemOutro.trim()}` : origem
@@ -354,7 +373,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       attendingDoctor: medicoAtendeu || null,
       performingDoctor: medicoExecuta || null,
       anesthetist: anestesista || null,
-      valueCents: parseMoney(valor),
+      valueCents: valorCents,
       depositCents: entrada ? entradaCents : null,
       depositAt: entradaData || null,
       depositPayee: entradaPara || null,
@@ -581,8 +600,8 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
 
           <div className="grid gap-3 sm:grid-cols-4">
             <div className="space-y-1.5">
-              <Label>Valor</Label>
-              <Input value={valor} onChange={(e) => setValor(e.target.value)} placeholder="30.000,00" inputMode="decimal" />
+              <Label>{cirurgia ? 'Valor total' : 'Valor'}</Label>
+              <Input value={valor} onChange={(e) => setValor(e.target.value)} placeholder={cirurgia ? '45.200,00' : '30.000,00'} inputMode="decimal" />
             </div>
             <div className="space-y-1.5">
               <Label>Entrada</Label>
@@ -602,6 +621,16 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
               />
             </div>
           </div>
+
+          {cirurgia && totalCents > 0 ? (
+            <p className={entradaCents > totalCents || !entrada ? 'text-xs text-amber-700 dark:text-amber-300' : 'text-xs text-muted-foreground'}>
+              {entradaCents > totalCents
+                ? 'A entrada está maior que o valor total. O valor total é tudo o que o paciente paga, com a entrada dentro.'
+                : entrada
+                  ? `Para a clínica ficam ${brlCampo(valorCents)}: o total menos a entrada de ${brlCampo(entradaCents)}, que paga o anestesista. O repasse do médico é sobre esse valor.`
+                  : 'Valor total é tudo o que o paciente paga. Se ele deu entrada, preencha o campo Entrada: ela sai do total e paga o anestesista.'}
+            </p>
+          ) : null}
 
           {entrada && (
             <div className="space-y-1.5">
@@ -699,9 +728,9 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
                 <span className={lucroCents < 0 ? 'font-medium text-destructive' : 'font-medium text-emerald-600'}>
                   {(lucroCents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                 </span>
-                {valorCents > 0 && custoCents > 0 && (
+                {baseMargemCents > 0 && custoCents > 0 && (
                   <span className="ml-1 text-xs text-muted-foreground">
-                    {Math.round((lucroCents / valorCents) * 100)}% de margem
+                    {Math.round((lucroCents / baseMargemCents) * 100)}% de margem
                   </span>
                 )}
               </span>
@@ -733,7 +762,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
                   descricao={descricaoAnestesia}
                   temRegra={previa?.anestesiaCents != null}
                   manual={anestesiaManual}
-                  valorCents={anestesiaCents}
+                  valorCents={anestesiaNaTelaCents}
                   texto={custoAnestesia}
                   onDigitar={(t) => {
                     setAnestesiaManual(true)

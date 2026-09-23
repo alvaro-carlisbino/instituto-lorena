@@ -113,17 +113,15 @@ describe('descreverAnestesiaCirurgia', () => {
 
   // A entrada do transplante É o pagamento do anestesista: o campo zera e a linha explica
   // por quê. Sem a frase, o zero parece erro e alguém digita o valor cheio por cima.
-  it('entrada que cobre a anestesia inteira zera o campo e diz de onde veio', () => {
+  it('entrada que cobre a anestesia inteira: o campo mostra a anestesia cheia e diz que a entrada pagou', () => {
     const p = previa({ anestesiaCents: 0, anestesiaEntradaCents: 250_000 })
-    expect(descreverAnestesiaCirurgia(p).replace(/\u00a0/g, ' ')).toBe(
-      'com raspagem, UF a informar: R$ 2.500 pagos na entrada do paciente',
-    )
+    expect(descreverAnestesiaCirurgia(p).replace(/\u00a0/g, ' ')).toBe('com raspagem, UF a informar: paga com a entrada do paciente')
   })
 
-  it('entrada menor que a anestesia abate só o que pagou', () => {
+  it('entrada menor que a anestesia: diz quanto a entrada pagou e quanto sai da clínica', () => {
     const p = previa({ anestesiaCents: 30_000, anestesiaEntradaCents: 220_000 })
     expect(descreverAnestesiaCirurgia(p).replace(/\u00a0/g, ' ')).toBe(
-      'com raspagem, UF a informar: R$ 2.500 menos R$ 2.200 da entrada',
+      'com raspagem, UF a informar: R$ 2.200 da entrada + R$ 300 da clínica',
     )
   })
 })

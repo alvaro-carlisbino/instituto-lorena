@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { totalParaMostrar } from '@/lib/valorDaCirurgia'
 import { RegrasRepasseDialog } from '@/components/vendas/RegrasRepasseDialog'
 import { listResultadoProcedimentos } from '@/services/resultadoProcedimentos'
 import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
@@ -984,12 +985,15 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                         )}
                       </TableCell>
                       <TableCell className="text-right whitespace-nowrap">
-                        <div>{brl(s.valueCents)}</div>
+                        {/* Transplante: o total que o paciente paga, como é digitado; embaixo o que fica
+                            para a clínica (o valor gravado, base do repasse). */}
+                        <div>{brl(s.kind === 'cirurgia' ? totalParaMostrar(s.valueCents, s.depositCents) : s.valueCents)}</div>
                         <div className="text-xs text-muted-foreground">{tipoNegociacao(s)}</div>
                         {s.depositCents != null && s.depositCents > 0 && (
                           <div className="text-xs text-muted-foreground">
                             entrada {brl(s.depositCents)}
                             {s.depositPayee ? ` · ${DEPOSIT_PAYEE_LABEL[s.depositPayee]}` : ''}
+                            {s.kind === 'cirurgia' ? <span className="block">clínica {brl(s.valueCents)}</span> : null}
                           </div>
                         )}
                       </TableCell>

@@ -263,11 +263,11 @@ export function descreverAnestesiaCirurgia(p: PreviaCirurgia): string {
   const regra = p.ufDaSala ? `${p.anestesiaRegra ?? ''} (UF da sala)` : (p.anestesiaRegra ?? '')
   // A entrada do transplante É o pagamento do anestesista. Sem dizer isso aqui, o campo
   // zerado vira mistério e alguém digita o valor cheio por cima.
+  // O campo mostra a anestesia cheia (lib/valorDaCirurgia); a frase diz quem pagou.
   if (p.anestesiaEntradaCents > 0) {
-    const cheio = brl(p.anestesiaPoliticaCents ?? 0)
     return p.anestesiaCents === 0
-      ? `${regra}: ${cheio} pagos na entrada do paciente`
-      : `${regra}: ${cheio} menos ${brl(p.anestesiaEntradaCents)} da entrada`
+      ? `${regra}: paga com a entrada do paciente`
+      : `${regra}: ${brl(p.anestesiaEntradaCents)} da entrada + ${brl(p.anestesiaCents)} da clínica`
   }
   return regra
 }
