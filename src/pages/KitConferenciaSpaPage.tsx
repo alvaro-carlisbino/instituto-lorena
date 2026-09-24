@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { EstadoDaTela, VoltarParaKits } from '@/components/kits/TelaDoKit'
+import { EstadoDaTela } from '@/components/kits/TelaDoKit'
 import { diaLocal } from '@/lib/diaLocal'
 import { type AtendimentoSpa, type LinhaConferenciaSpa, type SituacaoSpa, agruparAtendimentos, resumoSpa } from '@/lib/conferenciaSpa'
 import { cn } from '@/lib/utils'
@@ -102,7 +102,6 @@ export function KitConferenciaSpaPage() {
       title="Conferência do SPA"
       subtitle="Quem foi atendido no Spa Capilar, pela agenda do Shosp, e se o material saiu do estoque."
     >
-      <VoltarParaKits />
       <div className="mx-auto w-full max-w-3xl space-y-4">
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1.5">
@@ -190,7 +189,7 @@ export function KitConferenciaSpaPage() {
                             {a.situacao === 'pendente' && a.primeiroAgendamento ? (
                               <>
                                 <Link
-                                  to={`/kits?aba=montar&agendamento=${encodeURIComponent(a.primeiroAgendamento)}`}
+                                  to={`/kits/montar?agendamento=${encodeURIComponent(a.primeiroAgendamento)}`}
                                   className={buttonVariants({ size: 'sm', className: 'h-8' })}
                                 >
                                   <PackagePlus className="size-4" aria-hidden /> Montar kit

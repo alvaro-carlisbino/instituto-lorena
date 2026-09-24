@@ -3,7 +3,6 @@ import { toast } from 'sonner'
 import { Check, Printer, ScanBarcode, Search, Tag } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -12,13 +11,11 @@ import { Input } from '@/components/ui/input'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
 import { formatQtd } from '@/components/kits/kitUi'
-import { useTenant } from '@/context/TenantContext'
 import { beep } from '@/lib/beep'
 import { codigoInterno, ean13Svg, ean13Valido, proximaSequencia } from '@/lib/codigoBarras'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { escaparHtml, imprimirHtml } from '@/lib/exportar'
 import { cn } from '@/lib/utils'
-import { estoqueTabs } from '@/pages/EstoquePage'
 import { type StockItem, listStockItems, vincularCodigoAoItem } from '@/services/estoqueCompras'
 import { listKitTemplates } from '@/services/estoqueKits'
 
@@ -32,7 +29,6 @@ const normalizar = (v: string) => v.toLowerCase().normalize('NFD').replace(/[̀-
  * A lista começa pelos itens dos kits sem código, que são os que travam a montagem bipando.
  */
 export function CodigosBarrasPage() {
-  const { tenant } = useTenant()
   const [items, setItems] = useState<StockItem[]>([])
   const [emKit, setEmKit] = useState<Set<string>>(new Set())
   const [carregando, setCarregando] = useState(true)
@@ -150,7 +146,6 @@ export function CodigosBarrasPage() {
 
   return (
     <AppLayout title="Códigos de barras" subtitle="Deixe o estoque pronto para bipar: ensine o código da caixa ou imprima etiqueta para o que não tem.">
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
       <div className="mx-auto w-full max-w-3xl space-y-4">
         <div className="grid grid-cols-3 gap-2">

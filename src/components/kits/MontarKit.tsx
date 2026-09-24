@@ -224,7 +224,7 @@ export function MontarKit({
     }))
   }
 
-  // Vindo da conferência do SPA (/kits?aba=montar&agendamento=…): já entra com o paciente do horário.
+  // Vindo da conferência do SPA (/kits/montar?agendamento=…): já entra com o paciente do horário.
   const [params, setParams] = useSearchParams()
   const agendamentoDaUrl = params.get('agendamento')
   useEffect(() => {
@@ -575,7 +575,7 @@ export function MontarKit({
             </button>
           ))}
           {templates.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum modelo ainda. Crie na aba Modelos ou bipe os itens avulsos.</p>
+            <p className="text-sm text-muted-foreground">Nenhum modelo ainda. Crie em Modelos de kit, no menu, ou bipe os itens avulsos.</p>
           ) : null}
         </div>
         {r.linhas.length > 0 && r.iniciadaEm ? (

@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import { Ban, Check, ClipboardCheck, ListChecks, Plus } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -19,7 +18,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { formatQtd, produtosParaBusca } from '@/components/kits/kitUi'
-import { estoqueTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { beep } from '@/lib/beep'
 import { normalizarBusca } from '@/lib/busca'
@@ -242,7 +240,6 @@ export function InventarioPage() {
       title="Inventário"
       subtitle="Contagem física por setor: a diferença vira ajuste no saldo, e a falta sai dos lotes que vencem antes."
     >
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,300px)_1fr]">
         <div className="space-y-4">

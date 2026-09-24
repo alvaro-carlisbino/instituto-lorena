@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import { Printer, ShoppingCart } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -13,7 +12,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SearchField } from '@/components/ui/search-field'
 import { formatFracao } from '@/components/kits/kitUi'
-import { estoqueTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { diaLocal } from '@/lib/diaLocal'
 import { escaparHtml, imprimirHtml } from '@/lib/exportar'
@@ -156,7 +154,6 @@ export function EstoqueReposicaoPage() {
       title="Lista de compra"
       subtitle="O que foi gasto no período, quanto tem em todos os setores e quanto comprar. Vira ordem de compra para o financeiro."
     >
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div className="space-y-1.5">

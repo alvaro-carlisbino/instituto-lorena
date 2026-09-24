@@ -5,7 +5,6 @@ import { toast } from 'sonner'
 import { ClipboardList, Plus, Trash2, Truck, Check, ShoppingCart, Ban } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -13,8 +12,6 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { estoqueTabs } from '@/pages/EstoquePage'
-import { useTenant } from '@/context/TenantContext'
 import { listAppUsersForLink } from '@/services/rhPonto'
 import {
   type PurchaseOrder,
@@ -46,7 +43,6 @@ type DraftItem = { itemId: string; description: string; qty: string; unitCost: s
 const EMPTY_ROW: DraftItem = { itemId: '', description: '', qty: '', unitCost: '' }
 
 export function ComprasPage() {
-  const { tenant } = useTenant()
   const [orders, setOrders] = useState<PurchaseOrder[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [stockItems, setStockItems] = useState<StockItem[]>([])
@@ -214,7 +210,6 @@ export function ComprasPage() {
       title="Ordens de compra"
       subtitle="Abra por item, escolha o responsável e (opcional) o fornecedor, receber dá entrada no estoque."
     >
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,440px)_1fr]">
         <Card>

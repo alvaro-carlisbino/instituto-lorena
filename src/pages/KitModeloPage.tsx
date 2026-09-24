@@ -7,7 +7,7 @@ import { EstadoDaTela, VoltarParaKits } from '@/components/kits/TelaDoKit'
 import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 import { type KitTemplate, listKitTemplates } from '@/services/estoqueKits'
 
-const LISTA_DE_MODELOS = '/kits?aba=modelos'
+const LISTA_DE_MODELOS = '/kits/modelos'
 
 /** /kits/modelos/novo e /kits/modelos/:modeloId: a lista padrão da bandeja. */
 export function KitModeloPage() {
@@ -39,7 +39,7 @@ export function KitModeloPage() {
       title={novo ? 'Novo modelo de kit' : modelo ? `Modelo: ${modelo.name}` : 'Editar modelo'}
       subtitle="Bipe os itens da bandeja ou busque pelo nome. Bipar de novo soma +1."
     >
-      <VoltarParaKits rotulo="Modelos" />
+      <VoltarParaKits rotulo="Modelos de kit" para={LISTA_DE_MODELOS} />
       <EstadoDaTela carregando={carregando} erro={erro} vazio={!novo && !modelo ? 'Modelo não encontrado' : null}>
         <EditorModelo
           key={modeloId}

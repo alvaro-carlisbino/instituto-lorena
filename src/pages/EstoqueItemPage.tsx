@@ -16,7 +16,6 @@ import {
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { ExportarMenu } from '@/components/page/ExportarMenu'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import {
@@ -38,7 +37,6 @@ import { ComprasDoItem, LotesDoItem } from '@/components/estoque/ComprasELotesDo
 import { FiltrosDoKardex, KardexDoItem } from '@/components/estoque/KardexDoItem'
 import { ROTULO_GRUPO, dataDia, dataHora } from '@/components/estoque/kardexUi'
 import { formatBRL, formatQtd } from '@/components/kits/kitUi'
-import { estoqueTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { diaLocal, diaLocalComOffset, hojeLocal } from '@/lib/diaLocal'
 import { exportarExcel, exportarPdf } from '@/lib/exportar'
@@ -279,7 +277,6 @@ export function EstoqueItemPage() {
   if (!carregando && !erro && !item) {
     return (
       <AppLayout title="Item não encontrado">
-        <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
         <EmptyState icon={PackageX} title="Este item não existe neste polo" description="Volte ao estoque e abra o item pela lista." />
       </AppLayout>
     )
@@ -360,7 +357,6 @@ export function EstoqueItemPage() {
         ) : null
       }
     >
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
       <div className="mb-3">
         <button

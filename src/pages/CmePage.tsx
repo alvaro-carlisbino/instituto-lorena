@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Check, ChevronDown, FlaskConical, PackageSearch, Printer, Settings2, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, FlaskConical, Printer, Trash2, X } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { Badge } from '@/components/ui/badge'
@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
@@ -43,8 +42,6 @@ import {
 // autoclave); o resultado do ciclo libera ou bloqueia os pacotes; na montagem do kit o pacote é
 // bipado e fica ligado ao paciente.
 
-type Aba = 'ciclos' | 'pacotes' | 'cadastro'
-const ABAS: Aba[] = ['ciclos', 'pacotes', 'cadastro']
 
 const dataHora = (iso: string) =>
   new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -83,7 +80,7 @@ function EscolherColaborador({
   if (colaboradores.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        Nenhum colaborador cadastrado. Cadastre na aba <b>Cadastro</b>.
+        Nenhum colaborador cadastrado. Cadastre em <Link className="underline" to="/cme/cadastro">Cadastro da CME</Link>.
       </p>
     )
   }
@@ -198,7 +195,7 @@ function NovoCiclo({
         <Label>Pacotes que entram no ciclo</Label>
         {materiais.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Nenhum material cadastrado. Cadastre as caixas e instrumentais na aba <b>Cadastro</b>.
+            Nenhum material cadastrado. Cadastre as caixas e instrumentais em <Link className="underline" to="/cme/cadastro">Cadastro da CME</Link>.
           </p>
         ) : (
           <ul className="divide-y divide-border rounded-lg border border-border">
@@ -716,9 +713,8 @@ function AbaCadastro({
   )
 }
 
-export function CmePage() {
-  const [params, setParams] = useSearchParams()
-  const aba: Aba = ABAS.includes(params.get('aba') as Aba) ? (params.get('aba') as Aba) : 'ciclos'
+/** Autoclaves, colaboradores, materiais e ciclos: o que as três telas da CME leem. */
+function useDadosDaCme() {
   const [autoclaves, setAutoclaves] = useState<Autoclave[]>([])
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([])
   const [materiais, setMateriais] = useState<MaterialCme[]>([])
@@ -741,72 +737,72 @@ export function CmePage() {
     void carregar()
   }, [carregar])
 
-  const abertos = useMemo(() => (ciclos ?? []).filter((c) => c.status === 'aberto').length, [ciclos])
+  return { autoclaves, colaboradores, materiais, ciclos, erro, carregar }
+}
 
+function Erro({ erro }: { erro: string | null }) {
+  return erro ? (
+    <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+      {erro}
+    </div>
+  ) : null
+}
+
+// CME em três telas, cada uma no menu lateral (24/09/2026): as abas internas foram a mesma
+// reclamação dos kits, "botão dentro da página para trocar de página".
+
+/** /cme: abrir ciclo, imprimir etiquetas, registrar o resultado. Atende o link antigo ?aba=. */
+export function CmePage() {
+  const [params] = useSearchParams()
+  const d = useDadosDaCme()
+  const aba = params.get('aba')
+  if (aba === 'pacotes') return <Navigate to="/cme/pacotes" replace />
+  if (aba === 'cadastro') return <Navigate to="/cme/cadastro" replace />
   return (
-    <AppLayout title="CME · Esterilização" subtitle="Ciclos da autoclave, etiquetas dos pacotes e em qual paciente cada pacote foi usado.">
+    <AppLayout title="Ciclos da autoclave" subtitle="Abra o ciclo, imprima as etiquetas antes da autoclave e registre o resultado quando terminar.">
       <div className="mx-auto w-full max-w-3xl space-y-4">
-        {erro ? (
-          <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-            {erro}
-          </div>
-        ) : null}
-        <Tabs
-          value={aba}
-          onValueChange={(v) =>
-            setParams(
-              (atual) => {
-                const n = new URLSearchParams(atual)
-                n.set('aba', String(v))
-                return n
-              },
-              { replace: true },
-            )
-          }
-        >
-          <TabsList>
-            <TabsTrigger value="ciclos">
-              <FlaskConical aria-hidden /> Ciclos
-              {abertos > 0 ? (
-                <span className="rounded-full bg-primary px-1.5 text-[11px] font-semibold tabular-nums text-primary-foreground">{abertos}</span>
-              ) : null}
-            </TabsTrigger>
-            <TabsTrigger value="pacotes">
-              <PackageSearch aria-hidden /> Pacotes
-            </TabsTrigger>
-            <TabsTrigger value="cadastro">
-              <Settings2 aria-hidden /> Cadastro
-            </TabsTrigger>
-          </TabsList>
+        <Erro erro={d.erro} />
+        <NovoCiclo autoclaves={d.autoclaves} colaboradores={d.colaboradores} materiais={d.materiais} onAberto={() => void d.carregar()} />
+        <section className="space-y-2">
+          <h2 className="text-base font-semibold">Ciclos</h2>
+          {d.ciclos == null ? (
+            <p className="text-sm text-muted-foreground">Carregando…</p>
+          ) : d.ciclos.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+              Nenhum ciclo ainda. O primeiro aparece aqui assim que for aberto.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {d.ciclos.map((c) => (
+                <CartaoCiclo key={c.id} ciclo={c} colaboradores={d.colaboradores} onMudou={() => void d.carregar()} />
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </AppLayout>
+  )
+}
 
-          <TabsContent value="ciclos" className="space-y-4">
-            <NovoCiclo autoclaves={autoclaves} colaboradores={colaboradores} materiais={materiais} onAberto={() => void carregar()} />
-            <section className="space-y-2">
-              <h2 className="text-base font-semibold">Ciclos</h2>
-              {ciclos == null ? (
-                <p className="text-sm text-muted-foreground">Carregando…</p>
-              ) : ciclos.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                  Nenhum ciclo ainda. O primeiro aparece aqui assim que for aberto.
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {ciclos.map((c) => (
-                    <CartaoCiclo key={c.id} ciclo={c} colaboradores={colaboradores} onMudou={() => void carregar()} />
-                  ))}
-                </ul>
-              )}
-            </section>
-          </TabsContent>
+/** /cme/pacotes */
+export function CmePacotesPage() {
+  return (
+    <AppLayout title="Pacotes e validade" subtitle="Bipe uma etiqueta para ver lote, validade e em qual paciente o pacote foi usado.">
+      <div className="mx-auto w-full max-w-3xl space-y-4">
+        <AbaPacotes />
+      </div>
+    </AppLayout>
+  )
+}
 
-          <TabsContent value="pacotes">
-            <AbaPacotes />
-          </TabsContent>
-
-          <TabsContent value="cadastro">
-            <AbaCadastro materiais={materiais} colaboradores={colaboradores} autoclaves={autoclaves} onMudou={() => void carregar()} />
-          </TabsContent>
-        </Tabs>
+/** /cme/cadastro */
+export function CmeCadastroPage() {
+  const d = useDadosDaCme()
+  return (
+    <AppLayout title="Cadastro da CME" subtitle="Materiais que passam pela autoclave, colaboradores e o tamanho da etiqueta.">
+      <div className="mx-auto w-full max-w-3xl space-y-4">
+        <Erro erro={d.erro} />
+        <AbaCadastro materiais={d.materiais} colaboradores={d.colaboradores} autoclaves={d.autoclaves} onMudou={() => void d.carregar()} />
       </div>
     </AppLayout>
   )

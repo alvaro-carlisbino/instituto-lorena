@@ -5,7 +5,6 @@ import { toast } from 'sonner'
 import { Boxes, Plus, ArrowDownToLine, ArrowUpFromLine, History, MoreHorizontal, Pencil, ScanBarcode, ShieldAlert } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Button, buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -52,30 +51,8 @@ import { type StockBatch, listBatchBalances } from '@/services/estoqueKits'
 import { BarcodeCameraDialog } from '@/components/estoque/BarcodeCameraDialog'
 import { useTenant } from '@/context/TenantContext'
 
-/** Abas do módulo de ESTOQUE: só o que é mercadoria física (o que entra, o que sai, o que tem).
- *  Dinheiro (contas a pagar, NF-e) mora em financeiroTabs — antes vivia aqui e confundia:
- *  a mesma fileira misturava "bipar caixa" com "pagar boleto".
- *  Kits cirúrgicos é só da clínica (o polo de vendas não tem procedimento). */
-export function estoqueTabs(isSalesPolo: boolean): Array<{ to: string; label: string }> {
-  return [
-    { to: '/estoque', label: 'Estoque' },
-    { to: '/bipagem', label: 'Bipagem' },
-    { to: '/estoque-codigos', label: 'Códigos de barras' },
-    { to: '/estoque-reposicao', label: 'Lista de compra' },
-    { to: '/compras', label: 'Ordens de compra' },
-    { to: '/transferencias-estoque', label: 'Transferências' },
-    { to: '/estoque-enderecos', label: 'Endereços' },
-    { to: '/inventario', label: 'Inventário' },
-    ...(isSalesPolo
-      ? []
-      : [
-          { to: '/kits', label: 'Kits cirúrgicos' },
-          { to: '/conta-cirurgica', label: 'Conta cirúrgica' },
-        ]),
-    { to: '/estoque-relatorios', label: 'Relatórios' },
-  ]
-}
-
+/* As telas de estoque, kits, CME e compras não têm mais barra de abas (24/09/2026): cada uma é
+ * um item do menu lateral, nos grupos Kits, CME, Estoque e Compras (config/navigation.ts). */
 /* A navegação do financeiro mora em `components/page/FinanceTabs.tsx`, em dois níveis.
  * Ficava aqui, numa régua plana de 14 abas — e uma tela de ESTOQUE ser a dona do menu do
  * FINANCEIRO era metade do motivo de ninguém achar nada. */
@@ -559,7 +536,6 @@ export function EstoquePage() {
       title="Estoque"
       subtitle="Itens e saldos por setor. Clique no item para ver de qual nota veio, os lotes, onde fica e todo o histórico."
     >
-      <SubTabs tabs={estoqueTabs(isSalesPolo)} />
 
       {isSalesPolo ? (
         <Card className="mb-4">

@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-24-menu-kits-cme-estoque-compras",
+    "data": "2026-09-24",
+    "titulo": "Menu novo: cada tela de kits, CME, estoque e compras tem o seu lugar",
+    "itens": [
+      "Acabaram as abas dentro das páginas. O menu da esquerda tem agora quatro grupos: Kits, CME, Estoque e Compras, e cada tela é um item: Montar kit, Kits dos pacientes, Conferência do SPA, Modelos de kit, Consumo do setor, Livro de controlados, Conta cirúrgica.",
+      "CME virou três telas: Ciclos da autoclave, Pacotes e validade e Cadastro da CME. Estoque tem Estoque, Entrada e saída (a antiga Bipagem), Transferências, Inventário, Setores, Endereços, Códigos de barras e Relatórios. Compras tem Lista de compra e Ordens de compra.",
+      "A barra de abas que repetia todas as telas de estoque no alto da página saiu. O item aceso no menu mostra onde você está.",
+      "Favoritos e links antigos continuam funcionando: eles levam para a tela nova certa."
+    ]
+  },
+  {
     "id": "2026-09-24-kits-custo-edicao-e-agenda",
     "data": "2026-09-24",
     "titulo": "Kits: custo certo na folha, edição sem erro e a agenda certa para cada kit",

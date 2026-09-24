@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Ban, ChevronDown, MapPin, MoreHorizontal, Pencil, Plus, Printer, RotateCcw, Star, Warehouse, X } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -29,13 +28,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SearchField } from '@/components/ui/search-field'
 import { type PickerItem, SearchPicker } from '@/components/ui/search-picker'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
 import { formatQtd, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
-import { useTenant } from '@/context/TenantContext'
-import { estoqueTabs } from '@/pages/EstoquePage'
 import { beep } from '@/lib/beep'
 import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
@@ -63,7 +59,6 @@ import {
 } from '@/services/estoqueRastreio'
 
 type Aba = 'enderecos' | 'setores'
-const ABAS: Aba[] = ['enderecos', 'setores']
 type ParamUrl = 'aba' | 'setor' | 'endereco'
 type Saldo = { warehouseId: string; itemId: string; qty: number }
 
@@ -77,12 +72,17 @@ const temSaldo = (q: number | undefined) => (q ?? 0) > 0.0001
  * Onde cada item fica dentro do setor (Principal › A-03 "Armário A, prateleira 3") e o cadastro
  * dos setores. A enfermagem guardava isso de cabeça: quem cobria folga abria armário por armário.
  */
-export function EnderecosEstoquePage() {
-  const { tenant } = useTenant()
-  // Aba, setor e endereço aberto moram na URL: abrir a ficha de um item e voltar devolve a
+/** /estoque-setores: o cadastro dos setores, tela própria no menu (era a aba Setores). */
+export function SetoresEstoquePage() {
+  return <EnderecosEstoquePage tela="setores" />
+}
+
+export function EnderecosEstoquePage({ tela = 'enderecos' }: { tela?: Aba }) {
+  // Setor e endereço aberto moram na URL: abrir a ficha de um item e voltar devolve a
   // enfermeira ao mesmo armário, e a tela remonta quando o navegador volta do foco.
   const [params, setParams] = useSearchParams()
-  const aba: Aba = ABAS.includes(params.get('aba') as Aba) ? (params.get('aba') as Aba) : 'enderecos'
+  const navigate = useNavigate()
+  const aba: Aba = tela
   const mudarUrl = useCallback(
     (mudancas: Partial<Record<ParamUrl, string | null>>) =>
       setParams(
@@ -174,22 +174,20 @@ export function EnderecosEstoquePage() {
   const setorDaUrl = params.get('setor')
   const setor = setoresAtivos.find((s) => s.id === setorDaUrl) ?? padrao
 
+  // Link antigo da aba Setores (`/estoque-enderecos?aba=setores`) segue para a tela nova.
+  if (tela === 'enderecos' && params.get('aba') === 'setores') return <Navigate to="/estoque-setores" replace />
+
   return (
-    <AppLayout title="Setores e endereços" subtitle="Diga onde cada item fica guardado, imprima as etiquetas das prateleiras e mantenha os setores.">
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
-
-      <Tabs value={aba} onValueChange={(v) => mudarUrl({ aba: v as Aba })}>
-        <TabsList className="overflow-x-auto">
-          <TabsTrigger value="enderecos">
-            <MapPin aria-hidden /> Endereços
-          </TabsTrigger>
-          <TabsTrigger value="setores">
-            <Warehouse aria-hidden /> Setores
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="enderecos">
-          {setor ? (
+    <AppLayout
+      title={aba === 'setores' ? 'Setores' : 'Endereços'}
+      subtitle={
+        aba === 'setores'
+          ? 'Os lugares onde o estoque fica: Principal, Centro Cirúrgico, SPA. Setor padrão é onde entra a nota.'
+          : 'Diga onde cada item fica guardado e imprima as etiquetas das prateleiras.'
+      }
+    >
+        {aba === 'enderecos' ? (
+          setor ? (
             <AbaEnderecos
               // Seleção de etiquetas, destino rápido e busca valem para um setor só: trocar de setor zera.
               key={setor.id}
@@ -211,22 +209,19 @@ export function EnderecosEstoquePage() {
             <EmptyState
               icon={Warehouse}
               title={loading ? 'Carregando…' : 'Nenhum setor ativo'}
-              description={loading ? undefined : 'Cadastre um setor na aba Setores para criar os endereços.'}
+              description={loading ? undefined : 'Cadastre um setor na tela Setores (menu Estoque) para criar os endereços.'}
             />
-          )}
-        </TabsContent>
-
-        <TabsContent value="setores">
+          )
+        ) : (
           <AbaSetores
             setores={setores}
             enderecos={enderecos}
             saldoPorSetor={saldoPorSetor}
             loading={loading}
             onMudou={recarregarSetores}
-            onVerEnderecos={(id) => mudarUrl({ aba: 'enderecos', setor: id, endereco: null })}
+            onVerEnderecos={(id) => navigate(`/estoque-enderecos?setor=${encodeURIComponent(id)}`)}
           />
-        </TabsContent>
-      </Tabs>
+        )}
     </AppLayout>
   )
 }

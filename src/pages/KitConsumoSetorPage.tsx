@@ -8,13 +8,13 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { SearchPicker } from '@/components/ui/search-picker'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
-import { EstadoDaTela, VoltarParaKits } from '@/components/kits/TelaDoKit'
+import { EstadoDaTela } from '@/components/kits/TelaDoKit'
 import { formatFracao, formatQtd, produtosParaBusca } from '@/components/kits/kitUi'
 import { cn } from '@/lib/utils'
 import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 import { type ConsumoSetor, listConsumoSetor, salvarConsumoSetor } from '@/services/estoqueKits'
 
-const LISTA_DE_MODELOS = '/kits?aba=modelos'
+const LISTA_DE_MODELOS = '/kits/modelos'
 const numero = (texto: string) => {
   const n = Number(texto.replace(/\s/g, '').replace(',', '.'))
   return Number.isFinite(n) ? n : NaN
@@ -73,7 +73,6 @@ export function KitConsumoSetorPage() {
 
   return (
     <AppLayout title="Consumo do setor" subtitle="O que o setor gasta em cada cirurgia ou SPA e entra na conta do paciente.">
-      <VoltarParaKits rotulo="Modelos" />
       <EstadoDaTela carregando={carregando} erro={erro} vazio={null}>
         <div className="mx-auto w-full max-w-3xl space-y-4">
           <ul className="space-y-3">

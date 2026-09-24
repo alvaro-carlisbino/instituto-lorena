@@ -10,7 +10,6 @@ import {
 } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -28,7 +27,6 @@ import {
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { estoqueTabs } from '@/pages/EstoquePage'
 import {
   type StockItem,
   listStockItems,
@@ -43,7 +41,6 @@ import { BarcodeCameraDialog } from '@/components/estoque/BarcodeCameraDialog'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
 import { beep } from '@/lib/beep'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
-import { useTenant } from '@/context/TenantContext'
 
 // Bipagem contínua com leitor USB (modo teclado: digita o código + Enter).
 // Fluxo pensado pra caixa chegando ou material saindo: escolhe Entrada ou Saída,
@@ -62,8 +59,6 @@ type ScanLine = {
 const EMPTY_NEW_ITEM = { name: '', category: '', unit: 'un', controlled: false }
 
 export function BipagemPage() {
-  const { tenant } = useTenant()
-  const isSalesPolo = tenant.poloType === 'sales'
 
   const [items, setItems] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -268,7 +263,6 @@ export function BipagemPage() {
       title="Bipagem"
       subtitle="Entrada e saída contínuas com o leitor de código de barras: bipe tudo, confira e confirme de uma vez."
     >
-      <SubTabs tabs={estoqueTabs(isSalesPolo)} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,340px)_1fr]">
         <Card>

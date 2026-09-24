@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Boxes, CalendarCheck, Layers, PackageCheck, ShieldAlert } from 'lucide-react'
-import { buttonVariants } from '@/components/ui/button'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { KitsLista } from '@/components/kits/KitsLista'
 import { LivroControlados } from '@/components/kits/LivroControlados'
 import { ModelosKit } from '@/components/kits/ModelosKit'
 import { MontarKit } from '@/components/kits/MontarKit'
 import { useTenant } from '@/context/TenantContext'
-import { estoqueTabs } from '@/pages/EstoquePage'
 import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 import {
   type ControlledLogRow,
@@ -26,141 +21,130 @@ import {
   listKits,
 } from '@/services/estoqueKits'
 
-type Aba = 'montar' | 'kits' | 'modelos' | 'controlados'
-const ABAS: Aba[] = ['montar', 'kits', 'modelos', 'controlados']
+// Kits: cada tela no próprio endereço e no menu lateral (24/09/2026). Antes era uma página só com
+// abas internas (Montar, Kits, Modelos, Controlados) e um botão escondido para a Conferência do
+// SPA, por cima de uma barra de abas do estoque inteiro. A equipe se perdia todo dia: o menu dizia
+// "Kits cirúrgicos" e a tela certa estava duas camadas abaixo.
 
-export function KitsPage() {
-  const { tenant } = useTenant()
-  // A aba mora na URL: a tela remonta quando o navegador volta do foco, e sem isso a
-  // enfermeira no meio de um "Registrar uso" caía de novo em Montar.
-  const [params, setParams] = useSearchParams()
-  const aba: Aba = ABAS.includes(params.get('aba') as Aba) ? (params.get('aba') as Aba) : 'montar'
-  const irPara = useCallback(
-    (a: Aba) =>
-      setParams(
-        (prev) => {
-          const next = new URLSearchParams(prev)
-          next.set('aba', a)
-          return next
-        },
-        { replace: true },
-      ),
-    [setParams],
-  )
+type Partes = { itens?: boolean; modelos?: boolean; kits?: boolean; controlados?: boolean }
 
+/** Carrega só o que a tela usa. `recarregar` não pisca a tela: `carregando` vale para a primeira carga. */
+function useDadosDosKits(partes: Partes) {
   const [items, setItems] = useState<StockItem[]>([])
   const [templates, setTemplates] = useState<KitTemplate[]>([])
   const [kits, setKits] = useState<StockKit[]>([])
   const [controlledLog, setControlledLog] = useState<ControlledLogRow[]>([])
   const [kitCosts, setKitCosts] = useState<Map<string, KitCost>>(new Map())
   const [lastCosts, setLastCosts] = useState<Map<string, number>>(new Map())
-  const [loading, setLoading] = useState(true)
-  const navigate = useNavigate()
+  const [carregando, setCarregando] = useState(true)
+  const { itens, modelos, kits: comKits, controlados } = partes
 
-  // `loading` só vale para a primeira carga (nasce true); recarregar depois de uma ação não
-  // pisca a tela inteira de "Carregando…".
-  const load = async () => {
+  const recarregar = useCallback(async () => {
     try {
       const [it, tpls, ks, log, costs, last] = await Promise.all([
-        listStockItems(),
-        listKitTemplates(),
-        listKits(),
-        listControlledLog(),
-        listKitCosts(),
-        listItemLastCosts(),
+        itens ? listStockItems() : Promise.resolve(null),
+        modelos ? listKitTemplates() : Promise.resolve(null),
+        comKits ? listKits() : Promise.resolve(null),
+        controlados ? listControlledLog() : Promise.resolve(null),
+        comKits ? listKitCosts() : Promise.resolve(null),
+        comKits ? listItemLastCosts() : Promise.resolve(null),
       ])
-      setItems(it)
-      setTemplates(tpls)
-      setKits(ks)
-      setControlledLog(log)
-      setKitCosts(costs)
-      setLastCosts(last)
+      if (it) setItems(it)
+      if (tpls) setTemplates(tpls)
+      if (ks) setKits(ks)
+      if (log) setControlledLog(log)
+      if (costs) setKitCosts(costs)
+      if (last) setLastCosts(last)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao carregar kits')
     } finally {
-      setLoading(false)
+      setCarregando(false)
     }
-  }
+  }, [itens, modelos, comKits, controlados])
 
   useEffect(() => {
-    void load()
-  }, [])
+    void recarregar()
+  }, [recarregar])
 
-  // `/kits?aba=kits&kit=<id>` era o link antigo da edição (Resultado por cirurgia, favoritos):
-  // a edição virou tela, então o link velho segue para ela.
-  const kitDaUrl = params.get('kit')
-  useEffect(() => {
-    if (kitDaUrl) navigate(`/kits/${kitDaUrl}/editar`, { replace: true })
-  }, [kitDaUrl, navigate])
+  const trocarItem = useCallback((item: StockItem) => setItems((prev) => prev.map((i) => (i.id === item.id ? item : i))), [])
 
-  const trocarItem = useCallback(
-    (item: StockItem) => setItems((prev) => prev.map((i) => (i.id === item.id ? item : i))),
-    [],
-  )
+  return { items, templates, kits, controlledLog, kitCosts, lastCosts, carregando, recarregar, trocarItem }
+}
 
-  const nomes = useMemo(() => new Map(items.map((i) => [i.id, i.name] as const)), [items])
-  const abertos = kits.filter((k) => k.status === 'montado').length
-
+/** /kits/montar */
+export function KitMontarPage() {
+  const { tenant } = useTenant()
+  const navigate = useNavigate()
+  const d = useDadosDosKits({ itens: true, modelos: true })
   return (
-    <AppLayout title="Kits cirúrgicos" subtitle="Monte bipando, registre o uso depois da cirurgia e devolva a sobra ao estoque.">
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
-
-      <Tabs value={aba} onValueChange={(v) => irPara(v as Aba)}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-        <TabsList className="overflow-x-auto">
-          <TabsTrigger value="montar">
-            <Boxes aria-hidden /> Montar
-          </TabsTrigger>
-          <TabsTrigger value="kits">
-            <PackageCheck aria-hidden /> Kits
-            {abertos > 0 ? (
-              <span className="rounded-full bg-primary px-1.5 text-[11px] font-semibold tabular-nums text-primary-foreground">{abertos}</span>
-            ) : null}
-          </TabsTrigger>
-          <TabsTrigger value="modelos">
-            <Layers aria-hidden /> Modelos
-          </TabsTrigger>
-          <TabsTrigger value="controlados">
-            <ShieldAlert aria-hidden /> Controlados
-          </TabsTrigger>
-        </TabsList>
-        <Link to="/kits/conferencia-spa" className={buttonVariants({ variant: 'outline', size: 'sm', className: 'h-8' })}>
-          <CalendarCheck aria-hidden /> Conferência do SPA
-        </Link>
-        </div>
-
-        <TabsContent value="montar">
-          <MontarKit
-            tenantId={tenant.id}
-            items={items}
-            templates={templates}
-            onItemAtualizado={trocarItem}
-            onMontado={() => {
-              void load()
-              irPara('kits')
-            }}
-          />
-        </TabsContent>
-        <TabsContent value="kits">
-          <KitsLista
-            kits={kits}
-            items={items}
-            kitCosts={kitCosts}
-            lastCosts={lastCosts}
-            loading={loading}
-            onRegistrarUso={(k) => navigate(`/kits/${k.id}/uso`)}
-            onEditar={(k) => navigate(`/kits/${k.id}/editar`)}
-            onMudou={() => void load()}
-          />
-        </TabsContent>
-        <TabsContent value="modelos">
-          <ModelosKit templates={templates} items={items} onMudou={() => void load()} />
-        </TabsContent>
-        <TabsContent value="controlados">
-          <LivroControlados rows={controlledLog} nomes={nomes} />
-        </TabsContent>
-      </Tabs>
-
+    <AppLayout title="Montar kit" subtitle="Escolha o modelo e o paciente, bipe o que entra na bandeja e toque em Montar kit.">
+      <MontarKit
+        tenantId={tenant.id}
+        items={d.items}
+        templates={d.templates}
+        onItemAtualizado={d.trocarItem}
+        onMontado={() => navigate('/kits')}
+      />
     </AppLayout>
   )
 }
+
+/**
+ * /kits: os kits dos pacientes. Também atende os links antigos das abas (`/kits?aba=montar`,
+ * `?aba=modelos`, `?kit=<id>`), que estão em favoritos e no Resultado por cirurgia.
+ */
+export function KitsPage() {
+  const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const d = useDadosDosKits({ itens: true, kits: true })
+  const aba = params.get('aba')
+  const kitDaUrl = params.get('kit')
+
+  if (kitDaUrl) return <Navigate to={`/kits/${kitDaUrl}/editar`} replace />
+  if (aba === 'montar') {
+    const resto = new URLSearchParams(params)
+    resto.delete('aba')
+    const qs = resto.toString()
+    return <Navigate to={`/kits/montar${qs ? `?${qs}` : ''}`} replace />
+  }
+  if (aba === 'modelos') return <Navigate to="/kits/modelos" replace />
+  if (aba === 'controlados') return <Navigate to="/kits/controlados" replace />
+
+  return (
+    <AppLayout title="Kits dos pacientes" subtitle="Kits montados, usados e cancelados. Registre o uso depois do procedimento e corrija o que for preciso.">
+      <KitsLista
+        kits={d.kits}
+        items={d.items}
+        kitCosts={d.kitCosts}
+        lastCosts={d.lastCosts}
+        loading={d.carregando}
+        onRegistrarUso={(k) => navigate(`/kits/${k.id}/uso`)}
+        onEditar={(k) => navigate(`/kits/${k.id}/editar`)}
+        onMudou={() => void d.recarregar()}
+      />
+    </AppLayout>
+  )
+}
+
+/** /kits/modelos */
+export function KitModelosPage() {
+  const d = useDadosDosKits({ itens: true, modelos: true })
+  return (
+    <AppLayout title="Modelos de kit" subtitle="A lista fixa de cada kit. Mudar um modelo vale para os próximos kits, não para os já montados.">
+      <ModelosKit templates={d.templates} items={d.items} onMudou={() => void d.recarregar()} />
+    </AppLayout>
+  )
+}
+
+/** /kits/controlados */
+export function KitControladosPage() {
+  const d = useDadosDosKits({ itens: true, controlados: true })
+  const nomes = useMemo(() => new Map(d.items.map((i) => [i.id, i.name] as const)), [d.items])
+  return (
+    <AppLayout title="Livro de controlados" subtitle="Toda entrada e saída de medicamento controlado, com o paciente.">
+      <LivroControlados rows={d.controlledLog} nomes={nomes} />
+    </AppLayout>
+  )
+}
+
+export default KitsPage

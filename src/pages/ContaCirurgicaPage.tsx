@@ -5,7 +5,6 @@ import { toast } from 'sonner'
 import { FilePlus2, Plus, Printer, Trash2 } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -14,8 +13,6 @@ import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PatientSearchField, type PatientPick } from '@/components/PatientSearchField'
-import { estoqueTabs } from '@/pages/EstoquePage'
-import { useTenant } from '@/context/TenantContext'
 import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 import {
   SURGERY_LINE_KINDS,
@@ -42,7 +39,6 @@ const EMPTY: DraftLine = { kind: 'mat_med', description: '', qty: '1', unit: '',
 const formatBRL = (c: number) => (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 export function ContaCirurgicaPage() {
-  const { tenant } = useTenant()
   const [accounts, setAccounts] = useState<SurgeryAccount[]>([])
   const [items, setItems] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -142,7 +138,6 @@ export function ContaCirurgicaPage() {
       title="Conta do centro cirúrgico"
       subtitle="Mat/Med, hora sala, anestesia, consumo, acréscimos e pagamentos, imprima a conta do paciente."
     >
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,440px)_1fr]">
         <Card>

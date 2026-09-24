@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import { ArrowLeft, FileSearch, Merge } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -20,8 +19,6 @@ import { SearchField } from '@/components/ui/search-field'
 import { Skeleton } from '@/components/ui/skeleton'
 import { dataHora } from '@/components/estoque/kardexUi'
 import { formatQtd } from '@/components/kits/kitUi'
-import { estoqueTabs } from '@/pages/EstoquePage'
-import { useTenant } from '@/context/TenantContext'
 import { normalizarBusca } from '@/lib/busca'
 import { cn } from '@/lib/utils'
 import { type StockItem, getStockItem } from '@/services/estoqueCompras'
@@ -57,7 +54,6 @@ function parecenca(item: StockItem, nota: ItemDeNota): number {
  */
 export function EstoqueJuntarItemPage() {
   const { itemId = '' } = useParams()
-  const { tenant } = useTenant()
   const navigate = useNavigate()
   const [item, setItem] = useState<StockItem | null>(null)
   const [itensDeNota, setItensDeNota] = useState<ItemDeNota[]>([])
@@ -128,7 +124,6 @@ export function EstoqueJuntarItemPage() {
       title="Procurar a nota do item"
       subtitle={item ? `Nota que entrou com outro nome e é ${item.name}` : 'Nota que entrou com outro nome'}
     >
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
       <div className="mx-auto w-full max-w-3xl space-y-4">
         <Link to={`/estoque/item/${itemId}?aba=compras`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-4" aria-hidden /> Ficha do item

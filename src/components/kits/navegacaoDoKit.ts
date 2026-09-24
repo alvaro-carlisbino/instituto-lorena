@@ -9,7 +9,7 @@ import { type ConsumoSetor, type SetorKit, type StockKit, buscarKit, listConsumo
 // celular o popup cobria a tela inteira de qualquer jeito, fechava com um toque fora e não
 // tinha endereço: voltar do navegador saía do CRM, recarregar perdia tudo. Agora são telas.
 
-export const LISTA_DE_KITS = '/kits?aba=kits'
+export const LISTA_DE_KITS = '/kits'
 
 /** Volta para onde a pessoa veio (lista de kits, resultado da cirurgia); sem histórico, para a lista. */
 export function voltarDaTela(navigate: NavigateFunction, destino = LISTA_DE_KITS) {

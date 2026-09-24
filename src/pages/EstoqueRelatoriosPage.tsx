@@ -4,7 +4,6 @@ import { toast } from 'sonner'
 import { ArrowDownUp, Boxes, CalendarClock, FileDown, FileBarChart2, Flame } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,8 +11,6 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { estoqueTabs } from '@/pages/EstoquePage'
-import { useTenant } from '@/context/TenantContext'
 import {
   type StockItem,
   type StockMovementRow,
@@ -41,7 +38,6 @@ const firstDayOfMonth = () => {
 const KIND_LABEL: Record<string, string> = { entrada: 'Entrada', saida: 'Saída', ajuste: 'Ajuste' }
 
 export function EstoqueRelatoriosPage() {
-  const { tenant } = useTenant()
   const [items, setItems] = useState<StockItem[]>([])
   const [batches, setBatches] = useState<StockBatch[]>([])
   const [lastCosts, setLastCosts] = useState<Map<string, number>>(new Map())
@@ -165,7 +161,6 @@ export function EstoqueRelatoriosPage() {
       title="Relatórios de estoque"
       subtitle="Posição e valor do estoque, movimentações e consumo por período, tudo exportável em CSV."
     >
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div className="space-y-1.5">
@@ -228,7 +223,7 @@ export function EstoqueRelatoriosPage() {
           </CardHeader>
           <CardContent>
             {position.length === 0 ? (
-              <EmptyState icon={Boxes} title={loading ? 'Carregando…' : 'Sem itens'} description="Cadastre itens na aba Estoque." />
+              <EmptyState icon={Boxes} title={loading ? 'Carregando…' : 'Sem itens'} description="Cadastre itens na tela Estoque." />
             ) : (
               <div className="max-h-[420px] overflow-auto">
                 <Table className="table-fixed">

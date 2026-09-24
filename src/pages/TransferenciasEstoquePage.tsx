@@ -5,7 +5,6 @@ import { ArrowDownUp, ArrowLeftRight, MapPin, Trash2, Undo2 } from 'lucide-react
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { ExportarMenu } from '@/components/page/ExportarMenu'
-import { SubTabs } from '@/components/page/SubTabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,7 +25,6 @@ import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
 import { formatQtd, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
-import { estoqueTabs } from '@/pages/EstoquePage'
 import { useTenant } from '@/context/TenantContext'
 import { beep } from '@/lib/beep'
 import { normalizarBusca } from '@/lib/busca'
@@ -280,7 +278,6 @@ export function TransferenciasEstoquePage() {
         />
       }
     >
-      <SubTabs tabs={estoqueTabs(tenant.poloType === 'sales')} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
         <section className="space-y-4 rounded-xl border border-border bg-card p-3 sm:p-4">
@@ -288,10 +285,10 @@ export function TransferenciasEstoquePage() {
             <div className="flex items-center justify-between gap-2">
               <Label>Sai de</Label>
               <Link
-                to="/estoque-enderecos"
+                to="/estoque-setores"
                 className="inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
               >
-                <MapPin className="size-3.5" aria-hidden /> Setores e endereços
+                <MapPin className="size-3.5" aria-hidden /> Setores
               </Link>
             </div>
             {setores(fromId, setFromId, toId)}

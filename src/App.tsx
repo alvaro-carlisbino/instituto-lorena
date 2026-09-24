@@ -118,12 +118,17 @@ const FluxoCaixaPage = lazyPage(() => import('./pages/FluxoCaixaPage'), 'FluxoCa
 const RecorrentesPage = lazyPage(() => import('./pages/RecorrentesPage'), 'RecorrentesPage')
 const NfePage = lazyPage(() => import('./pages/NfePage'), 'NfePage')
 const KitsPage = lazyPage(() => import('./pages/KitsPage'), 'KitsPage')
+const KitMontarPage = lazyPage(() => import('./pages/KitsPage'), 'KitMontarPage')
+const KitModelosPage = lazyPage(() => import('./pages/KitsPage'), 'KitModelosPage')
+const KitControladosPage = lazyPage(() => import('./pages/KitsPage'), 'KitControladosPage')
 const KitUsoPage = lazyPage(() => import('./pages/KitUsoPage'), 'KitUsoPage')
 const KitEditarPage = lazyPage(() => import('./pages/KitEditarPage'), 'KitEditarPage')
 const KitModeloPage = lazyPage(() => import('./pages/KitModeloPage'), 'KitModeloPage')
 const KitConsumoSetorPage = lazyPage(() => import('./pages/KitConsumoSetorPage'), 'KitConsumoSetorPage')
 const KitConferenciaSpaPage = lazyPage(() => import('./pages/KitConferenciaSpaPage'), 'KitConferenciaSpaPage')
 const CmePage = lazyPage(() => import('./pages/CmePage'), 'CmePage')
+const CmePacotesPage = lazyPage(() => import('./pages/CmePage'), 'CmePacotesPage')
+const CmeCadastroPage = lazyPage(() => import('./pages/CmePage'), 'CmeCadastroPage')
 const InventarioPage = lazyPage(() => import('./pages/InventarioPage'), 'InventarioPage')
 const EstoqueRelatoriosPage = lazyPage(() => import('./pages/EstoqueRelatoriosPage'), 'EstoqueRelatoriosPage')
 const CodigosBarrasPage = lazyPage(() => import('./pages/CodigosBarrasPage'), 'CodigosBarrasPage')
@@ -131,6 +136,7 @@ const TransferenciasEstoquePage = lazyPage(() => import('./pages/TransferenciasE
 const EstoqueItemPage = lazyPage(() => import('./pages/EstoqueItemPage'), 'EstoqueItemPage')
 const EstoqueJuntarItemPage = lazyPage(() => import('./pages/EstoqueJuntarItemPage'), 'EstoqueJuntarItemPage')
 const EnderecosEstoquePage = lazyPage(() => import('./pages/EnderecosEstoquePage'), 'EnderecosEstoquePage')
+const SetoresEstoquePage = lazyPage(() => import('./pages/EnderecosEstoquePage'), 'SetoresEstoquePage')
 const ContaCirurgicaPage = lazyPage(() => import('./pages/ContaCirurgicaPage'), 'ContaCirurgicaPage')
 const AlertasPagamentoPage = lazyPage(() => import('./pages/AlertasPagamentoPage'), 'AlertasPagamentoPage')
 const ImportShopPage = lazyPage(() => import('./pages/ImportShopPage'), 'ImportShopPage')
@@ -181,6 +187,7 @@ function AppRoutes() {
         <Route path="/estoque/item/:itemId" element={<EstoqueItemPage />} />
         <Route path="/estoque/item/:itemId/juntar" element={<EstoqueJuntarItemPage />} />
         <Route path="/estoque-enderecos" element={<EnderecosEstoquePage />} />
+        <Route path="/estoque-setores" element={<SetoresEstoquePage />} />
         <Route path="/bipagem" element={<BipagemPage />} />
         <Route path="/estoque-reposicao" element={<EstoqueReposicaoPage />} />
         <Route path="/compras" element={<ComprasPage />} />
@@ -203,12 +210,17 @@ function AppRoutes() {
         <Route path="/recorrentes" element={<FinanceOnly><RecorrentesPage /></FinanceOnly>} />
         <Route path="/nfe" element={<NfePage />} />
         <Route path="/kits" element={<KitsPage />} />
+        <Route path="/kits/montar" element={<KitMontarPage />} />
+        <Route path="/kits/modelos" element={<KitModelosPage />} />
+        <Route path="/kits/controlados" element={<KitControladosPage />} />
         <Route path="/kits/:kitId/uso" element={<KitUsoPage />} />
         <Route path="/kits/:kitId/editar" element={<KitEditarPage />} />
         <Route path="/kits/modelos/:modeloId" element={<KitModeloPage />} />
         <Route path="/kits/consumo-do-setor" element={<KitConsumoSetorPage />} />
         <Route path="/kits/conferencia-spa" element={<KitConferenciaSpaPage />} />
         <Route path="/cme" element={<CmePage />} />
+        <Route path="/cme/pacotes" element={<CmePacotesPage />} />
+        <Route path="/cme/cadastro" element={<CmeCadastroPage />} />
         <Route path="/inventario" element={<InventarioPage />} />
         <Route path="/estoque-relatorios" element={<EstoqueRelatoriosPage />} />
         <Route path="/estoque-codigos" element={<CodigosBarrasPage />} />

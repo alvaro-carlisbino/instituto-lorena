@@ -6,11 +6,11 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { LISTA_DE_KITS } from '@/components/kits/navegacaoDoKit'
 
-export function VoltarParaKits({ rotulo = 'Kits' }: { rotulo?: string }) {
+export function VoltarParaKits({ rotulo = 'Kits dos pacientes', para = LISTA_DE_KITS }: { rotulo?: string; para?: string }) {
   return (
     <div className="mx-auto w-full max-w-3xl">
       <Link
-        to={LISTA_DE_KITS}
+        to={para}
         className="inline-flex items-center gap-1 rounded-md text-sm text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
       >
         <ArrowLeft className="size-4" aria-hidden /> {rotulo}
