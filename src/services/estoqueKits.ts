@@ -70,7 +70,7 @@ export async function ensureBatch(payload: {
 // ------------------------------------------------------------ modelos de kit
 
 export type KitTemplateItem = { id: string; itemId: string; qty: number }
-/** De onde é o kit: decide o padrão do consumo do setor no registro de uso. */
+/** De onde é o kit: decide de qual setor ele baixa e qual agenda a montagem sugere. */
 export type SetorKit = 'cirurgia' | 'spa'
 export type KitTemplate = {
   id: string
@@ -107,14 +107,6 @@ export async function listKitTemplates(): Promise<KitTemplate[]> {
     warehouseId: r.warehouse_id != null ? String(r.warehouse_id) : null,
     items: byTpl.get(String(r.id)) ?? [],
   }))
-}
-
-/** Setor do modelo (inclusive desativado): kit antigo continua sabendo de onde veio. */
-export async function setorDoModelo(templateId: string): Promise<SetorKit | null> {
-  const { data, error } = await assertClient().from('kit_templates').select('setor').eq('id', templateId).maybeSingle()
-  if (error) throw new Error(error.message)
-  const setor = (data as { setor?: unknown } | null)?.setor
-  return setor === 'cirurgia' || setor === 'spa' ? setor : null
 }
 
 export async function createKitTemplate(payload: {
@@ -307,10 +299,21 @@ async function comLinhas(kits: Array<Record<string, unknown>>): Promise<StockKit
   }))
 }
 
-export async function listKits(leadId?: string): Promise<StockKit[]> {
+/**
+ * Kits do paciente (leadId), os 100 mais recentes, ou, com `busca`, os que batem no nome do
+ * paciente, do kit ou do procedimento em todo o histórico.
+ */
+export async function listKits(leadId?: string, busca?: string): Promise<StockKit[]> {
   const client = assertClient()
   let kitsQuery = client.from('stock_kits').select(COLUNAS_KIT).order('created_at', { ascending: false })
-  kitsQuery = leadId ? kitsQuery.eq('lead_id', leadId) : kitsQuery.limit(100)
+  // Vírgula, parêntese e asterisco quebram o filtro "or" do PostgREST.
+  const termo = (busca ?? '').replace(/[,()*%\\]/g, ' ').trim().replace(/\s+/g, '*')
+  if (leadId) kitsQuery = kitsQuery.eq('lead_id', leadId)
+  else if (termo) {
+    kitsQuery = kitsQuery
+      .or(`patient_name.ilike.*${termo}*,name.ilike.*${termo}*,procedure_label.ilike.*${termo}*`)
+      .limit(100)
+  } else kitsQuery = kitsQuery.limit(100)
   const kits = await kitsQuery
   if (kits.error) throw new Error(kits.error.message)
   return comLinhas((kits.data ?? []) as Array<Record<string, unknown>>)
@@ -449,9 +452,7 @@ export async function registrarUsoKit(
   kitId: string,
   linhas: Array<{ kitItemId: string; voltou: number; desfazer?: number; aMais: number }>,
   fechar = true,
-  /** Consumo do setor já na unidade do estoque (2 pares de luva = 0,04 caixa). */
-  consumo: Array<{ itemId: string; qty: number }> = [],
-): Promise<{ movimentos: number; unidades: number; controlados: number; aMais: number; desfeito: number; consumoItens: number }> {
+): Promise<{ movimentos: number; unidades: number; controlados: number; aMais: number; desfeito: number }> {
   const client = assertClient()
   const { data, error } = await client.rpc('stock_kit_registrar_uso', {
     p_kit_id: kitId,
@@ -459,7 +460,8 @@ export async function registrarUsoKit(
       .filter((l) => l.voltou > 0 || (l.desfazer ?? 0) > 0 || l.aMais > 0)
       .map((l) => ({ kit_item_id: l.kitItemId, voltou: l.voltou, desfazer: l.desfazer ?? 0, a_mais: l.aMais })),
     p_fechar: fechar,
-    p_consumo: consumo.filter((c) => c.qty > 0).map((c) => ({ item_id: c.itemId, qty: c.qty })),
+    // Consumo do setor saiu do kit (24/09/2026): é lançado em Transferência e uso.
+    p_consumo: [],
   })
   if (error) throw new Error(error.message)
   const r = (data ?? {}) as {
@@ -468,7 +470,6 @@ export async function registrarUsoKit(
     controlados?: number
     a_mais?: number
     desfeito?: number
-    consumo_itens?: number
   }
   return {
     movimentos: Number(r.movimentos ?? 0),
@@ -476,72 +477,6 @@ export async function registrarUsoKit(
     controlados: Number(r.controlados ?? 0),
     aMais: Number(r.a_mais ?? 0),
     desfeito: Number(r.desfeito ?? 0),
-    consumoItens: Number(r.consumo_itens ?? 0),
-  }
-}
-
-// ------------------------------------------------------------ consumo do setor
-
-export type ConsumoSetor = {
-  id: string | null
-  itemId: string
-  rotulo: string
-  /** Como a equipe conta: "par", "ml", "un". */
-  unidade: string
-  /** Quanto do estoque sai por unidade lançada (par de luva, caixa de 100 → 0,02). */
-  fator: number
-  padraoCirurgia: number
-  padraoSpa: number
-}
-
-export async function listConsumoSetor(): Promise<ConsumoSetor[]> {
-  const { data, error } = await assertClient()
-    .from('stock_consumo_setor')
-    .select('id, item_id, rotulo, unidade, fator, padrao_cirurgia, padrao_spa, ordem')
-    .order('ordem')
-    .order('rotulo')
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((r) => ({
-    id: String(r.id),
-    itemId: String(r.item_id),
-    rotulo: String(r.rotulo),
-    unidade: String(r.unidade ?? 'un'),
-    fator: Number(r.fator ?? 1),
-    padraoCirurgia: Number(r.padrao_cirurgia ?? 0),
-    padraoSpa: Number(r.padrao_spa ?? 0),
-  }))
-}
-
-/** Grava a lista inteira: atualiza, inclui e apaga o que saiu da tela. */
-export async function salvarConsumoSetor(lista: ConsumoSetor[]): Promise<void> {
-  const client = assertClient()
-  const validas = lista.filter((c) => c.itemId && c.rotulo.trim() && c.fator > 0)
-  const itens = new Set<string>()
-  for (const c of validas) {
-    if (itens.has(c.itemId)) throw new Error(`O item de "${c.rotulo}" aparece duas vezes na lista.`)
-    itens.add(c.itemId)
-  }
-  const { data: atuais, error: readErr } = await client.from('stock_consumo_setor').select('id, item_id')
-  if (readErr) throw new Error(readErr.message)
-  // Pelo item, não pelo id: linha que trocou de item vira outra linha no upsert, e a antiga sai.
-  const apagar = (atuais ?? []).filter((r) => !itens.has(String(r.item_id))).map((r) => String(r.id))
-  if (apagar.length) {
-    const { error } = await client.from('stock_consumo_setor').delete().in('id', apagar)
-    if (error) throw new Error(error.message)
-  }
-  const linhas = validas.map((c, ordem) => ({
-    item_id: c.itemId,
-    rotulo: c.rotulo.trim(),
-    unidade: c.unidade.trim() || 'un',
-    fator: c.fator,
-    padrao_cirurgia: Math.max(0, c.padraoCirurgia),
-    padrao_spa: Math.max(0, c.padraoSpa),
-    ordem,
-  }))
-  if (linhas.length) {
-    // Chave (tenant, item): trocar o item de uma linha vira outra linha, sem duplicar.
-    const { error } = await client.from('stock_consumo_setor').upsert(linhas, { onConflict: 'tenant_id,item_id' })
-    if (error) throw new Error(error.message)
   }
 }
 
@@ -850,9 +785,11 @@ export async function imprimirContaDoKit(
   imprimirHtml(html)
 }
 
-/** Folha para ticar durante a cirurgia (itens do kit em MAT/MED + consumo do setor em branco). */
+/**
+ * Folha para ticar durante a cirurgia (itens do kit em MAT/MED). O consumo do setor saiu da folha
+ * em 24/09/2026: é lançado no setor, em Transferência e uso.
+ */
 export async function imprimirFolhaDoKit(kit: StockKit, itens: Map<string, ItemParaImpressao>): Promise<void> {
-  const consumo = await listConsumoSetor()
   const { html } = htmlFolhaDoKit({
     paciente: kit.patientName,
     procedimento: kit.procedureLabel,
@@ -868,7 +805,7 @@ export async function imprimirFolhaDoKit(kit: StockKit, itens: Map<string, ItemP
         avulso: l.isExtra,
         consumoSetor: false,
       })),
-    consumo: consumo.map((c) => ({ rotulo: c.rotulo, unidade: c.unidade })),
+    consumo: [],
   })
   imprimirHtml(html)
 }
@@ -885,7 +822,6 @@ export async function imprimirFolhaDeItens(dados: {
   linhas: Array<{ itemId: string; qty: number; avulso?: boolean }>
   itens: Map<string, ItemParaImpressao>
 }): Promise<void> {
-  const consumo = await listConsumoSetor()
   const emBranco = !dados.paciente && !dados.procedimento && !dados.data
   const { html } = htmlFolhaDoKit({
     paciente: dados.paciente ?? null,
@@ -903,7 +839,7 @@ export async function imprimirFolhaDeItens(dados: {
         avulso: Boolean(l.avulso),
         consumoSetor: false,
       })),
-    consumo: consumo.map((c) => ({ rotulo: c.rotulo, unidade: c.unidade })),
+    consumo: [],
   })
   imprimirHtml(html)
 }

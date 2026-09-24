@@ -51,7 +51,6 @@ import {
   ShieldAlert,
   ShoppingCart,
   SlidersHorizontal,
-  SprayCan,
   SquareCheck,
   Star,
   Store,
@@ -673,15 +672,6 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     visible: (ctx) => isClinic(ctx) && canBoards(ctx),
   },
   {
-    id: 'kits-consumo-setor',
-    path: '/kits/consumo-do-setor',
-    label: 'Consumo do setor',
-    icon: SprayCan,
-    group: 'kits',
-    keywords: ['álcool', 'luva', 'toca', 'propé', 'clorexidina', 'gasto do setor'],
-    visible: (ctx) => isClinic(ctx) && canBoards(ctx),
-  },
-  {
     id: 'kits-controlados',
     path: '/kits/controlados',
     label: 'Livro de controlados',
@@ -754,7 +744,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     label: 'Transferência e uso',
     icon: ArrowLeftRight,
     group: 'estoque',
-    keywords: ['uso do setor', 'gasto do setor', 'dar baixa', 'usei', 'usamos', 'álcool', 'luva', 'movimentação', 'entre setores', 'levar para o setor'],
+    keywords: ['uso do setor', 'consumo do setor', 'gasto do setor', 'dar baixa', 'usei', 'usamos', 'álcool', 'luva', 'clorexidina', 'toca', 'propé', 'movimentação', 'entre setores', 'levar para o setor'],
     visible: canBoards,
   },
   {

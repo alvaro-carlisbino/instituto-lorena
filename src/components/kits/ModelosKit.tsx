@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Layers, Pencil, Plus, Printer, SprayCan, Trash2, TriangleAlert } from 'lucide-react'
+import { Layers, Pencil, Plus, Printer, Trash2, TriangleAlert } from 'lucide-react'
 
 import { Button, buttonVariants } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { SearchField } from '@/components/ui/search-field'
 import { formatQtd, itemEhEscolha, ordenarPorNome } from '@/components/kits/kitUi'
+import { combinaBusca } from '@/lib/busca'
 import { cn } from '@/lib/utils'
 import type { StockItem } from '@/services/estoqueCompras'
 import { type KitTemplate, deactivateKitTemplate, imprimirFolhaDeItens } from '@/services/estoqueKits'
@@ -22,6 +24,11 @@ export function ModelosKit({
 }) {
   const [desativando, setDesativando] = useState<KitTemplate | null>(null)
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
+  const [busca, setBusca] = useState('')
+  const termo = useDeferredValue(busca)
+  // Pelo nome do modelo ou de um item: "clorexidina" mostra em quais modelos ela está.
+  const itensQueBatem = (t: KitTemplate) => (termo ? t.items.filter((i) => combinaBusca(termo, porId.get(i.itemId)?.name)) : [])
+  const visiveis = templates.filter((t) => combinaBusca(termo, t.name) || itensQueBatem(t).length > 0)
 
   const desativar = async (t: KitTemplate) => {
     setDesativando(null)
@@ -39,20 +46,26 @@ export function ModelosKit({
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">O modelo é a lista padrão da bandeja. Na montagem dá para ajustar tudo.</p>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
-          <Link to="/kits/consumo-do-setor" className={buttonVariants({ variant: 'outline' })}>
-            <SprayCan className="size-4" aria-hidden /> Consumo do setor
-          </Link>
           <Link to="/kits/modelos/novo" className={buttonVariants()}>
             <Plus className="size-4" aria-hidden /> Novo modelo
           </Link>
         </div>
       </div>
 
+      {templates.length > 3 ? (
+        <SearchField value={busca} onChange={setBusca} label="Buscar modelo ou item" resultados={termo ? visiveis.length : undefined} />
+      ) : null}
+
       {templates.length === 0 ? (
         <EmptyState icon={Layers} title="Nenhum modelo de kit" description="Crie o primeiro modelo com os itens que vão na bandeja." />
+      ) : visiveis.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground">
+          Nenhum modelo tem "{termo}" no nome ou nos itens.
+        </p>
       ) : (
         <ul className="space-y-2.5">
-          {templates.map((t) => {
+          {visiveis.map((t) => {
+            const achados = itensQueBatem(t)
             const escolhas = t.items.filter((i) => itemEhEscolha(porId.get(i.itemId)?.name)).length
             const semSaldo = t.items.filter((i) => (porId.get(i.itemId)?.qty ?? 0) < i.qty).length
             const kitsPossiveis = t.items.length
@@ -82,6 +95,11 @@ export function ModelosKit({
                         ]
                           .filter(Boolean)
                           .join(' · ')}
+                      </p>
+                    ) : null}
+                    {achados.length > 0 ? (
+                      <p className="mt-1 text-xs font-medium text-foreground">
+                        Tem: {achados.map((i) => `${formatQtd(i.qty)}× ${porId.get(i.itemId)?.name ?? '?'}`).join(', ')}
                       </p>
                     ) : null}
                     <p className="mt-1.5 line-clamp-2 text-xs text-muted-foreground">

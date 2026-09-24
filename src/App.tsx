@@ -124,7 +124,6 @@ const KitControladosPage = lazyPage(() => import('./pages/KitsPage'), 'KitContro
 const KitUsoPage = lazyPage(() => import('./pages/KitUsoPage'), 'KitUsoPage')
 const KitEditarPage = lazyPage(() => import('./pages/KitEditarPage'), 'KitEditarPage')
 const KitModeloPage = lazyPage(() => import('./pages/KitModeloPage'), 'KitModeloPage')
-const KitConsumoSetorPage = lazyPage(() => import('./pages/KitConsumoSetorPage'), 'KitConsumoSetorPage')
 const KitConferenciaSpaPage = lazyPage(() => import('./pages/KitConferenciaSpaPage'), 'KitConferenciaSpaPage')
 const CmePage = lazyPage(() => import('./pages/CmePage'), 'CmePage')
 const CmePacotesPage = lazyPage(() => import('./pages/CmePage'), 'CmePacotesPage')
@@ -217,7 +216,8 @@ function AppRoutes() {
         <Route path="/kits/:kitId/uso" element={<KitUsoPage />} />
         <Route path="/kits/:kitId/editar" element={<KitEditarPage />} />
         <Route path="/kits/modelos/:modeloId" element={<KitModeloPage />} />
-        <Route path="/kits/consumo-do-setor" element={<KitConsumoSetorPage />} />
+        {/* Consumo do setor saiu do kit em 24/09/2026: agora é lançado em Transferência e uso. */}
+        <Route path="/kits/consumo-do-setor" element={<Navigate to="/transferencias-estoque" replace />} />
         <Route path="/kits/conferencia-spa" element={<KitConferenciaSpaPage />} />
         <Route path="/cme" element={<CmePage />} />
         <Route path="/cme/pacotes" element={<CmePacotesPage />} />

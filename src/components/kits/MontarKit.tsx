@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Check, ClipboardList, PackagePlus, Printer, RefreshCw, ShieldAlert, Trash2, TriangleAlert } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -44,7 +44,7 @@ import { cn } from '@/lib/utils'
 import { agendaDoDiaParaKit, buscarPacientesDoKit, cirurgiasParaKit, horarioDoShosp } from '@/services/pacienteDoKit'
 import type { StockItem } from '@/services/estoqueCompras'
 import { type StockWarehouse, listWarehouseBalances, listWarehouses } from '@/services/estoqueArmazens'
-import { type KitTemplate, createKit, imprimirFolhaDeItens } from '@/services/estoqueKits'
+import { type KitTemplate, type StockKit, buscarKit, createKit, imprimirFolhaDeItens, listKits } from '@/services/estoqueKits'
 import { SITUACAO_PACOTE, acharPacote, usarPacotesNoKit } from '@/services/cme'
 
 type Rascunho = {
@@ -261,6 +261,67 @@ export function MontarKit({
     }
   }, [agendamentoDaUrl, setParams])
 
+  // "Outro kit para este paciente" (/kits/montar?do-kit=…): TC e Nanofat no mesmo paciente são dois
+  // kits. Entra com paciente, venda, procedimento e data do kit anterior; falta só o modelo.
+  const doKitDaUrl = params.get('do-kit')
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (!doKitDaUrl) return
+    let vivo = true
+    const tirarDaUrl = () =>
+      setParams(
+        (atual) => {
+          const n = new URLSearchParams(atual)
+          n.delete('do-kit')
+          return n
+        },
+        { replace: true },
+      )
+    void buscarKit(doKitDaUrl)
+      .then((k) => {
+        if (!vivo) return
+        if (!k) {
+          toast.error('Kit anterior não encontrado.')
+          return
+        }
+        const nome = k.patientName || 'o paciente'
+        if (linhasRef.current.length > 0) {
+          toast.error(`Tem uma bandeja em andamento. Monte ou limpe essa antes do outro kit de ${nome}.`)
+          return
+        }
+        setR({
+          ...VAZIO,
+          leadId: k.leadId ?? '',
+          leadName: k.leadId ? (k.patientName ?? '') : '',
+          paciente: k.leadId ? '' : (k.patientName ?? ''),
+          prontuario: k.shospProntuario,
+          clinicSaleId: k.clinicSaleId,
+          procedimento: k.procedureLabel ?? '',
+          data: k.scheduledFor ?? '',
+        })
+        toast.success(`Outro kit para ${nome}. Agora escolha o modelo (ex.: Nanofat).`)
+      })
+      .catch((e) => vivo && toast.error(e instanceof Error ? e.message : 'Falha ao abrir o kit anterior'))
+      .finally(() => vivo && tirarDaUrl())
+    return () => {
+      vivo = false
+    }
+  }, [doKitDaUrl, setParams])
+
+  // Kits que o paciente já tem: montar outro é normal (TC + Nanofat), mas a equipe vê o que já saiu.
+  const [kitsDoPaciente, setKitsDoPaciente] = useState<{ leadId: string; kits: StockKit[] } | null>(null)
+  useEffect(() => {
+    if (!r.leadId) return
+    let vivo = true
+    listKits(r.leadId)
+      .then((kits) => vivo && setKitsDoPaciente({ leadId: r.leadId, kits: kits.filter((k) => k.status !== 'cancelado') }))
+      .catch(() => undefined)
+    return () => {
+      vivo = false
+    }
+  }, [r.leadId])
+  const kitsJaMontados = r.leadId && kitsDoPaciente?.leadId === r.leadId ? kitsDoPaciente.kits : []
+
   const aplicarModelo = (templateId: string) => {
     const tpl = templates.find((t) => t.id === templateId)
     set({
@@ -398,6 +459,12 @@ export function MontarKit({
       toast.success(
         `${nome} montado${nomePaciente ? ` para ${nomePaciente}` : ''}: ${movements} ${movements === 1 ? 'baixa' : 'baixas'} no estoque` +
           (controlled > 0 ? `, ${controlled} no livro de controlados.` : '.'),
+        nomePaciente
+          ? {
+              duration: 12000,
+              action: { label: 'Outro kit para este paciente', onClick: () => navigate(`/kits/montar?do-kit=${kitId}`) },
+            }
+          : undefined,
       )
       const pacotes = (r.pacotesCme ?? []).map((p) => p.codigo)
       if (pacotes.length > 0) {
@@ -466,6 +533,16 @@ export function MontarKit({
           {!r.leadId && r.prontuario ? (
             <p className="text-xs text-muted-foreground">
               Paciente do Shosp (prontuário {r.prontuario}) sem cadastro no CRM: o kit fica com o nome.
+            </p>
+          ) : null}
+          {kitsJaMontados.length > 0 ? (
+            <p className="rounded-md bg-sky-500/10 px-2 py-1.5 text-xs text-sky-800 dark:text-sky-200">
+              Já tem {kitsJaMontados.length === 1 ? 'kit' : `${kitsJaMontados.length} kits`}:{' '}
+              {kitsJaMontados
+                .slice(0, 3)
+                .map((k) => `${k.name}${k.scheduledFor ? ` (${k.scheduledFor.split('-').reverse().slice(0, 2).join('/')})` : ''}`)
+                .join(', ')}
+              {kitsJaMontados.length > 3 ? '…' : ''}. Pode montar outro (ex.: TC e Nanofat são dois kits).
             </p>
           ) : null}
           {!r.leadId && !r.prontuario ? (
@@ -865,7 +942,7 @@ export function MontarKit({
         open={trocarModelo != null}
         onOpenChange={(open) => !open && setTrocarModelo(null)}
         title="Trocar o modelo?"
-        description="A bandeja atual, com o que já foi conferido, será substituída pelos itens do novo modelo."
+        description="A bandeja atual, com o que já foi conferido, será substituída pelos itens do novo modelo. Se o paciente precisa dos dois kits (ex.: TC e Nanofat), não troque: monte este e toque em Outro kit para este paciente."
         confirmLabel="Trocar modelo"
         variant="default"
         onConfirm={() => {

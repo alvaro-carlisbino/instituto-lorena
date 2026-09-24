@@ -144,7 +144,7 @@ export function EditorModelo({
               </button>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground">Decide o padrão do consumo do setor ao registrar o uso.</p>
+          <p className="text-xs text-muted-foreground">Decide de qual setor o kit baixa e qual agenda a montagem sugere.</p>
         </div>
         {setoresEstoque.length > 1 ? (
           <div className="space-y-1.5">

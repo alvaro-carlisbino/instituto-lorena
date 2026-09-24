@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { SearchField } from '@/components/ui/search-field'
 import { SearchPicker } from '@/components/ui/search-picker'
 import { produtosParaBusca } from '@/components/kits/kitUi'
 import { toast } from 'sonner'
@@ -12,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { combinaBusca } from '@/lib/busca'
 import { listAppUsersForLink } from '@/services/rhPonto'
 import {
   type PurchaseOrder,
@@ -59,6 +61,9 @@ export function ComprasPage() {
   const [newSupplierName, setNewSupplierName] = useState('')
   const [showNewSupplier, setShowNewSupplier] = useState(false)
   const [itemFilter, setItemFilter] = useState('')
+  const [buscaOrdem, setBuscaOrdem] = useState('')
+  const termoOrdem = useDeferredValue(buscaOrdem)
+  const [statusOrdem, setStatusOrdem] = useState<PurchaseOrderStatus | 'abertas' | 'todas'>('todas')
 
   const load = async () => {
     setLoading(true)
@@ -180,6 +185,14 @@ export function ComprasPage() {
       setSaving(false)
     }
   }
+
+  // Código (OC-12), item, fornecedor, responsável ou observação.
+  const ordensVisiveis = orders.filter(
+    (po) =>
+      (statusOrdem === 'todas' ||
+        (statusOrdem === 'abertas' ? po.status !== 'recebida' && po.status !== 'cancelada' : po.status === statusOrdem)) &&
+      combinaBusca(termoOrdem, po.code, po.supplierName, po.responsibleName, po.note, ...po.items.map((it) => it.description)),
+  )
 
   const advance = async (po: PurchaseOrder, status: PurchaseOrderStatus) => {
     try {
@@ -371,10 +384,49 @@ export function ComprasPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <ClipboardList className="size-4 text-primary" /> Ordens ({orders.length})
+              <ClipboardList className="size-4 text-primary" /> Ordens ({ordensVisiveis.length === orders.length ? orders.length : `${ordensVisiveis.length} de ${orders.length}`})
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2.5">
+            {orders.length > 0 ? (
+              <div className="space-y-2">
+                <SearchField
+                  value={buscaOrdem}
+                  onChange={setBuscaOrdem}
+                  label="Buscar ordem, item, fornecedor ou responsável"
+                  resultados={termoOrdem ? ordensVisiveis.length : undefined}
+                />
+                <div className="flex gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Situação da ordem">
+                  {(
+                    [
+                      ['todas', 'Todas'],
+                      ['abertas', 'Em aberto'],
+                      ['recebida', 'Recebidas'],
+                      ['cancelada', 'Canceladas'],
+                    ] as Array<[typeof statusOrdem, string]>
+                  ).map(([s, rotulo]) => (
+                    <button
+                      key={s}
+                      type="button"
+                      aria-pressed={statusOrdem === s}
+                      onClick={() => setStatusOrdem(s)}
+                      className={
+                        statusOrdem === s
+                          ? 'min-h-9 shrink-0 rounded-full border border-foreground bg-foreground px-3 text-xs font-medium text-background'
+                          : 'min-h-9 shrink-0 rounded-full border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-muted'
+                      }
+                    >
+                      {rotulo}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {orders.length > 0 && ordensVisiveis.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+                Nenhuma ordem com esse filtro.
+              </p>
+            ) : null}
             {orders.length === 0 ? (
               <EmptyState
                 icon={ClipboardList}
@@ -382,7 +434,7 @@ export function ComprasPage() {
                 description="Comece pelos itens à esquerda, depois escolha responsável e fornecedor."
               />
             ) : (
-              orders.map((po) => {
+              ordensVisiveis.map((po) => {
                 const badge = STATUS_BADGE[po.status]
                 return (
                   <div key={po.id} className="rounded-lg border border-border p-3">

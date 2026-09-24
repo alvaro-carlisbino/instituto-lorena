@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Ban, ChevronDown, ClipboardCheck, MoreHorizontal, PackageCheck, Pencil, Printer, ShieldAlert, Trash2, Undo2 } from 'lucide-react'
+import { Ban, ChevronDown, ClipboardCheck, MoreHorizontal, PackageCheck, PackagePlus, Pencil, Printer, ShieldAlert, Trash2, Undo2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { EmptyState } from '@/components/ui/empty-state'
+import { SearchField } from '@/components/ui/search-field'
 import { CabecalhoGrupo } from '@/components/kits/CabecalhoGrupo'
 import { STATUS_KIT, agruparMatMed, formatBRL, formatQtd } from '@/components/kits/kitUi'
 import { podeVoltar } from '@/lib/kitMontagem'
@@ -27,21 +28,31 @@ const dataCurta = (iso: string | null) =>
 
 export function KitsLista({
   kits,
+  busca,
+  onBusca,
+  buscando,
   items,
   kitCosts,
   lastCosts,
   loading,
   onRegistrarUso,
   onEditar,
+  onOutroKit,
   onMudou,
 }: {
   kits: StockKit[]
+  /** Busca por paciente, kit, procedimento ou item (quem filtra é a página). */
+  busca: string
+  onBusca: (v: string) => void
+  buscando: boolean
   items: StockItem[]
   kitCosts: Map<string, KitCost>
   lastCosts: Map<string, number>
   loading: boolean
   onRegistrarUso: (kit: StockKit) => void
   onEditar: (kit: StockKit) => void
+  /** Montar mais um kit para o mesmo paciente (TC e Nanofat são dois kits). */
+  onOutroKit: (kit: StockKit) => void
   onMudou: () => void
 }) {
   const abertos = kits.filter((k) => k.status === 'montado').length
@@ -100,6 +111,16 @@ export function KitsLista({
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-3">
+      <SearchField
+        value={busca}
+        onChange={(v) => {
+          // Quem busca um paciente quer achar o kit, esteja ele aberto ou já usado.
+          if (v.trim() && !busca.trim() && filtro === 'abertos') setFiltro('todos')
+          onBusca(v)
+        }}
+        label="Buscar paciente, kit, procedimento ou item"
+        resultados={busca.trim().length >= 2 ? visiveis.length : undefined}
+      />
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {(
           [
@@ -126,8 +147,22 @@ export function KitsLista({
       {visiveis.length === 0 ? (
         <EmptyState
           icon={PackageCheck}
-          title={loading ? 'Carregando…' : filtro === 'abertos' ? 'Nenhum kit aguardando uso' : 'Nenhum kit aqui'}
-          description="Kits montados aparecem aqui até alguém registrar o uso depois da cirurgia."
+          title={
+            loading || buscando
+              ? 'Carregando…'
+              : busca.trim()
+                ? `Nenhum kit com "${busca.trim()}"${filtro !== 'todos' ? ' neste filtro' : ''}`
+                : filtro === 'abertos'
+                  ? 'Nenhum kit aguardando uso'
+                  : 'Nenhum kit aqui'
+          }
+          description={
+            busca.trim()
+              ? filtro !== 'todos'
+                ? 'Toque em Todos para procurar em todos os kits.'
+                : 'A busca olha o nome do paciente, do kit, o procedimento e os itens.'
+              : 'Kits montados aparecem aqui até alguém registrar o uso depois da cirurgia.'
+          }
         />
       ) : (
         <ul className="space-y-2.5">
@@ -186,6 +221,11 @@ export function KitsLista({
                       {kit.status !== 'cancelado' ? (
                         <DropdownMenuItem onClick={() => onEditar(kit)}>
                           <Pencil className="size-4" aria-hidden /> Editar kit e cobranças
+                        </DropdownMenuItem>
+                      ) : null}
+                      {kit.patientName ? (
+                        <DropdownMenuItem onClick={() => onOutroKit(kit)}>
+                          <PackagePlus className="size-4" aria-hidden /> Outro kit para este paciente
                         </DropdownMenuItem>
                       ) : null}
                       <DropdownMenuItem onClick={() => void imprimir(kit, 'folha')} disabled={imprimindo === kit.id}>

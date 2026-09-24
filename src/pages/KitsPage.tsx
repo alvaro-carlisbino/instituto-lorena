@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 
@@ -8,6 +8,7 @@ import { LivroControlados } from '@/components/kits/LivroControlados'
 import { ModelosKit } from '@/components/kits/ModelosKit'
 import { MontarKit } from '@/components/kits/MontarKit'
 import { useTenant } from '@/context/TenantContext'
+import { combinaBusca } from '@/lib/busca'
 import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 import {
   type ControlledLogRow,
@@ -45,7 +46,8 @@ function useDadosDosKits(partes: Partes) {
         itens ? listStockItems() : Promise.resolve(null),
         modelos ? listKitTemplates() : Promise.resolve(null),
         comKits ? listKits() : Promise.resolve(null),
-        controlados ? listControlledLog() : Promise.resolve(null),
+        // O livro tem busca: carrega um histórico que valha a pena buscar, não só os 50 últimos.
+        controlados ? listControlledLog(1000) : Promise.resolve(null),
         comKits ? listKitCosts() : Promise.resolve(null),
         comKits ? listItemLastCosts() : Promise.resolve(null),
       ])
@@ -100,6 +102,36 @@ export function KitsPage() {
   const aba = params.get('aba')
   const kitDaUrl = params.get('kit')
 
+  // Busca: paciente, kit e procedimento no histórico inteiro (banco); item, nos kits já carregados.
+  const [busca, setBusca] = useState('')
+  const termo = useDeferredValue(busca.trim())
+  const [doBanco, setDoBanco] = useState<{ termo: string; kits: StockKit[] } | null>(null)
+  useEffect(() => {
+    if (termo.length < 2) return
+    let vivo = true
+    const t = window.setTimeout(() => {
+      listKits(undefined, termo)
+        .then((kits) => vivo && setDoBanco({ termo, kits }))
+        .catch((e) => vivo && toast.error(e instanceof Error ? e.message : 'Falha na busca de kits'))
+    }, 300)
+    return () => {
+      vivo = false
+      window.clearTimeout(t)
+    }
+  }, [termo])
+  const porItemId = useMemo(() => new Map(d.items.map((i) => [i.id, i.name] as const)), [d.items])
+  const kitsNaTela = useMemo(() => {
+    if (termo.length < 2) return d.kits
+    const locais = d.kits.filter(
+      (k) =>
+        combinaBusca(termo, k.patientName, k.name, k.procedureLabel) ||
+        k.items.some((l) => combinaBusca(termo, l.label, porItemId.get(l.itemId))),
+    )
+    const vistos = new Set(locais.map((k) => k.id))
+    const remotos = doBanco?.termo === termo ? doBanco.kits.filter((k) => !vistos.has(k.id)) : []
+    return [...locais, ...remotos].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }, [termo, d.kits, doBanco, porItemId])
+
   if (kitDaUrl) return <Navigate to={`/kits/${kitDaUrl}/editar`} replace />
   if (aba === 'montar') {
     const resto = new URLSearchParams(params)
@@ -113,13 +145,17 @@ export function KitsPage() {
   return (
     <AppLayout title="Kits dos pacientes" subtitle="Kits montados, usados e cancelados. Registre o uso depois do procedimento e corrija o que for preciso.">
       <KitsLista
-        kits={d.kits}
+        kits={kitsNaTela}
+        busca={busca}
+        onBusca={setBusca}
+        buscando={termo.length >= 2 && doBanco?.termo !== termo}
         items={d.items}
         kitCosts={d.kitCosts}
         lastCosts={d.lastCosts}
         loading={d.carregando}
         onRegistrarUso={(k) => navigate(`/kits/${k.id}/uso`)}
         onEditar={(k) => navigate(`/kits/${k.id}/editar`)}
+        onOutroKit={(k) => navigate(`/kits/montar?do-kit=${k.id}`)}
         onMudou={() => void d.recarregar()}
       />
     </AppLayout>

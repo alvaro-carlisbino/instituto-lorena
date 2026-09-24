@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-24-kits-outro-kit-e-busca",
+    "data": "2026-09-24",
+    "titulo": "Kits: mais de um kit para o mesmo paciente, consumo do setor fora do kit e busca nas listas",
+    "itens": [
+      "Paciente com TC e Nanofat? Monte o primeiro kit e toque em Outro kit para este paciente (aparece logo depois de montar e no menu de cada kit na lista). A montagem já vem com paciente, venda, procedimento e data, e avisa quais kits ele já tem.",
+      "Consumo do setor (álcool, luvas, clorexidina) saiu do Registrar uso e da folha para ticar: agora é lançado em Estoque, Transferência e uso. A clorexidina aquosa saiu dos modelos MMP, Mesoject e Biópsia.",
+      "Barra de busca em Kits dos pacientes (paciente, kit, procedimento ou item, em todo o histórico), Livro de controlados (remédio, paciente ou dia, com Entradas e Saídas), Conferência do SPA, Modelos de kit (mostra em quais modelos um item está) e Ordens de compra."
+    ]
+  },
+  {
     "id": "2026-09-24-transferencia-com-uso-e-data",
     "data": "2026-09-24",
     "titulo": "Transferência e uso: dê baixa no que o setor gastou, no dia em que gastou",

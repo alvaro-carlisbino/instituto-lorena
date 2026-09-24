@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Ban, Check, PackagePlus, Undo2 } from 'lucide-react'
@@ -8,7 +8,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SearchField } from '@/components/ui/search-field'
 import { EstadoDaTela } from '@/components/kits/TelaDoKit'
+import { combinaBusca } from '@/lib/busca'
 import { diaLocal } from '@/lib/diaLocal'
 import { type AtendimentoSpa, type LinhaConferenciaSpa, type SituacaoSpa, agruparAtendimentos, resumoSpa } from '@/lib/conferenciaSpa'
 import { cn } from '@/lib/utils'
@@ -43,6 +45,8 @@ export function KitConferenciaSpaPage() {
   const [erro, setErro] = useState<string | null>(null)
   const [filtro, setFiltro] = useState<Filtro>('pendente')
   const [mexendo, setMexendo] = useState<string | null>(null)
+  const [busca, setBusca] = useState('')
+  const termo = useDeferredValue(busca)
 
   const carregar = useCallback(async () => {
     if (!de || !ate) return
@@ -64,7 +68,12 @@ export function KitConferenciaSpaPage() {
   const atendimentos = useMemo(() => agruparAtendimentos(linhas), [linhas])
   const resumo = resumoSpa(atendimentos)
   const kitsSemAgenda = linhas.filter((l) => l.tipo === 'kit_sem_agenda')
-  const visiveis = filtro === 'todos' ? atendimentos : atendimentos.filter((a) => a.situacao === filtro)
+  // Paciente, prontuário, profissional ou kit: "sonia", "12345", "mariana".
+  const visiveis = atendimentos.filter(
+    (a) =>
+      (filtro === 'todos' || a.situacao === filtro) &&
+      combinaBusca(termo, a.paciente, a.prontuario, ...a.profissionais, ...a.kits.map((k) => k.nome)),
+  )
   const porDia = useMemo(() => {
     const m = new Map<string, AtendimentoSpa[]>()
     for (const a of visiveis) m.set(a.data, [...(m.get(a.data) ?? []), a])
@@ -122,6 +131,13 @@ export function KitConferenciaSpaPage() {
           </div>
         </div>
 
+        <SearchField
+          value={busca}
+          onChange={setBusca}
+          label="Buscar paciente, prontuário ou profissional"
+          resultados={termo ? visiveis.length : undefined}
+        />
+
         <div className="flex gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Filtrar atendimentos">
           {chips.map(([f, rotulo, n]) => (
             <button
@@ -144,9 +160,11 @@ export function KitConferenciaSpaPage() {
             <p className="rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
               {resumo.total === 0
                 ? 'Ninguém na agenda do Spa Capilar neste período.'
-                : filtro === 'pendente'
-                  ? 'Todo atendimento do período tem kit ou está marcado como sem material.'
-                  : 'Nada neste filtro.'}
+                : termo
+                  ? `Ninguém com "${termo}" ${filtro === 'todos' ? 'no período' : 'neste filtro'}.`
+                  : filtro === 'pendente'
+                    ? 'Todo atendimento do período tem kit ou está marcado como sem material.'
+                    : 'Nada neste filtro.'}
             </p>
           ) : (
             <div className="space-y-5">
