@@ -41,7 +41,7 @@ export type LeadformOutreachConfig = {
 
 const MENSAGEM_PADRAO =
   'Oi, {{primeiro_nome}}! Aqui é a Sofia, do Instituto Lorena. Vi que você deixou seu contato para saber ' +
-  'mais sobre o tratamento capilar. Posso te explicar como funciona a avaliação?'
+  'mais sobre o tratamento capilar. Posso te explicar como funciona a consulta?'
 
 /** Config do primeiro contato do polo (tenant_integrations.outreach.leadform). */
 export async function loadLeadformOutreachConfig(
