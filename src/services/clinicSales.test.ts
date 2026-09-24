@@ -36,6 +36,7 @@ const venda = (over: Partial<ClinicSale> = {}): ClinicSale =>
     performingDoctor: 'Lorena Visentainer',
     anesthetist: null,
     valueCents: 3_000_000,
+    totalCents: null,
     depositCents: null,
     depositAt: null,
     depositPayee: null,

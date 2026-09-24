@@ -52,6 +52,11 @@ export type ClinicSale = {
   performingDoctor: string | null
   anesthetist: string | null
   valueCents: number
+  /**
+   * Transplante: o que o paciente paga, com a entrada dentro. Gravado desde 24/09/2026; nulo nas
+   * vendas anteriores (total = valor + entrada). Ver lib/valorDaCirurgia.
+   */
+  totalCents: number | null
   depositCents: number | null
   depositAt: string | null
   depositPayee: DepositPayee | null
@@ -177,6 +182,7 @@ function mapSale(r: Record<string, unknown>): ClinicSale {
     performingDoctor: str(r.performing_doctor),
     anesthetist: str(r.anesthetist),
     valueCents: Number(r.value_cents ?? 0),
+    totalCents: num(r.total_cents),
     depositCents: num(r.deposit_cents),
     depositAt: str(r.deposit_at),
     depositPayee:
@@ -237,7 +243,7 @@ const SALE_COLS =
   'confirmation_status, confirmation_at, confirmation_note, cost_materials_cents, cost_doctor_cents, ' +
   'tax_cents, cost_other_cents, profit_cents, no_date_dismissed_at, no_date_dismissed_reason, ' +
   'no_patient_dismissed_at, no_patient_dismissed_reason, deposit_paid, contract_signed, contract_sent, ' +
-  'cost_anesthesia_cents, cost_doctor_manual, cost_anesthesia_manual, sem_raspagem, follicular_units'
+  'cost_anesthesia_cents, cost_doctor_manual, cost_anesthesia_manual, sem_raspagem, follicular_units, total_cents'
 
 export async function listClinicSales(kind?: ClinicSaleKind, limit = 400): Promise<ClinicSale[]> {
   const client = assertClient()
@@ -287,6 +293,12 @@ export type ClinicSaleInput = {
   performingDoctor?: string | null
   anesthetist?: string | null
   valueCents: number
+  /**
+   * Transplante: o total digitado. Com ele o banco recalcula o valor pela anestesia da política
+   * (a entrada só abate até o valor da anestesia). Só vai quando veio, para quem salva sem o
+   * formulário de cirurgia não apagar o total.
+   */
+  totalCents?: number | null
   depositCents?: number | null
   depositAt?: string | null
   depositPayee?: DepositPayee | null
@@ -335,6 +347,9 @@ function toRow(input: ClinicSaleInput) {
     performing_doctor: input.performingDoctor || input.attendingDoctor || null,
     anesthetist: input.anesthetist || null,
     value_cents: Math.max(0, Math.round(input.valueCents)),
+    ...(input.totalCents !== undefined && {
+      total_cents: input.totalCents != null ? Math.max(0, Math.round(input.totalCents)) : null,
+    }),
     deposit_cents: input.depositCents != null ? Math.max(0, Math.round(input.depositCents)) : null,
     deposit_at: input.depositAt || null,
     deposit_payee: input.depositPayee || null,
@@ -387,7 +402,9 @@ function validate(input: ClinicSaleInput) {
   if (input.scheduledAt && input.scheduledAt.slice(0, 10) < input.soldAt) {
     throw new Error('A data do procedimento está antes da data da venda. Confira o ano.')
   }
-  if (input.depositCents != null && input.depositCents > input.valueCents) {
+  // Com o total, a comparação é com ele: a entrada que passa da anestesia fica no valor, mas a
+  // entrada inteira pode passar do valor (total 20.000, entrada 19.000, anestesia 2.500).
+  if (input.depositCents != null && input.depositCents > (input.totalCents ?? input.valueCents)) {
     throw new Error('A entrada é maior que o valor da venda.')
   }
 }

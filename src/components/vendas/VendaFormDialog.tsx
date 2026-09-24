@@ -30,7 +30,14 @@ import {
   listSellerNames,
   updateClinicSale,
 } from '@/services/clinicSales'
-import { anestesiaParaGravar, anestesiaParaMostrar, totalParaMostrar, valorParaGravar } from '@/lib/valorDaCirurgia'
+import {
+  anestesiaParaGravar,
+  anestesiaParaMostrar,
+  entradaDaAnestesia,
+  entradaDaAnestesiaGravada,
+  totalParaMostrar,
+  valorParaGravar,
+} from '@/lib/valorDaCirurgia'
 import {
   type PreviaCirurgia,
   type RegraRepasse,
@@ -161,8 +168,8 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       setMedicoAtendeu(editing.attendingDoctor ?? '')
       setMedicoExecuta(editing.performingDoctor ?? '')
       setAnestesista(editing.anesthetist ?? '')
-      // Transplante: a tela mostra o total (valor gravado + entrada), ver lib/valorDaCirurgia.
-      setValor(showMoney(editing.kind === 'cirurgia' ? totalParaMostrar(editing.valueCents, editing.depositCents) : editing.valueCents))
+      // Transplante: a tela mostra o total, ver lib/valorDaCirurgia.
+      setValor(showMoney(editing.kind === 'cirurgia' ? totalParaMostrar(editing) : editing.valueCents))
       setEntrada(showMoney(editing.depositCents))
       setEntradaData(editing.depositAt ?? '')
       setEntradaPara(editing.depositPayee ?? '')
@@ -170,7 +177,11 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       setCustoMaterial(showMoney(editing.costMaterialsCents))
       setCustoMedico(showMoney(editing.costDoctorCents))
       setCustoAnestesia(
-        showMoney(editing.costAnesthesiaManual ? anestesiaParaMostrar(editing.costAnesthesiaCents, editing.depositCents ?? 0) : editing.costAnesthesiaCents),
+        showMoney(
+          editing.costAnesthesiaManual
+            ? anestesiaParaMostrar(editing.costAnesthesiaCents, entradaDaAnestesiaGravada(editing))
+            : editing.costAnesthesiaCents,
+        ),
       )
       setMedicoManual(editing.costDoctorManual)
       setAnestesiaManual(editing.costAnesthesiaManual)
@@ -265,12 +276,20 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
 
   // O lucro aparece enquanto ela digita: é a conta que hoje ela faz na
   // calculadora do celular depois de fechar a planilha.
-  // A entrada entra na conta do repasse: no transplante ela já é o pagamento do anestesista.
+  // A entrada entra na conta do repasse: no transplante ela paga o anestesista, até o valor
+  // da anestesia. O que passa disso é pagamento da cirurgia e fica com a clínica.
   const entradaCents = parseMoney(entrada)
   // Transplante: digita-se o TOTAL que o paciente paga; o valor da venda (base dos 13% do médico e
-  // do que é gravado) é o total sem a entrada. Protocolo segue como era.
+  // do que é gravado) é o total sem a parte da entrada que pagou a anestesia. Enquanto a prévia
+  // não volta, a anestesia é desconhecida e desconta a entrada inteira (a tela nunca mostra lucro
+  // a mais). O banco refaz a conta ao gravar. Protocolo segue como era.
   const totalCents = parseMoney(valor)
-  const valorCents = cirurgia ? valorParaGravar(totalCents, entradaCents) : totalCents
+  const anestesiaCheiaCents = anestesiaManual
+    ? parseMoney(custoAnestesia)
+    : (previa?.anestesiaPoliticaCents ?? null)
+  const entradaDoAnestesistaCents = entradaDaAnestesia(entradaCents, anestesiaCheiaCents)
+  const valorCents = cirurgia ? valorParaGravar(totalCents, entradaDoAnestesistaCents) : totalCents
+  const sobraDaEntradaCents = cirurgia ? Math.max(0, entradaCents - entradaDoAnestesistaCents) : 0
   const ufNum = ufTexto.replace(/\D/g, '') ? Number(ufTexto.replace(/\D/g, '')) : null
   // Protocolo não tem campo de quem opera: o banco grava quem atendeu (ver toRow), e a regra
   // procura pelo mesmo nome.
@@ -374,6 +393,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       performingDoctor: medicoExecuta || null,
       anesthetist: anestesista || null,
       valueCents: valorCents,
+      totalCents: cirurgia ? totalCents : undefined,
       depositCents: entrada ? entradaCents : null,
       depositAt: entradaData || null,
       depositPayee: entradaPara || null,
@@ -627,8 +647,10 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
               {entradaCents > totalCents
                 ? 'A entrada está maior que o valor total. O valor total é tudo o que o paciente paga, com a entrada dentro.'
                 : entrada
-                  ? `Para a clínica ficam ${brlCampo(valorCents)}: o total menos a entrada de ${brlCampo(entradaCents)}, que paga o anestesista. O repasse do médico é sobre esse valor.`
-                  : 'Valor total é tudo o que o paciente paga. Se ele deu entrada, preencha o campo Entrada: ela sai do total e paga o anestesista.'}
+                  ? sobraDaEntradaCents > 0
+                    ? `Para a clínica ficam ${brlCampo(valorCents)}: o total menos ${brlCampo(entradaDoAnestesistaCents)} da entrada, que pagam a anestesia. Os outros ${brlCampo(sobraDaEntradaCents)} da entrada são pagamento da cirurgia e ficam com a clínica. O repasse do médico é sobre esse valor.`
+                    : `Para a clínica ficam ${brlCampo(valorCents)}: o total menos a entrada de ${brlCampo(entradaCents)}, que paga o anestesista. O repasse do médico é sobre esse valor.`
+                  : 'Valor total é tudo o que o paciente paga. Se ele deu entrada, preencha o campo Entrada: ela sai do total e paga o anestesista, até o valor da anestesia.'}
             </p>
           ) : null}
 
