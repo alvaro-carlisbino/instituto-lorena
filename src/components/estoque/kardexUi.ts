@@ -7,7 +7,7 @@ export const ROTULO_GRUPO: Record<FiltroKardex['grupo'], string> = {
   saidas: 'Só saídas',
   compra: 'Compras (notas)',
   kit: 'Kits',
-  transferencia: 'Transferências',
+  transferencia: 'Transferências e uso do setor',
   inventario: 'Inventário e acertos',
   avulso: 'Lançamentos avulsos',
   estorno: 'Estornos',
@@ -39,7 +39,7 @@ export function linkDaOrigem(l: LinhaKardex, podeVerFinanceiro: boolean): string
   const o = l.origem
   if (o.tipo === 'nota' && o.id && podeVerFinanceiro) return `/contas-a-pagar?nota=${o.id}`
   if (o.tipo === 'kit' && o.id) return `/kits/${o.id}/editar`
-  if (o.tipo === 'transferencia') return '/transferencias-estoque'
+  if (o.tipo === 'transferencia' || o.tipo === 'uso') return `/transferencias-estoque/${o.id}`
   if (o.tipo === 'inventario') return '/inventario'
   return null
 }

@@ -133,6 +133,7 @@ const InventarioPage = lazyPage(() => import('./pages/InventarioPage'), 'Inventa
 const EstoqueRelatoriosPage = lazyPage(() => import('./pages/EstoqueRelatoriosPage'), 'EstoqueRelatoriosPage')
 const CodigosBarrasPage = lazyPage(() => import('./pages/CodigosBarrasPage'), 'CodigosBarrasPage')
 const TransferenciasEstoquePage = lazyPage(() => import('./pages/TransferenciasEstoquePage'), 'TransferenciasEstoquePage')
+const TransferenciaEditarPage = lazyPage(() => import('./pages/TransferenciaEditarPage'), 'TransferenciaEditarPage')
 const EstoqueItemPage = lazyPage(() => import('./pages/EstoqueItemPage'), 'EstoqueItemPage')
 const EstoqueJuntarItemPage = lazyPage(() => import('./pages/EstoqueJuntarItemPage'), 'EstoqueJuntarItemPage')
 const EnderecosEstoquePage = lazyPage(() => import('./pages/EnderecosEstoquePage'), 'EnderecosEstoquePage')
@@ -225,6 +226,7 @@ function AppRoutes() {
         <Route path="/estoque-relatorios" element={<EstoqueRelatoriosPage />} />
         <Route path="/estoque-codigos" element={<CodigosBarrasPage />} />
         <Route path="/transferencias-estoque" element={<TransferenciasEstoquePage />} />
+        <Route path="/transferencias-estoque/:id" element={<TransferenciaEditarPage />} />
         <Route path="/conta-cirurgica" element={<ContaCirurgicaPage />} />
         <Route path="/alertas-pagamento" element={<FinanceOnly><AlertasPagamentoPage /></FinanceOnly>} />
         <Route path="/importar-shop" element={<FinanceOnly><ImportShopPage /></FinanceOnly>} />

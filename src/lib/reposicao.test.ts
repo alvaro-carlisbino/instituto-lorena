@@ -29,6 +29,16 @@ describe('consumoLiquido', () => {
     expect(c.get('gaze')?.qty).toBe(3)
   })
 
+  it('baixa do que o setor usou na transferência é gasto; corrigir para menos desconta', () => {
+    const c = consumoLiquido([
+      mov({ qtyDelta: -3, refType: 'stock_transfer' }),
+      mov({ kind: 'entrada', qtyDelta: 3, refType: 'stock_transfer' }),
+      mov({ qtyDelta: -3, refType: 'stock_uso' }),
+      mov({ kind: 'entrada', qtyDelta: 1, refType: 'estorno' }),
+    ])
+    expect(c.get('gaze')).toEqual({ qty: 2, costCents: 200, uncosted: false })
+  })
+
   it('estorno desfaz a saída; entrada de nota e ajuste de contagem não mexem', () => {
     const c = consumoLiquido([
       mov({ qtyDelta: -5 }),

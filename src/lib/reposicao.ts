@@ -4,7 +4,8 @@
 // Consumo não é "toda saída": o kit sai cheio na montagem e a sobra volta como entrada do mesmo
 // kit; a transferência entre setores é saída num lugar e entrada no outro, nada foi gasto; o
 // estorno desfaz um lançamento. Somar só as saídas contava o kit cheio e a transferência como
-// gasto, e o pedido sairia inflado.
+// gasto, e o pedido sairia inflado. O que o setor usou do que foi levado (baixa na transferência,
+// ref_type 'stock_uso', 24/09/2026) é saída comum e conta; usou menos vira estorno e desconta.
 
 export type MovimentoDeConsumo = {
   itemId: string

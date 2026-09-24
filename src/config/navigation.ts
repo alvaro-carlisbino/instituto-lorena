@@ -751,10 +751,10 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   {
     id: 'transferencias',
     path: '/transferencias-estoque',
-    label: 'Transferências',
+    label: 'Transferência e uso',
     icon: ArrowLeftRight,
     group: 'estoque',
-    keywords: ['movimentação', 'entre setores', 'levar para o setor'],
+    keywords: ['uso do setor', 'gasto do setor', 'dar baixa', 'usei', 'usamos', 'álcool', 'luva', 'movimentação', 'entre setores', 'levar para o setor'],
     visible: canBoards,
   },
   {

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowDownUp, ArrowLeftRight, MapPin, Trash2, Undo2 } from 'lucide-react'
+import { ArrowDownUp, ArrowLeftRight, MapPin, PackageMinus, Pencil, Undo2 } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { ExportarMenu } from '@/components/page/ExportarMenu'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -21,15 +21,24 @@ import { Label } from '@/components/ui/label'
 import { SearchField } from '@/components/ui/search-field'
 import { SearchPicker } from '@/components/ui/search-picker'
 import { Textarea } from '@/components/ui/textarea'
-import { QtyStepper } from '@/components/estoque/QtyStepper'
+import { DiaDoUso, LinhaLevouUsou } from '@/components/estoque/LevouUsou'
 import { ScanBar } from '@/components/estoque/ScanBar'
 import { VincularCodigoDialog } from '@/components/estoque/VincularCodigoDialog'
 import { formatQtd, produtosParaBusca, semCodigoBipado } from '@/components/kits/kitUi'
 import { useTenant } from '@/context/TenantContext'
 import { beep } from '@/lib/beep'
 import { normalizarBusca } from '@/lib/busca'
+import { diaLocal, hojeLocal } from '@/lib/diaLocal'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { exportarExcel, exportarPdf } from '@/lib/exportar'
+import {
+  type LinhaLevouUsou as Linha,
+  ROTULO_SITUACAO,
+  type SituacaoDaTransferencia,
+  diaValido,
+  rotuloDoDia,
+  situacaoDaTransferencia,
+} from '@/lib/transferenciaUso'
 import { cn } from '@/lib/utils'
 import { type StockItem, listStockItems } from '@/services/estoqueCompras'
 import {
@@ -42,7 +51,12 @@ import {
   listWarehouses,
 } from '@/services/estoqueArmazens'
 
-type Linha = { itemId: string; qty: number }
+const COR_SITUACAO: Record<SituacaoDaTransferencia, string> = {
+  cancelada: '',
+  usada: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  parte: 'bg-amber-500/10 text-amber-800 dark:text-amber-200',
+  no_setor: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+}
 
 const dataHora = (iso: string) =>
   new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -52,8 +66,12 @@ const letras = (v: string) => v.replace(/[^\p{L}]/gu, '').length
 
 /**
  * Levar material de um setor para outro (Principal → Centro Cirúrgico, SPA, Consultório,
- * Higienização). Era um select com os 1.500 itens do estoque em cada linha: ninguém acha
- * "luva 7,5" rolando uma lista. Agora é digitar ou bipar, como no resto do estoque.
+ * Higienização) e dar baixa no que o setor usou. Era um select com os 1.500 itens do estoque em
+ * cada linha: ninguém acha "luva 7,5" rolando uma lista. Agora é digitar ou bipar.
+ *
+ * 24/09/2026: a clínica não tem estoque parado em cada setor; o que vai para o setor é, na
+ * maioria, gasto lá. Cada item tem "levou" e "usou", com o dia (às vezes o uso é de ontem), e a
+ * transferência se corrige depois em /transferencias-estoque/:id.
  */
 export function TransferenciasEstoquePage() {
   const { tenant } = useTenant()
@@ -66,6 +84,8 @@ export function TransferenciasEstoquePage() {
   const [fromId, setFromId] = useState('')
   const [toId, setToId] = useState('')
   const [note, setNote] = useState('')
+  const hoje = hojeLocal()
+  const [dia, setDia] = useState(hoje)
   const [linhas, setLinhas] = useState<Linha[]>([])
   const [saving, setSaving] = useState(false)
   const [codigo, setCodigo] = useState<string | null>(null)
@@ -81,6 +101,7 @@ export function TransferenciasEstoquePage() {
 
   const [filtroSetor, setFiltroSetor] = useState('')
   const [buscaHist, setBuscaHist] = useState('')
+  const [soSemBaixa, setSoSemBaixa] = useState(false)
 
   const porId = useMemo(() => new Map(items.map((i) => [i.id, i] as const)), [items])
   const ativos = useMemo(() => items.filter((i) => i.active), [items])
@@ -98,7 +119,7 @@ export function TransferenciasEstoquePage() {
 
   const load = async () => {
     try {
-      const [w, it, tr] = await Promise.all([listWarehouses(), listStockItems(true), listTransfers()])
+      const [w, it, tr] = await Promise.all([listWarehouses(), listStockItems(true), listTransfers(300)])
       setWarehouses(w)
       setItems(it)
       setTransfers(tr)
@@ -135,8 +156,9 @@ export function TransferenciasEstoquePage() {
     beep(true)
     setLinhas((prev) => {
       const i = prev.findIndex((l) => l.itemId === item.id)
-      if (i >= 0) return prev.map((l, j) => (j === i ? { ...l, qty: l.qty + 1 } : l))
-      return [{ itemId: item.id, qty: 1 }, ...prev]
+      // Linha marcada "usou tudo" continua usou tudo ao bipar de novo.
+      if (i >= 0) return prev.map((l, j) => (j === i ? { ...l, qty: l.qty + 1, usado: l.usado >= l.qty ? l.usado + 1 : l.usado } : l))
+      return [{ itemId: item.id, qty: 1, usado: 0 }, ...prev]
     })
   }
 
@@ -162,12 +184,21 @@ export function TransferenciasEstoquePage() {
       toast.error('Inclua ao menos um item.')
       return
     }
+    if (!diaValido(dia, hoje)) {
+      toast.error('Confira o dia: entre hoje e 30 dias atrás.')
+      return
+    }
     setSaving(true)
     try {
-      await createTransfer({ fromWarehouseId: fromId, toWarehouseId: toId, note, items: validas })
-      toast.success(`Transferência registrada: ${validas.length} ${validas.length === 1 ? 'item' : 'itens'}.`)
+      await createTransfer({ fromWarehouseId: fromId, toWarehouseId: toId, note, dia, items: validas })
+      const comBaixa = validas.filter((l) => l.usado > 0).length
+      toast.success(
+        `Transferência registrada: ${validas.length} ${validas.length === 1 ? 'item' : 'itens'}` +
+          (comBaixa > 0 ? `, ${comBaixa} com baixa do que foi usado.` : '.'),
+      )
       setLinhas([])
       setNote('')
+      setDia(hoje)
       setVersaoSaldo((v) => v + 1)
       await load()
     } catch (e) {
@@ -187,7 +218,7 @@ export function TransferenciasEstoquePage() {
     setCancelSalvando(true)
     try {
       await cancelarTransferencia(cancelando.id, motivo)
-      toast.success(`Transferência cancelada. Os itens voltaram para ${cancelando.fromName}.`)
+      toast.success(`Transferência cancelada. Os itens voltaram para ${cancelando.fromName} e a baixa foi desfeita.`)
       setCancelando(null)
       setVersaoSaldo((v) => v + 1)
       await load()
@@ -231,29 +262,44 @@ export function TransferenciasEstoquePage() {
     const termo = normalizarBusca(buscaHist)
     return transfers.filter((t) => {
       if (filtroSetor && t.fromWarehouseId !== filtroSetor && t.toWarehouseId !== filtroSetor) return false
+      if (soSemBaixa) {
+        const sit = situacaoDaTransferencia(t)
+        if (sit !== 'no_setor' && sit !== 'parte') return false
+      }
       if (!termo) return true
+      // Item, setor ou observação: "luva", "londrina", "sala 2".
+      if (normalizarBusca(`${t.fromName} ${t.toName} ${t.note ?? ''}`).includes(termo)) return true
       return t.items.some((i) => normalizarBusca(porId.get(i.itemId)?.name ?? '').includes(termo))
     })
-  }, [transfers, filtroSetor, buscaHist, porId])
-  const filtrando = filtroSetor !== '' || buscaHist.trim() !== ''
+  }, [transfers, filtroSetor, buscaHist, porId, soSemBaixa])
+  const filtrando = filtroSetor !== '' || buscaHist.trim() !== '' || soSemBaixa
 
-  const situacao = (t: StockTransfer) => (t.cancelledAt ? `Cancelada${t.cancelReason ? `: ${t.cancelReason}` : ''}` : 'Feita')
+  const situacao = (t: StockTransfer) =>
+    t.cancelledAt ? `Cancelada${t.cancelReason ? `: ${t.cancelReason}` : ''}` : ROTULO_SITUACAO[situacaoDaTransferencia(t)]
+  const diaDe = (t: StockTransfer) => t.feitoEm ?? diaLocal(t.createdAt)
+  const diaBr = (d: string) => d.split('-').reverse().join('/')
   const linhasHistorico = visiveis.flatMap((t) =>
-    t.items.map((i) => [
-      new Date(t.createdAt).toLocaleString('pt-BR'),
-      t.fromName,
-      t.toName,
-      porId.get(i.itemId)?.name ?? '?',
-      i.qty,
-      t.note ?? '',
-      situacao(t),
-    ]),
+    t.items
+      .filter((i) => i.qty > 0)
+      .map((i) => [
+        diaBr(diaDe(t)),
+        new Date(t.createdAt).toLocaleString('pt-BR'),
+        t.fromName,
+        t.toName,
+        porId.get(i.itemId)?.name ?? '?',
+        i.qty,
+        i.usado,
+        t.note ?? '',
+        situacao(t),
+      ]),
   )
+  const comBaixa = linhas.some((l) => l.usado > 0)
+  const todasUsadas = linhas.length > 0 && linhas.every((l) => l.qty > 0 && l.usado >= l.qty)
 
   return (
     <AppLayout
-      title="Transferência de estoque"
-      subtitle="Leve material entre setores: digite ou bipe o item, ajuste a quantidade e confirme."
+      title="Transferência e uso"
+      subtitle="Leve material para o setor e dê baixa no que ele usou, no dia em que usou. Dá para corrigir depois."
       actions={
         <ExportarMenu
           disabled={visiveis.length === 0}
@@ -261,7 +307,7 @@ export function TransferenciasEstoquePage() {
             exportarExcel('transferencias-estoque', [
               {
                 nome: 'Transferências',
-                colunas: ['Data', 'De', 'Para', 'Item', 'Quantidade', 'Observação', 'Situação'],
+                colunas: ['Dia', 'Registrado em', 'De', 'Para', 'Item', 'Levou', 'Usou', 'Observação', 'Situação'],
                 linhas: linhasHistorico,
               },
             ])
@@ -270,8 +316,8 @@ export function TransferenciasEstoquePage() {
             exportarPdf({
               titulo: 'Transferências de estoque',
               subtitulo: tenant.name,
-              colunas: ['Data', 'De', 'Para', 'Item', 'Qtd', 'Observação', 'Situação'],
-              numericas: [4],
+              colunas: ['Dia', 'Registrado', 'De', 'Para', 'Item', 'Levou', 'Usou', 'Observação', 'Situação'],
+              numericas: [5, 6],
               linhas: linhasHistorico,
             })
           }
@@ -312,6 +358,8 @@ export function TransferenciasEstoquePage() {
             {setores(toId, setToId, fromId)}
           </div>
 
+          <DiaDoUso dia={dia} hoje={hoje} onChange={setDia} ajuda="Usou ontem? Escolha o dia antes de registrar." />
+
           <div className="space-y-2 border-t border-border pt-4">
             <Label>Itens</Label>
             <ScanBar onCode={onCode} placeholder="Bipe o item" />
@@ -333,62 +381,66 @@ export function TransferenciasEstoquePage() {
               Nenhum item ainda. Digite o nome ou bipe.
             </p>
           ) : (
-            <ul className="divide-y divide-border rounded-lg border border-border">
-              {linhas.map((l) => {
-                const item = porId.get(l.itemId)
-                const unidade = item?.unit ?? 'un'
-                const noSetor = saldoNaOrigem(l.itemId)
-                // Só avisa: o saldo por setor ainda tem lançamento antigo sem setor, e travar aqui
-                // impediria levar material que está de fato na prateleira.
-                const passa = noSetor != null && l.qty > noSetor + 1e-9
-                return (
-                  <li key={l.itemId} className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <div className="min-w-0 flex-1">
-                        {/* Aba nova: tocar no nome no meio da transferência não pode apagar a lista. */}
-                        <Link
-                          to={`/estoque/item/${l.itemId}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-sm font-medium leading-snug hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
-                        >
-                          {item?.name ?? 'Item'}
-                        </Link>
-                        <p className="text-xs text-muted-foreground tabular-nums">
-                          {noSetor == null ? 'conferindo saldo no setor…' : `no setor de origem: ${formatQtd(noSetor)} ${unidade}`}
-                        </p>
-                      </div>
-                      <QtyStepper
-                        value={l.qty}
-                        min={0}
-                        label={item?.name ?? 'item'}
-                        onChange={(qty) => setLinhas((prev) => prev.map((x) => (x.itemId === l.itemId ? { ...x, qty } : x)))}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-9 shrink-0"
-                        onClick={() => setLinhas((prev) => prev.filter((x) => x.itemId !== l.itemId))}
-                        aria-label={`Tirar ${item?.name ?? 'item'}`}
-                      >
-                        <Trash2 className="size-4" aria-hidden />
-                      </Button>
-                    </div>
-                    {passa ? (
-                      <p className="mt-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-xs text-amber-800 dark:text-amber-200">
-                        O sistema registra {formatQtd(noSetor)} em {nomeOrigem}; confira antes de transferir.
-                      </p>
-                    ) : null}
-                  </li>
-                )
-              })}
-            </ul>
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  "Usou" dá baixa no estoque; o resto fica guardado em {warehouses.find((w) => w.id === toId)?.name ?? 'destino'}.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  onClick={() =>
+                    setLinhas((prev) => prev.map((l) => ({ ...l, usado: todasUsadas ? 0 : l.qty })))
+                  }
+                >
+                  <PackageMinus className="size-4" aria-hidden />
+                  {todasUsadas ? 'Nada foi usado' : 'Usou tudo'}
+                </Button>
+              </div>
+              <ul className="divide-y divide-border rounded-lg border border-border">
+                {linhas.map((l) => {
+                  const item = porId.get(l.itemId)
+                  const unidade = item?.unit ?? 'un'
+                  const noSetor = saldoNaOrigem(l.itemId)
+                  // Só avisa: o saldo por setor ainda tem lançamento antigo sem setor, e travar aqui
+                  // impediria levar material que está de fato na prateleira.
+                  const passa = noSetor != null && l.qty > noSetor + 1e-9
+                  return (
+                    <LinhaLevouUsou
+                      key={l.itemId}
+                      itemId={l.itemId}
+                      nome={item?.name ?? 'Item'}
+                      unidade={unidade}
+                      levou={l.qty}
+                      usou={l.usado}
+                      onChange={({ levou, usou }) =>
+                        setLinhas((prev) => prev.map((x) => (x.itemId === l.itemId ? { ...x, qty: levou, usado: usou } : x)))
+                      }
+                      onRemover={() => setLinhas((prev) => prev.filter((x) => x.itemId !== l.itemId))}
+                      detalhe={noSetor == null ? 'conferindo saldo no setor…' : `em ${nomeOrigem}: ${formatQtd(noSetor)} ${unidade}`}
+                      aviso={
+                        passa ? (
+                          <p className="mt-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-xs text-amber-800 dark:text-amber-200">
+                            O sistema registra {formatQtd(noSetor)} em {nomeOrigem}; confira antes de transferir.
+                          </p>
+                        ) : null
+                      }
+                    />
+                  )
+                })}
+              </ul>
+            </div>
           )}
 
           <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Observação (opcional)" className="h-9" />
-          <Button className="h-10 w-full" onClick={() => void transferir()} disabled={saving || linhas.length === 0}>
+          <Button className="h-10 w-full" onClick={() => void transferir()} disabled={saving || linhas.length === 0 || !diaValido(dia, hoje)}>
             <ArrowLeftRight className="size-4" aria-hidden />
-            {saving ? 'Transferindo…' : `Transferir ${linhas.length > 0 ? `${linhas.length} ${linhas.length === 1 ? 'item' : 'itens'}` : ''}`}
+            {saving
+              ? 'Registrando…'
+              : linhas.length === 0
+                ? 'Transferir'
+                : `${comBaixa ? 'Transferir e dar baixa' : 'Transferir'}: ${linhas.length} ${linhas.length === 1 ? 'item' : 'itens'}${dia !== hoje ? ` (${rotuloDoDia(dia, hoje)})` : ''}`}
           </Button>
         </section>
 
@@ -398,7 +450,18 @@ export function TransferenciasEstoquePage() {
           </h2>
           {transfers.length > 0 ? (
             <div className="space-y-2">
-              <SearchField value={buscaHist} onChange={setBuscaHist} label="Buscar item no histórico" resultados={visiveis.length} />
+              <SearchField value={buscaHist} onChange={setBuscaHist} label="Buscar no histórico: item, setor ou observação" resultados={visiveis.length} />
+              <button
+                type="button"
+                aria-pressed={soSemBaixa}
+                onClick={() => setSoSemBaixa((v) => !v)}
+                className={cn(
+                  'min-h-9 rounded-full border px-3 text-xs font-medium',
+                  soSemBaixa ? 'border-foreground bg-foreground text-background' : 'border-border text-muted-foreground hover:bg-muted',
+                )}
+              >
+                Ainda no setor (falta dar baixa)
+              </button>
               {setoresDoHistorico.length > 1 ? (
                 <div className="flex gap-1.5 overflow-x-auto pb-1" role="group" aria-label="Filtrar por setor">
                   {[{ id: '', name: 'Todos' }, ...setoresDoHistorico].map((s) => (
@@ -424,62 +487,85 @@ export function TransferenciasEstoquePage() {
             <EmptyState
               icon={ArrowLeftRight}
               title={loading ? 'Carregando…' : filtrando ? 'Nenhuma transferência com esse filtro' : 'Nenhuma transferência'}
-              description={filtrando ? 'Troque o setor ou a busca.' : 'As transferências confirmadas aparecem aqui.'}
+              description={filtrando ? 'Troque o filtro ou a busca.' : 'As transferências confirmadas aparecem aqui.'}
             />
           ) : (
             <ul className="space-y-2">
-              {visiveis.map((t) => (
-                <li key={t.id} className={cn('rounded-xl border border-border bg-card p-3 text-sm', t.cancelledAt && 'bg-muted/40')}>
-                  <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <p className={cn('font-semibold', t.cancelledAt && 'text-muted-foreground line-through')}>
-                          {t.fromName} → {t.toName}
+              {visiveis.map((t) => {
+                const sit = situacaoDaTransferencia(t)
+                const diaT = diaDe(t)
+                const registradoOutroDia = diaT !== diaLocal(t.createdAt)
+                return (
+                  <li key={t.id} className={cn('rounded-xl border border-border bg-card p-3 text-sm', t.cancelledAt && 'bg-muted/40')}>
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className={cn('font-semibold', t.cancelledAt && 'text-muted-foreground line-through')}>
+                            {t.fromName} → {t.toName}
+                          </p>
+                          {t.cancelledAt ? (
+                            <Badge variant="destructive">Cancelada</Badge>
+                          ) : (
+                            <span className={cn('rounded px-1.5 py-0.5 text-[11px] font-semibold', COR_SITUACAO[sit])}>{ROTULO_SITUACAO[sit]}</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {registradoOutroDia ? `Dia ${diaBr(diaT)} · registrado ${dataHora(t.createdAt)}` : dataHora(t.createdAt)}
+                          {t.note ? ` · ${t.note}` : ''}
                         </p>
-                        {t.cancelledAt ? (
-                          <Badge variant="destructive">Cancelada</Badge>
-                        ) : null}
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {dataHora(t.createdAt)}
-                        {t.note ? ` · ${t.note}` : ''}
-                      </p>
+                      {!t.cancelledAt ? (
+                        <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row">
+                          <Link
+                            to={`/transferencias-estoque/${t.id}`}
+                            className={cn(buttonVariants({ variant: sit === 'usada' ? 'ghost' : 'outline', size: 'sm' }), 'h-9')}
+                          >
+                            <Pencil className="size-4" aria-hidden /> {sit === 'usada' ? 'Editar' : 'Dar baixa'}
+                          </Link>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-9 text-muted-foreground"
+                            onClick={() => abrirCancelamento(t)}
+                            aria-label={`Cancelar transferência de ${t.fromName} para ${t.toName}`}
+                          >
+                            <Undo2 className="size-4" aria-hidden /> Cancelar
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
-                    {!t.cancelledAt ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-9 shrink-0 text-muted-foreground"
-                        onClick={() => abrirCancelamento(t)}
-                        aria-label={`Cancelar transferência de ${t.fromName} para ${t.toName}`}
-                      >
-                        <Undo2 className="size-4" aria-hidden /> Cancelar
-                      </Button>
+                    {t.cancelledAt ? (
+                      <p className="mt-1.5 rounded-md bg-destructive/5 px-2 py-1 text-xs text-destructive">
+                        Cancelada em {dataHora(t.cancelledAt)}
+                        {t.cancelReason ? `: ${t.cancelReason}` : ''}
+                      </p>
                     ) : null}
-                  </div>
-                  {t.cancelledAt ? (
-                    <p className="mt-1.5 rounded-md bg-destructive/5 px-2 py-1 text-xs text-destructive">
-                      Cancelada em {dataHora(t.cancelledAt)}
-                      {t.cancelReason ? `: ${t.cancelReason}` : ''}
-                    </p>
-                  ) : null}
-                  <ul className="mt-1.5 space-y-0.5 text-xs">
-                    {t.items.map((i) => (
-                      <li key={i.id} className="flex justify-between gap-2">
-                        <Link
-                          to={`/estoque/item/${i.itemId}`}
-                          className="min-w-0 truncate hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
-                        >
-                          {porId.get(i.itemId)?.name ?? 'Item removido'}
-                        </Link>
-                        <span className="shrink-0 tabular-nums">
-                          {formatQtd(i.qty)} {porId.get(i.itemId)?.unit ?? ''}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              ))}
+                    <ul className="mt-1.5 space-y-0.5 text-xs">
+                      {t.items
+                        .filter((i) => i.qty > 0)
+                        .map((i) => {
+                          const unidade = porId.get(i.itemId)?.unit ?? ''
+                          return (
+                            <li key={i.id} className="flex justify-between gap-2">
+                              <Link
+                                to={`/estoque/item/${i.itemId}`}
+                                className="min-w-0 truncate hover:underline focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none"
+                              >
+                                {porId.get(i.itemId)?.name ?? 'Item removido'}
+                              </Link>
+                              <span className="shrink-0 tabular-nums">
+                                levou {formatQtd(i.qty)} {unidade}
+                                {i.usado > 0 ? (
+                                  <span className="text-muted-foreground"> · usou {i.usado >= i.qty ? 'tudo' : formatQtd(i.usado)}</span>
+                                ) : null}
+                              </span>
+                            </li>
+                          )
+                        })}
+                    </ul>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </section>
@@ -491,13 +577,13 @@ export function TransferenciasEstoquePage() {
             <DialogTitle>Cancelar esta transferência?</DialogTitle>
             <DialogDescription>
               {cancelando
-                ? `${cancelando.fromName} → ${cancelando.toName}, ${dataHora(cancelando.createdAt)}, ${cancelando.items.length} ${cancelando.items.length === 1 ? 'item' : 'itens'}. Ela continua no histórico como cancelada.`
+                ? `${cancelando.fromName} → ${cancelando.toName}, ${dataHora(cancelando.createdAt)}, ${cancelando.items.filter((i) => i.qty > 0).length} ${cancelando.items.filter((i) => i.qty > 0).length === 1 ? 'item' : 'itens'}. Ela continua no histórico como cancelada.`
                 : ''}
             </DialogDescription>
           </DialogHeader>
           {cancelando ? (
             <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
-              Os itens voltam para {cancelando.fromName}. Se já foram usados em {cancelando.toName}, o saldo de lá pode ficar negativo.
+              Os itens voltam para {cancelando.fromName} e a baixa do que foi usado é desfeita. Se o que ficou guardado em {cancelando.toName} já saiu num kit, o saldo de lá pode ficar negativo.
             </p>
           ) : null}
           <div className="space-y-1.5">

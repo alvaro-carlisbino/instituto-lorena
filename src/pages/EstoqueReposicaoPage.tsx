@@ -20,7 +20,7 @@ import { createPurchaseOrder, listMovementsInRange, listStockItems } from '@/ser
 import { listItemLastCosts } from '@/services/estoqueKits'
 
 // /estoque-reposicao: a relação de segunda-feira. Olha o que foi GASTO no período (kit menos a
-// sobra, baixa avulsa; transferência entre setores não conta), projeta para os próximos dias e
+// sobra, baixa avulsa, uso do setor na transferência; levar para o setor não conta), projeta para os próximos dias e
 // tira o que já tem em todos os setores. Vira ordem de compra "solicitada" para o financeiro.
 
 const formatBRL = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })

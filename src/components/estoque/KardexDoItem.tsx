@@ -50,10 +50,10 @@ function Origem({ l, podeVerFinanceiro, itemNome }: { l: LinhaKardex; podeVerFin
           na nota: {l.observacao.split(' · ')[1]}
         </p>
       ) : null}
-      {l.motivo && !['compra (NF-e)', 'kit montado', 'transferência', 'inventário'].includes(l.motivo) ? (
+      {l.motivo && !['compra (NF-e)', 'kit montado', 'transferência', 'uso do setor', 'inventário'].includes(l.motivo) ? (
         <p className="truncate text-xs text-muted-foreground" title={l.motivo}>
           {l.motivo}
-          {l.observacao && l.origem.tipo !== 'kit' && l.origem.tipo !== 'transferencia' ? ` · ${l.observacao}` : ''}
+          {l.observacao && l.origem.tipo !== 'kit' && l.origem.tipo !== 'transferencia' && l.origem.tipo !== 'uso' ? ` · ${l.observacao}` : ''}
         </p>
       ) : null}
     </div>
@@ -291,7 +291,7 @@ export function KardexDoItem({
                 </td>
                 <td className="px-2 py-2 text-xs">
                   <span className="inline-flex items-center gap-1">
-                    {l.origem.tipo === 'transferencia' ? <ArrowLeftRight className="size-3 text-muted-foreground" aria-hidden /> : null}
+                    {l.origem.tipo === 'transferencia' || l.origem.tipo === 'uso' ? <ArrowLeftRight className="size-3 text-muted-foreground" aria-hidden /> : null}
                     {l.setorNome ?? ''}
                   </span>
                 </td>

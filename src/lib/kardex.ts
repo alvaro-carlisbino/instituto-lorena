@@ -32,6 +32,8 @@ export type OrigemMovimento =
     }
   | { tipo: 'inventario'; id: string; nome: string }
   | { tipo: 'transferencia'; id: string; de: string; para: string; cancelada: boolean }
+  /** Baixa do que o setor usou numa transferência (ou a correção dela), no dia do uso. */
+  | { tipo: 'uso'; id: string; de: string; setor: string; dia: string | null; cancelada: boolean }
   /** Item de nota juntado no item que a equipe usa (saldo passou de um para o outro). */
   | { tipo: 'juncao'; id: string; origem: string; destino: string; desfeita: boolean }
   | { tipo: 'estorno'; movimentoId: string }
@@ -117,6 +119,16 @@ function mapearOrigem(bruta: unknown, refType: string | null, refId: string | nu
       cancelada: Boolean(o?.cancelada),
     }
   }
+  if (tipo === 'uso') {
+    return {
+      tipo: 'uso',
+      id: String(o?.id ?? ''),
+      de: String(o?.de ?? '?'),
+      setor: String(o?.setor ?? '?'),
+      dia: texto(o?.dia),
+      cancelada: Boolean(o?.cancelada),
+    }
+  }
   if (tipo === 'juncao') {
     return {
       tipo: 'juncao',
@@ -193,6 +205,13 @@ export function rotuloOrigem(o: OrigemMovimento): { titulo: string; detalhe: str
       return { titulo: 'Inventário', detalhe: o.nome }
     case 'transferencia':
       return { titulo: `Transferência ${o.de} → ${o.para}`, detalhe: o.cancelada ? 'cancelada' : null }
+    case 'uso':
+      return {
+        titulo: `Uso do setor · ${o.setor}`,
+        detalhe: [`saiu de ${o.de}`, o.dia ? `usado ${dataCurta(o.dia)}` : null, o.cancelada ? 'cancelado' : null]
+          .filter(Boolean)
+          .join(' · '),
+      }
     case 'juncao':
       return { titulo: 'Item juntado', detalhe: `${o.origem} → ${o.destino}${o.desfeita ? ' · desfeita' : ''}` }
     case 'estorno':
@@ -225,6 +244,7 @@ export function grupoOperacao(l: LinhaKardex): GrupoOperacao {
     case 'kit':
       return 'kit'
     case 'transferencia':
+    case 'uso':
       return 'transferencia'
     case 'inventario':
     case 'importacao':
@@ -260,6 +280,7 @@ function textoDaLinha(l: LinhaKardex): string {
   if (o.tipo === 'kit') partes.push(o.nome, o.paciente)
   if (o.tipo === 'inventario') partes.push(o.nome)
   if (o.tipo === 'transferencia') partes.push(o.de, o.para)
+  if (o.tipo === 'uso') partes.push(o.de, o.setor, 'uso do setor')
   if (o.tipo === 'juncao') partes.push(o.origem, o.destino)
   if (l.loteOrigem) partes.push(l.loteOrigem.numero, l.loteOrigem.fornecedor)
   return normalizarBusca(partes.filter(Boolean).join(' '))
