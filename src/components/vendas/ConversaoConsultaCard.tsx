@@ -107,6 +107,9 @@ export function ConversaoConsultaCard({ mes, kind, rotuloMes }: { mes: string; k
             {rotuloMes} · {dados?.pacientes ?? 0} {dados?.pacientes === 1 ? 'paciente' : 'pacientes'} em{' '}
             {dados?.denominador?.tipo_usado === 'tc' ? 'consulta de transplante' : 'consulta'}
             {dados && dados.agendamentos !== dados.pacientes ? ` (${dados.agendamentos} agendamentos)` : ''}
+            {dados?.cortesias
+              ? ` · ${dados.cortesias} ${dados.cortesias === 1 ? 'cortesia' : 'cortesias'} fora da conta`
+              : ''}
           </span>
         </CardTitle>
       </CardHeader>

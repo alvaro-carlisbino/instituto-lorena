@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-24-safra-cortesia-e-outra-fila",
+    "data": "2026-09-24",
+    "titulo": "Central de Vendas: consulta de cortesia fora da taxa e paciente na fila certa",
+    "itens": [
+      "No fechamento do mês, clique na palavra Consulta embaixo do nome do paciente: agora dá para marcar Consulta, Retorno ou Cortesia.",
+      "Cortesia é para parceria e permuta: o paciente continua aparecendo, numa lista própria embaixo, mas sai da porcentagem da semana, do mês e do card de conversão da consulta.",
+      "Paciente de protocolo que entrou como transplante (ou o contrário)? No mesmo menu, Não é transplante: passar para protocolo. Ele sai daqui, entra no fechamento da outra fila e o card vai junto para o funil certo."
+    ]
+  },
+  {
     "id": "2026-09-24-kits-outro-kit-e-busca",
     "data": "2026-09-24",
     "titulo": "Kits: mais de um kit para o mesmo paciente, consumo do setor fora do kit e busca nas listas",

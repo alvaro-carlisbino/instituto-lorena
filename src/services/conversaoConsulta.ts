@@ -81,6 +81,12 @@ export type ConversaoConsulta = {
   /** Última venda LANÇADA no mês. O lançamento atrasa e a agenda não. */
   ultima_venda_registrada: string | null
   dias_sem_registro: number | null
+  /**
+   * Pacientes com consulta marcada como cortesia (parceria, permuta) na safra do mês. Já estão
+   * FORA do denominador; o número vem para a tela dizer, e não para a conta. Opcional porque a
+   * RPC anterior a 24/set não devolvia.
+   */
+  cortesias?: number
 }
 
 export async function fetchConversaoConsulta(mes: string, kind: string): Promise<ConversaoConsulta | null> {

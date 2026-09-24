@@ -4,19 +4,35 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { hojeLocal } from '@/lib/diaLocal'
 import { cn } from '@/lib/utils'
 import {
   type Atendimento,
   type IndicacaoAtendimento,
   type Mes,
+  OUTRA_INDICACAO,
+  ROTULO_INDICACAO,
+  ROTULO_TIPO,
   type SemanaAtendimentos,
+  type TipoAtendimento,
   alterarTipoAtendimento,
+  contaNaTaxa,
   limitesDoMes,
   listAtendimentos,
   mesAtual,
   mesComOffset,
   nomeDoMes,
+  passarParaOutraFila,
   resumoDoMes,
   resumoPorSemana,
 } from '@/services/atendimentos'
@@ -64,13 +80,14 @@ function ondeEsta(a: Atendimento): string {
   return ROTULO_COLUNA.get(a.coluna)?.toLowerCase() ?? a.coluna
 }
 
-function linhaDoPaciente(
-  a: Atendimento,
-  trocarTipo: (a: Atendimento) => void,
-  trocando: boolean,
-) {
+type AcoesDaLinha = {
+  mudarTipo: (a: Atendimento, tipo: TipoAtendimento) => void
+  mudarFila: (a: Atendimento) => void
+}
+
+function linhaDoPaciente(a: Atendimento, acoes: AcoesDaLinha, trocando: boolean) {
   const detalhe = [ptBr(a.atendidoEm), a.medico, a.cidade, a.origem].filter(Boolean).join(' · ')
-  const retorno = a.tipo === 'retorno'
+  const outra = OUTRA_INDICACAO[a.indicacao]
 
   return (
     <div
@@ -89,24 +106,48 @@ function linhaDoPaciente(
           <p className="truncate text-sm font-medium leading-tight">{a.paciente}</p>
         )}
         <p className="truncate text-xs text-muted-foreground">
-          {/* A Shosp agenda muito retorno como "CONSULTA ...", e só quem atendeu sabe.
-              Por isso a palavra é o próprio botão: um clique troca, outro desfaz. */}
-          <button
-            type="button"
-            disabled={trocando}
-            onClick={() => trocarTipo(a)}
-            title={retorno ? 'Era consulta? Clique para voltar a consulta' : 'Foi retorno? Clique para marcar como retorno'}
-            className={cn(
-              'rounded-sm underline decoration-dotted underline-offset-2 hover:text-foreground disabled:cursor-wait disabled:opacity-60',
-              retorno && 'font-medium text-amber-700 dark:text-amber-500',
-            )}
-          >
-            {retorno ? 'Retorno' : 'Consulta'}
-          </button>{' '}
+          {/* A Shosp agenda muito retorno como "CONSULTA ...", e só quem atendeu sabe. Por
+              isso a palavra é o próprio botão, e é ali que se corrige tudo o que a agenda não
+              sabe: retorno, cortesia de parceria, e atendimento que caiu na safra errada. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              disabled={trocando}
+              title="Corrigir: consulta, retorno, cortesia ou outra fila"
+              className={cn(
+                'rounded-sm underline decoration-dotted underline-offset-2 hover:text-foreground disabled:cursor-wait disabled:opacity-60',
+                a.tipo === 'retorno' && 'font-medium text-amber-700 dark:text-amber-500',
+                a.tipo === 'cortesia' && 'font-medium text-sky-700 dark:text-sky-400',
+              )}
+            >
+              {ROTULO_TIPO[a.tipo]}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-auto min-w-64">
+              <DropdownMenuLabel>O que foi este atendimento?</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={a.tipo}
+                onValueChange={(v) => acoes.mudarTipo(a, v as TipoAtendimento)}
+              >
+                <DropdownMenuRadioItem value="consulta" closeOnClick>Consulta</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="retorno" closeOnClick>Retorno</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="cortesia" closeOnClick>
+                  Cortesia
+                  <span className="text-xs text-muted-foreground">parceria, não conta na taxa</span>
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => acoes.mudarFila(a)}>
+                Não é {ROTULO_INDICACAO[a.indicacao]}: passar para {ROTULO_INDICACAO[outra]}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>{' '}
           {detalhe}
         </p>
       </div>
-      {a.fechou ? (
+      {!contaNaTaxa(a) ? (
+        <Badge variant="outline" className="shrink-0 text-[10px] font-normal">
+          fora da conta
+        </Badge>
+      ) : a.fechou ? (
         <Badge className="shrink-0 bg-emerald-600 text-[10px] text-white hover:bg-emerald-600">
           {a.valorCents ? reais(a.valorCents) : 'Fechou'}
         </Badge>
@@ -133,24 +174,54 @@ export function AtendimentosSemana({
   /** null = a semana mais recente do mês. Só vira escolha explícita quando ela clica. */
   const [escolhida, setEscolhida] = useState<string | null>(null)
   const [trocando, setTrocando] = useState<string | null>(null)
-  const [avisoTipo, setAvisoTipo] = useState<string | null>(null)
+  const [aviso, setAviso] = useState<{ texto: string; erro: boolean } | null>(null)
 
   // Troca na tela na hora e grava por trás; se o banco recusar, volta como estava e diz
   // por quê. Esperar a volta do banco para mudar a palavra faria o clique parecer morto.
-  const trocarTipo = (a: Atendimento) => {
-    const novo = a.tipo === 'retorno' ? 'consulta' : 'retorno'
+  const mudarTipo = (a: Atendimento, novo: TipoAtendimento) => {
+    if (novo === a.tipo) return
     const aplicar = (tipo: Atendimento['tipo']) =>
       setLinhas((ls) => ls.map((l) => (l.id === a.id ? { ...l, tipo } : l)))
     setTrocando(a.id)
-    setAvisoTipo(null)
+    setAviso(null)
     aplicar(novo)
     alterarTipoAtendimento(a.id, novo)
       .catch((e: unknown) => {
         aplicar(a.tipo)
-        setAvisoTipo(e instanceof Error ? e.message : 'Não deu para trocar consulta e retorno.')
+        setAviso({
+          texto: e instanceof Error ? e.message : 'Não deu para trocar o tipo do atendimento.',
+          erro: true,
+        })
       })
       .finally(() => setTrocando(null))
   }
+
+  // Aqui a tela ESPERA o banco: o paciente sai desta lista e vai para a de outra pessoa, e
+  // sumir antes de gravar faria um erro parecer que deu certo.
+  const mudarFila = (a: Atendimento) => {
+    setTrocando(a.id)
+    setAviso(null)
+    passarParaOutraFila(a)
+      .then(({ indicacao: nova, cardMovido, avisoCard }) => {
+        setLinhas((ls) => ls.filter((l) => l.id !== a.id))
+        const destino = ROTULO_INDICACAO[nova]
+        setAviso({
+          texto:
+            `${a.paciente} foi para a safra de ${destino}` +
+            (cardMovido ? `, e o card foi junto para o funil de ${destino}.` : '.') +
+            (avisoCard ? ` Mas ${avisoCard}.` : ''),
+          erro: false,
+        })
+      })
+      .catch((e: unknown) => {
+        setAviso({
+          texto: e instanceof Error ? e.message : 'Não deu para passar para a outra fila.',
+          erro: true,
+        })
+      })
+      .finally(() => setTrocando(null))
+  }
+  const acoes: AcoesDaLinha = { mudarTipo, mudarFila }
   const hoje = hojeLocal()
   const limites = useMemo(() => limitesDoMes(mes), [mes])
 
@@ -184,15 +255,20 @@ export function AtendimentosSemana({
     semanas.find((s) => s.inicio === escolhida) ?? semanas[0] ?? null
 
   const daSemana = useMemo(() => {
-    if (!aberta) return { fecharam: [] as Atendimento[], abertos: [] as Atendimento[] }
+    if (!aberta) {
+      return { fecharam: [] as Atendimento[], abertos: [] as Atendimento[], cortesias: [] as Atendimento[] }
+    }
     // Por FAIXA DE DATA, não pela segunda-feira: a semana que atravessa a virada do mês vem
     // recortada, e agrupar pela segunda traria de volta o que é do mês anterior.
     const itens = linhas
       .filter((a) => a.atendidoEm >= aberta.inicio && a.atendidoEm <= aberta.fim)
       .sort((x, y) => x.atendidoEm.localeCompare(y.atendidoEm) || x.paciente.localeCompare(y.paciente))
+    // A cortesia fica fora das duas listas pelo mesmo motivo que fica fora da taxa: as duas
+    // contagens de cima têm de somar o denominador da semana.
     return {
-      fecharam: itens.filter((i) => i.fechou),
-      abertos: itens.filter((i) => !i.fechou),
+      fecharam: itens.filter((i) => contaNaTaxa(i) && i.fechou),
+      abertos: itens.filter((i) => contaNaTaxa(i) && !i.fechou),
+      cortesias: itens.filter((i) => !contaNaTaxa(i)),
     }
   }, [linhas, aberta])
 
@@ -231,6 +307,9 @@ export function AtendimentosSemana({
           ? ` (${mesInteiro.retornos} ${mesInteiro.retornos === 1 ? 'retorno' : 'retornos'})`
           : ''}
         {mesInteiro.receitaCents > 0 ? ` · ${reais(mesInteiro.receitaCents)}` : ''}
+        {mesInteiro.cortesias > 0
+          ? ` · ${mesInteiro.cortesias} ${mesInteiro.cortesias === 1 ? 'cortesia' : 'cortesias'} fora da conta`
+          : ''}
       </p>
       {mesInteiro.incompleta && (
         <Badge
@@ -319,7 +398,7 @@ export function AtendimentosSemana({
                   <p className="text-xs text-muted-foreground">Ninguém fechou nesta semana ainda.</p>
                 ) : (
                   <div className="space-y-1">
-                    {daSemana.fecharam.map((a) => linhaDoPaciente(a, trocarTipo, trocando === a.id))}
+                    {daSemana.fecharam.map((a) => linhaDoPaciente(a, acoes, trocando === a.id))}
                   </div>
                 )}
               </div>
@@ -329,15 +408,34 @@ export function AtendimentosSemana({
                   <p className="text-xs text-muted-foreground">
                     {daSemana.fecharam.length > 0
                       ? 'Todo mundo desta semana fechou.'
-                      : 'Nenhum atendimento registrado nesta semana.'}
+                      : daSemana.cortesias.length > 0
+                        ? 'Nesta semana só houve cortesia.'
+                        : 'Nenhum atendimento registrado nesta semana.'}
                   </p>
                 ) : (
                   <div className="space-y-1">
-                    {daSemana.abertos.map((a) => linhaDoPaciente(a, trocarTipo, trocando === a.id))}
+                    {daSemana.abertos.map((a) => linhaDoPaciente(a, acoes, trocando === a.id))}
                   </div>
                 )}
               </div>
-              {avisoTipo && <p className="text-xs text-destructive md:col-span-2">{avisoTipo}</p>}
+              {daSemana.cortesias.length > 0 && (
+                <div className="space-y-1.5 md:col-span-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Cortesia, fora da conta ({daSemana.cortesias.length})
+                  </p>
+                  <div className="grid gap-1 md:grid-cols-2">
+                    {daSemana.cortesias.map((a) => linhaDoPaciente(a, acoes, trocando === a.id))}
+                  </div>
+                </div>
+              )}
+              {aviso && (
+                <p
+                  role={aviso.erro ? 'alert' : 'status'}
+                  className={cn('text-xs md:col-span-2', aviso.erro ? 'text-destructive' : 'text-muted-foreground')}
+                >
+                  {aviso.texto}
+                </p>
+              )}
             </div>
           )}
         </>

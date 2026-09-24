@@ -189,6 +189,8 @@ export function NovoAtendimentoDialog({
                 <SelectContent>
                   <SelectItem value="consulta">Consulta</SelectItem>
                   <SelectItem value="retorno">Retorno</SelectItem>
+                  {/* Parceria e permuta: fica registrada, mas fora da taxa de fechamento. */}
+                  <SelectItem value="cortesia">Cortesia</SelectItem>
                 </SelectContent>
               </Select>
             </div>

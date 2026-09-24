@@ -19,7 +19,20 @@ const assertClient = () => {
 }
 
 export type IndicacaoAtendimento = 'cirurgia' | 'protocolo'
-export type TipoAtendimento = 'consulta' | 'retorno'
+/**
+ * `cortesia` é a consulta que não foi para vender: parceria, permuta, convidado. Fica na lista
+ * para ninguém achar que o sistema perdeu o paciente, mas sai de toda conta, porque no
+ * denominador cada parceria baixaria a taxa por construção. Pedido da Aline em 24/set.
+ */
+export type TipoAtendimento = 'consulta' | 'retorno' | 'cortesia'
+
+export const ROTULO_TIPO: Record<TipoAtendimento, string> = {
+  consulta: 'Consulta',
+  retorno: 'Retorno',
+  cortesia: 'Cortesia',
+}
+
+const TIPOS = new Set<string>(Object.keys(ROTULO_TIPO))
 /** De onde a linha veio. `venda` é histórico: só existe porque fechou. Ver `SAFRA_COMPLETA_DESDE`. */
 export type FonteAtendimento = 'manual' | 'pos_consulta' | 'venda'
 
@@ -82,7 +95,7 @@ function mapear(row: Record<string, unknown>): Atendimento {
     cidade: texto(row.cidade),
     email: texto(row.email),
     origem: texto(row.origem),
-    tipo: (row.tipo === 'retorno' ? 'retorno' : 'consulta') as TipoAtendimento,
+    tipo: (TIPOS.has(String(row.tipo)) ? row.tipo : 'consulta') as TipoAtendimento,
     indicacao: (row.indicacao === 'protocolo' ? 'protocolo' : 'cirurgia') as IndicacaoAtendimento,
     atendidoEm: String(row.atendido_em),
     medico: texto(row.medico),
@@ -190,22 +203,29 @@ export type ResumoDoMes = {
   fecharam: number
   /** Quantos dos atendimentos foram retorno. Entram na conta, como na planilha dela. */
   retornos: number
+  /** Consultas de cortesia. Já estão FORA de `atendimentos`: o número vem para a tela dizer. */
+  cortesias: number
   pct: number | null
   receitaCents: number
   incompleta: boolean
 }
 
-const conta = (itens: Atendimento[]): ResumoDoMes => {
+/** Entra na taxa? Só a cortesia fica de fora; o retorno conta, como na planilha dela. */
+export const contaNaTaxa = (a: Pick<Atendimento, 'tipo'>) => a.tipo !== 'cortesia'
+
+const conta = (todos: Atendimento[]): ResumoDoMes => {
+  const itens = todos.filter(contaNaTaxa)
   const fecharam = itens.filter((i) => i.fechou)
   return {
     atendimentos: itens.length,
     fecharam: fecharam.length,
     retornos: itens.filter((i) => i.tipo === 'retorno').length,
+    cortesias: todos.length - itens.length,
     pct: itens.length === 0 ? null : Math.round((fecharam.length / itens.length) * 100),
     receitaCents: fecharam.reduce((t, i) => t + (i.valorCents ?? 0), 0),
     // Basta UM atendimento que só existe por ter virado venda para o período estar torto:
     // o que não fechou naquela época nunca foi registrado.
-    incompleta: itens.some((i) => i.fonte === 'venda'),
+    incompleta: todos.some((i) => i.fonte === 'venda'),
   }
 }
 
@@ -253,7 +273,7 @@ export function resumoPorSemana(
 }
 
 /**
- * Corrige consulta ↔ retorno numa linha da safra.
+ * Corrige consulta, retorno ou cortesia numa linha da safra.
  *
  * O `select` depois do update não é enfeite: com a RLS, atualizar linha de outro polo
  * devolve sucesso com zero linhas, e a tela mostraria "Retorno" sem ter gravado nada.
@@ -268,6 +288,64 @@ export async function alterarTipoAtendimento(id: string, tipo: TipoAtendimento):
   if ((data ?? []).length === 0) {
     throw new Error('Não deu para trocar: este atendimento não está ao alcance do seu polo.')
   }
+}
+
+export const OUTRA_INDICACAO: Record<IndicacaoAtendimento, IndicacaoAtendimento> = {
+  cirurgia: 'protocolo',
+  protocolo: 'cirurgia',
+}
+
+export const ROTULO_INDICACAO: Record<IndicacaoAtendimento, string> = {
+  cirurgia: 'transplante',
+  protocolo: 'protocolo',
+}
+
+/**
+ * O atendimento foi para a safra errada: era protocolo e entrou como transplante, ou o
+ * contrário. Leva a linha para a outra safra e, se o card do paciente ainda está na etapa
+ * onde o encaminhamento o deixou, leva o card junto para o funil certo.
+ *
+ * Nasceu do Gabriel (24/set): encaminhado como transplante da fila de pós-consulta, paciente
+ * de protocolo desde 2025. Ela tentou tirá-lo dispensando o card do quadro, mas dispensar o
+ * follow-up não mexe na safra, e nem deveria: o atendimento aconteceu, só estava na fila
+ * errada. Apagar a linha faria a safra de protocolos perder um atendimento de verdade.
+ *
+ * O card só muda se estiver parado em "Consulta realizada" do funil antigo. Se alguém já o
+ * andou para outra etapa, foi decisão de alguém, e a troca de safra não passa por cima.
+ * Devolve se o card foi junto, para a tela dizer.
+ */
+export async function passarParaOutraFila(
+  a: Pick<Atendimento, 'id' | 'leadId' | 'indicacao'>,
+): Promise<{ indicacao: IndicacaoAtendimento; cardMovido: boolean; avisoCard: string | null }> {
+  const client = assertClient()
+  const nova = OUTRA_INDICACAO[a.indicacao]
+  const { data, error } = await client
+    .from('clinic_atendimentos')
+    .update({ indicacao: nova })
+    .eq('id', a.id)
+    .eq('indicacao', a.indicacao)
+    .select('id')
+  if (error) throw new Error(error.message)
+  if ((data ?? []).length === 0) {
+    throw new Error('Não deu para trocar: este atendimento não está ao alcance do seu polo ou já foi trocado.')
+  }
+
+  if (!a.leadId) return { indicacao: nova, cardMovido: false, avisoCard: null }
+  const de = DESTINO[a.indicacao]
+  const para = DESTINO[nova]
+  // O card é secundário aqui: a safra já está certa. Se o card não puder ser movido (sem
+  // permissão de mexer em card, card de outro polo), a tela avisa e ninguém perde a troca.
+  const { data: movidos, error: cardErr } = await client
+    .from('leads')
+    .update({ pipeline_id: para.pipeline, stage_id: para.stage, stage_entered_at: new Date().toISOString() })
+    .eq('id', a.leadId)
+    .eq('pipeline_id', de.pipeline)
+    .eq('stage_id', de.stage)
+    .select('id')
+  if (cardErr) {
+    return { indicacao: nova, cardMovido: false, avisoCard: `o card não pôde ser movido (${cardErr.message})` }
+  }
+  return { indicacao: nova, cardMovido: (movidos ?? []).length > 0, avisoCard: null }
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +484,7 @@ export async function registrarAtendimento(
     channel: 'WhatsApp',
     note:
       input.observacao?.trim() ||
-      `Atendimento ${input.tipo === 'retorno' ? 'de retorno' : 'de consulta'} com indicação de ${
+      `Atendimento de ${ROTULO_TIPO[input.tipo].toLowerCase()} com indicação de ${
         input.indicacao === 'protocolo' ? 'protocolo' : 'transplante'
       }`,
     ownerId: input.ownerId,

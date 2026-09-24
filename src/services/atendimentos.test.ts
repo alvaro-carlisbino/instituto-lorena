@@ -143,6 +143,7 @@ describe('o mês', () => {
       atendimentos: 4,
       fecharam: 2,
       retornos: 0,
+      cortesias: 0,
       pct: 50,
       receitaCents: 2_000_000,
       incompleta: false,
@@ -159,6 +160,33 @@ describe('o mês', () => {
     expect(resumo.retornos).toBe(2)
     expect(resumo.atendimentos).toBe(4)
     expect(resumo.pct).toBe(25)
+  })
+  // Maikel, 22/09: consulta de parceria, fechou permuta e não venda. No denominador, cada
+  // parceria baixaria a semana; lançada como venda, inflaria o faturamento.
+  it('tira a cortesia da taxa, mas diz quantas foram', () => {
+    const resumo = resumoDoMes([
+      atendimento({ fechou: true, valorCents: 4_270_000 }),
+      atendimento({}),
+      atendimento({ tipo: 'cortesia' }),
+    ])
+    expect(resumo.atendimentos).toBe(2)
+    expect(resumo.fecharam).toBe(1)
+    expect(resumo.pct).toBe(50)
+    expect(resumo.cortesias).toBe(1)
+  })
+
+  it('cortesia que aparece com venda casada também não entra no fechamento', () => {
+    const resumo = resumoDoMes([atendimento({ tipo: 'cortesia', fechou: true, valorCents: 1_000_000 })])
+    expect(resumo.atendimentos).toBe(0)
+    expect(resumo.fecharam).toBe(0)
+    expect(resumo.receitaCents).toBe(0)
+    expect(resumo.pct).toBeNull()
+  })
+
+  it('semana só com cortesia não vira 0%', () => {
+    const [semana] = resumoPorSemana([atendimento({ tipo: 'cortesia' })])
+    expect(semana.atendimentos).toBe(0)
+    expect(semana.pct).toBeNull()
   })
 })
 
